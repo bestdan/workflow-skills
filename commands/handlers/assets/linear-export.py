@@ -35,6 +35,9 @@ walks two independent ladders: secret/pointer (`$LINEAR_API_KEY` ->
 A failed resolve never falls through to the next rung. See
 dev_docs/auth_key_access.md for the full contract. This script reads no config.
 
+The key framing (`lin_api_…` bare, an OAuth token as `Bearer`) lives in
+`_linear_auth.py`, shared with `linear-successor.py`.
+
 SCHEMA NOTE — the `relations` / `inverseRelations` shape is inherited from
 linear-relations.py, whose header records it as documented-but-unverified. This
 repo runs keyless, so `scripts/test-linear-export-live.sh` is where drift in
@@ -56,6 +59,7 @@ import urllib.request
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _linear_auth import auth_header  # noqa: E402
 from _secret_resolve import SecretUnavailable, resolve_key  # noqa: E402
 from _shape import ShapeError, expect  # noqa: E402
 
@@ -154,25 +158,6 @@ def get_key():
         return resolve_key("LINEAR_API_KEY")
     except SecretUnavailable as e:
         sys.exit(str(e))
-
-
-def auth_header(key):
-    """Frame the key the way Linear expects for the kind of key it is.
-
-    A personal API key (`lin_api_…`) goes in the Authorization header BARE —
-    every other linear asset here hardcodes that, and adding a scheme breaks
-    it. An OAuth access token does not: it is a Bearer token, and Linear
-    rejects it unframed. A client_credentials grant returns the latter, so this
-    export is the first asset here that can be handed either.
-
-    Getting it wrong surfaces as an authentication error, which reads like a
-    bad key rather than a correctly-valued key in the wrong envelope — so the
-    framing is decided from the key's own shape rather than from a flag the
-    caller has to know to pass.
-    """
-    if key.startswith("Bearer ") or key.startswith("lin_api_"):
-        return key
-    return "Bearer " + key
 
 
 def gql(key, query, variables=None):
