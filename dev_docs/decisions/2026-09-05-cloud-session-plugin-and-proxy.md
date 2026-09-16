@@ -17,6 +17,14 @@ merged to `main` in PR #498. Run ids are cited directly throughout, so every cla
 checkable against the run rather than against either record. The 09-08 probe is
 session `session_01ERAh8hmMbqq4Xu2hfqbEcA` and is recorded below.
 
+**Amended 2026-09-15, and this one overturns the file's headline conclusion.** A cloud
+session read a GitHub **issue dependency edge** successfully — the capability every
+version of this file, and the companion routine record, treated as unavailable. It did it
+with plain `curl` and the ambient `$GH_TOKEN`. **The barrier measured on 09-05 was `gh`,
+not the environment and not the credential.** See
+[2026-09-15: the API is reachable without `gh`](#2026-09-15-the-api-is-reachable-without-gh)
+before relying on anything below, and read finding 2 with that correction in hand.
+
 **The 2026-09-05 measurements are unchanged and still carry their date.** What changed
 is what may be concluded from them. Each amendment says so where it sits and names the
 earlier wording, so a reader who saw the first version can tell what moved.
@@ -191,6 +199,71 @@ mcp__github__issue_read(method=get_labels, …)
   → {"labels":[{"name":"est:1", …}],"totalCount":1}
 ```
 
+### 2026-09-15: the API is reachable without `gh`
+
+**A cloud session read an issue dependency edge, and got the right answer.** Asked for
+`bestdan/workflow-skills#691`'s `blocked_by` set, it returned **#692** with its labels —
+matching the live board, which is what makes this a read and not an artefact.
+
+```
+curl -sS -H "Authorization: Bearer $GH_TOKEN" \
+  "https://api.github.com/repos/bestdan/workflow-skills/issues/691/dependencies/blocked_by?per_page=100"
+→ [ { "number": 692, … } ]
+```
+
+**Two things in that session differ from every earlier one, and the second is the
+finding:**
+
+- **There was no `gh` binary at all — and finding 1 predicts exactly that.** The source
+  repo here was `bestdan/workflow-skills`, not `dotfiles`, and finding 1 established
+  across eight runs that `gh` arrives from the `dotfiles` setup script: every
+  `gh`-present run sourced `dotfiles`, every `gh`-absent run did not. So this is a ninth
+  run agreeing with it, not a changed image. **It also means the 09-05 `gh` failure was
+  never the general case** — it was measured in the one configuration that happens to
+  install `gh`.
+- **The ambient `$GH_TOKEN` authenticated against `api.github.com`.** On 09-05 the same
+  variable read the literal string `proxy-injected` and `gh auth status` called it
+  invalid.
+
+**What this overturns.** This file's finding 2 says a cloud session has "no working
+credential in the session as provisioned", reading 403 on reads as well as writes, and
+the companion routine record reaches the same conclusion by a different route. **That is
+now too strong.** What was measured on 09-05 is that **`gh` could not authenticate**. The
+inference from there to "the environment has no GitHub API access" did not hold, and this
+probe is the counterexample. The endpoint, the credential and the egress path all work;
+the client was the broken part.
+
+**This was foreshadowed and not followed up.** Finding 6 already recorded that `git` is
+credentialed for the source repo where `gh` REST is not — same session, same repo,
+seconds apart. That was the same shape of result (a non-`gh` client succeeding where `gh`
+fails) and it was read as a curiosity about `git` rather than as evidence about `gh`.
+
+**What it does NOT establish**, kept deliberately narrow, because over-reading a single
+probe is the specific error this amendment is correcting:
+
+- **One session, one repo, one moment.** `bestdan/workflow-skills` was that session's own
+  source repo. Nothing here says an unattached repo is reachable; the 09-08 scoping
+  finding suggests it would not be.
+- **Interactive cloud session ≠ scheduled routine.** This file has drawn that line
+  repeatedly and it still stands unmeasured. The routines probed in August had neither
+  `gh` nor a working token. **Do not conclude a routine can do this** — probe it.
+- **Reads only.** No write was attempted through this path. `POST`/`DELETE` on the
+  dependency endpoints is untested here, and the connector remains the measured write
+  channel.
+- **Where the token comes from is unresolved.** Whether `$GH_TOKEN` now holds a real
+  credential, or still holds `proxy-injected` with the egress proxy substituting one, was
+  not checked — `echo "${#GH_TOKEN} ${GH_TOKEN:0:4}"` settles it in one command and
+  decides whether the capability travels off this proxy path. **Worth capturing on the
+  next cloud session that runs for any reason.**
+
+**Consequence for the `Blocked by:` footer.** `commands/push-plan.md` §5.5 justifies the
+body footer on the grounds that an unattended agent cannot read dependency edges in any
+form. For a cloud session that premise is now false. The footer's remaining defence is
+the routine case above, which is unmeasured rather than established — so the footer is
+resting on an open question, not on a measured limitation. Track that with
+[#500](https://github.com/bestdan/workflow-skills/issues/500), which is already open
+against `/push-plan` writing footers instead of native edges.
+
 ### 2026-09-08: the credentialed-attach experiment, and why it did not run here
 
 Session `session_01ERAh8hmMbqq4Xu2hfqbEcA`, `claude --cloud` from the CLI, Claude Code
@@ -296,7 +369,16 @@ access:"push" to attach the repository with credentials.`
    hook correctly declined — not that the source repo is irrelevant. Both arms read
    `true`, so neither result is void. **Any future probe of this must report it too.**
 2. **`gh` was present in this session — see finding 1 for where from — and had no
-   working credential in the session as provisioned**, reads 403 alongside writes. So the
+   working credential in the session as provisioned**, reads 403 alongside writes.
+
+   > **Superseded in its consequence, 2026-09-15.** This finding is still true about
+   > `gh`. What it was taken to imply — that the session has no GitHub API access — is
+   > false: plain `curl` with the ambient `$GH_TOKEN` read a dependency edge correctly.
+   > **Read every "no usable `gh`" sentence below as a statement about the client, not
+   > about the environment.** See
+   > [2026-09-15: the API is reachable without `gh`](#2026-09-15-the-api-is-reachable-without-gh).
+
+   So the
    2026-08-24 routine finding and this session's finding agree in effect: no usable `gh`.
    They differ in how far they got — that routine had no `gh` binary to try, this session
    had the binary and a dead token. **Do not read that as a session-versus-routine
@@ -369,6 +451,14 @@ access:"push" to attach the repository with credentials.`
   So read finding 2 as "not available in the session as provisioned" — **not** as "the
   proxy forbids it", and **not** as "`gh` cannot work in a cloud session". The question is
   **unanswered, not answered no.**
+
+  > **Partly answered 2026-09-15, and reading 3 was the right one.** The 403 was never
+  > the last word, because the API is reachable in a cloud session **without `gh` at
+  > all** — `curl` with `$GH_TOKEN` read a dependency edge on the session's source repo.
+  > So whatever the 403's cause, it is specific to `gh`'s auth path and is not a wall
+  > around the environment. The three readings above remain the open question **for
+  > `gh` specifically**, which is now a much smaller question than it looked: nothing
+  > needs `gh` if `curl` works.
 
 - **Whether a credentialed attach fixes it — attempted twice, still open.** Calling
   `add_repo` with `access:"push"` and re-probing is what would settle reading 2, and it
