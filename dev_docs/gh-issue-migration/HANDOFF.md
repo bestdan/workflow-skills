@@ -2,8 +2,8 @@
 
 **Redrafted 2026-09-15. Task 9 is DONE — both boards are settled and the close-out has
 run.** The GitHub board was checked by something that did not write it (125 entries, 27
-edges, 15 sub-issue links, 62 transcripts). The Linear originals point at their successors
-and are `Canceled`, 123 of them. #516 then found the graph already sound, wrote the 27
+edges, 15 sub-issue links, 62 transcripts). The Linear originals point at their successors, and all
+123 are archived — the cap relief this whole exercise was for. #516 then found the graph already sound, wrote the 27
 missing `Blocked by:` echoes, and left the verifier with a **standing expected failure** —
 read "What #516 ran" before treating its output as a regression.
 
@@ -395,9 +395,27 @@ and must not be edited to make a check pass.** So this failure is now the expect
 `GitHub #<n> (migrated)` link attachment, and — behind `--cancel` — sets the team's
 `canceled`-type state. Idempotent **per write, not per issue**.
 
-**123 of the 125 originals now carry all three.** A re-run reports 0 outstanding.
+**123 of the 125 originals took all three, and all 123 are now ARCHIVED** (2026-09-15,
+`Archived 123, failed 0`) — so they no longer count against Linear's 250-issue cap, and
+they no longer accept any mutation. A re-run of `linear-successor.py` reports 0
+outstanding.
 PRE-555 was checked by hand: comment → `bestdan/workflow-skills#691`, attachment to the
 same, state `Canceled`/`canceled`.
+
+> **Archived 2026-09-15, and that closed the revert path.** Cancelling them freed no
+> capacity: Linear's free plan counts every **non-archived** issue of every state, so 123
+> cancelled issues still consumed 123 of the 250 and the workspace sat at ~253 — over the
+> cap, with Linear refusing to create new issues. Archiving took it to ~130. The three
+> files that had this rule wrong are corrected in
+> [PR #739](https://github.com/bestdan/workflow-skills/pull/739); `linear-archive.py` had
+> it right all along and `linear-common.md` did not.
+>
+> The cost is that an archived issue refuses `issueUpdate`, so the documented revert (a
+> scripted un-cancel over the mapping) no longer runs, and there is no `issueUnarchive`
+> tooling here (#460). **Inspect that trade rather than inheriting it:** the un-cancel was
+> never the expensive part — every GitHub issue completed or created since 2026-09-13 has
+> no Linear counterpart, so a revert is a reverse migration of that delta whether or not
+> the originals are archived. See task 10 in the plan.
 
 **The 2 that did not: PRE-503 and PRE-504, archived since 2026-08-01.** Linear serves an
 archived issue to `issue(id:)` and then refuses **every** mutation against it —

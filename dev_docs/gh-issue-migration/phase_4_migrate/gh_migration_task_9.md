@@ -75,11 +75,17 @@ silently lost on arrival.
 > (an archived issue keeps its state type, so #511's live-state filter passed them), and
 > nothing has been filed for it.
 >
-> **"Do not delete anything in Linear until task 10 decides" still stands.** The issues
-> are canceled, not archived, deliberately: archiving them would make the documented
-> revert — a scripted un-cancel over the mapping file — fail, because an archived issue
-> refuses `issueUpdate` too. Recovery would need `issueUnarchive` first, which nobody has
-> written.
+> **The 123 were ARCHIVED on 2026-09-15, overturning the note that used to sit here.**
+> This paragraph previously said they were kept `Canceled` on purpose so a revert could
+> un-cancel them. The premise was wrong: cancelling freed no capacity, because Linear's
+> free plan counts every non-archived issue of every state. The workspace was at ~253 of
+> 250 and refusing new issues; archiving took it to ~130.
+>
+> "Do not **delete**" still stands — archived is not deleted, and the export remains the
+> provenance record either way. What is gone is the cheap revert: an archived issue
+> refuses `issueUpdate`, and there is no `issueUnarchive` tooling here (#460). Task 10
+> should be read as keep-or-extend; a revert is a fresh reverse migration of everything
+> GitHub has accumulated since 2026-09-13, which the un-cancel was never a large part of.
 >
 > **The plan file is no longer regenerable.** Regenerating re-runs the create-versus-reopen
 > decision, and the eight reopen targets are now OPEN — which that decision refuses,
