@@ -16,17 +16,24 @@ Read this first, then [`gh_migration_plan.md`](gh_migration_plan.md) (the epic) 
 **Three things task 10's verdict opened rather than closed** — all of them task 11's, none
 of them decided:
 
-1. **The migration assets lost their justification.** `linear-import.py` (~2,500 lines),
-   `linear-verify.py`, `linear-successor.py`, `linear-export.py` and `_linear_auth.py`
-   were kept against the possibility that the gate said _extend_. It said _keep_. Every
-   installed plugin user carries them. **Retire or keep deliberately — see task 11.**
+1. **The migration assets are to be REMOVED** (owner, 2026-09-15). `linear-import.py`
+   (~2,500 lines), `linear-verify.py`, `linear-successor.py`, `linear-export.py` and
+   `_linear_auth.py` were kept only against the possibility that the gate said _extend_.
+   It said _keep_, no future use is known, and **git history is the recovery path** — so
+   the delete commit must name them explicitly. **Two checks first**, in task 11: the
+   Linear _handler_ and its four commands stay (`finplan` is still on Linear), and each
+   asset needs a grep to confirm nothing in the day-to-day path calls it. Note
+   `linear-verify.py` is what produces the expected-failure contract below, so **run it
+   one last time before deleting it** if you want that check ever again.
 2. **Task 13 now has nothing standing behind it.** It used to gate task 10's fairness;
    task 10 closed without it. This repo has been outside unattended auto-pilot since
    2026-09-07 and **nothing is now scheduled to end that.**
-3. **The `Blocked by:` footer's "revisit at task 10" never happened.** Task 10 settled the
-   assets question it was paired with and did not touch the footer. The footer's own
-   argument is a capability one about the routine channel, unaffected by keep-versus-
-   extend, so it stands — but it stands unreviewed. See "The footer" below.
+3. **The `Blocked by:` footer's "revisit at task 10" never happened, and the question has
+   no home.** Task 10 settled the assets question it was paired with and did not touch the
+   footer. **Checked 2026-09-15: no open issue tracks it** — the nearest, #500, asks the
+   opposite (that `/push-plan` also write native edges, since it currently writes only the
+   footer). So it lives only in this file, on an unmerged branch, which is how it slid
+   past task 10 in the first place. See "The footer" below.
 
 ## The launcher prompt is these three lines
 
@@ -125,12 +132,12 @@ owner rather than a tidy-up in passing.
 
 Four sets. **Task 10 decided two of them; task 11 owns the remaining two.**
 
-| Files                                                            | Fate                                                                                                                   |
-| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `dev_docs/tasks/gh_migration_plan/` (untracked scaffolding)      | **Delete** — task 11 says so, the path is still accurate, needs the owner's go                                         |
-| `$HOME/src/linear-export/` (export, plan, mapping)               | **Keep forever.** #516 step 3 records their paths in `linear-common.md`. **No remote** — unowned exposure              |
-| `dev_docs/gh-issue-migration/` (these 18 tracked files, PR #441) | **UNDECIDED** — merge, close, or graduate a subset. See "Closing out PR #441"                                          |
-| `linear-import.py`, `linear-verify.py`, `linear-successor.py`    | **UNDECIDED, and newly so** — task 10 said keep-not-extend, which removed the reason they were being held. See task 11 |
+| Files                                                            | Fate                                                                                                                      |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `dev_docs/tasks/gh_migration_plan/` (untracked scaffolding)      | **Delete** — task 11 says so, the path is still accurate, needs the owner's go                                            |
+| `$HOME/src/linear-export/` (export, plan, mapping)               | **Keep forever.** #516 step 3 records their paths in `linear-common.md`. **No remote** — unowned exposure                 |
+| `dev_docs/gh-issue-migration/` (these 18 tracked files, PR #441) | **UNDECIDED** — merge, close, or graduate a subset. See "Closing out PR #441"                                             |
+| `linear-import.py`, `linear-verify.py`, `linear-successor.py`    | **REMOVE** (owner, 2026-09-15) — keep-not-extend spent their justification; git history is the recovery path. See task 11 |
 
 **#516's own acceptance criterion names a folder that never existed.** It asks that
 `dev_docs/tasks/linear_import_plan/` "no longer exists locally" — verified absent
@@ -289,7 +296,8 @@ read issue bodies. The 27 imported issues were the only dependencies on the boar
 without an echo, so they were exactly the set an unattended routine would misread as
 unblocked.
 
-> **The honest counter, still unreviewed:** nothing consumes the footer unattended
+> **The honest counter, still unreviewed and untracked:** nothing consumes the footer
+> unattended
 > _today_. The only reader is `gh-issue-graph.py`, for reconciliation. This is a capability
 > argument, not a usage one — and with task 13 now unscheduled, the routine channel that
 > would consume it has no arrival date. **This was supposed to be revisited at task 10 and

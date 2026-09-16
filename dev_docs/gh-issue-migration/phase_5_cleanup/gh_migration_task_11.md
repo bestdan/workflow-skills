@@ -59,28 +59,35 @@ Then delete `dev_docs/tasks/gh_migration_plan/`.
 **Only retire the Linear handler and its four Linear-only commands once no repo
 is still on Linear.** If `finplan` remains, they stay.
 
-> **`linear-import.py` is the case this rule does not cover, and task 10 has now
-> decided it.** It is ~2,500 lines of one-shot migration tooling that every installed
-> plugin user carries, and it was kept not because a repo is on Linear but because
-> **task 10 might extend the migration to `finplan`** — which is why #516 step 3
-> documents its usage. **Task 10 closed 2026-09-15 as keep, not extend**, so that
-> justification is spent and retiring it is squarely in scope here. Same for
-> `linear-verify.py` and `linear-successor.py`.
+> **`linear-import.py` is the case this rule does not cover, and it is now DECIDED:
+> remove it.** Owner's call, 2026-09-15. It is ~2,500 lines of one-shot migration tooling
+> that every installed plugin user carries, and it was kept only against the possibility
+> that task 10 said _extend_. It said _keep_. **No future use is known, so it goes** —
+> along with `linear-verify.py`, `linear-successor.py`, `linear-export.py` and
+> `_linear_auth.py` if nothing else imports them.
 >
-> **Retiring them is not the same decision as retiring the handler, and the two must
-> not be run together.** The handler and its four Linear-only commands stay while
-> `finplan` is on Linear — that is the rule above and it is unchanged. These five
-> assets (`linear-export.py`, `linear-import.py`, `linear-verify.py`,
-> `linear-successor.py`, `_linear_auth.py`) are migration tooling, not loop tooling;
-> nothing in the day-to-day Linear path calls them. **Check that claim before
-> deleting** rather than inheriting it from this sentence.
+> **The recovery path is git history, and that is the whole reason this is a cheap
+> decision.** Nothing is lost that a `git log --diff-filter=D` and a checkout cannot
+> restore. If `finplan` is ever migrated, the assets come back from the commit that
+> deleted them — which is why the delete commit's message must name them explicitly
+> rather than saying "remove migration tooling".
 >
-> **Two things argue for keeping them anyway, and they deserve an answer rather than
-> a default.** They are the only executable record of how the migration was performed,
-> against three provenance files that are no longer regenerable; and "keep" is a
-> reversible verdict, so a later decision to extend would have to rebuild them. The
-> counter is that they are dead weight in every user's install today and git history
-> holds them either way. **The owner decides; do not let it drift.**
+> **Two checks before deleting, because the rule above is not the same rule.** The Linear
+> **handler** and its four Linear-only commands **stay** — `finplan` is still on Linear.
+> These five assets are migration tooling, not loop tooling. **Verify that rather than
+> inheriting it from this sentence:** grep the handlers, commands and scripts for each
+> asset name, and check `scripts/check.sh`'s test list for the `test-linear-*.sh` pairs
+> that must go with them. An asset something in the day-to-day path still calls is not
+> migration tooling, whatever this note says.
+>
+> **`linear-export.py` is the one to look at hardest.** It is the only one of the five
+> with a plausible non-migration use (dumping a Linear workspace), and `_linear_auth.py`
+> exists because two assets share it — so if either survives the grep, the pair may need
+> to.
+
+**`finplan` is not scheduled to migrate, and there are no firm plans either way.**
+(Owner, 2026-09-15.) Not-now rather than never — which is precisely why the deletion above
+is defensible: reversing it is a checkout, not a rewrite.
 
 ## Acceptance Criteria
 

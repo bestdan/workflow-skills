@@ -217,11 +217,15 @@ join, and `gh` covers it only partially.
     that cap and the relief was being withheld to preserve an escape hatch already
     measured as impractical. Archiving ran the same day and took the workspace to ~130.
 
-    **The one consequence that opens rather than closes:** "keep, not extend" removes the
-    justification for the migration assets. `linear-import.py` (~2,500 lines),
+    **The one consequence that opens rather than closes, now also decided:** "keep, not
+    extend" removed the justification for the migration assets, and the owner's call
+    (2026-09-15) is to **remove them**. No future use is known and git history is the
+    recovery path, so the deletion is cheap and reversible — which is what makes it
+    defensible while `finplan`'s own migration stays a not-now rather than a never. `linear-import.py` (~2,500 lines),
     `linear-verify.py` and `linear-successor.py` were kept against the possibility that
-    this gate said extend, and every installed plugin user carries them. Retiring them is
-    live in [task 11](phase_5_cleanup/gh_migration_task_11.md). The Linear **handler** and
+    this gate said extend, and every installed plugin user carries them. Executed in
+    [task 11](phase_5_cleanup/gh_migration_task_11.md), with the greps that must precede
+    it. The Linear **handler** and
     its four Linear-only commands are a separate question and they stay — `finplan` is
     still on Linear, which is the rule task 11 states.
 
