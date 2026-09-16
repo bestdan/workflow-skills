@@ -277,7 +277,7 @@ Nothing found → `PASS`.
 
 **Check 6 — Archive health.** Whether `/archive-tasks` can retire completed work
 so the tracker doesn't fill up (acute for `linear`, whose free plan caps a
-workspace at 250 _active_ issues). Read-only signal, **`WARN`/`PASS` only** —
+workspace at 250 non-archived issues of any state — completing or cancelling one frees nothing, only archiving does; see `linear-common.md` → `active_issue_quota` for why that figure is dated rather than fixed). Read-only signal, **`WARN`/`PASS` only** —
 never auto-fixed, since every remedy is a human decision (set a threshold, enable
 auto-archive, store an API key). Report against the resolved handler:
 

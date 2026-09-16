@@ -78,21 +78,29 @@ As on the file path, this scope gate is **model judgment, not a deterministic ru
 
 ### 7. Report workspace issue-quota headroom (advisory — never holds a promotion)
 
-Linear's free plan caps a workspace at **250 non-archived issues of every state**. Backlog, Todo, In Progress, Done and Canceled all count; **archiving is the only thing that removes one**, and completing or cancelling an issue frees nothing. Over the cap, Linear refuses to **create** new issues — existing issues still update normally.
+Linear's free plan caps a workspace at a fixed number of **non-archived issues of every state** — `250` as of 2026-09, sourced from `linear.active_issue_quota` (see `linear-common.md`, which owns the figure and says why the repo cannot verify it). Backlog, Todo, In Progress, Done and Canceled all count; **archiving is the only thing that removes one**, and completing or cancelling an issue frees nothing. Over the cap, Linear refuses to **create** new issues — existing issues still update normally.
 
 **So a promotion spends no quota.** Step 8 moves an issue `backlog` → `unstarted`, and that issue was already counted in both states. This step therefore **reports** headroom and never holds a candidate back.
 
 > **It used to hold them, on a premise that was wrong.** The earlier text read "promoting a batch of backlog cards is functionally creating that many new active issues from the quota's point of view", and counted only `unstarted` + `started` against the 250. Both halves were wrong: the count omitted the Backlog, Done and Canceled issues that do consume the cap, and the conclusion gated an operation that consumes none of it. The `held (quota)` outcome is gone with it — a promotion is never refused for quota, so nothing is ever held for it.
 
-Skip this step entirely if **no** candidate scored HIGH in step 6.
+**Run this step on every invocation, including one that promotes nothing.** It used to be skipped when no candidate scored HIGH, on the reasoning that a LOW-scored candidate never leaves Backlog and so cannot affect the count — true of the gate, and irrelevant now. Workspace fullness is a fact about the workspace, not about this run's candidates, and a run where everything scored LOW is if anything the one most likely to be sitting on a backlog worth archiving. The cost is one `list_issues` call.
 
-1. **Resolve and validate the quota.** Read `linear.active_issue_quota`. The supported domain is an integer `0`–`250` — `250` is Linear's actual free-plan hard cap, not an arbitrary ceiling, and the count in step 2 is calibrated against it. Default (unset) is `250`. `0` disables the check, e.g. on a paid plan with no cap — skip the rest of this step. Any other value outside `0`–`250` (negative, non-integer, non-numeric, or `> 250`) is a config error: warn once (`linear.active_issue_quota <value> is invalid (must be an integer 0-250) — quota report disabled for this run`) and skip the rest of this step. Do not clamp a too-large value down to `250` silently; that would silently report against a smaller quota than configured. Nothing here is fail-open or fail-closed any more — the step writes nothing either way.
+1. **Resolve and validate the quota.** Read `linear.active_issue_quota`. The supported domain is an integer `0`–`250`, whose ceiling is the observed free-plan figure `linear-common.md` records. Default (unset) is `250`. `0` disables the report, e.g. on a paid plan with no cap — skip the rest of this step. Any other value outside `0`–`250` (negative, non-integer, non-numeric, or `> 250`) is a config error: warn once (`linear.active_issue_quota <value> is invalid (must be an integer 0-250) — quota report disabled for this run`) and skip the rest of this step. Do not clamp a too-large value down to `250` silently; that would silently report against a smaller quota than configured. Nothing here is fail-open or fail-closed any more — the step writes nothing either way.
 2. **Count non-archived issues, workspace-wide.** The cap is per-workspace, not per-team, so omit `team`/`teamId` (a configured project scope doesn't narrow it either — every project draws on the same workspace cap). Call `<linear-mcp>__list_issues` **once**, with **no `state` filter**, `includeArchived: false`, `limit: <active_issue_quota>`, and take the result count as `issue_count`. A `state` filter is exactly the bug this step used to have: every state counts, so filtering to any of them undercounts. If the call returns `hasNextPage: true`, the workspace already holds `>= active_issue_quota` non-archived issues (the call was capped at exactly the quota), so treat it as at-or-over without paginating further.
+
+   **Both halves of that are measured, not assumed** — probed 2026-09-16 against the live PreThink workspace. An unfiltered call with `includeArchived: false` returned issues of every state type, `completed` among them (132 issues, `hasNextPage: false`), so omitting the `state` filter does not silently narrow to active states. And `limit: 10` returned exactly 10 with `hasNextPage: true`, confirming the count saturates at `limit` — which is why step 3 renders a lower bound rather than an exact figure.
 3. **Report, and promote regardless.** Let `remaining = active_issue_quota - issue_count`.
    - `remaining > 0` → note the headroom in step 9's report and proceed.
-   - `remaining <= 0` → the workspace is full. **Every HIGH candidate still promotes** — the transition is legal and costs nothing. Lead step 9's report with the warning below, because the next `/add-task` or `/push-plan` **will** be refused by Linear:
+   - `remaining <= 0` → the workspace is at or over the cap. **Report it as a lower bound:** step 2's call is capped at `limit: <active_issue_quota>`, so `issue_count` saturates there and can never exceed it — render `≥<active_issue_quota>/<active_issue_quota>` whenever step 2 saw `hasNextPage: true`, never an exact-looking figure that understates. **Every HIGH candidate still promotes** — the transition is legal and costs nothing. Lead step 9's report with one of two lines, chosen by whether the configured threshold **is** Linear's cap. The domain allows any value `0`–`250`, so a sub-250 threshold is an operator's own early-warning line and must never be reported as a refusal Linear will not make:
 
-     `/promote-tasks: workspace at <issue_count>/<active_issue_quota> non-archived issues — Linear will refuse to CREATE new issues until you run /archive-tasks. Promotions are unaffected and were applied.`
+     - `active_issue_quota` **is 250** (Linear's real cap) — the next `/add-task` or `/push-plan` **will** be refused, so say so:
+
+       `/promote-tasks: workspace at ≥250/250 non-archived issues — Linear will refuse to CREATE new issues until you run /archive-tasks. Promotions are unaffected by this cap.`
+
+     - `active_issue_quota` **is below 250** — report the threshold as the operator's own, and name Linear's actual cap so the reader can tell the two apart:
+
+       `/promote-tasks: workspace at <issue_count>/<active_issue_quota> non-archived issues — your configured warning threshold (Linear's hard cap is 250). Run /archive-tasks to free room. Promotions are unaffected by this cap.`
 4. **Carry `issue_count`/`active_issue_quota`** into step 9 (Report) — this is one read, not a per-candidate query.
 
 ### 8. Apply
@@ -107,8 +115,6 @@ Otherwise, for each scored candidate call `<linear-mcp>__save_issue` with `id` =
 
   **A promotion is not refused for quota, so there is no quota race to handle here.** The issue already counts against the cap in both its old and new state, and Linear's limit refuses _creates_, not updates. An `exceeded free issue limit` error on this `save_issue` would therefore contradict the documented rule — treat it as a genuine unexpected failure and surface it, rather than converting the batch to a held outcome. (The earlier text instructed exactly that conversion, inferred from the wrong premise this step used to carry; nothing ever measured it.)
 
-  (append the backfill note in the same comment when one applies, same shape as the LOW comment below).
-
 - **LOW:** **do not** change `state` (leave the issue in backlog); `labels` = existing label ids **plus** `human-approval-requested`; `priority`/`estimate` = the backfilled value(s) from step 6, if any. Call `<linear-mcp>__save_comment` with `issueId` = candidate `id` (the `save_comment` field is named `issueId`, not `id` — same as `linear-claim.md`) and `body` = a one-line reason (`/promote-tasks: <failed-check>`) so the human can fix it quickly — mirrors the file path's `# promoter:` comment; if any field was backfilled, note it in the same comment (e.g. `promoter auto-set priority to Medium, estimate to 2`).
 
 If a candidate had no other failed check but **did** get a backfill, still call `save_comment` to note what was auto-set (there is no failed-check reason in that case, just the backfill note) — mirrors the file path's provenance comment being appended even when the card is otherwise HIGH.
@@ -121,7 +127,7 @@ Print the same summary shape as the file path (`commands/promote-tasks.md` step 
 
 ```
 scope: project Payments revamp
-⚠ workspace at 251/250 non-archived issues — Linear will refuse to CREATE new issues until you run /archive-tasks. Promotions are unaffected and were applied.
+⚠ workspace at ≥250/250 non-archived issues — Linear will refuse to CREATE new issues until you run /archive-tasks. Promotions are unaffected by this cap.
 ⚠ candidate query for project Payments revamp hit the 500-candidate cap — some backlog issues may not have been scored this run.
 Promoted 5 of 8 candidates:
   ready (4):
