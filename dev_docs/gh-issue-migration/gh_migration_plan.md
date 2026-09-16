@@ -192,10 +192,21 @@ join, and `gh` covers it only partially.
    since 2026-08-01 and therefore unwritable. The set is 125, not the "84" the task file
    opened with nor the "96 or 135" that replaced it — both predate an export, and the
    count lives in `$HOME/src/linear-export/2026-09-13-import-plan.json`.
-   **[#516](https://github.com/bestdan/workflow-skills/issues/516) is the only step
-   left**: the `/reoptimize-tasks` spot-check, a second `linear-verify.py` run, and this
-   file's own close-out.
+   **DONE 2026-09-15.** [#516](https://github.com/bestdan/workflow-skills/issues/516)
+   closed it out: `/reoptimize-tasks` at whole-repo scope found the graph already sound
+   (0 cycles, 0 stale edges, 0 inversions) and reported the 27 imported edges as missing
+   their `Blocked by:` body echo — applied as 27 edges over 20 issues, which settles the
+   footer question the handoff had left open. Three edges were spot-checked against the
+   export, 3/3. The second `linear-verify.py` run then passes every check except `fields`,
+   which now reports `body` differences on exactly those 20 issues — a **deliberate,
+   permanent divergence**, because the plan file is provenance and must not be edited to
+   make a check pass. See HANDOFF.md → "What #516 ran" for the expected-failure contract.
 10. [phase_4_migrate/gh_migration_task_10.md](phase_4_migrate/gh_migration_task_10.md) — Pilot evaluation gate: keep, extend, or revert.
+    **The two-week clock opened 2026-09-15**, when task 9 closed — so the gate is due on
+    or after **2026-09-29**. Nothing is archived or deleted in Linear until it runs: the
+    123 migrated originals are `Canceled`, deliberately **not** archived, because an
+    archived Linear issue refuses `issueUpdate` too and the documented revert is a
+    scripted un-cancel over the mapping file. Measured on PRE-503/504, not inferred.
     **The thing this warned about has happened.** The warning below was written while the
     flip was still ahead; [PR #503](https://github.com/bestdan/workflow-skills/pull/503)
     made it on **2026-09-07** for an unrelated reason (a label transfer from `dotfiles`),

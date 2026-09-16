@@ -1,11 +1,15 @@
 # Handoff — migrating the task loop from Linear to GitHub Issues
 
-**Redrafted 2026-09-15, after #515 landed. Both boards are now settled: the GitHub
-board was checked by something that did not write it (125 entries, 27 edges, 15
-sub-issue links, 62 transcripts), and the Linear originals now point at their
-successors and are `Canceled` — 123 of them; see "What #515 settled".
-[#516](https://github.com/bestdan/workflow-skills/issues/516) (close out) is the last
-step, and it needs no Linear credential.** Read this first, then
+**Redrafted 2026-09-15. Task 9 is DONE — both boards are settled and the close-out has
+run.** The GitHub board was checked by something that did not write it (125 entries, 27
+edges, 15 sub-issue links, 62 transcripts). The Linear originals point at their successors
+and are `Canceled`, 123 of them. #516 then found the graph already sound, wrote the 27
+missing `Blocked by:` echoes, and left the verifier with a **standing expected failure** —
+read "What #516 ran" before treating its output as a regression.
+
+**Next is task 10, the pilot gate: keep, extend, or revert. Its two-week clock opened
+2026-09-15, so it is due on or after 2026-09-29.** Nothing in Linear is archived or
+deleted until it decides. Read this first, then
 [`gh_migration_plan.md`](gh_migration_plan.md) (the epic) and
 [`2026-08-24-requirements-and-evidence.md`](2026-08-24-requirements-and-evidence.md)
 (the measured record).
@@ -20,16 +24,15 @@ to begin already-merged work, none with any git history to recover from. If you 
 yourself wanting a longer pointer, the missing content belongs **here** instead.
 
 ```
-Pick up https://github.com/bestdan/workflow-skills/issues/516
+Task 9 is done. Next is task 10 (pilot gate), due on or after 2026-09-29.
 
 Read dev_docs/gh-issue-migration/HANDOFF.md first — it is NOT on main, only on the
 unmerged draft PR #441. Get it with:
   git show origin/bestdan/gh-issue-migration:dev_docs/gh-issue-migration/HANDOFF.md
 ```
 
-Swap the issue number as the chain advances (#516 is the last) and the pointer keeps
-working, because which task is next is a fact this file carries rather than one the
-prompt has to.
+The chain #510–#516 is finished, so the pointer now names a task rather than an issue —
+which task is next is a fact this file carries rather than one the prompt has to.
 
 ## Redraft this file when you finish — read this before you start
 
@@ -298,15 +301,28 @@ the two label invariants with **no reconciler rule**. Use `gh-issue-state.py --d
    outside becomes a note. Unreachable on the board as imported; reachable the moment
    #516 runs `/reoptimize-tasks`, which is what makes it worth having.
 
-**The `Blocked by:` footer decision is still open, and #514 did not take it.** The rule is
-"write the edge, then echo it", and the 27 edges now exist, so an echo is legal for the
-first time. `--link` did not write one because the task did not ask, and `linear-verify.py`
-does not require one because requiring it would have been taking the decision by
-implication. `/push-plan` **does** write that footer and `/reoptimize-tasks` reads it as
-an echo of an edge, so the two verbs are inconsistent today. **This is #516's to settle.**
-Note that imported bodies do carry `Blockers not migrated:` for blockers outside the
-selection — deliberately not spelled `Blocked by:`, because those blockers have no edge
-and never can.
+**The `Blocked by:` footer decision is SETTLED — the echo is written.** #516 ran
+`/reoptimize-tasks`, which reported all 27 imported edges as `edge_only` (a real edge with
+no body echo), and the footers were applied: **27 edges over 20 issues**, since the footer
+is an aggregate line (#686 carries five blockers on one line, #679 three).
+
+**The deciding argument was not consistency, it was the routine channel.** The "one fact,
+one home" objection is the obvious one and it is wrong here: `dev_docs/decisions/
+2026-08-24-routine-claim-channel.md` records a measured probe showing the **GitHub MCP
+connector exposes no dependency-edge tool**, so a cloud routine — no `gh` — cannot read
+`blocked_by` in any form, while it _can_ read issue bodies. `push-plan.md` §5.5 already
+names that as the footer's strongest reason. The 27 imported issues were the only
+dependencies on the board written without an echo, so they were exactly the set an
+unattended routine would have misread as unblocked once task 13 restores auto-pilot here.
+
+> **The honest counter, recorded because it may outlive the decision:** nothing consumes
+> the footer unattended _today_ — the only reader is `gh-issue-graph.py`, for
+> reconciliation. This is a capability argument, not a usage one. If the routine channel
+> never grows a dependency-aware step, the footer is maintained for a reader who never
+> arrives. Revisit at task 10 alongside the "do the Linear assets stay" question.
+> Note that imported bodies do carry `Blockers not migrated:` for blockers outside the
+> selection — deliberately not spelled `Blocked by:`, because those blockers have no edge
+> and never can.
 
 **A reopened issue carries TWO provenance footers, and that is faithful.** The eight were
 migrated OUT of GitHub in August, so each body already ended with
@@ -329,6 +345,48 @@ writes took about three minutes. The secondary limit was never the binding const
 that pace — but it was also never reached, so do not read that as licence to drop the
 throttle. #515's writes go to Linear's API rather than GitHub's, so none of this transfers
 except the habit.
+
+## What #516 ran, and the one divergence it leaves behind
+
+**`/reoptimize-tasks`, whole-repo scope, 2026-09-15.** Scope is whole-repo on purpose:
+the migrated issues span milestones 4–8 plus unmilestoned ones, and gh-issue has no
+grouping above a milestone, so a milestone-scoped run would have missed every
+cross-milestone edge. 247 nodes, 50 real edges, not truncated.
+
+**The graph was already sound.** 0 cycles, 0 stale edges, 0 priority inversions, 0
+concurrent-started pairs, 0 `footer_only`. The 23 `satisfied_edges` are this plan's own
+chain (#510→#511→…) with the blocker closed `completed` — satisfied, not a defect, and
+GitHub already stops counting them. The only finding was the 27 missing echoes, now
+applied.
+
+**Dimension 2 produced nothing, and the reason is worth knowing before you trust that
+field.** All 279 prose candidates came back `weak`/`related` — zero blocking strength —
+and **151 of them point at numbers that are not issues in this graph** (`#1`, `#2`,
+`#3580`). `_body_refs.py` reads any `#<digits>` as an issue reference, but on GitHub
+issues and PRs share one number space, so a prose `#138` is as likely to be a PR. That is
+a ~54% false-positive rate on this repo, harmless only because nothing acts on a weak
+candidate. **Unfiled.**
+
+**Three edges spot-checked against the export**, as this task asks: #679←#674, #679←#684,
+#679←#685 → PRE-582 blocked by PRE-593 / PRE-566 / PRE-564, all three present as real
+`blocks` relations. 3/3.
+
+### The divergence: `linear-verify.py` now fails `fields` on 20 issues, and that is correct
+
+**Recorded rather than silenced, per this task's own instruction.** The post-reoptimize
+verify run reports exactly one failing check — `fields`, `body`-only, on exactly the 20
+issues that took a footer. Every other check passes, including `edges` (27/27) and
+`sub_issues` (15/15). The failing set and the edited set were compared programmatically
+and are identical, so nothing else moved.
+
+The cause is structural and permanent: the plan file holds each body as `--apply` wrote
+it, the board now holds that body plus a `Blocked by:` line, and **the plan is provenance
+and must not be edited to make a check pass.** So this failure is now the expected result:
+
+> **A future `linear-verify.py` run should report `1 check(s) failed: fields`, 20 issues,
+> `body` only. That is the pass condition, not a regression.** A run that reports _more_
+> than those 20, or a wrong field other than `body`, is a real finding. The 20 are
+> #679, #686–#691, #693–#698, #707–#710, #719, #720, #729.
 
 ## What #515 settled — the Linear side is done
 
@@ -373,6 +431,26 @@ crash you expect and you get the crash you did not.
 against the local export/plan/mapping files; every `gh` call is a GET.
 
 ## What will bite you
+
+### This branch is far behind `main`, and its handler docs will lie to you
+
+**Measured 2026-09-15: `bestdan/gh-issue-migration` was 153 commits behind `main`.** The
+launcher prompt above sends you here for the plan, which is right — the plan exists
+nowhere else. But the checkout you land in also contains a whole `commands/` tree, and
+**that copy is stale**.
+
+This is not theoretical. #516's run nearly used this branch's
+`commands/handlers/gh-issue-reoptimize.md`, whose first line reads _"(report-only)"_ and
+whose body states that GitHub Issues **have no native dependency edge**, so Dimensions 1–2
+can only ever suggest a body footer. `main`'s copy says the opposite — the edge is real,
+and the flow creates and removes it — which is the version matching a board that has
+carried 27 real edges since #513. The stale doc would have produced a confident report
+built on a false premise, and the helper it calls (`gh-issue-deps.py`) does not exist on
+this branch at all.
+
+**So: read the PLAN from this branch, and read every `commands/`, `skills/` or `scripts/`
+file from `main`.** Run the tooling from a fresh worktree off `main`, not from here. The
+plan files are the only thing this branch is authoritative about.
 
 ### `op` is dead over SSH, and there is a second Linear credential that is not
 
@@ -764,12 +842,12 @@ carries the imported issues, the consumed Linear labels, the footers, the depend
 and now an independent check that all four are right. No criterion here is waiting on
 migration work any more.
 
-- **Task 8's migrated-backlog half — runnable NOW, and nothing blocks it.** It is also
-  **#516 step 1**, so running it early is running #516 early rather than doing it twice.
-  `/reoptimize-tasks` against the migrated `workflow-skills` backlog, spot-checking three
-  edges in the UI, then `linear-verify.py` again to confirm what it changed. The 27 edges
-  and 15 sub-issue links are live; #701 and #702 are the two richest subjects, and the
-  PRE-554/PRE-555 chain (#692 → #691 → #686) is the clearest dependency to eyeball.
+- **Task 8's migrated-backlog half — DONE 2026-09-15, discharged by #516 step 1.** The two
+  were the same run, as this entry predicted. `/reoptimize-tasks` at whole-repo scope,
+  three edges spot-checked against the export (3/3), `linear-verify.py` re-run. The
+  PRE-554/PRE-555 chain (#692 → #691 → #686) now carries its `Blocked by:` echo along with
+  the other 26. See "What #516 ran" above, including the expected-failure contract the
+  verifier now has.
 - **Task 16's dispatch half is unrunnable, not merely blocked.** `/do-tasks --all`
   dispatching bounded sessions needs a repo that can legitimately set
   `remote_batch: true`, and the probe says none can today. Retire the criterion or
