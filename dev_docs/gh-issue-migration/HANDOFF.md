@@ -1,10 +1,11 @@
 # Handoff — migrating the task loop from Linear to GitHub Issues
 
-**Redrafted 2026-09-14, after #514 landed in v2.55.0. The GitHub board has now been
-checked against the export by something that did not write it — 125 entries, 27 edges,
-15 sub-issue links, 62 transcripts, all confirmed — and
-[#515](https://github.com/bestdan/workflow-skills/issues/515) (the Linear side)
-is next; see "#515 is next".** Read this first, then
+**Redrafted 2026-09-15, after #515 landed. Both boards are now settled: the GitHub
+board was checked by something that did not write it (125 entries, 27 edges, 15
+sub-issue links, 62 transcripts), and the Linear originals now point at their
+successors and are `Canceled` — 123 of them; see "What #515 settled".
+[#516](https://github.com/bestdan/workflow-skills/issues/516) (close out) is the last
+step, and it needs no Linear credential.** Read this first, then
 [`gh_migration_plan.md`](gh_migration_plan.md) (the epic) and
 [`2026-08-24-requirements-and-evidence.md`](2026-08-24-requirements-and-evidence.md)
 (the measured record).
@@ -19,14 +20,14 @@ to begin already-merged work, none with any git history to recover from. If you 
 yourself wanting a longer pointer, the missing content belongs **here** instead.
 
 ```
-Pick up https://github.com/bestdan/workflow-skills/issues/515
+Pick up https://github.com/bestdan/workflow-skills/issues/516
 
 Read dev_docs/gh-issue-migration/HANDOFF.md first — it is NOT on main, only on the
 unmerged draft PR #441. Get it with:
   git show origin/bestdan/gh-issue-migration:dev_docs/gh-issue-migration/HANDOFF.md
 ```
 
-Swap the issue number as the chain advances (#515 → #516) and the pointer keeps
+Swap the issue number as the chain advances (#516 is the last) and the pointer keeps
 working, because which task is next is a fact this file carries rather than one the
 prompt has to.
 
@@ -162,10 +163,12 @@ happened without task 13" below. **Do not plan as though the flip is still ahead
 **The milestone's own description is the crosswalk contract** — the Linear-to-GitHub
 table nothing else in this repo states. Read it there, not from a copy.
 
-**#510 through #514 are complete and all of them are on `main`** — #510–#513 as of
+**#510 through #515 are complete and all of them are on `main`** — #510–#513 as of
 v2.54.0, #514 as of **v2.55.0** ([PR #735](https://github.com/bestdan/workflow-skills/pull/735),
-merged `c962ffb`). The assets are `commands/handlers/assets/linear-export.py`,
-`linear-import.py` (`--plan`, `--show`, `--apply`, `--link`) and `linear-verify.py`.
+merged `c962ffb`), #515 via [PR #736](https://github.com/bestdan/workflow-skills/pull/736),
+merged 2026-09-15. The assets are `commands/handlers/assets/linear-export.py`,
+`linear-import.py` (`--plan`, `--show`, `--apply`, `--link`), `linear-verify.py`,
+`linear-successor.py`, and the shared `_linear_auth.py`. **#516 is the only one left.**
 
 **THE MIGRATION HAS RUN, THE GITHUB BOARD IS THE LIVE BOARD, AND IT HAS BEEN CHECKED
 BY SOMETHING THAT DID NOT WRITE IT.** 125 Linear issues landed on 2026-09-13:
@@ -327,22 +330,54 @@ that pace — but it was also never reached, so do not read that as licence to d
 throttle. #515's writes go to Linear's API rather than GitHub's, so none of this transfers
 except the habit.
 
-## #515 is next, and it is the only step left that needs a Linear credential
+## What #515 settled — the Linear side is done
 
-#515 adds `linear-successor.py`: per mapping entry, a comment naming the GitHub successor,
-a `GitHub #<n> (migrated)` link attachment, and — behind `--cancel` — the team's
-`canceled`-type state. Idempotent **per write, not per issue**, so a crash between any two
-leaves the rerun to finish the rest. Read the issue for the exact mutation shapes.
+`linear-successor.py` shipped and **has been run against the live workspace**
+(2026-09-15). Per mapping entry it posts a comment naming the GitHub successor, creates a
+`GitHub #<n> (migrated)` link attachment, and — behind `--cancel` — sets the team's
+`canceled`-type state. Idempotent **per write, not per issue**.
 
-**Get the credential sorted before writing any of it.** See "`op` is dead over SSH" below:
-this is the step where that bites, and #514 needed no Linear credential at all.
+**123 of the 125 originals now carry all three.** A re-run reports 0 outstanding.
+PRE-555 was checked by hand: comment → `bestdan/workflow-skills#691`, attachment to the
+same, state `Canceled`/`canceled`.
+
+**The 2 that did not: PRE-503 and PRE-504, archived since 2026-08-01.** Linear serves an
+archived issue to `issue(id:)` and then refuses **every** mutation against it —
+`commentCreate` answers `Entity not found: Issue`, which names neither the issue nor the
+reason. They are on the board as **#714 and #713**.
+
+> **That is a finding about the import SELECTION, not about the script, and nothing has
+> been filed for it.** An archived issue keeps its state type, so #511's
+> `backlog`/`unstarted`/`started` filter let two archived issues into the import set. If
+> that selector is ever re-run or reused, it will do the same thing again.
+
+**Two defects surfaced only by running it**, both now fixed and pinned by tests:
+
+- **One bad issue ended the whole pass.** `gql()` answers a GraphQL error with
+  `sys.exit`, as every sibling's does, and nothing caught it — so the first apply died 19
+  issues in and took the remaining 105 with it, while the docstring two lines up claimed a
+  failed write does not abort the others. Now caught per write, the way
+  `linear-archive.py` already did around `issueArchive`. **Check the siblings before
+  trusting this pattern elsewhere**: the catch is per call site, not in `gql()`.
+- **The `Bearer` framing was missing.** `linear-successor.py` copied the bare
+  `"Authorization": key` header from the six older assets, which is right only for a
+  personal `lin_api_…` key. The rule now lives in `_linear_auth.py`, imported by both
+  `linear-export.py` and `linear-successor.py`; **the other five still hardcode the bare
+  form** and will fail against an OAuth token.
+
+**The per-write idempotence earned its keep unplanned.** The aborted first run resumed
+with no special handling — the guards simply found the 106 outstanding. Design for the
+crash you expect and you get the crash you did not.
+
+**#516 needs no Linear credential.** Its `linear-verify.py` re-run reads the GitHub board
+against the local export/plan/mapping files; every `gh` call is a GET.
 
 ## What will bite you
 
 ### `op` is dead over SSH, and there is a second Linear credential that is not
 
-**Measured 2026-09-13** while running #510's export from an SSH session on the Mac mini.
-This is #515's critical path.
+**Measured 2026-09-13** while running #510's export from an SSH session on the Mac mini,
+and confirmed again on 2026-09-15 for #515's writes. No remaining step needs it.
 
 **`op` cannot work here, and the error says which kind of cannot.** The key in
 `dev_docs/tasks/.task-config.local.yml` is an `op://Private/…` ref, and that read returns
@@ -356,13 +391,19 @@ all, so the CLI is desktop-integrated only.
 client id and secret, and Linear's `client_credentials` grant against
 `https://api.linear.app/oauth/token` returns a working token at scope `read`. Contrary
 to the obvious worry, that app-actor token is **not** scope-limited in practice — it read
-all 810 issues including the 557 archived ones. **Unmeasured for #515: whether that same
-grant can WRITE.** Scope `read` is what was asked for and what worked; a comment, an
-attachment and a state change are three mutations, and nothing here has tried one. Probe
-it before planning around it. Two things to know either way: it is a **`Bearer`** token,
-not a personal `lin_api_…` key (`linear-export.py:auth_header()` handles both, and nothing
-else in `commands/handlers/assets/` does), and the token is a plaintext credential wherever
-you park it, so delete it after.
+all 810 issues including the 557 archived ones.
+
+**The open question — whether that grant can WRITE — is answered: it can.** Measured
+2026-09-15 at scope `read,write`: 123 issues took a `commentCreate`, an
+`attachmentCreate` and an `issueUpdate` each, 0 failures. Two things that follow:
+
+- **The comments are authored by the APP, not by you.** A `client_credentials` token
+  carries an `app` actor. For a migration footer that is arguably better provenance, but
+  it is not reversible per comment, so decide before a bulk write rather than after.
+- It is a **`Bearer`** token, not a personal `lin_api_…` key. That framing now lives in
+  `_linear_auth.py` (`linear-export.py` and `linear-successor.py` import it; **the other
+  five assets still hardcode the bare header**). The token is a plaintext credential
+  wherever you park it, so delete it after.
 
 > **Two credentials are still live on this machine, and their fate is still undecided.**
 > `~/.linear-key` holds the OAuth token in plaintext (mode 600), and
@@ -386,9 +427,10 @@ output path that nothing ever executes.** `linear-verify.py`'s `--json` mode pas
 green gate and a clean live run while never having been invoked once, in tests or by
 hand — the rendered path was the only one exercised, and `--json` carries different
 shapes (integer pairs, nested dicts) that a serialisation error would have caught only at
-use. It works, now that it has been run and pinned by a test. **#515 has the same shape**:
-its `--json` summary and its `--cancel` gate are each a path the default invocation never
-touches. Run every flag once before calling a task done.
+use. It works, now that it has been run and pinned by a test. **#515 had the same shape
+and the rule held**: its `--json` summary and its `--cancel` gate are each a path the
+default invocation never touches, and both were exercised live before the task closed.
+Run every flag once before calling a task done.
 
 Practical note: an approval-based resolver is invalidated between resolves, so a harness
 that probes and then runs the script raises one dialog per resolve. And a

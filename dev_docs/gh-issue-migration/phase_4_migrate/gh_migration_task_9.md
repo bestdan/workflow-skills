@@ -57,21 +57,34 @@ Only `workflow-skills` migrates in this plan. `finplan` stays on Linear as the c
 **Labels must be provisioned before any issue lands** (task 2), or the state is
 silently lost on arrival.
 
-> **The import ran on 2026-09-13 — step 2 is half done and step 1 is finished.** All
-> **125** selected issues are on the GitHub board: 117 created (#617–#733) and 8 reopened
-> (#284, #288, #289, #295, #296, #297, #299, #302), each with its labels, milestone,
-> provenance footer and comment transcript, and one assignee. Verified by reading the
-> board rather than the run's own log.
+> **All four steps are done as of 2026-09-15.** Step 1's export is
+> `$HOME/src/linear-export/2026-09-13-prethink.json` (810 issues, archived included).
+> Step 2 landed all **125** selected issues on GitHub — 117 created as #617–#733 and 8
+> reopened (#284, #288, #289, #295, #296, #297, #299, #302) — with the **27 `blocked_by`
+> edges** and **15 sub-issue links** written by
+> [#513](https://github.com/bestdan/workflow-skills/issues/513) and the whole board
+> independently checked by [#514](https://github.com/bestdan/workflow-skills/issues/514).
+> Step 3's project→milestone mapping came with the import. Step 4's mapping file is
+> `$HOME/src/linear-export/2026-09-13-mapping.json`, **and it is the only copy**.
 >
-> **What step 2 still owes is the graph**: no `blocked_by` edge and no sub-issue link has
-> been written — 27 and 15 of them respectively, and that is
-> [#513](https://github.com/bestdan/workflow-skills/issues/513). Step 4's mapping is
-> written, at `$HOME/src/linear-export/2026-09-13-mapping.json`, and it is the only copy.
+> **The Linear side is closed too**, by
+> [#515](https://github.com/bestdan/workflow-skills/issues/515): 123 of the 125 originals
+> carry a successor comment, a link attachment and `Canceled`. The 2 exceptions are
+> PRE-503 and PRE-504, archived since 2026-08-01 — Linear refuses every mutation against
+> an archived issue. That they reached the import at all is a defect in the **selection**
+> (an archived issue keeps its state type, so #511's live-state filter passed them), and
+> nothing has been filed for it.
 >
-> **The plan file is no longer regenerable**, which the earlier note above does not say.
-> Regenerating re-runs the create-versus-reopen decision, and the eight reopen targets are
-> now OPEN — which that decision refuses, correctly, as two live homes. Treat the export,
-> the plan and the mapping all as provenance now.
+> **"Do not delete anything in Linear until task 10 decides" still stands.** The issues
+> are canceled, not archived, deliberately: archiving them would make the documented
+> revert — a scripted un-cancel over the mapping file — fail, because an archived issue
+> refuses `issueUpdate` too. Recovery would need `issueUnarchive` first, which nobody has
+> written.
+>
+> **The plan file is no longer regenerable.** Regenerating re-runs the create-versus-reopen
+> decision, and the eight reopen targets are now OPEN — which that decision refuses,
+> correctly, as two live homes. Treat the export, the plan and the mapping all as
+> provenance now.
 
 ## Task
 

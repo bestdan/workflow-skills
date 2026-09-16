@@ -184,13 +184,17 @@ join, and `gh` covers it only partially.
    **Broken down 2026-09-08 into GitHub issues [#510](https://github.com/bestdan/workflow-skills/issues/510)–[#516](https://github.com/bestdan/workflow-skills/issues/516)**
    under milestone 1, a strict chain: export → plan → apply → link → verify → Linear-side
    close-out → retire. **Not blocked by task 13** — importing issues needs no auto-pilot.
-   **#510, #511 and #512 are done and the import has landed**: all **125** selected issues
-   are on the GitHub board as of 2026-09-13, 117 created and 8 reopened. The set is 125,
-   not the "84" the task file opened with nor the "96 or 135" that replaced it — both
-   predate an export, and the count now lives in
-   `$HOME/src/linear-export/2026-09-13-import-plan.json`. **#513 is next**: the dependency
-   edges and sub-issue links were deliberately left out of the import and are the only
-   thing still missing from the board.
+   **#510 through #515 are done, on `main`, and both boards are settled.** All **125**
+   selected issues landed on the GitHub board on 2026-09-13, 117 created and 8 reopened,
+   with the edges and sub-issue links written by #513 and the whole board independently
+   checked by #514. #515 then pointed the Linear originals at their successors and
+   canceled them — **123 of 125**, the 2 exceptions being PRE-503 and PRE-504, archived
+   since 2026-08-01 and therefore unwritable. The set is 125, not the "84" the task file
+   opened with nor the "96 or 135" that replaced it — both predate an export, and the
+   count lives in `$HOME/src/linear-export/2026-09-13-import-plan.json`.
+   **[#516](https://github.com/bestdan/workflow-skills/issues/516) is the only step
+   left**: the `/reoptimize-tasks` spot-check, a second `linear-verify.py` run, and this
+   file's own close-out.
 10. [phase_4_migrate/gh_migration_task_10.md](phase_4_migrate/gh_migration_task_10.md) — Pilot evaluation gate: keep, extend, or revert.
     **The thing this warned about has happened.** The warning below was written while the
     flip was still ahead; [PR #503](https://github.com/bestdan/workflow-skills/pull/503)
