@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.56.1] - 2026-09-16
+
+### Fixes
+
+- the free-plan cap counts every non-archived issue, not just active ones [N/A] (#739) (5372ab6)
+
 ## [2.56.0] - 2026-09-16
 
 ### Features
