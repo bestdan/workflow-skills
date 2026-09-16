@@ -3,7 +3,9 @@
 Invoked from `/archive-tasks` when `handler: linear` is configured. Retires
 terminal-state Linear issues (`completed`/`canceled`/`duplicate` state types) older than the
 resolved threshold so the workspace stays under Linear's **free-plan cap of 250
-_active_ issues** — archived issues are unlimited and excluded from the cap.
+non-archived issues of any state** — archived issues are unlimited and excluded,
+and completing or cancelling frees nothing. `linear-common.md` →
+`active_issue_quota` owns that figure and records that it is dated, not fixed.
 
 **Shared reference:** see `commands/handlers/linear-common.md` for connection
 details, the config schema, the preflight pattern, and the kanban → state-type

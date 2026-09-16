@@ -9,8 +9,9 @@ argument-hint: "[--older-than <N>d] [--issues <refs>] [--all] [dry-run]"
 The task loop **creates** work items but never **retires** them. Over a
 high-velocity month the configured tracker fills with completed/canceled items
 that still count as live records, and on some trackers that is a hard wall:
-**Linear's free plan caps a workspace at 250 _active_ issues** (archived issues
-are unlimited and excluded from the cap), so a busy loop hits
+**Linear's free plan caps a workspace at 250 non-archived issues of any state**
+(archived issues are unlimited and excluded; completing or cancelling frees
+nothing — `linear-common.md` → `active_issue_quota` owns that figure), so a busy loop hits
 `Usage limit exceeded` and silently breaks — `/add-task` can't file and
 `/push-plan` can't push. `/archive-tasks` is the generic cleanup verb that retires
 terminal-state work past an age threshold.

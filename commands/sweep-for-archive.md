@@ -8,7 +8,8 @@ argument-hint: "[--since 24h] [--apply] [--project <uuid>] [--restore-false-clos
 
 A high-velocity day closes a dozen issues, and three separate questions follow:
 were they _really_ delivered, is anything sitting merged-but-not-completed, and
-can the settled ones stop consuming Linear's 250-active-issue cap.
+can the settled ones stop consuming Linear's non-archived-issue cap (closing
+one does not — only archiving does).
 `/sweep-for-complete` and `/find-false-closures` and `/archive-tasks` each answer
 one of those. `/sweep-for-archive` is the close-out pass that runs all three **in
 the one order that is safe**, and — the reason it is a command rather than three
