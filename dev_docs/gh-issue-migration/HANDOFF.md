@@ -7,9 +7,14 @@ edges, 15 sub-issue links, 62 transcripts). The Linear originals point at their 
 missing `Blocked by:` echoes, and left the verifier with a **standing expected failure** —
 read "What #516 ran" before treating its output as a regression.
 
-**Next is task 10, the pilot gate: keep, extend, or revert. Its two-week clock opened
-2026-09-15, so it is due on or after 2026-09-29.** Nothing in Linear is archived or
-deleted until it decides. Read this first, then
+**Next is task 10, the pilot gate: keep, extend, or revert — due on or after 2026-09-29**
+(its two-week clock opened 2026-09-15). Read it as **keep-or-extend**: the 123 Linear
+originals are archived, so the documented revert no longer runs.
+
+**If you are here to close out PR #441, read "Closing out PR #441" below first.** The
+branch is current with `main` as of 2026-09-16 and the gate passes, so nothing is blocked
+by its condition — but task 11 is blocked by task 10, five-sixths of it is not, and the
+merge-or-close decision is still open and is that task's to make. Read this first, then
 [`gh_migration_plan.md`](gh_migration_plan.md) (the epic) and
 [`2026-08-24-requirements-and-evidence.md`](2026-08-24-requirements-and-evidence.md)
 (the measured record).
@@ -448,27 +453,83 @@ crash you expect and you get the crash you did not.
 **#516 needs no Linear credential.** Its `linear-verify.py` re-run reads the GitHub board
 against the local export/plan/mapping files; every `gh` call is a GET.
 
+## Closing out PR #441 — the decision, and what is actually blocked
+
+**State as of 2026-09-16.** The branch is **current with `main`** (merged, 0 behind, gate
+passes), clean-merging, and carries **18 tracked plan files**. PR #441 is still a draft.
+Nothing about closing it out is blocked by the branch's condition any more.
+
+**But task 11 is blocked by task 10, and that is real.** `gh_migration_task_11.md` declares
+`is_blocked_by: gh_migration_task_10`, the pilot gate, which is **due on or after
+2026-09-29**. Not all of task 11 depends on it — the split is worth knowing:
+
+| Task 11 asks for                                                                 | Blocked by task 10?                      |
+| -------------------------------------------------------------------------------- | ---------------------------------------- |
+| The label schema and three invariants                                            | no                                       |
+| Validate-then-PATCH and the two spike failures                                   | no                                       |
+| Why the claim lock is ref creation (and the `Everything up-to-date` exit-0 trap) | no                                       |
+| Merge-as-completion, review gate as convention not enforcement                   | no                                       |
+| Label provisioning as a migration prerequisite                                   | no                                       |
+| **Which Linear commands retire and which remain**                                | **yes** — it turns on keep/extend/revert |
+
+So five-sixths of `dev_docs/gh_issue_task_loop.md` can be written now. Only the retirement
+list has to wait, and `finplan` being on Linear is what makes it wait: the answer is "they
+all stay" unless task 10 says extend.
+
+### The open decision this task owns
+
+Task 11 names it and deliberately does not settle it: **merge #441, or close it and leave
+the record on the branch.** "Both are defensible; drift is not." What each costs:
+
+- **Merge it.** The 18 files reach `main` permanently. Costs: the repo's own `AGENTS.md`
+  calls plan folders ephemeral in-flight state and says durable wisdom graduates to a
+  top-level `dev_docs/<name>.md` — so this puts scaffolding on `main` against the
+  progressive-disclosure rule the repo is built on.
+- **Close it.** No scaffolding on `main`. Costs: the history survives only as long as
+  nobody deletes `origin/bestdan/gh-issue-migration`, and an abandoned branch is exactly
+  the kind of thing a later sweep removes. Note closing the PR does **not** delete the
+  branch — only a separate delete does.
+
+**A third option the task file does not list, and the one to consider first: graduate a
+curated subset.** Merge `dev_docs/gh_issue_task_loop.md` (task 11's distillation) **and**
+`2026-08-24-requirements-and-evidence.md` — 43K of measured record that is durable by any
+reading and is the one file here nothing else can reconstruct — then close the PR without
+merging the per-task scaffolding. That buys permanence for what is durable and keeps the
+in-flight material off `main`, which is what the repo's rules actually ask for.
+
+### What changed under this plan since it was written
+
+Anything you read below predates these unless it says otherwise:
+
+- Task 9 is **done**; #510–#516 are all closed and on `main`.
+- The **123 Linear originals are archived**, not merely cancelled — so the cheap revert is
+  gone and task 10 is realistically keep-or-extend. See task 10 in the plan.
+- The free-plan cap was **misdocumented for months** (it counts every non-archived issue,
+  not `unstarted`+`started`); corrected in #739, and `linear-common.md` now owns the
+  figure as a dated observation because Linear exposes no field to re-derive it.
+- Three findings from this work are open and unfiled against any task here: **#737**
+  (archived issues reached the import), **#738** (`_body_refs` can't tell an issue from a
+  PR), **#740** (`active_issue_quota`'s domain hardcodes the cap).
+
 ## What will bite you
 
-### This branch is far behind `main`, and its handler docs will lie to you
+### Keep this branch merged with `main`, or read `commands/` from `main`
 
-**Measured 2026-09-15: `bestdan/gh-issue-migration` was 153 commits behind `main`.** The
-launcher prompt above sends you here for the plan, which is right — the plan exists
-nowhere else. But the checkout you land in also contains a whole `commands/` tree, and
-**that copy is stale**.
+**This bit you before, on 2026-09-15: the branch was 155 commits behind `main`, and its
+stale `commands/handlers/gh-issue-reoptimize.md` said GitHub Issues have _no native
+dependency edge_** — the opposite of `main`'s, and of a board that had carried 27 real
+edges since #513. It nearly drove #516's whole analysis, and the helper that file calls
+(`gh-issue-deps.py`) did not exist here at all.
 
-This is not theoretical. #516's run nearly used this branch's
-`commands/handlers/gh-issue-reoptimize.md`, whose first line reads _"(report-only)"_ and
-whose body states that GitHub Issues **have no native dependency edge**, so Dimensions 1–2
-can only ever suggest a body footer. `main`'s copy says the opposite — the edge is real,
-and the flow creates and removes it — which is the version matching a board that has
-carried 27 real edges since #513. The stale doc would have produced a confident report
-built on a false premise, and the helper it calls (`gh-issue-deps.py`) does not exist on
-this branch at all.
+**Resolved 2026-09-16 by merging `main` in; the branch is current and the gate passes.**
+The trap is only dormant, though — it returns the moment `main` moves on. Two ways to
+stay safe, either is enough:
 
-**So: read the PLAN from this branch, and read every `commands/`, `skills/` or `scripts/`
-file from `main`.** Run the tooling from a fresh worktree off `main`, not from here. The
-plan files are the only thing this branch is authoritative about.
+- merge `main` into this branch before you trust anything under `commands/` here, or
+- read the plan from this branch and every `commands/`, `skills/` or `scripts/` file from
+  `main`.
+
+The plan files are the only thing this branch is authoritative about.
 
 ### `op` is dead over SSH, and there is a second Linear credential that is not
 
