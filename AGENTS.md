@@ -4,18 +4,22 @@ Guidance for anyone — human or agent — working **on** this repository. It is
 the map and the short list of rules that are load-bearing here; everything
 deeper is one link away.
 
-| You want to…                                                   | Go to                                                          |
-| -------------------------------------------------------------- | -------------------------------------------------------------- |
-| Install and use the plugin                                     | [`README.md`](README.md)                                       |
-| Set up the dev loop, run the gate, add a skill/command/handler | [`CONTRIBUTING.md`](CONTRIBUTING.md)                           |
-| Cut a release, fix a failed one, land a stack of PRs           | [`dev_docs/releasing.md`](dev_docs/releasing.md)               |
-| Interpret a skipped test, or add a host-dependent one          | [`dev_docs/testing.md`](dev_docs/testing.md)                   |
-| Speed the gate up, or add concurrency to it                    | [`dev_docs/gate-performance.md`](dev_docs/gate-performance.md) |
-| Call codex/agy/devin from a workflow                           | [`dev_docs/external-agents.md`](dev_docs/external-agents.md)   |
-| Understand secret/API-key resolution                           | [`dev_docs/auth_key_access.md`](dev_docs/auth_key_access.md)   |
-| Read a design decision                                         | `dev_docs/designs/`, `dev_docs/decisions/`                     |
+| You want to…                                                   | Go to                                                                                            |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Install and use the plugin                                     | [`README.md`](README.md)                                                                         |
+| Set up the dev loop, run the gate, add a skill/command/handler | [`CONTRIBUTING.md`](CONTRIBUTING.md)                                                             |
+| Cut a release, fix a failed one, land a stack of PRs           | [`dev_docs/releasing.md`](dev_docs/releasing.md)                                                 |
+| Interpret a skipped test, or add a host-dependent one          | [`dev_docs/testing.md`](dev_docs/testing.md)                                                     |
+| Speed the gate up, or add concurrency to it                    | [`dev_docs/gate-performance.md`](dev_docs/gate-performance.md)                                   |
+| Call codex/agy/devin from a workflow                           | [`dev_docs/external-agents.md`](dev_docs/external-agents.md)                                     |
+| Understand secret/API-key resolution                           | [`dev_docs/auth_key_access.md`](dev_docs/auth_key_access.md)                                     |
+| Find prose that should be a helper script, and extract it      | [`dev_docs/finding-prose-that-should-be-code.md`](dev_docs/finding-prose-that-should-be-code.md) |
+| Read a design decision                                         | `dev_docs/designs/`, `dev_docs/decisions/`                                                       |
+| Pick up work a previous session left for you                   | [`dev_docs/.handoffs/README.md`](dev_docs/.handoffs/README.md)                                   |
 
 ## What this repo is
+
+<!-- copilot:begin id=repo-shape -->
 
 A **Claude Code plugin**. The product is prompt text, not a program:
 
@@ -39,10 +43,14 @@ behavior at runtime for every installed user.** Treat those files with the care
 you'd give production code, and treat their length as a cost — every line is
 tokens in someone's context window.
 
+<!-- copilot:end -->
+
 ## Progressive disclosure is the house style
 
 It applies to the docs _and_ to the skills, for the same reason: an agent pays
 for what it loads.
+
+<!-- copilot:begin id=progressive-disclosure -->
 
 - A top-level file states the rule and links to the detail. It does not inline
   the detail.
@@ -54,10 +62,14 @@ for what it loads.
   `dev_docs/releasing.md`, or a skill's own reference file, **link to it** — a
   second copy rots silently and there is no invalidation.
 
+<!-- copilot:end -->
+
 Before adding a section to `README.md`, `CONTRIBUTING.md`, or this file, ask
 whether it belongs one level down instead. The answer is usually yes.
 
 ## Rules that bite here
+
+<!-- copilot:begin id=rules-that-bite -->
 
 - **Run `just check` before pushing.** It is exactly what CI runs
   (`scripts/check.sh`), it runs everything concurrently, and it reports every
@@ -70,6 +82,14 @@ whether it belongs one level down instead. The answer is usually yes.
   [Conventional Commit](https://www.conventionalcommits.org/) type
   (`feat` / `fix` / `chore` / …) is what decides whether a version ships and how
   big the bump is. Getting it wrong ships a wrong release, not a wrong label.
+- **Logic goes in a typed file, not a fenced block.** A skill/command/handler
+  body is runtime prompt text, and nothing in the gate lints or runs shell
+  inside markdown — that gap shipped seven defects in one 36-line block. Put the
+  code in `commands/handlers/assets/<name>.py` (or `scripts/<name>.sh`), give it
+  a test pair, and call it from the prose. `validate.py` fails a fenced block
+  that carries two or more control-flow statements and closes one on its own
+  line. Full rule, including what stays inline:
+  [CONTRIBUTING.md](CONTRIBUTING.md#logic-goes-in-a-typed-file).
 - **Adding a skill or command means editing `README.md` in the same PR.**
   `validate.py` fails the build if the "N skills, M commands, and K subagent"
   sentence drifts from reality.
@@ -83,15 +103,25 @@ whether it belongs one level down instead. The answer is usually yes.
   there is ephemeral in-flight state — durable wisdom graduates to a top-level
   `dev_docs/<name>.md`. See the comment block in `.gitignore` before trying to
   force-track anything under it.
+- **`.github/copilot-instructions.md` and `.github/instructions/` are
+  generated.** Copilot code review cannot follow links, so those files are a
+  flat copy of the marked spans in `AGENTS.md` and `CONTRIBUTING.md`. Edit the
+  rule where it lives, then rerun
+  `python3 scripts/build-copilot-instructions.py`; the gate fails on drift.
 - **Don't commit state another system owns.** Linear, GitHub, and the changelog
   already know their own facts; write a link, not a copy. A file that records a
   moment carries its date in the name.
+
+<!-- copilot:end -->
 
 ## Working style
 
 - Read a file before modifying it. Read `origin/main`'s `.gitignore` and a
   file's history before untracking or deleting it — several things here are
   tracked on purpose.
+
+<!-- copilot:begin id=working-style-code -->
+
 - Don't over-engineer: no error handling for impossible cases, no feature flags,
   no backwards-compat shims. Three similar lines beat a premature abstraction.
 - Don't refactor surrounding code, add comments/docstrings/type annotations to
@@ -99,6 +129,9 @@ whether it belongs one level down instead. The answer is usually yes.
 - Don't disable or delete tests to make the gate pass.
 - Don't add dependencies without discussing it first. `scripts/validate.py`'s
   single dependency is hash-locked in `scripts/validate.py.lock`.
+
+<!-- copilot:end -->
+
 - **Resolve uncertainty by running something.** A question about behavior, an
   API, or an assumption is usually cheaper to settle with a one-liner or a
   targeted test than with another round of speculation.
@@ -108,11 +141,18 @@ whether it belongs one level down instead. The answer is usually yes.
   Inference can't tell "not there" from "not where I looked".
 - **Verify before claiming success.** Run the gate, name the smallest command
   that shows the change working, and report what it actually printed.
+
+<!-- copilot:begin id=merge-status -->
+
 - **Determine merge status from PR state, not commit ancestry.** This repo
   squash-merges, so `git merge-base --is-ancestor` reports every landed branch
   as unmerged. Use `gh pr list --head <branch> --state all --json state`.
 
+<!-- copilot:end -->
+
 ## Shell and script conventions
+
+<!-- copilot:begin id=shell-conventions -->
 
 - Shell is formatted with `shfmt -i 2 -ci -bn` and linted with ShellCheck via
   `scripts/lint-shell.sh`; both run in `just check`.
@@ -130,3 +170,5 @@ whether it belongs one level down instead. The answer is usually yes.
 - Never redirect a failable command into a tracked file. `cmd > real_file`
   truncates the destination even when `cmd` fails; write to a temp path and
   `mv` on success.
+
+<!-- copilot:end -->

@@ -58,7 +58,7 @@ if command -v shasum >/dev/null 2>&1; then
   # the broker's own --cmd-hash must match --verify-cmd (install/args mismatch)
   bhm="$("$SCRIPT" verify-broker --sentinel-dir "$SENT" --verify-cmd "$CMD" --cmd-hash deadbeef --confine-under "$ROOT" 2>&1)"
   bhc=$?
-  if [ "$bhc" = 2 ] && printf '%s' "$bhm" | grep -qF 'does not match'; then
+  if [ "$bhc" = 2 ] && grep -qF 'does not match' <<<"$bhm"; then
     ok "verify-broker: pinned hash/cmd mismatch fails closed"
   else
     bad "verify-broker: pinned hash/cmd mismatch fails closed" "exit=$bhc"
@@ -82,7 +82,7 @@ if command -v shasum >/dev/null 2>&1; then
     local o c
     o="$("$SCRIPT" verify-request "$@" 2>&1)"
     c=$?
-    if [ "$c" = 2 ] && printf '%s' "$o" | grep -qF "$want"; then ok "verify-request fail-closed: $name"; else bad "verify-request fail-closed: $name" "exit=$c msg=$o"; fi
+    if [ "$c" = 2 ] && grep -qF "$want" <<<"$o"; then ok "verify-request fail-closed: $name"; else bad "verify-request fail-closed: $name" "exit=$c msg=$o"; fi
   }
   fcr "non-hex cmd-hash" "must be lowercase hex" --sentinel-dir "$SENT" --worktree "$WT" --cmd-hash "NOTHEX"
   fcr "missing worktree" "does not exist" --sentinel-dir "$SENT" --worktree "$VB/nope" --cmd-hash "$PIN"
@@ -109,7 +109,7 @@ if command -v shasum >/dev/null 2>&1; then
     --label 'bad label' --workdir "$WT" --log "$VB/b.log" --path '/usr/bin:/bin' \
     --out-script "$VB/x.sh" --out-plist "$VB/x.plist" 2>&1)"
   wvc=$?
-  if [ "$wvc" = 2 ] && printf '%s' "$wvbc" | grep -qF 'must be [A-Za-z0-9._-]'; then
+  if [ "$wvc" = 2 ] && grep -qF 'must be [A-Za-z0-9._-]' <<<"$wvbc"; then
     ok "write-verify-broker: bad label fails closed"
   else
     bad "write-verify-broker: bad label fails closed" "exit=$wvc"
@@ -206,10 +206,10 @@ lack "status: until value keeps no quotes" 'until="2026' "$sout4"
 
 # fail-closed: missing --label / missing RUN.md
 o="$("$SCRIPT" status --dir "$RUNDIR" 2>&1)"
-[ $? = 2 ] && printf '%s' "$o" | grep -q 'requires --label' \
+[ $? = 2 ] && grep -q 'requires --label' <<<"$o" \
   && ok "status fail-closed: missing --label" || bad "status fail-closed: missing --label" "$o"
 o="$("$SCRIPT" status --label x --dir "$BASE/no-such-dir" 2>&1)"
-[ $? = 2 ] && printf '%s' "$o" | grep -q 'no run state found' \
+[ $? = 2 ] && grep -q 'no run state found' <<<"$o" \
   && ok "status fail-closed: missing RUN.md" || bad "status fail-closed: missing RUN.md" "$o"
 
 # --- teardown --done-sentinel: the single completion mechanism (task 8) --------
@@ -286,12 +286,12 @@ qcount="$(grep -cE '^## Q[0-9]+' "$QFILE")"
 mkdir -p "$BASE/plain-dir-not-a-repo"
 o="$("$SCRIPT" assert-run-head --dir "$BASE/plain-dir-not-a-repo" --run-id "$RUN_ID" 2>&1)"
 [ $? = 2 ] \
-  && printf '%s' "$o" | grep -q 'not a git worktree' \
+  && grep -q 'not a git worktree' <<<"$o" \
   && ok "assert-run-head fail-closed: not a git worktree" || bad "assert-run-head fail-closed: not a git worktree" "$o"
 
 # fail-closed: missing required args
 o="$("$SCRIPT" assert-run-head --dir "$HEAD_REPO" 2>&1)"
-[ $? = 2 ] && printf '%s' "$o" | grep -q 'requires --dir and --run-id' \
+[ $? = 2 ] && grep -q 'requires --dir and --run-id' <<<"$o" \
   && ok "assert-run-head fail-closed: missing --run-id" || bad "assert-run-head fail-closed: missing --run-id" "$o"
 
 # fail-closed: a DIRTY deviation must NOT restore (a non-conflicting checkout
@@ -301,7 +301,7 @@ printf 'uncommitted edit\n' >>"$HEAD_REPO/task-file"
 o="$("$SCRIPT" assert-run-head --dir "$HEAD_REPO" --run-id "$RUN_ID" 2>&1)"
 drc=$?
 dhead="$(git -C "$HEAD_REPO" rev-parse --abbrev-ref HEAD)"
-[ "$drc" = 2 ] && printf '%s' "$o" | grep -q 'uncommitted changes' && [ "$dhead" = "auto-pilot/hardening-task_3" ] \
+[ "$drc" = 2 ] && grep -q 'uncommitted changes' <<<"$o" && [ "$dhead" = "auto-pilot/hardening-task_3" ] \
   && ok "assert-run-head fail-closed: dirty deviation is not restored" \
   || bad "assert-run-head fail-closed: dirty deviation is not restored" "rc=$drc head=$dhead msg=$o"
 git -C "$HEAD_REPO" checkout -q -- task-file # drop the dirty edit for later checks
@@ -386,10 +386,10 @@ have "classify-exit: invalid --since-offset falls back to the whole file" 'fatal
 
 # fail-closed: required args
 o="$("$SCRIPT" classify-exit --output "$CX/clean.log" 2>&1)"
-[ $? = 2 ] && printf '%s' "$o" | grep -qF 'requires --exit-code' \
+[ $? = 2 ] && grep -qF 'requires --exit-code' <<<"$o" \
   && ok "classify-exit fail-closed: missing --exit-code" || bad "classify-exit fail-closed: missing --exit-code" "$o"
 o="$("$SCRIPT" classify-exit --exit-code 1 --output "$CX/nope.log" 2>&1)"
-[ $? = 2 ] && printf '%s' "$o" | grep -qF 'not found' \
+[ $? = 2 ] && grep -qF 'not found' <<<"$o" \
   && ok "classify-exit fail-closed: missing --output file" || bad "classify-exit fail-closed: missing --output file" "$o"
 
 # co-review: an auth signal that is CONTENT (transcript prose, a diff, or the
@@ -646,7 +646,7 @@ sgc=$?
 
 # fail-closed: required args
 o="$("$SCRIPT" supervisor-gate --label x 2>&1)"
-[ $? = 2 ] && printf '%s' "$o" | grep -qF 'requires --dir and --label' \
+[ $? = 2 ] && grep -qF 'requires --dir and --label' <<<"$o" \
   && ok "supervisor-gate fail-closed: missing --dir" || bad "supervisor-gate fail-closed: missing --dir" "$o"
 
 # shellcheck source=scripts/lib/spawn-orchestrator-test-epilogue.sh

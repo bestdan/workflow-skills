@@ -63,12 +63,23 @@ date is older than the threshold. Never touch issues in the `To Do` or
 
 5. **Transition.** For each candidate, resolve the transition that leads to
    `archive_status` — call `<atlassian-mcp>__getTransitionsForJiraIssue` for the
-   issue, match the transition whose target status name equals
-   `jira.archive_status` (names are resolved per-issue; `transitionJiraIssue`
-   takes a transition id, not a status name — same pattern as `jira-promote.md`),
-   then call `<atlassian-mcp>__transitionJiraIssue`. If no available transition
-   reaches `archive_status` for a given issue, record it as skipped and continue —
-   one unreachable issue must not abort the rest.
+   issue, write the response to a file, and let the helper match the target
+   status name against `jira.archive_status` (names are resolved per-issue;
+   `transitionJiraIssue` takes a transition id, not a status name — same
+   pattern as `jira-promote.md`):
+
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-resolve-transition.py" \
+     --exact "<jira.archive_status>" \
+     < <transitions-response.json>
+   ```
+
+   If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
+   `**/handlers/assets/jira-resolve-transition.py`. On success it prints
+   `<id>\t<to.name>`; call `<atlassian-mcp>__transitionJiraIssue` with that id.
+   On exit 2 (`NONE` or `AMBIGUOUS`) — no single transition reaches
+   `archive_status` for this issue — record it as skipped and continue; one
+   unreachable issue must not abort the rest.
 
 6. **Report.** Count transitioned, any skipped (no reachable transition), and in
    dry-run the candidate list plus "nothing archived".

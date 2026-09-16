@@ -19,7 +19,8 @@
     "test/vendor/**",
     "scripts/local-review/**",
     ".worktrees/**",
-    ".claude/**"
+    ".claude/**",
+    "dev_docs/.handoffs/**"
   ],
   "plugins": [
     "https://plugins.dprint.dev/typescript-0.96.0.wasm",

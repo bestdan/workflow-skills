@@ -27,7 +27,7 @@ copied.
 | Claim                                           | the handler's own claim section (see step 2) — never a bespoke claim                            |
 | Route the worker                                | `select-coder` (`skills/select-coder/SKILL.md`), non-interactive                                |
 | Run the worker in isolation, integrate the diff | the worktree + integrate rules in `orchestrate-coders` (`skills/orchestrate-coders/SKILL.md`)   |
-| Base-freshness                                  | `scripts/preflight-freshness.sh`                                                                |
+| Base-freshness                                  | `"${CLAUDE_PLUGIN_ROOT}/scripts/preflight-freshness.sh"`                                        |
 | Exercise the feature                            | driving the changed behavior end-to-end, inline (see step 3)                                    |
 | Review the PR                                   | `/co-review --non-interactive` (`skills/co-review/SKILL.md`)                                    |
 | Open the PR + hand off                          | the handler's own PR-link + review-state sections (see steps 4, 7) — never a bespoke transition |
@@ -59,43 +59,44 @@ copied.
 
 ## Auto-pilot reserve gate
 
-Only when `--run-state <RUN.md>` is supplied, read the persisted `reserve`
-as the **fixed floor** and obtain `scripts/claude-usage.sh --session-status`
-once at the start of this delivery cycle. Cache that cycle's successful
-`<percent> <reset_epoch>` status; do not re-read it at later lifecycle
-boundaries. Before the first gate decision, use this same cached status to
-perform the atomic `usage_delta_baseline` / `usage_deltas` update in
-[`run-state.md`](../auto-pilot/references/run-state.md) "`RUN.md`": append a
-delta only when the previous and current raw validated `reset_epoch` match;
-discard a cross-window delta; then replace the baseline. A non-zero usage read
-is fail-closed: clear that baseline and record nothing, use auto-pilot's
-existing conservative time/dispatch proxy at the boundary, and never treat the
-failed query as headroom or a sample.
+Only when `--run-state <RUN.md>` is supplied. Obtain
+`"${CLAUDE_PLUGIN_ROOT}/scripts/claude-usage.sh" --session-status` **once** at
+the start of this delivery cycle and cache that cycle's successful `<percent>
+<reset_epoch>`; do not re-read it at later lifecycle boundaries. Then each
+Claude-consuming boundary is **one call**:
 
-For a successful cached status, calculate the effective `reserve` from the
-fixed floor and the persisted rolling deltas exactly as
-[`run-budget.md`](../auto-pilot/references/run-budget.md) "Pre-invoke reserve"
-defines. Fewer than five valid recorded in-window deltas means the effective
-reserve is the fixed floor. Do not alter the persisted `reserve` field or
-include Codex/Antigravity worker usage.
+```bash
+# a successful --session-status read
+"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" reserve-gate \
+  --run-md <RUN.md> --percent <percent> --reset-epoch <reset_epoch>
+# a failed (non-zero) one
+"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" reserve-gate \
+  --run-md <RUN.md> --read-failed
+```
 
-Consult the cached status (or that fallback) immediately before each
-Claude-consuming lifecycle boundary:
+That subcommand owns **both** halves of the boundary — the atomic
+`usage_delta_baseline` / `usage_deltas` rewrite and the go/no-go — and its
+header comment in `scripts/spawn-orchestrator.sh` is the **one home** of the
+arithmetic: the floor, the 1.25 safety factor, the five-sample threshold, the
+epoch-match rule and the 20-entry cap. Do not restate or hand-walk any of it.
+Re-presenting the one cached reading at all four boundaries is deliberate: the
+subcommand records one interval per cycle, not one per call. It reads the
+persisted `reserve` as its fixed floor and never rewrites it, and the record
+measures only this Claude orchestrator — never Codex/Antigravity worker usage.
 
-- step 2, **Claim**;
-- step 3, **Verify**;
-- step 5, **Co-review**; and
-- step 6, **Iterate**, before every **re-verify** and every repeated
-  **co-review**.
+Branch on the exit code and nothing else:
 
-For a successful status, compute `headroom = 100 - percent`. When `headroom <
-reserve`, follow auto-pilot's existing [`run-budget.md`](../auto-pilot/references/run-budget.md)
-"Near-cap → pause + relaunch past reset" checkpoint-then-exit protocol,
-including atomically writing `paused_until = reset_epoch + grace` (with
-`pause_observed_at` and `pause_source`) in canonical ISO-8601 form, and stop this lifecycle
-before the boundary. This is an expected auto-pilot pause, **not a delivery
-failure**. The usage query is predictive only; an actual 429 remains
-authoritatively classified by auto-pilot's `supervisor-check` /
+| exit | stdout             | do                                                                                                                                                                                                                                                                                                                                                                                             |
+| ---- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | `verdict=proceed`  | cross the boundary.                                                                                                                                                                                                                                                                                                                                                                            |
+| `1`  | `verdict=pause`    | follow auto-pilot's [`run-budget.md`](../auto-pilot/references/run-budget.md) "Near-cap → pause + relaunch past reset" checkpoint-then-exit protocol — atomically write `paused_until = reset_epoch + grace` (with `pause_observed_at` and `pause_source`) in canonical ISO-8601 form — and stop this lifecycle before the boundary. An expected auto-pilot pause, **not a delivery failure**. |
+| `2`  | —                  | malformed input or an unrewritable `RUN.md`. Fail-closed: a delivery error, not a proceed.                                                                                                                                                                                                                                                                                                     |
+| `3`  | `verdict=fallback` | the usage read failed, so the gate did not decide. The baseline is cleared and nothing recorded; use auto-pilot's existing conservative time/dispatch proxy for this boundary, and if that crosses its threshold take the same near-cap path. Never read this as headroom or as a sample.                                                                                                      |
+
+Call it immediately before step 2 **Claim**, step 3 **Verify**, step 5
+**Co-review**, and — in step 6 **Iterate** — every **re-verify** and every
+repeated **co-review**. The usage query is predictive only; an actual 429
+remains authoritatively classified by auto-pilot's `supervisor-check` /
 `classify-exit` path.
 
 ## 0. Resolve the handler
@@ -131,7 +132,7 @@ the local base ref **explicitly** (a bare `git fetch` may not move the local
 
 ```bash
 git fetch origin <base>:<base>          # default <base> = main
-scripts/preflight-freshness.sh --ref <base>
+"${CLAUDE_PLUGIN_ROOT}/scripts/preflight-freshness.sh" --ref <base>
 ```
 
 On `stale`, stop and surface it (the work branch would start behind); on
@@ -186,8 +187,9 @@ With the base fetched (step 1), the claim held, and the work branch checked out:
    session's checkout. The orchestrating session then **owns the task branch**:
    read the worker's diff, integrate it onto the task branch, and **clean up the
    worker worktree**.
-3. **Diff judgment, then verify.** For an auto-pilot invocation, apply the
-   reserve gate immediately before this diff-judgment / verify boundary. After
+3. **Diff judgment, then verify.** For an auto-pilot invocation, run the one
+   `reserve-gate` call immediately before this diff-judgment / verify
+   boundary. After
    integration and before the shell check, inspect the worker diff against the
    task packet and evidence. By default the
    orchestrator keeps its existing judgment. If the same `--run-state` says
@@ -212,7 +214,7 @@ With the base fetched (step 1), the claim held, and the work branch checked out:
    broker.** A `sandbox-exec`-jailed orchestrator can't run `bash scripts/check.sh`
    directly — the harnesses execve-deny (`bad interpreter`, exit 126) and children
    inherit the jail — so when the run installed a verify broker
-   (`scripts/spawn-orchestrator.sh write-verify-broker`,
+   (`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" write-verify-broker`,
    [`launch-runtime.md`](../auto-pilot/references/launch-runtime.md) §5), verify is:
    drop a request (`verify-request --worktree <task worktree> --cmd-hash <hash of
    the pinned verify_command>`), then block on `verify-await` and gate on the
@@ -246,7 +248,9 @@ to **draft** — the safe choice.
   (the same `ADMIN`/`MAINTAIN`/`WRITE` gate); otherwise leave it a draft and hand
   off in that state — never fail trying to ready a PR you lack permission to. On
   **linear/gh-issue/jira**, open the PR with the handler's own title/link
-  conventions (e.g. `[PRE-12]` + the linked issue), draft per the same gate.
+  conventions (e.g. `fix(scope): … [PRE-12]` + the linked issue), draft per the
+  same gate. The title grammar is the `agent-guidance` plugin's
+  `portable.md` (`Git:` bullet), not this file.
 - **PR body:** the evidence captured in step 3 (check output, screenshots,
   artifact paths) **plus how-to-evaluate steps** for any human-judgment item —
   exactly how to judge it and what a "no" would invalidate.
@@ -256,8 +260,8 @@ to **draft** — the safe choice.
 
 ## 5. Co-review
 
-For an auto-pilot invocation, apply the reserve gate immediately before this
-co-review boundary. Read `co_review_mode` from the same `--run-state` at this
+For an auto-pilot invocation, run the one `reserve-gate` call immediately
+before this co-review boundary. Read `co_review_mode` from the same `--run-state` at this
 step. `off` means **skip `/co-review` entirely** and record `co-review skipped (profile)` in the hand-off summary. `cheap-single` means run `/co-review
 --non-interactive --reviewer-set cheap-single`; `default` (or no `--run-state`)
 runs `/co-review --non-interactive` exactly as before. Its
@@ -271,9 +275,9 @@ advisory).
 ## 6. Iterate (bounded)
 
 Each iteration is a full round: apply co-review's **high-confidence** fixes,
-then, for an auto-pilot invocation, apply the reserve gate immediately before
-the **re-verify** (step 3's check), re-push, and apply it again immediately
-before every repeated **co-review** when re-running `/co-review --non-interactive`
+then, for an auto-pilot invocation, run the one `reserve-gate` call
+immediately before the **re-verify** (step 3's check), re-push, and run it
+again immediately before every repeated **co-review** when re-running `/co-review --non-interactive`
 on the updated PR to gather fresh findings. **Judgment calls** (medium findings)
 are never applied silently:
 
@@ -281,6 +285,17 @@ are never applied silently:
   one is passed (the `/auto-pilot` orchestrator's `QUESTIONS.md`);
 - **standalone (no `--questions`)**, carry them in the hand-off summary instead —
   this skill never writes run-state files itself.
+
+**Verification tests come back with the findings.** Co-review's step 9 hands
+over a list of real-machine checks, each naming the environment it needs and
+who runs it. Run the items marked as yours once, against the final branch tip
+— after the last round that changes it, or straight after step 5 when no round
+does — and record what each produced; leave the user's items unrun, since you
+are not the human they need.
+Then refresh the PR body's **how-to-evaluate steps** slot (step 4) with the
+results and the still-unrun items: that body was written before this list
+existed, so it does not yet describe them. Unrun items ride out in the hand-off
+summary (step 7).
 
 **Cross-cutting or round-bound deferrals also get filed.** When `--questions`
 is passed (running under `/auto-pilot`) and a deferred finding is
@@ -310,7 +325,7 @@ remaining findings and proceed — don't loop.
   state). This is the skill's terminal success state.
 - **Hand-off summary** (structured — for a human, or the `/auto-pilot` morning
   report): task id, PR URL, reviewer classes that ran, outstanding findings (the
-  deferred judgment calls), and evidence paths.
+  deferred judgment calls), any verification tests left unrun, and evidence paths.
 - **Freeze rule:** once a task hands off, its PR is **frozen for the rest of a
   run** — late-arriving findings (e.g. a bot review that lands after co-review's
   timeout) are **logged, never applied**. This keeps a stacked child's base

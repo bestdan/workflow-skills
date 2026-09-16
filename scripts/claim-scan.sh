@@ -189,7 +189,7 @@ while IFS= read -r line; do
   # Whole-line match against the in_progress slug list — grep -Fxq, not a
   # substring test, for the same task_1/task_13 reason as the extraction
   # above.
-  if ! printf '%s\n' "$in_progress_slugs" | grep -Fxq "$slug"; then
+  if ! grep -Fxq "$slug" <<<"$in_progress_slugs"; then
     echo "STALE pr=$pr slug=$slug updated=$updated"
   fi
 done <<EOF

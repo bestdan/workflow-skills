@@ -37,6 +37,13 @@ assumed_monthly_api_requests = (
 )
 
 # ---------------------------------------------------------------------------
+# Inputs: reporting thresholds
+# Source: assumption — the margin below which a cost lead is not worth acting on
+# ---------------------------------------------------------------------------
+
+decisive_margin_pct = 0.05  # assumption: a lead under 5% is within pricing noise
+
+# ---------------------------------------------------------------------------
 # Derived values
 # ---------------------------------------------------------------------------
 
@@ -87,6 +94,18 @@ recommended_vendor = min(monthly_costs, key=monthly_costs.get)
 recommended_monthly = monthly_costs[recommended_vendor]
 recommended_annual = recommended_monthly * 12
 
+# The word describing the margin is derived, not hand-written. A pricing change
+# that narrows the gap has to change the memo's sentence, not only its numbers.
+runner_up_vendor, runner_up_monthly = sorted(
+    monthly_costs.items(), key=lambda item: item[1]
+)[1]
+runner_up_annual = runner_up_monthly * 12
+margin_vs_runner_up = runner_up_annual - recommended_annual
+margin_vs_runner_up_pct = margin_vs_runner_up / runner_up_annual
+margin_verdict = (
+    "decisive" if margin_vs_runner_up_pct >= decisive_margin_pct else "narrow"
+)
+
 # ---------------------------------------------------------------------------
 # Output
 # ---------------------------------------------------------------------------
@@ -123,6 +142,10 @@ output = {
             "monthly_api_requests": assumed_monthly_api_requests,
             "note": "assumption — revisit with infra team",
         },
+        "reporting_thresholds": {
+            "decisive_margin_pct": f"{decisive_margin_pct:.0%}",
+            "note": "assumption — a lead under this is within pricing noise",
+        },
     },
     "derived": {
         "Nimbus Cloud": {
@@ -153,6 +176,10 @@ output = {
         "annual_cost": fmt_usd(recommended_annual),
         "most_expensive_annual": fmt_usd(most_expensive_annual),
         "max_annual_savings": fmt_usd(most_expensive_annual - recommended_annual),
+        "runner_up": runner_up_vendor,
+        "margin_vs_runner_up": fmt_usd(margin_vs_runner_up),
+        "margin_vs_runner_up_pct": f"{margin_vs_runner_up_pct:.1%}",
+        "margin_verdict": margin_verdict,
     },
 }
 

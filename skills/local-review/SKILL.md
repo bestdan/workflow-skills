@@ -129,6 +129,28 @@ Then open `$review_url` for the user:
 - Without browser tooling: print `$review_url` and ask the user to open it.
   The tool is fully usable by hand.
 
+**Over SSH, the URL is dead until the user opens a tunnel.** The server binds
+loopback on the machine it runs on; in an SSH session that is the remote
+host, and the reviewer's browser is on their own machine. The server detects
+`$SSH_CONNECTION` / `$SSH_TTY` and writes `SSH:` lines to the log before
+`LOCAL_REVIEW_URL=`, carrying the tunnel command with the bound port filled
+in. The readiness line stays last, so once the poll above has seen it the
+hint is already in the log. Print the lines verbatim beside the URL:
+
+```bash
+grep '^SSH: ' <scratch>/lr_server.log
+```
+
+The local port must equal the remote one (`ssh -L 8765:127.0.0.1:8765
+<host>`). `_origin_ok()` in `server.py` allows only origins on the bound
+port, so a tunnel on a different local port half-works: GETs are ungated and
+the page renders, but every `/submit` and `/reply` POST is rejected, and the
+reviewer loses the round when they submit it. The last `SSH:` line names the
+permanent fix: a `LocalForward` entry for the host in the user's own
+`~/.ssh/config`, after which every session carries the tunnel and the URL
+opens with no extra step. No `SSH:` lines means a local launch; nothing
+changes.
+
 In threads mode the server shuts itself down when the user clicks Finish. The
 recorded PID is cleanup only for an abandoned session — one the user never
 finishes: `kill "$(cat <scratch>/lr_server.pid)"`.
@@ -215,6 +237,12 @@ resolution — so acting on a round never needs a previous one. Reply to each
 thread you answered with `author: "agent"`, as in the loop above; the
 endpoint table, full payload schemas, and re-placement rules are in
 `references/threads.md`, loaded when running a threaded review.
+
+A non-empty `summary` also mints its own thread (`kind: "summary"`, no file
+anchor — rendered above the file cards) the moment this round's payload is
+read. If you answer the summary, reply to it the same way you reply to any
+other thread — its `id` rides in `threads` like every other entry — rather
+than answering only in chat.
 
 **The agent never resolves a thread.** Resolve is the user's click in the
 page. Propose resolution in reply prose ("resolving unless you object") and

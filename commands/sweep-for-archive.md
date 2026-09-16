@@ -8,7 +8,8 @@ argument-hint: "[--since 24h] [--apply] [--project <uuid>] [--restore-false-clos
 
 A high-velocity day closes a dozen issues, and three separate questions follow:
 were they _really_ delivered, is anything sitting merged-but-not-completed, and
-can the settled ones stop consuming Linear's 250-active-issue cap.
+can the settled ones stop consuming Linear's non-archived-issue cap (closing
+one does not — only archiving does).
 `/sweep-for-complete` and `/find-false-closures` and `/archive-tasks` each answer
 one of those. `/sweep-for-archive` is the close-out pass that runs all three **in
 the one order that is safe**, and — the reason it is a command rather than three
@@ -16,11 +17,12 @@ invocations — **carries the verified id set between them**.
 
 That carry is the whole point. `/archive-tasks --issues` takes a literal id list
 and archives it whatever the age; the list this command hands it is exactly the
-set the earlier legs _proved_ was delivered. Archiving is the deepest gate in the
-loop (`linear-false-closures.md`: an archived completion is settled and the
-backstop never revisits it), so an id that reaches leg 3 on a guess is a false
-closure that can no longer be found. Nothing gets archived here that a merged PR
-did not own.
+set the earlier legs _proved_ was delivered. Archiving is irreversible for the
+backstop (`linear-false-closures.md`: its scan sees only live issues, so it
+never revisits an archived one), so an id that reaches leg 3 on a guess is a
+false closure that can no longer be found. Nothing gets archived here that
+delivered work did not own — a merged PR, or sub-issues that themselves
+completed.
 
 **`linear` handler only.** Two of the three legs already refuse on
 `repo-pr`/`gh-issue`/`jira` — see step 1.
@@ -81,8 +83,10 @@ leg's mutation is a _restore_, which step 5 gates separately.
 Split its output into two sets and hold both, **tagging each row with the project
 whose invocation produced it** — step 5's restore needs that partition:
 
-- **`verified`** — every `ok <IDENTIFIER> <- <PR URL>` line. A merged PR owns
-  each of these; they are leg 3's candidate list.
+- **`verified`** — every `ok <IDENTIFIER> <- <OWNER>` line. Delivered work owns
+  each of these — usually a merged PR URL, but `<OWNER>` is also `sub-issues
+  <ids> (completed)` for a rollup parent that carries no PR of its own. They are
+  leg 3's candidate list.
 - **`false`** — every `FALSE CLOSURES` row. These are **excluded from `verified`
   permanently** and never reach leg 3, whatever step 5 decides. A false closure
   is unfinished work wearing a Done label; archiving it would bury it.
@@ -122,8 +126,8 @@ Carry leg 2's out-of-scope warning line through to the final report unchanged.
 If `verified` is empty, skip the leg and report "nothing verified in the window —
 nothing to archive."
 
-Otherwise follow **`commands/handlers/linear-archive.md`** → "Named issues
-instead of a sweep (`--issues <refs>`)", passing `verified` as the refs and
+Otherwise follow **`commands/handlers/linear-archive.md`** → "`--issues` —
+archive specific issues, no age threshold", passing `verified` as the refs and
 `--apply` only if this command got it:
 
 ```bash

@@ -291,6 +291,229 @@ assert_not_contains "placeholder under a missing parent is not flagged" "$out_f"
 assert_not_contains "end-of-sentence reference is not flagged" "$out_f" \
   "real-thing.sh does not exist"
 
+# --- Fixture (g): a fenced shell block carrying real logic is flagged ------
+# Also covers the two shapes that must NOT be flagged: a guarded one-liner
+# (one control-flow statement is still legible inline), and a prose "prompt
+# payload" wearing a bash fence, which is where an unanchored keyword match
+# produces false positives — repo-pr-execute.md scores 11 hits that way with
+# zero lines of shell in it.
+DIR_G="$BASE/shell-logic-fail"
+make_plugin_fixture "$DIR_G"
+cat >"$DIR_G/commands/cmd.md" <<'MD'
+---
+description: fixture command
+---
+
+Guarded one-liner (not flagged):
+
+```bash
+if [ -z "$REPO" ]; then REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner); fi
+```
+
+A prompt payload (not flagged — English, not shell):
+
+```bash
+claude --remote "Read the task file.
+if the acceptance criteria are unclear, ask.
+for each file you touch, run the tests.
+while the gate is red, keep going."
+```
+
+Real logic (flagged):
+
+```bash
+CURSOR=""
+while :; do
+  RESP=$(gh api graphql -f query="$Q" -F cursor="$CURSOR")
+  for n in $(echo "$RESP" | jq -r '.data[]'); do
+    echo "$n"
+  done
+  CURSOR=$(echo "$RESP" | jq -r '.pageInfo.endCursor')
+done
+```
+
+A single multi-line construct (not flagged — one opener):
+
+```bash
+if [ -z "$REPO" ]; then
+  REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
+fi
+```
+MD
+
+out_g="$(uv run "$DIR_G/scripts/validate.py" 2>&1)"
+rc_g=$?
+assert_contains "shell logic block names the file, line and count" "$out_g" \
+  "cmd.md: line 22: fenced shell block carries 2 control-flow statements"
+assert_contains "shell logic block points at the fix" "$out_g" \
+  "move the logic to a typed file"
+if [ "$rc_g" -eq 1 ]; then
+  ok "fenced shell logic: exits 1"
+else
+  bad "fenced shell logic: should exit 1, got $rc_g"
+fi
+# Line 7 is the one-liner's block, line 13 the prompt payload's. Asserting on
+# the line numbers is what distinguishes "the right block was flagged" from
+# "something was flagged" — a check that flagged all three would still satisfy
+# the assertions above.
+assert_not_contains "guarded one-liner is not flagged" "$out_g" "cmd.md: line 7"
+assert_not_contains "prose prompt payload is not flagged" "$out_g" "cmd.md: line 13"
+# The threshold's own boundary: ONE multi-line construct (1 opener + 1 bare
+# terminator) must pass. Without this case the `> SHELL_OPENER_MAX` half of the
+# predicate is untested — the other three blocks are all decided by the
+# terminator clause alone, so dropping the opener threshold left the suite green
+# (verified by mutation).
+assert_not_contains "a single multi-line construct is not flagged" "$out_g" "cmd.md: line 35"
+
+# --- Fixture (h): a plugin with no fenced logic is clean -------------------
+DIR_H="$BASE/shell-logic-pass"
+make_plugin_fixture "$DIR_H"
+cat >"$DIR_H/commands/cmd.md" <<'MD'
+---
+description: fixture command
+---
+
+Call the helper instead of inlining the loop:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/helper.py" --repo "<repo>"
+```
+MD
+echo "#!/usr/bin/env python3" >"$DIR_H/scripts/helper.py"
+
+out_h="$(uv run "$DIR_H/scripts/validate.py" 2>&1)"
+rc_h=$?
+assert_not_contains "a handler that shells out to a typed file is clean" "$out_h" \
+  "control-flow statements"
+if [ "$rc_h" -eq 0 ]; then
+  ok "no fenced shell logic: exits 0"
+else
+  bad "no fenced shell logic: should exit 0, got $rc_h"
+fi
+
+# --- crush reviewer asset drift ---------------------------------------
+# CRUSH_MD/CRUSH_ASSET in validate.py are fixed ROOT-relative paths (they
+# check the real files, not a parameterized target), so exercising them needs
+# a fixture with a real skills/co-review/SKILL.md present — otherwise the
+# fixture's own skill-directory and README-count checks fire as unrelated
+# noise on top of whatever this section is testing.
+make_crush_plugin_fixture() {
+  # make_crush_plugin_fixture <dir>
+  local dir="$1"
+  make_plugin_fixture "$dir"
+  mkdir -p "$dir/skills/co-review/reviewers/assets"
+  cat >"$dir/skills/co-review/SKILL.md" <<'MD'
+---
+description: fixture co-review skill
+---
+
+body
+MD
+  cat >"$dir/commands/cmd.md" <<'MD'
+---
+description: fixture command
+---
+
+body
+MD
+  cat >"$dir/README.md" <<'MD'
+This fixture plugin has 1 skill, 1 command, and 0 subagents.
+MD
+}
+
+# --- Fixture (i): consistent prose/asset is clean -------------------------
+DIR_I="$BASE/crush-roster-pass"
+make_crush_plugin_fixture "$DIR_I"
+cat >"$DIR_I/skills/co-review/reviewers/crush.md" <<'MD'
+Pre-flight probe: compare its output to the pinned **`crush version v0.92.0`** byte-for-byte.
+
+Re-check the roster in [config.go](https://github.com/charmbracelet/crush/blob/v0.92.0/internal/config/config.go).
+
+The list the asset was built against (4 tools, unchanged from v0.91.0 — notes) is `agent`, `bash`, `lsp_*` (2). The asset disables all of them.
+MD
+cat >"$DIR_I/skills/co-review/reviewers/assets/crush-readonly.json" <<'JSON'
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "disabled_tools": ["agent", "bash", "lsp_foo", "lsp_bar"]
+  }
+}
+JSON
+out_i="$(uv run "$DIR_I/scripts/validate.py" 2>&1)"
+rc_i=$?
+assert_not_contains "crush roster: consistent prose/asset is clean" "$out_i" "crush.md:"
+if [ "$rc_i" -eq 0 ]; then
+  ok "crush roster: consistent prose/asset exits 0"
+else
+  bad "crush roster: consistent prose/asset should exit 0, got $rc_i"
+fi
+
+# --- Fixture (j): version gate vs. roster link mismatch is flagged --------
+DIR_J="$BASE/crush-roster-version-mismatch"
+make_crush_plugin_fixture "$DIR_J"
+cat >"$DIR_J/skills/co-review/reviewers/crush.md" <<'MD'
+Pre-flight probe: compare its output to the pinned **`crush version v0.92.0`** byte-for-byte.
+
+Re-check the roster in [config.go](https://github.com/charmbracelet/crush/blob/v0.91.0/internal/config/config.go).
+
+The list the asset was built against (4 tools, unchanged from v0.91.0 — notes) is `agent`, `bash`, `lsp_*` (2). The asset disables all of them.
+MD
+cat >"$DIR_J/skills/co-review/reviewers/assets/crush-readonly.json" <<'JSON'
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "disabled_tools": ["agent", "bash", "lsp_foo", "lsp_bar"]
+  }
+}
+JSON
+out_j="$(uv run "$DIR_J/scripts/validate.py" 2>&1)"
+assert_contains "crush roster: version gate/link mismatch is flagged" "$out_j" \
+  "version gate 'v0.92.0' != roster link tag 'v0.91.0'"
+
+# --- Fixture (k): roster tool-count mismatch is flagged --------------------
+DIR_K="$BASE/crush-roster-count-mismatch"
+make_crush_plugin_fixture "$DIR_K"
+cat >"$DIR_K/skills/co-review/reviewers/crush.md" <<'MD'
+Pre-flight probe: compare its output to the pinned **`crush version v0.92.0`** byte-for-byte.
+
+Re-check the roster in [config.go](https://github.com/charmbracelet/crush/blob/v0.92.0/internal/config/config.go).
+
+The list the asset was built against (5 tools, unchanged from v0.91.0 — notes) is `agent`, `bash`, `lsp_*` (2). The asset disables all of them.
+MD
+cat >"$DIR_K/skills/co-review/reviewers/assets/crush-readonly.json" <<'JSON'
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "disabled_tools": ["agent", "bash", "lsp_foo", "lsp_bar"]
+  }
+}
+JSON
+out_k="$(uv run "$DIR_K/scripts/validate.py" 2>&1)"
+assert_contains "crush roster: tool-count mismatch is flagged" "$out_k" \
+  "roster prose claims 5 tools but"
+
+# --- Fixture (l): a missing/wrong tool name is flagged ---------------------
+DIR_L="$BASE/crush-roster-name-mismatch"
+make_crush_plugin_fixture "$DIR_L"
+cat >"$DIR_L/skills/co-review/reviewers/crush.md" <<'MD'
+Pre-flight probe: compare its output to the pinned **`crush version v0.92.0`** byte-for-byte.
+
+Re-check the roster in [config.go](https://github.com/charmbracelet/crush/blob/v0.92.0/internal/config/config.go).
+
+The list the asset was built against (4 tools, unchanged from v0.91.0 — notes) is `agent`, `write`, `lsp_*` (2). The asset disables all of them.
+MD
+cat >"$DIR_L/skills/co-review/reviewers/assets/crush-readonly.json" <<'JSON'
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "disabled_tools": ["agent", "bash", "lsp_foo", "lsp_bar"]
+  }
+}
+JSON
+out_l="$(uv run "$DIR_L/scripts/validate.py" 2>&1)"
+assert_contains "crush roster: name mismatch names the asset-only tool" "$out_l" "'bash'"
+assert_contains "crush roster: name mismatch names the prose-only tool" "$out_l" "'write'"
+
 # --- Default (no arg): still validates this plugin's own dev_docs/tasks --
 # (preserves today's CI behavior — see validate.py module docstring)
 out_default="$(uv run "$SCRIPT" 2>&1)"

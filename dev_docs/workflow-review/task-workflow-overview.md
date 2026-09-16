@@ -173,7 +173,11 @@ custom states required**:
   `human-approval-requested`),
 - `ready` → **Todo** (tagged `auto-eligible`),
 - `in_progress` / `blocked` / `needs_review` → **In Progress** (or **In Review**),
-- `done` → **Done**, set _only_ by Linear's GitHub integration on PR merge.
+- `done` → **Done**, set _only_ by the reconciler verbs — `/sweep-for-complete`
+  or `/reconcile-tasks` detects that the issue's own linked PR merged, then
+  drives `/complete-task`. That is the required path; where Linear's GitHub
+  integration is live it may also set it on merge, which is expected — see
+  `commands/handlers/linear-claim.md`, "Whether Linear's integration is live".
 
 `/do-tasks` on Linear runs **in the current session (foreground)**: it pulls one
 unstarted issue small enough to finish (`estimate < max_estimate`), judges "can I

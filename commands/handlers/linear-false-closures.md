@@ -11,11 +11,12 @@ details and the config schema this flow's project/repo scoping assumes.
 
 ## The bug it detects
 
-This workspace's Linear/GitHub integration treats a **bare** issue id
-(`PRE-123`) appearing anywhere in a merged PR's title or body as a closing
-reference. A PR that merely name-drops a sibling issue therefore sweeps that
-sibling to Done too, with no branch, no PR, and no code behind it — it has
-done so repeatedly, which is why that integration got disabled.
+A repo-local merge workflow scraped **bare** issue ids (`PRE-123`) out of a
+merged PR's title and body and swept every match to Done. A PR that merely
+name-dropped a sibling issue therefore closed it too, with no branch, no PR, and
+no code behind it. Linear's own GitHub integration is not the source: it links by
+branch name and magic word, per its documentation. See
+`commands/handlers/linear-claim.md`, "Whether Linear's integration is live".
 
 `/reconcile-tasks` (`commands/handlers/linear-reconcile.md`) cannot repair
 this: its rule table is deliberately **promote/complete-only and never
@@ -46,12 +47,140 @@ frequently does not embed the Linear id and branch matching alone would miss
 delivered work. The sub-issue signal covers parents that were closed once their
 child slices delivered (with no branch or PR of their own).
 
-**Archived issues are trusted, by design.** Archival is a deeper-vetting gate —
-an issue is only archived after it has been reviewed and confirmed correctly
-closed. The query therefore does not pass `includeArchived`: an archived
-completion is settled, not a candidate. This is not a coverage gap. The backstop
-targets exactly the window where the over-close bug is still unreviewed — live
-completed issues — and leaves the vetted archive alone.
+**Archived issues are out of scope, and the reason is ordering — not review.**
+The query does not pass `includeArchived`, so the scan sees only live completed
+issues. What makes that safe is that a false closure is scanned **while it is
+still live**, before anything archives it. It is not that archival implies
+anyone looked: archival is a pure age threshold on both **age-based** paths that
+reach it —
+Linear's own team auto-archive setting (a pure timer, unreviewed, and
+per-workspace — do not assume a duration) and
+`/archive-tasks --older-than N`, which retires terminal-state issues on their
+terminal timestamp alone — `completedAt` for `completed`, `canceledAt` for
+`canceled` and `duplicate` — and asserts nothing about their correctness.
+
+So the omission is sound only under a caller that archives nothing detection
+has not already had a chance to see. Two different mechanisms deliver that, and
+they are worth keeping apart:
+
+- **`/sweep-for-archive` — bounded by evidence.** It chains
+  `/find-false-closures` → `/sweep-for-complete` → `/archive-tasks`, and leg 3
+  archives an explicit `--issues` list carrying only ids an earlier leg
+  individually proved delivered. There is no age threshold in that path at all,
+  and none is needed: every member arrived with its own proof.
+- **An independent, age-based archive pipeline — bounded by the window.** Here
+  the threshold is doing the work, so detection must run **first**, with a scan
+  window **wider** than the archive threshold. Otherwise an issue becomes
+  archive-eligible in a window detection never covered.
+
+**The residual gap is any archive that runs without detection first** — a bare
+`/archive-tasks` sweep, a standalone archive cron, or a night when detection was
+skipped while archive still ran. An issue falsely closed and then archived that
+way is invisible here, and cannot be repaired even once found: the `--apply`
+path has no `issueUnarchive` step. That window is narrow rather than
+theoretical, and closing it is tracked in `bestdan/workflow-skills#460`.
+
+## `--prs-file` — the path for a cloud routine
+
+`merged_prs()` gets its merged-PR list from `gh api --paginate
+repos/{repo}/pulls?state=closed`. In a Claude Code **cloud routine** that call
+is impossible: the session proxy refuses every repo-scoped GitHub REST call
+with `HTTP 403 GitHub access is not enabled for this session`, `gh pr list` is
+refused separately as GraphQL, and `gh` itself is not reliably even installed.
+GitHub reads there are only available through the `mcp__github__*` MCP tools,
+which the script cannot call — only the agent can.
+
+`--prs-file PATH` is the alternative: the agent fetches the merged-PR list
+itself and hands it to the script as a JSON file instead of a repo name.
+`--repo` and `--prs-file` are mutually exclusive — pass exactly one.
+
+**Building that file by hand is what `--from-mcp-json` replaces.** The agent
+still owns the two MCP calls — `mcp__github__search_pull_requests` (titles and
+bodies, windowed by an `is:merged` search) and `mcp__github__list_pull_requests`
+(head branches, `state: closed`) — and saves each raw result to its own JSON
+file, but the join is one call:
+
+```bash
+python3 commands/handlers/assets/linear-false-closures.py \
+  --from-mcp-json search.json list.json \
+  --complete-since 2026-08-08T00:00:00Z \
+  --prs-file merged_prs.json   # or --prs-file - to print instead of write
+```
+
+It joins the two captures on PR number, renames `merged_at`→`mergedAt`,
+`head.ref`→`headRefName`, `html_url`→`url`, coerces a null title/body to
+`""` (`load_prs_file()` below dies on a null), and writes the `--prs-file`
+object shown below. A number present in `search.json` with no matching entry
+in `list.json` is a failed join, not a partial result — the script dies
+naming every missing number, because silently dropping one there would
+silently shrink the ownership evidence and could turn delivered work into a
+reported false closure. The reverse (a `list.json` number `search.json`
+doesn't have — a closed-but-unmerged PR, say) is simply not part of the
+merged-PR set and is dropped, not an error. Both tools are deferred in a
+routine — call `ToolSearch` with
+`select:mcp__github__search_pull_requests,mcp__github__list_pull_requests`
+before the first use, per `linear-sweep-complete.md`'s "claude-web
+environment" note.
+
+**The fetch itself — paging both calls, and the pagination stop rule
+(`updated_at`, never `merged_at`: an old merged PR that later took a comment
+surfaces near the top with a stale `merged_at` and would end the scan
+early) — stays the caller's responsibility; this script only joins what it's
+handed.** `dotfiles/agents/routines/nightly-linear-tidy.md`'s "1. Restore
+false closures" step is the worked procedure this repo's cloud routine
+follows for both calls; that file's rewrite to call `--from-mcp-json`
+directly is tracked separately (`bestdan/dotfiles`, out of this repo's scope).
+
+The file `--from-mcp-json` writes — and what any hand-built `--prs-file` must
+match — is a JSON **object**, not a bare list:
+
+```json
+{
+  "complete_since": "2026-08-08T00:00:00Z",
+  "pull_requests": [
+    {
+      "number": 472,
+      "headRefName": "alex/pre-645-...",
+      "url": "https://github.com/bestdan/workflow-skills/pull/472",
+      "title": "...",
+      "body": "...",
+      "mergedAt": "2026-09-05T01:22:11Z"
+    }
+  ]
+}
+```
+
+Each `pull_requests` entry carries the same keys `merged_prs()` itself
+produces, so the rest of the script consumes them unchanged. Entries with a
+null or missing `mergedAt` are dropped — only merged PRs establish ownership.
+
+`complete_since` is the caller's assertion: **this list contains every PR
+merged in this repo at or after this instant.** Set it to the oldest instant
+your `mcp__github__list_pull_requests` fetch actually covers. A **later**
+`complete_since` than you strictly need is the safe direction — it only costs
+a few issues going unclassified. An **earlier** one is the dangerous
+direction: the guard classifies an issue whenever its anchor is at or after
+`complete_since`, so moving `complete_since` earlier widens the classified set
+and claims coverage you may not actually have — it can hide a real owning PR
+outside the window and let `--apply` un-complete delivered work.
+
+**The coverage guard.** `--repo` paginates the _whole_ closed-PR history (see
+`merged_prs()`'s own docstring), so every completed issue can be safely
+classified. A `--prs-file` list is inherently a window, so that guarantee has
+to be re-established explicitly: an issue is classified only if the window
+provably covers its whole life. Concretely, the script compares
+`complete_since` against `issue.createdAt`; an owning PR cannot predate the
+issue it delivers, so if the issue was created before the window opened, an
+owning PR could have merged earlier than the file covers, and the script
+refuses to call it either a false closure or `ok` and reports it instead:
+
+```
+skip  PRE-123  (merged-PR window starts 2026-08-08T00:00:00Z — not classified)
+```
+
+Those issues are excluded from `FALSE CLOSURES` and, therefore, from anything
+`--apply` would restore. This guard never applies under `--repo`, which
+already has full history.
 
 ## Invoked from `/find-false-closures`
 
@@ -64,26 +193,40 @@ then run the script once per project:
    flow is **project-scoped** (the asset queries `project(id:)`), so if no
    projects are configured and none was passed, stop and tell the user to
    configure `linear.projects` or pass `--project`.
-2. **Repo.** Resolve in this order: the caller's `--repo owner/name`; else the
-   project's own `repo:` under `linear.projects` (each configured project may
-   name its repo, since the workspace spans more than one — see
-   `linear-common.md`); else the current repo's `origin`:
+2. **Repo, unless the caller passed `--prs-file`.** The script rejects
+   passing both `--repo` and `--prs-file` (and rejects passing neither), so:
 
-   ```bash
-   gh repo view --json nameWithOwner --jq .nameWithOwner
-   ```
+   - **Caller passed `--prs-file <path>`.** Skip repo resolution entirely —
+     do not resolve or pass `--repo`.
+   - **Otherwise**, resolve the repo in this order: the caller's
+     `--repo owner/name`; else the project's own `repo:` under
+     `linear.projects` (each configured project may name its repo, since the
+     workspace spans more than one — see `linear-common.md`); else the
+     current repo's `origin`:
 
-   (One repo per run — a Linear project whose work spans several repos needs a
-   run per repo, or the widest repo whose merged PRs cover it. `--repo`
-   overrides everything; the per-project `repo:` is what makes a
-   multi-project sweep resolve the right repo for each project.)
+     ```bash
+     gh repo view --json nameWithOwner --jq .nameWithOwner
+     ```
+
+     (One repo per run — a Linear project whose work spans several repos
+     needs a run per repo, or the widest repo whose merged PRs cover it.
+     `--repo` overrides everything; the per-project `repo:` is what makes a
+     multi-project sweep resolve the right repo for each project.)
 
 Then, per resolved project, run the asset (dry-run unless the caller passed
-`--apply`), reading the API key exactly as the standalone path does:
+`--apply`), reading the API key exactly as the standalone path does. With a
+resolved repo:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/linear-false-closures.py" \
   --project "<project-id>" --repo "<owner/name>" [--since 48h] [--apply] [--only PRE-1,PRE-2]
+```
+
+Or, when the caller passed `--prs-file`:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/linear-false-closures.py" \
+  --project "<project-id>" --prs-file "<path>" [--since 48h] [--apply] [--only PRE-1,PRE-2]
 ```
 
 If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/linear-false-closures.py`.
@@ -150,8 +293,19 @@ python3 commands/handlers/assets/linear-false-closures.py --project <uuid> --rep
 
 # Restore only specific flagged ids (must be among those detected):
 python3 commands/handlers/assets/linear-false-closures.py --project <uuid> --repo owner/name --apply --only PRE-1,PRE-2
+
+# Cloud routine (no gh): pass a pre-fetched merged-PR list instead of --repo.
+python3 commands/handlers/assets/linear-false-closures.py --project <uuid> --prs-file merged_prs.json
+
+# Build that merged-PR list from two saved MCP captures instead of by hand
+# (no --project here -- this mode only builds the file, it doesn't detect):
+python3 commands/handlers/assets/linear-false-closures.py \
+  --from-mcp-json search.json list.json --complete-since 2026-08-08T00:00:00Z \
+  --prs-file merged_prs.json
 ```
 
 `--project` is the Linear project UUID (see "Resolve configured projects" in
-`linear-common.md` for where that id comes from); `--repo` is the
-`owner/name` GitHub repo whose merged PRs are checked for ownership.
+`linear-common.md` for where that id comes from). Exactly one of `--repo`
+(the `owner/name` GitHub repo whose merged PRs are checked for ownership) or
+`--prs-file` (a pre-fetched merged-PR list — see "`--prs-file` — the path for
+a cloud routine" above) is required.

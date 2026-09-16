@@ -1,0 +1,36 @@
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "disabled_tools": [
+      "agent",
+      "agentic_fetch",
+      "bash",
+      "crush_info",
+      "crush_logs",
+      "download",
+      "edit",
+      "fetch",
+      "glob",
+      "grep",
+      "job_kill",
+      "job_output",
+      "list_mcp_resources",
+      "ls",
+      "lsp_call_hierarchy",
+      "lsp_definition",
+      "lsp_diagnostics",
+      "lsp_references",
+      "lsp_rename",
+      "lsp_replace_symbol",
+      "lsp_restart",
+      "lsp_symbols",
+      "multiedit",
+      "question",
+      "read_mcp_resource",
+      "sourcegraph",
+      "todos",
+      "view",
+      "write"
+    ]
+  }
+}

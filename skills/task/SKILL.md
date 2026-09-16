@@ -19,7 +19,7 @@ Repo-native system for capturing follow-up work with full context and processing
 When the user opens work on an issue that already exists in the tracker — "work on
 PRE-683", "let's do ABC-142", "pick up ENG-9", or a pasted Jira/Linear issue URL —
 that issue must be **claimed before the first edit**: assigned to the user and moved
-into its tracker's started state (`In Progress` on Jira/Linear; the `auto-claimed`
+into its tracker's started state (`In Progress` on Jira/Linear; the `status:3_started`
 label on gh-issue, which has no status field). Without that, the board silently shows the
 work as unstarted and unowned for its whole lifetime, and a parallel session can
 claim the same issue.
@@ -41,13 +41,13 @@ Each claims on a primitive that can elect one winner among sessions authenticate
 merge is the only completion signal.
 
 The primitive differs per handler, and reporting a claim means reporting which one held:
-jira and gh-issue create the `task/<KEY>` ref through GitHub's create-ref API, which
+jira and gh-issue create the claim ref through GitHub's create-ref API, which
 returns 422 rather than updating a ref that exists (a plain `git push` is **not** the
 lock — see `commands/handlers/claim-lock.md`), and linear runs a
 first-writer-wins election on a comment log carrying a unique per-session token. An
 assignee re-read is **not** a lock on any of them: it confirms only that the final
 assignee is your own account, which is identical for two sessions on the same account.
-In a branch-pinned environment that cannot create `task/<KEY>`, jira and gh-issue degrade
+In a branch-pinned environment that cannot create that ref, jira and gh-issue degrade
 to the same comment-token election and say so explicitly — never report an atomic claim
 the run did not make.
 
@@ -86,7 +86,7 @@ auto_execute_max_size: 2 # optional — repo-pr batch auto-routing: auto-execute
 
 Resolution: file absent or no `handler:` → `repo-pr`; unknown value → `/add-task` stops and points to `/task-config`. Every handler receives the same drafted task (`title`, body, `priority`, `tags`, `source_branch`, `source_pr`, `is_blocked_by`, …) and returns the URL of what it created.
 
-`wip_limit` (default `3`) bounds in-flight work for `/do-tasks`. On the `repo-pr` file path it caps **batch** dispatch (`--all` / `-n N`) to `wip_limit - current_wip` so the human review bottleneck stays bounded; single-task dispatch is ungated. On the `gh-issue`, `jira`, and `linear` paths it's a **pre-claim gate** that runs on every claiming run, single ones included, and declines once in-flight work meets the limit (see the next paragraph for the one case that offers an override instead). How `current_wip` is counted: `commands/handlers/repo-pr-execute.md` (`repo-pr`), `commands/handlers/gh-issue-claim.md`, `commands/handlers/jira-claim.md`, and `commands/do-tasks.md` (`linear`).
+`wip_limit` (default `3`) bounds in-flight work for `/do-tasks`. On the `repo-pr` file path it caps **batch** dispatch (`--all` / `-n N`) to `wip_limit - current_wip` so the human review bottleneck stays bounded; single-task dispatch is ungated. On the `gh-issue`, `jira`, and `linear` paths it's a **pre-claim gate** that runs on every claiming run, single ones included, and declines once in-flight work meets the limit (see the next paragraph for the one case that offers an override instead) — **except a `gh-issue` batch dispatch**, which takes the `repo-pr` shape above instead: the dispatcher reads the slack once and caps the batch, and the dispatched sessions run no **WIP** gate of their own (`commands/do-tasks.md` §4 step 5, which also says what that costs; they do re-check dependency readiness before claiming). How `current_wip` is counted: `commands/handlers/repo-pr-execute.md` (`repo-pr`), `commands/handlers/gh-issue-claim.md`, `commands/handlers/jira-claim.md`, and `commands/do-tasks.md` (`linear`).
 
 **When the limit is met, a batch is bounded and a present human is asked.** The gate always runs, but what it does at the limit depends on the action. A **batch** — `--all`, `-n N`, a `--claim-only` batch, any batch remote dispatch — is bounded or declined unconditionally: presence at dispatch says nothing about the pull requests that land later. (It is the batch, never the transport, that decides: `repo-pr` dispatches single tasks remotely and those stay ungated.) A **single** claim in an attended session gets a one-keystroke override, because the human the cap protects is right there and can see the queue. The gate is never simply skipped, so an unattended run that misjudges itself declines rather than flooding the queue. `commands/handlers/attendedness.md` owns the rule and the reasoning; `--non-interactive` declares a run unattended outright.
 
@@ -105,7 +105,7 @@ Available handlers — each owns its own auth/preflight, config schema, prerequi
 
 Set the handler with `/task-config` (which dispatches to `commands/handlers/<handler>-config.md`).
 
-> Different handlers support different downstream commands. `/list-tasks` and `/do-tasks` dispatch to whichever handler is configured, but a handler may legitimately decline a verb. `/do-tasks` runs the file path for `repo-pr`, the tracker path for `linear`, the gh-issue path for `gh-issue`, and the jira path for `jira` (single only — needs `jira.ready_status` set). Of the reconciler verbs, `/complete-task` supports all four handlers (`linear`, `gh-issue`, `repo-pr`, and `jira`); `/sweep-for-complete` and `/reconcile-tasks` remain `linear`-only in v1. The handler files document what they do and don't support.
+> Different handlers support different downstream commands. `/list-tasks` and `/do-tasks` dispatch to whichever handler is configured, but a handler may legitimately decline a verb. `/do-tasks` runs the file path for `repo-pr`, the tracker path for `linear`, the gh-issue path for `gh-issue`, and the jira path for `jira` (single only — needs `jira.ready_status` set). Of the reconciler verbs, `/complete-task` supports all four handlers (`linear`, `gh-issue`, `repo-pr`, and `jira`); `/sweep-for-complete` remains `linear`-only in v1, and `/reconcile-tasks` supports `linear` and `gh-issue` against a different rule table each — `linear` repairs PR-versus-column drift, `gh-issue` audits the `labels.yml` invariants. The handler files document what they do and don't support.
 
 ### Promote (`/promote-tasks`)
 
@@ -124,10 +124,10 @@ Flag matrix:
 | -------------------- | --------------------------------------------------------------------------------------------------- |
 | `/do-tasks`          | execute the single highest-ranked dependency-ready task                                             |
 | `/do-tasks <slug>`   | execute a specific task (or, for `linear`, a specific issue id like `PRE-12`)                       |
-| `/do-tasks --all`    | batch: all dependency-ready tasks, bounded by `wip_limit` (file path only)                          |
-| `/do-tasks -n N`     | batch capped at the top `N`, then bounded by `wip_limit` (file path only)                           |
-| `--remote` (default) | dispatch each task to its own cloud VM (file path)                                                  |
-| `--local`            | run in the current session; caps the batch at 1 (file path)                                         |
+| `/do-tasks --all`    | batch: all dependency-ready tasks, bounded by `wip_limit` (file path and linear)                    |
+| `/do-tasks -n N`     | batch capped at the top `N`, then bounded by `wip_limit` (file path and linear)                     |
+| `--remote` (default) | dispatch each task to its own cloud VM (file path and linear)                                       |
+| `--local`            | run in the current session; caps the batch at 1 (file path and linear)                              |
 | `--claim-only`       | run only the claim step (reserve the task); no execution, no PR. Batchable                          |
 | `--no-claim`         | skip the claim step; execute a task this caller already claimed. Single only                        |
 | `--non-interactive`  | declare no human present: never prompt, and the WIP gate declines rather than offering its override |
@@ -165,7 +165,9 @@ Renders a kanban view grouped by `status` column with priority, dependency block
 
 ### Diagnostics (`/doctor`)
 
-`/doctor` is the **explicit** "diagnose and fix my setup" entry point (see `commands/doctor.md`). It runs a set of checks — config validity (known `handler:`), handler prerequisites (gh auth / MCP reachability), legacy dirs, schema drift (reusing `scripts/validate.py`'s rules), and hygiene (expired tasks, orphan branches) — and reports `PASS`/`WARN`/`FAIL` per check. It is **read-only by default**; `/doctor --fix` applies the safe mechanical repairs (run the legacy migration, prune expired tasks, fill defaulted fields) and leaves judgment calls (unknown handler, failing auth) as reported warnings.
+`/doctor` is the **explicit** "diagnose and fix my setup" entry point (see `commands/doctor.md`). It runs a set of checks — config validity (known `handler:`), handler prerequisites (gh auth / MCP reachability), legacy dirs, schema drift (reusing `scripts/validate.py`'s rules), hygiene (expired tasks, orphan branches), and co-review allow-rule drift — and reports `PASS`/`WARN`/`FAIL` per check. It is **read-only by default**; `/doctor --fix` applies the safe mechanical repairs (run the legacy migration, prune expired tasks, fill defaulted fields) and leaves judgment calls (unknown handler, failing auth, allow-rule drift) as reported warnings.
+
+The allow-rule check is the one that isn't about the task loop; it is there because its failure is silent by construction, so nothing else would ever surface it. See `commands/doctor.md` → Check 7.
 
 It **complements, not replaces, migrate-on-contact** (below): that implicit preflight keeps stale setups working without anyone invoking `/doctor`, while `/doctor` surfaces the same drift — and more — in one place on demand. Both reference the single migration procedure in this file.
 

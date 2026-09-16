@@ -52,7 +52,7 @@ demo — decisions: 1 decided, 0 ready, 0 blocked
 
   account-provisioning  DECIDED decided in dev_docs/research/demo/PROJECT.md
 
-  account:  Q 1 answered / 0 open / 0 retired    O 0 discharged / 1 open (1 stub)
+  account:  Q 1 answered / 0 open / 0 retired    O 0 discharged / 1 open (1 stub) / 0 declared none
 ```
 
 The decision reads `DECIDED`. The stub is counted on the track line. **Nothing

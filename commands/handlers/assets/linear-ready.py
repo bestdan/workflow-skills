@@ -10,9 +10,11 @@ Read-only. Never mutates anything. This is the sibling of linear-archive.py; it
 reuses that script's gql() helper verbatim, and both call the shared
 _secret_resolve.py for get_key().
 
-Gate + rank rules mirror commands/handlers/linear-common.md's "Ready-candidate
-selection" block exactly. Change them there first and update both consumers
-(linear-claim.md and this file) in lockstep.
+Gate + rank rules live in commands/handlers/assets/_linear_rank.py, this
+script's sibling module — its header docstring is the single source of truth
+for commands/handlers/linear-common.md's "Ready-candidate selection" block.
+Change them there first; both this script and linear-rank.py (the MCP-floor
+entry point) import from it.
 
 The API key is resolved by commands/handlers/assets/_secret_resolve.py, which
 walks two independent ladders: secret/pointer (`$LINEAR_API_KEY` ->
@@ -31,9 +33,9 @@ with the reason on stderr, so the caller can fall back to the MCP floor. Stdout
 carries exactly one JSON object and nothing else.
 
 Usage:
-  python3 linear-ready.py --team PreThink
-  python3 linear-ready.py --team PreThink --project <uuid> --project <uuid>:5
-  python3 linear-ready.py --team PreThink --max-estimate 5 --limit 100
+  python3 linear-ready.py --team Platform
+  python3 linear-ready.py --team Platform --project <uuid> --project <uuid>:5
+  python3 linear-ready.py --team Platform --max-estimate 5 --limit 100
 """
 
 import argparse
@@ -45,7 +47,9 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _secret_resolve import SecretUnavailable, resolve_key
+from _linear_rank import gate, rank_key  # noqa: E402
+from _secret_resolve import SecretUnavailable, resolve_key  # noqa: E402
+from _shape import ShapeError, expect  # noqa: E402
 
 API = "https://api.linear.app/graphql"
 
@@ -123,9 +127,21 @@ def gql(key, query, variables=None):
         # Network failure or the timeout above — exit non-zero (not a hang) so the
         # caller falls back to the MCP floor per this script's contract.
         sys.exit(f"GraphQL request failed: {e.reason}")
+    # Guard the root BEFORE the membership test: `"errors" in None` and
+    # `"errors" in 5` raise TypeError, so a scalar JSON body would reach neither
+    # this check nor expect() below and would surface as the traceback this
+    # whole seam exists to remove. gh-issue-rollups.py guards in the same order.
+    if not isinstance(payload, dict):
+        sys.exit(f"GraphQL response: expected an object, got {type(payload).__name__}")
     if "errors" in payload:
         sys.exit("GraphQL error: " + json.dumps(payload["errors"], indent=2))
-    return payload["data"]
+    # A malformed response used to surface as a KeyError traceback here, and
+    # then as a chain of KeyErrors at every caller that indexed into the result.
+    # expect() makes it one sentence naming the field.
+    try:
+        return expect(payload, "data", dict, "GraphQL response")
+    except ShapeError as exc:
+        sys.exit(str(exc))
 
 
 def resolve_team(key, team):
@@ -164,32 +180,6 @@ def parse_project_arg(raw, default_max):
     return raw, default_max
 
 
-def gate(issue, max_estimate):
-    """Return a drop reason string, or None if the issue survives the gates."""
-    estimate = issue.get("estimate")
-    if estimate is None:
-        return "no estimate set"
-    if estimate >= max_estimate:
-        return f"estimate {estimate} >= {max_estimate}"
-    label_names = {n["name"] for n in issue["labels"]["nodes"]}
-    if "auto-claimed" in label_names:
-        return "already auto-claimed"
-    if "human-approval-requested" in label_names:
-        return "human-approval-requested"
-    if "blocked" in label_names:
-        return "blocked"
-    assignee = issue.get("assignee")
-    if assignee and not assignee.get("isMe"):
-        who = assignee.get("displayName") or assignee.get("id") or "unknown"
-        return f"assigned to {who}"
-    return None
-
-
-def rank_key(candidate):
-    priority = candidate["priority"] or 0
-    return (priority if priority != 0 else float("inf"), candidate["_updatedAt"])
-
-
 def main():
     ap = argparse.ArgumentParser(
         description="Resolve ready Linear candidates via a GraphQL fast-path."
@@ -198,7 +188,7 @@ def main():
         "--team",
         default=os.environ.get("LINEAR_TEAM"),
         required=os.environ.get("LINEAR_TEAM") is None,
-        help="Team name (e.g. PreThink) or UUID id, or $LINEAR_TEAM.",
+        help="Team name (e.g. Platform) or UUID id, or $LINEAR_TEAM.",
     )
     ap.add_argument(
         "--project",

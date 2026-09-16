@@ -1,15 +1,16 @@
 ---
 description: Detect completed Linear issues that no merged PR owns (the bare-id over-close bug) and optionally restore them — a safe, schedulable backstop
-allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(op *), Bash(python3 *), Glob, Grep, Read, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__linear__list_teams, mcp__linear__list_projects
-argument-hint: "[--apply] [--project <uuid>] [--repo <owner/name>] [--since 48h] [--only PRE-1,PRE-2]"
+allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(op *), Bash(python3 *), Glob, Grep, Read, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__linear__list_teams, mcp__linear__list_projects, mcp__github
+argument-hint: "[--apply] [--project <uuid>] [--repo <owner/name>] [--prs-file <path>] [--since 48h] [--only PRE-1,PRE-2]"
 ---
 
 # Find False Closures
 
-Linear's GitHub integration treats a **bare** issue id (`PRE-123`) appearing
-anywhere in a merged PR's title or body as a closing reference, so a PR that
-merely name-drops a sibling issue sweeps that sibling to Done — no branch, no
-PR, no code. `/reconcile-tasks` can't repair it (its rule table is
+A repo-local merge workflow scraped **bare** issue ids (`PRE-123`) out of a
+merged PR's title and body and swept every match to Done, so a PR that merely
+name-dropped a sibling issue closed it — no branch, no PR, no code. Linear's own
+GitHub integration is not the source; see `commands/handlers/linear-claim.md`,
+"Whether Linear's integration is live". `/reconcile-tasks` can't repair it (its rule table is
 promote/complete-only and never demotes), and `/sweep-for-complete` is immune
 to the bug but doesn't detect issues already falsely closed.
 
@@ -31,6 +32,11 @@ whichever of those wraps it.
   ownership. Resolution order: this flag, else the project's own `repo:` in
   `linear.projects` (each project can name its repo — the workspace spans
   more than one), else the current repo's `origin` (`gh repo view`).
+- **`--prs-file <path>`** — a JSON file with a pre-fetched merged-PR list,
+  instead of `--repo`, for hosts where `gh` cannot reach the GitHub API (a
+  Claude Code cloud routine). Mutually exclusive with `--repo`. See
+  `commands/handlers/linear-false-closures.md` for the file format and the
+  coverage guard it requires.
 - **`--since <window>`** — only consider issues completed within the window:
   `48h` / `2d` shorthand, an ISO datetime, or a Linear duration (`-P2D`).
   Omit to scan the whole completed history. Ideal for a scheduled run that
@@ -57,7 +63,8 @@ Overlay the local override on the committed config — mappings merge recursivel
   runs the detection asset per project, and — with `--apply` — restores the
   flagged issues). If the relative path doesn't resolve, find it with **Glob**
   (`**/commands/handlers/linear-false-closures.md`) and Read the result. Pass
-  `--apply`, `--project`, `--repo`, `--since`, and `--only` through.
+  `--apply`, `--project`, `--repo`, `--prs-file`, `--since`, and `--only`
+  through.
 - File absent, or `handler: repo-pr` → **UNSUPPORTED.** Print: "unsupported for
   handler repo-pr — there is no tracker state to falsely close; a merged PR
   **is** the record. `/find-false-closures` has nothing to do."

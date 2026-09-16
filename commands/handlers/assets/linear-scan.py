@@ -31,9 +31,9 @@ non-zero with the reason on stderr, so the caller can fall back to the MCP
 floor. Stdout carries exactly one JSON object and nothing else.
 
 Usage:
-  python3 linear-scan.py --team PreThink
-  python3 linear-scan.py --team PreThink --state-type started --state-type unstarted
-  python3 linear-scan.py --team PreThink --project <uuid> --project <uuid>
+  python3 linear-scan.py --team Platform
+  python3 linear-scan.py --team Platform --state-type started --state-type unstarted
+  python3 linear-scan.py --team Platform --project <uuid> --project <uuid>
 """
 
 import argparse
@@ -45,7 +45,8 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _secret_resolve import SecretUnavailable, resolve_key
+from _secret_resolve import SecretUnavailable, resolve_key  # noqa: E402
+from _shape import ShapeError, expect  # noqa: E402
 
 API = "https://api.linear.app/graphql"
 
@@ -75,8 +76,13 @@ query($name: String!) {
 }"""
 
 # %s slot: project var decl + extra filter. Skinny fields per linear-common.md's
-# "In-flight scan": id identifier title url state { id type } plus attachments —
-# explicitly no `description`.
+# "In-flight scan": id identifier title url state { id type } plus attachments and
+# the issue's own project — explicitly no `description`.
+#
+# `project { id name }` is the issue's REAL project, not the scope that returned
+# it. Consumers map an issue to its per-project config (e.g. `repo:`) by this id,
+# and a whole-team query — which is what `--all` runs — has no scope id to fall
+# back on, so asking the API per issue is the only thing that answers there.
 ISSUES_QUERY = """
 query($cursor: String, $first: Int!, $team: ID!, $types: [String!]%s) {
   issues(first: $first, after: $cursor, filter: {
@@ -87,6 +93,7 @@ query($cursor: String, $first: Int!, $team: ID!, $types: [String!]%s) {
     nodes {
       id identifier title url
       state { id type }
+      project { id name }
       attachments { nodes { url } }
     }
     pageInfo { hasNextPage endCursor }
@@ -122,9 +129,21 @@ def gql(key, query, variables=None):
         # Network failure or the timeout above — exit non-zero (not a hang) so the
         # caller falls back to the MCP floor per this script's contract.
         sys.exit(f"GraphQL request failed: {e.reason}")
+    # Guard the root BEFORE the membership test: `"errors" in None` and
+    # `"errors" in 5` raise TypeError, so a scalar JSON body would reach neither
+    # this check nor expect() below and would surface as the traceback this
+    # whole seam exists to remove. gh-issue-rollups.py guards in the same order.
+    if not isinstance(payload, dict):
+        sys.exit(f"GraphQL response: expected an object, got {type(payload).__name__}")
     if "errors" in payload:
         sys.exit("GraphQL error: " + json.dumps(payload["errors"], indent=2))
-    return payload["data"]
+    # A malformed response used to surface as a KeyError traceback here, and
+    # then as a chain of KeyErrors at every caller that indexed into the result.
+    # expect() makes it one sentence naming the field.
+    try:
+        return expect(payload, "data", dict, "GraphQL response")
+    except ShapeError as exc:
+        sys.exit(str(exc))
 
 
 def resolve_team(key, team):
@@ -175,7 +194,7 @@ def main():
         "--team",
         default=os.environ.get("LINEAR_TEAM"),
         required=os.environ.get("LINEAR_TEAM") is None,
-        help="Team name (e.g. PreThink) or UUID id, or $LINEAR_TEAM.",
+        help="Team name (e.g. Platform) or UUID id, or $LINEAR_TEAM.",
     )
     ap.add_argument(
         "--project",
@@ -224,7 +243,12 @@ def main():
             key, team_node["id"], state_types, scope["id"], args.limit
         )
         for issue in issues:
-            issue["project"] = scope["name"]
+            # `project` comes from the API and stays untouched: the issue's own
+            # project as {id, name}, or null when it has none. `scope` records
+            # which query returned it, which is what this used to overwrite
+            # `project` with — a scope name, identical for every issue under a
+            # whole-team query and therefore useless for per-project lookup.
+            issue["scope"] = scope["name"]
             issue["attachments"] = [n["url"] for n in issue["attachments"]["nodes"]]
             all_issues.append(issue)
 

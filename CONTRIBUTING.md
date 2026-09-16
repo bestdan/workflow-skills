@@ -64,7 +64,7 @@ itself faster, is in [`dev_docs/gate-performance.md`](dev_docs/gate-performance.
 
 ## The gate (`just check`)
 
-Four deterministic, blocking checks, plus the shell lint and Bats suites:
+Five deterministic, blocking checks, plus the shell lint and Bats suites:
 
 1. **`dprint check`** — formatting (config in `dprint.json`).
 2. **`claude plugin validate . --strict`** — official manifest/frontmatter
@@ -74,20 +74,40 @@ Four deterministic, blocking checks, plus the shell lint and Bats suites:
      directory and the `^[a-z0-9-]+$` slug rules; `description` non-empty and
      ≤1024 chars; SKILL.md body ≤500 lines;
    - `plugin.json` and `marketplace.json` versions are present and **equal**;
-   - the README "N skills, M commands, K subagent" sentence matches reality.
+   - the README "N skills, M commands, K subagent" sentence matches reality;
+   - no fenced shell block in a runtime `.md` carries more than one control-flow
+     statement — see **Logic goes in a typed file** below.
 4. **`scripts/typecheck.sh`** — mypy over the repo's Python, at a version pinned
    in the script (fetched by `uvx`, so it needs network on the first run of a
-   given pin). Two tiers, split by annotation coverage rather than by what
-   ships: `--strict` on `scripts/research-spike.py`, default settings on the
-   other `scripts/` entrypoints and the handler assets. Both tiers always run
-   and the exit code is their OR, so one failing never hides the other's
-   findings. The script's header carries the full rationale, including why not
-   `ty`.
+   given pin). Four tiers, split by **who runs the file**, each with
+   `--python-version` pinned so diagnostics can't drift with the interpreter:
+   `--strict` on `scripts/research-spike.py`; everything consumers execute as
+   bare `python3` at **3.9** — the handler assets _plus_ `local-review/server.py`
+   and `coreview-rule-drift.py`, which live under `scripts/` but are launched
+   through `${CLAUDE_PLUGIN_ROOT}`; the genuinely dev-only `scripts/`
+   entrypoints at 3.11; and `scripts/test_*.py` at 3.11 with `attr-defined` off.
+   **A file's tier follows the interpreter it must survive, not the directory it
+   sits in.** All but the strict tier run
+   `--check-untyped-defs` — without it mypy reads no unannotated function body,
+   which is every file here. Every tier always runs and the exit code is their
+   OR, so one failing never hides another's findings. The script's header
+   carries the operational detail;
+   [`dev_docs/decisions/python_type_checking.md`](dev_docs/decisions/python_type_checking.md)
+   carries why mypy rather than pyright or `ty`, and **what would change that** —
+   read it before swapping the checker or raising a floor.
+5. **`scripts/lint-python.sh`** — `ruff check` at ruff's **default** rules (E4,
+   E7, E9, F), pinned the same way. The selection is a floor held on purpose:
+   the repo was clean under it on adoption, so the gate started green and any
+   finding is a regression rather than a backlog. `E501` and the `B`/`SIM`/`C4`
+   families were measured and left off; the script's header says why, with the
+   numbers.
 
 `scripts/validate.py` is dev/CI-only tooling (never shipped to plugin
 consumers); its one dependency is hash-locked in `scripts/validate.py.lock`.
 
 ## Adding a skill
+
+<!-- copilot:begin id=adding-a-skill -->
 
 1. Create `skills/<name>/SKILL.md` with valid frontmatter (`description`
    required; `name`, if set, must equal `<name>`). Keep the body ≤500 lines —
@@ -100,7 +120,11 @@ consumers); its one dependency is hash-locked in `scripts/validate.py.lock`.
 4. Run `just check` (must pass) and, if you can, `just eval` to confirm the new
    skill auto-triggers.
 
+<!-- copilot:end -->
+
 ## What loads at runtime vs. contributor-only
+
+<!-- copilot:begin id=runtime-vs-contributor -->
 
 Skill files split into two tiers with different audiences, and confusing them
 silently drops behavior:
@@ -122,6 +146,145 @@ co-review pass, before a second pass caught it. The same split applies to
 `commands/handlers/<handler>.md` (loaded when a task command dispatches into
 it), and `agents/<name>.md` (loaded when the subagent spawns): their bodies are
 runtime prompts, not documentation.
+
+<!-- copilot:end -->
+
+## Logic goes in a typed file
+
+<!-- copilot:begin id=logic-typed-file -->
+
+**Write code in a `.py` or `.sh` file and call it from the markdown. Do not
+write it as a fenced block inside a skill, command, handler, or agent body.**
+
+The gate cannot see a fenced block. `scripts/lint-shell.sh` globs `*.sh`,
+`*.bash` and `*.bats` from `git ls-files`, so shell inside a `.md` is never
+syntax-checked, never shellchecked, and never run. Nothing else covers it
+either. A fenced block is the one place in this repo where code ships with no
+check at all.
+
+<!-- copilot:end -->
+
+That is not theoretical. `gh-issue-promote.md` step 3a carried a 36-line
+GraphQL pagination loop, and **seven defects were found in it across three
+review rounds on one PR — every one by a human reviewer, none by the gate.**
+They shared a signature: a wrong or empty result that read as a clean run (no
+pagination; no failure check; a computed result that printed nothing; unchecked
+`jq`; a string `totalCount` passing a numeric comparison; a null cursor
+re-fetching the same page forever; a valid-but-unchanging cursor doing the
+same). The density is the argument: each prose fix is a bet that the eighth
+defect is not there, and nothing can check the bet. It is now
+`commands/handlers/assets/gh-issue-rollups.py` with
+`scripts/test_gh_issue_rollups.py` pinning each defect.
+
+<!-- copilot:begin id=logic-typed-where -->
+
+**Where it goes.** A helper a runtime prompt shells out to belongs in
+`commands/handlers/assets/<name>.py` — Python, matching every existing asset
+there, and it replaces `jq` with real JSON handling. Dev/CI tooling belongs in
+`scripts/`. Either way, add the test pair: `scripts/test_<name>.py` (stdlib
+`unittest`, no network, the subprocess seam stubbed) plus a thin
+`scripts/test-<name>.sh` that `exec`s it. `scripts/check.sh` discovers
+`scripts/test-*.sh` by glob, so the gate picks it up with no edit.
+
+<!-- copilot:end -->
+
+**How to call it.** Mirror `gh-issue-promote.md` step 3a:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/<name>.py" --repo "<repo>"
+```
+
+and document the `$CLAUDE_PLUGIN_ROOT`-unset fallback (Glob
+`**/handlers/assets/<name>.py`). Steps run as separate tool calls with no shared
+shell state, so **the helper's stdout is the contract** — a shell variable or a
+temp path does not survive the invocation. Say in the prose what the helper
+prints, and keep the two in sync: prose disagreeing with the output channel is
+one of the seven defects above, and it recurred twice.
+
+<!-- copilot:begin id=logic-typed-inline -->
+
+**What is still fine inline.** A `gh` invocation, a one-liner with a `||`
+fallback, a guarded `if ...; then ...; fi`. The check fires on a fenced shell
+block with **two or more** control-flow statements plus a bare `fi`/`done`/`esac`
+line. The terminator requirement is what keeps the prompt payloads in
+`repo-pr-execute.md` and `repo-pr.md` — English wearing a `bash` fence — from
+being flagged; English does not write a bare `done`.
+
+**The allowlist is not an escape hatch.** `SHELL_LOGIC_ALLOWLIST` in
+`scripts/validate.py` names the blocks that predate the check and the count each
+may keep, and validate.py fails if an entry has more headroom than its file
+needs. Shrink an entry when you extract a block. Never raise one to land a new
+block — extract instead.
+
+<!-- copilot:end -->
+
+**How to find candidates.** The rubric for spotting prose that should be a
+helper, how to rank what you find, and the gotchas that have already bitten an
+extraction:
+[`dev_docs/finding-prose-that-should-be-code.md`](dev_docs/finding-prose-that-should-be-code.md).
+
+## Writing Python the checker can follow
+
+The assets are unannotated by convention and that is not changing — the leverage
+is in about ten lines per file, not in annotating every parameter. Two idioms
+carry nearly all of it. `commands/handlers/assets/gh-issue-rollups.py` is the
+worked example for both.
+
+**Name a multi-value return whose fields share a type.** `code, out, err =
+run_gh(...)` unpacks positionally, and two of those three are `str` — so
+swapping stdout and stderr type-checks, runs, and quietly reports the wrong text
+as the failure reason. No annotation catches that. A `NamedTuple` does not make
+the swap impossible either — construct or unpack it positionally and you are
+back where you started. What it buys is a name at the point the value is
+**built**, so construct with keywords and the transposition has to be written
+past the field names:
+
+```python
+class GhResult(NamedTuple):
+    returncode: int
+    stdout: str
+    stderr: str
+```
+
+`typing.NamedTuple` is stdlib and predates every Python these assets run on, and
+a test may still stub the seam with a plain 3-tuple — unpacking is identical
+either way.
+
+**Narrow inline, at the guard.** A validator that returns plain `bool` tells the
+checker nothing, so the value stays `Any` at the comparison and the _next_
+unguarded one is not flagged either. Write the `isinstance` test where the
+`raise` is, and the checker follows the same reasoning the reader does:
+
+```python
+if not isinstance(total, int) or isinstance(total, bool):
+    raise LookupFailed(...)
+if total > 0:              # `total` is int here, to mypy as well as to you
+```
+
+Prefer `expect()` over a hand-rolled chain: it returns `T`, so the checker
+narrows at the call site with no `TypeGuard` and no `typing_extensions`, and the
+failure is one sentence naming the field instead of a `KeyError` traceback.
+Reach for a literal `isinstance` only where `expect()` does not fit — a value
+that may legitimately be absent, like `endCursor` on the last page.
+
+On `typing.TypeGuard`: it is 3.10+, but that does **not** by itself bar it from
+an asset. Under `if TYPE_CHECKING:` with `from __future__ import annotations` it
+is erased at runtime — verified on CPython 3.9 with `typing_extensions` not
+installed. What bars it is the tier above: at `--python-version 3.9` mypy
+refuses the symbol (`Module "typing" has no attribute "TypeGuard"`) and stops
+narrowing, and `typing_extensions` — which mypy already depends on, so it costs
+no install — would work but is a third-party name in a stdlib-only directory.
+`expect()` gets the same narrowing with neither, which is why it exists.
+
+**A dynamically loaded module needs its spec asserted.** Every
+`scripts/test_*.py` imports a hyphenated asset through `importlib`, where the
+spec and its loader are both `Optional`. Assert them — it satisfies the test
+tier and turns a wrong asset path into a readable failure instead of
+`AttributeError: 'NoneType' object has no attribute 'exec_module'`:
+
+```python
+assert _spec is not None and _spec.loader is not None, f"cannot load {ASSET}"
+```
 
 ## Adding a command
 
@@ -150,3 +313,34 @@ procedure for landing a stack of PRs are all in
 auto-invokes each skill from its naive prompt. They cost API tokens and are
 nondeterministic, so they are **opt-in and never block a PR**. See
 [`evals/README.md`](evals/README.md).
+
+## Copilot review instructions are generated
+
+GitHub Copilot code review reads `.github/copilot-instructions.md` and the
+path-scoped `.github/instructions/*.instructions.md` files, and it **does not
+follow links**. Progressive disclosure — the house style everywhere else here —
+therefore hands Copilot a map and no territory, which is why its reviews used to
+miss the rules above.
+
+So those three files are a flat copy, and the copy is generated rather than
+maintained:
+
+```sh
+python3 scripts/build-copilot-instructions.py            # rewrite the files
+python3 scripts/build-copilot-instructions.py --check    # fail on drift
+```
+
+The source of truth stays in `AGENTS.md` and this file. Spans are delimited by a
+pair of `copilot:begin id=<id>` and `copilot:end` HTML comments, and routed to an
+output file by the `OUTPUTS` table in the script. (Write those two words as
+comments only where you mean them — the parser reads the whole file and cannot
+tell a documented marker from a real one.) Edit the rule where it lives, rerun
+the script, and commit both — `scripts/test-copilot-instructions.sh` fails the
+gate when a committed output no longer matches its source, so a rule change
+cannot quietly stop reaching reviewers.
+
+Two constraints the script enforces, both from GitHub's own guidance: an
+instruction file over ~1000 lines starts getting silently dropped, and a URL
+inside a marked span is an instruction that does nothing. Keep spans short and
+link-free; add a new marked span rather than growing an existing one past the
+point a reviewer would read it.

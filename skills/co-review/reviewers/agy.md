@@ -59,13 +59,13 @@ It persists every session to a per-conversation SQLite store and keeps cross-ses
 **GitHub mode, with requests** — note the `&&` between every step: dispatch happens only if the diff actually landed.
 
 ```sh
-cat "<this skill dir>/review_prompt.md" "<REQUESTS>" > "<INPUT>" && gh pr diff <n> >> "<INPUT>" && agy --sandbox --add-dir "<INPUT-DIR>" -p "<AGY-POINTER>" --model "Gemini 3.6 Flash (High)"
+cat "<this skill dir>/review_prompt.md" <CONVENTIONS> "<REQUESTS>" > "<INPUT>" && gh pr diff <n> --repo <owner>/<name> >> "<INPUT>" && agy --sandbox --add-dir "<INPUT-DIR>" -p "<AGY-POINTER>" --model "Gemini 3.6 Flash (High)"
 ```
 
-`--sandbox` enables `agy`'s read-only terminal restrictions. `--add-dir "<INPUT-DIR>"` (the directory holding `<INPUT>`) trusts the input's workspace so headless `read_file` auto-allows while `write_file` stays gated — **omit it and every headless dispatch auto-denies with "no output produced"** (see the read_file-gate section above). `--model "Gemini 3.6 Flash (High)"` pins a non-Claude model for genuine reviewer diversity at low quota cost — swap in `"Gemini 3.1 Pro (High)"` for a deeper (higher-consumption) review; both are pre-approved via their own exact-match allow-rule below, so switching between the two does not re-prompt (see the note under the allow-rules for why the tail is **not** wildcarded). `agy` needs network + an Antigravity login, so this line must run **unsandboxed** in the Bash tool — it cannot run under a restrictive sandbox.
+`--sandbox` enables `agy`'s read-only terminal restrictions. `--add-dir "<INPUT-DIR>"` (the directory holding `<INPUT>`) trusts the input's workspace so headless `read_file` auto-allows while `write_file` stays gated — **omit it and every headless dispatch auto-denies with "no output produced"** (see the read_file-gate section above). `--model "Gemini 3.6 Flash (High)"` pins a non-Claude model for genuine reviewer diversity at low quota cost — swap in `"Gemini 3.1 Pro (High)"` for a deeper (higher-consumption) review; both are pre-approved via their own exact-match allow-rule below, so switching between the two does not re-prompt (see the note under the allow-rules for why the tail is **not** wildcarded). `agy` needs network + an Antigravity login, so this line must run **unsandboxed** in the Bash tool — it cannot run under a restrictive sandbox. `<owner>/<name>` is the repo resolved in SKILL.md step 2 — never `cwd`'s by default.
 
 - **GitHub mode, no requests** → drop the `"<REQUESTS>"` argument from the assembling `cat`; the dispatch tail is unchanged.
-- **`--local` mode** → swap `gh pr diff <n>` for `git diff <base>` and append any untracked files you read, per the shared `--local` rule in SKILL.md — keeping the `&&` chain.
+- **`--local` mode** → swap the `gh pr diff …` segment for `git diff <base>` and append any untracked files you read, per the shared `--local` rule in SKILL.md — keeping the `&&` chain.
 
 `<AGY-POINTER>` is agy's own pointer — the shared `<POINTER>` from SKILL.md retargeted from stdin to the input **file**, since agy has no stdin (a pointer that claims otherwise is what produced the spurious `NO INPUT`):
 
@@ -75,7 +75,7 @@ cat "<this skill dir>/review_prompt.md" "<REQUESTS>" > "<INPUT>" && gh pr diff <
 
 ## Permission allow-rules (exact-match, approve once)
 
-Merge into the `permissions.allow` array (see SKILL.md → Permissions). The first two are the reviewer command, one per pre-approved model (default + deep-review escalation); the third is the pre-flight auth probe (a read-only status query with no varying arguments). Replace `<INPUT>` with your real fixed absolute path — and `<INPUT-DIR>` with its containing directory — in the first two rules:
+Merge into the `permissions.allow` array (see [`../references/permissions.md`](../references/permissions.md)). The first two are the reviewer command, one per pre-approved model (default + deep-review escalation); the third is the pre-flight auth probe (a read-only status query with no varying arguments). Replace `<INPUT>` with your real fixed absolute path — and `<INPUT-DIR>` with its containing directory — in the first two rules:
 
 ```json
 "Bash(agy --sandbox --add-dir \"<INPUT-DIR>\" -p \"Your entire input is the file at <INPUT> (a review rubric followed by a diff). Read that file and review ONLY it. Do NOT explore any other file, run commands, or retrieve any prior conversation or memory. If that file is missing or empty, output exactly NO INPUT and stop. Output findings as file:line, the issue, and a suggested fix. Read only.\" --model \"Gemini 3.6 Flash (High)\")",

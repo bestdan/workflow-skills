@@ -11,10 +11,16 @@ load test_helper
   assert_doc_contains "$REPO_ROOT/skills/auto-pilot/references/run-state.md" 'diff_judgment_tier: orchestrator # default | sonnet'
 }
 
-@test "less-claude launch is CAO fail-closed and resume rechecks it" {
-  assert_doc_contains "$REPO_ROOT/skills/auto-pilot/references/launch-preflight.md" 'require `cao`, `cao-run`, and `cao-server` on `PATH`'
-  assert_doc_contains "$REPO_ROOT/skills/auto-pilot/references/launch-preflight.md" 'nc -z localhost'
-  assert_doc_contains "$REPO_ROOT/skills/auto-pilot/references/resume.md" 're-verify `cao`, `cao-run`, and `cao-server` on `PATH`'
+@test "less-claude launch is CAO fail-closed and resume rechecks it, via one scout invocation" {
+  # The CAO probe list (cao/cao-run/cao-server on PATH, nc -z localhost 9889,
+  # cao_coder_mapping vs the fixed fleet) has one home now: preflight.sh's
+  # --scout-run-md scout. Launch step 6 and resume both call it rather than
+  # each restating the probe list — see run-state.md "RUN.md" table's `coder`
+  # column and the two callers below.
+  assert_doc_contains "$REPO_ROOT/skills/auto-pilot/references/launch-preflight.md" '"${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh" --scout-run-md'
+  assert_doc_contains "$REPO_ROOT/skills/auto-pilot/references/resume.md" '"${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh" --scout-run-md'
+  assert_doc_contains "$REPO_ROOT/scripts/preflight.sh" 'nc -z localhost 9889'
+  assert_doc_contains "$REPO_ROOT/scripts/preflight.sh" 'cao cao-run cao-server'
 }
 
 @test "profile composes with the single run-state delivery path" {

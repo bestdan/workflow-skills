@@ -28,7 +28,8 @@ in the committed `.task-config.yml`.
 
 A pointer is not a secret, but it is still sensitive — it advertises where a full-account
 token lives — so its canonical home is that same gitignored file, never the committed
-one.
+one. See [What may appear in a committed file](#what-may-appear-in-a-committed-file) for
+what to write in docs and tests instead, and what to do if a real one lands in the tree.
 
 ## Two ladders
 
@@ -87,8 +88,8 @@ A reference must start with a scheme — `^[a-z][a-z0-9+.-]*://` at position 0 �
 leading or trailing whitespace and no newline.
 
 Whitespace **inside** a reference is legal and must stay legal: 1Password item titles
-routinely contain spaces, so `op://Private/PreThink Linear/dan_local_key` and
-`op://Private/Linear API/credential` are both valid. What the rule rejects is a value
+routinely contain spaces, so `op://Private/Linear API/credential` — note the space in
+the item title — is valid. What the rule rejects is a value
 that begins with something other than a scheme — notably a command-prefixed one like
 `opx op://Private/x/y`, which is a `malformed-ref` failure with its own distinct message
 rather than a generic "no key" error.
@@ -146,6 +147,90 @@ transcript**. For a plaintext key without either exposure, export `$<NAME>` from
 shell profile — same rung, nothing on disk in the checkout and nothing bridged.
 
 Both are legitimate. Nothing in this plugin nags about either.
+
+## What may appear in a committed file
+
+Three kinds of secret configuration, and none of them may be committed:
+
+|                                  | Where it belongs                             | Enforced by                                                         |
+| -------------------------------- | -------------------------------------------- | ------------------------------------------------------------------- |
+| A raw secret                     | `.task-config.local.yml`, or `$<NAME>`       | [Plaintext keys](#plaintext-keys) — refused in the committed config |
+| A `*_resolver` identifier        | `.task-config.local.yml`, or the environment | [Provenance](#provenance) — a loud error in the committed config    |
+| **A personal `op://` reference** | `.task-config.local.yml`                     | **nothing — prose only**                                            |
+
+The third is the one that gets committed, because it looks harmless. It is a
+pointer, not a key: reading it requires an authorized `op` session for the
+account that owns the vault. That is exactly why it slips through review.
+
+Commit it anyway and you publish the **location** of a full-account bearer
+token — which vault, which item, which field. A credential can be rotated; the
+fact that a particular named item in a particular named vault is worth
+attacking cannot be. That is what a targeted phishing or social-engineering
+attempt wants, and `commands/handlers/linear-config.md:78` already forbids
+advertising it. Note also that a committed pointer is **not inert**: as
+[Provenance](#provenance) says, on any machine with a live `op` session it
+resolves.
+
+This applies to prose and test fixtures, not only to config. A reference in a
+design doc or an assertion is as public as one in a YAML file.
+
+**Use a non-resolving form in anything committed.** Three are sanctioned:
+
+| Form                                      | Use                               |
+| ----------------------------------------- | --------------------------------- |
+| `op://Private/Linear API/credential`      | the canonical example in prose    |
+| `op://TestVault/Item With Spaces/<field>` | tests and fixtures                |
+| `op://<vault>/<item>/<field>`             | when the shape alone is the point |
+
+The first two keep a **space in the item title** on purpose. That space is the
+property [Reference grammar](#reference-grammar) exists to protect — whitespace
+inside a reference is legal and must stay legal — so a placeholder that drops it
+stops exercising the thing the passage is about. Reach for the bracketed form
+only where no resolution behavior is being demonstrated.
+
+## If a reference reaches the tree anyway
+
+**Rotate the referent. Do not reach for a history rewrite.**
+
+Removing it at `HEAD` is worth doing and is not the fix. The reference stays in
+history, in every clone taken since it landed, and in every fork — none of which
+a rewrite can reach.
+
+Rotation can. **Revoke the key and issue a new one**, then update the reference
+in `.task-config.local.yml`. Every copy of the old pointer now names a dead
+credential: the disclosure is not hidden, it is made worthless.
+
+Revocation is the whole mitigation. Renaming a segment of the reference is
+**not** a substitute and is easy to overrate — resolution needs all three
+segments to match, so renaming any one of them breaks the disclosed reference
+equally, and none of it reaches someone who already read the value while it was
+live. Renaming the **item** buys a little residual hygiene, since it is the
+segment that identifies what the item holds; renaming the field buys almost
+none. Neither is worth doing in place of revoking, and after revoking neither is
+worth much at all.
+
+A rewrite, by contrast, renumbers every commit since the reference landed,
+breaks existing clones and forks, invalidates any commit hash cited in
+`dev_docs/`, and still leaves the blob fetchable by SHA until GitHub purges
+unreachable objects. It buys partial removal at high cost, and buys nothing once
+the pointer is already false.
+
+The general rule: **for a leaked pointer or credential, invalidate the referent.**
+Rewriting history is at best cleanup afterwards, never the remedy.
+
+### Searching for one correctly
+
+A search for the whole reference **under-counts**, and will tell you the tree is
+clean when it is not. Two shapes escape it:
+
+- A reference **assembled at runtime** — `f"op://{vault}/{item}/{secret}"` in a
+  test — contains no literal to match.
+- A **truncated** occurrence that keeps the vault/item pair and elides the
+  field, which is common in comments and shell fixtures.
+
+Search for the **vault/item prefix**, not the full reference, and read every hit
+rather than counting them. An audit that missed both shapes once reported a
+third of the real number.
 
 ## Failure semantics
 

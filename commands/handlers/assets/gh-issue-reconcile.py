@@ -1,0 +1,650 @@
+#!/usr/bin/env python3
+"""Audit a repo's issues against the label invariants in labels.yml.
+
+This is an **audit**, not a load-bearing repair. Every status write goes through
+gh-issue-state.py's validate-then-one-PATCH path, which replaces the whole label
+set in a single request — so a double-`status:` issue cannot arise on the happy
+path. The drift this catches comes from somewhere else entirely: a human editing
+labels in GitHub's web UI, which is a supported way to work with this board.
+
+Four rules, matching the invariants labels.yml states:
+
+1. An open issue carrying two or more vocabulary `status:` labels — keep the
+   HIGHEST rung, drop the rest. The ladder is numbered (`0_untriaged` ..
+   `4_needs_review`) precisely so "highest" is a fact rather than a judgment,
+   and keeping it is the same forward-only doctrine `/reconcile-tasks` applies
+   to Linear: a wrong read can leave an issue ahead of where it belongs, never
+   retire live work.
+2. An open issue missing a `status:` or an `auto:` rung — FLAG, never assign.
+   Which rung it should carry is a human's call; guessing `0_untriaged` would
+   quietly demote started work, and guessing anything else would invent state.
+3. An issue closed although it was NEVER labelled `status:4_needs_review` —
+   FLAG. Under this schema a merge IS completion, so a stray or mistaken
+   `Closes #<n>` in an unrelated PR body closes an issue that never passed
+   review, and nothing else in the loop would notice. Void where that label is
+   not present on the repo — see the provisioning note below.
+4. A CLOSED issue still carrying a `status:` or an `auto:` rung — STRIP both,
+   keep `prio:`/`est:`. "Done" is the absence of those two rungs, and until
+   this rule the only write that produced it was /complete-task's `--done`;
+   the primary completion
+   path is a merged PR carrying `Closes #<n>`, and GitHub knows nothing about
+   this vocabulary — it flips the state and leaves every label untouched. So
+   the invariant is violated by the NORMAL path, not an exotic one. Unlike
+   rules 2 and 3 this one repairs, because the target state is not a judgment:
+   labels.yml states it outright.
+
+Rules 1 and 4 can write, and only with `--apply`. Rules 2 and 3 never write, at
+any flag combination.
+
+Rule 4 is the one rule whose drift is routine rather than exceptional. It also
+catches an issue closed by hand in the web UI, which is why it is worth having
+even if a merge-time workflow ever strips the rungs at the source.
+
+**Rules 2 and 3 check that the labels they look for are provisioned.** Label
+namespaces are per-repo, so a rung this audit asks about may simply never have
+been created — and then the question is unanswerable rather than answered "no".
+Rule 3 is the sharp case: on a repo without `status:4_needs_review`, every closed
+issue is a hit. Measured 2026-09-04 against
+`bestdan/dotfiles` — 50 of 50, correctly scoped by the configured label, every
+one of them noise. So one `gh label list` runs before any per-issue work, and a
+row whose premise is void reports THAT, once, and returns no findings.
+
+**Provisioning the label does not end the noise, it moves it.** This guard is not
+a migration story. Every issue that closed BEFORE the rung existed still has no
+`labeled` event for it, so the run after provisioning flags exactly the issues
+this one suppresses. Answering that needs a rollout boundary — evidence the rung
+was assignable when each issue closed — which is state this repo would then own
+and keep in step, and it is out of scope here. Until then, read row 3's first
+post-provisioning run as a backlog, not as drift, and mind that the boundary is
+per-repo so no date can be hardcoded.
+
+Rule 2 is guarded by group, not by completeness. Its premise is that a rung was
+assignable and nobody assigned it, which holds as long as the group has any
+member provisioned; a partly provisioned `status:` group still makes a bare issue
+a real finding. Only a group with NO provisioned member voids the rule. Rules 1
+and 4 need no guard: they read labels the issue actually carries, which cannot
+exist unprovisioned.
+
+**Scope is load-bearing for rule 2.** Every issue in a repo that is not part of
+the task loop — a bug report a user filed, a dependency bot's issue — is missing
+both rungs and is a rule-2 hit. Pass `--label` for each of the repo's configured
+`gh-issue.labels` (`follow-up` and friends) to narrow the audit to task issues;
+repeated flags AND together. Unscoped, rule 2 reports the whole repo and the
+report says so rather than letting the noise read as drift.
+
+Rule 3 costs one API call per closed issue, so `--limit` bounds it — and `--limit`
+bounds rule 4's reach for the same reason, since both read the closed window. Rule
+4 itself costs nothing to detect: it reads the labels already on the `gh issue
+list` payload. Mind what the
+window actually holds: `gh issue list` orders by CREATION date descending, not by
+close date (measured 2026-09-03), so it is the most recently created issues, and a
+long-lived issue closed yesterday can sit outside a small `--limit` and never be
+audited. There is no close-date ordering to reach for: GitHub search has no
+`sort:closed`. `--search "sort:updated-desc"` is the nearest proxy and does
+compose with `--label` (measured), but `updated` moves on a comment after the
+close, so it is not the same question — this script does not use it.
+
+Rule 3 asks whether the label was EVER applied, across the issue's whole event
+history, not whether it was applied before the last close. An issue reopened and
+re-closed has a `4_needs_review` event somewhere behind it either way, and
+scoping to the final close would re-flag every one of them. The rule exists to
+find issues that never reached review at all.
+
+Read paths, both measured against the live API on 2026-09-03:
+
+- `repos/{owner}/{repo}/issues/{n}/events` carries the `labeled` stream rule 3
+  needs. The task spec named the `timeline` endpoint; that returns the same
+  `labeled` events plus `cross-referenced` and comment entries this rule has no
+  use for, so the leaner one is used.
+- It is read with `--paginate --slurp`, like gh-issue-ready.py's blocker read
+  and for the same reason: a bare call returns one page, and an issue whose
+  `4_needs_review` event fell past it would read as never-reviewed. `--slurp`
+  wraps the pages in one array, because bare `--paginate` concatenates arrays
+  into something that is not valid JSON.
+
+Usage:
+  python3 gh-issue-reconcile.py --repo owner/name
+  python3 gh-issue-reconcile.py --repo owner/name --label follow-up --json
+  python3 gh-issue-reconcile.py --repo owner/name --label follow-up --apply
+"""
+
+import argparse
+import importlib.util
+import json
+import os
+import shlex
+import subprocess
+import sys
+from pathlib import Path
+
+ASSETS = Path(__file__).resolve().parent
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _labels import (  # noqa: E402
+    DEFAULT_LABELS_FILE,
+    VocabularyError,
+    expected_labels,
+    load_vocabulary,
+)
+
+
+def _load(filename, name):
+    """Import a sibling asset whose filename is not a legal module name."""
+    spec = importlib.util.spec_from_file_location(name, ASSETS / filename)
+    assert spec is not None and spec.loader is not None, filename
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+gh_issue_state = _load("gh-issue-state.py", "gh_issue_state")
+gh_label_sync = _load("gh-label-sync.py", "gh_label_sync")
+
+REVIEW_STATUS_VALUE = "4_needs_review"
+
+# Row 4's two primitives live in gh-issue-state.py, because the merged-PR branch
+# of gh-issue-pr-sync.py strips the same rungs at the moment of completion and
+# the two must not disagree about what "done" is. The groups themselves are
+# `_labels.EXACTLY_ONE` — the vocabulary's own statement of which rungs an open
+# issue carries exactly one of, and therefore which a closed one carries none of.
+carried_rungs = gh_issue_state.carried_rungs
+done_set = gh_issue_state.done_label_set
+
+
+def run_gh(args):
+    """Run `gh` and return (returncode, stdout, stderr). The seam the tests stub."""
+    proc = subprocess.run(["gh", *args], capture_output=True, text=True)
+    return proc.returncode, proc.stdout, proc.stderr
+
+
+def review_label(groups):
+    """Derive `status:4_needs_review` from the vocabulary instead of hardcoding it.
+
+    A rename in labels.yml must fail loudly here rather than silently making
+    rule 3 flag every closed issue in the repo.
+    """
+    if REVIEW_STATUS_VALUE not in groups.get("status", []):
+        raise VocabularyError(
+            f"labels.yml: status group has no `{REVIEW_STATUS_VALUE}` value"
+        )
+    return f"status:{REVIEW_STATUS_VALUE}"
+
+
+def rung_rank(value):
+    """The ladder position encoded in a status value's numeric prefix.
+
+    `max()` over these is what rule 1 keeps. Parsing the prefix rather than
+    trusting labels.yml's line order means a reordered file still ranks
+    correctly, and a status value that lost its number fails loudly instead of
+    ranking arbitrarily — which would silently pick the wrong rung to keep.
+    """
+    prefix = value.split("_", 1)[0]
+    if not prefix.isdigit():
+        raise VocabularyError(
+            f"labels.yml: status value `{value}` has no numeric ladder prefix"
+        )
+    return int(prefix)
+
+
+def status_rungs(labels, vocabulary):
+    """The issue's in-vocabulary `status:` labels, highest rung last.
+
+    Out-of-vocabulary names (`status:blocked`, invented in the web UI) are
+    excluded deliberately: they have no ladder position, so they cannot be
+    ranked, and the full-set write drops them anyway — gh-issue-state.py reports
+    that as `dropped`.
+    """
+    rungs = [
+        label for label in labels if label.startswith("status:") and label in vocabulary
+    ]
+    return sorted(rungs, key=lambda label: rung_rank(label.split(":", 1)[1]))
+
+
+def list_issues(repo, state, limit, scope_labels, fields):
+    args = ["issue", "list", "--repo", repo, "--state", state]
+    for scope in scope_labels:
+        args += ["--label", scope]
+    args += ["--json", fields, "--limit", str(limit)]
+    code, out, err = run_gh(args)
+    if code != 0:
+        raise SystemExit(
+            f"gh issue list --state {state} failed for {repo}: "
+            f"{err.strip() or out.strip()}"
+        )
+    return json.loads(out or "[]")
+
+
+def label_names(issue):
+    return [entry["name"] for entry in issue.get("labels", [])]
+
+
+def ever_labelled(repo, issue, label):
+    """True if `label` was applied to the issue at any point in its history."""
+    code, out, err = run_gh(
+        ["api", "--paginate", "--slurp", f"repos/{repo}/issues/{issue}/events"]
+    )
+    if code != 0:
+        raise SystemExit(
+            f"gh api events failed for {repo}#{issue}: {err.strip() or out.strip()}"
+        )
+    pages = json.loads(out or "[]")
+    return any(
+        event.get("event") == "labeled"
+        and (event.get("label") or {}).get("name") == label
+        for page in pages
+        for event in page
+    )
+
+
+def repair_set(current, keep, groups, vocabulary):
+    """The complete label set that leaves `keep` as the issue's only status rung.
+
+    Every other managed label the vocabulary defines rides through unchanged —
+    the `auto:` rung the invariant needs, plus prio:/est: — and everything
+    outside the four namespaces is preserved, because the write replaces the
+    whole set and would otherwise delete `follow-up` and anything a human added.
+    """
+    managed = [keep] + [
+        label
+        for label in current
+        if label != keep
+        and not label.startswith("status:")
+        and gh_issue_state.in_managed_namespace(label, set(groups))
+        and label in vocabulary
+    ]
+    gh_issue_state.validate(managed, vocabulary)
+    preserved = gh_issue_state.preserve_unmanaged(current, set(groups))
+    return managed + [label for label in preserved if label not in managed]
+
+
+def unprovisioned_groups(present, groups):
+    """The `status:`/`auto:` groups for which the repo has NO provisioned label.
+
+    Rule 2's premise is that a rung was assignable and nobody assigned it. Where
+    a group has no member provisioned at all, the rung is UNassignable, so every
+    open issue is a hit and the row says nothing — the same void rule 3 hits on
+    a single missing label. A group that is PARTLY provisioned still leaves rule
+    2 answerable: some rung could have been applied, so an issue carrying none
+    is a real finding, and the report names the wider gap so a reader can weigh
+    it. That is why this is a per-group emptiness test rather than a completeness
+    test.
+    """
+    return [
+        group
+        for group in ("status", "auto")
+        if not any(f"{group}:{value}" in present for value in groups[group])
+    ]
+
+
+def compute(repo, labels_file, limit, scope_labels=(), apply=False):
+    groups, colors = load_vocabulary(labels_file)
+    vocabulary = expected_labels(groups, colors)
+    review = review_label(groups)
+
+    # One `gh label list` before any per-issue work. Label namespaces are
+    # per-repo, so a rung this audit looks for may simply never have been
+    # provisioned — and a row whose premise is void answers with total
+    # confidence and no signal rather than with an error. Read what the repo
+    # actually has, and let each row check its own premise against it.
+    present = set(gh_label_sync.existing_labels(repo))
+    missing_vocabulary = [name for name in vocabulary if name not in present]
+    review_provisioned = review in present
+    voided = unprovisioned_groups(present, groups)
+
+    double_status = []
+    missing_rung = []
+    open_issues = list_issues(repo, "open", limit, scope_labels, "number,title,labels")
+    for issue in open_issues:
+        current = label_names(issue)
+        rungs = status_rungs(current, vocabulary)
+
+        if len(rungs) > 1:
+            keep = rungs[-1]
+            finding = {
+                "number": issue["number"],
+                "title": issue["title"],
+                "rungs": rungs,
+                "keep": keep,
+                "drop": [label for label in rungs if label != keep],
+                # Seeded rather than assigned only on the success path: `--json`
+                # is an interface, and a key that appears only when the repair
+                # worked is one a consumer discovers by breaking on the first
+                # refused issue.
+                "labels": None,
+                "dropped": [],
+                "applied": False,
+                "refused": None,
+            }
+            try:
+                labels = repair_set(current, keep, groups, vocabulary)
+            except gh_issue_state.InvalidLabelSet as exc:
+                # Rule 2's drift on the same issue — a missing `auto:` rung,
+                # say. Repairing rule 1 would still leave an illegal set, and
+                # inventing the missing rung is exactly what rule 2 forbids.
+                finding["refused"] = str(exc)
+            else:
+                finding["labels"] = labels
+                # The full-set write also purges any managed-namespace label the
+                # vocabulary does not define — a `prio:urgent` someone invented.
+                # Purging it is right; doing so without naming it is not, which
+                # is why gh-issue-state.py exposes this and why every other
+                # caller prints it. Rule 1 was the one that did not.
+                finding["dropped"] = gh_issue_state.dropped_unrecognized(
+                    current, set(groups), vocabulary
+                )
+                if apply:
+                    gh_issue_state.patch_issue(repo, issue["number"], labels)
+                    finding["applied"] = True
+            double_status.append(finding)
+
+        # Reported independently of rule 1: an issue can break both invariants,
+        # and rule 1's repair deliberately does not fix this one.
+        #
+        # Membership in the vocabulary, not the bare `status:` prefix, is what
+        # counts as carrying a rung — the same definition gh-issue-state.py's
+        # validate() enforces, where a name outside labels.yml is rejected
+        # outright. A prefix test would read a hand-typed `status:blocked` as a
+        # rung and leave the issue invisible to every rule: rule 1 already skips
+        # it, having no ladder position to rank it by. That is the exact input
+        # this audit exists for.
+        missing = []
+        unrecognized = []
+        for group in ("status", "auto"):
+            # The repo has no label in this group at all, so the rung is
+            # unassignable rather than unassigned. Reported once, above.
+            if group in voided:
+                continue
+            prefixed = [label for label in current if label.startswith(f"{group}:")]
+            if any(label in vocabulary for label in prefixed):
+                continue
+            missing.append(group)
+            unrecognized += [label for label in prefixed if label not in vocabulary]
+        if missing:
+            missing_rung.append(
+                {
+                    "number": issue["number"],
+                    "title": issue["title"],
+                    "missing": missing,
+                    # Named so the report does not say "no status: label" about
+                    # an issue that visibly carries one.
+                    "unrecognized": unrecognized,
+                }
+            )
+
+    closed_unreviewed = []
+    closed_with_rungs = []
+    closed_issues = list_issues(
+        repo, "closed", limit, scope_labels, "number,title,labels,stateReason"
+    )
+
+    # Rule 4, on the same list rule 3 reads and at no extra API cost. It runs
+    # whatever rule 3's premise says: it asks only about labels the issue
+    # carries right now, so no provisioning guard applies.
+    for issue in closed_issues:
+        current = label_names(issue)
+        rungs = carried_rungs(current, vocabulary)
+        if not rungs:
+            continue
+        finding = {
+            "number": issue["number"],
+            "title": issue["title"],
+            "rungs": rungs,
+            # Seeded on every path for the same reason rule 1's are: `--json` is
+            # an interface, and a key that appears only when the repair worked is
+            # one a consumer discovers by breaking on the first refused issue.
+            "labels": None,
+            "dropped": [],
+            "applied": False,
+            "refused": None,
+        }
+        try:
+            labels = done_set(current, groups, vocabulary)
+        except gh_issue_state.InvalidLabelSet as exc:
+            # The rung-free set is still illegal — two `prio:` labels, say. The
+            # strip is not worth a second invariant break, so refuse and say why.
+            finding["refused"] = str(exc)
+        else:
+            finding["labels"] = labels
+            finding["dropped"] = gh_issue_state.dropped_unrecognized(
+                current, set(groups), vocabulary
+            )
+            if apply:
+                # No `state` in the payload, so the issue stays closed. Rule 4
+                # repairs labels; reopening is never this audit's to do.
+                gh_issue_state.patch_issue(repo, issue["number"], labels)
+                finding["applied"] = True
+        closed_with_rungs.append(finding)
+
+    # Rule 3's premise is that the rung EXISTS and this issue never carried it.
+    # Where it is absent from the repo, every closed issue in the window is a hit
+    # — measured 2026-09-04 against bestdan/dotfiles: 50 of 50, correctly scoped,
+    # all of them noise. Report the gap once instead, and skip the event reads,
+    # which is also the run's whole per-issue API cost.
+    #
+    # Absence now is not proof the label was NEVER provisioned. A label deleted
+    # after issues carried it reads the same, and the `labeled` events keep the
+    # name, so the evidence this row wants would still be there; a label created
+    # and deleted unused reads the same again. The current set cannot tell those
+    # apart. Voiding is still right — it is the only cheap signal, and a shouted
+    # gap beats a confident wrong answer — but say "not present", and do not
+    # enumerate the histories that could have produced it.
+    for issue in closed_issues if review_provisioned else ():
+        if ever_labelled(repo, issue["number"], review):
+            continue
+        closed_unreviewed.append(
+            {
+                "number": issue["number"],
+                "title": issue["title"],
+                # Never a filter, always context. `state_reason` is not written
+                # by anything in this handler, so `not_planned` here means a
+                # human deliberately abandoned the issue and the finding can be
+                # dismissed on sight — which is worth saying, and not worth
+                # deciding on the reader's behalf.
+                "state_reason": (issue.get("stateReason") or "").lower() or None,
+            }
+        )
+
+    return {
+        "repo": repo,
+        # Carried so the remediation command can name the same vocabulary the
+        # gap was computed from. Without it a run under --labels-file prints a
+        # command that provisions the DEFAULT labels — a wrong write, against a
+        # gap it does not close.
+        "labels_file": str(labels_file),
+        "scope_labels": list(scope_labels),
+        "limit": limit,
+        # `closed` is the window rule 3 was given; `closed_examined` is how many
+        # it actually read. They differ exactly when the row is void, and the
+        # split is in the JSON rather than only in the printed verb because the
+        # key name IS the claim — a consumer reading "checked" got the same wrong
+        # answer the report used to give.
+        "checked": {
+            "open": len(open_issues),
+            "closed": len(closed_issues),
+            "closed_examined": len(closed_issues) if review_provisioned else 0,
+        },
+        # Provisioning is reported, not just consumed: a row that went quiet
+        # because its premise was void must say so, or the reader reads a clean
+        # section as a clean board.
+        "review_label": review,
+        "review_label_provisioned": review_provisioned,
+        "unprovisioned_groups": voided,
+        "missing_vocabulary": missing_vocabulary,
+        "double_status": double_status,
+        "missing_rung": missing_rung,
+        "closed_unreviewed": closed_unreviewed,
+        "closed_with_rungs": closed_with_rungs,
+        "applied": apply,
+    }
+
+
+def provision_command(result):
+    """The gh-label-sync invocation that closes the reported gap.
+
+    It carries `--labels-file` whenever the audit ran against a non-default
+    vocabulary: the gap was computed from THAT file, so a command naming the
+    default would provision a different label set and leave the gap open. Every
+    path is shell-quoted — this line exists to be copied and run.
+    """
+    parts = [
+        "python3",
+        str(ASSETS / "gh-label-sync.py"),
+        "--repo",
+        result["repo"],
+    ]
+    if Path(result["labels_file"]) != DEFAULT_LABELS_FILE:
+        parts += ["--labels-file", result["labels_file"]]
+    parts.append("--apply")
+    return " ".join(shlex.quote(part) for part in parts)
+
+
+def report(result):
+    scope = (
+        ", ".join(result["scope_labels"])
+        if result["scope_labels"]
+        else "whole repo (rule 2 will flag every issue outside the task loop)"
+    )
+    checked = result["checked"]
+    # "listed" rather than "checked" when rule 3 is void: the closed issues were
+    # read into the window but nothing examined them. The count stays, because it
+    # is the only signal of how much the provisioning gap is costing.
+    closed_verb = (
+        "checked" if checked["closed_examined"] == checked["closed"] else "listed"
+    )
+    print(
+        f"{result['repo']}: checked {checked['open']} open and "
+        f"{closed_verb} {checked['closed']} closed issue(s), "
+        f"limit {result['limit']} — scope: {scope}"
+    )
+
+    if result["missing_vocabulary"]:
+        names = ", ".join(result["missing_vocabulary"])
+        print(
+            f"\nProvisioning gap — {len(result['missing_vocabulary'])} vocabulary "
+            f"label(s) absent from this repo: {names}\n"
+            f"  Provision with: {provision_command(result)}"
+        )
+
+    findings = result["double_status"]
+    print(f"\nRule 1 — two or more status: rungs, keep the highest ({len(findings)}):")
+    for finding in findings:
+        dropped = ", ".join(finding["drop"])
+        if finding["refused"]:
+            outcome = f"NOT repaired — {finding['refused']}"
+        elif finding["applied"]:
+            outcome = f"repaired — kept {finding['keep']}, dropped {dropped}"
+        else:
+            outcome = f"would keep {finding['keep']}, drop {dropped}"
+        print(f"  #{finding['number']} {finding['title']} — {outcome}")
+        # Named on its own line: these are deletions the repair makes beyond the
+        # rung it exists to drop, so folding them into `outcome` would read as
+        # part of the ordinary transition.
+        if finding.get("dropped"):
+            names = ", ".join(finding["dropped"])
+            print(f"      also dropped (not in labels.yml): {names}")
+
+    findings = result["missing_rung"]
+    print(f"\nRule 2 — open issue missing a rung, FLAG only ({len(findings)}):")
+    for group in result["unprovisioned_groups"]:
+        print(
+            # "no vocabulary rung", not "no `status:` label": this test reads the
+            # vocabulary, so a hand-typed `status:blocked` can be sitting on the
+            # repo while this line prints. Saying the label does not exist would
+            # be false, and visibly so to whoever typed it.
+            f"  VOID for {group}: — no vocabulary `{group}:` rung is provisioned "
+            "on this repo, so the rung is unassignable rather than unassigned. "
+            "Not checked."
+        )
+    for finding in findings:
+        missing = ", ".join(f"{group}:" for group in finding["missing"])
+        line = f"  #{finding['number']} {finding['title']} — no {missing} label"
+        if finding["unrecognized"]:
+            names = ", ".join(finding["unrecognized"])
+            line += f" (carries {names}, not in labels.yml)"
+        print(line)
+
+    findings = result["closed_unreviewed"]
+    if not result["review_label_provisioned"]:
+        print(
+            f"\nRule 3 — closed, never labelled {REVIEW_STATUS_VALUE}: VOID.\n"
+            f"  `{result['review_label']}` is not present on {result['repo']} "
+            "now, and the current label set cannot say why.\n"
+            "  So the row cannot be answered from it, and every closed issue "
+            "would read as a hit.\n"
+            "  Provision the label, run the loop, then re-run this audit."
+        )
+    else:
+        print(
+            f"\nRule 3 — closed, never labelled {REVIEW_STATUS_VALUE}, FLAG only "
+            f"({len(findings)}):"
+        )
+    for finding in findings:
+        reason = finding["state_reason"] or "unset"
+        print(
+            f"  #{finding['number']} {finding['title']} — "
+            f"possible stray closing keyword (state_reason: {reason})"
+        )
+
+    findings = result["closed_with_rungs"]
+    print(
+        f"\nRule 4 — closed issue still carrying status:/auto: rungs, strip them "
+        f"({len(findings)}):"
+    )
+    for finding in findings:
+        rungs = ", ".join(finding["rungs"])
+        if finding["refused"]:
+            outcome = f"NOT stripped — {finding['refused']}"
+        elif finding["applied"]:
+            outcome = f"stripped {rungs}"
+        else:
+            outcome = f"would strip {rungs}"
+        print(f"  #{finding['number']} {finding['title']} — {outcome}")
+        if finding.get("dropped"):
+            names = ", ".join(finding["dropped"])
+            print(f"      also dropped (not in labels.yml): {names}")
+
+    if not result["applied"]:
+        print("\nnothing changed (dry-run) — pass --apply to repair rules 1 and 4")
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--repo", required=True, help="owner/name")
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=50,
+        help="max issues to read per state (newest by creation date)",
+    )
+    parser.add_argument(
+        "--label",
+        action="append",
+        default=[],
+        dest="scope_labels",
+        metavar="LABEL",
+        help=(
+            "narrow the audit to issues carrying this label; repeatable (AND). "
+            "Pass the repo's configured gh-issue.labels — unscoped, rule 2 "
+            "flags every issue that is not part of the task loop"
+        ),
+    )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="repair rules 1 and 4. Rules 2 and 3 are flag-only and never write",
+    )
+    parser.add_argument("--labels-file", type=Path, default=DEFAULT_LABELS_FILE)
+    parser.add_argument("--json", action="store_true", dest="as_json")
+    args = parser.parse_args(argv)
+
+    result = compute(
+        args.repo, args.labels_file, args.limit, args.scope_labels, args.apply
+    )
+    if args.as_json:
+        print(json.dumps(result, indent=2))
+    else:
+        report(result)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

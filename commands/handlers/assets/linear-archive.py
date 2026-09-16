@@ -33,10 +33,19 @@ script only because the caller bridges them onto the environment — see
 linear-common.md's "Key resolution" step. This script reads no config.
 
 Usage:
-  python3 linear-archive.py --team PreThink --older-than 10
-  python3 linear-archive.py --team PreThink --older-than 10 --apply
-  python3 linear-archive.py --team PreThink --older-than 30 --project <uuid> --apply
-  python3 linear-archive.py --team PreThink --issues PRE-12,PRE-13 --apply
+  python3 linear-archive.py --team Platform --older-than 10
+  python3 linear-archive.py --team Platform --older-than 10 --apply
+  python3 linear-archive.py --team Platform --older-than 30 --project <uuid> --apply
+  python3 linear-archive.py --team Platform --older-than 30 \
+    --project <uuid-1> --project <uuid-2> --apply
+  python3 linear-archive.py --team Platform --issues PRE-12,PRE-13 --apply
+
+--project is repeatable. No --project sweeps the whole team (unchanged
+default); one or more scope the sweep to exactly those projects, looping the
+query once per id and unioning the results (deduped by issue id) — this is how
+a caller resolves `linear.projects` from `.task-config.yml` (see
+linear-common.md "Resolve configured projects") into a scope this
+script understands, without the script itself reading any config.
 """
 
 import argparse
@@ -49,7 +58,8 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _secret_resolve import SecretUnavailable, resolve_key
+from _secret_resolve import SecretUnavailable, resolve_key  # noqa: E402
+from _shape import ShapeError, expect  # noqa: E402
 
 API = "https://api.linear.app/graphql"
 
@@ -142,9 +152,21 @@ def gql(key, query, variables=None):
         sys.exit(f"Linear API error {e.code}: {e.read().decode(errors='replace')}")
     except urllib.error.URLError as e:
         sys.exit(f"Network error: {e.reason}")
+    # Guard the root BEFORE the membership test: `"errors" in None` and
+    # `"errors" in 5` raise TypeError, so a scalar JSON body would reach neither
+    # this check nor expect() below and would surface as the traceback this
+    # whole seam exists to remove. gh-issue-rollups.py guards in the same order.
+    if not isinstance(payload, dict):
+        sys.exit(f"GraphQL response: expected an object, got {type(payload).__name__}")
     if "errors" in payload:
         sys.exit("GraphQL error: " + json.dumps(payload["errors"], indent=2))
-    return payload["data"]
+    # A malformed response used to surface as a KeyError traceback here, and
+    # then as a chain of KeyErrors at every caller that indexed into the result.
+    # expect() makes it one sentence naming the field.
+    try:
+        return expect(payload, "data", dict, "GraphQL response")
+    except ShapeError as exc:
+        sys.exit(str(exc))
 
 
 def terminal_passes():
@@ -237,11 +259,19 @@ def find_by_ref(key, team, identifiers, uuids):
     them explicitly, so an already-archived issue is a no-op to report rather
     than a lookup failure. Only `nodes` are archive candidates.
     """
-    nodes, archived, seen = [], [], set()
+    nodes: list = []
+    archived: list = []
+    seen = set()
     if identifiers:
         team_field = "id" if UUID_RE.match(team) else "name"
         query = LOOKUP_BY_NUMBER % (PAGE, team_field, NODE_FIELDS)
-        numbers = sorted({int(IDENTIFIER_RE.match(i).group(2)) for i in identifiers})
+        # parse_issue_refs() already rejected every ref that does not match
+        # IDENTIFIER_RE, so each match here is non-None. Assert it rather than
+        # dereferencing blind: a future caller reaching find_by_ref() directly
+        # gets this line instead of `NoneType has no attribute 'group'`.
+        matches = [IDENTIFIER_RE.match(i) for i in identifiers]
+        assert all(matches), f"unparsed identifier in {identifiers}"
+        numbers = sorted({int(m.group(2)) for m in matches if m})
         wanted = set(identifiers)
         for node in gql(key, query, {"team": team, "numbers": numbers})["issues"][
             "nodes"
@@ -268,17 +298,34 @@ def find_by_ref(key, team, identifiers, uuids):
 
 
 def collect_aged(key, args):
-    """Age-threshold sweep: every terminal state, older than the cutoff."""
+    """Age-threshold sweep: every terminal state, older than the cutoff.
+
+    --project may be repeated to scope the sweep to several projects — the
+    query loops once per id and the results are unioned, deduped by issue id
+    (an issue could otherwise appear twice if scopes ever overlapped). No
+    --project sweeps the whole team, unchanged. A project id repeated in
+    --project (a caller mistake) is deduped before the loop, same as
+    linear-relations.py / linear-ready.py — otherwise it would re-run all
+    three paginated terminal-state queries for no new candidates.
+    """
     cutoff = (datetime.now(timezone.utc) - timedelta(days=args.older_than)).strftime(
         "%Y-%m-%dT%H:%M:%S.000Z"
     )
+    projects = list(dict.fromkeys(args.project)) or [None]
+    seen = set()
     candidates = []
-    for state_type, ts_field in terminal_passes():
-        for issue in find(key, args.team, args.project, state_type, ts_field, cutoff):
-            issue["_when"] = (issue.get(ts_field) or "")[:10]
-            candidates.append(issue)
+    for project in projects:
+        for state_type, ts_field in terminal_passes():
+            for issue in find(key, args.team, project, state_type, ts_field, cutoff):
+                if issue["id"] in seen:
+                    continue
+                seen.add(issue["id"])
+                issue["_when"] = (issue.get(ts_field) or "")[:10]
+                candidates.append(issue)
 
-    scope = f"team={args.team}" + (f", project={args.project}" if args.project else "")
+    scope = f"team={args.team}" + (
+        f", projects={','.join(projects)}" if args.project else ""
+    )
     print(f"Cutoff: {cutoff}  ({scope}, Done + Canceled + Duplicate)\n")
     return candidates
 
@@ -340,7 +387,7 @@ def main():
         "--team",
         default=os.environ.get("LINEAR_TEAM"),
         required=os.environ.get("LINEAR_TEAM") is None,
-        help="Team name (e.g. PreThink) or $LINEAR_TEAM.",
+        help="Team name (e.g. Platform) or $LINEAR_TEAM.",
     )
     ap.add_argument(
         "--older-than",
@@ -357,7 +404,13 @@ def main():
         "age. Comma-separated and/or repeated. Ignores --older-than/--project.",
     )
     ap.add_argument(
-        "--project", default=None, help="Optional project UUID to scope to."
+        "--project",
+        action="append",
+        default=[],
+        metavar="UUID",
+        help="Project UUID to scope to. Repeatable — one per configured "
+        "project; the sweep loops per id and unions the results. Omit for "
+        "the whole team.",
     )
     ap.add_argument(
         "--apply", action="store_true", help="Archive. Without it, DRY RUN."

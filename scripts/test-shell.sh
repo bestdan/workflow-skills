@@ -57,7 +57,7 @@ run() {
 # In a full run the bats files sit alongside the orchestrator suite, and serial
 # bats still finishes inside it — so fanning out here cannot shorten this
 # wrapper, and the extra jobs only contend with the suite that is the actual
-# critical path (which since the split runs seven of its own parts
+# critical path (which since the split runs its own parts
 # concurrently). Under --fast the orchestrator is gone, bats becomes the
 # critical path, and the fan-out is the whole difference.
 #

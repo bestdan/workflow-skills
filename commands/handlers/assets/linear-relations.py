@@ -58,9 +58,9 @@ non-zero with the reason on stderr, so the caller can fall back to the MCP
 floor. Stdout carries exactly one JSON object and nothing else.
 
 Usage:
-  python3 linear-relations.py --team PreThink
-  python3 linear-relations.py --team PreThink --project <uuid> --project <uuid>
-  python3 linear-relations.py --team PreThink --limit 100
+  python3 linear-relations.py --team Platform
+  python3 linear-relations.py --team Platform --project <uuid> --project <uuid>
+  python3 linear-relations.py --team Platform --limit 100
 """
 
 import argparse
@@ -72,9 +72,25 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _secret_resolve import SecretUnavailable, resolve_key
+from _body_refs import parse as parse_body_refs  # noqa: E402
+from _secret_resolve import SecretUnavailable, resolve_key  # noqa: E402
+from _shape import ShapeError, expect  # noqa: E402
 
 API = "https://api.linear.app/graphql"
+
+# `_body_refs.parse()`'s `id_pattern` for this handler: an embedded
+# `<issue id="PRE-NNN" href="…">` mention (the `tag_id` group) or a bare
+# `PRE-NNN` (the `bare_id` group), never a fragment of a longer word —
+# `(?<![\w-])`/`(?![\w-])` refuse a match inside e.g. `PRE-142a` or
+# `subPRE-142`. `re.I` so a hand-typed lowercase mention (`pre-142`) still
+# matches; `_body_refs.parse()`'s self-exclusion already compares
+# case-insensitively, but that's moot if the pattern never matches lowercase
+# in the first place.
+LINEAR_BODY_REF_PATTERN = re.compile(
+    r'<issue\b[^>]*\bid="(?P<tag_id>[A-Z]+-\d+)"[^>]*>'
+    r"|(?<![\w-])(?P<bare_id>[A-Z]+-\d+)(?![\w-])",
+    re.I,
+)
 
 # linear.team may be a team NAME or a UUID id (see linear-common.md / linear-config.md).
 UUID_RE = re.compile(
@@ -149,9 +165,21 @@ def gql(key, query, variables=None):
         # Network failure or the timeout above — exit non-zero (not a hang) so the
         # caller falls back to the MCP floor per this script's contract.
         sys.exit(f"GraphQL request failed: {e.reason}")
+    # Guard the root BEFORE the membership test: `"errors" in None` and
+    # `"errors" in 5` raise TypeError, so a scalar JSON body would reach neither
+    # this check nor expect() below and would surface as the traceback this
+    # whole seam exists to remove. gh-issue-rollups.py guards in the same order.
+    if not isinstance(payload, dict):
+        sys.exit(f"GraphQL response: expected an object, got {type(payload).__name__}")
     if "errors" in payload:
         sys.exit("GraphQL error: " + json.dumps(payload["errors"], indent=2))
-    return payload["data"]
+    # A malformed response used to surface as a KeyError traceback here, and
+    # then as a chain of KeyErrors at every caller that indexed into the result.
+    # expect() makes it one sentence naming the field.
+    try:
+        return expect(payload, "data", dict, "GraphQL response")
+    except ShapeError as exc:
+        sys.exit(str(exc))
 
 
 def resolve_team(key, team):
@@ -236,7 +264,7 @@ def main():
         "--team",
         default=os.environ.get("LINEAR_TEAM"),
         required=os.environ.get("LINEAR_TEAM") is None,
-        help="Team name (e.g. PreThink) or UUID id, or $LINEAR_TEAM.",
+        help="Team name (e.g. Platform) or UUID id, or $LINEAR_TEAM.",
     )
     ap.add_argument(
         "--project",
@@ -298,8 +326,46 @@ def main():
                 "blocks": blocks,
                 "relatedTo": related_to,
                 "duplicateOf": duplicate_of,
+                # Every dependency-phrase reference the description makes,
+                # direction- and strength-classified by the shared
+                # `_body_refs` table — the fixed phrase list
+                # `linear-reoptimize.md` Dimensions 1-2 used to hand-walk.
+                "body_references": parse_body_refs(
+                    issue.get("description") or "",
+                    issue["identifier"],
+                    LINEAR_BODY_REF_PATTERN,
+                ),
             }
         )
+
+    # `body_references` with no matching native relation yet — Dimension 1-2's
+    # "prose -> native reconciliation" and "hidden cross-project dependencies"
+    # both read this instead of re-parsing descriptions themselves. Covered by
+    # `blockedBy`/`blocks`/`relatedTo` respectively, compared case-insensitively
+    # since a hand-typed mention's case need not match the real identifier's.
+    by_identifier = {issue["identifier"].casefold(): issue for issue in issues_out}
+    proposed = []
+    for issue in issues_out:
+        for ref in issue["body_references"]:
+            target_norm = ref["target"].casefold()
+            if ref["direction"] == "blocked_by":
+                native_list = issue["blockedBy"]
+            elif ref["direction"] == "blocks":
+                native_list = issue["blocks"]
+            else:
+                native_list = issue["relatedTo"]
+            covered = any(t.casefold() == target_norm for t in native_list)
+            if not covered:
+                target = by_identifier.get(target_norm)
+                proposed.append(
+                    {
+                        "from": issue["identifier"],
+                        "target": target["identifier"] if target else ref["target"],
+                        "phrase": ref["phrase"],
+                        "direction": ref["direction"],
+                        "strength": ref["strength"],
+                    }
+                )
 
     print(
         f"Resolved team={team_node['name']} scopes={len(project_ids)} "
@@ -314,6 +380,7 @@ def main():
             "states": team_node["states"]["nodes"],
         },
         "issues": issues_out,
+        "proposed": proposed,
     }
     print(json.dumps(result))
 

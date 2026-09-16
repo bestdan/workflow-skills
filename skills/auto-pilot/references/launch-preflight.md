@@ -26,7 +26,7 @@ reachable. Fail here with the specific missing artifact, not a generic error.
 
 ## Step 2 — Non-interactive auth probes (BLOCKS LAUNCH)
 
-Run `scripts/preflight.sh --source <plan|linear> --base <base branch>` first
+Run `"${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh" --source <plan|linear> --base <base branch>` first
 — the read-only pre-flight helper this step extracts to. Its `PREFLIGHT …`
 output and `PREFLIGHT VERDICT: go` / `no-go — <reason>` line cover the binary
 fingerprint / environment class, coder availability, base freshness, the
@@ -56,7 +56,7 @@ authenticates through CLIs, `claude-web` through **MCP**. Probe whichever applie
   Either way, run `linear-common.md`'s shared **preflight** (`list_teams` → match
   the team) to confirm auth actually works, not just that it resolves.
 - **Coder CLIs** (`local-full` only — a `claude-web` run has none) — run each
-  configured coder's auth probe via `scripts/probe-coders.sh`, the **single
+  configured coder's auth probe via `"${CLAUDE_PLUGIN_ROOT}/scripts/probe-coders.sh"`, the **single
   source of truth** (don't restate its per-coder commands here — they'd drift).
   A logged-out coder the run depends on is a blocker, not a silent skip.
 - **MCP** — any MCP the tasks touch: one cheap read call to confirm a live token.
@@ -76,15 +76,15 @@ a different environment re-runs that join.
 Also confirm **unattended viability** here, up front while the human is
 present rather than at spawn: a `local-full` run needs the machine to stay
 awake for the run's duration — a human judgment call, not a probe, so it
-stays here rather than in `scripts/preflight.sh`
+stays here rather than in `"${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh"`
 ([`launch-runtime.md`](launch-runtime.md) "Laptop
 sleep"). If it can't be guaranteed, **BLOCKS LAUNCH**.
 
-**Less-claude CAO gate (BLOCKS LAUNCH).** Only when `--profile less-claude` is
-present, require `cao`, `cao-run`, and `cao-server` on `PATH`, then prove the
-already-running daemon responds at `localhost:9889` with `nc -z localhost
-9889`. Any missing binary or failed port probe **BLOCKS LAUNCH**; name the
-missing prerequisite and do not start or restart `cao-server`.
+**Less-claude CAO gate (BLOCKS LAUNCH).** A `--profile less-claude` run routes
+every task through the CAO fleet, so this gate is folded into the scout's one
+call in Step 6 below rather than duplicated here — there is nothing to check
+yet at this point, since the task graph (and each task's `coder`) doesn't
+exist until Step 6 materializes it.
 
 ## Step 3 — Resolve config into non-interactive choices (BLOCKS LAUNCH)
 
@@ -98,12 +98,13 @@ so nothing prompts at 3am:
   (codex + Claude + reconciler) over one that includes the slower cloud
   reviewers (`devin` / `agy`); cloud reviewers are **optional/skippable** in
   this set — a skipped reviewer is never fatal and is recorded (`REPORT.md`
-  review classes). Then **compute `min_task_budget` from this resolved
-  set** — the pre-dispatch floor is coupled to reviewer latency, not a
-  constant; formula in
-  [`run-budget.md`](run-budget.md) "Minimum task
-  budget" — and write it to `RUN.md` front matter (step 6) so the run loop's
-  pre-dispatch deadline guard reads a concrete number.
+  review classes). Then run
+  `"${CLAUDE_PLUGIN_ROOT}/scripts/min-task-budget.sh"` with the resolved
+  `local_reviewers` names (pass nothing for a Claude-only set) — the script
+  owns the formula; [`run-budget.md`](run-budget.md) "Minimum task budget"
+  carries the reasoning — and write its output to `RUN.md` front matter
+  (step 6) so the run loop's pre-dispatch deadline guard reads a concrete
+  number.
 - **Coder config** — run `select-coder` once to resolve each task's
   `<backend>:<model>` from the capability matrix, so `orchestrate-coders`
   dispatches without prompting for a missing default.
@@ -141,7 +142,7 @@ task's `/deliver-task` verifies the same way.
 
 Because the orchestrator runs **jailed** and `verify_command` can't pass
 inside the jail (execve-deny, exit 126), install the **verify broker** here
-so verify runs **outside** the jail: `scripts/spawn-orchestrator.sh
+so verify runs **outside** the jail: `"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh"
 write-verify-broker` registers a second, un-jailed launchd job that runs the
 **pinned** `verify_command` in a run-root-confined worktree, and each task's
 verify becomes a `verify-request` → `verify-await` handshake
@@ -164,17 +165,27 @@ existing `RUN.md` bytes. Also seed empty `.auto-pilot/QUESTIONS.md` and
 `.auto-pilot/REPORT.md`. **Commit** all three to the run-state branch (the
 first write under the run-state branch's fixed write order).
 
-**Scout — per-task capability join (BLOCKS LAUNCH).** With the graph now
-materialized and each task's coder resolved (step 3) against the environment
-fingerprint (step 2), check the **demand** side the auth probes structurally
-can't see: for **each** task, take the `<backend>` it routes to and confirm
-it **exists in this environment** — the motivating case is a `codex` task in
-a `claude-web` run with no `codex` binary. A task routed to an absent backend
-**BLOCKS LAUNCH**, naming the task, the missing backend, and the fix (install
-it, or re-route the task). This is a **deterministic** check only: it blocks
-on a provable route-vs-environment gap, never a guess about what a task's
-prose might need — inferring demands from task _text_ is a separate,
-warn-only predictive scout, deliberately not here.
+**Scout — per-task capability join (BLOCKS LAUNCH).** Record each task's
+resolved `<backend>` (step 3) in its `coder` cell as the table is written
+above (`run-state.md` "`RUN.md`"). Then run:
+
+```bash
+"${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh" --scout-run-md .auto-pilot/RUN.md
+```
+
+against the environment fingerprint (step 2) — the demand side the auth
+probes structurally can't see: for each task, does its declared backend
+**exist in this environment** — the motivating case is a `codex` task in a
+`claude-web` run with no `codex` binary — and, only when any task's backend
+is `cao`, is the less-claude CAO gate (`cao`/`cao-run`/`cao-server` on `PATH`,
+the daemon responding at `localhost:9889`, every `cao_coder_mapping` route in
+the fixed CAO fleet) satisfied. Its `SCOUT VERDICT: go` / `no-go` line and any
+`BLOCKS LAUNCH: <task> -> <backend> (missing)` lines are the source of truth;
+a `no-go` **BLOCKS LAUNCH** with the reason it names — install the backend, or
+re-route the task. This is a **deterministic** check only: it blocks on a
+provable route-vs-environment gap, never a guess about what a task's prose
+might need — inferring demands from task _text_ is a separate, warn-only
+predictive scout, deliberately not here.
 
 **v1 treats every route as _required_** — an absent backend blocks. A planned
 follow-up softens this to **required-vs-preferred** (a _preferred_ backend

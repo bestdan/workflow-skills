@@ -7,11 +7,10 @@ an open issue is exactly "one `status:` rung and one `auto:` rung". Writing them
 separately would leave a window in which the issue contradicts itself, so the
 single PATCH carries both.
 
-Once the gh-issue handler migrates onto it, this will be the only supported way
-to change an issue's status, routing, priority or estimate. Nothing calls it yet
-— the handler transitions still use `gh issue edit`, and they move together in a
-later change rather than half-now. Two measured facts force its shape, and
-neither half is sufficient alone:
+This is the only supported way to change an issue's status, routing, priority or
+estimate. `gh-issue-claim.md` calls it on all three of its transitions — claim,
+move-to-review, and bail — and the promote and complete flows call it too. Two
+measured facts force its shape, and neither half is sufficient alone:
 
 - `gh issue edit --add-label X --remove-label Y` is **not atomic** — it produced
   8 HTTP request lines. A crash between them strands an issue carrying two
@@ -129,7 +128,7 @@ def validate(labels, vocabulary, done=False):
             + ", ".join(unknown)
         )
 
-    counts = {}
+    counts: dict = {}
     for label in labels:
         counts[group_of(label)] = counts.get(group_of(label), 0) + 1
 
@@ -205,6 +204,50 @@ def dropped_unrecognized(current, managed_groups, vocabulary):
         label
         for label in current
         if in_managed_namespace(label, managed_groups) and label not in vocabulary
+    ]
+
+
+def done_label_set(current, groups, vocabulary):
+    """The complete label set for a CLOSED issue: no rungs, `prio:`/`est:` kept.
+
+    "Done" is the absence of the EXACTLY_ONE groups — labels.yml states it, and
+    `validate(done=True)` enforces it. `prio:`/`est:` are facts about the work
+    and stay useful afterwards; everything outside the four managed namespaces
+    rides through, because the write replaces the whole set.
+
+    Two callers need this and must not disagree about it: the merged-PR branch
+    of gh-issue-pr-sync.py, which strips the rungs at the moment of completion,
+    and gh-issue-reconcile.py's row 4, which sweeps up whatever that missed.
+
+    Raises InvalidLabelSet when the rung-free set would STILL be illegal — two
+    `prio:` labels, say. Stripping the rungs is not worth leaving a second
+    invariant broken, so the caller reports the refusal instead of writing.
+    """
+    managed = [
+        label
+        for label in current
+        if in_managed_namespace(label, set(groups))
+        and label in vocabulary
+        and group_of(label) not in EXACTLY_ONE
+    ]
+    validate(managed, vocabulary, done=True)
+    preserved = preserve_unmanaged(current, set(groups))
+    return managed + [label for label in preserved if label not in managed]
+
+
+def carried_rungs(labels, vocabulary):
+    """The issue's in-vocabulary `status:`/`auto:` labels.
+
+    Vocabulary membership, not the bare prefix, is what counts as carrying a
+    rung — the same reading validate() enforces. A hand-typed `status:blocked`
+    is not a rung, so it does not on its own make a caller rewrite an issue with
+    no invariant drift; where a caller DOES fire, the full-set write purges such
+    a name anyway and dropped_unrecognized() names it.
+    """
+    return [
+        label
+        for label in labels
+        if label in vocabulary and group_of(label) in EXACTLY_ONE
     ]
 
 

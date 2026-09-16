@@ -10,6 +10,18 @@ gh-issue:
   repo: owner/name # optional; defaults to the current repo
   labels: [follow-up] # optional; each is created if missing
   assignees: [] # optional GitHub usernames
+  remote_batch: false # optional, DEFAULT false (unlike linear.remote_batch, which
+  # defaults true). true → /do-tasks --all dispatches one cloud session per issue.
+  # Leave it false unless the dispatched environment BOTH installs this plugin some
+  # other way AND gives the session a working gh credential. Probed 2026-09-05: a cloud
+  # session installed nothing from a committed .claude/settings.json, and its gh 403'd
+  # on reads as well as writes. See
+  # dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md and
+  # commands/do-tasks.md §4 "gh-issue batch".
+  max_estimate: 3 # optional — upper bound /promote-tasks gates an issue's `est:` label against.
+  # Same key name, same Fibonacci scale and same default (3) as `linear.max_estimate`
+  # (see commands/handlers/linear-common.md "Config block"). gh-issue has no per-project
+  # list, so there is no per-scope override — this one value covers the repo.
 ```
 
 ## Steps
@@ -34,7 +46,11 @@ gh-issue:
    > task slugs — e.g. `/push-plan` translates blockers to `#142`, `#143` after
    > creating them in dependency order — render this line as
    > `Blocked by: #142, #143` instead of `Blocked by task: …`, so the footer is a
-   > real cross-issue link.
+   > real cross-issue link. It is a **human-readable echo** of the native
+   > `blocked_by` edge `/push-plan` §5.5 draws, never a substitute for it —
+   > `/list-tasks` and `/do-tasks` read the native edge, not the footer, and so
+   > does `/reoptimize-tasks` (`gh-issue-reoptimize.md`), which creates and
+   > removes edges and reconciles this footer against them.
 
 3. **Ensure labels exist.** For each label in `gh-issue.labels`:
 
@@ -57,6 +73,18 @@ gh-issue:
 
    (Omit `--repo` to use the current repo; omit `--label`/`--assignee` flags that have no configured values.)
 
+   Then stamp the new issue's initial state. Take `<n>` from the trailing path segment of the URL `gh issue create` printed, and `<repo>` from `gh-issue.repo` — the writer's `--repo` is required, so when the key is unset resolve it with `gh repo view --json nameWithOwner --jq .nameWithOwner` rather than omitting the flag:
+
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-state.py" \
+     --repo "<repo>" --issue <n> \
+     --labels status:0_untriaged,auto:human-review-needed --apply
+   ```
+
+   If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/gh-issue-state.py`. The write replaces the whole label set but carries forward everything outside the four managed namespaces, so the configured `gh-issue.labels` (`follow-up` and friends) survive it — see `commands/handlers/assets/labels.yml` for the vocabulary and its invariants.
+
+   **The pair is the point.** `status:` says where the work is; `auto:` says whether automation may take it. They are independent axes, and a fresh issue is neither scored nor automation's to touch, so it gets a rung on each. That is what keeps an unscored issue _visibly_ unscored: it renders in `new`, it is exactly what `/promote-tasks` selects, and it appears in no automation queue. One conflated label could not say both, so it would have to default the issue into one of those queues by omission.
+
 5. **Return the URL.** `gh issue create` prints the new issue URL to stdout — capture it and return it as this handler's artifact URL for `/add-task` step 8.
 
 This handler does **not** create any `dev_docs/tasks/*.md` file, branch, or PR.
@@ -65,7 +93,9 @@ This handler does **not** create any `dev_docs/tasks/*.md` file, branch, or PR.
 
 Invoked from `/list-tasks` when `handler: gh-issue` is configured. Read-only — one `gh issue list` query, no edits, no claims. Renders the repo's issues as the same vertical-section kanban the file-based path uses, so `$ARGUMENTS` and the layout match `commands/list-tasks.md` step 4.
 
-> **Coverage note.** `gh-issue` supports capture (`/add-task`), list (this section), **promote** (`/promote-tasks` → `commands/handlers/gh-issue-promote.md`, which adds `auto-eligible` / `human-approval-requested`), and single **do** (`/do-tasks` → `commands/handlers/gh-issue-claim.md`, which claims an issue — an atomic `task/<n>` ref-creation lock plus the `@me` + `auto-claimed` board marker — and swaps to `needs-review` on PR open). So issues now move `new → needs_refinement`/`ready → in_progress → needs_review` through these commands, and reach `done` when the PR merges via `Closes #<n>` — with `/complete-task` → `commands/handlers/gh-issue-complete.md` as the explicit fallback when that auto-close doesn't fire. Batch `/do-tasks --all` is not yet supported. The status-label mapping below is honored whenever the labels are present.
+> **Coverage note.** `gh-issue` supports capture (`/add-task`), list (this section), **promote** (`/promote-tasks` → `commands/handlers/gh-issue-promote.md`, which scores an issue to `status:2_ready` + `auto:eligible` or `status:1_needs_refinement` + `auto:human-review-needed`), and single **do** (`/do-tasks` → `commands/handlers/gh-issue-claim.md`, which claims an issue — an atomic `<branch_prefix>task-<n>` ref-creation lock plus the `@me` + `status:3_started` board marker — and swaps to the needs-review rung on PR open). So issues now move `new → needs_refinement`/`ready → in_progress → needs_review` through these commands, and reach `done` when the PR merges via `Closes #<n>` — with `/complete-task` → `commands/handlers/gh-issue-complete.md` as the explicit fallback when that auto-close doesn't fire. Batch `/do-tasks --all` is supported **on opt-in** (`gh-issue.remote_batch: true`, off by default — see the config block above) — one dispatched remote session per dependency-ready issue, bounded by the WIP limit (`commands/do-tasks.md` §4 "gh-issue batch").
+
+**The vocabulary lives in `commands/handlers/assets/labels.yml`** — four namespaces (`status:`, `auto:`, `prio:`, `est:`) and the invariants that govern them. Read the names from there; never hardcode one. Two of those invariants decide how this section reads a board: an **open** issue carries exactly one `status:` and exactly one `auto:` rung, and a **closed** issue carries neither while keeping its `prio:`/`est:`. `status:` and `auto:` answer different questions — where the work is, versus whether automation may take it — so listing reads `status:` for the section and ignores `auto:` entirely.
 
 1. **Preflight auth.** Run `gh auth status 2>&1`. If it fails, use the same handling as the create flow's step 1 (TLS/x509 → sandbox keychain hint; otherwise report the auth failure) and **stop** — do not fall back to another handler.
 
@@ -84,37 +114,57 @@ Invoked from `/list-tasks` when `handler: gh-issue` is configured. Read-only —
    - Pass one `--label` flag per entry in `gh-issue.labels` (AND filter) so the board shows only the issues this loop files. Omit `--label` entirely when no labels are configured.
    - `--state all` is required so closed issues populate the `done` section (`gh issue list` defaults to open only).
 
-3. **Group into kanban sections.** Classify each issue by `state` plus label presence. Reuse the same label vocabulary as the Linear mapping in `linear-common.md` so a board behaves consistently across trackers:
+3. **Group into kanban sections.** Map each issue into a row and classify with the shared helper, `commands/handlers/assets/kanban-classify.py`, rather than hand-walking the section table:
 
-   | Section            | Match rule                                                                                                                       |
-   | ------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
-   | `new`              | `open`, none of the status labels below present                                                                                  |
-   | `needs_refinement` | `open`, has `human-approval-requested`                                                                                           |
-   | `ready`            | `open`, has `auto-eligible`                                                                                                      |
-   | `in_progress`      | `open`, has `auto-claimed` (or `in-progress`), no `blocked`                                                                      |
-   | `blocked`          | `open`, has `blocked`                                                                                                            |
-   | `needs_review`     | `open`, has `needs-review` (best-effort — `gh issue list` does not return linked PRs, so do not call extra tools to detect them) |
-   | `done`             | `closed` — select the 10 most recent by `createdAt`, then sort per step 4                                                        |
+   | Row field   | Source                                                                                                                                      |
+   | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+   | `id`        | `#<number>`                                                                                                                                 |
+   | `category`  | `closed` when `state == "closed"`; else the `status:<value>` label's `<value>` (e.g. `2_ready`); else `""` (no `status:` label, open issue) |
+   | `labels`    | label names on the issue — **including** a `blocked` entry folded in per the dependency check below                                         |
+   | `priority`  | the `prio:<0-3>` label's `<n>` (int), or `null` when absent                                                                                 |
+   | `sort_date` | `createdAt`                                                                                                                                 |
 
-   If an issue matches more than one rule, prefer the more actionable signal in this order: `blocked` > `needs_review` > `in_progress` > `ready` > `needs_refinement`.
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/kanban-classify.py" --tracker gh-issue
+   ```
 
-4. **Render** as stacked vertical sections in the fixed order `new → needs_refinement → ready → in_progress → blocked → needs_review → done`, using the same `## <section> (N)` header, single-line bullet, and `---` separator layout as `commands/list-tasks.md` step 4 (don't re-specify it). Card line:
+   (If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/kanban-classify.py`.) The helper's header carries the fixed render order and the canonical precedence sentence (`blocked > needs_review > in_progress > ready > needs_refinement`) — link there rather than restating it, matching the Linear and jira handlers.
+
+   Select the `done` category's (`closed`) rows down to the 10 most recent by `createdAt` before building rows — the helper classifies and ranks whatever it's given, so this selection cap runs before the call, not after.
+
+   **Blocked has two independent sources; report both in that one section.**
+   - **The `blocked` label** is a manual override, and stays the only way to mark an issue blocked by something outside GitHub. It sits outside the four managed namespaces, so `gh-issue-state.py` carries it forward through every state write instead of dropping it — a human's override survives a promote or a claim.
+   - **An open dependency** comes from GitHub's native dependency graph, not from a label. Read it per issue at `repos/<repo>/issues/<n>/dependencies/blocked_by`; the issue is dependency-blocked when any entry is still `open`.
+
+     **Check dependencies for `status:2_ready` issues only** — one `gh api` GET each, and readiness is the only claim an open blocker contradicts. No other section asserts anything about dependencies, so spending a call on all 50 buys nothing. `commands/handlers/assets/gh-issue-ready.py` already runs exactly this pass and splits the ready issues into ready and blocked; run it rather than re-deriving the loop:
+
+     ```bash
+     python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-ready.py" \
+       --repo "<repo>" --json [--label "<label>" --label "<label2>"]
+     ```
+
+     Pass one `--label` per entry in `gh-issue.labels`, the same filters step 2 used. Without them the helper draws its own 50-issue window over the **whole** repo, so an in-scope issue can fall outside it and get no verdict at all — and a missing verdict is indistinguishable from a ready one, which the intersection below cannot detect.
+
+     If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/gh-issue-ready.py`. `--repo` is required, so resolve the current repo with `gh repo view --json nameWithOwner --jq .nameWithOwner` when `gh-issue.repo` is unset. **Intersect its output with the issue numbers step 2 returned**, then for each of those it reports as blocked, add `blocked` to that issue's `labels` row field (annotated with the open blockers it names) before calling the helper. The helper queries the whole repo, while step 2 may be narrowed by `gh-issue.labels` (which defaults to `[follow-up]`), so applying its verdicts unfiltered would put a card on the board that this board never listed.
+
+4. **Render** the helper's `sections` in the fixed render order stated in its header, using the same `## <section> (N)` header, single-line bullet, and `---` separator layout as `commands/list-tasks.md` step 4 (don't re-specify it). Card line:
 
    ```
-   - [high] #142 Fix broken import — assignee dan
+   - [p1] #142 Fix broken import (est 3) — assignee dan
    ```
 
    Field mapping (vs. the `repo-pr` card line, which uses slug + frontmatter):
 
-   | Field       | Source                                                                                                                                         |
-   | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-   | Priority    | A `priority:<urgent\|high\|medium\|low>` label if present; otherwise render `[—]` and sort it last in the tier                                 |
-   | Identifier  | `#<number>`                                                                                                                                    |
-   | Title       | issue `title`                                                                                                                                  |
-   | Assignee    | first `assignees[].login` (omit `— assignee …` when unassigned)                                                                                |
-   | Annotations | `human-approval-requested`, `blocked`, `needs-review` — bare label name when present, comma-separated and appended after the assignee with `—` |
+   | Field       | Source                                                                                                                                                       |
+   | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+   | Priority    | the `prio:<0-3>` label if present, rendered `[p<n>]`; otherwise `[—]`, sorted last in the tier                                                               |
+   | Identifier  | `#<number>`                                                                                                                                                  |
+   | Title       | issue `title`                                                                                                                                                |
+   | Estimate    | the `est:<n>` label if present, rendered `(est <n>)` after the title; omit the parenthetical when the issue carries none                                     |
+   | Assignee    | first `assignees[].login` (omit `— assignee …` when unassigned)                                                                                              |
+   | Annotations | `blocked` when the label is present, and `waiting on #<n>[, #<m>]` for a dependency-blocked issue — comma-separated and appended after the assignee with `—` |
 
-   Sort within each section by priority (`urgent > high > medium > low`, none last), then `createdAt` (oldest first).
+   The helper already sorted each section (priority `prio:0` first through `prio:3`, none last, then `createdAt` oldest first) — render its order as-is.
 
 5. **Summary line.** Same shape as the file-based path:
 

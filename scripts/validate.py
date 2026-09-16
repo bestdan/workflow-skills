@@ -48,6 +48,35 @@ SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
 PLUGIN_ROOT_REF_RE = re.compile(
     r"\$\{CLAUDE_PLUGIN_ROOT\}/([A-Za-z0-9_./<>-]*[A-Za-z0-9_/<>-])"
 )
+# --- shell logic in runtime markdown ---
+# A fenced shell block in a skill/command/handler/agent body is runtime prompt
+# text. `scripts/lint-shell.sh` globs only `*.sh`/`*.bash`/`*.bats` from
+# `git ls-files`, so nothing in the gate ever syntax-checks, shellchecks or runs
+# such a block — see the "Logic goes in a typed file" section of CONTRIBUTING.md
+# for the incident that produced this check.
+SHELL_FENCE_RE = re.compile(r"^\s*```(bash|sh|shell|zsh)\s*$")
+SHELL_OPENER_RE = re.compile(r"^\s*(if|for|while|until|case)\s")
+# The prose filter. Several fenced `bash` blocks here are not shell at all —
+# `repo-pr-execute.md` and `repo-pr.md` are `claude --remote "..."` prompt
+# payloads, English with placeholders — and their sentences start with the words
+# "if", "for" and "while" often enough that opener-counting alone flags them
+# (measured: 11 hits in a block with zero lines of shell). A bare `fi`/`done`/
+# `esac` on its own line is the thing English never writes, so requiring one is
+# what separates a program from a paragraph. It also exempts guarded one-liners
+# for free: `if ...; then ...; fi` keeps its terminator on the opener's line.
+SHELL_TERMINATOR_RE = re.compile(r"^\s*(fi|done|esac)\s*(;|&&|\|\||#.*)?\s*$")
+# One multi-line construct still reads inline; two openers is a program.
+SHELL_OPENER_MAX = 1
+# Blocks that predate the check, with the count they are allowed to keep. A new
+# offending block anywhere — including a third one here — fails. Shrink an entry
+# when you extract one; never raise one to make a new block pass.
+#
+# skills/local-review/SKILL.md: real logic, but written against a literal
+# `<scratch>` placeholder, so it is not valid shell and needs parameterising
+# before it can move to a file. Declared out of scope by
+# https://github.com/bestdan/workflow-skills/issues/465.
+SHELL_LOGIC_ALLOWLIST = {"skills/local-review/SKILL.md": 2}
+
 DESC_MAX = 1024
 BODY_MAX_LINES = 500
 BODY_WARN_LINES = 450
@@ -250,6 +279,61 @@ for f in plugin_root_ref_files:
                     f"line {n}: ${{CLAUDE_PLUGIN_ROOT}}/{captured} does not exist",
                 )
 
+
+# --- shell logic in runtime markdown ---
+# Reuses plugin_root_ref_files: the same skills/commands/agents bodies, which is
+# exactly the set an agent executes at runtime.
+def shell_logic_blocks(text: str):
+    """Yield (start_line, opener_count) for each fenced shell block with logic."""
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        if SHELL_FENCE_RE.match(lines[i]):
+            i += 1
+            start = i
+            openers = 0
+            terminators = 0
+            while i < len(lines) and not lines[i].strip().startswith("```"):
+                if SHELL_OPENER_RE.match(lines[i]):
+                    openers += 1
+                if SHELL_TERMINATOR_RE.match(lines[i]):
+                    terminators += 1
+                i += 1
+            if openers > SHELL_OPENER_MAX and terminators:
+                yield start, openers
+        i += 1
+
+
+for f in plugin_root_ref_files:
+    offenders = list(shell_logic_blocks(f.read_text()))
+    allowed = SHELL_LOGIC_ALLOWLIST.get(str(rel(f)), 0)
+    if len(offenders) > allowed:
+        for line_no, openers in offenders[allowed:]:
+            err(
+                rel(f),
+                f"line {line_no}: fenced shell block carries {openers} control-flow "
+                f"statements (max {SHELL_OPENER_MAX}). Nothing in the gate can lint or "
+                f"run shell inside markdown — move the logic to a typed file "
+                f"(commands/handlers/assets/<name>.py or scripts/<name>.sh) and call it "
+                f"from here. See CONTRIBUTING.md, 'Logic goes in a typed file'.",
+            )
+# An allowlist entry with more headroom than the file needs is stale config
+# pretending to be a rule; fail on it so extractions actually shrink the list.
+# A *missing* file is skipped rather than flagged: validate.py is copied into
+# the fixture plugins scripts/test-validate.sh builds, and those carry none of
+# this repo's own skills.
+for allowed_path, count in SHELL_LOGIC_ALLOWLIST.items():
+    target = ROOT / allowed_path
+    if not target.exists():
+        continue
+    present = len(list(shell_logic_blocks(target.read_text())))
+    if present < count:
+        err(
+            "scripts/validate.py",
+            f"SHELL_LOGIC_ALLOWLIST allows {count} block(s) in {allowed_path} but it "
+            f"has {present} — lower the entry, or drop it if the count is 0",
+        )
+
 # --- task files (task_dir/**/*.md, default ROOT/dev_docs/tasks) ---
 # The repo-native task store (see skills/task/SKILL.md). Lenient like the rest
 # of this script: validate the shape of fields that are present, don't hard-
@@ -402,6 +486,120 @@ else:
             "README.md",
             f"claims (skills,commands,subagents)={claimed} but actual={actual}",
         )
+
+
+# --- crush reviewer asset drift ---
+# skills/co-review/reviewers/crush.md carries three prose facts that must stay
+# in sync with skills/co-review/reviewers/assets/crush-readonly.json: the
+# pinned version (the pre-flight probe's gate sentence vs. the config.go link
+# it points at), the disabled-tool count, and the disabled-tool names
+# themselves. Nothing else in the gate reads either file, so drift between
+# them is silent until a live upgrade — see scripts/test-crush-roster-live.sh
+# for the check that actually re-derives the roster from upstream; this one
+# only catches the asset and the prose disagreeing with EACH OTHER.
+CRUSH_MD = ROOT / "skills" / "co-review" / "reviewers" / "crush.md"
+CRUSH_ASSET = (
+    ROOT / "skills" / "co-review" / "reviewers" / "assets" / "crush-readonly.json"
+)
+CRUSH_GATE_VERSION_RE = re.compile(r"pinned \*\*`crush version v(\d+\.\d+\.\d+)`\*\*")
+CRUSH_LINK_VERSION_RE = re.compile(
+    r"\]\(https://github\.com/charmbracelet/crush/blob/v(\d+\.\d+\.\d+)/internal/config/config\.go\)"
+)
+# Captures the tool count and the backtick-quoted roster between "... is" and
+# the sentence-ending period before "The asset disables all of them" — DOTALL
+# because the roster line-wraps in the source.
+CRUSH_ROSTER_SENTENCE_RE = re.compile(
+    r"The list the asset was built against \((\d+) tools,.*?\) is (.+?)\.\s"
+    r"The asset disables all of them",
+    re.DOTALL,
+)
+# Each roster token is either a bare tool name (`agent`) or the abbreviated
+# `` `lsp_*` (8) `` form standing in for 8 lsp_-prefixed names.
+CRUSH_TOKEN_RE = re.compile(r"`([a-zA-Z0-9_*]+)`(?:\s*\((\d+)\))?")
+
+# A rename or move of either file must not silently retire this check, so a
+# one-sided disappearance is an error. Both absent is the only quiet case: a
+# plugin that ships no crush reviewer at all has nothing to keep in sync.
+if CRUSH_MD.exists() != CRUSH_ASSET.exists():
+    err(
+        rel(CRUSH_MD if CRUSH_ASSET.exists() else CRUSH_ASSET),
+        "crush reviewer prose and asset must exist together — one is missing, "
+        "so the roster drift check cannot run",
+    )
+if CRUSH_MD.exists() and CRUSH_ASSET.exists():
+    crush_text = CRUSH_MD.read_text()
+    gate_m = CRUSH_GATE_VERSION_RE.search(crush_text)
+    link_m = CRUSH_LINK_VERSION_RE.search(crush_text)
+    roster_m = CRUSH_ROSTER_SENTENCE_RE.search(crush_text)
+    if not gate_m:
+        err(
+            rel(CRUSH_MD),
+            "could not find the pinned 'crush version vX.Y.Z' gate sentence",
+        )
+    if not link_m:
+        err(
+            rel(CRUSH_MD),
+            "could not find the config.go roster link carrying the pinned tag",
+        )
+    if not roster_m:
+        err(
+            rel(CRUSH_MD),
+            "could not find the 'The list the asset was built against (N tools, ...) "
+            "is ...' roster sentence",
+        )
+    if gate_m and link_m and gate_m.group(1) != link_m.group(1):
+        err(
+            rel(CRUSH_MD),
+            f"version gate 'v{gate_m.group(1)}' != roster link tag 'v{link_m.group(1)}'",
+        )
+    if roster_m:
+        prose_count = int(roster_m.group(1))
+        prose_names: set[str] = set()
+        prose_lsp_count = None
+        for tok in CRUSH_TOKEN_RE.finditer(roster_m.group(2)):
+            name, paren = tok.group(1), tok.group(2)
+            if name == "lsp_*":
+                prose_lsp_count = int(paren) if paren else 0
+            else:
+                prose_names.add(name)
+        asset = json.loads(CRUSH_ASSET.read_text())
+        disabled = asset.get("options", {}).get("disabled_tools", [])
+        if not isinstance(disabled, list):
+            err(rel(CRUSH_ASSET), "options.disabled_tools must be a list")
+        else:
+            asset_names = set(disabled)
+            asset_lsp = {n for n in asset_names if n.startswith("lsp_")}
+            asset_other = asset_names - asset_lsp
+            if prose_count != len(disabled):
+                err(
+                    rel(CRUSH_MD),
+                    f"roster prose claims {prose_count} tools but "
+                    f"{rel(CRUSH_ASSET)} disables {len(disabled)}",
+                )
+            if prose_lsp_count is None:
+                err(rel(CRUSH_MD), "roster prose is missing the 'lsp_*' (K) token")
+            elif prose_lsp_count != len(asset_lsp):
+                err(
+                    rel(CRUSH_MD),
+                    f"roster prose claims {prose_lsp_count} lsp_ tools but "
+                    f"{rel(CRUSH_ASSET)} has {len(asset_lsp)}",
+                )
+            if prose_names != asset_other:
+                missing_from_prose = asset_other - prose_names
+                missing_from_asset = prose_names - asset_other
+                detail = []
+                if missing_from_prose:
+                    detail.append(
+                        f"in asset but not prose: {sorted(missing_from_prose)}"
+                    )
+                if missing_from_asset:
+                    detail.append(
+                        f"in prose but not asset: {sorted(missing_from_asset)}"
+                    )
+                err(
+                    rel(CRUSH_MD),
+                    f"roster prose names disagree with {rel(CRUSH_ASSET)} ({'; '.join(detail)})",
+                )
 
 for w in warnings:
     print(f"  ⚠ {w}")

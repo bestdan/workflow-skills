@@ -1116,13 +1116,13 @@ GHWEOF
 
   # --- fail-closed: bad usage --------------------------------------------
   o="$("$SCRIPT" doctor --run-id x 2>&1)"
-  [ $? = 2 ] && printf '%s' "$o" | grep -q 'requires --dir' \
+  [ $? = 2 ] && grep -q 'requires --dir' <<<"$o" \
     && ok "doctor fail-closed: missing --dir" || bad "doctor fail-closed: missing --dir" "$o"
   o="$("$SCRIPT" doctor --dir "$D1/run" --run-id x --handler bogus 2>&1)"
-  [ $? = 2 ] && printf '%s' "$o" | grep -q 'unknown --handler' \
+  [ $? = 2 ] && grep -q 'unknown --handler' <<<"$o" \
     && ok "doctor fail-closed: unknown --handler" || bad "doctor fail-closed: unknown --handler" "$o"
   o="$("$SCRIPT" doctor --dir "$D1/run" --run-id x --context bogus 2>&1)"
-  [ $? = 2 ] && printf '%s' "$o" | grep -q 'unknown --context' \
+  [ $? = 2 ] && grep -q 'unknown --context' <<<"$o" \
     && ok "doctor fail-closed: unknown --context" || bad "doctor fail-closed: unknown --context" "$o"
 else
   echo "skip - doctor: git not available"

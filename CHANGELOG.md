@@ -4,6 +4,408 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.56.1] - 2026-09-16
+
+### Fixes
+
+- the free-plan cap counts every non-archived issue, not just active ones [N/A] (#739) (5372ab6)
+
+## [2.56.0] - 2026-09-16
+
+### Features
+
+- point migrated Linear issues at their successors [#515] (#736) (c090c59)
+
+## [2.55.0] - 2026-09-14
+
+### Features
+
+- verify the landed import with linear-verify.py [#514] (#735) (c962ffb)
+
+## [2.54.0] - 2026-09-14
+
+### Features
+
+- write the import graph with linear-import.py --link [#513] (#734) (2d9fe39)
+
+## [2.53.2] - 2026-09-14
+
+### Fixes
+
+- correct what disabled Linear's integration and what over-closed (#509) (3bec0a2)
+
+## [2.53.1] - 2026-09-14
+
+### Fixes
+
+- correct /do-tasks flag matrix — batch flags aren't file-path-only (#521) (aaf0415)
+
+## [2.53.0] - 2026-09-14
+
+### Features
+
+- record how to weigh a reviewer's proposed fix (#558) (3e0e38c)
+
+## [2.52.0] - 2026-09-14
+
+### Features
+
+- land the Linear import plan with linear-import.py --apply [#512] (#616) (9defa2e)
+
+## [2.51.0] - 2026-09-14
+
+### Features
+
+- strip status:/auto: rungs at merge time [#613] (#615) (4886ffa)
+
+## [2.50.0] - 2026-09-14
+
+### Features
+
+- give the round summary its own thread [#429] (#585) (cae26d2)
+
+## [2.49.0] - 2026-09-13
+
+### Features
+
+- build the reviewable Linear-to-GitHub import plan (#597) (32f8523)
+
+## [2.48.6] - 2026-09-13
+
+### Fixes
+
+- reconcile row 4 strips rungs from closed issues [#608] (#612) (ec673df)
+
+## [2.48.5] - 2026-09-13
+
+### Fixes
+
+- pass --plugin-root so the allow-rule pre-flight runs [#607] (#609) (9ce1b9b)
+
+## [2.48.4] - 2026-09-13
+
+### Fixes
+
+- set branch_prefix so the claim lock is not caller-dependent [#599] (#605) (2cd2764)
+
+## [2.48.3] - 2026-09-13
+
+### Fixes
+
+- devin's auth probe gates login, not model entitlement [N/A] (#592) (c41288b)
+
+## [2.48.2] - 2026-09-13
+
+### Fixes
+
+- name the context window behind crush's opaque oversize error [N/A] (#603) (4548842)
+
+## [2.48.1] - 2026-09-13
+
+### Fixes
+
+- deliver the trailing-key title grammar to installs (#593) (b9569f8)
+
+## [2.48.0] - 2026-09-13
+
+### Features
+
+- append the review conventions to every assembled <INPUT> (#591) (510bc1c)
+
+## [2.47.0] - 2026-09-13
+
+### Features
+
+- export every PreThink issue to a date-named JSON file (#590) (d57d51c)
+
+## [2.46.0] - 2026-09-13
+
+### Features
+
+- resolve the installed agent-guidance plugin (#588) (e679c8a)
+
+## [2.45.2] - 2026-09-11
+
+### Fixes
+
+- present the review in a fixed three-section template (#587) (6251b96)
+
+## [2.45.1] - 2026-09-10
+
+### Fixes
+
+- the remote self-check passes on a dead credential (#507) (0fe235a)
+
+## [2.45.0] - 2026-09-10
+
+### Features
+
+- offer a held issue to a direct pick instead of refusing (#584) (2ac4468)
+
+## [2.44.0] - 2026-09-10
+
+### Features
+
+- add min-task-budget.sh and cut the archive handler's prose walk (#579) (d1b022d)
+
+## [2.43.0] - 2026-09-09
+
+### Features
+
+- add preflight.sh --scout-run-md for the per-task capability join (#557) (12135da)
+
+## [2.42.0] - 2026-09-09
+
+### Features
+
+- generate Copilot review instructions from the canonical docs (#556) (df88afd)
+
+## [2.41.0] - 2026-09-09
+
+### Features
+
+- add spawn-orchestrator.sh reserve-gate for the usage_delta bookkeeping (#551) (52f58a0)
+
+## [2.40.1] - 2026-09-09
+
+### Fixes
+
+- drop a dead import and an inaccurate noqa (#554) (e4b25a2)
+
+## [2.40.0] - 2026-09-09
+
+### Features
+
+- script the reproducibility re-run and restore (#553) (f615462)
+
+## [2.39.0] - 2026-09-09
+
+### Features
+
+- add --from-mcp-json to build the PR file (#552) (89a0ffc)
+
+## [2.38.0] - 2026-09-09
+
+### Features
+
+- resolve PRs and merge state in a tested script (#550) (4f6dc5d)
+
+## [2.37.0] - 2026-09-09
+
+### Features
+
+- generalise gh-issue-claim.py acquire for shared claim-lock prose (#549) (61d77db)
+
+## [2.36.0] - 2026-09-09
+
+### Features
+
+- share one kanban-classify.py across linear/gh-issue/jira (#548) (e2adb16)
+
+## [2.35.0] - 2026-09-09
+
+### Features
+
+- extract dependency-phrase body parsing into _body_refs.py (#547) (c44d2c9)
+
+## [2.34.0] - 2026-09-09
+
+### Features
+
+- add diff-anchor-check.py for the batched review POST (#546) (c2632a5)
+
+## [2.33.0] - 2026-09-09
+
+### Features
+
+- extract transition-id resolution into jira-resolve-transition.py (#545) (b7e37ab)
+
+## [2.32.0] - 2026-09-09
+
+### Features
+
+- script the $WORK root guard (#544) (92e4903)
+
+## [2.31.0] - 2026-09-09
+
+### Features
+
+- split gate()/rank_key() out of linear-ready.py for the MCP floor (#543) (72b405f)
+
+## [2.30.0] - 2026-09-09
+
+### Features
+
+- add --sort to gh-issue-graph.py for Dimension 3 (#542) (7df91ff)
+
+## [2.29.0] - 2026-09-09
+
+### Features
+
+- add linear-graph-analyze.py for cycles, order, inversions (#541) (33cbbd2)
+
+## [2.28.1] - 2026-09-08
+
+### Fixes
+
+- close the three tools crush's denylist never named (#518) (e654ed7)
+
+## [2.28.0] - 2026-09-08
+
+### Features
+
+- add the --all scope override gh-issue already needed (#506) (ce50ae2)
+
+## [2.27.0] - 2026-09-07
+
+### Features
+
+- accept a pre-fetched merged-PR list (#505) (49e5601)
+
+## [2.26.3] - 2026-09-07
+
+### Fixes
+
+- correct the claims #492 introduced while removing one (#501) (66bbcd5)
+
+## [2.26.2] - 2026-09-07
+
+### Fixes
+
+- pin codex to gpt-5.6-terra, which the account can serve (#499) (d61a0d7)
+
+## [2.26.1] - 2026-09-07
+
+### Fixes
+
+- print the SSH tunnel command when launched over SSH (#497) (abcb516)
+
+## [2.26.0] - 2026-09-07
+
+### Features
+
+- count bare none: obligation blocks in status (#413) (495166c)
+
+## [2.25.0] - 2026-09-06
+
+### Features
+
+- contract the descriptor audit (#494) (3133516)
+
+## [2.24.3] - 2026-09-06
+
+### Fixes
+
+- stop pipefail turning a matching grep -q into a miss (#493) (e045ee8)
+
+## [2.24.2] - 2026-09-05
+
+### Fixes
+
+- stop naming the vault that holds a full-account Linear key (#489) (6e56071)
+
+## [2.24.1] - 2026-09-05
+
+### Fixes
+
+- resolve sweep PR discovery against each project's repo (#450) (ad46d3f)
+
+## [2.24.0] - 2026-09-05
+
+### Features
+
+- wire batch execution into the tracker-batch subroutine (#482) (547f776)
+
+## [2.23.0] - 2026-09-04
+
+### Features
+
+- add crush as a built-in local reviewer (#485) (8a18df5)
+
+## [2.22.0] - 2026-09-04
+
+### Features
+
+- derive verification tests during review (#484) (14dfdb9)
+
+## [2.21.2] - 2026-09-04
+
+### Fixes
+
+- render relative preview links inert (#445) (#481) (a945733)
+
+## [2.21.1] - 2026-09-04
+
+### Fixes
+
+- void a reconciler row whose label was never provisioned (#479) (446b45f)
+
+## [2.21.0] - 2026-09-04
+
+### Features
+
+- reoptimize reads and writes the native dependency graph (#478) (2e64e0a)
+
+## [2.20.0] - 2026-09-04
+
+### Features
+
+- stop a review before it lands on contested text (#474) (f6d4762)
+
+## [2.19.0] - 2026-09-04
+
+### Features
+
+- reconcile the label invariants (#464) (afd2d00)
+
+## [2.18.1] - 2026-09-04
+
+### Fixes
+
+- extract the parent-rollup loop into a tested handler asset (#466) (cc92042)
+
+## [2.18.0] - 2026-09-03
+
+### Features
+
+- sync an issue's status rung to its PR's lifecycle (#447) (4261eb6)
+
+## [2.17.0] - 2026-09-02
+
+### Features
+
+- write native blocked_by edges on the gh-issue path (#444) (09aa71f)
+
+## [2.16.0] - 2026-09-01
+
+### Features
+
+- precheck workspace active-issue quota in /promote-tasks (#436) (6131b9f)
+
+## [2.15.1] - 2026-08-31
+
+### Fixes
+
+- point --no-claim at the branch the claim actually creates (#443) (62a1141)
+
+## [2.15.0] - 2026-08-31
+
+### Features
+
+- move the claim lifecycle onto the status vocabulary (#442) (06fd72c)
+
+## [2.14.0] - 2026-08-31
+
+### Features
+
+- carry the state model through add, list, promote and complete (#439) (a4815d7)
+
+## [2.13.2] - 2026-08-31
+
+### Fixes
+
+- devin cannot start in a fresh worktree (#438) (082df6e)
+
 ## [2.13.1] - 2026-08-30
 
 ### Fixes

@@ -1,0 +1,3 @@
+# Match captured output with `grep -q PATTERN <<<"$out"`, never
+# `echo "$out" | grep -q PATTERN`. grep -q exits the moment it matches.
+echo ok

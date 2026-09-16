@@ -890,6 +890,54 @@ finally:
     if acquired:
         hold_sock.close()
 
+# -- SSH hint: printed only when launched over SSH, with the bound port -----
+def run_startup_output(env):
+    # Pin a port so the output can be read whole after shutdown. Readiness
+    # is an HTTP response, not a TCP connect: the server listens in its
+    # constructor, before the startup prints, so a connect can succeed
+    # before any line is written. A response proves serve_forever() is
+    # running, which comes after every print.
+    probe = _socket.socket()
+    probe.bind(("127.0.0.1", 0))
+    port = probe.getsockname()[1]
+    probe.close()
+    proc, patch = start_server(["--port", str(port)], env=env)
+    for _ in range(100):
+        try:
+            _urlrequest.urlopen(f"http://127.0.0.1:{port}/", timeout=0.5).close()
+            break
+        except _urlerror.HTTPError:
+            break
+        except (OSError, _urlerror.URLError):
+            _time.sleep(0.05)
+    proc.terminate()
+    try:
+        out = proc.communicate(timeout=5)[0]
+    except _subprocess.TimeoutExpired:
+        proc.kill()
+        out = proc.communicate()[0]
+    os.unlink(patch)
+    return port, out
+
+base_env = {k: v for k, v in os.environ.items() if k not in ("SSH_CONNECTION", "SSH_TTY")}
+port_l, out_l = run_startup_output(base_env)
+check("ssh hint: absent outside SSH",
+      "LOCAL_REVIEW_URL=" in out_l and "SSH:" not in out_l, out_l)
+
+ssh_env = dict(base_env, SSH_CONNECTION="10.0.0.2 51234 10.0.0.1 22")
+port_s, out_s = run_startup_output(ssh_env)
+check("ssh hint: printed under SSH_CONNECTION", "SSH:" in out_s, out_s)
+check("ssh hint: tunnel command pins the bound port on both sides",
+      f"ssh -L {port_s}:127.0.0.1:{port_s} " in out_s, out_s)
+check("ssh hint: names the local-port-must-match failure",
+      "Origin check" in out_s and "local port" in out_s, out_s)
+check("ssh hint: offers the permanent LocalForward config with the bound port",
+      f"LocalForward {port_s} 127.0.0.1:{port_s}" in out_s, out_s)
+
+tty_env = dict(base_env, SSH_TTY="/dev/pts/3")
+_, out_t = run_startup_output(tty_env)
+check("ssh hint: printed under SSH_TTY alone", "SSH:" in out_t, out_t)
+
 # -- full round trip: GET /, POST /submit, atomic $OUT, --once exits --------
 # (--out with --once: one-shot mode)
 out_fd, out_path = _tempfile.mkstemp(suffix=".json")
@@ -1383,6 +1431,95 @@ finally:
     os.unlink(patch_path)
     if os.path.exists(ep_out):
         os.unlink(ep_out)
+
+# -- threads mode: round-summary thread (issue #429) --------------------------
+sm_fd, sm_out = _tempfile.mkstemp(suffix=".json")
+os.close(sm_fd)
+os.unlink(sm_out)
+proc, patch_path = start_server(["--out", sm_out])  # stay-alive: threads mode (--out, no --once)
+try:
+    url = read_url(proc)
+    check("server: summary-thread run starts", bool(url), url)
+    if url:
+        def post_json(route, obj):
+            req = _urlrequest.Request(
+                f"{url}{route}", data=json.dumps(obj).encode(),
+                headers={"Content-Type": "application/json"}, method="POST",
+            )
+            with _urlrequest.urlopen(req, timeout=5) as resp:
+                return resp.status, json.loads(resp.read().decode())
+
+        def get_json(route):
+            with _urlrequest.urlopen(f"{url}{route}", timeout=5) as resp:
+                return resp.status, json.loads(resp.read().decode())
+
+        # round 1: a non-empty summary alongside one line comment -> the
+        # summary mints its OWN thread (t2), anchor-free, same round.
+        payload1 = {"meta": {}, "summary": "Looks good overall.", "comments": [
+            {"file": "a.py", "side": "R", "line": 1, "code": "x", "text": "first"},
+        ]}
+        status, info1 = post_json("submit", payload1)
+        check("server: summary-thread round 1 returns 200", status == 200, status)
+        check("server: summary-thread round 1 mints ids for the comment only",
+              info1.get("ids") == ["t1"], info1)  # only comments are minted into "ids"
+
+        status, threads1 = get_json("threads")
+        check("server: summary-thread round 1 mints 2 threads (comment + summary)",
+              len(threads1.get("threads", [])) == 2, threads1)
+        summary1 = next((t for t in threads1["threads"] if t.get("kind") == "summary"), None)
+        check("server: summary-thread round 1 minted a kind:summary thread", summary1 is not None, threads1)
+        if summary1:
+            check("server: summary thread carries the round's summary text",
+                  summary1.get("text") == "Looks good overall.", summary1)
+            check("server: summary thread carries no file anchor",
+                  summary1.get("file") is None and summary1.get("side") is None
+                  and summary1.get("line") is None and summary1.get("code") is None,
+                  summary1)
+            check("server: summary thread starts unresolved with no replies",
+                  summary1.get("resolved") is False and summary1.get("replies") == [], summary1)
+            check("server: summary thread carries round 1", summary1.get("round") == 1, summary1)
+
+        with open(sm_out) as f:
+            written1 = json.load(f)
+        check("server: --out summary key is unchanged (still the plain string)",
+              written1.get("summary") == "Looks good overall.", written1)
+        check("server: --out comments carries only the line comment, not the summary",
+              [c.get("id") for c in written1.get("comments", [])] == ["t1"], written1)
+
+        # round 2: an empty summary mints nothing -- no blank thread left behind.
+        status, info2 = post_json("submit", {"meta": {}, "summary": "", "comments": []})
+        check("server: summary-thread round 2 (empty summary) returns 200", status == 200, status)
+        status, threads2 = get_json("threads")
+        check("server: an empty-summary round mints no new thread",
+              len(threads2.get("threads", [])) == 2, threads2)
+
+        # the summary thread takes /reply and /resolve exactly like any other.
+        status, r1 = post_json("reply", {"thread_id": summary1["id"], "author": "agent",
+                                          "text": "Thanks -- addressed the one comment."})
+        check("server: POST /reply to a summary thread returns 200", status == 200, status)
+        _, after_reply = get_json("threads")
+        sum_after = next(t for t in after_reply["threads"] if t["id"] == summary1["id"])
+        check("server: summary thread shows the new reply", len(sum_after["replies"]) == 1, sum_after)
+        check("server: summary thread reply carries author agent",
+              sum_after["replies"][0].get("author") == "agent", sum_after)
+
+        status, res1 = post_json("resolve", {"thread_id": summary1["id"], "resolved": True})
+        check("server: POST /resolve on a summary thread returns 200", status == 200, status)
+        _, after_resolve = get_json("threads")
+        sum_resolved = next(t for t in after_resolve["threads"] if t["id"] == summary1["id"])
+        check("server: summary thread can be resolved like any other", sum_resolved.get("resolved") is True,
+              sum_resolved)
+finally:
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except _subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+    os.unlink(patch_path)
+    if os.path.exists(sm_out):
+        os.unlink(sm_out)
 
 # -- threads mode: submit response counts replies since the last round -------
 rc_fd, rc_out = _tempfile.mkstemp(suffix=".json")
@@ -2737,6 +2874,17 @@ out.tagsOutsideAllowlist = out.tags.filter(t => SAFE_TAGS.indexOf(t) === -1);
 out.hrefs = texts.filter(t => t.startsWith('HREF:')).map(t => t.slice(5)).sort();
 out.protoPolluted = ({}).polluted !== undefined || Object.prototype.polluted !== undefined;
 
+const linkShape = src => {
+  const links = [];
+  walk(describe(src), n => {
+    if(n.tag === 'span' && !n.text && n.kids && n.kids.length)
+      links.push({tag:n.tag, class:(n.attrs || {}).class || ''});
+  });
+  return links;
+};
+out.relativeLinkShape = linkShape('[e](../submit) [f](/x/y) [g](sneaky.html)');
+out.hostileLinkShape = linkShape('[x](javascript:alert(1)) [h](//evil.test/x)');
+
 // Anchoring: CRLF must not drift, and table rows get their own line.
 const crlf = describe('# One\r\n\r\nTwo\r\n\r\nThree\r\n');
 out.crlfLines = (crlf.kids || []).map(k => k.line);
@@ -2910,11 +3058,22 @@ console.log(JSON.stringify(out));
             check("preview: no attribute beyond class/href",
                   _o["attrs"] == ["class", "href"] or _o["attrs"] == ["class"] or _o["attrs"] == ["href"],
                   _o["attrs"])
-            check("preview: javascript:, data:, relative and protocol-relative hrefs are all rejected",
+            check("preview: javascript:, data:, relative and protocol-relative hrefs are not anchors",
                   all(h.startswith("https://") or h.startswith("mailto:") for h in _o["hrefs"]),
                   _o["hrefs"])
             check("preview: the two legitimate hrefs do survive",
                   len(_o["hrefs"]) == 2, _o["hrefs"])
+            check("preview: relative links stay inert with normal styling",
+                  len(_o["relativeLinkShape"]) == 3
+                  and all(x["tag"] == "span" and x["class"] == "md-inertlink" for x in _o["relativeLinkShape"]),
+                  _o["relativeLinkShape"])
+            check("preview: relative links retain the accent affordance",
+                  ".md-inertlink{color:var(--accent);text-decoration:none}" in server.PAGE,
+                  "md-inertlink lacks accent styling")
+            check("preview: hostile links keep rejected styling",
+                  len(_o["hostileLinkShape"]) == 2
+                  and all(x["class"] == "md-deadlink" for x in _o["hostileLinkShape"]),
+                  _o["hostileLinkShape"])
             check("preview: a __proto__ frontmatter key does not pollute Object.prototype",
                   _o["protoPolluted"] is False, _o["protoPolluted"])
             check("preview: a document over the byte cap is declined",
@@ -3093,6 +3252,43 @@ check("server.PAGE's Reply control posts route 'reply' with author 'user'",
       _re.search(r"openThreadReply[\s\S]{0,800}?postThreadAction\('reply',\s*\{thread_id:\s*thread\.id,\s*author:\s*'user'",
                  server.PAGE) is not None,
       "openThreadReply() does not post {thread_id, author: 'user'} to 'reply'")
+
+# -- summary-thread rendering (source scans, DOM unreachable) ----------------
+# The server-side round-trip above proves /reply mutates a kind:summary
+# thread; it says nothing about the browser path that is supposed to SHOW
+# that reply -- fetchThreads() routing it out of placeThreads(), the
+# dedicated strip renderer, and buildThreadChip()'s anchor-free branch. A
+# regression that dropped a summary thread on the floor somewhere in that
+# path would leave every server-side check above green.
+check("server.PAGE's page carries the summary-threads container above <main id=\"root\">",
+      '<div class="summary-threads" id="summaryThreads" hidden></div>' in server.PAGE
+      and server.PAGE.index('id="summaryThreads"') < server.PAGE.index('id="root"'),
+      "the summaryThreads container is missing, or not above #root")
+check("server.PAGE's fetchThreads() buckets kind:summary threads separately from placeThreads()",
+      _re.search(r"if\(t\.kind === 'summary'\)\{[\s\S]{0,400}?summaries\.push\(t\);", server.PAGE) is not None,
+      "fetchThreads() does not route kind:summary threads to their own bucket before placeThreads()")
+check("server.PAGE's fetchThreads() hands the bucket to summaryThreads and re-renders it",
+      _re.search(r"summaryThreads\s*=\s*summaries;\s*\n\s*renderSummaryThreads\(\);", server.PAGE) is not None,
+      "fetchThreads() does not assign summaryThreads and call renderSummaryThreads()")
+check("server.PAGE defines a summary-threads renderer that appends into summaryThreadsEl",
+      _re.search(r"function renderSummaryThreads\(\)\{[\s\S]{0,500}?buildThreadChip\(t,\s*\{reopen:\s*!!t\.resolved\}\)[\s\S]{0,200}?summaryThreadsEl\.appendChild\(chip\)",
+                 server.PAGE) is not None,
+      "renderSummaryThreads() is missing, or does not append chips into summaryThreadsEl")
+# A resolved summary thread has no file card, so it never collapses into the
+# per-file resolved strip the way a per-line thread does -- without a dimmed
+# in-place treatment, resolved and unresolved chips render identically apart
+# from the button's wording, and the state is invisible.
+check("server.PAGE's summary renderer marks a resolved chip so it reads as resolved",
+      _re.search(r"if\(t\.resolved\)\s*chip\.classList\.add\('summary-resolved'\);", server.PAGE) is not None,
+      "renderSummaryThreads() does not tag a resolved summary chip with .summary-resolved")
+check("server.PAGE dims a resolved summary chip and labels its anchor",
+      ".summary-threads .cmt-row.summary-resolved{opacity:" in server.PAGE
+      and _re.search(r"\.summary-resolved \.cmt-anchor::after\{content:' · resolved'", server.PAGE) is not None,
+      "the .summary-resolved rule is missing its dimming or its ' · resolved' anchor label")
+check("server.PAGE's buildThreadChip() renders a summary thread's anchor as 'Round N summary'",
+      _re.search(r"if\(thread\.kind === 'summary'\)\{[\s\S]{0,300}?Round \$\{thread\.round\} summary",
+                 server.PAGE) is not None,
+      "buildThreadChip() does not special-case kind:summary with a 'Round N summary' anchor")
 
 # -- d. documentation: resolve is the user's click, never the agent's -------
 # Timing subtlety: references/threads.md is a later task and doesn't exist

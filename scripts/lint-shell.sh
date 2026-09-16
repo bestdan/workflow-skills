@@ -78,7 +78,7 @@ narrow_to_touched() { # <touched-list> <file...> -> the files that appear in the
   local touched="$1" file
   shift
   for file in "$@"; do
-    printf '%s\n' "$touched" | grep -qxF -- "$file" && printf '%s\n' "$file"
+    grep -qxF -- "$file" <<<"$touched" && printf '%s\n' "$file"
   done
 }
 
@@ -118,14 +118,22 @@ run() {
   "$@" || fail=1
 }
 
-# The Bash 3.2 floor. scripts/lint-bash4.sh owns the patterns and the reasoning
-# behind them; it takes its files as ARGUMENTS rather than discovering them,
-# which is what lets test/lint-bash4.bats exercise it against fixtures in a temp
-# dir instead of only through this script's whole-tree scan.
-bash4_files=()
-[ "${#shell_files[@]}" -gt 0 ] && bash4_files+=("${shell_files[@]}")
-[ "${#bats_files[@]}" -gt 0 ] && bash4_files+=("${bats_files[@]}")
-[ "${#bash4_files[@]}" -eq 0 ] || run scripts/lint-bash4.sh "${bash4_files[@]}"
+# The file list both pattern lints scan. Each owns its own patterns and the
+# reasoning behind them, and each takes its files as ARGUMENTS rather than
+# discovering them — which is what lets test/lint-bash4.bats and
+# test/lint-pipefail.bats exercise them against fixtures in a temp dir instead
+# of only through this script's whole-tree scan.
+lint_files=()
+[ "${#shell_files[@]}" -gt 0 ] && lint_files+=("${shell_files[@]}")
+[ "${#bats_files[@]}" -gt 0 ] && lint_files+=("${bats_files[@]}")
+
+# The Bash 3.2 floor: bash-4-only constructs, which parse fine on the ubuntu
+# job's Bash 5 and fail only on a contributor's Mac.
+[ "${#lint_files[@]}" -eq 0 ] || run scripts/lint-bash4.sh "${lint_files[@]}"
+
+# `<writer> | grep -q` under pipefail: a match can report 141 and read as a
+# miss.
+[ "${#lint_files[@]}" -eq 0 ] || run scripts/lint-pipefail.sh "${lint_files[@]}"
 
 if [ "${#shell_files[@]}" -gt 0 ]; then
   run bash -n "${shell_files[@]}"

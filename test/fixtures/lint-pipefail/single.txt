@@ -1,0 +1,2 @@
+# a comment mentioning printf | grep -q that must not fire
+if printf '%s' "$out" | grep -q 'needle'; then echo hit; fi

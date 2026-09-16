@@ -98,7 +98,7 @@ fc() { # <name> <expected-substr> <args...>
   local o c
   o="$("$SCRIPT" render-profile "$@" --out "$target" 2>&1)"
   c=$?
-  if [ "$c" = 2 ] && [ ! -e "$target" ] && printf '%s' "$o" | grep -qF "$want"; then
+  if [ "$c" = 2 ] && [ ! -e "$target" ] && grep -qF "$want" <<<"$o"; then
     ok "fail-closed: $name"
   else
     bad "fail-closed: $name" "exit=$c wrote=$([ -e "$target" ] && echo YES || echo no) msg=$o"
@@ -111,12 +111,12 @@ fc "exec non-exec file" "not an executable file" --exec "$PLAIN"
 
 # --out required
 o="$("$SCRIPT" render-profile --rw "$RUN_WT" 2>&1)"
-[ $? = 2 ] && printf '%s' "$o" | grep -q 'requires --out' \
+[ $? = 2 ] && grep -q 'requires --out' <<<"$o" \
   && ok "fail-closed: --out required" || bad "fail-closed: --out required" "$o"
 
 # unknown subcommand
 o="$("$SCRIPT" bogus 2>&1)"
-[ $? = 2 ] && printf '%s' "$o" | grep -q 'unknown subcommand' \
+[ $? = 2 ] && grep -q 'unknown subcommand' <<<"$o" \
   && ok "usage: unknown subcommand exits 2" || bad "usage: unknown subcommand exits 2" "$o"
 
 # --- Seatbelt compile check (macOS only; skip-with-note elsewhere) ------------
@@ -277,7 +277,7 @@ if [ "$SEATBELT_OK" = 1 ]; then
       # documents); $1 expands to the real path, so the grep matches exactly.
       edwout="$(sandbox-exec -f "$edwprof" "$edwbin" -c 'echo x > "$1"' _ "$BASE/exec-dir-denied" 2>&1)"
       if [ ! -f "$BASE/exec-dir-denied" ] \
-        && printf '%s' "$edwout" | grep -qF "$BASE/exec-dir-denied: Operation not permitted"; then
+        && grep -qF "$BASE/exec-dir-denied: Operation not permitted" <<<"$edwout"; then
         ok "exec-dir: write outside rw scope still denied"
       else
         bad "exec-dir: write outside rw scope still denied" "$edwout"
@@ -372,7 +372,7 @@ sfc() { # <name> <want-substr> <args...>
   local o c
   o="$("$SCRIPT" render-settings "$@" --out "$t" 2>&1)"
   c=$?
-  if [ "$c" = 2 ] && [ ! -e "$t" ] && printf '%s' "$o" | grep -qF "$want"; then
+  if [ "$c" = 2 ] && [ ! -e "$t" ] && grep -qF "$want" <<<"$o"; then
     ok "settings fail-closed: $name"
   else
     bad "settings fail-closed: $name" "exit=$c wrote=$([ -e "$t" ] && echo YES || echo no) msg=$o"
@@ -410,18 +410,18 @@ have "render: profile carries the @spawn-tmpdir stamp" ";; @spawn-tmpdir: $BASE/
 # --tmpdir must sit inside a confinement root when confined (bounds the job's mkdir).
 tdesc="$("$SCRIPT" render-profile --confine-under "$BASE/root" --rw "$BASE/root/wt" --tmpdir "$BASE/elsewhere/tmp" --out "$BASE/td.sb" 2>&1)"
 tdc=$?
-[ "$tdc" = 2 ] && printf '%s' "$tdesc" | grep -qF 'escapes --confine-under' \
+[ "$tdc" = 2 ] && grep -qF 'escapes --confine-under' <<<"$tdesc" \
   && ok "render: --tmpdir outside confine root fails closed" || bad "render: --tmpdir outside confine root fails closed" "$tdesc"
 # SBPL line-injection: a scope path containing a newline (which could smuggle a
 # fake `;; @spawn-tmpdir:` line or its own allow rule) is rejected fail-closed.
 nlpath="$(printf '/x\n;; @spawn-tmpdir: /evil')"
 nlo="$("$SCRIPT" render-profile --rw "$nlpath" --tmpdir "$BASE/root/wt/tmp" --out "$BASE/nl.sb" 2>&1)"
 nlc=$?
-[ "$nlc" = 2 ] && [ ! -e "$BASE/nl.sb" ] && printf '%s' "$nlo" | grep -qF 'newline' \
+[ "$nlc" = 2 ] && [ ! -e "$BASE/nl.sb" ] && grep -qF 'newline' <<<"$nlo" \
   && ok "render: a scope path with a newline fails closed" || bad "render: a scope path with a newline fails closed" "exit=$nlc"
 cfo="$("$SCRIPT" render-profile --confine-under "$BASE/root" --rw / --out "$BASE/cfx.sb" 2>&1)"
 cfc=$?
-if [ "$cfc" = 2 ] && [ ! -e "$BASE/cfx.sb" ] && printf '%s' "$cfo" | grep -qF 'refusing --rw /'; then
+if [ "$cfc" = 2 ] && [ ! -e "$BASE/cfx.sb" ] && grep -qF 'refusing --rw /' <<<"$cfo"; then
   ok "confine-under: rw / fails closed"
 else
   bad "confine-under: rw / fails closed" "exit=$cfc"
@@ -429,13 +429,13 @@ fi
 # floor holds even WITHOUT --confine-under (the guard is opt-in; the floor isn't)
 rfo="$("$SCRIPT" render-profile --rw / --out "$BASE/rf.sb" 2>&1)"
 rfc=$?
-[ "$rfc" = 2 ] && [ ! -e "$BASE/rf.sb" ] && printf '%s' "$rfo" | grep -qF 'refusing --rw /' \
+[ "$rfc" = 2 ] && [ ! -e "$BASE/rf.sb" ] && grep -qF 'refusing --rw /' <<<"$rfo" \
   && ok "floor: rw / refused with no --confine-under" || bad "floor: rw / refused with no --confine-under" "exit=$rfc"
 # a sibling that shares a prefix but is NOT under the root is rejected (literal prefix)
 mkdir -p "$BASE/rootX/wt"
 sib="$("$SCRIPT" render-profile --confine-under "$BASE/root" --rw "$BASE/rootX/wt" --out "$BASE/sib.sb" 2>&1)"
 sibc=$?
-[ "$sibc" = 2 ] && printf '%s' "$sib" | grep -qF 'escapes --confine-under' \
+[ "$sibc" = 2 ] && grep -qF 'escapes --confine-under' <<<"$sib" \
   && ok "confine-under: prefix-sibling rejected" || bad "confine-under: prefix-sibling rejected" "exit=$sibc"
 
 # --- cred-ro: a credential file stays RO inside an RW state dir (task 3, P1 #5) --
@@ -569,7 +569,7 @@ if command -v git >/dev/null 2>&1; then
     # "the ledger wasn't staged" and passes the test without ever exercising it.
     if ! git -C "$GIROOT" add -A >/dev/null 2>&1; then
       bad "supervisor-state: precondition — \`git add -A\` succeeds" "git add failed in $GIROOT"
-    elif git -C "$GIROOT" diff --cached --name-only | grep -qxF '.auto-pilot/supervisor-state'; then
+    elif grep -qxF '.auto-pilot/supervisor-state' <<<"$(git -C "$GIROOT" diff --cached --name-only)"; then
       bad "supervisor-state: a plain \`git add -A\` STAGED the supervisor ledger" \
         "the Seatbelt deny protects writes, not \`git add\` — once tracked, checkout/reset fails"
     else
@@ -709,14 +709,14 @@ pembad="$("$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.js
   --path "$LAUNCH_PATH" --tmpdir "$BASE/root/wt/tmp" --pause-exempt-max 0 \
   --out-script "$BASE/pembad.sh" --out-plist "$BASE/pembad.plist" 2>&1)"
 pembadc=$?
-[ "$pembadc" = 2 ] && [ ! -e "$BASE/pembad.sh" ] && printf '%s' "$pembad" | grep -qF 'positive integer' \
+[ "$pembadc" = 2 ] && [ ! -e "$BASE/pembad.sh" ] && grep -qF 'positive integer' <<<"$pembad" \
   && ok "write-launch: --pause-exempt-max 0 fails closed" \
   || bad "write-launch: --pause-exempt-max 0 fails closed" "exit=$pembadc $pembad"
 # fail-closed at the supervisor-scan CLI itself, not just at write-launch's
 # generation-time check — the two validate independently.
 scpe="$("$SCRIPT" supervisor-scan --dir "$BASE" --label com.autopilot.pescan --pause-exempt-max abc 2>&1)"
 scpec=$?
-[ "$scpec" = 2 ] && printf '%s' "$scpe" | grep -qF 'positive integer' \
+[ "$scpec" = 2 ] && grep -qF 'positive integer' <<<"$scpe" \
   && ok "supervisor-scan: --pause-exempt-max abc fails closed" \
   || bad "supervisor-scan: --pause-exempt-max abc fails closed" "exit=$scpec $scpe"
 # both supervisor thresholds must survive the `launch` passthrough, which is the
@@ -733,7 +733,7 @@ done
 wlnopath="$("$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
   --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --label com.autopilot.nopath --claude-bin "$BIN" \
   --out-script "$BASE/nopath.sh" --out-plist "$BASE/nopath.plist" 2>&1)"
-[ $? = 2 ] && [ ! -e "$BASE/nopath.sh" ] && printf '%s' "$wlnopath" | grep -qF 'requires --path' \
+[ $? = 2 ] && [ ! -e "$BASE/nopath.sh" ] && grep -qF 'requires --path' <<<"$wlnopath" \
   && ok "launch: missing --path fails closed" || bad "launch: missing --path fails closed" "$wlnopath"
 # plist injection: an XML-metachar path must still yield a VALID plist (escaped).
 # Rendered unconditionally: the content assertion below is the only guard CI has
@@ -758,7 +758,7 @@ fi
 # write-launch fail-closed on a missing input file
 wlfc="$("$SCRIPT" write-launch --profile "$BASE/nope.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
   --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --label x --claude-bin "$BIN" --path "$LAUNCH_PATH" --tmpdir "$BASE/root/wt/tmp" --out-script "$BASE/x.sh" --out-plist "$BASE/x.plist" 2>&1)"
-[ $? = 2 ] && printf '%s' "$wlfc" | grep -qF 'not found' && ok "launch: missing profile fails closed" || bad "launch: missing profile fails closed"
+[ $? = 2 ] && grep -qF 'not found' <<<"$wlfc" && ok "launch: missing profile fails closed" || bad "launch: missing profile fails closed"
 
 # TMPDIR is now derived from the profile's @spawn-tmpdir stamp, not a required
 # flag — so a missing --tmpdir SUCCEEDS and the launch script exports the stamped
@@ -773,21 +773,21 @@ have "launch: the job mkdir -p's its TMPDIR" "mkdir -p $BASE/root/wt/tmp" "$(cat
 wltr="$("$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
   --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --label x --claude-bin "$BIN" --path "$LAUNCH_PATH" \
   --tmpdir "relative/tmp" --out-script "$BASE/tr.sh" --out-plist "$BASE/tr.plist" 2>&1)"
-[ $? = 2 ] && printf '%s' "$wltr" | grep -qF 'must be absolute' \
+[ $? = 2 ] && grep -qF 'must be absolute' <<<"$wltr" \
   && ok "launch: relative --tmpdir fails closed" || bad "launch: relative --tmpdir fails closed" "$wltr"
 # a --tmpdir that does NOT match the profile's stamp is fail-closed (the exact
 # render/launch drift that silently degraded the inner sandbox).
 wltx="$("$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
   --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --label x --claude-bin "$BIN" --path "$LAUNCH_PATH" \
   --tmpdir "$BASE/root/wt/OTHER" --out-script "$BASE/tx.sh" --out-plist "$BASE/tx.plist" 2>&1)"
-[ $? = 2 ] && printf '%s' "$wltx" | grep -qF 'does not match the profile' \
+[ $? = 2 ] && grep -qF 'does not match the profile' <<<"$wltx" \
   && ok "launch: --tmpdir mismatching the stamp fails closed" || bad "launch: --tmpdir mismatching the stamp fails closed" "$wltx"
 # a profile with no @spawn-tmpdir stamp (stale render) is fail-closed.
 grep -v '@spawn-tmpdir' "$BASE/cf.sb" >"$BASE/nostamp.sb"
 wltn="$("$SCRIPT" write-launch --profile "$BASE/nostamp.sb" --settings "$BASE/wl.json" --workdir "$BASE/root/wt" \
   --log "$BASE/o.log" --prompt-file "$BASE/prompt.txt" --label x --claude-bin "$BIN" --path "$LAUNCH_PATH" \
   --out-script "$BASE/tn.sh" --out-plist "$BASE/tn.plist" 2>&1)"
-[ $? = 2 ] && printf '%s' "$wltn" | grep -qF 'no @spawn-tmpdir stamp' \
+[ $? = 2 ] && grep -qF 'no @spawn-tmpdir stamp' <<<"$wltn" \
   && ok "launch: profile with no stamp fails closed" || bad "launch: profile with no stamp fails closed" "$wltn"
 # Belt to the braces (canonicalize's newline guard blocks the injection at the
 # source): even if an earlier `;; @spawn-tmpdir:` line were present, the REAL
@@ -804,7 +804,7 @@ lack "launch: the forged stamp is NOT used" "export TMPDIR=/evil/tmp" "$(cat "$B
 
 # --- record-handle: dead pid / non-numeric pid fail closed (task 3) -----------
 rho="$("$SCRIPT" record-handle --pid 999999 --out "$BASE/h.txt" 2>&1)"
-[ $? = 2 ] && [ ! -e "$BASE/h.txt" ] && printf '%s' "$rho" | grep -qF 'no live process' && ok "record-handle: dead pid fails closed" || bad "record-handle: dead pid fails closed"
+[ $? = 2 ] && [ ! -e "$BASE/h.txt" ] && grep -qF 'no live process' <<<"$rho" && ok "record-handle: dead pid fails closed" || bad "record-handle: dead pid fails closed"
 "$SCRIPT" record-handle --pid abc --out "$BASE/h.txt" >/dev/null 2>&1 && bad "record-handle: non-numeric pid fails" || ok "record-handle: non-numeric pid fails"
 
 # The report's --gh / --usage-bin are explicit-only downstream so the suite can
@@ -857,7 +857,7 @@ have "real launch: --park-limit lands on the generated supervisor-check line" '-
 have "real launch: --report-every lands on the generated supervisor-scan line" '--report-every 1m' "$rlscan"
 # the failure it DOES hit is the stubbed launchctl's missing pid — i.e. the
 # launch got all the way to detach, not an argument death anywhere before it.
-[ "$rlc" != 0 ] && printf '%s' "$rlout" | grep -qF 'could not read the orchestrator PID' \
+[ "$rlc" != 0 ] && grep -qF 'could not read the orchestrator PID' <<<"$rlout" \
   && ok "real launch: fails only at the (stubbed) detach, nowhere earlier" \
   || bad "real launch: fails only at the (stubbed) detach, nowhere earlier" "exit=$rlc $rlout"
 

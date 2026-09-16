@@ -331,7 +331,7 @@ else
   FAIL "write-launch / plist"
 fi
 if launchctl bootstrap "gui/$(id -u)" "$D/job.plist" 2>/dev/null \
-  && launchctl print "gui/$(id -u)/com.autopilot.smoke" 2>/dev/null | grep -q 'pid = '; then
+  && grep -q 'pid = ' <<<"$(launchctl print "gui/$(id -u)/com.autopilot.smoke" 2>/dev/null)"; then
   PASS "job bootstrapped with a pid"
 else
   INDET "launchd bootstrap (may need Full Disk Access / a real login session)"

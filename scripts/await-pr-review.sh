@@ -128,10 +128,10 @@ while :; do
 
     still_pending=()
     for token in "${pending[@]}"; do
-      if printf '%s\n' "$review_logins" | grep -qiF "$token"; then
+      if grep -qiF "$token" <<<"$review_logins"; then
         landed+=("$token") # signal 1: reviews[]
-      elif printf '%s\n' "$initial_requested" | grep -qiF "$token" \
-        && ! printf '%s\n' "$requested_logins" | grep -qiF "$token"; then
+      elif grep -qiF "$token" <<<"$initial_requested" \
+        && ! grep -qiF "$token" <<<"$requested_logins"; then
         landed+=("$token") # signal 2: dropped out
       else
         still_pending+=("$token")

@@ -38,7 +38,7 @@ a step ordering that no code enforces. Belt and braces: the guard here, the
 liveness gate there.)
 
 **Clear the run's alarms — after the guard above, and BEFORE the doctor.** Run
-`spawn-orchestrator.sh alarm-clear --dir <run-dir>`, which removes the
+`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" alarm-clear --dir <run-dir>`, which removes the
 `.auto-pilot/ALARM` sentinel and any undelivered `alarm-requests/`. That sentinel
 is the alarm's **per-run idempotency key**
 ([`run-budget.md`](run-budget.md) "The alarm"), and every alarm's own required
@@ -57,7 +57,7 @@ FILES an `alarm-request` when it halts (`run-state.md` "Run doctor"), and an
 filed, restoring exactly the silence both mechanisms exist to end.
 
 **Clear the terminal exit state — likewise before the doctor and the first wake.** Run
-`scripts/spawn-orchestrator.sh clear-exit-state --dir <run-worktree>`. The exit
+`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" clear-exit-state --dir <run-worktree>`. The exit
 contract is DURABLE by design ([`run-state.md`](run-state.md) "Exit contract"):
 the last `exit_reason` / `exit_reason_at` / `exit_reason_detail` are committed to
 the run-state branch, and a terminal reason (`done` / `systemic` / `deadline`)
@@ -74,7 +74,7 @@ three `exit_reason*` fields, and commits — so the run's first real declaration
 the only one on the branch.
 
 **Then run the doctor — before anything else reads the worktree.** Run
-`scripts/spawn-orchestrator.sh doctor --dir <run-worktree> --run-id <run_id>
+`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" doctor --dir <run-worktree> --run-id <run_id>
 --questions .auto-pilot/QUESTIONS.md [--handler <h>]`
 ([`run-state.md`](run-state.md) "Run doctor"). `--resume`'s reconciliation pass
 **is** the doctor, run once at the top of resume — the same seven-invariant
@@ -102,12 +102,21 @@ half, the scout's **capability join**, must re-run against the current
 environment — and **base freshness**. As at launch, a hard failure here
 **BLOCKS THE RESUME**, fail-closed the same way.
 
-**Less-claude capability join.** Read `run_profile` and its profile fields from
-the selected `RUN.md` before re-running the join. When it is `less-claude`,
-re-verify `cao`, `cao-run`, and `cao-server` on `PATH` and `nc -z localhost
-9889`; a missing binary or non-responding `cao-server` **BLOCKS THE RESUME**.
-Then re-check every recorded `cao_coder_mapping` route against the current CAO
-fleet. Do not restart the daemon or downgrade the profile during resume.
+**Capability join, including the less-claude CAO gate.** Re-run the same one
+call launch step 6 used:
+
+```bash
+"${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh" --scout-run-md .auto-pilot/RUN.md
+```
+
+against the selected `RUN.md` on the resumable branch. Every task's `coder`
+cell and (for a `less-claude` run) `cao_coder_mapping` already exist from
+launch, so this one call re-verifies both halves at once: each task's
+backend on `PATH`, and — only when any task routes to `cao` —
+`cao`/`cao-run`/`cao-server` on `PATH`, the daemon responding at
+`localhost:9889`, and every `cao_coder_mapping` route still in the fixed CAO
+fleet. A `no-go` **BLOCKS THE RESUME**, naming the gap. Do not restart the
+daemon or downgrade the profile during resume.
 
 **Locate the run-state branch.** `--resume` takes a `<source>`, not a `run_id`,
 but run-state branches are named `auto-pilot/<run_id>`

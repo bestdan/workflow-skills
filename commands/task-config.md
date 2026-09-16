@@ -14,7 +14,7 @@ This command is a thin dispatcher. The per-handler setup logic (preflight checks
 
 ## Handler capability matrix
 
-Handler feature parity is jagged — `linear` now supports every verb in the table, `repo-pr` supports all but `reoptimize`, and the CLI-backed `gh-issue`/`jira` are thinner still. This table is the **single source of truth** for which verbs each handler supports; step 5 reads it to warn the user about what they're opting out of. Keep it in sync as handlers gain verbs (see "Adding a handler" in `CONTRIBUTING.md`).
+Handler feature parity is jagged — `linear` now supports every verb in the table, `repo-pr` supports all but `reoptimize`, and the CLI-backed `gh-issue`/`jira` are thinner still (`gh-issue` less so since it gained native reoptimize). This table is the **single source of truth** for which verbs each handler supports; step 5 reads it to warn the user about what they're opting out of. Keep it in sync as handlers gain verbs (see "Adding a handler" in `CONTRIBUTING.md`).
 
 | Verb (command)                      | `repo-pr` | `gh-issue` | `jira` | `linear` |
 | ----------------------------------- | --------- | ---------- | ------ | -------- |
@@ -22,17 +22,20 @@ Handler feature parity is jagged — `linear` now supports every verb in the tab
 | list (`/list-tasks`)                | yes       | yes        | yes    | yes      |
 | promote (`/promote-tasks`)          | yes       | yes        | yes    | yes      |
 | do — single (`/do-tasks`)           | yes       | yes        | yes    | yes      |
-| process — batch (`/do-tasks --all`) | yes       | no         | no     | yes      |
+| process — batch (`/do-tasks --all`) | yes       | opt        | no     | yes      |
 | archive (`/archive-tasks`)          | yes       | hygiene    | opt    | yes      |
-| reoptimize (`/reoptimize-tasks`)    | no        | report     | no     | yes      |
+| reoptimize (`/reoptimize-tasks`)    | no        | yes        | no     | yes      |
+| reconcile (`/reconcile-tasks`)      | no        | audit      | no     | yes      |
 
-`linear` is the most complete handler — it now supports **every** verb in the table, including batch process and reoptimize. `repo-pr` supports all but `reoptimize` (its tasks are local plan files — reoptimize those directly). `jira` and `gh-issue` add list, promote, and single `do` but **not** batch process. Unsupported verbs aren't broken — the work just lives in the external tracker (your Jira board, `gh issue list`, Linear) instead of through these commands.
+`linear` is the most complete handler — it now supports **every** verb in the table, including batch process and reoptimize. `repo-pr` supports all but `reoptimize` (its tasks are local plan files — reoptimize those directly). `gh-issue` batch process is **`opt`** — the machinery is there (one dispatched cloud session per dependency-ready issue, blockers read off GitHub's native `blocked_by` graph), but it is **off by default**: this handler's label writes run a plugin script, and a cloud session does **not** install this plugin from a committed `.claude/settings.json` — probed 2026-09-05, `dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md`. Installing the plugin is necessary but not sufficient: every phase of this handler shells out to `gh`, and the probed session's `gh` credential failed on reads as well as writes. A repo whose cloud environment installs the plugin some other way **and** whose sessions have a working `gh` credential sets `gh-issue.remote_batch: true`; otherwise `--all` degrades to a single foreground claim. `jira` adds list, promote, and single `do` but **not** batch process. Unsupported verbs aren't broken — the work just lives in the external tracker (your Jira board, `gh issue list`, Linear) instead of through these commands.
 
-**Archive** (`/archive-tasks`) retires terminal-state work past an age threshold; support is jagged: `repo-pr` moves stale `done` files to `dev_docs/tasks/_archive/`; `linear` is the load-bearing case (native team auto-archive plus a GraphQL `issueArchive` backstop) because Linear's free plan caps a workspace at **250 active issues**; `gh-issue` is **hygiene only** (GitHub has no cap and no true archive — it just labels long-closed issues `archived`); `jira` transitions terminal issues to a configured `archive_status` where the project has one and is otherwise an **opt-in no-op** (native archival is Jira Premium). See each handler's `*-archive.md`.
+**Archive** (`/archive-tasks`) retires terminal-state work past an age threshold; support is jagged: `repo-pr` moves stale `done` files to `dev_docs/tasks/_archive/`; `linear` is the load-bearing case (native team auto-archive plus a GraphQL `issueArchive` backstop) because Linear's free plan caps a workspace at **250 non-archived issues of any state** — completing or cancelling one does not free a slot, only archiving does; `gh-issue` is **hygiene only** (GitHub has no cap and no true archive — it just labels long-closed issues `archived`); `jira` transitions terminal issues to a configured `archive_status` where the project has one and is otherwise an **opt-in no-op** (native archival is Jira Premium). See each handler's `*-archive.md`.
 
-`reoptimize` (`/reoptimize-tasks`) is the exception that runs _against_ the tracker graph rather than the local files. **`linear`** applies relation edits, priority, and duplicates natively. **`gh-issue`** is `report` — GitHub Issues have no native dependency edge, so dependency findings surface as a report plus a suggested `Blocked by:`/`Related:` body footer line rather than a real link; priority/label fixes still apply via `gh issue edit`. `jira` re-optimize is a planned follow-up, and `repo-pr` is `no` because its tasks are local plan files — re-optimize those directly (or `/push-plan` to a tracker first).
+`reoptimize` (`/reoptimize-tasks`) is the exception that runs _against_ the tracker graph rather than the local files. **`linear`** applies relation edits, priority, and duplicates natively. **`gh-issue`** applies dependency edits natively too: it reads, creates and removes the same `blocked_by` edge `/push-plan` draws and `/do-tasks` reads, and detects cycles over that real graph. The `Blocked by:` body footer is a human-readable echo of an edge that exists, never a substitute for one. `Related:` and `duplicateOf` have no native counterpart on GitHub and stay prose. `jira` re-optimize is a planned follow-up, and `repo-pr` is `no` because its tasks are local plan files — re-optimize those directly (or `/push-plan` to a tracker first).
 
-`/do-tasks` is the single execute verb across handlers: executes a single task by default, `--all` / `-n N` for batch dispatch on `repo-pr` and `linear` (Linear dispatches one remote session per dependency-ready issue, bounded by the WIP limit). On `gh-issue` and `jira` it claims and executes one issue in the current session.
+`reconcile` (`/reconcile-tasks`) fixes issues sitting in the wrong state against a **closed** rule table, and the two supporting handlers reconcile different things. **`linear`** repairs drift between an issue's column and its PR — the four rows in `commands/handlers/linear-reconcile.md`. **`gh-issue`** is `audit`: on GitHub the open PR **is** the review state and a merge closes the issue natively, so that drift cannot occur; what can drift is the label state model, which the web UI can edit by hand. Its four rows check the `labels.yml` invariants, and two of them write — row 1 and row 4 (see `commands/handlers/gh-issue-reconcile.md`). `repo-pr` is `no` because a merged PR **is** its done signal, and `jira` is `no` because its GitHub integration or smart commits transition the issue natively.
+
+`/do-tasks` is the single execute verb across handlers: executes a single task by default, `--all` / `-n N` for batch dispatch on `repo-pr` and `linear` (each dispatches one remote session per dependency-ready task or issue, bounded by the WIP limit), and on `gh-issue` **when the repo opts in** (`gh-issue.remote_batch: true`) — absent or `false`, `gh-issue` `--all` degrades to a single foreground claim in the current session. On `jira` it claims and executes one issue in the current session.
 
 ## Steps
 
@@ -95,6 +98,7 @@ gh-issue:
   repo: owner/name
   labels: [follow-up]
   assignees: []
+  # branch_prefix: bestdan/   # optional — prepended verbatim to the /do-tasks claim branch, which is `<branch_prefix>task-<issue number>`; empty by default, giving `task-142`
 # archive_after: 30          # optional, top-level — default /archive-tasks age threshold (days)
 ```
 
@@ -118,7 +122,7 @@ jira:
 handler: linear
 wip_limit: 3 # top-level — per-project default each linear.projects entry inherits unless overridden
 linear:
-  team: PreThink # team NAME (as shown in Linear) or UUID id — never the team key like "PRE"
+  team: Platform # team NAME (as shown in Linear) or UUID id — never the team key like "PLAT"
   default_priority: 3
   projects: # replaces scalar default_project; absent/empty → whole team
     - id: ebbc284b-0000-0000-0000-000000000000 # required id/UUID; optional per-entry wip_limit/max_estimate
@@ -163,8 +167,8 @@ Tell the user:
 - **The handler's supported and unsupported verbs**, read from the capability matrix above. Name them explicitly so the user knows what they've opted into. For example:
   - `repo-pr`: "`repo-pr` runs the full loop: /add-task, /list-tasks, /promote-tasks, /do-tasks, /archive-tasks (moves stale done files to dev_docs/tasks/_archive/)."
   - `jira`: "`jira` supports: /add-task (lands a complete, unblocked task in `ready_status` when that key is set — otherwise it stays in the project's initial status), /list-tasks, /promote-tasks (uses `ready_status`/`refinement_status` if set, else prompts), /do-tasks (single — needs `ready_status` set), /archive-tasks (only when `archive_status` is set — native Jira archival is Premium). Not supported: batch /do-tasks --all. You can still manage these in Jira directly."
-  - `gh-issue`: "`gh-issue` supports: /add-task, /list-tasks, /promote-tasks, /do-tasks (single), /archive-tasks (hygiene only — GitHub has no issue cap; it just labels long-closed issues). Not supported: batch /do-tasks --all. You can still manage these in GitHub directly."
-  - `linear`: "`linear` supports: /add-task, /list-tasks, /promote-tasks, /do-tasks (single and batch /do-tasks --all — one remote session per dependency-ready issue, bounded by the WIP limit), /archive-tasks (native auto-archive + a GraphQL backstop to stay under Linear's 250-active-issue cap). You can still manage issues in Linear directly."
+  - `gh-issue`: "`gh-issue` supports: /add-task, /list-tasks, /promote-tasks, /do-tasks (single; batch /do-tasks --all is opt-in via `gh-issue.remote_batch: true`, and leave it off unless your cloud environment installs this plugin itself and gives sessions a working gh credential — probed 2026-09-05, a committed .claude/settings.json did not install the plugin, and the session's gh was uncredentialed on reads as well as writes), /archive-tasks (hygiene only — GitHub has no issue cap; it just labels long-closed issues). You can still manage these in GitHub directly."
+  - `linear`: "`linear` supports: /add-task, /list-tasks, /promote-tasks, /do-tasks (single and batch /do-tasks --all — one remote session per dependency-ready issue, bounded by the WIP limit), /archive-tasks (native auto-archive + a GraphQL backstop to stay under Linear's non-archived-issue cap). You can still manage issues in Linear directly."
 - **For `repo-pr`:** that the config (and the task files under `dev_docs/tasks/`) are meant to be **committed and shared** — no exclude was added — so they should commit `.task-config.yml` for teammates to pick up the same destination.
 - **For `gh-issue` / `jira` / `linear`:** that `dev_docs/tasks/` was added to the repo's local git exclude, so the config stays local and out of `git status` (rerun the guarded `git check-ignore … || echo …` command above on any other clone). If they instead want teammates to share this destination, they can **commit** `.task-config.yml` rather than excluding it.
 - They can now run `/add-task`, or re-run `/task-config` to switch handlers.

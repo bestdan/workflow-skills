@@ -24,3 +24,7 @@ cat memo.filled.md | claude -p "Fill in the {{narrative:rationale}} section with
 ```
 
 The first two steps are deterministic. Step 3 regenerates prose from the data-filled document — re-run it anytime without touching the model.
+
+## Deriving the claim, not just the value
+
+The executive summary calls the lead over the runner-up "decisive". That word is `recommendation.margin_verdict`, computed in `model.py` from the margin and a stated threshold — it is not typed into the template. Change a vendor's price so the margin falls under the threshold, re-run both steps, and the memo says "narrow" instead. See "Derive the claim, not just the value" in `../SKILL.md`.
