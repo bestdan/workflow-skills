@@ -275,11 +275,20 @@ probe is the specific error this amendment is correcting:
 earlier draft cited) justifies the body footer on the grounds that a cloud routine
 cannot read the edge in any form. **That premise is false in both environments as of
 2026-09-16** — the session measured here, and the routine measured below. The footer now
-has no measured limitation behind it. Track it with
-[#500](https://github.com/bestdan/workflow-skills/issues/500), which is already open
-against `/push-plan` writing footers instead of native edges. **Removing the footer is
-not thereby decided** — that is a behaviour change with its own consequences, and this
-record's job is to say the reason for it is gone, not to make the call.
+has no measured limitation behind it. **Removing the footer is not thereby decided** —
+that is a behaviour change with its own consequences, and this record's job is to say the
+reason for it is gone, not to make the call.
+
+> **Correcting an earlier draft of this paragraph, 2026-09-17.** It pointed at
+> [#500](https://github.com/bestdan/workflow-skills/issues/500) as the open issue that
+> owned footer removal. **#500 is CLOSED/COMPLETED and never owned that.** It was
+> already delivered by [#444](https://github.com/bestdan/workflow-skills/pull/444)
+> (merged 2026-09-02, v2.17.0) — five days before #500 was filed — and its closing note
+> records that the `Blocked by:` footer was **kept alongside the native edge on
+> purpose**, as that issue's own option 1. So `/push-plan` has written native edges since
+> v2.17.0, and keeping the footer beside them was a deliberate choice, not an oversight
+> awaiting a decision. **No open issue owns footer removal.** Anyone who wants it removed
+> is reopening a settled call and should say so.
 
 ### 2026-09-16: the same read, from a routine
 

@@ -736,8 +736,11 @@ yet speak (see `claim-lock.md`).
 > reason the flag stays `false` has narrowed.** The connector is not the only
 > credentialed channel: measured in a routine, plain `curl` **reads** the API and
 > **PATCHes an issue's labels** (`HTTP 200`), while the ref path stays refused. So the
-> 09-05 403s were about **`gh`'s** credential, not about a closed environment, and the
-> handler's own writes have an unattended route that is neither `gh` nor the connector.
+> 09-05 403s **do not show a closed environment** — what caused them is still open, and
+> this note must not be read as blaming `gh`: four variables differ between those
+> observations and no run has isolated one. The load-bearing part is the positive
+> finding, that the handler's own writes have an unattended route which is neither `gh`
+> nor the connector.
 >
 > **This does not flip the gate.** The plugin half is still binding, and the scripts
 > that would do the writing call `gh api` rather than `curl` — and `gh` is absent from a
