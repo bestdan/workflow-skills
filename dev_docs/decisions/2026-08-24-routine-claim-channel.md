@@ -14,9 +14,10 @@ claim was taken from documentation rather than from a measurement.
 - The first version asserted that a cloud session "runs pinned to a fixed
   `claude/<session>` branch and cannot create `task/<KEY>`" — so the ref lock was
   described as unavailable to routines outright. Removed in `08a6642`.
-- The second asserted that the proxy refused GitHub API writes outright. That is true
-  of the raw HTTP path and false of the MCP connector, which is the credentialed one —
-  so the conclusion drawn from it was wrong.
+- The second asserted that the proxy refused GitHub API writes outright. ~~That is true
+  of the raw HTTP path~~ **narrowed 2026-09-17: true of the ref path only — issue writes
+  over raw HTTP are permitted, see the amendment below** — and false of the MCP
+  connector, which is credentialed — so the conclusion drawn from it was wrong.
 
 Neither survived contact with a probe.
 

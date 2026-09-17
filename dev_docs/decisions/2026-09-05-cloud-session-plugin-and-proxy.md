@@ -361,8 +361,11 @@ PATCH /repos/bestdan/workflow-skills/issues/723   → HTTP 200 (full issue objec
 labels before: ['prio:3', 'est:2']   labels after: ['prio:3', 'est:2']   state: closed
 ```
 
-No policy error of any kind — against the same proxy that refused the ref path minutes
-earlier, carrying the same token.
+No policy error of any kind — against the same proxy, in the same environment, minutes
+after the ref path was refused, carrying the same `proxy-injected` placeholder. **Not
+"the same token":** the real credential is substituted by the proxy and was never
+visible, so whether both requests carried the same one is unobserved. What was held
+constant is the environment and the placeholder.
 
 **So the refusal message meant what it said.** "Write access to **this GitHub API path**
 is not permitted" is path-scoped. Reading it as "writes are blocked" would take a true
