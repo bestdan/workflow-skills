@@ -258,28 +258,82 @@ probe is the specific error this amendment is correcting:
 - **One session, one repo, one moment.** `bestdan/workflow-skills` was that session's own
   source repo. Nothing here says an unattached repo is reachable; the 09-08 scoping
   finding suggests it would not be.
-- **Interactive cloud session ≠ scheduled routine.** This file has drawn that line
-  repeatedly and it still stands unmeasured. The routines probed in August had neither
-  `gh` nor a working token. **Do not conclude a routine can do this** — probe it.
+- **Interactive cloud session ≠ scheduled routine.** ~~This file has drawn that line
+  repeatedly and it still stands unmeasured.~~ **Answered 2026-09-16 — a routine can do
+  it too.** See [2026-09-16: the same read, from a
+  routine](#2026-09-16-the-same-read-from-a-routine).
 - **Reads only.** No write was attempted through this path. `POST`/`DELETE` on the
   dependency endpoints is untested here, and the connector remains the measured write
-  channel.
-- **Where the token comes from is unresolved.** Whether `$GH_TOKEN` now holds a real
+  channel. **Still true after the 09-16 routine run**, which was also reads-only.
+- **Where the token comes from is unresolved.** ~~Whether `$GH_TOKEN` now holds a real
   credential, or still holds `proxy-injected` with the egress proxy substituting one, was
-  not checked — `echo "${#GH_TOKEN} ${GH_TOKEN:0:4}"` settles it in one command and
-  decides whether the capability travels off this proxy path. **Worth capturing on the
-  next cloud session that runs for any reason.**
+  not checked.~~ **Answered 2026-09-16: it is the placeholder, and the proxy substitutes.**
+  See the routine section below.
 
 **Consequence for the `Blocked by:` footer.** `commands/push-plan.md` §5's preamble
 (the "Its strongest reason is the routine channel" paragraph, **not** §5.5, which an
 earlier draft cited) justifies the body footer on the grounds that a cloud routine
-cannot read the edge in any form. For a cloud **session** that premise is now false;
-the paragraph says "routine", so it is not thereby falsified — but its sibling
-premise just was. The footer's remaining defence is
-the routine case above, which is unmeasured rather than established — so the footer is
-resting on an open question, not on a measured limitation. Track that with
+cannot read the edge in any form. **That premise is false in both environments as of
+2026-09-16** — the session measured here, and the routine measured below. The footer now
+has no measured limitation behind it. Track it with
 [#500](https://github.com/bestdan/workflow-skills/issues/500), which is already open
-against `/push-plan` writing footers instead of native edges.
+against `/push-plan` writing footers instead of native edges. **Removing the footer is
+not thereby decided** — that is a behaviour change with its own consequences, and this
+record's job is to say the reason for it is gone, not to make the call.
+
+### 2026-09-16: the same read, from a routine
+
+**A scheduled cloud routine read the dependency edge.** Routine
+`trig_01KpwuLtYj74EJ954dPHVwpH`, run `cse_01Dg1yyyDLSTKykKZKSxpQ7v`, environment
+`Linear Tidy Routine`, sources `bestdan/workflow-skills` + `bestdan/dotfiles`,
+`claude-sonnet-5`, 74s, reads only.
+
+```
+curl HTTP 200
+[ { "url": "https://api.github.com/repos/bestdan/workflow-skills/issues/692", … } ]
+```
+
+`#691`'s `blocked_by` returned **#692**, matching the live board. `probe-cloud-deps.sh`
+agreed independently and exited 0.
+
+**The token is the placeholder, and the read still worked. That is the finding.**
+
+```
+GH_TOKEN len=14 first4=prox
+GITHUB_TOKEN len=14
+```
+
+Both hold the literal string `proxy-injected` — not a credential. So **the egress proxy
+substitutes a real credential on outbound HTTPS**, and the capability belongs to the
+proxy path rather than to anything the environment holds. Two consequences:
+
+- "Does this session have a working token?" is the wrong question. It does not, and it
+  reads the API anyway.
+- The capability does **not** travel. Anything running off this proxy path — a local
+  shell, a runner, a different egress — has to be measured separately.
+
+**What did NOT happen: the controlled comparison.** `gh` was **absent**, so only one
+client was tested and no gh-side result exists. The run was designed to settle whether
+`gh` specifically is what fails, by running both clients in one session; it did not.
+**So "the client is the barrier" remains unproven** — `curl` succeeding is a positive
+result that needs no control, but it is not evidence about `gh`.
+
+**An unexplained contradiction, recorded rather than guessed at.** `bestdan/dotfiles`
+**was** a source and the setup script **did** run to completion, yet `gh` was absent.
+Finding 1 above establishes across eight runs that `gh` arrives from the `dotfiles`
+setup script. Either the `Linear Tidy Routine` environment supplies its own setup script
+in place of the repo's, or finding 1 is narrower than it reads. **Not diagnosed** — no
+second run was made, and the two readings are not distinguished by anything measured.
+
+**What this does NOT establish**, same discipline as the session section above:
+
+- **Reads only, again.** No write was attempted. The 2026-08-24 routine record measured
+  `POST`/`DELETE` on `/git/refs` returning `403 … not permitted through this proxy`, a
+  **different** refusal from the read path — so `claim-lock.md`'s "a routine cannot
+  release" is untouched by this and still stands. A write probe is the obvious next one.
+- **One routine, one environment, one repo**, and that repo was a cloned source. Nothing
+  here says an unattached repo is reachable.
+- **`gh` untested**, per above.
 
 ### 2026-09-08: the credentialed-attach experiment, and why it did not run here
 

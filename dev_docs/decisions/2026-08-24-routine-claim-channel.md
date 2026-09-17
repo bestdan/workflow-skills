@@ -27,21 +27,40 @@ not re-derive routine behaviour from documentation.** Probe it.
 
 A routine reaches GitHub two ways, and they do not behave alike.
 
-### Raw HTTP — uncredentialed
+### Raw HTTP — uncredentialed for writes, and **credentialed for reads**
+
+> **Amended 2026-09-16, and the heading changed with it.** A routine read a GitHub
+> dependency edge over plain `curl` — `HTTP 200`, correct data — so "uncredentialed" is
+> wrong as a blanket description of this channel. **The write findings below are
+> untouched and still govern `claim-lock.md`.** Run
+> `cse_01Dg1yyyDLSTKykKZKSxpQ7v`; full measurement in
+> [`2026-09-05-cloud-session-plugin-and-proxy.md`](2026-09-05-cloud-session-plugin-and-proxy.md)
+> → "2026-09-16: the same read, from a routine".
 
 - `gh` is **not installed**. Absent from `PATH`, and absent from
-  `find / -maxdepth 4 -name gh -type f`.
-- `curl` to `api.github.com` carries **no token**.
+  `find / -maxdepth 4 -name gh -type f`. **Still true 2026-09-16**, including in a run
+  that sourced `bestdan/dotfiles` — see the 09-16 section for why that is unexplained.
+- ~~`curl` to `api.github.com` carries **no token**.~~ **Superseded 2026-09-16.**
+  `$GH_TOKEN` holds the literal placeholder `proxy-injected` (len 14) — so "no token" is
+  literally right and was the wrong thing to measure. **The egress proxy substitutes a
+  real credential**, and the read succeeds carrying the placeholder. Read the token
+  variable as saying nothing about what the channel can do.
 - `POST` and `DELETE` on `/git/refs` return:
 
   ```
   403 Write access to this GitHub API path is not permitted through this proxy.
   ```
 
-- Read behaviour on that path was **inconsistent between runs**, so it is not
-  dependable for reads either.
+  **Not retested on 09-16** (that run was reads-only), and note this refusal is worded
+  differently from anything on the read path — so the reads result does **not** carry
+  over to it. This is the finding `claim-lock.md` rests on, and it stands.
 
-Consequence: the `gh api` acquire form in `claim-lock.md` is **local-only**.
+- Read behaviour on that path was **inconsistent between runs**, so it is not
+  dependable for reads either. **That is about `/git/refs` specifically**; the 09-16
+  read was against `/issues/{n}/dependencies/blocked_by` and was clean.
+
+Consequence: the `gh api` acquire form in `claim-lock.md` is **local-only** — still
+true, and now for a sharper reason: `gh` is absent rather than merely unusable.
 
 ### The GitHub MCP connector — authenticated
 
