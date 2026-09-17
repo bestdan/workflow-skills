@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.58.0] - 2026-09-17
+
+### Features
+
+- backfill prio and est on an already-scored issue [#750] (#752) (def993b)
+
 ## [2.57.1] - 2026-09-17
 
 ### Fixes
