@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.58.1] - 2026-09-17
+
+### Fixes
+
+- the proxy's write block is path-scoped, not blanket [N/A] (#751) (96c9298)
+
 ## [2.58.0] - 2026-09-17
 
 ### Features
