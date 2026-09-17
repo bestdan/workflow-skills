@@ -36,6 +36,14 @@ A routine reaches GitHub two ways, and they do not behave alike.
 > `cse_01Dg1yyyDLSTKykKZKSxpQ7v`; full measurement in
 > [`2026-09-05-cloud-session-plugin-and-proxy.md`](2026-09-05-cloud-session-plugin-and-proxy.md)
 > → "2026-09-16: the same read, from a routine".
+>
+> **Amended again 2026-09-17: the write block is PATH-SCOPED, so "for writes" is too
+> broad as well.** The same routine `PATCH`ed an issue's labels and got `HTTP 200`. The
+> ref refusal below is real and specific to **that path** — it is not a statement about
+> writes in general, and the refusal's own wording ("this GitHub API path") says so. Run
+> `cse_012mi73fBwpCdckjPF3KKhts`; full measurement in the companion record →
+> "2026-09-17: the proxy's write block is PATH-SCOPED". **Read every claim in this
+> section as scoped to the endpoint it was measured on.**
 
 - `gh` is **not installed**. Absent from `PATH`, and absent from
   `find / -maxdepth 4 -name gh -type f`. **Still true 2026-09-16**, including in a run

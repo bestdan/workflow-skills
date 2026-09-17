@@ -327,12 +327,12 @@ second run was made, and the two readings are not distinguished by anything meas
 
 **What this does NOT establish**, same discipline as the session section above:
 
-- **Reads only in this run — and the write probe has since been run.** Measured the same
-  day, runs `cse_01R2HLXrknbeDW8NuK8bBjYP` and `cse_01EvGKZQfMFPGrfSSucrNkC3`: `DELETE`
-  and `POST` on `/git/refs` both return `403 Write access to this GitHub API path is not
-  permitted through this proxy`, word for word what 2026-08-24 measured. So the
-  asymmetry is real and now measured in one environment minutes apart — **reads
-  credentialed, writes refused at the proxy** — and `claim-lock.md` stands.
+- **Reads only in this run — and the write probes have since been run.** Measured the
+  same day, runs `cse_01R2HLXrknbeDW8NuK8bBjYP` and `cse_01EvGKZQfMFPGrfSSucrNkC3`:
+  `DELETE` and `POST` on the ref path both return `403 Write access to this GitHub API
+  path is not permitted through this proxy`, word for word what 2026-08-24 measured — so
+  `claim-lock.md` stands. **But "writes are refused" is the wrong generalisation from
+  that; see the next section.**
 
   **Note the two refusals are different in kind**, which is why neither settles the
   other. The write path fails with a **proxy policy** message; the read path, when
@@ -341,6 +341,61 @@ second run was made, and the two readings are not distinguished by anything meas
 - **One routine, one environment, one repo**, and that repo was a cloned source. Nothing
   here says an unattached repo is reachable.
 - **`gh` untested**, per above.
+
+### 2026-09-17: the proxy's write block is PATH-SCOPED — issue writes are permitted
+
+**A routine PATCHed an issue's labels and it was allowed.** Run
+`cse_012mi73fBwpCdckjPF3KKhts`, same environment as the read and ref-write probes.
+
+```
+PATCH /repos/bestdan/workflow-skills/issues/723   → HTTP 200 (full issue object)
+labels before: ['prio:3', 'est:2']   labels after: ['prio:3', 'est:2']   state: closed
+```
+
+No policy error of any kind — against the same proxy that refused the ref path minutes
+earlier, carrying the same token.
+
+**So the refusal message meant what it said.** "Write access to **this GitHub API path**
+is not permitted" is path-scoped. Reading it as "writes are blocked" would take a true
+observation about one endpoint and generalise it into a false claim about the
+environment — the same error this file has now made twice in the other direction.
+
+| routine, plain `curl`, one environment  | result                |
+| --------------------------------------- | --------------------- |
+| `GET` issue dependencies (`blocked_by`) | `200`                 |
+| `PATCH` an issue's labels               | **`200` — permitted** |
+| `POST` a ref                            | `403` proxy policy    |
+| `DELETE` a ref                          | `403` proxy policy    |
+
+**The write was a no-op by construction** — the probe read #723's labels and sent back
+exactly that set, so permission was tested without risking the board. Raw REST label
+writes replace the whole set, which is why it was built to read-then-echo rather than to
+send a hand-written list.
+
+**What this changes, and what it does not:**
+
+- **`claim-lock.md` is unaffected, and its reason is now sharper.** A routine cannot
+  release a claim ref — not because routines cannot write, but because **the ref path
+  specifically** is closed to them. The comment-token election stays correct.
+- **The handler's label writes have a working unattended channel that is not the MCP
+  connector.** That reframes "the handler owes an MCP branch for its label writes" from a
+  prerequisite into one of two options.
+- **It does NOT unblock `gh-issue.remote_batch`.** That gate needs **two** things
+  (`commands/do-tasks.md` §4): a dispatched session with the **plugin** installed, and a
+  working write channel. The plugin gap is untouched and remains binding — and the
+  handler's writes go through `gh-issue-state.py` calling `gh api`, not `curl`, while
+  `gh` is absent from a routine entirely.
+
+**What it does NOT establish:**
+
+- **Only the labels field, only a no-op.** A mutating PATCH was deliberately not
+  attempted. The proxy decides by path and method rather than payload, so a real change
+  is **expected** to behave the same — expected, not observed.
+- **One repo, one environment, one moment**, and `bestdan/workflow-skills` was that
+  session's own cloned source.
+- **Which other paths are writable is unmapped.** Comments, milestones, sub-issues and
+  the dependency endpoints were not tried. The only safe reading is per-path: measure the
+  one you need, and do not extrapolate from either result here.
 
 ### 2026-09-08: the credentialed-attach experiment, and why it did not run here
 

@@ -128,6 +128,13 @@ symmetric:
 > path with a separate refusal, and "reads work, so writes probably do" would have been
 > the same bad inference in the other direction. See
 > `dev_docs/decisions/2026-08-24-routine-claim-channel.md` → "Raw HTTP".
+>
+> **Sharpened 2026-09-17, and the distinction is the whole rule.** A routine is **not**
+> write-blocked in general: it `PATCH`es an issue's labels over `curl` and gets `HTTP
+> 200`. The proxy's block is **path-scoped**, and the ref path is one of the blocked ones.
+> So state the reason precisely — a routine cannot release a claim ref **because refs are
+> closed to it**, not because it cannot write. Anyone reasoning from "routines can't
+> write" will reach wrong conclusions about the label lifecycle, which works fine.
 
 |                  | left behind     | cost                                                                                                     |
 | ---------------- | --------------- | -------------------------------------------------------------------------------------------------------- |
