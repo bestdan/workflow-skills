@@ -28,12 +28,16 @@ of them decided:
 2. **Task 13 now has nothing standing behind it.** It used to gate task 10's fairness;
    task 10 closed without it. This repo has been outside unattended auto-pilot since
    2026-09-07 and **nothing is now scheduled to end that.**
-3. **The `Blocked by:` footer's "revisit at task 10" never happened, and the question has
-   no home.** Task 10 settled the assets question it was paired with and did not touch the
-   footer. **Checked 2026-09-15: no open issue tracks it** — the nearest, #500, asks the
-   opposite (that `/push-plan` also write native edges, since it currently writes only the
-   footer). So it lives only in this file, on an unmerged branch, which is how it slid
-   past task 10 in the first place. See "The footer" below.
+3. **The `Blocked by:` footer's justification is GONE — measured, not argued, and it is
+   now #500's to act on.** Task 10 never revisited it, but the question got answered
+   anyway: a cloud **session** and a scheduled **routine** both read `blocked_by` over
+   plain `curl`, so "an unattended agent cannot read the edge" is false in both
+   environments. Four runtime claims were corrected in
+   [PR #741](https://github.com/bestdan/workflow-skills/pull/741), **merged 2026-09-17**.
+   The footer is still written; removing it is a behaviour change owned by
+   [#500](https://github.com/bestdan/workflow-skills/issues/500), which is
+   `status:2_ready` and whose open design fork this closes: `/push-plan` should write
+   native edges and **not** a second copy. See "The footer" below.
 
 ## The launcher prompt is these three lines
 
@@ -288,25 +292,43 @@ rule**. Use `gh-issue-state.py --done`.
 aggregate line (#686 carries five blockers on one line, #679 three). `/reoptimize-tasks`
 reported all 27 imported edges as `edge_only` and the footers were applied.
 
-**The deciding argument was the routine channel, not consistency.**
-[`2026-08-24-routine-claim-channel.md`](../decisions/2026-08-24-routine-claim-channel.md)
-records a measured probe showing the **GitHub MCP connector exposes no dependency-edge
-tool**, so a cloud routine — no `gh` — cannot read `blocked_by` in any form, while it _can_
-read issue bodies. The 27 imported issues were the only dependencies on the board written
-without an echo, so they were exactly the set an unattended routine would misread as
-unblocked.
+**The argument that decided it has since been measured FALSE.** It ran: the GitHub MCP
+connector exposes no dependency-edge tool, and a cloud routine has no `gh`, so an
+unattended agent could not read `blocked_by` in any form while it _could_ read issue
+bodies. Both halves of that premise are true and the conclusion does not follow — the
+connector and `gh` were never the only channels.
 
-> **The honest counter, still unreviewed and untracked:** nothing consumes the footer
-> unattended
-> _today_. The only reader is `gh-issue-graph.py`, for reconciliation. This is a capability
-> argument, not a usage one — and with task 13 now unscheduled, the routine channel that
-> would consume it has no arrival date. **This was supposed to be revisited at task 10 and
-> was not.** Task 10 settled the Linear-assets half of that pairing and left this half
-> untouched. It is task 11's or nobody's.
+**Measured 2026-09-15 and 2026-09-16:** a cloud session and a scheduled routine each read
+`blocked_by` over plain `curl`, `HTTP 200` with correct data, carrying nothing but the
+literal `proxy-injected` placeholder — the egress proxy substitutes a credential. Four
+runtime claims were corrected in
+[PR #741](https://github.com/bestdan/workflow-skills/pull/741), merged 2026-09-17; the
+evidence is in
+[`2026-09-05-cloud-session-plugin-and-proxy.md`](../decisions/2026-09-05-cloud-session-plugin-and-proxy.md)
+→ "2026-09-16: the same read, from a routine".
+
+> **What survives for the footer, and what does not.** The unattended-reader argument is
+> dead — do not re-derive it. What is left is that the footer is visible in the body where
+> the dependency panel is easy to miss, and that a blocker held back by `--ready-only` has
+> no issue to link to and can only be recorded as prose. Those are human-legibility
+> reasons, and they are weaker than the one they replace.
+>
+> **The 27 footers on the board stay.** They cost nothing and rewriting provenance to
+> chase a decision is what this plan has repeatedly declined to do. What changes is what
+> `/push-plan` should write **next**, which is
+> [#500](https://github.com/bestdan/workflow-skills/issues/500)'s to decide — and the fork
+> it faced ("write both, or replace the footer with the edge?") is now closed on evidence.
 >
 > Note that imported bodies carry `Blockers not migrated:` for blockers outside the
 > selection — deliberately not spelled `Blocked by:`, because those blockers have no edge
 > and never can.
+
+**Writes are a different story, and that asymmetry is the durable fact.** The same routine
+was refused on `POST` and `DELETE` to `/git/refs` — `403 Write access to this GitHub API
+path is not permitted through this proxy`, word for word what 2026-08-24 measured. So
+reads are credentialed and writes are not, and `claim-lock.md`'s "a routine cannot
+release" stands. Re-measured deliberately rather than inherited, precisely because the
+read half of that same record had just fallen.
 
 ### Two import-selection facts worth not rediscovering
 
@@ -399,6 +421,16 @@ is not, and drift is what has been happening.
 ### What changed under this plan since the sections below were written
 
 Anything you read below predates these unless it says otherwise:
+
+- **2026-09-17 — the routine channel was re-measured and half of it was wrong.** A cloud
+  session and a scheduled routine both **read** `blocked_by` over plain `curl`; both are
+  **refused** on `POST`/`DELETE` to `/git/refs`. So reads are credentialed and writes are
+  not. Four runtime claims corrected and `claim-lock.md` re-confirmed in
+  [PR #741](https://github.com/bestdan/workflow-skills/pull/741), **merged**. The
+  `Blocked by:` footer's justification is gone; the footers already on the board stay.
+  **The `$GH_TOKEN` in those environments is the literal `proxy-injected` placeholder** —
+  the proxy substitutes a credential, so the capability belongs to the proxy path and
+  does not travel.
 
 - **Task 10 is done — the verdict is KEEP**, decided 2026-09-15 on day 0 of its own clock
   rather than run to term. Task 9 is done; #510–#516 are all closed and on `main`.
@@ -546,9 +578,11 @@ Consequences for the plan:
   16's acceptance criterion said flip it to `yes`. Do not — the premise that would have
   justified flipping is now measured false rather than merely unprobed, which is a
   stronger reason for the same default. **This deviation is settled, not pending.**
-- **The handler owes an MCP branch for its label writes.** It is the only route to a
-  working dispatched session, since `gh` does not work there. It still owes the same
-  `labels.yml` validate-then-replace rule.
+- **The handler owes an MCP branch for its label writes.** It is the only **measured**
+  route to a working dispatched session, and it still owes the same `labels.yml`
+  validate-then-replace rule. **"Only" is weaker than it was**: raw `curl` reads work
+  there now, and whether a label `PATCH` works is **untested** — see the label-write
+  question under "Open blockers".
 - **`claim-lock.md` no longer claims a dispatched session "usually can" acquire the
   ref.** PR #490 amended that sentence; the instruction (take the election) is unchanged.
 
@@ -636,9 +670,15 @@ Full evidence in
 and §10b of the requirements record. **All are dated snapshots — read them as what was
 true then.**
 
-**Channels.** A routine's credentialed channel is the GitHub MCP connector, which has
-**no dependency-edge tool**, and it can acquire the claim ref
-(`mcp__github__create_branch`) but **cannot release** it. A cloud session's credentialed
+**Channels.** ~~A routine's credentialed channel is the GitHub MCP connector~~ —
+**amended 2026-09-16: raw HTTPS is a credentialed channel too, for READS.** A routine
+reads the GitHub API over plain `curl` carrying the `proxy-injected` placeholder, because
+the egress proxy substitutes a credential; a cloud session does the same. So the
+connector is the credentialed channel for **writes**, not for everything. The connector
+still has **no dependency-edge tool**, and it can acquire the claim ref
+(`mcp__github__create_branch`) but **cannot release** it — re-measured 2026-09-16 on the
+raw path as well (`POST`/`DELETE` on `/git/refs` → `403 … not permitted through this
+proxy`), so that limit holds on every channel. A cloud session's credentialed
 channel is the same connector, for a different reason — `gh` is present there but its
 token does not work. A **GitHub Actions runner** is a third channel and is the one that
 is not credential-starved: measured 2026-09-02 by task 6
@@ -733,11 +773,23 @@ about cloud sessions. Probe it.
   auto-pilot today. **And it no longer gates anything.** It used to gate a like-for-like
   task 10; task 10 closed 2026-09-15 having weighed that unfairness and decided anyway. So
   what remains is the bare cost with no schedule behind it — the shape of thing that
-  drifts. If the footer above is ever to have its unattended reader, this is the task that
-  brings it.
+  drifts. ~~If the footer above is ever to have its unattended reader, this is the task
+  that brings it.~~ **That reason is spent**: the footer's unattended reader turned out
+  not to need task 13 at all, because a routine reads the edge directly. Task 13's cost is
+  now purely that this repo has no unattended auto-pilot.
 - **The handler owes an MCP branch for its label writes**, reusing `labels.yml` for the
-  same validate-then-replace rule. The probe promoted this from "for any channel without
-  `gh`" to **the** prerequisite for a working dispatched session. **No task owns it.**
+  same validate-then-replace rule. **No task owns it.**
+
+  > **And there is now a cheaper question to ask first, unasked.** The 09-16 write
+  > refusal was measured on `/git/refs`, and its wording is path-scoped — "Write access to
+  > **this GitHub API path** is not permitted through this proxy". Whether
+  > `PATCH /repos/{owner}/{repo}/issues/{n}` is refused the same way is **untested**, and
+  > it is the write this handler actually needs. If it is allowed, a dispatched session
+  > needs no MCP branch at all and `gh-issue.remote_batch` loses its blocker; if it is
+  > refused, the MCP branch is confirmed as the only route rather than assumed to be.
+  > **One `curl` in a routine settles it** — the same shape as the two probes already run.
+  > Do not infer it from the `/git/refs` result: that is the inference this plan has been
+  > wrong on twice.
 - **A crashed claim strands its issue, and nothing sweeps it.** A session that claims and
   dies before opening a PR leaves the issue assigned and on `status:3_started`; the
   candidate query excludes it on **both** counts, so no later run picks it up. Identical on
