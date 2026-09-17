@@ -28,16 +28,67 @@ of them decided:
 2. **Task 13 now has nothing standing behind it.** It used to gate task 10's fairness;
    task 10 closed without it. This repo has been outside unattended auto-pilot since
    2026-09-07 and **nothing is now scheduled to end that.**
-3. **The `Blocked by:` footer's justification is GONE — measured, not argued, and it is
-   now #500's to act on.** Task 10 never revisited it, but the question got answered
-   anyway: a cloud **session** and a scheduled **routine** both read `blocked_by` over
-   plain `curl`, so "an unattended agent cannot read the edge" is false in both
-   environments. Four runtime claims were corrected in
-   [PR #741](https://github.com/bestdan/workflow-skills/pull/741), **merged 2026-09-17**.
-   The footer is still written; removing it is a behaviour change owned by
-   [#500](https://github.com/bestdan/workflow-skills/issues/500), which is
-   `status:2_ready` and whose open design fork this closes: `/push-plan` should write
-   native edges and **not** a second copy. See "The footer" below.
+3. **The `Blocked by:` footer's justification is GONE, but NOTHING follows from that
+   about removing it.** Task 10 never revisited it; the question got answered anyway. A
+   cloud **session** and a scheduled **routine** both read `blocked_by` over plain
+   `curl`, so "an unattended agent cannot read the edge" is false in both environments.
+   Four runtime claims were corrected in
+   [PR #741](https://github.com/bestdan/workflow-skills/pull/741) and
+   [#751](https://github.com/bestdan/workflow-skills/pull/751), both **merged 2026-09-17**.
+
+   > **Correcting earlier drafts of this file, which said removal was "owned by #500".**
+   > **#500 is CLOSED/COMPLETED and never owned it.** It was already delivered by
+   > [#444](https://github.com/bestdan/workflow-skills/pull/444) (merged 2026-09-02,
+   > v2.17.0) — five days before #500 was filed — and #500's closing note records that
+   > the footer was **kept alongside the native edge on purpose**, as that issue's own
+   > option 1. So `/push-plan` has written native edges since v2.17.0, the footer beside
+   > them is a settled choice, and **no open issue owns removing it.** There was never
+   > an open design fork here; an earlier draft claimed one. Anyone who wants the footer
+   > gone is reopening a settled decision and should say so. See "The footer" below.
+
+## The board today, and the one thing that is actually blocking
+
+Measured 2026-09-17, on `main` at v2.58.1:
+
+|                           |                             |
+| ------------------------- | --------------------------- |
+| open issues               | **177**                     |
+| `status:2_ready`          | **74** (78 `auto:eligible`) |
+| `status:3_started`        | **0** — nothing in flight   |
+| stale `task/*` claim refs | **0** — the board is clean  |
+| unattended capability     | **none**                    |
+
+**74 ready issues, nothing running, and no automation that can touch them.** That is the
+state to hold in your head. `/auto-pilot` still stops at `skills/auto-pilot/SKILL.md:135`
+on any handler but `linear`/`repo-pr`, and `gh-issue.remote_batch` is `false`, so the only
+working path is foreground `/do-tasks`, one issue at a time, with a human present.
+
+**Do not mistake the probe work for progress on this.** Three probes in September
+corrected six false claims and confirmed `claim-lock.md`, which was worth doing — but they
+answered "what can a routine reach?", and the bottleneck is "what can drive a task?".
+Nothing measured so far moves it.
+
+**The three routes, and they are not equal:**
+
+1. **Task 13 — `/auto-pilot` gh-issue support.** The only route that ends with the board
+   working itself. Owner-deferred twice (09-02, 09-12) pending a new harness — but that
+   harness is moving (five commits to `skills/auto-pilot/` + `spawn-orchestrator.sh` since
+   09-01, latest #579), so **the reason for the deferral may have expired. Ask before
+   assuming it still holds.**
+2. **`remote_batch`.** Needs the plugin installed in the cloud environment — measured
+   working 2026-09-07 via an environment **setup script**, which is per-environment
+   config the owner sets and a repo cannot commit. Then the handler's `gh api` calls
+   still need a `gh` that a routine does not have. Two gaps; bigger than task 13.
+3. **Work the board in foreground.** No new capability, but 74 ready issues is a lot of
+   available work and `/do-tasks` functions today.
+
+**The prerequisite nobody owns.** A crashed claim strands its issue permanently (see
+"Open blockers"). Today that is harmless — 0 started, 0 stale refs — and it stops being
+harmless the moment anything unattended runs, scaling with the batch. Treat the sweep as a
+**precondition** for routes 1 and 2, not a follow-up.
+
+**Task 11 is bookkeeping, not capability.** It closes the plan — docs, asset removal, the
+#441 decision — and gets nothing running. Fine to do; it should not jump the queue.
 
 ## The launcher prompt is these three lines
 
@@ -313,11 +364,12 @@ evidence is in
 > no issue to link to and can only be recorded as prose. Those are human-legibility
 > reasons, and they are weaker than the one they replace.
 >
-> **The 27 footers on the board stay.** They cost nothing and rewriting provenance to
-> chase a decision is what this plan has repeatedly declined to do. What changes is what
-> `/push-plan` should write **next**, which is
-> [#500](https://github.com/bestdan/workflow-skills/issues/500)'s to decide — and the fork
-> it faced ("write both, or replace the footer with the edge?") is now closed on evidence.
+> **The 27 footers on the board stay**, and so does the one `/push-plan` writes on every
+> new plan. They cost nothing, and rewriting provenance to chase a decision is what this
+> plan has repeatedly declined to do. **What does NOT follow is a change to `/push-plan`.**
+> It has written the native edge _and_ the footer since v2.17.0 (#444), deliberately —
+> see the correction at the top of this file. The measurement below removes one argument
+> for the footer; it does not create a task.
 >
 > Note that imported bodies carry `Blockers not migrated:` for blockers outside the
 > selection — deliberately not spelled `Blocked by:`, because those blockers have no edge
@@ -578,11 +630,14 @@ Consequences for the plan:
   16's acceptance criterion said flip it to `yes`. Do not — the premise that would have
   justified flipping is now measured false rather than merely unprobed, which is a
   stronger reason for the same default. **This deviation is settled, not pending.**
-- **The handler owes an MCP branch for its label writes.** It is the only **measured**
-  route to a working dispatched session, and it still owes the same `labels.yml`
-  validate-then-replace rule. **"Only" is weaker than it was**: raw `curl` reads work
-  there now, and whether a label `PATCH` works is **untested** — see the label-write
-  question under "Open blockers".
+- **The handler owes an MCP branch for its label writes — but it is now one option, not
+  the only route.** Measured 2026-09-17 (#751): a routine `PATCH`ed an issue's labels
+  over plain `curl` and got **`HTTP 200`**. The proxy's write block is **path-scoped** —
+  the ref path is refused, the issues path is not. Whichever route is built still owes
+  the same `labels.yml` validate-then-replace rule. Two caveats the record carries: only
+  a **no-op** PATCH was observed (a mutating one is expected to behave the same,
+  expected not measured), and the handler's own writes go through `gh-issue-state.py`
+  calling `gh api`, while `gh` is absent from a routine outright.
 - **`claim-lock.md` no longer claims a dispatched session "usually can" acquire the
   ref.** PR #490 amended that sentence; the instruction (take the election) is unchanged.
 
@@ -780,16 +835,18 @@ about cloud sessions. Probe it.
 - **The handler owes an MCP branch for its label writes**, reusing `labels.yml` for the
   same validate-then-replace rule. **No task owns it.**
 
-  > **And there is now a cheaper question to ask first, unasked.** The 09-16 write
-  > refusal was measured on `/git/refs`, and its wording is path-scoped — "Write access to
-  > **this GitHub API path** is not permitted through this proxy". Whether
-  > `PATCH /repos/{owner}/{repo}/issues/{n}` is refused the same way is **untested**, and
-  > it is the write this handler actually needs. If it is allowed, a dispatched session
-  > needs no MCP branch at all and `gh-issue.remote_batch` loses its blocker; if it is
-  > refused, the MCP branch is confirmed as the only route rather than assumed to be.
-  > **One `curl` in a routine settles it** — the same shape as the two probes already run.
-  > Do not infer it from the `/git/refs` result: that is the inference this plan has been
-  > wrong on twice.
+  > **ANSWERED 2026-09-17 — the issues path is writable.** An earlier draft of this file
+  > posed this as the cheap unasked question; it has since been asked. A routine
+  > `PATCH`ed an issue's labels and got **`HTTP 200`** (#751), while the ref path stays
+  > `403`. The refusal's wording — "Write access to **this GitHub API path**" — was
+  > path-scoped and meant it.
+  >
+  > **So the MCP branch is no longer the only conceivable route, and `remote_batch` is
+  > NOT thereby unblocked.** That gate needs two things and the **plugin-install gap is
+  > the binding one** — untouched by any of this. The handler's writes also go through
+  > `gh-issue-state.py` calling `gh api`, and `gh` is absent from a routine. What changed
+  > is that "no working write channel" stops being a second independent blocker and
+  > becomes an implementation gap.
 - **A crashed claim strands its issue, and nothing sweeps it.** A session that claims and
   dies before opening a PR leaves the issue assigned and on `status:3_started`; the
   candidate query excludes it on **both** counts, so no later run picks it up. Identical on
