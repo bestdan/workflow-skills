@@ -15,3 +15,10 @@ gh-issue:
   # sessions that disagree about the prefix each acquire a ref the other cannot
   # see, and both think they won.
   branch_prefix: bestdan/
+  # Raised from the default 3 because /promote-tasks now backfills `est:`
+  # (commands/handlers/task-fill.md). The gate is exclusive, so the default
+  # would fail `est:3` — and on a 1/2/3/5 ladder 3 is the modal size, not an
+  # oversized task. At 5 the gate still catches est:5 and the over-ceiling
+  # est:8/est:13 the backfill records, which is the backstop it exists to be.
+  # The backlog measurement behind the number is in #742's pull request.
+  max_estimate: 5
