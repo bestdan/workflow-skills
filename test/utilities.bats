@@ -276,3 +276,81 @@ exit 128'
   assert_failure 2
   assert_output --partial 'git submodule update --init --recursive'
 }
+
+# --- probe-cloud-deps.sh -------------------------------------------------
+# Its entire output is a verdict about whether a credential can read a
+# dependency edge, so each classification branch is asserted separately. The
+# curl stub emits `<body>\n<http_code>` to match `curl -w '\n%{http_code}'`,
+# and branches on the requested URL so the baseline read and the dependency
+# read can be failed independently of each other.
+
+@test "cloud-deps probe: the expected edge reads as CAN" {
+  make_stub curl 'for a in "$@"; do url="$a"; done
+case "$url" in
+  *"/dependencies/blocked_by"*) printf "%s\n%s" "[{\"number\": 692}]" 200 ;;
+  *) printf "%s\n%s" "{\"full_name\": \"x/y\"}" 200 ;;
+esac'
+  GH_TOKEN=ghp_stub run bash "$REPO_ROOT/scripts/probe-cloud-deps.sh"
+  assert_success
+  assert_output --partial 'read the edge: #691 is blocked_by #692'
+  assert_output --partial 'CAN read dependency edges'
+}
+
+@test "cloud-deps probe: an empty 200 is a denial, never an answer of none" {
+  # The branch this probe exists for. A repo with no edges and a silent denial
+  # are indistinguishable by status code, so the known fixture edge is the only
+  # thing separating them -- an empty list must never read as a clean pass.
+  make_stub curl 'for a in "$@"; do url="$a"; done
+case "$url" in
+  *"/dependencies/blocked_by"*) printf "%s\n%s" "[]" 200 ;;
+  *) printf "%s\n%s" "{\"full_name\": \"x/y\"}" 200 ;;
+esac'
+  GH_TOKEN=ghp_stub run bash "$REPO_ROOT/scripts/probe-cloud-deps.sh"
+  assert_failure
+  assert_output --partial 'NO edges returned'
+  assert_output --partial 'CANNOT read dependency edges'
+}
+
+@test "cloud-deps probe: a failed baseline does not veto a successful edge read" {
+  # Regression test. The verdict used to be computed from the shared fail
+  # counter, so this input printed `PASS read the edge` and then `CANNOT read
+  # dependency edges` and exited 1 -- the script contradicting itself two
+  # lines apart.
+  make_stub curl 'for a in "$@"; do url="$a"; done
+case "$url" in
+  *"/dependencies/blocked_by"*) printf "%s\n%s" "[{\"number\": 692}]" 200 ;;
+  *) printf "%s\n%s" "{\"message\": \"Not Found\"}" 404 ;;
+esac'
+  GH_TOKEN=ghp_stub run bash "$REPO_ROOT/scripts/probe-cloud-deps.sh"
+  assert_success
+  assert_output --partial 'read the edge'
+  assert_output --partial 'CAN read dependency edges'
+  assert_output --partial 'the baseline check did not'
+}
+
+@test "cloud-deps probe: a 403 reports the denial rather than an empty read" {
+  make_stub curl 'for a in "$@"; do url="$a"; done
+case "$url" in
+  *"/dependencies/blocked_by"*) printf "%s\n%s" "{\"message\": \"Claude GitHub App\"}" 403 ;;
+  *) printf "%s\n%s" "{\"full_name\": \"x/y\"}" 200 ;;
+esac'
+  GH_TOKEN=ghp_stub run bash "$REPO_ROOT/scripts/probe-cloud-deps.sh"
+  assert_failure
+  assert_output --partial 'refused the call (HTTP 403)'
+  assert_output --partial 'Claude GitHub'
+}
+
+@test "cloud-deps probe: a missing python3 is inconclusive, not a denial" {
+  # Everything the script runs before this guard is a bash builtin, so BIN_DIR
+  # alone is a sufficient PATH -- and it holds no python3. Without the guard,
+  # the suppressed parse error leaves the result empty and the run reports a
+  # denial (exit 1) instead of an environment failure (exit 2).
+  #
+  # `$BASH` is absolute on purpose: adding /bin to PATH to find the shell would
+  # hand python3 back on any merged-/usr Linux, where /bin IS /usr/bin -- so the
+  # test would pass here and quietly assert nothing in CI.
+  make_stub curl 'printf "%s\n%s" "[]" 200'
+  PATH="$BIN_DIR" GH_TOKEN=ghp_stub run "$BASH" "$REPO_ROOT/scripts/probe-cloud-deps.sh"
+  assert_equal "$status" 2
+  assert_output --partial 'INCONCLUSIVE -- no python3'
+}

@@ -20,8 +20,16 @@ session `session_01ERAh8hmMbqq4Xu2hfqbEcA` and is recorded below.
 **Amended 2026-09-15, and this one overturns the file's headline conclusion.** A cloud
 session read a GitHub **issue dependency edge** successfully — the capability every
 version of this file, and the companion routine record, treated as unavailable. It did it
-with plain `curl` and the ambient `$GH_TOKEN`. **The barrier measured on 09-05 was `gh`,
-not the environment and not the credential.** See
+with plain `curl` and the ambient `$GH_TOKEN`. **So the conclusion that a cloud session
+has no working GitHub API access is false.** One counterexample settles that much.
+
+**Why `gh` failed on 09-05 stays open, and this amendment does not close it.** Four
+things differ between the two observations — ten days, a different source repo, a
+different client, and credential provisioning that was never inspected — so the pair
+cannot isolate any one of them as the cause. An earlier draft of this amendment said
+"the barrier measured on 09-05 was `gh`, not the environment and not the credential";
+that was a causal claim this evidence does not support, and it contradicted this
+amendment's own "What it does NOT establish" list one section down. See
 [2026-09-15: the API is reachable without `gh`](#2026-09-15-the-api-is-reachable-without-gh)
 before relying on anything below, and read finding 2 with that correction in hand.
 
@@ -211,8 +219,7 @@ curl -sS -H "Authorization: Bearer $GH_TOKEN" \
 → [ { "number": 692, … } ]
 ```
 
-**Two things in that session differ from every earlier one, and the second is the
-finding:**
+**Two things in that session differ from the 09-05 one, and the second is the finding:**
 
 - **There was no `gh` binary at all — and finding 1 predicts exactly that.** The source
   repo here was `bestdan/workflow-skills`, not `dotfiles`, and finding 1 established
@@ -221,17 +228,24 @@ finding:**
   run agreeing with it, not a changed image. **It also means the 09-05 `gh` failure was
   never the general case** — it was measured in the one configuration that happens to
   install `gh`.
-- **The ambient `$GH_TOKEN` authenticated against `api.github.com`.** On 09-05 the same
-  variable read the literal string `proxy-injected` and `gh auth status` called it
-  invalid.
+- **A request carrying `Authorization: Bearer $GH_TOKEN` was authenticated by
+  `api.github.com`.** Stated that narrowly on purpose: whether the variable held a real
+  credential, or still held `proxy-injected` with the egress proxy substituting one, was
+  **not inspected** — see the last bullet of "What it does NOT establish" below. On 09-05
+  the same variable read the literal string `proxy-injected` and `gh auth status` called
+  it invalid.
 
 **What this overturns.** This file's finding 2 says a cloud session has "no working
 credential in the session as provisioned", reading 403 on reads as well as writes, and
 the companion routine record reaches the same conclusion by a different route. **That is
 now too strong.** What was measured on 09-05 is that **`gh` could not authenticate**. The
 inference from there to "the environment has no GitHub API access" did not hold, and this
-probe is the counterexample. The endpoint, the credential and the egress path all work;
-the client was the broken part.
+probe is the counterexample.
+
+**What replaced that inference is smaller than it looks.** A path to the API exists in a
+cloud session; which of the four differences above accounts for `gh`'s 09-05 failure is
+not settled by this, and an earlier draft of this section overstated it as "the client
+was the broken part."
 
 **This was foreshadowed and not followed up.** Finding 6 already recorded that `git` is
 credentialed for the source repo where `gh` REST is not — same session, same repo,
@@ -256,9 +270,12 @@ probe is the specific error this amendment is correcting:
   decides whether the capability travels off this proxy path. **Worth capturing on the
   next cloud session that runs for any reason.**
 
-**Consequence for the `Blocked by:` footer.** `commands/push-plan.md` §5.5 justifies the
-body footer on the grounds that an unattended agent cannot read dependency edges in any
-form. For a cloud session that premise is now false. The footer's remaining defence is
+**Consequence for the `Blocked by:` footer.** `commands/push-plan.md` §5's preamble
+(the "Its strongest reason is the routine channel" paragraph, **not** §5.5, which an
+earlier draft cited) justifies the body footer on the grounds that a cloud routine
+cannot read the edge in any form. For a cloud **session** that premise is now false;
+the paragraph says "routine", so it is not thereby falsified — but its sibling
+premise just was. The footer's remaining defence is
 the routine case above, which is unmeasured rather than established — so the footer is
 resting on an open question, not on a measured limitation. Track that with
 [#500](https://github.com/bestdan/workflow-skills/issues/500), which is already open

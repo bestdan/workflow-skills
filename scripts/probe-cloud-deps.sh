@@ -23,6 +23,11 @@ API="${PROBE_API:-https://api.github.com}"
 
 pass=0
 fail=0
+# The VERDICT turns on this alone, not on the pass/fail counters. The baseline
+# check is a diagnostic that disambiguates a step-2 refusal; letting it into the
+# verdict lets the script print "PASS read the edge" and then report that the
+# environment cannot read edges.
+edge_ok=0
 note() { printf '  %s\n' "$1"; }
 ok() {
   printf 'PASS  %s\n' "$1"
@@ -65,6 +70,13 @@ echo
 
 if ! command -v curl >/dev/null 2>&1; then
   echo "RESULT: INCONCLUSIVE -- no curl."
+  exit 2
+fi
+# python3 parses the response below. Check it HERE rather than letting the parse
+# fail: its stderr is suppressed, so a missing interpreter would leave `found`
+# empty and take the empty-200 branch -- reporting a denial the probe never saw.
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "RESULT: INCONCLUSIVE -- no python3 to parse the response."
   exit 2
 fi
 
@@ -127,6 +139,7 @@ if isinstance(d, list):
     note "an empty 200 here is a silent denial, not an answer of 'none'"
   elif grep -qx "$EXPECT" <<<"$found"; then
     ok "read the edge: #$ISSUE is blocked_by #$EXPECT"
+    edge_ok=1
   else
     no "returned edges, but not the expected one"
     note "expected $EXPECT, got: $(printf '%s' "$found" | tr '\n' ' ')"
@@ -136,7 +149,11 @@ echo
 
 echo "=== result ==="
 echo "passed: $pass   failed: $fail"
-if [ "$fail" -eq 0 ]; then
+if [ "$edge_ok" -eq 1 ]; then
+  if [ "$fail" -ne 0 ]; then
+    note "(the edge read succeeded; the baseline check did not -- read the"
+    note " diagnostics above before trusting either.)"
+  fi
   echo "VERDICT: this environment CAN read dependency edges."
   echo "         An unattended agent here does not need the Blocked-by footer."
   exit 0
