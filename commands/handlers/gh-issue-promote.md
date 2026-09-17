@@ -73,16 +73,31 @@ Any candidate whose number appears in the list is a parent rollup — add it to 
 
 ### 4. Score each candidate
 
-For each candidate, run the **confidence check** from `skills/task/SKILL.md` — the **same judgment-based gate the file path uses** (`commands/promote-tasks.md` step 2), read against the GitHub issue per the field mapping `linear-promote.md` step 6 defines. GitHub issues carry no native `priority` or `estimate` field, so both live as the optional `prio:`/`est:` labels from `commands/handlers/assets/labels.yml`. Neither is required for a HIGH score, and this flow never backfills either — unlike `linear-promote.md` step 6, which writes a backfilled `estimate` into a native field. Scoring only reads `est:`, as the gate below.
+For each candidate, run the **confidence check** from `skills/task/SKILL.md` — the **same judgment-based gate the file path uses** (`commands/promote-tasks.md` step 2), read against the GitHub issue per the field mapping `linear-promote.md` step 6 defines. GitHub issues carry no native `priority` or `estimate` field, so both live as the `prio:`/`est:` labels from `commands/handlers/assets/labels.yml`.
+
+**Backfill `prio:` and `est:` first,** before scoring. The rules are defined once in `commands/handlers/task-fill.md` — the static `medium` default, the model-produced Fibonacci estimate, the over-ceiling rule, reason precedence, and the fact that a backfilled value is trusted downstream. Read it and apply it; do not re-derive any of it here.
+
+Its **`gh-issue` adapter** is this path's half, and two things in it are specific to GitHub:
+
+- **`prio:0` is highest**, the inverse of Linear's priority `0` (which means _none_). Encode from the symbolic value — `urgent prio:0 · high prio:1 · medium prio:2 · low prio:3` — and never from Linear's integer.
+- **This ladder admits `8` and `13`**, so this is the one handler that **records** an over-ceiling estimate rather than leaving the field unset. Write the honest number; the scope-fit check below still scores LOW.
+
+Both ride out on step 5's existing full-set PATCH — an argument change to the write the transition already makes, not a second write or a second round trip — and the LOW comment names the auto-set fields the way the Linear path's comment does. `dry-run` reports the intended backfills and writes nothing.
+
+If a relative path doesn't resolve, find it with **Glob** (`**/commands/handlers/task-fill.md`) and Read it.
+
+Scoring then reads the **backfilled** `est:` in the gate below. That is the point of backfilling here: an issue with no `est:` label used to pass the size gate unconditionally, which degraded a deterministic check into the judgment check it exists to backstop.
 
 **HIGH (→ promote)** requires ALL of:
 
 - `title` present and non-empty.
 - `body` contains acceptance-style content — a `## Acceptance Criteria` section (or an equivalent concrete, checkable outcome). A bare title or an "investigate X" body fails with `body missing acceptance criteria`.
 - `body` has no unresolved `## Open Questions` / `## TBD` content (an empty heading is fine) → otherwise `unresolved open questions`.
-- **The `est:` gate, when the issue carries an `est:` label.** Read `gh-issue.max_estimate` from the merged `dev_docs/tasks/.task-config.yml` (default `3` when unset — same key, scale and default as `linear.max_estimate`; see `commands/handlers/gh-issue.md`'s config block). The bound is **exclusive**, matching Linear: `linear-ready.py` gates on `estimate >= max_estimate`, so `est:5` fails against `max_estimate: 5`. An `est:<n>` at or above the bound scores LOW with reason `estimate <n> >= max_estimate <m>` — the same reason string Linear emits, so a board reads identically across trackers. This is a deterministic check on a recorded number, so it runs before the judgment call below and wins the reason slot.
+- **The `est:` gate.** Read `gh-issue.max_estimate` from the merged `dev_docs/tasks/.task-config.yml` (default `3` when unset — same key, scale and default as `linear.max_estimate`; see `commands/handlers/gh-issue.md`'s config block). The bound is **exclusive**, matching Linear: `linear-ready.py` gates on `estimate >= max_estimate`, so `est:5` fails against `max_estimate: 5`. An `est:<n>` at or above the bound scores LOW with reason `estimate <n> >= max_estimate <m>` — the same reason string Linear emits, so a board reads identically across trackers. Backfill means every candidate now carries a number, so this runs on all of them, and it reads a backfilled `est:` exactly as it reads a human's.
 
-- **Scope fits one PR (~size 5), judgment not keywords.** For an issue carrying **no** `est:` label, weigh the body's breadth against ~300 lines / ~5 files (see **Task size** in `skills/task/SKILL.md`). Do **not** invent an estimate and do not write one: an absent `est:` means nobody has sized the issue, and a guessed number would be indistinguishable downstream from a human's. If the scope clearly exceeds size `5`, score LOW with reason `scope exceeds size 5 — split into sub-issues`. The `break-down-task` skill (`skills/break-down-task/SKILL.md`) performs that split. An issue that **has** an `est:` label has already passed the deterministic gate above and needs no second scope judgment.
+- **Scope fits one PR (~size 5), judgment not keywords.** This is the same judgment that produced the backfilled `est:` above — weigh the body's breadth against ~300 lines / ~5 files (see **Task size** in `skills/task/SKILL.md`). If the scope clearly exceeds size `5`, the honest `est:8`/`est:13` is recorded and the issue scores LOW with reason `scope exceeds size 5 — split into sub-issues`. The `break-down-task` skill (`skills/break-down-task/SKILL.md`) performs that split.
+
+**Which reason wins when both fail.** The deterministic `est:` gate normally takes the reason slot ahead of the judgment call — **except** over the size-`5` ceiling, where `task-fill.md`'s **reason precedence** gives it to `scope exceeds size 5 — split into sub-issues`. An `est:8` trips both, and "split this issue" is the instruction the human needs; `estimate 8 >= max_estimate 3` only reads as "lower the number".
 
 **LOW** if any HIGH condition fails. Record the first failed check as the reason (e.g. `body missing acceptance criteria`, `unresolved open questions`).
 
@@ -100,13 +115,15 @@ The consequence for this flow is that a transition is a **read-modify-write on t
 gh issue view <n> --json labels --jq '[.labels[].name]' [--repo <repo>]
 ```
 
-Keep that issue's `prio:` and `est:` labels verbatim, drop its `status:`/`auto:` rungs, and append the new pair. An issue with `prio:1,est:3` promoted HIGH is written as `status:2_ready,auto:eligible,prio:1,est:3` — omitting `prio:1,est:3` from the `--labels` value would delete them.
+Keep that issue's `prio:` and `est:` labels — **or, where step 4 backfilled one, the backfilled value in its place** — drop its `status:`/`auto:` rungs, and append the new pair. An issue with `prio:1,est:3` promoted HIGH is written as `status:2_ready,auto:eligible,prio:1,est:3`; omitting `prio:1,est:3` from the `--labels` value would delete them. An issue that carried neither and was backfilled to medium/2 is written as `status:2_ready,auto:eligible,prio:2,est:2`. This is why the backfill costs no extra write: the `--labels` value is being composed anyway, and `prio:`/`est:` are two more entries in it.
 
-**Batch writes — never fire them all in parallel.** Each candidate costs a `gh issue view` read, a `gh-issue-state.py` PATCH, and — for LOW — a `gh issue comment`. Firing those for every scored candidate at once can saturate the GitHub API transport, causing cascading timeouts and partial-state corruption: some candidates end up relabeled while their siblings silently fail mid-batch. Apply writes serially, or in small concurrent groups — 2–5 candidates at a time is a judgment call, not a measured limit, and what matters is that the fan-out is bounded (the incident behind this rule fired ~36 writes in a single turn). Wait for each group to finish before starting the next.
+A backfilled label carries no marker distinguishing it from a human's, by design — `task-fill.md`'s "trusted downstream" rule. The provenance is the issue comment below, not the label.
+
+**Batch writes — never fire them all in parallel.** Each candidate costs a `gh issue view` read, a `gh-issue-state.py` PATCH, and — for LOW, or for a HIGH that was backfilled — a `gh issue comment`. Firing those for every scored candidate at once can saturate the GitHub API transport, causing cascading timeouts and partial-state corruption: some candidates end up relabeled while their siblings silently fail mid-batch. Apply writes serially, or in small concurrent groups — 2–5 candidates at a time is a judgment call, not a measured limit, and what matters is that the fan-out is bounded (the incident behind this rule fired ~36 writes in a single turn). Wait for each group to finish before starting the next.
 
 Then, for each scored candidate (`<managed>` is the set just assembled):
 
-- **HIGH** — `status:2_ready` + `auto:eligible`, plus the issue's existing `prio:`/`est:`:
+- **HIGH** — `status:2_ready` + `auto:eligible`, plus the issue's `prio:`/`est:` (existing or backfilled):
 
   ```bash
   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-state.py" \
@@ -114,16 +131,22 @@ Then, for each scored candidate (`<managed>` is the set just assembled):
     --labels status:2_ready,auto:eligible[,<prio:…>][,<est:…>] --apply
   ```
 
-- **LOW** — `status:1_needs_refinement` + `auto:human-review-needed`, plus the issue's existing `prio:`/`est:`:
+  If anything was backfilled, also comment what was auto-set, so a HIGH issue's guessed numbers are as correctable as a LOW one's:
+
+  ```bash
+  gh issue comment <n> --body "/promote-tasks: promoter auto-set prio:2, est:3" [--repo <repo>]
+  ```
+
+- **LOW** — `status:1_needs_refinement` + `auto:human-review-needed`, plus the issue's `prio:`/`est:` (existing or backfilled):
 
   ```bash
   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-state.py" \
     --repo "<repo>" --issue <n> \
     --labels status:1_needs_refinement,auto:human-review-needed[,<prio:…>][,<est:…>] --apply
-  gh issue comment <n> --body "/promote-tasks: <failed-check>" [--repo <repo>]
+  gh issue comment <n> --body "/promote-tasks: <failed-check> (promoter auto-set prio:2, est:8)" [--repo <repo>]
   ```
 
-  The comment names the failed check so the human can fix it quickly — the gh analogue of the file path's `# promoter:` frontmatter comment and `linear-promote.md`'s LOW comment.
+  The comment names the failed check so the human can fix it quickly — the gh analogue of the file path's `# promoter:` frontmatter comment and `linear-promote.md`'s LOW comment — and names the auto-set fields in the same comment rather than a second one, exactly as the Linear path does. Drop the parenthetical when nothing was backfilled.
 
 If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/gh-issue-state.py`. `--repo` is required by the helper, so resolve the current repo with `gh repo view --json nameWithOwner --jq .nameWithOwner` when `gh-issue.repo` is unset; drop `--apply` to see the resulting set without writing it. No `gh label create` step is needed here — the raw PATCH creates a missing label rather than rejecting it, and `/task-config` provisions the vocabulary with its intended colors (`commands/handlers/gh-issue-config.md` step 3).
 
@@ -131,7 +154,7 @@ If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handler
 
 ### 6. Report
 
-Print the same summary shape as the file path (`commands/promote-tasks.md` step 4), keyed by issue number. Lead with the resolved scope from step 2a (`scope: milestone <title>` / `scope: whole backlog (all)` / `scope: whole backlog (no milestones)`), and — if step 3's query hit the 500-issue cap — a prominent warning line **before** the summary (not a trailing footnote). The `Promoted N of M candidates` line directly below carries the true count: under a cap hit `M` **is** the cap, so the warning states the truncation and the summary states the number. Neither repeats the other:
+Print the same summary shape as the file path (`commands/promote-tasks.md` step 4), keyed by issue number and annotating any issue that got a backfill. Lead with the resolved scope from step 2a (`scope: milestone <title>` / `scope: whole backlog (all)` / `scope: whole backlog (no milestones)`), and — if step 3's query hit the 500-issue cap — a prominent warning line **before** the summary (not a trailing footnote). The `Promoted N of M candidates` line directly below carries the true count: under a cap hit `M` **is** the cap, so the warning states the truncation and the summary states the number. Neither repeats the other:
 
 ```
 parent rollup detection skipped (subIssues field unavailable)
@@ -139,16 +162,20 @@ scope: milestone v2.0
 ⚠ candidate query hit the 500-issue cap — some open issues may not have been scored this run.
 Promoted 5 of 8 candidates:
   ready (3):
-    - #142  Fix broken import
-    - #145  Bump eslint config
+    - #142  Fix broken import  (backfilled: est)
+    - #145  Bump eslint config  (backfilled: prio, est)
     - #148  Remove stale alias
   needs_refinement (2):
-    - #151  Restructure auth module  (scope exceeds size 5 — split into sub-issues)
-    - #152  Rewrite the config loader  (estimate 8 >= max_estimate 3)
+    - #151  Restructure auth module  (scope exceeds size 5 — split into sub-issues)  (backfilled: est 8)
+    - #152  Rewrite the config loader  (estimate 5 >= max_estimate 3)
   skipped (3):
     - #109  (already scored)
     - #110  (parent rollup)
     - #111  (blocked)
+backfilled (3):
+  - #142  (est)
+  - #145  (prio, est)
+  - #151  (est 8)
 ```
 
 Skipped issues are reported with their reason — `already scored`, `parent rollup`, or `blocked`. The 500-cap warning (if it applied) leads the report per above, not a trailing footnote.
