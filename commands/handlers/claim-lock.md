@@ -116,6 +116,19 @@ delete-branch and no delete-ref tool, and `git push --delete` returns 403. So th
 path at the end of this file is **unavailable unattended**, and the two failures are not
 symmetric:
 
+> **Re-confirmed 2026-09-16, deliberately rather than by inheritance.** `DELETE` on
+> `/git/refs` over plain `curl`, against a ref verified to exist a second earlier, still
+> returns `403 Write access to this GitHub API path is not permitted through this
+> proxy`. `POST` returns the same. So the raw-HTTP route is closed alongside the
+> connector one, and this rule holds on all three channels.
+>
+> **It needed re-checking because the neighbouring premise fell the same day.** A
+> routine's **reads** turned out to be credentialed — it can read `blocked_by` over
+> `curl` — which overturned four claims elsewhere in this plugin. Writes are a separate
+> path with a separate refusal, and "reads work, so writes probably do" would have been
+> the same bad inference in the other direction. See
+> `dev_docs/decisions/2026-08-24-routine-claim-channel.md` → "Raw HTTP".
+
 |                  | left behind     | cost                                                                                                     |
 | ---------------- | --------------- | -------------------------------------------------------------------------------------------------------- |
 | `create_branch`  | a lock ref      | **permanent** — every later session reads it as a live claim and skips the issue forever                 |

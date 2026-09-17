@@ -4,6 +4,18 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.57.1] - 2026-09-17
+
+### Fixes
+
+- the API is reachable without gh, from sessions and routines alike [N/A] (#741) (3f6b5ea)
+
+## [2.57.0] - 2026-09-17
+
+### Features
+
+- fill prio and est in one shared filler [#742] (#747) (753ed1f)
+
 ## [2.56.1] - 2026-09-16
 
 ### Fixes

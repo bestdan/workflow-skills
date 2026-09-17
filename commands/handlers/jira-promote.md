@@ -95,7 +95,9 @@ After step 3a, `ready_status` and `refinement_status` are both resolved for the 
 
 ### 4. Score each candidate
 
-For each candidate, run the **confidence check** from `skills/task/SKILL.md` — the **same judgment-based gate the file path uses** (`commands/promote-tasks.md` step 2), read against the Jira issue per the field mapping `linear-promote.md` step 6 defines. Jira issues carry a native `priority` but no `size`/`estimate` field (story points, when present, are a custom field), so size folds into the scope judgment.
+For each candidate, run the **confidence check** from `skills/task/SKILL.md` — the **same judgment-based gate the file path uses** (`commands/promote-tasks.md` step 2), read against the Jira issue per the field mapping `linear-promote.md` step 6 defines.
+
+**This path backfills neither field, and that is a declared property, not an omission.** `commands/handlers/task-fill.md` defines the shared backfill and carries a **`jira` adapter** saying why jira opts out of both halves: there is no estimate field to write (story points, when a project exposes them, are a per-project custom field this handler does not resolve), and `priority`, though native and read, has site-configured scheme names that the symbolic vocabulary has no fixed encoding for without a config key this handler does not yet have. Size therefore folds into the scope judgment below, and priority is read as found.
 
 **HIGH (→ promote)** requires ALL of:
 
