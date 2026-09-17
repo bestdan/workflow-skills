@@ -327,10 +327,17 @@ second run was made, and the two readings are not distinguished by anything meas
 
 **What this does NOT establish**, same discipline as the session section above:
 
-- **Reads only, again.** No write was attempted. The 2026-08-24 routine record measured
-  `POST`/`DELETE` on `/git/refs` returning `403 … not permitted through this proxy`, a
-  **different** refusal from the read path — so `claim-lock.md`'s "a routine cannot
-  release" is untouched by this and still stands. A write probe is the obvious next one.
+- **Reads only in this run — and the write probe has since been run.** Measured the same
+  day, runs `cse_01R2HLXrknbeDW8NuK8bBjYP` and `cse_01EvGKZQfMFPGrfSSucrNkC3`: `DELETE`
+  and `POST` on `/git/refs` both return `403 Write access to this GitHub API path is not
+  permitted through this proxy`, word for word what 2026-08-24 measured. So the
+  asymmetry is real and now measured in one environment minutes apart — **reads
+  credentialed, writes refused at the proxy** — and `claim-lock.md` stands.
+
+  **Note the two refusals are different in kind**, which is why neither settles the
+  other. The write path fails with a **proxy policy** message; the read path, when
+  unprovisioned, fails with the **org-App provisioning** message. A credentialed attach
+  is a plausible answer to the second and would not touch the first.
 - **One routine, one environment, one repo**, and that repo was a cloned source. Nothing
   here says an unattached repo is reachable.
 - **`gh` untested**, per above.

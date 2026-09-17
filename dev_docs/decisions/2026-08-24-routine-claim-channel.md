@@ -51,9 +51,24 @@ A routine reaches GitHub two ways, and they do not behave alike.
   403 Write access to this GitHub API path is not permitted through this proxy.
   ```
 
-  **Not retested on 09-16** (that run was reads-only), and note this refusal is worded
-  differently from anything on the read path — so the reads result does **not** carry
-  over to it. This is the finding `claim-lock.md` rests on, and it stands.
+  > **Re-measured 2026-09-16 and unchanged — word for word, three weeks later.** Runs
+  > `cse_01R2HLXrknbeDW8NuK8bBjYP` (DELETE) and `cse_01EvGKZQfMFPGrfSSucrNkC3` (POST),
+  > against a disposable ref in `bestdan/workflow-skills`, both returning the body above
+  > with `documentation_url: …/claude-code/github-actions`.
+  >
+  > **The DELETE was run against a ref confirmed to exist**, by a `GET` returning 200
+  > immediately before, so the refusal is not an artefact of a missing target. The ref
+  > was still present afterwards and was removed by hand.
+  >
+  > This was worth re-running rather than inheriting: the **read** half of this same
+  > record was overturned the same day, and "the other half is probably still fine" is
+  > the reasoning that produced the errors these records exist to correct. It is now
+  > measured, not assumed. **This is the finding `claim-lock.md` rests on, and it
+  > stands.**
+  >
+  > A first POST attempt returned `415 Request bodies must declare Content-Type:
+  > application/json` — a malformed request of the prober's own making, testing nothing.
+  > Recorded because a 415 in a transcript reads like a refusal and is not one.
 
 - Read behaviour on that path was **inconsistent between runs**, so it is not
   dependable for reads either. **That is about `/git/refs` specifically**; the 09-16
