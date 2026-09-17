@@ -56,7 +56,7 @@ Also set aside (do **not** score) any candidate that is **blocked** — a backlo
 
 **Backfill `priority` and `estimate` first,** before scoring. The rules are defined once in `commands/handlers/task-fill.md` — the static `medium` default, the model-produced Fibonacci estimate, the over-ceiling rule, reason precedence, the held-card exception, and the fact that a backfilled value is trusted downstream. Read it and apply it; do not re-derive any of it here.
 
-Its **`linear` adapter** is this path's half: the symbolic priority encodes onto Linear's native 0–4 integer (`none 0 · urgent 1 · high 2 · medium 3 · low 4`), the `1`/`2`/`3`/`5` ladder onto the native `estimate` field (over-ceiling is left unset — this ladder does not admit `8`/`13`), both written by step 8's `save_issue` alongside the state/label transition rather than a second write, with a one-line issue comment for provenance. `dry-run` reports the intended backfills without writing them.
+Its **`linear` adapter row** is this path's half — the 0–4 priority encoding, the estimate ladder, and the provenance comment all live there, and this file deliberately does not repeat them. The one thing worth saying twice is the write: both fields ride out on step 8's `save_issue` alongside the state/label transition, never a second call. `dry-run` reports the intended backfills without writing them.
 
 If a relative path doesn't resolve, find it with **Glob** (`**/commands/handlers/task-fill.md`) and Read it.
 

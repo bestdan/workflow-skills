@@ -66,11 +66,20 @@ one value that would make an oversized card look routable.
   `13` (`commands/handlers/assets/labels.yml`), so write the honest number there.
   A recorded `8` is strictly better than a blank: it feeds the deterministic
   `max_estimate` gate and tells the human how far over the card is.
-- **Leave it unset where the ladder does not.** `repo-pr` and `linear` admit
-  `1`/`2`/`3`/`5` only, so the field stays as it was.
+- **Leave it unset where the ladder does not** — both above the ladder's top and
+  where there is no rung for it at all. `repo-pr` and `linear` admit
+  `1`/`2`/`3`/`5` only. `gh-issue` stops at `13`, so an honest `21` is left unset
+  there too: every ladder is finite, and the rule is the ladder's, not one
+  tracker's.
+
+A value off the ladder is not a near-miss to round — it is a write that fails.
+`gh-issue-state.py` validates every name against `labels.yml` before its network
+call and refuses an unknown one outright (`est:7` is refused today, and so would
+`est:21` be), so writing an off-ladder number does not degrade to a missing label:
+it fails the whole transition, taking the `status:`/`auto:` rungs with it.
 
 Either way the scope-fit check scores **LOW** with the split reason — recording
-the number is not a promotion.
+the number is not a promotion, and neither is declining to record one.
 
 ### Reason precedence
 

@@ -63,7 +63,7 @@ The script excludes `_archive/` (where `/archive-tasks` parks stale `done` files
 
 **Backfill `priority` and `size` first,** before scoring. The rules are defined once in `commands/handlers/task-fill.md` — the static `medium` default, the model-produced Fibonacci estimate, the over-ceiling rule, reason precedence, the held-card exception, and the fact that a backfilled value is trusted downstream. Read it and apply it; do not re-derive any of it here.
 
-Its **`repo-pr` adapter** is this path's half: the symbolic priority word goes verbatim into `priority:`, the `1`/`2`/`3`/`5` ladder into `size:` (over-ceiling is left unset — this ladder does not admit `8`/`13`), both written by step 3's `Edit` with `# promoter:` frontmatter comments for provenance. Record what you intend to backfill for each candidate so step 3 can write it; `dry-run` reports the intended backfills and writes nothing.
+Its **`repo-pr` adapter row** is this path's half — the encoding, the ladder, the write and the provenance comment all live there, and this file deliberately does not repeat them. Record what you intend to backfill for each candidate so step 3 can write it; `dry-run` reports the intended backfills and writes nothing.
 
 If a relative path doesn't resolve, find it with **Glob** (`**/commands/handlers/task-fill.md`) and Read it.
 

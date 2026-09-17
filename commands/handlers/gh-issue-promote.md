@@ -79,10 +79,10 @@ For each candidate, run the **confidence check** from `skills/task/SKILL.md` —
 
 Its **`gh-issue` adapter** is this path's half, and two things in it are specific to GitHub:
 
-- **`prio:0` is highest**, the inverse of Linear's priority `0` (which means _none_). Encode from the symbolic value — `urgent prio:0 · high prio:1 · medium prio:2 · low prio:3` — and never from Linear's integer.
-- **This ladder admits `8` and `13`**, so this is the one handler that **records** an over-ceiling estimate rather than leaving the field unset. Write the honest number; the scope-fit check below still scores LOW.
+- **`prio:0` is highest here**, the inverse of Linear's priority `0` (which means _none_). Encode from the symbolic value through the adapter table's `gh-issue` row, never from Linear's integer — that inversion is the one mistake this encoding invites.
+- **This ladder runs to `13`**, so this is the one handler that **records** an over-ceiling estimate rather than leaving the field unset. Write the honest number up to `13`; above it the field stays unset, as on every other handler. The scope-fit check below still scores LOW either way.
 
-Both ride out on step 5's existing full-set PATCH — an argument change to the write the transition already makes, not a second write or a second round trip — and the LOW comment names the auto-set fields the way the Linear path's comment does. `dry-run` reports the intended backfills and writes nothing.
+The adapter row carries the rest — the exact encoding, the ladder and where provenance lands — and this file deliberately does not repeat it. The one thing worth saying twice is the write: both fields ride out on step 5's existing full-set PATCH, an argument change to the write the transition already makes, not a second write or a second round trip. `dry-run` reports the intended backfills and writes nothing.
 
 If a relative path doesn't resolve, find it with **Glob** (`**/commands/handlers/task-fill.md`) and Read it.
 
@@ -93,7 +93,7 @@ Scoring then reads the **backfilled** `est:` in the gate below. That is the poin
 - `title` present and non-empty.
 - `body` contains acceptance-style content — a `## Acceptance Criteria` section (or an equivalent concrete, checkable outcome). A bare title or an "investigate X" body fails with `body missing acceptance criteria`.
 - `body` has no unresolved `## Open Questions` / `## TBD` content (an empty heading is fine) → otherwise `unresolved open questions`.
-- **The `est:` gate.** Read `gh-issue.max_estimate` from the merged `dev_docs/tasks/.task-config.yml` (default `3` when unset — same key, scale and default as `linear.max_estimate`; see `commands/handlers/gh-issue.md`'s config block). The bound is **exclusive**, matching Linear: `linear-ready.py` gates on `estimate >= max_estimate`, so `est:5` fails against `max_estimate: 5`. An `est:<n>` at or above the bound scores LOW with reason `estimate <n> >= max_estimate <m>` — the same reason string Linear emits, so a board reads identically across trackers. Backfill means every candidate now carries a number, so this runs on all of them, and it reads a backfilled `est:` exactly as it reads a human's.
+- **The `est:` gate.** Read `gh-issue.max_estimate` from the merged `dev_docs/tasks/.task-config.yml` (default `3` when unset — same key, scale and default as `linear.max_estimate`; see `commands/handlers/gh-issue.md`'s config block). The bound is **exclusive**, matching Linear: `linear-ready.py` gates on `estimate >= max_estimate`, so `est:5` fails against `max_estimate: 5`. An `est:<n>` at or above the bound scores LOW with reason `estimate <n> >= max_estimate <m>` — the same reason string Linear emits, so a board reads identically across trackers. Backfill means nearly every candidate now carries a number, and this gate reads a backfilled `est:` exactly as it reads a human's. The exception is an issue whose honest estimate ran off the ladder's top: it has no `est:` to gate on, and the scope-fit check below is what catches it.
 
 - **Scope fits one PR (~size 5), judgment not keywords.** This is the same judgment that produced the backfilled `est:` above — weigh the body's breadth against ~300 lines / ~5 files (see **Task size** in `skills/task/SKILL.md`). If the scope clearly exceeds size `5`, the honest `est:8`/`est:13` is recorded and the issue scores LOW with reason `scope exceeds size 5 — split into sub-issues`. The `break-down-task` skill (`skills/break-down-task/SKILL.md`) performs that split.
 
