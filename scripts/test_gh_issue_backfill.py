@@ -42,11 +42,16 @@ class FakeRepo:
     maps number -> [(blocker, state)]. Every `gh` call the backfill path makes
     lands here, and `patches` / `comments` record the writes so a test can
     assert that a path wrote nothing at all.
+
+    `fail_on` is an optional predicate over the `gh` argv; returning a truthy
+    stderr string makes that one call fail, which is how the transient-failure
+    tests inject a flaky `gh` without reassigning a method.
     """
 
-    def __init__(self, issues, blocked_by=None):
+    def __init__(self, issues, blocked_by=None, fail_on=None):
         self.issues = {n: dict(v) for n, v in issues.items()}
         self.blocked_by = dict(blocked_by or {})
+        self.fail_on = fail_on
         self.patches = []
         self.comments = []
         self.calls = []
@@ -56,6 +61,10 @@ class FakeRepo:
 
     def run_gh(self, args, stdin=None):
         self.calls.append(args)
+        if self.fail_on:
+            stderr = self.fail_on(args)
+            if stderr:
+                return 1, "", stderr
         if args[:2] == ["issue", "list"]:
             payload = [
                 {
@@ -208,6 +217,20 @@ class ScanTests(unittest.TestCase):
         self.assertEqual(result["held"][0]["reason"], "blocked label")
         self.assertEqual(result["held"][1]["reason"], "blocked by #9")
         self.assertEqual(repo.patches, [])
+        self.assertFalse(result["truncated"])
+
+    def test_a_result_at_the_cap_is_flagged_truncated(self):
+        """A sweep that could not see the whole backlog must not read as one."""
+        repo = FakeRepo(
+            {n: {"title": "t", "labels": ["status:2_ready"]} for n in (1, 2)}
+        )
+        with wired(repo):
+            result = backfill.scan("o/r", LABELS_FILE, 2)
+        self.assertTrue(result["truncated"])
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            backfill.report_scan(result)
+        self.assertIn("cap", buf.getvalue().splitlines()[0])
 
 
 class ApplyTests(unittest.TestCase):
@@ -237,6 +260,24 @@ class ApplyTests(unittest.TestCase):
             sorted(["status:2_ready", "auto:eligible", "prio:2", "est:2", "follow-up"]),
         )
         self.assertNotIn("state", payload)
+
+    def test_an_undefined_managed_label_is_dropped_but_reported(self):
+        """The full-set write purges `status:custom`; saying so is the contract."""
+        repo = FakeRepo(
+            {
+                26: {
+                    "labels": ["status:2_ready", "auto:eligible", "status:custom"],
+                }
+            }
+        )
+        outcome = self.outcome(repo, [{"number": 26, "estimate": 2}])
+        result = outcome["backfilled"][0]
+        self.assertEqual(result["dropped"], ["status:custom"])
+        self.assertNotIn("status:custom", repo.patches[0][1]["labels"])
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            backfill.report_apply(outcome)
+        self.assertIn("status:custom", buf.getvalue())
 
     def test_missing_only_est_keeps_the_humans_priority(self):
         repo = FakeRepo({8: {"labels": ["status:2_ready", "auto:eligible", "prio:0"]}})
@@ -349,6 +390,53 @@ class ApplyTests(unittest.TestCase):
         self.assertIn("status:/auto: rung", outcome["skipped"][0]["reason"])
 
 
+class BatchResilienceTests(unittest.TestCase):
+    """One entry's failure must not take the batch — or its report — with it."""
+
+    def test_a_gh_failure_midway_does_not_abort_the_batch(self):
+        repo = FakeRepo(
+            {n: {"labels": ["status:2_ready", "auto:eligible"]} for n in (30, 31, 32)},
+            fail_on=lambda args: (
+                "gh: authentication token expired"
+                if args[:3] == ["issue", "view", "31"]
+                else None
+            ),
+        )
+        with wired(repo):
+            outcome = backfill.apply_plan(
+                "o/r",
+                [{"number": n, "estimate": 2} for n in (30, 31, 32)],
+                LABELS_FILE,
+                True,
+            )
+        # #31 is recorded as an error; its siblings are still written.
+        self.assertEqual([r["number"] for r in outcome["backfilled"]], [30, 32])
+        self.assertEqual(outcome["errors"][0]["number"], 31)
+        self.assertEqual([n for n, _ in repo.patches], [30, 32])
+
+    def test_a_failed_patch_is_one_entrys_error_not_the_runs(self):
+        def patch_33_fails(args):
+            if args[0] == "api" and "--method" in args:
+                number = int(args[args.index("--method") + 2].rsplit("/", 1)[1])
+                if number == 33:
+                    return "gh: 503 Service Unavailable"
+            return None
+
+        repo = FakeRepo(
+            {n: {"labels": ["status:2_ready", "auto:eligible"]} for n in (33, 34)},
+            fail_on=patch_33_fails,
+        )
+        with wired(repo):
+            outcome = backfill.apply_plan(
+                "o/r",
+                [{"number": n, "estimate": 2} for n in (33, 34)],
+                LABELS_FILE,
+                True,
+            )
+        self.assertEqual(outcome["errors"][0]["number"], 33)
+        self.assertEqual([r["number"] for r in outcome["backfilled"]], [34])
+
+
 class ProvenanceTests(unittest.TestCase):
     def test_batch_posts_one_comment_not_one_per_issue(self):
         repo = FakeRepo(
@@ -376,6 +464,34 @@ class ProvenanceTests(unittest.TestCase):
         for n in (21, 22, 23):
             self.assertIn(f"#{n}", body)
 
+    def test_a_failed_comment_still_prints_the_report(self):
+        """The comment is what failed, so the report is the only record left."""
+        repo = FakeRepo(
+            {27: {"labels": ["status:2_ready", "auto:eligible"]}},
+            fail_on=lambda args: (
+                "gh: could not resolve to an Issue"
+                if args[:2] == ["issue", "comment"]
+                else None
+            ),
+        )
+        path = plan_file([{"number": 27, "estimate": 2}])
+        with wired(repo):
+            code, out = run_main(
+                [
+                    "apply",
+                    "--repo",
+                    "o/r",
+                    "--plan",
+                    path,
+                    "--apply",
+                    "--provenance-issue",
+                    "99",
+                ]
+            )
+        self.assertEqual(len(repo.patches), 1)
+        self.assertIn("#27", out)
+        self.assertEqual(code, 1)
+
     def test_dry_run_posts_no_comment(self):
         repo = FakeRepo({24: {"labels": ["status:2_ready", "auto:eligible"]}})
         path = plan_file([{"number": 24, "estimate": 2}])
@@ -399,6 +515,13 @@ class CliTests(unittest.TestCase):
             code, _out = run_main(["encode", "--priority", "urgent"])
         self.assertEqual(code, 2)
         self.assertIn("urgent", buf.getvalue())
+
+    def test_a_quoted_estimate_is_refused_before_any_write(self):
+        """The whole plan fails at load, so nothing is half-written."""
+        path = plan_file([{"number": 1, "estimate": "3"}])
+        with self.assertRaises(SystemExit) as caught:
+            backfill.load_plan(path)
+        self.assertIn("must be an integer", str(caught.exception))
 
     def test_duplicate_plan_entry_is_refused(self):
         path = plan_file([{"number": 1}, {"number": 1}])

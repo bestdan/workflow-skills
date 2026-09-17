@@ -233,7 +233,13 @@ def hold_reason(repo, number, labels):
 
 
 def scan(repo, labels_file, limit, milestone=None):
-    """Open issues missing a `prio:` or `est:`, partitioned into writable and held."""
+    """Open issues missing a `prio:` or `est:`, partitioned into writable and held.
+
+    A result sitting exactly at `limit` may be truncated, and a sweep that says
+    "whole backlog" while omitting later issues is the one wrong answer this is
+    asked for — the scoring flow warns on the same condition
+    (`gh-issue-promote.md` step 6), so this does too.
+    """
     load_vocabulary(labels_file)
     candidates, held, complete = [], [], []
     issues = list_open_issues(repo, limit, milestone)
@@ -257,6 +263,7 @@ def scan(repo, labels_file, limit, milestone=None):
     return {
         "repo": repo,
         "checked": len(issues),
+        "truncated": len(issues) >= limit,
         "milestone": milestone,
         "candidates": candidates,
         "held": held,
@@ -275,6 +282,16 @@ def load_plan(path):
             raise SystemExit(f"{path}: every entry needs an integer `number`")
         if number in seen:
             raise SystemExit(f"{path}: #{number} appears twice")
+        # A quoted number is what a model emits when it is being careful with
+        # JSON, and it would otherwise reach `encode`'s ladder comparison as a
+        # str and raise mid-batch. Refusing the whole plan here is strictly
+        # better: it happens before the first PATCH, so nothing is half-written.
+        estimate = entry.get("estimate")
+        if estimate is not None and not isinstance(estimate, int):
+            raise SystemExit(
+                f"{path}: #{number}: `estimate` must be an integer, got "
+                f"{type(estimate).__name__}"
+            )
         seen.add(number)
     return entries
 
@@ -363,6 +380,11 @@ def plan_one(repo, entry, groups, vocabulary):
         }
 
     labels = backfill_set(current, new_labels, groups, vocabulary)
+    # The full-set write purges a managed-namespace name the vocabulary does not
+    # define (a hand-typed `status:custom`), and correctly so — but silently,
+    # which would make this path's "writes prio:/est: and nothing else" claim
+    # false in the reader's eyes. Report it, as every sibling full-set caller does.
+    dropped = gh_issue_state.dropped_unrecognized(current, set(groups), vocabulary)
     before, after = rungs_of(current, vocabulary), rungs_of(labels, vocabulary)
     if before != after:
         # A backstop, not the first line of defence: composing a set that MOVED
@@ -382,6 +404,7 @@ def plan_one(repo, entry, groups, vocabulary):
         "added": new_labels,
         "labels": labels,
         "rungs": before,
+        "dropped": dropped,
         "notes": notes,
     }
 
@@ -391,13 +414,22 @@ def apply_plan(repo, entries, labels_file, do_apply):
     vocabulary = expected_labels(groups, colors)
     results, errors = [], []
     for entry in entries:
+        # One entry's failure must not take the batch with it. Every gh
+        # transport failure in this loop arrives as `SystemExit` — the helpers
+        # raise it on a non-zero exit — so an expired token would otherwise
+        # abort at issue 17 of 30, leaving 16 written and printing no report.
+        # The sibling routines let it propagate because a later run heals the
+        # gap and nobody reads their output; this is a one-shot command whose
+        # printed report is the batch's only record. `patch_issue` is inside
+        # the try for the same reason: a failed PATCH is one more entry's
+        # failure, not the run's.
         try:
             result = plan_one(repo, entry, groups, vocabulary)
-        except (BackfillError, gh_issue_state.InvalidLabelSet) as exc:
+            if result["action"] == "backfill" and do_apply:
+                gh_issue_state.patch_issue(repo, result["number"], result["labels"])
+        except (BackfillError, gh_issue_state.InvalidLabelSet, SystemExit) as exc:
             errors.append({"number": entry["number"], "error": str(exc)})
             continue
-        if result["action"] == "backfill" and do_apply:
-            gh_issue_state.patch_issue(repo, result["number"], result["labels"])
         results.append(result)
     return {
         "repo": repo,
@@ -415,11 +447,11 @@ def provenance_body(outcome):
 
     Per-issue provenance is the `labeled` timeline event on each issue — actor,
     timestamp, correctable in place, no notification. This names the run that
-    produced them so a human can find the whole batch from any one of them.
+    produced them so a human can find the whole batch from any one of them. It is
+    only ever called on an applied run — a dry run writes nothing to post.
     """
-    verb = "auto-set" if outcome["applied"] else "would auto-set"
     lines = [
-        f"/promote-tasks backfill-only: {verb} prio:/est: on "
+        "/promote-tasks backfill-only: auto-set prio:/est: on "
         f"{len(outcome['backfilled'])} issue(s) — no status:/auto: rung moved."
     ]
     for result in outcome["backfilled"]:
@@ -434,19 +466,34 @@ def provenance_body(outcome):
 
 
 def post_provenance(repo, issue, body):
+    """Post the batch's one comment. Returns an error string, or None on success.
+
+    It returns rather than raises because the caller's next act is to print the
+    report — and when this comment is what failed, that report is the batch's
+    only remaining record. Exiting here would destroy it at precisely the moment
+    it matters most.
+    """
     code, out, err = run_gh(
         ["issue", "comment", str(issue), "--repo", repo, "--body", body]
     )
     if code != 0:
-        raise SystemExit(
+        return (
             f"posting provenance to {repo}#{issue} failed: {err.strip() or out.strip()}"
         )
+    return None
 
 
 def report_scan(result):
     scope = (
         f"milestone {result['milestone']}" if result["milestone"] else "whole backlog"
     )
+    if result["truncated"]:
+        # Leads the report, never trails it: a reader who stops early must still
+        # learn the sweep was incomplete.
+        print(
+            f"⚠ query hit the {result['checked']}-issue cap — later open "
+            "issues may not have been scanned. Re-run with a higher --limit."
+        )
     print(f"{result['repo']}: checked {result['checked']} open issue(s), {scope}")
     print(f"\nMissing prio:/est: ({len(result['candidates'])}):")
     for issue in result["candidates"]:
@@ -465,6 +512,8 @@ def report_apply(outcome):
     for result in outcome["backfilled"]:
         note = f"  ({'; '.join(result['notes'])})" if result.get("notes") else ""
         print(f"  #{result['number']}  {', '.join(result['added'])}{note}")
+        if result.get("dropped"):
+            print(f"      dropped (not in labels.yml): {', '.join(result['dropped'])}")
     if outcome["held"]:
         print(f"\nHeld ({len(outcome['held'])}, no write):")
         for result in outcome["held"]:
@@ -539,14 +588,23 @@ def main(argv=None):
     outcome = apply_plan(args.repo, entries, args.labels_file, args.apply)
     # A dry run posts nothing. The comment is a write like any other, and the
     # report below is what a dry run is for.
+    # Seeded unconditionally: `--json` is an interface, and a key that appears
+    # only on success makes the absent case indistinguishable from an old
+    # version of this script.
+    outcome["provenance_issue"] = None
+    outcome["provenance_error"] = None
     if args.apply and args.provenance_issue and outcome["backfilled"]:
-        post_provenance(args.repo, args.provenance_issue, provenance_body(outcome))
         outcome["provenance_issue"] = args.provenance_issue
+        outcome["provenance_error"] = post_provenance(
+            args.repo, args.provenance_issue, provenance_body(outcome)
+        )
     if args.as_json:
         print(json.dumps(outcome, indent=2))
     else:
         report_apply(outcome)
-    return 1 if outcome["errors"] else 0
+        if outcome["provenance_error"]:
+            print(f"\n{outcome['provenance_error']}", file=sys.stderr)
+    return 1 if outcome["errors"] or outcome["provenance_error"] else 0
 
 
 if __name__ == "__main__":

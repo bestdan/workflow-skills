@@ -12,7 +12,7 @@ Scoring writes **both** rungs because they answer different questions: `status:`
 
 ## Steps
 
-> **`backfill-only` short-circuits this flow.** If `$ARGUMENTS` contains `backfill-only`, run step 1 (auth) and step 2 (repo), then go straight to **step 7** and stop. Steps 2a–6 are the scoring flow, and `backfill-only` does not score: no candidate query, no confidence check, no transition, no report of promotions that did not happen.
+> **`backfill-only` short-circuits this flow.** If `$ARGUMENTS` contains `backfill-only`, run step 1 (auth) and step 2 (repo), then go straight to **step 7** and stop. Step 7's helper requires `--repo`, so resolve it even when step 2 would have omitted the flag: `<repo>` is `gh-issue.repo` from `.task-config.yml` if set, else `gh repo view --json nameWithOwner --jq .nameWithOwner`. Steps 2a–6 are the scoring flow, and `backfill-only` does not score: no candidate query, no confidence check, no transition, no report of promotions that did not happen.
 
 ### 1. Preflight auth
 
@@ -213,6 +213,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-backfill.py" \
 Returns `candidates` (open, missing `prio:` or `est:`, not held — each with its `title`, `body`, current `labels`, and which fields are `missing`), `held` (each with the reason that held it), and `complete` (the numbers already carrying both, which get no write). The hold check is the native one: the `blocked` label **or** any open entry in the issue's `blocked_by` graph, per `commands/handlers/gh-issue.md`'s definition of an open dependency — it reuses `gh-issue-ready.py`'s paginating implementation rather than a third copy. Report and stop if `candidates` is empty.
 
 `--milestone` is optional here and there is no detection step: a backfill sweep is normally the whole backlog, and narrowing it is the caller's explicit choice.
+
+**`truncated: true` in the result means the query sat at the `--limit` cap and later open issues may not have been scanned.** Surface that as a prominent line **leading** the step-7d report, not a footnote — the same treatment step 6 gives its own 500-cap hit, and for the same reason: a run that could not see the whole backlog must not be read as having swept it.
 
 ### 7b. Estimate each candidate
 
