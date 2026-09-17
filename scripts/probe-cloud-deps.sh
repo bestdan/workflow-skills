@@ -49,7 +49,19 @@ echo "gh binary    : $(command -v gh || echo '(absent -- expected off dotfiles)'
 # PROBE_TOKEN_FILE lets a caller hand the token over without putting it in argv
 # or in the environment of every child. A cloud session needs none of this --
 # it just has GH_TOKEN set already.
-if [ -n "${PROBE_TOKEN_FILE:-}" ] && [ -r "${PROBE_TOKEN_FILE:-}" ]; then
+#
+# An explicit-but-unreadable path is INCONCLUSIVE, never a fallback. Falling
+# through to the ambient token would answer confidently about a credential the
+# caller did not ask about -- and the whole output of this script is a verdict
+# about which credential works, so that is a wrong answer, not a missing one.
+if [ -n "${PROBE_TOKEN_FILE:-}" ]; then
+  if [ ! -r "$PROBE_TOKEN_FILE" ]; then
+    echo "token        : PROBE_TOKEN_FILE is set but not readable"
+    note "path: $PROBE_TOKEN_FILE"
+    echo
+    echo "RESULT: INCONCLUSIVE -- refusing to fall back to the ambient token."
+    exit 2
+  fi
   tok="$(tr -d '\r\n' <"$PROBE_TOKEN_FILE")"
 else
   tok="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
@@ -64,7 +76,20 @@ elif [ "$tok" = "proxy-injected" ]; then
   note "if the read below SUCCEEDS, the egress proxy is substituting a real"
   note "credential -- so the capability is tied to this proxy path."
 else
-  echo "token        : real value, len ${#tok}, prefix ${tok:0:4}"
+  # Report the token TYPE, not four raw bytes. For every current GitHub format
+  # the leading characters are a fixed, entropy-free prefix -- but a legacy
+  # 40-hex PAT has no prefix at all, so slicing it would print secret material
+  # under a comment promising not to.
+  case "$tok" in
+    ghp_*) ttype="classic PAT (ghp_)" ;;
+    gho_*) ttype="OAuth token (gho_)" ;;
+    ghs_*) ttype="server-to-server / Actions (ghs_)" ;;
+    ghu_*) ttype="user-to-server (ghu_)" ;;
+    ghr_*) ttype="refresh token (ghr_)" ;;
+    github_pat_*) ttype="fine-grained PAT (github_pat_)" ;;
+    *) ttype="unrecognised — no known GitHub prefix" ;;
+  esac
+  echo "token        : real value, type $ttype, len ${#tok}"
 fi
 echo
 
@@ -133,10 +158,26 @@ if isinstance(d, list):
         print(i.get("number"))' 2>/dev/null)"
 
   if [ -z "$found" ]; then
-    # THE IMPORTANT BRANCH. A clean 200 with an empty body looks like success
-    # and is not: #691 has a known edge, so empty means we cannot see it.
-    no "HTTP 200 but NO edges returned -- and #$ISSUE definitely has one"
-    note "an empty 200 here is a silent denial, not an answer of 'none'"
+    # THE IMPORTANT BRANCH, and it has two causes, not one. An empty 200 means
+    # either a silent denial OR that the fixture edge is gone -- the ground
+    # truth is live board state and nothing pins it. Separate them here rather
+    # than reporting the alarming one by default: a false "CANNOT read" sends
+    # the reader after a credential problem that does not exist.
+    req "repos/$REPO/issues/$ISSUE"
+    if [ "$STATUS" = "404" ]; then
+      echo
+      echo "RESULT: INCONCLUSIVE -- the fixture issue #$ISSUE is not readable"
+      echo "        (HTTP 404), so an empty edge list says nothing about access."
+      echo "        Re-point the probe with PROBE_ISSUE/PROBE_EXPECT at an edge"
+      echo "        you have confirmed exists."
+      exit 2
+    fi
+    no "HTTP 200 but NO edges returned -- and #$ISSUE is expected to have one"
+    note "two explanations, and this probe cannot separate them further:"
+    note "  1. a silent denial -- the likely one, and why this branch fails"
+    note "  2. the fixture edge was removed from the board since 2026-09-15"
+    note "check #$ISSUE on the board, or re-run with PROBE_ISSUE/PROBE_EXPECT"
+    note "pointed at an edge you have just confirmed."
   elif grep -qx "$EXPECT" <<<"$found"; then
     ok "read the edge: #$ISSUE is blocked_by #$EXPECT"
     edge_ok=1

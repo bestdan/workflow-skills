@@ -354,3 +354,62 @@ esac'
   assert_equal "$status" 2
   assert_output --partial 'INCONCLUSIVE -- no python3'
 }
+
+@test "cloud-deps probe: an unreadable PROBE_TOKEN_FILE never falls back" {
+  # The ambient token is a different credential from the one the caller named.
+  # Answering about it would be a wrong answer, not a missing one, so an
+  # explicit-but-unreadable path has to be inconclusive. GH_TOKEN is set here
+  # precisely so a fallback would otherwise succeed and mask the mistake.
+  make_stub curl 'for a in "$@"; do url="$a"; done
+case "$url" in
+  *"/dependencies/blocked_by"*) printf "%s\n%s" "[{\"number\": 692}]" 200 ;;
+  *) printf "%s\n%s" "{\"full_name\": \"x/y\"}" 200 ;;
+esac'
+  PROBE_TOKEN_FILE="$TEST_TMPDIR/nope" GH_TOKEN=ghp_stub run bash "$REPO_ROOT/scripts/probe-cloud-deps.sh"
+  assert_equal "$status" 2
+  assert_output --partial 'refusing to fall back to the ambient token'
+}
+
+@test "cloud-deps probe: a vanished fixture issue is inconclusive, not a denial" {
+  # The ground truth is live board state. If the fixture issue is gone, an
+  # empty edge list says nothing about access -- reporting the denial anyway
+  # would send the reader after a credential problem that does not exist.
+  make_stub curl 'for a in "$@"; do url="$a"; done
+case "$url" in
+  *"/dependencies/blocked_by"*) printf "%s\n%s" "[]" 200 ;;
+  *"/issues/691") printf "%s\n%s" "{\"message\": \"Not Found\"}" 404 ;;
+  *) printf "%s\n%s" "{\"full_name\": \"x/y\"}" 200 ;;
+esac'
+  GH_TOKEN=ghp_stub run bash "$REPO_ROOT/scripts/probe-cloud-deps.sh"
+  assert_equal "$status" 2
+  assert_output --partial 'the fixture issue #691 is not readable'
+}
+
+@test "cloud-deps probe: an empty 200 on a LIVE fixture still fails as a denial" {
+  # The guard above must not swallow the real case: when the fixture issue is
+  # readable and the edge list is still empty, that is the silent denial this
+  # probe exists to catch, and it must stay a failure.
+  make_stub curl 'for a in "$@"; do url="$a"; done
+case "$url" in
+  *"/dependencies/blocked_by"*) printf "%s\n%s" "[]" 200 ;;
+  *) printf "%s\n%s" "{\"number\": 691}" 200 ;;
+esac'
+  GH_TOKEN=ghp_stub run bash "$REPO_ROOT/scripts/probe-cloud-deps.sh"
+  assert_failure
+  assert_output --partial 'NO edges returned'
+  assert_output --partial 'a silent denial'
+}
+
+@test "cloud-deps probe: reports the token type without printing raw bytes" {
+  # A legacy 40-hex PAT has no prefix, so slicing four characters off it would
+  # print secret material under a comment promising not to.
+  make_stub curl 'for a in "$@"; do url="$a"; done
+case "$url" in
+  *"/dependencies/blocked_by"*) printf "%s\n%s" "[{\"number\": 692}]" 200 ;;
+  *) printf "%s\n%s" "{\"full_name\": \"x/y\"}" 200 ;;
+esac'
+  GH_TOKEN=0123456789abcdef0123456789abcdef01234567 run bash "$REPO_ROOT/scripts/probe-cloud-deps.sh"
+  assert_success
+  assert_output --partial 'type unrecognised'
+  refute_output --partial '0123'
+}
