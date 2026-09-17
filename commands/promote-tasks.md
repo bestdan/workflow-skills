@@ -1,7 +1,7 @@
 ---
 description: Score new tasks against the confidence check and promote them to ready or needs_refinement
 allowed-tools: Bash(git *), Bash(find *), Bash(grep *), Bash(cat *), Bash(gh *), Glob, Grep, Read, Edit, AskUserQuestion, Skill, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__list_projects, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__list_issue_labels, mcp__claude_ai_Linear__create_issue_label, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__save_comment, mcp__claude_ai_Linear__list_comments, mcp__linear__list_teams, mcp__linear__list_issues, mcp__linear__list_projects, mcp__linear__list_workflow_states, mcp__linear__list_issue_labels, mcp__linear__create_issue_label, mcp__linear__save_issue, mcp__linear__save_comment, mcp__linear__list_comments, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Atlassian__getTransitionsForJiraIssue, mcp__claude_ai_Atlassian__transitionJiraIssue, mcp__claude_ai_Atlassian__addCommentToJiraIssue, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__searchJiraIssuesUsingJql, mcp__atlassian__getTransitionsForJiraIssue, mcp__atlassian__transitionJiraIssue, mcp__atlassian__addCommentToJiraIssue
-argument-hint: "[dry-run] [all] (default: apply, scoped to one project/epic/milestone)"
+argument-hint: "[dry-run] [all] [backfill-only] (default: apply, scoped to one project/epic/milestone)"
 ---
 
 # Promote Tasks
@@ -14,6 +14,7 @@ When the configured handler is an external tracker, the same scoring runs agains
 >
 > - `dry-run` — print proposed transitions and exit without writing.
 > - `all` — on a tracker handler, score the **whole** team/project/repo backlog instead of narrowing to a single project/epic/milestone (see each tracker handler's project-filter step). No effect on the file-based `repo-pr` path, which has no sub-project scope.
+> - `backfill-only` — fill missing `priority`/`size` on cards at **any** rung and write nothing else: no scoring, no transition, no `auto:` change. This is the only path to those two fields on a card the promoter has already scored, and it is not a re-score — demotion stays a human's call. `gh-issue` implements it (`commands/handlers/gh-issue-promote.md` step 7); on a handler that does not, say so and stop rather than falling back to a scoring run.
 >
 > Test each token with a "contains" check (e.g. `$ARGUMENTS` contains `dry-run`), not equality — `/promote-tasks dry-run all` enables both.
 
@@ -39,7 +40,7 @@ Overlay the local override on the committed config — mappings merge recursivel
 
   If a relative path doesn't resolve, find the file with **Glob** (`**/commands/handlers/linear-*.md`) and Read the result.
 
-- `handler: gh-issue` → **dispatch to the gh-issue handler.** Read `commands/handlers/gh-issue-promote.md` (the promote flow; it cites the `## List` section of `commands/handlers/gh-issue.md` for the shared label vocabulary), passing `$ARGUMENTS` (the optional `dry-run` and `all` tokens) through. The handler owns the gh-issue scoring and label transitions. Skip steps 1–4 of this file.
+- `handler: gh-issue` → **dispatch to the gh-issue handler.** Read `commands/handlers/gh-issue-promote.md` (the promote flow; it cites the `## List` section of `commands/handlers/gh-issue.md` for the shared label vocabulary), passing `$ARGUMENTS` (the optional `dry-run`, `all` and `backfill-only` tokens) through. The handler owns the gh-issue scoring and label transitions. Skip steps 1–4 of this file.
 
   If a relative path doesn't resolve, find the file with **Glob** (`**/commands/handlers/gh-issue-promote.md`) and Read the result.
 
@@ -88,7 +89,7 @@ This scope gate is **model judgment, not a deterministic rule** — acceptable h
 
 ### 3. Apply
 
-If `$ARGUMENTS` contains `dry-run`, print the proposed transitions **and the intended backfills** and exit without writing. (`all` has no effect on this file path — there is no sub-project scope to widen.)
+If `$ARGUMENTS` contains `dry-run`, print the proposed transitions **and the intended backfills** and exit without writing. (`all` has no effect on this file path — there is no sub-project scope to widen. Neither does `backfill-only`: it is a tracker-handler mode, and on this path a card past `new` is a file a human can edit directly.)
 
 Otherwise, for each scored candidate, use `Edit` to update the YAML frontmatter in place:
 

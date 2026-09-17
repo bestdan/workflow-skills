@@ -7,8 +7,12 @@ Invoked from `/promote-tasks` when `handler: gh-issue` is configured. Scores the
 Scoring writes **both** rungs because they answer different questions: `status:` is where the work is, `auto:` is whether automation may take it. A HIGH issue is ready _and_ released to automation; a LOW issue needs a human _and_ is withheld from it. The old single `auto-eligible` label conflated the two, so there was no way to say "ready, but a human takes this one".
 
 > **Hard rule: this path only ever touches open issues that are un-scored — `status:0_untriaged`, or carrying no `status:` label at all (a pre-migration issue).** Any other `status:` rung is the gh analogue of "past the `new` column": the issue has been scored and is out of the promoter's lane, exactly as the file path never touches tasks past `status: new`, and as `linear-promote.md` never touches a non-`backlog` issue. Closed issues are `done` and are never scored. If you are about to write to an already-scored or closed issue, you have a bug — stop.
+>
+> **`backfill-only` is not an exception to that rule — it is a different write.** The rule guards the _transition_: which rung an issue sits on, and whether automation may take it. `backfill-only` (step 7) never touches either. It writes `prio:`/`est:` and nothing else, at any rung, and it moves nothing. The two coexist because scoring is one-way and one-time while a missing estimate is a gap that outlives it: an issue scored before this flow learned to backfill has no `prio:`/`est:` and no other way to get one.
 
 ## Steps
+
+> **`backfill-only` short-circuits this flow.** If `$ARGUMENTS` contains `backfill-only`, run step 1 (auth) and step 2 (repo), then go straight to **step 7** and stop. Steps 2a–6 are the scoring flow, and `backfill-only` does not score: no candidate query, no confidence check, no transition, no report of promotions that did not happen.
 
 ### 1. Preflight auth
 
@@ -84,6 +88,15 @@ Its **`gh-issue` adapter** is this path's half, and two things in it are specifi
 
 The adapter row carries the rest — the exact encoding, the ladder and where provenance lands — and this file deliberately does not repeat it. The one thing worth saying twice is the write: both fields ride out on step 5's existing full-set PATCH, an argument change to the write the transition already makes, not a second write or a second round trip. `dry-run` reports the intended backfills and writes nothing.
 
+**Do not spell the two labels out from the table — ask for them.** The encoding has one implementation, and a hand-composed `prio:` is exactly where the inversion above lands:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-backfill.py" \
+  encode --priority <urgent|high|medium|low|none> [--estimate <n>]
+```
+
+It prints the comma-separated label names (`prio:2,est:3`) to splice into step 5's `--labels` value, an empty line when neither field encodes to one, and a `# …` note on stderr when a value was deliberately not encoded — a `none` priority, or an estimate past the ladder's top. It refuses `urgent` with a non-zero exit, which is `task-fill.md`'s "never auto-set `urgent`" made mechanical. Same `$CLAUDE_PLUGIN_ROOT` fallback as the other assets: Glob `**/handlers/assets/gh-issue-backfill.py`.
+
 If a relative path doesn't resolve, find it with **Glob** (`**/commands/handlers/task-fill.md`) and Read it.
 
 Scoring then reads the **backfilled** `est:` in the gate below. That is the point of backfilling here: an issue with no `est:` label used to pass the size gate unconditionally, which degraded a deterministic check into the judgment check it exists to backstop.
@@ -115,7 +128,7 @@ The consequence for this flow is that a transition is a **read-modify-write on t
 gh issue view <n> --json labels --jq '[.labels[].name]' [--repo <repo>]
 ```
 
-Keep that issue's `prio:` and `est:` labels — **or, where step 4 backfilled one, the backfilled value in its place** — drop its `status:`/`auto:` rungs, and append the new pair. An issue with `prio:1,est:3` promoted HIGH is written as `status:2_ready,auto:eligible,prio:1,est:3`; omitting `prio:1,est:3` from the `--labels` value would delete them. An issue that carried neither and was backfilled to medium/2 is written as `status:2_ready,auto:eligible,prio:2,est:2`. This is why the backfill costs no extra write: the `--labels` value is being composed anyway, and `prio:`/`est:` are two more entries in it.
+Keep that issue's `prio:` and `est:` labels — **or, where step 4 backfilled one, the names `encode` printed** — drop its `status:`/`auto:` rungs, and append the new pair. An issue with `prio:1,est:3` promoted HIGH is written as `status:2_ready,auto:eligible,prio:1,est:3`; omitting `prio:1,est:3` from the `--labels` value would delete them. An issue that carried neither and was backfilled to medium/2 is written as `status:2_ready,auto:eligible,prio:2,est:2`. This is why the backfill costs no extra write: the `--labels` value is being composed anyway, and `prio:`/`est:` are two more entries in it.
 
 A backfilled label carries no marker distinguishing it from a human's, by design — `task-fill.md`'s "trusted downstream" rule. The provenance is the issue comment below, not the label.
 
@@ -183,3 +196,65 @@ backfilled (3):
 Skipped issues are reported with their reason — `already scored`, `parent rollup`, or `blocked`. The 500-cap warning (if it applied) leads the report per above, not a trailing footnote.
 
 **If step 3a's fallback fired, `parent rollup detection skipped (<reason>)` is the report's first line**, above the scope line — as shown above, quoting the `ROLLUP_REASON` the helper printed. It leads rather than trails because such a run may have promoted a rollup, and a reader who stops before the last line must still see that.
+
+### 7. `backfill-only` — fill `prio:`/`est:` without a transition
+
+Reached only from the short-circuit above. This writes the two optional labels on issues that are **missing** one, at any `status:` rung, and writes nothing else. It is not a re-score: it never moves an issue between rungs in either direction, never touches `auto:`, and never overwrites a value a human set. Demotion stays a human's call.
+
+The judgment is still `commands/handlers/task-fill.md`'s and is unchanged here — the static `medium` default, the model-produced estimate, the over-ceiling rule, the held-card exception. What changes is only that there is no transition for the write to ride on, so the whole write belongs to `gh-issue-backfill.py`.
+
+### 7a. Scan
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-backfill.py" \
+  scan --repo "<repo>" [--milestone "<scope-milestone>"] --json
+```
+
+Returns `candidates` (open, missing `prio:` or `est:`, not held — each with its `title`, `body`, current `labels`, and which fields are `missing`), `held` (each with the reason that held it), and `complete` (the numbers already carrying both, which get no write). The hold check is the native one: the `blocked` label **or** any open entry in the issue's `blocked_by` graph, per `commands/handlers/gh-issue.md`'s definition of an open dependency — it reuses `gh-issue-ready.py`'s paginating implementation rather than a third copy. Report and stop if `candidates` is empty.
+
+`--milestone` is optional here and there is no detection step: a backfill sweep is normally the whole backlog, and narrowing it is the caller's explicit choice.
+
+### 7b. Estimate each candidate
+
+For each candidate, produce the symbolic priority and the Fibonacci estimate per `task-fill.md` — the same scope-fit reasoning step 4 runs, which is what produces the number. Do not encode them; the script does that. Write the plan to a file:
+
+```json
+[
+  { "number": 142, "priority": "medium", "estimate": 3 },
+  { "number": 145, "estimate": 8 }
+]
+```
+
+- `priority` is the **symbolic word**, never an integer. Omit it to take the static `medium` default; `"none"` means no `prio:` label. `"urgent"` is refused — escalation is a human's call.
+- `estimate` is an honest integer on the ladder. Over the ladder's top it is left unset and reported, per the over-ceiling rule; off the ladder (`7`) it is refused rather than rounded.
+- An issue missing only one of the two needs only that one judged; a value supplied for a field the issue already carries is ignored, not written.
+
+### 7c. Apply
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-backfill.py" \
+  apply --repo "<repo>" --plan <plan.json> --apply [--provenance-issue <n>]
+```
+
+Drop `--apply` for a dry run — it re-reads every issue, reports exactly what it would write, and sends nothing (including no comment). `dry-run` in `$ARGUMENTS` means exactly this.
+
+Each issue is re-read at write time, because the plan was composed between the scan and the write and an issue can acquire a label, a blocker or a closure in that window. Then, per issue: a held one is reported and skipped, one already carrying both is skipped, one missing a `status:`/`auto:` rung is skipped (a pre-migration issue is the scoring flow's lane, not this one), and the rest get one full-set PATCH whose `status:`/`auto:` labels are byte-identical to the ones just read — asserted before the write, not after.
+
+**Provenance.** Per-issue provenance is the issue's own `labeled` timeline event: it names the actor and the time, it sits where a human correcting the value already is, and it notifies no one. The batch's one record is the report the script prints. Pass `--provenance-issue <n>` to also post it as a **single** comment on one issue — the issue that motivated the sweep, when there is one. Do not post one comment per issue: that is right for a promote run touching a handful of issues and is notification noise at thirty.
+
+### 7d. Report
+
+Print what the script printed. It is already the batch's provenance record, so restating it in a different shape would make two records that can disagree:
+
+```
+Backfilled 12 issue(s):
+  #142  prio:2, est:3
+  #151  prio:1  (estimate 21 over ladder top 13 — unset)
+
+Held (2, no write):
+  #693  blocked by #694
+  #710  blocked label
+
+Skipped (1):
+  #109  already carries prio: and est:
+```

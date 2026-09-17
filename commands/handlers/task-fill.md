@@ -26,6 +26,14 @@ entirely untouched — no backfill, no transition, no comment — so it stays in
 scanned pool and is re-scored next run once the blocker clears. `dry-run` reports
 the intended backfills and writes nothing.
 
+A card **already past the promoter's lane** is the other way in. Scoring is
+one-way and one-time, so a card scored before backfill existed would never be
+reached by the rule above — it carries no `priority`/`size` and nothing else
+writes one. `backfill-only` is that path: it fills the two fields at any rung,
+writes **nothing else**, and is not a re-score. It never moves a card between
+rungs in either direction, because demotion stays a human's call. The adapter
+says what implements it.
+
 ## Priority — a static default, and a symbolic value
 
 Missing or unset → **`medium`**. A flat static default is correct here because
@@ -97,6 +105,12 @@ naming **which** fields were auto-set. The adapter says where that lands. A
 candidate that scores HIGH still gets the note — there is no failed check to
 report in that case, just the backfill.
 
+**A batch leaves one record, not one per card.** The per-card note is right for a
+promote run touching a handful of cards; at thirty it is notification noise, and
+the noise is what stops the next batch from being run at all. So a `backfill-only`
+run emits a single record naming every card it touched. Per-card provenance still
+has to exist — the adapter says what carries it there.
+
 ## Backfilled values are trusted downstream
 
 Exactly like a human-set one, and with no carve-out. An auto-estimated size is
@@ -113,12 +127,12 @@ permanently blocked one.
 Four questions, and nothing else: which of the two fields this tracker can hold,
 how a symbolic priority encodes, how a value is written, where provenance lands.
 
-| handler    | priority encoding                                                            | estimate ladder     | written how                                                       | provenance                                                                   |
-| ---------- | ---------------------------------------------------------------------------- | ------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `repo-pr`  | `priority:` — the symbolic word verbatim                                     | `1/2/3/5` → `size:` | `Edit` on the YAML frontmatter                                    | `# promoter:` frontmatter comment                                            |
-| `linear`   | `none 0 · urgent 1 · high 2 · medium 3 · low 4`                              | `1/2/3/5`           | fields on the step-8 `save_issue` (not a separate write)          | one-line issue comment                                                       |
-| `gh-issue` | `urgent prio:0 · high prio:1 · medium prio:2 · low prio:3 · none = no label` | `1/2/3/5/8/13`      | `prio:`/`est:` in `gh-issue-state.py`'s full-set `--labels` PATCH | issue comment — folded into the LOW comment, or its own on a backfilled HIGH |
-| `jira`     | **not backfilled** — read only                                               | **no field at all** | —                                                                 | —                                                                            |
+| handler    | priority encoding                                                                                            | estimate ladder     | written how                                                                               | provenance                                                                                        |
+| ---------- | ------------------------------------------------------------------------------------------------------------ | ------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `repo-pr`  | `priority:` — the symbolic word verbatim                                                                     | `1/2/3/5` → `size:` | `Edit` on the YAML frontmatter                                                            | `# promoter:` frontmatter comment                                                                 |
+| `linear`   | `none 0 · urgent 1 · high 2 · medium 3 · low 4`                                                              | `1/2/3/5`           | fields on the step-8 `save_issue` (not a separate write)                                  | one-line issue comment                                                                            |
+| `gh-issue` | `gh-issue-backfill.py encode` — `urgent prio:0 · high prio:1 · medium prio:2 · low prio:3 · none = no label` | `1/2/3/5/8/13`      | `gh-issue-backfill.py` — `encode` into the transition's `--labels`, or `apply` standalone | on a transition, the issue comment; on a standalone batch, the timeline event plus one run record |
+| `jira`     | **not backfilled** — read only                                                                               | **no field at all** | —                                                                                         | —                                                                                                 |
 
 ### repo-pr
 
@@ -143,13 +157,30 @@ GitHub has no native priority or estimate field, so both live as the optional
 highest**, the inverse of Linear's `0`; encode from the symbolic value and never
 from Linear's integer.
 
-The write is free. `gh-issue-state.py` already takes the **complete** managed label
-set in one full-set PATCH, so a backfilled `prio:`/`est:` is an argument change to
-the call the transition already makes — no extra write, no extra round trip. The
-backfilled `est:` is assembled into `--labels` alongside the `status:`/`auto:`
-rungs. Provenance is an issue comment either way, the way the Linear path's is:
-on a LOW issue it is folded into the comment naming the failed check, and a HIGH
-issue that was backfilled gets one of its own.
+**The encoding above has one implementation: `commands/handlers/assets/gh-issue-backfill.py`.**
+Never compose a `prio:`/`est:` label from this table by hand — `encode` is what
+reads it, and `scripts/test_gh_issue_backfill.py` pins the mapping in both
+directions so a Linear integer leaking in fails the gate instead of inverting the
+board.
+
+Two call shapes, because the write differs and the judgment does not:
+
+- **On a transition** (the promote flow), the write is free. `gh-issue-state.py`
+  already takes the **complete** managed label set in one full-set PATCH, so a
+  backfilled `prio:`/`est:` is an argument change to the call the transition
+  already makes — no extra write, no extra round trip. The flow asks
+  `gh-issue-backfill.py encode --priority <word> [--estimate <n>]` for the label
+  names and splices them into that `--labels` value. Provenance is an issue
+  comment either way, the way the Linear path's is: on a LOW issue it is folded
+  into the comment naming the failed check, and a HIGH issue that was backfilled
+  gets one of its own.
+- **Standalone** (`backfill-only`), there is no transition to ride on, so
+  `gh-issue-backfill.py apply` owns the whole write: it re-reads each issue, holds
+  the blocked ones, fills only the **missing** field, and composes the full label
+  set with the `status:`/`auto:` rungs byte-identical to the ones it read. Per-issue
+  provenance is the issue's own `labeled` timeline event — actor, timestamp,
+  correctable in place, and no notification — and the batch's one record is the run
+  report, posted as a single comment with `--provenance-issue <n>`.
 
 This is the one handler whose ladder admits `8`/`13`, so it is the one that records
 an over-ceiling estimate rather than discarding it.
