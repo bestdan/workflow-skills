@@ -363,6 +363,28 @@ join, and `gh` covers it only partially.
 **Phase 5 — cleanup**
 
 11. [phase_5_cleanup/gh_migration_task_11.md](phase_5_cleanup/gh_migration_task_11.md) — Graduate durable decisions to `dev_docs/`, delete the plan folder.
+    **DONE 2026-09-17 — [PR #755](https://github.com/bestdan/workflow-skills/pull/755).**
+    `dev_docs/gh_issue_task_loop.md` carries all six points; the
+    requirements-and-evidence record graduated beside it as
+    `dev_docs/decisions/2026-08-24-gh-issue-migration-requirements-and-evidence.md`. The
+    five migration assets and their nine test files are deleted, each named in the delete
+    commit so `log --diff-filter=D` is the recovery path. The untracked
+    `dev_docs/tasks/gh_migration_plan/` is gone from the main checkout.
+
+    **The #441 decision this task owned: graduate a curated subset.** Those two files reach
+    `main`; the per-task scaffolding does not, and PR #441 is closed without merging. The
+    record survives on `origin/bestdan/gh-issue-migration`.
+
+    **Two things verified rather than inherited.** The task file says "four Linear-only
+    commands"; there are **three** — `/sweep-for-complete`, `/find-false-closures` and
+    `/sweep-for-archive` are the only ones that refuse on every other handler
+    (`/reconcile-tasks` reads as the fourth but `gh-issue` supports it as `audit`). And
+    `test_linear_gql_shape.py` asserts its glob finds **at least five** assets defining
+    `gql()`: there were seven, two went, so it now sits exactly on its boundary — the next
+    Linear asset removed breaks it.
+
+    **This plan is complete.** Task 12 was never written and gates nothing; task 13 is the
+    owner's, tracked outside this plan.
 
 ## In-flight PRs against files this plan owns
 
