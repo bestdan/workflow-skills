@@ -732,6 +732,23 @@ even a session that found the scripts could not run their `gh api` calls. The
 credentialed channel there is the GitHub MCP connector, which this handler does not
 yet speak (see `claim-lock.md`).
 
+> **Amended 2026-09-17 — that last sentence is no longer the whole story, and the
+> reason the flag stays `false` has narrowed.** The connector is not the only
+> credentialed channel: measured in a routine, plain `curl` **reads** the API and
+> **PATCHes an issue's labels** (`HTTP 200`), while the ref path stays refused. So the
+> 09-05 403s **do not show a closed environment** — what caused them is still open, and
+> this note must not be read as blaming `gh`: four variables differ between those
+> observations and no run has isolated one. The load-bearing part is the positive
+> finding, that the handler's own writes have an unattended route which is neither `gh`
+> nor the connector.
+>
+> **This does not flip the gate.** The plugin half is still binding, and the scripts
+> that would do the writing call `gh api` rather than `curl` — and `gh` is absent from a
+> routine outright. What changed is that "no working write channel" is no longer a second
+> independent blocker; it is an implementation gap. Evidence:
+> `dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md` → "2026-09-17: the
+> proxy's write block is PATH-SCOPED".
+
 So `true` needs **two** things the probed environment did not have, and the plugin is
 only the first. **The plugin half now has a known answer**: a cloud-environment setup
 script running `claude plugin marketplace add` plus `claude plugin install` before the

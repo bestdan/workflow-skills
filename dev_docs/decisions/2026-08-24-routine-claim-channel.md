@@ -14,9 +14,10 @@ claim was taken from documentation rather than from a measurement.
 - The first version asserted that a cloud session "runs pinned to a fixed
   `claude/<session>` branch and cannot create `task/<KEY>`" — so the ref lock was
   described as unavailable to routines outright. Removed in `08a6642`.
-- The second asserted that the proxy refused GitHub API writes outright. That is true
-  of the raw HTTP path and false of the MCP connector, which is the credentialed one —
-  so the conclusion drawn from it was wrong.
+- The second asserted that the proxy refused GitHub API writes outright. ~~That is true
+  of the raw HTTP path~~ **narrowed 2026-09-17: true of the ref path only — issue writes
+  over raw HTTP are permitted, see the amendment below** — and false of the MCP
+  connector, which is credentialed — so the conclusion drawn from it was wrong.
 
 Neither survived contact with a probe.
 
@@ -36,6 +37,14 @@ A routine reaches GitHub two ways, and they do not behave alike.
 > `cse_01Dg1yyyDLSTKykKZKSxpQ7v`; full measurement in
 > [`2026-09-05-cloud-session-plugin-and-proxy.md`](2026-09-05-cloud-session-plugin-and-proxy.md)
 > → "2026-09-16: the same read, from a routine".
+>
+> **Amended again 2026-09-17: the write block is PATH-SCOPED, so "for writes" is too
+> broad as well.** The same routine `PATCH`ed an issue's labels and got `HTTP 200`. The
+> ref refusal below is real and specific to **that path** — it is not a statement about
+> writes in general, and the refusal's own wording ("this GitHub API path") says so. Run
+> `cse_012mi73fBwpCdckjPF3KKhts`; full measurement in the companion record →
+> "2026-09-17: the proxy's write block is PATH-SCOPED". **Read every claim in this
+> section as scoped to the endpoint it was measured on.**
 
 - `gh` is **not installed**. Absent from `PATH`, and absent from
   `find / -maxdepth 4 -name gh -type f`. **Still true 2026-09-16**, including in a run
