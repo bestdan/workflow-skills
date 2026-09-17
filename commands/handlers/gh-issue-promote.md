@@ -134,8 +134,10 @@ Then, for each scored candidate (`<managed>` is the set just assembled):
   If anything was backfilled, also comment what was auto-set, so a HIGH issue's guessed numbers are as correctable as a LOW one's:
 
   ```bash
-  gh issue comment <n> --body "/promote-tasks: promoter auto-set prio:2, est:3" [--repo <repo>]
+  gh issue comment <n> --body "/promote-tasks: promoter auto-set <the labels backfilled>" [--repo <repo>]
   ```
+
+  `<the labels backfilled>` names only what step 4 actually wrote — `prio:2, est:3` when both, `est:3` alone when the issue already carried a `prio:`. Claiming a field that was already a human's is worse than saying nothing: it sends them to correct a value they set themselves.
 
 - **LOW** — `status:1_needs_refinement` + `auto:human-review-needed`, plus the issue's `prio:`/`est:` (existing or backfilled):
 
@@ -143,10 +145,10 @@ Then, for each scored candidate (`<managed>` is the set just assembled):
   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-state.py" \
     --repo "<repo>" --issue <n> \
     --labels status:1_needs_refinement,auto:human-review-needed[,<prio:…>][,<est:…>] --apply
-  gh issue comment <n> --body "/promote-tasks: <failed-check> (promoter auto-set prio:2, est:8)" [--repo <repo>]
+  gh issue comment <n> --body "/promote-tasks: <failed-check> (promoter auto-set <the labels backfilled>)" [--repo <repo>]
   ```
 
-  The comment names the failed check so the human can fix it quickly — the gh analogue of the file path's `# promoter:` frontmatter comment and `linear-promote.md`'s LOW comment — and names the auto-set fields in the same comment rather than a second one, exactly as the Linear path does. Drop the parenthetical when nothing was backfilled.
+  The comment names the failed check so the human can fix it quickly — the gh analogue of the file path's `# promoter:` frontmatter comment and `linear-promote.md`'s LOW comment — and names the auto-set fields in the same comment rather than a second one, exactly as the Linear path does. `<the labels backfilled>` is the same actual-fields-only rule as the HIGH path above; drop the parenthetical entirely when nothing was backfilled.
 
 If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/gh-issue-state.py`. `--repo` is required by the helper, so resolve the current repo with `gh repo view --json nameWithOwner --jq .nameWithOwner` when `gh-issue.repo` is unset; drop `--apply` to see the resulting set without writing it. No `gh label create` step is needed here — the raw PATCH creates a missing label rather than rejecting it, and `/task-config` provisions the vocabulary with its intended colors (`commands/handlers/gh-issue-config.md` step 3).
 
