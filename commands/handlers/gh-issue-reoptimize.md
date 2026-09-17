@@ -9,9 +9,17 @@ an existing GitHub Issues backlog's dependency graph and ordering against the
 handler honours: `/push-plan` §5.5 draws one per plan dependency,
 `/list-tasks` and `/do-tasks` read it (`gh-issue-ready.py`), and this flow now
 creates and removes it too. The `Blocked by: #<n>` body footer stays alongside as
-a human-readable copy — visible where the dependency panel is easy to miss, and
-readable by a cloud routine, which has no `gh` and no MCP dependency tool
-([`2026-08-24-routine-claim-channel.md`](../../dev_docs/decisions/2026-08-24-routine-claim-channel.md)).
+a human-readable copy — visible where the dependency panel is easy to miss.
+
+> **The unattended-reader half of that rationale is gone, measured 2026-09-16.**
+> This sentence used to add "and readable by a cloud routine, which has no `gh`
+> and no MCP dependency tool". Both those limits are real and neither is the
+> whole channel: a routine read `blocked_by` over plain `curl` (`HTTP 200`,
+> correct data), carrying only the `proxy-injected` placeholder, because the
+> egress proxy substitutes a credential. See
+> [`2026-09-05-cloud-session-plugin-and-proxy.md`](../../dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md)
+> → "2026-09-16: the same read, from a routine". The footer's surviving reason is
+> visibility to **humans**; do not re-derive the unattended one.
 
 Two rules follow, and they are the whole design:
 
@@ -289,10 +297,19 @@ wrong one whenever `gh-issue.repo` is configured.
   mutation back in the final summary (issue number + what changed), and list
   anything skipped (unapproved, terminal, out of scope, or cyclic) with the
   reason.
-- **State what a routine can and cannot see** in the final summary: the edges
-  are the graph, and a cloud routine cannot read them — it sees only the footer
-  echo. Anything relying on unattended dependency awareness through the MCP
-  connector is reading a hint.
+- **State what a routine can and cannot see** in the final summary: the edges are
+  the graph, and **a routine reading through the MCP connector alone** sees only
+  the footer echo, because that connector exposes no dependency tool. Anything
+  relying on unattended dependency awareness _through the connector_ is reading a
+  hint.
+
+  > **Corrected 2026-09-16.** This bullet used to say a cloud routine "cannot read
+  > them" outright. It can: a routine read `blocked_by` over plain `curl`, `HTTP
+  > 200` with correct data, carrying only the `proxy-injected` placeholder — the
+  > egress proxy substitutes a credential. The connector limit is real; it was
+  > never the whole channel. See
+  > `dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md` →
+  > "2026-09-16: the same read, from a routine".
 
 ## Optional deepening — cross-check the source plan
 

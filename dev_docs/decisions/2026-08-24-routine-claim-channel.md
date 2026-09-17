@@ -27,21 +27,55 @@ not re-derive routine behaviour from documentation.** Probe it.
 
 A routine reaches GitHub two ways, and they do not behave alike.
 
-### Raw HTTP — uncredentialed
+### Raw HTTP — uncredentialed for writes, and **credentialed for reads**
+
+> **Amended 2026-09-16, and the heading changed with it.** A routine read a GitHub
+> dependency edge over plain `curl` — `HTTP 200`, correct data — so "uncredentialed" is
+> wrong as a blanket description of this channel. **The write findings below are
+> untouched and still govern `claim-lock.md`.** Run
+> `cse_01Dg1yyyDLSTKykKZKSxpQ7v`; full measurement in
+> [`2026-09-05-cloud-session-plugin-and-proxy.md`](2026-09-05-cloud-session-plugin-and-proxy.md)
+> → "2026-09-16: the same read, from a routine".
 
 - `gh` is **not installed**. Absent from `PATH`, and absent from
-  `find / -maxdepth 4 -name gh -type f`.
-- `curl` to `api.github.com` carries **no token**.
+  `find / -maxdepth 4 -name gh -type f`. **Still true 2026-09-16**, including in a run
+  that sourced `bestdan/dotfiles` — see the 09-16 section for why that is unexplained.
+- ~~`curl` to `api.github.com` carries **no token**.~~ **Superseded 2026-09-16.**
+  `$GH_TOKEN` holds the literal placeholder `proxy-injected` (len 14) — so "no token" is
+  literally right and was the wrong thing to measure. **The egress proxy substitutes a
+  real credential**, and the read succeeds carrying the placeholder. Read the token
+  variable as saying nothing about what the channel can do.
 - `POST` and `DELETE` on `/git/refs` return:
 
   ```
   403 Write access to this GitHub API path is not permitted through this proxy.
   ```
 
-- Read behaviour on that path was **inconsistent between runs**, so it is not
-  dependable for reads either.
+  > **Re-measured 2026-09-16 and unchanged — word for word, three weeks later.** Runs
+  > `cse_01R2HLXrknbeDW8NuK8bBjYP` (DELETE) and `cse_01EvGKZQfMFPGrfSSucrNkC3` (POST),
+  > against a disposable ref in `bestdan/workflow-skills`, both returning the body above
+  > with `documentation_url: …/claude-code/github-actions`.
+  >
+  > **The DELETE was run against a ref confirmed to exist**, by a `GET` returning 200
+  > immediately before, so the refusal is not an artefact of a missing target. The ref
+  > was still present afterwards and was removed by hand.
+  >
+  > This was worth re-running rather than inheriting: the **read** half of this same
+  > record was overturned the same day, and "the other half is probably still fine" is
+  > the reasoning that produced the errors these records exist to correct. It is now
+  > measured, not assumed. **This is the finding `claim-lock.md` rests on, and it
+  > stands.**
+  >
+  > A first POST attempt returned `415 Request bodies must declare Content-Type:
+  > application/json` — a malformed request of the prober's own making, testing nothing.
+  > Recorded because a 415 in a transcript reads like a refusal and is not one.
 
-Consequence: the `gh api` acquire form in `claim-lock.md` is **local-only**.
+- Read behaviour on that path was **inconsistent between runs**, so it is not
+  dependable for reads either. **That is about `/git/refs` specifically**; the 09-16
+  read was against `/issues/{n}/dependencies/blocked_by` and was clean.
+
+Consequence: the `gh api` acquire form in `claim-lock.md` is **local-only** — still
+true, and now for a sharper reason: `gh` is absent rather than merely unusable.
 
 ### The GitHub MCP connector — authenticated
 

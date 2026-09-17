@@ -290,12 +290,27 @@ echo of the edge, never a substitute for one** — the edge is what
 is the only encoding either one honours. The footer is worth keeping because it
 is visible in the issue body where the dependency panel is easy to miss, and
 because a blocker held back by `--ready-only` has no issue to link to and can
-only be recorded as prose. Its strongest reason is the routine channel: a
-cloud routine cannot read the edge in any form. It has no `gh`, and the
-GitHub MCP connector exposes no dependency tool
-(`dev_docs/decisions/2026-08-24-routine-claim-channel.md`). Issue bodies are
-readable through the connector, so the footer is the only blocked-ness signal
-available unattended. Read it as a hint, never as the graph: nothing keeps the
+only be recorded as prose.
+
+> **Its strongest reason is gone, measured 2026-09-16.** This paragraph used to
+> argue that a cloud routine cannot read the edge in any form — no `gh`, and no
+> dependency tool on the GitHub MCP connector. The premise was never wrong about
+> those two channels; it was wrong to treat them as the only ones. A routine read
+> `blocked_by` over plain `curl` (`HTTP 200`, correct data), carrying nothing but
+> the `proxy-injected` placeholder, because the egress proxy substitutes a
+> credential. A cloud session does the same. See
+> `dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md` →
+> "2026-09-16: the same read, from a routine".
+>
+> **The footer is still written**, and this note does not change that — removing
+> it is a behaviour change owned by
+> [#500](https://github.com/bestdan/workflow-skills/issues/500), not by a
+> correction to the reasoning. What it does change is what you may say for it:
+> the remaining reasons are that it is visible in the body where the dependency
+> panel is easy to miss, and that a `--ready-only` blocker has no issue to link
+> to. Do not re-derive the unattended-reader argument; it has been measured false.
+
+Read the footer as a hint, never as the graph: nothing keeps the
 footer and the edge in sync between writes, so a hand-edited body can claim a
 dependency the graph does not have.
 
@@ -481,6 +496,14 @@ drop the flag for a rehearsal. Two limits worth stating plainly: this path is
 dependency tool (`dev_docs/decisions/2026-08-24-routine-claim-channel.md`) — and
 the local `sandbox-network-guard` hook blocks non-GET `gh api`, so `--apply`
 needs the sandbox escape.
+
+> **"Local only" still holds here, but check the reason before reusing it.** Both
+> clauses above are about this step, which **writes** edges. A routine's writes
+> are refused at the proxy (`403 … not permitted through this proxy`, still the
+> operative measurement). Its **reads** are not: measured 2026-09-16, a routine
+> read `blocked_by` over `curl` carrying only the `proxy-injected` placeholder.
+> So do not cite this sentence as evidence that a routine cannot _see_ the graph
+> — it cannot _write_ it.
 
 ### 5.6 Cleanup — delete each migrated task file
 
