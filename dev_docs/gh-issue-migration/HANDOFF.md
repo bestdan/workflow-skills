@@ -101,7 +101,7 @@ If your redraft looks like the previous version with a paragraph added, you patc
 
 ## Where this lives, and why it is not on main
 
-This plan used to live under `dev_docs/tasks/gh_migration_plan/`, which `.gitignore:31`
+This plan used to live under `dev_docs/tasks/gh_migration_plan/`, which `.gitignore:35`
 excludes — so it existed in exactly one git worktree, uncommitted, with no history and no
 remote. It is now committed under `dev_docs/gh-issue-migration/`, per the `.gitignore`
 comment block's own advice: "Prefer graduating durable wisdom to a top-level
@@ -502,10 +502,12 @@ first create: `gh issue create --milestone 8` exits 1 with
 `could not add to milestone '8': '8' not found`. Both `gh issue create -m` and
 `gh issue edit -m` are documented "by name" and look the title up.
 
-`commands/push-plan.md` §5.3 said to pass the resolved **number**, "so a title with
-shell-unsafe characters or a later rename can't break it". That reason does not survive
-contact with the flag, and it does not apply to a caller passing argv entries anyway.
-**The sentence is amended where it lives** (PR #616), with the measurement beside it. The
+`commands/push-plan.md` **§5.4 step 4** said to pass the resolved **number**, "so a title
+with shell-unsafe characters or a later rename can't break it". That reason does not
+survive contact with the flag, and it does not apply to a caller passing argv entries
+anyway. **The sentence is amended where it lives** (PR #616), with the measurement beside
+it. (Earlier drafts of this file cited §5.3, which is "Order the tasks (topological)" and
+says nothing about milestones — §5.2 resolves the number, §5.4 step 4 passes the title.) The
 number is still resolved and still needed — for reuse-before-create and for the record —
 it is just not what `gh` accepts at the create.
 
@@ -679,7 +681,7 @@ backstop.
 - **`gh issue create -m` / `gh issue edit -m` take the milestone by TITLE**, measured
   2026-09-13 against gh 2.98.0 after the number cost `--apply` its first create:
   `--milestone 8` exits 1 with `could not add to milestone '8': '8' not found`.
-  `commands/push-plan.md` §5.3 said to pass the resolved number and is amended.
+  `commands/push-plan.md` §5.4 step 4 said to pass the resolved number and is amended.
 
 **Reads**, measured 2026-09-03 by task 7
 ([PR #464](https://github.com/bestdan/workflow-skills/pull/464)).
