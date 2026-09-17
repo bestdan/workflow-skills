@@ -95,12 +95,17 @@ session owns — the lock is the **creation**, and it is already decided by then
 
 ## Cloud routines: use the comment election, not the ref lock
 
-A routine has two channels to GitHub and only one of them is credentialed:
+A routine has two channels to GitHub, and what each can do is **per path** — not per
+channel. Read every rule below as scoped to the endpoint it names:
 
-- **Raw HTTP carries no token.** `gh` is not installed, and `curl` to `api.github.com`
-  gets **403** on writes; reads on `/git/refs` were inconsistent between runs, so do
-  not rely on that path for reads either. **The `gh api` acquire form above is
-  therefore local-only.**
+- **Raw HTTP is effectively credentialed, and the ref path is still closed.** `$GH_TOKEN`
+  holds the literal `proxy-injected` placeholder and the egress proxy substitutes a real
+  credential, so the variable says nothing about what the channel can do. Measured
+  2026-09-16/17: `GET` on issue endpoints and a no-op `PATCH` of an issue's labels both
+  return `200`; `POST`/`DELETE` on `/git/refs` return `403 … not permitted through this
+  proxy`, and reads on that path were inconsistent between runs. `gh` is **not
+  installed**. **The `gh api` acquire form above is therefore still local-only** — now
+  for two separate reasons, no `gh` and no ref writes, either of which is sufficient.
 - **The GitHub MCP connector is the routine's real channel**, and
   `mcp__github__create_branch` is a working acquire primitive there — create-only, and a
   duplicate is rejected with `Reference already exists`, the same election semantics as
@@ -128,6 +133,19 @@ symmetric:
 > path with a separate refusal, and "reads work, so writes probably do" would have been
 > the same bad inference in the other direction. See
 > `dev_docs/decisions/2026-08-24-routine-claim-channel.md` → "Raw HTTP".
+>
+> **Sharpened 2026-09-17, and the distinction is the whole rule.** A routine is **not**
+> write-blocked in general: it `PATCH`es an issue's labels over `curl` and gets `HTTP
+> 200`. The proxy's block is **path-scoped**, and the ref path is one of the blocked ones.
+> So state the reason precisely — a routine cannot release a claim ref **because refs are
+> closed to it**, not because it cannot write. Anyone reasoning from "routines can't
+> write" will reach wrong conclusions about the label path, where a **no-op** `PATCH` of
+> an issue's labels returned `200`.
+>
+> **A mutating label write has not been observed.** The proxy is believed to decide by
+> path and method rather than payload, so a real change is **expected** to behave the
+> same — expected, not measured. Do not route real label writes here on the strength of
+> this note alone.
 
 |                  | left behind     | cost                                                                                                     |
 | ---------------- | --------------- | -------------------------------------------------------------------------------------------------------- |
