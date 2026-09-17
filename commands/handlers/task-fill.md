@@ -104,12 +104,12 @@ permanently blocked one.
 Four questions, and nothing else: which of the two fields this tracker can hold,
 how a symbolic priority encodes, how a value is written, where provenance lands.
 
-| handler    | priority encoding                                                            | estimate ladder     | written how                                                       | provenance                        |
-| ---------- | ---------------------------------------------------------------------------- | ------------------- | ----------------------------------------------------------------- | --------------------------------- |
-| `repo-pr`  | `priority:` — the symbolic word verbatim                                     | `1/2/3/5` → `size:` | `Edit` on the YAML frontmatter                                    | `# promoter:` frontmatter comment |
-| `linear`   | `none 0 · urgent 1 · high 2 · medium 3 · low 4`                              | `1/2/3/5`           | fields on the step-8 `save_issue` (not a separate write)          | one-line issue comment            |
-| `gh-issue` | `urgent prio:0 · high prio:1 · medium prio:2 · low prio:3 · none = no label` | `1/2/3/5/8/13`      | `prio:`/`est:` in `gh-issue-state.py`'s full-set `--labels` PATCH | named in the LOW issue comment    |
-| `jira`     | **not backfilled** — read only                                               | **no field at all** | —                                                                 | —                                 |
+| handler    | priority encoding                                                            | estimate ladder     | written how                                                       | provenance                                                                   |
+| ---------- | ---------------------------------------------------------------------------- | ------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `repo-pr`  | `priority:` — the symbolic word verbatim                                     | `1/2/3/5` → `size:` | `Edit` on the YAML frontmatter                                    | `# promoter:` frontmatter comment                                            |
+| `linear`   | `none 0 · urgent 1 · high 2 · medium 3 · low 4`                              | `1/2/3/5`           | fields on the step-8 `save_issue` (not a separate write)          | one-line issue comment                                                       |
+| `gh-issue` | `urgent prio:0 · high prio:1 · medium prio:2 · low prio:3 · none = no label` | `1/2/3/5/8/13`      | `prio:`/`est:` in `gh-issue-state.py`'s full-set `--labels` PATCH | issue comment — folded into the LOW comment, or its own on a backfilled HIGH |
+| `jira`     | **not backfilled** — read only                                               | **no field at all** | —                                                                 | —                                                                            |
 
 ### repo-pr
 
@@ -138,8 +138,9 @@ The write is free. `gh-issue-state.py` already takes the **complete** managed la
 set in one full-set PATCH, so a backfilled `prio:`/`est:` is an argument change to
 the call the transition already makes — no extra write, no extra round trip. The
 backfilled `est:` is assembled into `--labels` alongside the `status:`/`auto:`
-rungs, and the LOW comment names the auto-set fields the way the Linear path's
-comment does.
+rungs. Provenance is an issue comment either way, the way the Linear path's is:
+on a LOW issue it is folded into the comment naming the failed check, and a HIGH
+issue that was backfilled gets one of its own.
 
 This is the one handler whose ladder admits `8`/`13`, so it is the one that records
 an over-ceiling estimate rather than discarding it.
