@@ -302,13 +302,22 @@ only be recorded as prose.
 > `dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md` →
 > "2026-09-16: the same read, from a routine".
 >
-> **The footer is still written**, and this note does not change that — removing
-> it is a behaviour change owned by
-> [#500](https://github.com/bestdan/workflow-skills/issues/500), not by a
-> correction to the reasoning. What it does change is what you may say for it:
-> the remaining reasons are that it is visible in the body where the dependency
-> panel is easy to miss, and that a `--ready-only` blocker has no issue to link
-> to. Do not re-derive the unattended-reader argument; it has been measured false.
+> **The footer is still written, and writing both forms is the settled design** —
+> not an oversight this note exposes. §5.5 has drawn the native edge since
+> v2.17.0 ([#444](https://github.com/bestdan/workflow-skills/pull/444), merged
+> 2026-09-02) and the footer has been kept beside it deliberately, as the
+> human-readable echo. What this note changes is only what you may say **for**
+> the footer: the remaining reasons are that it is visible in the body where the
+> dependency panel is easy to miss, and that a `--ready-only` blocker has no
+> issue to link to. Do not re-derive the unattended-reader argument; it has been
+> measured false.
+>
+> **No open issue owns removing the footer.** An earlier draft of this note
+> pointed at [#500](https://github.com/bestdan/workflow-skills/issues/500) as
+> its owner. #500 is **CLOSED/COMPLETED** and never owned that: it was already
+> delivered by #444 five days before it was filed, and its closing note records
+> keeping the footer as that issue's own option 1. Anyone who wants the footer
+> gone is reopening a settled call and should say so rather than citing a ticket.
 
 Read the footer as a hint, never as the graph: nothing keeps the
 footer and the edge in sync between writes, so a hand-edited body can claim a
