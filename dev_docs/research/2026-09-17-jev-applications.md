@@ -1,6 +1,6 @@
 ---
 created: 2026-09-17
-status: proposed
+question: "Where, if anywhere, in this repo would a typed model call be a better tool than a prose model call?"
 ---
 
 # Where TypeSafe's Jev could fit in this repo (2026-09-17)
@@ -240,7 +240,12 @@ than a cost.
   where `jev-1.13` is unreliable, and three of its entries land on the uses ranked
   above. See §8.
 
-## Sources
+## Method and sources
+
+No design or decision cites this record yet. The constraints in "If any of this is
+ever adopted" are findings about what an adoption would have to honor, not a
+recommendation to adopt — the recommendation belongs in whichever design first cites
+this.
 
 The first draft of this note was written against a mirror, because `docs.typesafe.ai`
 was blocked by that session's egress policy. On 2026-09-18 the live docs were
