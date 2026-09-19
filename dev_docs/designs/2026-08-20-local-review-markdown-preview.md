@@ -1,3 +1,7 @@
+---
+created: 2026-08-20
+---
+
 # local-review — rendered markdown preview
 
 Design for [#382](https://github.com/bestdan/workflow-skills/issues/382): a
@@ -6,7 +10,7 @@ document it is, rather than as source.
 
 Builds on the view-mode machinery merged in #380. Vocabulary and the
 constraints that look arbitrary from outside are in
-[`../decisions/local_review_view_modes.md`](../decisions/local_review_view_modes.md).
+[`../decisions/2026-08-19-local-review-view-modes.md`](../decisions/2026-08-19-local-review-view-modes.md).
 
 This revision incorporates an adversarial review by two independent reviewers.
 Where the first draft was wrong, the wrongness is recorded rather than quietly
@@ -312,5 +316,5 @@ Both out of scope here; each wants its own issue.
 - Frontmatter, link titles, and reference definitions are visible in preview.
 - `Referrer-Policy: no-referrer` is sent on every response.
 - The mapping tests run under `node` and skip cleanly without it.
-- `dev_docs/decisions/local_review_view_modes.md` stops describing preview in
+- `dev_docs/decisions/2026-08-19-local-review-view-modes.md` stops describing preview in
   the present tense before it is true.

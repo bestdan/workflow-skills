@@ -49,7 +49,7 @@ id**, exactly as the POST body does; passing the issue number there addresses a
 different edge or none.
 
 A cloud routine has no `gh`, and the GitHub MCP connector has no dependency tool
-(measured — `dev_docs/decisions/2026-08-24-routine-claim-channel.md`), so this
+(measured — `dev_docs/research/2026-08-24-routine-claim-channel.md`), so this
 path is LOCAL ONLY. There is no unattended equivalent to fall back to.
 
 Note: the local `sandbox-network-guard` hook blocks non-GET `gh api`, so

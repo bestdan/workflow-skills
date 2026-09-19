@@ -1,3 +1,7 @@
+---
+created: 2026-08-01
+---
+
 # Design — generic auth-key resolution
 
 Status: approved, not yet implemented
@@ -279,7 +283,7 @@ handling. Two behaviors it adds that do not exist today:
   the `op read` contract verbatim.
 - `commands/handlers/linear-common.md` → "Key resolution": both ladders, the raw-local-leaf
   exception for the resolver, the reason categories.
-- `dev_docs/decisions/linear_read_fastpaths.md` — not the addendum the earlier draft
+- `dev_docs/linear-read-fastpaths.md` — not the addendum the earlier draft
   planned. It currently states that `get_key()` is defined in `linear-archive.py` and
   copied verbatim by every sibling, and that refs resolve via `op read`; both stop being
   true in this PR. Correct those statements and add the addendum.
@@ -296,7 +300,7 @@ keeps `op` as the default.
 - `commands/handlers/linear-config.md` → "Archive key".
 - `commands/doctor.md` — replace the direct `op read "<ref>"` probe (currently at
   ~L246) with `--probe`, and add the committed-resolver provenance check.
-- `dev_docs/decisions/linear_shared_scan.md` — mentions the `$LINEAR_API_KEY_REF`
+- `dev_docs/linear-shared-scan.md` — mentions the `$LINEAR_API_KEY_REF`
   contract.
 - The committed `dev_docs/tasks/.task-config.yml` comment block (~L12-17), which
   documents the ref/env contract and should name the resolver key.

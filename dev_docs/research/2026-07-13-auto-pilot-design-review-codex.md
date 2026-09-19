@@ -1,3 +1,7 @@
+---
+created: 2026-07-13
+---
+
 # Verdict
 
 Yes: the architecture is manufacturing these bugs.

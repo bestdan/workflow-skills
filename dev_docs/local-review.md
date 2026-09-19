@@ -85,7 +85,7 @@ body labelled. A per-fence size cap would not fix that, because the cost is
 additive across fences. The server sends
 `Referrer-Policy: no-referrer` because the token is in the URL (see #386), and
 the whole design including eight corrections to its first draft is in
-[`designs/local-review-markdown-preview.md`](designs/local-review-markdown-preview.md).
+[`designs/2026-08-20-local-review-markdown-preview.md`](designs/2026-08-20-local-review-markdown-preview.md).
 
 `single` emits a genuine two-column grid rather than hiding two of four, so
 `insertAfterRow()` reads the column count from `grid.dataset.cols` instead of
@@ -98,7 +98,7 @@ that stops being legal falls back to the default. Collapse and "Viewed" live in
 `comments` store so the submit counter never disagrees with the page.
 
 The reasoning, and the two constraints that look arbitrary from outside, are in
-[`decisions/local_review_view_modes.md`](decisions/local_review_view_modes.md).
+[`decisions/2026-08-19-local-review-view-modes.md`](decisions/2026-08-19-local-review-view-modes.md).
 
 ## The agent contract
 

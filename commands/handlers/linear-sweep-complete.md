@@ -320,7 +320,7 @@ post-filter above especially — as the specification they are.
 > this sweep through `gh`. If a `gh` REST call does start answering, the repo
 > was provisioned since — re-measure, do not treat it as a malfunction.
 > Measurements, refusal texts and run ids:
-> `dev_docs/decisions/2026-09-07-cloud-routine-plugins-and-gh.md`.
+> `dev_docs/research/2026-09-07-cloud-routine-plugins-and-gh.md`.
 
 The prefix is `mcp__github__`, and the surface comes from the **GitHub App
 installed for claude.ai/code** — not a claude.ai connector, so it is absent

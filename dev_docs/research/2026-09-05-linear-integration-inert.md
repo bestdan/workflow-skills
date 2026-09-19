@@ -1,3 +1,7 @@
+---
+created: 2026-09-05
+---
+
 # 2026-09-05 — the over-close incident, and why this workspace's Linear integration never fired
 
 A snapshot of one workspace on one date. The handler docs used to carry this

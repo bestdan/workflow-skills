@@ -132,7 +132,7 @@ symmetric:
 > `curl` — which overturned four claims elsewhere in this plugin. Writes are a separate
 > path with a separate refusal, and "reads work, so writes probably do" would have been
 > the same bad inference in the other direction. See
-> `dev_docs/decisions/2026-08-24-routine-claim-channel.md` → "Raw HTTP".
+> `dev_docs/research/2026-08-24-routine-claim-channel.md` → "Raw HTTP".
 >
 > **Sharpened 2026-09-17, and the distinction is the whole rule.** A routine is **not**
 > write-blocked in general: it `PATCH`es an issue's labels over `curl` and gets `HTTP
@@ -165,7 +165,7 @@ _name_ — but the branch may not sit at the sha the session read earlier.
 
 > **Measured 2026-08-24 against the live API.** Probe transcripts, the verbatim 403
 > texts and the full 58-tool connector inventory are in
-> [`dev_docs/decisions/2026-08-24-routine-claim-channel.md`](../../dev_docs/decisions/2026-08-24-routine-claim-channel.md).
+> [`dev_docs/research/2026-08-24-routine-claim-channel.md`](../../dev_docs/research/2026-08-24-routine-claim-channel.md).
 > **Do not re-derive routine behaviour from documentation** — this file was wrong twice
 > that way.
 
@@ -182,7 +182,7 @@ line below — no API error happened). Such a session must **not** attempt the
 acquire first.
 
 > **A cloud session may not be able to acquire at all.** Probed 2026-09-05
-> ([`dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md`](../../dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md)):
+> ([`dev_docs/research/2026-09-05-cloud-session-plugin-and-proxy.md`](../../dev_docs/research/2026-09-05-cloud-session-plugin-and-proxy.md)):
 > `gh` is installed there but uncredentialed, and every `gh api` call — read as well as
 > write — returned 403. The same dead credential takes down the election's own
 > `gh issue comment` (same token; only `gh api` was exercised), so such a session claims

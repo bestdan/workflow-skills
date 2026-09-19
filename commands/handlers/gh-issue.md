@@ -16,7 +16,7 @@ gh-issue:
   # other way AND gives the session a working gh credential. Probed 2026-09-05: a cloud
   # session installed nothing from a committed .claude/settings.json, and its gh 403'd
   # on reads as well as writes. See
-  # dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md and
+  # dev_docs/research/2026-09-05-cloud-session-plugin-and-proxy.md and
   # commands/do-tasks.md §4 "gh-issue batch".
   max_estimate: 3 # optional — upper bound /promote-tasks gates an issue's `est:` label against.
   # Same key name, same Fibonacci scale and same default (3) as `linear.max_estimate`

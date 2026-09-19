@@ -1,3 +1,7 @@
+---
+created: 2026-07-13
+---
+
 # Verdict
 
 **Proceed, but cut it down to Stages 1–3 — the scenario harness, supervisor-owned authority, and the watcher split. Do not approve Stages 4–5 or the one-task-per-process model yet.**

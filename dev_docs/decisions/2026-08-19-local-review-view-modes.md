@@ -1,3 +1,8 @@
+---
+created: 2026-08-19
+status: accepted
+---
+
 # local-review view modes
 
 Why the review UI has three per-file view modes instead of one split diff, and
@@ -76,7 +81,20 @@ store rather than treating the DOM as the record.
   from the token stream, so no attacker-derived string ever reaches an HTML
   parser and there is nothing to sanitize. Full reasoning, and the eight claims
   the first design draft got wrong, are in
-  [`../designs/local-review-markdown-preview.md`](../designs/local-review-markdown-preview.md).
+  [`../designs/2026-08-20-local-review-markdown-preview.md`](../designs/2026-08-20-local-review-markdown-preview.md).
+
+## Revisit when
+
+- **The full file becomes readable in every mode.** `preview` is limited to
+  wholly-added files because `--diff-file` and a foreign PR's `gh pr diff`
+  carry only hunk fragments. A source of whole-file content that holds in all
+  four modes removes that constraint, and preview extends to modified files.
+- **Someone asks for an interleaved single-column diff.** That is a different
+  feature from `single`, which is defined only when one side is empty. Building
+  it means deciding whether it shares the name or takes its own.
+- **`marked`'s lexer stops carrying preview.** The no-sanitizer position holds
+  only because no attacker-derived string reaches an HTML parser. A feature
+  that needs raw HTML through reopens it.
 
 ## Deferred
 

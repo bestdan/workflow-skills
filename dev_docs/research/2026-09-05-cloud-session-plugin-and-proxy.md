@@ -1,3 +1,7 @@
+---
+created: 2026-09-05
+---
+
 # What a cloud session gives a gh-issue batch, and what it withholds
 
 **Measured 2026-09-05** inside a Claude Code cloud session, against

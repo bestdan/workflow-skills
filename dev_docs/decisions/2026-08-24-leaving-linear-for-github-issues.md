@@ -1,3 +1,8 @@
+---
+created: 2026-08-24
+status: accepted
+---
+
 # Why the task loop left Linear for GitHub Issues
 
 **Decided 2026-08-24**, from an interview plus measurement against the live Linear
@@ -107,8 +112,8 @@ Four consequences, each of which outlived the spike:
 that is the number to size `/auto-pilot` fan-out against.
 
 Two things a reader should not look for here. Whether **unattended** agents can reach
-GitHub is [`2026-08-24-routine-claim-channel.md`](2026-08-24-routine-claim-channel.md) and
-[`2026-09-05-cloud-session-plugin-and-proxy.md`](2026-09-05-cloud-session-plugin-and-proxy.md),
+GitHub is [`2026-08-24-routine-claim-channel.md`](../research/2026-08-24-routine-claim-channel.md) and
+[`2026-09-05-cloud-session-plugin-and-proxy.md`](../research/2026-09-05-cloud-session-plugin-and-proxy.md),
 which own that question and have been re-measured since. And **"nothing merges before
 review" is a convention, not an enforced rule** — the repos use rulesets rather than legacy
 protection, so `/branches/main/protection` returns 404 and that does not mean unprotected.

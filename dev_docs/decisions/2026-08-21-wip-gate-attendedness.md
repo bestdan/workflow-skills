@@ -1,3 +1,8 @@
+---
+created: 2026-08-21
+status: accepted
+---
+
 # WIP gate attendedness
 
 Why the pre-claim WIP gate asks a present human instead of detecting one, and why
@@ -81,3 +86,18 @@ than a silent label removal, and live on the promote side. Note also that the or
 proposal's "remove the marker inside the same claim mutation" is not achievable as
 stated: the claim lock is a ref push or a comment election, and the label write is a
 separate call regardless.
+
+## Revisit when
+
+- **An unanswered `AskUserQuestion` stops holding.** The gate detects nothing;
+  it relies on a prompt going unanswered in an unattended run. A harness that
+  resolves an unanswered prompt to a default turns the gate into a no-op, and
+  attendedness then needs a real signal.
+- **A tracker gains a marker distinct from `needs_refinement`.** The
+  selection-preference inversion was cut because `human-approval-requested` and
+  `needs_refinement` are one population on every handler. Two genuinely
+  different markers reopen it — on the promote side, showing the promoter's
+  failed check or the bail comment and recording approval as a comment.
+- **A caller appears that must never prompt.** There is deliberately no config
+  key to restore always-declining behaviour; a lane that cannot tolerate the
+  prompt is the evidence that one is needed.

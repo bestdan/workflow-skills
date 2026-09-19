@@ -11,7 +11,7 @@ longer) the plan.
 
 The product design — the problem, the measured evidence, the record formats,
 the full on-disk structure — is settled and lives at
-[`dev_docs/designs/research_spike_skill.md`](designs/research_spike_skill.md).
+[`dev_docs/designs/2026-08-01-research-spike-skill.md`](designs/2026-08-01-research-spike-skill.md).
 Read it for the "why does this skill exist at all" story (the four-day
 `aiutopilot` incident, the 6-discharged-against-23-open numbers, the
 deferral-visibility table). This doc does not repeat that story; it covers
@@ -450,12 +450,12 @@ to verify this.
 
 ## File map
 
-| Path                                                 | What it is                                                                                                                                           |
-| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `scripts/research-spike.py`                          | The script half — stdlib-only, deterministic — the only research-spike thing CI runs (via `scripts/check.sh`, which runs many other checks besides). |
-| `scripts/test-research-spike.sh`                     | The hermetic fixture harness, wired into `scripts/check.sh`.                                                                                         |
-| `skills/research-spike/SKILL.md`                     | The judgment half — the five procedures and the script/LLM boundary.                                                                                 |
-| `skills/research-spike/references/record-grammar.md` | The full field reference, written by hand against the script's own constants — see "Where the record grammar lives" for why that sync is not tested. |
-| `skills/research-spike/references/adoption.md`       | The setup playbook for turning this on in a repo with real deferred work.                                                                            |
-| `dev_docs/designs/research_spike_skill.md`           | The product design — problem, evidence, and the settled architecture.                                                                                |
-| `dev_docs/research_spike.md` (this file)             | The engineering record — decisions, rationale, gotchas.                                                                                              |
+| Path                                                  | What it is                                                                                                                                           |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scripts/research-spike.py`                           | The script half — stdlib-only, deterministic — the only research-spike thing CI runs (via `scripts/check.sh`, which runs many other checks besides). |
+| `scripts/test-research-spike.sh`                      | The hermetic fixture harness, wired into `scripts/check.sh`.                                                                                         |
+| `skills/research-spike/SKILL.md`                      | The judgment half — the five procedures and the script/LLM boundary.                                                                                 |
+| `skills/research-spike/references/record-grammar.md`  | The full field reference, written by hand against the script's own constants — see "Where the record grammar lives" for why that sync is not tested. |
+| `skills/research-spike/references/adoption.md`        | The setup playbook for turning this on in a repo with real deferred work.                                                                            |
+| `dev_docs/designs/2026-08-01-research-spike-skill.md` | The product design — problem, evidence, and the settled architecture.                                                                                |
+| `dev_docs/research_spike.md` (this file)              | The engineering record — decisions, rationale, gotchas.                                                                                              |

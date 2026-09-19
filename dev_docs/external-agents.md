@@ -71,31 +71,31 @@ completion rather than blocking a foreground call to the 7-minute ceiling.
 
 ### Checklist
 
-- [ ] **Background long runs.** `run_in_background: true` for anything that might
-      exceed ~2 min; the Bash foreground ceiling is ~7 min and a hit there loses
-      all output.
-- [ ] **Scratchpad, never `$TMPDIR`.** Prompt, `-o` output, and log all live in
-      the session scratchpad — a stable path that survives across turns.
-- [ ] **Machine-readable capture.** Prefer `codex exec -o <file>` (or `--json`)
-      over scraping stdout, so the result is a file you can re-read next turn.
-- [ ] **Detect empty _and_ incomplete results.** Always echo the **exit code**
-      and the output **byte count** — a 0-byte file or non-zero exit is how you
-      catch a silent failure instead of trusting a blank review. Byte count
-      alone does not prove the agent finished: an agent that exits 0 after a
-      preamble or a tool result produces non-empty output that reads as a clean
-      run. Where the prompt specifies a terminal verdict line (co-review's
-      rubric requires `REVIEW_COMPLETE: PASS` / `REVIEW_COMPLETE: FINDINGS`),
-      echo `tail -n 1` of the output too and check for it — missing means
-      **incomplete, not PASS**.
-- [ ] **Guard the prompt.** `[ -s "$SP/codex-prompt.txt" ]` before dispatch; never
-      inline `$(cat "$TMPDIR/…")`.
-- [ ] **Run unsandboxed — but only the _Bash_ sandbox.** `codex` (and `agy`) need
-      **network**, so dispatch must run with the **Bash/tool** sandbox disabled.
-      That is _not_ the same as the agent's own `--sandbox read-only` flag —
-      **keep that on** so the external agent can't edit files. Request the sandbox
-      escape on the **first** call; a network-blocked failure (`could not resolve
+- **Background long runs.** `run_in_background: true` for anything that might
+  exceed ~2 min; the Bash foreground ceiling is ~7 min and a hit there loses
+  all output.
+- **Scratchpad, never `$TMPDIR`.** Prompt, `-o` output, and log all live in
+  the session scratchpad — a stable path that survives across turns.
+- **Machine-readable capture.** Prefer `codex exec -o <file>` (or `--json`)
+  over scraping stdout, so the result is a file you can re-read next turn.
+- **Detect empty _and_ incomplete results.** Always echo the **exit code**
+  and the output **byte count** — a 0-byte file or non-zero exit is how you
+  catch a silent failure instead of trusting a blank review. Byte count
+  alone does not prove the agent finished: an agent that exits 0 after a
+  preamble or a tool result produces non-empty output that reads as a clean
+  run. Where the prompt specifies a terminal verdict line (co-review's
+  rubric requires `REVIEW_COMPLETE: PASS` / `REVIEW_COMPLETE: FINDINGS`),
+  echo `tail -n 1` of the output too and check for it — missing means
+  **incomplete, not PASS**.
+- **Guard the prompt.** `[ -s "$SP/codex-prompt.txt" ]` before dispatch; never
+  inline `$(cat "$TMPDIR/…")`.
+- **Run unsandboxed — but only the _Bash_ sandbox.** `codex` (and `agy`) need
+  **network**, so dispatch must run with the **Bash/tool** sandbox disabled.
+  That is _not_ the same as the agent's own `--sandbox read-only` flag —
+  **keep that on** so the external agent can't edit files. Request the sandbox
+  escape on the **first** call; a network-blocked failure (`could not resolve
       host`, `connection refused`, socket `operation not permitted`) is the Bash
-      sandbox, not a real error — don't retry inside it.
+  sandbox, not a real error — don't retry inside it.
 
 ## Sandbox note
 

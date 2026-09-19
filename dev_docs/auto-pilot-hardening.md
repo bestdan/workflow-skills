@@ -8,7 +8,7 @@ contract of the spawn helper, the posture on verification, the pre-flight, and
 the handful of invariants the loop must not violate.
 
 It exists because the first fully detached run (findings recorded in
-`dev_docs/decisions/2026-07-10-autopilot-detached-run-1-findings.md`)
+`dev_docs/research/2026-07-10-autopilot-detached-run-1-findings.md`)
 succeeded only after three fatal spawn bugs were hand-patched at launch and five
 judgment calls were made live. Everything below is the graduated form of that
 backlog: the design a new dev should be able to follow without reading the run
@@ -265,7 +265,7 @@ resolutions outright rather than making each run re-derive them (task_6 / PR
   no race to arbitrate. **The run-state branch is the lock.** Still do the
   pre-claim `gh` PR scan, for `--resume` idempotency.
 - **The code PR carries only code** (a seam the attended dry-run surfaced; see
-  `dev_docs/decisions/2026-07-09-autopilot-dry-run.md`). Task files live on the
+  `dev_docs/research/2026-07-09-autopilot-dry-run.md`). Task files live on the
   run-state branch, so the `ready → in_progress → needs_review` status flips are
   committed **on the run-state branch**, never in the code PR's diff. repo-pr's
   "task file on `main`, deleted on merge" model does not apply.
@@ -332,9 +332,9 @@ rule above had no live chain left to constrain.
 
 ## See also
 
-- `dev_docs/decisions/2026-07-10-autopilot-detached-run-1-findings.md` — the ranked findings this doc
+- `dev_docs/research/2026-07-10-autopilot-detached-run-1-findings.md` — the ranked findings this doc
   graduates; the inline `#N` citations resolve to it.
-- `dev_docs/decisions/2026-07-09-autopilot-dry-run.md` — the earlier attended dry-run, which surfaced
+- `dev_docs/research/2026-07-09-autopilot-dry-run.md` — the earlier attended dry-run, which surfaced
   the plan-source seams (handler resolution, task files off `main`, `--until`
   sizing) before the detached run hit the jail.
 - [`auto-pilot.md`](./auto-pilot.md) — the mode's own design decisions, and the

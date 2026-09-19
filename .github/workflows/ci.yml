@@ -62,6 +62,17 @@ jobs:
         # Node/npm are preinstalled on ubuntu-latest.
         run: npm install -g @anthropic-ai/claude-code
 
+      - name: Fetch agent-guidance (dev_docs layout checker)
+        # scripts/dev-docs-layout.sh runs the checker that ships in the
+        # agent-guidance plugin, and fails rather than skips when it cannot
+        # find one. A runner has no plugin install, so clone the public repo
+        # and point the resolver at it. Shallow: the checker and the
+        # conventions beside it are all that gets read.
+        run: |
+          clone="$RUNNER_TEMP/agent-guidance"
+          git clone --depth 1 https://github.com/bestdan/agent-guidance.git "$clone"
+          echo "AGENT_GUIDANCE_DIR=$clone" >>"$GITHUB_ENV"
+
       # NOTE (tracked in dev_docs/.../step_3.md): first CI run verifies whether
       # `claude plugin validate` works headless (no auth) on a GitHub runner. If
       # it requires auth, fold manifest-schema validation into scripts/validate.py

@@ -35,7 +35,7 @@
 #
 # WHY mypy rather than pyright or `ty`, why the floor is 3.9, and what would
 # legitimately change either answer — with the measurements behind each:
-# dev_docs/decisions/python_type_checking.md
+# dev_docs/decisions/2026-09-04-python-type-checking.md
 
 set -uo pipefail
 

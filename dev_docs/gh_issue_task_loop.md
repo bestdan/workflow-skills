@@ -193,9 +193,9 @@ file, so recovery is a checkout rather than a rewrite.
 - **Why Linear was left, and what would reopen the choice** —
   [`decisions/2026-08-24-leaving-linear-for-github-issues.md`](decisions/2026-08-24-leaving-linear-for-github-issues.md).
 - **How an unattended agent reaches GitHub** —
-  [`decisions/2026-08-24-routine-claim-channel.md`](decisions/2026-08-24-routine-claim-channel.md)
+  [`research/2026-08-24-routine-claim-channel.md`](research/2026-08-24-routine-claim-channel.md)
   and
-  [`decisions/2026-09-05-cloud-session-plugin-and-proxy.md`](decisions/2026-09-05-cloud-session-plugin-and-proxy.md).
+  [`research/2026-09-05-cloud-session-plugin-and-proxy.md`](research/2026-09-05-cloud-session-plugin-and-proxy.md).
   `/auto-pilot` does not support this handler and `gh-issue.remote_batch` defaults to
   `false`; both are open work, not settled design.
 - **Anything a runtime file states.** One fact, one home — this file links rather than

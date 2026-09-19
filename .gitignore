@@ -16,6 +16,11 @@ __pycache__/
 # available is machine-specific, so this is not committed/shared.
 dev_docs/co-review/
 
+# orchestrate-coders local config — which coder backends (codex, agy, devin, …)
+# this machine can run, probed per machine. The layout's one ignore channel for
+# a skill's machine-local directory is this file, so it travels with the repo.
+dev_docs/orchestrate-coders/
+
 # Session-to-session handoff notes — local by design; only the README is
 # tracked (force-added). See dev_docs/.handoffs/README.md.
 dev_docs/.handoffs/
