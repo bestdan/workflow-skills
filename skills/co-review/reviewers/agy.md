@@ -73,7 +73,7 @@ cat "<this skill dir>/review_prompt.md" <CONVENTIONS> "<REQUESTS>" > "<INPUT>" &
 
 **Substitute `<INPUT>` with the real fixed absolute path** (and `<INPUT-DIR>` with its containing directory) — in the command _and_ in the matching allow-rule below. The path is inside the approved prompt string, so the two must agree byte-for-byte or the rule won't match. (Both stay _fixed_ per-agent paths, so the command is still invariant run-to-run — that's what keeps the approve-once rule honest.)
 
-**Where that path is under your home directory, spell it `$HOME/…` — required, not merely permitted** (e.g. `$HOME/.claude/co-review-input/in.agy`). The matcher compares rule and command before either is expanded, so `$HOME` on both sides matches and one rule works on every machine; a literal `/Users/you/…` in one with `$HOME` in the other is a different string and **does not match**, which under `--non-interactive` means the dispatch is denied rather than queued and agy silently vanishes from the run summary. Full reasoning: [`../references/permissions.md`](../references/permissions.md#home-rooted-paths).
+**Where that path is under your home directory, spell it `$HOME/…` — required, not merely permitted** (e.g. `$HOME/.claude/co-review-input/in.agy`), and spell it identically in the rule and the invocation: `/Users/you/…` on one side and `$HOME` on the other do not match, and under `--non-interactive` a non-matching dispatch is denied silently. Why the literal `$HOME` is what matches: [`../references/permissions.md`](../references/permissions.md#home-rooted-paths).
 
 ## Permission allow-rules (exact-match, approve once)
 
