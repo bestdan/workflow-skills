@@ -243,10 +243,19 @@ the only reason scoring needs a model at all, it is restated across four handler
 the docs already concede it is tolerable only because `/promote-tasks` is not a
 blocking gate.
 
-As a Score over size levels it becomes uniform across handlers, cheap enough to run
-over a whole backlog under `all`, and — the real gain — **confidence-gated**: a
-genuinely ambiguous card can be _held_ in `new` instead of coin-flipped into
-`needs_refinement`. That is strictly better behavior than today's binary.
+As a Score over size levels the judgment becomes uniform across handlers, cheap enough
+to run over a whole backlog under `all`, and — the intended gain — **confidence-gated**:
+a genuinely ambiguous card could be _held_ in `new` instead of coin-flipped into
+`needs_refinement`.
+
+That gain is conditional, and the condition is not met yet. Holding a card depends
+entirely on a confidence threshold, and §5 is the only place in this note where
+confidence was checked against ground truth: it came back **16 points overconfident**
+— 0.79 mean against 62.9% agreement. A threshold set on today's numbers would hold the
+wrong cards and release the wrong ones, with the model most assured exactly where it
+was wrong. So this is better than the binary **once the threshold is calibrated
+against this repo's own cards**, and no better before — see §8 on why a size judgment
+is also the shape Jev is documented as weakest at.
 
 ### 5. Semantic lint for rules `validate.py` structurally cannot check — Class A
 
