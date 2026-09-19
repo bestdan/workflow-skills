@@ -13,6 +13,7 @@ deeper is one link away.
 | Speed the gate up, or add concurrency to it                    | [`dev_docs/gate-performance.md`](dev_docs/gate-performance.md)                                   |
 | Call codex/agy/devin from a workflow                           | [`dev_docs/external-agents.md`](dev_docs/external-agents.md)                                     |
 | Understand secret/API-key resolution                           | [`dev_docs/auth_key_access.md`](dev_docs/auth_key_access.md)                                     |
+| Understand the gh-issue label/claim/completion model           | [`dev_docs/gh_issue_task_loop.md`](dev_docs/gh_issue_task_loop.md)                               |
 | Find prose that should be a helper script, and extract it      | [`dev_docs/finding-prose-that-should-be-code.md`](dev_docs/finding-prose-that-should-be-code.md) |
 | Read a design decision                                         | `dev_docs/designs/`, `dev_docs/decisions/`                                                       |
 | Pick up work a previous session left for you                   | [`dev_docs/.handoffs/README.md`](dev_docs/.handoffs/README.md)                                   |
