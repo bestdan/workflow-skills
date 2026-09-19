@@ -129,8 +129,11 @@ An issue completes when its PR merges, via GitHub's closing keywords (`closes`/`
 `resolves` — a bare `#123` only cross-references). Three reasons this is right here rather
 than a swept state:
 
-- On GitHub the review gate is **pre-merge**. The open PR _is_ `status:4_needs_review`;
-  merging is the act of accepting it.
+- On GitHub the review gate is **pre-merge**. The open, **non-draft** PR _is_
+  `status:4_needs_review`; merging is the act of accepting it. The draft qualifier is
+  load-bearing rather than pedantic — the house convention makes some repos' PRs always
+  draft, which is why `.github/workflows/gh-issue-pr-sync.yml` guards its `opened` trigger
+  on `!github.event.pull_request.draft` rather than trusting the event name.
 - `/auto-pilot`'s contract is "nothing is merged or tracker-completed unattended", so a
   merge is always a human act — which makes it a sound completion signal.
 - Closing keywords are GitHub's documented, supported mechanism, with explicit rather than
@@ -153,8 +156,11 @@ existed because Linear could not be trusted to close correctly.
 > surfaces, not one.
 
 **A bare `gh issue close` is the wrong tool.** It leaves live `status:`/`auto:` rungs on a
-closed issue — one of the two label invariants with no reconciler rule. Use
-`gh-issue-state.py --done`.
+closed issue, violating invariant 3. The reconciler's row 4 does repair that — it strips
+both rungs and keeps `prio:`/`est:` — but it is a **sweep, not an instant repair**, so the
+issue sits in violation until someone runs it, with a live `auto:` instruction pointing a
+scheduler at finished work. Use `gh-issue-state.py --done`, which never creates the
+violation in the first place.
 
 ## 5. Label provisioning is a prerequisite, not hygiene
 
@@ -188,10 +194,14 @@ group has any member provisioned; only an entirely empty group voids it. Guardin
 in place, because `finplan` is still on Linear — and the rule is _no Linear command is
 deleted while any repo's `.task-config.yml` says `handler: linear`_.
 
-`linear` remains the most complete handler; `commands/task-config.md` holds the capability
-matrix, which is the single source of truth for what each handler supports. Three commands
-are **Linear-only** and refuse on every other handler, each for a reason specific to what
-GitHub does natively:
+`linear` remains the most complete handler. `commands/task-config.md` holds the capability
+matrix, which is the single source of truth for the **verbs it lists** — capture, list,
+promote, do, process, archive, reoptimize, reconcile. Three commands are not verbs in it,
+are **Linear-only**, and refuse on every other handler; each command's own "Resolve the
+handler" section is authoritative for that. The reason lives there too, in the refusal text
+each one prints. The table below is a cross-reference, gathering those three refusals into
+one view so they can be read against §4's merge-is-completion argument, which is what they
+all turn on:
 
 | command                | why it is Linear-only                                                                 |
 | ---------------------- | ------------------------------------------------------------------------------------- |
