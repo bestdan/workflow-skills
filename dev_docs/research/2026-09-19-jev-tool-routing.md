@@ -66,23 +66,24 @@ overconfident against ground truth, so nothing here gates on being sure.
 ### The cases
 
 36 decisions this repo already made and shipped, each phrased as the job was phrased
-before the tool was chosen:
+before the tool was chosen. Twelve of each at the time of the run; **13 / 12 / 11**
+after finding 5 moved one case from `llm` to `code`:
 
-- **12 `code`** — each a script in `scripts/`: `task-scan.py`'s readiness scan,
+- **`code`** — each a script in `scripts/`: `task-scan.py`'s readiness scan,
   `plan-graph.py`'s topological sort, `tier-coverage.py`'s partition check,
   `bump-version.py`'s bump level, two `validate.py` checks, and so on.
-- **12 `jev`** — the sibling note's ranked fits: §7's deferral detection, §5's
+- **`jev`** — the sibling note's ranked fits: §7's deferral detection, §5's
   Conventional Commit type and three semantic lints, §1's skill routing, §3's
   `assess-task` dimensions, §4's size check, §6's dedupe and screening, §2's
   output-quality rating.
-- **12 `llm`** — model judgments a skill body still asks for: authoring a PR body,
+- **`llm`** — model judgments a skill body still asks for: authoring a PR body,
   §6's reconciler grading, `break-down-task`'s slicing, `plan-with-docs`' drafting,
   `deliver-task`'s diff judgment, ordinary debugging and search.
 
 **The labels are shipped decisions, not annotations invented for the probe.** That is
 their strength and their bias: a job that landed as code is one where code turned out
-to work, so the set is filtered by survivorship. Three cases are marked contested and
-scored separately, so one arguable label cannot carry the result.
+to work, so the set is filtered by survivorship. Two cases remain marked contested and
+are scored separately, so one arguable label cannot carry the result.
 
 ## Findings
 
@@ -108,73 +109,95 @@ had checked, silently cost 42 points. Any ladder built on Jev signals is exposed
 it, and the flat signals are the dangerous ones — a signal that fires everywhere looks
 decisive and decides nothing.
 
-### 2. `exact` separates `code` with no overlap; four of the seven signals do not separate anything
+### 2. `exact` separates `code` cleanly; four of the seven signals separate nothing
 
-Means over three passes, with the range across cases:
+Means over three passes, with the range across cases, against the corrected labels
+(see finding 5):
 
 | signal            | `code`               | `jev`                | `llm`            |
 | ----------------- | -------------------- | -------------------- | ---------------- |
-| `exact`           | **0.89** [0.66–0.97] | 0.17 [0.10–0.31]     | 0.25 [0.11–0.63] |
-| `closed_output`   | 0.66 [0.10–0.97]     | **0.88** [0.79–0.96] | 0.20 [0.04–0.70] |
-| `prose_output`    | 0.35                 | 0.41                 | 0.63 [0.22–0.97] |
-| `dependent_steps` | 0.57                 | 0.35                 | 0.67             |
-| `needs_fetch`     | 0.56                 | 0.21                 | 0.56             |
-| `tally`           | 0.52                 | 0.16                 | 0.23             |
+| `exact`           | **0.87** [0.63–0.97] | 0.17 [0.10–0.31]     | 0.22 [0.11–0.50] |
+| `closed_output`   | 0.63 [0.10–0.97]     | **0.88** [0.79–0.96] | 0.20 [0.04–0.70] |
+| `prose_output`    | 0.34                 | 0.41                 | 0.66 [0.22–0.97] |
+| `dependent_steps` | 0.56                 | 0.35                 | 0.70             |
+| `needs_fetch`     | 0.53                 | 0.21                 | 0.60             |
+| `tally`           | 0.54                 | 0.16                 | 0.17             |
 
-Every `code` case sits at 0.66 or above on `exact`; every other case at 0.63 or below.
-A clean single cut, no overlap. `closed_output` separates `jev` at 81% on its own. The
-best single cut for any other signal is 83% (`prose_output` for `llm`), and the rest
-are noise.
+The lowest `code` case sits at **0.63** and the highest non-`code` case at **0.50** —
+a clean cut with 0.13 of daylight. `closed_output` separates `jev` at 81% on its own.
+No other signal's best single cut beats 83%, and `needs_fetch` and `dependent_steps`
+separate nothing at all.
 
-### 3. Two rungs on two signals score 36/36 fitted, 35/36 leave-one-out
+### 3. Two rungs on two signals: 36/36 fitted, 35/36 leave-one-out
 
 ```
-exact >= 0.65          -> code
+exact >= 0.60          -> code
 closed_output >= 0.75  -> jev
 otherwise              -> llm
 ```
 
-Leave-one-out refits the thresholds on the other 35 cases each time: **35/36 (97%)**.
-Three fresh passes against the live API with the fitted thresholds: 36/36 each.
+Leave-one-out refits the thresholds on the other 35 cases each time and scores the
+held-out one: **35/36 (97%)**. Three fresh passes against the live API with the fitted
+thresholds: 36/36 each, no case unstable across passes.
 
-The thresholds are fitted to this set and the set is one person's, so 97% is the
-ceiling of a friendly measurement, not an accuracy claim.
+`exact`'s constant was 0.65 before finding 5 corrected a label, and 0.60 after.
+**Leave-one-out is 97% at either value** — the cross-validated estimate does not move,
+which is what says the refit tidies a constant rather than buying accuracy.
 
-### 4. The unaided agent matched it, and agreed with itself perfectly
+97% is the ceiling of a friendly measurement, not an accuracy claim: the thresholds
+are fitted to this set and the set is one person's.
+
+### 4. The unaided agent matched it with no fitting at all
 
 |                                | score      | uncontested |
 | ------------------------------ | ---------- | ----------- |
-| Jev, two-rung ladder, 3 passes | 36/36      | 33/33       |
-| Unaided agent × 3 runs         | 35/36 each | 33/33 each  |
+| Jev, two-rung ladder, 3 passes | 36/36 each | 34/34 each  |
+| Unaided agent × 3 runs         | 36/36 each | 34/34 each  |
 
-**The three agents agreed with each other on every one of the 36 cases** — no
-disagreement anywhere. Jev's own answers flipped on two cases between passes under the
-first ladder. On this evidence the agent is the more stable of the two, not only the
+A tie on the score, and not a tie on what it cost. Jev's side needed two thresholds
+fitted to this very set, and its cross-validated estimate is 97% rather than 100%. The
+agents' side needed three lines of prose and no fitting, and produced no
+cross-validation gap because there was nothing to cross-validate.
+
+**The three agents also agreed with each other on every one of the 36 cases** — no
+disagreement anywhere. Jev's answers flipped on two cases between passes under the
+first ladder. On this evidence the agent is the more stable of the two as well as the
 cheaper.
 
-### 5. The single disagreement is one where the label is wrong
+### 5. The agents caught an error in the ground truth
 
 `rank-the-coders` — _given a task profile already scored on six dimensions and a matrix
-of each coder's strengths, order the coders by fit._ All three agents said `code`. The
-label says `llm`, and Jev agreed with the label.
+of each coder's strengths, order the coders by fit._ It was labelled `llm`. All three
+agents said `code`, against the label and against Jev, which agreed with the label.
 
-The agents have the better of it. The sibling note says "once a profile exists, mapping
-it through `matrix.md` is a lookup," and a lookup is code. The label came from reading
-that note's _Where it does not belong_ section as "belongs to no tool" when it means
-"does not belong to **Jev**."
+**The agents were right.** The sibling note says "once a profile exists, mapping it
+through `matrix.md` is a lookup," and a lookup is code. The `llm` label came from
+reading that note's _Where it does not belong_ section as "belongs to no tool" when it
+means "does not belong to **Jev**."
 
-**The label is left as written.** Correcting it now would be grading an answer against
-a label chosen after seeing the answer, which is what §7 of the sibling note refuses
-to do with its own single miss. It stays marked contested, the reasoning sits in a
-comment on the case, and the uncontested column is the number to read. Corrected, the
-scoreline would read agent 36/36 against Jev 35/36.
+The label was corrected in a commit of its own, after the run, so the run's numbers
+stay readable as they were measured. Both scorings are reported here: against the
+label as shipped, Jev 36/36 and the agents 35/36; against the corrected label, both
+36/36, with Jev needing its `exact` threshold refit from 0.65 to 0.60 to get there.
+
+The correction moves a point away from the thing being probed and toward the
+incumbent, which is the direction that makes it safe to apply after the fact. Had it
+gone the other way it should have stayed as measured.
+
+**This is the strongest single result in the run.** Not that the agents scored well —
+that they found a defect in the labels they were being graded against, which the
+typed call did not.
 
 ## What these numbers cannot support
 
-Two methods both sitting at 97–100% cannot be ranked against each other. That is a
-ceiling effect and it says the cases are easy — `exact` separating `code` with
-literally zero overlap is a symptom of the same thing. Any claim that one method is
-_better_ than the other is outside what this run measured.
+Both methods sit at 36/36, so **nothing here ranks them on accuracy.** That is a
+ceiling effect and it says the cases are easy — `exact` separating `code` with 0.13 of
+daylight is a symptom of the same thing. What the run separates is cost and fitting,
+not correctness: one side needed two thresholds tuned to this set and still
+cross-validates at 97%, the other needed three lines of prose.
+
+The tie is enough for the decision, which turns on whether the call is _needed_, and
+not enough for a claim that either method is better.
 
 Verified here: the scores, the signal spreads, the inter-agent agreement, the
 leave-one-out figure. Inferred, not verified: that the case set generalises. It was

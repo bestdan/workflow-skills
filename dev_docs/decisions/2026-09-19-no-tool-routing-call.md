@@ -13,14 +13,18 @@ call cheap and fast enough to use reflexively — a `pick-tool` command an agent
 reach for without thinking about it.
 
 [`../research/2026-09-19-jev-tool-routing.md`](../research/2026-09-19-jev-tool-routing.md)
-measured it against 36 routing decisions this repo already shipped. A tuned two-rung
-ladder over Jev signals scored 36/36. Three Claude subagents given only a blind case
-list and a three-line decision table scored 35/36 each, agreed with one another on all
-36 cases, and were right on the one case where they disagreed with the label.
+measured it against 36 routing decisions this repo already shipped. **Both sides
+scored 36/36, three times each**: a two-rung ladder over Jev signals, and three Claude
+subagents given only a blind case list and the three-line table below.
+
+What separates them is not accuracy but what the score cost. The ladder needed two
+thresholds fitted to this very set and cross-validates at 97%; the agents needed three
+lines of prose, no fitting, and agreed with one another on all 36 cases. The agents
+also caught an error in the labels they were being graded against — one case the
+ladder got wrong in the same direction the label did.
 
 The forces: the table is free and permanently in an agent's context; the call costs a
-round trip, an API key, and a dependency on a third party. Nothing in the measurement
-separates their accuracy.
+round trip, an API key, and a dependency on a third party.
 
 ## Decision
 

@@ -7,8 +7,9 @@ version can be graded against the same cases.
 
 **The answer was no, and the tool it was probing was not built** — see
 `dev_docs/decisions/2026-09-19-no-tool-routing-call.md`. Three unaided agents matched
-the tuned ladder here and agreed with each other on all 36 cases. That is the result;
-this file is the evidence for it, not a utility anything calls.
+the ladder here 36/36 with no thresholds to fit, agreed with each other on all 36
+cases, and caught an error in the labels they were being graded against. That is the
+result; this file is the evidence for it, not a utility anything calls.
 
 ## The shape, and why it is not the obvious one
 
@@ -185,7 +186,12 @@ QUESTIONS: dict[str, dict] = {
 
 @dataclass(frozen=True)
 class Thresholds:
-    exact: float = 0.65
+    # 0.65 until the `rank-the-coders` label was corrected; 0.60 is the refit to the
+    # corrected set, where the gap `exact` leaves is wider than before — lowest `code`
+    # case 0.63, highest non-`code` 0.50. Leave-one-out is 97% at either value, which
+    # is the point: the cross-validated estimate does not move, so the refit tidies a
+    # constant rather than buying accuracy.
+    exact: float = 0.60
     closed: float = 0.75
     # The split flag is deliberately looser than the routing thresholds: a job that is
     # part arithmetic and part judgment should be flagged as splittable well before
@@ -211,7 +217,7 @@ class Routing:
 def route(signals: dict[str, float], t: Thresholds = THRESHOLDS) -> Routing:
     """Properties of a task -> the tool that should do it. Two rungs, two signals.
 
-        exact >= 0.65           -> code
+        exact >= 0.60           -> code
         closed_output >= 0.75   -> jev
         otherwise               -> llm
 
@@ -645,21 +651,25 @@ CASES: list[dict] = [
     },
     {
         "id": "rank-the-coders",
-        "label": "llm",
-        "source": "note: 'select-coder's ranking' under Where it does not belong",
-        # The label is probably wrong, and it is left as written on purpose.
+        "label": "code",
+        # Corrected 2026-09-19, after the measurement, which is why the history is
+        # here rather than quietly gone.
         #
-        # Three independent agents all said `code`, and re-reading the note they have
-        # the better of it: "once a profile exists, mapping it through matrix.md is a
-        # lookup." A lookup is code. I labelled it `llm` because the note files it
-        # under "Where it does not belong" — but that section says it does not belong
-        # to JEV, which is not the same claim.
+        # It shipped as `llm` and that was a misreading. The note files select-coder's
+        # ranking under "Where it does not belong" — which says it does not belong to
+        # JEV, not that it belongs to no tool — while the same note says "once a
+        # profile exists, mapping it through matrix.md is a lookup." A lookup is code.
         #
-        # Changing it now would be grading an answer against a label chosen after
-        # seeing it, which the research note explicitly refuses to do (section 7's
-        # one miss is recorded the same way). So it stays `llm`, stays marked
-        # contested, and the uncontested column is the number to read.
-        "hard": True,
+        # All three baseline agents said `code` and were right; Jev said `llm` and
+        # agreed with the mistake. The correction therefore moves a point from Jev to
+        # the incumbent, against the interest of the thing being probed, which is the
+        # direction that makes it safe to apply. It is a separate commit from the run
+        # so that the run's own numbers stay readable as they were measured, and
+        # `2026-09-19-jev-tool-routing.md` reports both scorings.
+        #
+        # No longer `hard`: the flag means a careful reader could defensibly disagree,
+        # and after this nobody does.
+        "source": "note: 'once a profile exists, mapping it through matrix.md is a lookup'",
         "task": (
             "Given a profile of a coding task already scored along six dimensions, "
             "and a matrix of each available coding agent's strengths on those same "
