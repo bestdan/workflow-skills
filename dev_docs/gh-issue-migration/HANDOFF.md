@@ -26,8 +26,15 @@ on Linear. 125 Linear issues landed on GitHub on 2026-09-13 (117 created as #617
 That archival was the point — it took the Linear workspace from ~253 against a 250 cap to
 ~130.
 
-Nothing is scheduled to migrate next, and `finplan`'s migration is a not-now rather than a
-never.
+**`workflow-skills` is the only repo that moved, and that is the end of it** (owner,
+2026-09-18). `finplan` and `aiutopilot` stay on Linear **by decision, not deferral** —
+superseding this file's earlier "not-now rather than never" framing. Nothing is queued
+behind this plan, and the `linear` handler is a permanent part of the plugin rather than
+a shim awaiting retirement.
+
+Note the evidence record's scope line asks about all three repos, because that is how the
+question was framed on 2026-08-24. Only one was answered yes; the record carries a dated
+scope note saying so.
 
 ## What is still owed, and who owns it
 

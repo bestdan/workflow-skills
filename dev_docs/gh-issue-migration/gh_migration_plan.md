@@ -204,7 +204,9 @@ join, and `gh` covers it only partially.
 10. [phase_4_migrate/gh_migration_task_10.md](phase_4_migrate/gh_migration_task_10.md) — Pilot evaluation gate: keep, extend, or revert.
     **DONE 2026-09-15 — the verdict is KEEP**, and the gate was closed on day 0 of its
     own two-week clock rather than run to term. `workflow-skills` stays on `gh-issue`,
-    `finplan` stays on Linear, nothing is scheduled to migrate next.
+    `finplan` stays on Linear, nothing is scheduled to migrate next. **Firmed up
+    2026-09-18: `finplan` and `aiutopilot` stay on Linear by decision, not deferral —
+    `workflow-skills` is the only repo that ever moved.**
 
     **Closing it early was the decision, not a shortcut past it.** Two weeks of waiting
     would have bought a comparison against a control that does not hold still — both

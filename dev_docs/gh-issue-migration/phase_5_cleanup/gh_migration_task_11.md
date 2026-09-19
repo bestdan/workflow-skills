@@ -85,9 +85,15 @@ is still on Linear.** If `finplan` remains, they stay.
 > exists because two assets share it — so if either survives the grep, the pair may need
 > to.
 
-**`finplan` is not scheduled to migrate, and there are no firm plans either way.**
-(Owner, 2026-09-15.) Not-now rather than never — which is precisely why the deletion above
-is defensible: reversing it is a checkout, not a rewrite.
+~~**`finplan` is not scheduled to migrate, and there are no firm plans either way.**
+(Owner, 2026-09-15.) Not-now rather than never.~~
+
+**Superseded 2026-09-18: `finplan` and `aiutopilot` stay on Linear by decision.**
+`workflow-skills` is the only repo that moved. This **strengthens** the deletion rather
+than weakening it — the three migration-only assets now have no prospective consumer at
+all, and `linear-verify.py` and `linear-successor.py` cannot even be invoked without the
+plan and mapping files one migration produced, which they take as required arguments.
+Reversing the deletion is still a checkout rather than a rewrite.
 
 ## Acceptance Criteria
 
