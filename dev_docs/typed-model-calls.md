@@ -5,9 +5,11 @@ model call — today that means [Jev](https://typesafe.ai/), TypeSafe's System
 One model, which takes a state plus yes/no, multiple-choice and rating
 questions and returns typed answers with probabilities.
 
-Nothing in this repo calls Jev at runtime and nothing needs a key. Two
-measurements sit behind that, and this file is the short version of what they
-cost to learn.
+No installed user and no CI run needs a key: nothing in `skills/`, `commands/`
+or the blocking gate calls Jev. **Reproducing either measurement below does call
+it and does need one**, resolved as [`auth_key_access.md`](auth_key_access.md)
+describes. Two measurements sit behind that posture, and this file is the short
+version of what they cost to learn.
 
 | Read this when                                       | Go to                                                                                                                                                                                        |
 | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -82,9 +84,14 @@ note under **Using it well**, and are not repeated here.
   that must have neither.
 - **Logic goes in a typed file with a test pair**, called from the prose — see
   [CONTRIBUTING.md](../CONTRIBUTING.md#logic-goes-in-a-typed-file).
-- **Fence third-party text and treat the answer as advisory.** Task cards, PR
-  bodies and review findings are attacker-adjacent. No injection flipped an
-  answer when this was probed, but a plausible authority claim turned a
-  1.000/0.000 answer into a near-tie every time.
+- **Fence third-party text, and treat the answer as advisory anyway.** Task
+  cards, PR bodies and review findings are attacker-adjacent. A fence is a hint
+  to the model, **not a boundary it enforces** — a delimiter inside the data
+  escapes it unless you neutralise it on the way in, which the routing probe's
+  `fence()` did not do until co-review caught it. Neutralising the delimiter is
+  worth doing and is not what makes this safe: no injection flipped an answer
+  when this was probed, but a plausible authority claim turned a 1.000/0.000
+  answer into a near-tie every time, and that attack never needed to escape
+  anything. Advisory is the control; the fence is hygiene.
 - **A probe script is a record's artifact, not tooling.** It belongs in that
   record's `references/`, not in `scripts/` — see [`README.md`](README.md).
