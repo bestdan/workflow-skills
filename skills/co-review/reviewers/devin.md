@@ -47,7 +47,7 @@ Because it's stateful and agentic, drive it as a reviewer this specific way:
 
 ## Permission allow-rules (exact-match, approve once)
 
-Merge into the `permissions.allow` array (see [`../references/permissions.md`](../references/permissions.md)). The first two prepare and enter the neutral cwd, the third is the reviewer command, and the fourth is the pre-flight auth probe. Replace `<NEUTRAL>` with the same literal fixed absolute path the invocation uses, and `<INPUT>` in the rule with the **same literal fixed absolute path** the invocation writes to (it appears in the command because devin reads it via `--prompt-file`); keep it a stable user-level path so one rule works across repos:
+Merge into the `permissions.allow` array (see [`../references/permissions.md`](../references/permissions.md)). The first two prepare and enter the neutral cwd, the third is the reviewer command, and the fourth is the pre-flight auth probe. Replace `<NEUTRAL>` with the same fixed absolute path the invocation uses, and `<INPUT>` in the rule with the **same fixed absolute path** the invocation writes to (it appears in the command because devin reads it via `--prompt-file`); keep it a stable user-level path so one rule works across repos. **Spell the home-rooted part `$HOME/…` — required, not merely permitted** (e.g. `$HOME/.claude/co-review-input/in.devin`), and spell it identically in the rule and the invocation: `/Users/you/…` on one side and `$HOME` on the other do not match, and under `--non-interactive` a non-matching dispatch is denied silently. Why the literal `$HOME` is what matches: [`../references/permissions.md`](../references/permissions.md#home-rooted-paths).
 
 ```json
 "Bash(mkdir -p \"<NEUTRAL>\")",

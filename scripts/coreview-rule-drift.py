@@ -54,12 +54,19 @@ PLACEHOLDER_RE = re.compile(r"(<INPUT-DIR>|<INPUT>|<NEUTRAL>)")
 # detect. Checking it would report a valid config as broken and catch nothing.
 EXEMPT_PLACEHOLDERS = {"<NEUTRAL>"}
 
-# What a placeholder may stand for. Every reviewer file requires a "literal
-# fixed absolute path" here, so anything not starting with `/` is not a
-# substitution of this template — which is what stops a general-purpose
-# `Bash(cd "$(git rev-parse --show-toplevel)")` from being read as devin's
-# neutral-cwd rule.
-PLACEHOLDER_VALUE = r'(/[^"]+?)'
+# What a placeholder may stand for. Every reviewer file requires a fixed
+# absolute path here, written either `/`-rooted or `$HOME`-rooted, so anything
+# starting with neither is not a substitution of this template — which is what
+# stops a general-purpose `Bash(cd "$(git rev-parse --show-toplevel)")` from
+# being read as devin's neutral-cwd rule.
+#
+# The `$HOME` form is the portable one, and the reviewer files require it for a
+# home-rooted path: neither the rule nor the command is expanded before the
+# permission matcher compares them, so a literal `$HOME` on both sides matches
+# byte-for-byte and the shell expands at exec time. One rule then works on
+# every machine — and reading it as a non-substitution here would report a
+# working config as DEAD.
+PLACEHOLDER_VALUE = r'((?:/|\$HOME/)[^"]+?)'
 
 # Binaries a reviewer template shares with ordinary shell work. A settings rule
 # driving one of these is not attributable to the reviewer, so it is never
@@ -153,9 +160,16 @@ def offmachine_paths(rule, rx, names):
     m = rx.fullmatch(rule)
     bad = []
     for name, value in zip(names, m.groups()):
-        if name in EXEMPT_PLACEHOLDERS or not value.startswith("/"):
+        # A `$HOME`-rooted rule is expanded by the shell at exec time, so the
+        # existence question is about the expanded path. Testing the literal
+        # `$HOME/…` string would report every portable rule OFF-MACHINE, since
+        # no such directory exists anywhere. If `$HOME` is unset, expandvars
+        # leaves the string alone and the `startswith` below skips it rather
+        # than inventing a path.
+        expanded = os.path.expandvars(value)
+        if name in EXEMPT_PLACEHOLDERS or not expanded.startswith("/"):
             continue
-        p = Path(value)
+        p = Path(expanded)
         missing = 0
         while p != p.parent and not p.exists():
             p = p.parent
@@ -322,8 +336,10 @@ def report(findings, plugin_root, settings_read, settings_searched):
             "A dead rule fails silently: under `/co-review --non-interactive` the\n"
             "dispatch is denied, not queued, so the reviewer just stops appearing in\n"
             "the run summary. To repair: copy each MISSING template verbatim,\n"
-            "substitute its placeholders with the same literal absolute paths your\n"
-            "invocation uses, and delete the DEAD rule it replaces.\n"
+            "substitute its placeholders with the same fixed absolute paths your\n"
+            "invocation uses — spelled `$HOME/...` wherever the path is under your\n"
+            "home directory, the form the reviewer files require — and delete the DEAD\n"
+            "rule it replaces.\n"
             "\n"
             "Make that edit wherever the settings file above is MANAGED, which is not\n"
             "always the file itself — a generated or dotfiles-synced settings.json\n"

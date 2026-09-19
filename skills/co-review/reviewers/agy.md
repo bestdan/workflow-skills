@@ -73,9 +73,11 @@ cat "<this skill dir>/review_prompt.md" <CONVENTIONS> "<REQUESTS>" > "<INPUT>" &
 
 **Substitute `<INPUT>` with the real fixed absolute path** (and `<INPUT-DIR>` with its containing directory) — in the command _and_ in the matching allow-rule below. The path is inside the approved prompt string, so the two must agree byte-for-byte or the rule won't match. (Both stay _fixed_ per-agent paths, so the command is still invariant run-to-run — that's what keeps the approve-once rule honest.)
 
+**Where that path is under your home directory, spell it `$HOME/…` — required, not merely permitted** (e.g. `$HOME/.claude/co-review-input/in.agy`), and spell it identically in the rule and the invocation: `/Users/you/…` on one side and `$HOME` on the other do not match, and under `--non-interactive` a non-matching dispatch is denied silently. Why the literal `$HOME` is what matches: [`../references/permissions.md`](../references/permissions.md#home-rooted-paths).
+
 ## Permission allow-rules (exact-match, approve once)
 
-Merge into the `permissions.allow` array (see [`../references/permissions.md`](../references/permissions.md)). The first two are the reviewer command, one per pre-approved model (default + deep-review escalation); the third is the pre-flight auth probe (a read-only status query with no varying arguments). Replace `<INPUT>` with your real fixed absolute path — and `<INPUT-DIR>` with its containing directory — in the first two rules:
+Merge into the `permissions.allow` array (see [`../references/permissions.md`](../references/permissions.md)). The first two are the reviewer command, one per pre-approved model (default + deep-review escalation); the third is the pre-flight auth probe (a read-only status query with no varying arguments). Replace `<INPUT>` with your real fixed absolute path — and `<INPUT-DIR>` with its containing directory — in the first two rules, spelled `$HOME/…` for the home-rooted part and identically to the invocation ([why](../references/permissions.md#home-rooted-paths)):
 
 ```json
 "Bash(agy --sandbox --add-dir \"<INPUT-DIR>\" -p \"Your entire input is the file at <INPUT> (a review rubric followed by a diff). Read that file and review ONLY it. Do NOT explore any other file, run commands, or retrieve any prior conversation or memory. If that file is missing or empty, output exactly NO INPUT and stop. Output findings as file:line, the issue, and a suggested fix. Read only.\" --model \"Gemini 3.6 Flash (High)\")",

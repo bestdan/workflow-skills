@@ -107,6 +107,13 @@ run_drift() {
   RC=$?
 }
 
+# run_drift_home <home> <settings> — same, under a controlled HOME, so a rule
+# written with a literal `$HOME` expands into a tree this test owns.
+run_drift_home() {
+  OUT="$(HOME="$1" "$SCRIPT" --plugin-root "$PLUGIN" --settings "$2" --json 2>&1)"
+  RC=$?
+}
+
 # count <reviewer> <field> — how many entries that reviewer has in that field.
 count() {
   printf '%s' "$OUT" | jq --arg r "$1" --arg f "$2" \
@@ -220,6 +227,50 @@ if [ "$(count devin offmachine)" = "1" ] && [ "$(count devin missing)" = "1" ]; 
   pass "a deep <INPUT> is still off-machine (the exemption is per-placeholder)"
 else
   fail "deep <INPUT> not flagged (offmachine=$(count devin offmachine), missing=$(count devin missing))"
+fi
+
+# --- 4d. a `$HOME`-form rule is a substitution, and it resolves ------------
+# The portable form: one rule for every machine, because neither the rule nor
+# the command is expanded before the permission matcher compares them. It must
+# be read as a substitution of the template, or it is DEAD on a config that
+# works.
+#
+# What this case pins is the WIDENED PLACEHOLDER_VALUE, not the expansion: a
+# `$HOME/…` string starts with neither `/` nor anything on disk, so the
+# off-machine check skips it either way and `offmachine=0` proves nothing on its
+# own. Case 4e is the one that fails without a real `expandvars`.
+
+FAKE_HOME="$BASE/fakehome"
+mkdir -p "$FAKE_HOME/co-review-input"
+
+make_settings "$BASE/homeform.json" \
+  'Bash(agy --sandbox --add-dir "$HOME/co-review-input" -p "read $HOME/co-review-input/in.agy" --model "M1")' \
+  "Bash(agy models)"
+run_drift_home "$FAKE_HOME" "$BASE/homeform.json"
+if [ "$RC" -eq 0 ] && [ "$(count agy dead)" = "0" ] \
+  && [ "$(count agy missing)" = "0" ] && [ "$(count agy offmachine)" = "0" ]; then
+  pass "a \$HOME-form rule covers its template and resolves after expansion"
+else
+  fail "\$HOME-form rule misclassified (rc=$RC, dead=$(count agy dead), missing=$(count agy missing), offmachine=$(count agy offmachine))"
+fi
+
+# --- 4e. a `$HOME`-form rule pointing nowhere is still off-machine ---------
+# Expanding narrows the check; it must not disable it. Under the same HOME, a
+# path two-plus levels from anything on disk cannot be written or read here, so
+# the rule cannot fire — exactly as for a `/`-rooted one.
+#
+# This is the discriminating case for `expandvars`: drop it and the unexpanded
+# `$HOME/nope/…` string is skipped by the off-machine check, so the rule counts
+# as LIVE coverage of a template it can never actually satisfy.
+
+make_settings "$BASE/homeform-nope.json" \
+  'Bash(agy --sandbox --add-dir "$HOME/nope/deeper/inputs" -p "read $HOME/nope/deeper/inputs/in.agy" --model "M1")' \
+  "Bash(agy models)"
+run_drift_home "$FAKE_HOME" "$BASE/homeform-nope.json"
+if [ "$(count agy offmachine)" = "1" ] && [ "$(count agy missing)" = "1" ]; then
+  pass "a \$HOME-form rule that resolves nowhere is still off-machine"
+else
+  fail "\$HOME-form off-machine rule not flagged (offmachine=$(count agy offmachine), missing=$(count agy missing))"
 fi
 
 # --- 5. no rules at all is "not configured", not drift ---------------------
