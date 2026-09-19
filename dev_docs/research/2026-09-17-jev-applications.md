@@ -467,12 +467,20 @@ few lines.
 
 The SDK's env var is `TYPESAFE_API_KEY`, which is exactly what
 [`dev_docs/auth_key_access.md`](../auth_key_access.md)'s `$<SERVICE>_<CREDENTIAL>`
-convention produces. This costs less than it looks: `_secret_resolve.py`'s
-`resolve_key(name)` is **already generic** — it walks the `$<NAME>` → `$<NAME>_REF` →
-unavailable ladder and the `$<NAME>_RESOLVER` ladder for whatever name it is handed, so
-`resolve_key("TYPESAFE_API_KEY")` works today with no new module. There is no
-`_linear_auth.py` to write a sibling to; each `linear-*.py` calls the shared resolver
-directly, and a Jev client would do the same.
+convention produces, so the name costs nothing.
+
+The resolver is where the two adoption classes part, and the split is worth stating
+because it was got wrong once. A **Class B** client — a handler asset — needs no new
+module: `_secret_resolve.py`'s `resolve_key(name)` is already generic over the name it
+is handed, so `resolve_key("TYPESAFE_API_KEY")` works today, and there is no
+`_linear_auth.py` to write a sibling to (each `linear-*.py` calls the shared resolver
+directly). A **Class A** script cannot reuse it — `scripts/` does not import from
+`commands/handlers/assets/` — and the one that exists did not try:
+[`scripts/jev-description-collision.py`](../../scripts/jev-description-collision.py)
+defines its own `resolve_key`, deliberately ordered rung 0 → 1 → 3 so a configured
+pointer is read before the environment. `_secret_resolve.py` reads the environment
+first. Both are faithful to `auth_key_access.md`; they implement different rungs of it,
+for different callers. Neither is the other's fallback.
 
 ### There is an official Claude Code plugin, and it is a dev-time tool
 
@@ -488,34 +496,6 @@ That is **authoring support for whoever writes the questions**, not a runtime
 dependency and not something this plugin would ever bundle. Worth knowing it exists
 before hand-writing a client. Worth also knowing it puts another skill in a user's
 roster alongside our 16 — a description-collision surface we do not control.
-
-### A staged path, if anyone wants one
-
-Three layers, strictly in this order, each independently abandonable.
-
-**Layer 0 — dev-time, zero risk.** Install the plugin above for authoring. Touches no
-product surface and no gate.
-
-**Layer 1 — `scripts/jev-route.py`, Class A, stdlib only.** One request per eval
-prompt: a Choice over all 16 skill descriptions plus a Noul for "does this prompt need
-a skill at all?". Emits winner, margin to runner-up, confidence, and the no-skill noul.
-Never gates.
-
-On a missing key it should exit 0 with "skipped". Note that this is a posture to
-**adopt**, not one to inherit: `scripts/eval.sh` does not skip when its key is absent —
-it prints a note, relies on a logged-in `claude` CLI, and exits 1 if any row fails. The
-skip-on-no-key behavior is the right call for a Class A probe precisely because it
-keeps the gate clean, but the claim that `evals/` already works that way is wrong.
-
-Start here because **the ground truth already exists**: `manifest.tsv` is a labeled
-set. Run it, compare Jev's argmax against the expected skill, and the agreement number
-is available in an afternoon — measured against this repo's own data, which is exactly
-the calibration the constraints below demand.
-
-**Layer 2 — Class B, only if Layer 1 agrees.** `commands/handlers/assets/_typesafe.py`
-(one `ask()` over `urllib`, 3.9-clean, calling `resolve_key("TYPESAFE_API_KEY")`) and an
-`assess-task-profile.py` calling it, with a degrade path so an absent or failing key
-falls back to today's model judgment.
 
 ## If any of this is ever adopted
 
