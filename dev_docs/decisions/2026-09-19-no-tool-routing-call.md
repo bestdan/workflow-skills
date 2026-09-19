@@ -1,6 +1,7 @@
 ---
 created: 2026-09-19
 status: accepted
+convention: ../typed-model-calls.md
 ---
 
 # No typed call for "which tool should do this job"
