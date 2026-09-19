@@ -102,8 +102,13 @@ descriptions, but only **15** are auto-routable — `analysis-conventions` is
 ineligible option can only depress margins, so the zero-collision and zero-misfire
 results survive its removal a fortiori; the one result it does invalidate is the
 `analysis-pipeline / analysis-conventions` probe, whose margin is measured against an
-option Claude is never offered. And the manifest suite was run **once** while the
-ambiguous suite was run four times — see the run-count note below.
+option Claude is never offered.
+
+Both halves were run **four times**. The labelled half is zero misfires and zero
+collisions in every one of the four, with a per-run minimum margin of 0.38–0.43 — far
+clear of the threshold and much steadier than the ambiguous half, whose tightest pair
+swings 0.16–0.48. That asymmetry is itself the finding: the cases written to trigger
+one skill are not where the variance lives.
 
 The specific pairs named in the first draft were the wrong ones. `research-spike` vs
 `research-spike-tutorial` — flagged hardest — separates at 0.98 even on "show me how
@@ -129,8 +134,8 @@ for exactly this, which is itself a signal about how stable one call is.
 So the mechanism works and the monitoring value stands — the margin did rank the
 weakest boundaries consistently across runs, which a pass/fail harness cannot — but
 it is a **regression monitor with no regression to report**, not a bug-finder, and it
-needs n>1 per prompt to be trustworthy — including on the labelled half, which was run
-once. `confidence` tracked the **margin** closely
+needs n>1 per prompt to be trustworthy, which is why both halves were run four times.
+`confidence` tracked the **margin** closely
 throughout (0.44 at the tightest, 1.00 at the widest) and was the more stable of the
 two across runs.
 
@@ -146,7 +151,8 @@ Honest limit: Jev is not the model doing the routing at runtime, so this is a **
 for whether the descriptions discriminate**, not a replication of Claude's selection.
 The `claude -p` suite stays the ground truth. Jev's version is the cheap pre-check
 that could plausibly run on every PR — which the current one never can. The whole
-22-prompt run cost **$0.0023** and about 55k input tokens.
+22 distinct prompts cost **$0.0023** for one pass over each (about 55k input tokens);
+the full four-pass measurement is 88 requests and roughly **$0.009**.
 
 Bonus: it also covers the two skills with no eval case by oversight — `auto-pilot` and
 `deliver-task` — for free, since scoring is per-prompt against the whole description
@@ -348,8 +354,8 @@ than a cost.
 The §1 measurement was run on 2026-09-18 against `jev-1.13.0` with a live key: one
 `choice` question per prompt, `criteria` built from the `description` frontmatter of
 all 16 `skills/*/SKILL.md`, over the 14 `evals/manifest.tsv` cases plus 8
-purpose-written ambiguous probes, with the ambiguous suite repeated four times to
-estimate run-to-run spread. One request per prompt — questions in a request share a
+purpose-written ambiguous probes, each suite repeated four times to estimate
+run-to-run spread — 88 requests in total. One request per prompt — questions in a request share a
 `state` and each prompt is a distinct state, so the docs' batching win does not apply
 to this shape. It also confirms the request and response shapes below by observation
 rather than by reading.
