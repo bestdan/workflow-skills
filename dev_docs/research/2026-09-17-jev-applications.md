@@ -96,13 +96,15 @@ threshold. The two halves have different denominators on purpose — an ambiguou
 has no expected skill, so a misfire is not defined over it. Most of the manifest cases
 resolve at 1.000. The descriptions discriminate better than this note assumed.
 
-Two scoping caveats on that number. The Choice was over all **16** skill
-descriptions, but only **15** are auto-routable — `analysis-conventions` is
-`user-invocable: false`, so one option could never legitimately win. Adding an
-ineligible option can only depress margins, so the zero-collision and zero-misfire
-results survive its removal a fortiori; the one result it does invalidate is the
-`analysis-pipeline / analysis-conventions` probe, whose margin is measured against an
-option Claude is never offered.
+On the option set: the Choice was over all **16** skill descriptions, and all 16 are
+the right options. `analysis-conventions` is `user-invocable: false`, which removes it
+from the `/` menu and nothing else — the
+[skills documentation](https://code.claude.com/docs/en/skills) gives that field as
+"You can invoke: No, Claude can invoke: Yes, description always in context". The field
+that would take a skill out of Claude's routing is `disable-model-invocation: true`,
+which no skill in this repo sets. So the 16-way Choice models the decision Claude
+actually makes, and the `analysis-pipeline / analysis-conventions` probe is measuring
+a real boundary rather than a phantom one.
 
 Both halves were run **four times**. The labelled half is zero misfires and zero
 collisions in every one of the four, with a per-run minimum margin of 0.38–0.43 — far
@@ -154,13 +156,19 @@ that could plausibly run on every PR — which the current one never can. The wh
 22 distinct prompts cost **$0.0023** for one pass over each (about 55k input tokens);
 the full four-pass measurement is 88 requests and roughly **$0.009**.
 
-Bonus: it also covers the two skills with no eval case by oversight — `auto-pilot` and
-`deliver-task` — for free, since scoring is per-prompt against the whole description
-set. `analysis-conventions` is uncovered for a different reason and should not be
-counted with them: `evals/README.md` says it is "intentionally absent: it's
-`user-invocable: false` (context-load only), so there's nothing to auto-route."
-(Measured 2026-09-18: 16 `skills/*/SKILL.md`, 15 of them auto-routable, 14 rows in
-`evals/manifest.tsv` covering 13 distinct skills, `task` appearing twice.)
+Bonus: it also covers the three skills with no eval case at all — `analysis-conventions`,
+`auto-pilot` and `deliver-task` — for free, since scoring is per-prompt against the
+whole description set. (Measured 2026-09-18: 16 `skills/*/SKILL.md`, all 16
+model-routable, 14 rows in `evals/manifest.tsv` covering 13 distinct skills, `task`
+appearing twice.)
+
+`evals/README.md` excludes `analysis-conventions` deliberately, but on a rationale
+that does not hold: "it's `user-invocable: false` (context-load only), so there's
+nothing to auto-route." That field does not stop Claude auto-routing to the skill —
+see the option-set note above — so either the intent is that Claude should never load
+it automatically, in which case the frontmatter wants `disable-model-invocation: true`,
+or its description ("Use when writing notebooks or analysis scripts") is meant to fire
+and an eval row is missing. Out of scope for this note; worth a separate look.
 
 ### 2. The unbuilt output-quality evals — Class A
 
