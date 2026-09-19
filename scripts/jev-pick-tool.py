@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 """Probe: can Jev tell code, Jev and an LLM apart as the right tool for a job?
 
-The instrument behind the "pick the tool" proof. It asks whether a typed call can
-answer the question an agent faces dozens of times a session — *this thing I have to
-decide, do I write code for it, ask a typed model, or reason about it myself?*
+The instrument behind `dev_docs/research/2026-09-19-jev-tool-routing.md`. It exists so
+that record's numbers can be re-run rather than taken on trust, and so a new Jev
+version can be graded against the same cases.
+
+**The answer was no, and the tool it was probing was not built** — see
+`dev_docs/decisions/2026-09-19-no-tool-routing-call.md`. Three unaided agents matched
+the tuned ladder here and agreed with each other on all 36 cases. That is the result;
+this file is the evidence for it, not a utility anything calls.
 
 ## The shape, and why it is not the obvious one
 
-The obvious design asks one Choice over `code | jev | llm`. This does not, for two
-reasons and one of them is measurable:
+The obvious design asks one Choice over `code | jev | llm`. This does not:
 
 1. **It is not one snap judgment.** Picking between three tools means modelling what
    each can do, which is the reasoning shape section 6 of
@@ -18,47 +22,15 @@ reasons and one of them is measurable:
    whether its own product fits invites a bias nobody can subtract afterwards.
 
 So the seven questions below ask only about **properties of the task**. None names a
-tool, none knows Jev exists, and the mapping from properties to tool is
-`route()` — ordinary code, a ladder you can read and edit. That is rule 2
-(decompose, weight in code) applied to the router itself.
+tool, none knows Jev exists, and the mapping from properties to tool is `route()` —
+ordinary code, a ladder you can read and edit. That is rule 2 (decompose, weight in
+code) applied to the router itself, and a test in the pair holds both the questions
+and the case texts to it.
 
-## What it measures
-
-Accuracy against `CASES`: decisions this repo already made and shipped, labelled with
-the tool they landed on. The labels are not annotations invented for the probe — a
-`code` case is a script in `scripts/`, an `llm` case is a model judgment a skill body
-still asks for, and the `jev`/anti-`jev` cases are the ranked sections of the research
-note. Survivorship bias is real and stated in the note that follows this probe: a job
-that landed as code is one where code turned out to work.
-
-What it found, 2026-09-19, `jev-1.13.0`, 36 cases x 3 passes: the seven signals are
-good and the first ladder built on them was bad. See `route` for the numbers — the
-short version is that three of the seven questions are flat enough to be noise, one
-of them (`exact`) separates `code` from everything else with no overlap at all, and a
-two-rung ladder on two signals scores 36/36 where the five-rung one scored 58%.
-
-**The incumbent is the unaided agent**, not chance. Section 7 of the note is its
-strongest result precisely because it had an incumbent to beat. `--cases` dumps the
-suite with labels withheld so an agent can answer it blind; `--score` grades that file
-the same way the Jev run is graded. A tie is a real result: it means the three-line
-decision table in the design does the job and no call is needed.
-
-**The incumbent won, and that is the finding.** Three Claude subagents, independent
-contexts, given only the blind `--cases` dump and the three-line table and forbidden
-from reading this repository, each scored **35/36 — and all three agreed on every
-single case**, including with each other. Jev scored 36/36 against the labels. The
-one case they part on is `rank-the-coders`, where all three agents said `code` and
-the label (and Jev) say `llm`.
-
-Read plainly: **on the decisions this repo actually makes, a typed call adds nothing
-over the agent's own read of a three-line table.** The table is free and always in
-context; the call costs a round trip. That settles the question this probe was built
-to ask, in the negative, and it is worth more than a passing result would have been.
-
-The narrow caveat is that a suite where two methods both sit at 97-100% cannot rank
-them — it is a ceiling effect, and the honest next step is harder cases rather than
-more passes over these. What it can support is the negative claim, which is the one
-that changes what gets built.
+`CASES` are decisions this repo already made and shipped, labelled with the tool they
+landed on, phrased as the job was phrased before the tool was chosen. `--cases` dumps
+them with labels withheld so a rival can answer blind; `--score` grades either side
+through the same scorer, which is the only reason the two numbers can be compared.
 
 Dev-only. Never invoked by a skill or command at runtime, never part of `just check` —
 it costs money and needs the network. It lives under `scripts/` because that is the
@@ -239,47 +211,31 @@ class Routing:
 def route(signals: dict[str, float], t: Thresholds = THRESHOLDS) -> Routing:
     """Properties of a task -> the tool that should do it. Two rungs, two signals.
 
-    ## This is the second ladder. The first one was wrong, and measurably so.
-
-    The ladder shipped in the first draft had five rungs. Three of them were vetoes —
-    retrieval, prose output and chained steps — placed AHEAD of `exact`, on the
-    argument that a job which has to go and fetch something is not one a single-shot
-    script can do either, whatever else is true of it. The argument reads well. The
-    measurement (2026-09-19, 36 cases, three passes) says it is false:
-
-    - **58%**, stable to the point across all three passes.
-    - **10 of 12 `code` cases were vetoed into `llm`**, every one of them by a veto
-      rung, while their `exact` signal sat at 0.84-0.96.
-    - `needs_fetch` scored a mean of **0.56 on `code` cases and 0.56 on `llm` cases**.
-      Identical. It is not a weak signal, it is no signal — the model reads almost
-      any job as needing to look something up, so a veto on it fires everywhere.
-    - `dependent_steps` was nearly as flat (0.57 vs 0.67).
-
-    What the same run shows is that **`exact` separates `code` from everything else
-    perfectly**: all 12 `code` cases at 0.66 or above, all 24 others at 0.63 or
-    below, a clean single cut with no overlap. `closed_output` separates `jev` at 81%
-    on its own. So the ladder below is two rungs on two signals:
-
         exact >= 0.65           -> code
         closed_output >= 0.75   -> jev
         otherwise               -> llm
 
-    which scores **36/36 fitted and 35/36 (97%) leave-one-out**, thresholds refit on
-    the other 35 cases each time. The thresholds are fitted to this set, and the set
-    is one person's, so 97% is the ceiling of a friendly measurement and not an
-    accuracy claim — the out-of-sample number is the one that decides anything, and
-    it is not in hand yet.
+    **This is the second ladder; the first one was wrong.** It had five rungs, three
+    of them vetoes — retrieval, prose output, chained steps — placed ahead of `exact`
+    on the argument that a job which has to fetch something is not one a single-shot
+    script can do either. The argument reads well and cost 42 points: `needs_fetch`
+    measured 0.56 on `code` cases and 0.56 on `llm` cases, so the veto fired
+    everywhere and pushed 10 of 12 `code` cases into `llm`. The numbers, and the
+    signal spreads that replaced it, are in
+    `dev_docs/research/2026-09-19-jev-tool-routing.md`.
 
-    Two things survive from the first design unchanged. The fallback is still `llm`:
-    today's behaviour and the expensive-but-safe answer, because an unclear case must
-    never fall through to something cheaper than the status quo. And `stakes` still
-    does not route.
+    The lesson is worth more than the ladder: check a signal's per-label spread before
+    giving it a rung. A signal that fires everywhere looks decisive and decides
+    nothing. `test_the_flat_signals_do_not_veto_anything` pins it.
+
+    The fallback is `llm` — today's behaviour and the expensive-but-safe answer,
+    because an unclear case must never fall through to something cheaper than the
+    status quo. `stakes` does not route.
 
     The five unconsumed signals stay in the request. That is rule 3 read literally —
-    fan out speculatively and let code discard what it does not use — and it is what
+    fan out speculatively, let code discard what it does not use — and it is what
     makes a re-measurement possible: dropping them would leave nothing to re-test the
-    ladder against when a new model version lands. They are logged per case by
-    `--suite`.
+    ladder against when a new model version lands. `--suite` logs all seven per case.
     """
     split = (
         signals["tally"] >= t.split_tally and signals["closed_output"] >= t.split_closed
