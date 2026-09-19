@@ -16,7 +16,13 @@ graduate a curated subset_, and the answer was the subset. Two files reached `ma
 
 Everything else — the per-task scaffolding, the plan, this file — stays on
 `origin/bestdan/gh-issue-migration` and never reaches `main`. **That branch is the only
-copy. Do not delete it**, and note an abandoned-branch sweep is exactly what would.
+copy. Do not delete it**, and note an abandoned-branch sweep is exactly what would: a
+closed PR no longer marks the branch as in use.
+
+**The tag `archive/gh-issue-migration-plan` points at the same commit** and survives a
+branch sweep, so it is the durable handle. Recover the plan with
+`git show archive/gh-issue-migration-plan:dev_docs/gh-issue-migration/HANDOFF.md`, or
+check the whole tree out into a worktree from the tag.
 
 ## If you are here for the migration's outcome
 
@@ -137,9 +143,13 @@ invokes it. **Run every flag once before calling a task done.**
 The plan files are the only thing this branch is authoritative about. It was 155 commits
 behind `main` on 2026-09-15 and its stale `gh-issue-reoptimize.md` said GitHub Issues have
 no native dependency edge — the opposite of the truth, and it nearly drove #516's whole
-analysis. The branch was brought current on 2026-09-16 and is now frozen, so the trap
-returns the moment `main` moves. **Read every `commands/`, `skills/` and `scripts/` file
-from `main`.**
+analysis.
+
+**`main` was merged in a final time on 2026-09-18, immediately before PR #441 was closed,
+so this branch differs from that `main` by exactly the 18 plan files and nothing else.**
+That is the state it is frozen in. Everything outside `dev_docs/gh-issue-migration/` here
+is a snapshot of `main` at `c8e65b9` and goes stale the moment `main` moves, which it
+will. **Read every `commands/`, `skills/` and `scripts/` file from `main`.**
 
 ### Things that are settled — do not reopen them by accident
 
