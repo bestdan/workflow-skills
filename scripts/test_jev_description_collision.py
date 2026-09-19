@@ -158,6 +158,34 @@ class KeyLadderTests(unittest.TestCase):
     def test_empty_config_yields_nothing(self):
         self.assertIsNone(jev.extract_key("typesafe:\n"))
 
+    def test_another_services_key_is_never_returned(self):
+        """The real config holds linear.api_key too; returning it would send a
+        full-account Linear token to TypeSafe in an Authorization header."""
+        text = (
+            'linear:\n  api_key: "lin_api_SECRET"\n'
+            'typesafe:\n  api_key: "sk-typesafe"\n'
+        )
+        self.assertEqual(jev.extract_key(text), ("raw", "sk-typesafe"))
+
+    def test_no_typesafe_block_means_no_key_at_all(self):
+        """Not 'fall back to whatever key is in the file'."""
+        self.assertIsNone(jev.extract_key('linear:\n  api_key: "lin_api_SECRET"\n'))
+
+    def test_a_nested_typesafe_key_does_not_count_as_the_block(self):
+        """Only a top-level `typesafe:` mapping is the TypeSafe config."""
+        self.assertIsNone(
+            jev.extract_key('other:\n  typesafe:\n    api_key: "sk-nested"\n')
+        )
+
+
+class RedactionTests(unittest.TestCase):
+    def test_a_pointer_is_reduced_to_its_vault(self):
+        """auth_key_access.md: "Never print a full reference. Reduce it."""
+        self.assertEqual(jev.redact_ref("op://Private/TypeSafe/key"), "op://Private/…")
+
+    def test_something_that_is_not_a_full_pointer_is_left_alone(self):
+        self.assertEqual(jev.redact_ref("op://Private"), "op://Private")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

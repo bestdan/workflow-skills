@@ -90,9 +90,20 @@ rate from 16.8% to 7.3% and its needless-load rate from 9.8% to 4.0%.
 **Measured 2026-09-18, against a live key — and the collision hypothesis did not
 survive.** All 16 descriptions scored as one Choice per prompt, over the 14
 `evals/manifest.tsv` cases and then over 8 prompts written deliberately to straddle
-the near-neighbour pairs this note originally named. Result: **0 misfires and 0
-collisions in 22 prompts** at a 0.10 margin threshold. Most of the manifest cases
+the near-neighbour pairs this note originally named. Result: **0 misfires in the 14
+labelled manifest cases, and 0 collisions across all 22 prompts** at a 0.10 margin
+threshold. The two halves have different denominators on purpose — an ambiguous probe
+has no expected skill, so a misfire is not defined over it. Most of the manifest cases
 resolve at 1.000. The descriptions discriminate better than this note assumed.
+
+Two scoping caveats on that number. The Choice was over all **16** skill
+descriptions, but only **15** are auto-routable — `analysis-conventions` is
+`user-invocable: false`, so one option could never legitimately win. Adding an
+ineligible option can only depress margins, so the zero-collision and zero-misfire
+results survive its removal a fortiori; the one result it does invalidate is the
+`analysis-pipeline / analysis-conventions` probe, whose margin is measured against an
+option Claude is never offered. And the manifest suite was run **once** while the
+ambiguous suite was run four times — see the run-count note below.
 
 The specific pairs named in the first draft were the wrong ones. `research-spike` vs
 `research-spike-tutorial` — flagged hardest — separates at 0.98 even on "show me how
@@ -118,9 +129,18 @@ for exactly this, which is itself a signal about how stable one call is.
 So the mechanism works and the monitoring value stands — the margin did rank the
 weakest boundaries consistently across runs, which a pass/fail harness cannot — but
 it is a **regression monitor with no regression to report**, not a bug-finder, and it
-needs n>1 per prompt to be trustworthy. `confidence` tracks the margin closely enough
-throughout (0.44 at the tightest, 1.00 at the widest) to be usable as the single
-gating number, and it was the more stable of the two.
+needs n>1 per prompt to be trustworthy — including on the labelled half, which was run
+once. `confidence` tracked the **margin** closely
+throughout (0.44 at the tightest, 1.00 at the widest) and was the more stable of the
+two across runs.
+
+Read that narrowly: it says confidence tracks the shape of the distribution, not that
+it tracks correctness. This suite produced zero errors, so it carries no accuracy
+signal at all and cannot support gating on confidence. **The only place in this note
+where confidence was checked against ground truth is §5, and there it was
+overconfident by 16 points** — 0.79 mean confidence against 62.9% agreement. Until
+that gap is closed on a question this repo actually cares about, confidence is a
+diagnostic to log, not a number to gate on.
 
 Honest limit: Jev is not the model doing the routing at runtime, so this is a **proxy
 for whether the descriptions discriminate**, not a replication of Claude's selection.
@@ -128,9 +148,12 @@ The `claude -p` suite stays the ground truth. Jev's version is the cheap pre-che
 that could plausibly run on every PR — which the current one never can. The whole
 22-prompt run cost **$0.0023** and about 55k input tokens.
 
-Bonus: it also covers the three skills with no eval case at all — `analysis-conventions`,
-`auto-pilot` and `deliver-task` — for free, since scoring is per-prompt against the
-whole description set. (Measured 2026-09-18: 16 `skills/*/SKILL.md`, 14 rows in
+Bonus: it also covers the two skills with no eval case by oversight — `auto-pilot` and
+`deliver-task` — for free, since scoring is per-prompt against the whole description
+set. `analysis-conventions` is uncovered for a different reason and should not be
+counted with them: `evals/README.md` says it is "intentionally absent: it's
+`user-invocable: false` (context-load only), so there's nothing to auto-route."
+(Measured 2026-09-18: 16 `skills/*/SKILL.md`, 15 of them auto-routable, 14 rows in
 `evals/manifest.tsv` covering 13 distinct skills, `task` appearing twice.)
 
 ### 2. The unbuilt output-quality evals — Class A

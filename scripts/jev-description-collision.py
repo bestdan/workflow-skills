@@ -44,7 +44,11 @@ import urllib.request
 from pathlib import Path
 
 ENDPOINT = "https://api.typesafe.ai/v1/systemone"
-MODEL = "jev-latest"
+# Pinned, not `jev-latest`. The record this reproduces grades one model version, so a
+# floating alias would silently re-measure a different model under the same numbers —
+# defeating the only reason this file exists. `--model` is how you deliberately
+# re-measure against a newer one.
+MODEL = "jev-1.13.0"
 DEFAULT_MARGIN = 0.10
 PLACEHOLDER = "REPLACE_ME"
 LOCAL_CONFIG = Path("dev_docs") / "tasks" / ".task-config.local.yml"
@@ -84,6 +88,11 @@ AMBIGUOUS_PROBES: list[tuple[str, str]] = [
 
 
 # ---------------------------------------------------------------- pure helpers
+
+
+def say(line: str) -> None:
+    """Progress output. Stderr, so stdout stays parseable under `--json`."""
+    print(line, file=sys.stderr)
 
 
 def rank(probabilities: dict[str, float]) -> tuple[str, float, str, float, float]:
@@ -148,19 +157,51 @@ def parse_manifest(text: str) -> list[tuple[str, str]]:
     return rows
 
 
+def typesafe_block(config_text: str) -> str:
+    """The top-level `typesafe:` mapping only, or empty when it is absent.
+
+    Scoping this is not defensive tidiness. The same file holds other services'
+    credentials — `commands/handlers/linear-config.md` documents `linear.api_key`
+    living in `dev_docs/tasks/.task-config.local.yml` — so an unscoped `api_key:`
+    search returns whichever service happens to appear first in the file, and a
+    `linear:` block above `typesafe:` would send a full-account Linear token to a
+    third party in an Authorization header.
+    """
+    head = re.search(r"^typesafe:[ \t]*$", config_text, re.M)
+    if not head:
+        return ""
+    rest = config_text[head.end() :]
+    nxt = re.search(r"^(?=\S)", rest, re.M)
+    return rest[: nxt.start()] if nxt else rest
+
+
+def redact_ref(ref: str) -> str:
+    """`op://vault/item/field` reduced to `op://vault/…`.
+
+    dev_docs/auth_key_access.md: "Never print a full reference." A personal pointer
+    advertises which vault holds a full-account token.
+    """
+    parts = ref.split("/")
+    return "/".join(parts[:3]) + "/…" if len(parts) > 3 else ref
+
+
 def extract_key(config_text: str) -> tuple[str, str] | None:
     """(kind, value) from a local config, where kind is 'raw' or 'ref'.
 
     Raw beats ref, matching rung 0 of dev_docs/auth_key_access.md. The template's
     placeholder is treated as absent so an unfilled file falls through to the next
-    rung instead of sending a literal REPLACE_ME to the API.
+    rung instead of sending a literal REPLACE_ME to the API. Both searches are
+    scoped to the `typesafe:` block — see typesafe_block.
     """
-    raw = re.search(r'^\s*api_key:\s*"?([^"\n#]+)"?', config_text, re.M)
+    block = typesafe_block(config_text)
+    if not block:
+        return None
+    raw = re.search(r'^\s*api_key:\s*"?([^"\n#]+)"?', block, re.M)
     if raw:
         value = raw.group(1).strip()
         if value and value != PLACEHOLDER:
             return "raw", value
-    ref = re.search(r'^\s*api_key_ref:\s*"?(op://[^"\n#]+)"?', config_text, re.M)
+    ref = re.search(r'^\s*api_key_ref:\s*"?(op://[^"\n#]+)"?', block, re.M)
     if ref:
         return "ref", ref.group(1).strip()
     return None
@@ -200,21 +241,38 @@ def local_config_paths(root: Path) -> list[Path]:
 
 
 def resolve_key(root: Path) -> str:
-    """Rung 0, then rung 1, then rung 3 — dev_docs/auth_key_access.md."""
+    """Rung 0, then rung 1, then rung 3 — dev_docs/auth_key_access.md.
+
+    The order is the contract, not an implementation detail. Resolving a configured
+    pointer before reading the environment means an exported key cannot override a
+    stale or unreachable one, and the caller gets an `op` failure where it expected
+    its own key to win. So every config is read first for a raw secret, then the
+    environment, and only then is a pointer resolved.
+    """
+    refs: list[str] = []
     for path in local_config_paths(root):
         found = extract_key(path.read_text())
-        if found and found[0] == "raw":
+        if not found:
+            continue
+        if found[0] == "raw":
             return found[1]
-        if found:
-            got = subprocess.run(
-                ["op", "read", found[1]], capture_output=True, text=True
-            )
-            if got.returncode != 0:
-                sys.exit(f"op read failed for {found[1]}: {got.stderr.strip()}")
-            return got.stdout.strip()
+        refs.append(found[1])
+
     env = os.environ.get("TYPESAFE_API_KEY")
     if env:
         return env
+
+    for ref in refs:
+        got = subprocess.run(["op", "read", ref], capture_output=True, text=True)
+        if got.returncode != 0:
+            # A failed resolve never falls through to the next rung, and the message
+            # carries neither the full pointer nor the resolver's stderr — both can
+            # name the vault holding a full-account token.
+            sys.exit(
+                "could not resolve the configured TypeSafe reference "
+                f"({redact_ref(ref)}); run `op read` on it yourself to see why"
+            )
+        return got.stdout.strip()
     sys.exit(
         f"No TypeSafe key. Put it in {LOCAL_CONFIG} as\n"
         '  typesafe:\n    api_key: "..."\n'
@@ -237,12 +295,12 @@ def load_manifest_cases(root: Path) -> list[tuple[str, str]]:
     ]
 
 
-def ask(key: str, state: str, criteria: dict[str, str]) -> dict:
+def ask(key: str, state: str, criteria: dict[str, str], model: str = MODEL) -> dict:
     return ask_payload(
         key,
         {
             "state": state,
-            "model": MODEL,
+            "model": model,
             "questions": {
                 "skill": {
                     "type": "choice",
@@ -282,11 +340,12 @@ def run_suite(
     rows: list[tuple[str, str]],
     threshold: float,
     expects: bool,
+    model: str = MODEL,
 ) -> dict:
     """One row per prompt. `expects` says whether rows[i][0] is an expected skill."""
     results, tokens = [], 0
     for label, prompt in rows:
-        data = ask(key, prompt, criteria)
+        data = ask(key, prompt, criteria, model)
         answer = data["answers"]["skill"]
         winner, p_win, runner, p_run, margin = rank(answer["probabilities"])
         tokens += data.get("usage", {}).get("input_tokens", 0)
@@ -315,14 +374,16 @@ def run_suite(
         conf = record["confidence"]
         conf_text = f"   conf {conf:.2f}" if conf is not None else ""
         flag_text = ("   << " + " ".join(flags)) if flags else ""
-        print(("expect " if expects else "probing ") + label)
-        print(f"   {prompt[:78]!r}")
-        print(f"   1. {winner:<28} {p_win:.3f}")
-        print(
+        # Progress goes to stderr so `--json` leaves stdout carrying exactly one
+        # JSON document, which is what the record advertises it for.
+        say(("expect " if expects else "probing ") + label)
+        say(f"   {prompt[:78]!r}")
+        say(f"   1. {winner:<28} {p_win:.3f}")
+        say(
             f"   2. {runner:<28} {p_run:.3f}   margin {margin:.3f}"
             f"{conf_text}{flag_text}"
         )
-        print()
+        say("")
     return {"results": results, "input_tokens": tokens}
 
 
@@ -338,6 +399,11 @@ def main(argv: list[str] | None = None) -> int:
         help=f"collision threshold (default {DEFAULT_MARGIN})",
     )
     ap.add_argument("--json", action="store_true", help="emit the raw records")
+    ap.add_argument(
+        "--model",
+        default=MODEL,
+        help=f"model to measure against (default {MODEL}, the version the record grades)",
+    )
     args = ap.parse_args(argv)
 
     root = repo_root()
@@ -347,26 +413,28 @@ def main(argv: list[str] | None = None) -> int:
     suites, tokens, records = {}, 0, []
     if args.suite in ("manifest", "both"):
         rows = load_manifest_cases(root)
-        print(f"{len(criteria)} descriptions, {len(rows)} manifest cases\n")
-        out = run_suite(key, criteria, rows, args.margin, expects=True)
+        say(f"{len(criteria)} descriptions, {len(rows)} manifest cases\n")
+        out = run_suite(key, criteria, rows, args.margin, True, args.model)
         suites["manifest"], tokens = out, tokens + out["input_tokens"]
         records += out["results"]
     if args.suite in ("ambiguous", "both"):
-        print(
-            f"{len(criteria)} descriptions, {len(AMBIGUOUS_PROBES)} ambiguous probes\n"
-        )
-        out = run_suite(key, criteria, AMBIGUOUS_PROBES, args.margin, expects=False)
+        say(f"{len(criteria)} descriptions, {len(AMBIGUOUS_PROBES)} ambiguous probes\n")
+        out = run_suite(key, criteria, AMBIGUOUS_PROBES, args.margin, False, args.model)
         suites["ambiguous"], tokens = out, tokens + out["input_tokens"]
         records += out["results"]
 
     if args.json:
-        print(json.dumps(suites, indent=2))
+        print(json.dumps({"model": args.model, "suites": suites}, indent=2))
         return 0
 
-    misfires = [r for r in records if r["misfire"]]
+    # Only the manifest suite carries an expected skill, so it is the only half a
+    # misfire is defined over; the ambiguous probes record `misfire: None`.
+    labelled = [r for r in records if r["misfire"] is not None]
+    misfires = [r for r in labelled if r["misfire"]]
     collisions = [r for r in records if r["collision"]]
     print("=" * 66)
-    print(f"misfires:   {len(misfires)}")
+    print(f"model:      {args.model}")
+    print(f"misfires:   {len(misfires)}/{len(labelled)} labelled cases")
     print(f"collisions: {len(collisions)}/{len(records)} (margin < {args.margin})")
     for r in sorted(records, key=lambda r: r["margin"])[:3]:
         print(
