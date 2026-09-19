@@ -46,6 +46,16 @@ for it to mean anything a year from now.
 - **Good, because** the probe surfaced a defect that outlives it: a precedence rule
   argued from first principles, resting on a signal whose per-label spread nobody
   checked, cost 42 points. That is a review question for any future Jev ladder.
+- **Good, because** it puts a reading on agreement that the shadow-mode rollout in
+  [`../designs/2026-09-18-assess-task-typed-profile.md`](../designs/2026-09-18-assess-task-typed-profile.md)
+  will need. That design logs the typed profile and today's model side by side and
+  promotes what agrees. Agreement is the green light there — but this measurement is
+  a case where the two agreed completely and the right conclusion was _don't adopt_,
+  because agreement equally means the incumbent was already sufficient. What
+  distinguishes the two readings is cost: here one side needed thresholds fitted to
+  the set and a round trip, and the other needed three lines of prose. Agreement
+  licenses a switch only when the typed side is also cheaper, faster or steadier than
+  what it replaces.
 - **Bad, because** the measurement rests on 36 cases written by one person from one
   repository, and a ceiling effect means it can support "the call is not needed" but
   not "the call is worse."
