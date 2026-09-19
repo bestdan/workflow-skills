@@ -92,6 +92,7 @@ DEV_FILES=(
   scripts/build-copilot-instructions.py
   scripts/bump-version.py
   scripts/jev-description-collision.py
+  scripts/jev-pick-tool.py
   scripts/plan-graph.py
   scripts/task-scan.py
   scripts/tier-coverage.py
