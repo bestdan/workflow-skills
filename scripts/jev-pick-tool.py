@@ -43,6 +43,23 @@ suite with labels withheld so an agent can answer it blind; `--score` grades tha
 the same way the Jev run is graded. A tie is a real result: it means the three-line
 decision table in the design does the job and no call is needed.
 
+**The incumbent won, and that is the finding.** Three Claude subagents, independent
+contexts, given only the blind `--cases` dump and the three-line table and forbidden
+from reading this repository, each scored **35/36 — and all three agreed on every
+single case**, including with each other. Jev scored 36/36 against the labels. The
+one case they part on is `rank-the-coders`, where all three agents said `code` and
+the label (and Jev) say `llm`.
+
+Read plainly: **on the decisions this repo actually makes, a typed call adds nothing
+over the agent's own read of a three-line table.** The table is free and always in
+context; the call costs a round trip. That settles the question this probe was built
+to ask, in the negative, and it is worth more than a passing result would have been.
+
+The narrow caveat is that a suite where two methods both sit at 97-100% cannot rank
+them — it is a ceiling effect, and the honest next step is harder cases rather than
+more passes over these. What it can support is the negative claim, which is the one
+that changes what gets built.
+
 Dev-only. Never invoked by a skill or command at runtime, never part of `just check` —
 it costs money and needs the network. It lives under `scripts/` because that is the
 only tree the linters and typechecker cover.
@@ -674,6 +691,18 @@ CASES: list[dict] = [
         "id": "rank-the-coders",
         "label": "llm",
         "source": "note: 'select-coder's ranking' under Where it does not belong",
+        # The label is probably wrong, and it is left as written on purpose.
+        #
+        # Three independent agents all said `code`, and re-reading the note they have
+        # the better of it: "once a profile exists, mapping it through matrix.md is a
+        # lookup." A lookup is code. I labelled it `llm` because the note files it
+        # under "Where it does not belong" — but that section says it does not belong
+        # to JEV, which is not the same claim.
+        #
+        # Changing it now would be grading an answer against a label chosen after
+        # seeing it, which the research note explicitly refuses to do (section 7's
+        # one miss is recorded the same way). So it stays `llm`, stays marked
+        # contested, and the uncontested column is the number to read.
         "hard": True,
         "task": (
             "Given a profile of a coding task already scored along six dimensions, "
