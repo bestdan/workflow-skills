@@ -3,8 +3,8 @@
 #
 # Wraps scripts/test_jev_description_collision.py (stdlib unittest; the pure
 # functions take their inputs directly, so there is no fixture and no network).
-# The live half is scripts/test-jev-description-collision-live.sh, which costs
-# money and is excluded from the gate by check.sh's test-*-live.sh rule.
+# There is no live counterpart on purpose — nothing here depends on the Jev API,
+# so a standing test against it would outlive its reason to exist.
 #
 # Run directly: bash scripts/test-jev-description-collision.sh
 set -uo pipefail

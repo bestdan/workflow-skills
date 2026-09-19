@@ -3,8 +3,10 @@
 
 The pure half only: frontmatter parsing, manifest parsing, the ranking maths, the
 collision threshold, and the key-resolution ladder. Nothing here touches the network
-or reads a real key — the live half is scripts/test-jev-description-collision-live.sh,
-which is opt-in and excluded from the gate.
+or reads a real key. There is deliberately no live counterpart: nothing in this repo
+depends on the Jev API, so a standing test against it would be surface with no
+dependency behind it. Check the request and response shapes by running the
+instrument when that changes.
 
 Each case reproduces something that actually bit during the section-1 measurement,
 rather than restating the implementation.

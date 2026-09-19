@@ -291,9 +291,12 @@ Reproduce it with
 (`--suite manifest | ambiguous | both`, `--json` for the raw records). It resolves a
 key per [`auth_key_access.md`](../auth_key_access.md) and is dev-only — never called
 by a skill at runtime, never part of `just check`. Its pure half is tested offline by
-`scripts/test-jev-description-collision.sh`, which does run in the gate; the paid
-single-request smoke is `scripts/test-jev-description-collision-live.sh`, which is
-opt-in and skips cleanly with no key.
+`scripts/test-jev-description-collision.sh`, which does run in the gate.
+
+The instrument is an artifact of this record, not standing tooling: it exists so the
+numbers above can be re-run when a `description` changes or a new Jev version ships.
+There is deliberately no live test against the API, because nothing in this repo
+depends on it. If something ever does, that dependency brings its own test.
 
 No design or decision cites this record yet. The constraints in "If any of this is
 ever adopted" are findings about what an adoption would have to honor, not a

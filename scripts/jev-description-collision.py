@@ -20,9 +20,12 @@ Two suites:
               collision would actually show, so a claim about collisions rests on
               this suite, not the one above.
 
-Dev-only: never invoked by a skill or command at runtime, and never part of
-`just check` — it costs money and needs the network. See scripts/typecheck.sh for
-why that puts it in the dev tier.
+An artifact of that record, not standing tooling. Nothing in this repo depends on the
+Jev API; this exists so the record's numbers can be re-run when a `description`
+changes or a new Jev version ships. It is dev-only — never invoked by a skill or
+command at runtime, and never part of `just check`, since it costs money and needs
+the network. It lives under scripts/ because that is the only tree the linters and
+typechecker cover; dev_docs/research/ holds markdown records only.
 
 Run directly:
     python3 scripts/jev-description-collision.py --suite both
