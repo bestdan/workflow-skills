@@ -417,18 +417,6 @@ one-judgment-per-question matters, and **irrelevant context acts as a distractor
 which is why §3's "the caller has to assemble the state first" is a feature rather
 than a cost.
 
-## Where it does not belong
-
-- **Anything in the blocking gate.** `just check` is hermetic and offline. A network
-  call adds a flake source and a secret requirement to the one thing that must have
-  neither.
-- **Anything `validate.py`, `task-scan.py`, `plan-graph.py` or `tier-coverage.py`
-  already decides.** Deterministic work stays deterministic — Jev's own rule 4.
-- **The reconciler's correctness judgments.** See §6.
-- **Any prose.** PR bodies, task cards, plans, review comments. Jev generates nothing.
-- **`select-coder`'s ranking.** Once a profile exists (§3), mapping it through
-  `matrix.md` is a lookup. The value is upstream, not here.
-
 ## What connecting it would actually take
 
 ### The SDK is out; the HTTP API is a good fit
@@ -496,6 +484,18 @@ That is **authoring support for whoever writes the questions**, not a runtime
 dependency and not something this plugin would ever bundle. Worth knowing it exists
 before hand-writing a client. Worth also knowing it puts another skill in a user's
 roster alongside our 16 — a description-collision surface we do not control.
+
+## Where it does not belong
+
+- **Anything in the blocking gate.** `just check` is hermetic and offline. A network
+  call adds a flake source and a secret requirement to the one thing that must have
+  neither.
+- **Anything `validate.py`, `task-scan.py`, `plan-graph.py` or `tier-coverage.py`
+  already decides.** Deterministic work stays deterministic — Jev's own rule 4.
+- **The reconciler's correctness judgments.** See §6.
+- **Any prose.** PR bodies, task cards, plans, review comments. Jev generates nothing.
+- **`select-coder`'s ranking.** Once a profile exists (§3), mapping it through
+  `matrix.md` is a lookup. The value is upstream, not here.
 
 ## If any of this is ever adopted
 
