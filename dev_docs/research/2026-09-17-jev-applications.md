@@ -298,12 +298,57 @@ What Jev _can_ do in co-review is the work around it: **deduplication** ("are th
 findings the same finding?" — a Noul, and the reconciler already has to merge across
 reviewers), and **screening** which findings warrant the expensive pass at all.
 
+**Probed 2026-09-18: 7 of 8, on this repo's own findings.** The pairs are verbatim
+from the co-review run on the pull request that carries this note, where three
+reviewers independently reported one `--json` defect in three different wordings —
+the case the dedupe exists for. It scored those at 0.92, and caught a harder pair at
+0.84: two findings with different filenames and different wordings that turn out to
+share a root cause.
+
+The single miss is the pair built to be hard — two findings about the same sentence
+of this note, one objecting to its denominator and one to its run count. It called
+them the same at 0.64. They are not, but a human merging a review queue might well
+make the same call, so read that as the boundary of the question rather than as a
+failure of it.
+
 ### 7. `research-spike` backfill — small but exact
 
 `skills/research-spike/references/adoption.md` calls out that `backfill` is judgment —
 "deciding whether a sentence is a deferral at all". That is a Noul over each candidate
 sentence. The convergence metrics themselves are arithmetic and must stay in
 `research-spike.py`: rule 4.
+
+**Probed 2026-09-18, and this is the strongest measured result in the note: 94%
+against a 33% baseline.** Unlike every other application here, §7 has an incumbent to
+beat rather than an accuracy target to guess at — `find_deferral_phrase` in
+`scripts/research-spike.py` is five phrases plus one `once … lands` regex, and its own
+docstring concedes it returned 29 hits "most of them prose describing behaviour rather
+than deferring work". Scored over 18 sentences drawn from this repo's `dev_docs/`:
+
+|                                           | Noul            | lexical scan |
+| ----------------------------------------- | --------------- | ------------ |
+| correct                                   | **17/18 (94%)** | 6/18 (33%)   |
+| fires on prose that defers nothing        | 1               | 6            |
+| misses a deferral it cannot lexically see | 0               | 6            |
+
+The two failure modes are what matter. The scan fires on every "belongs to the
+machine" and "left to keep fences away from" it meets, and it is blind to every
+deferral phrased without its vocabulary — "out of scope for this note", "revisit only
+with measurements", "flagged here, not changed". The Noul separated both classes
+cleanly, 0.06–0.35 against 0.87–0.94, with no case landing near the boundary except
+the one below.
+
+Its one miss is a sentence I labelled as not deferring — "batching left to the
+consumer, since the script unions the results itself" — which it scored 0.82. On
+re-reading, that sentence does hand work to the consumer, so the label is probably
+wrong and the count is probably 18/18. Recording it as a miss rather than quietly
+relabelling it, because the alternative is grading an answer against a label chosen
+after seeing it.
+
+**What bounds all of this:** the labels are mine, assigned by reading each item, so
+both probes measure agreement with one careful reader rather than truth. Each case ran
+once. Neither is enough to adopt on; both are enough to say these two are worth the
+design work that §1 and §5 turned out not to be.
 
 ## 8. What the vendor says Jev is bad at — and where that hits the list above
 
