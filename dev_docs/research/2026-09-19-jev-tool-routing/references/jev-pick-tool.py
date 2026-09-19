@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Probe: can Jev tell code, Jev and an LLM apart as the right tool for a job?
 
-The instrument behind `dev_docs/research/2026-09-19-jev-tool-routing.md`. It exists so
+The instrument behind the `README.md` beside it. It exists so
 that record's numbers can be re-run rather than taken on trust, and so a new Jev
 version can be graded against the same cases.
 
@@ -28,10 +28,13 @@ ordinary code, a ladder you can read and edit. That is rule 2 (decompose, weight
 code) applied to the router itself, and a test in the pair holds both the questions
 and the case texts to it.
 
-`CASES` are decisions this repo already made and shipped, labelled with the tool they
-landed on, phrased as the job was phrased before the tool was chosen. `--cases` dumps
-them with labels withheld so a rival can answer blind; `--score` grades either side
-through the same scorer, which is the only reason the two numbers can be compared.
+`CASES` carries 36 jobs phrased as they were phrased before a tool was chosen. The 13
+`code` and 11 `llm` labels are decisions this repo shipped — a script that exists, a
+model judgment a skill body still asks for. The 12 `jev` labels are not: they are one
+reader's judgment of where a typed call would fit, taken from a note that adopts
+nothing. See the record's **The cases** for what that costs. `--cases` dumps them with
+labels withheld so a rival can answer blind; `--score` grades either side through the
+same scorer, which is the only reason the two numbers can be compared.
 
 A frozen artifact of the record beside it, not standing tooling: nothing imports it,
 no gate runs it, and it needs the network and a paid key. If a future Jev version
@@ -43,13 +46,20 @@ Dependencies: the standard library, plus `resolve_key` and `ask_payload` from
 two rather than carrying its own copy. Needs a TypeSafe key, resolved the way
 `dev_docs/auth_key_access.md` describes.
 
+`measurement/` holds the run the record reports — the Jev passes, the three baseline
+agents' answers, and the prompt they were given — so every number in the record is
+printed by a command that reads committed evidence and needs no key.
+
 Run by path, from the repository root:
     D=dev_docs/research/2026-09-19-jev-tool-routing/references
+    # no key, no network — these regenerate the record
+    python3 $D/jev-pick-tool.py --analyze $D/measurement/suite-run.json
+    python3 $D/jev-pick-tool.py --score $D/measurement/baseline/agent-1.json
+    python3 $D/test_jev_pick_tool.py
+    # these call the API and need a key
     python3 $D/jev-pick-tool.py --ask "decide whether two findings are the same"
     python3 $D/jev-pick-tool.py --suite --repeat 3
     python3 $D/jev-pick-tool.py --cases > blind.json
-    python3 $D/jev-pick-tool.py --score answers.json
-    python3 $D/test_jev_pick_tool.py        # the hermetic half; no key, no network
 """
 
 from __future__ import annotations
@@ -784,6 +794,123 @@ def run_suite(key: str, repeat: int, model: str = MODEL) -> dict:
     }
 
 
+# ------------------------------------------------------------------- analysis
+#
+# The record reports three things the live suite does not print: the per-label signal
+# spreads, the thresholds fitted to the set, and the leave-one-out score. They were
+# computed in a scratch script the first time, which is exactly the defect the record
+# warns about elsewhere — a number in a document that traces to nothing committed. So
+# they live here, and `--analyze` regenerates every one of them from a saved run.
+
+
+def mean_signals(run: dict) -> dict[str, dict[str, float]]:
+    """Per case, each signal averaged over the run's passes.
+
+    Averaging first is deliberate: Jev is not deterministic, so a threshold fitted to
+    one pass is fitted partly to that pass's noise. The record's ranges are ranges over
+    these per-case means, not over individual answers.
+    """
+    passes = run["passes"]
+    return {
+        cid: {
+            q: sum(p["detail"][cid]["signals"][q] for p in passes) / len(passes)
+            for q in QUESTIONS
+        }
+        for cid in (c["id"] for c in CASES)
+    }
+
+
+def signal_spreads(avg: dict[str, dict[str, float]]) -> dict[str, dict[str, tuple]]:
+    """(mean, low, high) per signal per label — the record's finding-2 table."""
+    labels = {c["id"]: c["label"] for c in CASES}
+    out: dict[str, dict[str, tuple]] = {}
+    for q in QUESTIONS:
+        out[q] = {}
+        for label in LABELS:
+            vals = [avg[c][q] for c in avg if labels[c] == label]
+            out[q][label] = (sum(vals) / len(vals), min(vals), max(vals))
+    return out
+
+
+def _grid() -> list[float]:
+    return [i / 100 for i in range(30, 100, 5)]
+
+
+def _score_with(avg: dict, ids: list[str], te: float, tc: float) -> float:
+    labels = {c["id"]: c["label"] for c in CASES}
+    t = Thresholds(exact=te, closed=tc)
+    return sum(route(avg[c], t).tool == labels[c] for c in ids) / len(ids)
+
+
+def fit_thresholds(
+    avg: dict, ids: list[str] | None = None
+) -> tuple[float, float, float]:
+    """(exact, closed, accuracy) — the best two-rung ladder over a grid.
+
+    Ties go to the lowest thresholds, which `max` gives for free over an ascending
+    grid: a tie means the cases between the two candidates are empty, and the looser
+    cut is the one that does not depend on that emptiness holding.
+    """
+    ids = ids or [c["id"] for c in CASES]
+    best = max(
+        (_score_with(avg, ids, te, tc), -te, -tc) for te in _grid() for tc in _grid()
+    )
+    return -best[1], -best[2], best[0]
+
+
+def leave_one_out(avg: dict) -> tuple[int, int, list[str]]:
+    """Refit on n-1, score the held-out case. (correct, n, the ids it missed).
+
+    This is the number worth quoting and the one the first draft could not reproduce:
+    thresholds fitted to the set you then score are not a measurement.
+    """
+    labels = {c["id"]: c["label"] for c in CASES}
+    ids = [c["id"] for c in CASES]
+    missed = []
+    for held in ids:
+        te, tc, _ = fit_thresholds(avg, [c for c in ids if c != held])
+        if route(avg[held], Thresholds(exact=te, closed=tc)).tool != labels[held]:
+            missed.append(held)
+    return len(ids) - len(missed), len(ids), missed
+
+
+def format_analysis(run: dict) -> str:
+    avg = mean_signals(run)
+    spreads = signal_spreads(avg)
+    labels = {c["id"]: c["label"] for c in CASES}
+
+    lines = [f"{run['repeat']} passes, model {run['model']}", "", "signal spreads:"]
+    lines.append(f"  {'':<17}" + "".join(f"{lab:>22}" for lab in LABELS))
+    for q in QUESTIONS:
+        row = f"  {q:<17}"
+        for lab in LABELS:
+            m, lo, hi = spreads[q][lab]
+            row += f"{m:>10.2f} [{lo:.2f}-{hi:.2f}]"
+        lines.append(row)
+
+    code = sorted((avg[c]["exact"], c) for c in avg if labels[c] == "code")
+    other = sorted((avg[c]["exact"], c) for c in avg if labels[c] != "code")
+    lines += [
+        "",
+        f"exact: lowest code {code[0][0]:.2f} ({code[0][1]}), "
+        f"highest non-code {other[-1][0]:.2f} ({other[-1][1]}) — "
+        + ("clean cut" if code[0][0] > other[-1][0] else "OVERLAP"),
+    ]
+
+    te, tc, acc = fit_thresholds(avg)
+    shipped = _score_with(avg, list(avg), THRESHOLDS.exact, THRESHOLDS.closed)
+    correct, n, missed = leave_one_out(avg)
+    lines += [
+        "",
+        f"best fitted ladder: exact>={te:.2f} closed>={tc:.2f} -> {acc:.0%}",
+        f"shipped thresholds: exact>={THRESHOLDS.exact:.2f} "
+        f"closed>={THRESHOLDS.closed:.2f} -> {shipped:.0%}",
+        f"leave-one-out:      {correct}/{n} = {correct / n:.0%}"
+        + (f"  (missed: {', '.join(missed)})" if missed else ""),
+    ]
+    return "\n".join(lines)
+
+
 def format_report(report: dict) -> str:
     lines = [
         f"{report['correct']}/{report['n']} correct "
@@ -828,6 +955,12 @@ def main(argv: list[str] | None = None) -> int:
         metavar="FILE",
         help='grade a {"case-id": "code|jev|llm"} file against the labels',
     )
+    mode.add_argument(
+        "--analyze",
+        metavar="FILE",
+        help="regenerate the record's signal spreads, fitted ladder and "
+        "leave-one-out from a saved --suite --json run",
+    )
     p.add_argument("--repeat", type=int, default=1, help="passes over the suite")
     p.add_argument("--model", default=MODEL)
     p.add_argument("--json", action="store_true", help="machine-readable output")
@@ -845,6 +978,26 @@ def main(argv: list[str] | None = None) -> int:
     if args.score:
         report = score_answers(json.loads(Path(args.score).read_text()))
         print(json.dumps(report, indent=2) if args.json else format_report(report))
+        return 0
+
+    if args.analyze:
+        run = json.loads(Path(args.analyze).read_text())
+        if args.json:
+            avg = mean_signals(run)
+            te, tc, acc = fit_thresholds(avg)
+            correct, n, missed = leave_one_out(avg)
+            print(
+                json.dumps(
+                    {
+                        "spreads": signal_spreads(avg),
+                        "fitted": {"exact": te, "closed": tc, "accuracy": acc},
+                        "leave_one_out": {"correct": correct, "n": n, "missed": missed},
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            print(format_analysis(run))
         return 0
 
     key = _jev.resolve_key(_jev.repo_root())

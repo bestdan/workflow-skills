@@ -31,16 +31,37 @@ passes, roughly $0.004. Median round trip 0.55s.
 
 ```
 D=dev_docs/research/2026-09-19-jev-tool-routing/references
-python3 $D/jev-pick-tool.py --suite --repeat 3     # the Jev run
-python3 $D/jev-pick-tool.py --cases > blind.json   # labels withheld
-python3 $D/jev-pick-tool.py --score answers.json   # grades either side
+python3 $D/jev-pick-tool.py --analyze $D/measurement/suite-run.json   # every number below
+python3 $D/jev-pick-tool.py --score $D/measurement/baseline/agent-1.json
 python3 $D/test_jev_pick_tool.py                   # hermetic; no key, no network
+python3 $D/jev-pick-tool.py --suite --repeat 3     # a fresh Jev run; costs a key
+python3 $D/jev-pick-tool.py --cases > blind.json   # the blind dump, labels withheld
 ```
 
+**Every number in this record is printed by one of the first three commands**, which
+need neither a key nor the network — they read committed evidence. `--analyze` emits
+the signal table, the fitted ladder and the leave-one-out figure; `--score` grades the
+baseline answers; the test suite checks the ladder and the case set.
+
+`references/measurement/` is that evidence, and it is a single coherent run rather
+than an assemblage:
+
+- `suite-run.json` — one `--suite --repeat 3` run: per case, per pass, the seven raw
+  Jev answers and the routing they produced.
+- `baseline/agent-{1,2,3}.json` — the three subagents' answers, exactly as written.
+- `baseline-prompt.md` — the prompt they were given, verbatim.
+
+The first version of this record committed none of it and reported numbers from two
+different runs computed in a scratch script. That is the defect the record itself
+warns about — a number in a document tracing to nothing committed — and finding 3
+records what it cost when the gap was closed.
+
 The baseline was three Claude subagents in independent contexts, each given the blind
-dump, the three-line table in the decision record, and one instruction not to read any
-repository file. Both sides are graded by the same scorer, which is the only reason
-the two numbers can sit in one table.
+dump, the three-line table, and one instruction not to read any repository file. That
+last constraint is the measurement: an agent that grepped the repo would find the
+labels in `jev-pick-tool.py` and score 36/36 by reading the answer key. Both sides are
+graded by the same scorer, which is the only reason the two numbers can sit in one
+table.
 
 ### The question shape, and why it is not a single Choice
 
@@ -136,19 +157,22 @@ Means over three passes, with the range across cases, against the corrected labe
 
 | signal            | `code`               | `jev`                | `llm`            |
 | ----------------- | -------------------- | -------------------- | ---------------- |
-| `exact`           | **0.87** [0.63–0.97] | 0.17 [0.10–0.31]     | 0.22 [0.11–0.50] |
-| `closed_output`   | 0.63 [0.10–0.97]     | **0.88** [0.79–0.96] | 0.20 [0.04–0.70] |
-| `prose_output`    | 0.34                 | 0.41                 | 0.66 [0.22–0.97] |
+| `exact`           | **0.87** [0.62–0.97] | 0.17 [0.10–0.29]     | 0.23 [0.11–0.51] |
+| `closed_output`   | 0.63 [0.10–0.97]     | **0.89** [0.79–0.96] | 0.20 [0.04–0.71] |
+| `prose_output`    | 0.34                 | 0.40                 | 0.66 [0.21–0.97] |
 | `dependent_steps` | 0.56                 | 0.35                 | 0.70             |
-| `needs_fetch`     | 0.53                 | 0.21                 | 0.60             |
+| `needs_fetch`     | 0.53                 | 0.21                 | 0.59             |
 | `tally`           | 0.54                 | 0.16                 | 0.17             |
 
-The lowest `code` case sits at **0.63** and the highest non-`code` case at **0.50** —
-a clean cut with 0.13 of daylight. `closed_output` separates `jev` at 81% on its own.
+Regenerate this table with `--analyze` over the committed run (see **Method**); it is
+printed, not transcribed.
+
+The lowest `code` case sits at **0.62** (`rank-the-coders`) and the highest non-`code`
+case at **0.51** (`find-the-assumers`) — a clean cut with 0.11 of daylight. `closed_output` separates `jev` at 81% on its own.
 No other signal's best single cut beats 83%, and `needs_fetch` and `dependent_steps`
 separate nothing at all.
 
-### 3. Two rungs on two signals: 36/36 fitted, 35/36 leave-one-out
+### 3. Two rungs on two signals: 36/36 fitted, 34/36 leave-one-out
 
 ```
 exact >= 0.60          -> code
@@ -157,15 +181,28 @@ otherwise              -> llm
 ```
 
 Leave-one-out refits the thresholds on the other 35 cases each time and scores the
-held-out one: **35/36 (97%)**. Three fresh passes against the live API with the fitted
-thresholds: 36/36 each, no case unstable across passes.
+held-out one: **34/36 (94%)**, missing `did-the-coder-deliver` and `find-the-assumers`.
+Three fresh passes against the live API with the fitted thresholds: 36/36 each, no case
+unstable across passes.
 
-`exact`'s constant was 0.65 before finding 5 corrected a label, and 0.60 after.
-**Leave-one-out is 97% at either value** — the cross-validated estimate does not move,
-which is what says the refit tidies a constant rather than buying accuracy.
+**That 94% was published as 97% in the first version of this record, and the
+difference was an undocumented tie-break.** Two threshold pairs reach 100% on the full
+set — `exact >= 0.55` and `exact >= 0.60`, both with `closed >= 0.75` — because the
+optimum is a plateau, not a point. Which one a fold picks decides the held-out answer:
+resolving ties toward the higher cut gives 35/36, toward the lower gives 34/36. The
+first number came from a scratch script whose `max()` happened to break ties upward,
+and nothing recorded that it had. `fit_thresholds` now resolves ties toward the
+**lower** cut and says why in its docstring, so the figure is 94% and it is derivable
+rather than incidental.
 
-97% is the ceiling of a friendly measurement, not an accuracy claim: the thresholds
-are fitted to this set and the set is one person's.
+Read the honest version as **94–97% depending on an arbitrary choice** — quoting a
+single figure to two significant digits overstated what a 36-case plateau can support.
+The conservative end is the one reported.
+
+`exact`'s shipped constant is 0.60. The fit prefers 0.55; both score 100% on the full
+set, and the shipped value is left where the earlier refit put it because moving it
+changes no case. 94% is the ceiling of a friendly measurement, not an accuracy claim:
+the thresholds are fitted to this set and the set is one person's.
 
 ### 4. The unaided agent matched it with no fitting at all
 

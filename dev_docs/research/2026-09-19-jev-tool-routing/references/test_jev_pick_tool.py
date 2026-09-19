@@ -24,6 +24,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+MEASUREMENT = Path(__file__).resolve().parent / "measurement"
 SPEC = importlib.util.spec_from_file_location(
     "jev_pick_tool", Path(__file__).resolve().parent / "jev-pick-tool.py"
 )
@@ -261,6 +262,127 @@ class ScorerTests(unittest.TestCase):
         c = next(x for x in pick.CASES if x["label"] == "jev")
         report = pick.score_answers({c["id"]: "llm"})
         self.assertEqual(report["confusion"]["jev"]["llm"], 1)
+
+
+def fake_run(per_case: dict[str, dict[str, float]], passes: int = 2) -> dict:
+    """A --suite-shaped run whose signals are exactly what the caller asked for.
+
+    Each pass gets its own copy of every signal dict. Sharing one object across
+    passes made a test that edits a single pass silently edit all of them — which is
+    how the first version of this fixture reported a mean of 1.0 for (1.0+0.4+0.4)/3.
+    """
+    return {
+        "model": "test",
+        "repeat": passes,
+        "passes": [
+            {"detail": {cid: {"signals": dict(sig)} for cid, sig in per_case.items()}}
+            for _ in range(passes)
+        ],
+    }
+
+
+class AnalysisTests(unittest.TestCase):
+    """The analysis prints numbers the record publishes, so it is the half most
+    worth testing: a silent change here rewrites a finding."""
+
+    def _run_matching_labels(self):
+        # Every case given signals that route to its own label under the shipped
+        # ladder, so a perfect fit and a perfect leave-one-out are the expected answer.
+        per_case = {}
+        for c in pick.CASES:
+            if c["label"] == "code":
+                per_case[c["id"]] = signals(exact=0.9)
+            elif c["label"] == "jev":
+                per_case[c["id"]] = signals(closed_output=0.9)
+            else:
+                per_case[c["id"]] = signals()
+        return fake_run(per_case)
+
+    def test_mean_signals_averages_across_passes(self):
+        cid = pick.CASES[0]["id"]
+        run = fake_run({c["id"]: signals(exact=0.4) for c in pick.CASES}, passes=3)
+        run["passes"][0]["detail"][cid]["signals"]["exact"] = 1.0
+        # (1.0 + 0.4 + 0.4) / 3
+        self.assertAlmostEqual(pick.mean_signals(run)[cid]["exact"], 0.6)
+
+    def test_spreads_carry_mean_low_and_high_per_label(self):
+        spreads = pick.signal_spreads(pick.mean_signals(self._run_matching_labels()))
+        mean, lo, hi = spreads["exact"]["code"]
+        for got in (mean, lo, hi):
+            self.assertAlmostEqual(got, 0.9)
+        for got in spreads["exact"]["jev"]:
+            self.assertAlmostEqual(got, 0.0)
+
+    def test_a_separable_set_fits_perfectly(self):
+        _, _, acc = pick.fit_thresholds(pick.mean_signals(self._run_matching_labels()))
+        self.assertEqual(acc, 1.0)
+
+    def test_ties_resolve_to_the_lower_threshold(self):
+        # The whole point of pinning this: the record's first leave-one-out figure was
+        # 97% purely because a scratch script broke ties upward, and nothing said so.
+        # Two cuts score the same here, and the looser one must win.
+        avg = pick.mean_signals(self._run_matching_labels())
+        te, _, _ = pick.fit_thresholds(avg)
+        looser = pick.Thresholds(exact=te, closed=0.75)
+        self.assertEqual(
+            pick._score_with(avg, list(avg), te, 0.75),
+            pick._score_with(avg, list(avg), te + 0.05, 0.75),
+        )
+        self.assertEqual(pick.route(signals(exact=te), looser).tool, "code")
+
+    def test_leave_one_out_holds_each_case_out(self):
+        correct, n, missed = pick.leave_one_out(
+            pick.mean_signals(self._run_matching_labels())
+        )
+        self.assertEqual((correct, n, missed), (len(pick.CASES), len(pick.CASES), []))
+
+    def test_leave_one_out_can_score_below_the_fitted_number(self):
+        # The property that makes it worth reporting instead of the fitted score.
+        avg = pick.mean_signals(self._run_matching_labels())
+        odd = next(c["id"] for c in pick.CASES if c["label"] == "code")
+        avg[odd] = signals(
+            exact=0.31
+        )  # inside the grid, far below every other code case
+        _, _, fitted = pick.fit_thresholds(avg)
+        correct, n, _ = pick.leave_one_out(avg)
+        self.assertLessEqual(correct / n, fitted)
+
+    def test_format_analysis_names_the_separation_verdict(self):
+        text = pick.format_analysis(self._run_matching_labels())
+        self.assertIn("clean cut", text)
+        self.assertIn("leave-one-out", text)
+
+    def test_the_committed_run_reproduces_the_records_numbers(self):
+        # The record is only as good as this file agreeing with it.
+        run = json.loads((MEASUREMENT / "suite-run.json").read_text())
+        avg = pick.mean_signals(run)
+        correct, n, _ = pick.leave_one_out(avg)
+        self.assertEqual((correct, n), (34, 36))
+        self.assertEqual(pick.fit_thresholds(avg)[2], 1.0)
+        spreads = pick.signal_spreads(avg)
+        self.assertGreater(spreads["exact"]["code"][1], spreads["exact"]["llm"][2])
+        self.assertGreater(spreads["exact"]["code"][1], spreads["exact"]["jev"][2])
+
+
+class BaselineTests(unittest.TestCase):
+    def test_all_three_baseline_files_score_36_of_36(self):
+        # The claim the record rests on: the unaided agent matched the ladder.
+        for n in (1, 2, 3):
+            with self.subTest(agent=n):
+                answers = json.loads(
+                    (MEASUREMENT / "baseline" / f"agent-{n}.json").read_text()
+                )
+                report = pick.score_answers(answers)
+                self.assertEqual(report["correct"], len(pick.CASES))
+                self.assertEqual(report["missing"], [])
+
+    def test_the_three_agents_agreed_with_each_other(self):
+        seen = [
+            json.loads((MEASUREMENT / "baseline" / f"agent-{n}.json").read_text())
+            for n in (1, 2, 3)
+        ]
+        disagreed = [k for k in seen[0] if len({a[k] for a in seen}) > 1]
+        self.assertEqual(disagreed, [])
 
 
 class CliTests(unittest.TestCase):
