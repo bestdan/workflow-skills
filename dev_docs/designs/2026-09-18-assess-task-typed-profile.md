@@ -8,11 +8,12 @@ status: proposed
 ## Summary
 
 `assess-task` asks a model for a `task_profile` of seven fixed enums, a derived
-`label`, a self-reported `confidence`, and a `runner_up`. Every consumer of that block
-pays a subagent spawn for it. This proposes splitting the profile by **who can answer
-each field**: code computes what is arithmetic, a typed model call answers the
-genuine snap judgments, and today's model answers everything when no key is present.
-The `task_profile` block consumers read does not change shape.
+`label`, a self-reported `confidence`, a `runner_up`, and one freeform `notes` line.
+`select-coder` pays a subagent spawn for that block on every packet it routes. This
+proposes splitting the profile by **who can answer each field**: code computes what is
+arithmetic, a typed model call answers the genuine snap judgments, code composes the
+one freeform line, and today's model answers everything whenever the typed call is
+unavailable. The `task_profile` block consumers read does not change shape.
 
 The evidence is
 [`dev_docs/research/2026-09-17-jev-applications.md`](../research/2026-09-17-jev-applications.md).
@@ -36,6 +37,7 @@ task_profile:
   label: <one of the routing labels>
   confidence: high | low
   runner_up: <routing label> | null
+  notes: <one line> # freeform: assumptions and brief reasoning
 ```
 
 Three things about that block matter here, and all three are in the skill's own text:
@@ -47,9 +49,13 @@ Three things about that block matter here, and all three are in the skill's own 
 - **`confidence` and `runner_up` are self-reported**, which is the least reliable
   thing a model produces.
 
-Consumers: `select-coder` routes on the profile, `break-down-task` sizes on
-`complexity` + `scope`, `promote-tasks` uses it as one input to its confidence check.
-Each of those pays a subagent spawn per packet.
+Consumers, and they do not cost the same. `select-coder` invokes `assess-task` as step
+1 of Selection, unconditionally, so it pays a spawn on **every** packet it routes —
+including under `orchestrate-coders`, which routes packets through it. `break-down-task`
+and `promote-tasks` reach for it only when sizing is genuinely uncertain, and both say
+so in their own text: "Advisory only" and "advisory input, not a replacement for it."
+So the cost case rests on `select-coder`; the other two pay occasionally, and a design
+that claimed a spawn per packet for all three would be overstating its own savings.
 
 ## Proposal
 
@@ -59,14 +65,48 @@ Three lanes, decided by who can answer the field.
 consults `related_files` / linked context "if the raw description is thin" — an
 escalation, not a guarantee. So there are two cases and they are not the same problem:
 
-- **Concrete.** The task names paths, or links a diff, branch or PR. A file count and
-  a subsystem set exist, the four levels are bucket boundaries over them, and a helper
-  — `scripts/task-profile.py`, a typed file with a test pair, per
+- **Concrete.** The task links a diff, branch or PR. A complete changed-file set
+  exists, the four levels are bucket boundaries over it, and a helper —
+  `scripts/task-profile.py`, a typed file with a test pair, per
   [CONTRIBUTING.md](../../CONTRIBUTING.md#logic-goes-in-a-typed-file) — does the
   bucketing. No model is involved.
 - **Predictive.** The task is prose describing work not yet done. Nothing can be
   counted, because the files do not exist. `scope` here is a forecast of blast radius
   from a description, and it stays a model judgment.
+
+**The cut points, since "bucket boundaries" is not a specification.** The measured
+result — 40/40 — came from redefining the levels _in terms of the count_, so it
+transfers to the helper only if the helper implements the same definitions. That makes
+the boundaries part of this design's contract rather than an implementation detail;
+left to the helper they could silently diverge from what was measured, and the
+71.6% → 100% claim would stop being falsifiable. The input is the **changed-file count
+alone** — the ~300-line figure in **Task size** never entered the measurement and is
+not an input here.
+
+| level            | changed files | source                                                     |
+| ---------------- | ------------- | ---------------------------------------------------------- |
+| `single-file`    | 1             | the enum name; size 1 is "a few lines in one file"         |
+| `pr-sized`       | 2–5           | the §3 re-run's own wording, and the size-5 ceiling (≤ ~5) |
+| `multi-file`     | 6+            | the complement                                             |
+| `whole-codebase` | see below     | **unmeasured — this design invents it**                    |
+
+Three of the four come from sources that already exist. The fourth does not, and it is
+worth flagging rather than burying: `assess-task` defines `whole-codebase` proportionally
+— "needs to read most of the tree" — so no count is available to lift. The §3 probe had
+to bucket it somehow, but that probe was never committed (the record says so), so there
+is no rule to recover. This design proposes **changed files ≥ half the tracked files**
+and marks it as the one cut with no measurement behind it; the predictive probe that
+licenses the forecasting half should re-check this boundary while it is in there.
+
+**Named paths are a floor, not a count.** An earlier draft of this design put any card
+naming paths in the concrete lane, and that was wrong: `skills/task/SKILL.md` defines
+`related_files` as "paths the consumer should read for context", not the set the work
+will change. A card naming three context files can produce a twenty-file change, so
+bucketing on that count would under-read `scope` — the same direction as the error in
+§3, reintroduced by the fix meant to remove it. So a named-path card stays predictive,
+and its path count enters as a **lower bound**: it can raise the model's `scope`, never
+cap it. That asymmetry is the whole point, because under-reading is the measured
+failure and over-reading is not.
 
 This split is the part of the design most likely to be wrong, and it is worth saying
 why plainly: **the §3 measurement only covers the concrete case.** It scored merged
@@ -77,7 +117,17 @@ for a numerically-defined question says only that arithmetic is arithmetic.
 
 The one part that is never arithmetic in either case is the skill's own override, "3+
 unrelated subsystems", which becomes a separate narrow judgment rather than being
-folded into a size estimate.
+folded into a size estimate. **It rides in the typed call as a seventh Noul**, beside
+the six below — extra questions are evaluated in parallel against the same state, so
+it costs no extra request — and it composes the same way a named-path count does: it
+can raise `scope` to at least `multi-file`, never lower it. That direction is not a
+preference. `skills/assess-task/SKILL.md` already makes the subsystem rule dominant
+("subsystem count trumps line/file count when they disagree"), and every measured
+error in §3 was an under-read, so the only correction worth wiring is upward.
+
+Naming the owner is what keeps the concrete lane honest. Left unassigned, the override
+is a judgment nobody makes, and the "no model is involved" claim above would be true
+only because the dominant rule had been quietly dropped.
 
 **A typed call answers the six remaining dimensions.** `complexity`, `creativity`,
 `autonomy`, `speed_sensitivity`, `cost_sensitivity` and `verification_criticality` are
@@ -92,9 +142,37 @@ record where `confidence` met ground truth is §5, where it ran 16 points overco
 So the typed `confidence` replaces a self-report with a measurable number; it does not
 yet replace it with a trustworthy one.
 
-**Today's model answers everything when no key is present.** This is the only
-defensible Class B shape: a fast path, never a requirement. No installed user acquires
-a `TYPESAFE_API_KEY` obligation, and the block is identical either way.
+**Code writes `notes`, deterministically.** It is the eleventh field and the only
+freeform one, so it is the one thing neither lane above can produce — a typed call
+returns typed answers and generates no prose at all. That leaves three options, and
+two of them are bad: dropping the field breaks the interface promise below for no
+gain, and invoking today's model just to fill it keeps the whole spawn this design
+exists to remove. So the helper composes the line itself, from values it already
+holds — which path ran, the counts behind a computed `scope`, and the dimensions that
+drove `label`.
+
+That is a change of purpose, not just of author. Today's `notes` is the model's own
+freeform reasoning; the composed line is a provenance record, and it is the more
+useful of the two here precisely because this design splits the block across three
+producers. Nothing is lost by the swap: **no consumer reads `notes`.** `select-coder`
+takes `label`, `confidence`, `runner_up` and the dimensions; `break-down-task` and
+`promote-tasks` take `complexity` and `scope`. The field is a human-facing audit line,
+which is why it can be redefined without touching a consumer — and why it must not be
+silently dropped, since an audit line is exactly what a three-producer block needs.
+
+**Today's model answers everything whenever the typed call is unavailable** — no key,
+a failed or timed-out request, a non-success response after the bounded retry, or a
+payload that does not parse. The trigger is availability, not key presence, and the
+distinction is the whole of the Class B rule: a fast path that degrades only on a
+missing key is still a hard requirement for everyone who has one, which is the
+opposite of what this design claims. It is worth stating in those terms because the
+client is hand-rolled `urllib` — the one SDK behaviour given up is retry-with-backoff
+on `429`/`529`, so the failure surface is named a few lines above and has to be wired
+to the degrade path rather than merely acknowledged.
+
+No installed user acquires a `TYPESAFE_API_KEY` obligation, and the block is identical
+either way — on the degraded path `notes` stays the model's own prose, so the field's
+contract ("one freeform line") holds whichever producer fills it.
 
 ### The interface that must not move
 
@@ -103,8 +181,17 @@ adoption leaks into three other skills and the degrade path stops being transpar
 So the block's keys, enum values and semantics are unchanged by this design, and the
 helper's contract is "return a `task_profile`", not "call Jev".
 
-The corollary is that the helper is **consumer code**: it runs as bare `python3` on
-other people's machines, so it sits in `scripts/typecheck.sh`'s `CONSUMER_FILES` at
+**One entry point owns that contract**, and naming it is what makes "the helper"
+singular true across three producers. The skill invokes the handler asset; it resolves
+the key, makes the typed call, shells out to `scripts/task-profile.py` as a subprocess
+for the bucketing when there is a changed-file set to count, composes `notes`, and
+returns the assembled block. The composition has to sit on that side of the split
+because `scripts/` cannot import from `commands/handlers/assets/` — a subprocess is
+the available seam, and it is the cheaper direction anyway, since the bucketing half
+is pure arithmetic over a file list and needs nothing from the caller but that list.
+
+The corollary is that both files are **consumer code**: they run as bare `python3` on
+other people's machines, so both sit in `scripts/typecheck.sh`'s `CONSUMER_FILES` at
 the 3.9 floor, not the dev tier.
 
 That floor decides the client, and the record now settles it rather than assuming it.
@@ -137,11 +224,15 @@ mechanism, and no auth module to write.
 ## Decisions
 
 **`scope` is computed wherever it is countable, and asked only where it is a
-forecast.** Measured at 71.6% exact with the error systematic in one direction —
-`multi-file` under-read as `pr-sized` in 31 of 33 misses. The rejected alternative is
+forecast.** Asking a typed Score for `scope` measured 71.6% exact against 116 merged
+PRs, with the error systematic in one direction — `multi-file` under-read as `pr-sized`
+in 31 of 33 misses. That measurement is the reason to compute rather than ask, not a
+score for the computed path, which is arithmetic and does not have one. The rejected
+alternative is
 to keep asking even where a count exists, with a better-posed question: restating the
 count first and defining levels numerically scores 100%, but at that point the
-question is arithmetic and rule 4 applies. Asking a model to bucket an integer buys
+question is arithmetic and the record's rule 4 — never ask what code can compute —
+applies. Asking a model to bucket an integer buys
 nondeterminism and a network call for nothing.
 
 The measurement does **not** license the predictive case, and the first
@@ -235,7 +326,12 @@ switches until they agree on this repo's real cards. This is the step that caugh
 Decision records, one per choice above that someone could revisit: `scope` is
 computed rather than judged; Jev is a fast path and never a requirement; calibration
 precedes any threshold; `confidence` is a tripwire on pressure, never a gate on
-correctness. Conventions: `skills/assess-task/SKILL.md` gains the degrade
-path and loses `scope` from the asked set, and the helper's contract is documented
-where its consumers can find it. This design is deleted in the PR that finishes the
+correctness. Conventions: `skills/assess-task/SKILL.md` gains the degrade path and
+loses `scope` from the asked set **for the concrete case only**, keeping a narrower
+predictive `scope` question for cards with nothing to count — or losing the dimension
+entirely, if the probe above comes back badly. It must not lose `scope` outright, which
+would leave a predictive card with no producer for it. The same edit restates `notes`
+in the contract block as provenance rather than reasoning, so the field's documented
+intent matches what the helper emits. The helper's contract is documented where its
+consumers can find it. This design is deleted in the PR that finishes the
 rollout, or the one after.
