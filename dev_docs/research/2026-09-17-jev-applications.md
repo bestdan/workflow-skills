@@ -417,6 +417,74 @@ one-judgment-per-question matters, and **irrelevant context acts as a distractor
 which is why §3's "the caller has to assemble the state first" is a feature rather
 than a cost.
 
+## What connecting it would actually take
+
+### The SDK is out; the HTTP API is a good fit
+
+`typesafe-sdk` 0.6.0 requires **Python ≥ 3.10** and pulls four runtime dependencies
+(`httpx2`, `msgspec`, `tenacity`, `typing-extensions`). This repo typechecks everything
+consumers execute as bare `python3` at **3.9**
+([CONTRIBUTING.md](../../CONTRIBUTING.md)), and adding dependencies needs a discussion
+first ([AGENTS.md](../../AGENTS.md)). **The SDK cannot be used for any Class B
+adoption**, and is not worth the dependency for Class A either.
+
+That floor is not a snapshot artifact: 0.7.0 has since shipped, still `>=3.10`, having
+swapped `msgspec` for `pydantic` + `pydantic-core` (re-read from PyPI 2026-09-19).
+`httpx2` is the real package name, not a typo for `httpx`.
+
+**Nor is it a pin someone could relax** — it is the SDK's own source. Three modules
+(`_core/json_types.py`, `_core/response_types.py`, `_core/question_types.py`) import
+`TypeAlias` from `typing`, which only exists at 3.10; and 13 files annotate with PEP 604
+`X | Y` unions while only one carries `from __future__ import annotations`, so those
+unions evaluate at import. Measured 2026-09-19: the SDK's modules **compile** under
+3.9.6 and then die at import with `ImportError: cannot import name 'TypeAlias' from
+'typing'`, while the same files run under 3.12. `msgspec>=0.21.1` is a second, transitive
+floor — 0.21.1 itself declares `>=3.10` — but removing it in 0.7.0 did not lower the
+SDK's floor, which is what points at the source as the real bar. The vendor backports
+deliberately where it wants to (`_core/schemas/base.py` takes `Self` from
+`typing_extensions`), so 3.10 is a choice, not an oversight, and escaping it would take
+a refactor across those files rather than a version bump.
+
+It is also unnecessary. The API is one JSON POST, which `urllib.request` + `json`
+handle on 3.9 with zero dependencies — exactly how
+`commands/handlers/assets/linear-scan.py` already talks to Linear. The retry-with-
+backoff behavior the SDK provides for `429`/`529` is the only thing lost, and that is a
+few lines.
+
+### The secret plumbing already exists and the name already matches
+
+The SDK's env var is `TYPESAFE_API_KEY`, which is exactly what
+[`dev_docs/auth_key_access.md`](../auth_key_access.md)'s `$<SERVICE>_<CREDENTIAL>`
+convention produces, so the name costs nothing.
+
+The resolver is where the two adoption classes part, and the split is worth stating
+because it was got wrong once. A **Class B** client — a handler asset — needs no new
+module: `_secret_resolve.py`'s `resolve_key(name)` is already generic over the name it
+is handed, so `resolve_key("TYPESAFE_API_KEY")` works today, and there is no
+`_linear_auth.py` to write a sibling to (each `linear-*.py` calls the shared resolver
+directly). A **Class A** script cannot reuse it — `scripts/` does not import from
+`commands/handlers/assets/` — and the one that exists did not try:
+[`scripts/jev-description-collision.py`](../../scripts/jev-description-collision.py)
+defines its own `resolve_key`, deliberately ordered rung 0 → 1 → 3 so a configured
+pointer is read before the environment. `_secret_resolve.py` reads the environment
+first. Both are faithful to `auth_key_access.md`; they implement different rungs of it,
+for different callers. Neither is the other's fallback.
+
+### There is an official Claude Code plugin, and it is a dev-time tool
+
+TypeSafe ships [an agent skill](https://docs.typesafe.ai/agent-skill) as a Claude Code
+plugin:
+
+```sh
+claude plugin marketplace add typesafe-ai/skills
+claude plugin install typesafe@typesafe-ai
+```
+
+That is **authoring support for whoever writes the questions**, not a runtime
+dependency and not something this plugin would ever bundle. Worth knowing it exists
+before hand-writing a client. Worth also knowing it puts another skill in a user's
+roster alongside our 16 — a description-collision surface we do not control.
+
 ## Where it does not belong
 
 - **Anything in the blocking gate.** `just check` is hermetic and offline. A network
