@@ -32,12 +32,12 @@ There is no canonical ten-defect inventory in the draft, so I reconstructed the 
 | `--park-limit` was parsed but not emitted                             |                      **No** | Configuration plumbing failure                                                                 |
 | Periodic status reconciliation had no production `gh`/usage arguments |                      **No** | Production entry point failed to supply dependencies                                           |
 
-The original defect review explicitly describes the dominant pattern as test/production divergence, not self-authored state: wrong fixture timing, impossible `gh` semantics, bypassing the real wrapper, and escaped side effects ([review feedback](auto-pilot-developer-review-feedback.md#L13)). The pause defect is the clean authority-boundary example. Several others are ordinary—but serious—composition and test-fidelity failures.
+The original defect review explicitly describes the dominant pattern as test/production divergence, not self-authored state: wrong fixture timing, impossible `gh` semantics, bypassing the real wrapper, and escaped side effects ([review feedback](2026-07-12-auto-pilot-developer-review-feedback.md#L13)). The pause defect is the clean authority-boundary example. Several others are ordinary—but serious—composition and test-fidelity failures.
 
 Two current follow-ups weaken the grand-unification claim further:
 
-- `supervisor_gate` does not verify that bootout succeeded ([task 28](tasks/autopilot_hardening_plan/autopilot_hardening_task_28.md#L20)).
-- The sentinel-aware teardown is followed by a sentinel-free retry, producing “gone but not done” ([task 29](tasks/autopilot_hardening_plan/autopilot_hardening_task_29.md#L19); implementation at [spawn-orchestrator.sh](../scripts/spawn-orchestrator.sh#L1285)).
+- `supervisor_gate` does not verify that bootout succeeded ([task 28](../tasks/autopilot_hardening_plan/autopilot_hardening_task_28.md#L20)).
+- The sentinel-aware teardown is followed by a sentinel-free retry, producing “gone but not done” ([task 29](../tasks/autopilot_hardening_plan/autopilot_hardening_task_29.md#L19); implementation at [spawn-orchestrator.sh](../../scripts/spawn-orchestrator.sh#L1285)).
 
 A Python controller can reproduce both defects perfectly. SQLite does not make launchd transactional.
 
@@ -49,7 +49,7 @@ That still supports Stages 1–3. It does not prove the need for Stages 4–5.
 
 ## 2. Stage 2 captures most of the authority win; Stage 3 captures the seam win
 
-The supervisor-owned lease is the strongest proposal in the document. It gives destructive cleanup, retry counting, pause budgets, and process ownership a fact the agent cannot invent. Moving the verify verdict outside the writable tree is similarly well justified: the current reference explicitly admits that the result is forgeable ([launch-runtime.md](../skills/auto-pilot/references/launch-runtime.md#L414)).
+The supervisor-owned lease is the strongest proposal in the document. It gives destructive cleanup, retry counting, pause budgets, and process ownership a fact the agent cannot invent. Moving the verify verdict outside the writable tree is similarly well justified: the current reference explicitly admits that the result is forgeable ([launch-runtime.md](../../skills/auto-pilot/references/launch-runtime.md#L414)).
 
 Stage 3 is also justified. The generated wrapper really does have a load-bearing topology encoded in comments and print statements:
 
@@ -59,7 +59,7 @@ Stage 3 is also justified. The generated wrapper really does have a load-bearing
 - model;
 - post-model classification.
 
-See [spawn-orchestrator.sh](../scripts/spawn-orchestrator.sh#L1093). A stable watcher removes that category of landing error.
+See [spawn-orchestrator.sh](../../scripts/spawn-orchestrator.sh#L1093). A stable watcher removes that category of landing error.
 
 That is the real cutoff.
 
@@ -128,7 +128,7 @@ Without those qualifications, “exit 0 without external effect” is a useful r
 
 ## 4. One task per cold process is not required for the authority win
 
-The current model intentionally reuses context across tasks. The run loop invokes `/deliver-task` repeatedly in one orchestrator session ([auto-pilot skill](../skills/auto-pilot/SKILL.md#L313)). That context can carry:
+The current model intentionally reuses context across tasks. The run loop invokes `/deliver-task` repeatedly in one orchestrator session ([auto-pilot skill](../../skills/auto-pilot/SKILL.md#L313)). That context can carry:
 
 - repository conventions learned during the first task;
 - why a parent was implemented a particular way;
@@ -153,7 +153,7 @@ The controller can still:
 
 Set `N=1` only if measurements show that it improves reliability enough to offset context loss and cold-start cost. It should not be embedded as an architectural axiom.
 
-There is another internal mismatch: `/deliver-task` already owns the full per-task lifecycle—claim, implementation, verify, PR, co-review, iteration, hand-off ([deliver-task skill](../skills/deliver-task/SKILL.md#L112)). If “one task attempt” still runs that entire lifecycle, `/deliver-task` does **not** shrink dramatically. If the controller owns those phases, then the model is receiving phase attempts, not one task attempt. The design needs to choose.
+There is another internal mismatch: `/deliver-task` already owns the full per-task lifecycle—claim, implementation, verify, PR, co-review, iteration, hand-off ([deliver-task skill](../../skills/deliver-task/SKILL.md#L112)). If “one task attempt” still runs that entire lifecycle, `/deliver-task` does **not** shrink dramatically. If the controller owns those phases, then the model is receiving phase attempts, not one task attempt. The design needs to choose.
 
 ## 5. Sizing and migration are optimistic
 
@@ -197,9 +197,9 @@ Calling those lines “deleted or subsumed” and then estimating only 1,200–1
 - scenario fixtures and fault injection;
 - packaging Python/`uv` into a detached launch environment.
 
-The repository has Python scripts, but its check path runs them through `uv` ([check.sh](../scripts/check.sh#L35)). “There is Python infra” does not establish that a stable Python runtime is available to a detached launchd controller.
+The repository has Python scripts, but its check path runs them through `uv` ([check.sh](../../scripts/check.sh#L35)). “There is Python infra” does not establish that a stable Python runtime is available to a detached launchd controller.
 
-The test deletion estimate is particularly weak. There are direct generated-wrapper sections around [test-spawn-orchestrator.sh](../scripts/test-spawn-orchestrator.sh#L508), [test-spawn-orchestrator.sh](../scripts/test-spawn-orchestrator.sh#L1120), and the pause scenarios around [test-spawn-orchestrator.sh](../scripts/test-spawn-orchestrator.sh#L2747). That is hundreds of lines, not obviously 1,500–2,000. Doctor, restack, teardown, and reconciliation tests still need equivalents; relabeling them “scenarios” does not delete their behavioral surface.
+The test deletion estimate is particularly weak. There are direct generated-wrapper sections around [test-spawn-orchestrator.sh](../../scripts/test-spawn-orchestrator.sh#L508), [test-spawn-orchestrator.sh](../../scripts/test-spawn-orchestrator.sh#L1120), and the pause scenarios around [test-spawn-orchestrator.sh](../../scripts/test-spawn-orchestrator.sh#L2747). That is hundreds of lines, not obviously 1,500–2,000. Doctor, restack, teardown, and reconciliation tests still need equivalents; relabeling them “scenarios” does not delete their behavioral surface.
 
 ### “Independently shippable” is contradicted by the document itself
 
@@ -224,7 +224,7 @@ The real affected documentation surface is approximately:
 - 245 lines in `skills/deliver-task/SKILL.md`;
 - the `/auto-pilot`, `/deliver-task`, and `/add-task` command contracts.
 
-Most of the auto-pilot run phase from [SKILL.md](../skills/auto-pilot/SKILL.md#L302) onward changes. So do launch, resume, crash reconciliation, run-budget semantics, status, verification, and projections.
+Most of the auto-pilot run phase from [SKILL.md](../../skills/auto-pilot/SKILL.md#L302) onward changes. So do launch, resume, crash reconciliation, run-budget semantics, status, verification, and projections.
 
 But the claim that `/deliver-task` “shrinks dramatically” is wrong. Its lifecycle remains necessary unless the controller also takes ownership of model-mediated implementation, co-review interpretation, iterative fixes, and hand-off evidence. Only its auto-pilot-specific broker, question-log, base, and stale-review seams obviously move.
 
@@ -232,14 +232,14 @@ The command files are thin routers, so their line-count blast radius is small. T
 
 ## 7. The `supervisor-state` hazard is real but overstated
 
-The file currently lives at `.auto-pilot/supervisor-state` ([spawn-orchestrator.sh](../scripts/spawn-orchestrator.sh#L365)) and is protected by a later Seatbelt deny ([spawn-orchestrator.sh](../scripts/spawn-orchestrator.sh#L592), [path construction](../scripts/spawn-orchestrator.sh#L690)).
+The file currently lives at `.auto-pilot/supervisor-state` ([spawn-orchestrator.sh](../../scripts/spawn-orchestrator.sh#L365)) and is protected by a later Seatbelt deny ([spawn-orchestrator.sh](../../scripts/spawn-orchestrator.sh#L592), [path construction](../../scripts/spawn-orchestrator.sh#L690)).
 
 But the draft’s phrase “inside git-tracked `.auto-pilot/`” is imprecise:
 
 - the directory contains tracked state;
 - `supervisor-state` itself is explicitly uncommitted;
 - current recovery code deliberately tolerates untracked `.auto-pilot` files;
-- it explicitly avoids `git clean` and notes that checkout/reset do not discard untracked files ([spawn-orchestrator.sh](../scripts/spawn-orchestrator.sh#L3695), [doctor handling](../scripts/spawn-orchestrator.sh#L3939)).
+- it explicitly avoids `git clean` and notes that checkout/reset do not discard untracked files ([spawn-orchestrator.sh](../../scripts/spawn-orchestrator.sh#L3695), [doctor handling](../../scripts/spawn-orchestrator.sh#L3939)).
 
 The more immediate hazard is different: the deny prevents modifying the file, but it does not prevent reading and staging it. An accidental `git add -A` could commit the ledger because no ignore rule protects it. Once tracked, later checkout/reset behavior becomes uglier.
 
@@ -255,7 +255,7 @@ Deleting the proposed line-survival audit is safe and preferable. The implementa
 - semantic negation passes;
 - custom merge drivers or repository configuration complicate the claimed proof.
 
-The draft’s assertion that a clean three-way rebase “provably cannot” lose a parent-added line is too categorical. Git applies commits, not abstract line-preservation theorems. The current restack uses a normal `git rebase --onto` ([spawn-orchestrator.sh](../scripts/spawn-orchestrator.sh#L3032)); clean completion is good evidence of textual mergeability, not behavioral preservation.
+The draft’s assertion that a clean three-way rebase “provably cannot” lose a parent-added line is too categorical. Git applies commits, not abstract line-preservation theorems. The current restack uses a normal `git rebase --onto` ([spawn-orchestrator.sh](../../scripts/spawn-orchestrator.sh#L3032)); clean completion is good evidence of textual mergeability, not behavioral preservation.
 
 The right reason to remove the audit is that it produces false confidence while checking the wrong invariant. Keep the requirements that matter:
 
@@ -271,7 +271,7 @@ The design also misses that a user-run acceptance criterion may require human ju
 The draft faithfully carries over the recommended authority inversion and watcher/attempt split. It overstates the review in two ways:
 
 1. The original review separately identified authority, gate topology, test fidelity, restack, and deployment mode. It did not establish that every defect was a special case of self-authored truth.
-2. It recommended foreground as the default and detached launchd as an explicit deployment mode ([original review](auto-pilot-design-review-codex.md#L109)). The draft downgrades that to something merely “worth deciding” before Stage 3 ([inversion design](https://github.com/bestdan/workflow-skills/blob/0b0d207/dev_docs/auto-pilot-inversion-design.md#L188)).
+2. It recommended foreground as the default and detached launchd as an explicit deployment mode ([original review](2026-07-13-auto-pilot-design-review-codex.md#L109)). The draft downgrades that to something merely “worth deciding” before Stage 3 ([inversion design](https://github.com/bestdan/workflow-skills/blob/0b0d207/dev_docs/auto-pilot-inversion-design.md#L188)).
 
 That decision should be made before designing the new controller. It materially changes the required launchd, TCC, notification, and crash-recovery surface.
 
