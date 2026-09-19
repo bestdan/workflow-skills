@@ -233,10 +233,11 @@ so they come back with a checkout rather than a rewrite.
 
 ## What is deliberately not here
 
-- **The requirements and the measured record behind them** — every fact cited above, with
-  the spike tables, the rejected alternatives and what the first pass got wrong — is
-  [`decisions/2026-08-24-gh-issue-migration-requirements-and-evidence.md`](decisions/2026-08-24-gh-issue-migration-requirements-and-evidence.md).
-  It is a dated snapshot: read it as what was true that day.
+- **Why Linear was left at all**, the baseline that justified it, the alternatives that
+  were eliminated, and what would reopen the choice —
+  [`decisions/2026-08-24-leaving-linear-for-github-issues.md`](decisions/2026-08-24-leaving-linear-for-github-issues.md).
+  It is a dated record: read it as what was decided that day, and read this file for how
+  the loop works now.
 - **Unattended operation.** `/auto-pilot` does not support this handler, and
   `gh-issue.remote_batch` defaults to `false`. Both are tracked as open work, not settled
   design.
