@@ -17,7 +17,8 @@ The `task_profile` block consumers read does not change shape.
 The evidence is
 [`dev_docs/research/2026-09-17-jev-applications.md`](../research/2026-09-17-jev-applications.md).
 Read §3 and §8 before reviewing this; the measurements are there and are not repeated
-here.
+here. "What connecting it would actually take" is the other section this design leans
+on — it settles the client and the key plumbing, so neither is an open question below.
 
 ## What is true today
 
@@ -104,8 +105,34 @@ helper's contract is "return a `task_profile`", not "call Jev".
 
 The corollary is that the helper is **consumer code**: it runs as bare `python3` on
 other people's machines, so it sits in `scripts/typecheck.sh`'s `CONSUMER_FILES` at
-the 3.9 floor, not the dev tier. Key resolution is the existing ladder in
-[`auth_key_access.md`](../auth_key_access.md) — `typesafe.api_key`, no new mechanism.
+the 3.9 floor, not the dev tier.
+
+That floor decides the client, and the record now settles it rather than assuming it.
+**The vendor SDK is unusable here and cannot be made usable.** `typesafe-sdk` requires
+Python ≥ 3.10 — still true in 0.7.0 — and it is the SDK's own source that sets the bar,
+not a relaxable pin: three modules import `TypeAlias` from `typing`, and it dies at
+import under 3.9.6 with `ImportError` while running fine under 3.12. So the client is
+`urllib.request` + `json`, zero dependencies, the way
+`commands/handlers/assets/linear-scan.py` already talks to Linear. The only thing lost
+is retry-with-backoff on `429`/`529`, which is a few lines.
+
+The floor also splits the work across two files, which this design should name
+separately because they have different needs:
+
+- **The bucketing half is arithmetic** — no key, no network — so `scripts/task-profile.py`
+  is the right home and it needs no resolver at all.
+- **The Jev-calling half needs the key**, and that puts it in
+  `commands/handlers/assets/`. `scripts/` cannot import from there, so a `scripts/`
+  client would have to carry its own resolver — which is exactly what the dev-only
+  `scripts/jev-description-collision.py` does, deliberately and with a different rung
+  order. A handler asset needs **no new module**: `_secret_resolve.py`'s `resolve_key`
+  is already generic over the name it is handed, so `resolve_key("TYPESAFE_API_KEY")`
+  works today.
+
+Key resolution is therefore the existing ladder in
+[`auth_key_access.md`](../auth_key_access.md) unchanged — `$TYPESAFE_API_KEY`, with
+`typesafe.api_key_ref` / `typesafe.api_key_resolver` as the pointer rungs. No new
+mechanism, and no auth module to write.
 
 ## Decisions
 
