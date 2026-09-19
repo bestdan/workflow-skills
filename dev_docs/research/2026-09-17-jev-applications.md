@@ -80,20 +80,42 @@ which is exactly why the suite is opt-in and non-blocking.
 Jev answers that question natively, and returns `probabilities` over all 16 skills.
 The margin between the winner and the runner-up is the number that actually matters
 here and the current harness cannot produce it: it shows a description **collision**
-before it causes a misfire. This repo is full of near-neighbours — `co-review` vs
-`local-review`, `research-spike` vs `research-spike-tutorial`, `task` vs
-`assess-task`, `do-tasks` vs `deliver-task`, `sweep-for-complete` vs
-`sweep-for-archive` vs `complete-task`. The docs' own
+before it causes a misfire. The docs' own
 [skill-suggestion cookbook](https://docs.typesafe.ai/cookbooks/skill_suggestion)
 holds a 182-skill roster in a single Choice question; 16 is trivial. That cookbook
 also shows the two-stage shape worth copying — rank the whole roster on truncated
 descriptions, then re-rank the top three on full ones, which took its wrong-skill
 rate from 16.8% to 7.3% and its needless-load rate from 9.8% to 4.0%.
 
+**Measured 2026-09-18, against a live key — and the collision hypothesis did not
+survive.** All 16 descriptions scored as one Choice per prompt, over the 14
+`evals/manifest.tsv` cases and then over 8 prompts written deliberately to straddle
+the near-neighbour pairs this note originally named. Result: **0 misfires and 0
+collisions in 22 prompts** at a 0.10 margin threshold. Most of the manifest cases
+resolve at 1.000. The descriptions discriminate better than this note assumed.
+
+The specific pairs named in the first draft were the wrong ones. `research-spike` vs
+`research-spike-tutorial` — flagged hardest — separates at 0.98 even on "show me how
+the obligation ledger works". The two weakest discriminations in the whole run are
+elsewhere:
+
+| Probe                                       | Winner              | Runner-up            | Margin | Confidence |
+| ------------------------------------------- | ------------------- | -------------------- | ------ | ---------- |
+| "Take this one and run with it."            | `deliver-task` 0.49 | `auto-pilot` 0.30    | 0.19   | 0.44       |
+| "changes I want gone over before they land" | `local-review` 0.63 | `co-review` 0.37     | 0.26   | 0.59       |
+| "six tasks queued and access to coders"     | `select-coder` 0.59 | `orchestrate-coders` | 0.35   | 0.56       |
+
+So the mechanism works and the monitoring value stands — the margin did rank the
+weakest boundaries, which a pass/fail harness cannot — but it is a **regression
+monitor with no regression to report**, not a bug-finder. `confidence` tracks the
+margin closely enough across all 22 (0.44 at the tightest, 1.00 at the widest) that
+it is usable as the single gating number on its own.
+
 Honest limit: Jev is not the model doing the routing at runtime, so this is a **proxy
 for whether the descriptions discriminate**, not a replication of Claude's selection.
 The `claude -p` suite stays the ground truth. Jev's version is the cheap pre-check
-that could plausibly run on every PR — which the current one never can.
+that could plausibly run on every PR — which the current one never can. The whole
+22-prompt run cost **$0.0023** and about 55k input tokens.
 
 Bonus: it also covers the three skills with no eval case at all — `analysis-conventions`,
 `auto-pilot` and `deliver-task` — for free, since scoring is per-prompt against the
@@ -243,6 +265,14 @@ than a cost.
   above. See §8.
 
 ## Method and sources
+
+The §1 measurement was run on 2026-09-18 against `jev-1.13.0` with a live key: one
+`choice` question per prompt, `criteria` built from the `description` frontmatter of
+all 16 `skills/*/SKILL.md`, over the 14 `evals/manifest.tsv` cases plus 8
+purpose-written ambiguous probes. One request per prompt — questions in a request
+share a `state` and each prompt is a distinct state, so the docs' batching win does
+not apply to this shape. 54,613 input tokens, $0.0023. That run also confirms the
+request and response shapes below by observation rather than by reading.
 
 No design or decision cites this record yet. The constraints in "If any of this is
 ever adopted" are findings about what an adoption would have to honor, not a
