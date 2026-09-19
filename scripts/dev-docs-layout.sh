@@ -11,7 +11,9 @@
 #
 # Exit status:
 #   0  the layout is clean
-#   1  violations, listed on stdout; or the plugin root could not be resolved
+#   1  violations, listed on stdout; or the plugin root could not be resolved,
+#      whether because AGENT_GUIDANCE_DIR names something that is not one or
+#      because no copy of the plugin is installed
 #   2  the installed plugin is too old to ship the checker
 #
 # A missing plugin FAILS rather than skips. A check that skips is green while
@@ -23,17 +25,26 @@ set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd "$here/.." && pwd)"
 
-root="${AGENT_GUIDANCE_DIR:-}"
-if [ -z "$root" ]; then
-  root="$("$here/agent-guidance-dir.sh")"
-  rc=$?
-  if [ "$rc" -ne 0 ]; then
-    # Exit 3 means "not installed", which the resolver treats as a normal
-    # outcome for a caller that can work without the plugin. This one cannot.
+# Resolve through agent-guidance-dir.sh rather than reading AGENT_GUIDANCE_DIR
+# here: the resolver honours that variable as its own first step AND validates
+# it, so a stale or mistyped value is reported as what it is. Reading it
+# directly skipped that check and blamed the plugin's version instead.
+root="$("$here/agent-guidance-dir.sh")"
+rc=$?
+case "$rc" in
+  0) ;;
+  # Set-but-wrong is a misconfiguration the resolver refuses to paper over.
+  1)
+    printf 'dev-docs-layout: AGENT_GUIDANCE_DIR does not name a plugin root\n' >&2
+    exit 1
+    ;;
+  # Exit 3 means "not installed", which the resolver treats as a normal outcome
+  # for a caller that can work without the plugin. This one cannot.
+  *)
     printf 'dev-docs-layout: the agent-guidance plugin is required for this check\n' >&2
     exit 1
-  fi
-fi
+    ;;
+esac
 
 checker="$root/scripts/dev-docs-layout.py"
 if [ ! -f "$checker" ]; then
