@@ -91,6 +91,7 @@ CONSUMER_PYTHON=3.9
 DEV_FILES=(
   scripts/build-copilot-instructions.py
   scripts/bump-version.py
+  scripts/jev-description-collision.py
   scripts/plan-graph.py
   scripts/task-scan.py
   scripts/tier-coverage.py
