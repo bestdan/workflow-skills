@@ -191,8 +191,14 @@ group has any member provisioned; only an entirely empty group voids it. Guardin
 ## 6. What Linear keeps
 
 **Nothing was retired.** The `linear` handler and every command that dispatches to it stay
-in place, because `finplan` is still on Linear — and the rule is _no Linear command is
-deleted while any repo's `.task-config.yml` says `handler: linear`_.
+in place, and the rule is _no Linear command is deleted while any repo's
+`.task-config.yml` says `handler: linear`_.
+
+**`workflow-skills` is the only repo that moved.** `finplan` and `aiutopilot` stay on
+Linear by decision, not by deferral — so the `linear` handler is a permanent part of this
+plugin, not a compatibility shim waiting to be retired. Anyone reading the migration
+record should note its scope line asks about three repos; only one of them was answered
+yes.
 
 `linear` remains the most complete handler. `commands/task-config.md` holds the capability
 matrix, which is the single source of truth for the **verbs it lists** — capture, list,
@@ -212,9 +218,12 @@ all turn on:
 What **was** removed is the one-shot migration tooling that moved the board across —
 `linear-export.py`, `linear-import.py`, `linear-verify.py`, `linear-successor.py` and the
 shared `_linear_auth.py`, with their test pairs. That is migration tooling, not loop
-tooling, and it was carried by every installed plugin user for no ongoing purpose. The
-recovery path is git history: the commit that deleted them names each file, so if
-`finplan` is ever migrated they come back with a checkout rather than a rewrite.
+tooling, and it was carried by every installed plugin user for no ongoing purpose. With no
+further repo migrating, `linear-import.py`, `linear-verify.py` and `linear-successor.py`
+have no remaining consumer at all — the latter two cannot even be invoked without the plan
+and mapping files that one migration produced, both of which they take as required
+arguments. The recovery path is git history: the commit that deleted them names each file,
+so they come back with a checkout rather than a rewrite.
 
 > One shape worth carrying forward from those assets, since the code is gone: **`gql()`
 > answered a GraphQL error with `sys.exit`**, so a single bad issue ended a whole batch

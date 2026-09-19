@@ -6,6 +6,13 @@
 `finplan`, `workflow-skills`, `aiutopilot` (currently `linear` handler) and
 `dotfiles`, `gregan_finances` (currently `gh-issue` handler).
 
+> **Scope note, added 2026-09-18 when this record was graduated to `main`. The scope
+> line above is the question as it was framed on 2026-08-24, not what was decided.**
+> **Only `workflow-skills` moved.** `finplan` and `aiutopilot` stay on Linear — a
+> decision, not a deferral, so nothing is queued behind this record. The line is left
+> as written because it is what the investigation was scoped to; read it as the
+> question, and read this note for the answer.
+
 **Revision note:** §3 decisions 8, 11 and 16 were **reopened and reversed**
 after the first pass, when two facts surfaced late: nightly cloud routines as a
 consumer class, and the fact that the user _does_ use GitHub's web UI.
