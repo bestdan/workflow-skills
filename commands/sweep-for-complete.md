@@ -95,8 +95,9 @@ Overlay the local override on the committed config — mappings merge recursivel
 - `handler: gh-issue` → **UNSUPPORTED.** Print: "unsupported for handler
   gh-issue — GitHub already closes the issue natively on merge via
   `Closes #<n>` in the PR body. `/sweep-for-complete` has nothing to add; if
-  that auto-close didn't fire, close the issue directly with
-  `gh issue close <n>`."
+  that auto-close didn't fire, complete the issue with `/complete-task` (or
+  `gh-issue-state.py --issue <n> --done --apply`). Don't use a bare
+  `gh issue close` — it leaves live `status:`/`auto:` rungs on a closed issue."
 - `handler: jira` → **UNSUPPORTED.** Print: "unsupported for handler jira —
   Jira's completion path is its GitHub integration or **smart commits**
   (`<issue-key> #done` / `#comment` in a commit/PR) transitioning the issue
