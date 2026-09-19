@@ -33,6 +33,16 @@ trap 'rm -rf "$BASE"' EXIT
 BASE="$(cd "$BASE" && pwd -P)" || exit 2
 export GIT_CEILING_DIRECTORIES="$BASE"
 
+# The two no-arg/default assertions below need a card in THIS repo's own
+# dev_docs/tasks to prove which directory validate.py scanned. They used to
+# read the real plan scaffolding that happened to be sitting there, so
+# deleting a finished plan broke the suite. Plant a disposable card instead —
+# dev_docs/tasks/* is gitignored, so it pollutes nothing tracked — and name it
+# per-pid so concurrent runs don't collide.
+SELFCHECK_DIR="$ROOT/dev_docs/tasks/.validate-selfcheck-$$"
+SELFCHECK_MARK=".validate-selfcheck-$$"
+trap 'rm -rf "$BASE" "$SELFCHECK_DIR"' EXIT
+
 # A developer's global/system git config leaks into these fixture repos too:
 # core.hooksPath (whose pre-commit hook blocks commits to main, and git init
 # names the initial branch main) can silently veto fixture commits, and
@@ -211,11 +221,20 @@ if [ "$exit_d" -eq 0 ]; then
 else
   bad "explicit dir: clean fixture card should exit 0, got $exit_d"
 fi
+# Plant the disposable card in this repo's own dev_docs/tasks (see the
+# SELFCHECK_DIR comment at the top). It is missing `title`, so validate.py
+# always has something to say about it.
+write_task "$SELFCHECK_DIR/card.md" "priority: low
+size: 1
+status: new
+created: 2020-01-01
+source_branch: x
+related_files: [a.md]
+expires: 2099-01-01"
+
 # Prove it's the PASSED dir under validation, not this plugin's own
 # dev_docs/tasks: a card that only exists in $DIR_D must appear in the
-# output, and this plugin's own real task cards (which have pre-existing
-# `missing required field 'expires'` warnings — see dev_docs/tasks/
-# autopilot_hardening_plan/) must NOT.
+# output, and this plugin's own planted card must NOT.
 DIR_D_EMPTY_TITLE="$BASE/consumer-repo-tasks-2"
 write_task "$DIR_D_EMPTY_TITLE/needs-a-flag.md" "priority: low
 size: 1
@@ -226,7 +245,7 @@ related_files: [a.md]
 expires: 2099-01-01"
 out_d2="$(uv run "$SCRIPT" "$DIR_D_EMPTY_TITLE" 2>&1)"
 assert_contains "explicit dir: validates the passed dir's own card" "$out_d2" "needs-a-flag.md: missing required field 'title'"
-assert_not_contains "explicit dir: does NOT validate the plugin's own dev_docs/tasks" "$out_d2" "autopilot_hardening"
+assert_not_contains "explicit dir: does NOT validate the plugin's own dev_docs/tasks" "$out_d2" "$SELFCHECK_MARK"
 
 # --- Fixture (e): ${CLAUDE_PLUGIN_ROOT}/<path> reference that resolves ------
 DIR_E="$BASE/plugin-root-pass"
@@ -517,7 +536,7 @@ assert_contains "crush roster: name mismatch names the prose-only tool" "$out_l"
 # --- Default (no arg): still validates this plugin's own dev_docs/tasks --
 # (preserves today's CI behavior — see validate.py module docstring)
 out_default="$(uv run "$SCRIPT" 2>&1)"
-assert_contains "no-arg default validates the plugin's own dev_docs/tasks" "$out_default" "autopilot_hardening"
+assert_contains "no-arg default validates the plugin's own dev_docs/tasks" "$out_default" "$SELFCHECK_MARK"
 
 echo
 echo "test-validate: $pass_count passed, $fail_count failed"
