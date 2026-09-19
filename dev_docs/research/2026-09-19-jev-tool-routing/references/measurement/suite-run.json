@@ -1,0 +1,2584 @@
+{
+  "model": "jev-1.13.0",
+  "repeat": 3,
+  "input_tokens": 96942,
+  "accuracy_per_pass": [
+    1.0,
+    1.0,
+    1.0
+  ],
+  "unstable": [],
+  "passes": [
+    {
+      "n": 36,
+      "correct": 36,
+      "accuracy": 1.0,
+      "n_uncontested": 34,
+      "accuracy_uncontested": 1.0,
+      "missing": [],
+      "confusion": {
+        "code": {
+          "code": 13,
+          "jev": 0,
+          "llm": 0
+        },
+        "jev": {
+          "code": 0,
+          "jev": 12,
+          "llm": 0
+        },
+        "llm": {
+          "code": 0,
+          "jev": 0,
+          "llm": 11
+        }
+      },
+      "rows": [
+        {
+          "id": "ready-cards",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "topo-order",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "tier-partition",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "bump-level",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "readme-count",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "version-sync",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "anchor-comments",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "rule-drift",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "generated-drift",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "archive-age",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "did-it-land",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "budget-floor",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "is-a-deferral",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "commit-type",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "description-is-interface",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "restates-elsewhere",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "belongs-in-references",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "which-skill",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "creativity-level",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "needs-a-human",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "fits-size-5",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": true
+        },
+        {
+          "id": "same-finding",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "worth-verifying",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "body-matches-diff",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "write-pr-body",
+          "expected": "llm",
+          "got": "llm",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "grade-a-finding",
+          "expected": "llm",
+          "got": "llm",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "slice-a-card",
+          "expected": "llm",
+          "got": "llm",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "write-the-plan",
+          "expected": "llm",
+          "got": "llm",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "why-ci-only",
+          "expected": "llm",
+          "got": "llm",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "author-the-fix",
+          "expected": "llm",
+          "got": "llm",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "did-the-coder-deliver",
+          "expected": "llm",
+          "got": "llm",
+          "correct": true,
+          "hard": true
+        },
+        {
+          "id": "teach-the-change",
+          "expected": "llm",
+          "got": "llm",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "find-the-assumers",
+          "expected": "llm",
+          "got": "llm",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "whats-blocking",
+          "expected": "llm",
+          "got": "llm",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "recover-a-run",
+          "expected": "llm",
+          "got": "llm",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "rank-the-coders",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        }
+      ],
+      "detail": {
+        "ready-cards": {
+          "signals": {
+            "exact": 0.92,
+            "tally": 0.33,
+            "closed_output": 0.17,
+            "prose_output": 0.23,
+            "dependent_steps": 0.79,
+            "needs_fetch": 0.58,
+            "stakes": 1.54
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.23
+        },
+        "topo-order": {
+          "signals": {
+            "exact": 0.9,
+            "tally": 0.24,
+            "closed_output": 0.1,
+            "prose_output": 0.48,
+            "dependent_steps": 0.82,
+            "needs_fetch": 0.37,
+            "stakes": 1.54
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.31
+        },
+        "tier-partition": {
+          "signals": {
+            "exact": 0.95,
+            "tally": 0.94,
+            "closed_output": 0.88,
+            "prose_output": 0.46,
+            "dependent_steps": 0.72,
+            "needs_fetch": 0.94,
+            "stakes": 1.87
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.0
+        },
+        "bump-level": {
+          "signals": {
+            "exact": 0.87,
+            "tally": 0.71,
+            "closed_output": 0.97,
+            "prose_output": 0.16,
+            "dependent_steps": 0.69,
+            "needs_fetch": 0.72,
+            "stakes": 1.77
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.34
+        },
+        "readme-count": {
+          "signals": {
+            "exact": 0.65,
+            "tally": 0.98,
+            "closed_output": 0.54,
+            "prose_output": 0.64,
+            "dependent_steps": 0.65,
+            "needs_fetch": 0.94,
+            "stakes": 0.75
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.25
+        },
+        "version-sync": {
+          "signals": {
+            "exact": 0.96,
+            "tally": 0.19,
+            "closed_output": 0.83,
+            "prose_output": 0.35,
+            "dependent_steps": 0.43,
+            "needs_fetch": 0.64,
+            "stakes": 1.52
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.12
+        },
+        "anchor-comments": {
+          "signals": {
+            "exact": 0.94,
+            "tally": 0.27,
+            "closed_output": 0.21,
+            "prose_output": 0.31,
+            "dependent_steps": 0.49,
+            "needs_fetch": 0.11,
+            "stakes": 0.92
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.08
+        },
+        "rule-drift": {
+          "signals": {
+            "exact": 0.85,
+            "tally": 0.17,
+            "closed_output": 0.5,
+            "prose_output": 0.34,
+            "dependent_steps": 0.51,
+            "needs_fetch": 0.83,
+            "stakes": 2.07
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.4
+        },
+        "generated-drift": {
+          "signals": {
+            "exact": 0.88,
+            "tally": 0.35,
+            "closed_output": 0.86,
+            "prose_output": 0.42,
+            "dependent_steps": 0.6,
+            "needs_fetch": 0.72,
+            "stakes": 1.38
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.0
+        },
+        "archive-age": {
+          "signals": {
+            "exact": 0.98,
+            "tally": 0.9,
+            "closed_output": 0.96,
+            "prose_output": 0.2,
+            "dependent_steps": 0.39,
+            "needs_fetch": 0.26,
+            "stakes": 1.98
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.3
+        },
+        "did-it-land": {
+          "signals": {
+            "exact": 0.87,
+            "tally": 0.33,
+            "closed_output": 0.92,
+            "prose_output": 0.3,
+            "dependent_steps": 0.62,
+            "needs_fetch": 0.27,
+            "stakes": 1.35
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.09
+        },
+        "budget-floor": {
+          "signals": {
+            "exact": 0.94,
+            "tally": 0.8,
+            "closed_output": 0.93,
+            "prose_output": 0.31,
+            "dependent_steps": 0.17,
+            "needs_fetch": 0.42,
+            "stakes": 1.62
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.11
+        },
+        "is-a-deferral": {
+          "signals": {
+            "exact": 0.18,
+            "tally": 0.07,
+            "closed_output": 0.89,
+            "prose_output": 0.41,
+            "dependent_steps": 0.19,
+            "needs_fetch": 0.08,
+            "stakes": 1.4
+          },
+          "split": false,
+          "reasons": [
+            "one value from a known set, judged from text in hand"
+          ],
+          "stakes_confidence": 0.2
+        },
+        "commit-type": {
+          "signals": {
+            "exact": 0.22,
+            "tally": 0.14,
+            "closed_output": 0.91,
+            "prose_output": 0.21,
+            "dependent_steps": 0.42,
+            "needs_fetch": 0.11,
+            "stakes": 0.59
+          },
+          "split": false,
+          "reasons": [
+            "one value from a known set, judged from text in hand"
+          ],
+          "stakes_confidence": 0.41
+        },
+        "description-is-interface": {
+          "signals": {
+            "exact": 0.21,
+            "tally": 0.06,
+            "closed_output": 0.93,
+            "prose_output": 0.37,
+            "dependent_steps": 0.17,
+            "needs_fetch": 0.06,
+            "stakes": 0.98
+          },
+          "split": false,
+          "reasons": [
+            "one value from a known set, judged from text in hand"
+          ],
+          "stakes_confidence": 0.02
+        },
+        "restates-elsewhere": {
+          "signals": {
+            "exact": 0.15,
+            "tally": 0.07,
+            "closed_output": 0.9,
+            "prose_output": 0.52,
+            "dependent_steps": 0.36,
+            "needs_fetch": 0.07,
+            "stakes": 1.39
+          },
+          "split": false,
+          "reasons": [
+            "one value from a known set, judged from text in hand"
+          ],
+          "stakes_confidence": 0.12
+        },
+        "belongs-in-references": {
+          "signals": {
+            "exact": 0.31,
+            "tally": 0.14,
+            "closed_output": 0.89,
+            "prose_output": 0.32,
+            "dependent_steps": 0.22,
+            "needs_fetch": 0.23,
+            "stakes": 1.7
+          },
+          "split": false,
+          "reasons": [
+            "one value from a known set, judged from text in hand"
+          ],
+          "stakes_confidence": 0.39
+        },
+        "which-skill": {
+          "signals": {
+            "exact": 0.16,
+            "tally": 0.1,
+            "closed_output": 0.96,
+            "prose_output": 0.24,
+            "dependent_steps": 0.23,
+            "needs_fetch": 0.14,
+            "stakes": 0.77
+          },
+          "split": false,
+          "reasons": [
+            "one value from a known set, judged from text in hand"
+          ],
+          "stakes_confidence": 0.23
+        },
+        "creativity-level": {
+          "signals": {
+            "exact": 0.12,
+            "tally": 0.1,
+            "closed_output": 0.96,
+            "prose_output": 0.3,
+            "dependent_steps": 0.23,
+            "needs_fetch": 0.39,
+            "stakes": 1.07
+          },
+          "split": false,
+          "reasons": [
+            "one value from a known set, judged from text in hand"
+          ],
+          "stakes_confidence": 0.0
+        },
+        "needs-a-human": {
+          "signals": {
+            "exact": 0.2,
+            "tally": 0.26,
+            "closed_output": 0.88,
+            "prose_output": 0.42,
+            "dependent_steps": 0.48,
+            "needs_fetch": 0.46,
+            "stakes": 1.63
+          },
+          "split": false,
+          "reasons": [
+            "one value from a known set, judged from text in hand"
+          ],
+          "stakes_confidence": 0.3
+        },
+        "fits-size-5": {
+          "signals": {
+            "exact": 0.09,
+            "tally": 0.57,
+            "closed_output": 0.81,
+            "prose_output": 0.6,
+            "dependent_steps": 0.53,
+            "needs_fetch": 0.27,
+            "stakes": 1.15
+          },
+          "split": true,
+          "reasons": [
+            "one value from a known set, judged from text in hand \u2014 but part of it is arithmetic"
+          ],
+          "stakes_confidence": 0.42
+        },
+        "same-finding": {
+          "signals": {
+            "exact": 0.13,
+            "tally": 0.07,
+            "closed_output": 0.9,
+            "prose_output": 0.47,
+            "dependent_steps": 0.5,
+            "needs_fetch": 0.13,
+            "stakes": 1.56
+          },
+          "split": false,
+          "reasons": [
+            "one value from a known set, judged from text in hand"
+          ],
+          "stakes_confidence": 0.32
+        },
+        "worth-verifying": {
+          "signals": {
+            "exact": 0.15,
+            "tally": 0.2,
+            "closed_output": 0.81,
+            "prose_output": 0.55,
+            "dependent_steps": 0.35,
+            "needs_fetch": 0.37,
+            "stakes": 1.44
+          },
+          "split": false,
+          "reasons": [
+            "one value from a known set, judged from text in hand"
+          ],
+          "stakes_confidence": 0.42
+        },
+        "body-matches-diff": {
+          "signals": {
+            "exact": 0.1,
+            "tally": 0.15,
+            "closed_output": 0.79,
+            "prose_output": 0.4,
+            "dependent_steps": 0.41,
+            "needs_fetch": 0.14,
+            "stakes": 1.17
+          },
+          "split": false,
+          "reasons": [
+            "one value from a known set, judged from text in hand"
+          ],
+          "stakes_confidence": 0.28
+        },
+        "write-pr-body": {
+          "signals": {
+            "exact": 0.14,
+            "tally": 0.09,
+            "closed_output": 0.05,
+            "prose_output": 0.97,
+            "dependent_steps": 0.36,
+            "needs_fetch": 0.17,
+            "stakes": 0.58
+          },
+          "split": false,
+          "reasons": [
+            "not exact, not a closed answer; judgment it is"
+          ],
+          "stakes_confidence": 0.42
+        },
+        "grade-a-finding": {
+          "signals": {
+            "exact": 0.33,
+            "tally": 0.12,
+            "closed_output": 0.61,
+            "prose_output": 0.71,
+            "dependent_steps": 0.85,
+            "needs_fetch": 0.21,
+            "stakes": 2.01
+          },
+          "split": false,
+          "reasons": [
+            "not exact, not a closed answer; judgment it is"
+          ],
+          "stakes_confidence": 0.46
+        },
+        "slice-a-card": {
+          "signals": {
+            "exact": 0.15,
+            "tally": 0.37,
+            "closed_output": 0.18,
+            "prose_output": 0.5,
+            "dependent_steps": 0.69,
+            "needs_fetch": 0.68,
+            "stakes": 1.52
+          },
+          "split": false,
+          "reasons": [
+            "not exact, not a closed answer; judgment it is"
+          ],
+          "stakes_confidence": 0.34
+        },
+        "write-the-plan": {
+          "signals": {
+            "exact": 0.27,
+            "tally": 0.13,
+            "closed_output": 0.04,
+            "prose_output": 0.68,
+            "dependent_steps": 0.57,
+            "needs_fetch": 0.61,
+            "stakes": 1.41
+          },
+          "split": false,
+          "reasons": [
+            "not exact, not a closed answer; judgment it is"
+          ],
+          "stakes_confidence": 0.37
+        },
+        "why-ci-only": {
+          "signals": {
+            "exact": 0.23,
+            "tally": 0.12,
+            "closed_output": 0.16,
+            "prose_output": 0.68,
+            "dependent_steps": 0.87,
+            "needs_fetch": 0.94,
+            "stakes": 1.3
+          },
+          "split": false,
+          "reasons": [
+            "not exact, not a closed answer; judgment it is"
+          ],
+          "stakes_confidence": 0.24
+        },
+        "author-the-fix": {
+          "signals": {
+            "exact": 0.17,
+            "tally": 0.12,
+            "closed_output": 0.09,
+            "prose_output": 0.21,
+            "dependent_steps": 0.74,
+            "needs_fetch": 0.84,
+            "stakes": 1.95
+          },
+          "split": false,
+          "reasons": [
+            "not exact, not a closed answer; judgment it is"
+          ],
+          "stakes_confidence": 0.7
+        },
+        "did-the-coder-deliver": {
+          "signals": {
+            "exact": 0.18,
+            "tally": 0.16,
+            "closed_output": 0.71,
+            "prose_output": 0.62,
+            "dependent_steps": 0.64,
+            "needs_fetch": 0.45,
+            "stakes": 1.7
+          },
+          "split": false,
+          "reasons": [
+            "not exact, not a closed answer; judgment it is"
+          ],
+          "stakes_confidence": 0.49
+        },
+        "teach-the-change": {
+          "signals": {
+            "exact": 0.11,
+            "tally": 0.11,
+            "closed_output": 0.07,
+            "prose_output": 0.95,
+            "dependent_steps": 0.69,
+            "needs_fetch": 0.43,
+            "stakes": 1.12
+          },
+          "split": false,
+          "reasons": [
+            "not exact, not a closed answer; judgment it is"
+          ],
+          "stakes_confidence": 0.0
+        },
+        "find-the-assumers": {
+          "signals": {
+            "exact": 0.48,
+            "tally": 0.18,
+            "closed_output": 0.07,
+            "prose_output": 0.46,
+            "dependent_steps": 0.85,
+            "needs_fetch": 0.96,
+            "stakes": 2.39
+          },
+          "split": false,
+          "reasons": [
+            "not exact, not a closed answer; judgment it is"
+          ],
+          "stakes_confidence": 0.39
+        },
+        "whats-blocking": {
+          "signals": {
+            "exact": 0.22,
+            "tally": 0.29,
+            "closed_output": 0.07,
+            "prose_output": 0.9,
+            "dependent_steps": 0.57,
+            "needs_fetch": 0.38,
+            "stakes": 1.43
+          },
+          "split": false,
+          "reasons": [
+            "not exact, not a closed answer; judgment it is"
+          ],
+          "stakes_confidence": 0.31
+        },
+        "recover-a-run": {
+          "signals": {
+            "exact": 0.18,
+            "tally": 0.19,
+            "closed_output": 0.13,
+            "prose_output": 0.56,
+            "dependent_steps": 0.83,
+            "needs_fetch": 0.92,
+            "stakes": 1.32
+          },
+          "split": false,
+          "reasons": [
+            "not exact, not a closed answer; judgment it is"
+          ],
+          "stakes_confidence": 0.24
+        },
+        "rank-the-coders": {
+          "signals": {
+            "exact": 0.61,
+            "tally": 0.82,
+            "closed_output": 0.24,
+            "prose_output": 0.26,
+            "dependent_steps": 0.35,
+            "needs_fetch": 0.11,
+            "stakes": 1.16
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.38
+        }
+      }
+    },
+    {
+      "n": 36,
+      "correct": 36,
+      "accuracy": 1.0,
+      "n_uncontested": 34,
+      "accuracy_uncontested": 1.0,
+      "missing": [],
+      "confusion": {
+        "code": {
+          "code": 13,
+          "jev": 0,
+          "llm": 0
+        },
+        "jev": {
+          "code": 0,
+          "jev": 12,
+          "llm": 0
+        },
+        "llm": {
+          "code": 0,
+          "jev": 0,
+          "llm": 11
+        }
+      },
+      "rows": [
+        {
+          "id": "ready-cards",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "topo-order",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "tier-partition",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "bump-level",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "readme-count",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "version-sync",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "anchor-comments",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "rule-drift",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "generated-drift",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "archive-age",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "did-it-land",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "budget-floor",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "is-a-deferral",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "commit-type",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "description-is-interface",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "restates-elsewhere",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "belongs-in-references",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "which-skill",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "creativity-level",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "needs-a-human",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "fits-size-5",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": true
+        },
+        {
+          "id": "same-finding",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "worth-verifying",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "body-matches-diff",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "write-pr-body",
+          "expected": "llm",
+          "got": "llm",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "grade-a-finding",
+          "expected": "llm",
+          "got": "llm",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "slice-a-card",
+          "expected": "llm",
+          "got": "llm",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "write-the-plan",
+          "expected": "llm",
+          "got": "llm",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "why-ci-only",
+          "expected": "llm",
+          "got": "llm",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "author-the-fix",
+          "expected": "llm",
+          "got": "llm",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "did-the-coder-deliver",
+          "expected": "llm",
+          "got": "llm",
+          "correct": true,
+          "hard": true
+        },
+        {
+          "id": "teach-the-change",
+          "expected": "llm",
+          "got": "llm",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "find-the-assumers",
+          "expected": "llm",
+          "got": "llm",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "whats-blocking",
+          "expected": "llm",
+          "got": "llm",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "recover-a-run",
+          "expected": "llm",
+          "got": "llm",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "rank-the-coders",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        }
+      ],
+      "detail": {
+        "ready-cards": {
+          "signals": {
+            "exact": 0.92,
+            "tally": 0.35,
+            "closed_output": 0.18,
+            "prose_output": 0.22,
+            "dependent_steps": 0.76,
+            "needs_fetch": 0.56,
+            "stakes": 1.46
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.15
+        },
+        "topo-order": {
+          "signals": {
+            "exact": 0.91,
+            "tally": 0.28,
+            "closed_output": 0.1,
+            "prose_output": 0.52,
+            "dependent_steps": 0.82,
+            "needs_fetch": 0.34,
+            "stakes": 1.61
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.35
+        },
+        "tier-partition": {
+          "signals": {
+            "exact": 0.95,
+            "tally": 0.95,
+            "closed_output": 0.89,
+            "prose_output": 0.45,
+            "dependent_steps": 0.68,
+            "needs_fetch": 0.94,
+            "stakes": 1.9
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.25
+        },
+        "bump-level": {
+          "signals": {
+            "exact": 0.83,
+            "tally": 0.73,
+            "closed_output": 0.97,
+            "prose_output": 0.17,
+            "dependent_steps": 0.72,
+            "needs_fetch": 0.69,
+            "stakes": 1.75
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.33
+        },
+        "readme-count": {
+          "signals": {
+            "exact": 0.63,
+            "tally": 0.98,
+            "closed_output": 0.6,
+            "prose_output": 0.63,
+            "dependent_steps": 0.67,
+            "needs_fetch": 0.94,
+            "stakes": 0.83
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.17
+        },
+        "version-sync": {
+          "signals": {
+            "exact": 0.96,
+            "tally": 0.22,
+            "closed_output": 0.85,
+            "prose_output": 0.35,
+            "dependent_steps": 0.44,
+            "needs_fetch": 0.67,
+            "stakes": 1.59
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.19
+        },
+        "anchor-comments": {
+          "signals": {
+            "exact": 0.93,
+            "tally": 0.29,
+            "closed_output": 0.23,
+            "prose_output": 0.31,
+            "dependent_steps": 0.5,
+            "needs_fetch": 0.11,
+            "stakes": 0.98
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.02
+        },
+        "rule-drift": {
+          "signals": {
+            "exact": 0.85,
+            "tally": 0.17,
+            "closed_output": 0.48,
+            "prose_output": 0.34,
+            "dependent_steps": 0.5,
+            "needs_fetch": 0.81,
+            "stakes": 2.1
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.39
+        },
+        "generated-drift": {
+          "signals": {
+            "exact": 0.88,
+            "tally": 0.34,
+            "closed_output": 0.86,
+            "prose_output": 0.45,
+            "dependent_steps": 0.57,
+            "needs_fetch": 0.69,
+            "stakes": 1.51
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.02
+        },
+        "archive-age": {
+          "signals": {
+            "exact": 0.97,
+            "tally": 0.9,
+            "closed_output": 0.96,
+            "prose_output": 0.21,
+            "dependent_steps": 0.38,
+            "needs_fetch": 0.26,
+            "stakes": 1.98
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.33
+        },
+        "did-it-land": {
+          "signals": {
+            "exact": 0.88,
+            "tally": 0.33,
+            "closed_output": 0.92,
+            "prose_output": 0.31,
+            "dependent_steps": 0.64,
+            "needs_fetch": 0.29,
+            "stakes": 1.29
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.19
+        },
+        "budget-floor": {
+          "signals": {
+            "exact": 0.95,
+            "tally": 0.8,
+            "closed_output": 0.94,
+            "prose_output": 0.3,
+            "dependent_steps": 0.17,
+            "needs_fetch": 0.42,
+            "stakes": 1.7
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.17
+        },
+        "is-a-deferral": {
+          "signals": {
+            "exact": 0.2,
+            "tally": 0.07,
+            "closed_output": 0.89,
+            "prose_output": 0.42,
+            "dependent_steps": 0.19,
+            "needs_fetch": 0.09,
+            "stakes": 1.38
+          },
+          "split": false,
+          "reasons": [
+            "one value from a known set, judged from text in hand"
+          ],
+          "stakes_confidence": 0.2
+        },
+        "commit-type": {
+          "signals": {
+            "exact": 0.21,
+            "tally": 0.14,
+            "closed_output": 0.91,
+            "prose_output": 0.23,
+            "dependent_steps": 0.46,
+            "needs_fetch": 0.13,
+            "stakes": 0.76
+          },
+          "split": false,
+          "reasons": [
+            "one value from a known set, judged from text in hand"
+          ],
+          "stakes_confidence": 0.24
+        },
+        "description-is-interface": {
+          "signals": {
+            "exact": 0.23,
+            "tally": 0.06,
+            "closed_output": 0.94,
+            "prose_output": 0.35,
+            "dependent_steps": 0.18,
+            "needs_fetch": 0.06,
+            "stakes": 0.83
+          },
+          "split": false,
+          "reasons": [
+            "one value from a known set, judged from text in hand"
+          ],
+          "stakes_confidence": 0.17
+        },
+        "restates-elsewhere": {
+          "signals": {
+            "exact": 0.16,
+            "tally": 0.07,
+            "closed_output": 0.9,
+            "prose_output": 0.52,
+            "dependent_steps": 0.38,
+            "needs_fetch": 0.08,
+            "stakes": 1.39
+          },
+          "split": false,
+          "reasons": [
+            "one value from a known set, judged from text in hand"
+          ],
+          "stakes_confidence": 0.12
+        },
+        "belongs-in-references": {
+          "signals": {
+            "exact": 0.28,
+            "tally": 0.16,
+            "closed_output": 0.89,
+            "prose_output": 0.32,
+            "dependent_steps": 0.23,
+            "needs_fetch": 0.2,
+            "stakes": 1.61
+          },
+          "split": false,
+          "reasons": [
+            "one value from a known set, judged from text in hand"
+          ],
+          "stakes_confidence": 0.32
+        },
+        "which-skill": {
+          "signals": {
+            "exact": 0.14,
+            "tally": 0.1,
+            "closed_output": 0.96,
+            "prose_output": 0.24,
+            "dependent_steps": 0.22,
+            "needs_fetch": 0.12,
+            "stakes": 0.78
+          },
+          "split": false,
+          "reasons": [
+            "one value from a known set, judged from text in hand"
+          ],
+          "stakes_confidence": 0.22
+        },
+        "creativity-level": {
+          "signals": {
+            "exact": 0.12,
+            "tally": 0.1,
+            "closed_output": 0.96,
+            "prose_output": 0.29,
+            "dependent_steps": 0.23,
+            "needs_fetch": 0.44,
+            "stakes": 1.15
+          },
+          "split": false,
+          "reasons": [
+            "one value from a known set, judged from text in hand"
+          ],
+          "stakes_confidence": 0.17
+        },
+        "needs-a-human": {
+          "signals": {
+            "exact": 0.2,
+            "tally": 0.26,
+            "closed_output": 0.88,
+            "prose_output": 0.42,
+            "dependent_steps": 0.48,
+            "needs_fetch": 0.45,
+            "stakes": 1.67
+          },
+          "split": false,
+          "reasons": [
+            "one value from a known set, judged from text in hand"
+          ],
+          "stakes_confidence": 0.29
+        },
+        "fits-size-5": {
+          "signals": {
+            "exact": 0.1,
+            "tally": 0.58,
+            "closed_output": 0.81,
+            "prose_output": 0.61,
+            "dependent_steps": 0.53,
+            "needs_fetch": 0.29,
+            "stakes": 1.15
+          },
+          "split": true,
+          "reasons": [
+            "one value from a known set, judged from text in hand \u2014 but part of it is arithmetic"
+          ],
+          "stakes_confidence": 0.47
+        },
+        "same-finding": {
+          "signals": {
+            "exact": 0.13,
+            "tally": 0.07,
+            "closed_output": 0.91,
+            "prose_output": 0.48,
+            "dependent_steps": 0.5,
+            "needs_fetch": 0.12,
+            "stakes": 1.63
+          },
+          "split": false,
+          "reasons": [
+            "one value from a known set, judged from text in hand"
+          ],
+          "stakes_confidence": 0.34
+        },
+        "worth-verifying": {
+          "signals": {
+            "exact": 0.16,
+            "tally": 0.19,
+            "closed_output": 0.8,
+            "prose_output": 0.54,
+            "dependent_steps": 0.37,
+            "needs_fetch": 0.41,
+            "stakes": 1.45
+          },
+          "split": false,
+          "reasons": [
+            "one value from a known set, judged from text in hand"
+          ],
+          "stakes_confidence": 0.4
+        },
+        "body-matches-diff": {
+          "signals": {
+            "exact": 0.11,
+            "tally": 0.14,
+            "closed_output": 0.78,
+            "prose_output": 0.43,
+            "dependent_steps": 0.42,
+            "needs_fetch": 0.14,
+            "stakes": 1.07
+          },
+          "split": false,
+          "reasons": [
+            "one value from a known set, judged from text in hand"
+          ],
+          "stakes_confidence": 0.31
+        },
+        "write-pr-body": {
+          "signals": {
+            "exact": 0.14,
+            "tally": 0.09,
+            "closed_output": 0.04,
+            "prose_output": 0.97,
+            "dependent_steps": 0.37,
+            "needs_fetch": 0.17,
+            "stakes": 0.68
+          },
+          "split": false,
+          "reasons": [
+            "not exact, not a closed answer; judgment it is"
+          ],
+          "stakes_confidence": 0.32
+        },
+        "grade-a-finding": {
+          "signals": {
+            "exact": 0.38,
+            "tally": 0.13,
+            "closed_output": 0.6,
+            "prose_output": 0.71,
+            "dependent_steps": 0.84,
+            "needs_fetch": 0.18,
+            "stakes": 1.96
+          },
+          "split": false,
+          "reasons": [
+            "not exact, not a closed answer; judgment it is"
+          ],
+          "stakes_confidence": 0.43
+        },
+        "slice-a-card": {
+          "signals": {
+            "exact": 0.16,
+            "tally": 0.35,
+            "closed_output": 0.17,
+            "prose_output": 0.51,
+            "dependent_steps": 0.68,
+            "needs_fetch": 0.63,
+            "stakes": 1.48
+          },
+          "split": false,
+          "reasons": [
+            "not exact, not a closed answer; judgment it is"
+          ],
+          "stakes_confidence": 0.31
+        },
+        "write-the-plan": {
+          "signals": {
+            "exact": 0.25,
+            "tally": 0.14,
+            "closed_output": 0.04,
+            "prose_output": 0.66,
+            "dependent_steps": 0.6,
+            "needs_fetch": 0.61,
+            "stakes": 1.35
+          },
+          "split": false,
+          "reasons": [
+            "not exact, not a closed answer; judgment it is"
+          ],
+          "stakes_confidence": 0.42
+        },
+        "why-ci-only": {
+          "signals": {
+            "exact": 0.22,
+            "tally": 0.12,
+            "closed_output": 0.17,
+            "prose_output": 0.67,
+            "dependent_steps": 0.88,
+            "needs_fetch": 0.94,
+            "stakes": 1.27
+          },
+          "split": false,
+          "reasons": [
+            "not exact, not a closed answer; judgment it is"
+          ],
+          "stakes_confidence": 0.21
+        },
+        "author-the-fix": {
+          "signals": {
+            "exact": 0.15,
+            "tally": 0.12,
+            "closed_output": 0.09,
+            "prose_output": 0.21,
+            "dependent_steps": 0.75,
+            "needs_fetch": 0.86,
+            "stakes": 1.98
+          },
+          "split": false,
+          "reasons": [
+            "not exact, not a closed answer; judgment it is"
+          ],
+          "stakes_confidence": 0.69
+        },
+        "did-the-coder-deliver": {
+          "signals": {
+            "exact": 0.19,
+            "tally": 0.17,
+            "closed_output": 0.71,
+            "prose_output": 0.63,
+            "dependent_steps": 0.66,
+            "needs_fetch": 0.41,
+            "stakes": 1.71
+          },
+          "split": false,
+          "reasons": [
+            "not exact, not a closed answer; judgment it is"
+          ],
+          "stakes_confidence": 0.47
+        },
+        "teach-the-change": {
+          "signals": {
+            "exact": 0.11,
+            "tally": 0.11,
+            "closed_output": 0.07,
+            "prose_output": 0.95,
+            "dependent_steps": 0.67,
+            "needs_fetch": 0.42,
+            "stakes": 1.12
+          },
+          "split": false,
+          "reasons": [
+            "not exact, not a closed answer; judgment it is"
+          ],
+          "stakes_confidence": 0.0
+        },
+        "find-the-assumers": {
+          "signals": {
+            "exact": 0.53,
+            "tally": 0.19,
+            "closed_output": 0.08,
+            "prose_output": 0.47,
+            "dependent_steps": 0.85,
+            "needs_fetch": 0.96,
+            "stakes": 2.37
+          },
+          "split": false,
+          "reasons": [
+            "not exact, not a closed answer; judgment it is"
+          ],
+          "stakes_confidence": 0.37
+        },
+        "whats-blocking": {
+          "signals": {
+            "exact": 0.21,
+            "tally": 0.3,
+            "closed_output": 0.07,
+            "prose_output": 0.91,
+            "dependent_steps": 0.58,
+            "needs_fetch": 0.37,
+            "stakes": 1.46
+          },
+          "split": false,
+          "reasons": [
+            "not exact, not a closed answer; judgment it is"
+          ],
+          "stakes_confidence": 0.28
+        },
+        "recover-a-run": {
+          "signals": {
+            "exact": 0.19,
+            "tally": 0.19,
+            "closed_output": 0.13,
+            "prose_output": 0.56,
+            "dependent_steps": 0.84,
+            "needs_fetch": 0.93,
+            "stakes": 1.27
+          },
+          "split": false,
+          "reasons": [
+            "not exact, not a closed answer; judgment it is"
+          ],
+          "stakes_confidence": 0.18
+        },
+        "rank-the-coders": {
+          "signals": {
+            "exact": 0.6,
+            "tally": 0.78,
+            "closed_output": 0.24,
+            "prose_output": 0.24,
+            "dependent_steps": 0.35,
+            "needs_fetch": 0.12,
+            "stakes": 1.16
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.35
+        }
+      }
+    },
+    {
+      "n": 36,
+      "correct": 36,
+      "accuracy": 1.0,
+      "n_uncontested": 34,
+      "accuracy_uncontested": 1.0,
+      "missing": [],
+      "confusion": {
+        "code": {
+          "code": 13,
+          "jev": 0,
+          "llm": 0
+        },
+        "jev": {
+          "code": 0,
+          "jev": 12,
+          "llm": 0
+        },
+        "llm": {
+          "code": 0,
+          "jev": 0,
+          "llm": 11
+        }
+      },
+      "rows": [
+        {
+          "id": "ready-cards",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "topo-order",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "tier-partition",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "bump-level",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "readme-count",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "version-sync",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "anchor-comments",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "rule-drift",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "generated-drift",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "archive-age",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "did-it-land",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "budget-floor",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "is-a-deferral",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "commit-type",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "description-is-interface",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "restates-elsewhere",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "belongs-in-references",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "which-skill",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "creativity-level",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "needs-a-human",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "fits-size-5",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": true
+        },
+        {
+          "id": "same-finding",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "worth-verifying",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "body-matches-diff",
+          "expected": "jev",
+          "got": "jev",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "write-pr-body",
+          "expected": "llm",
+          "got": "llm",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "grade-a-finding",
+          "expected": "llm",
+          "got": "llm",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "slice-a-card",
+          "expected": "llm",
+          "got": "llm",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "write-the-plan",
+          "expected": "llm",
+          "got": "llm",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "why-ci-only",
+          "expected": "llm",
+          "got": "llm",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "author-the-fix",
+          "expected": "llm",
+          "got": "llm",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "did-the-coder-deliver",
+          "expected": "llm",
+          "got": "llm",
+          "correct": true,
+          "hard": true
+        },
+        {
+          "id": "teach-the-change",
+          "expected": "llm",
+          "got": "llm",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "find-the-assumers",
+          "expected": "llm",
+          "got": "llm",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "whats-blocking",
+          "expected": "llm",
+          "got": "llm",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "recover-a-run",
+          "expected": "llm",
+          "got": "llm",
+          "correct": true,
+          "hard": false
+        },
+        {
+          "id": "rank-the-coders",
+          "expected": "code",
+          "got": "code",
+          "correct": true,
+          "hard": false
+        }
+      ],
+      "detail": {
+        "ready-cards": {
+          "signals": {
+            "exact": 0.93,
+            "tally": 0.36,
+            "closed_output": 0.17,
+            "prose_output": 0.22,
+            "dependent_steps": 0.73,
+            "needs_fetch": 0.59,
+            "stakes": 1.46
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.19
+        },
+        "topo-order": {
+          "signals": {
+            "exact": 0.88,
+            "tally": 0.22,
+            "closed_output": 0.1,
+            "prose_output": 0.49,
+            "dependent_steps": 0.82,
+            "needs_fetch": 0.35,
+            "stakes": 1.59
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.37
+        },
+        "tier-partition": {
+          "signals": {
+            "exact": 0.94,
+            "tally": 0.95,
+            "closed_output": 0.89,
+            "prose_output": 0.45,
+            "dependent_steps": 0.68,
+            "needs_fetch": 0.94,
+            "stakes": 1.89
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.24
+        },
+        "bump-level": {
+          "signals": {
+            "exact": 0.83,
+            "tally": 0.7,
+            "closed_output": 0.97,
+            "prose_output": 0.17,
+            "dependent_steps": 0.71,
+            "needs_fetch": 0.74,
+            "stakes": 1.72
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.38
+        },
+        "readme-count": {
+          "signals": {
+            "exact": 0.66,
+            "tally": 0.98,
+            "closed_output": 0.62,
+            "prose_output": 0.65,
+            "dependent_steps": 0.69,
+            "needs_fetch": 0.94,
+            "stakes": 0.74
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.26
+        },
+        "version-sync": {
+          "signals": {
+            "exact": 0.96,
+            "tally": 0.22,
+            "closed_output": 0.84,
+            "prose_output": 0.37,
+            "dependent_steps": 0.44,
+            "needs_fetch": 0.67,
+            "stakes": 1.51
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.13
+        },
+        "anchor-comments": {
+          "signals": {
+            "exact": 0.94,
+            "tally": 0.29,
+            "closed_output": 0.23,
+            "prose_output": 0.3,
+            "dependent_steps": 0.5,
+            "needs_fetch": 0.1,
+            "stakes": 0.96
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.04
+        },
+        "rule-drift": {
+          "signals": {
+            "exact": 0.84,
+            "tally": 0.18,
+            "closed_output": 0.48,
+            "prose_output": 0.35,
+            "dependent_steps": 0.52,
+            "needs_fetch": 0.82,
+            "stakes": 2.09
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.37
+        },
+        "generated-drift": {
+          "signals": {
+            "exact": 0.88,
+            "tally": 0.34,
+            "closed_output": 0.87,
+            "prose_output": 0.43,
+            "dependent_steps": 0.57,
+            "needs_fetch": 0.71,
+            "stakes": 1.48
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.02
+        },
+        "archive-age": {
+          "signals": {
+            "exact": 0.97,
+            "tally": 0.89,
+            "closed_output": 0.96,
+            "prose_output": 0.19,
+            "dependent_steps": 0.39,
+            "needs_fetch": 0.27,
+            "stakes": 1.94
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.32
+        },
+        "did-it-land": {
+          "signals": {
+            "exact": 0.86,
+            "tally": 0.32,
+            "closed_output": 0.92,
+            "prose_output": 0.32,
+            "dependent_steps": 0.65,
+            "needs_fetch": 0.3,
+            "stakes": 1.37
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.11
+        },
+        "budget-floor": {
+          "signals": {
+            "exact": 0.95,
+            "tally": 0.82,
+            "closed_output": 0.93,
+            "prose_output": 0.31,
+            "dependent_steps": 0.16,
+            "needs_fetch": 0.38,
+            "stakes": 1.61
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.15
+        },
+        "is-a-deferral": {
+          "signals": {
+            "exact": 0.18,
+            "tally": 0.07,
+            "closed_output": 0.9,
+            "prose_output": 0.4,
+            "dependent_steps": 0.19,
+            "needs_fetch": 0.07,
+            "stakes": 1.47
+          },
+          "split": false,
+          "reasons": [
+            "one value from a known set, judged from text in hand"
+          ],
+          "stakes_confidence": 0.13
+        },
+        "commit-type": {
+          "signals": {
+            "exact": 0.21,
+            "tally": 0.14,
+            "closed_output": 0.91,
+            "prose_output": 0.21,
+            "dependent_steps": 0.44,
+            "needs_fetch": 0.13,
+            "stakes": 0.73
+          },
+          "split": false,
+          "reasons": [
+            "one value from a known set, judged from text in hand"
+          ],
+          "stakes_confidence": 0.27
+        },
+        "description-is-interface": {
+          "signals": {
+            "exact": 0.21,
+            "tally": 0.06,
+            "closed_output": 0.93,
+            "prose_output": 0.34,
+            "dependent_steps": 0.18,
+            "needs_fetch": 0.06,
+            "stakes": 0.9
+          },
+          "split": false,
+          "reasons": [
+            "one value from a known set, judged from text in hand"
+          ],
+          "stakes_confidence": 0.1
+        },
+        "restates-elsewhere": {
+          "signals": {
+            "exact": 0.15,
+            "tally": 0.07,
+            "closed_output": 0.89,
+            "prose_output": 0.51,
+            "dependent_steps": 0.37,
+            "needs_fetch": 0.07,
+            "stakes": 1.37
+          },
+          "split": false,
+          "reasons": [
+            "one value from a known set, judged from text in hand"
+          ],
+          "stakes_confidence": 0.11
+        },
+        "belongs-in-references": {
+          "signals": {
+            "exact": 0.27,
+            "tally": 0.14,
+            "closed_output": 0.89,
+            "prose_output": 0.33,
+            "dependent_steps": 0.23,
+            "needs_fetch": 0.22,
+            "stakes": 1.67
+          },
+          "split": false,
+          "reasons": [
+            "one value from a known set, judged from text in hand"
+          ],
+          "stakes_confidence": 0.39
+        },
+        "which-skill": {
+          "signals": {
+            "exact": 0.14,
+            "tally": 0.1,
+            "closed_output": 0.95,
+            "prose_output": 0.24,
+            "dependent_steps": 0.23,
+            "needs_fetch": 0.12,
+            "stakes": 0.86
+          },
+          "split": false,
+          "reasons": [
+            "one value from a known set, judged from text in hand"
+          ],
+          "stakes_confidence": 0.14
+        },
+        "creativity-level": {
+          "signals": {
+            "exact": 0.13,
+            "tally": 0.1,
+            "closed_output": 0.96,
+            "prose_output": 0.29,
+            "dependent_steps": 0.24,
+            "needs_fetch": 0.4,
+            "stakes": 1.13
+          },
+          "split": false,
+          "reasons": [
+            "one value from a known set, judged from text in hand"
+          ],
+          "stakes_confidence": 0.18
+        },
+        "needs-a-human": {
+          "signals": {
+            "exact": 0.2,
+            "tally": 0.27,
+            "closed_output": 0.88,
+            "prose_output": 0.44,
+            "dependent_steps": 0.49,
+            "needs_fetch": 0.47,
+            "stakes": 1.64
+          },
+          "split": false,
+          "reasons": [
+            "one value from a known set, judged from text in hand"
+          ],
+          "stakes_confidence": 0.29
+        },
+        "fits-size-5": {
+          "signals": {
+            "exact": 0.1,
+            "tally": 0.56,
+            "closed_output": 0.81,
+            "prose_output": 0.61,
+            "dependent_steps": 0.54,
+            "needs_fetch": 0.26,
+            "stakes": 1.13
+          },
+          "split": true,
+          "reasons": [
+            "one value from a known set, judged from text in hand \u2014 but part of it is arithmetic"
+          ],
+          "stakes_confidence": 0.48
+        },
+        "same-finding": {
+          "signals": {
+            "exact": 0.12,
+            "tally": 0.07,
+            "closed_output": 0.9,
+            "prose_output": 0.48,
+            "dependent_steps": 0.52,
+            "needs_fetch": 0.13,
+            "stakes": 1.49
+          },
+          "split": false,
+          "reasons": [
+            "one value from a known set, judged from text in hand"
+          ],
+          "stakes_confidence": 0.26
+        },
+        "worth-verifying": {
+          "signals": {
+            "exact": 0.15,
+            "tally": 0.19,
+            "closed_output": 0.81,
+            "prose_output": 0.56,
+            "dependent_steps": 0.38,
+            "needs_fetch": 0.4,
+            "stakes": 1.41
+          },
+          "split": false,
+          "reasons": [
+            "one value from a known set, judged from text in hand"
+          ],
+          "stakes_confidence": 0.46
+        },
+        "body-matches-diff": {
+          "signals": {
+            "exact": 0.11,
+            "tally": 0.14,
+            "closed_output": 0.79,
+            "prose_output": 0.45,
+            "dependent_steps": 0.42,
+            "needs_fetch": 0.13,
+            "stakes": 1.21
+          },
+          "split": false,
+          "reasons": [
+            "one value from a known set, judged from text in hand"
+          ],
+          "stakes_confidence": 0.24
+        },
+        "write-pr-body": {
+          "signals": {
+            "exact": 0.14,
+            "tally": 0.09,
+            "closed_output": 0.04,
+            "prose_output": 0.97,
+            "dependent_steps": 0.36,
+            "needs_fetch": 0.17,
+            "stakes": 0.67
+          },
+          "split": false,
+          "reasons": [
+            "not exact, not a closed answer; judgment it is"
+          ],
+          "stakes_confidence": 0.33
+        },
+        "grade-a-finding": {
+          "signals": {
+            "exact": 0.41,
+            "tally": 0.12,
+            "closed_output": 0.61,
+            "prose_output": 0.7,
+            "dependent_steps": 0.85,
+            "needs_fetch": 0.18,
+            "stakes": 1.97
+          },
+          "split": false,
+          "reasons": [
+            "not exact, not a closed answer; judgment it is"
+          ],
+          "stakes_confidence": 0.38
+        },
+        "slice-a-card": {
+          "signals": {
+            "exact": 0.16,
+            "tally": 0.36,
+            "closed_output": 0.17,
+            "prose_output": 0.51,
+            "dependent_steps": 0.69,
+            "needs_fetch": 0.66,
+            "stakes": 1.55
+          },
+          "split": false,
+          "reasons": [
+            "not exact, not a closed answer; judgment it is"
+          ],
+          "stakes_confidence": 0.37
+        },
+        "write-the-plan": {
+          "signals": {
+            "exact": 0.28,
+            "tally": 0.14,
+            "closed_output": 0.04,
+            "prose_output": 0.68,
+            "dependent_steps": 0.57,
+            "needs_fetch": 0.61,
+            "stakes": 1.42
+          },
+          "split": false,
+          "reasons": [
+            "not exact, not a closed answer; judgment it is"
+          ],
+          "stakes_confidence": 0.39
+        },
+        "why-ci-only": {
+          "signals": {
+            "exact": 0.23,
+            "tally": 0.12,
+            "closed_output": 0.17,
+            "prose_output": 0.66,
+            "dependent_steps": 0.87,
+            "needs_fetch": 0.94,
+            "stakes": 1.28
+          },
+          "split": false,
+          "reasons": [
+            "not exact, not a closed answer; judgment it is"
+          ],
+          "stakes_confidence": 0.21
+        },
+        "author-the-fix": {
+          "signals": {
+            "exact": 0.16,
+            "tally": 0.12,
+            "closed_output": 0.09,
+            "prose_output": 0.21,
+            "dependent_steps": 0.73,
+            "needs_fetch": 0.85,
+            "stakes": 1.96
+          },
+          "split": false,
+          "reasons": [
+            "not exact, not a closed answer; judgment it is"
+          ],
+          "stakes_confidence": 0.69
+        },
+        "did-the-coder-deliver": {
+          "signals": {
+            "exact": 0.18,
+            "tally": 0.16,
+            "closed_output": 0.71,
+            "prose_output": 0.6,
+            "dependent_steps": 0.66,
+            "needs_fetch": 0.4,
+            "stakes": 1.74
+          },
+          "split": false,
+          "reasons": [
+            "not exact, not a closed answer; judgment it is"
+          ],
+          "stakes_confidence": 0.5
+        },
+        "teach-the-change": {
+          "signals": {
+            "exact": 0.12,
+            "tally": 0.11,
+            "closed_output": 0.07,
+            "prose_output": 0.95,
+            "dependent_steps": 0.67,
+            "needs_fetch": 0.42,
+            "stakes": 1.07
+          },
+          "split": false,
+          "reasons": [
+            "not exact, not a closed answer; judgment it is"
+          ],
+          "stakes_confidence": 0.0
+        },
+        "find-the-assumers": {
+          "signals": {
+            "exact": 0.51,
+            "tally": 0.19,
+            "closed_output": 0.08,
+            "prose_output": 0.47,
+            "dependent_steps": 0.85,
+            "needs_fetch": 0.96,
+            "stakes": 2.32
+          },
+          "split": false,
+          "reasons": [
+            "not exact, not a closed answer; judgment it is"
+          ],
+          "stakes_confidence": 0.32
+        },
+        "whats-blocking": {
+          "signals": {
+            "exact": 0.21,
+            "tally": 0.3,
+            "closed_output": 0.08,
+            "prose_output": 0.91,
+            "dependent_steps": 0.57,
+            "needs_fetch": 0.36,
+            "stakes": 1.57
+          },
+          "split": false,
+          "reasons": [
+            "not exact, not a closed answer; judgment it is"
+          ],
+          "stakes_confidence": 0.19
+        },
+        "recover-a-run": {
+          "signals": {
+            "exact": 0.18,
+            "tally": 0.19,
+            "closed_output": 0.12,
+            "prose_output": 0.54,
+            "dependent_steps": 0.85,
+            "needs_fetch": 0.93,
+            "stakes": 1.3
+          },
+          "split": false,
+          "reasons": [
+            "not exact, not a closed answer; judgment it is"
+          ],
+          "stakes_confidence": 0.21
+        },
+        "rank-the-coders": {
+          "signals": {
+            "exact": 0.64,
+            "tally": 0.81,
+            "closed_output": 0.24,
+            "prose_output": 0.24,
+            "dependent_steps": 0.36,
+            "needs_fetch": 0.12,
+            "stakes": 1.11
+          },
+          "split": false,
+          "reasons": [
+            "computable exactly from the inputs"
+          ],
+          "stakes_confidence": 0.37
+        }
+      }
+    }
+  ]
+}

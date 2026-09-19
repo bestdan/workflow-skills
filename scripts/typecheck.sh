@@ -111,9 +111,19 @@ TEST_FILES=(scripts/test_*.py)
 # skills/analysis-pipeline/example/*.py: teaching examples shipped inside a
 # skill, not entrypoints. The one diagnostic there (a `min(key=...)` overload)
 # would be silenced by making the example worse at the job it exists for.
+#
+# dev_docs/research/*/references/*.py: a record's own artifacts. The dev_docs
+# layout puts a probe script in the record that cites it precisely so nobody has
+# to keep it working, and typechecking it would be keeping it working — a mypy
+# release would turn a green gate red over evidence frozen months earlier. They
+# are run by path when someone reproduces a record, and they break then or not
+# at all.
 # shellcheck disable=SC2034  # read by scripts/tier-coverage.py, which parses
 # this file's arrays as text; bash itself never expands this one.
-EXCLUDED_FROM_TYPECHECK=(skills/analysis-pipeline/example/*.py)
+EXCLUDED_FROM_TYPECHECK=(
+  skills/analysis-pipeline/example/*.py
+  dev_docs/research/*/references/*.py
+)
 
 rc=0
 
