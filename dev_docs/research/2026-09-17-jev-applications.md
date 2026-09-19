@@ -183,6 +183,14 @@ counts the files and buckets them. What is left for a model is the part the skil
 trumps the count — "3+ unrelated subsystems" — which is a genuine judgment and a
 separate, narrower question.
 
+**Scope limit on this measurement, added on review:** it is entirely post-hoc. Ground
+truth was the file count of a _merged_ PR, so every case handed the model a change
+that had already happened. `assess-task` runs before the work exists, where `scope` is
+a forecast from prose and there is nothing to count. So this run establishes that Jev
+under-reads a blast radius it can see, and says nothing about whether it can predict
+one it cannot. The predictive case is unmeasured and needs its own probe — prose cards
+whose work later landed, scored against the eventual PR.
+
 That has a knock-on: `label` is **derived** from the dimensions via the table under
 **Deriving `label`**, not judged independently. With `scope` computed, more of that
 table is computable too — so asking Jev for `label` may duplicate deterministic logic,
