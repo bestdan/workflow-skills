@@ -95,8 +95,10 @@ for whether the descriptions discriminate**, not a replication of Claude's selec
 The `claude -p` suite stays the ground truth. Jev's version is the cheap pre-check
 that could plausibly run on every PR — which the current one never can.
 
-Bonus: it also covers the two skills with no eval case at all (`auto-pilot`,
-`deliver-task`) for free, since scoring is per-prompt against the whole description set.
+Bonus: it also covers the three skills with no eval case at all — `analysis-conventions`,
+`auto-pilot` and `deliver-task` — for free, since scoring is per-prompt against the
+whole description set. (Measured 2026-09-18: 16 `skills/*/SKILL.md`, 14 rows in
+`evals/manifest.tsv` covering 13 distinct skills, `task` appearing twice.)
 
 ### 2. The unbuilt output-quality evals — Class A
 
