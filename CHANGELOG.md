@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.58.3] - 2026-09-19
+
+### Fixes
+
+- accept $HOME-rooted paths in reviewer allow-rules [#595] (#776) (da39522)
+
 ## [2.58.2] - 2026-09-17
 
 ### Fixes
