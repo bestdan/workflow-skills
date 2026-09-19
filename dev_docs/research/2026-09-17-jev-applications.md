@@ -444,6 +444,19 @@ That floor is not a snapshot artifact: 0.7.0 has since shipped, still `>=3.10`, 
 swapped `msgspec` for `pydantic` + `pydantic-core` (re-read from PyPI 2026-09-19).
 `httpx2` is the real package name, not a typo for `httpx`.
 
+**Nor is it a pin someone could relax** — it is the SDK's own source. Three modules
+(`_core/json_types.py`, `_core/response_types.py`, `_core/question_types.py`) import
+`TypeAlias` from `typing`, which only exists at 3.10; and 13 files annotate with PEP 604
+`X | Y` unions while only one carries `from __future__ import annotations`, so those
+unions evaluate at import. Measured 2026-09-19: the SDK's modules **compile** under
+3.9.6 and then die at import with `ImportError: cannot import name 'TypeAlias' from
+'typing'`, while the same files run under 3.12. `msgspec>=0.21.1` is a second, transitive
+floor — 0.21.1 itself declares `>=3.10` — but removing it in 0.7.0 did not lower the
+SDK's floor, which is what points at the source as the real bar. The vendor backports
+deliberately where it wants to (`_core/schemas/base.py` takes `Self` from
+`typing_extensions`), so 3.10 is a choice, not an oversight, and escaping it would take
+a refactor across those files rather than a version bump.
+
 It is also unnecessary. The API is one JSON POST, which `urllib.request` + `json`
 handle on 3.9 with zero dependencies — exactly how
 `commands/handlers/assets/linear-scan.py` already talks to Linear. The retry-with-
