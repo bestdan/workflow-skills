@@ -24,17 +24,18 @@ lines of prose, no fitting, and agreed with one another on all 36 cases. The age
 also caught an error in the labels they were being graded against — one case the
 ladder got wrong in the same direction the label did.
 
-The forces: the table is free and permanently in an agent's context; the call costs a
-round trip, an API key, and a dependency on a third party.
+The forces: the table is three lines of prose in a file an agent reads, costing a read
+it was going to make anyway; the call costs a round trip, an API key, and a dependency
+on a third party. Neither `typed-model-calls.md` nor this record is auto-loaded, so the
+table is cheap rather than literally always in context — the comparison is a read
+against a network call, not free against paid.
 
 ## Decision
 
-Do not build the routing tool. Carry the three-line table in guidance instead:
-
-> - computable exactly from what you have → **write code**
-> - one of a fixed set, a yes/no, or a point on a scale, judged from text you already
->   have → **a typed call**
-> - text a human reads, or it needs steps or fetching → **reason about it yourself**
+Do not build the routing tool. Carry the three-line table in guidance instead, where
+it now lives as **The rule, when you just need the answer** in
+[`../typed-model-calls.md`](../typed-model-calls.md) — that file is the one copy, and
+this record cites it rather than holding a second.
 
 Keep the probe, as an artifact of the record rather than as tooling: it lives in that
 record's `references/`, nothing imports it, and no gate runs it. The negative result is

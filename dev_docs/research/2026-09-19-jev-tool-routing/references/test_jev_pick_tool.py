@@ -49,8 +49,8 @@ class RoutingLadderTests(unittest.TestCase):
         self.assertEqual(pick.route(signals()).tool, "llm")
 
     def test_exact_routes_to_code(self):
-        # The measured discriminator: all 12 code cases at 0.66+, all 24 others at
-        # 0.63 or below. A clean single cut with no overlap.
+        # The measured discriminator: all 13 code cases at 0.63 or above, all 23
+        # others at 0.50 or below — a clean cut with 0.13 of daylight.
         self.assertEqual(pick.route(signals(exact=0.8)).tool, "code")
 
     def test_exact_wins_over_a_closed_output(self):

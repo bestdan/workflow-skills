@@ -16,6 +16,23 @@ cost to learn.
 | You want the `assess-task` adoption's shape          | [`designs/2026-09-18-assess-task-typed-profile.md`](designs/2026-09-18-assess-task-typed-profile.md)                                                                                         |
 | You want the key plumbing                            | [`auth_key_access.md`](auth_key_access.md)                                                                                                                                                   |
 
+## The rule, when you just need the answer
+
+Measured against this repo's own decisions and not beaten by a typed call — see
+[`decisions/2026-09-19-no-tool-routing-call.md`](decisions/2026-09-19-no-tool-routing-call.md).
+The rungs are in order: the first that matches wins.
+
+1. Computable exactly from what you have → **write code**.
+2. One of a fixed set, a yes/no, or a point on a scale, judged from text you
+   already have → **a typed call**.
+3. Text a human reads, or it needs steps or fetching → **reason about it
+   yourself**.
+
+Rung 1 beats rung 3: a job that reads files and then computes an exact answer is
+code's, not an LLM's. Retrieval only disqualifies the typed call, which cannot
+fetch anything — and it is not a general veto, because that is precisely the flat
+signal that misrouted 10 of 12 code cases in rule 3 below.
+
 ## The six that cost us something
 
 Each of these was learned by running it, not by reading the vendor's docs. The

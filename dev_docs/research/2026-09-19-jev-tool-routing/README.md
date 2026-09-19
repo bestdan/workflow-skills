@@ -87,10 +87,23 @@ after finding 5 moved one case from `llm` to `code`:
   §6's reconciler grading, `break-down-task`'s slicing, `plan-with-docs`' drafting,
   `deliver-task`'s diff judgment, ordinary debugging and search.
 
-**The labels are shipped decisions, not annotations invented for the probe.** That is
-their strength and their bias: a job that landed as code is one where code turned out
-to work, so the set is filtered by survivorship. Two cases remain marked contested and
-are scored separately, so one arguable label cannot carry the result.
+**Two thirds of the labels are shipped decisions; the other third is opinion.** Each
+`code` case is a script that exists in `scripts/`, and each `llm` case is a model
+judgment a skill body still asks for — those 24 are what the repo actually does. The 12
+`jev` labels are not: they come from the sibling note's ranked applications, and that
+note opens "Nothing here is adopted." They are one reader's judgment of where a typed
+call _would_ fit.
+
+That matters for how the scores read. Against the `code` and `llm` cases, a method is
+being graded on what the repo shipped. Against the `jev` cases it is being graded on
+agreement with a taxonomy the same author wrote — so an absolute accuracy over all 36
+is worth less than the fact that **both methods were graded against the same labels**,
+which is what makes the comparison survive the labels being partly opinion.
+
+Two further biases, both against the set rather than the comparison: a job that landed
+as code is one where code turned out to work, so the shipped two thirds are filtered by
+survivorship; and two cases remain marked contested and are scored separately, so one
+arguable label cannot carry the result.
 
 ## Findings
 
