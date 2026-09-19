@@ -12,7 +12,7 @@ typed model call, or its own reasoning. The proposal was to answer that with a t
 call cheap and fast enough to use reflexively — a `pick-tool` command an agent could
 reach for without thinking about it.
 
-[`../research/2026-09-19-jev-tool-routing.md`](../research/2026-09-19-jev-tool-routing.md)
+[`../research/2026-09-19-jev-tool-routing/`](../research/2026-09-19-jev-tool-routing/README.md)
 measured it against 36 routing decisions this repo already shipped. **Both sides
 scored 36/36, three times each**: a two-rung ladder over Jev signals, and three Claude
 subagents given only a blind case list and the three-line table below.
@@ -35,9 +35,11 @@ Do not build the routing tool. Carry the three-line table in guidance instead:
 >   have → **a typed call**
 > - text a human reads, or it needs steps or fetching → **reason about it yourself**
 
-Keep `scripts/jev-pick-tool.py` as a dev-only instrument. The negative result is only
-as good as its labels and its ladder, and both have to stay inspectable and re-runnable
-for it to mean anything a year from now.
+Keep the probe, as an artifact of the record rather than as tooling: it lives in that
+record's `references/`, nothing imports it, and no gate runs it. The negative result is
+only as good as its labels and its ladder, so both have to stay inspectable and
+re-runnable for it to mean anything a year from now — which is what a bundle is for,
+and is a weaker promise than a maintained script makes.
 
 ## Consequences
 
@@ -59,9 +61,11 @@ for it to mean anything a year from now.
 - **Bad, because** the measurement rests on 36 cases written by one person from one
   repository, and a ceiling effect means it can support "the call is not needed" but
   not "the call is worse."
-- **Bad, because** keeping an instrument nothing depends on is a maintenance cost with
-  no gate defending it. It is in `scripts/` so the linters and typechecker cover it,
-  which bounds the cost but does not remove it.
+- **Bad, because** the probe left the gate when it became an artifact. Its tests no
+  longer run in `just check` and mypy no longer reads it, so it can rot unnoticed
+  until someone re-runs the record. That is the trade the `dev_docs` layout makes
+  deliberately — evidence nobody maintains, rather than code everybody must — and the
+  cost lands on whoever reopens this, not on the gate.
 
 ## Revisit when
 
@@ -78,9 +82,11 @@ for it to mean anything a year from now.
 
 ## Confirmation
 
-Nothing enforces this. `scripts/test_jev_pick_tool.py` holds the instrument's ladder
-and case set to their shape, including a test pinning the flat-signal defect so it
-cannot return by accident, but no gate stops someone adding a routing call elsewhere.
+Nothing enforces this, and less than before. The probe's own tests still hold its
+ladder and case set to their shape — including one pinning the flat-signal defect so
+it cannot return by accident — but they sit in the record's `references/` and no gate
+runs them, so they check nothing until someone runs them by hand. No gate stops
+someone adding a routing call elsewhere either.
 
 ## Alternatives
 

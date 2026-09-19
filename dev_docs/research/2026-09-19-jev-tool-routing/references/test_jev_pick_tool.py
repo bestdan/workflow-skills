@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
-"""Hermetic tests for scripts/jev-pick-tool.py.
+"""Hermetic tests for the jev-pick-tool.py beside this file.
 
 The pure half: the routing ladder, the response reduction, the fence, the scorer and
 the case set's own integrity. Nothing here touches the network or reads a key — the
-key ladder lives in jev-description-collision.py and is tested there.
+key ladder lives in scripts/jev-description-collision.py and is tested there.
+
+No gate runs this: it is a frozen artifact of the record in the parent directory, and
+leaving the repo's `scripts/test-*.sh` glob is the cost of that. Run it by path —
+`python3 dev_docs/research/2026-09-19-jev-tool-routing/references/test_jev_pick_tool.py`
+— when re-running the measurement.
 
 Each case pins something the design argues for, so that changing the ladder's shape
 breaks a test that names the reason rather than one that restates the code.
@@ -19,9 +24,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
 SPEC = importlib.util.spec_from_file_location(
-    "jev_pick_tool", ROOT / "scripts" / "jev-pick-tool.py"
+    "jev_pick_tool", Path(__file__).resolve().parent / "jev-pick-tool.py"
 )
 assert SPEC and SPEC.loader
 pick = importlib.util.module_from_spec(SPEC)

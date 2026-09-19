@@ -33,15 +33,23 @@ landed on, phrased as the job was phrased before the tool was chosen. `--cases` 
 them with labels withheld so a rival can answer blind; `--score` grades either side
 through the same scorer, which is the only reason the two numbers can be compared.
 
-Dev-only. Never invoked by a skill or command at runtime, never part of `just check` —
-it costs money and needs the network. It lives under `scripts/` because that is the
-only tree the linters and typechecker cover.
+A frozen artifact of the record beside it, not standing tooling: nothing imports it,
+no gate runs it, and it needs the network and a paid key. If a future Jev version
+breaks it, fix it as part of re-running the record rather than treating it as a
+regression.
 
-Run directly:
-    python3 scripts/jev-pick-tool.py --ask "decide whether two findings are the same"
-    python3 scripts/jev-pick-tool.py --suite --repeat 3
-    python3 scripts/jev-pick-tool.py --cases > blind.json
-    python3 scripts/jev-pick-tool.py --score answers.json
+Dependencies: the standard library, plus `resolve_key` and `ask_payload` from
+`scripts/jev-description-collision.py` — see the import below for why it borrows those
+two rather than carrying its own copy. Needs a TypeSafe key, resolved the way
+`dev_docs/auth_key_access.md` describes.
+
+Run by path, from the repository root:
+    D=dev_docs/research/2026-09-19-jev-tool-routing/references
+    python3 $D/jev-pick-tool.py --ask "decide whether two findings are the same"
+    python3 $D/jev-pick-tool.py --suite --repeat 3
+    python3 $D/jev-pick-tool.py --cases > blind.json
+    python3 $D/jev-pick-tool.py --score answers.json
+    python3 $D/test_jev_pick_tool.py        # the hermetic half; no key, no network
 """
 
 from __future__ import annotations
@@ -53,12 +61,17 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+# The bundle sits four levels below the repository root:
+# dev_docs/research/<record>/references/<this file>.
+ROOT = Path(__file__).resolve().parents[4]
 
-# The key ladder, the POST and the ranking maths already exist next door and are
-# security-sensitive (that module's `typesafe_block` exists because an unscoped
-# `api_key:` search once reached for a full-account Linear token). Importing beats a
-# second copy — "one fact, one home" applies hardest to the code that reads secrets.
+# The one place this artifact is not standalone, which the bundle convention asks for
+# and this deliberately breaks. The key ladder and the POST live next door and are
+# security-sensitive: that module's `typesafe_block` exists because an unscoped
+# `api_key:` search once reached for a full-account Linear token. A second copy of
+# code that reads secrets is a worse hazard than a coupling that fails loudly when
+# the sibling moves, and this file is frozen evidence — a loud break while someone
+# reproduces the record is the acceptable failure mode.
 _SPEC = importlib.util.spec_from_file_location(
     "jev_collision", ROOT / "scripts" / "jev-description-collision.py"
 )

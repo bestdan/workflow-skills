@@ -1,33 +1,36 @@
 ---
 created: 2026-09-19
 question: "Can a typed call tell an agent whether a job wants code, a typed call, or an LLM — and does it beat the agent's own judgment?"
-feeds: ../decisions/2026-09-19-no-tool-routing-call.md
+feeds: ../../decisions/2026-09-19-no-tool-routing-call.md
 ---
 
 # Routing a job to code, Jev or an LLM (2026-09-19)
 
 Evidence for whether a typed model call can pick the right tool for a job better than
 the agent facing the job can pick it unaided. What was decided from this is in
-[`../decisions/2026-09-19-no-tool-routing-call.md`](../decisions/2026-09-19-no-tool-routing-call.md).
+[`../../decisions/2026-09-19-no-tool-routing-call.md`](../../decisions/2026-09-19-no-tool-routing-call.md).
 
-Sibling to [`2026-09-17-jev-applications.md`](2026-09-17-jev-applications.md), which
+Sibling to [`2026-09-17-jev-applications.md`](../2026-09-17-jev-applications.md), which
 ranked where a typed call might fit at all. This grades one candidate that note did
 not rank: the meta-decision an agent makes dozens of times a session.
 
 ## Method
 
 `jev-1.13.0`, pinned rather than `jev-latest`, run 2026-09-19 with a live key. The
-instrument is [`scripts/jev-pick-tool.py`](../../scripts/jev-pick-tool.py), which is
-kept so these numbers can be re-run rather than taken on trust.
+instrument is [`references/jev-pick-tool.py`](references/jev-pick-tool.py), kept beside
+this record so the numbers can be re-run rather than taken on trust. It is frozen
+evidence, not tooling: nothing imports it and no gate runs it.
 
 Three passes of 36 cases, one request per case — each case is its own state, so the
 docs' batching win does not apply to this shape. 96,942 input tokens over the three
 passes, roughly $0.004. Median round trip 0.55s.
 
 ```
-python3 scripts/jev-pick-tool.py --suite --repeat 3     # the Jev run
-python3 scripts/jev-pick-tool.py --cases > blind.json   # labels withheld
-python3 scripts/jev-pick-tool.py --score answers.json   # grades either side
+D=dev_docs/research/2026-09-19-jev-tool-routing/references
+python3 $D/jev-pick-tool.py --suite --repeat 3     # the Jev run
+python3 $D/jev-pick-tool.py --cases > blind.json   # labels withheld
+python3 $D/jev-pick-tool.py --score answers.json   # grades either side
+python3 $D/test_jev_pick_tool.py                   # hermetic; no key, no network
 ```
 
 The baseline was three Claude subagents in independent contexts, each given the blind
