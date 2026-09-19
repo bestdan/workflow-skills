@@ -163,6 +163,33 @@ subagent spawn that `select-coder` and `orchestrate-coders` pay for per packet.
 Cost to weigh: the skill reads `related_files` when a description is thin. Jev cannot
 go fetch anything, so the caller has to assemble the state first.
 
+**Measured 2026-09-18 — `scope` must not be a Jev question.** Scored as a Score over
+the four levels against 116 merged PRs, with ground truth being the real blast radius
+(the file count the merged PR actually touched): **71.6% exact, 100% within one
+level**, and the error is systematic rather than noisy — **31 of 33 misses are level
+2 read as level 1**, i.e. `multi-file` under-read as `pr-sized`. It under-estimates
+blast radius, in one direction, which is §8's counting weakness showing up exactly
+where §8 predicted.
+
+The mitigation §8 proposed does not work, because it was already in force: that state
+already began "Changed files (34 total)" and listed every path. Stating the count is
+not enough — the model does not use the number it is handed.
+
+What does work is not asking. Re-run on 40 of the same PRs with the count as the first
+line of the state and the four levels redefined in terms of that number ("2 to 5 files
+changed"), it scores **40/40, 100%**. But at that point the question is arithmetic,
+and rule 4 says code owns it. So `scope` comes out of the Jev call entirely: code
+counts the files and buckets them. What is left for a model is the part the skill says
+trumps the count — "3+ unrelated subsystems" — which is a genuine judgment and a
+separate, narrower question.
+
+That has a knock-on: `label` is **derived** from the dimensions via the table under
+**Deriving `label`**, not judged independently. With `scope` computed, more of that
+table is computable too — so asking Jev for `label` may duplicate deterministic logic,
+and with it goes the tidy claim above that `confidence` and `runner_up` come free from
+`label`'s distribution. Whether the table is complete enough to be pure code is the
+open question a design has to settle.
+
 ### 4. The 7th promote check — Class B, narrowest and cleanest
 
 `commands/promote-tasks.md` runs six deterministic checks in `task-scan.py` plus one
@@ -184,7 +211,17 @@ semantic, not syntactic:
 - **PR title Conventional Commit type.** "The PR title is the release lever… getting
   it wrong ships a wrong release, not a wrong label." A Choice over
   `feat`/`fix`/`chore`/… given a diff summary is a textbook Jev question, and this is
-  an unguarded rule with real blast radius.
+  an unguarded rule with real blast radius. **Measured 2026-09-18 and it is not ready
+  to gate anything:** against 116 merged PRs, with the shipped type as ground truth
+  and the title stripped from the state, it agrees **62.9% of the time at a mean
+  confidence of 0.79** — overconfident by 16 points, which is the failure mode that
+  makes a threshold dangerous rather than merely weak. The dominant error is the
+  expensive one: **`feat` read as `fix` in 18 of 43 misses**, which is precisely the
+  minor-versus-patch call the rule exists to protect. Read this as a floor, not a
+  verdict — the state was the PR body plus a file listing, not the patch, and the
+  ground truth is the author's own label, which is itself noisy across `feat`/`fix`.
+  Before this could gate, it needs the real diff in the state and the cookbook's
+  two-stage shape, and then re-measuring.
 - **"Frontmatter `description` is interface."** Is this written as trigger conditions
   or as documentation? A Noul.
 - **"One fact, one home."** Does this new section restate something already true in
@@ -292,6 +329,13 @@ Reproduce it with
 key per [`auth_key_access.md`](../auth_key_access.md) and is dev-only — never called
 by a skill at runtime, never part of `just check`. Its pure half is tested offline by
 `scripts/test-jev-description-collision.sh`, which does run in the gate.
+
+The §3 and §5 calibration used 116 merged PRs from this repo as a labelled set — the
+shipped Conventional Commit type as truth for §5, the real changed-file count as truth
+for §3 — with both questions riding in one request per PR. The §3 follow-up re-ran 40
+of them with the count stated first. Those two probes are not committed: they are
+one-shot calibrations against a snapshot of the PR history, and re-running them means
+re-fetching that history anyway. Their numbers and method are recorded above.
 
 The instrument is an artifact of this record, not standing tooling: it exists so the
 numbers above can be re-run when a `description` changes or a new Jev version ships.

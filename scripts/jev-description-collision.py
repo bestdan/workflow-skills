@@ -238,21 +238,28 @@ def load_manifest_cases(root: Path) -> list[tuple[str, str]]:
 
 
 def ask(key: str, state: str, criteria: dict[str, str]) -> dict:
-    payload = {
-        "state": state,
-        "model": MODEL,
-        "questions": {
-            "skill": {
-                "type": "choice",
-                "instructions": (
-                    "A user typed this message to a coding agent. Which skill, if "
-                    "any, should the agent load to handle it? Choose the single "
-                    "best fit."
-                ),
-                "criteria": criteria,
-            }
+    return ask_payload(
+        key,
+        {
+            "state": state,
+            "model": MODEL,
+            "questions": {
+                "skill": {
+                    "type": "choice",
+                    "instructions": (
+                        "A user typed this message to a coding agent. Which skill, if "
+                        "any, should the agent load to handle it? Choose the single "
+                        "best fit."
+                    ),
+                    "criteria": criteria,
+                }
+            },
         },
-    }
+    )
+
+
+def ask_payload(key: str, payload: dict) -> dict:
+    """POST one System One request. Every question in `payload` rides together."""
     req = urllib.request.Request(
         ENDPOINT,
         data=json.dumps(payload).encode(),
