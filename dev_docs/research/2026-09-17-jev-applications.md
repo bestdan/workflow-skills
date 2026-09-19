@@ -99,17 +99,28 @@ The specific pairs named in the first draft were the wrong ones. `research-spike
 the obligation ledger works". The two weakest discriminations in the whole run are
 elsewhere:
 
-| Probe                                       | Winner              | Runner-up            | Margin | Confidence |
-| ------------------------------------------- | ------------------- | -------------------- | ------ | ---------- |
-| "Take this one and run with it."            | `deliver-task` 0.49 | `auto-pilot` 0.30    | 0.19   | 0.44       |
-| "changes I want gone over before they land" | `local-review` 0.63 | `co-review` 0.37     | 0.26   | 0.59       |
-| "six tasks queued and access to coders"     | `select-coder` 0.59 | `orchestrate-coders` | 0.35   | 0.56       |
+| Probe                                       | Winner vs runner-up                    | Margin over 4 runs | Confidence  |
+| ------------------------------------------- | -------------------------------------- | ------------------ | ----------- |
+| "Take this one and run with it."            | `deliver-task` vs `auto-pilot`         | 0.18 – 0.24        | 0.44 – 0.48 |
+| "changes I want gone over before they land" | `local-review` vs `co-review`          | 0.16 – 0.48        | 0.54 – 0.71 |
+| "six tasks queued and access to coders"     | `select-coder` vs `orchestrate-coders` | 0.35               | 0.56        |
+
+**The margins are ranges because Jev is not deterministic across runs**, which the
+first single-run measurement hid. `local-review` vs `co-review` moved between 0.16
+and 0.48 on the identical prompt and option set over four runs — a threefold spread
+on the number the whole proposal rests on. `deliver-task` vs `auto-pilot` was steady
+by comparison (0.18–0.24). The lowest margin observed anywhere was 0.16, still above
+the 0.10 threshold, so the "no collisions" result holds — but a single run's margin
+is not a measurement, and anything built on this has to sample repeatedly. TypeSafe
+publishes [self-consistency cookbooks](https://docs.typesafe.ai/cookbooks/consistency_choice_cookbook)
+for exactly this, which is itself a signal about how stable one call is.
 
 So the mechanism works and the monitoring value stands — the margin did rank the
-weakest boundaries, which a pass/fail harness cannot — but it is a **regression
-monitor with no regression to report**, not a bug-finder. `confidence` tracks the
-margin closely enough across all 22 (0.44 at the tightest, 1.00 at the widest) that
-it is usable as the single gating number on its own.
+weakest boundaries consistently across runs, which a pass/fail harness cannot — but
+it is a **regression monitor with no regression to report**, not a bug-finder, and it
+needs n>1 per prompt to be trustworthy. `confidence` tracks the margin closely enough
+throughout (0.44 at the tightest, 1.00 at the widest) to be usable as the single
+gating number, and it was the more stable of the two.
 
 Honest limit: Jev is not the model doing the routing at runtime, so this is a **proxy
 for whether the descriptions discriminate**, not a replication of Claude's selection.
@@ -269,10 +280,20 @@ than a cost.
 The §1 measurement was run on 2026-09-18 against `jev-1.13.0` with a live key: one
 `choice` question per prompt, `criteria` built from the `description` frontmatter of
 all 16 `skills/*/SKILL.md`, over the 14 `evals/manifest.tsv` cases plus 8
-purpose-written ambiguous probes. One request per prompt — questions in a request
-share a `state` and each prompt is a distinct state, so the docs' batching win does
-not apply to this shape. 54,613 input tokens, $0.0023. That run also confirms the
-request and response shapes below by observation rather than by reading.
+purpose-written ambiguous probes, with the ambiguous suite repeated four times to
+estimate run-to-run spread. One request per prompt — questions in a request share a
+`state` and each prompt is a distinct state, so the docs' batching win does not apply
+to this shape. It also confirms the request and response shapes below by observation
+rather than by reading.
+
+Reproduce it with
+[`scripts/jev-description-collision.py`](../../scripts/jev-description-collision.py)
+(`--suite manifest | ambiguous | both`, `--json` for the raw records). It resolves a
+key per [`auth_key_access.md`](../auth_key_access.md) and is dev-only — never called
+by a skill at runtime, never part of `just check`. Its pure half is tested offline by
+`scripts/test-jev-description-collision.sh`, which does run in the gate; the paid
+single-request smoke is `scripts/test-jev-description-collision-live.sh`, which is
+opt-in and skips cleanly with no key.
 
 No design or decision cites this record yet. The constraints in "If any of this is
 ever adopted" are findings about what an adoption would have to honor, not a
