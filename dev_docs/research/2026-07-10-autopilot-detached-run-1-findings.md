@@ -4,13 +4,13 @@ created: 2026-07-10
 status: reference
 context: /auto-pilot linear-fastpath-p2, first FULLY DETACHED + sandboxed run (Step 7 live)
 audience: a future agent hardening /auto-pilot
-related: ./autopilot-dry-run.md (the earlier attended dry-run; Step 7 skipped)
+related: ./2026-07-09-autopilot-dry-run.md (the earlier attended dry-run; Step 7 skipped)
 ---
 
 # Auto-pilot detached run #1 — everything that tripped, and how to fix it
 
 First real **detached + sandboxed** auto-pilot run (the attended dry-run in
-`autopilot-dry-run.md` skipped the Step-7 spawn). It **succeeded** — 6/6 tasks
+`2026-07-09-autopilot-dry-run.md` skipped the Step-7 spawn). It **succeeded** — 6/6 tasks
 handed off in ~1h05m, 0 parked, PRs #162–#167, the human merged #162–#165 mid-run
 and the freeze rule held. But getting there required hand-patching three fatal
 spawn bugs and making five launch-time judgment calls, and the run surfaced a

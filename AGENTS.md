@@ -15,7 +15,7 @@ deeper is one link away.
 | Understand secret/API-key resolution                           | [`dev_docs/auth_key_access.md`](dev_docs/auth_key_access.md)                                     |
 | Understand the gh-issue label/claim/completion model           | [`dev_docs/gh_issue_task_loop.md`](dev_docs/gh_issue_task_loop.md)                               |
 | Find prose that should be a helper script, and extract it      | [`dev_docs/finding-prose-that-should-be-code.md`](dev_docs/finding-prose-that-should-be-code.md) |
-| Read a design decision                                         | `dev_docs/designs/`, `dev_docs/decisions/`                                                       |
+| Read a design decision, or file a doc under `dev_docs/`        | [`dev_docs/README.md`](dev_docs/README.md)                                                       |
 | Pick up work a previous session left for you                   | [`dev_docs/.handoffs/README.md`](dev_docs/.handoffs/README.md)                                   |
 
 ## What this repo is
@@ -100,6 +100,12 @@ whether it belongs one level down instead. The answer is usually yes.
 - **`plugin.json` and `marketplace.json` versions must stay equal**, as plain
   `X.Y.Z` — `validate.py` rejects a `v` prefix. The Release workflow normally
   owns both; if you bump by hand, bump both.
+- **`dev_docs/` follows the shared layout, and `just check` enforces it.** A
+  date in a filename means a record; no date means a live file kept current.
+  Which directory holds what is [`dev_docs/README.md`](dev_docs/README.md), and
+  the convention itself is `dev_docs_layout.md` in the `agent-guidance` plugin.
+  `scripts/dev-docs-layout.sh` runs that plugin's checker and **fails when the
+  plugin is missing** rather than skipping, so CI clones it.
 - **`dev_docs/tasks/` is ignored except `.task-config.yml`.** Plan scaffolding
   there is ephemeral in-flight state — durable wisdom graduates to a top-level
   `dev_docs/<name>.md`. See the comment block in `.gitignore` before trying to

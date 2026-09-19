@@ -1,3 +1,7 @@
+---
+created: 2026-08-01
+---
+
 # Design — the obligation ledger for research spikes
 
 Status: designed. The ledger mechanism is extracted from a working

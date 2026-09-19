@@ -1,3 +1,7 @@
+---
+created: 2026-08-24
+---
+
 # How a cloud routine reaches GitHub, and why it cannot hold the ref lock
 
 **Measured 2026-08-24** against the live API from inside a Claude Code cloud routine.

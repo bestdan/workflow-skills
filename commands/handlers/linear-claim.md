@@ -16,7 +16,7 @@ Invoked from `/do-tasks` (section 3, "Tracker path") when `handler: linear` is c
 
 **This is a per-workspace question, and this plugin does not depend on the answer.** This plugin relies only on the reconciler verbs, so the flow below is correct whether your integration fires or not — but a live integration will also act on the `Closes <identifier>` line below, so an issue found already `completed` after its PR merged means your integration fired. Treat that as expected, never as a false closure to reopen. To check yours: a live integration puts webhooks on the repository (`gh api repos/<owner>/<name>/hooks`) and writes its own linkbacks onto issues when a PR opens.
 
-In the workspace this plugin was developed against, the integration has never fired — see [`dev_docs/decisions/2026-09-05-linear-integration-inert.md`](../../dev_docs/decisions/2026-09-05-linear-integration-inert.md) for the evidence and its limits. That document also records the incident that shaped this design: the over-closing earlier revisions of this file attributed to Linear came from a **repo-local GitHub Actions workflow** that scraped ids out of PR text on merge, not from Linear.
+In the workspace this plugin was developed against, the integration has never fired — see [`dev_docs/research/2026-09-05-linear-integration-inert.md`](../../dev_docs/research/2026-09-05-linear-integration-inert.md) for the evidence and its limits. That document also records the incident that shaped this design: the over-closing earlier revisions of this file attributed to Linear came from a **repo-local GitHub Actions workflow** that scraped ids out of PR text on merge, not from Linear.
 
 ### What Linear does when the integration is live
 

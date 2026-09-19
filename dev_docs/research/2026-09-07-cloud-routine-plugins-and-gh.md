@@ -1,3 +1,7 @@
+---
+created: 2026-09-07
+---
+
 # What a cloud routine gives a plugin, and what `gh` needs before it serves
 
 **Measured 2026-09-07** inside scheduled **routines** (not `claude --cloud`

@@ -1,3 +1,7 @@
+---
+created: 2026-08-14
+---
+
 # Would `research-spike` be a good application of Lean?
 
 Evaluated: Lean 4 (the [lean-lang.org](https://lean-lang.org/) dependently-typed

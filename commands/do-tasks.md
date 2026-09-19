@@ -546,7 +546,7 @@ session, which can only run them if that session has the handler's MCP connector
 unlike the repo-pr remote fan-out, which needs only `git`/`gh`. That is a smaller
 dependency, not a free one: the 2026-09-05 probe found a cloud session's `gh`
 uncredentialed on reads as well as writes
-(`dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md`), so a session that
+(`dev_docs/research/2026-09-05-cloud-session-plugin-and-proxy.md`), so a session that
 claims over MCP can still fail at `gh pr create`. A remote session **may**
 inherit the Linear connector but does **not** always, and the launching session has **no
 deterministic way to introspect what `claude --remote` will inherit** — the tools loaded
@@ -618,7 +618,7 @@ capability is actually visible — inside the remote session** — via two concr
    `Move to review on PR open`). The remote prompt must be
    **self-contained** — **assume the VM has no plugin** unless its environment's setup
    script installed one; a committed `.claude/settings.json` does **not** install one
-   (both probed 2026-09-05 and after, `dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md`
+   (both probed 2026-09-05 and after, `dev_docs/research/2026-09-05-cloud-session-plugin-and-proxy.md`
    findings 1 and 9; see §4's gate), **and** a fresh clone has no local task config
    (`/task-config` gitignores `dev_docs/tasks/` by default) — so
    inline the issue identifier, the claim+execute instructions, **and** the
@@ -724,7 +724,7 @@ steps are **scripts that ship in the plugin** — every label write goes through
 prompt. Documentation says a cloud session installs a plugin the repo declares in a
 **committed `.claude/settings.json`** (`extraKnownMarketplaces` + `enabledPlugins`).
 **Probed 2026-09-05, and it does not**
-(`dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md`): the declaration
+(`dev_docs/research/2026-09-05-cloud-session-plugin-and-proxy.md`): the declaration
 was present on the cloned HEAD, `claude plugin list` reported none installed,
 `$CLAUDE_PLUGIN_ROOT` was empty, and no asset script existed on the box. The same
 session also had `gh` installed but uncredentialed — reads **and** writes 403 — so
@@ -746,13 +746,13 @@ yet speak (see `claim-lock.md`).
 > that would do the writing call `gh api` rather than `curl` — and `gh` is absent from a
 > routine outright. What changed is that "no working write channel" is no longer a second
 > independent blocker; it is an implementation gap. Evidence:
-> `dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md` → "2026-09-17: the
+> `dev_docs/research/2026-09-05-cloud-session-plugin-and-proxy.md` → "2026-09-17: the
 > proxy's write block is PATH-SCOPED".
 
 So `true` needs **two** things the probed environment did not have, and the plugin is
 only the first. **The plugin half now has a known answer**: a cloud-environment setup
 script running `claude plugin marketplace add` plus `claude plugin install` before the
-session starts does install it (measured 2026-09-07 — `dev_docs/decisions/2026-09-07-cloud-routine-plugins-and-gh.md`). Note it is
+session starts does install it (measured 2026-09-07 — `dev_docs/research/2026-09-07-cloud-routine-plugins-and-gh.md`). Note it is
 **environment** configuration — a repo cannot commit it, which is why looking for it in
 a repo finds nothing.
 
@@ -945,9 +945,9 @@ step 5's self-check stops each session loudly on its own issue.
    >
    > **Why the exit code alone is not enough.** `gh auth status` **exits 0 while
    > reporting failure**. Measured in a cloud session on 2026-09-05
-   > (`dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md`) and again in a
+   > (`dev_docs/research/2026-09-05-cloud-session-plugin-and-proxy.md`) and again in a
    > routine on 2026-09-07 (run `cse_016MBzxJfhs7w8pgwt1k2Hjd`; recorded in
-   > `dev_docs/decisions/2026-09-07-cloud-routine-plugins-and-gh.md`) — both printed `Active account: true` and
+   > `dev_docs/research/2026-09-07-cloud-routine-plugins-and-gh.md`) — both printed `Active account: true` and
    > `The token in GH_TOKEN is invalid.` and returned **rc 0**. So an `if ! gh auth
    > status` guard never fires, and this whole self-check silently passes in exactly the
    > environment it exists to stop. `gh api user` is no better: it succeeds on the same
@@ -965,7 +965,7 @@ step 5's self-check stops each session loudly on its own issue.
    all.** The gate reads a config flag; the self-check reads the VM. Both failures
    it guards against were **measured**, not imagined: a cloud session started with
    the plugin absent, and its `gh` 403'd on reads as well as writes
-   (`dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md`). So a session
+   (`dev_docs/research/2026-09-05-cloud-session-plugin-and-proxy.md`). So a session
    dispatched into an environment that has not solved both stops on its own issue
    and says so, rather than claiming work it cannot write back. Keeping the check
    inside the session is section 3's rule for the same reason: what the VM actually

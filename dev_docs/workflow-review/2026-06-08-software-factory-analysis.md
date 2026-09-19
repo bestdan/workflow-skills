@@ -1,3 +1,7 @@
+---
+created: 2026-06-08
+---
+
 # The Task Loop as a Software Factory
 
 _Framing the workflow as a production line — Linear as the project-management

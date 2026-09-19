@@ -1,3 +1,7 @@
+---
+created: 2026-06-08
+---
+
 # The Task Workflow, End to End
 
 _A plain-language tour of how `workflow-skills` turns feature design and slicing

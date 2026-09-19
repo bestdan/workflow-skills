@@ -1,3 +1,7 @@
+---
+created: 2026-08-24
+---
+
 # local-review — threaded replies and multi-round review
 
 Design for a conversational review loop in `local-review`: the agent answers a

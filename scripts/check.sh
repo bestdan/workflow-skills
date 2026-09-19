@@ -121,6 +121,7 @@ run() {
 run dprint check --incremental=false
 run claude plugin validate . --strict
 run uv run scripts/validate.py
+run scripts/dev-docs-layout.sh
 run scripts/typecheck.sh
 run scripts/lint-python.sh
 if [[ "$fast" == 1 ]]; then

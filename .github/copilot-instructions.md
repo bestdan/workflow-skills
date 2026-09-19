@@ -53,6 +53,12 @@ tokens in someone's context window.
 - **`plugin.json` and `marketplace.json` versions must stay equal**, as plain
   `X.Y.Z` — `validate.py` rejects a `v` prefix. The Release workflow normally
   owns both; if you bump by hand, bump both.
+- **`dev_docs/` follows the shared layout, and `just check` enforces it.** A
+  date in a filename means a record; no date means a live file kept current.
+  Which directory holds what is `dev_docs/README.md`, and
+  the convention itself is `dev_docs_layout.md` in the `agent-guidance` plugin.
+  `scripts/dev-docs-layout.sh` runs that plugin's checker and **fails when the
+  plugin is missing** rather than skipping, so CI clones it.
 - **`dev_docs/tasks/` is ignored except `.task-config.yml`.** Plan scaffolding
   there is ephemeral in-flight state — durable wisdom graduates to a top-level
   `dev_docs/<name>.md`. See the comment block in `.gitignore` before trying to

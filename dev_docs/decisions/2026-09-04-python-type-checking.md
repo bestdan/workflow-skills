@@ -1,3 +1,8 @@
+---
+created: 2026-09-04
+status: accepted
+---
+
 # Python type checking: mypy, four tiers, a 3.9 consumer floor
 
 Why the gate runs mypy rather than pyright or `ty`, why tiers are split by who
@@ -134,7 +139,7 @@ in comments and docstrings that ruff-_format_ leaves alone by design. `B`/`SIM`/
 `C4` add 11 minor findings; one of them (`SIM102`) wants a nested guard collapsed
 whose intervening comment explains the defect it closes.
 
-## What would change this
+## Revisit when
 
 Concrete triggers, so a future contributor can recognise one rather than
 re-litigate the whole question. **Any one is sufficient.**

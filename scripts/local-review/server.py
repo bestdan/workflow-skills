@@ -1059,7 +1059,7 @@ function placeThreads(files, threads){
 // emits HTML, are never called. describe() turns tokens into a plain tree and
 // is a pure function (no DOM), so the security-critical half is testable under
 // bare node; materialize() turns that tree into elements and has no logic.
-// Full rationale: dev_docs/designs/local-review-markdown-preview.md
+// Full rationale: dev_docs/designs/2026-08-20-local-review-markdown-preview.md
 const PREVIEW_MAX_BYTES = 512 * 1024;
 const PREVIEW_MAX_DEPTH = 24;
 

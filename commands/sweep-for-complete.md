@@ -62,9 +62,9 @@ GitHub channel there. That MCP surface comes
 from the **GitHub App installed for claude.ai/code**, not from a claude.ai
 connector — so it will not appear in a routine's connector list, and there is
 nothing to "attach" there. Measurements:
-`dev_docs/decisions/2026-09-07-cloud-routine-plugins-and-gh.md`; the surface
+`dev_docs/research/2026-09-07-cloud-routine-plugins-and-gh.md`; the surface
 was enumerated in full (58 tools) in
-`dev_docs/decisions/2026-08-24-routine-claim-channel.md`.
+`dev_docs/research/2026-08-24-routine-claim-channel.md`.
 
 **If the MCP tools are absent, the run completes nothing.** Resolving a PR
 from a `links` attachment is discovery, not verification — it proves a PR is

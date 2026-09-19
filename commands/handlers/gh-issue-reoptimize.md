@@ -17,7 +17,7 @@ a human-readable copy — visible where the dependency panel is easy to miss.
 > whole channel: a routine read `blocked_by` over plain `curl` (`HTTP 200`,
 > correct data), carrying only the `proxy-injected` placeholder, because the
 > egress proxy substitutes a credential. See
-> [`2026-09-05-cloud-session-plugin-and-proxy.md`](../../dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md)
+> [`2026-09-05-cloud-session-plugin-and-proxy.md`](../../dev_docs/research/2026-09-05-cloud-session-plugin-and-proxy.md)
 > → "2026-09-16: the same read, from a routine". The footer's surviving reason is
 > visibility to **humans**; do not re-derive the unattended one.
 
@@ -308,7 +308,7 @@ wrong one whenever `gh-issue.repo` is configured.
   > 200` with correct data, carrying only the `proxy-injected` placeholder — the
   > egress proxy substitutes a credential. The connector limit is real; it was
   > never the whole channel. See
-  > `dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md` →
+  > `dev_docs/research/2026-09-05-cloud-session-plugin-and-proxy.md` →
   > "2026-09-16: the same read, from a routine".
 
 ## Optional deepening — cross-check the source plan

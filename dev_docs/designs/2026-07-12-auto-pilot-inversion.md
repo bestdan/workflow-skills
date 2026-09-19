@@ -4,9 +4,9 @@ status: draft v2 — revised after adversarial review
 created: 2026-07-12
 revised: 2026-07-12
 related:
-  - dev_docs/auto-pilot-developer-review-feedback.md
-  - dev_docs/auto-pilot-design-review-codex.md
-  - dev_docs/auto-pilot-inversion-design-review-codex.md
+  - dev_docs/research/2026-07-12-auto-pilot-developer-review-feedback.md
+  - dev_docs/research/2026-07-13-auto-pilot-design-review-codex.md
+  - dev_docs/research/2026-07-13-auto-pilot-inversion-design-review-codex.md
 ---
 
 # Auto-pilot: invert the authority boundary (scoped)

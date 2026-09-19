@@ -299,7 +299,7 @@ only be recorded as prose.
 > `blocked_by` over plain `curl` (`HTTP 200`, correct data), carrying nothing but
 > the `proxy-injected` placeholder, because the egress proxy substitutes a
 > credential. A cloud session does the same. See
-> `dev_docs/decisions/2026-09-05-cloud-session-plugin-and-proxy.md` →
+> `dev_docs/research/2026-09-05-cloud-session-plugin-and-proxy.md` →
 > "2026-09-16: the same read, from a routine".
 >
 > **The footer is still written, and writing both forms is the settled design** —
@@ -502,7 +502,7 @@ Four things the helper settles, so don't re-derive them here:
 Without `--apply` the helper writes nothing and reports what it would create, so
 drop the flag for a rehearsal. Two limits worth stating plainly: this path is
 **local only** — a cloud routine has no `gh` and the GitHub MCP connector has no
-dependency tool (`dev_docs/decisions/2026-08-24-routine-claim-channel.md`) — and
+dependency tool (`dev_docs/research/2026-08-24-routine-claim-channel.md`) — and
 the local `sandbox-network-guard` hook blocks non-GET `gh api`, so `--apply`
 needs the sandbox escape.
 

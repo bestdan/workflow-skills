@@ -1,3 +1,7 @@
+---
+created: 2026-07-12
+---
+
 # Auto-pilot hardening: review feedback
 
 Written after co-reviewing PRs #188–#191 (auto-pilot hardening tasks 11, 14, 15, 16). Three of the four carried defects that a green suite did not catch; two were merge blockers, and one was a reproducible data-loss bug. This is a note about the _class_ of thing that got missed, not about those four PRs.
@@ -148,17 +152,17 @@ Ask of any guard, harness, or invariant check: **what would a bypass look like, 
 
 Before opening a PR:
 
-- [ ] Every stub's contract checked against the real binary at least once (exit codes, not just stdout).
-- [ ] Generated artifacts are driven **as generated** — the test does not re-implement the call sequence.
-- [ ] No side effect can escape the suite: every external side-effecting binary shadowed **globally**, with an assertion that the escape count is zero — and check that no fixture **overrides `PATH`** past the shadow (a guard that counts what it catches cannot see what got away).
-- [ ] Fixtures include the **in-flight** state between each pair of consecutive writes, not only the settled one.
-- [ ] Any new early return: everything downstream classified _must-run_ vs _skip_, and the seam made explicit in code.
-- [ ] Every load-bearing claim in the PR body names a test that fails if the claim goes false.
-- [ ] Each new guard mutation-tested: delete it, confirm the new tests go red.
-- [ ] Diff grepped for discarded exit codes and `|| true` around anything that can `exit`.
+- Every stub's contract checked against the real binary at least once (exit codes, not just stdout).
+- Generated artifacts are driven **as generated** — the test does not re-implement the call sequence.
+- No side effect can escape the suite: every external side-effecting binary shadowed **globally**, with an assertion that the escape count is zero — and check that no fixture **overrides `PATH`** past the shadow (a guard that counts what it catches cannot see what got away).
+- Fixtures include the **in-flight** state between each pair of consecutive writes, not only the settled one.
+- Any new early return: everything downstream classified _must-run_ vs _skip_, and the seam made explicit in code.
+- Every load-bearing claim in the PR body names a test that fails if the claim goes false.
+- Each new guard mutation-tested: delete it, confirm the new tests go red.
+- Diff grepped for discarded exit codes and `|| true` around anything that can `exit`.
 
 After any rebase or restack, before merge:
 
-- [ ] Suite re-run (free — necessary, not sufficient).
-- [ ] **The PR's own "How to evaluate" criterion re-run by hand against the rebased head.**
-- [ ] The merged result audited for changes that landed **without** a conflict marker — those are the dangerous ones.
+- Suite re-run (free — necessary, not sufficient).
+- **The PR's own "How to evaluate" criterion re-run by hand against the rebased head.**
+- The merged result audited for changes that landed **without** a conflict marker — those are the dangerous ones.

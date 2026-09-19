@@ -5,7 +5,7 @@ secret a skill, command, or asset script needs — the Linear API key today, a J
 or a GitHub token tomorrow.
 
 The design rationale, the alternatives that were rejected, and why the rules are shaped
-this way live in [`dev_docs/designs/auth-key-resolution.md`](designs/auth-key-resolution.md).
+this way live in [`dev_docs/designs/2026-08-01-auth-key-resolution.md`](designs/2026-08-01-auth-key-resolution.md).
 This document is the contract itself.
 
 ## The three names

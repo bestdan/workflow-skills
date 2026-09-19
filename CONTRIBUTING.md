@@ -92,7 +92,7 @@ Five deterministic, blocking checks, plus the shell lint and Bats suites:
    which is every file here. Every tier always runs and the exit code is their
    OR, so one failing never hides another's findings. The script's header
    carries the operational detail;
-   [`dev_docs/decisions/python_type_checking.md`](dev_docs/decisions/python_type_checking.md)
+   [`dev_docs/decisions/2026-09-04-python-type-checking.md`](dev_docs/decisions/2026-09-04-python-type-checking.md)
    carries why mypy rather than pyright or `ty`, and **what would change that** —
    read it before swapping the checker or raising a floor.
 5. **`scripts/lint-python.sh`** — `ruff check` at ruff's **default** rules (E4,

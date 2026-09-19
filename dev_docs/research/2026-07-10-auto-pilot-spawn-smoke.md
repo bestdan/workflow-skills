@@ -103,10 +103,10 @@ launchctl print "gui/$(id -u)/com.autopilot.smoke" 2>&1 | tail -1          # sho
 
 ## Sign-off
 
-- [ ] §1 write-outside DENIED, read-outside DENIED, unlisted-exec DENIED, write-inside OK
-- [ ] §2(a) allowlisted host OK
-- [ ] §2(b) non-allowlisted host DENIED
-- [ ] §2(c) raw IP DENIED **and** §2(d) raw socket DENIED — or the layer-1 fix applied and re-verified
-- [ ] §3 job loads with a pid and `teardown` removes it
+- §1 write-outside DENIED, read-outside DENIED, unlisted-exec DENIED, write-inside OK
+- §2(a) allowlisted host OK
+- §2(b) non-allowlisted host DENIED
+- §2(c) raw IP DENIED **and** §2(d) raw socket DENIED — or the layer-1 fix applied and re-verified
+- §3 job loads with a pid and `teardown` removes it
 
 Clean up: `rm -rf "$D"` (and `launchctl bootout` the label if you skipped §3's teardown).

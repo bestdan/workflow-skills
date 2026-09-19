@@ -1,3 +1,7 @@
+---
+created: 2026-08-21
+---
+
 # Why codex passed prose-only diffs — audit and experiment (2026-08-21)
 
 A snapshot. The measurements below are tied to specific commits and to the
@@ -41,21 +45,21 @@ commit `49285ebf3` is the fix for its own sharpest finding, so testing against
 were recovered from each comment's anchor: `6863ec384` (#402) and `58950eee5`
 (#405).
 
-| PR   | Finding                               | Evidence needed                  | Verdict       |
-| ---- | ------------------------------------- | -------------------------------- | ------------- |
-| #402 | `do-tasks.md:311` `assigneeId`        | `linear-claim.md:73`             | **invisible** |
-| #402 | `jira-claim.md:93` blocked_statuses   | config's "claim flow reads" list | **invisible** |
-| #402 | `SKILL.md:82` per-operator cap        | `repo-pr-execute.md:174-190`     | **invisible** |
-| #405 | `attendedness.md:37`                  | `repo-pr-execute.md:171-173`     | visible       |
-| #405 | `attendedness.md:47` remote dispatch  | `repo-pr-execute.md:171-173`     | visible       |
-| #405 | `wip_gate_attendedness.md:46`         | self-contradictory added para    | visible       |
-| #405 | `SKILL.md:91`                         | `repo-pr-execute.md:171-173`     | visible       |
-| #405 | `repo-pr-execute.md:173` cron overrun | added para vs added rule         | visible       |
-| #405 | `gh-issue-claim.md:68` step 3         | step 3, ~30 lines below hunk     | **invisible** |
-| #405 | `jira-claim.md:72` step 3             | same                             | **invisible** |
-| #405 | `do-tasks.md:312` steps 3/4/5         | gate steps below hunk            | **invisible** |
-| #405 | `do-tasks.md:32` `--non-interactive`  | preflight at lines 18-20         | **invisible** |
-| #405 | `SKILL.md:130` flag matrix            | `do-tasks.md:42-55`              | **invisible** |
+| PR   | Finding                                  | Evidence needed                  | Verdict       |
+| ---- | ---------------------------------------- | -------------------------------- | ------------- |
+| #402 | `do-tasks.md:311` `assigneeId`           | `linear-claim.md:73`             | **invisible** |
+| #402 | `jira-claim.md:93` blocked_statuses      | config's "claim flow reads" list | **invisible** |
+| #402 | `SKILL.md:82` per-operator cap           | `repo-pr-execute.md:174-190`     | **invisible** |
+| #405 | `attendedness.md:37`                     | `repo-pr-execute.md:171-173`     | visible       |
+| #405 | `attendedness.md:47` remote dispatch     | `repo-pr-execute.md:171-173`     | visible       |
+| #405 | `2026-08-21-wip-gate-attendedness.md:46` | self-contradictory added para    | visible       |
+| #405 | `SKILL.md:91`                            | `repo-pr-execute.md:171-173`     | visible       |
+| #405 | `repo-pr-execute.md:173` cron overrun    | added para vs added rule         | visible       |
+| #405 | `gh-issue-claim.md:68` step 3            | step 3, ~30 lines below hunk     | **invisible** |
+| #405 | `jira-claim.md:72` step 3                | same                             | **invisible** |
+| #405 | `do-tasks.md:312` steps 3/4/5            | gate steps below hunk            | **invisible** |
+| #405 | `do-tasks.md:32` `--non-interactive`     | preflight at lines 18-20         | **invisible** |
+| #405 | `SKILL.md:130` flag matrix               | `do-tasks.md:42-55`              | **invisible** |
 
 **8 of 13 (62%) diff-invisible. 5 of 13 (38%) fully visible and missed by
 codex.** All five visible ones are on #405, and all turn on an added paragraph
