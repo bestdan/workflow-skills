@@ -131,7 +131,12 @@ fi
 ref_commit="$(git rev-parse --verify --quiet "refs/heads/$ref^{commit}")"
 [ -n "$ref_commit" ] || ref_commit="$(git rev-parse --verify --quiet "$ref^{commit}")" || die "ref '$ref' does not resolve to a commit"
 
-git merge-tree --write-tree --quiet "$base_commit" "$ref_commit" >/dev/null 2>&1
+# No --quiet here: merge-tree learned it well after --write-tree, so a git
+# inside the window the gate above admits rejects it with exit 129 — which is
+# neither 0 nor 1 and so becomes reason=merge-tree-failed, an unknown verdict
+# on every run with nothing pointing at the flag. The redirect already
+# discards what --quiet would suppress, and the exit status is unchanged.
+git merge-tree --write-tree "$base_commit" "$ref_commit" >/dev/null 2>&1
 merge_status=$?
 
 case "$merge_status" in
