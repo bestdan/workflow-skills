@@ -929,10 +929,16 @@ port_s, out_s = run_startup_output(ssh_env)
 check("ssh hint: printed under SSH_CONNECTION", "SSH:" in out_s, out_s)
 check("ssh hint: tunnel command pins the bound port on both sides",
       f"ssh -L {port_s}:127.0.0.1:{port_s} " in out_s, out_s)
-check("ssh hint: names the local-port-must-match failure",
-      "Origin check" in out_s and "local port" in out_s, out_s)
-check("ssh hint: offers the permanent LocalForward config with the bound port",
-      f"LocalForward {port_s} 127.0.0.1:{port_s}" in out_s, out_s)
+# The hint used to insist the local side match the bound port, which is what
+# made two forwarded hosts collide on one local port. It now says the opposite,
+# so assert the new claim rather than merely that some prose is present: it
+# must offer a free local side and warn about the per-host collision.
+check("ssh hint: says the local side need not match the bound port",
+      "need not be" in out_s, out_s)
+check("ssh hint: warns that two hosts sharing a local port lose the forward",
+      "cannot bind" in out_s, out_s)
+check("ssh hint: offers the permanent LocalForward config against the bound port",
+      f"LocalForward L 127.0.0.1:{port_s}" in out_s, out_s)
 
 tty_env = dict(base_env, SSH_TTY="/dev/pts/3")
 _, out_t = run_startup_output(tty_env)
@@ -1948,15 +1954,57 @@ try:
               os.path.exists(sec_out) and json.load(open(sec_out)).get("summary") == "sameorigin", sec_out)
         os.unlink(sec_out)
 
-        vanity_origin = f"http://review.localhost:{port}"
+        # Host travels with Origin here, because _origin_ok() is a real
+        # same-origin test: it compares Origin against the request's OWN Host.
+        # A browser on http://review.localhost:<port>/ sends both, so sending
+        # Origin alone would describe a request no browser makes.
+        vanity_host = f"review.localhost:{port}"
+        vanity_origin = f"http://{vanity_host}"
         req = _urlrequest.Request(
             f"{url}submit", data=b'{"meta":{},"summary":"vanity","comments":[]}',
-            headers={"Content-Type": "application/json", "Origin": vanity_origin}, method="POST",
+            headers={"Content-Type": "application/json", "Origin": vanity_origin,
+                     "Host": vanity_host}, method="POST",
         )
         with _urlrequest.urlopen(req, timeout=5) as resp:
             check("server: POST /submit with Origin review.localhost returns 200", resp.status == 200, resp.status)
         check("server: OUT written after review.localhost-origin submit",
               os.path.exists(sec_out) and json.load(open(sec_out)).get("summary") == "vanity", sec_out)
+        os.unlink(sec_out)
+
+        # An allowlisted hostname does NOT license a foreign Origin: Host and
+        # Origin must name the same thing. This is the DNS-rebinding shape with
+        # the names swapped, and the pair-check is the only thing rejecting it.
+        req = _urlrequest.Request(
+            f"{url}submit", data=b'{"meta":{},"summary":"mismatch","comments":[]}',
+            headers={"Content-Type": "application/json",
+                     "Origin": f"http://localhost:{port}", "Host": vanity_host}, method="POST",
+        )
+        try:
+            _urlrequest.urlopen(req, timeout=5)
+            bad("server: POST /submit with Origin and Host disagreeing returns 403",
+                "request unexpectedly succeeded")
+        except _urlerror.HTTPError as e:
+            check("server: POST /submit with Origin and Host disagreeing returns 403", e.code == 403, e.code)
+        check("server: Origin/Host mismatch POST does not write OUT", not os.path.exists(sec_out), sec_out)
+
+        # The tunnel case, and the reason _origin_ok() moved off the bound
+        # port. `ssh -L <L>:127.0.0.1:<bound>` makes the browser's Host and
+        # Origin name L while the server bound something else, which is not an
+        # attack and must be accepted. L is chosen to differ from the bound
+        # port; the request still arrives on the real socket, exactly as it
+        # does through a forward.
+        tunnel_port = port + 1 if port + 1 < 65536 else port - 1
+        tunnel_host = f"127.0.0.1:{tunnel_port}"
+        req = _urlrequest.Request(
+            f"{url}submit", data=b'{"meta":{},"summary":"tunnel","comments":[]}',
+            headers={"Content-Type": "application/json", "Origin": f"http://{tunnel_host}",
+                     "Host": tunnel_host}, method="POST",
+        )
+        with _urlrequest.urlopen(req, timeout=5) as resp:
+            check("server: POST /submit through a port-translating tunnel returns 200",
+                  resp.status == 200, resp.status)
+        check("server: OUT written after tunnelled submit",
+              os.path.exists(sec_out) and json.load(open(sec_out)).get("summary") == "tunnel", sec_out)
         os.unlink(sec_out)
 
         evil_vanity_origin = f"http://evil.localhost:{port}"
