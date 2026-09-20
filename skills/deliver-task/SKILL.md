@@ -286,6 +286,17 @@ are never applied silently:
 - **standalone (no `--questions`)**, carry them in the hand-off summary instead —
   this skill never writes run-state files itself.
 
+**Co-review's Next round recommendation rides the same path.** After the last
+round, append it to `--questions <path>` as one more entry — the question is
+whether to run another co-review round on this PR, the options are
+`another round` | `no further round`, the call is deferred to the human, and
+the reasoning is co-review's stated reason verbatim. The hand-off summary
+(step 7) is never written to run state, and `REPORT.md` is rebuilt from
+`RUN.md` and `QUESTIONS.md` alone, so this entry is what puts the
+recommendation in front of the morning reader; without it the recommendation
+exists only in transient command output. Standalone, it rides in the hand-off
+summary like the judgment calls above.
+
 **Verification tests come back with the findings.** Co-review's step 9 hands
 over a list of real-machine checks, each naming the environment it needs and
 who runs it. Run the items marked as yours once, against the final branch tip
