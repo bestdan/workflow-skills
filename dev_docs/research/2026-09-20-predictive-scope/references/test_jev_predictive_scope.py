@@ -379,6 +379,40 @@ def test_spreads_cover_every_label_in_the_run() -> None:
     check(out.count("pass ") == len(run["passes"]), "one block per pass")
 
 
+def test_floor_sensitivity_prints_every_threshold() -> None:
+    """The decoder-free floor count depends on where the 0.5 line sits; the report
+    must show the count at each threshold so a reader can see the harm is not
+    threshold-fragile. Pinned on a synthetic run so the arithmetic is checkable."""
+    run = {
+        "model": "synthetic",
+        "passes": [
+            {
+                "detail": [
+                    {"id": "a", "label": "pr-sized", "subsystems": 0.55},
+                    {"id": "b", "label": "multi-file", "subsystems": 0.65},
+                    {"id": "c", "label": "pr-sized", "subsystems": 0.75},
+                    {"id": "d", "label": "single-file", "subsystems": 0.10},
+                ]
+            }
+        ],
+    }
+    out = probe.floor_sensitivity(run)
+    for t in probe.SENSITIVITY_THRESHOLDS:
+        check(f"threshold {t:.1f}" in out, f"threshold {t} must be printed")
+    check(
+        "threshold 0.5   fired   3   wrong by construction   2" in out,
+        "0.5: a,b,c fire; a,c wrong",
+    )
+    check(
+        "threshold 0.7   fired   1   wrong by construction   1" in out,
+        "0.7: only c fires; wrong",
+    )
+    check(
+        "threshold 0.8   fired   0   wrong by construction   0" in out,
+        "0.8: nothing fires",
+    )
+
+
 def test_the_scale_is_clamped_at_both_ends() -> None:
     check(
         probe.level_from(-0.2, 0.0) == "single-file", "below zero clamps to the floor"

@@ -267,7 +267,15 @@ it does, printed by `--analyze` on every pass, one of which needs no decoder at 
 `pr-sized` cards and 0.54 on `multi-file`**, with ranges of 0.13–0.76 and 0.22–0.77:
 it barely separates the two labels the floor exists to discriminate, and the 0.5
 threshold cuts through the middle of both. The Score does separate them — means of
-0.95 and 1.40 — which is the signal the floor overrides. Rule 3 of
+0.95 and 1.40 — which is the signal the floor overrides.
+
+Nor is 0.5 the problem. The sensitivity block `--analyze` prints pools the three passes
+and moves the line: at 0.5 the floor fires 72 times and 34 (47%) are wrong by
+construction; at 0.6, 44 and 26 (59%); at 0.7, 17 and 11 (65%); at 0.8 it never fires.
+Tightening the threshold raises the share of firings that are wrong — the confident
+`yes` answers are more often on `pr-sized` cards, not less — so there is no setting at
+which the floor helps. The threshold was never fitted, and this is why fitting it would
+not have rescued it either. Rule 3 of
 [`../../typed-model-calls.md`](../../typed-model-calls.md) is the general form: a
 signal's per-label spread has to be printed before anything branches on it, and this
 one was not until review asked for it.

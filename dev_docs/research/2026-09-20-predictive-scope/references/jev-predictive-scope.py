@@ -278,6 +278,38 @@ def run_suite(key: str, corpus: dict, repeat: int, model: str = MODEL) -> dict:
     return {"model": model, "passes": passes, "input_tokens": tokens}
 
 
+SENSITIVITY_THRESHOLDS = (0.5, 0.6, 0.7, 0.8)
+
+
+def floor_sensitivity(run: dict, ids: set[str] | None = None) -> str:
+    """Firings and wrong-by-construction firings at each threshold, pooled over passes.
+
+    `SUBSYSTEM_THRESHOLD` is 0.5 because that is a Noul's natural yes/no midpoint, not
+    because anything was fitted — and it stays unfitted, since a cutoff tuned on the
+    set it is then scored on is the hazard rule 4 names. What a reader needs instead
+    is whether the floor's harm depends on where the line sits. It does not, and not
+    in the direction a rescue would need: at 0.5 close to half its firings land on
+    cards truly below `multi-file`, where raising is wrong however the Score is read,
+    and tightening the threshold raises that share rather than lowering it, until at
+    0.8 the floor never fires at all. There is no setting at which it helps.
+    """
+    below = ("single-file", "pr-sized")
+    rows = [
+        d for p in run["passes"] for d in p["detail"] if ids is None or d["id"] in ids
+    ]
+    out = [
+        "floor sensitivity (pooled over passes; wrong = fired on a card truly below multi-file):"
+    ]
+    for t in SENSITIVITY_THRESHOLDS:
+        fired = [d for d in rows if d["subsystems"] >= t]
+        wrong = sum(1 for d in fired if d["label"] in below)
+        share = f"{wrong / len(fired):.0%}" if fired else "n/a"
+        out.append(
+            f"  threshold {t:.1f}   fired {len(fired):>3}   wrong by construction {wrong:>3}   ({share})"
+        )
+    return "\n".join(out)
+
+
 def format_analysis(
     run: dict,
     ablate_floor: bool = False,
@@ -386,6 +418,8 @@ def format_analysis(
             f"  spread {spread:.1%} vs margin over base rate {margin:+.1%}  "
             f"-- {'spread exceeds the margin' if spread > abs(margin) else 'margin exceeds the spread'}"
         )
+    out.append("")
+    out.append(floor_sensitivity(run, ids=ids))
     out.append(
         "\nSection 3 measured 71.6% exact post-hoc against a different distribution. "
         "That\nnumber and these are not comparable; the base rate above is the "
