@@ -108,10 +108,10 @@ restate none of it.
 The two lifecycle points answer different questions, and the difference is not
 cosmetic:
 
-| Gate            | Question                                          | What a card does when it trips                                    |
-| --------------- | ------------------------------------------------- | ----------------------------------------------------------------- |
-| Promote-time    | Is this card well enough specified for automation? | Demoted. Only a human can retrieve it — the promoter never re-scores a scored card. |
-| Claim-time      | May the loop take this card *right now*?          | Stays `ready` and visible; passed over until the bound or the card changes. |
+| Gate         | Question                                           | What a card does when it trips                                                      |
+| ------------ | -------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Promote-time | Is this card well enough specified for automation? | Demoted. Only a human can retrieve it — the promoter never re-scores a scored card. |
+| Claim-time   | May the loop take this card _right now_?           | Stays `ready` and visible; passed over until the bound or the card changes.         |
 
 Size is the second question. A card sized `5` is not badly written, and nothing
 about it improves by a human looking at it — it is simply larger than one

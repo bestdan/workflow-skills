@@ -803,16 +803,27 @@ step 5's self-check stops each session loudly on its own issue.
    (<count> in flight) — nothing dispatched`. This bound is **unconditional**: a
    batch never offers the attended override (`commands/handlers/attendedness.md`
    step 2).
-3. **Drop the dependency-blocked.** One call, over **exactly** the ranked
-   candidates from step 1:
+3. **Drop the dependency-blocked and the oversized.** One call, over **exactly** the
+   ranked candidates from step 1:
 
    ```bash
    python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-ready.py" \
-     --repo <repo> --issue <n1> --issue <n2> ... --json
+     --repo <repo> --issue <n1> --issue <n2> ... \
+     --max-estimate <gh-issue.max_estimate, default 3> --json
    ```
 
    Keep the numbers in its `ready` array, **in step 1's ranked order**; record each
-   entry in `blocked` as `waiting on #<b>` naming the open blockers it reports.
+   entry in `blocked` as `waiting on #<b>` naming the open blockers it reports, and
+   each entry in `oversized` with the reason string it reports.
+
+   **`--max-estimate` is not optional here.** A batch is the one path with no human
+   to offer the override to (`commands/handlers/attendedness.md` — an at-limit batch
+   declines rather than prompting), so it is exactly where the bound has to hold.
+   Omitting it would dispatch a remote session per oversized issue — the unattended
+   claim the bound exists to prevent. Resolve it from the merged config including any
+   `max-estimate=` run override (`commands/task-config.md` → "Run-scoped overrides"),
+   and pass the **resolved** number, so a caller that raised the bound gets the raised
+   bound here rather than the file's.
 
    **There is no body-footer path on this handler.** A `Blocked by: #<n>` line in an
    issue body is a human-readable **echo** of a native `blocked_by` edge, never the
@@ -852,10 +863,20 @@ step 5's self-check stops each session loudly on its own issue.
      — a blocker can be reopened between selection and claim, and unlike the WIP
      bound there is no arithmetic making the recheck redundant. The session runs
      `python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-ready.py"
-     --repo <repo> --issue <n> --json` against its one pinned issue and **stops
-     without claiming** if it comes back `blocked`, naming the open blockers.
-     Claiming an issue whose dependencies are no longer met is a mutation this
-     batch would otherwise make on stale evidence.
+     --repo <repo> --issue <n> --max-estimate <the dispatcher's resolved bound>
+     --json` against its one pinned issue and **stops without claiming** if it
+     comes back `blocked`, naming the open blockers. Claiming an issue whose
+     dependencies are no longer met is a mutation this batch would otherwise make
+     on stale evidence.
+
+     **Inline the resolved bound in the prompt, as a number.** The dispatched
+     session has no task config (§4's self-contained rule: a fresh clone gitignores
+     `dev_docs/tasks/`), so a `--max-estimate` it is told to read from config
+     resolves to nothing and the recheck silently drops its size gate. Pass the
+     integer the dispatcher resolved, the same way the WIP bound and the project
+     scope are inlined. An issue whose `est:` crossed the bound between selection
+     and claim comes back `oversized`, and the session stops without claiming,
+     exactly as for `blocked`.
 
      **Say what this costs: `slack` becomes the only WIP bound, measured once.**
      The session-side gate was redundant against _this_ batch's own dispatches —

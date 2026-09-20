@@ -317,7 +317,10 @@ class EstimateGateTests(unittest.TestCase):
         repo = FakeRepo({1: "big"}, estimates={1: 8})
         result = self._compute(repo, issue_numbers=[1], max_estimate=3)
         self.assertEqual([i["number"] for i in result["oversized"]], [1])
-        self.assertEqual([c[:2] for c in repo.calls if c[:2] == ["issue", "view"]], [["issue", "view"]])
+        self.assertEqual(
+            [c[:2] for c in repo.calls if c[:2] == ["issue", "view"]],
+            [["issue", "view"]],
+        )
 
     def test_candidate_scoped_mode_skips_the_label_read_when_not_gating(self):
         repo = FakeRepo({1: "whatever"}, estimates={1: 8})

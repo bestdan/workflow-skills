@@ -25,12 +25,14 @@ bestdan/workflow-skills#746 names. The bound is EXCLUSIVE (`est:3` fails
 against `3`) and the reason string is byte-identical to `_linear_rank.py`'s, so
 one board reads the same on both handlers.
 
-**Omitting the flag means no size gate.** That is for a caller which has already
-discharged the decision — an override granted through
-`commands/handlers/attendedness.md`, or a `max-estimate=` run override. The claim
-flow itself always passes the configured bound and offers the override on the
-drop, because "is a human watching?" is not observable and this script must not
-guess it (attendedness.md, "Do not classify the run").
+**Omitting the flag means no size gate**, and the only caller entitled to omit it
+is one whose human already granted the override through
+`commands/handlers/attendedness.md`. A `max-estimate=` run override is NOT such a
+caller: it replaces the bound, so it is passed here as a different `--max-estimate`
+value, never by dropping the flag. The claim flow otherwise always passes the
+resolved bound and offers the override on the drop, because "is a human watching?"
+is not observable and this script must not guess it (attendedness.md, "Do not
+classify the run").
 
 Size is a routing concern for automation, not a quality verdict on the card, so
 an oversized issue stays `status:2_ready` and visible here rather than being
@@ -329,8 +331,8 @@ def main(argv=None):
         metavar="N",
         help=(
             "drop candidates whose `est:` label is N or higher (EXCLUSIVE bound, "
-            "matching linear-rank.py). Omitted means no size gate at all — for a "
-            "caller that already discharged the decision; see gh-issue-claim.md"
+            "matching linear-rank.py). Omitted means no size gate at all — only "
+            "for a caller whose human granted the override; see gh-issue-claim.md"
         ),
     )
     parser.add_argument("--labels-file", type=Path, default=DEFAULT_LABELS_FILE)

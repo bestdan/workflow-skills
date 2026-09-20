@@ -99,7 +99,7 @@ It prints the comma-separated label names (`prio:2,est:3`) to splice into step 5
 
 If a relative path doesn't resolve, find it with **Glob** (`**/commands/handlers/task-fill.md`) and Read it.
 
-Scoring then reads the **backfilled** `est:` in the gate below. That is the point of backfilling here: an issue with no `est:` label used to pass the size gate unconditionally, which degraded a deterministic check into the judgment check it exists to backstop.
+The backfilled `est:` is **recorded for claim-time selection**, not read by any gate in this step. `/do-tasks` is what consumes it (`commands/handlers/gh-issue-claim.md` → "Find candidates", via `gh-issue-ready.py --max-estimate`), which is why filling it here still matters: an issue with no `est:` label is invisible to that bound, so the promoter is the only place the number reliably gets written. Scoring below judges the card's specification, never its size.
 
 **HIGH (→ promote)** requires ALL of:
 
