@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.64.0] - 2026-09-20
+
+### Features
+
+- port the lifecycle hooks and register them in hooks.json [N/A] (#800) (96056e6)
+
 ## [2.63.0] - 2026-09-20
 
 ### Features
