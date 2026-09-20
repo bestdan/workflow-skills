@@ -7,6 +7,7 @@
 #
 #   exit 0   removed (or the checkout was already gone)
 #   exit 1   refused by the cwd guard or a pre-flight write probe
+#   exit 64  the caller named nothing to remove
 #   otherwise git's own exit status from the removal
 #
 # `git worktree remove` cleans up after itself, but an `rm -rf`'d worktree
