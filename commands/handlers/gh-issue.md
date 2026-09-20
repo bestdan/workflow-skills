@@ -18,10 +18,17 @@ gh-issue:
   # on reads as well as writes. See
   # dev_docs/research/2026-09-05-cloud-session-plugin-and-proxy.md and
   # commands/do-tasks.md §4 "gh-issue batch".
-  max_estimate: 3 # optional — upper bound /promote-tasks gates an issue's `est:` label against.
-  # Same key name, same Fibonacci scale and same default (3) as `linear.max_estimate`
-  # (see commands/handlers/linear-common.md "Config block"). gh-issue has no per-project
-  # list, so there is no per-scope override — this one value covers the repo.
+  max_estimate: 3 # optional — upper bound /do-tasks gates an issue's `est:` label against
+  # AT CLAIM. Same key name, same Fibonacci scale, same default (3) and — since v2.59 —
+  # the same lifecycle point as `linear.max_estimate` (see commands/handlers/linear-common.md
+  # "Config block"). It used to differ: this handler gated at promote and demoted the card,
+  # which is the divergence bestdan/workflow-skills#746 named. commands/handlers/task-fill.md
+  # "Where the estimate gate lives" owns the rule for both handlers.
+  # An oversized issue stays `status:2_ready` and is passed over at selection, not demoted.
+  # Override it for one run with `max-estimate=<n>` (commands/task-config.md
+  # "Run-scoped overrides") rather than editing this file.
+  # gh-issue has no per-project list, so there is no per-scope override — this one value
+  # covers the repo.
 ```
 
 ## Steps

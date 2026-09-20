@@ -36,6 +36,7 @@ The per-handler mechanics live in handler reference files this command
 - `/do-tasks --claim-only` — run only the claim step (reserve the task); no execution, no PR
 - `/do-tasks --no-claim` — skip the claim step and execute a task this caller already claimed
 - `/do-tasks --project <name|id|unassigned|any>` — **`linear` only** (the other tracker handlers have no project dimension: `gh-issue` refuses the flag, see section 4; `jira` has no scope prompt): pin which scope to claim from, skipping the scope prompt. `any` ranks across all projects (per-project caps); `unassigned` claims from the Unassigned bucket; a name/id picks one project (a live project not in config triggers an offer to add it). See section 3.
+- `/do-tasks <key>=<value>` — a **run-scoped config override**, e.g. `/do-tasks max-estimate=8`. Combinable with any flag above. `commands/task-config.md` → "Run-scoped overrides" owns the allowed keys, the precedence and the refusal on an unknown one; this file restates none of it. Report the overridden keys in section 6.
 - `/do-tasks --non-interactive` — declare that no human is present: **never prompt anywhere in this command**. Every decision that would otherwise ask takes a documented default — matching the same flag on `/co-review` and `/select-coder`, which is why the guarantee is global rather than a list of exceptions. All six prompt sites are covered: the scope prompt resolves to **Any** (section 3), the WIP gate declines instead of offering its override (`commands/handlers/attendedness.md`), the held-issue override on a direct pick declines the same way (same file), the persist-unconfigured-project offer never fires (`linear-common.md`), the legacy-migration preflight skips with a note (above), and a `--claim-only`/`--no-claim` conflict is a hard error rather than a question. Pass it from any unattended caller — a cron, a wrapper script, or a dispatching session handing work to a remote worker.
 
 **Scope of `--all` / `-n N`.** Batch _execution_ is meaningful only for **remote**
@@ -802,16 +803,32 @@ step 5's self-check stops each session loudly on its own issue.
    (<count> in flight) — nothing dispatched`. This bound is **unconditional**: a
    batch never offers the attended override (`commands/handlers/attendedness.md`
    step 2).
-3. **Drop the dependency-blocked.** One call, over **exactly** the ranked
-   candidates from step 1:
+3. **Drop the dependency-blocked and the oversized.** One call, over **exactly** the
+   ranked candidates from step 1:
 
    ```bash
    python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-ready.py" \
-     --repo <repo> --issue <n1> --issue <n2> ... --json
+     --repo <repo> --issue <n1>:<est1> --issue <n2>:<est2> ... \
+     --max-estimate <gh-issue.max_estimate, default 3> --json
    ```
 
+   Step 1's ranking query already read each candidate's labels (it ranks on
+   `prio:`), so pass each `est:` with its number — see `gh-issue-claim.md` →
+   "Find candidates" for why, and use a bare `--issue <n>` for a candidate that
+   carries no `est:` label.
+
    Keep the numbers in its `ready` array, **in step 1's ranked order**; record each
-   entry in `blocked` as `waiting on #<b>` naming the open blockers it reports.
+   entry in `blocked` as `waiting on #<b>` naming the open blockers it reports, and
+   each entry in `oversized` with the reason string it reports.
+
+   **`--max-estimate` is not optional here.** A batch is the one path with no human
+   to offer the override to (`commands/handlers/attendedness.md` — an at-limit batch
+   declines rather than prompting), so it is exactly where the bound has to hold.
+   Omitting it would dispatch a remote session per oversized issue — the unattended
+   claim the bound exists to prevent. Resolve it from the merged config including any
+   `max-estimate=` run override (`commands/task-config.md` → "Run-scoped overrides"),
+   and pass the **resolved** number, so a caller that raised the bound gets the raised
+   bound here rather than the file's.
 
    **There is no body-footer path on this handler.** A `Blocked by: #<n>` line in an
    issue body is a human-readable **echo** of a native `blocked_by` edge, never the
@@ -851,10 +868,26 @@ step 5's self-check stops each session loudly on its own issue.
      — a blocker can be reopened between selection and claim, and unlike the WIP
      bound there is no arithmetic making the recheck redundant. The session runs
      `python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-ready.py"
-     --repo <repo> --issue <n> --json` against its one pinned issue and **stops
-     without claiming** if it comes back `blocked`, naming the open blockers.
-     Claiming an issue whose dependencies are no longer met is a mutation this
-     batch would otherwise make on stale evidence.
+     --repo <repo> --issue <n> --max-estimate <the dispatcher's resolved bound>
+     --json` against its one pinned issue and **stops without claiming** if it
+     comes back `blocked`, naming the open blockers. Claiming an issue whose
+     dependencies are no longer met is a mutation this batch would otherwise make
+     on stale evidence.
+
+     **This call keeps the bare `--issue <n>` form**, unlike step 3's. The
+     `:<est>` suffix exists to reuse an estimate the caller already holds, and
+     the only estimate this session holds came from the dispatcher — the same
+     stale evidence the recheck exists to re-read. Passing it would make the
+     check confirm its own input. Let the script read the label.
+
+     **Inline the resolved bound in the prompt, as a number.** The dispatched
+     session has no task config (§4's self-contained rule: a fresh clone gitignores
+     `dev_docs/tasks/`), so a `--max-estimate` it is told to read from config
+     resolves to nothing and the recheck silently drops its size gate. Pass the
+     integer the dispatcher resolved, the same way the WIP bound and the project
+     scope are inlined. An issue whose `est:` crossed the bound between selection
+     and claim comes back `oversized`, and the session stops without claiming,
+     exactly as for `blocked`.
 
      **Say what this costs: `slack` becomes the only WIP bound, measured once.**
      The session-side gate was redundant against _this_ batch's own dispatches —

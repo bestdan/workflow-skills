@@ -73,6 +73,8 @@ Then, for each candidate, run the **confidence check** from `skills/task/SKILL.m
 
 **LOW** if any HIGH condition fails. Record the first failed check as the reason (e.g. `no estimate set`, `description missing acceptance criteria`, `no priority set`) — **except** when backfill deliberately left `estimate` unset because the honest estimate exceeded `5`, where `task-fill.md`'s **reason precedence** gives the slot to `scope exceeds estimate 5 — split into sub-issues` instead.
 
+> **`max_estimate` is deliberately absent from the list above.** It is a claim-time bound on this handler (`linear-ready.py` / `_linear_rank.py`), not a promote-time one, and since v2.59 `gh-issue` matches — see `commands/handlers/task-fill.md` → "Where the estimate gate lives", which owns the rule for both. The scale check above is a different thing: it asks whether the estimate is a legal Fibonacci value, not whether it is under an operator's bound.
+
 As on the file path, this scope gate is **model judgment, not a deterministic rule** — acceptable because `/promote-tasks` is not a blocking CI gate: a misjudged issue lands tagged `human-approval-requested` for a human to confirm, never silently lost.
 
 ### 7. Report workspace issue-quota headroom (advisory — never holds a promotion)

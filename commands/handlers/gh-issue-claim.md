@@ -183,10 +183,18 @@ gh issue list --state open --search 'label:"status:2_ready" label:"auto:eligible
 - **Then drop the dependency-blocked.** The query above catches only the manual `blocked` label; GitHub's native `blocked_by` graph is a separate fact, and without this pass `/list-tasks` shows an issue as blocked while `/do-tasks` claims it. Ask about **exactly** the ranked candidates:
 
   ```bash
-  python3 commands/handlers/assets/gh-issue-ready.py --repo <repo> --issue <n1> --issue <n2> ... --json
+  python3 commands/handlers/assets/gh-issue-ready.py --repo <repo> \
+    --issue <n1>:<est1> --issue <n2>:<est2> ... \
+    --max-estimate <gh-issue.max_estimate, default 3> --json
   ```
 
+  **Pass each candidate's estimate with its number.** The board query above already selected `--json …,labels`, so every candidate's `est:` is in hand; the `:<est>` suffix hands it over instead of making the script re-read it, which would cost one `gh issue view` per candidate — up to 50 on a full window, before any blocker read. Omit the suffix (bare `--issue <n>`) only for a candidate that carries no `est:` label at all; the script then reads it, and the verdict is the same either way.
+
   Keep the candidates in its `ready` array, in the ranked order above; drop those in `blocked`, reporting each with the open blockers it names. Pass the numbers rather than letting the script run its own board query: `--limit` is applied by the API before anything local runs, so a second bounded query could omit a candidate silently, and a missing verdict is indistinguishable from a ready one.
+
+- **`--max-estimate` is where this handler's size gate lives** — at claim, not at promote. `commands/handlers/task-fill.md` → "Where the estimate gate lives" owns that rule and the reason for it; read the bound from the merged config (including any `max-estimate=` run override, `commands/task-config.md` → "Run-scoped overrides"). The script returns an **`oversized`** array beside `ready` and `blocked`; those candidates are passed over, **not** demoted — they stay `status:2_ready` and are picked up unchanged as soon as the bound moves.
+
+  **On a direct `/do-tasks <#n>` pick, an `oversized` drop is an override, not a refusal** — apply the held-issue override in `commands/handlers/attendedness.md`, which owns the prompt and the hard negatives. A person who names an issue by number is exactly who a size bound is not for. This file owns only the message: on decline, report `#<n> — <the script's reason string>, no issue claimed` and stop. On the **ranked path** and in any **batch**, an oversized candidate is dropped silently and reported; never prompt there, per that file's batch rule.
 
 - Limit 50. If exactly 50 issues are returned the page may be truncated — note it in the report; do not paginate.
 

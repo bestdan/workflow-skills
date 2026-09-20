@@ -98,6 +98,48 @@ by first-failure buries the one reason that says what to actually do behind one
 that reads as "fill in a number". `skills/break-down-task/SKILL.md` is how that
 split gets performed.
 
+## Where the estimate gate lives
+
+**`max_estimate` is applied at CLAIM, on every handler that has it. Never at
+promote.** This section is the single home for that rule; `gh-issue-promote.md`,
+`linear-promote.md`, `gh-issue-claim.md` and `linear-claim.md` cite it and
+restate none of it.
+
+The two lifecycle points answer different questions, and the difference is not
+cosmetic:
+
+| Gate         | Question                                           | What a card does when it trips                                                      |
+| ------------ | -------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Promote-time | Is this card well enough specified for automation? | Demoted. Only a human can retrieve it — the promoter never re-scores a scored card. |
+| Claim-time   | May the loop take this card _right now_?           | Stays `ready` and visible; passed over until the bound or the card changes.         |
+
+Size is the second question. A card sized `5` is not badly written, and nothing
+about it improves by a human looking at it — it is simply larger than one
+unattended session should start. Gating it at promote answers a routing question
+with a quality verdict, and the card then needs human action to undo a hold that
+was never about human judgment.
+
+**This was measured, not reasoned.** On `bestdan/dotfiles`, 2026-09-20, five
+cards with complete acceptance criteria and no open questions were demoted to
+`needs_refinement` by nothing but the default `max_estimate: 3` against an
+exclusive bound — three of them sized exactly `3`. Recovering them required
+editing committed config and re-running, because a demoted card is out of the
+promoter's lane. See bestdan/workflow-skills#746.
+
+**The bound is EXCLUSIVE on every handler**: `est:3` / `estimate 3` fails
+against `max_estimate: 3`. The reason string is `estimate <n> >= <max>`,
+byte-identical across handlers so one board reads the same on all of them.
+
+**A missing estimate is handled per handler, and the two differ on purpose.**
+`linear` drops it (`no estimate set` — Linear has no backfill at promote, so an
+unestimated issue is genuinely unsized). `gh-issue` does not, because its
+promoter backfills `est:` on every card it scores, so a card with no `est:` has
+never been scored and its `status:` rung already says so far more precisely.
+
+**Anyone may override the bound for one run** — see
+`commands/task-config.md` → "Run-scoped overrides". A human present outranks a
+default.
+
 ## Provenance
 
 Every backfilled value is recorded where a human can cheaply spot and correct it,

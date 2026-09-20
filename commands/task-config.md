@@ -161,6 +161,70 @@ cat "$ROOT/dev_docs/tasks/.task-config.local.yml" 2>/dev/null # optional gitigno
 
 Overlay the local override on the committed config (mappings merge recursively, local leaf values win, per "Local override" above), then read `handler:` from the result. A missing or empty value → the default `repo-pr`. Commands and skills must not resolve `handler:` from `.task-config.yml` alone.
 
+### Run-scoped overrides
+
+There is a **third and highest-precedence layer**: a `key=value` token in the
+command's own arguments, which applies to that one run and is written nowhere.
+
+```
+/do-tasks max-estimate=8 wip-limit=5
+```
+
+Precedence, lowest to highest: **committed config → `.task-config.local.yml` →
+per-project override → run-scoped token.**
+
+**The token overrides the _resolved effective_ cap, not a config layer.** That
+distinction is load-bearing on `linear`, where a per-project `wip_limit` /
+`max_estimate` (`linear-common.md` → "Resolve configured projects") is applied
+_after_ the handler default: a token that merely replaced the handler default
+would be silently beaten by any project carrying its own value, which is the
+common case. Apply the token last, to every scope, after all inheritance has
+resolved — so `max-estimate=8` means 8 for each scope in the run, whatever each
+one's configured value was.
+
+**Why this layer exists.** Without it, changing a bound to get past it means
+editing committed config — which in a protected-branch repo means a branch, a
+PR, a review and a merge, to change one integer for one command. That cost is
+paid at exactly the moment someone is trying to get work done, and it is paid in
+a currency (a permanent config change) far larger than the need (this run).
+Measured 2026-09-20: clearing five wrongly-demoted cards on `bestdan/dotfiles`
+required opening a config PR and waiting for it to merge before the command
+could be re-run.
+
+**Rules.**
+
+- **The allowlist is closed, and it is this table.** "Bounds and caps, and the
+  like" is not a rule a runtime can apply — a model asked whether
+  `global-wip-limit` or `active-issue-quota` is supported has to guess, and a
+  guess in either direction is a silent wrong answer. Every overridable key is
+  named here, with the config key it resolves to and the commands that read it.
+  A token outside this table is **refused by name**, whether it is a typo or a
+  real config key nobody wired up — never silently dropped, because a dropped
+  override reads as a bound that did not apply.
+
+  | Token          | Resolves to              | Read by                       |
+  | -------------- | ------------------------ | ----------------------------- |
+  | `max-estimate` | `<handler>.max_estimate` | `/do-tasks` (claim-time gate) |
+  | `wip-limit`    | top-level `wip_limit`    | `/do-tasks` (pre-claim gate)  |
+
+  Two things the table says that prose kept getting wrong. `wip_limit` is a
+  **top-level** key shared across handlers, not `<handler>.wip_limit`
+  (`linear-common.md` → "Config block"; `gh-issue-claim.md` reads it there too) —
+  so a token written against the nested path would resolve to nothing. And
+  `max-estimate` is **not read by `/promote-tasks`**: since the gate moved to
+  claim time (`commands/handlers/task-fill.md` → "Where the estimate gate
+  lives"), no promoter path consumes it, so passing it there is refused rather
+  than accepted and quietly ignored.
+
+- **Report what was overridden, and to what**, in the run report — an override
+  nobody can see in the output is indistinguishable from a bug.
+- **It works unattended, deliberately.** A dispatched or scheduled run can carry
+  one in its own prompt, which is how an `/auto-pilot` run raises a bound
+  without a config change. This is not a hole in `attendedness.md`: that file
+  governs whether an _unanswered prompt_ may be treated as consent, and a token
+  is an explicit instruction, not an inferred one. What it must never become is
+  a default — a run with no token gets the configured bound.
+
 ### 5. Confirm
 
 Tell the user:

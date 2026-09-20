@@ -35,17 +35,28 @@ class FakeRepo:
     the shape `gh api --paginate --slurp` returns.
     """
 
-    def __init__(self, issues, blocked_by=None, page_size=100):
+    def __init__(self, issues, blocked_by=None, page_size=100, estimates=None):
         self.issues = dict(issues)
         self.blocked_by = dict(blocked_by or {})
         self.page_size = page_size
+        # number -> int, rendered as the issue's `est:<n>` label. An issue absent
+        # from this map carries no `est:` label at all, which is the un-scored case.
+        self.estimates = dict(estimates or {})
         self.calls = []
+
+    def _labels(self, number):
+        labels = [{"name": "status:2_ready"}]
+        if number in self.estimates:
+            labels.append({"name": f"est:{self.estimates[number]}"})
+        return labels
 
     def run_gh(self, args):
         self.calls.append(args)
+        if args[:2] == ["issue", "view"]:
+            return 0, json.dumps({"labels": self._labels(int(args[2]))}), ""
         if args[:2] == ["issue", "list"]:
             payload = [
-                {"number": n, "title": t, "labels": [{"name": "status:2_ready"}]}
+                {"number": n, "title": t, "labels": self._labels(n)}
                 for n, t in self.issues.items()
             ]
             return 0, json.dumps(payload), ""
@@ -253,6 +264,153 @@ class CandidateScopedTests(unittest.TestCase):
         self.assertEqual([c for c in repo.calls if c[:2] == ["issue", "list"]], [])
         result = json.loads(out.getvalue())
         self.assertEqual(sorted(i["number"] for i in result["ready"]), [7, 9])
+
+
+class EstimateGateTests(unittest.TestCase):
+    """The claim-time size gate (bestdan/workflow-skills#746).
+
+    Its default is the behaviour under test as much as its filtering is: an
+    attended run passes no bound and must see every ready issue.
+    """
+
+    def setUp(self):
+        self._orig_run_gh = gh_issue_ready.run_gh
+        self.addCleanup(setattr, gh_issue_ready, "run_gh", self._orig_run_gh)
+
+    def _compute(self, repo, **kwargs):
+        gh_issue_ready.run_gh = repo.run_gh
+        return gh_issue_ready.compute(
+            repo="owner/name", labels_file=LABELS_FILE, limit=50, **kwargs
+        )
+
+    def test_no_max_estimate_gates_nothing(self):
+        repo = FakeRepo({1: "huge"}, estimates={1: 13})
+        result = self._compute(repo)
+        self.assertEqual([i["number"] for i in result["ready"]], [1])
+        self.assertEqual(result["oversized"], [])
+
+    def test_the_bound_is_exclusive(self):
+        """`est:3` fails against 3, matching linear-rank.py rather than reading as `<=`."""
+        repo = FakeRepo({1: "at the bound", 2: "under it"}, estimates={1: 3, 2: 2})
+        result = self._compute(repo, max_estimate=3)
+        self.assertEqual([i["number"] for i in result["oversized"]], [1])
+        self.assertEqual([i["number"] for i in result["ready"]], [2])
+
+    def test_reason_string_matches_linear(self):
+        repo = FakeRepo({1: "big"}, estimates={1: 5})
+        result = self._compute(repo, max_estimate=3)
+        self.assertEqual(result["oversized"][0]["reason"], "estimate 5 >= 3")
+
+    def test_an_issue_with_no_estimate_is_not_dropped(self):
+        """Absence is not a drop here — see estimate_of()'s docstring."""
+        repo = FakeRepo({1: "never scored"})
+        result = self._compute(repo, max_estimate=3)
+        self.assertEqual([i["number"] for i in result["ready"]], [1])
+        self.assertEqual(result["oversized"], [])
+
+    def test_oversized_issue_costs_no_blocker_query(self):
+        repo = FakeRepo({1: "big"}, blocked_by={1: [(2, "open")]}, estimates={1: 8})
+        self._compute(repo, max_estimate=3)
+        self.assertEqual([c for c in repo.calls if c[0] == "api"], [])
+
+    def test_candidate_scoped_mode_fetches_labels_it_has_no_list_query_for(self):
+        repo = FakeRepo({1: "big"}, estimates={1: 8})
+        result = self._compute(repo, issue_numbers=[1], max_estimate=3)
+        self.assertEqual([i["number"] for i in result["oversized"]], [1])
+        self.assertEqual(
+            [c[:2] for c in repo.calls if c[:2] == ["issue", "view"]],
+            [["issue", "view"]],
+        )
+
+    def test_candidate_scoped_mode_skips_the_label_read_when_not_gating(self):
+        repo = FakeRepo({1: "whatever"}, estimates={1: 8})
+        self._compute(repo, issue_numbers=[1])
+        self.assertEqual([c for c in repo.calls if c[:2] == ["issue", "view"]], [])
+
+    def test_the_gate_issues_no_mutating_call(self):
+        repo = FakeRepo({1: "big"}, estimates={1: 8})
+        self._compute(repo, issue_numbers=[1], max_estimate=3)
+        self.assertEqual(repo.mutating_calls(), [])
+
+
+class CallerSuppliedEstimateTests(unittest.TestCase):
+    """`--issue <n>:<est>` — the caller hands over what it already fetched."""
+
+    def setUp(self):
+        self._orig_run_gh = gh_issue_ready.run_gh
+        self.addCleanup(setattr, gh_issue_ready, "run_gh", self._orig_run_gh)
+
+    def _compute(self, repo, **kwargs):
+        gh_issue_ready.run_gh = repo.run_gh
+        return gh_issue_ready.compute(
+            repo="owner/name", labels_file=LABELS_FILE, limit=50, **kwargs
+        )
+
+    def test_a_bare_number_parses_with_no_estimate(self):
+        self.assertEqual(gh_issue_ready.parse_issue_arg("7"), (7, None))
+
+    def test_a_number_with_an_estimate_parses_both(self):
+        self.assertEqual(gh_issue_ready.parse_issue_arg("7:3"), (7, 3))
+
+    def test_a_non_integer_number_is_a_usage_error(self):
+        with self.assertRaises(gh_issue_ready.argparse.ArgumentTypeError):
+            gh_issue_ready.parse_issue_arg("seven")
+
+    def test_a_non_integer_estimate_is_a_usage_error_not_a_fallback_read(self):
+        """A typo'd estimate must fail loudly, never degrade to the slow path."""
+        with self.assertRaises(gh_issue_ready.argparse.ArgumentTypeError):
+            gh_issue_ready.parse_issue_arg("7:big")
+
+    def test_an_empty_estimate_is_a_usage_error(self):
+        with self.assertRaises(gh_issue_ready.argparse.ArgumentTypeError):
+            gh_issue_ready.parse_issue_arg("7:")
+
+    def test_a_supplied_estimate_skips_the_label_read(self):
+        repo = FakeRepo({1: "big"}, estimates={1: 8})
+        result = self._compute(repo, issue_numbers=[(1, 8)], max_estimate=3)
+        self.assertEqual([i["number"] for i in result["oversized"]], [1])
+        self.assertEqual([c for c in repo.calls if c[:2] == ["issue", "view"]], [])
+
+    def test_a_supplied_estimate_under_the_bound_still_checks_blockers(self):
+        repo = FakeRepo({1: "small"}, blocked_by={1: [(99, "open")]})
+        result = self._compute(repo, issue_numbers=[(1, 2)], max_estimate=3)
+        self.assertEqual(result["blocked"][0]["open_blockers"], [99])
+        self.assertEqual([c for c in repo.calls if c[:2] == ["issue", "view"]], [])
+
+    def test_a_bare_entry_still_falls_back_to_the_read(self):
+        repo = FakeRepo({1: "big"}, estimates={1: 8})
+        result = self._compute(repo, issue_numbers=[(1, None)], max_estimate=3)
+        self.assertEqual([i["number"] for i in result["oversized"]], [1])
+        self.assertEqual(len([c for c in repo.calls if c[:2] == ["issue", "view"]]), 1)
+
+    def test_plain_ints_still_work(self):
+        """Backward compatibility: compute() predates the tuple form."""
+        repo = FakeRepo({1: "small"})
+        result = self._compute(repo, issue_numbers=[1])
+        self.assertEqual([i["number"] for i in result["ready"]], [1])
+
+    def test_main_accepts_the_suffixed_form_end_to_end(self):
+        repo = FakeRepo({7: "big"}, estimates={7: 8})
+        gh_issue_ready.run_gh = repo.run_gh
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = gh_issue_ready.main(
+                [
+                    "--repo",
+                    "owner/name",
+                    "--labels-file",
+                    str(LABELS_FILE),
+                    "--issue",
+                    "7:8",
+                    "--max-estimate",
+                    "3",
+                    "--json",
+                ]
+            )
+        self.assertEqual(code, 0)
+        result = json.loads(out.getvalue())
+        self.assertEqual([i["number"] for i in result["oversized"]], [7])
+        self.assertEqual([c for c in repo.calls if c[:2] == ["issue", "view"]], [])
 
 
 if __name__ == "__main__":
