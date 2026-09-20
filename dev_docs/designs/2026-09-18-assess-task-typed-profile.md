@@ -16,7 +16,7 @@ one freeform line, and today's model answers everything whenever the typed call 
 unavailable. The `task_profile` block consumers read does not change shape.
 
 The evidence is
-[`dev_docs/research/2026-09-17-jev-applications.md`](../research/2026-09-17-jev-applications.md).
+[`dev_docs/research/2026-09-17-jev-applications/`](../research/2026-09-17-jev-applications/README.md).
 Read §3 and §8 before reviewing this; the measurements are there and are not repeated
 here. "What connecting it would actually take" is the other section this design leans
 on — it settles the client and the key plumbing, so neither is an open question below.
@@ -211,7 +211,8 @@ separately because they have different needs:
 - **The Jev-calling half needs the key**, and that puts it in
   `commands/handlers/assets/`. `scripts/` cannot import from there, so a `scripts/`
   client would have to carry its own resolver — which is exactly what the dev-only
-  `scripts/jev-description-collision.py` does, deliberately and with a different rung
+  `dev_docs/research/2026-09-17-jev-applications/references/jev-description-collision.py`
+  does, deliberately and with a different rung
   order. A handler asset needs **no new module**: `_secret_resolve.py`'s `resolve_key`
   is already generic over the name it is handed, so `resolve_key("TYPESAFE_API_KEY")`
   works today.

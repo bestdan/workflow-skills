@@ -17,7 +17,7 @@ The obvious design asks one Choice over `code | jev | llm`. This does not:
 
 1. **It is not one snap judgment.** Picking between three tools means modelling what
    each can do, which is the reasoning shape section 6 of
-   `dev_docs/research/2026-09-17-jev-applications.md` records as a non-fit. Jev's own
+   `dev_docs/research/2026-09-17-jev-applications/README.md` records as a non-fit. Jev's own
    rule 1 says split a question that needs extended reasoning.
 2. **A question naming Jev is a question about Jev.** Asking the vendor's model
    whether its own product fits invites a bias nobody can subtract afterwards.
@@ -42,8 +42,8 @@ breaks it, fix it as part of re-running the record rather than treating it as a
 regression.
 
 Dependencies: the standard library, plus `resolve_key` and `ask_payload` from
-`scripts/jev-description-collision.py` — see the import below for why it borrows those
-two rather than carrying its own copy. Needs a TypeSafe key, resolved the way
+`../../2026-09-17-jev-applications/references/jev-description-collision.py` — see the
+import below for why it borrows those two rather than carrying its own copy. Needs a TypeSafe key, resolved the way
 `dev_docs/auth_key_access.md` describes.
 
 `measurement/` holds the run the record reports — the Jev passes, the three baseline
@@ -77,14 +77,20 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[4]
 
 # The one place this artifact is not standalone, which the bundle convention asks for
-# and this deliberately breaks. The key ladder and the POST live next door and are
-# security-sensitive: that module's `typesafe_block` exists because an unscoped
-# `api_key:` search once reached for a full-account Linear token. A second copy of
-# code that reads secrets is a worse hazard than a coupling that fails loudly when
-# the sibling moves, and this file is frozen evidence — a loud break while someone
-# reproduces the record is the acceptable failure mode.
+# and this deliberately breaks. The key ladder and the POST live in the sibling
+# record's own references/ and are security-sensitive: that module's `typesafe_block`
+# exists because an unscoped `api_key:` search once reached for a full-account Linear
+# token. A second copy of code that reads secrets is a worse hazard than a coupling
+# that fails loudly when the sibling moves, and this file is frozen evidence — a loud
+# break while someone reproduces the record is the acceptable failure mode.
 _SPEC = importlib.util.spec_from_file_location(
-    "jev_collision", ROOT / "scripts" / "jev-description-collision.py"
+    "jev_collision",
+    ROOT
+    / "dev_docs"
+    / "research"
+    / "2026-09-17-jev-applications"
+    / "references"
+    / "jev-description-collision.py",
 )
 assert _SPEC and _SPEC.loader
 _jev = importlib.util.module_from_spec(_SPEC)

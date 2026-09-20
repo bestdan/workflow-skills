@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Hermetic tests for scripts/jev-description-collision.py.
+"""Hermetic tests for the jev-description-collision.py beside this file.
 
 The pure half only: frontmatter parsing, manifest parsing, the ranking maths, the
 collision threshold, and the key-resolution ladder. Nothing here touches the network
@@ -10,6 +10,11 @@ instrument when that changes.
 
 Each case reproduces something that actually bit during the section-1 measurement,
 rather than restating the implementation.
+
+No gate runs this: it is a frozen artifact of the record in the parent directory, and
+leaving the repo's `scripts/test-*.sh` glob is the cost of that. Run it by path —
+`python3 dev_docs/research/2026-09-17-jev-applications/references/test_jev_description_collision.py`
+— when re-running the measurement. Dependencies: the standard library only.
 """
 
 from __future__ import annotations
@@ -18,9 +23,12 @@ import importlib.util
 import unittest
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+HERE = Path(__file__).resolve().parent
+# The bundle sits four levels below the repository root:
+# dev_docs/research/<record>/references/<this file>.
+ROOT = Path(__file__).resolve().parents[4]
 SPEC = importlib.util.spec_from_file_location(
-    "jev_collision", ROOT / "scripts" / "jev-description-collision.py"
+    "jev_collision", HERE / "jev-description-collision.py"
 )
 assert SPEC and SPEC.loader
 jev = importlib.util.module_from_spec(SPEC)

@@ -12,7 +12,7 @@ that nothing has measured: whether `scope` can be forecast from prose, where the
 nothing to count. That design's own text calls this "the part of the design most likely
 to be wrong."
 
-Sibling to [`../2026-09-17-jev-applications.md`](../2026-09-17-jev-applications.md),
+Sibling to [`../2026-09-17-jev-applications/`](../2026-09-17-jev-applications/README.md),
 whose §3 measured the **post-hoc** case — 71.6% exact against 116 merged pull requests,
 with 31 of 33 misses under-reading blast radius — and recorded its own scope limit:
 ground truth was the file count of a pull request that had already merged, so every

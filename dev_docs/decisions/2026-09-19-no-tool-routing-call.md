@@ -93,7 +93,7 @@ someone adding a routing call elsewhere either.
 ## Alternatives
 
 - **Ship the tool anyway, for the confidence number.** Rejected: §5 of
-  [`../research/2026-09-17-jev-applications.md`](../research/2026-09-17-jev-applications.md)
+  [`../research/2026-09-17-jev-applications/`](../research/2026-09-17-jev-applications/README.md)
   measured confidence 16 points overconfident against ground truth, so there is no
   threshold worth gating on yet.
 - **Ask Jev the tri-choice directly rather than seven task properties.** Rejected

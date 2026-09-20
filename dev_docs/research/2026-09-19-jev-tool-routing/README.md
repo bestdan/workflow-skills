@@ -14,7 +14,7 @@ The rules this and the sibling note produced, for anyone proposing a typed call
 rather than revisiting this one, are in
 [`../../typed-model-calls.md`](../../typed-model-calls.md).
 
-Sibling to [`2026-09-17-jev-applications.md`](../2026-09-17-jev-applications.md), which
+Sibling to [`2026-09-17-jev-applications/`](../2026-09-17-jev-applications/README.md), which
 ranked where a typed call might fit at all. This grades one candidate that note did
 not rank: the meta-decision an agent makes dozens of times a session.
 

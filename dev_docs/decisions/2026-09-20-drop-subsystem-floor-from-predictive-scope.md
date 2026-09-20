@@ -11,7 +11,7 @@ convention: ../typed-model-calls.md
 [`../designs/2026-09-18-assess-task-typed-profile.md`](../designs/2026-09-18-assess-task-typed-profile.md)
 splits `scope` in two. A **concrete** card links a diff, so code counts the changed
 files; §3 of
-[`../research/2026-09-17-jev-applications.md`](../research/2026-09-17-jev-applications.md)
+[`../research/2026-09-17-jev-applications/`](../research/2026-09-17-jev-applications/README.md)
 settled that at 40/40 and rule 4 says code owns arithmetic. A **predictive** card is
 prose describing work not yet done, and there the design keeps `scope` as a model
 judgment, adds a seventh question — "three or more unrelated subsystems?" — and makes

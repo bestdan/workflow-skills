@@ -424,8 +424,8 @@ than a cost.
 `typesafe-sdk` 0.6.0 requires **Python ≥ 3.10** and pulls four runtime dependencies
 (`httpx2`, `msgspec`, `tenacity`, `typing-extensions`). This repo typechecks everything
 consumers execute as bare `python3` at **3.9**
-([CONTRIBUTING.md](../../CONTRIBUTING.md)), and adding dependencies needs a discussion
-first ([AGENTS.md](../../AGENTS.md)). **The SDK cannot be used for any Class B
+([CONTRIBUTING.md](../../../CONTRIBUTING.md)), and adding dependencies needs a discussion
+first ([AGENTS.md](../../../AGENTS.md)). **The SDK cannot be used for any Class B
 adoption**, and is not worth the dependency for Class A either.
 
 That floor is not a snapshot artifact: 0.7.0 has since shipped, still `>=3.10`, having
@@ -454,7 +454,7 @@ few lines.
 ### The secret plumbing already exists and the name already matches
 
 The SDK's env var is `TYPESAFE_API_KEY`, which is exactly what
-[`dev_docs/auth_key_access.md`](../auth_key_access.md)'s `$<SERVICE>_<CREDENTIAL>`
+[`dev_docs/auth_key_access.md`](../../auth_key_access.md)'s `$<SERVICE>_<CREDENTIAL>`
 convention produces, so the name costs nothing.
 
 The resolver is where the two adoption classes part, and the split is worth stating
@@ -463,10 +463,12 @@ module: `_secret_resolve.py`'s `resolve_key(name)` is already generic over the n
 is handed, so `resolve_key("TYPESAFE_API_KEY")` works today, and there is no
 `_linear_auth.py` to write a sibling to (each `linear-*.py` calls the shared resolver
 directly). A **Class A** script cannot reuse it — `scripts/` does not import from
-`commands/handlers/assets/` — and the one that exists did not try:
-[`scripts/jev-description-collision.py`](../../scripts/jev-description-collision.py)
-defines its own `resolve_key`, deliberately ordered rung 0 → 1 → 3 so a configured
-pointer is read before the environment. `_secret_resolve.py` reads the environment
+`commands/handlers/assets/` — and the one script that actually faced this did not try:
+this record's own instrument,
+[`references/jev-description-collision.py`](references/jev-description-collision.py),
+which sat under `scripts/` as Class A tooling when the §1 measurement ran and is a
+frozen artifact of this record now. It defines its own `resolve_key`, deliberately
+ordered rung 0 → 1 → 3 so a configured pointer is read before the environment. `_secret_resolve.py` reads the environment
 first. Both are faithful to `auth_key_access.md`; they implement different rungs of it,
 for different callers. Neither is the other's fallback.
 
@@ -501,10 +503,10 @@ roster alongside our 16 — a description-collision surface we do not control.
 
 - **Fast path, never a requirement.** Every Class B use degrades to today's model
   judgment when no key is present. Route the secret through
-  [`dev_docs/auth_key_access.md`](../auth_key_access.md).
+  [`dev_docs/auth_key_access.md`](../../auth_key_access.md).
 - **Logic goes in a typed file.** A Jev call from a skill body is
   `commands/handlers/assets/<name>.py` with a test pair, called from the prose — see
-  [CONTRIBUTING.md](../../CONTRIBUTING.md#logic-goes-in-a-typed-file). Not a fenced block.
+  [CONTRIBUTING.md](../../../CONTRIBUTING.md#logic-goes-in-a-typed-file). Not a fenced block.
 - **Calibration is claimed, not proven for our questions.** No threshold gates
   anything until it has been tuned against this repo's own cards, prompts and diffs.
   Start by logging Jev's answer _and_ the model's and comparing; promote only what
@@ -528,11 +530,13 @@ to this shape. It also confirms the request and response shapes below by observa
 rather than by reading.
 
 Reproduce it with
-[`scripts/jev-description-collision.py`](../../scripts/jev-description-collision.py)
+[`references/jev-description-collision.py`](references/jev-description-collision.py)
 (`--suite manifest | ambiguous | both`, `--json` for the raw records). It resolves a
-key per [`auth_key_access.md`](../auth_key_access.md) and is dev-only — never called
+key per [`auth_key_access.md`](../../auth_key_access.md) and is dev-only — never called
 by a skill at runtime, never part of `just check`. Its pure half is tested offline by
-`scripts/test-jev-description-collision.sh`, which does run in the gate.
+[`references/test_jev_description_collision.py`](references/test_jev_description_collision.py),
+run by path like the instrument — no gate runs either, which is what an artifact of a
+record is.
 
 The §8 injection probe was paired by construction: each case scored the identical
 state with and without one appended sentence, four on the routing Choice and three on

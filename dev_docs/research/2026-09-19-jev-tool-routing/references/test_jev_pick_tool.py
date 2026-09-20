@@ -3,7 +3,8 @@
 
 The pure half: the routing ladder, the response reduction, the fence, the scorer and
 the case set's own integrity. Nothing here touches the network or reads a key — the
-key ladder lives in scripts/jev-description-collision.py and is tested there.
+key ladder lives in the 2026-09-17-jev-applications bundle's
+jev-description-collision.py and is tested there.
 
 No gate runs this: it is a frozen artifact of the record in the parent directory, and
 leaving the repo's `scripts/test-*.sh` glob is the cost of that. Run it by path —
