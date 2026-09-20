@@ -16,4 +16,4 @@
 ## Next round
 
 **Fix commit:** <sha, or "none — nothing was applied", or "not applicable — `--post` changes no files">
-**Recommendation:** <another round | no further round> — <the reason, grounded in what the fixes changed: an interface or contract, a reconciler-authored fix, collateral edits, a test never shown to fail, or the round-over-round yield that says the review has converged>
+**Recommendation:** <another round | no further round | not applicable under `--post`> — <the reason, grounded in what the fixes changed: an interface or contract, a reconciler-authored fix, collateral edits, a test never shown to fail, or the round-over-round yield that says the review has converged>
