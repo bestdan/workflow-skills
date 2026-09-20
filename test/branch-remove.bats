@@ -220,6 +220,18 @@ run_br() {
   assert_success
 }
 
+@test "a global stanza for a branch with no local ref is not mistaken for residue" {
+  # The read has to be scoped like the write it guards. An unscoped listing also
+  # returns global entries, so this stanza would send a branch that does not
+  # exist down the residue path and produce a sandbox denial that never happened
+  # — exit 3 where the honest answer is 64.
+  printf '[branch "globalonly"]\n\tremote = origin\n' >>"$GIT_CONFIG_GLOBAL"
+  run_br "$REPO" globalonly
+  assert_failure 64
+  assert_output --partial "no branch named globalonly"
+  refute_output --partial "denies that write"
+}
+
 @test "a missing branch is rejected as missing even when the config cannot be written" {
   # git takes the config lock BEFORE checking whether a section exists, so under
   # a denial a missing section and a denied removal are the same exit code (255).

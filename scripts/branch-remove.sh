@@ -76,8 +76,16 @@ fi
 # Branching on the code there would report "the sandbox denies that write" for a
 # branch that simply does not exist — the same invented denial this script exists
 # to remove, moved to a different case.
+#
+# `--local`, because the read has to have the same scope as the write it guards.
+# `--remove-section` below writes the repository config; an unscoped listing also
+# returns global and system entries, so a global `branch.<name>.*` — for a branch
+# with no local ref — sends this down the residue path, the removal exits 128 for
+# a section that was never in .git/config, and the script announces a sandbox
+# denial that did not happen. That is the invented denial again, one scope over.
+# Branch stanzas do not live in `--worktree` scope, so local is the whole of it.
 has_stanza() { # branch
-  git -C "$root" config --list --name-only 2>/dev/null | awk -v p="branch.$1." '
+  git -C "$root" config --local --list --name-only 2>/dev/null | awk -v p="branch.$1." '
     index($0, p) == 1 && index(substr($0, length(p) + 1), ".") == 0 { found = 1; exit }
     END { exit !found }'
 }
