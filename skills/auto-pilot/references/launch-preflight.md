@@ -45,10 +45,12 @@ access or Full Disk Access against the run's own paths. It covers **filesystem**
 consent only — Keychain, biometric and browser OAuth remain covered by the
 credential probes in this step, which run under the terminal's attribution
 ([`launch-runtime.md`](launch-runtime.md) §3, "What is enforced, and what is
-not"). Pass the run worktree from step 1 as `--run-root <path>`: the probe tests
-that checkout and its `--git-common-dir`, and defaults to `$PWD` rather than
-guessing, so a caller standing somewhere else gets a wrong answer that looks
-right.
+not"). **`--run-root <path>` is required** — pass the run worktree from step 1.
+The probe tests that checkout and its `--git-common-dir`, and the flag has no
+default on purpose: `$ROOT` is the installed plugin's directory, never the run's
+tree, and a `$PWD` fallback would certify whatever checkout the caller happened
+to stand in. Omitting it exits 2 with a usage message, the way omitting
+`--source` does, rather than reporting a `go` for the wrong tree.
 The probe path depends on the **environment class** (below): `local-full`
 authenticates through CLIs, `claude-web` through **MCP**. Probe whichever applies:
 

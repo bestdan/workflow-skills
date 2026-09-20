@@ -213,7 +213,16 @@ EOF
 
 : >"$result"
 case "${CONSENT_FAKE_MODE:-clean}" in
-  silent) exit 0 ;; # job never reports back
+  silent)
+    # A job that dies mid-resource: the self-checks and one `attempting` line
+    # land, then nothing. This is what a stalled read leaves behind, and it is
+    # what the timeout blocker has to name.
+    echo "CONSENT stdin_closed: ok" >>"$result"
+    echo "CONSENT no_controlling_tty: ok" >>"$result"
+    first_spec="$(printf '%s\n' "$specs" | sed -n '2p')"
+    echo "CONSENT attempting ${first_spec%%=*}: ${first_spec#*=}" >>"$result"
+    exit 0
+    ;;
   terminal)
     echo "CONSENT stdin_closed: FAIL" >>"$result"
     echo "CONSENT no_controlling_tty: FAIL" >>"$result"
@@ -349,6 +358,12 @@ else
   assert_exit "silent probe: exits 1" 1 "$rc4"
   assert_contains "silent probe: blocks as unproven" \
     "PREFLIGHT BLOCKER: consent-gate probe did not complete" "$out4"
+  # "see the log" is not an answer at 3am: the blocker must name the resource it
+  # stalled on and carry the same remedy the denial branch does.
+  assert_contains "silent probe: names the resource it stalled on" \
+    "stalled on run_root: $ROOT" "$out4"
+  assert_contains "silent probe: carries the Full Disk Access remedy" \
+    "System Settings → Privacy & Security → Full Disk Access" "$out4"
 fi
 
 # --- Case 5: no launchctl — a logged skip, not a blocker -------------------
@@ -417,18 +432,67 @@ else
   mkdir -p "$amp_root"
   cp -R "$ROOT/scripts" "$ROOT/dev_docs" "$amp_root/"
   GIT_CONFIG_GLOBAL=/dev/null git -C "$amp_root" init -q
+  # Every case shares $CAPTURE/plist, so clear it: otherwise a run that died
+  # before bootstrapping would leave this asserting against a predecessor's
+  # artifact, and `plutil -lint` alone would pass vacuously.
+  rm -f "$CAPTURE/plist"
   CONSENT_FAKE_MODE=clean CAPTURE="$CAPTURE" PATH="$FIXTURE_PATH" \
     PREFLIGHT_LAUNCHCTL="$FIXBIN/fake-launchctl" \
     PREFLIGHT_TCC_LOCATIONS="$amp_protected" \
     PREFLIGHT_CONSENT_TICKS=4 \
     bash "$amp_root/scripts/preflight.sh" --source plan --base main --run-root "$amp_root" >/dev/null 2>&1
-  if plutil -lint "$CAPTURE/plist" >/dev/null 2>&1; then
+  if [ ! -s "$CAPTURE/plist" ]; then
+    bad "plist escaping: no job was submitted, so nothing was tested"
+  elif plutil -lint "$CAPTURE/plist" >/dev/null 2>&1; then
     ok "plist with & and < in its paths parses"
   else
     bad "plist with & and < in its paths is malformed: $(plutil -lint "$CAPTURE/plist" 2>&1)"
   fi
   assert_contains "plist escapes the metacharacters rather than dropping them" \
     "a&amp;b&lt;c" "$(cat "$CAPTURE/plist" 2>/dev/null)"
+fi
+
+# --- Case 9: a protected location with a space, and one with a glob ---------
+# The PRODUCTION default list contains `$HOME/Library/Mobile Documents` — a path
+# with a space — and every other case overrides it with a space-free fixture, so
+# the colon-split loops' quoting is otherwise untested in the one configuration
+# that actually ships. The `*` entry covers the other half: IFS makes the split
+# happen on ':' only, but it does not stop the resulting words from being
+# pathname-expanded.
+if [ "$have_sandbox" = 0 ]; then
+  skipped "space/glob in a protected location: requires sandbox-exec (macOS)"
+else
+  spaced="$BASE/with space"
+  spaced_root="$spaced/fixture"
+  mkdir -p "$spaced_root"
+  cp -R "$ROOT/scripts" "$ROOT/dev_docs" "$spaced_root/"
+  GIT_CONFIG_GLOBAL=/dev/null git -C "$spaced_root" init -q
+  out9="$(CONSENT_FAKE_MODE=clean CAPTURE="$CAPTURE" PATH="$FIXTURE_PATH" \
+    PREFLIGHT_LAUNCHCTL="$FIXBIN/fake-launchctl" \
+    PREFLIGHT_TCC_LOCATIONS="$spaced" \
+    PREFLIGHT_CONSENT_TICKS=4 \
+    bash "$spaced_root/scripts/preflight.sh" --source plan --base main --run-root "$spaced_root" 2>&1)"
+  assert_contains "space in a protected location survives the split intact" \
+    "PREFLIGHT CONSENT_PROTECTED: $spaced" "$out9"
+  assert_contains "space-containing location reaches the probe as one spec" \
+    "CONSENT resource protected_1: ok $spaced" "$out9"
+
+  # The glob fixture is built so expansion CHANGES the answer: `d[x]` as a
+  # bracket expression matches the decoy `dx` and not its own literal name, so
+  # an expanded $loc no longer contains the run root and the location drops out
+  # of the inventory. Without `set -f` this reports `none`.
+  globbed="$BASE/d[x]"
+  globbed_root="$globbed/fixture"
+  mkdir -p "$globbed_root" "$BASE/dx"
+  cp -R "$ROOT/scripts" "$ROOT/dev_docs" "$globbed_root/"
+  GIT_CONFIG_GLOBAL=/dev/null git -C "$globbed_root" init -q
+  out9b="$(CONSENT_FAKE_MODE=clean CAPTURE="$CAPTURE" PATH="$FIXTURE_PATH" \
+    PREFLIGHT_LAUNCHCTL="$FIXBIN/fake-launchctl" \
+    PREFLIGHT_TCC_LOCATIONS="$globbed" \
+    PREFLIGHT_CONSENT_TICKS=4 \
+    bash "$globbed_root/scripts/preflight.sh" --source plan --base main --run-root "$globbed_root" 2>&1)"
+  assert_contains "glob metacharacter in a protected location is not expanded" \
+    "PREFLIGHT CONSENT_PROTECTED: $globbed" "$out9b"
 fi
 
 echo

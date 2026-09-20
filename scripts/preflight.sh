@@ -14,19 +14,20 @@
 # creates and removes for the confinement smoke.
 #
 # Usage:
-#   scripts/preflight.sh --source <plan|linear> [--base <branch>]
-#                        [--run-root <path>]
+#   scripts/preflight.sh --source <plan|linear> --run-root <path>
+#                        [--base <branch>]
 #   scripts/preflight.sh --scout-run-md <path to RUN.md>
 #
 #   --source        Task-graph source the run reads from. Required unless
 #                    --scout-run-md is given.
 #   --base          Base branch to check for staleness. Default: main.
 #   --run-root      The checkout the detached run will work in — the run
-#                    worktree launch step 1 created. Default: $PWD. The
-#                    consent-gate probe tests THIS path (and its
-#                    --git-common-dir), never the installed plugin's own
-#                    directory, which is never where the run's files are. A
-#                    value that is not a git checkout is fatal, not a skip.
+#                    worktree launch step 1 created. REQUIRED: the consent-gate
+#                    probe tests THIS path and its --git-common-dir, and a
+#                    default would fail OPEN, certifying whatever tree the
+#                    caller stood in. The installed plugin's own directory is
+#                    never where the run's files are. A value that is not a git
+#                    checkout is fatal, not a skip.
 #   --scout-run-md   Run ONLY the per-task capability-join scout (auto-pilot
 #                    launch step 6 / resume's capability join) against the
 #                    given RUN.md: read each task's `coder` column, probe
@@ -272,7 +273,7 @@ while [ $# -gt 0 ]; do
       shift 2
       ;;
     -h | --help)
-      sed -n '2,76p' "$0"
+      sed -n '2,77p' "$0"
       exit 0
       ;;
     *) die "unknown argument: $1" ;;
@@ -290,6 +291,26 @@ case "$source_arg" in
   "") die "requires --source <plan|linear>" ;;
   *) die "unknown --source (fail-closed): $source_arg" ;;
 esac
+
+# The run root decides which paths the consent-gate probe tests (section 5), and
+# it is REQUIRED rather than defaulted. Omitting `--source` fails closed;
+# a `--run-root` that quietly fell back to `$PWD` would fail **open** —
+# certifying whatever tree the caller happened to be standing in, which is the
+# defect class the flag exists to remove. `$ROOT` cannot stand in for it either:
+# in production this script runs from the installed plugin directory.
+#
+# Two paths come out of it. A linked worktree under ~/src/worktrees still reads
+# and writes its main checkout's `.git` on every git operation, so a probe that
+# tests only the worktree passes tonight and dies on the first fetch at 3am.
+#
+# Validated here, beside `--source`, rather than in section 5: an argument error
+# should cost a usage message, not a full run of the auth probes, the network
+# freshness check and the confinement smoke before exiting from mid-stream.
+[ -n "$run_root_arg" ] || die "requires --run-root <the run's worktree> — the checkout the detached run will work in"
+run_toplevel="$(git -C "$run_root_arg" rev-parse --show-toplevel 2>/dev/null || true)"
+[ -n "$run_toplevel" ] || die "--run-root is not a git checkout (fail-closed): $run_root_arg"
+run_gitdir="$(git -C "$run_root_arg" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+
 [ -f "$PROBE_CODERS" ] || die "coder probe not found: $PROBE_CODERS"
 [ -f "$FRESHNESS" ] || die "not found: $FRESHNESS"
 [ -f "$SPAWN" ] || die "not found: $SPAWN"
@@ -616,28 +637,17 @@ add_protected() { # <location> — append to protected_needed, once
   esac
 }
 
-# **`$ROOT` is not the run's checkout.** It is `dirname($0)/..`, and production
-# invokes this as `"${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh"` — so on an
-# installed plugin `$ROOT` is `~/.claude/plugins/…`, which is never in a
-# protected location. Inventorying from it reports `none` and a `go` for a
-# checkout sitting in ~/Documents: the exact run this probe exists to stop.
-# The run root is the caller's, so it is an argument, not a derivation.
-#
-# Two paths come out of it, not one. A linked worktree under ~/src/worktrees
-# still reads and writes its main checkout's `.git` on every git operation, so a
-# probe that tests only the worktree passes tonight and dies on the first fetch
-# at 3am. `--git-common-dir` is that second path.
-consent_run_root="${run_root_arg:-$PWD}"
-run_toplevel="$(git -C "$consent_run_root" rev-parse --show-toplevel 2>/dev/null || true)"
-[ -n "$run_toplevel" ] || die "run root is not a git checkout (fail-closed): $consent_run_root — pass --run-root <the run's worktree>"
-run_gitdir="$(git -C "$consent_run_root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
-if [ -z "$run_gitdir" ]; then # git < 2.31 has no --path-format
-  run_gitdir="$(cd "$consent_run_root" && cd "$(git rev-parse --git-common-dir)" && pwd)" || run_gitdir=""
-fi
+# `run_toplevel` and `run_gitdir` are resolved at argument-validation time, from
+# the required `--run-root` — see the block beside the `--source` check.
 echo "PREFLIGHT RUN_ROOT: $run_toplevel"
 
+# `set -f` for the two colon-split loops below. Setting IFS makes the unquoted
+# expansion split on ':' only, but it does NOT stop the resulting words from
+# being pathname-expanded — so a location holding a glob character would silently
+# expand to something else, which is a location the probe then does not check.
 protected_needed=""
 consent_old_ifs="$IFS"
+set -f
 IFS=':'
 for loc in $TCC_LOCATIONS; do
   IFS="$consent_old_ifs"
@@ -650,6 +660,7 @@ for loc in $TCC_LOCATIONS; do
   IFS=':'
 done
 IFS="$consent_old_ifs"
+set +f
 # A removable or network volume is the other gated class, and it is named by
 # the run's own paths rather than by any fixed list.
 for run_path in "$run_toplevel" "$run_gitdir" "$ROOT" "${TMPDIR:-/tmp}"; do
@@ -670,6 +681,7 @@ plugin_root=$ROOT"
 git_common_dir=$run_gitdir"
 consent_i=0
 consent_old_ifs="$IFS"
+set -f
 IFS=':'
 for loc in $protected_needed; do
   IFS="$consent_old_ifs"
@@ -681,7 +693,17 @@ protected_$consent_i=$loc"
   IFS=':'
 done
 IFS="$consent_old_ifs"
+set +f
 
+# **Only a non-macOS host skips.** Past the two checks below, this machine can
+# run the probe — so anything that then stops it (no scratch dir, no rendered
+# profile, a refused bootstrap, a probe that never reports) leaves
+# launchd-attributed consent UNPROVEN, and a `go` on an unproven property is the
+# fail-open this whole section exists to close. The earlier reasoning — "a
+# missing capability is not evidence of a consent gate" — holds only for a
+# genuinely absent capability, which is what the two skips below test for.
+# Blocking costs nothing real: the run itself bootstraps into the same
+# `gui/$(id -u)` domain, so a domain that refuses the probe refuses the run too.
 consent_verdict=""
 if ! command -v sandbox-exec >/dev/null 2>&1; then
   consent_verdict="skip (sandbox-exec not available — non-macOS host)"
@@ -692,8 +714,8 @@ elif ! command -v "$LAUNCHCTL_BIN" >/dev/null 2>&1; then
 else
   cscratch="$(mktemp -d "${TMPDIR:-/tmp}/preflight-consent.XXXXXX" 2>/dev/null || true)"
   if [ -z "$cscratch" ] || [ ! -d "$cscratch" ]; then
-    consent_verdict="skip (could not create a scratch dir)"
-    skip_notes+=("consent-gate probe skipped: scratch dir creation failed")
+    consent_verdict="FAIL (no scratch dir)"
+    blockers+=("consent-gate probe could not create its scratch dir under ${TMPDIR:-/tmp} — launchd-attributed consent is unproven on a host that can run the probe")
   else
     consent_label="com.bestdan.workflow-skills.preflight-consent.$$"
     consent_done=false
@@ -756,6 +778,10 @@ fi
 for spec in "$@"; do
   key="${spec%%=*}"
   path="${spec#*=}"
+  # Announced BEFORE the read, so a resource that hangs or kills the job leaves a
+  # record of which one it was. The result's last `attempting` line with no
+  # matching `resource` line names the path that never came back.
+  echo "CONSENT attempting $key: $path" >>"$out"
   if err="$(/bin/ls -- "$path" 2>&1 >/dev/null)"; then
     echo "CONSENT resource $key: ok $path" >>"$out"
   else
@@ -775,8 +801,8 @@ PROBE
     done
 
     if ! bash "$SPAWN" render-profile --rw "$cscratch" ${cex_args[@]+"${cex_args[@]}"} --out "$cprof" >/dev/null 2>&1; then
-      consent_verdict="skip (render-profile failed — the confinement smoke above owns that blocker)"
-      skip_notes+=("consent-gate probe skipped: render-profile produced no profile for this environment")
+      consent_verdict="FAIL (render-profile failed)"
+      blockers+=("consent-gate probe could not render a Seatbelt profile for this environment — launchd-attributed consent is unproven; the confinement smoke above reports the renderer's own failure")
     else
       {
         echo '<?xml version="1.0" encoding="UTF-8"?>'
@@ -811,8 +837,8 @@ EOF
       } >"$cplist"
 
       if ! "$LAUNCHCTL_BIN" bootstrap "gui/$(id -u)" "$cplist" >/dev/null 2>&1; then
-        consent_verdict="skip (launchd refused the probe bootstrap in this environment)"
-        skip_notes+=("consent-gate probe skipped: launchctl bootstrap failed — re-run this pre-flight from a normal login session before trusting a go")
+        consent_verdict="FAIL (launchd refused the probe bootstrap)"
+        blockers+=("consent-gate probe could not be bootstrapped into gui/$(id -u) — launchd-attributed consent is unproven, and the run itself bootstraps into that same domain, so a domain that refuses this will refuse the run. Re-run this pre-flight from a normal login session.")
       else
         consent_waited=0
         while [ "$consent_waited" -lt "$CONSENT_TIMEOUT_TICKS" ]; do
@@ -823,8 +849,12 @@ EOF
         "$LAUNCHCTL_BIN" bootout "gui/$(id -u)/$consent_label" >/dev/null 2>&1 || true
 
         if ! grep -q '^CONSENT done: 1$' "$cresult" 2>/dev/null; then
+          # Name the resource it died on, and carry the same remedy the denial
+          # branch carries — a timeout on a protected path is a consent failure
+          # wearing a different hat, and "see the log" is not an answer at 3am.
+          stalled="$(sed -n 's/^CONSENT attempting //p' "$cresult" 2>/dev/null | tail -1)"
           consent_verdict="FAIL (probe did not complete)"
-          blockers+=("consent-gate probe did not complete under launchd attribution — the detached run's own entry path could not be exercised, so a prompt-free run is unproven; probe log: $clog")
+          blockers+=("consent-gate probe did not complete under launchd attribution${stalled:+, and stalled on $stalled} — launchd-attributed consent is unproven. If it stalled on a protected path, the remedy is the denial one: move the run's paths out of that location, or grant Full Disk Access under System Settings → Privacy & Security → Full Disk Access to the job's responsible process ('/bin/bash', or possibly '${attribution_bin:-<claude is not on PATH>}') and re-run this pre-flight. Probe log: $clog")
         else
           consent_verdict="pass"
           while IFS= read -r line; do
