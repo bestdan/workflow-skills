@@ -7,8 +7,14 @@
 #
 #   exit 0   removed (or the checkout was already gone)
 #   exit 1   refused by the cwd guard or a pre-flight write probe
-#   exit 64  the caller named nothing to remove
+#   exit 64  the caller named nothing to remove, or no repository could be
+#            found for it — neither the path nor the cwd is in one
 #   otherwise git's own exit status from the removal
+#
+# The path may be relative, and the removal runs in the target's own repo (see
+# the root pin below), so an absolute spelling is computed once and used for
+# every git call after that pin. The `-e "$path"` checks stay on the original
+# spelling: the cwd never changes, so they remain correct as written.
 #
 # `git worktree remove` cleans up after itself, but an `rm -rf`'d worktree
 # strands .git/worktrees/<name>/ (config.worktree included) until something
@@ -98,8 +104,17 @@ fi
 # may be `git add -A`-ing — before `git worktree remove` refuses the main
 # worktree anyway. --git-common-dir is the same path only in the main checkout,
 # which is exactly the case to skip.
-admin=$(git -C "$target" rev-parse --path-format=absolute --git-dir 2>/dev/null)
-common=$(git -C "$target" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+#
+# Only asked of a path that resolved. `git -C ""` is a no-op, so an empty target
+# would answer for the cwd instead — and from a linked worktree that is the
+# caller's own admin dir, which the removal never touches but the probe below
+# would then walk and could refuse on.
+admin=""
+common=""
+if [ -n "$target" ]; then
+  admin=$(git -C "$target" rev-parse --path-format=absolute --git-dir 2>/dev/null)
+  common=$(git -C "$target" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+fi
 [ "$admin" = "$common" ] && admin=""
 if [ -n "$admin" ] && [ -d "$admin" ]; then
   # Every directory in the admin tree counts, not just its top: the entry holds
@@ -145,7 +160,9 @@ fi
 # a branch here, but never reaches the delete: `git worktree remove` refuses it,
 # and that failure exits before the branch half.
 branch=""
+abs="$path"
 if [ -n "$target" ]; then
+  abs="$target"
   branch=$(git -C "$target" symbolic-ref --quiet --short HEAD 2>/dev/null)
 else
   # An already-`rm -rf`'d worktree has no checkout left to ask — and that is the
@@ -160,9 +177,11 @@ else
     # porcelain match survives /tmp -> /private/tmp and friends. A stale
     # *detached* worktree prints `detached` where a branch line would be, so the
     # capture stays empty and the step skips — which is the right answer,
-    # exactly as for a live detached HEAD.
+    # exactly as for a live detached HEAD. The same spelling is what the
+    # removal below is handed, so the two agree by construction.
+    abs="$parent/$(basename -- "$path")"
     listing=$(git worktree list --porcelain 2>/dev/null)
-    branch=$(awk -v w="worktree $parent/$(basename -- "$path")" '
+    branch=$(awk -v w="worktree $abs" '
       $0 == w { found = 1; next }
       /^worktree / { found = 0 }
       found && sub(/^branch refs\/heads\//, "") { print; exit }' <<<"$listing")
@@ -179,6 +198,15 @@ if [ -z "$root" ]; then
   cwd_common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
   [ -n "$cwd_common" ] && root=$(dirname "$cwd_common")
 fi
+# No root means no repository to remove from. Without this the removal fails,
+# the prune is skipped, and the empty branch reaches the final exit 0 — a bogus
+# invocation reported as a finished teardown. A stale path can only find its
+# repo through the cwd, which is why the message names both.
+if [ -z "$root" ]; then
+  err "$path is not in a git repository, and neither is the cwd — run this"
+  cont "from inside the repository that owns the worktree"
+  exit 64
+fi
 
 # Capture the failure text so the submodule refusal below can be recognised,
 # then replay it. `git worktree remove` is silent on success, so this only ever
@@ -189,7 +217,14 @@ fi
 # the match never fires and the retry silently never happens. There is no git
 # config knob for message language, so an env prefix is the only form available.
 # The replayed text is English as a consequence, which is the intended trade.
-errtext=$(LC_ALL=C git worktree remove -- "$path" 2>&1)
+#
+# -C "$root" because `git worktree remove` resolves the registry from the cwd:
+# run from outside the repo, or from another repo, it fails with "not a working
+# tree" while the checkout stays put. The root is the target's own, so the call
+# works from anywhere — which is what lets a hook or a sibling worktree tear
+# this one down. Hence the absolute path: under -C a relative one would resolve
+# against the root instead of the cwd it was typed in.
+errtext=$(LC_ALL=C git -C "$root" worktree remove -- "$abs" 2>&1)
 rc=$?
 
 # A populated submodule makes git refuse outright — "working trees containing
@@ -242,7 +277,7 @@ if [ "$rc" -ne 0 ] && [ -n "$target" ]; then
       else
         warn "populated submodules block a plain remove; the tree is"
         cont "clean and no submodule holds a stash, so forcing is safe here"
-        git worktree remove --force -- "$path"
+        git -C "$root" worktree remove --force -- "$abs"
         rc=$?
         forced=1
       fi
@@ -263,7 +298,7 @@ fi
 if [ -n "$refuse" ]; then
   err "could not remove $path — it has populated submodules,"
   cont "which only --force can remove, and $refuse"
-  cont "  git worktree remove --force -- $path"
+  cont "  git -C $root worktree remove --force -- $abs"
   exit "$rc"
 fi
 
@@ -287,7 +322,7 @@ if [ "$rc" -ne 0 ] && [ -e "$path" ]; then
   if [ -n "$damaged" ]; then
     cont "The tree was clean before this attempt, so a \"modified or untracked\""
     cont "refusal on retry is this run's own partial deletion, not your work:"
-    cont "  git worktree remove --force -- $path   # unsandboxed"
+    cont "  git -C $root worktree remove --force -- $abs   # unsandboxed"
   fi
   exit "$rc"
 fi
@@ -304,14 +339,25 @@ fi
 # matches, the writer dies of SIGPIPE, and pipefail then turns a SUCCESSFUL
 # match into status 141 — which reads as "not found", exactly inverting the
 # test.
+#
+# The other way to get here is a root that never owned the path: a stale
+# worktree names no repo of its own, so root came from the cwd, and if that is
+# a different repository git refuses with "is not a working tree" and lists no
+# entry. The absorbed case never lands here — git drops a missing path's entry
+# itself and exits 0 — so a nonzero exit with nothing listed is a wrong-repo
+# run, and exiting 0 would report a teardown that never happened.
 if [ "$rc" -ne 0 ] && [ ! -e "$path" ]; then
   entries=$(git -C "$root" worktree list --porcelain 2>/dev/null)
-  if grep -Fqx "worktree $target" <<<"$entries"; then
+  if grep -Fqx "worktree $abs" <<<"$entries"; then
     err "$path is gone but git exited $rc — its .git/worktrees"
     cont "entry survived and is now stranded. Finish the job unsandboxed:"
     cont "  git -C $root worktree prune"
     exit "$rc"
   fi
+  err "could not remove $path — $root does not list it as a worktree, and the"
+  cont "path itself is gone, so its repository cannot be found from here. Run this"
+  cont "from inside the repository that owns it."
+  exit "$rc"
 fi
 
 # The branch half of teardown lives in scripts/branch-remove.sh — the same work

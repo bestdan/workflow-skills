@@ -241,6 +241,56 @@ run_wr() {
   refute_output --partial "branch-ghost"
 }
 
+# ------------------------------------------------ the repo comes from the target
+# `git worktree remove` resolves the registry from the cwd, so without the root
+# pin a run from outside the repo, or from another repo, fails with "not a
+# working tree" and leaves the checkout in place. The hook that calls this at
+# session exit and a sibling worktree tearing this one down are both that shape.
+
+@test "a worktree is removed from a cwd outside any repository" {
+  target=$(wt outside)
+  run_wr "$TEST_TMPDIR" "$target"
+  assert_success
+  assert [ ! -e "$target" ]
+  run git -C "$REPO" worktree list --porcelain
+  refute_output --partial "branch-outside"
+}
+
+@test "a worktree is removed from the checkout of a different repository" {
+  git init -q -b main "$TEST_TMPDIR/other"
+  git -C "$TEST_TMPDIR/other" commit -q --allow-empty -m other
+  target=$(wt crossrepo)
+  run_wr "$TEST_TMPDIR/other" "$target"
+  assert_success
+  assert [ ! -e "$target" ]
+  run git -C "$REPO" worktree list --porcelain
+  refute_output --partial "branch-crossrepo"
+  # The other repo was never touched: its only entry is its own checkout.
+  run git -C "$TEST_TMPDIR/other" worktree list --porcelain
+  refute_output --partial "crossrepo"
+}
+
+@test "an rm -rf'd worktree is absorbed from the checkout of a different repository" {
+  # A stale path cannot name its repo, so this run can only find the OTHER
+  # repo, and it must fail rather than claim a teardown that never happened.
+  git init -q -b main "$TEST_TMPDIR/other"
+  git -C "$TEST_TMPDIR/other" commit -q --allow-empty -m other
+  target=$(wt stalecross)
+  rm -rf "$target"
+  run_wr "$TEST_TMPDIR/other" "$target"
+  assert_failure
+  refute_output --partial "deleted branch"
+  # The entry is still there for a run from the right repo to prune.
+  run git -C "$REPO" worktree list --porcelain
+  assert_output --partial "branch-stalecross"
+}
+
+@test "with no repository on either side the run is refused, not reported done" {
+  run_wr "$TEST_TMPDIR" "$TEST_TMPDIR/nowhere"
+  assert_failure 64
+  assert_output --partial "not in a git repository"
+}
+
 # --------------------------------------------------------- populated submodules
 # `git worktree remove` refuses any worktree with a POPULATED submodule, however
 # clean it is: "working trees containing submodules cannot be moved or removed".
@@ -293,6 +343,20 @@ swt() {
   assert_output --partial "forcing is safe"
   run git -C "$SUBROOT" worktree list --porcelain
   refute_output --partial "sub-clean"
+}
+
+@test "the force also runs in the target's repository, from a cwd outside it" {
+  # The forced retry is a second removal, so it needs the same root pin as the
+  # first — once the plain attempt is pinned, this is the call that would
+  # otherwise fail after both gates had already passed.
+  mk_sub_fixture
+  target=$(swt outsideforce populate)
+  run_wr "$TEST_TMPDIR" "$target"
+  assert_success
+  assert [ ! -e "$target" ]
+  assert_output --partial "forcing is safe"
+  run git -C "$SUBROOT" worktree list --porcelain
+  refute_output --partial "sub-outsideforce"
 }
 
 @test "uncommitted work inside a submodule blocks the force" {
