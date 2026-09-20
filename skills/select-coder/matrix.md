@@ -135,7 +135,7 @@ several rows. It fails **gate 1**, and the two roles fail it differently:
 
 The local kill switches are real and their layer ordering (env > config >
 remote) was third-party verified — but on **0.2.93**, in July, against a line now
-at **1.0.38**, with the hard veto key undocumented and auto-update on by
+at **1.0.34**, with the hard veto key undocumented and auto-update on by
 default. The gate's bar is an answer from binding documents, and the nearest
 binding artifact points the other way: xAI closed a client-side `grok-build-cli`
 report as **out of scope** for its bounty ([SlowMist][grok-0day]). co-review

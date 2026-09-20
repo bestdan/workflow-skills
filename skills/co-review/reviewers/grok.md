@@ -76,22 +76,19 @@ Run both before dispatching. Either one failing means **skip `grok`** (noted in 
 
 > **There is a cheap auth probe if you want one, and it is not currently wired in.** `grok models` prints `You are logged in with grok.com`, the default model, and the servable roster, in about a second and with no inference — the same shape as `agy models`. It was not added as a third gate because grok's auth failure is caught from dispatch output like `copilot`'s and does not hang the way `agy`'s does, so a third gate would buy latency, not correctness. It is the right command to reach for by hand when a dispatch comes back empty, and it is also how to confirm the `--model` pin: on this account the roster is exactly `grok-4.6 (default)`, so the pin names the only model available.
 
-**Gate 1 — the telemetry pin is actually present.** This is the one that matters. Run:
+**Gate 1 — the telemetry pin is actually in effect.** This is the one that matters. Run:
 
 ```bash
-grep -c -E "^[[:space:]]*(telemetry|trace_upload)[[:space:]]*=[[:space:]]*false$|^[[:space:]]*disable_codebase_upload[[:space:]]*=[[:space:]]*true$" "$HOME/.grok/config.toml"
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/grok-telemetry-gate.py"
 ```
 
-It must print exactly `3`. Anything else — a missing file (rc 2), a partial pin, a commented-out key — means setup is incomplete, so **skip grok** with the reason: `grok telemetry pin incomplete — see reviewers/grok.md "One-time setup"`. Failing closed here costs one reviewer. Failing open ships the reviewed diff, and the contents of anything grok reads, to xAI's trace channel.
+**Exit 0** means pinned. **Exit 1** means a key is missing, wrong, in the wrong table, or overridden by the environment. **Exit 2** means the config is absent or unparseable. On anything but 0, **skip grok** and carry the script's one-line reason into the run summary. Failing closed costs one reviewer. Failing open ships the reviewed diff, and the contents of anything grok reads, to xAI's trace channel.
 
-> **The pattern is anchored, and that is the whole point of it.** An earlier revision matched the bare substrings, which counts **commented-out** lines: a config with `# trace_upload = false` and the other two keys live still printed `3`, so the gate passed on a config that does not pin trace upload. Measured both ways against the same fixture — substring form `3`, anchored form `2`. Requiring the assignment to start the line and end it is what makes a commented key fail. If you add keys, keep them anchored.
+> **This started as a `grep` one-liner and had two fail-opens, both found by review.** The first counted **commented-out** lines, so `# trace_upload = false` satisfied it. Anchoring the pattern fixed that and left the second: a `grep` cannot tell which **table** an assignment landed in, so a real, uncommented `trace_upload = false` under the wrong table also satisfied it, while grok went on using its uploading default. Both are regression cases in [`../../../scripts/test-grok-telemetry-gate.sh`](../../../scripts/test-grok-telemetry-gate.sh). Parsing the file is what closes them, which is why this gate is a script and not a fenced one-liner.
+>
+> It also checks the **environment**, which outranks the file: the layer order is env > config > remote, so a truthy `GROK_TELEMETRY_ENABLED` or `GROK_TELEMETRY_TRACE_UPLOAD` in your shell profile re-enables uploads over a correct config. Set them to `0` or leave them unset.
 
-This is a **presence** check, not a proof, and two gaps are worth naming rather than papering over:
-
-- **It cannot see the environment, which outranks the file.** The layer order is env > config > remote, so `GROK_TELEMETRY_TRACE_UPLOAD=1` in your shell profile re-enables uploads while this gate still prints `3`. The gate is not extended to cover it because that variable is _yours_ — it is the same trust class as the user-level agent config below, not the untrusted-repo class the rest of this file defends against. Do not set those variables truthy; if you set them at all, set them to `0` so the two layers agree.
-- **It does not parse TOML.** It cannot tell which table a key landed in, and it cannot confirm the binary honoured it. Pair it with the `grok inspect` check in the setup section, which is what proves the file parsed at all.
-
-Read a pass as "setup was done", not as "nothing is uploading".
+It is still a **configuration** check, not a wire check. It proves the file says the right thing and nothing in the environment contradicts it; it cannot prove the binary honoured it. Only a proxy capture could, and co-review is not going to run one per dispatch. Read a pass as "this build is configured not to upload", not as "nothing is uploading".
 
 **Gate 2 — version.** Run bare `grok --version` and compare its **version field** to the pinned **`1.0.34`**. On a mismatch, skip with the reason: `grok <version> is not validated — re-verify the telemetry pin and the tool allowlist, then bump the pin in reviewers/grok.md`. The gate exists because `disable_codebase_upload` is undocumented (an update may rename or drop it), because `--disallowed-tools` was measured failing open (see Driving rules), and because this tool's history is precisely that of behaviour changing underneath a stable-looking surface. It is the same argument as `crush`'s version gate, for stronger reasons.
 
@@ -138,6 +135,8 @@ The trailing `2>&1` folds stderr into the captured output. grok exits `0` on suc
 
 Check the output for the rubric's terminal `REVIEW_COMPLETE: PASS` / `REVIEW_COMPLETE: FINDINGS` line — that, not the exit code, is what proves a review happened. Missing it means **incomplete, not PASS**: treat it as a skipped reviewer (noted, never fatal). See the "Long reviews" note in [`../SKILL.md`](../SKILL.md) for the backgrounding pattern.
 
+> **Background it, and expect a large diff to hit the 15-minute bound.** grok buffers: `--output-format plain` writes **nothing** until the run ends, so a partially-complete review is indistinguishable from a hung one by byte count alone. Two measurements on the same machine and model: a **24KB** input (rubric plus a two-file diff) returned findings in a few minutes, while a **93KB** input (rubric, conventions and this PR's full diff) was still at **zero bytes past 25 minutes** — comfortably beyond the **15-min** CLI bound in [`../SKILL.md`](../SKILL.md), so `--non-interactive` would record it as timed-out. This is a latency limit, not the context window: 93KB is a fraction of grok's 500K. Treat grok as the slowest reviewer in the pool on a large PR, always dispatch it with `run_in_background: true`, and read a timeout as a skip rather than as a failure of the pin or the config.
+
 Two failures worth naming before you reach for the pin or the config:
 
 - **Exit 1 with narration but no verdict line** means `--permission-mode auto` is missing, not that grok refused the review: the model reached for a tool the default mode wanted approval for, and headless has no way to grant it. See the driving rule above.
@@ -145,12 +144,11 @@ Two failures worth naming before you reach for the pin or the config:
 
 ## Permission allow-rules (exact-match, approve once)
 
-Merge into the `permissions.allow` array (see [`../references/permissions.md`](../references/permissions.md)). The first two are the pre-flight gates, the third prepares the neutral cwd, and the fourth is the reviewer command.
+Merge into the `permissions.allow` array (see [`../references/permissions.md`](../references/permissions.md)). The first is gate 2, the second prepares the neutral cwd, and the third is the reviewer command. **Gate 1 needs no rule of its own** — it is a `python3` script shipped by this plugin, so the shared `Bash(python3 <PLUGIN-CACHE>/…:*)` prefix in [`../references/permissions.md`](../references/permissions.md) already covers it, the same way it covers the allow-rule pre-flight. That is a side benefit of moving the gate out of a one-liner: one fewer exact-match rule to keep in sync.
 
 Replace `<NEUTRAL>` with a fixed absolute path — **grok's own**, so this `mkdir` rule is a third entry beside `devin`'s and `crush`'s rather than the same one — and `<INPUT>` with the fixed absolute path the invocation writes to, which must sit **inside** `<NEUTRAL>` (e.g. `$HOME/.claude/co-review-grok/in.grok`). **Spell the home-rooted part `$HOME/…` — required, not merely permitted** — and spell it identically in the rule and the invocation: `/Users/you/…` on one side and `$HOME` on the other do not match, and under `--non-interactive` a non-matching dispatch is denied silently. Why the literal `$HOME` is what matches: [`../references/permissions.md`](../references/permissions.md#home-rooted-paths).
 
 ```json
-"Bash(grep -c -E \"^[[:space:]]*(telemetry|trace_upload)[[:space:]]*=[[:space:]]*false$|^[[:space:]]*disable_codebase_upload[[:space:]]*=[[:space:]]*true$\" \"$HOME/.grok/config.toml\")",
 "Bash(grok --version)",
 "Bash(mkdir -p \"<NEUTRAL>\")",
 "Bash(grok --cwd \"<NEUTRAL>\" --sandbox strict --permission-mode auto --tools read_file --prompt-file \"<INPUT>\" --model \"grok-4.6\")"
