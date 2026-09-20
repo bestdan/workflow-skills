@@ -90,8 +90,12 @@ QUESTIONS: dict[str, dict] = {
     },
 }
 
-# The seventh Noul raises the floor and never lowers it. That direction is not a
-# preference: under-reading is the measured failure mode and over-reading is not.
+# The seventh Noul raises the floor and never lowers it. The design's reasoning: under-
+# reading was section 3's measured failure mode, so only an upward correction could
+# help. Kept as specified because this instrument measures the design — but finding 11
+# of the record shows the premise does not survive the predictive case: the floor is
+# wrong on 38 of its 81 firings before any decoder is chosen. `--ablate-floor` scores
+# the run without it.
 SUBSYSTEM_FLOOR = "multi-file"
 SUBSYSTEM_THRESHOLD = 0.5
 
@@ -126,23 +130,44 @@ def ask(key: str, card: str, model: str = MODEL) -> dict:
 
 
 def level_from(score: float, subsystems: float) -> str:
-    """Map the raw answers to a level, floor included.
+    """Map the raw answers to a level by rounding the Score's mean, floor included.
 
-    **A Jev Score is a position on the criteria index scale, 0 to n-1 — not [0, 1].**
+    **A Jev Score is the expected value of a distribution over the criteria indices,
+    0 to n-1 — not a number in [0, 1], and not itself a choice.** The raw response
+    carries both: `score` is the mean and `probabilities` is the distribution it is
+    the mean of, verified by dumping one live answer rather than assumed.
+
     The first version of this function assumed a normalised score and multiplied by
     four. Every case scoring above 0.75 then landed in `whole-codebase`: 39 of 45, an
     apparent 4.4% against a 55.6% base rate, with the misses running 42 over-reads to
-    1 under-read — the exact opposite of the direction section 3 measured.
+    1 under-read — the exact opposite of the direction section 3 measured. That
+    inversion is what gave it away; the sibling routing probe's `stakes`, also four
+    criteria, runs 0.580 to 2.390 over 108 answers, and a normalised score cannot
+    exceed 1.
 
-    That inversion is what gave it away, and the scale is confirmed against committed
-    evidence rather than assumption: the sibling routing probe's `stakes`, also four
-    criteria, runs 0.580 to 2.390 over 108 answers. A normalised score cannot exceed 1.
-
-    The level is therefore the nearest criterion index. This is a fixed mapping, not a
-    fitted threshold: the routing record warns that thresholds tuned on the set you
-    then score are not a measurement, and there is nothing here worth fitting.
+    Rounding the mean is one decoder. `level_from_probs` is the other, and the record
+    reports both. Neither is a fitted threshold: the routing record warns that
+    thresholds tuned on the set you then score are not a measurement.
     """
     index = min(max(round(score), 0), len(LEVELS) - 1)
+    return _apply_floor(index, subsystems)
+
+
+def level_from_probs(probabilities: list[float], subsystems: float) -> str:
+    """The other decoder: the level the model put the most mass on.
+
+    `score` is the expected value of `probabilities` over the level indices, so
+    rounding it reads a bimodal answer as its midpoint — {0: 0.4, 1: 0.2, 2: 0.4} has a
+    mean of 1.0 and rounds to `pr-sized`, the one level the model was ruling out. The
+    argmax reads the distribution as a choice. When the mass is concentrated the two
+    agree; where they part is a measurement, not a preference, and `--decoder` reports
+    both against the same committed answers.
+    """
+    index = max(range(len(probabilities)), key=lambda i: probabilities[i])
+    return _apply_floor(index, subsystems)
+
+
+def _apply_floor(index: int, subsystems: float) -> str:
     level = LEVELS[index]
     if subsystems >= SUBSYSTEM_THRESHOLD:
         floor = LEVELS.index(SUBSYSTEM_FLOOR)
@@ -210,12 +235,22 @@ def run_suite(key: str, corpus: dict, repeat: int, model: str = MODEL) -> dict:
             answers = data["answers"]
             score = float(answers["scope"]["score"])
             subs = float(answers["subsystems"]["noul"])
+            # The whole distribution is kept, not just its mean. `score` is the
+            # expected value of `probabilities` over the level indices, so the two
+            # decoders — round the mean, or take the argmax — can disagree, and only
+            # the distribution lets a reader apply either one to committed evidence.
+            # The first run stored `score` alone and could not be re-decoded.
+            probs = {
+                int(k): float(v)
+                for k, v in (answers["scope"].get("probabilities") or {}).items()
+            }
             detail.append(
                 {
                     "id": case["id"],
                     "label": case["label"],
                     "changed_files": case["changed_files"],
                     "raw_score": score,
+                    "probabilities": [probs.get(i, 0.0) for i in range(len(LEVELS))],
                     "subsystems": subs,
                     "predicted": level_from(score, subs),
                     # Recorded, never scored on — rule 6.
@@ -229,7 +264,9 @@ def run_suite(key: str, corpus: dict, repeat: int, model: str = MODEL) -> dict:
     return {"model": model, "passes": passes, "input_tokens": tokens}
 
 
-def format_analysis(run: dict, ablate_floor: bool = False) -> str:
+def format_analysis(
+    run: dict, ablate_floor: bool = False, decoder: str = "round"
+) -> str:
     """Every figure is recomputed from the committed raw answers, never read back from
     an aggregate frozen at run time.
 
@@ -239,22 +276,28 @@ def format_analysis(run: dict, ablate_floor: bool = False) -> str:
     needed a fresh API call to say anything, and the committed evidence would have
     silently described an instrument that no longer exists.
     """
-    detail_of = run["passes"]
-    if ablate_floor:
-        # Re-derive the level from the raw Score alone, as if the design's seventh
-        # question had never been asked. Everything else is untouched.
-        detail_of = [
-            {
-                "detail": [
-                    {**d, "predicted": LEVELS[min(max(round(d["raw_score"]), 0), 3)]}
-                    for d in p["detail"]
-                ]
-            }
-            for p in run["passes"]
-        ]
+
+    # The level is always re-derived here from the raw answers, never read back from
+    # the `predicted` the run stored. That field is what the instrument believed at
+    # run time; this is what the chosen decoder says now.
+    def redo(d: dict) -> str:
+        subs = 0.0 if ablate_floor else d["subsystems"]
+        if decoder == "argmax":
+            if "probabilities" not in d:
+                sys.exit(
+                    "this run stored only the Score's mean, not its distribution; "
+                    "the argmax decoder needs a run made after that field was added"
+                )
+            return level_from_probs(d["probabilities"], subs)
+        return level_from(d["raw_score"], subs)
+
+    detail_of = [
+        {"detail": [{**d, "predicted": redo(d)} for d in p["detail"]]}
+        for p in run["passes"]
+    ]
     passes = [score_pass(p["detail"]) for p in detail_of]
-    label = run["model"] + (" (subsystem floor removed)" if ablate_floor else "")
-    out = [f"model: {label}   passes: {len(passes)}", ""]
+    tags = [f"decoder={decoder}"] + (["floor removed"] if ablate_floor else [])
+    out = [f"model: {run['model']}   {'  '.join(tags)}   passes: {len(passes)}", ""]
     for i, p in enumerate(passes, 1):
         out += [
             f"pass {i}:",
@@ -303,13 +346,23 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="with --analyze: re-score as if the subsystem floor were never applied",
     )
+    p.add_argument(
+        "--decoder",
+        choices=("round", "argmax"),
+        default="round",
+        help="with --analyze: round the Score's mean, or take the argmax of its distribution",
+    )
     p.add_argument("--corpus", default=str(HERE / "measurement" / "corpus.json"))
     p.add_argument("--model", default=MODEL)
     args = p.parse_args(argv)
 
     if args.analyze:
         with open(args.analyze) as fh:
-            print(format_analysis(json.load(fh), ablate_floor=args.ablate_floor))
+            print(
+                format_analysis(
+                    json.load(fh), ablate_floor=args.ablate_floor, decoder=args.decoder
+                )
+            )
         return 0
 
     key = _jev.resolve_key(ROOT)

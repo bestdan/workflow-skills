@@ -208,6 +208,53 @@ def test_a_score_above_one_is_not_read_as_normalised() -> None:
     )
 
 
+def test_argmax_decoder_reads_the_distribution_not_its_mean() -> None:
+    """`score` is the expected value of `probabilities`. A bimodal answer has a mean in
+    the middle — the one level the model was ruling out — and only the argmax sees it."""
+    bimodal = [0.4, 0.2, 0.4, 0.0]  # mean 1.0
+    check(probe.level_from(1.0, 0.0) == "pr-sized", "round reads the mean as pr-sized")
+    check(
+        probe.level_from_probs(bimodal, 0.0) == "single-file",
+        "argmax must pick a mode, not the midpoint",
+    )
+    check(
+        probe.level_from_probs([0.01, 0.8, 0.19, 0.0], 0.0) == "pr-sized",
+        "a concentrated distribution decodes to its mode",
+    )
+
+
+def test_argmax_decoder_still_applies_the_floor() -> None:
+    check(
+        probe.level_from_probs([0.9, 0.1, 0.0, 0.0], 1.0) == "multi-file",
+        "the floor applies to the argmax path too",
+    )
+
+
+def test_committed_run_carries_the_distribution() -> None:
+    """The first run stored only the Score's mean and could not be re-decoded. Every
+    run from now on must carry the distribution, or the argmax decoder has nothing to
+    read and `--decoder argmax` exits."""
+    path = HERE / "measurement" / "suite-run.json"
+    if not path.exists():
+        FAILURES.append("measurement/suite-run.json is missing")
+        return
+    run = json.load(open(path))
+    for p in run["passes"]:
+        for d in p["detail"]:
+            probs = d.get("probabilities")
+            check(
+                isinstance(probs, list) and len(probs) == len(probe.LEVELS),
+                f"{d['id']}: no {len(probe.LEVELS)}-entry distribution stored",
+            )
+            if probs:
+                mean = sum(i * v for i, v in enumerate(probs))
+                check(
+                    abs(mean - d["raw_score"]) < 0.02,
+                    f"{d['id']}: stored score {d['raw_score']} is not the mean "
+                    f"of its distribution ({mean:.3f})",
+                )
+
+
 def test_the_scale_is_clamped_at_both_ends() -> None:
     check(
         probe.level_from(-0.2, 0.0) == "single-file", "below zero clamps to the floor"

@@ -37,7 +37,7 @@ code's, not an LLM's. Retrieval only disqualifies the typed call, which cannot
 fetch anything — and it is not a general veto, because that is precisely the flat
 signal that misrouted 10 of 12 code cases in rule 3 below.
 
-## The eight that cost us something
+## The nine that cost us something
 
 Each of these was learned by running it, not by reading the vendor's docs. The
 vendor's own rules — one judgment per question, decompose and weight in code,
@@ -79,18 +79,31 @@ note under **Using it well**, and are not repeated here.
 7. **Quote the base rate of the slice you scored, not of the set.** Rule 1 asks
    what the incumbent scores; this asks what a constant scores. They are
    different floors and the slice's is usually the higher one. The predictive
-   `scope` probe read 60.0% against the set's 55.6% and looked like a win; on
+   `scope` probe read 60.7% against the set's 55.6% and looked like a win; on
    the 43-case boundary that carried the result, the majority class alone
    scores 58.1% and the call scored 58.9%. Print the baseline beside every
    accuracy figure, in the tool, so the two cannot be quoted apart.
 
-8. **Know the scale of an answer before you map it.** A Jev `Score` is a
-   position on the criteria index, `0` to `n-1` — not `[0, 1]`. Reading it as
-   normalised sent 39 of 45 cases to the top bucket and reported 4.4% against a
-   55.6% base rate. What exposed it was not the number but the _direction_: the
-   errors inverted against a prior measurement, and an inversion that total is
-   a claim about the instrument before it is a claim about the model. Confirm a
-   scale against committed answers from another probe, never from memory.
+8. **Know what an answer _is_ before you map it, and keep all of it.** A Jev
+   `Score` is not a number in `[0, 1]` and not itself a choice: it is the
+   expected value of a `probabilities` distribution over the criteria indices,
+   `0` to `n-1`, and the response carries both — the vendor's skill calls it a
+   "probability-weighted position on ordered levels". Reading it as normalised sent
+   39 of 45 cases to the top bucket and reported 4.4% against a 55.6% base
+   rate. What exposed it was not the number but the _direction_ — the errors
+   inverted against a prior measurement, and an inversion that total is a claim
+   about the instrument before it is a claim about the model. Then the first
+   corrected run stored only the mean, and could not be re-decoded when the
+   distribution turned out to matter. Dump one raw response before writing the
+   decoder, and store the whole answer, not the field you think you need.
+
+9. **Score the raw signal beside anything you add to it.** Three probes, three
+   cases where the wrapper was the defect and the model was fine: a flat
+   signal a veto rested on, a mis-scaled decoder, and an upward-only floor
+   that fired on 26–28 of 45 cards and was wrong on 38 of its 81 firings by
+   construction. None was visible from the wrapped number alone. Every report
+   prints the unwrapped result next to the wrapped one — `--ablate-floor` here
+   — so the mapping's contribution is a column, not an assumption.
 
 ## Before you open the PR
 
