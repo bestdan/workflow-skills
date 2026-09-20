@@ -286,6 +286,17 @@ are never applied silently:
 - **standalone (no `--questions`)**, carry them in the hand-off summary instead —
   this skill never writes run-state files itself.
 
+**Co-review's Next round recommendation rides the same path.** After the last
+round, append it to `--questions <path>` as one more entry — the question is
+whether to run another co-review round on this PR, the options are
+`another round` | `no further round`, the call is deferred to the human, and
+the reasoning is co-review's stated reason verbatim. The hand-off summary
+(step 7) is never written to run state, and `REPORT.md` is rebuilt from
+`RUN.md` and `QUESTIONS.md` alone, so this entry is what puts the
+recommendation in front of the morning reader; without it the recommendation
+exists only in transient command output. Standalone, it rides in the hand-off
+summary like the judgment calls above.
+
 **Verification tests come back with the findings.** Co-review's step 9 hands
 over a list of real-machine checks, each naming the environment it needs and
 who runs it. Run the items marked as yours once, against the final branch tip
@@ -325,7 +336,9 @@ remaining findings and proceed — don't loop.
   state). This is the skill's terminal success state.
 - **Hand-off summary** (structured — for a human, or the `/auto-pilot` morning
   report): task id, PR URL, reviewer classes that ran, outstanding findings (the
-  deferred judgment calls), any verification tests left unrun, and evidence paths.
+  deferred judgment calls), any verification tests left unrun, co-review's
+  **Next round** recommendation from the last round (its verdict and reason,
+  verbatim — the human decides whether to run it), and evidence paths.
 - **Freeze rule:** once a task hands off, its PR is **frozen for the rest of a
   run** — late-arriving findings (e.g. a bot review that lands after co-review's
   timeout) are **logged, never applied**. This keeps a stacked child's base

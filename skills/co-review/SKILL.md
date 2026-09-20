@@ -234,6 +234,7 @@ The governing rule: **any decision that would prompt takes the documented defaul
 - **Untrusted custom / non-built-in command** (Local reviewers, step 5) — **skip it** with a logged note, **unless** its `command:` string was pre-approved via `--allow-command <cmd>` (byte-for-byte). Repo-controlled code is never run unattended on the strength of the config alone.
 - **Medium-confidence findings** (default disposition, steps 9/11) — there's no one to answer the per-item yes/no. Apply **only** high-confidence auto-fixes; record every medium finding as a **deferred judgment call** in the summary (the `/deliver-task` caller logs these to its `QUESTIONS.md` for morning review). Never apply a medium item unattended.
 - **Verification tests** (step 9) — no human is present to run the real-machine checks, and the agent-runnable items are not executed in that step anyway. Record **every** item as a deferred verification item in the summary; the `/deliver-task` caller carries them into the PR body and its hand-off. Report the empty list too, so the caller can tell "none needed" from "never derived".
+- **Next round** (step 12) — there is no one to put the recommendation to, so record it in the run summary — the template's **Next round** section, with the fix commit sha and the reason — and never launch the round yourself; the `/deliver-task` caller carries it into the hand-off, where a human decides in the morning. Under `--post --non-interactive` the section reads `not applicable`, as in step 13.
 - **`--post` verdict** (step 11, `--post` only) — default the review event to **`COMMENT`** (never `REQUEST_CHANGES`/`APPROVE` unattended) and post the high+medium set without a vetting prompt. `/deliver-task` uses the default (own-PR) disposition, so this path is rare, but it stays deterministic.
 
 **Bots-unavailable fallback.** If the remote bot times out (20 min) or can't run at all (e.g. a draft PR on a repo whose bots don't review drafts), fall back to **local reviewers only** — the run still completes and the summary records that the bot class was skipped and why.
@@ -379,6 +380,8 @@ label is the only signal of how hard each finding is meant to land.
 
    **Co-review lists; it never runs.** Offer the items you could run yourself; do not execute them in this step. The local-agent reviewers are read-only and sandboxed, and under `--post` the tree is never touched at all.
 
+   **The template's last section, Next round, is not this step's.** It judges the fix commit, which does not exist until step 12 — so it is the one section step 9 omits: step 12 prints it with the fix commit summary, and step 13 under `--post` prints it as not applicable. Everything else in the template is filled here.
+
    Two dispositions reshape the sections without reordering them:
    - **`--post` mode (someone else's PR):** section 2 keeps only the skip list (low) and the verification list, and the **post-candidate list moves to section 3**, because vetting it (step 10) is the call the user makes — **high + medium** findings as a single numbered list, each with `file:line`, the issue, the suggested fix, and its tier. That list is the one place the one-at-a-time rule doesn't apply: step 10 vets it as a set. The verification list is presented to the user only and is **never posted to the PR** — you cannot know the author's environment, and a verification list is not a review finding.
    - **`--non-interactive`, default disposition:** there is no one to answer, so **section 3 becomes the deferred log** — every medium finding recorded as a deferred judgment call and every verification item recorded as a deferred entry, so the `/deliver-task` caller can carry them into the PR body and the hand-off.
@@ -407,8 +410,15 @@ The remaining steps depend on disposition.
     - Stage only the files you changed as part of the review fixes — don't sweep in unrelated work that was already in the working tree.
     - Write a concise commit message describing the review fixes (e.g., `Apply co-review fixes`), summarizing the items addressed.
     - Push the current branch. If it already has an upstream (`git rev-parse --abbrev-ref --symbolic-full-name @{u}` succeeds), a plain `git push` is enough. Otherwise set one explicitly against the branch's intended remote — `git push -u <remote> HEAD`, where `<remote>` is the configured remote (default `origin`, but don't assume it: fall back to whatever `git remote` reports if `origin` isn't present).
-    - If there are no committable changes (nothing was auto-fixed and the user approved nothing), skip this step.
-    - Then summarize what changed and confirm the commit/push.
+    - If there are no committable changes (nothing was auto-fixed and the user approved nothing), skip the commit and push — but still print the **Next round** section below, with the fix commit recorded as `none — nothing was applied`.
+    - Then summarize what changed, confirm the commit/push, and **fill the template's Next round section: recommend whether another round is warranted, and say why.** The fix commit is unreviewed code by construction — the reconciler is dispatched before the fixes exist and never grades a fix it wrote, so nothing in this round has looked at this round's output. The recommendation is a judgment, not a score — weigh these signals, roughly strongest first, and name the ones that decided it:
+      - **A fix changed an interface or a contract** — a new or changed flag, a changed output format, a failure mode moved from skip to blocker. These carry their own new defects; a one-line doc correction does not.
+      - **The reconciler authored the `recommended_fix` rather than a reviewer.** Step 8 caps those at medium because a fix you authored yourself has been checked by no one; applying one is a strong argument for another look.
+      - **A fix touched code no finding was about.** Collateral edits are unreviewed by construction.
+      - **Round-over-round yield.** Falling yield, findings that are mostly refutations, and findings arriving only from internal reviewers all point at convergence — and a review that has converged is a legitimate reason to recommend **against** another round. Say so plainly; "no further round" is an answer, not the absence of one.
+      - **A new test was never mutation-checked.** A test written alongside a fix and never shown to fail against the unfixed code is not evidence the fix works.
+
+      A bare yes/no is not a recommendation. Interactively, put it to the user; under `--non-interactive`, record it in the run summary (see **Non-interactive mode**). Never launch the next round yourself — running it is the user's call, or the orchestrator's.
 
 **`--post` disposition (someone else's PR):**
 
@@ -428,7 +438,7 @@ The remaining steps depend on disposition.
 
       `<DIFF>` and `<COMMENTS>` are fixed absolute paths (not `$TMPDIR`); write the candidate `[{path, line, body}]` array to `<COMMENTS>` before this call. The helper prints `{"anchored": [...], "unanchored": [...]}` on stdout — each entry keeps its original fields. Use `anchored` as the `comments` array above and fold every `unanchored` entry's `body` into the review's top-level `body` instead (each keeps its conventional-comment label). If the POST still fails after that split — the helper and GitHub disagree — retry once with the offending comment(s) moved to `body`.
 
-13. **Report the result.** Print the review URL (`gh pr view <n> --repo <owner>/<name> --json url` plus the review, or the API response's `html_url` — `<owner>/<name>` is the same resolved repo from step 2, not necessarily `cwd`'s). Don't commit or push anything — you changed no files.
+13. **Report the result.** Print the review URL (`gh pr view <n> --repo <owner>/<name> --json url` plus the review, or the API response's `html_url` — `<owner>/<name>` is the same resolved repo from step 2, not necessarily `cwd`'s). Don't commit or push anything — you changed no files. Print the template's **Next round** section with both fields filled — `Fix commit: not applicable — --post changes no files` and `Recommendation: not applicable` — there is no fix commit to judge, and saying so is what keeps an omitted section distinguishable from a forgotten one.
 
 ## Rules
 
@@ -440,6 +450,7 @@ The remaining steps depend on disposition.
 - Never auto-fix items the user has already declined in this session.
 - Architectural/design judgment calls (signal handling, test design patterns, harness structure, and similar calls with a defensible "right" answer) get escalated to Fable for a recommendation before they reach the user as a question; genuine user-preference calls (priority, scope, whether to do the work) go to the user directly. See step 9.
 - Every run produces a verification-test verdict at step 9 — the real-machine checks `just check` and CI cannot cover. Co-review derives and presents that list; it never runs the items, and never posts them to a PR. An empty list is a valid verdict, but it must be stated rather than omitted.
+- Every run in the default disposition ends with a **Next round** recommendation (step 12), whether or not anything was applied: whether another round is warranted and why, grounded in what the fixes changed. Recommending against one is a legitimate answer; a bare yes/no is not. Co-review advises — it never launches the next round itself.
 - A local agent that fails to run is noted and skipped, never fatal.
 - `gemini` is retired (the Gemini CLI was sunset). Never probe for or invoke it; silently skip any `gemini` entry left in an existing config, note that it was ignored, and offer to drop it.
 - Don't re-ask the local-reviewer question once a config (including an explicit empty list) exists.
