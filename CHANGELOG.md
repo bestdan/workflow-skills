@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.59.0] - 2026-09-20
+
+### Features
+
+- resolve the root and branch prefix from config [N/A] (#784) (1f03ca5)
+
 ## [2.58.4] - 2026-09-20
 
 ### Fixes
