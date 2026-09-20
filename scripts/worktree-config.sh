@@ -113,7 +113,15 @@ config_get() { # relpath key
 # ------------------------------------------------------------------- the root
 
 validate_root() { # source value
+  # A bare `/` passes the absolute-path test and then breaks the lifecycle
+  # quietly: the create hook builds `//<repo>/<name>`, which canonicalizes to
+  # `/<repo>/<name>`, while the remove hook's containment gate tests against
+  # the pattern `//*/*` — which that path does not match, so the hook keeps
+  # every worktree it created. Rejected here rather than worked around in each
+  # hook: this is the one place that decides what a root may be, and worktrees
+  # directly under `/` are nobody's intent anyway.
   case "$(expand_tilde "$2")" in
+    /) die "$1 must not be /: worktrees would be created directly under the filesystem root: $2" ;;
     /*) ;;
     *) die "$1 must be an absolute path (or start with ~/): $2" ;;
   esac

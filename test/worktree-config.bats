@@ -62,6 +62,25 @@ resolve() { # [env=val ...] -- [arg]
   refute_output --partial "/from/config"
 }
 
+@test "a root of / is an error, not a silently unusable lifecycle" {
+  # `/` passes the absolute-path test and then breaks the hooks quietly: the
+  # created path canonicalizes to /<repo>/<name>, which the remove hook's
+  # containment pattern (//*/*) never matches, so it keeps every worktree it
+  # made. Rejected here, at the one place that decides what a root may be.
+  write_config "root: /from/config"
+  resolve WORKFLOW_SKILLS_WORKTREE_ROOT=/ bash "$RESOLVER" root
+  assert_failure 1
+  assert_output --partial "must not be /"
+  refute_output --partial "/from/config"
+}
+
+@test "a root of / in the config file is an error too" {
+  write_config "root: /"
+  resolve bash "$RESOLVER" root
+  assert_failure 1
+  assert_output --partial "must not be /"
+}
+
 @test "a prefix with whitespace in the env var is an error" {
   resolve WORKFLOW_SKILLS_BRANCH_PREFIX="two words" bash "$RESOLVER" prefix
   assert_failure 1
