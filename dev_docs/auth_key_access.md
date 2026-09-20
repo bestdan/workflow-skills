@@ -133,18 +133,28 @@ There is a third consequence, and it is the one most easily missed: bridging a c
 value into the environment means the agent writes it into the **command it runs**, so a
 plaintext key lands in the session transcript and is briefly visible in `ps`. A pointer
 does not have that problem — only the reference is bridged, and the resolver hands the
-secret to the process directly. This is inherent to choosing plaintext, not a defect in
-the bridge, but it is part of what you accept.
+secret to the process directly. This is inherent to the **bridge**, not a defect in it,
+and it is part of what you accept.
+
+It follows from the bridge rather than from plaintext as such, which is worth stating
+because the two get conflated. A script that reads the raw `.task-config.local.yml` leaf
+**itself**, in-process, pays the repo-tree cost below and not this one: nothing is
+bridged, so nothing reaches a command line. `_secret_resolve.py` never does this — it
+reads only the environment, which is why rung 0 needs the agent at all — but a Class A
+script outside `commands/handlers/assets/` may, and one does. See
+[`decisions/2026-09-20-typesafe-key-stays-plaintext.md`](decisions/2026-09-20-typesafe-key-stays-plaintext.md).
 
 The trade, stated plainly so the choice is informed. `.task-config.local.yml` is ignored
 robustly: `.gitignore` ignores `dev_docs/tasks/*` wholesale and negates only the committed
 config, so this is not one forgotten ignore line away from being committed, and
 `git stash -u` does not sweep ignored files. What you accept instead is twofold: a
 plaintext full-account token **inside the repo tree**, where every agent session, editor
-index, directory-wide grep, and backup of that folder can read it — and, because the
+index, directory-wide grep, and backup of that folder can read it — and, wherever the
 agent bridges it into the command it runs, the token also appears in the **session
 transcript**. For a plaintext key without either exposure, export `$<NAME>` from your
-shell profile — same rung, nothing on disk in the checkout and nothing bridged.
+shell profile — same rung, nothing on disk in the checkout and nothing bridged. That
+export has its own cost, though: it is inherited by every process you start, which is
+worse than a `600` file for a secret only one script reads.
 
 Both are legitimate. Nothing in this plugin nags about either.
 
