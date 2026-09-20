@@ -115,6 +115,43 @@ codex — say so instead of routing a 1M-token read at an unverified window.
 `devin:kimi-k3` is deliberately absent despite the strongest open-weights
 numbers here: reach for it manually on a public repo, not as a default.
 
+**Grok Build is a reviewer, not a coder backend.** xAI's `grok` CLI is a built-in
+co-review reviewer ([`../co-review/reviewers/grok.md`](../co-review/reviewers/grok.md))
+and is deliberately **not** ranked here. It is not a capability judgment —
+`grok-4.6` reports TB 2.1 88.4% (vendor-reported, absent from the primary board)
+at `$2/$6` per Mtok with a 500K window, which would place it near the top of
+several rows. It fails **gate 1**, and the two roles fail it differently:
+
+- A **coder** reads and writes the working tree. Grok Build was measured
+  uploading whole repositories, full history and committed secrets included, to
+  xAI storage independent of what the agent read, and its user-facing privacy
+  toggle did not stop it ([repro][grok-repro]). That upload is off by a
+  **server-side flag**, not a client release, and the code remains in the binary
+  ([Better Stack][grok-bs]). Session traces still carry the verbatim contents of
+  every file the agent reads ([hardening harness][grok-hard]).
+- A **reviewer** reads a diff from a neutral directory and nothing else. Pinned
+  to `--sandbox strict`, reads never reach the tree at all, which is what makes
+  the same tool addable there and not here.
+
+The local kill switches are real and their layer ordering (env > config >
+remote) was third-party verified — but on **0.2.93**, in July, against a line now
+at **1.0.38**, with the hard veto key undocumented and auto-update on by
+default. The gate's bar is an answer from binding documents, and the nearest
+binding artifact points the other way: xAI closed a client-side `grok-build-cli`
+report as **out of scope** for its bounty ([SlowMist][grok-0day]). co-review
+absorbs that residue behind a fail-closed pre-flight gate; a coder backend has
+no equivalent place to put it.
+
+**Revisit when** a wire capture of a 1.0.x build shows the pins holding, and the
+vendor treats CLI reports as in scope. `devin:grok-4.5` below is a different
+question — that routes xAI weights through Cognition's harness, and carries
+devin's gate verdict, not xAI's.
+
+[grok-repro]: https://github.com/cereblab/grok-build-exfil-repro
+[grok-bs]: https://betterstack.com/community/guides/ai/grok-cli-data-leak/
+[grok-hard]: https://github.com/wetlink/grok-build-privacy-hardening
+[grok-0day]: https://slowmist.medium.com/xai-grok-build-0-day-one-day-after-open-source-trust-mechanism-bypass-and-the-security-70b676300d98
+
 Meta's **Muse Spark 1.1** is absent for a different reason: it tops the
 SWE-bench Pro **board** (61.5% — the higher 62.1% shown for `devin:glm-5.2`
 below is a `‡` figure, not a board entry) and scores 76.2% on TB 2.1, but no

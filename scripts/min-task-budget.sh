@@ -17,6 +17,7 @@
 #   term(devin)   = 15   # same
 #   term(copilot) = 15   # same
 #   term(crush)   = 15   # cloud (Charm Hyper), unmeasured; same 15-min bound
+#   term(grok)    = 15   # cloud (xAI), unmeasured; same 15-min bound
 #   term(gemini)  = ignored (retired; co-review silently skips it)
 #   no reviewers  = Claude-only set (main agent + reconciler are in-session,
 #                    already inside OVERHEAD) -> max term 0
@@ -25,8 +26,8 @@
 #   scripts/min-task-budget.sh [<reviewer> ...]
 #
 #   <reviewer>  a resolved `local_reviewers` name (codex, agy, devin,
-#               copilot, crush, gemini), lowercase, one per argument. Zero
-#               args means the Claude-only set.
+#               copilot, crush, grok, gemini), lowercase, one per argument.
+#               Zero args means the Claude-only set.
 #
 # Prints exactly one line "<N>m" on stdout — a value
 # `_parse_duration_or_off` (spawn-orchestrator.sh) accepts.
@@ -57,7 +58,7 @@ for reviewer in "$@"; do
   case "$reviewer" in
     gemini) continue ;;
     codex) term=2 ;;
-    agy | devin | copilot | crush) term=15 ;;
+    agy | devin | copilot | crush | grok) term=15 ;;
     *)
       echo "min-task-budget: unknown reviewer '$reviewer'" >&2
       exit 2
