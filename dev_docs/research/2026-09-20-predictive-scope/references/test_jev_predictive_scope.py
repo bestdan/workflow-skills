@@ -186,11 +186,33 @@ def test_committed_corpus_is_consistent() -> None:
 # ----------------------------------------------------------------- the mapping
 
 
-def test_level_mapping_covers_the_range() -> None:
+def test_level_mapping_is_on_the_criteria_index_scale() -> None:
+    """A Jev Score runs 0..n-1 over the criteria, not 0..1. Confirmed against the
+    sibling routing probe's committed `stakes` answers, which reach 2.390."""
     check(probe.level_from(0.0, 0.0) == "single-file", "0.0 is single-file")
-    check(probe.level_from(0.3, 0.0) == "pr-sized", "0.3 is pr-sized")
-    check(probe.level_from(0.6, 0.0) == "multi-file", "0.6 is multi-file")
-    check(probe.level_from(1.0, 0.0) == "whole-codebase", "1.0 is whole-codebase")
+    check(probe.level_from(1.0, 0.0) == "pr-sized", "1.0 is pr-sized")
+    check(probe.level_from(2.0, 0.0) == "multi-file", "2.0 is multi-file")
+    check(probe.level_from(3.0, 0.0) == "whole-codebase", "3.0 is whole-codebase")
+    check(probe.level_from(1.4, 0.0) == "pr-sized", "1.4 rounds down to pr-sized")
+    check(probe.level_from(1.6, 0.0) == "multi-file", "1.6 rounds up to multi-file")
+
+
+def test_a_score_above_one_is_not_read_as_normalised() -> None:
+    """The defect this record found in its own instrument. Treating the score as [0, 1]
+    sent 39 of 45 cases to whole-codebase and inverted the error direction. A score of
+    1.1 is a pr-sized answer, not a near-maximal one."""
+    check(probe.level_from(1.1, 0.0) == "pr-sized", "1.1 must be pr-sized")
+    check(
+        probe.level_from(1.95, 0.0) == "multi-file",
+        "1.95 — the corpus maximum — must be multi-file, not whole-codebase",
+    )
+
+
+def test_the_scale_is_clamped_at_both_ends() -> None:
+    check(
+        probe.level_from(-0.2, 0.0) == "single-file", "below zero clamps to the floor"
+    )
+    check(probe.level_from(9.0, 0.0) == "whole-codebase", "above n-1 clamps to the top")
 
 
 def test_subsystem_floor_only_raises() -> None:
@@ -202,7 +224,7 @@ def test_subsystem_floor_only_raises() -> None:
         "a confident subsystem answer must raise a low score to the floor",
     )
     check(
-        probe.level_from(1.0, 1.0) == "whole-codebase",
+        probe.level_from(3.0, 1.0) == "whole-codebase",
         "the floor must never pull whole-codebase down",
     )
     check(

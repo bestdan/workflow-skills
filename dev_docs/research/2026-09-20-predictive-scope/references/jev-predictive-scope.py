@@ -128,12 +128,21 @@ def ask(key: str, card: str, model: str = MODEL) -> dict:
 def level_from(score: float, subsystems: float) -> str:
     """Map the raw answers to a level, floor included.
 
-    `score` is Jev's Score in [0, 1] over four ordered criteria, so the level is the
-    quartile it falls in. This is a fixed mapping, not a fitted threshold: the routing
-    probe's decision record warns that thresholds tuned on the set you then score are
-    not a measurement, and there is nothing here worth fitting.
+    **A Jev Score is a position on the criteria index scale, 0 to n-1 — not [0, 1].**
+    The first version of this function assumed a normalised score and multiplied by
+    four. Every case scoring above 0.75 then landed in `whole-codebase`: 39 of 45, an
+    apparent 4.4% against a 55.6% base rate, with the misses running 42 over-reads to
+    1 under-read — the exact opposite of the direction section 3 measured.
+
+    That inversion is what gave it away, and the scale is confirmed against committed
+    evidence rather than assumption: the sibling routing probe's `stakes`, also four
+    criteria, runs 0.580 to 2.390 over 108 answers. A normalised score cannot exceed 1.
+
+    The level is therefore the nearest criterion index. This is a fixed mapping, not a
+    fitted threshold: the routing record warns that thresholds tuned on the set you
+    then score are not a measurement, and there is nothing here worth fitting.
     """
-    index = min(int(score * len(LEVELS)), len(LEVELS) - 1)
+    index = min(max(round(score), 0), len(LEVELS) - 1)
     level = LEVELS[index]
     if subsystems >= SUBSYSTEM_THRESHOLD:
         floor = LEVELS.index(SUBSYSTEM_FLOOR)
@@ -164,6 +173,13 @@ def score_pass(detail: list[dict]) -> dict:
     pair = [d for d in detail if d["label"] in ("pr-sized", "multi-file")]
     pair_ok = sum(1 for d in pair if d["predicted"] == d["label"])
 
+    # The boundary slice has its own majority class, and it is the comparison that
+    # decides whether the call is doing anything there. Quoting the overall base rate
+    # beside a boundary-only accuracy would flatter the result: the slice is more
+    # evenly split than the corpus, so its baseline is the harder one to beat.
+    pair_counts = Counter(d["label"] for d in pair)
+    pair_base = max(pair_counts.values()) / len(pair) if pair else 0.0
+
     counts = Counter(d["label"] for d in detail)
     base = max(counts.values()) / n if n else 0.0
 
@@ -179,6 +195,7 @@ def score_pass(detail: list[dict]) -> dict:
         "boundary_cases": len(pair),
         "boundary_exact": pair_ok,
         "boundary_rate": pair_ok / len(pair) if pair else 0.0,
+        "boundary_base_rate": pair_base,
         "base_rate": base,
         "confusion": Counter(f"{d['label']}->{d['predicted']}" for d in misses),
     }
@@ -213,8 +230,18 @@ def run_suite(key: str, corpus: dict, repeat: int, model: str = MODEL) -> dict:
 
 
 def format_analysis(run: dict) -> str:
-    out = [f"model: {run['model']}   passes: {len(run['passes'])}", ""]
-    for i, p in enumerate(run["passes"], 1):
+    """Every figure is recomputed from the committed raw answers, never read back from
+    an aggregate frozen at run time.
+
+    That is not defensive tidiness. This record's own mapping defect was found after
+    the run, and re-scoring the stored answers under the fix is what confirmed the
+    mapping alone was responsible. A report that trusted the stored totals would have
+    needed a fresh API call to say anything, and the committed evidence would have
+    silently described an instrument that no longer exists.
+    """
+    passes = [score_pass(p["detail"]) for p in run["passes"]]
+    out = [f"model: {run['model']}   passes: {len(passes)}", ""]
+    for i, p in enumerate(passes, 1):
         out += [
             f"pass {i}:",
             f"  four-level exact   {p['exact']}/{p['cases']}  {p['exact_rate']:.1%}"
@@ -222,7 +249,8 @@ def format_analysis(run: dict) -> str:
             f"  within one level   {p['within_one']}/{p['cases']}  "
             f"{p['within_one_rate']:.1%}",
             f"  boundary only      {p['boundary_exact']}/{p['boundary_cases']}  "
-            f"{p['boundary_rate']:.1%}   (pr-sized vs multi-file)",
+            f"{p['boundary_rate']:.1%}   (pr-sized vs multi-file; "
+            f"base rate {p['boundary_base_rate']:.1%})",
             f"  misses             {p['misses']}  "
             f"({p['under_read']} under-read, {p['over_read']} over-read)",
         ]
@@ -232,9 +260,15 @@ def format_analysis(run: dict) -> str:
             )
             out.append(f"  most common        {worst}")
         out.append("")
-    rates = [p["exact_rate"] for p in run["passes"]]
+    rates = [p["exact_rate"] for p in passes]
     if len(rates) > 1:
+        spread = max(rates) - min(rates)
+        margin = sum(rates) / len(rates) - passes[0]["base_rate"]
         out.append(f"spread across passes: {min(rates):.1%} to {max(rates):.1%}")
+        out.append(
+            f"  spread {spread:.1%} vs margin over base rate {margin:+.1%}  "
+            f"-- {'spread exceeds the margin' if spread > abs(margin) else 'margin exceeds the spread'}"
+        )
     out.append(
         "\nSection 3 measured 71.6% exact post-hoc against a different distribution. "
         "That\nnumber and these are not comparable; the base rate above is the "
