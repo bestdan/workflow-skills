@@ -7,6 +7,9 @@ record would.
 
     D=dev_docs/research/2026-09-20-predictive-scope/references
     python3 $D/jev-predictive-scope.py --analyze $D/measurement/suite-run.json
+    python3 $D/jev-predictive-scope.py --analyze $D/measurement/suite-run.json --ablate-floor
+    python3 $D/jev-predictive-scope.py --analyze $D/measurement/suite-run.json --decoder argmax
+    python3 $D/jev-predictive-scope.py --analyze $D/measurement/suite-run.json --ablate-floor --ids $D/measurement/run3-ids.json
     python3 $D/test_jev_predictive_scope.py          # hermetic; no key, no network
     python3 $D/jev-predictive-scope.py --suite --repeat 3   # a fresh run; costs a key
 
@@ -94,8 +97,8 @@ QUESTIONS: dict[str, dict] = {
 # reading was section 3's measured failure mode, so only an upward correction could
 # help. Kept as specified because this instrument measures the design — but finding 11
 # of the record shows the premise does not survive the predictive case: the floor is
-# wrong on 38 of its 81 firings before any decoder is chosen. `--ablate-floor` scores
-# the run without it.
+# wrong on 34 of its 72 firings before any decoder is chosen. `--ablate-floor` scores
+# the run without it, and every `--analyze` pass prints the floor audit.
 SUBSYSTEM_FLOOR = "multi-file"
 SUBSYSTEM_THRESHOLD = 0.5
 
@@ -127,6 +130,17 @@ def ask(key: str, card: str, model: str = MODEL) -> dict:
     return _jev.ask_payload(
         key, {"state": fence(card), "model": model, "questions": QUESTIONS}
     )
+
+
+def card_state(case: dict) -> str:
+    """Title and body together, which is what `assess-task` is handed.
+
+    `skills/task/SKILL.md` supplies both, and a title is often the one concise
+    statement of scope a card carries. The first three runs sent the body alone — an
+    input the consumer would never see — which review caught. Finding 12 measures
+    what the change did: four points, all of it more under-reading.
+    """
+    return f"{case['title']}\n\n{case['card']}"
 
 
 def level_from(score: float, subsystems: float) -> str:
@@ -231,7 +245,7 @@ def run_suite(key: str, corpus: dict, repeat: int, model: str = MODEL) -> dict:
     for _ in range(repeat):
         detail = []
         for case in corpus["cases"]:
-            data = ask(key, case["card"], model)
+            data = ask(key, card_state(case), model)
             answers = data["answers"]
             score = float(answers["scope"]["score"])
             subs = float(answers["subsystems"]["noul"])
@@ -265,7 +279,10 @@ def run_suite(key: str, corpus: dict, repeat: int, model: str = MODEL) -> dict:
 
 
 def format_analysis(
-    run: dict, ablate_floor: bool = False, decoder: str = "round"
+    run: dict,
+    ablate_floor: bool = False,
+    decoder: str = "round",
+    ids: set[str] | None = None,
 ) -> str:
     """Every figure is recomputed from the committed raw answers, never read back from
     an aggregate frozen at run time.
@@ -292,12 +309,54 @@ def format_analysis(
         return level_from(d["raw_score"], subs)
 
     detail_of = [
-        {"detail": [{**d, "predicted": redo(d)} for d in p["detail"]]}
+        {
+            "detail": [
+                {**d, "predicted": redo(d)}
+                for d in p["detail"]
+                if ids is None or d["id"] in ids
+            ]
+        }
         for p in run["passes"]
     ]
     passes = [score_pass(p["detail"]) for p in detail_of]
     tags = [f"decoder={decoder}"] + (["floor removed"] if ablate_floor else [])
+    if ids is not None:
+        tags.append(
+            f"{len(detail_of[0]['detail'])} of {len(run['passes'][0]['detail'])} ids"
+        )
     out = [f"model: {run['model']}   {'  '.join(tags)}   passes: {len(passes)}", ""]
+
+    # What the floor does, printed here so the record's counts trace to a committed
+    # command rather than a scratch script. Two of the four numbers need no decoder:
+    # the floor can only raise a level to `multi-file`, so a firing on a card whose
+    # true label is below that is wrong however the Score is read.
+    def floor_audit(detail: list[dict]) -> str:
+        below = ("single-file", "pr-sized")
+        fired = [d for d in detail if d["subsystems"] >= SUBSYSTEM_THRESHOLD]
+        wrong_by_construction = sum(1 for d in fired if d["label"] in below)
+        made_right = made_wrong = 0
+        for d in detail:
+            bare = (
+                level_from_probs(d["probabilities"], 0.0)
+                if decoder == "argmax"
+                else level_from(d["raw_score"], 0.0)
+            )
+            floored = (
+                level_from_probs(d["probabilities"], d["subsystems"])
+                if decoder == "argmax"
+                else level_from(d["raw_score"], d["subsystems"])
+            )
+            if bare != floored:
+                if floored == d["label"]:
+                    made_right += 1
+                elif bare == d["label"]:
+                    made_wrong += 1
+        return (
+            f"  floor fired        {len(fired)}/{len(detail)}  "
+            f"({wrong_by_construction} on cards truly below multi-file: wrong by "
+            f"construction; made {made_right} right, {made_wrong} wrong)"
+        )
+
     for i, p in enumerate(passes, 1):
         out += [
             f"pass {i}:",
@@ -310,6 +369,7 @@ def format_analysis(
             f"base rate {p['boundary_base_rate']:.1%})",
             f"  misses             {p['misses']}  "
             f"({p['under_read']} under-read, {p['over_read']} over-read)",
+            floor_audit(detail_of[i - 1]["detail"]),
         ]
         if p["confusion"]:
             worst = ", ".join(
@@ -352,15 +412,27 @@ def main(argv: list[str] | None = None) -> int:
         default="round",
         help="with --analyze: round the Score's mean, or take the argmax of its distribution",
     )
+    p.add_argument(
+        "--ids",
+        metavar="FILE",
+        help="with --analyze: score only the case ids listed in this JSON array",
+    )
     p.add_argument("--corpus", default=str(HERE / "measurement" / "corpus.json"))
     p.add_argument("--model", default=MODEL)
     args = p.parse_args(argv)
 
     if args.analyze:
         with open(args.analyze) as fh:
+            ids = None
+            if args.ids:
+                with open(args.ids) as ih:
+                    ids = set(json.load(ih))
             print(
                 format_analysis(
-                    json.load(fh), ablate_floor=args.ablate_floor, decoder=args.decoder
+                    json.load(fh),
+                    ablate_floor=args.ablate_floor,
+                    decoder=args.decoder,
+                    ids=ids,
                 )
             )
         return 0

@@ -85,9 +85,52 @@ def test_provenance_gate_drops_a_backfilled_card() -> None:
     ids = [c["issue"] for c in built["cases"]]
     check(ids == [1], f"backfilled card survived the gate: {ids}")
     check(
-        built["dropped"].get("card does not predate the pull request") == 1,
+        built["dropped"].get("no closing pull request postdates the card") == 1,
         f"drop reason not recorded: {built['dropped']}",
     )
+
+
+def test_a_pre_card_pr_is_skipped_not_selected() -> None:
+    """The #430 shape review caught: a PR opened before the issue existed, later edited
+    to close it, must not be chosen — and choosing it must not cost the case. The PR
+    that postdates the card is the forecast target."""
+    issues = [
+        {
+            "number": 430,
+            "title": "filed after a PR already existed",
+            "body": "work",
+            "createdAt": "2026-08-26T21:04:55Z",
+            "closedByPullRequestsReferences": [{"number": 415}, {"number": 431}],
+        }
+    ]
+    prs = {
+        415: {
+            "number": 415,
+            "createdAt": "2026-08-24T21:12:27Z",  # before the issue
+            "changedFiles": 13,
+            "additions": 1,
+            "deletions": 1,
+        },
+        431: {
+            "number": 431,
+            "createdAt": "2026-08-26T23:07:16Z",  # after the issue
+            "changedFiles": 3,
+            "additions": 1,
+            "deletions": 1,
+        },
+    }
+    built = corpus_tool.build(issues, prs)
+    check(len(built["cases"]) == 1, f"the case must be kept: {built['dropped']}")
+    check(built["cases"][0]["pr"] == 431, "the PR that postdates the card must win")
+    check(built["cases"][0]["label"] == "pr-sized", "label must follow that PR")
+    check(not built["dropped"], f"nothing should be dropped: {built['dropped']}")
+
+
+def test_card_state_carries_the_title() -> None:
+    """`assess-task` receives title and body; the probe must send the same."""
+    state = probe.card_state({"title": "Fix the thing", "card": "Details here."})
+    check(state.startswith("Fix the thing"), "title must lead the state")
+    check("Details here." in state, "body must follow")
 
 
 def test_bodyless_card_is_dropped() -> None:
@@ -253,6 +296,25 @@ def test_committed_run_carries_the_distribution() -> None:
                     f"{d['id']}: stored score {d['raw_score']} is not the mean "
                     f"of its distribution ({mean:.3f})",
                 )
+
+
+def test_run_covers_exactly_the_corpus() -> None:
+    """The corpus is a snapshot of a live issue list, so `--from-api` grows as issues
+    close; a run must cover exactly the committed corpus or every rate is over a
+    different denominator than the one the record quotes."""
+    cdir = HERE / "measurement"
+    if not (cdir / "corpus.json").exists() or not (cdir / "suite-run.json").exists():
+        FAILURES.append("committed corpus or run is missing")
+        return
+    corpus_ids = {c["id"] for c in json.load(open(cdir / "corpus.json"))["cases"]}
+    run = json.load(open(cdir / "suite-run.json"))
+    for i, p in enumerate(run["passes"], 1):
+        run_ids = {d["id"] for d in p["detail"]}
+        check(
+            run_ids == corpus_ids,
+            f"pass {i}: run covers {len(run_ids)} ids, corpus has {len(corpus_ids)} "
+            f"(missing {sorted(corpus_ids - run_ids)[:3]}, extra {sorted(run_ids - corpus_ids)[:3]})",
+        )
 
 
 def test_the_scale_is_clamped_at_both_ends() -> None:

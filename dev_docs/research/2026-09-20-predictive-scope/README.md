@@ -19,36 +19,44 @@ ground truth was the file count of a pull request that had already merged, so ev
 case handed the model a change that had already happened.
 
 **As the design specifies it, no — and the design's own seventh question is why.**
-Asked with the upward-only subsystem floor the design adds, the call scores 60.7%
-against a 55.6% base rate and sits on the majority-class baseline of the one boundary
-this corpus can measure. Remove that floor and the same answers reach 68.1%, a margin
-of 12.6 points over a 2.2-point run-to-run spread, with the error direction reverting
-to the under-read §3 measured. Which decoder reads the Score — round its mean, or take
-the argmax of its distribution — moves the result by at most one case per pass.
+Asked with the upward-only subsystem floor the design adds, the call scores 56.7%
+against a 56.0% base rate and falls below the majority-class baseline of the one
+boundary this corpus can measure. Remove that floor and the same answers reach 62.0%,
+identical on all three passes, with every miss an under-read — the direction §3
+measured. Which decoder reads the Score — round its mean, or take the argmax of its
+distribution — gives the same number in every cell.
 
 So the finding is about the wrapper, not the model: **the correction the design built
 against §3's under-read is what breaks the question when it is asked predictively.**
-Findings 6 to 11 are the measurement; 1 to 5 are what the corpus can and cannot
-support, and they bound what the measurement is allowed to claim.
+And one correction to this record's own earlier runs is a finding too: sending the
+body alone, as every earlier run did, reported 68.1%; sending title and body — what the
+consumer sends — scores 64.4% on the same cards. Findings 6 to 12 are the measurement; 1 to 5
+are what the corpus can and cannot support, and they bound what the measurement is
+allowed to claim.
 
 ## Method
 
 `jev-1.13.0`, pinned rather than `jev-latest`, run 2026-09-20 with a live key. Three
-passes of 45 cases, both questions riding on one request per case. The corpus is this
-repository's own issue and pull request history, read through `gh` the same day.
+passes of 50 cases, both questions riding on one request per case, each card sent as
+title and body. The corpus is this repository's own issue and pull request history,
+read through `gh` the same day — and it is a **snapshot**: `--from-api` reads the live
+issue list, so a rebuild after more issues close will hold more cases than the run
+covers. A test asserts the committed run covers exactly the committed corpus, which is
+the check that the rates are over the denominator the record quotes.
 
 ```
 D=dev_docs/research/2026-09-20-predictive-scope/references
 python3 $D/jev-predictive-scope.py --analyze $D/measurement/suite-run.json  # every number
 python3 $D/jev-predictive-scope.py --analyze $D/measurement/suite-run.json --ablate-floor
 python3 $D/jev-predictive-scope.py --analyze $D/measurement/suite-run.json --decoder argmax
+python3 $D/jev-predictive-scope.py --analyze $D/measurement/suite-run.json --ablate-floor --ids $D/measurement/run3-ids.json
 python3 $D/build-corpus.py --profile $D/measurement/corpus.json             # the corpus
 python3 $D/test_jev_predictive_scope.py                                     # hermetic
 python3 $D/build-corpus.py --from-api                        # rebuild the corpus; needs gh
 python3 $D/jev-predictive-scope.py --suite --repeat 3        # a fresh run; costs a key
 ```
 
-**Every number in this record is printed by one of the first three commands**, which
+**Every number in this record is printed by one of the first five commands**, which
 need neither a key nor the network — they read committed evidence. `--analyze`
 recomputes each figure from the committed raw answers rather than reading back an
 aggregate frozen at run time; finding 9 is why that matters. The first version of the
@@ -58,38 +66,45 @@ different runs computed in a scratch script, and closing that gap is what its fi
 
 `references/measurement/` is that evidence:
 
-- `corpus.json` — the 45 cases, each with the card as filed, the pull request that
+- `corpus.json` — the 50 cases, each with the card as filed, the pull request that
   closed it, and the changed-file count that labels it.
 - `suite-run.json` — one `--suite --repeat 3` run: per case, per pass, the raw Score,
   the four-entry distribution it is the mean of, the Noul, and the level they produced.
-  This is the third run. The first stored a mis-decoded level; the second stored the
-  Score's mean without its distribution and could not be re-decoded (finding 9). Both
-  are in this file's git history; their means are cited where reproducibility across
-  runs is the point.
+  This is the fourth run. The first stored a mis-decoded level; the second stored the
+  Score's mean without its distribution and could not be re-decoded; the third sent
+  the body without the title and used a closing-PR rule that dropped a valid card
+  (finding 9). All are in this file's git history, and the third's means are cited
+  where the input change is the point.
+- `run3-ids.json` — the 45 ids the third run covered, so `--ids` can score this run on
+  exactly those cards and isolate what changing the input did (finding 12).
 
-**The corpus is 45 task cards paired with the blast radius the work actually had.** A
+**The corpus is 50 task cards paired with the blast radius the work actually had.** A
 case is a closed issue whose text existed before the pull request that closed it,
 labelled with that pull request's changed-file count under the design's cut points.
 `created_at(issue) < created_at(pull request)` is a gate rather than a nicety: a card
 written or rewritten after its pull request would reproduce exactly the post-hoc defect
-this record exists to remove, and would do it invisibly. One case was dropped by that
-gate; a test pins it.
+this record exists to remove, and would do it invisibly. Where an issue has more than
+one merged closing pull request, only those opened after the card are candidates, and
+the first of them to open is the forecast target. An earlier version of the rule chose
+the earliest-opened pull request before checking it postdated the card, selected one
+opened two days before its issue, and dropped the case at the gate — finding 9. Under
+the current rule no case is dropped by it.
 
 ## Findings
 
 ### 1. The corpus exists, and it is thinner than §3's
 
-82 closed issues; 36 have no merged pull request that closed them; 45 of the remaining
-46 have a card that predates the work.
+86 closed issues at the snapshot; 36 have no merged pull request that closed them; all
+50 of the rest have a card that predates the pull request that closed it.
 
 | level            | rule                     | cases |
 | ---------------- | ------------------------ | ----- |
 | `single-file`    | 1 changed file           | 2     |
-| `pr-sized`       | 2–5                      | 25    |
-| `multi-file`     | 6+                       | 18    |
+| `pr-sized`       | 2–5                      | 28    |
+| `multi-file`     | 6+                       | 20    |
 | `whole-codebase` | ≥ half the tracked files | **0** |
 
-45 is comparable to the routing record's 36 cases and well short of §3's 116. The
+50 is comparable to the routing record's 36 cases and well short of §3's 116. The
 changed-file counts run 1 to 24, with a single case above 10.
 
 ### 2. `whole-codebase` has no instance, so the probe cannot license that cut
@@ -104,21 +119,21 @@ reached in practice, which is worth knowing and is not the same as validating wh
 sits. The boundary is implemented in `build-corpus.py` so it stays inspectable, and a
 test pins its arithmetic, but nothing here measures whether it is in the right place.
 
-### 3. The base rate is 55.6%, and §3's 71.6% is not comparable to it
+### 3. The base rate is 56.0%, and §3's 71.6% is not comparable to it
 
-Always answering `pr-sized` scores 25/45. A result has to clear that, not 25%: a
+Always answering `pr-sized` scores 28/50. A result has to clear that, not 25%: a
 four-level question over a distribution this skewed is easy to score well on for the
 wrong reason. Finding 6 is what that constraint does to the measured number.
 
 This also breaks the comparison the design invites. §3's 71.6% was measured against a
-different distribution — 116 merged pull requests, not 45 cards — so the two numbers
+different distribution — 116 merged pull requests, not 50 cards — so the two numbers
 cannot be set beside each other, and a result landing near 71.6% here would mean
 something different from what §3's did. `--analyze` prints the base rate beside every
 accuracy figure so the two cannot drift apart in the reporting.
 
 ### 4. The four-level question is mostly one boundary wearing a larger label
 
-43 of the 45 cases sit in `pr-sized` or `multi-file`, split at the 5/6-file line.
+48 of the 50 cases sit in `pr-sized` or `multi-file`, split at the 5/6-file line.
 
 That is a limitation and an aim at once. §3's failure was concentrated at exactly this
 boundary — 31 of 33 misses were `multi-file` read as `pr-sized` — so a corpus massed
@@ -129,54 +144,53 @@ cost.
 
 ### 5. The linkage rate is itself a constraint on any future corpus
 
-36 of 82 closed issues had no merged pull request that closed them — 44%. Some were
+36 of 86 closed issues had no merged pull request that closed them — 42%. Some were
 closed as duplicates or won't-fix, but the rate means that widening this corpus by
 waiting for more issues to close is slower than it looks: roughly half of what closes
 never becomes a labelled case.
 
-### 6. As specified, the four-level result barely clears its own run-to-run spread
+### 6. As specified, the four-level result is inside its own run-to-run spread
 
 | pass | exact         | within one   | boundary only |
 | ---- | ------------- | ------------ | ------------- |
-| 1    | 26/45 — 57.8% | 45/45 — 100% | 24/43 — 55.8% |
-| 2    | 28/45 — 62.2% | 45/45 — 100% | 26/43 — 60.5% |
-| 3    | 28/45 — 62.2% | 45/45 — 100% | 26/43 — 60.5% |
+| 1    | 29/50 — 58.0% | 50/50 — 100% | 27/48 — 56.2% |
+| 2    | 27/50 — 54.0% | 50/50 — 100% | 25/48 — 52.1% |
+| 3    | 29/50 — 58.0% | 50/50 — 100% | 27/48 — 56.2% |
 
-Mean exact is 60.7% against a **55.6% base rate** — a 5.2-point margin over a 4.4-point
-spread. On the previous run (git history) the same configuration scored 60.0% with a
-6.7-point spread, and the margin was inside it. A result that clears the noise on one
-draw and not on the next is not a result.
+Mean exact is 56.7% against a **56.0% base rate** — a 0.7-point margin under a
+4.0-point spread. The design as written does not beat a constant.
 
 That is rule 5 of [`../../typed-model-calls.md`](../../typed-model-calls.md) biting:
-Jev is not deterministic, and a single pass is an anecdote whatever it says. A one-pass
-run here could report 62.2% and read as a clear win over the baseline.
+Jev is not deterministic, and a single pass is an anecdote whatever it says. Two of the
+three passes here read 58.0% and would have looked like a two-point win.
 
-### 7. As specified, the call performs at the baseline on the boundary that matters
+### 7. As specified, the call falls below the baseline on the boundary that matters
 
-The `pr-sized`/`multi-file` slice is 43 of the 45 cases and has its own majority class:
-25 of 43 are `pr-sized`, so always answering `pr-sized` scores **58.1%**.
+The `pr-sized`/`multi-file` slice is 48 of the 50 cases and has its own majority class:
+28 of 48 are `pr-sized`, so always answering `pr-sized` scores **58.3%**.
 
-The call scores 55.8%, 60.5% and 60.5% — mean 58.9%. **This is the finding for the
-design as written**, because it is the only boundary the corpus has enough cases on
-either side of to say anything about. Finding 4 predicted the four-level number would
-mostly be this binary in disguise, and the two rates move together exactly as it said.
+The call scores 56.2%, 52.1% and 56.2% — mean 54.9%, below the constant on every pass.
+**This is the finding for the design as written**, because it is the only boundary the
+corpus has enough cases on either side of to say anything about. Finding 4 predicted
+the four-level number would mostly be this binary in disguise, and the two rates move
+together exactly as it said.
 
-The overall base rate (55.6%) is the easier comparison and flatters the result; the
-slice's own baseline (58.1%) is the honest one. `--analyze` prints both beside their
+The overall base rate (56.0%) is the easier comparison and flatters the result; the
+slice's own baseline (58.3%) is the honest one. `--analyze` prints both beside their
 accuracies so they cannot be quoted apart.
 
-### 8. As specified, the error direction inverts against §3
+### 8. As specified, the floor splits the misses; without it every miss is an under-read
 
 §3 measured 31 of 33 misses as under-reads — `multi-file` read as `pr-sized`. Here, as
-the design specifies, the misses run the other way: 38 over-reads against 15
-under-reads across three passes, dominated by `pr-sized` read as `multi-file`.
+the design specifies, the misses run 34 over-reads against 31 under-reads across three
+passes. With the floor removed (finding 11) they are 57 under-reads and 0 over-reads.
 
-Finding 11 shows this is the floor's doing, not the question's: with the floor removed
-the direction reverts to §3's, 43 under-reads and 0 over-reads. Whatever the model is
-doing, it is doing it consistently across the post-hoc and predictive regimes, and the
-floor was masking it.
+So the raw signal under-reads, exactly as §3 found post-hoc, and the floor converts
+about half of the cases it touches into over-reads without fixing the under-reads it
+was built for. Whatever the model is doing, it is doing it consistently across the
+post-hoc and predictive regimes, and the floor was masking it.
 
-### 9. The instrument was wrong twice, and the record keeps both
+### 9. The instrument was wrong three times, and the record keeps all three
 
 **First: a Jev Score is not in [0, 1].** The first version of `level_from` assumed a
 normalised score and multiplied by four, so every case above 0.75 landed in
@@ -199,16 +213,25 @@ response.** Dumping one raw answer, which should have been the first step:
 read afterwards, says the same in one line — a Score is a "probability-weighted
 position on ordered levels" — which is what the applications record meant when it
 called that skill "worth knowing before hand-writing a client". Rounding the mean
-reads a bimodal answer as its midpoint — {0: 0.4, 1: 0.2,
-2: 0.4} has a mean of 1.0 and rounds to `pr-sized`, the one level the model was ruling
-out. The second run stored only the mean, so the argmax decoder could not be applied to
-it and it had to be run again. Every run from now on stores the whole distribution, a
-test asserts it is present and that the stored mean is its mean, and `--decoder`
-reports both readings from the same committed answers.
+reads a bimodal answer as its midpoint — {0: 0.4, 1: 0.2, 2: 0.4} has a mean of 1.0
+and rounds to `pr-sized`, the one level the model was ruling out. The second run
+stored only the mean, so the argmax decoder could not be applied to it and it had to
+be run again. Every run from now on stores the whole distribution, a test asserts it
+is present and that the stored mean is its mean, and `--decoder` reports both readings
+from the same committed answers.
 
-This is the same defect class as the routing record's finding 2, where a rule resting
-on a signal whose per-label spread nobody had printed cost 42 points. Two rules in
-[`../../typed-model-calls.md`](../../typed-model-calls.md) carry what it cost here.
+**Third, caught in review: the input was not the consumer's, and the corpus rule
+dropped a valid card.** The third run sent each card's body alone; `assess-task` is
+handed title and body. And its closing-PR rule took the earliest-opened pull request
+before checking it postdated the card, so for one issue it selected a PR opened two
+days before the issue existed — later edited to reference it — and then dropped the
+case at the provenance check, which the record reported as the gate catching a
+rewritten card. Finding 12 measures what the input change did; a test pins the rule.
+
+All three are the same defect class as the routing record's finding 2, where a rule
+resting on a signal whose per-label spread nobody had printed cost 42 points. Three
+rules in [`../../typed-model-calls.md`](../../typed-model-calls.md) carry what they
+cost here.
 
 ### 10. The decoder does not matter
 
@@ -216,48 +239,69 @@ Same committed answers, all four combinations, mean four-level exact:
 
 |                          | `round` the mean | `argmax` the distribution |
 | ------------------------ | ---------------- | ------------------------- |
-| with floor (as designed) | 60.7%            | 60.0%                     |
-| floor removed            | **68.1%**        | **67.4%**                 |
+| with floor (as designed) | 56.7%            | 56.7%                     |
+| floor removed            | **62.0%**        | **62.0%**                 |
 
-The two decoders differ by at most one case per pass. The distributions the model
-returns are concentrated enough that the mean and the mode almost always land on the
-same level — which is worth knowing, and could not have been known without storing the
-distribution.
+The two decoders agree in every cell — every pass, every slice. The distributions the
+model returns are concentrated enough that the mean and the mode always land on the
+same level here, which could not have been known without storing the distribution.
 
 ### 11. Removing the design's floor is what the result turns on
 
-The subsystem Noul fires on 26–28 of the 45 cases per pass. Two ways of counting what
-it does, one of which needs no decoder at all:
+The subsystem Noul fires on 24 of the 50 cases in every pass. Two ways of counting what
+it does, printed by `--analyze` on every pass, one of which needs no decoder at all:
 
-- **Decoder-free.** The floor can only raise a level to `multi-file`. On 13, 12 and 13
+- **Decoder-free.** The floor can only raise a level to `multi-file`. On 11, 12 and 11
   of its firings the card's true label is _below_ `multi-file`, so the raised answer is
-  wrong however the Score is read: **38 of 81 firings wrong by construction.**
-- **Under `round`.** It changes the level on 20–22 cases per pass, and is right 25
-  times against 35 wrong.
+  wrong however the Score is read: **34 of 72 firings wrong by construction.**
+- **Under `round`.** It changes the level on 19 cases per pass, and is right 23 times
+  against 31 wrong.
 
 Re-scoring the same committed answers with it removed — `--ablate-floor`, no new API
 call:
 
 |                        | as the design specifies | floor removed              |
 | ---------------------- | ----------------------- | -------------------------- |
-| four-level exact, mean | 60.7%                   | **68.1%**                  |
-| margin over base rate  | +5.2 (spread 4.4)       | **+12.6 (spread 2.2)**     |
-| boundary only, mean    | 58.9% (baseline 58.1%)  | **66.7%** (baseline 58.1%) |
-| error direction        | 38 over / 15 under      | **0 over / 43 under**      |
+| four-level exact, mean | 56.7%                   | **62.0%**                  |
+| margin over base rate  | +0.7 (spread 4.0)       | **+6.0 (spread 0.0)**      |
+| boundary only, mean    | 54.9% (baseline 58.3%)  | **60.4%** (baseline 58.3%) |
+| error direction        | 34 over / 31 under      | **0 over / 57 under**      |
 
-Three things change at once. The margin over the base rate becomes several times the
-run-to-run spread. The error direction reverts to §3's. And the spread itself halves —
-the floor was adding noise as well as bias.
+Three things change at once. The margin over the base rate goes from inside the
+run-to-run spread to well outside it. The error direction reverts to §3's. And the
+spread collapses to zero — all three passes returned the same 31 correct answers,
+which says the raw Score is stable across passes and the Noul jittering around its
+0.5 threshold was the noise.
 
-**The floor-free 68.1% reproduced on an independent draw**: the second run (git
-history) gave 68.1% under the same ablation. So it is not a noise artifact. It is still
-the same 45 cards, so it is not a held-out confirmation either: two variants were
-scored on one corpus and the better one is reported, which is the hazard rule 4 names
-even though nothing here is a fitted threshold. What the ablation establishes solidly
-is the negative half — the floor as specified makes this worse, and 38 of its 81
-firings are wrong before any decoder is chosen. That the floor-free variant reaches
-68.1% on cards this run did not touch is a result wanting confirmation, not a
-measurement of it.
+**The floor-free variant is selected on the corpus it is quoted against, and its
+boundary margin is 2.1 points.** Two variants were scored on the same 50 cards and the
+better one is reported — the hazard rule 4 names, even though nothing here is a fitted
+threshold. What the ablation establishes solidly is the negative half: the floor as
+specified makes this worse, and 34 of its 72 firings are wrong before any decoder is
+chosen. That the floor-free variant clears a constant by two points on the boundary is
+a result wanting confirmation on cards this run did not touch, not a measurement of it.
+
+### 12. The consumer's input scores lower than the input two runs measured
+
+The third run sent the body alone and reported 68.1% with the floor removed, and a
+fresh draw reproduced it. This run sends title and body. Scored on exactly the 45 cards
+the third run covered — `--ids measurement/run3-ids.json` — the same configuration:
+
+| floor removed, 45 cards | body only (run 3) | title + body (this run) |
+| ----------------------- | ----------------- | ----------------------- |
+| four-level exact        | 68.1%             | **64.4%**               |
+| boundary only           | 66.7%             | **62.8%**               |
+| error direction         | 43 under / 0 over | 48 under / 0 over       |
+
+Four points, all of it more under-reading. A title is the tersest statement of the work
+a card carries, and the model reads terse as small. The five cards that entered the
+corpus with this run score 40% on their own — two `multi-file` cards under-read — and
+take the 50-card number the rest of the way to 62.0%.
+
+Two things follow. The 68.1% was a number about an input `assess-task` never sees, and
+reproducing it across runs did not make it the right one. And whether the question can
+be phrased so a title does not pull the estimate down is untested — the decision record
+lists it under what would reopen the choice.
 
 ## What the instrument does, that the design did not specify
 
@@ -284,14 +328,18 @@ measurement of it.
 - **That the call is worse than a model reasoning unaided.** No baseline was run
   against agents, as the routing record did. This measures the call against arithmetic
   baselines only.
-- **That the floor-free variant reaches 68.1% on cases it has not seen.** Two variants
-  were scored on the same 45 cards and the better one is reported. It reproduced across
-  two independent runs, which rules out noise, not selection. The negative half — the
-  floor as specified makes this worse — is solid; the positive number wants a fresh
-  corpus. See finding 11.
+- **That the floor-free variant reaches 62.0% on cases it has not seen.** Two variants
+  were scored on the same 50 cards and the better one is reported, and its margin on
+  the boundary is two points. The negative half — the floor as specified makes this
+  worse — is solid; the positive number wants a fresh corpus. See finding 11.
+- **Anything about the design's named-path lower bound.** The design wires two
+  upward-only corrections: the subsystem Noul and a floor from the count of paths a
+  card names. Only the subsystem floor was implemented here; the ablation and finding
+  11 speak to it alone. The named-path bound was not tested, and implementing it now
+  would be a third variant selected on the same 50 cards.
 - **That a better question would not do better.** The phrasing is one attempt, written
   to the design's spec.
-- **That 45 cards from one repository generalise.** Same limit §3 has, one-fifth the
+- **That 50 cards from one repository generalise.** Same limit §3 has, under half the
   size.
 
 ## Feeds

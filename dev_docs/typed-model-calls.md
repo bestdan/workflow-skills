@@ -37,7 +37,7 @@ code's, not an LLM's. Retrieval only disqualifies the typed call, which cannot
 fetch anything — and it is not a general veto, because that is precisely the flat
 signal that misrouted 10 of 12 code cases in rule 3 below.
 
-## The nine that cost us something
+## The ten that cost us something
 
 Each of these was learned by running it, not by reading the vendor's docs. The
 vendor's own rules — one judgment per question, decompose and weight in code,
@@ -79,10 +79,11 @@ note under **Using it well**, and are not repeated here.
 7. **Quote the base rate of the slice you scored, not of the set.** Rule 1 asks
    what the incumbent scores; this asks what a constant scores. They are
    different floors and the slice's is usually the higher one. The predictive
-   `scope` probe read 60.7% against the set's 55.6% and looked like a win; on
-   the 43-case boundary that carried the result, the majority class alone
-   scores 58.1% and the call scored 58.9%. Print the baseline beside every
-   accuracy figure, in the tool, so the two cannot be quoted apart.
+   `scope` probe, as its design specified, read 56.7% against the set's 56.0%
+   and looked like a narrow win; on the 48-case boundary that carried the
+   result, the majority class alone scores 58.3% and the call scored 54.9% —
+   below it. Print the baseline beside every accuracy figure, in the tool, so
+   the two cannot be quoted apart.
 
 8. **Know what an answer _is_ before you map it, and keep all of it.** A Jev
    `Score` is not a number in `[0, 1]` and not itself a choice: it is the
@@ -100,10 +101,19 @@ note under **Using it well**, and are not repeated here.
 9. **Score the raw signal beside anything you add to it.** Three probes, three
    cases where the wrapper was the defect and the model was fine: a flat
    signal a veto rested on, a mis-scaled decoder, and an upward-only floor
-   that fired on 26–28 of 45 cards and was wrong on 38 of its 81 firings by
-   construction. None was visible from the wrapped number alone. Every report
-   prints the unwrapped result next to the wrapped one — `--ablate-floor` here
-   — so the mapping's contribution is a column, not an assumption.
+   that fired on 24 of 50 cards per pass and was wrong on 34 of its 72 firings
+   by construction. None was visible from the wrapped number alone. Every
+   report prints the unwrapped result next to the wrapped one —
+   `--ablate-floor` here — so the mapping's contribution is a column, not an
+   assumption.
+
+10. **Measure the input the consumer sends, not the input you have handy.**
+    The predictive `scope` probe sent each card's body alone for two runs and
+    reported 68.1% with the floor removed. `assess-task` is handed title and
+    body. With that input, on the same 45 cards, the same configuration scored
+    64.4% and under-read more — a terse title reads as small work. A number
+    measured on an input the consumer never sees is a number about a different
+    system, and reproducing it across runs does not make it the right one.
 
 ## Before you open the PR
 

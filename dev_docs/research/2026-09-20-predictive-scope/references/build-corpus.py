@@ -104,13 +104,19 @@ def build(issues: list[dict], prs: dict[int, dict]) -> dict:
         if not merged:
             dropped["no merged pull request closed it"] += 1
             continue
-        # The first pull request to open among those that closed the issue. A later one
-        # was written with the earlier one's work already visible, so its file count is
-        # not a forecast target.
-        pr = min(merged, key=lambda p: p["createdAt"])
-        if not (issue["createdAt"] < pr["createdAt"]):
-            dropped["card does not predate the pull request"] += 1
+        # Only a pull request opened AFTER the card can be the work the card forecast.
+        # One opened before it — #430's PR 415, opened two days before the issue and
+        # later edited to reference it — is not, whatever it went on to touch. Among the
+        # survivors take the first to open: a later one was written with the earlier
+        # one's work already visible. The first version of this rule took the earliest
+        # opener BEFORE filtering, selected that pre-card PR for #430, and then dropped
+        # the whole case at the provenance check — which the record then misreported as
+        # the gate catching a rewritten card. Review caught it.
+        after = [p for p in merged if issue["createdAt"] < p["createdAt"]]
+        if not after:
+            dropped["no closing pull request postdates the card"] += 1
             continue
+        pr = min(after, key=lambda p: p["createdAt"])
         body = (issue.get("body") or "").strip()
         if not body:
             dropped["card has no body to judge"] += 1
