@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.61.0] - 2026-09-20
+
+### Features
+
+- port branch-remove to a plain script [N/A] (#789) (abb9d0a)
+
 ## [2.60.0] - 2026-09-20
 
 ### Features
