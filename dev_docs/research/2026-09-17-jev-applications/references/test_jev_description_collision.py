@@ -19,7 +19,9 @@ leaving the repo's `scripts/test-*.sh` glob is the cost of that. Run it by path 
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import unittest
 from pathlib import Path
 
@@ -146,6 +148,36 @@ class KeyLadderTests(unittest.TestCase):
         self.assertEqual(
             jev.extract_key('typesafe:\n  api_key_ref: "op://v/i/f"\n'),
             ("ref", "op://v/i/f"),
+        )
+
+    def test_a_pointer_in_the_raw_field_is_never_returned_as_a_secret(self):
+        """The whole point: an op:// string must not reach an Authorization header.
+
+        `api_key` and `api_key_ref` differ by six characters and the config looks
+        fine either way, so this recovers rather than refusing — but it must never
+        come back tagged 'raw', which is what sends it to the API verbatim.
+        """
+        with contextlib.redirect_stderr(io.StringIO()):
+            got = jev.extract_key('typesafe:\n  api_key: "op://v/i/f"\n')
+        self.assertEqual(got, ("ref", "op://v/i/f"))
+
+    def test_the_recovered_pointer_is_redacted_in_the_warning(self):
+        """auth_key_access.md: never print a full reference, even in a warning.
+
+        The item and field names are the half that advertises which vault entry
+        holds a full-account token, so they are what must not survive.
+        """
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            jev.extract_key('typesafe:\n  api_key: "op://vlt/ITEMNAME/FIELDNAME"\n')
+        self.assertIn("op://vlt/…", err.getvalue())
+        self.assertNotIn("ITEMNAME", err.getvalue())
+        self.assertNotIn("FIELDNAME", err.getvalue())
+
+    def test_a_real_key_is_still_raw(self):
+        """The recovery must not swallow the ordinary case."""
+        self.assertEqual(
+            jev.extract_key('typesafe:\n  api_key: "sk-real"\n'), ("raw", "sk-real")
         )
 
     def test_unfilled_placeholder_is_treated_as_absent(self):

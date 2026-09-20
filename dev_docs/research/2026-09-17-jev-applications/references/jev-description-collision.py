@@ -199,6 +199,14 @@ def extract_key(config_text: str) -> tuple[str, str] | None:
     placeholder is treated as absent so an unfilled file falls through to the next
     rung instead of sending a literal REPLACE_ME to the API. Both searches are
     scoped to the `typesafe:` block — see typesafe_block.
+
+    A pointer written to the raw `api_key:` field is read as a ref rather than
+    returned as one. The two field names differ by six characters and the mistake is
+    invisible in the config: before this check the pointer went out verbatim in an
+    Authorization header, which spends a request and advertises a vault name to a
+    third party. Recovering beats refusing here — the user's evident intent is to
+    resolve it, and resolving lands it at rung 3 where a pointer belongs — but it is
+    still a malformed config, so it says so on stderr rather than fixing it silently.
     """
     block = typesafe_block(config_text)
     if not block:
@@ -206,6 +214,12 @@ def extract_key(config_text: str) -> tuple[str, str] | None:
     raw = re.search(r'^\s*api_key:\s*"?([^"\n#]+)"?', block, re.M)
     if raw:
         value = raw.group(1).strip()
+        if value.startswith("op://"):
+            say(
+                f"warning: {redact_ref(value)} is in `api_key:`, which is the raw-secret "
+                "field — reading it as `api_key_ref:`. Move it to silence this."
+            )
+            return "ref", value
         if value and value != PLACEHOLDER:
             return "raw", value
     ref = re.search(r'^\s*api_key_ref:\s*"?(op://[^"\n#]+)"?', block, re.M)

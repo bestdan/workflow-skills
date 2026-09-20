@@ -126,21 +126,28 @@ If B is ever done, use `resolve_key`'s existing rung 3 (`api_key_ref`). Do not a
 `op run --env-file` wrapper on top: on this box `op run` needs the same service-account
 token, so it is B with redundant plumbing.
 
-**One guard to add at that point, because it does not exist yet.** Barclay rejects any
-credential still shaped like an `op://` reference, so forgetting the resolution step
-fails loudly instead of sending the literal string to the API. `extract_key` guards only
-one direction of that, measured 2026-09-20:
+**The misplaced-pointer guard is already in place**, added here rather than deferred with
+the rest of B. Barclay rejects any credential still shaped like an `op://` reference so
+that forgetting the resolution step fails loudly instead of sending the literal string to
+the API. `extract_key` guarded only one direction of that until now:
 
-| Config                          | `extract_key` returns                                           |
-| ------------------------------- | --------------------------------------------------------------- |
-| `api_key_ref: "sk-notapointer"` | `None` — a non-pointer in the pointer field is refused          |
-| `api_key_ref: "op://v/i/f"`     | `("ref", "op://v/i/f")` — resolved, correct                     |
-| `api_key: "op://v/i/f"`         | `("raw", "op://v/i/f")` — **sent to the API as a bearer token** |
+| Config                          | Before                                                 | Now                    |
+| ------------------------------- | ------------------------------------------------------ | ---------------------- |
+| `api_key_ref: "sk-notapointer"` | `None` — a non-pointer in the pointer field is refused | unchanged              |
+| `api_key_ref: "op://v/i/f"`     | `("ref", "op://v/i/f")` — resolved, correct            | unchanged              |
+| `api_key: "op://v/i/f"`         | `("raw", "op://v/i/f")` — **sent as a bearer token**   | `("ref", …)` + warning |
 
-The third row is the failure barclay designed against: a pointer written to the raw field
-is forwarded verbatim in an `Authorization` header. It costs one request and one confusing
-`401` rather than a secret, so it is not urgent today — but whoever does B should add the
-shape check in the same change, while the two field names are freshly in mind.
+The third row was the failure barclay designed against: a pointer written to the raw field
+went out verbatim in an `Authorization` header, spending a request and advertising a vault
+name to a third party. It cost a confusing `401` rather than a secret, which is why it was
+worth fixing cheaply rather than urgently.
+
+It **recovers rather than refuses** — the two field names differ by six characters, the
+mistake is invisible in the config, and the user's evident intent is to resolve the
+pointer, which lands it at rung 3 where a pointer belongs. A malformed config is still a
+malformed config, so it says so on stderr, redacted per
+[`../auth_key_access.md`](../auth_key_access.md)'s "never print a full reference". Both
+sibling bundles' instruments borrow `resolve_key`, so they inherit this without change.
 
 ## Alternatives
 
