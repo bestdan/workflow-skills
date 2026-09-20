@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.60.0] - 2026-09-20
+
+### Features
+
+- probe for consent gates under launchd attribution [#766] (#779) (979da31)
+
 ## [2.59.1] - 2026-09-20
 
 ### Fixes
