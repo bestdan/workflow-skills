@@ -5,12 +5,16 @@
 # The property under test: the handler is read from the RUN ROOT's task config,
 # never from the plugin directory the script lives in. This repo ships its own
 # tracked dev_docs/tasks/.task-config.yml in every release, so a plugin-dir
-# lookup reported this repository's handler to every installed user (#780).
+# lookup reported this repository's handler to every installed user.
 #
 # The fixture therefore keeps the two roots apart on purpose: preflight.sh is
 # copied into a PLUGIN root that ships a `gh-issue` config, and each case passes
 # a separate RUN root — one with a `linear` config, one with a `jira` config
-# plus a local override, one with no config at all. Fake `gh`, `claude`,
+# plus a local override, one with no config at all, and one that is a LINKED
+# WORKTREE whose main checkout holds an uncommitted `linear` config (the
+# production shape: external-handler config is excluded from git, and a linked
+# worktree never receives it, so the run root must fall back to its main
+# checkout). Fake `gh`, `claude`,
 # `probe-coders.sh`, `preflight-freshness.sh` and `spawn-orchestrator.sh` keep
 # every case off the network and the real repo, as test-preflight-consent.sh
 # does; the consent probe is pointed at a launchctl that does not exist so it
@@ -183,9 +187,47 @@ assert_contains "no-config run root: falls to the repo-pr default" \
 assert_not_contains "no-config run root: does not inherit the plugin's gh-issue" \
   "PREFLIGHT HANDLER: gh-issue" "$out3"
 assert_contains "no-config run root: says the default was taken, and from where" \
-  "PREFLIGHT HANDLER_SOURCE: default (no task config under $RUN_NONE/dev_docs/tasks)" "$out3"
+  "PREFLIGHT HANDLER_SOURCE: default (no task config under $RUN_NONE)" "$out3"
 assert_not_contains "no-config run root: HANDLER_SOURCE never points into the plugin dir" \
   "PREFLIGHT HANDLER_SOURCE: $PLUGIN" "$out3"
+
+# --- Case 4: a linked worktree falls back to its main checkout's config -----
+# The main checkout commits one file (so a worktree can be added), then gains a
+# `linear` config that is NOT committed — exactly what /task-config produces
+# for an external handler. The linked worktree checks out tracked files only,
+# so it has no config of its own.
+MAIN_WT="$(make_run_root main-wt)"
+printf 'x\n' >"$MAIN_WT/README"
+GIT_CONFIG_GLOBAL=/dev/null git -C "$MAIN_WT" add README
+GIT_CONFIG_GLOBAL=/dev/null git -C "$MAIN_WT" -c user.name=t -c user.email=t@t \
+  commit -q -m init
+printf 'handler: linear\nlinear:\n  team: EX\n' >"$MAIN_WT/dev_docs/tasks/.task-config.yml"
+LINKED="$BASE/linked-wt"
+GIT_CONFIG_GLOBAL=/dev/null git -C "$MAIN_WT" worktree add -q "$LINKED" >/dev/null 2>&1
+if [ ! -f "$LINKED/README" ]; then
+  bad "linked worktree fixture: could not create the worktree"
+else
+  [ -f "$LINKED/dev_docs/tasks/.task-config.yml" ] \
+    && bad "linked worktree fixture: the uncommitted config leaked into the worktree" \
+    || ok "linked worktree fixture: the worktree carries no config of its own"
+  out4="$(run_preflight "$LINKED")"
+  assert_contains "linked worktree: HANDLER comes from the main checkout" \
+    "PREFLIGHT HANDLER: linear" "$out4"
+  assert_contains "linked worktree: DEST_HOST follows it" \
+    "PREFLIGHT DEST_HOST: api.linear.app" "$out4"
+  assert_contains "linked worktree: HANDLER_SOURCE names the main checkout's file" \
+    "PREFLIGHT HANDLER_SOURCE: $MAIN_WT/dev_docs/tasks/.task-config.yml" "$out4"
+
+  # --- Case 5: the run root's own committed config wins over the main's ------
+  mkdir -p "$LINKED/dev_docs/tasks"
+  printf 'handler: gh-issue\ngh-issue:\n  repo: example/branch-repo\n' \
+    >"$LINKED/dev_docs/tasks/.task-config.yml"
+  out5="$(run_preflight "$LINKED")"
+  assert_contains "linked worktree with own config: the run root's copy wins" \
+    "PREFLIGHT HANDLER: gh-issue" "$out5"
+  assert_contains "linked worktree with own config: HANDLER_SOURCE names the run root's file" \
+    "PREFLIGHT HANDLER_SOURCE: $LINKED/dev_docs/tasks/.task-config.yml" "$out5"
+fi
 
 echo
 echo "test-preflight-handler: $pass_count passed, $fail_count failed"

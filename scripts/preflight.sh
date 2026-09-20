@@ -452,13 +452,28 @@ EOF
 # $ROOT. In production $ROOT is the installed plugin directory, and this repo
 # ships its own tracked dev_docs/tasks/.task-config.yml in every release, so a
 # $ROOT lookup reported this repository's handler and destination host to every
-# installed user regardless of their own config. A run root carrying no config
-# falls to the documented `repo-pr` default and says so in HANDLER_SOURCE
-# rather than inheriting anything from the plugin dir.
+# installed user regardless of their own config.
+#
+# Each file is looked up in the run root first and then in the run root's MAIN
+# checkout. For every handler except repo-pr the config is local, excluded
+# from git (`.git/info/exclude`), and the local override is ignored for all of
+# them — and a linked worktree checks out tracked files only, so the run
+# worktree the launch creates never carries either file. The main checkout is
+# where they live. The run root's own copy wins when present, because a
+# committed config on the branch the run builds from is the one that applies
+# there. On a main checkout the two roots are the same directory, so the
+# fallback changes nothing. A run with no config in either place falls to the
+# documented `repo-pr` default and says so in HANDLER_SOURCE rather than
+# inheriting anything from the plugin dir.
+main_root="$run_toplevel"
+[ -n "$run_gitdir" ] && main_root="$(dirname "$run_gitdir")"
 task_cfg="$run_toplevel/dev_docs/tasks/.task-config.yml"
+[ -f "$task_cfg" ] || task_cfg="$main_root/dev_docs/tasks/.task-config.yml"
 task_cfg_local="$run_toplevel/dev_docs/tasks/.task-config.local.yml"
+[ -f "$task_cfg_local" ] || task_cfg_local="$main_root/dev_docs/tasks/.task-config.local.yml"
 handler="repo-pr"
-handler_source="default (no task config under $run_toplevel/dev_docs/tasks)"
+handler_source="default (no task config under $run_toplevel)"
+[ "$main_root" = "$run_toplevel" ] || handler_source="default (no task config under $run_toplevel or $main_root)"
 for f in "$task_cfg" "$task_cfg_local"; do
   [ -f "$f" ] || continue
   h="$(sed -n 's/^handler:[[:space:]]*//p' "$f" | head -1 | tr -d '[:space:]')"
