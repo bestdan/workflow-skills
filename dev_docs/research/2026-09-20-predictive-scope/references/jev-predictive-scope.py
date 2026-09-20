@@ -394,6 +394,40 @@ def format_analysis(
     return "\n".join(out)
 
 
+def format_spreads(run: dict, ids: set[str] | None = None) -> str:
+    """Per pass and per true label: n, min, mean, max of both raw signals.
+
+    Rule 3 of `typed-model-calls.md`: check a signal's per-label spread before you
+    branch on it. A question the model answers the same way for every class looks
+    decisive and decides nothing. This is the diagnostic that caught the index-scale
+    defect (finding 9) — computed then in a scratch script, which is the wrong place
+    for a number the record cites. It also answers the question the floor rests on:
+    does the subsystem Noul separate `multi-file` cards from `pr-sized` ones at all?
+    """
+    out = [f"model: {run['model']}   per-label spread of the raw signals", ""]
+    for i, p in enumerate(run["passes"], 1):
+        rows = [d for d in p["detail"] if ids is None or d["id"] in ids]
+        out.append(f"pass {i}:")
+        out.append(
+            f"  {'label':<15} {'n':>3}   {'score min/mean/max':<22}   "
+            "subsystems min/mean/max"
+        )
+        for label in LEVELS:
+            group = [d for d in rows if d["label"] == label]
+            if not group:
+                out.append(f"  {label:<15} {0:>3}   (no cases)")
+                continue
+            sc = [d["raw_score"] for d in group]
+            su = [d["subsystems"] for d in group]
+            out.append(
+                f"  {label:<15} {len(group):>3}   "
+                f"{min(sc):.2f} / {sum(sc) / len(sc):.2f} / {max(sc):.2f}"
+                f"{'':<8}   {min(su):.2f} / {sum(su) / len(su):.2f} / {max(su):.2f}"
+            )
+        out.append("")
+    return "\n".join(out)
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     mode = p.add_mutually_exclusive_group(required=True)
@@ -417,6 +451,11 @@ def main(argv: list[str] | None = None) -> int:
         metavar="FILE",
         help="with --analyze: score only the case ids listed in this JSON array",
     )
+    p.add_argument(
+        "--spreads",
+        action="store_true",
+        help="with --analyze: print each raw signal's per-label spread instead of the scores",
+    )
     p.add_argument("--corpus", default=str(HERE / "measurement" / "corpus.json"))
     p.add_argument("--model", default=MODEL)
     args = p.parse_args(argv)
@@ -427,14 +466,18 @@ def main(argv: list[str] | None = None) -> int:
             if args.ids:
                 with open(args.ids) as ih:
                     ids = set(json.load(ih))
-            print(
-                format_analysis(
-                    json.load(fh),
-                    ablate_floor=args.ablate_floor,
-                    decoder=args.decoder,
-                    ids=ids,
+            run = json.load(fh)
+            if args.spreads:
+                print(format_spreads(run, ids=ids))
+            else:
+                print(
+                    format_analysis(
+                        run,
+                        ablate_floor=args.ablate_floor,
+                        decoder=args.decoder,
+                        ids=ids,
+                    )
                 )
-            )
         return 0
 
     key = _jev.resolve_key(ROOT)

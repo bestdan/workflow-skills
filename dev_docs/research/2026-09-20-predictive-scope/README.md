@@ -50,13 +50,14 @@ python3 $D/jev-predictive-scope.py --analyze $D/measurement/suite-run.json  # ev
 python3 $D/jev-predictive-scope.py --analyze $D/measurement/suite-run.json --ablate-floor
 python3 $D/jev-predictive-scope.py --analyze $D/measurement/suite-run.json --decoder argmax
 python3 $D/jev-predictive-scope.py --analyze $D/measurement/suite-run.json --ablate-floor --ids $D/measurement/run3-ids.json
+python3 $D/jev-predictive-scope.py --analyze $D/measurement/suite-run.json --spreads
 python3 $D/build-corpus.py --profile $D/measurement/corpus.json             # the corpus
 python3 $D/test_jev_predictive_scope.py                                     # hermetic
 python3 $D/build-corpus.py --from-api                        # rebuild the corpus; needs gh
 python3 $D/jev-predictive-scope.py --suite --repeat 3        # a fresh run; costs a key
 ```
 
-**Every number in this record is printed by one of the first five commands**, which
+**Every number in this record is printed by one of the first six commands**, which
 need neither a key nor the network — they read committed evidence. `--analyze`
 recomputes each figure from the committed raw answers rather than reading back an
 aggregate frozen at run time; finding 9 is why that matters. The first version of the
@@ -261,6 +262,15 @@ it does, printed by `--analyze` on every pass, one of which needs no decoder at 
   wrong however the Score is read: **34 of 72 firings wrong by construction.**
 - **Under `round`.** It changes the level on 19 cases per pass, and is right 23 times
   against 31 wrong.
+
+`--spreads` shows why it cannot do better. The subsystem Noul averages **0.45 on
+`pr-sized` cards and 0.54 on `multi-file`**, with ranges of 0.13–0.76 and 0.22–0.77:
+it barely separates the two labels the floor exists to discriminate, and the 0.5
+threshold cuts through the middle of both. The Score does separate them — means of
+0.95 and 1.40 — which is the signal the floor overrides. Rule 3 of
+[`../../typed-model-calls.md`](../../typed-model-calls.md) is the general form: a
+signal's per-label spread has to be printed before anything branches on it, and this
+one was not until review asked for it.
 
 Re-scoring the same committed answers with it removed — `--ablate-floor`, no new API
 call:

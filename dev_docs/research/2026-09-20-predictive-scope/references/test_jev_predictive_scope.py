@@ -358,6 +358,27 @@ def test_run_covers_exactly_the_corpus() -> None:
         )
 
 
+def test_spreads_cover_every_label_in_the_run() -> None:
+    """Rule 3: the per-label spread must be printable from the committed run by the
+    committed instrument. Every label present in the run appears with its count;
+    absent labels are named as absent rather than dropped."""
+    path = HERE / "measurement" / "suite-run.json"
+    if not path.exists():
+        FAILURES.append("measurement/suite-run.json is missing")
+        return
+    run = json.load(open(path))
+    out = probe.format_spreads(run)
+    present = {d["label"] for d in run["passes"][0]["detail"]}
+    for label in probe.LEVELS:
+        check(label in out, f"spread output must name {label!r}")
+        if label not in present:
+            check(
+                f"{label:<15}   0   (no cases)" in out,
+                f"absent label {label!r} must be shown as absent",
+            )
+    check(out.count("pass ") == len(run["passes"]), "one block per pass")
+
+
 def test_the_scale_is_clamped_at_both_ends() -> None:
     check(
         probe.level_from(-0.2, 0.0) == "single-file", "below zero clamps to the floor"
