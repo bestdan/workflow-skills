@@ -113,11 +113,16 @@ The design invents the `whole-codebase` boundary — "changed files ≥ half the
 files" — and flags it as the one cut with no measurement behind it. Step 4 of #782
 asked this probe to re-check it while it was in there.
 
-**It cannot.** No pull request in this repository's history comes near half the tracked
-files; the largest touched 24. The corpus can establish that the boundary is never
-reached in practice, which is worth knowing and is not the same as validating where it
-sits. The boundary is implemented in `build-corpus.py` so it stays inspectable, and a
-test pins its arithmetic, but nothing here measures whether it is in the right place.
+**It cannot.** The corpus carries the denominator — 437 tracked files at the checkout's
+HEAD, an approximation of each pull request's own tree that cannot move a label at
+this distance — and `bucket()` applies it to every case. The largest pull request
+touched 24 files, **5.5% of the tree**, against a cut at 50%; `--profile` prints that
+line. So the zero is computed, not asserted: the boundary is never reached in
+practice, which is worth knowing and is not the same as validating where it sits.
+Three reviewers independently caught the earlier version of this finding, where the
+builder never passed a denominator and the `whole-codebase` branch was unreachable by
+construction. A test now pins that the branch is reachable and that the committed
+corpus carries what it needs to recompute every label.
 
 ### 3. The base rate is 56.0%, and §3's 71.6% is not comparable to it
 
@@ -337,6 +342,13 @@ lists it under what would reopen the choice.
   card names. Only the subsystem floor was implemented here; the ablation and finding
   11 speak to it alone. The named-path bound was not tested, and implementing it now
   would be a third variant selected on the same 50 cards.
+- **That no card was edited after its work began.** Each card is the issue's body as
+  it stands now, and the provenance gate checks creation order only, so a body edited
+  or backfilled after its pull request opened passes it. The gate rules out the
+  post-hoc case §3 measured; it does not rule this one out. Closing it needs GitHub's
+  `userContentEdits` history per issue — a GraphQL query this environment's tooling
+  does not run — after which a case with a post-PR edit would be dropped or reverted
+  to its last pre-PR body. `corpus.json`'s `note` field points here.
 - **That a better question would not do better.** The phrasing is one attempt, written
   to the design's spec.
 - **That 50 cards from one repository generalise.** Same limit §3 has, under half the

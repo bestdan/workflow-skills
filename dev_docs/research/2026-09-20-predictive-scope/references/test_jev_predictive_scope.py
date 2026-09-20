@@ -213,17 +213,58 @@ def test_committed_corpus_is_consistent() -> None:
         FAILURES.append("measurement/corpus.json is missing")
         return
     corpus = json.load(open(path))
+    tracked = corpus.get("tracked_files")
+    check(
+        isinstance(tracked, int) and tracked > 0,
+        "corpus must carry the tracked-file denominator, or whole-codebase is "
+        "unreachable and its zero is asserted rather than computed",
+    )
     for case in corpus["cases"]:
         check(
-            case["label"] == corpus_tool.bucket(case["changed_files"]),
+            case["label"] == corpus_tool.bucket(case["changed_files"], tracked),
             f"{case['id']}: label {case['label']} does not follow from "
-            f"{case['changed_files']} files",
+            f"{case['changed_files']} of {tracked} files",
         )
         check(
             case["issue_created"] < case["pr_created"],
             f"{case['id']}: card does not predate its pull request",
         )
         check(bool(case["card"].strip()), f"{case['id']}: empty card")
+
+
+def test_build_stores_and_applies_the_denominator() -> None:
+    """With a denominator the whole-codebase branch is reachable; a change touching
+    half the tracked files must land there, and the denominator must be persisted so
+    a reader can recompute every label from the committed corpus alone."""
+    issues = [
+        {
+            "number": 7,
+            "title": "sweeping",
+            "body": "touch everything",
+            "createdAt": "2026-01-01T00:00:00Z",
+            "closedByPullRequestsReferences": [{"number": 70}],
+        }
+    ]
+    prs = {
+        70: {
+            "number": 70,
+            "createdAt": "2026-01-02T00:00:00Z",
+            "changedFiles": 6,
+            "additions": 1,
+            "deletions": 1,
+        }
+    }
+    built = corpus_tool.build(issues, prs, tracked_files=10)
+    check(built["tracked_files"] == 10, "denominator must be stored in the corpus")
+    check(
+        built["cases"][0]["label"] == "whole-codebase",
+        "6 of 10 tracked files must reach whole-codebase",
+    )
+    without = corpus_tool.build(issues, prs)
+    check(
+        without["cases"][0]["label"] == "multi-file",
+        "with no denominator the same change is multi-file — the old, unreachable state",
+    )
 
 
 # ----------------------------------------------------------------- the mapping

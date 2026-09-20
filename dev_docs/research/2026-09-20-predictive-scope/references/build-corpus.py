@@ -32,8 +32,13 @@ import json
 import subprocess
 import sys
 from collections import Counter
+from pathlib import Path
 
 REPO = "bestdan/workflow-skills"
+
+# The bundle sits four levels below the repository root:
+# dev_docs/research/<record>/references/<this file>. `git ls-files` counts from here.
+ROOT = Path(__file__).resolve().parents[4]
 
 # The design's cut points, from `../../../designs/2026-09-18-assess-task-typed-profile.md`.
 # They are the contract, not an implementation detail: the section "The cut points,
@@ -96,7 +101,24 @@ def fetch() -> tuple[list[dict], dict[int, dict]]:
     return issues, {p["number"]: p for p in prs}
 
 
-def build(issues: list[dict], prs: dict[int, dict]) -> dict:
+def tracked_file_count() -> int:
+    """`git ls-files` at HEAD of the checkout this runs in, counted at the repo root.
+
+    An approximation: each pull request's own tree had its own count. The design's
+    cut is "half the tracked files", and no case here comes within a factor of nine of
+    it, so the approximation cannot move a label — but without SOME denominator the
+    `whole-codebase` branch of `bucket()` is unreachable, and the record's zero would
+    be asserted rather than computed. Three reviewers found exactly that.
+    """
+    out = subprocess.run(
+        ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True
+    ).stdout
+    return len(out.splitlines())
+
+
+def build(
+    issues: list[dict], prs: dict[int, dict], tracked_files: int | None = None
+) -> dict:
     cases, dropped = [], Counter()
     for issue in issues:
         refs = issue.get("closedByPullRequestsReferences") or []
@@ -132,12 +154,13 @@ def build(issues: list[dict], prs: dict[int, dict]) -> dict:
                 "pr_created": pr["createdAt"],
                 "changed_files": pr["changedFiles"],
                 "churn": pr["additions"] + pr["deletions"],
-                "label": bucket(pr["changedFiles"]),
+                "label": bucket(pr["changedFiles"], tracked_files),
             }
         )
     cases.sort(key=lambda c: c["issue"])
     return {
         "repo": REPO,
+        "tracked_files": tracked_files,
         "cases": cases,
         "dropped": dict(dropped),
         "note": (
@@ -157,6 +180,14 @@ def profile(corpus: dict) -> str:
     lines += ["", "dropped:"]
     for reason, n in sorted(corpus["dropped"].items()):
         lines.append(f"  {reason:<38} {n:>3}")
+    tracked = corpus.get("tracked_files")
+    if cases and tracked:
+        biggest = max(c["changed_files"] for c in cases)
+        lines += [
+            "",
+            f"tracked files at build: {tracked}; the largest case touched {biggest} "
+            f"= {biggest / tracked:.1%} of them (whole-codebase cut is 50%)",
+        ]
     if cases:
         top = counts.most_common(1)[0]
         lines += [
@@ -192,7 +223,7 @@ def main(argv: list[str] | None = None) -> int:
     # indent=2 matches dprint, which formats the committed corpus. A rebuild that
     # emitted anything else would show up as a whole-file diff against evidence that
     # had not changed.
-    json.dump(build(issues, prs), sys.stdout, indent=2)
+    json.dump(build(issues, prs, tracked_file_count()), sys.stdout, indent=2)
     print()
     return 0
 
