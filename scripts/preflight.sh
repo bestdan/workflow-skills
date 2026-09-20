@@ -448,13 +448,24 @@ done <<EOF
 $uniq_dirs
 EOF
 
-task_cfg="$ROOT/dev_docs/tasks/.task-config.yml"
-task_cfg_local="$ROOT/dev_docs/tasks/.task-config.local.yml"
+# The task config is the RUN's, so it is read from the run root — never from
+# $ROOT. In production $ROOT is the installed plugin directory, and this repo
+# ships its own tracked dev_docs/tasks/.task-config.yml in every release, so a
+# $ROOT lookup reported this repository's handler and destination host to every
+# installed user regardless of their own config. A run root carrying no config
+# falls to the documented `repo-pr` default and says so in HANDLER_SOURCE
+# rather than inheriting anything from the plugin dir.
+task_cfg="$run_toplevel/dev_docs/tasks/.task-config.yml"
+task_cfg_local="$run_toplevel/dev_docs/tasks/.task-config.local.yml"
 handler="repo-pr"
+handler_source="default (no task config under $run_toplevel/dev_docs/tasks)"
 for f in "$task_cfg" "$task_cfg_local"; do
   [ -f "$f" ] || continue
   h="$(sed -n 's/^handler:[[:space:]]*//p' "$f" | head -1 | tr -d '[:space:]')"
-  [ -n "$h" ] && handler="$h"
+  if [ -n "$h" ]; then
+    handler="$h"
+    handler_source="$f"
+  fi
 done
 case "$handler" in
   linear) dest_host="api.linear.app" ;;
@@ -467,6 +478,7 @@ case "$handler" in
 esac
 echo "PREFLIGHT DEST_HOST: $dest_host"
 echo "PREFLIGHT HANDLER: $handler"
+echo "PREFLIGHT HANDLER_SOURCE: $handler_source"
 
 # --- 4. Confinement smoke ---------------------------------------------------
 # Layer 1 (filesystem/exec) is the rendered Seatbelt profile; layer 2 (network
