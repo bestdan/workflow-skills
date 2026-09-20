@@ -13,7 +13,7 @@ A Claude Code plugin bundling Daniel's general engineering workflow skills: coll
 
 ## What's in the box
 
-16 skills, 21 commands, and 2 subagents, organized into seven workflows. Each
+17 skills, 21 commands, and 2 subagents, organized into eight workflows. Each
 entry links to its own doc — that's where the flags, edge cases, and handler
 support live.
 
@@ -126,6 +126,21 @@ capability matrix.
 | ---------------------------------------------------------------------- | --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [**tutor**](skills/tutor/SKILL.md)                                     | `/tutor [--pr <N> \| --diff [<ref>] \| <path>]`, or "quiz me on this" | Teach you the work until you can defend it: elicit first, close the gap, verify with a counterfactual quiz. An item is checked off only once you've demonstrated it. |
 | [**research-spike-tutorial**](skills/research-spike-tutorial/SKILL.md) | "walk me through how the research-spike obligation ledger works"      | A hands-on tutorial against a disposable tree under a temp dir — hit the "destination must already exist" wall for real, then watch the divergence.                  |
+
+### Worktree lifecycle
+
+The plugin registers three hooks, so an isolated worktree is created and torn
+down without anything being typed: `WorktreeCreate` puts it where
+[`scripts/worktree-config.sh`](scripts/worktree-config.sh) says worktrees live
+(not inside the repo, which aborts in a repo that versions its own agent
+config), `WorktreeRemove` tears down only what the exiting session itself
+created, and a `PostToolUse` reminder on `ExitWorktree` says teardown ends
+there. Both halves are plain scripts you can run by hand:
+`scripts/worktree-remove.sh <path>` and `scripts/branch-remove.sh <branch>`.
+
+| Skill                                                      | Trigger                                                | What it does                                                                                                                                                             |
+| ---------------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [**worktree-teardown**](skills/worktree-teardown/SKILL.md) | auto, when a removal fails, refuses, or half-completes | The mechanics behind the teardown scripts: the submodule force gates, the PR-evidence branch delete, and the half-deleted and locked recovery cases. Not user-invocable. |
 
 ### Bundled subagents
 
