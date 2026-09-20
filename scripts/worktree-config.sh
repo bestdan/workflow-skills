@@ -135,15 +135,33 @@ resolve_root() {
   # no `~/src` at all. XDG_STATE_HOME is the standard answer for data a tool
   # creates and the user does not curate, and it is resolved rather than
   # assumed — the spec's own fallback is `~/.local/state`.
-  printf '%s\n' "${XDG_STATE_HOME:-$HOME/.local/state}/worktrees"
+  #
+  # A relative XDG_STATE_HOME is ignored rather than rejected, which is what the
+  # spec says to do with one — and unlike the two tiers above, this value was
+  # not set for this tool, so dying on it would be a new failure mode over
+  # someone else's broken environment. Ignoring matters because the downstream
+  # failure is silent: `git worktree add relative/worktrees/<repo>/<name>`
+  # succeeds against whatever directory the hook happened to run in, registers
+  # the worktree there, and every later lookup by the documented path misses it.
+  case "${XDG_STATE_HOME:-}" in
+    /*) printf '%s\n' "$XDG_STATE_HOME/worktrees" ;;
+    *) printf '%s\n' "$HOME/.local/state/worktrees" ;;
+  esac
 }
 
 # ----------------------------------------------------------------- the prefix
 
 # Normalise to exactly one trailing slash, so `bestdan` and `bestdan/` are the
 # same config and a caller can always write "$(prefix)$name".
+#
+# The whole run of trailing slashes goes, not one: `%` strips a single match,
+# so `owner//` would otherwise come back unchanged and build `owner//name`,
+# which git rejects as a ref with an empty path component — far from the
+# config line that caused it.
 normalise_prefix() { # value
-  printf '%s/\n' "${1%/}"
+  local v="$1"
+  while [ "${v%/}" != "$v" ]; do v="${v%/}"; done
+  printf '%s/\n' "$v"
 }
 
 validate_prefix() { # source value

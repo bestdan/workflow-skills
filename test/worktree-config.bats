@@ -180,6 +180,15 @@ write_task_config() { # rel body...
   refute_output --partial "/src/worktrees"
 }
 
+@test "a relative XDG_STATE_HOME is ignored, not propagated into the root" {
+  # The spec says to ignore one, and the downstream failure is silent: a
+  # relative root makes `git worktree add` succeed against the hook's own cwd,
+  # so the worktree lands somewhere no later lookup will find it.
+  resolve XDG_STATE_HOME=relative bash "$RESOLVER" root
+  assert_success
+  assert_output "$H/.local/state/worktrees"
+}
+
 @test "the default branch prefix is NOT the plugin author's" {
   # The regression that would make this plugin unusable by anyone else, and
   # exactly what survives a copy-paste port of the dotfiles original.
@@ -220,6 +229,14 @@ write_task_config() { # rel body...
 
 @test "a prefix already ending in a slash is not doubled" {
   resolve WORKFLOW_SKILLS_BRANCH_PREFIX=owner/ bash "$RESOLVER" prefix
+  assert_success
+  assert_output "owner/"
+}
+
+@test "a run of trailing slashes collapses to one, not to a shorter run" {
+  # The single-slash case above is what made this look covered: `%` strips one
+  # match, so `owner//` survived and built `owner//name` — a ref git rejects.
+  resolve WORKFLOW_SKILLS_BRANCH_PREFIX=owner/// bash "$RESOLVER" prefix
   assert_success
   assert_output "owner/"
 }
