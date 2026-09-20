@@ -21,6 +21,11 @@ dev_docs/co-review/
 # a skill's machine-local directory is this file, so it travels with the repo.
 dev_docs/orchestrate-coders/
 
+# Worktree lifecycle local config — where this machine puts worktrees and what
+# branch prefix they carry, read by scripts/worktree-config.sh. Personal to a
+# machine and a person, never shared; same ignore channel as the two above.
+dev_docs/worktrees/
+
 # Session-to-session handoff notes — local by design; only the README is
 # tracked (force-added). See dev_docs/.handoffs/README.md.
 dev_docs/.handoffs/
