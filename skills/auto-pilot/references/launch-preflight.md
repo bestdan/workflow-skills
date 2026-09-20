@@ -30,13 +30,21 @@ Run `"${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh" --source <plan|linear> --base 
 — the read-only pre-flight helper this step extracts to. Its `PREFLIGHT …`
 output and `PREFLIGHT VERDICT: go` / `no-go — <reason>` line cover the binary
 fingerprint / environment class, coder availability, base freshness, the
-resolved PATH/exec dirs, the add-task host, and the confinement smoke. A
+resolved PATH/exec dirs, the add-task host, the confinement smoke, and the
+consent-gate probe (below). A
 `no-go` **BLOCKS LAUNCH** with the reason it names; treat its output as the
 source of truth rather than re-deriving these facts by hand.
 
 Probe every credential the run will need, each **non-interactively** — a probe
 that would open a prompt (a browser OAuth, a biometric `op signin`) is itself the
 failure (see [`launch-runtime.md`](launch-runtime.md) §3).
+The same pre-flight call carries the **consent-gate probe**, which enforces that
+rule for gates no credential probe can see: it re-runs the entry path under
+**launchd attribution** (not this terminal's) and blocks on TCC folder access,
+Full Disk Access, Keychain, biometric or browser OAuth. Its
+`PREFLIGHT CONSENT_GATE` / `CONSENT_PROTECTED` / `ATTRIBUTION_BIN` lines are part
+of the fingerprint recorded below, so a `--resume` under a different attribution
+re-checks it.
 The probe path depends on the **environment class** (below): `local-full`
 authenticates through CLIs, `claude-web` through **MCP**. Probe whichever applies:
 

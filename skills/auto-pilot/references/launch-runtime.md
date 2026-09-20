@@ -336,6 +336,39 @@ explicit grant of the specific Keychain/helper access that tool needs — record
 in the profile, never left implicit. A tool that can only authenticate via an
 interactive Keychain/helper prompt is a launch blocker.
 
+**The rule is broader than credentials: ANY interactive consent gate is a launch
+blocker** — TCC folder access (Documents/Desktop/Downloads, removable and
+network volumes), Full Disk Access, Keychain, biometric, browser OAuth. The
+generalization is not hypothetical; the live failure was TCC folder consent, and
+the narrower Keychain-only wording is what let it through.
+
+**Detaching is what creates the gate.** macOS attributes a TCC grant to a
+**responsible process**. Run from a terminal, folder-access grants belong to
+Terminal/iTerm, which the user authorized long ago, so nothing prompts. The
+orchestrator is spawned by **launchd**, which makes the orchestrator's own
+binary the responsible process: a different TCC identity holding none of those
+grants. Every protected resource it touches raises a fresh consent dialog — on a
+locked screen, addressed to nobody. The property that makes auto-pilot valuable
+(it detaches and outlives your session) is the same property that invalidates
+the permissions you already granted.
+
+**And the dialog doesn't say "Claude."** `claude` is a symlink to
+`~/.local/share/claude/versions/<version>`, a bare Mach-O rather than an `.app`
+bundle. It is properly signed, but with no bundle there is no display name, so
+macOS falls back to the filename: the user sees a dialog from something called
+**"2.1.207"** — indistinguishable from malware, and the likely response (deny,
+or ignore) is the one that breaks the run.
+
+So the rule is **enforced, not merely written down**:
+`"${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh"` re-runs the entry path under the
+real attribution — a transient launchd job, stdin on `/dev/null`, no controlling
+TTY, exec'd through the rendered profile — and blocks on any gate it finds,
+naming the **resolved** binary path and the Full Disk Access remedy. A probe that
+passes from an interactive terminal proves nothing: the terminal's grants are
+exactly what the detached job will not have. The best outcome is needing no grant
+at all, which is why the pre-flight records `CONSENT_PROTECTED` — the protected
+locations the run's own paths sit in. `none` means no gate can fire.
+
 ### 4. Worker-CLI composition
 
 `/deliver-task` workers (codex/devin/…) are spawned **by** the orchestrator, in

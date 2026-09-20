@@ -43,10 +43,24 @@
 #   1  no-go    — at least one hard blocker (see PREFLIGHT/BLOCKS LAUNCH lines)
 #   2  usage or dependency error
 #
+# Consent-gate probe (default mode, macOS): the detached run is spawned by
+# launchd, which makes the orchestrator binary — not the terminal — the process
+# macOS attributes TCC grants to, so the grants the user gave Terminal do not
+# carry. The probe re-runs the entry path under that real attribution (a
+# transient launchd job, stdin on /dev/null, no controlling TTY, through the
+# rendered Seatbelt profile) and blocks launch on ANY interactive consent gate
+# it finds — TCC folder access, Full Disk Access, Keychain, biometric, browser
+# OAuth. See skills/auto-pilot/references/launch-runtime.md §3.
+#
 # Env overrides (for tests only — never needed in normal use):
 #   PREFLIGHT_PROBE_CODERS  path to a probe-coders.sh-compatible executable.
 #   PREFLIGHT_NC            path to an `nc`-compatible executable (scout's
 #                            CAO port probe).
+#   PREFLIGHT_LAUNCHCTL     path to a `launchctl`-compatible executable
+#                            (consent-gate probe's bootstrap/bootout).
+#   PREFLIGHT_TCC_LOCATIONS colon-separated protected-location list the
+#                            consent-gate probe checks the run's paths against.
+#   PREFLIGHT_CONSENT_TICKS how many 0.25s ticks to wait for the probe job.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -56,6 +70,11 @@ SPAWN="$ROOT/scripts/spawn-orchestrator.sh"
 FINGERPRINT_BINS="claude git gh codex uv node op"
 NC_BIN="${PREFLIGHT_NC:-nc}"
 CAO_FLEET="codex agy"
+LAUNCHCTL_BIN="${PREFLIGHT_LAUNCHCTL:-launchctl}"
+CONSENT_TIMEOUT_TICKS="${PREFLIGHT_CONSENT_TICKS:-120}" # 120 × 0.25s = 30s
+# The macOS TCC-protected home locations. Removable and network volumes are the
+# other gated class, but they are named by the run's own paths, not by a list.
+TCC_LOCATIONS="${PREFLIGHT_TCC_LOCATIONS:-$HOME/Documents:$HOME/Desktop:$HOME/Downloads}"
 
 die() {
   echo "preflight: $*" >&2
@@ -223,7 +242,7 @@ while [ $# -gt 0 ]; do
       shift 2
       ;;
     -h | --help)
-      sed -n '2,49p' "$0"
+      sed -n '2,63p' "$0"
       exit 0
       ;;
     *) die "unknown argument: $1" ;;
@@ -489,7 +508,259 @@ else
   fi
 fi
 
-# --- 5. Verdict --------------------------------------------------------------
+# --- 5. Consent-gate probe --------------------------------------------------
+# The launch blocker skills/auto-pilot/references/launch-runtime.md §3 names —
+# a credential reachable only through an interactive prompt — generalizes to
+# ANY interactive consent gate, and the live failure was not Keychain at all:
+# it was TCC folder consent.
+#
+# The act of detaching is what creates the gate. macOS attributes a TCC grant
+# to a RESPONSIBLE PROCESS. Run from a terminal, folder access belongs to
+# Terminal/iTerm, which the user authorized long ago, so nothing prompts. The
+# orchestrator is spawned by launchd, which makes the orchestrator's own
+# binary the responsible process — a different TCC identity holding none of
+# those grants. So a probe that passes from this terminal proves nothing about
+# the detached run. This one runs under the real attribution: a transient
+# launchd job, stdin on /dev/null, no controlling terminal, exec'd through the
+# same rendered Seatbelt profile the run uses.
+#
+# A COMPLETED probe reporting a denial is a hard blocker. An environment that
+# cannot run the probe at all (no sandbox-exec, launchd refuses the bootstrap)
+# degrades to a logged SKIP, the same way the confinement smoke above does — a
+# missing capability is not evidence of a consent gate.
+
+# Resolve a symlink chain without readlink -f, which BSD readlink lacked until
+# macOS 12.3 and which this must not depend on.
+resolve_link() {
+  local p="$1" t n=0
+  while [ -L "$p" ] && [ "$n" -lt 40 ]; do
+    t="$(readlink "$p")"
+    case "$t" in
+      /*) p="$t" ;;
+      *) p="$(dirname "$p")/$t" ;;
+    esac
+    n=$((n + 1))
+  done
+  (cd "$(dirname "$p")" 2>/dev/null && printf '%s/%s\n' "$(pwd -P)" "$(basename "$p")")
+}
+
+# The attribution identity: the RESOLVED claude binary, never the `claude`
+# symlink. This is the name the human has to find in System Settings, and the
+# reason they cannot: the target is a bare Mach-O, not an .app bundle, so macOS
+# has no display name for it and falls back to the filename — which is the
+# version number. A dialog from "2.1.207" is indistinguishable from malware.
+claude_link="$(command -v claude 2>/dev/null || true)"
+attribution_bin=""
+[ -n "$claude_link" ] && attribution_bin="$(resolve_link "$claude_link")"
+echo "PREFLIGHT ATTRIBUTION_BIN: ${attribution_bin:-absent}"
+
+# Which protected locations does the run actually NEED? The jail allows
+# `(allow file-read*)` globally — deliberately; a narrow read list broke
+# traversal — so nothing stops an incidental read of ~/Documents from raising a
+# gate. Recording the needed set is what makes "none" an answer: a run whose
+# paths all sit outside these locations should never trip one.
+under_path() { # <candidate> <ancestor> — true when candidate is at or under ancestor
+  case "$1" in "$2" | "$2"/*) return 0 ;; *) return 1 ;; esac
+}
+add_protected() { # <location> — append to protected_needed, once
+  case ":$protected_needed:" in
+    *":$1:"*) ;;
+    *) protected_needed="${protected_needed:+$protected_needed:}$1" ;;
+  esac
+}
+
+protected_needed=""
+consent_old_ifs="$IFS"
+IFS=':'
+for loc in $TCC_LOCATIONS; do
+  IFS="$consent_old_ifs"
+  if [ -n "$loc" ] && [ -d "$loc" ]; then
+    for run_path in "$ROOT" "$HOME/.claude" "${TMPDIR:-/tmp}"; do
+      under_path "$run_path" "$loc" && add_protected "$loc"
+    done
+  fi
+  IFS=':'
+done
+IFS="$consent_old_ifs"
+# A removable or network volume is the other gated class, and it is named by
+# the run's own paths rather than by any fixed list.
+for run_path in "$ROOT" "${TMPDIR:-/tmp}"; do
+  case "$run_path" in
+    /Volumes/*) add_protected "/Volumes/$(printf '%s' "${run_path#/Volumes/}" | cut -d/ -f1)" ;;
+  esac
+done
+echo "PREFLIGHT CONSENT_PROTECTED: ${protected_needed:-none}"
+
+# Always probe the run root: a checkout unreadable under launchd attribution is
+# the same failure whether or not it sits in a named TCC location — Full Disk
+# Access covers cases no location list enumerates.
+consent_specs="run_root=$ROOT"
+consent_i=0
+consent_old_ifs="$IFS"
+IFS=':'
+for loc in $protected_needed; do
+  IFS="$consent_old_ifs"
+  if [ -n "$loc" ]; then
+    consent_i=$((consent_i + 1))
+    consent_specs="$consent_specs
+protected_$consent_i=$loc"
+  fi
+  IFS=':'
+done
+IFS="$consent_old_ifs"
+
+consent_verdict=""
+if ! command -v sandbox-exec >/dev/null 2>&1; then
+  consent_verdict="skip (sandbox-exec not available — non-macOS host)"
+  skip_notes+=("consent-gate probe skipped: sandbox-exec absent (non-macOS host; TCC is macOS-only)")
+elif ! command -v "$LAUNCHCTL_BIN" >/dev/null 2>&1; then
+  consent_verdict="skip (launchctl not available — non-macOS host)"
+  skip_notes+=("consent-gate probe skipped: launchctl absent (non-macOS host)")
+else
+  cscratch="$(mktemp -d "${TMPDIR:-/tmp}/preflight-consent.XXXXXX" 2>/dev/null || true)"
+  if [ -z "$cscratch" ] || [ ! -d "$cscratch" ]; then
+    consent_verdict="skip (could not create a scratch dir)"
+    skip_notes+=("consent-gate probe skipped: scratch dir creation failed")
+  else
+    consent_label="com.bestdan.workflow-skills.preflight-consent.$$"
+    consent_done=false
+    consent_cleanup() {
+      $consent_done || {
+        "$LAUNCHCTL_BIN" bootout "gui/$(id -u)/$consent_label" >/dev/null 2>&1 || true
+        rm -rf "$cscratch"
+      }
+      consent_done=true
+    }
+    trap consent_cleanup EXIT
+    trap 'consent_cleanup; trap - EXIT INT TERM; exit 130' INT TERM
+
+    cprof="$cscratch/consent.sb"
+    cprobe="$cscratch/consent-probe.sh"
+    cresult="$cscratch/consent-result"
+    clog="$cscratch/consent.log"
+    cplist="$cscratch/consent.plist"
+
+    # The probe runs on launchd's minimal PATH under the 3.2 /bin/bash, so every
+    # binary it reaches is named absolutely and granted by --exec below.
+    cat >"$cprobe" <<'PROBE'
+#!/bin/bash
+# Written by scripts/preflight.sh — runs jailed, under launchd attribution.
+out="$1"
+shift
+: >"$out"
+# Self-checks first: a probe that ran with a terminal attached measured the
+# terminal's grants, which is exactly the thing that proves nothing.
+if [ -t 0 ]; then
+  echo "CONSENT stdin_closed: FAIL" >>"$out"
+else
+  echo "CONSENT stdin_closed: ok" >>"$out"
+fi
+if : >/dev/tty 2>/dev/null; then
+  echo "CONSENT no_controlling_tty: FAIL" >>"$out"
+else
+  echo "CONSENT no_controlling_tty: ok" >>"$out"
+fi
+for spec in "$@"; do
+  key="${spec%%=*}"
+  path="${spec#*=}"
+  if err="$(/bin/ls -- "$path" 2>&1 >/dev/null)"; then
+    echo "CONSENT resource $key: ok $path" >>"$out"
+  else
+    echo "CONSENT resource $key: denied $path — ${err##*: }" >>"$out"
+  fi
+done
+echo "CONSENT done: 1" >>"$out"
+PROBE
+
+    cex_args=()
+    for bin in $FINGERPRINT_BINS; do
+      p="$(command -v "$bin" 2>/dev/null || true)"
+      [ -n "$p" ] && cex_args+=(--exec "$p")
+    done
+    for cbin in /bin/bash /bin/ls; do
+      [ -x "$cbin" ] && cex_args+=(--exec "$cbin")
+    done
+
+    if ! bash "$SPAWN" render-profile --rw "$cscratch" ${cex_args[@]+"${cex_args[@]}"} --out "$cprof" >/dev/null 2>&1; then
+      consent_verdict="skip (render-profile failed — the confinement smoke above owns that blocker)"
+      skip_notes+=("consent-gate probe skipped: render-profile produced no profile for this environment")
+    else
+      {
+        echo '<?xml version="1.0" encoding="UTF-8"?>'
+        echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+        echo '<plist version="1.0">'
+        echo '<dict>'
+        echo '  <key>Label</key>'
+        printf '  <string>%s</string>\n' "$consent_label"
+        echo '  <key>ProgramArguments</key>'
+        echo '  <array>'
+        for a in /usr/bin/sandbox-exec -f "$cprof" /bin/bash "$cprobe" "$cresult"; do
+          printf '    <string>%s</string>\n' "$a"
+        done
+        while IFS= read -r spec; do
+          [ -n "$spec" ] && printf '    <string>%s</string>\n' "$spec"
+        done <<EOF
+$consent_specs
+EOF
+        echo '  </array>'
+        # stdin on /dev/null is half of "nobody can answer it": the probe must
+        # not be able to read an answer from anywhere.
+        echo '  <key>StandardInPath</key>'
+        echo '  <string>/dev/null</string>'
+        echo '  <key>StandardOutPath</key>'
+        printf '  <string>%s</string>\n' "$clog"
+        echo '  <key>StandardErrorPath</key>'
+        printf '  <string>%s</string>\n' "$clog"
+        echo '  <key>RunAtLoad</key>'
+        echo '  <true/>'
+        echo '</dict>'
+        echo '</plist>'
+      } >"$cplist"
+
+      if ! "$LAUNCHCTL_BIN" bootstrap "gui/$(id -u)" "$cplist" >/dev/null 2>&1; then
+        consent_verdict="skip (launchd refused the probe bootstrap in this environment)"
+        skip_notes+=("consent-gate probe skipped: launchctl bootstrap failed — re-run this pre-flight from a normal login session before trusting a go")
+      else
+        consent_waited=0
+        while [ "$consent_waited" -lt "$CONSENT_TIMEOUT_TICKS" ]; do
+          grep -q '^CONSENT done: 1$' "$cresult" 2>/dev/null && break
+          sleep 0.25
+          consent_waited=$((consent_waited + 1))
+        done
+        "$LAUNCHCTL_BIN" bootout "gui/$(id -u)/$consent_label" >/dev/null 2>&1 || true
+
+        if ! grep -q '^CONSENT done: 1$' "$cresult" 2>/dev/null; then
+          consent_verdict="FAIL (probe did not complete)"
+          blockers+=("consent-gate probe did not complete under launchd attribution — the detached run's own entry path could not be exercised, so a prompt-free run is unproven; probe log: $clog")
+        else
+          consent_verdict="pass"
+          while IFS= read -r line; do
+            echo "PREFLIGHT $line"
+            case "$line" in
+              "CONSENT stdin_closed: FAIL" | "CONSENT no_controlling_tty: FAIL")
+                consent_verdict="FAIL (probe ran attached to a terminal)"
+                blockers+=("consent-gate probe ran with a terminal attached — it measured this terminal's TCC grants, not the detached run's, and so proves nothing; the probe job's stdin/TTY setup is broken")
+                ;;
+              "CONSENT resource "*": denied "*)
+                gated_key="${line#CONSENT resource }"
+                gated_key="${gated_key%%:*}"
+                gated_path="${line#*: denied }"
+                gated_path="${gated_path%% — *}"
+                consent_verdict="FAIL (interactive consent gate)"
+                blockers+=("interactive consent gate on '$gated_path' ($gated_key) — it is not reachable under launchd attribution, so the detached run raises a macOS consent dialog on a locked screen, addressed to nobody. Fix: grant Full Disk Access to the RESOLVED binary '${attribution_bin:-<claude is not on PATH>}' under System Settings → Privacy & Security → Full Disk Access — add it with the file picker, and expect the list and the dialog to identify it only by its version number ('$(basename "${attribution_bin:-unknown}")'), never as \"Claude\", because it is a bare executable with no .app bundle. The fix that needs no grant at all: move the run's paths out of the protected location.")
+                ;;
+            esac
+          done <"$cresult"
+        fi
+      fi
+    fi
+    consent_cleanup
+    trap - EXIT INT TERM
+  fi
+fi
+echo "PREFLIGHT CONSENT_GATE: $consent_verdict"
+
+# --- 6. Verdict --------------------------------------------------------------
 
 for n in ${skip_notes[@]+"${skip_notes[@]}"}; do
   echo "PREFLIGHT SKIP_NOTE: $n"
