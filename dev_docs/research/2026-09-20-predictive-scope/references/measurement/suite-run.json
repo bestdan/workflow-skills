@@ -1,0 +1,2322 @@
+{
+  "model": "jev-1.13.0",
+  "passes": [
+    {
+      "cases": 50,
+      "exact": 29,
+      "exact_rate": 0.58,
+      "within_one": 50,
+      "within_one_rate": 1.0,
+      "misses": 21,
+      "under_read": 10,
+      "over_read": 11,
+      "boundary_cases": 48,
+      "boundary_exact": 27,
+      "boundary_rate": 0.5625,
+      "boundary_base_rate": 0.5833333333333334,
+      "base_rate": 0.56,
+      "confusion": {
+        "multi-file->pr-sized": 6,
+        "pr-sized->multi-file": 11,
+        "pr-sized->single-file": 4
+      },
+      "detail": [
+        {
+          "id": "issue-277",
+          "label": "multi-file",
+          "changed_files": 7,
+          "raw_score": 1.11,
+          "probabilities": [
+            0.0,
+            0.89,
+            0.11,
+            0.0
+          ],
+          "subsystems": 0.49,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.88
+        },
+        {
+          "id": "issue-348",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 0.27,
+          "probabilities": [
+            0.77,
+            0.2,
+            0.03,
+            0.0
+          ],
+          "subsystems": 0.67,
+          "predicted": "multi-file",
+          "scope_confidence": 0.73
+        },
+        {
+          "id": "issue-381",
+          "label": "pr-sized",
+          "changed_files": 5,
+          "raw_score": 1.35,
+          "probabilities": [
+            0.0,
+            0.65,
+            0.35,
+            0.0
+          ],
+          "subsystems": 0.63,
+          "predicted": "multi-file",
+          "scope_confidence": 0.65
+        },
+        {
+          "id": "issue-382",
+          "label": "multi-file",
+          "changed_files": 9,
+          "raw_score": 1.92,
+          "probabilities": [
+            0.0,
+            0.08,
+            0.92,
+            0.0
+          ],
+          "subsystems": 0.77,
+          "predicted": "multi-file",
+          "scope_confidence": 0.92
+        },
+        {
+          "id": "issue-385",
+          "label": "pr-sized",
+          "changed_files": 5,
+          "raw_score": 1.25,
+          "probabilities": [
+            0.0,
+            0.75,
+            0.25,
+            0.0
+          ],
+          "subsystems": 0.5,
+          "predicted": "multi-file",
+          "scope_confidence": 0.74
+        },
+        {
+          "id": "issue-386",
+          "label": "pr-sized",
+          "changed_files": 4,
+          "raw_score": 1.32,
+          "probabilities": [
+            0.0,
+            0.68,
+            0.32,
+            0.0
+          ],
+          "subsystems": 0.7,
+          "predicted": "multi-file",
+          "scope_confidence": 0.67
+        },
+        {
+          "id": "issue-390",
+          "label": "pr-sized",
+          "changed_files": 4,
+          "raw_score": 1.0,
+          "probabilities": [
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ],
+          "subsystems": 0.32,
+          "predicted": "pr-sized",
+          "scope_confidence": 1.0
+        },
+        {
+          "id": "issue-406",
+          "label": "single-file",
+          "changed_files": 1,
+          "raw_score": 0.01,
+          "probabilities": [
+            0.99,
+            0.01,
+            0.0,
+            0.0
+          ],
+          "subsystems": 0.06,
+          "predicted": "single-file",
+          "scope_confidence": 0.99
+        },
+        {
+          "id": "issue-429",
+          "label": "pr-sized",
+          "changed_files": 4,
+          "raw_score": 1.3,
+          "probabilities": [
+            0.0,
+            0.7,
+            0.3,
+            0.0
+          ],
+          "subsystems": 0.49,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.7
+        },
+        {
+          "id": "issue-430",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 1.01,
+          "probabilities": [
+            0.01,
+            0.97,
+            0.02,
+            0.0
+          ],
+          "subsystems": 0.22,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.98
+        },
+        {
+          "id": "issue-445",
+          "label": "pr-sized",
+          "changed_files": 2,
+          "raw_score": 0.49,
+          "probabilities": [
+            0.52,
+            0.48,
+            0.0,
+            0.0
+          ],
+          "subsystems": 0.2,
+          "predicted": "single-file",
+          "scope_confidence": 0.51
+        },
+        {
+          "id": "issue-446",
+          "label": "multi-file",
+          "changed_files": 7,
+          "raw_score": 1.86,
+          "probabilities": [
+            0.02,
+            0.19,
+            0.7,
+            0.09
+          ],
+          "subsystems": 0.32,
+          "predicted": "multi-file",
+          "scope_confidence": 0.69
+        },
+        {
+          "id": "issue-465",
+          "label": "multi-file",
+          "changed_files": 8,
+          "raw_score": 1.3,
+          "probabilities": [
+            0.0,
+            0.7,
+            0.3,
+            0.0
+          ],
+          "subsystems": 0.58,
+          "predicted": "multi-file",
+          "scope_confidence": 0.7
+        },
+        {
+          "id": "issue-477",
+          "label": "pr-sized",
+          "changed_files": 2,
+          "raw_score": 1.09,
+          "probabilities": [
+            0.04,
+            0.84,
+            0.12,
+            0.0
+          ],
+          "subsystems": 0.44,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.83
+        },
+        {
+          "id": "issue-486",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 0.19,
+          "probabilities": [
+            0.82,
+            0.17,
+            0.01,
+            0.0
+          ],
+          "subsystems": 0.13,
+          "predicted": "single-file",
+          "scope_confidence": 0.81
+        },
+        {
+          "id": "issue-491",
+          "label": "multi-file",
+          "changed_files": 24,
+          "raw_score": 1.94,
+          "probabilities": [
+            0.0,
+            0.06,
+            0.93,
+            0.01
+          ],
+          "subsystems": 0.55,
+          "predicted": "multi-file",
+          "scope_confidence": 0.92
+        },
+        {
+          "id": "issue-496",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 0.88,
+          "probabilities": [
+            0.12,
+            0.87,
+            0.01,
+            0.0
+          ],
+          "subsystems": 0.25,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.87
+        },
+        {
+          "id": "issue-502",
+          "label": "single-file",
+          "changed_files": 1,
+          "raw_score": 0.42,
+          "probabilities": [
+            0.6,
+            0.38,
+            0.02,
+            0.0
+          ],
+          "subsystems": 0.26,
+          "predicted": "single-file",
+          "scope_confidence": 0.58
+        },
+        {
+          "id": "issue-504",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 1.02,
+          "probabilities": [
+            0.0,
+            0.98,
+            0.02,
+            0.0
+          ],
+          "subsystems": 0.34,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.98
+        },
+        {
+          "id": "issue-511",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 1.4,
+          "probabilities": [
+            0.01,
+            0.59,
+            0.4,
+            0.0
+          ],
+          "subsystems": 0.74,
+          "predicted": "multi-file",
+          "scope_confidence": 0.59
+        },
+        {
+          "id": "issue-512",
+          "label": "pr-sized",
+          "changed_files": 4,
+          "raw_score": 1.13,
+          "probabilities": [
+            0.01,
+            0.86,
+            0.13,
+            0.0
+          ],
+          "subsystems": 0.75,
+          "predicted": "multi-file",
+          "scope_confidence": 0.86
+        },
+        {
+          "id": "issue-513",
+          "label": "pr-sized",
+          "changed_files": 2,
+          "raw_score": 1.17,
+          "probabilities": [
+            0.0,
+            0.83,
+            0.17,
+            0.0
+          ],
+          "subsystems": 0.76,
+          "predicted": "multi-file",
+          "scope_confidence": 0.82
+        },
+        {
+          "id": "issue-514",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 1.23,
+          "probabilities": [
+            0.01,
+            0.75,
+            0.24,
+            0.0
+          ],
+          "subsystems": 0.67,
+          "predicted": "multi-file",
+          "scope_confidence": 0.75
+        },
+        {
+          "id": "issue-515",
+          "label": "pr-sized",
+          "changed_files": 5,
+          "raw_score": 0.47,
+          "probabilities": [
+            0.55,
+            0.43,
+            0.02,
+            0.0
+          ],
+          "subsystems": 0.36,
+          "predicted": "single-file",
+          "scope_confidence": 0.53
+        },
+        {
+          "id": "issue-524",
+          "label": "multi-file",
+          "changed_files": 8,
+          "raw_score": 1.89,
+          "probabilities": [
+            0.0,
+            0.11,
+            0.89,
+            0.0
+          ],
+          "subsystems": 0.61,
+          "predicted": "multi-file",
+          "scope_confidence": 0.89
+        },
+        {
+          "id": "issue-525",
+          "label": "multi-file",
+          "changed_files": 6,
+          "raw_score": 1.11,
+          "probabilities": [
+            0.0,
+            0.89,
+            0.11,
+            0.0
+          ],
+          "subsystems": 0.46,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.89
+        },
+        {
+          "id": "issue-526",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 1.02,
+          "probabilities": [
+            0.0,
+            0.98,
+            0.02,
+            0.0
+          ],
+          "subsystems": 0.39,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.97
+        },
+        {
+          "id": "issue-527",
+          "label": "pr-sized",
+          "changed_files": 5,
+          "raw_score": 1.16,
+          "probabilities": [
+            0.0,
+            0.84,
+            0.16,
+            0.0
+          ],
+          "subsystems": 0.63,
+          "predicted": "multi-file",
+          "scope_confidence": 0.83
+        },
+        {
+          "id": "issue-528",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 1.02,
+          "probabilities": [
+            0.0,
+            0.98,
+            0.02,
+            0.0
+          ],
+          "subsystems": 0.35,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.98
+        },
+        {
+          "id": "issue-529",
+          "label": "multi-file",
+          "changed_files": 8,
+          "raw_score": 1.14,
+          "probabilities": [
+            0.0,
+            0.86,
+            0.14,
+            0.0
+          ],
+          "subsystems": 0.59,
+          "predicted": "multi-file",
+          "scope_confidence": 0.86
+        },
+        {
+          "id": "issue-530",
+          "label": "multi-file",
+          "changed_files": 10,
+          "raw_score": 1.43,
+          "probabilities": [
+            0.0,
+            0.57,
+            0.43,
+            0.0
+          ],
+          "subsystems": 0.56,
+          "predicted": "multi-file",
+          "scope_confidence": 0.57
+        },
+        {
+          "id": "issue-531",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 1.05,
+          "probabilities": [
+            0.0,
+            0.95,
+            0.05,
+            0.0
+          ],
+          "subsystems": 0.51,
+          "predicted": "multi-file",
+          "scope_confidence": 0.94
+        },
+        {
+          "id": "issue-532",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 1.09,
+          "probabilities": [
+            0.0,
+            0.91,
+            0.09,
+            0.0
+          ],
+          "subsystems": 0.61,
+          "predicted": "multi-file",
+          "scope_confidence": 0.9
+        },
+        {
+          "id": "issue-533",
+          "label": "multi-file",
+          "changed_files": 10,
+          "raw_score": 1.82,
+          "probabilities": [
+            0.0,
+            0.18,
+            0.82,
+            0.0
+          ],
+          "subsystems": 0.61,
+          "predicted": "multi-file",
+          "scope_confidence": 0.82
+        },
+        {
+          "id": "issue-534",
+          "label": "multi-file",
+          "changed_files": 7,
+          "raw_score": 1.29,
+          "probabilities": [
+            0.0,
+            0.71,
+            0.29,
+            0.0
+          ],
+          "subsystems": 0.44,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.71
+        },
+        {
+          "id": "issue-535",
+          "label": "pr-sized",
+          "changed_files": 4,
+          "raw_score": 1.11,
+          "probabilities": [
+            0.0,
+            0.89,
+            0.11,
+            0.0
+          ],
+          "subsystems": 0.48,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.89
+        },
+        {
+          "id": "issue-536",
+          "label": "multi-file",
+          "changed_files": 7,
+          "raw_score": 1.18,
+          "probabilities": [
+            0.0,
+            0.8200000000000001,
+            0.18,
+            0.0
+          ],
+          "subsystems": 0.56,
+          "predicted": "multi-file",
+          "scope_confidence": 0.81
+        },
+        {
+          "id": "issue-537",
+          "label": "multi-file",
+          "changed_files": 6,
+          "raw_score": 1.47,
+          "probabilities": [
+            0.0,
+            0.53,
+            0.47,
+            0.0
+          ],
+          "subsystems": 0.55,
+          "predicted": "multi-file",
+          "scope_confidence": 0.53
+        },
+        {
+          "id": "issue-538",
+          "label": "multi-file",
+          "changed_files": 10,
+          "raw_score": 1.0,
+          "probabilities": [
+            0.02,
+            0.97,
+            0.01,
+            0.0
+          ],
+          "subsystems": 0.22,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.97
+        },
+        {
+          "id": "issue-586",
+          "label": "pr-sized",
+          "changed_files": 2,
+          "raw_score": 0.72,
+          "probabilities": [
+            0.33,
+            0.63,
+            0.04,
+            0.0
+          ],
+          "subsystems": 0.17,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.62
+        },
+        {
+          "id": "issue-595",
+          "label": "multi-file",
+          "changed_files": 7,
+          "raw_score": 1.27,
+          "probabilities": [
+            0.0,
+            0.73,
+            0.27,
+            0.0
+          ],
+          "subsystems": 0.55,
+          "predicted": "multi-file",
+          "scope_confidence": 0.73
+        },
+        {
+          "id": "issue-607",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 0.88,
+          "probabilities": [
+            0.18,
+            0.76,
+            0.06,
+            0.0
+          ],
+          "subsystems": 0.43,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.76
+        },
+        {
+          "id": "issue-608",
+          "label": "pr-sized",
+          "changed_files": 5,
+          "raw_score": 0.95,
+          "probabilities": [
+            0.07,
+            0.91,
+            0.02,
+            0.0
+          ],
+          "subsystems": 0.46,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.9
+        },
+        {
+          "id": "issue-613",
+          "label": "multi-file",
+          "changed_files": 6,
+          "raw_score": 1.08,
+          "probabilities": [
+            0.01,
+            0.91,
+            0.08,
+            0.0
+          ],
+          "subsystems": 0.39,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.91
+        },
+        {
+          "id": "issue-742",
+          "label": "multi-file",
+          "changed_files": 8,
+          "raw_score": 1.6,
+          "probabilities": [
+            0.0,
+            0.4,
+            0.6,
+            0.0
+          ],
+          "subsystems": 0.7,
+          "predicted": "multi-file",
+          "scope_confidence": 0.6
+        },
+        {
+          "id": "issue-746",
+          "label": "multi-file",
+          "changed_files": 10,
+          "raw_score": 1.11,
+          "probabilities": [
+            0.0,
+            0.89,
+            0.11,
+            0.0
+          ],
+          "subsystems": 0.47,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.88
+        },
+        {
+          "id": "issue-750",
+          "label": "multi-file",
+          "changed_files": 7,
+          "raw_score": 1.38,
+          "probabilities": [
+            0.0,
+            0.62,
+            0.38,
+            0.0
+          ],
+          "subsystems": 0.7,
+          "predicted": "multi-file",
+          "scope_confidence": 0.61
+        },
+        {
+          "id": "issue-766",
+          "label": "multi-file",
+          "changed_files": 6,
+          "raw_score": 1.0,
+          "probabilities": [
+            0.11,
+            0.78,
+            0.11,
+            0.0
+          ],
+          "subsystems": 0.64,
+          "predicted": "multi-file",
+          "scope_confidence": 0.78
+        },
+        {
+          "id": "issue-786",
+          "label": "pr-sized",
+          "changed_files": 2,
+          "raw_score": 0.04,
+          "probabilities": [
+            0.96,
+            0.04,
+            0.0,
+            0.0
+          ],
+          "subsystems": 0.13,
+          "predicted": "single-file",
+          "scope_confidence": 0.96
+        },
+        {
+          "id": "issue-791",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 1.01,
+          "probabilities": [
+            0.03,
+            0.93,
+            0.04,
+            0.0
+          ],
+          "subsystems": 0.29,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.93
+        }
+      ]
+    },
+    {
+      "cases": 50,
+      "exact": 27,
+      "exact_rate": 0.54,
+      "within_one": 50,
+      "within_one_rate": 1.0,
+      "misses": 23,
+      "under_read": 11,
+      "over_read": 12,
+      "boundary_cases": 48,
+      "boundary_exact": 25,
+      "boundary_rate": 0.5208333333333334,
+      "boundary_base_rate": 0.5833333333333334,
+      "base_rate": 0.56,
+      "confusion": {
+        "multi-file->pr-sized": 7,
+        "pr-sized->multi-file": 12,
+        "pr-sized->single-file": 4
+      },
+      "detail": [
+        {
+          "id": "issue-277",
+          "label": "multi-file",
+          "changed_files": 7,
+          "raw_score": 1.09,
+          "probabilities": [
+            0.0,
+            0.9,
+            0.1,
+            0.0
+          ],
+          "subsystems": 0.46,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.9
+        },
+        {
+          "id": "issue-348",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 0.29,
+          "probabilities": [
+            0.75,
+            0.21,
+            0.04,
+            0.0
+          ],
+          "subsystems": 0.69,
+          "predicted": "multi-file",
+          "scope_confidence": 0.71
+        },
+        {
+          "id": "issue-381",
+          "label": "pr-sized",
+          "changed_files": 5,
+          "raw_score": 1.41,
+          "probabilities": [
+            0.0,
+            0.59,
+            0.41,
+            0.0
+          ],
+          "subsystems": 0.66,
+          "predicted": "multi-file",
+          "scope_confidence": 0.59
+        },
+        {
+          "id": "issue-382",
+          "label": "multi-file",
+          "changed_files": 9,
+          "raw_score": 1.95,
+          "probabilities": [
+            0.0,
+            0.05,
+            0.95,
+            0.0
+          ],
+          "subsystems": 0.78,
+          "predicted": "multi-file",
+          "scope_confidence": 0.94
+        },
+        {
+          "id": "issue-385",
+          "label": "pr-sized",
+          "changed_files": 5,
+          "raw_score": 1.26,
+          "probabilities": [
+            0.0,
+            0.74,
+            0.26,
+            0.0
+          ],
+          "subsystems": 0.53,
+          "predicted": "multi-file",
+          "scope_confidence": 0.73
+        },
+        {
+          "id": "issue-386",
+          "label": "pr-sized",
+          "changed_files": 4,
+          "raw_score": 1.34,
+          "probabilities": [
+            0.0,
+            0.67,
+            0.33,
+            0.0
+          ],
+          "subsystems": 0.71,
+          "predicted": "multi-file",
+          "scope_confidence": 0.66
+        },
+        {
+          "id": "issue-390",
+          "label": "pr-sized",
+          "changed_files": 4,
+          "raw_score": 1.0,
+          "probabilities": [
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ],
+          "subsystems": 0.36,
+          "predicted": "pr-sized",
+          "scope_confidence": 1.0
+        },
+        {
+          "id": "issue-406",
+          "label": "single-file",
+          "changed_files": 1,
+          "raw_score": 0.01,
+          "probabilities": [
+            0.99,
+            0.01,
+            0.0,
+            0.0
+          ],
+          "subsystems": 0.07,
+          "predicted": "single-file",
+          "scope_confidence": 0.99
+        },
+        {
+          "id": "issue-429",
+          "label": "pr-sized",
+          "changed_files": 4,
+          "raw_score": 1.37,
+          "probabilities": [
+            0.0,
+            0.63,
+            0.37,
+            0.0
+          ],
+          "subsystems": 0.47,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.63
+        },
+        {
+          "id": "issue-430",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 1.01,
+          "probabilities": [
+            0.01,
+            0.97,
+            0.02,
+            0.0
+          ],
+          "subsystems": 0.22,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.97
+        },
+        {
+          "id": "issue-445",
+          "label": "pr-sized",
+          "changed_files": 2,
+          "raw_score": 0.41,
+          "probabilities": [
+            0.59,
+            0.41,
+            0.0,
+            0.0
+          ],
+          "subsystems": 0.19,
+          "predicted": "single-file",
+          "scope_confidence": 0.59
+        },
+        {
+          "id": "issue-446",
+          "label": "multi-file",
+          "changed_files": 7,
+          "raw_score": 1.81,
+          "probabilities": [
+            0.02,
+            0.22,
+            0.7,
+            0.06
+          ],
+          "subsystems": 0.31,
+          "predicted": "multi-file",
+          "scope_confidence": 0.68
+        },
+        {
+          "id": "issue-465",
+          "label": "multi-file",
+          "changed_files": 8,
+          "raw_score": 1.3,
+          "probabilities": [
+            0.0,
+            0.7,
+            0.3,
+            0.0
+          ],
+          "subsystems": 0.59,
+          "predicted": "multi-file",
+          "scope_confidence": 0.7
+        },
+        {
+          "id": "issue-477",
+          "label": "pr-sized",
+          "changed_files": 2,
+          "raw_score": 1.13,
+          "probabilities": [
+            0.04,
+            0.8,
+            0.16,
+            0.0
+          ],
+          "subsystems": 0.47,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.78
+        },
+        {
+          "id": "issue-486",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 0.19,
+          "probabilities": [
+            0.82,
+            0.17,
+            0.01,
+            0.0
+          ],
+          "subsystems": 0.14,
+          "predicted": "single-file",
+          "scope_confidence": 0.81
+        },
+        {
+          "id": "issue-491",
+          "label": "multi-file",
+          "changed_files": 24,
+          "raw_score": 1.92,
+          "probabilities": [
+            0.0,
+            0.09,
+            0.9,
+            0.01
+          ],
+          "subsystems": 0.56,
+          "predicted": "multi-file",
+          "scope_confidence": 0.9
+        },
+        {
+          "id": "issue-496",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 0.87,
+          "probabilities": [
+            0.14,
+            0.85,
+            0.01,
+            0.0
+          ],
+          "subsystems": 0.24,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.85
+        },
+        {
+          "id": "issue-502",
+          "label": "single-file",
+          "changed_files": 1,
+          "raw_score": 0.47,
+          "probabilities": [
+            0.55,
+            0.44,
+            0.01,
+            0.0
+          ],
+          "subsystems": 0.31,
+          "predicted": "single-file",
+          "scope_confidence": 0.53
+        },
+        {
+          "id": "issue-504",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 1.02,
+          "probabilities": [
+            0.0,
+            0.98,
+            0.02,
+            0.0
+          ],
+          "subsystems": 0.35,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.98
+        },
+        {
+          "id": "issue-511",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 1.36,
+          "probabilities": [
+            0.01,
+            0.63,
+            0.36,
+            0.0
+          ],
+          "subsystems": 0.75,
+          "predicted": "multi-file",
+          "scope_confidence": 0.62
+        },
+        {
+          "id": "issue-512",
+          "label": "pr-sized",
+          "changed_files": 4,
+          "raw_score": 1.17,
+          "probabilities": [
+            0.01,
+            0.82,
+            0.17,
+            0.0
+          ],
+          "subsystems": 0.76,
+          "predicted": "multi-file",
+          "scope_confidence": 0.81
+        },
+        {
+          "id": "issue-513",
+          "label": "pr-sized",
+          "changed_files": 2,
+          "raw_score": 1.16,
+          "probabilities": [
+            0.01,
+            0.83,
+            0.16,
+            0.0
+          ],
+          "subsystems": 0.75,
+          "predicted": "multi-file",
+          "scope_confidence": 0.83
+        },
+        {
+          "id": "issue-514",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 1.2,
+          "probabilities": [
+            0.01,
+            0.78,
+            0.21,
+            0.0
+          ],
+          "subsystems": 0.66,
+          "predicted": "multi-file",
+          "scope_confidence": 0.78
+        },
+        {
+          "id": "issue-515",
+          "label": "pr-sized",
+          "changed_files": 5,
+          "raw_score": 0.31,
+          "probabilities": [
+            0.71,
+            0.28,
+            0.01,
+            0.0
+          ],
+          "subsystems": 0.38,
+          "predicted": "single-file",
+          "scope_confidence": 0.69
+        },
+        {
+          "id": "issue-524",
+          "label": "multi-file",
+          "changed_files": 8,
+          "raw_score": 1.9,
+          "probabilities": [
+            0.0,
+            0.11,
+            0.89,
+            0.0
+          ],
+          "subsystems": 0.63,
+          "predicted": "multi-file",
+          "scope_confidence": 0.89
+        },
+        {
+          "id": "issue-525",
+          "label": "multi-file",
+          "changed_files": 6,
+          "raw_score": 1.11,
+          "probabilities": [
+            0.0,
+            0.89,
+            0.11,
+            0.0
+          ],
+          "subsystems": 0.44,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.89
+        },
+        {
+          "id": "issue-526",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 1.02,
+          "probabilities": [
+            0.0,
+            0.98,
+            0.02,
+            0.0
+          ],
+          "subsystems": 0.39,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.98
+        },
+        {
+          "id": "issue-527",
+          "label": "pr-sized",
+          "changed_files": 5,
+          "raw_score": 1.18,
+          "probabilities": [
+            0.0,
+            0.82,
+            0.18,
+            0.0
+          ],
+          "subsystems": 0.62,
+          "predicted": "multi-file",
+          "scope_confidence": 0.82
+        },
+        {
+          "id": "issue-528",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 1.02,
+          "probabilities": [
+            0.0,
+            0.98,
+            0.02,
+            0.0
+          ],
+          "subsystems": 0.36,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.98
+        },
+        {
+          "id": "issue-529",
+          "label": "multi-file",
+          "changed_files": 8,
+          "raw_score": 1.17,
+          "probabilities": [
+            0.0,
+            0.83,
+            0.17,
+            0.0
+          ],
+          "subsystems": 0.58,
+          "predicted": "multi-file",
+          "scope_confidence": 0.83
+        },
+        {
+          "id": "issue-530",
+          "label": "multi-file",
+          "changed_files": 10,
+          "raw_score": 1.33,
+          "probabilities": [
+            0.0,
+            0.67,
+            0.33,
+            0.0
+          ],
+          "subsystems": 0.55,
+          "predicted": "multi-file",
+          "scope_confidence": 0.67
+        },
+        {
+          "id": "issue-531",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 1.08,
+          "probabilities": [
+            0.0,
+            0.92,
+            0.08,
+            0.0
+          ],
+          "subsystems": 0.5,
+          "predicted": "multi-file",
+          "scope_confidence": 0.92
+        },
+        {
+          "id": "issue-532",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 1.06,
+          "probabilities": [
+            0.0,
+            0.94,
+            0.06,
+            0.0
+          ],
+          "subsystems": 0.6,
+          "predicted": "multi-file",
+          "scope_confidence": 0.94
+        },
+        {
+          "id": "issue-533",
+          "label": "multi-file",
+          "changed_files": 10,
+          "raw_score": 1.8,
+          "probabilities": [
+            0.0,
+            0.2,
+            0.8,
+            0.0
+          ],
+          "subsystems": 0.61,
+          "predicted": "multi-file",
+          "scope_confidence": 0.79
+        },
+        {
+          "id": "issue-534",
+          "label": "multi-file",
+          "changed_files": 7,
+          "raw_score": 1.38,
+          "probabilities": [
+            0.0,
+            0.62,
+            0.38,
+            0.0
+          ],
+          "subsystems": 0.44,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.62
+        },
+        {
+          "id": "issue-535",
+          "label": "pr-sized",
+          "changed_files": 4,
+          "raw_score": 1.07,
+          "probabilities": [
+            0.0,
+            0.93,
+            0.07,
+            0.0
+          ],
+          "subsystems": 0.52,
+          "predicted": "multi-file",
+          "scope_confidence": 0.93
+        },
+        {
+          "id": "issue-536",
+          "label": "multi-file",
+          "changed_files": 7,
+          "raw_score": 1.15,
+          "probabilities": [
+            0.0,
+            0.85,
+            0.15,
+            0.0
+          ],
+          "subsystems": 0.51,
+          "predicted": "multi-file",
+          "scope_confidence": 0.84
+        },
+        {
+          "id": "issue-537",
+          "label": "multi-file",
+          "changed_files": 6,
+          "raw_score": 1.35,
+          "probabilities": [
+            0.0,
+            0.65,
+            0.35,
+            0.0
+          ],
+          "subsystems": 0.53,
+          "predicted": "multi-file",
+          "scope_confidence": 0.65
+        },
+        {
+          "id": "issue-538",
+          "label": "multi-file",
+          "changed_files": 10,
+          "raw_score": 1.0,
+          "probabilities": [
+            0.02,
+            0.97,
+            0.01,
+            0.0
+          ],
+          "subsystems": 0.24,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.97
+        },
+        {
+          "id": "issue-586",
+          "label": "pr-sized",
+          "changed_files": 2,
+          "raw_score": 0.64,
+          "probabilities": [
+            0.4,
+            0.56,
+            0.04,
+            0.0
+          ],
+          "subsystems": 0.17,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.56
+        },
+        {
+          "id": "issue-595",
+          "label": "multi-file",
+          "changed_files": 7,
+          "raw_score": 1.28,
+          "probabilities": [
+            0.0,
+            0.72,
+            0.28,
+            0.0
+          ],
+          "subsystems": 0.49,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.71
+        },
+        {
+          "id": "issue-607",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 0.85,
+          "probabilities": [
+            0.2,
+            0.75,
+            0.05,
+            0.0
+          ],
+          "subsystems": 0.42,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.76
+        },
+        {
+          "id": "issue-608",
+          "label": "pr-sized",
+          "changed_files": 5,
+          "raw_score": 0.9,
+          "probabilities": [
+            0.12,
+            0.86,
+            0.02,
+            0.0
+          ],
+          "subsystems": 0.43,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.86
+        },
+        {
+          "id": "issue-613",
+          "label": "multi-file",
+          "changed_files": 6,
+          "raw_score": 1.04,
+          "probabilities": [
+            0.01,
+            0.93,
+            0.06,
+            0.0
+          ],
+          "subsystems": 0.39,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.93
+        },
+        {
+          "id": "issue-742",
+          "label": "multi-file",
+          "changed_files": 8,
+          "raw_score": 1.61,
+          "probabilities": [
+            0.0,
+            0.39,
+            0.61,
+            0.0
+          ],
+          "subsystems": 0.68,
+          "predicted": "multi-file",
+          "scope_confidence": 0.61
+        },
+        {
+          "id": "issue-746",
+          "label": "multi-file",
+          "changed_files": 10,
+          "raw_score": 1.11,
+          "probabilities": [
+            0.01,
+            0.87,
+            0.12,
+            0.0
+          ],
+          "subsystems": 0.45,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.87
+        },
+        {
+          "id": "issue-750",
+          "label": "multi-file",
+          "changed_files": 7,
+          "raw_score": 1.35,
+          "probabilities": [
+            0.0,
+            0.65,
+            0.35,
+            0.0
+          ],
+          "subsystems": 0.71,
+          "predicted": "multi-file",
+          "scope_confidence": 0.65
+        },
+        {
+          "id": "issue-766",
+          "label": "multi-file",
+          "changed_files": 6,
+          "raw_score": 1.0,
+          "probabilities": [
+            0.11,
+            0.78,
+            0.11,
+            0.0
+          ],
+          "subsystems": 0.61,
+          "predicted": "multi-file",
+          "scope_confidence": 0.79
+        },
+        {
+          "id": "issue-786",
+          "label": "pr-sized",
+          "changed_files": 2,
+          "raw_score": 0.05,
+          "probabilities": [
+            0.95,
+            0.05,
+            0.0,
+            0.0
+          ],
+          "subsystems": 0.13,
+          "predicted": "single-file",
+          "scope_confidence": 0.95
+        },
+        {
+          "id": "issue-791",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 1.0,
+          "probabilities": [
+            0.04,
+            0.92,
+            0.04,
+            0.0
+          ],
+          "subsystems": 0.32,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.92
+        }
+      ]
+    },
+    {
+      "cases": 50,
+      "exact": 29,
+      "exact_rate": 0.58,
+      "within_one": 50,
+      "within_one_rate": 1.0,
+      "misses": 21,
+      "under_read": 10,
+      "over_read": 11,
+      "boundary_cases": 48,
+      "boundary_exact": 27,
+      "boundary_rate": 0.5625,
+      "boundary_base_rate": 0.5833333333333334,
+      "base_rate": 0.56,
+      "confusion": {
+        "multi-file->pr-sized": 6,
+        "pr-sized->multi-file": 11,
+        "pr-sized->single-file": 4
+      },
+      "detail": [
+        {
+          "id": "issue-277",
+          "label": "multi-file",
+          "changed_files": 7,
+          "raw_score": 1.09,
+          "probabilities": [
+            0.0,
+            0.91,
+            0.09,
+            0.0
+          ],
+          "subsystems": 0.47,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.9
+        },
+        {
+          "id": "issue-348",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 0.22,
+          "probabilities": [
+            0.81,
+            0.17,
+            0.02,
+            0.0
+          ],
+          "subsystems": 0.69,
+          "predicted": "multi-file",
+          "scope_confidence": 0.78
+        },
+        {
+          "id": "issue-381",
+          "label": "pr-sized",
+          "changed_files": 5,
+          "raw_score": 1.41,
+          "probabilities": [
+            0.0,
+            0.59,
+            0.41,
+            0.0
+          ],
+          "subsystems": 0.69,
+          "predicted": "multi-file",
+          "scope_confidence": 0.59
+        },
+        {
+          "id": "issue-382",
+          "label": "multi-file",
+          "changed_files": 9,
+          "raw_score": 1.92,
+          "probabilities": [
+            0.0,
+            0.08,
+            0.92,
+            0.0
+          ],
+          "subsystems": 0.74,
+          "predicted": "multi-file",
+          "scope_confidence": 0.92
+        },
+        {
+          "id": "issue-385",
+          "label": "pr-sized",
+          "changed_files": 5,
+          "raw_score": 1.3,
+          "probabilities": [
+            0.0,
+            0.7,
+            0.3,
+            0.0
+          ],
+          "subsystems": 0.52,
+          "predicted": "multi-file",
+          "scope_confidence": 0.7
+        },
+        {
+          "id": "issue-386",
+          "label": "pr-sized",
+          "changed_files": 4,
+          "raw_score": 1.32,
+          "probabilities": [
+            0.0,
+            0.68,
+            0.32,
+            0.0
+          ],
+          "subsystems": 0.69,
+          "predicted": "multi-file",
+          "scope_confidence": 0.67
+        },
+        {
+          "id": "issue-390",
+          "label": "pr-sized",
+          "changed_files": 4,
+          "raw_score": 1.0,
+          "probabilities": [
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ],
+          "subsystems": 0.34,
+          "predicted": "pr-sized",
+          "scope_confidence": 1.0
+        },
+        {
+          "id": "issue-406",
+          "label": "single-file",
+          "changed_files": 1,
+          "raw_score": 0.01,
+          "probabilities": [
+            0.99,
+            0.01,
+            0.0,
+            0.0
+          ],
+          "subsystems": 0.06,
+          "predicted": "single-file",
+          "scope_confidence": 0.99
+        },
+        {
+          "id": "issue-429",
+          "label": "pr-sized",
+          "changed_files": 4,
+          "raw_score": 1.32,
+          "probabilities": [
+            0.0,
+            0.68,
+            0.32,
+            0.0
+          ],
+          "subsystems": 0.48,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.68
+        },
+        {
+          "id": "issue-430",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 1.02,
+          "probabilities": [
+            0.01,
+            0.97,
+            0.02,
+            0.0
+          ],
+          "subsystems": 0.23,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.97
+        },
+        {
+          "id": "issue-445",
+          "label": "pr-sized",
+          "changed_files": 2,
+          "raw_score": 0.37,
+          "probabilities": [
+            0.64,
+            0.36,
+            0.0,
+            0.0
+          ],
+          "subsystems": 0.18,
+          "predicted": "single-file",
+          "scope_confidence": 0.63
+        },
+        {
+          "id": "issue-446",
+          "label": "multi-file",
+          "changed_files": 7,
+          "raw_score": 1.84,
+          "probabilities": [
+            0.02,
+            0.2,
+            0.7,
+            0.08
+          ],
+          "subsystems": 0.34,
+          "predicted": "multi-file",
+          "scope_confidence": 0.69
+        },
+        {
+          "id": "issue-465",
+          "label": "multi-file",
+          "changed_files": 8,
+          "raw_score": 1.28,
+          "probabilities": [
+            0.0,
+            0.72,
+            0.28,
+            0.0
+          ],
+          "subsystems": 0.58,
+          "predicted": "multi-file",
+          "scope_confidence": 0.72
+        },
+        {
+          "id": "issue-477",
+          "label": "pr-sized",
+          "changed_files": 2,
+          "raw_score": 1.11,
+          "probabilities": [
+            0.04,
+            0.81,
+            0.14,
+            0.01
+          ],
+          "subsystems": 0.41,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.81
+        },
+        {
+          "id": "issue-486",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 0.13,
+          "probabilities": [
+            0.87,
+            0.12,
+            0.01,
+            0.0
+          ],
+          "subsystems": 0.13,
+          "predicted": "single-file",
+          "scope_confidence": 0.87
+        },
+        {
+          "id": "issue-491",
+          "label": "multi-file",
+          "changed_files": 24,
+          "raw_score": 1.93,
+          "probabilities": [
+            0.0,
+            0.08,
+            0.91,
+            0.01
+          ],
+          "subsystems": 0.53,
+          "predicted": "multi-file",
+          "scope_confidence": 0.91
+        },
+        {
+          "id": "issue-496",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 0.92,
+          "probabilities": [
+            0.09,
+            0.9,
+            0.01,
+            0.0
+          ],
+          "subsystems": 0.26,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.89
+        },
+        {
+          "id": "issue-502",
+          "label": "single-file",
+          "changed_files": 1,
+          "raw_score": 0.41,
+          "probabilities": [
+            0.61,
+            0.38,
+            0.01,
+            0.0
+          ],
+          "subsystems": 0.28,
+          "predicted": "single-file",
+          "scope_confidence": 0.59
+        },
+        {
+          "id": "issue-504",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 1.01,
+          "probabilities": [
+            0.0,
+            0.98,
+            0.02,
+            0.0
+          ],
+          "subsystems": 0.35,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.98
+        },
+        {
+          "id": "issue-511",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 1.35,
+          "probabilities": [
+            0.01,
+            0.64,
+            0.35,
+            0.0
+          ],
+          "subsystems": 0.74,
+          "predicted": "multi-file",
+          "scope_confidence": 0.63
+        },
+        {
+          "id": "issue-512",
+          "label": "pr-sized",
+          "changed_files": 4,
+          "raw_score": 1.16,
+          "probabilities": [
+            0.01,
+            0.83,
+            0.16,
+            0.0
+          ],
+          "subsystems": 0.75,
+          "predicted": "multi-file",
+          "scope_confidence": 0.82
+        },
+        {
+          "id": "issue-513",
+          "label": "pr-sized",
+          "changed_files": 2,
+          "raw_score": 1.18,
+          "probabilities": [
+            0.0,
+            0.81,
+            0.19,
+            0.0
+          ],
+          "subsystems": 0.74,
+          "predicted": "multi-file",
+          "scope_confidence": 0.81
+        },
+        {
+          "id": "issue-514",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 1.17,
+          "probabilities": [
+            0.01,
+            0.82,
+            0.17,
+            0.0
+          ],
+          "subsystems": 0.66,
+          "predicted": "multi-file",
+          "scope_confidence": 0.81
+        },
+        {
+          "id": "issue-515",
+          "label": "pr-sized",
+          "changed_files": 5,
+          "raw_score": 0.44,
+          "probabilities": [
+            0.58,
+            0.41,
+            0.01,
+            0.0
+          ],
+          "subsystems": 0.4,
+          "predicted": "single-file",
+          "scope_confidence": 0.56
+        },
+        {
+          "id": "issue-524",
+          "label": "multi-file",
+          "changed_files": 8,
+          "raw_score": 1.88,
+          "probabilities": [
+            0.0,
+            0.12,
+            0.88,
+            0.0
+          ],
+          "subsystems": 0.61,
+          "predicted": "multi-file",
+          "scope_confidence": 0.88
+        },
+        {
+          "id": "issue-525",
+          "label": "multi-file",
+          "changed_files": 6,
+          "raw_score": 1.12,
+          "probabilities": [
+            0.0,
+            0.88,
+            0.12,
+            0.0
+          ],
+          "subsystems": 0.48,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.88
+        },
+        {
+          "id": "issue-526",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 1.02,
+          "probabilities": [
+            0.0,
+            0.98,
+            0.02,
+            0.0
+          ],
+          "subsystems": 0.38,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.98
+        },
+        {
+          "id": "issue-527",
+          "label": "pr-sized",
+          "changed_files": 5,
+          "raw_score": 1.21,
+          "probabilities": [
+            0.0,
+            0.79,
+            0.21,
+            0.0
+          ],
+          "subsystems": 0.64,
+          "predicted": "multi-file",
+          "scope_confidence": 0.79
+        },
+        {
+          "id": "issue-528",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 1.02,
+          "probabilities": [
+            0.0,
+            0.98,
+            0.02,
+            0.0
+          ],
+          "subsystems": 0.39,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.98
+        },
+        {
+          "id": "issue-529",
+          "label": "multi-file",
+          "changed_files": 8,
+          "raw_score": 1.19,
+          "probabilities": [
+            0.0,
+            0.81,
+            0.19,
+            0.0
+          ],
+          "subsystems": 0.57,
+          "predicted": "multi-file",
+          "scope_confidence": 0.81
+        },
+        {
+          "id": "issue-530",
+          "label": "multi-file",
+          "changed_files": 10,
+          "raw_score": 1.4,
+          "probabilities": [
+            0.0,
+            0.6,
+            0.4,
+            0.0
+          ],
+          "subsystems": 0.52,
+          "predicted": "multi-file",
+          "scope_confidence": 0.6
+        },
+        {
+          "id": "issue-531",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 1.07,
+          "probabilities": [
+            0.0,
+            0.93,
+            0.07,
+            0.0
+          ],
+          "subsystems": 0.49,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.93
+        },
+        {
+          "id": "issue-532",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 1.07,
+          "probabilities": [
+            0.0,
+            0.93,
+            0.07,
+            0.0
+          ],
+          "subsystems": 0.58,
+          "predicted": "multi-file",
+          "scope_confidence": 0.92
+        },
+        {
+          "id": "issue-533",
+          "label": "multi-file",
+          "changed_files": 10,
+          "raw_score": 1.77,
+          "probabilities": [
+            0.0,
+            0.23,
+            0.77,
+            0.0
+          ],
+          "subsystems": 0.6,
+          "predicted": "multi-file",
+          "scope_confidence": 0.77
+        },
+        {
+          "id": "issue-534",
+          "label": "multi-file",
+          "changed_files": 7,
+          "raw_score": 1.31,
+          "probabilities": [
+            0.0,
+            0.69,
+            0.31,
+            0.0
+          ],
+          "subsystems": 0.45,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.69
+        },
+        {
+          "id": "issue-535",
+          "label": "pr-sized",
+          "changed_files": 4,
+          "raw_score": 1.07,
+          "probabilities": [
+            0.0,
+            0.93,
+            0.07,
+            0.0
+          ],
+          "subsystems": 0.5,
+          "predicted": "multi-file",
+          "scope_confidence": 0.92
+        },
+        {
+          "id": "issue-536",
+          "label": "multi-file",
+          "changed_files": 7,
+          "raw_score": 1.14,
+          "probabilities": [
+            0.0,
+            0.86,
+            0.14,
+            0.0
+          ],
+          "subsystems": 0.55,
+          "predicted": "multi-file",
+          "scope_confidence": 0.85
+        },
+        {
+          "id": "issue-537",
+          "label": "multi-file",
+          "changed_files": 6,
+          "raw_score": 1.41,
+          "probabilities": [
+            0.0,
+            0.59,
+            0.41,
+            0.0
+          ],
+          "subsystems": 0.52,
+          "predicted": "multi-file",
+          "scope_confidence": 0.59
+        },
+        {
+          "id": "issue-538",
+          "label": "multi-file",
+          "changed_files": 10,
+          "raw_score": 1.0,
+          "probabilities": [
+            0.01,
+            0.98,
+            0.01,
+            0.0
+          ],
+          "subsystems": 0.2,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.98
+        },
+        {
+          "id": "issue-586",
+          "label": "pr-sized",
+          "changed_files": 2,
+          "raw_score": 0.7,
+          "probabilities": [
+            0.35,
+            0.61,
+            0.04,
+            0.0
+          ],
+          "subsystems": 0.18,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.6
+        },
+        {
+          "id": "issue-595",
+          "label": "multi-file",
+          "changed_files": 7,
+          "raw_score": 1.3,
+          "probabilities": [
+            0.0,
+            0.7,
+            0.3,
+            0.0
+          ],
+          "subsystems": 0.55,
+          "predicted": "multi-file",
+          "scope_confidence": 0.69
+        },
+        {
+          "id": "issue-607",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 0.86,
+          "probabilities": [
+            0.2,
+            0.75,
+            0.05,
+            0.0
+          ],
+          "subsystems": 0.42,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.75
+        },
+        {
+          "id": "issue-608",
+          "label": "pr-sized",
+          "changed_files": 5,
+          "raw_score": 0.95,
+          "probabilities": [
+            0.08,
+            0.9,
+            0.02,
+            0.0
+          ],
+          "subsystems": 0.4,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.9
+        },
+        {
+          "id": "issue-613",
+          "label": "multi-file",
+          "changed_files": 6,
+          "raw_score": 1.04,
+          "probabilities": [
+            0.01,
+            0.94,
+            0.05,
+            0.0
+          ],
+          "subsystems": 0.4,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.94
+        },
+        {
+          "id": "issue-742",
+          "label": "multi-file",
+          "changed_files": 8,
+          "raw_score": 1.61,
+          "probabilities": [
+            0.0,
+            0.39,
+            0.61,
+            0.0
+          ],
+          "subsystems": 0.69,
+          "predicted": "multi-file",
+          "scope_confidence": 0.61
+        },
+        {
+          "id": "issue-746",
+          "label": "multi-file",
+          "changed_files": 10,
+          "raw_score": 1.14,
+          "probabilities": [
+            0.0,
+            0.86,
+            0.14,
+            0.0
+          ],
+          "subsystems": 0.47,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.85
+        },
+        {
+          "id": "issue-750",
+          "label": "multi-file",
+          "changed_files": 7,
+          "raw_score": 1.34,
+          "probabilities": [
+            0.0,
+            0.66,
+            0.34,
+            0.0
+          ],
+          "subsystems": 0.69,
+          "predicted": "multi-file",
+          "scope_confidence": 0.66
+        },
+        {
+          "id": "issue-766",
+          "label": "multi-file",
+          "changed_files": 6,
+          "raw_score": 1.03,
+          "probabilities": [
+            0.09,
+            0.79,
+            0.12,
+            0.0
+          ],
+          "subsystems": 0.62,
+          "predicted": "multi-file",
+          "scope_confidence": 0.78
+        },
+        {
+          "id": "issue-786",
+          "label": "pr-sized",
+          "changed_files": 2,
+          "raw_score": 0.04,
+          "probabilities": [
+            0.96,
+            0.04,
+            0.0,
+            0.0
+          ],
+          "subsystems": 0.12,
+          "predicted": "single-file",
+          "scope_confidence": 0.96
+        },
+        {
+          "id": "issue-791",
+          "label": "pr-sized",
+          "changed_files": 3,
+          "raw_score": 1.01,
+          "probabilities": [
+            0.04,
+            0.92,
+            0.04,
+            0.0
+          ],
+          "subsystems": 0.3,
+          "predicted": "pr-sized",
+          "scope_confidence": 0.92
+        }
+      ]
+    }
+  ],
+  "input_tokens": 183645
+}
