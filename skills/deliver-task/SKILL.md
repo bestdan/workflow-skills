@@ -325,7 +325,9 @@ remaining findings and proceed — don't loop.
   state). This is the skill's terminal success state.
 - **Hand-off summary** (structured — for a human, or the `/auto-pilot` morning
   report): task id, PR URL, reviewer classes that ran, outstanding findings (the
-  deferred judgment calls), any verification tests left unrun, and evidence paths.
+  deferred judgment calls), any verification tests left unrun, co-review's
+  **Next round** recommendation from the last round (its verdict and reason,
+  verbatim — the human decides whether to run it), and evidence paths.
 - **Freeze rule:** once a task hands off, its PR is **frozen for the rest of a
   run** — late-arriving findings (e.g. a bot review that lands after co-review's
   timeout) are **logged, never applied**. This keeps a stacked child's base
