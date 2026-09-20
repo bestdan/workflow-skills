@@ -337,10 +337,12 @@ in the profile, never left implicit. A tool that can only authenticate via an
 interactive Keychain/helper prompt is a launch blocker.
 
 **The rule is broader than credentials: ANY interactive consent gate is a launch
-blocker** — TCC folder access (Documents/Desktop/Downloads, removable and
-network volumes), Full Disk Access, Keychain, biometric, browser OAuth. The
-generalization is not hypothetical; the live failure was TCC folder consent, and
-the narrower Keychain-only wording is what let it through.
+blocker** — TCC folder access (Documents/Desktop/Downloads, iCloud Drive,
+removable and network volumes), Full Disk Access, Keychain, biometric, browser
+OAuth. The generalization is not hypothetical; the live failure was TCC folder
+consent, and the narrower Keychain-only wording is what let it through. The rule
+is broader than what the pre-flight mechanically checks — see "What is enforced,
+and what is not" below.
 
 **Detaching is what creates the gate.** macOS attributes a TCC grant to a
 **responsible process**. Run from a terminal, folder-access grants belong to
@@ -352,22 +354,42 @@ locked screen, addressed to nobody. The property that makes auto-pilot valuable
 (it detaches and outlives your session) is the same property that invalidates
 the permissions you already granted.
 
-**And the dialog doesn't say "Claude."** `claude` is a symlink to
-`~/.local/share/claude/versions/<version>`, a bare Mach-O rather than an `.app`
-bundle. It is properly signed, but with no bundle there is no display name, so
-macOS falls back to the filename: the user sees a dialog from something called
-**"2.1.207"** — indistinguishable from malware, and the likely response (deny,
-or ignore) is the one that breaks the run.
+**And if the dialog names the claude binary, it won't say "Claude."** `claude` is
+a symlink to `~/.local/share/claude/versions/<version>`, a bare Mach-O rather
+than an `.app` bundle. It is properly signed, but with no bundle there is no
+display name, so macOS falls back to the filename — a dialog from something
+called **"2.1.207"**, indistinguishable from malware, whose likely response
+(deny, or ignore) is the one that breaks the run. Treat this as the hypothesis
+it is: the dialog has not been observed, and under the attribution model below
+it would more likely name `/bin/bash`. Either way the user cannot answer it,
+which is what makes the gate a launch blocker rather than a prompt.
 
-So the rule is **enforced, not merely written down**:
+So part of the rule is **enforced, not merely written down**:
 `"${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh"` re-runs the entry path under the
-real attribution — a transient launchd job, stdin on `/dev/null`, no controlling
-TTY, exec'd through the rendered profile — and blocks on any gate it finds,
-naming the **resolved** binary path and the Full Disk Access remedy. A probe that
-passes from an interactive terminal proves nothing: the terminal's grants are
-exactly what the detached job will not have. The best outcome is needing no grant
-at all, which is why the pre-flight records `CONSENT_PROTECTED` — the protected
-locations the run's own paths sit in. `none` means no gate can fire.
+real attribution — a transient launchd job whose program is `/bin/bash`, as the
+production job's is, stdin on `/dev/null`, no controlling TTY, running through
+the rendered profile — and blocks on a denial. A probe that passes from an
+interactive terminal proves nothing: the terminal's grants are exactly what the
+detached job will not have.
+
+**What is enforced, and what is not.** The probe covers **filesystem** consent —
+TCC folder access and Full Disk Access — against the run's own paths: the run
+worktree (passed as `--run-root`) and its `--git-common-dir`, which a linked
+worktree still writes to on every git operation. Keychain, biometric and browser
+OAuth stay covered only by step 2's credential probes, which run under the
+**terminal's** attribution, not launchd's. That gap is real; naming it is the
+point of this paragraph.
+
+**The grant target is not established, and the pre-flight says so.** launchd
+makes a job's own program the responsible process and children inherit it, which
+for both the probe and the real run is `/bin/bash` — but macOS may re-attribute
+on exec of a non-platform binary, and deciding that needs a desktop session to
+answer the dialog. So the blocker names both candidates, leads with the remedy
+that needs no grant, and tells the user to re-run the pre-flight after granting:
+the probe is the check. The best outcome is needing no grant at all, which is
+what `CONSENT_PROTECTED` records. **`none` means none of the run's known paths
+sit in a configured protected location** — the run root is probed regardless, and
+Full Disk Access can still block a path the inventory does not enumerate.
 
 ### 4. Worker-CLI composition
 

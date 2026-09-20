@@ -37,8 +37,10 @@ BASE="$(mktemp -d "${TMPDIR:-/tmp}/test-preflight-consent.XXXXXX")"
 trap 'rm -rf "$BASE"' EXIT
 # $TMPDIR often carries a trailing slash, and preflight.sh normalizes its own
 # ROOT through `cd … && pwd` — so normalize here too, or every path comparison
-# below is off by a doubled separator.
-BASE="$(cd "$BASE" && pwd)"
+# below is off by a doubled separator. `-P` because `git rev-parse
+# --show-toplevel` reports the PHYSICAL path, and under $TMPDIR that is
+# /private/var rather than /var; a logical $BASE would never match the run root.
+BASE="$(cd "$BASE" && pwd -P)"
 
 fail=0
 pass_count=0
@@ -139,6 +141,12 @@ SPAWN
 printf 'handler: gh-issue\n' >"$ROOT/dev_docs/tasks/.task-config.yml"
 chmod +x "$ROOT/scripts"/*.sh
 
+# The fixture root is what gets passed as --run-root, and preflight resolves that
+# through `git rev-parse`, so it has to be a real checkout. GIT_CONFIG_GLOBAL is
+# pinned per AGENTS.md: without it this fixture inherits the developer's global
+# config (a machine-wide core.hooksPath, say) and fails only on their laptop.
+GIT_CONFIG_GLOBAL=/dev/null git -C "$ROOT" init -q
+
 # --- Fixture PATH ----------------------------------------------------------
 # `claude` is a SYMLINK to a version-named bare executable, exactly as the real
 # install is — the resolved target is what the blocker message must name.
@@ -174,7 +182,7 @@ cat >"$FIXBIN/fake-launchctl" <<'LAUNCHCTL'
 echo "$2" >"$CAPTURE/domain"
 cp "$3" "$CAPTURE/plist"
 
-# ProgramArguments, in order: sandbox-exec -f <prof> /bin/bash <probe> <result> <specs...>
+# ProgramArguments, in order: /bin/bash <wrapper> <prof> <probe> <result> <specs...>
 # Read only what's inside <array>, or the trailing StandardInPath/log strings
 # would be mistaken for probe specs.
 args="$(awk '/<array>/{a=1;next} /<\/array>/{a=0} a' "$3" | sed -n 's/^ *<string>\(.*\)<\/string>$/\1/p')"
@@ -189,7 +197,15 @@ $a"
     result="$a"
     seen_probe=2
   fi
-  case "$a" in *consent-probe.sh) seen_probe=1 ;; esac
+  case "$a" in
+    *consent-probe.sh)
+      seen_probe=1
+      # Keep the generated probe and wrapper: preflight deletes its scratch dir
+      # on the way out, and case 7 runs the probe for real.
+      cp "$a" "$CAPTURE/probe.sh" 2>/dev/null || true
+      ;;
+    *consent-launch.sh) cp "$a" "$CAPTURE/wrapper.sh" 2>/dev/null || true ;;
+  esac
 done <<EOF
 $args
 EOF
@@ -211,7 +227,7 @@ while IFS= read -r spec; do
   [ -n "$spec" ] || continue
   key="${spec%%=*}"
   path="${spec#*=}"
-  if [ "${CONSENT_FAKE_MODE:-clean}" = "gated" ] && [ "$key" != "run_root" ]; then
+  if [ "${CONSENT_FAKE_MODE:-clean}" = "gated" ] && [ "${key#protected_}" != "$key" ]; then
     echo "CONSENT resource $key: denied $path — Operation not permitted" >>"$result"
   else
     echo "CONSENT resource $key: ok $path" >>"$result"
@@ -224,14 +240,14 @@ exit 0
 LAUNCHCTL
 chmod +x "$FIXBIN/fake-launchctl"
 
-run_preflight() { # run_preflight <fake-mode> [extra env assignments...]
+run_preflight() { # run_preflight <fake-mode>
   CONSENT_FAKE_MODE="$1" \
     CAPTURE="$CAPTURE" \
     PATH="$FIXTURE_PATH" \
     PREFLIGHT_LAUNCHCTL="$FIXBIN/fake-launchctl" \
     PREFLIGHT_TCC_LOCATIONS="$PROTECTED" \
     PREFLIGHT_CONSENT_TICKS=4 \
-    bash "$SCRIPT" --source plan --base main 2>&1
+    bash "$SCRIPT" --source plan --base main --run-root "$ROOT" 2>&1
 }
 
 have_sandbox=0
@@ -251,6 +267,10 @@ else
     "PREFLIGHT CONSENT_PROTECTED: $PROTECTED" "$out1"
   assert_contains "clean host: fingerprint records the RESOLVED binary" \
     "PREFLIGHT ATTRIBUTION_BIN: $RESOLVED_CLAUDE" "$out1"
+  assert_contains "clean host: probes the passed --run-root, not the plugin dir" \
+    "PREFLIGHT RUN_ROOT: $ROOT" "$out1"
+  assert_contains "clean host: probes the run root's git-common-dir too" \
+    "CONSENT resource git_common_dir: ok $ROOT/.git" "$out1"
 
   # The job itself: launchd domain (hence detached, no controlling TTY),
   # stdin on /dev/null, and exec'd through the rendered Seatbelt profile.
@@ -264,10 +284,18 @@ else
   else
     bad "job does not set StandardInPath to /dev/null"
   fi
+  # ProgramArguments[0] is the one variable that decides which process launchd
+  # makes responsible for the job, so it must be /bin/bash — what the production
+  # plist (scripts/orchestrator.plist.tmpl) runs — and not sandbox-exec.
   prog="$(printf '%s' "$plist" | sed -n 's/^ *<string>\(.*\)<\/string>$/\1/p' | tail -n +2 | head -3 | tr '\n' ' ')"
   case "$prog" in
-    "/usr/bin/sandbox-exec -f "*consent.sb*) ok "job execs through the rendered Seatbelt profile" ;;
-    *) bad "job does not exec through sandbox-exec -f <profile> (got: $prog)" ;;
+    "/bin/bash "*consent-launch.sh*consent.sb*) ok "job's program is /bin/bash, as the production job's is" ;;
+    *) bad "job's ProgramArguments does not lead with /bin/bash <wrapper> (got: $prog)" ;;
+  esac
+  wrapper="$(cat "$CAPTURE/wrapper.sh" 2>/dev/null)"
+  case "$wrapper" in
+    *'/usr/bin/sandbox-exec -f "$1" /bin/bash "$2"'*) ok "wrapper runs sandbox-exec on the rendered profile, as a child" ;;
+    *) bad "wrapper does not run sandbox-exec -f <profile> (got: $wrapper)" ;;
   esac
   if grep -q '<key>RunAtLoad</key><true/>' <<<"$plist_flat"; then
     ok "job runs at load"
@@ -327,7 +355,7 @@ fi
 out5="$(CONSENT_FAKE_MODE=clean CAPTURE="$CAPTURE" PATH="$FIXTURE_PATH" \
   PREFLIGHT_LAUNCHCTL="$BASE/no-such-launchctl" \
   PREFLIGHT_TCC_LOCATIONS="$PROTECTED" \
-  bash "$SCRIPT" --source plan --base main 2>&1)"
+  bash "$SCRIPT" --source plan --base main --run-root "$ROOT" 2>&1)"
 if [ "$have_sandbox" = 0 ]; then
   assert_contains "no sandbox-exec: skips rather than blocking" \
     "PREFLIGHT CONSENT_GATE: skip (sandbox-exec not available" "$out5"
@@ -346,9 +374,62 @@ out6="$(CONSENT_FAKE_MODE=clean CAPTURE="$CAPTURE" PATH="$FIXTURE_PATH" \
   PREFLIGHT_LAUNCHCTL="$FIXBIN/fake-launchctl" \
   PREFLIGHT_TCC_LOCATIONS="$BASE/elsewhere" \
   PREFLIGHT_CONSENT_TICKS=4 \
-  bash "$SCRIPT" --source plan --base main 2>&1)"
+  bash "$SCRIPT" --source plan --base main --run-root "$ROOT" 2>&1)"
 assert_contains "run outside every protected location: records none" \
   "PREFLIGHT CONSENT_PROTECTED: none" "$out6"
+
+# --- Case 7: the generated probe script, executed for real -----------------
+# Every case above asserts preflight's PARSING of a result file the fake wrote;
+# none of them runs the probe, which is the load-bearing half. This one does —
+# no launchd needed, so it runs everywhere.
+probe="$CAPTURE/probe.sh"
+if [ ! -s "$probe" ]; then
+  skipped "probe script: not captured (the launchd cases did not run)"
+else
+  readable="$BASE/probe-readable"
+  unreadable="$BASE/probe-unreadable"
+  mkdir -p "$readable" "$unreadable"
+  chmod 000 "$unreadable"
+  presult="$BASE/probe-result"
+  bash "$probe" "$presult" "run_root=$readable" "protected_1=$unreadable" </dev/null
+  chmod 755 "$unreadable"
+  pout="$(cat "$presult" 2>/dev/null)"
+  assert_contains "probe: reports a readable path ok" \
+    "CONSENT resource run_root: ok $readable" "$pout"
+  assert_contains "probe: reports an unreadable path denied" \
+    "CONSENT resource protected_1: denied $unreadable" "$pout"
+  assert_contains "probe: stdin-closed self-check passes on a closed stdin" \
+    "CONSENT stdin_closed: ok" "$pout"
+  assert_contains "probe: writes its completion marker last" "CONSENT done: 1" "$pout"
+fi
+
+# --- Case 8: a plist value carrying XML metacharacters stays well-formed ----
+# An unescaped `&` or `<` in a path makes the plist malformed; launchctl then
+# refuses the job and the whole check degrades to a logged skip while the
+# verdict stays `go`. So the gate fails OPEN, which is what this guards.
+if [ "$have_sandbox" = 0 ]; then
+  skipped "plist escaping: requires sandbox-exec (macOS)"
+elif ! command -v plutil >/dev/null 2>&1; then
+  skipped "plist escaping: plutil not available"
+else
+  amp_protected="$BASE/a&b<c"
+  amp_root="$amp_protected/fixture"
+  mkdir -p "$amp_root"
+  cp -R "$ROOT/scripts" "$ROOT/dev_docs" "$amp_root/"
+  GIT_CONFIG_GLOBAL=/dev/null git -C "$amp_root" init -q
+  CONSENT_FAKE_MODE=clean CAPTURE="$CAPTURE" PATH="$FIXTURE_PATH" \
+    PREFLIGHT_LAUNCHCTL="$FIXBIN/fake-launchctl" \
+    PREFLIGHT_TCC_LOCATIONS="$amp_protected" \
+    PREFLIGHT_CONSENT_TICKS=4 \
+    bash "$amp_root/scripts/preflight.sh" --source plan --base main --run-root "$amp_root" >/dev/null 2>&1
+  if plutil -lint "$CAPTURE/plist" >/dev/null 2>&1; then
+    ok "plist with & and < in its paths parses"
+  else
+    bad "plist with & and < in its paths is malformed: $(plutil -lint "$CAPTURE/plist" 2>&1)"
+  fi
+  assert_contains "plist escapes the metacharacters rather than dropping them" \
+    "a&amp;b&lt;c" "$(cat "$CAPTURE/plist" 2>/dev/null)"
+fi
 
 echo
 echo "test-preflight-consent: $pass_count passed, $fail_count failed, $skip_count skipped"

@@ -15,11 +15,18 @@
 #
 # Usage:
 #   scripts/preflight.sh --source <plan|linear> [--base <branch>]
+#                        [--run-root <path>]
 #   scripts/preflight.sh --scout-run-md <path to RUN.md>
 #
 #   --source        Task-graph source the run reads from. Required unless
 #                    --scout-run-md is given.
 #   --base          Base branch to check for staleness. Default: main.
+#   --run-root      The checkout the detached run will work in — the run
+#                    worktree launch step 1 created. Default: $PWD. The
+#                    consent-gate probe tests THIS path (and its
+#                    --git-common-dir), never the installed plugin's own
+#                    directory, which is never where the run's files are. A
+#                    value that is not a git checkout is fatal, not a skip.
 #   --scout-run-md   Run ONLY the per-task capability-join scout (auto-pilot
 #                    launch step 6 / resume's capability join) against the
 #                    given RUN.md: read each task's `coder` column, probe
@@ -44,13 +51,19 @@
 #   2  usage or dependency error
 #
 # Consent-gate probe (default mode, macOS): the detached run is spawned by
-# launchd, which makes the orchestrator binary — not the terminal — the process
+# launchd, which makes the job's own program — not the terminal — the process
 # macOS attributes TCC grants to, so the grants the user gave Terminal do not
 # carry. The probe re-runs the entry path under that real attribution (a
-# transient launchd job, stdin on /dev/null, no controlling TTY, through the
-# rendered Seatbelt profile) and blocks launch on ANY interactive consent gate
-# it finds — TCC folder access, Full Disk Access, Keychain, biometric, browser
-# OAuth. See skills/auto-pilot/references/launch-runtime.md §3.
+# transient launchd job whose program is /bin/bash, as production's is, stdin on
+# /dev/null, no controlling TTY, through the rendered Seatbelt profile) and
+# blocks launch on a denial.
+#
+# What it covers, exactly: FILESYSTEM consent — TCC folder access and Full Disk
+# Access — against the run's own paths. The other interactive gate classes
+# launch-runtime.md §3 names (Keychain, biometric, browser OAuth) are NOT
+# exercised here; they are covered only by the credential probes in section 1
+# above, which run under this terminal's attribution rather than launchd's.
+# That is a known gap, not a silent one.
 #
 # Env overrides (for tests only — never needed in normal use):
 #   PREFLIGHT_PROBE_CODERS  path to a probe-coders.sh-compatible executable.
@@ -62,6 +75,11 @@
 #                            consent-gate probe checks the run's paths against.
 #   PREFLIGHT_CONSENT_TICKS how many 0.25s ticks to wait for the probe job.
 set -uo pipefail
+# xml_escape's replacements emit a literal `&`, which patsub_replacement (on by
+# default in bash 5.2+) would expand to the matched text — rendering `&amp;` as
+# `&<the match>amp;` and breaking the plist. Quoting the replacement is not the
+# fix; bash 3.2 keeps the quotes literally.
+shopt -u patsub_replacement 2>/dev/null || true
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROBE_CODERS="${PREFLIGHT_PROBE_CODERS:-$ROOT/scripts/probe-coders.sh}"
@@ -74,7 +92,13 @@ LAUNCHCTL_BIN="${PREFLIGHT_LAUNCHCTL:-launchctl}"
 CONSENT_TIMEOUT_TICKS="${PREFLIGHT_CONSENT_TICKS:-120}" # 120 × 0.25s = 30s
 # The macOS TCC-protected home locations. Removable and network volumes are the
 # other gated class, but they are named by the run's own paths, not by a list.
-TCC_LOCATIONS="${PREFLIGHT_TCC_LOCATIONS:-$HOME/Documents:$HOME/Desktop:$HOME/Downloads}"
+# Measured on macOS 26 (2026-09-20) under launchd attribution, through the
+# rendered profile: Documents, Desktop, Downloads and iCloud Drive are denied
+# while the same reads succeed from a terminal. ~/Pictures, ~/Movies and ~/Music
+# are NOT folder-gated (the Photos *library* is a separate app-scoped
+# permission, not a path a checkout lives under), so they are deliberately out —
+# adding them would be three inventory entries that can never fire.
+TCC_LOCATIONS="${PREFLIGHT_TCC_LOCATIONS:-$HOME/Documents:$HOME/Desktop:$HOME/Downloads:$HOME/Library/Mobile Documents}"
 
 die() {
   echo "preflight: $*" >&2
@@ -224,8 +248,14 @@ run_scout() {
 source_arg=""
 base="main"
 scout_run_md=""
+run_root_arg=""
 while [ $# -gt 0 ]; do
   case "$1" in
+    --run-root)
+      [ $# -ge 2 ] || die "missing value for --run-root"
+      run_root_arg="$2"
+      shift 2
+      ;;
     --source)
       [ $# -ge 2 ] || die "missing value for --source"
       source_arg="$2"
@@ -242,7 +272,7 @@ while [ $# -gt 0 ]; do
       shift 2
       ;;
     -h | --help)
-      sed -n '2,63p' "$0"
+      sed -n '2,76p' "$0"
       exit 0
       ;;
     *) die "unknown argument: $1" ;;
@@ -544,6 +574,23 @@ resolve_link() {
   (cd "$(dirname "$p")" 2>/dev/null && printf '%s/%s\n' "$(pwd -P)" "$(basename "$p")")
 }
 
+# Escape a value for a plist <string>…</string>; `&` MUST go first. The same
+# helper and the same reasoning as spawn-orchestrator.sh's `xml_escape` — an
+# unescaped value can close the string and inject a second
+# <key>ProgramArguments</key>, which launchd execs DIRECTLY rather than under
+# sandbox-exec. Here the plainer failure matters more: `&` and `<` are legal in
+# macOS paths, and a malformed plist makes `launchctl bootstrap` fail, which this
+# section degrades to a SKIP — so an unescaped path turns a gate check into a
+# `go`. Relies on patsub_replacement being off (see the shopt below `set`).
+xml_escape() {
+  local s="$1"
+  s="${s//&/&amp;}"
+  s="${s//</&lt;}"
+  s="${s//>/&gt;}"
+  s="${s//\"/&quot;}"
+  printf '%s' "$s"
+}
+
 # The attribution identity: the RESOLVED claude binary, never the `claude`
 # symlink. This is the name the human has to find in System Settings, and the
 # reason they cannot: the target is a bare Mach-O, not an .app bundle, so macOS
@@ -569,13 +616,34 @@ add_protected() { # <location> — append to protected_needed, once
   esac
 }
 
+# **`$ROOT` is not the run's checkout.** It is `dirname($0)/..`, and production
+# invokes this as `"${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh"` — so on an
+# installed plugin `$ROOT` is `~/.claude/plugins/…`, which is never in a
+# protected location. Inventorying from it reports `none` and a `go` for a
+# checkout sitting in ~/Documents: the exact run this probe exists to stop.
+# The run root is the caller's, so it is an argument, not a derivation.
+#
+# Two paths come out of it, not one. A linked worktree under ~/src/worktrees
+# still reads and writes its main checkout's `.git` on every git operation, so a
+# probe that tests only the worktree passes tonight and dies on the first fetch
+# at 3am. `--git-common-dir` is that second path.
+consent_run_root="${run_root_arg:-$PWD}"
+run_toplevel="$(git -C "$consent_run_root" rev-parse --show-toplevel 2>/dev/null || true)"
+[ -n "$run_toplevel" ] || die "run root is not a git checkout (fail-closed): $consent_run_root — pass --run-root <the run's worktree>"
+run_gitdir="$(git -C "$consent_run_root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+if [ -z "$run_gitdir" ]; then # git < 2.31 has no --path-format
+  run_gitdir="$(cd "$consent_run_root" && cd "$(git rev-parse --git-common-dir)" && pwd)" || run_gitdir=""
+fi
+echo "PREFLIGHT RUN_ROOT: $run_toplevel"
+
 protected_needed=""
 consent_old_ifs="$IFS"
 IFS=':'
 for loc in $TCC_LOCATIONS; do
   IFS="$consent_old_ifs"
   if [ -n "$loc" ] && [ -d "$loc" ]; then
-    for run_path in "$ROOT" "$HOME/.claude" "${TMPDIR:-/tmp}"; do
+    for run_path in "$run_toplevel" "$run_gitdir" "$ROOT" "$HOME/.claude" "${TMPDIR:-/tmp}"; do
+      [ -n "$run_path" ] || continue
       under_path "$run_path" "$loc" && add_protected "$loc"
     done
   fi
@@ -584,17 +652,22 @@ done
 IFS="$consent_old_ifs"
 # A removable or network volume is the other gated class, and it is named by
 # the run's own paths rather than by any fixed list.
-for run_path in "$ROOT" "${TMPDIR:-/tmp}"; do
+for run_path in "$run_toplevel" "$run_gitdir" "$ROOT" "${TMPDIR:-/tmp}"; do
+  [ -n "$run_path" ] || continue
   case "$run_path" in
     /Volumes/*) add_protected "/Volumes/$(printf '%s' "${run_path#/Volumes/}" | cut -d/ -f1)" ;;
   esac
 done
 echo "PREFLIGHT CONSENT_PROTECTED: ${protected_needed:-none}"
 
-# Always probe the run root: a checkout unreadable under launchd attribution is
-# the same failure whether or not it sits in a named TCC location — Full Disk
-# Access covers cases no location list enumerates.
-consent_specs="run_root=$ROOT"
+# Always probe the run's own paths: a checkout unreadable under launchd
+# attribution is the same failure whether or not it sits in a named TCC location
+# — Full Disk Access covers cases no location list enumerates. `plugin_root` is
+# read at runtime too, so it is probed; it is just never the run root.
+consent_specs="run_root=$run_toplevel
+plugin_root=$ROOT"
+[ -n "$run_gitdir" ] && consent_specs="$consent_specs
+git_common_dir=$run_gitdir"
 consent_i=0
 consent_old_ifs="$IFS"
 IFS=':'
@@ -636,9 +709,26 @@ else
 
     cprof="$cscratch/consent.sb"
     cprobe="$cscratch/consent-probe.sh"
+    cwrapper="$cscratch/consent-launch.sh"
     cresult="$cscratch/consent-result"
     clog="$cscratch/consent.log"
     cplist="$cscratch/consent.plist"
+
+    # The launch wrapper exists so ProgramArguments[0] is `/bin/bash`, matching
+    # the production job (scripts/orchestrator.plist.tmpl), whose program is also
+    # `/bin/bash <launch script>` and which composes `sandbox-exec … claude -p …`
+    # as a CHILD. launchd makes a job's own initial process the one TCC holds
+    # responsible, and children inherit it — so ProgramArguments[0] is the single
+    # variable that decides which identity this probe measures. Dispatching
+    # sandbox-exec directly would guarantee a different one from production's.
+    # Runs sandbox-exec as a child rather than exec'ing it, mirroring what
+    # spawn-orchestrator.sh's write-launch composes.
+    cat >"$cwrapper" <<'WRAPPER'
+#!/bin/bash
+# Written by scripts/preflight.sh — launchd's program, so that the job's
+# responsible process is /bin/bash exactly as it is for the real run.
+/usr/bin/sandbox-exec -f "$1" /bin/bash "$2" "$3" "${@:4}"
+WRAPPER
 
     # The probe runs on launchd's minimal PATH under the 3.2 /bin/bash, so every
     # binary it reaches is named absolutely and granted by --exec below.
@@ -655,7 +745,10 @@ if [ -t 0 ]; then
 else
   echo "CONSENT stdin_closed: ok" >>"$out"
 fi
-if : >/dev/tty 2>/dev/null; then
+# stderr is redirected FIRST: bash applies redirections left to right and
+# reports a failed one on the old stderr, so the other order leaks
+# "/dev/tty: Device not configured" whenever the check correctly passes.
+if : 2>/dev/null >/dev/tty; then
   echo "CONSENT no_controlling_tty: FAIL" >>"$out"
 else
   echo "CONSENT no_controlling_tty: ok" >>"$out"
@@ -691,14 +784,14 @@ PROBE
         echo '<plist version="1.0">'
         echo '<dict>'
         echo '  <key>Label</key>'
-        printf '  <string>%s</string>\n' "$consent_label"
+        printf '  <string>%s</string>\n' "$(xml_escape "$consent_label")"
         echo '  <key>ProgramArguments</key>'
         echo '  <array>'
-        for a in /usr/bin/sandbox-exec -f "$cprof" /bin/bash "$cprobe" "$cresult"; do
-          printf '    <string>%s</string>\n' "$a"
+        for a in /bin/bash "$cwrapper" "$cprof" "$cprobe" "$cresult"; do
+          printf '    <string>%s</string>\n' "$(xml_escape "$a")"
         done
         while IFS= read -r spec; do
-          [ -n "$spec" ] && printf '    <string>%s</string>\n' "$spec"
+          [ -n "$spec" ] && printf '    <string>%s</string>\n' "$(xml_escape "$spec")"
         done <<EOF
 $consent_specs
 EOF
@@ -708,9 +801,9 @@ EOF
         echo '  <key>StandardInPath</key>'
         echo '  <string>/dev/null</string>'
         echo '  <key>StandardOutPath</key>'
-        printf '  <string>%s</string>\n' "$clog"
+        printf '  <string>%s</string>\n' "$(xml_escape "$clog")"
         echo '  <key>StandardErrorPath</key>'
-        printf '  <string>%s</string>\n' "$clog"
+        printf '  <string>%s</string>\n' "$(xml_escape "$clog")"
         echo '  <key>RunAtLoad</key>'
         echo '  <true/>'
         echo '</dict>'
@@ -745,9 +838,18 @@ EOF
                 gated_key="${line#CONSENT resource }"
                 gated_key="${gated_key%%:*}"
                 gated_path="${line#*: denied }"
-                gated_path="${gated_path%% — *}"
+                gated_path="${gated_path% — *}" # strip the trailing error only
                 consent_verdict="FAIL (interactive consent gate)"
-                blockers+=("interactive consent gate on '$gated_path' ($gated_key) — it is not reachable under launchd attribution, so the detached run raises a macOS consent dialog on a locked screen, addressed to nobody. Fix: grant Full Disk Access to the RESOLVED binary '${attribution_bin:-<claude is not on PATH>}' under System Settings → Privacy & Security → Full Disk Access — add it with the file picker, and expect the list and the dialog to identify it only by its version number ('$(basename "${attribution_bin:-unknown}")'), never as \"Claude\", because it is a bare executable with no .app bundle. The fix that needs no grant at all: move the run's paths out of the protected location.")
+                # The remedy leads with the fix that needs no grant, because it
+                # is the only one this pre-flight can be sure of. The grant
+                # target is NOT established: launchd makes a job's own program
+                # the responsible process, which for both this probe and the
+                # real run is /bin/bash — but macOS may re-attribute on exec of
+                # a non-platform binary, and that cannot be measured without a
+                # desktop session to answer the dialog. So name both candidates
+                # and say the probe is the check, rather than sending the user
+                # to grant access to a binary that may not be the one asking.
+                blockers+=("interactive consent gate on '$gated_path' ($gated_key) — it is not reachable under launchd attribution, so the detached run raises a macOS consent dialog on a locked screen, addressed to nobody. Fix, in order: (1) move the run's paths out of the protected location — then no grant is needed at all; or (2) grant Full Disk Access under System Settings → Privacy & Security → Full Disk Access to the launchd job's responsible process, then re-run this pre-flight to check whether it cleared. Most likely that is '/bin/bash' (the job's own program, for this probe and the real run alike); it may instead be the resolved binary '${attribution_bin:-<claude is not on PATH>}', which the list and the dialog would identify only by its version number ('$(basename "${attribution_bin:-unknown}")') rather than as \"Claude\", it being a bare executable with no .app bundle. This pre-flight cannot tell which, so grant and re-check rather than trusting either name.")
                 ;;
             esac
           done <"$cresult"
