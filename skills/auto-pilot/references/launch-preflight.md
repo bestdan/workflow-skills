@@ -26,17 +26,31 @@ reachable. Fail here with the specific missing artifact, not a generic error.
 
 ## Step 2 — Non-interactive auth probes (BLOCKS LAUNCH)
 
-Run `"${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh" --source <plan|linear> --base <base branch>` first
+Run `"${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh" --source <plan|linear> --base <base branch> --run-root <the step-1 worktree>` first
 — the read-only pre-flight helper this step extracts to. Its `PREFLIGHT …`
 output and `PREFLIGHT VERDICT: go` / `no-go — <reason>` line cover the binary
 fingerprint / environment class, coder availability, base freshness, the
-resolved PATH/exec dirs, the add-task host, and the confinement smoke. A
+resolved PATH/exec dirs, the add-task host, the confinement smoke, and the
+consent-gate probe (below). A
 `no-go` **BLOCKS LAUNCH** with the reason it names; treat its output as the
 source of truth rather than re-deriving these facts by hand.
 
 Probe every credential the run will need, each **non-interactively** — a probe
 that would open a prompt (a browser OAuth, a biometric `op signin`) is itself the
 failure (see [`launch-runtime.md`](launch-runtime.md) §3).
+The same pre-flight call carries the **consent-gate probe**, which enforces that
+rule for the gate class no credential probe can see: it re-runs the entry path
+under **launchd attribution** (not this terminal's) and blocks on TCC folder
+access or Full Disk Access against the run's own paths. It covers **filesystem**
+consent only — Keychain, biometric and browser OAuth remain covered by the
+credential probes in this step, which run under the terminal's attribution
+([`launch-runtime.md`](launch-runtime.md) §3, "What is enforced, and what is
+not"). **`--run-root <path>` is required** — pass the run worktree from step 1.
+The probe tests that checkout and its `--git-common-dir`, and the flag has no
+default on purpose: `$ROOT` is the installed plugin's directory, never the run's
+tree, and a `$PWD` fallback would certify whatever checkout the caller happened
+to stand in. Omitting it exits 2 with a usage message, the way omitting
+`--source` does, rather than reporting a `go` for the wrong tree.
 The probe path depends on the **environment class** (below): `local-full`
 authenticates through CLIs, `claude-web` through **MCP**. Probe whichever applies:
 
@@ -72,6 +86,12 @@ no local CLIs, narrower permission surface). **Detect** the facts (a
 `command -v` probe can't lie) rather than trusting a declared class. Record it
 on the run-state branch — the step-6 scout joins against it, and `--resume` in
 a different environment re-runs that join.
+
+Record the consent probe's three lines alongside it — `ATTRIBUTION_BIN` (the
+resolved binary, not the symlink), `RUN_ROOT` (the path actually probed, which
+is what makes the verdict readable at all) and `CONSENT_PROTECTED`. Attribution
+is an environment fact like the rest: a run launched from one machine and
+resumed on another re-runs this step and re-checks it.
 
 Also confirm **unattended viability** here, up front while the human is
 present rather than at spawn: a `local-full` run needs the machine to stay
