@@ -12,13 +12,13 @@ describes. Three measurements sit behind that posture, and each one ended in a
 decision not to adopt what it measured. This file is the short version of what
 they cost to learn.
 
-| Read this when                                                | Go to                                                                                                                                                                                        |
-| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| You want to know whether your judgment is Jev-shaped          | [`research/2026-09-17-jev-applications.md`](research/2026-09-17-jev-applications.md) — seven ranked candidates, the non-fits, the vendor's own rules, and what it is documented to be bad at |
-| You are about to build a ladder over Jev signals              | [`research/2026-09-19-jev-tool-routing/`](research/2026-09-19-jev-tool-routing/README.md) — a ladder that scored 58% and why                                                                 |
-| You are about to ask a model to forecast something from prose | [`research/2026-09-20-predictive-scope/`](research/2026-09-20-predictive-scope/README.md) — a forecast that landed on its base rate, and the scale bug that nearly buried the result         |
-| You want the `assess-task` adoption's shape                   | [`designs/2026-09-18-assess-task-typed-profile.md`](designs/2026-09-18-assess-task-typed-profile.md)                                                                                         |
-| You want the key plumbing                                     | [`auth_key_access.md`](auth_key_access.md)                                                                                                                                                   |
+| Read this when                                                | Go to                                                                                                                                                                                                                  |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| You want to know whether your judgment is Jev-shaped          | [`research/2026-09-17-jev-applications.md`](research/2026-09-17-jev-applications.md) — seven ranked candidates, the non-fits, the vendor's own rules, and what it is documented to be bad at                           |
+| You are about to build a ladder over Jev signals              | [`research/2026-09-19-jev-tool-routing/`](research/2026-09-19-jev-tool-routing/README.md) — a ladder that scored 58% and why                                                                                           |
+| You are about to ask a model to forecast something from prose | [`research/2026-09-20-predictive-scope/`](research/2026-09-20-predictive-scope/README.md) — a forecast whose wrapper, not the model, put it on its base rate, and three instrument defects the record caught in itself |
+| You want the `assess-task` adoption's shape                   | [`designs/2026-09-18-assess-task-typed-profile.md`](designs/2026-09-18-assess-task-typed-profile.md)                                                                                                                   |
+| You want the key plumbing                                     | [`auth_key_access.md`](auth_key_access.md)                                                                                                                                                                             |
 
 ## The rule, when you just need the answer
 
