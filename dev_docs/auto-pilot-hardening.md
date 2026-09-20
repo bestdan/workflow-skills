@@ -213,7 +213,8 @@ minimal settings hook set) rather than leaving the noise to be re-diagnosed.
 ## The pre-flight
 
 `scripts/preflight.sh` (task_5 / PR #173, #7 and #10) collapses ~20 manual
-launch steps into one call: `preflight.sh --source <plan|linear> [--base <branch>]`.
+launch steps into one call:
+`preflight.sh --source <plan|linear> --run-root <the run worktree> [--base <branch>]`.
 
 Two properties define it:
 

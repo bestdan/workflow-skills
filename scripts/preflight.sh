@@ -852,7 +852,14 @@ EOF
           # Name the resource it died on, and carry the same remedy the denial
           # branch carries — a timeout on a protected path is a consent failure
           # wearing a different hat, and "see the log" is not an answer at 3am.
-          stalled="$(sed -n 's/^CONSENT attempting //p' "$cresult" 2>/dev/null | tail -1)"
+          #
+          # The probe is a single sequential writer (`attempting K`, then
+          # `resource K`, per spec), so a read is still pending exactly when the
+          # LAST line is an `attempting` one. Hence tail-then-match, not
+          # match-then-tail: the latter names the last resource attempted even
+          # when the file goes on to show it returned, which would send the
+          # operator to grant access for a path the same file records as `ok`.
+          stalled="$(tail -n 1 "$cresult" 2>/dev/null | sed -n 's/^CONSENT attempting //p')"
           consent_verdict="FAIL (probe did not complete)"
           blockers+=("consent-gate probe did not complete under launchd attribution${stalled:+, and stalled on $stalled} — launchd-attributed consent is unproven. If it stalled on a protected path, the remedy is the denial one: move the run's paths out of that location, or grant Full Disk Access under System Settings → Privacy & Security → Full Disk Access to the job's responsible process ('/bin/bash', or possibly '${attribution_bin:-<claude is not on PATH>}') and re-run this pre-flight. Probe log: $clog")
         else

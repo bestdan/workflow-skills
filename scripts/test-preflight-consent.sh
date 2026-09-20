@@ -227,6 +227,20 @@ case "${CONSENT_FAKE_MODE:-clean}" in
     echo "CONSENT stdin_closed: FAIL" >>"$result"
     echo "CONSENT no_controlling_tty: FAIL" >>"$result"
     ;;
+  nomarker)
+    # Every read answered; only the completion marker missing. Nothing stalled,
+    # so the blocker must not name a resource.
+    echo "CONSENT stdin_closed: ok" >>"$result"
+    echo "CONSENT no_controlling_tty: ok" >>"$result"
+    while IFS= read -r spec; do
+      [ -n "$spec" ] || continue
+      echo "CONSENT attempting ${spec%%=*}: ${spec#*=}" >>"$result"
+      echo "CONSENT resource ${spec%%=*}: ok ${spec#*=}" >>"$result"
+    done <<EOF
+$specs
+EOF
+    exit 0
+    ;;
   *)
     echo "CONSENT stdin_closed: ok" >>"$result"
     echo "CONSENT no_controlling_tty: ok" >>"$result"
@@ -361,9 +375,26 @@ else
   # "see the log" is not an answer at 3am: the blocker must name the resource it
   # stalled on and carry the same remedy the denial branch does.
   assert_contains "silent probe: names the resource it stalled on" \
-    "stalled on run_root: $ROOT" "$out4"
+    ", and stalled on run_root: $ROOT" "$out4"
   assert_contains "silent probe: carries the Full Disk Access remedy" \
     "System Settings → Privacy & Security → Full Disk Access" "$out4"
+
+  # The other half of the same branch: every read answered, only the completion
+  # marker missing. Still a blocker — the property is unproven — but nothing
+  # stalled, so naming a resource would send the operator after a path this very
+  # file records as `ok`.
+  out4b="$(run_preflight nomarker)"
+  rc4b=$?
+  assert_exit "probe with no completion marker: exits 1" 1 "$rc4b"
+  assert_contains "probe with no completion marker: still blocks" \
+    "PREFLIGHT BLOCKER: consent-gate probe did not complete" "$out4b"
+  # Match the DYNAMIC clause only. The blocker also carries a constant sentence
+  # ("If it stalled on a protected path, …"), which is present either way, so a
+  # bare "stalled on" would match prose rather than the claim under test.
+  case "$out4b" in
+    *", and stalled on "*) bad "no completion marker: names a resource that returned ok" ;;
+    *) ok "no completion marker: claims no stalled resource" ;;
+  esac
 fi
 
 # --- Case 5: no launchctl — a logged skip, not a blocker -------------------
