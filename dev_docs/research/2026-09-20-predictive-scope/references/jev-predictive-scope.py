@@ -14,7 +14,7 @@ record would.
     python3 $D/jev-predictive-scope.py --suite --repeat 3   # a fresh run; costs a key
 
 The corpus is built by the sibling `build-corpus.py`; `measurement/corpus.json` is its
-committed output. Section 3 of `../../2026-09-17-jev-applications.md` asked this
+committed output. Section 3 of `../../2026-09-17-jev-applications/README.md` asked this
 question post-hoc and measured 71.6% exact with 31 of 33 misses under-reading blast
 radius. This asks it the way `assess-task` actually faces it: from prose, with nothing
 to count.
@@ -41,12 +41,17 @@ ROOT = Path(__file__).resolve().parents[4]
 HERE = Path(__file__).resolve().parent
 
 # The same deliberate coupling the routing probe documents: the key ladder and the
-# POST live in `scripts/jev-description-collision.py`, and a second copy of code that
-# reads secrets is a worse hazard than a coupling that fails loudly when the sibling
-# moves. Issue #771 gives that module a home in its own record's references/; when it
-# lands this path changes and this file breaks loudly, which is the intended failure.
+# POST live in `../../2026-09-17-jev-applications/references/jev-description-collision.py`,
+# and a second copy of code that reads secrets is a worse hazard than a coupling that
+# fails loudly when the sibling moves.
 _SPEC = importlib.util.spec_from_file_location(
-    "jev_collision", ROOT / "scripts" / "jev-description-collision.py"
+    "jev_collision",
+    ROOT
+    / "dev_docs"
+    / "research"
+    / "2026-09-17-jev-applications"
+    / "references"
+    / "jev-description-collision.py",
 )
 assert _SPEC and _SPEC.loader
 _jev = importlib.util.module_from_spec(_SPEC)

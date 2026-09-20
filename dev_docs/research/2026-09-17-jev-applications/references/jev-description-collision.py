@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Score this repo's skill descriptions as one Jev Choice question per prompt.
 
-The instrument behind section 1 of
-`dev_docs/research/2026-09-17-jev-applications.md`. It exists so that record's
-numbers can be reproduced rather than taken on trust.
+The instrument behind section 1 of the `README.md` beside it. It exists so that
+record's numbers can be reproduced rather than taken on trust.
 
 What it measures: given a naive prompt and the `description` frontmatter of every
 `skills/*/SKILL.md` as the option set, which skill wins, and by how much over the
@@ -24,11 +23,18 @@ An artifact of that record, not standing tooling. Nothing in this repo depends o
 Jev API; this exists so the record's numbers can be re-run when a `description`
 changes or a new Jev version ships. It is dev-only — never invoked by a skill or
 command at runtime, and never part of `just check`, since it costs money and needs
-the network. It lives under scripts/ because that is the only tree the linters and
-typechecker cover; dev_docs/research/ holds markdown records only.
+the network. No linter, typechecker or gate covers it: it is frozen evidence, and it
+breaks when someone reproduces the record or not at all.
 
-Run directly:
-    python3 scripts/jev-description-collision.py --suite both
+Dependencies: the standard library only. Needs a TypeSafe key, resolved the way
+`dev_docs/auth_key_access.md` describes. Its `resolve_key` and `ask_payload` are
+borrowed by the two sibling records' instruments — see `jev-pick-tool.py`'s import
+comment for why one copy of code that reads secrets beats three.
+
+Run by path, from the repository root:
+    D=dev_docs/research/2026-09-17-jev-applications/references
+    python3 $D/jev-description-collision.py --suite both   # calls the API, needs a key
+    python3 $D/test_jev_description_collision.py           # hermetic, no key
 """
 
 from __future__ import annotations

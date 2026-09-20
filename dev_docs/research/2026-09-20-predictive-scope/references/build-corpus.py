@@ -13,7 +13,7 @@ pull request's changed-file count.
     python3 build-corpus.py --profile measurement/corpus.json      # no network
 
 Why the provenance filter is the whole point. Section 3 of
-`../../2026-09-17-jev-applications.md` scored `scope` against 116 merged pull requests
+`../../2026-09-17-jev-applications/README.md` scored `scope` against 116 merged pull requests
 and measured 71.6% exact, with 31 of 33 misses under-reading blast radius. That run is
 post-hoc: ground truth was the file count of a merged pull request, so every case
 handed the model a change that had already happened. `assess-task` runs before the work
