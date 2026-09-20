@@ -463,10 +463,12 @@ module: `_secret_resolve.py`'s `resolve_key(name)` is already generic over the n
 is handed, so `resolve_key("TYPESAFE_API_KEY")` works today, and there is no
 `_linear_auth.py` to write a sibling to (each `linear-*.py` calls the shared resolver
 directly). A **Class A** script cannot reuse it — `scripts/` does not import from
-`commands/handlers/assets/` — and the one that exists did not try:
-[`references/jev-description-collision.py`](references/jev-description-collision.py)
-defines its own `resolve_key`, deliberately ordered rung 0 → 1 → 3 so a configured
-pointer is read before the environment. `_secret_resolve.py` reads the environment
+`commands/handlers/assets/` — and the one script that actually faced this did not try:
+this record's own instrument,
+[`references/jev-description-collision.py`](references/jev-description-collision.py),
+which sat under `scripts/` as Class A tooling when the §1 measurement ran and is a
+frozen artifact of this record now. It defines its own `resolve_key`, deliberately
+ordered rung 0 → 1 → 3 so a configured pointer is read before the environment. `_secret_resolve.py` reads the environment
 first. Both are faithful to `auth_key_access.md`; they implement different rungs of it,
 for different callers. Neither is the other's fallback.
 

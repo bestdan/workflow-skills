@@ -23,7 +23,8 @@ An artifact of that record, not standing tooling. Nothing in this repo depends o
 Jev API; this exists so the record's numbers can be re-run when a `description`
 changes or a new Jev version ships. It is dev-only — never invoked by a skill or
 command at runtime, and never part of `just check`, since it costs money and needs
-the network. No linter, typechecker or gate covers it: it is frozen evidence, and it
+the network. Nothing runs it and nothing typechecks it; the one gate that still
+touches it is `dprint`, which formats it. Otherwise it is frozen evidence, and it
 breaks when someone reproduces the record or not at all.
 
 Dependencies: the standard library only. Needs a TypeSafe key, resolved the way
