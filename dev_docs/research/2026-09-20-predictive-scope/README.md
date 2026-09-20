@@ -1,7 +1,7 @@
 ---
 created: 2026-09-20
 question: "Can a typed call forecast blast radius from a task card, before the work exists — and can this repository's own history measure that?"
-feeds: ../../designs/2026-09-18-assess-task-typed-profile.md
+feeds: ../../decisions/2026-09-20-drop-subsystem-floor-from-predictive-scope.md
 ---
 
 # Forecasting `scope` from a card (2026-09-20)
@@ -18,11 +18,17 @@ with 31 of 33 misses under-reading blast radius — and recorded its own scope l
 ground truth was the file count of a pull request that had already merged, so every
 case handed the model a change that had already happened.
 
-**The answer is no, on this corpus.** The typed call does not beat always answering
-the majority class on the boundary this repository's history can actually measure, and
-on the four-level question its run-to-run spread is wider than its margin over that
-baseline. Findings 6 to 9 are the measurement; 1 to 5 are what the corpus can and
-cannot support, and they bound what the measurement is allowed to claim.
+**As the design specifies it, no — and the design's own seventh question is why.**
+Asked with the upward-only subsystem floor the design adds, the call lands on the
+majority-class baseline of the one boundary this corpus can measure, with a margin
+narrower than its run-to-run spread. Remove that floor and the same answers reach
+68.1% against a 55.6% base rate, a margin twice the spread, with the error direction
+reverting to the under-read §3 measured.
+
+So the finding is about the wrapper, not the model: **the correction the design built
+against §3's under-read is what breaks the question when it is asked predictively.**
+Findings 6 to 10 are the measurement; 1 to 5 are what the corpus can and cannot
+support, and they bound what the measurement is allowed to claim.
 
 ## Method
 
@@ -33,6 +39,7 @@ repository's own issue and pull request history, read through `gh` the same day.
 ```
 D=dev_docs/research/2026-09-20-predictive-scope/references
 python3 $D/jev-predictive-scope.py --analyze $D/measurement/suite-run.json  # every number
+python3 $D/jev-predictive-scope.py --analyze $D/measurement/suite-run.json --ablate-floor
 python3 $D/build-corpus.py --profile $D/measurement/corpus.json             # the corpus
 python3 $D/test_jev_predictive_scope.py                                     # hermetic
 python3 $D/build-corpus.py --from-api                        # rebuild the corpus; needs gh
@@ -121,7 +128,7 @@ closed as duplicates or won't-fix, but the rate means that widening this corpus 
 waiting for more issues to close is slower than it looks: roughly half of what closes
 never becomes a labelled case.
 
-### 6. The four-level result does not survive its own run-to-run spread
+### 6. As specified, the four-level result does not survive its own run-to-run spread
 
 | pass | exact         | within one   | boundary only |
 | ---- | ------------- | ------------ | ------------- |
@@ -138,7 +145,7 @@ Jev is not deterministic, and a single pass is an anecdote whatever it says. A o
 run here could have reported 64.4% and read as a clear win over the baseline. Three
 passes show that number is inside the noise.
 
-### 7. On the boundary the corpus can measure, the call performs at the baseline
+### 7. As specified, the call performs at the baseline on the boundary that matters
 
 The `pr-sized`/`multi-file` slice is 43 of the 45 cases and has its own majority class:
 25 of 43 are `pr-sized`, so always answering `pr-sized` scores **58.1%**.
@@ -153,22 +160,54 @@ The overall base rate (55.6%) is the easier comparison and flatters the result; 
 slice's own baseline (58.1%) is the honest one. `--analyze` prints both beside their
 accuracies so they cannot be quoted apart.
 
-### 8. The error direction inverts against §3, which is the predictive case showing
+### 8. As specified, the error direction inverts against §3
 
 §3 measured 31 of 33 misses as under-reads — `multi-file` read as `pr-sized`. Here the
 misses run the other way: 12–13 over-reads against 4–7 under-reads, dominated by
 `pr-sized` read as `multi-file`.
 
-That is a difference between the two questions, not a contradiction. §3 handed the
+Finding 10 shows this is the floor's doing rather than the question's: removed, the
+direction reverts to §3's. What follows was written before that ablation and is kept
+because the reasoning is still the right reasoning to apply to an inversion — it just
+turned out to have a simpler cause.
+
+§3 handed the
 model a change that existed and it under-read what it could see. Asked to forecast from
 a card, it over-reads: a card describing work at length reads as large work. Every
 correction the design wires — the named-path floor, the subsystem Noul — only raises a
 level, because §3's under-read was the failure being designed against. **In the
 predictive case those corrections push in the direction the error already goes.**
 
-Not measured here: whether removing the subsystem floor improves the result. The floor
-fired on 25 of 45 cases and raised exactly 1 of them, so its effect on this corpus is
-near-nil either way, but that is an observation rather than a test.
+Finding 10 measures what that costs.
+
+### 10. Removing the design's floor is what the result turns on
+
+The subsystem Noul fires on 24–27 of the 45 cases and changes the level on 18–21 of
+them. It does not break even: across the three passes it made the answer right 22 times
+and wrong 33.
+
+Re-scoring the same committed answers with it removed —
+`--analyze … --ablate-floor`, no new API call:
+
+|                        | as the design specifies | floor removed              |
+| ---------------------- | ----------------------- | -------------------------- |
+| four-level exact, mean | 60.0%                   | **68.1%**                  |
+| margin over base rate  | +4.4 (spread 6.7)       | **+12.6 (spread 6.7)**     |
+| boundary only, mean    | 58.9% (baseline 58.1%)  | **67.4%** (baseline 58.1%) |
+| error direction        | 37 over / 17 under      | **1 over / 42 under**      |
+
+Two things change at once. The margin over the base rate becomes wider than the
+run-to-run spread, which is the bar finding 6 says the design's version fails. And the
+error direction reverts to §3's — almost every miss is now `multi-file` read as
+`pr-sized`, the same under-read the post-hoc run measured, which is evidence the model
+behaves consistently across the two regimes and the floor was masking it.
+
+**This number is selected on the corpus it is quoted against, and that is a real
+limit.** Two variants were scored on the same 45 cases and the better one is being
+reported — the hazard rule 4 names, even though nothing here is a fitted threshold.
+What the ablation establishes solidly is the negative half: the floor as specified
+makes this worse. That the floor-free variant reaches 68.1% is a result wanting
+confirmation on cases this run did not touch, not a measurement of it.
 
 ### 9. The instrument's first mapping was wrong, and the shape of the error is what caught it
 
@@ -207,10 +246,11 @@ per-label spread is again what found it.
   reason. A test asserts no digit appears in any question.
 - **The subsystem Noul raises and never lowers.** The design adds it as a seventh
   question and makes it a floor. The asymmetry was load-bearing on §3's evidence:
-  under-reading was the measured failure and over-reading was not. Finding 8 inverts
-  that premise for the predictive case, so the asymmetry now points the wrong way — it
-  is preserved here because it is what the design specifies and the record measures the
-  design, not a variant of it. A test pins the direction.
+  under-reading was the measured failure and over-reading was not. Finding 10 measures
+  what it costs once the question is predictive, and the answer is most of the result.
+  It is kept in the default path because it is what the design specifies and this record
+  measures the design; `--ablate-floor` scores the variant without it, and a test pins
+  the direction the default applies.
 - **Confidence is recorded and never scored on.** Rule 6 — it measured 16 points
   overconfident against ground truth.
 - **No threshold is fitted.** The level is the nearest criterion index. The routing
@@ -222,9 +262,12 @@ per-label spread is again what found it.
 - **That the call is worse than a model reasoning unaided.** No baseline was run
   against agents, as the routing record did. This measures the call against arithmetic
   baselines only.
+- **That the floor-free variant reaches 68.1% on cases it has not seen.** Two variants
+  were scored on the same 45 cards and the better one is reported. The negative half —
+  the floor as specified makes this worse — is solid; the positive number wants a fresh
+  corpus. See finding 10.
 - **That a better question would not do better.** The phrasing is one attempt, written
-  to the design's spec. Finding 8 suggests an obvious variant — drop the upward-only
-  floor — that was not tested.
+  to the design's spec.
 - **That 45 cards from one repository generalise.** Same limit §3 has, one-fifth the
   size.
 
@@ -235,8 +278,12 @@ per-label spread is again what found it.
 point, which finding 2 establishes this corpus cannot license; and its upward-only
 correction, which finding 8 shows points the wrong way once the question is predictive.
 
-Tracked as [#782]. A decision record, if one follows, is the place for what to do about
-this — per `README.md` in this directory, the recommendation does not belong here.
+What was decided from this is
+[`../../decisions/2026-09-20-drop-subsystem-floor-from-predictive-scope.md`](../../decisions/2026-09-20-drop-subsystem-floor-from-predictive-scope.md).
+Per this directory's conventions the recommendation lives there, not here, so the
+evidence can be re-read without the conclusion colouring it.
+
+Tracked as [#782].
 
 [#773]: https://github.com/bestdan/workflow-skills/issues/773
 [#782]: https://github.com/bestdan/workflow-skills/issues/782

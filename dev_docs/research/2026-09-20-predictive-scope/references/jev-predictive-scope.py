@@ -229,7 +229,7 @@ def run_suite(key: str, corpus: dict, repeat: int, model: str = MODEL) -> dict:
     return {"model": model, "passes": passes, "input_tokens": tokens}
 
 
-def format_analysis(run: dict) -> str:
+def format_analysis(run: dict, ablate_floor: bool = False) -> str:
     """Every figure is recomputed from the committed raw answers, never read back from
     an aggregate frozen at run time.
 
@@ -239,8 +239,22 @@ def format_analysis(run: dict) -> str:
     needed a fresh API call to say anything, and the committed evidence would have
     silently described an instrument that no longer exists.
     """
-    passes = [score_pass(p["detail"]) for p in run["passes"]]
-    out = [f"model: {run['model']}   passes: {len(passes)}", ""]
+    detail_of = run["passes"]
+    if ablate_floor:
+        # Re-derive the level from the raw Score alone, as if the design's seventh
+        # question had never been asked. Everything else is untouched.
+        detail_of = [
+            {
+                "detail": [
+                    {**d, "predicted": LEVELS[min(max(round(d["raw_score"]), 0), 3)]}
+                    for d in p["detail"]
+                ]
+            }
+            for p in run["passes"]
+        ]
+    passes = [score_pass(p["detail"]) for p in detail_of]
+    label = run["model"] + (" (subsystem floor removed)" if ablate_floor else "")
+    out = [f"model: {label}   passes: {len(passes)}", ""]
     for i, p in enumerate(passes, 1):
         out += [
             f"pass {i}:",
@@ -284,13 +298,18 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--analyze", metavar="RUN", help="report on a committed run")
     mode.add_argument("--ask", metavar="CARD", help="one card, printed")
     p.add_argument("--repeat", type=int, default=1, help="passes over the corpus")
+    p.add_argument(
+        "--ablate-floor",
+        action="store_true",
+        help="with --analyze: re-score as if the subsystem floor were never applied",
+    )
     p.add_argument("--corpus", default=str(HERE / "measurement" / "corpus.json"))
     p.add_argument("--model", default=MODEL)
     args = p.parse_args(argv)
 
     if args.analyze:
         with open(args.analyze) as fh:
-            print(format_analysis(json.load(fh)))
+            print(format_analysis(json.load(fh), ablate_floor=args.ablate_floor))
         return 0
 
     key = _jev.resolve_key(ROOT)
