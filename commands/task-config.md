@@ -161,6 +161,47 @@ cat "$ROOT/dev_docs/tasks/.task-config.local.yml" 2>/dev/null # optional gitigno
 
 Overlay the local override on the committed config (mappings merge recursively, local leaf values win, per "Local override" above), then read `handler:` from the result. A missing or empty value → the default `repo-pr`. Commands and skills must not resolve `handler:` from `.task-config.yml` alone.
 
+### Run-scoped overrides
+
+There is a **third and highest-precedence layer**: a `key=value` token in the
+command's own arguments, which applies to that one run and is written nowhere.
+
+```
+/promote-tasks max-estimate=8
+/do-tasks max-estimate=8 wip-limit=5
+```
+
+Precedence, lowest to highest: **committed config → `.task-config.local.yml` →
+run-scoped token.**
+
+**Why this layer exists.** Without it, changing a bound to get past it means
+editing committed config — which in a protected-branch repo means a branch, a
+PR, a review and a merge, to change one integer for one command. That cost is
+paid at exactly the moment someone is trying to get work done, and it is paid in
+a currency (a permanent config change) far larger than the need (this run).
+Measured 2026-09-20: clearing five wrongly-demoted cards on `bestdan/dotfiles`
+required opening a config PR and waiting for it to merge before the command
+could be re-run.
+
+**Rules.**
+
+- **Only bounds and caps.** `max-estimate`, `wip-limit`, and the like — numbers
+  a run may reasonably relax or tighten. **Never `handler`, never `repo`, never
+  any credential or `*_ref` key**: those choose a destination or reach a secret,
+  and a typo'd destination writes real issues somewhere nobody is looking.
+  Refuse an unknown or non-overridable key by name rather than ignoring it — a
+  silently dropped override reads as a bound that did not apply.
+- **Token spelling is kebab-case for the dotted config path**: `max-estimate`
+  sets `<handler>.max_estimate`, `wip-limit` sets `<handler>.wip_limit`. The
+  command reports which keys it overrode, and to what, in its run report — an
+  override nobody can see in the output is indistinguishable from a bug.
+- **It works unattended, deliberately.** A dispatched or scheduled run can carry
+  one in its own prompt, which is how an `/auto-pilot` run raises a bound
+  without a config change. This is not a hole in `attendedness.md`: that file
+  governs whether an *unanswered prompt* may be treated as consent, and a token
+  is an explicit instruction, not an inferred one. What it must never become is
+  a default — a run with no token gets the configured bound.
+
 ### 5. Confirm
 
 Tell the user:

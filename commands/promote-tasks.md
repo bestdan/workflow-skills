@@ -14,6 +14,7 @@ When the configured handler is an external tracker, the same scoring runs agains
 >
 > - `dry-run` — print proposed transitions and exit without writing.
 > - `all` — on a tracker handler, score the **whole** team/project/repo backlog instead of narrowing to a single project/epic/milestone (see each tracker handler's project-filter step). No effect on the file-based `repo-pr` path, which has no sub-project scope.
+> - `<key>=<value>` — a **run-scoped config override**, e.g. `max-estimate=8`. Overlaid on the merged config for this run only, above both the committed file and `.task-config.local.yml`. `commands/task-config.md` → "Run-scoped overrides" owns the rule, the allowed keys and the refusal on an unknown one; do not re-derive any of it here. Report which keys were overridden in step 4.
 > - `backfill-only` — fill missing `priority`/`size` on cards at **any** rung and write nothing else: no scoring, no transition, no `auto:` change. This is the only path to those two fields on a card the promoter has already scored, and it is not a re-score — demotion stays a human's call. `gh-issue` implements it (`commands/handlers/gh-issue-promote.md` step 7); on a handler that does not, say so and stop rather than falling back to a scoring run.
 >
 > Test each token with a "contains" check (e.g. `$ARGUMENTS` contains `dry-run`), not equality — `/promote-tasks dry-run all` enables both.
