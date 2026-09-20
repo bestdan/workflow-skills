@@ -136,3 +136,37 @@ conflict() { run bash -c "cd '$TEST_TMPDIR/clone' && '$REPO_ROOT/scripts/preflig
   refute_output --partial 'CONFLICT: clean'
   refute_output --partial 'CONFLICT: conflicting'
 }
+
+@test "a git in the 2.38-2.43 window still produces a verdict" {
+  # merge-tree learned --quiet after --write-tree, so a git inside the window
+  # the version gate admits rejects --quiet with exit 129. That is neither 0
+  # nor 1, so it lands in the unknown arm and the script reports
+  # reason=merge-tree-failed forever on such a host. The invocation has to stay
+  # inside what the advertised 2.38 floor supports.
+  real_git="$(command -v git)"
+  mkdir -p "$TEST_TMPDIR/stub"
+  {
+    echo '#!/usr/bin/env bash'
+    echo 'if [ "$1" = "--version" ]; then echo "git version 2.43.0"; exit 0; fi'
+    echo 'if [ "$1" = "merge-tree" ]; then'
+    echo '  for a in "$@"; do'
+    echo '    if [ "$a" = "--quiet" ]; then'
+    echo '      echo "error: unknown option quiet" >&2'
+    echo '      exit 129'
+    echo '    fi'
+    echo '  done'
+    echo 'fi'
+    echo "exec \"$real_git\" \"\$@\""
+  } >"$TEST_TMPDIR/stub/git"
+  chmod +x "$TEST_TMPDIR/stub/git"
+
+  git -C "$TEST_TMPDIR/clone" checkout -qb feature
+  echo new >"$TEST_TMPDIR/clone/g.txt"
+  git -C "$TEST_TMPDIR/clone" add g.txt
+  git -C "$TEST_TMPDIR/clone" commit -qm feature
+
+  PATH="$TEST_TMPDIR/stub:$PATH" conflict --ref feature
+  assert_success
+  assert_output --partial 'CONFLICT: clean base=main ref=feature'
+  refute_output --partial 'reason=merge-tree-failed'
+}
