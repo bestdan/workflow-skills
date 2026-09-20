@@ -44,6 +44,8 @@ Usage:
   python3 gh-issue-ready.py --repo owner/name --label follow-up   # match a board's scope
   python3 gh-issue-ready.py --repo owner/name --issue 7 --issue 9 # candidate-scoped pass
   python3 gh-issue-ready.py --repo owner/name --max-estimate 3    # unattended: gate on size
+  python3 gh-issue-ready.py --repo owner/name --issue 7:3 --issue 9:5 --max-estimate 3
+                                        # caller supplies each estimate: no label reads
 
 One or more --issue switches to candidate-scoped mode: the candidate set is
 EXACTLY those numbers and the `gh issue list` query is skipped entirely.
@@ -91,6 +93,42 @@ def ready_label(groups):
             f"labels.yml: status group has no `{READY_STATUS_VALUE}` value"
         )
     return f"status:{READY_STATUS_VALUE}"
+
+
+def parse_issue_arg(raw):
+    """`<n>` or `<n>:<est>` -> (number, estimate or None).
+
+    The optional estimate is how a caller that ALREADY has the issue's labels
+    avoids making this script re-read them. The claim flow's board query selects
+    on `--json number,title,body,labels`, so it holds every candidate's `est:`
+    before it calls here; without this form it would pay one `gh issue view` per
+    candidate — up to 50 on a full window, before a single blocker read.
+
+    A bare `<n>` still works and still triggers the read, because a caller that
+    genuinely does not know the estimate must not have one invented for it.
+    There is deliberately no spelling for "I know it has no estimate": the
+    fallback read reaches the same verdict, and an extra sentinel would be one
+    more thing to get wrong for one saved call in the rarest case.
+    """
+    text = str(raw)
+    number, sep, estimate = text.partition(":")
+    try:
+        parsed_number = int(number)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"--issue expects <n> or <n>:<est>, got {text!r}"
+        ) from None
+    if not sep:
+        return parsed_number, None
+    try:
+        return parsed_number, int(estimate)
+    except ValueError:
+        # Fail loudly rather than degrading to a read: a caller that meant to
+        # pass an estimate and typo'd it would otherwise get a silently
+        # different (slower, but also possibly different-verdict) code path.
+        raise argparse.ArgumentTypeError(
+            f"--issue estimate must be an integer, got {estimate!r} in {text!r}"
+        ) from None
 
 
 def list_ready_issues(repo, label, limit, scope_labels=()):
@@ -209,7 +247,16 @@ def compute(
         # Candidate-scoped: skip the list query entirely. Re-deriving the set
         # through a second bounded query risks silently dropping a candidate
         # the caller already selected — see the module docstring.
-        candidates = [{"number": n, "title": ""} for n in issue_numbers]
+        candidates = []
+        for entry in issue_numbers:
+            number, estimate = entry if isinstance(entry, tuple) else (entry, None)
+            candidate = {"number": number, "title": ""}
+            if estimate is not None:
+                # Seeding `labels` is what makes the gate below skip its read —
+                # the same branch a list-mode candidate takes, so the caller-
+                # supplied estimate and a fetched one go through one code path.
+                candidate["labels"] = [f"est:{estimate}"]
+            candidates.append(candidate)
     else:
         candidates = list_ready_issues(repo, label, limit, scope_labels)
     ready = []
@@ -314,14 +361,16 @@ def main(argv=None):
     parser.add_argument(
         "--issue",
         action="append",
-        type=int,
+        type=parse_issue_arg,
         default=[],
         dest="issue_numbers",
-        metavar="N",
+        metavar="N[:EST]",
         help=(
             "check exactly this issue number instead of querying for candidates; "
             "repeatable; skips the `gh issue list` call entirely and ignores "
-            "--limit/--label"
+            "--limit/--label. Append `:<est>` when you already hold the issue's "
+            "estimate, to skip the per-issue label read the size gate would "
+            "otherwise make"
         ),
     )
     parser.add_argument(

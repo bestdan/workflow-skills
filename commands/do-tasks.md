@@ -808,9 +808,14 @@ step 5's self-check stops each session loudly on its own issue.
 
    ```bash
    python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-ready.py" \
-     --repo <repo> --issue <n1> --issue <n2> ... \
+     --repo <repo> --issue <n1>:<est1> --issue <n2>:<est2> ... \
      --max-estimate <gh-issue.max_estimate, default 3> --json
    ```
+
+   Step 1's ranking query already read each candidate's labels (it ranks on
+   `prio:`), so pass each `est:` with its number — see `gh-issue-claim.md` →
+   "Find candidates" for why, and use a bare `--issue <n>` for a candidate that
+   carries no `est:` label.
 
    Keep the numbers in its `ready` array, **in step 1's ranked order**; record each
    entry in `blocked` as `waiting on #<b>` naming the open blockers it reports, and
@@ -868,6 +873,12 @@ step 5's self-check stops each session loudly on its own issue.
      comes back `blocked`, naming the open blockers. Claiming an issue whose
      dependencies are no longer met is a mutation this batch would otherwise make
      on stale evidence.
+
+     **This call keeps the bare `--issue <n>` form**, unlike step 3's. The
+     `:<est>` suffix exists to reuse an estimate the caller already holds, and
+     the only estimate this session holds came from the dispatcher — the same
+     stale evidence the recheck exists to re-read. Passing it would make the
+     check confirm its own input. Let the script read the label.
 
      **Inline the resolved bound in the prompt, as a number.** The dispatched
      session has no task config (§4's self-contained rule: a fresh clone gitignores

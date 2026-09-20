@@ -183,9 +183,12 @@ gh issue list --state open --search 'label:"status:2_ready" label:"auto:eligible
 - **Then drop the dependency-blocked.** The query above catches only the manual `blocked` label; GitHub's native `blocked_by` graph is a separate fact, and without this pass `/list-tasks` shows an issue as blocked while `/do-tasks` claims it. Ask about **exactly** the ranked candidates:
 
   ```bash
-  python3 commands/handlers/assets/gh-issue-ready.py --repo <repo> --issue <n1> --issue <n2> ... \
+  python3 commands/handlers/assets/gh-issue-ready.py --repo <repo> \
+    --issue <n1>:<est1> --issue <n2>:<est2> ... \
     --max-estimate <gh-issue.max_estimate, default 3> --json
   ```
+
+  **Pass each candidate's estimate with its number.** The board query above already selected `--json …,labels`, so every candidate's `est:` is in hand; the `:<est>` suffix hands it over instead of making the script re-read it, which would cost one `gh issue view` per candidate — up to 50 on a full window, before any blocker read. Omit the suffix (bare `--issue <n>`) only for a candidate that carries no `est:` label at all; the script then reads it, and the verdict is the same either way.
 
   Keep the candidates in its `ready` array, in the ranked order above; drop those in `blocked`, reporting each with the open blockers it names. Pass the numbers rather than letting the script run its own board query: `--limit` is applied by the API before anything local runs, so a second bounded query could omit a candidate silently, and a missing verdict is indistinguishable from a ready one.
 

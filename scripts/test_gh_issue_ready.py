@@ -333,5 +333,85 @@ class EstimateGateTests(unittest.TestCase):
         self.assertEqual(repo.mutating_calls(), [])
 
 
+class CallerSuppliedEstimateTests(unittest.TestCase):
+    """`--issue <n>:<est>` — the caller hands over what it already fetched."""
+
+    def setUp(self):
+        self._orig_run_gh = gh_issue_ready.run_gh
+        self.addCleanup(setattr, gh_issue_ready, "run_gh", self._orig_run_gh)
+
+    def _compute(self, repo, **kwargs):
+        gh_issue_ready.run_gh = repo.run_gh
+        return gh_issue_ready.compute(
+            repo="owner/name", labels_file=LABELS_FILE, limit=50, **kwargs
+        )
+
+    def test_a_bare_number_parses_with_no_estimate(self):
+        self.assertEqual(gh_issue_ready.parse_issue_arg("7"), (7, None))
+
+    def test_a_number_with_an_estimate_parses_both(self):
+        self.assertEqual(gh_issue_ready.parse_issue_arg("7:3"), (7, 3))
+
+    def test_a_non_integer_number_is_a_usage_error(self):
+        with self.assertRaises(gh_issue_ready.argparse.ArgumentTypeError):
+            gh_issue_ready.parse_issue_arg("seven")
+
+    def test_a_non_integer_estimate_is_a_usage_error_not_a_fallback_read(self):
+        """A typo'd estimate must fail loudly, never degrade to the slow path."""
+        with self.assertRaises(gh_issue_ready.argparse.ArgumentTypeError):
+            gh_issue_ready.parse_issue_arg("7:big")
+
+    def test_an_empty_estimate_is_a_usage_error(self):
+        with self.assertRaises(gh_issue_ready.argparse.ArgumentTypeError):
+            gh_issue_ready.parse_issue_arg("7:")
+
+    def test_a_supplied_estimate_skips_the_label_read(self):
+        repo = FakeRepo({1: "big"}, estimates={1: 8})
+        result = self._compute(repo, issue_numbers=[(1, 8)], max_estimate=3)
+        self.assertEqual([i["number"] for i in result["oversized"]], [1])
+        self.assertEqual([c for c in repo.calls if c[:2] == ["issue", "view"]], [])
+
+    def test_a_supplied_estimate_under_the_bound_still_checks_blockers(self):
+        repo = FakeRepo({1: "small"}, blocked_by={1: [(99, "open")]})
+        result = self._compute(repo, issue_numbers=[(1, 2)], max_estimate=3)
+        self.assertEqual(result["blocked"][0]["open_blockers"], [99])
+        self.assertEqual([c for c in repo.calls if c[:2] == ["issue", "view"]], [])
+
+    def test_a_bare_entry_still_falls_back_to_the_read(self):
+        repo = FakeRepo({1: "big"}, estimates={1: 8})
+        result = self._compute(repo, issue_numbers=[(1, None)], max_estimate=3)
+        self.assertEqual([i["number"] for i in result["oversized"]], [1])
+        self.assertEqual(len([c for c in repo.calls if c[:2] == ["issue", "view"]]), 1)
+
+    def test_plain_ints_still_work(self):
+        """Backward compatibility: compute() predates the tuple form."""
+        repo = FakeRepo({1: "small"})
+        result = self._compute(repo, issue_numbers=[1])
+        self.assertEqual([i["number"] for i in result["ready"]], [1])
+
+    def test_main_accepts_the_suffixed_form_end_to_end(self):
+        repo = FakeRepo({7: "big"}, estimates={7: 8})
+        gh_issue_ready.run_gh = repo.run_gh
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = gh_issue_ready.main(
+                [
+                    "--repo",
+                    "owner/name",
+                    "--labels-file",
+                    str(LABELS_FILE),
+                    "--issue",
+                    "7:8",
+                    "--max-estimate",
+                    "3",
+                    "--json",
+                ]
+            )
+        self.assertEqual(code, 0)
+        result = json.loads(out.getvalue())
+        self.assertEqual([i["number"] for i in result["oversized"]], [7])
+        self.assertEqual([c for c in repo.calls if c[:2] == ["issue", "view"]], [])
+
+
 if __name__ == "__main__":
     unittest.main()
