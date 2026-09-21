@@ -180,6 +180,47 @@ class KeyLadderTests(unittest.TestCase):
             jev.extract_key('typesafe:\n  api_key: "sk-real"\n'), ("raw", "sk-real")
         )
 
+    def test_a_configured_ref_beats_a_pointer_misplaced_in_the_raw_field(self):
+        """The recovery is a fallback, not a winner.
+
+        The two fields can name different items, and the misplaced one is the typo.
+        Resolving it would send another service's full-account token to this API in
+        an Authorization header — the harm typesafe_block guards against, one level
+        down. The canonical `api_key_ref` has to win.
+        """
+        with contextlib.redirect_stderr(io.StringIO()):
+            got = jev.extract_key(
+                "typesafe:\n"
+                '  api_key: "op://Private/Linear/token"\n'
+                '  api_key_ref: "op://Private/TypeSafe/key"\n'
+            )
+        self.assertEqual(got, ("ref", "op://Private/TypeSafe/key"))
+
+    def test_a_malformed_pointer_in_the_raw_field_does_not_mask_a_valid_ref(self):
+        """The degenerate case of the same bug.
+
+        A junk `op://` value is still classified as a pointer, so returning it early
+        meant `op read` failed and resolve_key exited without ever reaching the valid
+        `api_key_ref` below it.
+        """
+        with contextlib.redirect_stderr(io.StringIO()):
+            got = jev.extract_key(
+                'typesafe:\n  api_key: "op://"\n  api_key_ref: "op://v/i/f"\n'
+            )
+        self.assertEqual(got, ("ref", "op://v/i/f"))
+
+    def test_the_ignored_misplaced_pointer_is_redacted_too(self):
+        """The shadowed-pointer warning prints a ref, so it gets the same rule."""
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            jev.extract_key(
+                "typesafe:\n"
+                '  api_key: "op://vlt/ITEMNAME/FIELDNAME"\n'
+                '  api_key_ref: "op://v/i/f"\n'
+            )
+        self.assertNotIn("ITEMNAME", err.getvalue())
+        self.assertNotIn("FIELDNAME", err.getvalue())
+
     def test_unfilled_placeholder_is_treated_as_absent(self):
         """The template ships REPLACE_ME; sending it to the API would be worse."""
         self.assertIsNone(

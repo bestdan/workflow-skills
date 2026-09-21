@@ -194,8 +194,9 @@ above it and the old one keeps answering while you believe the new one is in eff
 - **Verify by running the consumer with the new shape absent.** What a clean removal
   looks like depends on what else is configured: with no pointer, the ladder reaches its
   own "no key" error; with an `op://` pointer, resolution goes **through the pointer**.
-  Either way, a key returned **without touching `op`** means a raw value survives in a
-  scanned config. The two cases are tabulated in
+  Either way, a key returned **without invoking the configured resolver** means a raw
+  value survives in a scanned config — the resolver, not `op` specifically, since
+  `$<NAME>_RESOLVER` may select `opx`. The two cases are tabulated in
   [the design's trap section](designs/2026-09-20-out-of-tree-plaintext-keys.md#the-trap-this-must-document).
 
 ## What may appear in a committed file

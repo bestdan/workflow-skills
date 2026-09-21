@@ -208,30 +208,40 @@ def extract_key(config_text: str) -> tuple[str, str] | None:
     resolve it, and resolving lands it at rung 3 where a pointer belongs — but it is
     still a malformed config, so it says so on stderr rather than fixing it silently.
 
-    The recovery returns before `api_key_ref` is consulted, so with a pointer in both
-    fields the misplaced one wins. That is deliberate rather than an oversight: the
-    config is malformed either way, the warning names it, and in the case that
-    actually happens the two pointers are the same pointer. Left as it is rather than
-    restructured, because this file is a frozen artifact amended once and narrowly —
-    see the record's README.
+    That recovery is a **fallback, not a winner**: `api_key_ref` is searched first and
+    a configured one always wins. Recovering before that check would let a typo in the
+    raw field shadow a correctly-placed pointer, and the two fields can name different
+    items — `api_key: op://Private/Linear/token` beside a valid TypeSafe `api_key_ref`
+    would resolve the Linear pointer and put a full-account token for another service
+    into this API's Authorization header. That is the harm typesafe_block exists to
+    prevent, one level down, so it is closed here rather than documented.
     """
     block = typesafe_block(config_text)
     if not block:
         return None
+    misplaced = None
     raw = re.search(r'^\s*api_key:\s*"?([^"\n#]+)"?', block, re.M)
     if raw:
         value = raw.group(1).strip()
         if value.startswith("op://"):
-            say(
-                f"warning: {redact_ref(value)} is in `api_key:`, which is the raw-secret "
-                "field — reading it as `api_key_ref:`. Move it to silence this."
-            )
-            return "ref", value
-        if value and value != PLACEHOLDER:
+            misplaced = value
+        elif value and value != PLACEHOLDER:
             return "raw", value
     ref = re.search(r'^\s*api_key_ref:\s*"?(op://[^"\n#]+)"?', block, re.M)
     if ref:
+        if misplaced:
+            say(
+                f"warning: {redact_ref(misplaced)} is in `api_key:`, the raw-secret "
+                "field, and is being ignored — `api_key_ref:` is set and wins. Delete "
+                "the `api_key:` line."
+            )
         return "ref", ref.group(1).strip()
+    if misplaced:
+        say(
+            f"warning: {redact_ref(misplaced)} is in `api_key:`, which is the raw-secret "
+            "field — reading it as `api_key_ref:`. Move it to silence this."
+        )
+        return "ref", misplaced
     return None
 
 
