@@ -21,13 +21,21 @@
 # Usage:
 #   scripts/preflight-cwd.sh [--ref <branch>]
 #
-#   --ref  Branch the flow is about to read/write. Default: the current branch.
-#          A detached HEAD with no --ref is a usage error, not a verdict.
+#   --ref  Branch the flow is about to read/write. Omit it for inventory only.
+#          It does NOT default to the current branch the way the siblings' --ref
+#          does: "is my current branch stale / conflicting" is a real question,
+#          but "is my current branch checked out here" is a tautology that can
+#          only answer ok. So a defaulted ref would check nothing and would
+#          additionally make a detached HEAD an error in the one mode (--local)
+#          that has no branch to name.
 #
 # Verdicts (exit status and structured final line, mirroring the sibling
 # pre-flights):
 #   0  CWD: ok ref=<b> cwd=<path>
 #      The ref is checked out right here. Proceed.
+#   0  CWD: ok ref=none cwd=<path> head=<branch-or-DETACHED>
+#      No --ref was given, so nothing was checked: the inventory is the answer,
+#      and head= names what this tree is on. A detached HEAD is fine here.
 #   1  CWD: foreign ref=<b> worktree=<path> cwd=<path> hint="enter <path> and re-run"
 #      The ref is checked out in a DIFFERENT worktree of this repo. Enter it —
 #      do not reach into it.
@@ -61,7 +69,7 @@ while [ $# -gt 0 ]; do
       shift 2
       ;;
     -h | --help)
-      sed -n '2,45p' "$0"
+      sed -n '2,46p' "$0"
       exit 0
       ;;
     *) die "unknown argument: $1" ;;
@@ -88,50 +96,66 @@ if ! worktrees="$(git worktree list --porcelain 2>&1)"; then
 fi
 
 head_branch="$(git branch --show-current)"
-if [ -z "$ref" ]; then
-  [ -n "$head_branch" ] || die "detached HEAD and no --ref given"
-  ref="$head_branch"
-fi
 
 # `git worktree list --porcelain` emits a blank-line-separated block per
 # worktree: a `worktree <path>` line, a `HEAD <sha>` line, and then either
-# `branch refs/heads/<name>` or `detached`. Flatten each block to one
-# "<path>\t<branch>" record; a detached worktree gets an empty branch field.
+# `branch refs/heads/<name>` or `detached`. A worktree whose directory has been
+# deleted is still listed, with its branch, plus a `prunable <reason>` line —
+# so the `prunable` flag has to be carried through. Without it the stale record
+# wins the holder lookup and the caller is told to enter a path that no longer
+# exists, which is the worst answer this script can give. Flatten each block to
+# one "<path>\t<branch>\t<prunable>" record; a detached worktree gets an empty
+# branch field.
 records="$(printf '%s\n' "$worktrees" | awk '
-  /^worktree /   { if (path != "") print path "\t" branch; path = substr($0, 10); branch = "" }
+  function flush() { if (path != "") print path "\t" branch "\t" prunable }
+  /^worktree /   { flush(); path = substr($0, 10); branch = ""; prunable = "" }
   /^branch /     { branch = substr($0, 8); sub(/^refs\/heads\//, "", branch) }
-  END            { if (path != "") print path "\t" branch }
+  /^prunable/    { prunable = "1" }
+  END            { flush() }
 ')"
 
 # Print the inventory, and find the worktree holding the ref. Both in one pass
 # so the physical-path resolution is paid once per worktree.
 holder=""
-while IFS="$(printf '\t')" read -r wt_path wt_branch; do
+while IFS="$(printf '\t')" read -r wt_path wt_branch wt_prunable; do
   [ -n "$wt_path" ] || continue
   wt_real="$(realpath_of "$wt_path")"
   [ -n "$wt_real" ] || wt_real="$wt_path"
   marker=""
   [ "$wt_real" = "$cwd_top" ] && marker="  <- cwd"
+  [ -n "$wt_prunable" ] && marker="  (prunable)$marker"
   echo "preflight-cwd: worktree $wt_real [${wt_branch:-DETACHED}]$marker"
-  if [ -n "$wt_branch" ] && [ "$wt_branch" = "$ref" ] && [ -z "$holder" ]; then
+  # A prunable record is inventoried but never wins the holder lookup: its
+  # directory is gone, so `foreign` would name an unenterable path. Letting it
+  # fall through to `absent` is the honest verdict.
+  if [ -n "$ref" ] && [ -n "$wt_branch" ] && [ "$wt_branch" = "$ref" ] && [ -z "$wt_prunable" ] && [ -z "$holder" ]; then
     holder="$wt_real"
   fi
 done <<EOF
 $records
 EOF
 
+# No ref to check: the inventory above is the whole answer. This is the
+# `--local` shape, where the flow reviews whatever tree it stands in rather
+# than a named branch — so a detached HEAD is a valid input, not an error.
+if [ -z "$ref" ]; then
+  echo "preflight-cwd: no ref to check — inventory only (standing in $cwd_top on ${head_branch:-DETACHED})"
+  echo "CWD: ok ref=none cwd=\"$cwd_top\" head=${head_branch:-DETACHED}"
+  exit 0
+fi
+
 if [ -z "$holder" ]; then
   echo "preflight-cwd: $ref — ABSENT (checked out in no worktree of this repo)" >&2
-  echo "CWD: absent ref=$ref cwd=$cwd_top head=${head_branch:-DETACHED}"
+  echo "CWD: absent ref=$ref cwd=\"$cwd_top\" head=${head_branch:-DETACHED}"
   exit 1
 fi
 
 if [ "$holder" != "$cwd_top" ]; then
   echo "preflight-cwd: $ref — FOREIGN (checked out at $holder, not here)" >&2
-  echo "CWD: foreign ref=$ref worktree=$holder cwd=$cwd_top hint=\"enter $holder and re-run\""
+  echo "CWD: foreign ref=$ref worktree=\"$holder\" cwd=\"$cwd_top\" hint=\"enter $holder and re-run\""
   exit 1
 fi
 
 echo "preflight-cwd: $ref — ok (checked out here)"
-echo "CWD: ok ref=$ref cwd=$cwd_top"
+echo "CWD: ok ref=$ref cwd=\"$cwd_top\""
 exit 0

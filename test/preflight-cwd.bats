@@ -23,7 +23,7 @@ add_worktree() {
 }
 
 @test "the branch checked out here is ok" {
-  cwd_check "$TEST_TMPDIR/main"
+  cwd_check "$TEST_TMPDIR/main" --ref main
   assert_success
   assert_output --partial 'CWD: ok ref=main'
 }
@@ -34,6 +34,17 @@ add_worktree() {
   assert_failure 1
   assert_output --partial 'CWD: foreign ref=feature'
   assert_output --partial "hint=\"enter $(cd "$TEST_TMPDIR/feature" && pwd -P) and re-run\""
+}
+
+# The skill tells the caller to take the EnterWorktree path from the worktree=
+# field, so an unquoted path with a space makes the verdict line unparseable
+# exactly where it is being read for a path.
+@test "a worktree path with a space stays parseable" {
+  git -C "$TEST_TMPDIR/main" worktree add -q -b spaced "$TEST_TMPDIR/my tree" main
+  cwd_check "$TEST_TMPDIR/main" --ref spaced
+  assert_failure 1
+  assert_output --partial "worktree=\"$(cd "$TEST_TMPDIR/my tree" && pwd -P)\""
+  assert_output --partial "cwd=\"$(cd "$TEST_TMPDIR/main" && pwd -P)\""
 }
 
 @test "the same check from inside that worktree is ok" {
@@ -65,6 +76,9 @@ add_worktree() {
   assert_success
   assert_output --partial '[main]'
   assert_output --partial "[feature]  <- cwd"
+  # The attached case is inventory-only too, not a trivially-ok branch check.
+  assert_output --partial 'CWD: ok ref=none cwd='
+  assert_output --partial 'head=feature'
 }
 
 @test "a detached worktree is inventoried, never mistaken for holding the ref" {
@@ -76,11 +90,48 @@ add_worktree() {
   assert_output --partial 'CWD: absent ref=feature'
 }
 
-@test "detached HEAD with no --ref is a usage error, not a verdict" {
+# A deleted worktree directory stays in `worktree list` with its branch and a
+# `prunable` line. Treating it as a holder would answer `foreign` with an
+# EnterWorktree hint for a path that is not there — the worst answer available,
+# since the skill tells the caller to enter that path without re-checking.
+@test "a worktree whose directory was deleted is absent, never foreign" {
+  add_worktree feature
+  rm -rf "$TEST_TMPDIR/feature"
+  cwd_check "$TEST_TMPDIR/main" --ref feature
+  assert_failure 1
+  assert_output --partial 'CWD: absent ref=feature'
+  assert_output --partial '(prunable)'
+  refute_output --partial 'CWD: foreign'
+}
+
+# The warn-and-continue arm. A regression that turned it into a hard failure or
+# a confident wrong verdict would otherwise pass the whole suite.
+@test "a failing worktree list is unknown, not a verdict" {
+  mkdir -p "$TEST_TMPDIR/stub"
+  cat >"$TEST_TMPDIR/stub/git" <<'SH'
+#!/usr/bin/env bash
+if [ "$1" = "worktree" ] && [ "$2" = "list" ]; then
+  echo "fatal: stubbed failure" >&2
+  exit 1
+fi
+exec /usr/bin/git "$@"
+SH
+  chmod +x "$TEST_TMPDIR/stub/git"
+  run bash -c "cd '$TEST_TMPDIR/main' && PATH='$TEST_TMPDIR/stub:$PATH' '$REPO_ROOT/scripts/preflight-cwd.sh'"
+  assert_failure 3
+  assert_output --partial 'CWD: unknown reason=worktree-list-failed'
+}
+
+# --ref has no current-branch default on purpose: "is my current branch checked
+# out here" is a tautology that can only answer ok, and defaulting would make a
+# detached HEAD an error in the one mode (--local) that reviews a tree rather
+# than a branch.
+@test "no --ref is inventory-only: a detached HEAD exits 0 and is named" {
   git -C "$TEST_TMPDIR/main" checkout -q --detach
   cwd_check "$TEST_TMPDIR/main"
-  assert_failure 2
-  refute_output --partial 'CWD:'
+  assert_success
+  assert_output --partial 'CWD: ok ref=none'
+  assert_output --partial 'head=DETACHED'
 }
 
 @test "outside a repository it fails as usage, not as a verdict" {
@@ -102,7 +153,7 @@ add_worktree() {
 # ignore this check.
 @test "a symlinked path to the same tree is ok, not foreign" {
   ln -s "$TEST_TMPDIR/main" "$TEST_TMPDIR/link"
-  cwd_check "$TEST_TMPDIR/link"
+  cwd_check "$TEST_TMPDIR/link" --ref main
   assert_success
   assert_output --partial 'CWD: ok ref=main'
 }
