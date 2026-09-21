@@ -141,10 +141,11 @@ AMBIGUOUS_PROBES: list[tuple[str, str]] = [
 #
 # THESE WERE AUTHORED, NOT SAMPLED, and that is the result's main limit. Sampling real
 # off-topic prompts would be better ground truth; the only corpus on the machine that
-# measured this is the operator's own Claude Code transcripts, and putting real messages
-# from those into a public repo was declined. So these are one person's idea of what an
-# off-topic message looks like, which is exactly the bias a false-positive rate is
-# supposed to catch. Read the number with that in front of it.
+# measured this is the operator's own Claude Code transcripts, and that read was never
+# obtained -- an overbroad OS permission prompt was rejected, which is not a refusal on
+# the merits and leaves the sampled measurement open rather than closed. So these are
+# one person's idea of what an off-topic message looks like, which is exactly the bias a
+# false-positive rate is supposed to catch. Read the number with that in front of it.
 #
 # Two tiers, reported separately, because they are different claims:
 #
