@@ -59,10 +59,10 @@ All three plaintext shapes stay supported. The contract's
 [Three shapes](../auth_key_access.md#three-shapes-and-which-to-pick) table is the
 comparison, and its
 [They do not collide, but they do shadow](../auth_key_access.md#they-do-not-collide-but-they-do-shadow)
-section is the rule that keeps them apart: precedence decides, first hit wins, so a
-second shape is never wrong — only inert, and silently so.
+section is the rule that keeps them apart — including what happens when two shapes set
+the same variable, which the ladder does not rank.
 
-That silence is the one thing this decision has to be executed carefully around. Deleting
+What matters here is that whichever way they are ranked, the loser is silent. Deleting
 the raw line is not optional housekeeping; it is the change. Leave it and the instrument
 keeps reading rung 0 while the out-of-tree file sits there believed-in and unused.
 

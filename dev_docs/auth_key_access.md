@@ -237,12 +237,19 @@ or rotation without touching disk matters, the answer is still a pointer plus a 
 
 ### They do not collide, but they do shadow
 
-Nothing stops you configuring more than one shape, and nothing warns you when you do. The
-ladder's precedence decides, first hit wins, and that is the whole collision rule — a
-second shape is never wrong, it is only **inert**.
+Nothing stops you configuring more than one shape, and nothing warns you when you do.
+Across **distinct rungs** the ladder's precedence decides, first hit wins, and a lower
+shape is never wrong — only **inert**.
 
-The hazard is that being inert is silent. Adopt a new shape without removing the ones
-above it and the old one keeps answering while you believe the new one is in effect. So:
+Two shapes that set the **same variable** are not ranked by the ladder at all. A profile
+`export` and a command-prefix assignment are both `$<NAME>`, so the shell decides: the
+per-command assignment wins for that one invocation, and the export answers every
+invocation made without it. Neither is inert — each is live in different runs. That is
+why adopting the prefix does not retire the export, and why "it worked when I tested it"
+does not establish which one answered.
+
+The hazard in both cases is silence. Adopt a new shape without removing the ones above it
+and the old one keeps answering while you believe the new one is in effect. So:
 
 - **Remove the higher rungs when you adopt a lower one.** Moving from a raw config value
   to either rung-1 shape means deleting that line in the same change, or nothing has
