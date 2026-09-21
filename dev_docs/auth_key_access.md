@@ -142,21 +142,56 @@ because the two get conflated. A script that reads the raw `.task-config.local.y
 bridged, so nothing reaches a command line. `_secret_resolve.py` never does this — it
 reads only the environment, which is why rung 0 needs the agent at all — but a Class A
 script outside `commands/handlers/assets/` may, and one does. See
-[`decisions/2026-09-20-typesafe-key-stays-plaintext.md`](decisions/2026-09-20-typesafe-key-stays-plaintext.md).
+[`decisions/2026-09-20-typesafe-key-out-of-tree.md`](decisions/2026-09-20-typesafe-key-out-of-tree.md).
 
 The trade, stated plainly so the choice is informed. `.task-config.local.yml` is ignored
 robustly: `.gitignore` ignores `dev_docs/tasks/*` wholesale and negates only the committed
 config, so this is not one forgotten ignore line away from being committed, and
-`git stash -u` does not sweep ignored files. What you accept instead is twofold: a
-plaintext full-account token **inside the repo tree**, where every agent session, editor
-index, directory-wide grep, and backup of that folder can read it — and, wherever the
-agent bridges it into the command it runs, the token also appears in the **session
-transcript**. For a plaintext key without either exposure, export `$<NAME>` from your
-shell profile — same rung, nothing on disk in the checkout and nothing bridged. That
-export has its own cost, though: it is inherited by every process you start, which is
-worse than a `600` file for a secret only one script reads.
+`git stash -u` does not sweep ignored files — though `git add -f` would still stage it,
+so this is exclusion from ordinary staging rather than an absolute. What you accept
+instead is twofold: a plaintext full-account token **inside the repo tree**, where every
+agent session, editor index, directory-wide grep, and backup of that folder can read it —
+and, wherever the agent bridges it into the command it runs, the token also appears in the
+**session transcript**.
 
-Both are legitimate. Nothing in this plugin nags about either.
+### Three shapes, and which to pick
+
+All three are legitimate and the plugin nags about none of them. They differ only in what
+they expose.
+
+| Shape                                                     | Rung | Exposure you accept                                                             |
+| --------------------------------------------------------- | ---- | ------------------------------------------------------------------------------- |
+| Raw value in `.task-config.local.yml`                     | 0    | In the repo tree; in the transcript wherever the agent bridges it               |
+| `export $<NAME>` from the shell profile                   | 1    | Every process of every login session, for as long as the line is in the profile |
+| A mode-600 file outside any checkout, read per invocation | 1    | The invoked command and its descendants, for that one invocation                |
+
+The third is the default worth reaching for, and the one the other two are usually chosen
+instead of by accident:
+
+```bash
+TYPESAFE_API_KEY="$(cat ~/.config/<tool>/<name>)" <command>
+```
+
+Use `$(cat …)`, not bash's `$(<…)` shorthand, which under `/bin/sh` yields an empty value
+and exits 0. Why this shape, what it does and does not buy, and when a pointer beats it:
+[`designs/2026-09-20-out-of-tree-plaintext-keys.md`](designs/2026-09-20-out-of-tree-plaintext-keys.md).
+
+### They do not collide, but they do shadow
+
+Nothing stops you configuring more than one shape, and nothing warns you when you do. The
+ladder's precedence decides, first hit wins, and that is the whole collision rule — a
+second shape is never wrong, it is only **inert**.
+
+The hazard is that being inert is silent. Adopt a new shape without removing the ones
+above it and the old one keeps answering while you believe the new one is in effect. So:
+
+- **Remove the higher rungs when you adopt a lower one.** Moving from a raw config value
+  to either rung-1 shape means deleting that line in the same change, or nothing has
+  changed at all.
+- **Remove it everywhere the ladder looks**, which is more than one file when a consumer
+  scans both a worktree's config and the main checkout's.
+- **Verify by running the consumer with the new shape absent**, and check that it fails
+  the way an unconfigured ladder fails rather than quietly returning a key.
 
 ## What may appear in a committed file
 
