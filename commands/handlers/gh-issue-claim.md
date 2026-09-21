@@ -233,7 +233,7 @@ Runs on the candidate **before "Judge feasibility" and "Claim the issue"**, on e
 
    This is the cheap read in front of the same ref the claim locks on — a trip here saves the full issue-body read and feasibility judgment. It is a probe, not the lock: the lock is the **creation** of that ref through the API, never a push (see `commands/handlers/claim-lock.md`, and "Claim the issue" step 2 below on why a push cannot serve).
 
-   **Also probe every other prefix shape — `<branch>` alone cannot detect a prefix disagreement.** Because this check is built from the same `<branch>` the claim then locks, a name derived from a stale or dropped `branch_prefix` makes it self-consistently wrong: it probes the wrong ref, finds nothing, and reports the issue free. One prefix-agnostic read catches the case where someone else is already on `#<n>` under a different prefix, matching the `task-<n>` tail under any prefix and none:
+   **Also probe every other prefix shape — `<branch>` alone cannot detect a prefix disagreement.** Because this check is built from the same `<branch>` the claim then locks, a name derived from a stale or dropped `branch_prefix` makes it self-consistently wrong: it probes the wrong ref, finds nothing, and reports the issue free. One prefix-agnostic read catches the case where someone else is already on `#<n>` under a different prefix. It matches the `task-<n>` tail under any `/`-terminated prefix and under none — deliberately the same shape `issue-number` above can parse back, so a branch this flow cannot trace to an issue is also not one this probe claims to find:
 
    ```bash
    git ls-remote --heads origin | grep -E 'refs/heads/(.*/)?task-<n>$'

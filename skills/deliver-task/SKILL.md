@@ -170,9 +170,11 @@ other cannot see, and both conclude they won the claim. The `<branch>`-derived
 pre-flight probe cannot catch it: it probes the mis-derived ref and reports the
 issue free. Only the prefix-agnostic probe in `gh-issue-claim.md` → pre-flight
 can, and only once the other session's ref already exists; `/doctor` Check 1c
-flags the inverse case. Recovery is not free either — renaming the branch
-afterwards closes the open PR. See `gh-issue-claim.md` → "Branch name", and #748
-for the delivery this was measured on.
+flags the inverse case. Recovery is not free either: renaming the work branch to
+the correct ref **closes** the open PR, because GitHub retargets a pull request
+whose _base_ is renamed, not whose _head_ is — so a replacement PR has to be
+opened. See `gh-issue-claim.md` → "Branch name", and #748 for the delivery where
+both the split and that recovery cost were measured.
 
 ## 2. Claim (the handler's protocol, verbatim)
 
