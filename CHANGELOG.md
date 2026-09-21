@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.65.1] - 2026-09-21
+
+### Fixes
+
+- read the task config from the run root, not the plugin dir [#780] (#797) (56aff45)
+
 ## [2.65.0] - 2026-09-21
 
 ### Features
