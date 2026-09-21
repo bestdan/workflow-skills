@@ -599,7 +599,7 @@ claude plugin install typesafe@typesafe-ai
 That is **authoring support for whoever writes the questions**, not a runtime
 dependency and not something this plugin would ever bundle. Worth knowing it exists
 before hand-writing a client. Worth also knowing it puts another skill in a user's
-roster alongside our 16 — a description-collision surface we do not control.
+roster alongside ours — a description-collision surface we do not control.
 
 ## Where it does not belong
 

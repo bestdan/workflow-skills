@@ -98,8 +98,8 @@ class NoulInstructionsTests(unittest.TestCase):
     def test_every_description_appears_verbatim(self):
         """A roster that drops a skill asks about a roster this repo does not ship.
 
-        The Choice would still be scored over all 16 via `criteria`, so the two
-        questions would silently be answering about different option sets.
+        The Choice would still be scored over every description via `criteria`, so
+        the two questions would silently be answering about different option sets.
         """
         crit = {"a": "Use when alpha.", "b": "Use when beta."}
         text = jev.noul_instructions(crit)
@@ -543,6 +543,129 @@ class ReportNoulTests(unittest.TestCase):
     def test_nothing_is_printed_when_neither_half_has_rows(self):
         """A Choice-only run must not emit an empty no-skill block."""
         self.assertEqual(self._report([{"records": []}]), "")
+
+
+class RunSuiteScoreToLabelTests(unittest.TestCase):
+    """The step that turns a score into a label: which noul meets which threshold, and
+    which way the `not` points.
+
+    The aggregation tests above inject `false_positive`/`false_negative` as fixture
+    booleans, so they cannot see an inversion in the expressions that compute them —
+    and until these cases, nothing executed `run_suite` at all. Patching `ask` rather
+    than `ask_payload` is the point: it replaces the network and the response while
+    leaving `rank`, `says_needs_skill` and the record assembly running for real, so
+    what is under test is the composition rather than the parts.
+    """
+
+    def _row(self, noul, truth, *, threshold=0.5, tiers=None):
+        def fake_ask(key, state, criteria, model=jev.MODEL):
+            return {
+                "answers": {
+                    "skill": {
+                        "probabilities": {"alpha": 0.7, "beta": 0.3},
+                        "confidence": 0.8,
+                    },
+                    "needs_skill": {"noul": noul},
+                },
+                "usage": {"input_tokens": 11},
+            }
+
+        # run_suite narrates to stderr; the verdict under test is the returned record.
+        with unittest.mock.patch.object(jev, "ask", fake_ask):
+            with contextlib.redirect_stderr(io.StringIO()):
+                out = jev.run_suite(
+                    "k",
+                    {"alpha": "Use when alpha."},
+                    [("alpha", "a prompt")],
+                    jev.DEFAULT_MARGIN,
+                    True,
+                    needs_skill_truth=truth,
+                    noul_threshold=threshold,
+                    tiers=tiers,
+                )
+        return out["results"][0]
+
+    def test_a_high_noul_on_a_no_skill_row_is_a_false_positive(self):
+        row = self._row(0.90, False)
+        self.assertTrue(row["false_positive"])
+        self.assertFalse(row["false_negative"])
+
+    def test_a_low_noul_on_a_needs_skill_row_is_a_false_negative(self):
+        row = self._row(0.10, True)
+        self.assertTrue(row["false_negative"])
+        self.assertFalse(row["false_positive"])
+
+    def test_neither_flag_fires_when_the_noul_agrees_with_the_truth(self):
+        """The common case. An inverted `not` in either expression breaks it."""
+        self.assertFalse(self._row(0.90, True)["false_negative"])
+        self.assertFalse(self._row(0.10, False)["false_positive"])
+
+    def test_a_noul_exactly_at_the_threshold_counts_as_fired(self):
+        """`says_needs_skill` is at-or-above. Its own unit test pins the predicate;
+        this pins that the record built from it rounds the same way."""
+        self.assertTrue(self._row(0.50, False, threshold=0.50)["false_positive"])
+        self.assertFalse(self._row(0.50, True, threshold=0.50)["false_negative"])
+
+    def test_the_threshold_that_was_passed_is_the_one_applied(self):
+        """A dropped `noul_threshold` would fall back to the 0.5 default in silence,
+        which is what makes `--noul-threshold` either load-bearing or a no-op."""
+        self.assertFalse(self._row(0.60, False, threshold=0.70)["false_positive"])
+        self.assertTrue(self._row(0.60, False, threshold=0.50)["false_positive"])
+
+    def test_the_tier_is_carried_onto_the_record(self):
+        """report_noul's per-tier split reads this field, and an unmapped label drops
+        the row out of both tiers rather than erroring."""
+        self.assertEqual(
+            self._row(0.10, False, tiers={"alpha": "plain"})["tier"], "plain"
+        )
+        self.assertIsNone(self._row(0.10, False)["tier"])
+
+
+class NoulThresholdRangeTests(unittest.TestCase):
+    """`--noul-threshold` is a probability, and argparse's `type=float` is not.
+
+    Out of range the run still completes and prints a rate, which is the failure mode
+    worth a check: 0/64 reads as a clean result. `nan` is the same shape and also
+    writes the bare token `NaN` into the `--json` records, which is not JSON a strict
+    parser reads back.
+    """
+
+    def _rejects(self, value):
+        """Rejection must happen before the paid path, and the test must not depend on
+        the code under test to stay hermetic.
+
+        `main` reaches `resolve_key` and then a live suite the moment the range check
+        lets a value through, so stubbing it is what keeps this suite offline even
+        against a regression that drops the guard. Without the stub, removing the
+        check turns this test into 22 paid requests — measured, not hypothesised.
+        """
+
+        def unreachable(root):
+            raise AssertionError("range check let the value through to the paid path")
+
+        with unittest.mock.patch.object(jev, "resolve_key", unreachable):
+            with contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as caught:
+                    jev.main(["--noul-threshold", value])
+        return caught.exception.code
+
+    def test_above_one_is_rejected(self):
+        self.assertEqual(self._rejects("5"), 2)
+
+    def test_below_zero_is_rejected(self):
+        self.assertEqual(self._rejects("-0.1"), 2)
+
+    def test_nan_is_rejected(self):
+        """Every comparison against nan is False, so the range check catches it."""
+        self.assertEqual(self._rejects("nan"), 2)
+
+    def test_infinity_is_rejected(self):
+        self.assertEqual(self._rejects("inf"), 2)
+
+    # The accepting side (0 and 1, the degenerate but meaningful bounds) has no test:
+    # the check is inline in main(), so a value that passes it falls through to
+    # resolve_key and a paid run. Asserting `0.0 <= 0.0 <= 1.0` instead would test
+    # Python, not this file.
 
 
 if __name__ == "__main__":

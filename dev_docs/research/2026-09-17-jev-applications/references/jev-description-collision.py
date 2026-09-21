@@ -688,6 +688,14 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     if args.runs < 1:
         ap.error("--runs must be at least 1")
+    # A Noul is a probability, so anything outside 0-1 is not a threshold. Checked
+    # before resolve_key so a typo cannot burn a paid run: out of range, the rate comes
+    # back 0/64 or 64/64 and reads as a result rather than as an error. The comparison
+    # also rejects nan, since every comparison against nan is False -- which matters
+    # beyond the rate, because `--json` would then write the bare token `NaN` into the
+    # records artifact, and that is not JSON a strict parser will read back.
+    if not 0.0 <= args.noul_threshold <= 1.0:
+        ap.error("--noul-threshold must be between 0 and 1")
 
     root = repo_root()
     key = resolve_key(root)
