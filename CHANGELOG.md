@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.66.0] - 2026-09-21
+
+### Features
+
+- port the teardown reminder hook and the worktree-teardown skill [N/A] (#803) (930c5a0)
+
 ## [2.65.1] - 2026-09-21
 
 ### Fixes
