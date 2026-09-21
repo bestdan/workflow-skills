@@ -5,6 +5,17 @@ cloud agent: repair the label invariants, triage what arrived untriaged, then
 take **one** ready issue as far as an open PR sitting at `status:4_needs_review`.
 Nothing merges and nothing closes unattended.
 
+> **Blocked as of 2026-09-21, and not on anything this file can fix.** A cloud
+> routine's proxy refuses **GitHub GraphQL entirely** (`HTTP 403`), and the
+> handler's shipped assets reach GitHub through `gh` porcelain — `gh issue list`,
+> `gh pr list`, `gh pr view`, `gh pr edit`, `gh pr create`, `gh pr ready` — every
+> one of which gh implements over GraphQL. Only `gh-issue-state.py` is on `gh api`
+> (REST), which works. So candidate-finding and PR creation both fail, and no step
+> here is independently runnable. Measured in
+> [`dev_docs/research/2026-09-21-nightly-gh-issue-routine-preflight.md`](research/2026-09-21-nightly-gh-issue-routine-preflight.md).
+> Until the handler grows a REST path, **run this job locally**, where GraphQL is
+> served. The steps below are correct wherever that holds.
+
 **This runbook invokes plugin verbs. It does not describe what they do.** That is
 the design, borrowed from `bestdan/dotfiles`' `agents/routines/nightly-linear-tidy.md`
 after three consecutive runs of a prose-shaped predecessor executed three

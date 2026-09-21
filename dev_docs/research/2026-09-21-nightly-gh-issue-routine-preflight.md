@@ -87,6 +87,61 @@ would have declared this environment broken while it was working.
 - `gh` 2.45.0 is Ubuntu's package, not the latest release. Nothing here measures a
   subcommand that needs a newer one.
 
+## The channel probe: REST serves everything, porcelain serves nothing
+
+A fourth run (`cse_011qxdBkk3APPDg8yicfVg7a`, 13:20Z) put twelve read-only calls through
+both channels. The split is total — no partial support, no per-subcommand exceptions.
+
+| Call                                             | Exit | Result                                                 |
+| ------------------------------------------------ | ---- | ------------------------------------------------------ |
+| `gh api '…/labels?per_page=3'`                   | 0    | `auto-eligible auto:eligible auto:human-review-needed` |
+| `gh api '…/issues?state=open&per_page=3'`        | 0    | `820 819 818`                                          |
+| `gh api '…/pulls?state=open&per_page=3'`         | 0    | `819 817 801`                                          |
+| `gh api …/pulls/819 --jq .state`                 | 0    | `open`                                                 |
+| `gh issue list`                                  | 1    | **HTTP 403 GraphQL**                                   |
+| `gh issue list --json number,title`              | 1    | **HTTP 403 GraphQL**                                   |
+| `gh issue view 723 --json number,labels`         | 1    | **HTTP 403 GraphQL**                                   |
+| `gh repo view`                                   | 1    | **HTTP 403 GraphQL**                                   |
+| `gh pr list`                                     | 1    | **HTTP 403 GraphQL**                                   |
+| `gh pr view 819 --json number,state`             | 1    | **HTTP 403 GraphQL**                                   |
+| `gh api graphql -f query='query{viewer{login}}'` | 1    | **HTTP 403 GraphQL**                                   |
+| `gh pr create --help`                            | 0    | help text (says nothing about creating)                |
+
+**The refusal body names replacement routes**, which the 09-07 record did not capture:
+
+> `GitHub GraphQL is not available from Claude Code sessions; use the REST API (gh api
+> repos/{owner}/{repo}/...). For review threads, auto-merge, and draft/ready-for-review
+> use the CCR routes on api.github.com: GET /repos/{owner}/{repo}/pulls/{n}/ccr/review_threads,
+> POST /repos/{owner}/{repo}/pulls/{n}/ccr/comments/{comment_id}/resolve (or /unresolve),
+> PUT or DELETE /repos/{owner}/…`
+
+So draft/ready-for-review and auto-merge — both GraphQL-only on the public API — have
+documented CCR equivalents here. That is a lead, not a measurement: none was exercised.
+
+### What this means for the handler, and it is not small
+
+Every refused call above appears in **shipped executable assets**, not only in prose:
+`gh pr list` (12), `gh issue list` (12), `gh pr edit` (10), `gh pr view` (8),
+`gh repo view` (6), `gh pr ready` (2). Only `gh-issue-state.py` is on `gh api`.
+
+**The gh-issue handler cannot run in a cloud routine as it stands.** Candidate-finding,
+PR creation, PR editing and the draft→ready transition are all on the refused channel,
+so the failure is not confined to one step that could be skipped. This is a channel
+problem, not a `gh` version or presence problem — no version of `gh` changes it, which
+is why a minimum-version guard would be answering the wrong question.
+
+Two honest limits on that conclusion. The twelve calls above were run directly, not
+through the verbs, so this says the verbs' **ingredients** fail, not that a particular
+verb was observed failing. And nothing here was a write — the refusals are all on reads,
+which merely makes the write case no better.
+
+## Incidental: the shell differs between runs
+
+Call 1 failed as `(eval):1: no matches found: repos/…/labels?per_page=3` — **zsh**
+glob-expanding the `?`. Earlier runs the same day reported `/bin/bash: line N:`. The
+interactive shell is not stable across runs, so any `gh api` URL carrying `?` or `&`
+must be quoted; unquoted, it works under bash and dies under zsh.
+
 ## Incidental: a label outside the vocabulary
 
 Check 5 returned both `auto-eligible` and `auto:eligible`. Only the colon form is in
