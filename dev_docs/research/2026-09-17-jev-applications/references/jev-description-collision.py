@@ -292,7 +292,7 @@ def resolve_key(root: Path) -> str:
     pointer before reading the environment means an exported key cannot override a
     stale or unreachable one, and the caller gets an `op` failure where it expected
     its own key to win. So every config is read first for a raw secret, then the
-    environment, and only then is a pointer resolved.
+    environment, then the operator key file, and only then is a pointer resolved.
     """
     refs: list[str] = []
     for path in local_config_paths(root):

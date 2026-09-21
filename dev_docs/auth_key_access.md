@@ -167,11 +167,11 @@ and, wherever the agent bridges it into the command it runs, the token also appe
 All three are legitimate and the plugin nags about none of them. They differ only in what
 they expose.
 
-| Shape                                                 | Rung | Exposure you accept                                                             |
-| ----------------------------------------------------- | ---- | ------------------------------------------------------------------------------- |
-| Raw value in `.task-config.local.yml`                 | 0    | In the repo tree; in the transcript wherever the agent bridges it               |
-| `export $<NAME>` from the shell profile               | 1    | Every process of every login session, for as long as the line is in the profile |
-| A mode-600 **operator key file** outside any checkout | 1    | Whatever reads the file, at the moment it reads it                              |
+| Shape                                                 | Rung    | Exposure you accept                                                             |
+| ----------------------------------------------------- | ------- | ------------------------------------------------------------------------------- |
+| Raw value in `.task-config.local.yml`                 | 0       | In the repo tree; in the transcript wherever the agent bridges it               |
+| `export $<NAME>` from the shell profile               | 1       | Every process of every login session, for as long as the line is in the profile |
+| A mode-600 **operator key file** outside any checkout | after 1 | Whatever reads the file, at the moment it reads it                              |
 
 The third is the default worth reaching for, and the one the other two are usually chosen
 instead of by accident. It lives at `~/.config/<tool>/<name>`, mode 600 under a 700

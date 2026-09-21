@@ -193,10 +193,19 @@ the silent-shadow case above:
 
 ## Confirmation
 
-**Nothing.** This rests on convention alone, and cannot do otherwise: rung 1 reads
-`$<NAME>` and nothing can tell where an inherited value came from, which is precisely
-what lets the shape work with no code change. The one mechanical check is the operator's
-own, in Execution step 4.
+The two routes to the file are confirmed differently, and only one of them mechanically.
+
+**The direct read is tested.** `OperatorKeyFileTests` in
+[`../research/2026-09-17-jev-applications/references/test_jev_description_collision.py`](../research/2026-09-17-jev-applications/references/test_jev_description_collision.py)
+covers the four behaviours the rung has to get right: the file is read when nothing else
+is configured, an exported variable still overrides it, an empty file falls through
+rather than returning an empty bearer token, and a raw config value still shadows it. The
+operator-side check in Execution step 4 confirms the same thing against the real file.
+
+**The command-prefix route rests on convention alone**, and cannot do otherwise: rung 1
+reads `$<NAME>`, and nothing can tell where an inherited value came from. That is the
+property which lets any consumer accept this shape without a code change, and it is also
+why nothing can enforce that the operator used it.
 
 ## Alternatives
 

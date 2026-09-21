@@ -266,9 +266,9 @@ class OperatorKeyFileTests(unittest.TestCase):
     """The rung that lets a human run this without typing a prefix.
 
     `resolve_key` reaches the filesystem and the environment, so each test points
-    the module's two location constants at a temp dir and clears the variable.
-    `local_config_paths` shells out to git, so the root handed in is a real
-    directory with no config in it rather than a bare tmp path.
+    the operator key file at a temp dir, confines the rung-0 scan to that same
+    dir, and clears the variable. Without all three the suite reads whatever the
+    developer's own machine has configured and passes or fails accordingly.
     """
 
     def setUp(self):
@@ -281,6 +281,20 @@ class OperatorKeyFileTests(unittest.TestCase):
         patched = unittest.mock.patch.object(jev, "OPERATOR_KEY_FILE", self.keyfile)
         patched.start()
         self.addCleanup(patched.stop)
+        # Confine the rung-0 scan to the fixture. The real local_config_paths adds
+        # the main checkout's config, found via `git rev-parse --git-common-dir`
+        # from the *test process's* cwd rather than from the root it is handed —
+        # so without this the developer's own key would be scanned, shadow the
+        # fixture, and make the result machine-dependent. Patched here rather than
+        # narrowed in the module: that fallback is deliberate, and it is what
+        # Execution step 3 of the decision record tells an operator to clean up.
+        paths = unittest.mock.patch.object(
+            jev,
+            "local_config_paths",
+            lambda root: [p for p in [root / jev.LOCAL_CONFIG] if p.exists()],
+        )
+        paths.start()
+        self.addCleanup(paths.stop)
         env = unittest.mock.patch.dict(os.environ, {}, clear=False)
         env.start()
         self.addCleanup(env.stop)
