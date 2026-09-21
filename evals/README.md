@@ -59,16 +59,27 @@ skill (tolerant of the `workflow-skills:` plugin prefix). Pattern adapted from
 
 ## Companion check: description discriminability
 
-A typed model call scores the same 14 prompts against every skill `description` in
-about 7 seconds for ~$0.003, and reports two things this harness cannot: the **margin**
-between the winning description and the runner-up, and whether **any** skill should
-fire at all. Run it when a `description` changes — it catches drift long before a
-misfire, and it is cheap enough to run per-PR, which this harness is not.
+A typed model call scores a prompt against every skill `description` and reports two
+things this harness cannot: the **margin** between the winning description and the
+runner-up, and whether **any** skill should fire at all — measured over 16 prompts
+written to need none, which `manifest.tsv` cannot express, since every row there names
+an expected skill. Run it when a `description` changes. It makes drift visible; whether
+a narrow margin predicts a real routing failure is untested, and the decision record
+says so.
 
 ```sh
 D=dev_docs/research/2026-09-17-jev-applications/references
-python3 $D/jev-description-collision.py --suite manifest --runs 4   # needs a TypeSafe key
+python3 $D/jev-description-collision.py --suite all --runs 4    # needs a TypeSafe key
 ```
+
+38 prompts per pass — the 14 manifest rows, 8 probes written to straddle neighbouring
+skills, and the 16 that should load nothing. Measured 2026-09-21: **19.2–19.5s per
+pass, ~$0.031 for the four-pass run.** Four passes rather than one because the answers
+move between runs, so a single pass is an anecdote.
+
+`--suite manifest` is the fast smoke check for a single description edit — the 14 rows
+only, ~7s and ~$0.003 per pass. It cannot produce the no-skill rate: the negative
+prompts run only under `--suite negative` or `--suite all`.
 
 **It does not answer this harness's question, and a clean run is not evidence that
 routing works.** It scores whether the descriptions discriminate, given that a skill

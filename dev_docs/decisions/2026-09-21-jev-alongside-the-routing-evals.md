@@ -37,7 +37,7 @@ disagree with each other on two rows.
 
 **The incumbent's failures are what settles this.** `orchestrate-coders` and
 `select-coder` failed in both runs by invoking no skill at all; `task` and `tutor`
-flapped. Jev reported clean on every one, in all four passes, at margins of 0.41 and
+flapped. Jev reported clean on every one, in all four passes, at margins of 0.40 and
 above — because the Choice is conditioned on a skill firing and structurally cannot
 observe a session that loaded none, and the Noul says what ought to happen rather than
 what did. A clean Jev sweep is compatible with a skill that never fires in a real
@@ -57,18 +57,25 @@ Claude actually routes to a skill. The typed call earns its place on what the
 incumbent cannot produce at all — the margin between winner and runner-up, and the
 no-skill Noul — not on being a cheaper way to ask the incumbent's question. Neither
 becomes a blocking check: the typed call needs a key and the network, which
-`just check` must not, so it joins `evals/` as opt-in and manual-dispatch.
+`just check` must not, so it joins `evals/` as opt-in and run by hand. No workflow
+dispatches it — unlike `evals/`, which has one — and wiring it into CI is a separate
+choice this record does not make.
 
 ## Consequences
 
-- **Good, because** a description regression becomes cheap to notice. 7s and $0.003
-  can run on every PR that edits a `description`; 13 to 16 minutes and 14 agent
-  sessions cannot, which is why nothing currently watches descriptions between manual
-  eval runs.
+- **Good, because** a description regression becomes cheap to notice. The companion
+  procedure `evals/README.md` documents — four passes over all three suites — measured
+  77s and $0.031, and can run on every PR that edits a `description`; 13 to 16 minutes
+  and 14 agent sessions cannot, which is why nothing currently watches descriptions
+  between manual eval runs. The 7s and $0.0029 in the table above are the manifest-only
+  slice, measured for comparison against the harness on identical rows, and are not
+  what the companion check costs.
 - **Good, because** it produces two signals nothing here had: the runner-up margin,
-  which degrades before a misfire does, and a false-positive rate over prompts that
-  should load nothing — ground truth `evals/manifest.tsv` cannot express, since every
-  row names an expected skill.
+  which narrows as two descriptions converge and does so before either takes the
+  other's prompt — a property of the ranking, and **not** a prediction that a real
+  session will misroute, which the "Revisit when" bullet below says is untested — and
+  a false-positive rate over prompts that should load nothing, ground truth
+  `evals/manifest.tsv` cannot express, since every row names an expected skill.
 - **Good, because** it keeps the measurement that caught the real defect. Had the
   typed call replaced the harness, the 2026-09-21 runs would have reported 14/14 and
   `select-coder` and `orchestrate-coders` would have gone on failing to fire unseen.
@@ -92,7 +99,7 @@ becomes a blocking check: the typed call needs a key and the network, which
   because its margins move, the harness because that is the check that would confirm
   the fix.
 - **A low margin is shown to predict a routing failure.** The tightest margin in the
-  run (0.41) sits on the two skills that failed to fire. Two cases is a coincidence
+  run (0.40) sits on the two skills that failed to fire. Two cases is a coincidence
   worth testing, not a signal. If it holds over more cases, the typed call becomes a
   cheap early warning for the expensive check and this decision gets stronger; if it
   does not, the two stay fully independent.

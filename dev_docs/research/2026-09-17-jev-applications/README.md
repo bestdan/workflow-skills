@@ -312,7 +312,7 @@ all**. Two flapped — `task` and `tutor` failed once and passed once, and the `
 failure invoked `add-task`, a neighbour inside the same family rather than a wrong
 answer of the kind the label implies.
 
-Jev reported clean on every one of those cases, in all four passes, at margins of 0.41
+Jev reported clean on every one of those cases, in all four passes, at margins of 0.40
 and above. **That is not Jev being right where the harness was wrong. It is the two
 measuring different things**, and this run is the demonstration:
 
@@ -329,7 +329,7 @@ which is exactly the state `select-coder` and `orchestrate-coders` were in on th
 both were measured. A description-discriminability check is not a routing check.
 
 One correlation is worth recording without being read as a finding: the tightest Jev
-margin in the whole run is `select-coder` vs `orchestrate-coders` at 0.41, and those
+margin in the whole run is `select-coder` vs `orchestrate-coders` at 0.40, and those
 are the two skills that failed to fire. Two cases is an observation. Whether a low
 margin predicts a real routing failure is the measurement that would turn it into
 something, and nothing here has made it.
