@@ -244,8 +244,11 @@ Also worth recording: this run **replicates** the original result on fresh sampl
 0 misfires in 56 labelled cases and 0 collisions across all 88 positive prompts, four
 runs, with the Noul riding along. That is the evidence that adding it disturbed
 nothing. It was designed not to: the roster the Noul needs lives in the Noul's own
-`instructions` rather than in the shared `state`, so the Choice's request is
-byte-identical to the one that produced the numbers above.
+`instructions` rather than in the shared `state`, so the Choice question's own input —
+its `state` and its `criteria` — is byte-identical to the one §1 measured, which is what
+the four `ChoiceRequestIsUnchangedTests` pin. The request as a whole is not: it carries a
+second question now. That the second one cannot leak into the first is Jev's documented
+parallel-and-isolated evaluation, taken on the vendor's word rather than measured here.
 
 **What this does not establish.** The negative prompts were **authored, not sampled.**
 The issue behind this measurement asked for sampled ones and it was right to; the only

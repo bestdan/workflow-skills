@@ -32,10 +32,12 @@ Three suites:
 
 The Choice's `state` is the bare prompt and its `criteria` are the skill descriptions,
 both unchanged by the Noul: the roster the Noul needs lives in the Noul's own
-`instructions` rather than in the shared state, so adding it leaves the Choice request
-byte-identical to the one the record's section-1 numbers were measured from. Questions
-are evaluated in parallel and in isolation, so the Noul costs latency it does not have
-and about 2.3k extra input tokens per request (the roster), and nothing else.
+`instructions` rather than in the shared state, so the Choice question's own input is
+byte-identical to the one the record's section-1 numbers were measured from. The request
+as a whole is not — it now carries a second question. What makes that harmless is Jev's
+documented evaluation of questions in parallel and in isolation, which this file does not
+verify; so the Noul costs latency it does not have and about 2.3k extra input tokens per
+request (the roster), and nothing else.
 
 An artifact of that record, not standing tooling. Nothing in this repo depends on the
 Jev API; this exists so the record's numbers can be re-run when a `description`
@@ -214,6 +216,13 @@ NEGATIVE_PROBES: list[tuple[str, str, str]] = [
         "near tutor — one answer, not a teaching loop",
         "In a paragraph, what does the claim lock actually do?",
     ),
+    # THE LABEL ON THIS ROW IS DISPUTED, and it is the only row that fires: all four
+    # false positives in the record's 4/64 are this prompt, at 0.76 in every run. It was
+    # written against `plan-with-docs`, whose territory the second clause rules out — but
+    # it does not rule out `assess-task` ("scope", writes nothing down), which is what
+    # Jev returns. The record judges the label wrong and reports 0/60 beside the 4/64;
+    # the row keeps `needs_skill_truth=False` so this file still reproduces the 4/64 it
+    # published. Re-cut it from the retained records, not by editing this table.
     (
         "near",
         "near plan-with-docs — explicitly nothing written down",

@@ -453,5 +453,97 @@ class RedactionTests(unittest.TestCase):
         self.assertEqual(jev.redact_ref("op://Private"), "op://Private")
 
 
+def _noul_record(truth, *, noul, tier=None, fp=False, fn=False, label="row"):
+    """Only the fields report_noul reads. A real record carries a dozen more."""
+    return {
+        "label": label,
+        "tier": tier,
+        "winner": "some-skill",
+        "needs_skill": noul,
+        "needs_skill_truth": truth,
+        "false_positive": fp,
+        "false_negative": fn,
+    }
+
+
+class RateLineTests(unittest.TestCase):
+    def test_the_per_run_spread_is_printed_not_averaged(self):
+        """Section 1's finding was that the spread is the story, so it is printed."""
+        self.assertEqual(
+            jev.rate_line("false positives:", [1, 0, 2], [3, 3, 3]),
+            "false positives: 3/9 = 33.3%  (per run: 1, 0, 2)",
+        )
+
+    def test_a_single_run_omits_the_spread(self):
+        """One run has no spread; "(per run: 1)" would imply it does."""
+        self.assertEqual(
+            jev.rate_line("false positives:", [1], [4]),
+            "false positives: 1/4 = 25.0%",
+        )
+
+    def test_an_empty_denominator_is_n_a_not_a_zero_division(self):
+        """`--suite negative` alone leaves the positive half with no rows at all."""
+        self.assertEqual(
+            jev.rate_line("false negatives:", [0], [0]),
+            "false negatives: 0/0 = n/a",
+        )
+
+
+class ReportNoulTests(unittest.TestCase):
+    """The counting that produces the published rates.
+
+    The fixture is deliberately asymmetric — six negatives against four positives, four
+    `plain` against two `near`, one false positive against two false negatives — so a
+    swapped denominator or an inverted `needs_skill_truth` partition has to change a
+    printed number rather than landing on the right one by luck.
+    """
+
+    def _passes(self):
+        return [
+            {
+                "records": [
+                    _noul_record(False, noul=0.80, tier="plain", fp=True, label="p-a"),
+                    _noul_record(False, noul=0.10, tier="plain", label="p-b"),
+                    _noul_record(False, noul=0.20, tier="near", label="n-c"),
+                    _noul_record(True, noul=0.30, fn=True, label="pos-1"),
+                    _noul_record(True, noul=0.90, label="pos-2"),
+                ]
+            },
+            {
+                "records": [
+                    _noul_record(False, noul=0.20, tier="plain", label="p-a"),
+                    _noul_record(False, noul=0.10, tier="plain", label="p-b"),
+                    _noul_record(False, noul=0.30, tier="near", label="n-c"),
+                    _noul_record(True, noul=0.40, fn=True, label="pos-1"),
+                    _noul_record(True, noul=0.90, label="pos-2"),
+                ]
+            },
+        ]
+
+    def _report(self, passes):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            jev.report_noul(passes, 0.5)
+        return buf.getvalue()
+
+    def test_the_two_rates_use_their_own_denominators(self):
+        out = self._report(self._passes())
+        self.assertIn(
+            "false positives: 1/6 = 16.7%  (per run: 1, 0) negative prompts", out
+        )
+        self.assertIn(
+            "false negatives: 2/4 = 50.0%  (per run: 1, 1) positive prompts", out
+        )
+
+    def test_each_tier_is_counted_against_its_own_rows(self):
+        out = self._report(self._passes())
+        self.assertIn("plain: 1/4 = 25.0%  (per run: 1, 0)", out)
+        self.assertIn("near: 0/2 = 0.0%  (per run: 0, 0)", out)
+
+    def test_nothing_is_printed_when_neither_half_has_rows(self):
+        """A Choice-only run must not emit an empty no-skill block."""
+        self.assertEqual(self._report([{"records": []}]), "")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
