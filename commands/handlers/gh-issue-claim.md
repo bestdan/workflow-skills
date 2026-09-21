@@ -251,10 +251,21 @@ Runs on the candidate **before "Judge feasibility" and "Claim the issue"**, on e
    | `1`  | no claim-lock ref for `#<n>` under any prefix | the issue is free on this check — continue to step 2                                   |
    | `0`  | one or more refs, printed one per line        | compare each against `<branch>` — see below                                            |
    | `4`  | the probe could not answer                    | **not** a free issue: `git ls-remote` failed, so stop and report the probe as unusable |
+   | `2`  | argparse rejected the subcommand              | the installed asset predates `find-task-refs` — stop and report the plugin as too old  |
+
+   **Exit `2` is argparse, not this contract.** A session on an older copy of
+   `gh-issue-claim.py` — a dispatched VM whose plugin lags — gets
+   `invalid choice: 'find-task-refs'` and exit `2`, and a caller reading only
+   0/1/4 could fall through as "no ref found" and claim into the race this probe
+   exists to catch. Treat it as exit `4` does: no verdict, stop. The batch path's
+   self-check does not catch it either — it verifies only that
+   `gh-issue-state.py` is present (`commands/do-tasks.md` §4; #806).
 
    On exit `0`, a printed name equal to `<branch>` is your own ref. Any **other** name is neither a free issue nor your own claim — it is another session on `#<n>` under a different prefix (a cloud routine's `claude/`-prefixed branch included), which is the split "Branch name" describes. **Stop and report** `Skipped #<n>: <the returned ref> exists but the configured prefix gives <branch> — the two disagree; either another session holds this issue under a different prefix, or this session's branch_prefix is stale`, and do not claim alongside it. Name both causes: the probe cannot tell them apart, and stopping is the right answer either way.
 
    Membership is decided by the same `parse_issue_number` as `issue-number` above, so the probe and the parser agree by construction — `pre-task-<n>`, `task-<n>0` and `team-task-<n>` are not this issue's lock, and neither this file nor a regex has to be kept in step with that rule by hand. (It does mean a `branch_prefix` the parser refuses is invisible to the probe too; that inconsistency predates both and is #808.)
+
+   **It probes a remote, while `acquire` creates the lock in `<repo>` — so skip it when those differ.** `--remote` names a git remote of this checkout (default `origin`); `gh-issue.repo` may point at a **different** tracker repository, and that is where the lock ref is created. In that split setup the probe reads the code repo instead of the lock repo, which both misses a differently-prefixed claim and can flag an unrelated `task-<n>` branch as a collision. Either pass a `--remote` that actually points at `gh-issue.repo`, or **skip this check and say so** — a check reading the wrong repository is worse than an absent one, because its exit `1` looks like evidence.
 
    **This probe does not validate your own prefix, and cannot.** Exit `1` is equally consistent with "issue free, prefix correct" and "issue free, prefix wrong" — so a session alone on the issue still locks the wrong ref silently. That case is closed only by resolving the prefix as of the claim ("Branch name" above, and `skills/deliver-task/SKILL.md` step 1); this probe is the backstop for the collision, not a substitute for the re-read.
 

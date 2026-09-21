@@ -123,9 +123,10 @@ Overlay the local override on the committed config — mappings merge recursivel
 If a relative path doesn't resolve, find it with **Glob**
 (`**/commands/handlers/<name>.md`) and Read it.
 
-**This read is provisional.** `.task-config.yml` is a tracked file, so step 1's
-fetch can move it — resolve which handler file to read here, but do not carry any
-value out of this step into the claim. Step 1 owns that rule.
+**This read is provisional.** Where `.task-config.yml` is tracked, step 1's fetch
+can move it — so resolve which handler file to read here, but do not carry any
+**value** out of this step into the claim. Step 1 owns that rule, including the
+case where the file is untracked and the fetch therefore cannot move it at all.
 
 ## 1. Fetch the base (before the claim)
 
@@ -154,36 +155,38 @@ since the `<slug>`/`<identifier>` this skill was invoked with is handler-specifi
 a `PRE-12` cannot be delivered by `gh-issue`. What the re-read is for is the keys
 under the already-chosen handler, `gh-issue.branch_prefix` above all.
 
-**Where to read it depends on whether it is tracked, and both setups are normal.**
-Ask, rather than assuming either:
+**Which source is correct has three cases, not two, so ask the helper:**
 
 ```bash
-git cat-file -e <base>:dev_docs/tasks/.task-config.yml 2>/dev/null \
-  && git show <base>:dev_docs/tasks/.task-config.yml \
-  || cat "$ROOT/dev_docs/tasks/.task-config.yml" 2>/dev/null
+python3 commands/handlers/assets/task-config-resolve.py committed --base <base>
 cat "$ROOT/dev_docs/tasks/.task-config.local.yml" 2>/dev/null   # override — always untracked
 ```
 
-Overlay them as step 0 does. Why each branch is the right read:
+Overlay them as step 0 does. The helper prints the committed layer on stdout
+(possibly empty) and names the source it chose on stderr; **exit `4` means git
+could not answer, so stop rather than overlaying a guessed layer.** The three
+cases it exists to keep apart, any pair of which collapses back into #748:
 
-- **Tracked** (`repo-pr`, and this plugin's own repo): the fetch can move the
-  file, so `<base>` is the only source that sees the new value. A re-`cat` of the
-  checked-out file returns byte-identical content and catches nothing — the fetch
-  updates a ref, not the index or the working tree, and what finally brings the
-  new config into the tree is the branch step 2 cuts from the fetched base, after
-  the name has been built.
-- **Untracked** (`gh-issue`, `jira`, `linear`): `/task-config` puts
-  `dev_docs/tasks/` in the repo's local exclude for every handler except
-  `repo-pr` (`commands/task-config.md`), so there is no blob in `<base>` at all.
-  A fetch cannot move an untracked file, so there is nothing to go stale and the
-  working tree is both the only and the correct source.
+- **Tracked and present in `<base>`** — only the fetched revision sees the new
+  value, because a fetch updates a ref and leaves the index and working tree
+  alone.
+- **Untracked** (`gh-issue`, `jira`, `linear`, since `/task-config` puts
+  `dev_docs/tasks/` in the repo's local exclude for every handler but `repo-pr`)
+  — a fetch cannot move a file git does not track, so the working tree is both
+  the only and the correct source.
+- **Tracked but deleted in `<base>`** — the committed layer is **empty**. This is
+  the one that reads backwards: the old file is still checked out, so falling
+  back to the working tree succeeds and hands back a stale `branch_prefix`.
 
-**Do not skip the existence test and just `git show`.** On an untracked config it
-fails with `path ... does not exist in <base>`, and a caller that reads that as
-"no config" resolves an empty `branch_prefix` and locks `task-<n>` — reproducing
-the exact split this step exists to prevent, in the setup the `gh-issue` handler
-sets up by default. Keep the override on a `cat` for the same reason: it is
-gitignored by construction, so a `git show` on it always fails.
+Tracked-ness is decided by the index, never by presence in `<base>` — those are
+different questions, and only the first separates the second case from the third.
+The override stays a plain `cat`: it is gitignored by construction, so no
+revision holds it and a fetch can never move it.
+
+This is a script rather than three lines of shell here for the reason the
+cross-prefix probe is: as markdown shell it is unlinted by the gate, and both of
+this step's earlier shell forms shipped a defect that a reviewer rather than the
+gate had to catch.
 
 The key that makes this load-bearing rather than tidy is `gh-issue.branch_prefix`:
 it is the claim **lock ref**, not just a branch name. A prefix read before the

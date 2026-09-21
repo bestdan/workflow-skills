@@ -21,11 +21,14 @@ sessions could each interpret slightly differently:
   the POST/422 dispatch a second time.
 - `find-task-refs` is the cross-prefix read pre-flight cannot do with its own
   `<branch>`: it lists every claim-lock ref for an issue under ANY prefix, so a
-  session whose `branch_prefix` disagrees with a sibling's is detected instead
-  of both silently winning. Its exit code separates "none found" (1) from "the
-  remote did not answer" (4), because `git ls-remote` prints nothing in both
-  cases and reading the second as the first claims into the race it exists to
-  catch.
+  session whose `branch_prefix` disagrees with a sibling's can SEE the other
+  ref. It is a detector, not an election — a read before a create cannot make
+  two differently-named refs exclusive, so two sessions that both scan before
+  either creates still both succeed. What prevents that is resolving the prefix
+  from one revision (`skills/deliver-task/SKILL.md` step 1); this only catches
+  the collision once a ref exists. Its exit code separates "none found" (1) from
+  "the remote did not answer" (4), because `git ls-remote` prints nothing in
+  both cases and reading the second as the first claims into that race.
 - `wip` counts in-flight work with one server-side query and reports the
   remaining batch ceiling as `slack`, so a caller cannot under-count by
   missing a label spelling, over-cost by issuing two calls, or hand a batch
@@ -232,9 +235,10 @@ def cmd_issue_number(args):
 def cmd_find_task_refs(args):
     """Exit code is the contract: 0 found, 1 none, 4 the probe could not answer.
 
-    1 and 4 are deliberately different numbers. Both print nothing, and a caller
-    that collapsed them would treat an unreachable remote as a free issue —
-    which is the one reading this probe exists to prevent.
+    1 and 4 are deliberately different numbers. Both write nothing to **stdout**
+    — 4 does explain itself on stderr — so a caller branching on output alone
+    cannot tell them apart, and collapsing them treats an unreachable remote as a
+    free issue, which is the one reading this probe exists to prevent.
     """
     try:
         refs = find_task_refs(args.issue, args.remote)
