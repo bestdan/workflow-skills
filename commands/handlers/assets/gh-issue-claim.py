@@ -19,6 +19,16 @@ sessions could each interpret slightly differently:
   issue number, so `claim-lock.md` and the jira handler — which have their own
   branch-naming rules — share this one implementation instead of hand-walking
   the POST/422 dispatch a second time.
+- `find-task-refs` is the cross-prefix read pre-flight cannot do with its own
+  `<branch>`: it lists every claim-lock ref for an issue under ANY prefix, so a
+  session whose `branch_prefix` disagrees with a sibling's can SEE the other
+  ref. It is a detector, not an election — a read before a create cannot make
+  two differently-named refs exclusive, so two sessions that both scan before
+  either creates still both succeed. What prevents that is resolving the prefix
+  from one revision (`skills/deliver-task/SKILL.md` step 1); this only catches
+  the collision once a ref exists. Its exit code separates "none found" (1) from
+  "the remote did not answer" (4), because `git ls-remote` prints nothing in
+  both cases and reading the second as the first claims into that race.
 - `wip` counts in-flight work with one server-side query and reports the
   remaining batch ceiling as `slack`, so a caller cannot under-count by
   missing a label spelling, over-cost by issuing two calls, or hand a batch
@@ -29,6 +39,8 @@ Usage:
   python3 gh-issue-claim.py branch-name --issue 142
   python3 gh-issue-claim.py branch-name --issue 142 --prefix bestdan/
   python3 gh-issue-claim.py issue-number --branch bestdan/task-142
+  python3 gh-issue-claim.py find-task-refs --issue 142
+  python3 gh-issue-claim.py find-task-refs --issue 142 --remote upstream
   python3 gh-issue-claim.py wip --repo owner/name --json
   python3 gh-issue-claim.py acquire --repo owner/name --issue 142 --base-sha <sha>
   python3 gh-issue-claim.py acquire-ref --repo owner/name --branch task/PLAT-142 --base-sha <sha>
@@ -60,6 +72,63 @@ def run_gh(args, stdin=None):
     """Run `gh` and return (returncode, stdout, stderr). The seam the tests stub."""
     proc = subprocess.run(["gh", *args], capture_output=True, text=True, input=stdin)
     return proc.returncode, proc.stdout, proc.stderr
+
+
+def run_git(args):
+    """Run `git` and return (returncode, stdout, stderr). The seam the tests stub."""
+    proc = subprocess.run(["git", *args], capture_output=True, text=True)
+    return proc.returncode, proc.stdout, proc.stderr
+
+
+class ProbeFailed(Exception):
+    """`git ls-remote` did not answer, so an empty result means nothing."""
+
+
+def find_task_refs(issue, remote="origin"):
+    """Branch names on `remote` that are claim-lock refs for `issue`, any prefix.
+
+    Pre-flight probes its own `<branch>` before claiming, which by construction
+    cannot see a sibling session working the same issue under a DIFFERENT
+    `branch_prefix` — both sessions then acquire a ref the other cannot see and
+    both conclude they won. This is the read that catches that, and it lives
+    here for the same reason the rest of this module does: two racing sessions
+    must perform it identically, and the shell pipeline it replaces shipped
+    four separate defects while nothing in the gate could lint it.
+
+    Two properties the caller depends on:
+
+    - **An empty list is not a failed query.** `git ls-remote` writes nothing to
+      stdout when it exits non-zero (unreachable remote, auth failure, DNS), so
+      a caller reading only the output takes an outage for "no ref exists, the
+      issue is free" and claims into the race. A failed probe raises instead.
+    - **Membership is decided by `parse_issue_number`, not by a pattern.** The
+      probe and the parser therefore agree by construction rather than by two
+      maintainers keeping a regex in step with a function: a ref this flow
+      cannot trace back to an issue is not one the probe reports, and
+      `pre-task-42`, `task-420` and `team-task-42` can never be read as issue
+      42's lock.
+
+    Names keep their full prefix (`bestdan/task-42`), which is what the caller
+    compares against its own `<branch>`. Only the leading `refs/heads/` is
+    stripped, and by length rather than by a greedy match, so a branch whose own
+    name contains `refs/heads/` is reported intact instead of collapsing onto a
+    different issue's ref.
+    """
+    code, out, err = run_git(["ls-remote", "--heads", remote])
+    if code != 0:
+        raise ProbeFailed(
+            err.strip() or out.strip() or f"git ls-remote {remote} failed"
+        )
+    prefix = "refs/heads/"
+    names = []
+    for line in out.splitlines():
+        _sha, _tab, ref = line.partition("\t")
+        if not ref.startswith(prefix):
+            continue
+        name = ref[len(prefix) :]
+        if parse_issue_number(name) == issue:
+            names.append(name)
+    return names
 
 
 def branch_name(issue, prefix=""):
@@ -160,6 +229,26 @@ def cmd_issue_number(args):
         print(f"not a task branch: {args.branch}", file=sys.stderr)
         return 1
     print(number)
+    return 0
+
+
+def cmd_find_task_refs(args):
+    """Exit code is the contract: 0 found, 1 none, 4 the probe could not answer.
+
+    1 and 4 are deliberately different numbers. Both write nothing to **stdout**
+    — 4 does explain itself on stderr — so a caller branching on output alone
+    cannot tell them apart, and collapsing them treats an unreachable remote as a
+    free issue, which is the one reading this probe exists to prevent.
+    """
+    try:
+        refs = find_task_refs(args.issue, args.remote)
+    except ProbeFailed as exc:
+        print(f"probe failed: {exc}", file=sys.stderr)
+        return 4
+    if not refs:
+        return 1
+    for ref in refs:
+        print(ref)
     return 0
 
 
@@ -271,6 +360,14 @@ def main(argv=None):
     )
     p.add_argument("--branch", required=True)
     p.set_defaults(func=cmd_issue_number)
+
+    p = subparsers.add_parser(
+        "find-task-refs",
+        help="claim-lock refs for an issue under ANY prefix (0 found / 1 none / 4 no answer)",
+    )
+    p.add_argument("--issue", required=True, type=int)
+    p.add_argument("--remote", default="origin")
+    p.set_defaults(func=cmd_find_task_refs)
 
     p = subparsers.add_parser("wip", help="count this caller's in-flight issues")
     p.add_argument("--repo", required=True, help="owner/name")

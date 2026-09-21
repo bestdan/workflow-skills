@@ -410,5 +410,113 @@ class WipTests(unittest.TestCase):
         self.assertEqual(remote.calls, [], "must fail before any network call")
 
 
+class FakeGit:
+    """A fake `git ls-remote --heads`: a ref list, or a failure that prints nothing.
+
+    `fail` reproduces the case the exit-code contract exists for — `ls-remote`
+    exits non-zero and writes nothing to stdout, so output alone cannot tell an
+    outage from a free issue.
+    """
+
+    def __init__(self, refs=(), fail=False):
+        self.refs = list(refs)
+        self.fail = fail
+        self.calls = []
+
+    def run_git(self, args):
+        self.calls.append(args)
+        if self.fail:
+            return 128, "", "fatal: could not read from remote repository"
+        body = "".join(f"{'0' * 40}\t{ref}\n" for ref in self.refs)
+        return 0, body, ""
+
+
+class FindTaskRefsTests(unittest.TestCase):
+    """The cross-prefix probe. Each case here is a defect the prose form shipped."""
+
+    def setUp(self):
+        self._real = gh_issue_claim.run_git
+        self.addCleanup(self._restore)
+
+    def _restore(self):
+        gh_issue_claim.run_git = self._real
+
+    def _find(self, refs, issue=42, fail=False):
+        git = FakeGit(refs=refs, fail=fail)
+        gh_issue_claim.run_git = git.run_git
+        return gh_issue_claim.find_task_refs(issue)
+
+    def test_finds_every_prefix_shape_and_keeps_the_prefix(self):
+        found = self._find(
+            [
+                "refs/heads/task-42",
+                "refs/heads/bestdan/task-42",
+                "refs/heads/claude/sess-1/task-42",
+            ]
+        )
+        self.assertEqual(found, ["task-42", "bestdan/task-42", "claude/sess-1/task-42"])
+
+    def test_rejects_near_misses_the_parser_also_rejects(self):
+        # A pattern loose enough to catch `team-task-42` also catches these,
+        # and each would fire a hard stop against an unrelated branch.
+        found = self._find(
+            [
+                "refs/heads/pre-task-42",
+                "refs/heads/refactor-task-42",
+                "refs/heads/team-task-42",
+                "refs/heads/task-420",
+                "refs/heads/task-42-fixup",
+                "refs/heads/a/pre-task-42",
+            ]
+        )
+        self.assertEqual(found, [], "probe must agree with parse_issue_number")
+
+    def test_a_name_containing_refs_heads_is_not_collapsed(self):
+        # A greedy strip reduces this to `task-42`, which then compares EQUAL to
+        # a bare `<branch>` and reads a foreign ref as this session's own.
+        found = self._find(["refs/heads/foo/refs/heads/task-42"])
+        self.assertEqual(found, ["foo/refs/heads/task-42"])
+
+    def test_non_branch_refs_are_ignored(self):
+        found = self._find(["refs/tags/task-42", "refs/pull/42/head"])
+        self.assertEqual(found, [])
+
+    def test_a_failed_probe_raises_instead_of_looking_free(self):
+        with self.assertRaises(gh_issue_claim.ProbeFailed):
+            self._find(["refs/heads/bestdan/task-42"], fail=True)
+
+    def test_cli_exit_codes_separate_none_found_from_no_answer(self):
+        git = FakeGit(refs=["refs/heads/bestdan/task-42"])
+        gh_issue_claim.run_git = git.run_git
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = gh_issue_claim.main(["find-task-refs", "--issue", "42"])
+        self.assertEqual(code, 0)
+        self.assertEqual(out.getvalue().strip(), "bestdan/task-42")
+
+        git = FakeGit(refs=["refs/heads/bestdan/task-99"])
+        gh_issue_claim.run_git = git.run_git
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = gh_issue_claim.main(["find-task-refs", "--issue", "42"])
+        self.assertEqual(code, 1, "no ref for this issue is exit 1")
+        self.assertEqual(out.getvalue(), "")
+
+        git = FakeGit(fail=True)
+        gh_issue_claim.run_git = git.run_git
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = gh_issue_claim.main(["find-task-refs", "--issue", "42"])
+        self.assertEqual(code, 4, "an unanswered probe must not look like exit 1")
+        self.assertEqual(out.getvalue(), "")
+        self.assertIn("probe failed", err.getvalue())
+
+    def test_remote_is_configurable_and_reaches_ls_remote(self):
+        git = FakeGit(refs=[])
+        gh_issue_claim.run_git = git.run_git
+        gh_issue_claim.main(["find-task-refs", "--issue", "42", "--remote", "upstream"])
+        self.assertEqual(git.calls, [["ls-remote", "--heads", "upstream"]])
+
+
 if __name__ == "__main__":
     unittest.main()

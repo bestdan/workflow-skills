@@ -6,7 +6,7 @@ In the **current session** (`/do-tasks`, `/do-tasks <#n>`, `--no-claim`, `--clai
 
 **Shared reference:** the label vocabulary is `commands/handlers/assets/labels.yml`, read the same way by `commands/handlers/gh-issue.md` (`## List`) and `gh-issue-promote.md`; every label write on this path goes through `commands/handlers/assets/gh-issue-state.py`; the claim lock this file acquires is defined once in `commands/handlers/claim-lock.md` (shared with the jira handler); `commands/handlers/linear-claim.md` is the structural template. Reuse those labels — do **not** invent `task:*` labels.
 
-**The deterministic parts are a script, not prose.** `commands/handlers/assets/gh-issue-claim.py` owns the four steps two racing sessions must perform **identically** — the branch name, parsing an issue number back out of a branch, the in-flight count, and the acquire/release of the lock ref. Its **exit codes are the contract** this file branches on; re-deriving any of it in prose reopens the race it closes.
+**The deterministic parts are a script, not prose.** `commands/handlers/assets/gh-issue-claim.py` owns the five steps two racing sessions must perform **identically** — the branch name, parsing an issue number back out of a branch, the cross-prefix ref read pre-flight uses, the in-flight count, and the acquire/release of the lock ref. Its **exit codes are the contract** this file branches on; re-deriving any of it in prose reopens the race it closes. The cross-prefix read was the last to move: it lived here as a shell pipeline and shipped four defects in four review rounds, none of which the gate could catch, because nothing lints shell inside markdown.
 
 **Branch name.** The work branch is `<branch_prefix>task-<n>`, and it is also the claim
 lock ref (see `claim-lock.md`). `<branch_prefix>` is the `gh-issue.branch_prefix` key in
@@ -26,6 +26,27 @@ error: you get a **different lock ref**, `task-<n>` instead of `<prefix>task-<n>
 session that passes the prefix and one that omits it then each acquire a ref the other
 cannot see, and both conclude they won the claim. `/doctor` Check 1c flags the inverse —
 a repo whose branches carry a prefix its config does not name.
+
+**And the value is read as of the claim, not as of session start.** Resolving the key
+once, correctly, at the top of a session is not enough. Where
+`dev_docs/tasks/.task-config.yml` is **tracked**, a base the caller updates between that
+read and the claim can carry a different `branch_prefix` — and `/deliver-task` mandates
+exactly that ordering, fetching the base in its step 1 _before_ the claim acquires the
+work branch. A cached value then produces the same split as a dropped `--prefix`, from a
+caller that did nothing wrong.
+
+**Which read is correct depends on whether the file is tracked, and on this handler it
+usually is not**: `/task-config` puts `dev_docs/tasks/` in the repo's local exclude for
+every handler except `repo-pr`. Untracked, a fetch cannot move it, so the working tree is
+the right source and there is no staleness to chase; tracked, only the base revision sees
+the new value, because a fetch updates a ref and leaves the working tree alone.
+`skills/deliver-task/SKILL.md` step 1 owns that branch and the trap in getting it wrong —
+a bare `git show` on an untracked config fails, and a caller reading that as "no config"
+resolves an empty prefix and locks `task-<n>`, which is this bug again.
+
+Use the one resolved value for `branch-name`, `acquire`, `release`, **and the pre-flight
+probe**, whose `<branch>`-derived check is built from the same name and so cannot catch
+the error on its own.
 
 Three constraints meet here. `claim-lock.md` needs one deterministic name both racers
 compute the same way — which is why it is derived from the issue number and not from the
@@ -215,7 +236,38 @@ Runs on the candidate **before "Judge feasibility" and "Claim the issue"**, on e
 
    If `git ls-remote` returns the ref, treat the issue as in flight: a non-empty `gh pr list` → `Skipped #<n>: open PR already exists (<url>)`; otherwise (branch exists, no PR yet) → `Skipped #<n>: remote branch <branch> already exists`.
 
-   This is the cheap read in front of the same ref the claim locks on — a trip here saves the full issue-body read and feasibility judgment. It is a probe, not the lock: the lock is the push (see `commands/handlers/claim-lock.md`).
+   This is the cheap read in front of the same ref the claim locks on — a trip here saves the full issue-body read and feasibility judgment. It is a probe, not the lock: the lock is the **creation** of that ref through the API, never a push (see `commands/handlers/claim-lock.md`, and "Claim the issue" step 2 below on why a push cannot serve).
+
+   **Then probe every other prefix shape — `<branch>` alone cannot detect a prefix disagreement.** Because the check above is built from the same `<branch>` the claim then locks, a name derived from a stale or dropped `branch_prefix` is self-consistently wrong: it probes the wrong ref, finds nothing, and reports the issue free. The cross-prefix read is a subcommand, not a pipeline — it is one more thing two racing sessions must do identically, and as prose it shipped four defects that the gate cannot lint (#748's pull request):
+
+   ```bash
+   python3 commands/handlers/assets/gh-issue-claim.py find-task-refs --issue <n> [--remote <name>]
+   ```
+
+   **Branch on the exit code; the three cases are not interchangeable:**
+
+   | exit | meaning                                       | do                                                                                     |
+   | ---- | --------------------------------------------- | -------------------------------------------------------------------------------------- |
+   | `1`  | no claim-lock ref for `#<n>` under any prefix | the issue is free on this check — continue to step 2                                   |
+   | `0`  | one or more refs, printed one per line        | compare each against `<branch>` — see below                                            |
+   | `4`  | the probe could not answer                    | **not** a free issue: `git ls-remote` failed, so stop and report the probe as unusable |
+   | `2`  | argparse rejected the subcommand              | the installed asset predates `find-task-refs` — stop and report the plugin as too old  |
+
+   **Exit `2` is argparse, not this contract.** A session on an older copy of
+   `gh-issue-claim.py` — a dispatched VM whose plugin lags — gets
+   `invalid choice: 'find-task-refs'` and exit `2`, and a caller reading only
+   0/1/4 could fall through as "no ref found" and claim into the race this probe
+   exists to catch. Treat it as exit `4` does: no verdict, stop. The batch path's
+   self-check does not catch it either — it verifies only that
+   `gh-issue-state.py` is present (`commands/do-tasks.md` §4; #806).
+
+   On exit `0`, a printed name equal to `<branch>` is your own ref. Any **other** name is neither a free issue nor your own claim — it is another session on `#<n>` under a different prefix (a cloud routine's `claude/`-prefixed branch included), which is the split "Branch name" describes. **Stop and report** `Skipped #<n>: <the returned ref> exists but the configured prefix gives <branch> — the two disagree; either another session holds this issue under a different prefix, or this session's branch_prefix is stale`, and do not claim alongside it. Name both causes: the probe cannot tell them apart, and stopping is the right answer either way.
+
+   Membership is decided by the same `parse_issue_number` as `issue-number` above, so the probe and the parser agree by construction — `pre-task-<n>`, `task-<n>0` and `team-task-<n>` are not this issue's lock, and neither this file nor a regex has to be kept in step with that rule by hand. (It does mean a `branch_prefix` the parser refuses is invisible to the probe too; that inconsistency predates both and is #808.)
+
+   **It probes a remote, while `acquire` creates the lock in `<repo>` — so skip it when those differ.** `--remote` names a git remote of this checkout (default `origin`); `gh-issue.repo` may point at a **different** tracker repository, and that is where the lock ref is created. In that split setup the probe reads the code repo instead of the lock repo, which both misses a differently-prefixed claim and can flag an unrelated `task-<n>` branch as a collision. Either pass a `--remote` that actually points at `gh-issue.repo`, or **skip this check and say so** — a check reading the wrong repository is worse than an absent one, because its exit `1` looks like evidence.
+
+   **This probe does not validate your own prefix, and cannot.** Exit `1` is equally consistent with "issue free, prefix correct" and "issue free, prefix wrong" — so a session alone on the issue still locks the wrong ref silently. That case is closed only by resolving the prefix as of the claim ("Branch name" above, and `skills/deliver-task/SKILL.md` step 1); this probe is the backstop for the collision, not a substitute for the re-read.
 
 2. **Open PR by issue number.** The execute path titles PRs `<type>(scope): <description> [#<n>]`, so also catch a PR opened from an unlinked branch:
 

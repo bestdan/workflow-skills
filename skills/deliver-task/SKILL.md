@@ -123,6 +123,11 @@ Overlay the local override on the committed config — mappings merge recursivel
 If a relative path doesn't resolve, find it with **Glob**
 (`**/commands/handlers/<name>.md`) and Read it.
 
+**This read is provisional.** Where `.task-config.yml` is tracked, step 1's fetch
+can move it — so resolve which handler file to read here, but do not carry any
+**value** out of this step into the claim. Step 1 owns that rule, including the
+case where the file is untracked and the fetch therefore cannot move it at all.
+
 ## 1. Fetch the base (before the claim)
 
 The claim step (below) acquires the work branch, so the base must be fresh
@@ -137,6 +142,77 @@ git fetch origin <base>:<base>          # default <base> = main
 
 On `stale`, stop and surface it (the work branch would start behind); on
 `unknown`, warn and proceed.
+
+**Then re-resolve the handler config from the fetched base — every value the claim
+uses is read _after_ this fetch, never before it.** `dev_docs/tasks/.task-config.yml`
+is tracked, so the base that just moved can carry a different config, and step 2 is
+the first consumer of its handler-specific keys.
+
+**It refreshes the chosen handler's _keys_, not the handler.** `handler:` itself is
+not re-resolved mid-delivery: an explicit `--handler` stays authoritative per
+**Arguments**, and a handler flip inside this window would be incoherent anyway,
+since the `<slug>`/`<identifier>` this skill was invoked with is handler-specific —
+a `PRE-12` cannot be delivered by `gh-issue`. What the re-read is for is the keys
+under the already-chosen handler, `gh-issue.branch_prefix` above all.
+
+**Which source is correct has three cases, not two, so ask the helper:**
+
+```bash
+ROOT="$(git rev-parse --show-toplevel)"
+python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/task-config-resolve.py" committed --base <base> --root "$ROOT"
+cat "$ROOT/dev_docs/tasks/.task-config.local.yml" 2>/dev/null   # override — always untracked
+```
+
+`ROOT` is re-assigned here on purpose: steps run as separate tool calls with no
+shared shell state, so step 0's copy is not in scope, and the `2>/dev/null` on
+the override would hide the miss rather than report it. If `$CLAUDE_PLUGIN_ROOT`
+is unset, find the helper with **Glob** (`**/handlers/assets/task-config-resolve.py`).
+
+Overlay them as step 0 does. The helper prints the committed layer on stdout
+(possibly empty) and names the source it chose on stderr; **exit `4` means git
+could not answer, so stop rather than overlaying a guessed layer.** The three
+cases it exists to keep apart, any pair of which collapses back into #748:
+
+- **Tracked and present in `<base>`** — only the fetched revision sees the new
+  value, because a fetch updates a ref and leaves the index and working tree
+  alone.
+- **Untracked** (`gh-issue`, `jira`, `linear`, since `/task-config` puts
+  `dev_docs/tasks/` in the repo's local exclude for every handler but `repo-pr`)
+  — a fetch cannot move a file git does not track, so the working tree is both
+  the only and the correct source.
+- **Tracked but deleted in `<base>`** — the committed layer is **empty**. This is
+  the one that reads backwards: the old file is still checked out, so falling
+  back to the working tree succeeds and hands back a stale `branch_prefix`.
+
+Tracked-ness is decided by the index, never by presence in `<base>` — those are
+different questions, and only the first separates the second case from the third.
+The override stays a plain `cat`: it is gitignored by construction, so no
+revision holds it and a fetch can never move it.
+
+This is a script rather than three lines of shell here for the reason the
+cross-prefix probe is: as markdown shell it is unlinted by the gate, and both of
+this step's earlier shell forms shipped a defect that a reviewer rather than the
+gate had to catch.
+
+The key that makes this load-bearing rather than tidy is `gh-issue.branch_prefix`:
+it is the claim **lock ref**, not just a branch name. A prefix read before the
+fetch and used after it locks `task-<n>` where the fetched config says
+`<prefix>task-<n>` — so this session and a concurrent one each acquire a ref the
+other cannot see, and both conclude they won the claim. The `<branch>`-derived
+pre-flight probe cannot catch it: it probes the mis-derived ref and reports the
+issue free. Only the prefix-agnostic probe in `gh-issue-claim.md` → pre-flight
+can, and only once the other session's ref already exists; `/doctor` Check 1c
+flags the inverse case. Recovery is not free either: renaming the work branch to
+the correct ref **closes** the open PR, because GitHub retargets a pull request
+whose _base_ is renamed, not whose _head_ is — so a replacement PR has to be
+opened. See `gh-issue-claim.md` → "Branch name", and #748 for the delivery where
+both the split and that recovery cost were measured.
+
+**Known gap:** the claim's step 2 fetches again and cuts the ref at
+`origin/<base>`, so the prefix and the `base_sha` can come from different
+revisions. The cross-prefix probe contains it — the later session stops and
+reports rather than double-claiming — and closing it properly means pinning one
+SHA through the `claim-lock.md` contract the jira handler shares (#818).
 
 ## 2. Claim (the handler's protocol, verbatim)
 
