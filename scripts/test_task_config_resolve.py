@@ -29,15 +29,20 @@ class FakeGit:
     """git answers for the three cases, plus the case where git itself fails.
 
     `tracked` drives `ls-files --error-unmatch` (0 tracked / 1 untracked),
-    `in_base` drives `cat-file -e <base>:<path>`, and `broken` makes every call
-    fail with a code that is neither 0 nor 1 — the "cannot answer" case, which
-    must never be read as untracked.
+    `base_resolves` drives `rev-parse --verify <base>^{commit}`, `in_base`
+    drives `cat-file -e <base>:<path>`, and `broken` makes every call fail with
+    a code that is neither 0 nor 1 — the "cannot answer" case, which must never
+    be read as untracked.
+
+    `base_resolves=False` and `in_base=False` both make `cat-file -e` exit 128
+    in real git, which is exactly why the base is checked separately.
     """
 
-    def __init__(self, tracked=True, in_base=True, broken=False):
+    def __init__(self, tracked=True, in_base=True, broken=False, base_resolves=True):
         self.tracked = tracked
         self.in_base = in_base
         self.broken = broken
+        self.base_resolves = base_resolves
         self.calls = []
 
     def run_git(self, args, root=None):
@@ -46,6 +51,12 @@ class FakeGit:
             return 128, "", "fatal: not a git repository"
         if args[:2] == ["ls-files", "--error-unmatch"]:
             return (0, "", "") if self.tracked else (1, "", "error: pathspec")
+        if args[:2] == ["rev-parse", "--verify"]:
+            return (
+                (0, "deadbeef\n", "")
+                if self.base_resolves
+                else (128, "", "fatal: invalid object name 'main'.")
+            )
         if args[:2] == ["cat-file", "-e"]:
             return (
                 (0, "", "")
@@ -95,11 +106,38 @@ class CommittedLayerTests(unittest.TestCase):
         self.assertEqual(source, "absent")
         self.assertEqual(text, "")
 
+    def test_an_unreadable_untracked_config_is_not_absent(self):
+        # A directory where the file should be reaches `open()` as an OSError
+        # that is NOT FileNotFoundError. Reporting it as a decided empty layer
+        # would drop `branch_prefix` silently.
+        with contextlib.ExitStack() as stack:
+            tmp = stack.enter_context(_temp_repo(None))
+            (Path(tmp) / "dev_docs" / "tasks" / ".task-config.yml").mkdir()
+            with self.assertRaises(task_config_resolve.GitUnavailable):
+                self._layer(FakeGit(tracked=False), root=tmp)
+
     def test_git_failing_is_not_read_as_untracked(self):
         # Reading a git failure as "untracked" would send a TRACKED config's
         # read to the working tree, which is the stale-prefix case.
         with self.assertRaises(task_config_resolve.GitUnavailable):
             self._layer(FakeGit(broken=True))
+
+    def test_an_unresolvable_base_is_not_a_deleted_config(self):
+        # `cat-file -e` exits 128 for BOTH a missing path and a missing
+        # revision, so a base that does not resolve would otherwise read as
+        # "deleted upstream" and hand back an empty prefix — #748 again.
+        with self.assertRaises(task_config_resolve.GitUnavailable):
+            self._layer(FakeGit(tracked=True, base_resolves=False))
+
+    def test_the_base_is_verified_before_the_path_is_looked_up(self):
+        git = FakeGit(tracked=True, in_base=True)
+        self._layer(git)
+        verbs = [call[:2] for call in git.calls]
+        self.assertLess(
+            verbs.index(["rev-parse", "--verify"]),
+            verbs.index(["cat-file", "-e"]),
+            "an unresolvable base must be caught before it looks like a deletion",
+        )
 
     def test_tracked_ness_is_decided_by_the_index_not_by_base_presence(self):
         git = FakeGit(tracked=True, in_base=True)

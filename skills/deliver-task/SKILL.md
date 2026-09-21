@@ -158,9 +158,15 @@ under the already-chosen handler, `gh-issue.branch_prefix` above all.
 **Which source is correct has three cases, not two, so ask the helper:**
 
 ```bash
-python3 commands/handlers/assets/task-config-resolve.py committed --base <base>
+ROOT="$(git rev-parse --show-toplevel)"
+python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/task-config-resolve.py" committed --base <base> --root "$ROOT"
 cat "$ROOT/dev_docs/tasks/.task-config.local.yml" 2>/dev/null   # override — always untracked
 ```
+
+`ROOT` is re-assigned here on purpose: steps run as separate tool calls with no
+shared shell state, so step 0's copy is not in scope, and the `2>/dev/null` on
+the override would hide the miss rather than report it. If `$CLAUDE_PLUGIN_ROOT`
+is unset, find the helper with **Glob** (`**/handlers/assets/task-config-resolve.py`).
 
 Overlay them as step 0 does. The helper prints the committed layer on stdout
 (possibly empty) and names the source it chose on stderr; **exit `4` means git
@@ -201,6 +207,12 @@ the correct ref **closes** the open PR, because GitHub retargets a pull request
 whose _base_ is renamed, not whose _head_ is — so a replacement PR has to be
 opened. See `gh-issue-claim.md` → "Branch name", and #748 for the delivery where
 both the split and that recovery cost were measured.
+
+**Known gap:** the claim's step 2 fetches again and cuts the ref at
+`origin/<base>`, so the prefix and the `base_sha` can come from different
+revisions. The cross-prefix probe contains it — the later session stops and
+reports rather than double-claiming — and closing it properly means pinning one
+SHA through the `claim-lock.md` contract the jira handler shares (#818).
 
 ## 2. Claim (the handler's protocol, verbatim)
 

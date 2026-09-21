@@ -95,8 +95,24 @@ def committed_layer(base, path=CONFIG_PATH, root=None):
         try:
             with open(path if root is None else f"{root}/{path}") as handle:
                 return handle.read(), "worktree"
-        except OSError:
+        except FileNotFoundError:
             return "", "absent"
+        except OSError as exc:
+            # Only a missing file is `absent`. An unreadable one, or a directory
+            # in its place, is git-could-not-answer territory: reporting it as a
+            # decided empty layer silently drops `branch_prefix`.
+            raise GitUnavailable(str(exc)) from exc
+
+    # `<base>` must be shown to resolve FIRST. `cat-file -e` exits 128 both for a
+    # path missing from a valid revision and for a revision that does not exist,
+    # so reading that one code as "deleted upstream" turns a typo'd or unfetched
+    # base into an empty layer and an empty `branch_prefix` — #748, arriving
+    # through the one door this module's contract says is never a guess.
+    code, _out, err = run_git(
+        ["rev-parse", "--verify", f"{base}^{{commit}}"], root=root
+    )
+    if code != 0:
+        raise GitUnavailable(err.strip() or f"cannot resolve base {base}")
 
     code, _out, _err = run_git(["cat-file", "-e", f"{base}:{path}"], root=root)
     if code != 0:
