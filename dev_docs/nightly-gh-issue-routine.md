@@ -64,23 +64,30 @@ this repo's records have had to relearn twice, is in
 - **`$TMPDIR` is empty and `/tmp/claude` does not exist.** Create your own scratch
   directory under `/tmp`.
 
-### GitHub: the MCP works, `gh` does not
+### GitHub: the MCP works, and so does `gh` REST — conditionally
 
 This is the one place the gh-issue handler and the cloud runner are in tension, and
 step 0 exists to keep a run from papering over it.
 
-> **As of 2026-09-21 this routine stops at step 0 assertion 4 and does nothing,
-> because `gh` is not installed on the box.** That is the preflight working. The
-> measurement — all nine checks, with the push-back path confirmed good — is
+> **`gh` is present only because the environment's setup script installs it**, and
+> it writes a receipt at `/usr/local/share/gh-setup-receipt.txt` when it does.
+> Measured 2026-09-21 on `env_01KURKZo3LcfRKBaEZWcbsrk`:
 > [`dev_docs/research/2026-09-21-nightly-gh-issue-routine-preflight.md`](research/2026-09-21-nightly-gh-issue-routine-preflight.md).
-> Until the label channel is resolved there is nothing for a nightly run to do.
+> Attaching `bestdan/dotfiles` as a source does **not** install it — that was
+> measured and is not the mechanism, whatever an older record implies.
 
-- **`gh` was absent from the box** in every probe that looked for it — not on
-  `PATH`, and not under `find / -maxdepth 4 -name gh -type f` — and an earlier
-  routine found it present in two of five runs with no trigger setting explaining
-  the difference. Measured 2026-08-24, re-measured 2026-09-16
-  ([`dev_docs/research/2026-08-24-routine-claim-channel.md`](research/2026-08-24-routine-claim-channel.md))
-  and again 2026-09-21 as `command not found`.
+- **Repo-scoped `gh` REST serves a repo attached as a source.**
+  `gh api repos/bestdan/workflow-skills` and `.../labels` both returned correct
+  data, exit 0 (2026-09-21). The routine's `sources` list is therefore an **access
+  grant**, not just a checkout — do not trim it.
+- **GraphQL is not served.** `gh pr list` and `gh pr view` are GraphQL queries and
+  were refused `HTTP 403` (2026-09-07); no credential fixes that. Prefer
+  `gh api repos/{owner}/{repo}/…` anywhere the choice exists.
+- **Never gate on `gh auth status`.** Measured 2026-09-21: it reported
+  `The token in GH_TOKEN is invalid.` and **exited 0**, seconds before two REST
+  calls succeeded. The proxy replaces the credential. It fails in the direction of
+  a false negative, so a preflight built on it would call a working environment
+  broken. Probe the call you actually need — which is what assertion 4 does.
 - **Every label write in this handler goes through `gh`.**
   `commands/handlers/assets/gh-issue-state.py` shells out to the CLI, by design —
   the enum guarantee is the CLI's, and a raw REST write silently creates an unknown
@@ -120,12 +127,19 @@ run is the exact defect this runbook exists to prevent.
    `rev-parse --show-toplevel` agrees. Every step below runs from there.
 3. **The GitHub MCP answers.** Load it — `ToolSearch select:mcp__github__get_me` —
    and call `get_me`; it must return `bestdan`. If it does not, **stop and report**.
-4. **`gh` can read this repo.** Run `gh issue list --repo bestdan/workflow-skills
-   --limit 1` and record the verbatim result. This is the assertion the whole run
-   turns on, because every label write goes through the CLI:
+4. **`gh` can read this repo over REST.** Run
+   `gh api repos/bestdan/workflow-skills/labels?per_page=1` and record the verbatim
+   result. This is the assertion the whole run turns on, because every label write
+   goes through the CLI. Use **`gh api`**, not `gh issue list` — the latter is
+   GraphQL-backed, GraphQL is refused here, and gating on it would stop a healthy
+   run. Do not substitute `gh auth status`; it reports an invalid token and exits 0
+   while REST works.
    - **It works** → run steps 1, 2 and 3.
    - **`gh` is missing, or the call is refused** → run **nothing**. Report the
-     verbatim error and stop. Do not substitute raw `curl`, do not hand-write
+     verbatim error and stop. When `gh` is missing, also report whether
+     `/usr/local/share/gh-setup-receipt.txt` exists: present-but-no-`gh` indicts
+     the install, absent indicts the setup script, and the two have opposite
+     fixes. Do not substitute raw `curl`, do not hand-write
      labels over the MCP, and do not "just do step 3 without the label moves" —
      a delivery whose state transitions silently no-op leaves an issue claimed,
      in the wrong rung, with a PR nobody is watching. Record the result in

@@ -2,84 +2,95 @@
 created: 2026-09-21
 ---
 
-# Can the nightly gh-issue routine run in the cloud? Not yet — `gh` is absent
+# `gh` in a cloud routine: the setup script installs it, and repo-scoped REST serves
 
-**Measured 2026-09-21** inside a scheduled routine on environment
-`env_01KURKZo3LcfRKBaEZWcbsrk` (`Linear Tidy Routine`), session
-`cse_011b38RxrvfmYvwiKYRTHWs4`, against the `bestdan/nightly-gh-issue-routine`
-branch. A dated snapshot: it records what was true that day and is allowed to go
-stale.
+**Measured 2026-09-21** across three runs of one probe on environment
+`env_01KURKZo3LcfRKBaEZWcbsrk`, varying one thing at a time. A dated snapshot: it
+records what was true that day and is allowed to go stale.
 
-## The question
+Two findings, both of which settle questions older records left open:
 
-[`dev_docs/nightly-gh-issue-routine.md`](../nightly-gh-issue-routine.md) stands up a
-nightly routine over this repo's board. Its step 0 assertion 4 turns the whole run on
-whether `gh` can read the repo, because every label write in the handler shells out to
-the CLI (`commands/handlers/assets/gh-issue-state.py`). `gh` had been measured absent
-here on 2026-08-24 and present in two of five runs of an earlier routine, unexplained.
-This probe settles it for this environment.
-
-Read-only: nine checks, no `--apply`, no label write, no issue or PR touched, and the
-one push was `--dry-run`.
-
-## What was measured
-
-| # | Command                                                        | Exit  | Verbatim result                                               |
-| - | -------------------------------------------------------------- | ----- | ------------------------------------------------------------- |
-| 1 | `claude plugin list`                                           | 0     | `workflow-skills@workflow-skills Version: 2.66.0 … √ enabled` |
-| 2 | `command -v gh` / `gh --version`                               | 1/127 | `/bin/bash: line 1: gh: command not found`                    |
-| 3 | `gh auth status`                                               | 127   | `/bin/bash: line 1: gh: command not found`                    |
-| 4 | `gh issue list --repo bestdan/workflow-skills`                 | 127   | `/bin/bash: line 1: gh: command not found`                    |
-| 5 | `gh label list --repo bestdan/workflow-skills`                 | 127   | `/bin/bash: line 1: gh: command not found`                    |
-| 6 | `mcp__github__get_me`                                          | —     | `{"login":"bestdan","id":2766380, …}`                         |
-| 7 | `push --dry-run origin HEAD:refs/heads/zz-probe-never-created` | 0     | `* [new branch] HEAD -> zz-probe-never-created`               |
-| 8 | `echo TMPDIR / CLAUDE_PLUGIN_ROOT`, `ls -d /tmp/claude`        | 0/2   | `TMPDIR=[] PLUGIN_ROOT=[]`, `No such file or directory`       |
-| 9 | `python3 --version`                                            | 0     | `Python 3.11.15`                                              |
-
-## The three verdicts
-
-- **The plugin's verbs can run here** (check 1). The environment's setup script
-  installs and enables `workflow-skills` before the agent starts, at the version
-  `main` was on. `agent-guidance` and `papercuts` come with it.
-- **Labels cannot be written here** (checks 2–5). `gh` is not on the box at all — this
-  is `command not found`, not a credential or proxy refusal, so nothing about tokens or
-  the egress proxy is being measured. Every `status:`/`auto:`/`prio:`/`est:` transition
-  the handler makes goes through it.
-- **Work could be pushed back here** (check 7). Push auth resolves and the dry run
-  reports the ref it _would_ create. Nothing was created; `zz-probe-never-created` does
-  not exist. This closes the second of the two risks the runbook opened, and it closes
-  it in the good direction.
-
-## What this means for the routine
-
-Assertion 4 fires, so the nightly stops before step 1 and does nothing, every night.
-**That is the preflight working, not failing** — the alternative it was written to
-prevent is a run that improvises label writes over another channel and leaves an issue
-claimed, in the wrong rung, with a PR nobody is watching.
-
-Three things follow, and none of them is "retry it":
-
-1. **`gh` being absent is not the same finding as the 403s** in
+1. **`gh` is installed by the environment's setup script, not by attaching
+   `bestdan/dotfiles` as a source.** Attaching dotfiles does **not** fire its
+   `.claude/hooks/session-start.sh`.
+2. **Repo-scoped `gh` REST serves a repo attached as a source** — `HTTP 200`,
+   correct data. This is the question
    [`2026-09-07-cloud-routine-plugins-and-gh.md`](2026-09-07-cloud-routine-plugins-and-gh.md)
-   and [`2026-08-24-routine-claim-channel.md`](2026-08-24-routine-claim-channel.md).
-   Those measured what a _present_ `gh` could reach through the proxy. Installing `gh`
-   in the setup script would make those findings load-bearing again — it does not
-   follow from this record that a present `gh` would work.
-2. **The raw-REST channel is measured permissive for this write.** A routine `PATCH`ed
-   an issue's labels over `curl` and got `HTTP 200` (2026-09-17, recorded in the
-   claim-channel file). `gh-issue-state.py` already validates the full label set locally
-   against `labels.yml` before any network call, so the enum guarantee the CLI provides
-   is not the only one available — which makes a REST channel in that helper a coherent
-   option rather than a workaround. It is unbuilt.
-3. **`/git/refs` stays closed** (403, measured twice), so the claim lock remains the
-   comment-token election whatever happens to the label channel.
-   [`commands/handlers/claim-lock.md`](../../commands/handlers/claim-lock.md) owns that
-   rule and is unaffected by this record.
+   named as "still the unanswered one", blocked three times.
 
-## What this record does not say
+## The three runs
 
-It does not say `gh` is absent from cloud routines in general — it says it was absent
-from this environment on this date, which is the third data point in a series that has
-also seen it present. It does not say the setup script cannot install it. And it says
-nothing about whether an installed `gh` would authenticate, which is a separate
-measurement nobody has made.
+Each probe was read-only: no `--apply`, no label write, no issue or PR touched, and
+the only push was `--dry-run`.
+
+| Run                 | Sources                                   | Setup script      | `gh`       | `just` / `shellcheck` |
+| ------------------- | ----------------------------------------- | ----------------- | ---------- | --------------------- |
+| `cse_011b38Rxrvfm…` | workflow-skills                           | pre-change        | **absent** | absent                |
+| `cse_01FRwcpxdtcQ…` | workflow-skills, dotfiles, agent-guidance | pre-change        | **absent** | absent                |
+| `cse_015pk8QjYd6L…` | workflow-skills, dotfiles, agent-guidance | **installs `gh`** | **2.45.0** | absent                |
+
+Run 2 is the discriminating one. The 09-07 record observed that every `gh`-present
+run had sourced `dotfiles`, whose `session-start.sh` apt-installs `shellcheck`, `zsh`
+and `gh` under `CLAUDE_CODE_REMOTE=true`, and reasoned from that to the source repo
+as the mechanism. Run 2 attaches dotfiles and `gh` is **still** absent — and so are
+`just` and `shellcheck`, the rest of that hook's payload. All three missing together
+means the hook never ran at all. **Attaching a repo as a source does not run its
+`SessionStart` hook**; the correlation was real and the causal reading was not.
+
+Run 3 changes only the setup script, and `just`/`shellcheck` stay absent — so `gh`'s
+arrival is attributable to that block and nothing else.
+
+## What run 3 measured
+
+| # | Command                                                | Exit  | Verbatim result                                                                                      |
+| - | ------------------------------------------------------ | ----- | ---------------------------------------------------------------------------------------------------- |
+| 1 | `cat /usr/local/share/gh-setup-receipt.txt`            | 0     | `written_at=2026-09-21T12:56:05Z whoami=root uid=0 gh_path=/usr/bin/gh gh_version=gh version 2.45.0` |
+| 2 | `command -v gh` / `gh --version`                       | 0     | `/usr/bin/gh` — `gh version 2.45.0 (2025-07-18 Ubuntu 2.45.0-1ubuntu0.3)`                            |
+| 3 | `command -v just` / `command -v shellcheck`            | 1/1   | both empty                                                                                           |
+| 4 | `gh api repos/bestdan/workflow-skills --jq .full_name` | 0     | `bestdan/workflow-skills`                                                                            |
+| 5 | `gh api repos/bestdan/workflow-skills/labels`          | 0     | `auto-eligible` `auto:eligible` `auto:human-review-needed` `bug` `dependencies`                      |
+| 6 | `gh auth status`                                       | **0** | `X Failed to log in to github.com using token (GH_TOKEN)` / `The token in GH_TOKEN is invalid.`      |
+| 7 | `gh-issue-state.py --help`                             | 0     | argparse usage                                                                                       |
+| — | `push --dry-run` (run 2)                               | 0     | `* [new branch] HEAD -> zz-probe-never-created`                                                      |
+
+## The receipt is the instrument, not decoration
+
+`gh` had been attempted in the setup script before, and the attempt "didn't work" with
+no way to tell why. A bare `command -v gh` cannot distinguish **the setup script never
+ran** from **it ran and its installs don't reach the session** — and those have
+opposite fixes. The receipt splits them: its presence proves the script ran and that a
+file it wrote survived into the session, so a receipt beside a missing `gh` would
+indict apt, while no receipt at all would indict the script. Run 3 produced both, which
+is why one run settled it.
+
+The receipt also records `whoami=root uid=0`, which is why the `$SUDO` fallback in the
+block is untested here rather than confirmed unnecessary.
+
+## `gh auth status` is worse than worthless — measured, not inherited
+
+It reported the token **invalid** and **exited 0**, while checks 4 and 5 succeeded
+seconds later. The proxy replaces the credential. The 09-07 record says never to gate
+on `gh`'s exit code; run 3 shows the body lies too, in the direction of a false
+negative. **Probe the call you actually need.** A preflight gating on `gh auth status`
+would have declared this environment broken while it was working.
+
+## What this does not say
+
+- It does not say the dotfiles `SessionStart` hook never works anywhere — only that
+  attaching dotfiles as a source did not fire it in these runs.
+- It does not say **writes** work. Every call above is a read. The `/git/refs` 403 in
+  [`2026-08-24-routine-claim-channel.md`](2026-08-24-routine-claim-channel.md) is
+  untouched, so the claim lock remains the comment-token election
+  ([`commands/handlers/claim-lock.md`](../../commands/handlers/claim-lock.md)).
+- It does not say GraphQL works. Checks 4 and 5 are REST by construction; `gh pr list`
+  and `gh pr view` were refused as GraphQL on 09-07 and were not re-tried here.
+- `gh` 2.45.0 is Ubuntu's package, not the latest release. Nothing here measures a
+  subcommand that needs a newer one.
+
+## Incidental: a label outside the vocabulary
+
+Check 5 returned both `auto-eligible` and `auto:eligible`. Only the colon form is in
+`commands/handlers/assets/labels.yml`; the hyphenated one is the Linear-side spelling
+from finplan's nightly job. It is inert — the write helper owns only its four
+namespaces and carries everything else forward — but it reads as a rung to a human
+scanning the board, and `carried_rungs()` will not count it.
