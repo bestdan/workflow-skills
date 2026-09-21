@@ -173,8 +173,8 @@ and an eval row is missing. Out of scope for this note; worth a separate look.
 #### The question the Choice cannot ask: should any skill fire?
 
 Everything above measures **which** skill wins. It never measures **whether one
-should**, and a Choice structurally cannot: argmax over 16 options returns one of the
-16 for a prompt that should load nothing, so zero misfires and clean margins are
+should**, and a Choice structurally cannot: argmax over the roster returns one of its
+members for a prompt that should load nothing, so zero misfires and clean margins are
 compatible with the router firing confidently on every off-topic message it is handed.
 In Jev's vocabulary that second question is a Noul — "does this prompt need a skill at
 all?" — and it now rides the same request as the Choice, answered in parallel and in

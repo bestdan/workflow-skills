@@ -12,9 +12,9 @@ degrade first if a description drifted.
 
 It asks two questions per prompt, in one request. The **Choice** above is the original.
 The **Noul** beside it — "should the agent load one of these skills at all?" — closes
-the gap the Choice cannot see: an argmax over 16 options returns one of the 16 even for
-a prompt that should load nothing, so a clean margin is compatible with the router
-firing confidently on every off-topic message it is handed. The Noul is what a
+the gap the Choice cannot see: an argmax over the roster returns one of its members
+even for a prompt that should load nothing, so a clean margin is compatible with the
+router firing confidently on every off-topic message it is handed. The Noul is what a
 false-positive rate is measured from.
 
 Three suites:
@@ -30,7 +30,7 @@ Three suites:
               cannot express "none of them". See NEGATIVE_PROBES for how they were
               written and what that costs the result.
 
-The Choice's `state` is the bare prompt and its `criteria` are the 16 descriptions,
+The Choice's `state` is the bare prompt and its `criteria` are the skill descriptions,
 both unchanged by the Noul: the roster the Noul needs lives in the Noul's own
 `instructions` rather than in the shared state, so adding it leaves the Choice request
 byte-identical to the one the record's section-1 numbers were measured from. Questions
@@ -83,9 +83,12 @@ DEFAULT_MARGIN = 0.10
 # A Noul is a probability, and 0.5 is where "more likely yes than no" falls. Nothing
 # subtler is defensible here: this measurement has no calibration data to tune a
 # threshold against, and picking one that flattered the result would be the whole
-# failure mode. `--noul-threshold` is how you re-cut the same records at another value,
-# and the report prints the rate at a second threshold so the choice is visible rather
-# than load-bearing.
+# failure mode. `--noul-threshold` moves the threshold for a run; it cannot re-cut the
+# same records, since every invocation issues fresh nondeterministic calls, so comparing
+# two invocations conflates threshold sensitivity with run-to-run variance. Re-cutting is
+# done offline from the per-row `needs_skill` scores in one `--json` output, which is how
+# the record's threshold-invariance claim was arrived at. The report prints the rate at
+# the selected threshold only.
 DEFAULT_NEEDS_SKILL = 0.5
 PLACEHOLDER = "REPLACE_ME"
 LOCAL_CONFIG = Path("dev_docs") / "tasks" / ".task-config.local.yml"
@@ -131,7 +134,7 @@ AMBIGUOUS_PROBES: list[tuple[str, str]] = [
 # Prompts that should load NO skill. The ground truth neither suite above contains:
 # every `evals/manifest.tsv` row names an expected skill, and the file's own header says
 # the eval "asserts Claude auto-invokes the expected skill", so it cannot express "none
-# of them" at all. A Choice over 16 options cannot either — argmax always returns one —
+# of them" at all. A Choice over the roster cannot either — argmax always returns one —
 # which is why measuring a false-positive rate needed this list written before it needed
 # any code.
 #
@@ -273,7 +276,7 @@ def noul_instructions(criteria: dict[str, str]) -> str:
 
     The roster goes HERE rather than into the shared `state`, and that placement is the
     whole reason this could be added without re-opening section 1. `state` is shared by
-    every question in a request, so putting 16 descriptions there would have changed the
+    every question in a request, so putting the whole roster there would have changed the
     Choice's input — and the Choice's numbers are what the record already reports.
     A question's own `instructions` are not shared, so the Choice sees exactly what it
     saw before: the bare prompt as state, the descriptions as `criteria`.
