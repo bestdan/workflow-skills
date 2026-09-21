@@ -154,20 +154,36 @@ since the `<slug>`/`<identifier>` this skill was invoked with is handler-specifi
 a `PRE-12` cannot be delivered by `gh-issue`. What the re-read is for is the keys
 under the already-chosen handler, `gh-issue.branch_prefix` above all.
 
-**Read the committed half from `<base>` itself, not from the working tree.** The
-fetch above updates a ref; it does not touch the index or the working tree, so a
-re-`cat` of the checked-out file returns byte-identical content and catches
-nothing. What eventually brings the new config into the tree is the branch step 2
-cuts from the freshly fetched base — which is after the name has been built. So:
+**Where to read it depends on whether it is tracked, and both setups are normal.**
+Ask, rather than assuming either:
 
 ```bash
-git show <base>:dev_docs/tasks/.task-config.yml          # committed config, as of the fetched base
-cat "$ROOT/dev_docs/tasks/.task-config.local.yml" 2>/dev/null   # optional override — untracked, tree only
+git cat-file -e <base>:dev_docs/tasks/.task-config.yml 2>/dev/null \
+  && git show <base>:dev_docs/tasks/.task-config.yml \
+  || cat "$ROOT/dev_docs/tasks/.task-config.yml" 2>/dev/null
+cat "$ROOT/dev_docs/tasks/.task-config.local.yml" 2>/dev/null   # override — always untracked
 ```
 
-Overlay them as step 0 does. Keep the second one a `cat`: the override is
-gitignored, so it has no blob in `<base>` and a `git show` on it fails — swapping
-both reads for `git show` silently drops the local override.
+Overlay them as step 0 does. Why each branch is the right read:
+
+- **Tracked** (`repo-pr`, and this plugin's own repo): the fetch can move the
+  file, so `<base>` is the only source that sees the new value. A re-`cat` of the
+  checked-out file returns byte-identical content and catches nothing — the fetch
+  updates a ref, not the index or the working tree, and what finally brings the
+  new config into the tree is the branch step 2 cuts from the fetched base, after
+  the name has been built.
+- **Untracked** (`gh-issue`, `jira`, `linear`): `/task-config` puts
+  `dev_docs/tasks/` in the repo's local exclude for every handler except
+  `repo-pr` (`commands/task-config.md`), so there is no blob in `<base>` at all.
+  A fetch cannot move an untracked file, so there is nothing to go stale and the
+  working tree is both the only and the correct source.
+
+**Do not skip the existence test and just `git show`.** On an untracked config it
+fails with `path ... does not exist in <base>`, and a caller that reads that as
+"no config" resolves an empty `branch_prefix` and locks `task-<n>` — reproducing
+the exact split this step exists to prevent, in the setup the `gh-issue` handler
+sets up by default. Keep the override on a `cat` for the same reason: it is
+gitignored by construction, so a `git show` on it always fails.
 
 The key that makes this load-bearing rather than tidy is `gh-issue.branch_prefix`:
 it is the claim **lock ref**, not just a branch name. A prefix read before the
