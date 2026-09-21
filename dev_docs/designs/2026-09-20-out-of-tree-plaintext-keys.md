@@ -46,7 +46,7 @@ install -m 600 /dev/null ~/.config/workflow-skills/typesafe_api_key
 # paste the key in with an editor; never echo it into the shell
 
 # per invocation
-TYPESAFE_API_KEY=$(cat ~/.config/workflow-skills/typesafe_api_key) <command>
+TYPESAFE_API_KEY="$(cat ~/.config/workflow-skills/typesafe_api_key)" <command>
 ```
 
 `$(cat …)` rather than bash's `$(<…)` shorthand, deliberately. Measured 2026-09-20 on

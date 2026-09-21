@@ -207,6 +207,13 @@ def extract_key(config_text: str) -> tuple[str, str] | None:
     third party. Recovering beats refusing here — the user's evident intent is to
     resolve it, and resolving lands it at rung 3 where a pointer belongs — but it is
     still a malformed config, so it says so on stderr rather than fixing it silently.
+
+    The recovery returns before `api_key_ref` is consulted, so with a pointer in both
+    fields the misplaced one wins. That is deliberate rather than an oversight: the
+    config is malformed either way, the warning names it, and in the case that
+    actually happens the two pointers are the same pointer. Left as it is rather than
+    restructured, because this file is a frozen artifact amended once and narrowly —
+    see the record's README.
     """
     block = typesafe_block(config_text)
     if not block:
