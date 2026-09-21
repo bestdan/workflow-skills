@@ -253,11 +253,18 @@ parallel-and-isolated evaluation, taken on the vendor's word rather than measure
 **What this does not establish.** The negative prompts were **authored, not sampled.**
 The issue behind this measurement asked for sampled ones and it was right to; the only
 corpus on the machine that ran it is the operator's own Claude Code transcripts, and
-committing real messages from those to a public repo was declined. So the set is one
+that read was never obtained. **Not because it was refused on the merits** — an
+overbroad OS permission prompt was rejected, which settled nothing about the research
+question and is recorded here so the next attempt does not read it as a closed door.
+A correctly scoped request reads the `user`-role message text from
+`~/.claude/projects/*/*.jsonl` and nothing else. So the set is one
 person's idea of what an off-topic message looks like — which is the exact bias a
 false-positive rate exists to catch, and the reason the headline number is 0% on the
 half that idea is most likely to have got right and 16.7% on the half it is most likely
-to have got wrong. A sampled set is the obvious next measurement. The per-row records
+to have got wrong. A sampled set is the obvious next measurement, and the publishing
+half of this limit is avoidable rather than blocking: the corpus can live at a fixed
+path outside every checkout, the way the operator key already does, with only the rate
+and the tier split committed. The per-row records
 for this measurement are retained in
 [`references/noul-records-2026-09-21.json`](references/noul-records-2026-09-21.json), so
 a reader who disagrees with a label can re-cut the rate without re-running anything —
