@@ -1,0 +1,186 @@
+{
+  "runs": [
+    {
+      "run": 1,
+      "suite_wall_s": 752.8482561339624,
+      "exit": 1,
+      "cases": [
+        {
+          "skill": "plan-with-docs",
+          "prompt": "prompts/plan-with-docs.txt",
+          "latency_s": 102.55983115383424,
+          "passed": true
+        },
+        {
+          "skill": "co-review",
+          "prompt": "prompts/co-review.txt",
+          "latency_s": 48.76934967190027,
+          "passed": true
+        },
+        {
+          "skill": "review-facts",
+          "prompt": "prompts/review-facts.txt",
+          "latency_s": 26.643811752088368,
+          "passed": true
+        },
+        {
+          "skill": "task",
+          "prompt": "prompts/task.txt",
+          "latency_s": 34.76077811094001,
+          "passed": false
+        },
+        {
+          "skill": "task",
+          "prompt": "prompts/task-named-issue.txt",
+          "latency_s": 30.245805931044742,
+          "passed": true
+        },
+        {
+          "skill": "analysis-pipeline",
+          "prompt": "prompts/analysis-pipeline.txt",
+          "latency_s": 28.64495084504597,
+          "passed": true
+        },
+        {
+          "skill": "break-down-task",
+          "prompt": "prompts/break-down-task.txt",
+          "latency_s": 26.345860439818352,
+          "passed": true
+        },
+        {
+          "skill": "orchestrate-coders",
+          "prompt": "prompts/orchestrate-coders.txt",
+          "latency_s": 39.03865074412897,
+          "passed": false
+        },
+        {
+          "skill": "select-coder",
+          "prompt": "prompts/select-coder.txt",
+          "latency_s": 24.31381816114299,
+          "passed": false
+        },
+        {
+          "skill": "assess-task",
+          "prompt": "prompts/assess-task.txt",
+          "latency_s": 14.264938317006454,
+          "passed": true
+        },
+        {
+          "skill": "tutor",
+          "prompt": "prompts/tutor.txt",
+          "latency_s": 32.94172564288601,
+          "passed": false
+        },
+        {
+          "skill": "research-spike",
+          "prompt": "prompts/research-spike.txt",
+          "latency_s": 20.750855496153235,
+          "passed": true
+        },
+        {
+          "skill": "research-spike-tutorial",
+          "prompt": "prompts/research-spike-tutorial.txt",
+          "latency_s": 23.066416695015505,
+          "passed": true
+        },
+        {
+          "skill": "local-review",
+          "prompt": "prompts/local-review.txt",
+          "latency_s": 300.45701584685594,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "run": 2,
+      "suite_wall_s": 983.443183994852,
+      "exit": 1,
+      "cases": [
+        {
+          "skill": "plan-with-docs",
+          "prompt": "prompts/plan-with-docs.txt",
+          "latency_s": 187.6125602410175,
+          "passed": true
+        },
+        {
+          "skill": "co-review",
+          "prompt": "prompts/co-review.txt",
+          "latency_s": 48.75534840300679,
+          "passed": true
+        },
+        {
+          "skill": "review-facts",
+          "prompt": "prompts/review-facts.txt",
+          "latency_s": 128.1636015640106,
+          "passed": true
+        },
+        {
+          "skill": "task",
+          "prompt": "prompts/task.txt",
+          "latency_s": 31.012372371042147,
+          "passed": true
+        },
+        {
+          "skill": "task",
+          "prompt": "prompts/task-named-issue.txt",
+          "latency_s": 40.78036481887102,
+          "passed": true
+        },
+        {
+          "skill": "analysis-pipeline",
+          "prompt": "prompts/analysis-pipeline.txt",
+          "latency_s": 26.566605607047677,
+          "passed": true
+        },
+        {
+          "skill": "break-down-task",
+          "prompt": "prompts/break-down-task.txt",
+          "latency_s": 27.970279530854896,
+          "passed": true
+        },
+        {
+          "skill": "orchestrate-coders",
+          "prompt": "prompts/orchestrate-coders.txt",
+          "latency_s": 26.115738426102325,
+          "passed": false
+        },
+        {
+          "skill": "select-coder",
+          "prompt": "prompts/select-coder.txt",
+          "latency_s": 53.18268670095131,
+          "passed": false
+        },
+        {
+          "skill": "assess-task",
+          "prompt": "prompts/assess-task.txt",
+          "latency_s": 24.479108773870394,
+          "passed": true
+        },
+        {
+          "skill": "tutor",
+          "prompt": "prompts/tutor.txt",
+          "latency_s": 28.471664998913184,
+          "passed": true
+        },
+        {
+          "skill": "research-spike",
+          "prompt": "prompts/research-spike.txt",
+          "latency_s": 32.46848939685151,
+          "passed": true
+        },
+        {
+          "skill": "research-spike-tutorial",
+          "prompt": "prompts/research-spike-tutorial.txt",
+          "latency_s": 27.342198432190344,
+          "passed": true
+        },
+        {
+          "skill": "local-review",
+          "prompt": "prompts/local-review.txt",
+          "latency_s": 300.47533527808264,
+          "passed": true
+        }
+      ]
+    }
+  ]
+}

@@ -621,6 +621,69 @@ class RunSuiteScoreToLabelTests(unittest.TestCase):
         self.assertIsNone(self._row(0.10, False)["tier"])
 
 
+class LatencySummaryTests(unittest.TestCase):
+    """The summary the latency report is built from.
+
+    `total` is the field the decision rests on — a serial suite's wall clock — so it is
+    pinned separately from the per-request figures rather than trusted to follow from
+    them.
+    """
+
+    def test_an_empty_run_summarises_to_n_zero_and_nothing_else(self):
+        """A report over zero requests has to print a row, not divide by zero."""
+        self.assertEqual(jev.latency_summary([]), {"n": 0})
+
+    def test_median_mean_and_extremes_come_from_the_values(self):
+        s = jev.latency_summary([0.4, 0.2, 0.9])
+        self.assertAlmostEqual(s["median"], 0.4)
+        self.assertAlmostEqual(s["mean"], 0.5)
+        self.assertAlmostEqual(s["min"], 0.2)
+        self.assertAlmostEqual(s["max"], 0.9)
+        self.assertEqual(s["n"], 3)
+
+    def test_total_is_the_serial_wall_clock_not_the_mean(self):
+        """One slow request moves the suite's total by its whole cost. A total computed
+        as mean x n would agree here; one that silently dropped a value would not."""
+        self.assertAlmostEqual(jev.latency_summary([0.5, 0.5, 4.0])["total"], 5.0)
+
+    def test_input_order_does_not_change_the_summary(self):
+        self.assertEqual(
+            jev.latency_summary([0.9, 0.2, 0.4]), jev.latency_summary([0.2, 0.4, 0.9])
+        )
+
+
+class RunSuiteLatencyTests(unittest.TestCase):
+    """That a record carries the round trip at all.
+
+    `report_latency` skips any record without `latency_s`, so a dropped field would
+    empty the report rather than fail it — the one shape of defect a report cannot show
+    you.
+    """
+
+    def test_every_record_carries_a_latency(self):
+        def fake_ask(key, state, criteria, model=jev.MODEL):
+            return {
+                "answers": {
+                    "skill": {"probabilities": {"alpha": 0.7, "beta": 0.3}},
+                    "needs_skill": {"noul": 0.9},
+                },
+                "usage": {"input_tokens": 11},
+            }
+
+        with unittest.mock.patch.object(jev, "ask", fake_ask):
+            with contextlib.redirect_stderr(io.StringIO()):
+                out = jev.run_suite(
+                    "k",
+                    {"alpha": "Use when alpha."},
+                    [("alpha", "a prompt"), ("alpha", "another prompt")],
+                    jev.DEFAULT_MARGIN,
+                    True,
+                )
+        for row in out["results"]:
+            self.assertIn("latency_s", row)
+            self.assertGreaterEqual(row["latency_s"], 0.0)
+
+
 class NoulThresholdRangeTests(unittest.TestCase):
     """`--noul-threshold` is a probability, and argparse's `type=float` is not.
 

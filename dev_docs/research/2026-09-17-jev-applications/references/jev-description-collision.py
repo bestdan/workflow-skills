@@ -69,8 +69,10 @@ import argparse
 import json
 import os
 import re
+import statistics
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -598,7 +600,13 @@ def run_suite(
     """
     results, tokens = [], 0
     for label, prompt in rows:
+        # Wall clock around the one request, which is what a caller would wait for.
+        # It is the round trip, not the model's own service time: the API publishes no
+        # latency figure, so a number measured from here is the only one available and
+        # it carries this host's network on top of whatever the model costs.
+        started = time.perf_counter()
         data = ask(key, prompt, criteria, model)
+        latency_s = time.perf_counter() - started
         answer = data["answers"]["skill"]
         winner, p_win, runner, p_run, margin = rank(answer["probabilities"])
         noul = data["answers"]["needs_skill"]["noul"]
@@ -624,6 +632,7 @@ def run_suite(
             # scores well by saying "no" to everything cannot read as a good result.
             "false_positive": fired and not needs_skill_truth,
             "false_negative": (not fired) and needs_skill_truth,
+            "latency_s": latency_s,
         }
         results.append(record)
 
@@ -774,6 +783,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"runs:       {args.runs}")
     report_choice(passes, args.margin)
     report_noul(passes, args.noul_threshold)
+    report_latency(passes)
     print(f"tokens: {tokens} in   (~${tokens / 1e6 * 0.042:.4f})")
     return 0
 
@@ -790,6 +800,57 @@ def rate_line(name: str, hits: list[int], totals: list[int]) -> str:
     spread = ", ".join(str(h) for h in hits)
     per_run = f"  (per run: {spread})" if len(hits) > 1 else ""
     return f"{name} {sum(hits)}/{total} = {pct}{per_run}"
+
+
+def latency_summary(values: list[float]) -> dict:
+    """Per-request round trip, summarised. Empty input summarises to `n: 0` and nothing
+    else, so a report over zero requests prints a row rather than dividing by zero.
+
+    The median leads and the max is carried beside it because a caller waiting on a
+    suite waits on the sum, and one slow request moves the sum more than it moves the
+    mean. `total` is that sum: the suite's wall clock when the requests are issued
+    serially, which is how this instrument issues them.
+    """
+    if not values:
+        return {"n": 0}
+    ordered = sorted(values)
+    return {
+        "n": len(ordered),
+        "median": statistics.median(ordered),
+        "mean": statistics.fmean(ordered),
+        "min": ordered[0],
+        "max": ordered[-1],
+        "total": sum(ordered),
+    }
+
+
+def report_latency(passes: list[dict]) -> None:
+    """One row per pass, then the pooled per-request figure.
+
+    Per-pass totals are printed rather than only a pooled number for the reason
+    `rate_line` gives: the spread is the story, and a mean over four passes hides a
+    slow one as convincingly as a single pass hides everything.
+    """
+    per_pass = [
+        [r["latency_s"] for r in p["records"] if "latency_s" in r] for p in passes
+    ]
+    pooled = latency_summary([v for run in per_pass for v in run])
+    if not pooled["n"]:
+        return
+    print("")
+    print("latency (round trip, this host):")
+    for i, run in enumerate(per_pass, 1):
+        s = latency_summary(run)
+        if s["n"]:
+            print(
+                f"  run {i}: {s['n']} requests   "
+                f"median {s['median']:.2f}s   max {s['max']:.2f}s   "
+                f"suite {s['total']:.1f}s serial"
+            )
+    print(
+        f"  pooled: {pooled['n']} requests   median {pooled['median']:.2f}s   "
+        f"mean {pooled['mean']:.2f}s   min {pooled['min']:.2f}s   max {pooled['max']:.2f}s"
+    )
 
 
 def report_choice(passes: list[dict], margin: float) -> None:

@@ -14,6 +14,13 @@ snapshots, not durable facts.
 model call to make a small judgment knows whether a typed call is the better tool,
 and knows the three places it plainly is.
 
+> [!NOTE]
+> 2026-09-21: no longer true of section 1. It was measured against the incumbent it
+> proposed replacing and adopted as a companion to that check rather than a
+> replacement for it — see
+> [`../../decisions/2026-09-21-jev-alongside-the-routing-evals.md`](../../decisions/2026-09-21-jev-alongside-the-routing-evals.md).
+> Every other section here remains unadopted.
+
 ## What Jev is, in one paragraph
 
 Jev takes a **state** (string or JSON) plus a map of typed **questions** and returns
@@ -270,6 +277,69 @@ for this measurement are retained in
 a reader who disagrees with a label can re-cut the rate without re-running anything —
 which is the only way to audit the rates above, since `--suite all --runs 4` draws a
 fresh nondeterministic sample rather than reproducing this one.
+
+#### What each side costs, and what the incumbent does that this cannot
+
+Everything above compares Jev against ground truth. Rule 1 of
+[`../../typed-model-calls.md`](../../typed-model-calls.md) says that is the wrong
+comparison: the question is whether it beats **what runs today**, which is
+`scripts/eval.sh` — one `claude -p` session per manifest row, up to six turns, serial,
+grepping the run log for a `Skill` invocation.
+
+**Measured 2026-09-21 on one Linux host, same 14 manifest rows, both sides.** Jev four
+passes; the eval harness twice, which is as many as its wall clock allows.
+
+|                           | `scripts/eval.sh`                   | Jev, same 14 rows            |
+| ------------------------- | ----------------------------------- | ---------------------------- |
+| suite wall clock, serial  | 752.8s and 983.4s                   | 6.9 – 7.9s over four passes  |
+| per case                  | median 30.6s, mean 62.0s            | median 0.50s, mean 0.52s     |
+| slowest case              | 300.5s — the harness's timeout cap  | 1.48s                        |
+| agreement with the labels | 10/14 then 12/14                    | 14/14 in each of four passes |
+| cost                      | 14 agent sessions; not metered here | $0.0029 per pass             |
+
+The suite gap is about **120×** on wall clock. The incumbent's own figure is a range
+rather than a number because the two runs differ by 230s, and its `local-review` row
+hit the 300s cap in both runs — it passed, so the cap is not a failure, but that row's
+latency is the cap rather than a completion and the mean carries it.
+
+Jev's dollar cost is metered; the incumbent's is **not measured here**. It ran against
+a logged-in CLI with no per-run token accounting, so this record says what it is — 14
+agent sessions with the whole plugin loaded — and quotes no figure for it.
+
+**The incumbent failed 4 of 14 and then 2 of 14, and that is the finding.** Two failed
+in both runs: `orchestrate-coders` and `select-coder`, each invoking **no skill at
+all**. Two flapped — `task` and `tutor` failed once and passed once, and the `task`
+failure invoked `add-task`, a neighbour inside the same family rather than a wrong
+answer of the kind the label implies.
+
+Jev reported clean on every one of those cases, in all four passes, at margins of 0.41
+and above. **That is not Jev being right where the harness was wrong. It is the two
+measuring different things**, and this run is the demonstration:
+
+- The Choice asks **which description wins** given that the roster is the option set.
+  It is conditioned on a skill firing, and cannot observe a session that loaded none.
+- The Noul asks **whether any skill should fire**, and answered yes on these rows — 0
+  false negatives across 56. It says what ought to happen, not what did.
+- `scripts/eval.sh` asks whether **Claude Code actually routed there**, with the plugin
+  loaded, tools available, and six turns to get distracted. That is the question the
+  two stable failures answer, and neither Jev question can reach it.
+
+So a clean Jev sweep is compatible with a skill that never fires in a real session,
+which is exactly the state `select-coder` and `orchestrate-coders` were in on the day
+both were measured. A description-discriminability check is not a routing check.
+
+One correlation is worth recording without being read as a finding: the tightest Jev
+margin in the whole run is `select-coder` vs `orchestrate-coders` at 0.41, and those
+are the two skills that failed to fire. Two cases is an observation. Whether a low
+margin predicts a real routing failure is the measurement that would turn it into
+something, and nothing here has made it.
+
+Both halves are retained, so neither table is a number read off a transcript:
+[`references/latency-records-2026-09-21.json`](references/latency-records-2026-09-21.json)
+(per-request round trips, four passes) and
+[`references/evals-timing-2026-09-21.json`](references/evals-timing-2026-09-21.json)
+(per-case wall clock and verdict, two runs). The decision this fed is
+[`../../decisions/2026-09-21-jev-alongside-the-routing-evals.md`](../../decisions/2026-09-21-jev-alongside-the-routing-evals.md).
 
 ### 2. The unbuilt output-quality evals — Class A
 

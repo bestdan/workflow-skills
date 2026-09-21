@@ -57,6 +57,26 @@ skill (tolerant of the `workflow-skills:` plugin prefix). Pattern adapted from
 `analysis-conventions` is intentionally absent: it's `user-invocable: false`
 (context-load only), so there's nothing to auto-route.
 
+## Companion check: description discriminability
+
+A typed model call scores the same 14 prompts against every skill `description` in
+about 7 seconds for ~$0.003, and reports two things this harness cannot: the **margin**
+between the winning description and the runner-up, and whether **any** skill should
+fire at all. Run it when a `description` changes — it catches drift long before a
+misfire, and it is cheap enough to run per-PR, which this harness is not.
+
+```sh
+D=dev_docs/research/2026-09-17-jev-applications/references
+python3 $D/jev-description-collision.py --suite manifest --runs 4   # needs a TypeSafe key
+```
+
+**It does not answer this harness's question, and a clean run is not evidence that
+routing works.** It scores whether the descriptions discriminate, given that a skill
+fires. It cannot see a session that loaded no skill at all — which is how
+`select-coder` and `orchestrate-coders` failed here on 2026-09-21 while the typed call
+reported 14/14. Neither check replaces the other. Why, and the measurement:
+[`dev_docs/decisions/2026-09-21-jev-alongside-the-routing-evals.md`](../dev_docs/decisions/2026-09-21-jev-alongside-the-routing-evals.md).
+
 ## Extension point: output-quality evals
 
 This harness only checks invocation, not whether Claude _followed_ the skill
