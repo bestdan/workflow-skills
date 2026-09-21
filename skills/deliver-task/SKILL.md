@@ -123,6 +123,10 @@ Overlay the local override on the committed config — mappings merge recursivel
 If a relative path doesn't resolve, find it with **Glob**
 (`**/commands/handlers/<name>.md`) and Read it.
 
+**This read is provisional.** `.task-config.yml` is a tracked file, so step 1's
+fetch can move it — resolve which handler file to read here, but do not carry any
+value out of this step into the claim. Step 1 owns that rule.
+
 ## 1. Fetch the base (before the claim)
 
 The claim step (below) acquires the work branch, so the base must be fresh
@@ -137,6 +141,23 @@ git fetch origin <base>:<base>          # default <base> = main
 
 On `stale`, stop and surface it (the work branch would start behind); on
 `unknown`, warn and proceed.
+
+**Then re-read the handler config — every value the claim uses is resolved
+_after_ this fetch, never before it.** `dev_docs/tasks/.task-config.yml` is
+tracked, so this fetch can change the config itself, and step 2 is the first
+consumer of its handler-specific keys. Re-run step 0's two `cat`s against the
+working tree as it stands now and resolve from **that** merged view.
+
+The key that makes this load-bearing rather than tidy is `gh-issue.branch_prefix`:
+it is the claim **lock ref**, not just a branch name. A prefix read before the
+fetch and used after it locks `task-<n>` where the current config says
+`<prefix>task-<n>` — so this session and a concurrent one each acquire a ref the
+other cannot see, and both conclude they won the claim. Nothing catches it: the
+pre-flight probe is built from the same mis-derived name, so it reports the issue
+free, and `/doctor` Check 1c flags only the inverse case. Recovery is not free
+either — renaming the branch afterwards closes the open PR. See
+`gh-issue-claim.md` → "Branch name", and #748 for the delivery this was measured
+on.
 
 ## 2. Claim (the handler's protocol, verbatim)
 

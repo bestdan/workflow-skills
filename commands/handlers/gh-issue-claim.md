@@ -27,6 +27,17 @@ session that passes the prefix and one that omits it then each acquire a ref the
 cannot see, and both conclude they won the claim. `/doctor` Check 1c flags the inverse —
 a repo whose branches carry a prefix its config does not name.
 
+**And the value is read as of the claim, not as of session start.** Resolving the key
+once, correctly, at the top of a session is not enough:
+`dev_docs/tasks/.task-config.yml` is tracked, so any fetch or pull between that read and
+the claim can change `branch_prefix` underneath it — and `/deliver-task` mandates exactly
+that ordering, fetching the base in its step 1 _before_ the claim acquires the work branch
+(`skills/deliver-task/SKILL.md`, which carries the re-read rule). A cached value produces
+the same split as a dropped `--prefix`, from a caller that did nothing wrong. So read the
+key from the working tree as it stands when you build the name, and use that one value for
+`branch-name`, `acquire`, `release`, **and the pre-flight probe** — which is derived from
+the same name and so cannot catch the error on its own.
+
 Three constraints meet here. `claim-lock.md` needs one deterministic name both racers
 compute the same way — which is why it is derived from the issue number and not from the
 title. The number must be **in** the name, so a branch or PR traces back to its issue.
@@ -215,7 +226,15 @@ Runs on the candidate **before "Judge feasibility" and "Claim the issue"**, on e
 
    If `git ls-remote` returns the ref, treat the issue as in flight: a non-empty `gh pr list` → `Skipped #<n>: open PR already exists (<url>)`; otherwise (branch exists, no PR yet) → `Skipped #<n>: remote branch <branch> already exists`.
 
-   This is the cheap read in front of the same ref the claim locks on — a trip here saves the full issue-body read and feasibility judgment. It is a probe, not the lock: the lock is the push (see `commands/handlers/claim-lock.md`).
+   This is the cheap read in front of the same ref the claim locks on — a trip here saves the full issue-body read and feasibility judgment. It is a probe, not the lock: the lock is the **creation** of that ref through the API, never a push (see `commands/handlers/claim-lock.md`, and step 2 below on why a push cannot serve).
+
+   **Also probe every other prefix shape — `<branch>` alone cannot detect a prefix disagreement.** Because this check is built from the same `<branch>` the claim then locks, a name derived from a stale or dropped `branch_prefix` makes it self-consistently wrong: it probes the wrong ref, finds nothing, and reports the issue free. One prefix-agnostic read closes that, matching the `task-<n>` tail under any prefix and none:
+
+   ```bash
+   git ls-remote --heads origin | grep -E 'refs/heads/(.*/)?task-<n>$'
+   ```
+
+   Compare what comes back against `<branch>`. A returned ref that is **not** `<branch>` is neither a free issue nor your own claim — it is a session working `#<n>` under a different prefix, which is the split "Branch name" describes. **Stop and report** `Skipped #<n>: <the returned ref> exists but the configured prefix gives <branch> — two sessions disagree about the lock ref`, and do not claim alongside it. Prefer the plain regex over an `ls-remote` glob pattern: `'*task-<n>'` relies on refspec tail-matching semantics, while the regex is exact about the shape it accepts.
 
 2. **Open PR by issue number.** The execute path titles PRs `<type>(scope): <description> [#<n>]`, so also catch a PR opened from an unlinked branch:
 
