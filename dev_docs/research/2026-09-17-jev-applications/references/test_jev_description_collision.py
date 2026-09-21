@@ -82,6 +82,115 @@ class CollisionTests(unittest.TestCase):
         self.assertFalse(jev.is_collision(0.16))
 
 
+class NeedsSkillThresholdTests(unittest.TestCase):
+    def test_the_threshold_itself_is_a_yes(self):
+        """Same boundary rule as is_collision, so the two questions round alike.
+
+        Jev returns exactly 0.50 often enough for the difference to decide rows.
+        """
+        self.assertTrue(jev.says_needs_skill(0.50, 0.50))
+
+    def test_below_the_threshold_is_a_no(self):
+        self.assertFalse(jev.says_needs_skill(0.49, 0.50))
+
+
+class NoulInstructionsTests(unittest.TestCase):
+    def test_every_description_appears_verbatim(self):
+        """A roster that drops a skill asks about a roster this repo does not ship.
+
+        The Choice would still be scored over all 16 via `criteria`, so the two
+        questions would silently be answering about different option sets.
+        """
+        crit = {"a": "Use when alpha.", "b": "Use when beta."}
+        text = jev.noul_instructions(crit)
+        for name, desc in crit.items():
+            self.assertIn(name, text)
+            self.assertIn(desc, text)
+
+    def test_the_roster_is_name_ordered_not_dict_ordered(self):
+        """Two runs must send byte-identical instructions, or they are not comparable."""
+        a = jev.noul_instructions({"z": "Zed.", "m": "Em."})
+        b = jev.noul_instructions({"m": "Em.", "z": "Zed."})
+        self.assertEqual(a, b)
+        self.assertLess(a.index("m: Em."), a.index("z: Zed."))
+
+    def test_the_real_roster_covers_every_skill(self):
+        files = {
+            str(p): p.read_text() for p in sorted((ROOT / "skills").glob("*/SKILL.md"))
+        }
+        crit = jev.parse_descriptions(files)
+        text = jev.noul_instructions(crit)
+        for name in crit:
+            self.assertIn(f"- {name}: ", text)
+
+
+class ChoiceRequestIsUnchangedTests(unittest.TestCase):
+    """The Noul must not disturb the Choice, or section 1 stops being reproducible.
+
+    The roster lives in the Noul's own `instructions` for exactly this reason. Putting
+    it in `state` — the obvious place, since state is shared — would change the Choice's
+    input, and the record's measured margins were taken with the bare prompt as state.
+    """
+
+    def _payload(self):
+        captured = {}
+
+        def fake(key, payload):
+            captured["payload"] = payload
+            return {"answers": {}}
+
+        with unittest.mock.patch.object(jev, "ask_payload", fake):
+            jev.ask("k", "a prompt", {"a": "Use when alpha."})
+        return captured["payload"]
+
+    def test_state_is_still_the_bare_prompt(self):
+        self.assertEqual(self._payload()["state"], "a prompt")
+
+    def test_the_choice_criteria_are_still_the_descriptions_alone(self):
+        choice = self._payload()["questions"]["skill"]
+        self.assertEqual(choice["criteria"], {"a": "Use when alpha."})
+        self.assertEqual(choice["type"], "choice")
+
+    def test_the_roster_is_not_in_the_shared_state(self):
+        self.assertNotIn("Use when alpha.", self._payload()["state"])
+
+    def test_the_noul_rides_the_same_request(self):
+        """One request, not two — the parallel-and-isolated property is the point."""
+        questions = self._payload()["questions"]
+        self.assertEqual(set(questions), {"skill", "needs_skill"})
+        self.assertEqual(questions["needs_skill"]["type"], "noul")
+
+
+class NegativeProbeTests(unittest.TestCase):
+    def test_labels_are_unique(self):
+        """main keys the tier map by label, so a duplicate silently loses a tier."""
+        labels = [label for _, label, _ in jev.NEGATIVE_PROBES]
+        self.assertEqual(len(labels), len(set(labels)))
+
+    def test_every_probe_carries_a_known_tier(self):
+        """The two tiers are reported separately; a typo would drop a row from both."""
+        for tier, label, _ in jev.NEGATIVE_PROBES:
+            self.assertIn(tier, ("plain", "near"), label)
+
+    def test_both_tiers_are_populated(self):
+        tiers = {tier for tier, _, _ in jev.NEGATIVE_PROBES}
+        self.assertEqual(tiers, {"plain", "near"})
+
+    def test_no_negative_prompt_names_a_skill(self):
+        """A prompt naming its own skill measures nothing.
+
+        `evals/manifest.tsv`'s header states that rule for the positive cases and
+        nothing enforces it there; the negative set gets the enforcement.
+        """
+        files = {
+            str(p): p.read_text() for p in sorted((ROOT / "skills").glob("*/SKILL.md"))
+        }
+        names = set(jev.parse_descriptions(files))
+        for _, label, prompt in jev.NEGATIVE_PROBES:
+            for name in names:
+                self.assertNotIn(name, prompt.lower(), label)
+
+
 class DescriptionTests(unittest.TestCase):
     def test_folded_scalar_is_joined_into_one_line(self):
         text = (
