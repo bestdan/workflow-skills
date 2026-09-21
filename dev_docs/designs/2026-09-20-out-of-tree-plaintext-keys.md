@@ -123,11 +123,15 @@ It applies to any credential the contract covers. `linear.api_key` and
 called with a root pointing at an empty temporary directory, it still returned
 `/home/dan/src/workflow-skills/dev_docs/tasks/.task-config.local.yml`, because the
 second path is computed from `git rev-parse --git-common-dir` rather than from the
-root. From a linked worktree, **editing the worktree's own copy does nothing** — the
-main checkout's copy is what is read, and rung 0 wins from there.
+root. That measurement shows the main checkout's copy is **also** scanned; it cannot
+show the worktree's own copy is skipped, because the empty root had none. Both are
+scanned, and **the checkout you are standing in is read first** — `local_config_paths`
+returns `[root, main]`, filtered to the ones that exist, and `resolve_key` returns on
+the first raw hit. So a worktree's own copy shadows the main checkout's, and a raw
+value in either one wins over rung 1.
 
 So the instruction is not "delete the line from the local config". It is **delete it
-from every copy the ladder scans, which includes the main checkout's**.
+from every copy the ladder scans — this checkout's and the main checkout's**.
 
 Verify by running the consumer with the variable unset. What counts as a pass depends
 on what else is configured, and "no key" is the right answer in only one of the two
@@ -181,9 +185,10 @@ refuses on its own grounds.
 - **Where should the file live?** `~/.config/<tool>/<name>` follows XDG and is what
   the example uses. `nightly-linear-tidy.sh` has its own `CREDS_FILE` convention;
   if these should be one path, that is a dotfiles change, not a change here.
-- **Should `auth_key_access.md` recommend this, or only describe it?** The contract's
-  Plaintext-keys section currently presents the two shapes neutrally. Adding a third
-  and endorsing it is a stronger edit than adding a third and leaving the choice open.
+- ~~**Should `auth_key_access.md` recommend this, or only describe it?**~~ Resolved in
+  this change: the contract recommends it. Its
+  [Three shapes](../auth_key_access.md#three-shapes-and-which-to-pick) table names this
+  one "the default worth reaching for" while leaving all three supported.
 - **Is a per-project wrapper script worth shipping**, or does each operator write
   their own? Shipping one makes the friction argument moot and the "not an export"
   property harder to lose by accident.

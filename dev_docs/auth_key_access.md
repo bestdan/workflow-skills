@@ -141,8 +141,9 @@ because the two get conflated. A script that reads the raw `.task-config.local.y
 **itself**, in-process, pays the repo-tree cost below and not this one: nothing is
 bridged, so nothing reaches a command line. `_secret_resolve.py` never does this — it
 reads only the environment, which is why rung 0 needs the agent at all — but a Class A
-script outside `commands/handlers/assets/` may, and one does. See
-[`decisions/2026-09-20-typesafe-key-out-of-tree.md`](decisions/2026-09-20-typesafe-key-out-of-tree.md).
+script outside `commands/handlers/assets/` may, and one does: the instrument in
+[`research/2026-09-17-jev-applications/`](research/2026-09-17-jev-applications/README.md#the-secret-plumbing-already-exists-and-the-name-already-matches),
+which defines its own `resolve_key` and reads the config leaf in-process.
 
 The trade, stated plainly so the choice is informed. `.task-config.local.yml` is ignored
 robustly: `.gitignore` ignores `dev_docs/tasks/*` wholesale and negates only the committed
@@ -190,8 +191,12 @@ above it and the old one keeps answering while you believe the new one is in eff
   changed at all.
 - **Remove it everywhere the ladder looks**, which is more than one file when a consumer
   scans both a worktree's config and the main checkout's.
-- **Verify by running the consumer with the new shape absent**, and check that it fails
-  the way an unconfigured ladder fails rather than quietly returning a key.
+- **Verify by running the consumer with the new shape absent.** What a clean removal
+  looks like depends on what else is configured: with no pointer, the ladder reaches its
+  own "no key" error; with an `op://` pointer, resolution goes **through the pointer**.
+  Either way, a key returned **without touching `op`** means a raw value survives in a
+  scanned config. The two cases are tabulated in
+  [the design's trap section](designs/2026-09-20-out-of-tree-plaintext-keys.md#the-trap-this-must-document).
 
 ## What may appear in a committed file
 

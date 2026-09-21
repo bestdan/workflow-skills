@@ -80,14 +80,30 @@ rotation, not a smaller blast radius — and it costs a service account created 
 UI, an item living in a service-account-readable vault, and a network `op read` that
 fails closed, replacing a local file read that cannot rot between runs.
 
+The objection to a shell-profile export above applies to B as #773 words it, too, which
+is worth saying because the two sections otherwise look inconsistent. B exports
+`OP_SERVICE_ACCOUNT_TOKEN` from the profile — a credential good for every item in every
+vault the account is granted, not just this one key — so the placement argument lands
+harder there, not softer. That is an objection to the placement and not to the service
+account, which is why B is priced above in the wrapper shape instead: the token in a
+gitignored, mode-700 file outside any repo, read per invocation like the key it guards.
+
 One framing correction, because an earlier draft of this record got it backwards: that
 service accounts cannot read Personal or Private vaults is **deliberate scoping, not a
 limitation**. It is what bounds a service account's blast radius, and it counts for the
-approach rather than against it. 1Password Environments is the vendor feature built for
-exactly this — keeping an application's variables out of a Personal vault — and it is
-rejected here only circumstantially: `op environment read` ships on the CLI's **beta**
-channel (`2.33.0-beta.02` or later), and stable 2.39.0 does not have it. No stable
-upgrade reaches it; the gate is the channel, not the version number.
+approach rather than against it.
+
+Two things get conflated here, so to be plain about which is which. A **service account**
+is a 1Password principal: a non-human identity with its own token, scoped to the vaults
+you grant it, whose reads 1Password logs. That is the thing this section defers.
+**1Password Environments** is a separate feature, for grouping an application's variables
+so they need not sit in a Personal vault. They are not two routes to the same place —
+Environments **composes with** a service account rather than replacing one, so on a
+headless box it still needs the whole apparatus priced above and removes none of that
+cost. It is named here only because it is the vendor's own answer to the vault-scoping
+point, and it is unavailable to this box anyway: `op environment read` ships on the CLI's
+**beta** channel (`2.33.0-beta.02` or later), and stable 2.39.0 does not have it. No
+stable upgrade reaches it; the gate is the channel, not the version number.
 
 ### The service-account question belongs to a runtime path
 
@@ -124,11 +140,13 @@ case above:
 1. `install -d -m 700 ~/.config/workflow-skills`
 2. `install -m 600 /dev/null ~/.config/workflow-skills/typesafe_api_key`, then paste the
    key in with an editor rather than echoing it into the shell.
-3. Delete `typesafe.api_key` from **the main checkout's**
-   `dev_docs/tasks/.task-config.local.yml`. A linked worktree's own copy is not the one
-   read — see the design's trap section.
-4. Verify per the design: run the instrument with the variable unset and confirm it
-   fails the way an unconfigured ladder fails.
+3. Delete `typesafe.api_key` from **every copy the ladder scans** — the checkout you are
+   standing in and the main checkout's `dev_docs/tasks/.task-config.local.yml`. Both are
+   read, the local one first; see the design's trap section.
+4. Verify per the design's table: run the instrument with the variable unset. With no
+   pointer configured that must reach the ladder's own "no key" error; with an `op://`
+   pointer configured it must resolve through the pointer. A key returned without
+   touching `op` means a raw value survives somewhere.
 
 ## Revisit when
 

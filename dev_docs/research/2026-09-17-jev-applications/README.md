@@ -472,6 +472,14 @@ ordered rung 0 → 1 → 3 so a configured pointer is read before the environmen
 first. Both are faithful to `auth_key_access.md`; they implement different rungs of it,
 for different callers. Neither is the other's fallback.
 
+**The freeze has one deliberate exception, taken 2026-09-20.** `extract_key` returned a
+pointer written to the raw `api_key:` field as a bearer token, so a misplaced `op://`
+went out verbatim in an `Authorization` header — spending a request and advertising a
+vault name to a third party. That was fixed in place rather than left standing, because
+a frozen artifact that leaks a reference is worse evidence than an amended one. The
+amendment is the `op://` check and its three tests, and nothing else; the §1 measurement
+is untouched by it.
+
 ### There is an official Claude Code plugin, and it is a dev-time tool
 
 TypeSafe ships [an agent skill](https://docs.typesafe.ai/agent-skill) as a Claude Code
