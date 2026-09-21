@@ -142,22 +142,37 @@ git fetch origin <base>:<base>          # default <base> = main
 On `stale`, stop and surface it (the work branch would start behind); on
 `unknown`, warn and proceed.
 
-**Then re-read the handler config — every value the claim uses is resolved
-_after_ this fetch, never before it.** `dev_docs/tasks/.task-config.yml` is
-tracked, so this fetch can change the config itself, and step 2 is the first
-consumer of its handler-specific keys. Re-run step 0's two `cat`s against the
-working tree as it stands now and resolve from **that** merged view.
+**Then re-resolve the handler config from the fetched base — every value the claim
+uses is read _after_ this fetch, never before it.** `dev_docs/tasks/.task-config.yml`
+is tracked, so the base that just moved can carry a different config, and step 2 is
+the first consumer of its handler-specific keys.
+
+**Read the committed half from `<base>` itself, not from the working tree.** The
+fetch above updates a ref; it does not touch the index or the working tree, so a
+re-`cat` of the checked-out file returns byte-identical content and catches
+nothing. What eventually brings the new config into the tree is the branch step 2
+cuts from the freshly fetched base — which is after the name has been built. So:
+
+```bash
+git show <base>:dev_docs/tasks/.task-config.yml          # committed config, as of the fetched base
+cat "$ROOT/dev_docs/tasks/.task-config.local.yml" 2>/dev/null   # optional override — untracked, tree only
+```
+
+Overlay them as step 0 does. Keep the second one a `cat`: the override is
+gitignored, so it has no blob in `<base>` and a `git show` on it fails — swapping
+both reads for `git show` silently drops the local override.
 
 The key that makes this load-bearing rather than tidy is `gh-issue.branch_prefix`:
 it is the claim **lock ref**, not just a branch name. A prefix read before the
-fetch and used after it locks `task-<n>` where the current config says
+fetch and used after it locks `task-<n>` where the fetched config says
 `<prefix>task-<n>` — so this session and a concurrent one each acquire a ref the
-other cannot see, and both conclude they won the claim. Nothing catches it: the
-pre-flight probe is built from the same mis-derived name, so it reports the issue
-free, and `/doctor` Check 1c flags only the inverse case. Recovery is not free
-either — renaming the branch afterwards closes the open PR. See
-`gh-issue-claim.md` → "Branch name", and #748 for the delivery this was measured
-on.
+other cannot see, and both conclude they won the claim. The `<branch>`-derived
+pre-flight probe cannot catch it: it probes the mis-derived ref and reports the
+issue free. Only the prefix-agnostic probe in `gh-issue-claim.md` → pre-flight
+can, and only once the other session's ref already exists; `/doctor` Check 1c
+flags the inverse case. Recovery is not free either — renaming the branch
+afterwards closes the open PR. See `gh-issue-claim.md` → "Branch name", and #748
+for the delivery this was measured on.
 
 ## 2. Claim (the handler's protocol, verbatim)
 
