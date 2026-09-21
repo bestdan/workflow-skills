@@ -85,10 +85,9 @@ DEFAULT_MARGIN = 0.10
 # threshold against, and picking one that flattered the result would be the whole
 # failure mode. `--noul-threshold` moves the threshold for a run; it cannot re-cut the
 # same records, since every invocation issues fresh nondeterministic calls, so comparing
-# two invocations conflates threshold sensitivity with run-to-run variance. Re-cutting is
-# done offline from the per-row `needs_skill` scores in one `--json` output, which is how
-# the record's threshold-invariance claim was arrived at. The report prints the rate at
-# the selected threshold only.
+# two invocations conflates threshold sensitivity with run-to-run variance. Re-cutting at
+# another value is done offline, from the per-row `needs_skill` scores in one `--json`
+# output. The report prints the rate at the selected threshold only.
 DEFAULT_NEEDS_SKILL = 0.5
 PLACEHOLDER = "REPLACE_ME"
 LOCAL_CONFIG = Path("dev_docs") / "tasks" / ".task-config.local.yml"

@@ -181,21 +181,25 @@ all?" — and it now rides the same request as the Choice, answered in parallel 
 isolation.
 
 **Measured 2026-09-21, `jev-1.13.0`, four runs over all three suites — 152 requests,
-738k input tokens, $0.031.** The false-positive rate is **4/64 = 6.2%** at a 0.5
+738k input tokens, $0.031.** The roster was the **17** `skills/*/SKILL.md` descriptions
+this record's tree ships; §1's earlier numbers were taken over 16, before
+`worktree-teardown` landed. The false-positive rate is **4/64 = 6.2%** at a 0.5
 threshold, and every one of the four is the **same prompt in all four runs**. The ten
-plainly off-topic prompts are **0/40 across every run**.
+plainly off-topic prompts are **0/40 across every run**. Every figure below is computed
+from the retained per-row records in
+[`references/noul-records-2026-09-21.json`](references/noul-records-2026-09-21.json).
 
 | Half of the negative set                        | False positives | Noul range  |
 | ----------------------------------------------- | --------------- | ----------- |
 | `plain` — ordinary work no skill here covers    | 0/40            | 0.10 – 0.39 |
-| `near` — adjacent to a skill, on the wrong side | 4/24            | 0.07 – 0.77 |
+| `near` — adjacent to a skill, on the wrong side | 4/24            | 0.07 – 0.76 |
 
 **The one false positive is a labelling error, not a model error.** The prompt is
 "Roughly how much work is this? Don't write anything down, I just want a sense of it."
 — written to sit near `plan-with-docs`, whose territory the second clause rules out.
 It does not rule out `assess-task`, which is "profile a coding task along stable
 dimensions — complexity, creativity, **scope**" and writes nothing down; that is what
-Jev returned, at 0.72–0.77, four times out of four. Read against a corrected label the
+Jev returned, at 0.76 in all four runs. Read against a corrected label the
 rate is **0/60 = 0%**. Both numbers are kept because the disagreement is the more
 useful finding: the hard part of this measurement was never the Noul, it was writing
 negative ground truth that survives contact with the descriptions.
@@ -208,29 +212,31 @@ implicitly:
 
 | Probe                                            | Noul over 4 runs | Under-fired |
 | ------------------------------------------------ | ---------------- | ----------- |
-| "Take this one and run with it."                 | 0.26 – 0.28      | 4/4         |
-| "I'm about to start on the cost model notebook." | 0.35 – 0.41      | 4/4         |
-| "There's a ticket here I need to deal with."     | 0.47 – 0.51      | 2/4         |
+| "Take this one and run with it."                 | 0.27 – 0.29      | 4/4         |
+| "I'm about to start on the cost model notebook." | 0.35 – 0.38      | 4/4         |
+| "There's a ticket here I need to deal with."     | 0.49 – 0.52      | 2/4         |
 
 That third row is the threshold doing the deciding rather than the model: it straddles
 0.5 and lands on either side depending on the run. The threshold is otherwise not
-load-bearing — the false-positive count is 4/64 at every value from 0.4 to 0.7, because
-the only hit sits at 0.72–0.77, while the false-negative count moves 8.0% → 13.6% over
-the same range.
+load-bearing — the false-positive count is 4/64 at every value from 0.45 to 0.7, because
+the only hit sits at 0.76, while the false-negative count moves 9.1% → 13.6% over the
+same range. The floor is 0.45 rather than 0.4: the `near co-review` prompt lands at
+exactly 0.40, and `says_needs_skill`'s at-or-above rule counts it, so a 0.40 threshold
+takes the count to 5/64.
 
 **Two findings beyond the rate itself.** First, the two distributions barely overlap:
 mean Noul 0.84 on the positive prompts against 0.22 on the negative ones. Second — and
 against the grain of everything else in this section — **the Noul is far steadier
 run-to-run than the Choice margin.** The largest per-prompt spread anywhere in the four
-runs is 0.06, where the margin this section rests on swung 0.16–0.48 on one prompt. The
+runs is 0.07, where the margin this section rests on swung 0.16–0.48 on one prompt. The
 nondeterminism that makes a single-run margin untrustworthy does not visibly afflict
 this question.
 
 **The Choice's own numbers already carry a weak version of the signal, and it is not
 enough.** Over the same runs, collisions land 0/56 on the manifest cases, 0/32 on the
-ambiguous probes and **14/64 on the negative ones**; mean confidence is 0.90 on
+ambiguous probes and **13/64 on the negative ones**; mean confidence is 0.91 on
 positives against 0.63 on negatives, and mean margin 0.85 against 0.49. So a collapsed
-margin is evidence that nothing fits — but 50 of the 64 negative prompts still clear the
+margin is evidence that nothing fits — but 51 of the 64 negative prompts still clear the
 0.10 collision threshold, so margin alone would wave them through. The Noul is doing
 work the margin cannot.
 
@@ -248,9 +254,12 @@ committing real messages from those to a public repo was declined. So the set is
 person's idea of what an off-topic message looks like — which is the exact bias a
 false-positive rate exists to catch, and the reason the headline number is 0% on the
 half that idea is most likely to have got right and 16.7% on the half it is most likely
-to have got wrong. A sampled set is the obvious next measurement. Reproduce either with
-`--suite all --runs 4`; the per-row records are in `--json`, so a reader who disagrees
-with a label can re-cut the rate without re-running anything.
+to have got wrong. A sampled set is the obvious next measurement. The per-row records
+for this measurement are retained in
+[`references/noul-records-2026-09-21.json`](references/noul-records-2026-09-21.json), so
+a reader who disagrees with a label can re-cut the rate without re-running anything —
+which is the only way to audit the rates above, since `--suite all --runs 4` draws a
+fresh nondeterministic sample rather than reproducing this one.
 
 ### 2. The unbuilt output-quality evals — Class A
 
