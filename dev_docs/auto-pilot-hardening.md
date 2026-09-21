@@ -232,7 +232,12 @@ Output is parseable `PREFLIGHT <KEY>: <val>` lines ending in a single
 The keys double as the environment fingerprint the launch consumes: `GH_AUTH`,
 `VIEWER_PERMISSION` (draft-vs-ready capability), `ENV_CLASS`, `CODER <name>`,
 `FRESHNESS`, `PATH_DIR` / `EXEC_DIR` (fed straight to `write-launch --path` and
-`render-profile --exec-dir`), `DEST_HOST`, `HANDLER`, and the smoke results.
+`render-profile --exec-dir`), `DEST_HOST`, `HANDLER`, `HANDLER_SOURCE` (the
+config file that set the handler, or `default (…)` when neither place carries
+one — each file is read from `--run-root` first, then from that run root's
+main checkout, since a linked run worktree never receives the git-excluded
+external-handler config; never from the plugin directory, which ships this
+repo's own config), and the smoke results.
 
 Blocker classes:
 
