@@ -80,6 +80,7 @@ CONSUMER_FILES=(
   scripts/local-review/server.py
   scripts/coreview-rule-drift.py
   scripts/diff-anchor-check.py
+  scripts/grok-telemetry-gate.py
 )
 CONSUMER_PYTHON=3.9
 
