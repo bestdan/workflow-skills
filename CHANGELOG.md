@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.66.1] - 2026-09-21
+
+### Fixes
+
+- resolve branch_prefix after the base fetch, not before [#748] (#805) (25bef7f)
+
 ## [2.66.0] - 2026-09-21
 
 ### Features
