@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.65.0] - 2026-09-21
+
+### Features
+
+- add grok as a built-in reviewer [N/A] (#799) (88a6f57)
+
 ## [2.64.0] - 2026-09-20
 
 ### Features
