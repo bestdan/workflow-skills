@@ -147,6 +147,13 @@ uses is read _after_ this fetch, never before it.** `dev_docs/tasks/.task-config
 is tracked, so the base that just moved can carry a different config, and step 2 is
 the first consumer of its handler-specific keys.
 
+**It refreshes the chosen handler's _keys_, not the handler.** `handler:` itself is
+not re-resolved mid-delivery: an explicit `--handler` stays authoritative per
+**Arguments**, and a handler flip inside this window would be incoherent anyway,
+since the `<slug>`/`<identifier>` this skill was invoked with is handler-specific —
+a `PRE-12` cannot be delivered by `gh-issue`. What the re-read is for is the keys
+under the already-chosen handler, `gh-issue.branch_prefix` above all.
+
 **Read the committed half from `<base>` itself, not from the working tree.** The
 fetch above updates a ref; it does not touch the index or the working tree, so a
 re-`cat` of the checked-out file returns byte-identical content and catches
