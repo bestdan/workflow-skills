@@ -67,12 +67,11 @@ the trivial sense; it is 34 bytes whose whole content sources the synced tree.
 
 ### Why not a service account, yet
 
-Priced against the shape [`bestdan/barclay`](https://github.com/bestdan/barclay) uses for
-Plaid — the service-account token in a gitignored, mode-700 wrapper outside any repo — a
-service account is a different threat model, not a relocation. It offers three things no
-plaintext shape can: the on-disk secret is revocable on its own without rotating the API
-key, its reads are logged by 1Password, and the API key itself never touches this box's
-disk.
+Priced in its usual shape — the service-account token in a gitignored, mode-700 wrapper
+outside any repo, read per invocation — a service account is a different threat model,
+not a relocation. It offers three things no plaintext shape can: the on-disk secret is
+revocable on its own without rotating the API key, its reads are logged by 1Password,
+and the API key itself never touches this box's disk.
 
 What it does not change is the **exposure set**: a 700 wrapper is readable by exactly the
 same principals as a 600 file. So against the out-of-tree file it buys audit and
@@ -85,8 +84,7 @@ is worth saying because the two sections otherwise look inconsistent. B exports
 `OP_SERVICE_ACCOUNT_TOKEN` from the profile — a credential good for every item in every
 vault the account is granted, not just this one key — so the placement argument lands
 harder there, not softer. That is an objection to the placement and not to the service
-account, which is why B is priced above in the wrapper shape instead: the token in a
-gitignored, mode-700 file outside any repo, read per invocation like the key it guards.
+account, which is why B is priced above in the wrapper shape instead.
 
 One framing correction, because an earlier draft of this record got it backwards: that
 service accounts cannot read Personal or Private vaults is **deliberate scoping, not a

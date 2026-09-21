@@ -149,14 +149,18 @@ read, so the consumer cannot say "no key" while one survives anywhere the ladder
 
 Do not disable the other rungs to isolate rung 0. The step is easy to forget to undo,
 and the alternative — a resolver trace naming which rung answered — does not exist in
-this code and adding one means editing a frozen artifact, which the next section
-refuses on its own grounds.
+this code. Adding one would mean amending a frozen artifact, which this change does
+once and narrowly, for a leak rather than for convenience: see the
+[freeze exception](../research/2026-09-17-jev-applications/README.md#the-secret-plumbing-already-exists-and-the-name-already-matches).
+A trace does not clear that bar, and the table above already answers what it would
+have told you.
 
 ## Rejected alternatives
 
 - **An out-of-tree _config_ file** — same file, but taught to the resolver as another
   `.task-config.local.yml` location. Rejected: it needs a code change in every
-  consumer, and for a frozen research artifact that means editing evidence. Rung 1
+  consumer, and for a frozen research artifact that means amending evidence for a
+  convenience — a lower bar than the one leak this change does amend for. Rung 1
   reaches outside a checkout today with no change at all, which is the whole reason
   the proposal wears rung 1 rather than inventing a path.
 - **A profile export** — see above. Trades a narrow exposure for an ambient one.
