@@ -514,6 +514,63 @@ out_l="$(uv run "$DIR_L/scripts/validate.py" 2>&1)"
 assert_contains "crush roster: name mismatch names the asset-only tool" "$out_l" "'bash'"
 assert_contains "crush roster: name mismatch names the prose-only tool" "$out_l" "'write'"
 
+# --- Fixture (m): dev_docs/ references that resolve are clean -------------
+# Covers the three things the check must NOT flag: a real shipped doc, a tree
+# the skill creates in the *consumer's* repo (absent here by design), and a
+# ${CLAUDE_PLUGIN_ROOT}-prefixed path, which belongs to the check above and
+# must not be reported twice.
+DIR_M="$BASE/dev-docs-refs-pass"
+make_plugin_fixture "$DIR_M"
+echo "a real shipped doc" >"$DIR_M/dev_docs/real.md"
+cat >"$DIR_M/commands/cmd.md" <<'MD'
+---
+description: fixture command
+---
+
+Read dev_docs/real.md, or [the same doc by relative link](../dev_docs/real.md).
+
+Cards live in dev_docs/tasks/<slug>.md and config in
+dev_docs/tasks/.task-config.yml; the ledger is dev_docs/co-review/ and the
+tutorial walks dev_docs/research/onboarding/decisions.md. None of those exist
+in this repo, and none of them should be flagged.
+
+The plugin-root form is owned by the other check: ${CLAUDE_PLUGIN_ROOT}/dev_docs/real.md
+MD
+out_m="$(uv run "$DIR_M/scripts/validate.py" 2>&1)"
+rc_m=$?
+assert_not_contains "resolving dev_docs reference is clean" "$out_m" "does not exist"
+assert_not_contains "consumer-repo dev_docs tree is not flagged" "$out_m" "dev_docs/tasks"
+assert_not_contains "resolving relative dev_docs link is clean" "$out_m" "does not resolve"
+if [ "$rc_m" -eq 0 ]; then
+  ok "clean dev_docs references: exits 0"
+else
+  bad "clean dev_docs references: should exit 0, got $rc_m"
+fi
+
+# --- Fixture (n): dangling dev_docs/ references are flagged ---------------
+DIR_N="$BASE/dev-docs-refs-fail"
+make_plugin_fixture "$DIR_N"
+echo "a real shipped doc" >"$DIR_N/dev_docs/real.md"
+cat >"$DIR_N/commands/cmd.md" <<'MD'
+---
+description: fixture command
+---
+
+Read dev_docs/gone.md for the details.
+
+Or follow [a dangling link](../dev_docs/also-gone.md).
+
+This link names a file that does exist, but with one "../" too many, so it
+resolves outside the repo: [wrong depth](../../dev_docs/real.md).
+MD
+out_n="$(uv run "$DIR_N/scripts/validate.py" 2>&1)"
+assert_contains "dangling dev_docs reference is flagged" "$out_n" \
+  "dev_docs/gone.md does not exist"
+assert_contains "dangling relative dev_docs link is flagged" "$out_n" \
+  "relative link ../dev_docs/also-gone.md does not resolve"
+assert_contains "relative link with the wrong depth is flagged" "$out_n" \
+  "relative link ../../dev_docs/real.md does not resolve"
+
 # --- Default (no arg): still validates this plugin's own dev_docs/tasks --
 # (preserves today's CI behavior — see validate.py module docstring)
 out_default="$(uv run "$SCRIPT" 2>&1)"

@@ -48,6 +48,40 @@ SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
 PLUGIN_ROOT_REF_RE = re.compile(
     r"\$\{CLAUDE_PLUGIN_ROOT\}/([A-Za-z0-9_./<>-]*[A-Za-z0-9_/<>-])"
 )
+# --- dev_docs/ documentation references ---
+# A skill or command body that points the user at a dev_docs/ file is handing
+# out a path in runtime prompt text: when the target is gone the agent reports
+# a missing file mid-session, which is a behavior change rather than a 404
+# someone shrugs at. Nothing else in the gate checks these — see
+# https://github.com/bestdan/workflow-skills/issues/774.
+#
+# Most dev_docs/ references are not ours to check. The skills create and read
+# these trees in the *consumer's* repo, where they legitimately do not exist
+# here, so the prefixes below are exempt.
+DEV_DOCS_CONSUMER_PREFIXES = (
+    "dev_docs/tasks",  # /add-task cards, /plan-with-docs plan dirs, task config
+    "dev_docs/co-review",  # /co-review config and ledger
+    "dev_docs/orchestrate-coders",  # /orchestrate-coders .coders.yml
+    "dev_docs/todos",  # legacy card dirs, both spellings, pre-tasks/
+    "dev_docs/todo",
+    # The research-spike tutorial walks a disposable tree under two example
+    # project names; every path beneath them is illustrative, never shipped.
+    "dev_docs/research/onboarding",
+    "dev_docs/research/demo",
+)
+# Repo-root-relative mentions. The lookbehind excludes a leading "/" or "." so
+# each other form is left to the check that owns it: "${CLAUDE_PLUGIN_ROOT}/
+# dev_docs/..." to PLUGIN_ROOT_REF_RE above, and "../dev_docs/..." to
+# DEV_DOCS_LINK_RE below. A shell-expansion prefix ends in ")", which the
+# lookbehind does not exclude, but every such reference names a consumer tree
+# and so lands in the exemption above.
+DEV_DOCS_REF_RE = re.compile(
+    r"(?<![A-Za-z0-9_/.-])(dev_docs/[A-Za-z0-9_./<>*-]*[A-Za-z0-9_/<>*-])"
+)
+# Relative markdown links resolve against the linking file's own directory
+# rather than ROOT, so a link carrying the wrong number of "../" is a distinct
+# failure that the repo-root form above cannot see.
+DEV_DOCS_LINK_RE = re.compile(r"\]\((\.\./[^)]*dev_docs/[^)#]*)")
 # --- shell logic in runtime markdown ---
 # A fenced shell block in a skill/command/handler/agent body is runtime prompt
 # text. `scripts/lint-shell.sh` globs only `*.sh`/`*.bash`/`*.bats` from
@@ -278,6 +312,29 @@ for f in plugin_root_ref_files:
                     rel(f),
                     f"line {n}: ${{CLAUDE_PLUGIN_ROOT}}/{captured} does not exist",
                 )
+
+# --- dev_docs/ documentation references ---
+# Same scan set as above: the bodies an agent actually reads at runtime.
+for f in plugin_root_ref_files:
+    for n, line in enumerate(f.read_text().splitlines(), start=1):
+        for ref in DEV_DOCS_REF_RE.finditer(line):
+            captured = ref.group(1)
+            if "<" in captured or "*" in captured:
+                continue  # a <placeholder> or a glob, not a literal path
+            stem = captured.rstrip("/")
+            if any(
+                stem == p or stem.startswith(p + "/")
+                for p in DEV_DOCS_CONSUMER_PREFIXES
+            ):
+                continue  # a tree the skill creates in the consumer's repo
+            if not (ROOT / captured).exists():
+                err(rel(f), f"line {n}: {captured} does not exist")
+        for link in DEV_DOCS_LINK_RE.finditer(line):
+            target = link.group(1)
+            if "<" in target or "*" in target:
+                continue
+            if not (f.parent / target).exists():
+                err(rel(f), f"line {n}: relative link {target} does not resolve")
 
 
 # --- shell logic in runtime markdown ---
