@@ -19,8 +19,13 @@ leaving the repo's `scripts/test-*.sh` glob is the cost of that. Run it by path 
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
+import os
+import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -148,6 +153,77 @@ class KeyLadderTests(unittest.TestCase):
             ("ref", "op://v/i/f"),
         )
 
+    def test_a_pointer_in_the_raw_field_is_never_returned_as_a_secret(self):
+        """The whole point: an op:// string must not reach an Authorization header.
+
+        `api_key` and `api_key_ref` differ by six characters and the config looks
+        fine either way, so this recovers rather than refusing — but it must never
+        come back tagged 'raw', which is what sends it to the API verbatim.
+        """
+        with contextlib.redirect_stderr(io.StringIO()):
+            got = jev.extract_key('typesafe:\n  api_key: "op://v/i/f"\n')
+        self.assertEqual(got, ("ref", "op://v/i/f"))
+
+    def test_the_recovered_pointer_is_redacted_in_the_warning(self):
+        """auth_key_access.md: never print a full reference, even in a warning.
+
+        The item and field names are the half that advertises which vault entry
+        holds a full-account token, so they are what must not survive.
+        """
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            jev.extract_key('typesafe:\n  api_key: "op://vlt/ITEMNAME/FIELDNAME"\n')
+        self.assertIn("op://vlt/…", err.getvalue())
+        self.assertNotIn("ITEMNAME", err.getvalue())
+        self.assertNotIn("FIELDNAME", err.getvalue())
+
+    def test_a_real_key_is_still_raw(self):
+        """The recovery must not swallow the ordinary case."""
+        self.assertEqual(
+            jev.extract_key('typesafe:\n  api_key: "sk-real"\n'), ("raw", "sk-real")
+        )
+
+    def test_a_configured_ref_beats_a_pointer_misplaced_in_the_raw_field(self):
+        """The recovery is a fallback, not a winner.
+
+        The two fields can name different items, and the misplaced one is the typo.
+        Resolving it would send another service's full-account token to this API in
+        an Authorization header — the harm typesafe_block guards against, one level
+        down. The canonical `api_key_ref` has to win.
+        """
+        with contextlib.redirect_stderr(io.StringIO()):
+            got = jev.extract_key(
+                "typesafe:\n"
+                '  api_key: "op://Private/Linear/token"\n'
+                '  api_key_ref: "op://Private/TypeSafe/key"\n'
+            )
+        self.assertEqual(got, ("ref", "op://Private/TypeSafe/key"))
+
+    def test_a_malformed_pointer_in_the_raw_field_does_not_mask_a_valid_ref(self):
+        """The degenerate case of the same bug.
+
+        A junk `op://` value is still classified as a pointer, so returning it early
+        meant `op read` failed and resolve_key exited without ever reaching the valid
+        `api_key_ref` below it.
+        """
+        with contextlib.redirect_stderr(io.StringIO()):
+            got = jev.extract_key(
+                'typesafe:\n  api_key: "op://"\n  api_key_ref: "op://v/i/f"\n'
+            )
+        self.assertEqual(got, ("ref", "op://v/i/f"))
+
+    def test_the_ignored_misplaced_pointer_is_redacted_too(self):
+        """The shadowed-pointer warning prints a ref, so it gets the same rule."""
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            jev.extract_key(
+                "typesafe:\n"
+                '  api_key: "op://vlt/ITEMNAME/FIELDNAME"\n'
+                '  api_key_ref: "op://v/i/f"\n'
+            )
+        self.assertNotIn("ITEMNAME", err.getvalue())
+        self.assertNotIn("FIELDNAME", err.getvalue())
+
     def test_unfilled_placeholder_is_treated_as_absent(self):
         """The template ships REPLACE_ME; sending it to the API would be worse."""
         self.assertIsNone(
@@ -184,6 +260,79 @@ class KeyLadderTests(unittest.TestCase):
         self.assertIsNone(
             jev.extract_key('other:\n  typesafe:\n    api_key: "sk-nested"\n')
         )
+
+
+class OperatorKeyFileTests(unittest.TestCase):
+    """The rung that lets a human run this without typing a prefix.
+
+    `resolve_key` reaches the filesystem and the environment, so each test points
+    the operator key file at a temp dir, confines the rung-0 scan to that same
+    dir, and clears the variable. Without all three the suite reads whatever the
+    developer's own machine has configured and passes or fails accordingly.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        (self.root / "dev_docs" / "tasks").mkdir(parents=True)
+        self.keyfile = self.root / "operator_key"
+
+        patched = unittest.mock.patch.object(jev, "OPERATOR_KEY_FILE", self.keyfile)
+        patched.start()
+        self.addCleanup(patched.stop)
+        # Confine the rung-0 scan to the fixture. The real local_config_paths adds
+        # the main checkout's config, found via `git rev-parse --git-common-dir`
+        # from the *test process's* cwd rather than from the root it is handed —
+        # so without this the developer's own key would be scanned, shadow the
+        # fixture, and make the result machine-dependent. Patched here rather than
+        # narrowed in the module: that fallback is deliberate, and it is what
+        # Execution step 3 of the decision record tells an operator to clean up.
+        paths = unittest.mock.patch.object(
+            jev,
+            "local_config_paths",
+            lambda root: [p for p in [root / jev.LOCAL_CONFIG] if p.exists()],
+        )
+        paths.start()
+        self.addCleanup(paths.stop)
+        env = unittest.mock.patch.dict(os.environ, {}, clear=False)
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("TYPESAFE_API_KEY", None)
+
+    def test_the_file_is_read_when_nothing_else_is_configured(self):
+        """The whole point of the rung: no prefix, no key in the repo tree."""
+        self.keyfile.write_text("sk-from-file\n")
+        self.assertEqual(jev.resolve_key(self.root), "sk-from-file")
+
+    def test_an_exported_variable_still_wins(self):
+        """The file sits after the environment, so a one-off prefix overrides it."""
+        self.keyfile.write_text("sk-from-file\n")
+        os.environ["TYPESAFE_API_KEY"] = "sk-from-env"
+        self.assertEqual(jev.resolve_key(self.root), "sk-from-env")
+
+    def test_an_empty_file_falls_through_rather_than_returning_nothing(self):
+        """A touched-but-unfilled file must not resolve to the empty string.
+
+        That would sail into an Authorization header as a blank bearer token and
+        fail at the API rather than here.
+        """
+        self.keyfile.write_text("\n")
+        with self.assertRaises(SystemExit) as caught:
+            jev.resolve_key(self.root)
+        self.assertIn("No TypeSafe key", str(caught.exception))
+
+    def test_a_raw_config_value_still_beats_the_file(self):
+        """Rung 0 is unchanged: an in-tree raw value still shadows this rung.
+
+        This is the silent-shadow case the contract warns about, asserted rather
+        than assumed — adopting the file does not retire the config line for you.
+        """
+        (self.root / "dev_docs" / "tasks" / ".task-config.local.yml").write_text(
+            'typesafe:\n  api_key: "sk-in-tree"\n'
+        )
+        self.keyfile.write_text("sk-from-file\n")
+        self.assertEqual(jev.resolve_key(self.root), "sk-in-tree")
 
 
 class RedactionTests(unittest.TestCase):

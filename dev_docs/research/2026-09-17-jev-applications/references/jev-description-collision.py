@@ -59,6 +59,11 @@ MODEL = "jev-1.13.0"
 DEFAULT_MARGIN = 0.10
 PLACEHOLDER = "REPLACE_ME"
 LOCAL_CONFIG = Path("dev_docs") / "tasks" / ".task-config.local.yml"
+# The operator key file — a raw secret outside every checkout, so it carries no
+# repo-tree exposure and needs no prefix typed at each invocation. Read directly
+# rather than bridged, which is what makes it usable by a human running this by
+# hand. See dev_docs/auth_key_access.md, "Three shapes".
+OPERATOR_KEY_FILE = Path.home() / ".config" / "workflow-skills" / "typesafe_api_key"
 
 # Prompts written to straddle a near-neighbour pair. There is no expected answer:
 # the measurement is the margin, not correctness. Each is deliberately underspecified
@@ -199,18 +204,50 @@ def extract_key(config_text: str) -> tuple[str, str] | None:
     placeholder is treated as absent so an unfilled file falls through to the next
     rung instead of sending a literal REPLACE_ME to the API. Both searches are
     scoped to the `typesafe:` block — see typesafe_block.
+
+    A pointer written to the raw `api_key:` field is read as a ref rather than
+    returned as one. The two field names differ by six characters and the mistake is
+    invisible in the config: before this check the pointer went out verbatim in an
+    Authorization header, which spends a request and advertises a vault name to a
+    third party. Recovering beats refusing here — the user's evident intent is to
+    resolve it, and resolving lands it at rung 3 where a pointer belongs — but it is
+    still a malformed config, so it says so on stderr rather than fixing it silently.
+
+    That recovery is a **fallback, not a winner**: a configured `api_key_ref` is
+    consulted before the misplaced value is used, and wins. Recovering before that
+    check would let a typo in the
+    raw field shadow a correctly-placed pointer, and the two fields can name different
+    items — `api_key: op://Private/Linear/token` beside a valid TypeSafe `api_key_ref`
+    would resolve the Linear pointer and put a full-account token for another service
+    into this API's Authorization header. That is the harm typesafe_block exists to
+    prevent, one level down, so it is closed here rather than documented.
     """
     block = typesafe_block(config_text)
     if not block:
         return None
+    misplaced = None
     raw = re.search(r'^\s*api_key:\s*"?([^"\n#]+)"?', block, re.M)
     if raw:
         value = raw.group(1).strip()
-        if value and value != PLACEHOLDER:
+        if value.startswith("op://"):
+            misplaced = value
+        elif value and value != PLACEHOLDER:
             return "raw", value
     ref = re.search(r'^\s*api_key_ref:\s*"?(op://[^"\n#]+)"?', block, re.M)
     if ref:
+        if misplaced:
+            say(
+                f"warning: {redact_ref(misplaced)} is in `api_key:`, the raw-secret "
+                "field, and is being ignored — `api_key_ref:` is set and wins. Delete "
+                "the `api_key:` line."
+            )
         return "ref", ref.group(1).strip()
+    if misplaced:
+        say(
+            f"warning: {redact_ref(misplaced)} is in `api_key:`, which is the raw-secret "
+            "field — reading it as `api_key_ref:`. Move it to silence this."
+        )
+        return "ref", misplaced
     return None
 
 
@@ -248,13 +285,14 @@ def local_config_paths(root: Path) -> list[Path]:
 
 
 def resolve_key(root: Path) -> str:
-    """Rung 0, then rung 1, then rung 3 — dev_docs/auth_key_access.md.
+    """Rung 0, then rung 1, then the operator key file, then rung 3 — see
+    dev_docs/auth_key_access.md.
 
     The order is the contract, not an implementation detail. Resolving a configured
     pointer before reading the environment means an exported key cannot override a
     stale or unreachable one, and the caller gets an `op` failure where it expected
     its own key to win. So every config is read first for a raw secret, then the
-    environment, and only then is a pointer resolved.
+    environment, then the operator key file, and only then is a pointer resolved.
     """
     refs: list[str] = []
     for path in local_config_paths(root):
@@ -269,6 +307,15 @@ def resolve_key(root: Path) -> str:
     if env:
         return env
 
+    # The operator key file: the same raw secret as rung 0, kept outside every
+    # checkout. It sits after the environment so a one-off prefix can still
+    # override it, and before the pointer because a raw secret beats a reference
+    # — the same precedence rung 0 has over rung 3.
+    if OPERATOR_KEY_FILE.exists():
+        val = OPERATOR_KEY_FILE.read_text().strip()
+        if val:
+            return val
+
     for ref in refs:
         got = subprocess.run(["op", "read", ref], capture_output=True, text=True)
         if got.returncode != 0:
@@ -281,9 +328,11 @@ def resolve_key(root: Path) -> str:
             )
         return got.stdout.strip()
     sys.exit(
-        f"No TypeSafe key. Put it in {LOCAL_CONFIG} as\n"
-        '  typesafe:\n    api_key: "..."\n'
-        "or export TYPESAFE_API_KEY. See dev_docs/auth_key_access.md."
+        f"No TypeSafe key. Put it in {OPERATOR_KEY_FILE} (mode 600), or export\n"
+        "TYPESAFE_API_KEY. A raw api_key in "
+        f"{LOCAL_CONFIG} still works and still\n"
+        "wins, but it puts the secret inside the repo tree. See\n"
+        "dev_docs/auth_key_access.md."
     )
 
 

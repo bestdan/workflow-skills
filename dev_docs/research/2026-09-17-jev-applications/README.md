@@ -472,6 +472,26 @@ ordered rung 0 → 1 → 3 so a configured pointer is read before the environmen
 first. Both are faithful to `auth_key_access.md`; they implement different rungs of it,
 for different callers. Neither is the other's fallback.
 
+**The freeze has two deliberate exceptions, both taken while #773 was settled.** Neither
+touches the §1 measurement, and both are amendments to how the key is found rather than
+to what was measured.
+
+The first, 2026-09-20: `extract_key` returned a pointer written to the raw `api_key:`
+field as a bearer token, so a misplaced `op://` went out verbatim in an `Authorization`
+header — spending a request and advertising a vault name to a third party. Fixed in
+place rather than left standing, because a frozen artifact that leaks a reference is
+worse evidence than an amended one. A follow-up made the recovery a fallback so a typo
+in the raw field cannot shadow a correctly-placed `api_key_ref`.
+
+The second, 2026-09-21: `resolve_key` learned to read an **operator key file** at
+`~/.config/workflow-skills/typesafe_api_key`, after the environment and before any
+pointer. The key moved out of the repo tree under
+[`../../decisions/2026-09-20-typesafe-key-out-of-tree.md`](../../decisions/2026-09-20-typesafe-key-out-of-tree.md),
+and without this branch the record could only be reproduced by typing a prefix at every
+invocation — which the operator declined, leaving a profile `export` as the alternative.
+Reproducibility is the reason this file exists, so a rung that keeps it runnable by hand
+clears the bar. The two sibling instruments import this `resolve_key`, so they inherit it.
+
 ### There is an official Claude Code plugin, and it is a dev-time tool
 
 TypeSafe ships [an agent skill](https://docs.typesafe.ai/agent-skill) as a Claude Code
