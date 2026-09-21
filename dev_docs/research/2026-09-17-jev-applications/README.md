@@ -187,8 +187,8 @@ plainly off-topic prompts are **0/40 across every run**.
 
 | Half of the negative set                        | False positives | Noul range  |
 | ----------------------------------------------- | --------------- | ----------- |
-| `plain` — ordinary work no skill here covers    | 0/40            | 0.07 – 0.39 |
-| `near` — adjacent to a skill, on the wrong side | 4/24            | 0.08 – 0.77 |
+| `plain` — ordinary work no skill here covers    | 0/40            | 0.10 – 0.39 |
+| `near` — adjacent to a skill, on the wrong side | 4/24            | 0.07 – 0.77 |
 
 **The one false positive is a labelling error, not a model error.** The prompt is
 "Roughly how much work is this? Don't write anything down, I just want a sense of it."
