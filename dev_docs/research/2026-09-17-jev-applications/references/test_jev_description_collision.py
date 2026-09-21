@@ -22,7 +22,10 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import io
+import os
+import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -257,6 +260,65 @@ class KeyLadderTests(unittest.TestCase):
         self.assertIsNone(
             jev.extract_key('other:\n  typesafe:\n    api_key: "sk-nested"\n')
         )
+
+
+class OperatorKeyFileTests(unittest.TestCase):
+    """The rung that lets a human run this without typing a prefix.
+
+    `resolve_key` reaches the filesystem and the environment, so each test points
+    the module's two location constants at a temp dir and clears the variable.
+    `local_config_paths` shells out to git, so the root handed in is a real
+    directory with no config in it rather than a bare tmp path.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        (self.root / "dev_docs" / "tasks").mkdir(parents=True)
+        self.keyfile = self.root / "operator_key"
+
+        patched = unittest.mock.patch.object(jev, "OPERATOR_KEY_FILE", self.keyfile)
+        patched.start()
+        self.addCleanup(patched.stop)
+        env = unittest.mock.patch.dict(os.environ, {}, clear=False)
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("TYPESAFE_API_KEY", None)
+
+    def test_the_file_is_read_when_nothing_else_is_configured(self):
+        """The whole point of the rung: no prefix, no key in the repo tree."""
+        self.keyfile.write_text("sk-from-file\n")
+        self.assertEqual(jev.resolve_key(self.root), "sk-from-file")
+
+    def test_an_exported_variable_still_wins(self):
+        """The file sits after the environment, so a one-off prefix overrides it."""
+        self.keyfile.write_text("sk-from-file\n")
+        os.environ["TYPESAFE_API_KEY"] = "sk-from-env"
+        self.assertEqual(jev.resolve_key(self.root), "sk-from-env")
+
+    def test_an_empty_file_falls_through_rather_than_returning_nothing(self):
+        """A touched-but-unfilled file must not resolve to the empty string.
+
+        That would sail into an Authorization header as a blank bearer token and
+        fail at the API rather than here.
+        """
+        self.keyfile.write_text("\n")
+        with self.assertRaises(SystemExit) as caught:
+            jev.resolve_key(self.root)
+        self.assertIn("No TypeSafe key", str(caught.exception))
+
+    def test_a_raw_config_value_still_beats_the_file(self):
+        """Rung 0 is unchanged: an in-tree raw value still shadows this rung.
+
+        This is the silent-shadow case the contract warns about, asserted rather
+        than assumed — adopting the file does not retire the config line for you.
+        """
+        (self.root / "dev_docs" / "tasks" / ".task-config.local.yml").write_text(
+            'typesafe:\n  api_key: "sk-in-tree"\n'
+        )
+        self.keyfile.write_text("sk-from-file\n")
+        self.assertEqual(jev.resolve_key(self.root), "sk-in-tree")
 
 
 class RedactionTests(unittest.TestCase):

@@ -53,6 +53,13 @@ Rung 0 is numbered from zero because it is not something the helper sees: like r
 is a config value the **agent** bridges into the environment. An inherited `$<NAME>`
 (rung 1) is what the helper actually reads in both cases.
 
+A consumer **may** also read an [operator key file](#three-shapes-and-which-to-pick)
+between rungs 1 and 2 — the same raw secret as rung 0, kept outside every checkout and
+read directly rather than bridged. It is unnumbered because it is optional and not every
+consumer has it: `_secret_resolve.py` does not, so the handler assets never see it, while
+the Class A instruments under `dev_docs/research/` do, which is what lets a human run one
+by hand. A consumer that implements it says so; one that does not is still conformant.
+
 **Resolver** — first hit wins:
 
 1. `$<NAME>_RESOLVER`.
@@ -160,14 +167,30 @@ and, wherever the agent bridges it into the command it runs, the token also appe
 All three are legitimate and the plugin nags about none of them. They differ only in what
 they expose.
 
-| Shape                                                     | Rung | Exposure you accept                                                             |
-| --------------------------------------------------------- | ---- | ------------------------------------------------------------------------------- |
-| Raw value in `.task-config.local.yml`                     | 0    | In the repo tree; in the transcript wherever the agent bridges it               |
-| `export $<NAME>` from the shell profile                   | 1    | Every process of every login session, for as long as the line is in the profile |
-| A mode-600 file outside any checkout, read per invocation | 1    | The invoked command and its descendants, for that one invocation                |
+| Shape                                                 | Rung | Exposure you accept                                                             |
+| ----------------------------------------------------- | ---- | ------------------------------------------------------------------------------- |
+| Raw value in `.task-config.local.yml`                 | 0    | In the repo tree; in the transcript wherever the agent bridges it               |
+| `export $<NAME>` from the shell profile               | 1    | Every process of every login session, for as long as the line is in the profile |
+| A mode-600 **operator key file** outside any checkout | 1    | Whatever reads the file, at the moment it reads it                              |
 
 The third is the default worth reaching for, and the one the other two are usually chosen
-instead of by accident:
+instead of by accident. It lives at `~/.config/<tool>/<name>`, mode 600 under a 700
+directory, and is reached two ways.
+
+**A consumer reads it directly.** This is the shape to prefer, because there is nothing to
+remember and nothing to type:
+
+```python
+OPERATOR_KEY_FILE = Path.home() / ".config" / "workflow-skills" / "typesafe_api_key"
+```
+
+placed **after** `$<NAME>` in the consumer's ladder — so a one-off prefix can still
+override it — and **before** any pointer, because a raw secret beats a reference, the same
+precedence rung 0 has over rung 3. `_secret_resolve.py` does **not** do this: it reads
+only the environment, and its callers get config values bridged by the agent. The Class A
+instruments under `dev_docs/research/` do, which is what lets a human run one by hand.
+
+**Or bridge it on the command line**, for a consumer that reads only `$<NAME>`:
 
 ```bash
 TYPESAFE_API_KEY="$(cat ~/.config/<tool>/<name>)" <command>
@@ -184,16 +207,23 @@ What it buys, and what it does not:
   grep or a backup of `$HOME` still reaches it; `~/.config` is not a hiding place. Against
   other users, mode 600 under a 700 directory is what narrows it. Against root and your
   own processes, nothing here does.
-- **It is not exported.** A command-prefix assignment scopes the value to the invoked
-  command and its descendants, for that one invocation. The difference from a profile
-  `export` is scope and lifetime, not a count of processes.
-- **It needs no code.** Rung 1 already reads `$<NAME>`, so every consumer works unchanged.
+- **It is not exported.** A consumer that reads the file holds the value in its own
+  process and nowhere else; a command-prefix assignment scopes it to the invoked command
+  and its descendants, for that one invocation. The difference from a profile `export` is
+  scope and lifetime, not a count of processes.
+- **It needs no new rung, and no new name.** It is the same raw secret rung 0 holds, in a
+  different place. A consumer that only reads `$<NAME>` still works via the prefix.
 
-The cost is that **you must type the prefix**, and that friction is the whole reason the
-value stays narrow. A wrapper script that sets the variable and runs the command is the
-same shape with the friction removed, and it is fine — its assignment still dies with the
-command it ran. What it must not become is an `export` in a shell profile, which lives in
-every login session for as long as the line is there.
+The cost is **one branch in each consumer that wants to read it directly** — about five
+lines, and none at all for a consumer reached through the prefix. An earlier draft of this
+section priced the cost as "you must type the prefix" and argued the friction was load-
+bearing. It is not: an operator who will not type it reaches for a profile `export`
+instead, which is the broadest shape here. Making the file directly readable removes the
+friction without widening anything, because the value's lifetime is still one process.
+
+A wrapper script that sets the variable and runs the command is also fine — its assignment
+dies with the command it ran. What it must not become is an `export` in a shell profile,
+which lives in every login session for as long as the line is there.
 
 Unattended, the two split: **cron** hands each entry to a shell, so a crontab line can
 carry the prefix directly — mind `%`, which cron reads as a newline, and the `dash` point

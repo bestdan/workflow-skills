@@ -59,6 +59,11 @@ MODEL = "jev-1.13.0"
 DEFAULT_MARGIN = 0.10
 PLACEHOLDER = "REPLACE_ME"
 LOCAL_CONFIG = Path("dev_docs") / "tasks" / ".task-config.local.yml"
+# The operator key file — a raw secret outside every checkout, so it carries no
+# repo-tree exposure and needs no prefix typed at each invocation. Read directly
+# rather than bridged, which is what makes it usable by a human running this by
+# hand. See dev_docs/auth_key_access.md, "Three shapes".
+OPERATOR_KEY_FILE = Path.home() / ".config" / "workflow-skills" / "typesafe_api_key"
 
 # Prompts written to straddle a near-neighbour pair. There is no expected answer:
 # the measurement is the margin, not correctness. Each is deliberately underspecified
@@ -280,7 +285,8 @@ def local_config_paths(root: Path) -> list[Path]:
 
 
 def resolve_key(root: Path) -> str:
-    """Rung 0, then rung 1, then rung 3 — dev_docs/auth_key_access.md.
+    """Rung 0, then rung 1, then the operator key file, then rung 3 — see
+    dev_docs/auth_key_access.md.
 
     The order is the contract, not an implementation detail. Resolving a configured
     pointer before reading the environment means an exported key cannot override a
@@ -301,6 +307,15 @@ def resolve_key(root: Path) -> str:
     if env:
         return env
 
+    # The operator key file: the same raw secret as rung 0, kept outside every
+    # checkout. It sits after the environment so a one-off prefix can still
+    # override it, and before the pointer because a raw secret beats a reference
+    # — the same precedence rung 0 has over rung 3.
+    if OPERATOR_KEY_FILE.exists():
+        val = OPERATOR_KEY_FILE.read_text().strip()
+        if val:
+            return val
+
     for ref in refs:
         got = subprocess.run(["op", "read", ref], capture_output=True, text=True)
         if got.returncode != 0:
@@ -313,9 +328,11 @@ def resolve_key(root: Path) -> str:
             )
         return got.stdout.strip()
     sys.exit(
-        f"No TypeSafe key. Put it in {LOCAL_CONFIG} as\n"
-        '  typesafe:\n    api_key: "..."\n'
-        "or export TYPESAFE_API_KEY. See dev_docs/auth_key_access.md."
+        f"No TypeSafe key. Put it in {OPERATOR_KEY_FILE} (mode 600), or export\n"
+        "TYPESAFE_API_KEY. A raw api_key in "
+        f"{LOCAL_CONFIG} still works and still\n"
+        "wins, but it puts the secret inside the repo tree. See\n"
+        "dev_docs/auth_key_access.md."
     )
 
 

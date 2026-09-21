@@ -26,19 +26,32 @@ service account as the only 1Password route.
 
 ## Decision
 
-**Move the key to a mode-600 file outside every checkout, read per invocation into
-rung 1.** How to use the shape is the contract's
+**Move the key to a mode-600 file outside every checkout, and have the instrument read it
+directly.** How to use the shape is the contract's
 [Three shapes](../auth_key_access.md#three-shapes-and-which-to-pick), which carries it as
 one of three supported plaintext shapes; this record is the reasoning.
+
+```python
+OPERATOR_KEY_FILE = Path.home() / ".config" / "workflow-skills" / "typesafe_api_key"
+```
+
+read after `$TYPESAFE_API_KEY` and before any pointer. Anything that reads only `$<NAME>`
+can still get it bridged on the command line:
 
 ```bash
 TYPESAFE_API_KEY="$(cat ~/.config/workflow-skills/typesafe_api_key)" <command>
 ```
 
 It answers the location objection directly and at no dependency cost: nothing new to
-install, nothing to lapse between runs, and no code change, because rung 1 already reads
-`$<NAME>`. What it does **not** do is narrow principals — root and anything running as
-the operator can still read the file. That was already acceptable and remains so.
+install and nothing to lapse between runs. What it does **not** do is narrow principals —
+root and anything running as the operator can still read the file. That was already
+acceptable and remains so.
+
+The direct read is a correction, not the original plan. This record first specified the
+prefix form only, on the argument that its friction was load-bearing. The operator
+declined to type it, which would have left a profile `export` — the broadest shape here —
+as the only friction-free option. Reading the file costs one branch in the one shared
+`resolve_key` and keeps the value's lifetime at a single process.
 
 ### This adds a shape; it does not remove one
 
@@ -125,9 +138,12 @@ cost of one config line.
 
 - The instrument keeps a rung with no external dependency that can rot between runs,
   which is what a reproducible research record wants.
-- The operator must type the prefix, or wrap it. Forgetting it is a loud failure **only
-  once the raw line is gone and no pointer is configured** — until then it succeeds
-  silently through the other rung.
+- The operator types nothing: the instrument reads the file. The prefix stays available
+  for a one-off override, since the file is read after `$<NAME>`.
+- The instrument now has a rung `_secret_resolve.py` does not, so the two ladders have
+  diverged further. Both remain faithful to the contract, which documents the operator
+  key file and says which consumers read it — but a reader comparing the two will find
+  four rungs on one side and three on the other.
 - A plaintext key still exists on disk, now at `~/.config/workflow-skills/`, mode 600
   under a 700 directory. Principals are unchanged.
 - `linear.api_key` has the same unresolved biometric problem and the same three shapes
@@ -136,10 +152,10 @@ cost of one config line.
 ## Execution
 
 Repo-side, in this change: the contract gains the third shape, how to use it, and the
-collision rule.
+collision rule, and `resolve_key` gains the branch that reads the operator key file.
 
-Operator-side, on the machine, in one go — because a half-done move is the silent-shadow
-case above:
+Operator-side — **done on `lindev` 2026-09-21**, in one go, because a half-done move is
+the silent-shadow case above:
 
 1. `install -d -m 700 ~/.config/workflow-skills`
 2. `install -m 600 /dev/null ~/.config/workflow-skills/typesafe_api_key`, then paste the
@@ -149,9 +165,15 @@ case above:
    read, the local one first, because `local_config_paths` computes the second from
    `git rev-parse --git-common-dir` rather than from the root it is handed.
 4. Verify per the contract's
-   [shadow section](../auth_key_access.md#they-do-not-collide-but-they-do-shadow): run the
-   instrument with the variable unset, and check the result against its table. A key
-   returned without the resolver being invoked means a raw value survives somewhere.
+   [shadow section](../auth_key_access.md#they-do-not-collide-but-they-do-shadow): with
+   the operator key file temporarily moved aside **and** the variable unset, the ladder
+   must reach its own "no key" error — that is what proves no raw value survives in a
+   scanned config. Then put the file back and confirm resolution comes from it.
+
+   Measured on `lindev`, 2026-09-21: with both absent, `SystemExit: No TypeSafe key`;
+   with the file present and `$TYPESAFE_API_KEY` unset, the key resolves from the file
+   and matches the value that had been in the config. Neither check calls the API —
+   `resolve_key` is exercised directly, since a live run costs money.
 
 ## Revisit when
 
@@ -188,8 +210,13 @@ own, in Execution step 4.
 - **1Password Environments.** The vendor feature for this job, rejected circumstantially:
   `op environment read` ships only on the CLI's beta channel, and it composes with a
   service account rather than replacing one. Revisit trigger 4 covers it.
-- **An out-of-tree _config_ file** — the same file, but taught to the resolver as another
-  `.task-config.local.yml` location. Rejected: it needs a code change in every consumer,
-  and for a frozen research artifact that means amending evidence for a convenience.
-  Rung 1 already reaches outside a checkout with no change at all, which is why the shape
-  wears rung 1 rather than inventing a path.
+- **An out-of-tree file the consumer reads itself** — **adopted**, after first being
+  rejected here. The rejection said it "needs a code change in every consumer," and that
+  was wrong on the facts: `_secret_resolve.py` reads only the environment and is
+  unaffected, and the three Class A instruments share one `resolve_key` — the two siblings
+  load it out of this record's instrument by `spec_from_file_location` rather than
+  reimplementing it. So the change is one branch in one function, not one per consumer.
+  It was also rejected on a cost that turned out not to be payable: the operator declined
+  to type the per-invocation prefix, which left a profile `export` as the only
+  friction-free shape, and that is the broadest option on the table. Reading the file
+  directly costs five lines and keeps the value's lifetime at one process.
