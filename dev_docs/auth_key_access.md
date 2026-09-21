@@ -173,9 +173,37 @@ instead of by accident:
 TYPESAFE_API_KEY="$(cat ~/.config/<tool>/<name>)" <command>
 ```
 
-Use `$(cat …)`, not bash's `$(<…)` shorthand, which under `/bin/sh` yields an empty value
-and exits 0. Why this shape, what it does and does not buy, and when a pointer beats it:
-[`designs/2026-09-20-out-of-tree-plaintext-keys.md`](designs/2026-09-20-out-of-tree-plaintext-keys.md).
+Use `$(cat …)`, not bash's `$(<…)` shorthand: it is not POSIX, and where `/bin/sh` is
+`dash` it yields an empty value and **exits 0**. It fails silently, in exactly the place
+this sends a reader who wants the shape unattended.
+
+What it buys, and what it does not:
+
+- **It is not in a checkout.** That closes the repo-tree vectors and only those — a
+  checkout-wide grep, an editor's project index, a backup of the repo folder. A home-wide
+  grep or a backup of `$HOME` still reaches it; `~/.config` is not a hiding place. Against
+  other users, mode 600 under a 700 directory is what narrows it. Against root and your
+  own processes, nothing here does.
+- **It is not exported.** A command-prefix assignment scopes the value to the invoked
+  command and its descendants, for that one invocation. The difference from a profile
+  `export` is scope and lifetime, not a count of processes.
+- **It needs no code.** Rung 1 already reads `$<NAME>`, so every consumer works unchanged.
+
+The cost is that **you must type the prefix**, and that friction is the whole reason the
+value stays narrow. A wrapper script that sets the variable and runs the command is the
+same shape with the friction removed, and it is fine — its assignment still dies with the
+command it ran. What it must not become is an `export` in a shell profile, which lives in
+every login session for as long as the line is there.
+
+Unattended, the two split: **cron** hands each entry to a shell, so a crontab line can
+carry the prefix directly — mind `%`, which cron reads as a newline, and the `dash` point
+above. **launchd** execs `ProgramArguments` with no shell at all, so it needs a wrapper or
+an explicit `sh -c`. Where neither is wanted, a service-account token is the answer — see
+[Unattended and cloud](#unattended-and-cloud).
+
+This narrows _location_, not _principals_. Where an audit trail, independent revocation,
+or rotation without touching disk matters, the answer is still a pointer plus a resolver
+(rungs 2–3).
 
 ### They do not collide, but they do shadow
 
@@ -189,15 +217,25 @@ above it and the old one keeps answering while you believe the new one is in eff
 - **Remove the higher rungs when you adopt a lower one.** Moving from a raw config value
   to either rung-1 shape means deleting that line in the same change, or nothing has
   changed at all.
-- **Remove it everywhere the ladder looks**, which is more than one file when a consumer
-  scans both a worktree's config and the main checkout's.
-- **Verify by running the consumer with the new shape absent.** What a clean removal
-  looks like depends on what else is configured: with no pointer, the ladder reaches its
-  own "no key" error; with an `op://` pointer, resolution goes **through the pointer**.
-  Either way, a key returned **without invoking the configured resolver** means a raw
-  value survives in a scanned config — the resolver, not `op` specifically, since
-  `$<NAME>_RESOLVER` may select `opx`. The two cases are tabulated in
-  [the design's trap section](designs/2026-09-20-out-of-tree-plaintext-keys.md#the-trap-this-must-document).
+- **Remove it everywhere the ladder looks**, which is more than one file. A consumer that
+  resolves a config path from `git rev-parse --git-common-dir` scans **both** the checkout
+  it is standing in and the main checkout, in that order — so from a linked worktree the
+  worktree's own copy is read first and shadows the main one, and a raw value in either
+  beats rung 1. Delete the line from both.
+- **Verify by running the consumer with the new shape absent.** What a clean removal looks
+  like depends on what else is configured:
+
+  | Configuration                 | A clean removal looks like                                                       |
+  | ----------------------------- | -------------------------------------------------------------------------------- |
+  | No pointer configured         | the ladder reaches its own "no key" error                                        |
+  | An `op://` pointer configured | resolution **through the pointer** — an approval, or a resolver-specific failure |
+
+  A key returned **without invoking the configured resolver** means a raw value survives
+  in a scanned config — the resolver, not `op` specifically, since `$<NAME>_RESOLVER` may
+  select `opx`. This check errs toward a false alarm rather than a false clear: a raw
+  value returns before the environment is read, so the consumer cannot report "no key"
+  while one survives anywhere the ladder looks. Don't disable the other rungs to isolate
+  rung 0 — the step is easy to forget to undo.
 
 ## What may appear in a committed file
 

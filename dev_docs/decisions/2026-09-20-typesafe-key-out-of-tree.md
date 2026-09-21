@@ -27,9 +27,9 @@ service account as the only 1Password route.
 ## Decision
 
 **Move the key to a mode-600 file outside every checkout, read per invocation into
-rung 1.** The shape and its reasoning are
-[`../designs/2026-09-20-out-of-tree-plaintext-keys.md`](../designs/2026-09-20-out-of-tree-plaintext-keys.md);
-the contract now carries it as one of three supported plaintext shapes.
+rung 1.** How to use the shape is the contract's
+[Three shapes](../auth_key_access.md#three-shapes-and-which-to-pick), which carries it as
+one of three supported plaintext shapes; this record is the reasoning.
 
 ```bash
 TYPESAFE_API_KEY="$(cat ~/.config/workflow-skills/typesafe_api_key)" <command>
@@ -103,6 +103,12 @@ point, and it is unavailable to this box anyway: `op environment read` ships on 
 **beta** channel (`2.33.0-beta.02` or later), and stable 2.39.0 does not have it. No
 stable upgrade reaches it; the gate is the channel, not the version number.
 
+Checked 2026-09-20, and recorded because the obvious probe misleads twice. `op --help` on
+2.39.0 lists no `environment` — but `op env` exists **unlisted**, and is a different
+thing (`op env ls` lists shell variables already holding `op://` references, a companion
+to `op run`). And the version number reads backwards: stable 2.39.0 is numerically past
+`2.33.0-beta.02` and still lacks the command, because the gate is the channel.
+
 ### The service-account question belongs to a runtime path
 
 On a headless box an interactive human has the same `op` problem as cron, so "does this
@@ -129,8 +135,8 @@ cost of one config line.
 
 ## Execution
 
-Repo-side, in this change: the contract gains the third shape and the collision rule, and
-the design is referenced from both.
+Repo-side, in this change: the contract gains the third shape, how to use it, and the
+collision rule.
 
 Operator-side, on the machine, in one go — because a half-done move is the silent-shadow
 case above:
@@ -140,11 +146,12 @@ case above:
    key in with an editor rather than echoing it into the shell.
 3. Delete `typesafe.api_key` from **every copy the ladder scans** — the checkout you are
    standing in and the main checkout's `dev_docs/tasks/.task-config.local.yml`. Both are
-   read, the local one first; see the design's trap section.
-4. Verify per the design's table: run the instrument with the variable unset. With no
-   pointer configured that must reach the ladder's own "no key" error; with an `op://`
-   pointer configured it must resolve through the pointer. A key returned without
-   touching `op` means a raw value survives somewhere.
+   read, the local one first, because `local_config_paths` computes the second from
+   `git rev-parse --git-common-dir` rather than from the root it is handed.
+4. Verify per the contract's
+   [shadow section](../auth_key_access.md#they-do-not-collide-but-they-do-shadow): run the
+   instrument with the variable unset, and check the result against its table. A key
+   returned without the resolver being invoked means a raw value survives somewhere.
 
 ## Revisit when
 
@@ -161,3 +168,28 @@ case above:
    **Environments reach the stable CLI channel**. Either makes the better option cheap
    enough to take on its own merits.
 5. **A second human account appears on the box.** The 600/700 posture is doing work here.
+
+## Confirmation
+
+**Nothing.** This rests on convention alone, and cannot do otherwise: rung 1 reads
+`$<NAME>` and nothing can tell where an inherited value came from, which is precisely
+what lets the shape work with no code change. The one mechanical check is the operator's
+own, in Execution step 4.
+
+## Alternatives
+
+- **A profile export.** Ruled out permanently, not deferred — see
+  [Why not a shell-profile export](#why-not-a-shell-profile-export). It trades a narrow,
+  per-invocation exposure for an ambient one, and `~/.zshenv` here is a symlink into a
+  synced repo.
+- **A 1Password service account plus a pointer.** Deferred with triggers, not rejected —
+  see [Why not a service account, yet](#why-not-a-service-account-yet). It buys audit and
+  independent rotation but does not shrink the exposure set.
+- **1Password Environments.** The vendor feature for this job, rejected circumstantially:
+  `op environment read` ships only on the CLI's beta channel, and it composes with a
+  service account rather than replacing one. Revisit trigger 4 covers it.
+- **An out-of-tree _config_ file** — the same file, but taught to the resolver as another
+  `.task-config.local.yml` location. Rejected: it needs a code change in every consumer,
+  and for a frozen research artifact that means amending evidence for a convenience.
+  Rung 1 already reaches outside a checkout with no change at all, which is why the shape
+  wears rung 1 rather than inventing a path.

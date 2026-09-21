@@ -208,8 +208,9 @@ def extract_key(config_text: str) -> tuple[str, str] | None:
     resolve it, and resolving lands it at rung 3 where a pointer belongs — but it is
     still a malformed config, so it says so on stderr rather than fixing it silently.
 
-    That recovery is a **fallback, not a winner**: `api_key_ref` is searched first and
-    a configured one always wins. Recovering before that check would let a typo in the
+    That recovery is a **fallback, not a winner**: a configured `api_key_ref` is
+    consulted before the misplaced value is used, and wins. Recovering before that
+    check would let a typo in the
     raw field shadow a correctly-placed pointer, and the two fields can name different
     items — `api_key: op://Private/Linear/token` beside a valid TypeSafe `api_key_ref`
     would resolve the Linear pointer and put a full-account token for another service
