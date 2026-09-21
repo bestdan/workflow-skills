@@ -29,7 +29,12 @@ sys.exit(1 if missing or not named else 0)
   refute_output --partial "named: 0"
 }
 
+# `assert_failure 1`, not a bare one: grep exits 2 on a regex or file error, and
+# a bare assertion reads that as "no retired recipe found". The pattern spells
+# its own word boundaries for the same reason — `\b` is a GNU extension, and BSD
+# grep on the macOS runner would not error on it, it would match differently,
+# which is a vacuous pass on the one platform that differs.
 @test "the skill names no retired dli/just recipe" {
-  run grep -nE '(\bdli\b|just --justfile)' "$SKILL"
-  assert_failure
+  run grep -nE '(^|[^A-Za-z0-9_])dli([^A-Za-z0-9_]|$)|just --justfile' "$SKILL"
+  assert_failure 1
 }

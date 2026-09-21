@@ -135,7 +135,11 @@ down without anything being typed: `WorktreeCreate` puts it where
 (not inside the repo, which aborts in a repo that versions its own agent
 config), `WorktreeRemove` tears down only what the exiting session itself
 created, and a `PostToolUse` reminder on `ExitWorktree` says teardown ends
-there. Both halves are plain scripts you can run by hand:
+there. Teardown covers the paths the harness dispatches: an explicit
+`ExitWorktree` and the interactive exit dialog. An unattended (`claude -p`)
+exit fires `SessionEnd` and nothing else, and subagent worktrees are never
+handed to the hook, so both still need a manual run of the same scripts —
+they are plain scripts you can run by hand either way:
 `scripts/worktree-remove.sh <path>` and `scripts/branch-remove.sh <branch>`.
 
 | Skill                                                      | Trigger                                                | What it does                                                                                                                                                             |

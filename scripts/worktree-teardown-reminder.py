@@ -37,8 +37,13 @@ field looks exactly like a hook that never fired.
 import json
 import sys
 
+# Phrased around the tool return, not the outcome: the ownership gates in
+# worktree-remove-hook.sh can keep a worktree while the harness still reports
+# it removed, so this hook — which knows only that ExitWorktree returned — is in
+# no position to certify a teardown. The prohibition clause is the part that
+# does the work, and is what the suite asserts.
 MESSAGE = (
-    "The worktree teardown is done. Report that and stop — don't enumerate, "
+    "`ExitWorktree` has returned. Report its result and stop — don't enumerate, "
     "query, or offer to clean up the repo's other worktrees."
 )
 

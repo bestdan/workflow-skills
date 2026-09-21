@@ -71,7 +71,7 @@ Teardown's real residue is the merged branch, and deleting it by hand costs appr
 
 A worktree someone already `rm -rf`'d has no checkout left to read, so the branch comes from its surviving `git worktree list --porcelain` entry instead. That entry is erased by the script's own prune, so this is the only window it can be read in — and it is the case that most needs the branch tidied, because whoever deleted the directory by hand is not coming back to run `git branch -D`.
 
-The gate is PR state, not ancestry: a squash-merging repo makes `--is-ancestor` call every merged branch unmerged, which is also why the delete is `-D` — `-d` answers a question the gate cannot depend on. It deletes while `origin/<branch>` still holds the merged tip and refuses once that ref is pruned, so the same merged branch succeeds or fails by how recently a fetch ran.
+The gate is PR state, not ancestry: a squash-merging repo makes `--is-ancestor` call every merged branch unmerged, which is also why the delete is `-D` — `-d` answers a question the gate cannot depend on. `-d` deletes while `origin/<branch>` still holds the merged tip and refuses once that ref is pruned, so the same merged branch succeeds or fails by how recently a fetch ran.
 
 ### `scripts/branch-remove.sh` is the same gate with no worktree attached
 
