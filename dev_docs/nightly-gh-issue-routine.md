@@ -64,16 +64,23 @@ this repo's records have had to relearn twice, is in
 - **`$TMPDIR` is empty and `/tmp/claude` does not exist.** Create your own scratch
   directory under `/tmp`.
 
-### GitHub: the MCP works, `gh` is the open question
+### GitHub: the MCP works, `gh` does not
 
-This is the one place the gh-issue handler and the cloud runner are known to be in
-tension, and step 0 exists to keep a run from papering over it.
+This is the one place the gh-issue handler and the cloud runner are in tension, and
+step 0 exists to keep a run from papering over it.
+
+> **As of 2026-09-21 this routine stops at step 0 assertion 4 and does nothing,
+> because `gh` is not installed on the box.** That is the preflight working. The
+> measurement — all nine checks, with the push-back path confirmed good — is
+> [`dev_docs/research/2026-09-21-nightly-gh-issue-routine-preflight.md`](research/2026-09-21-nightly-gh-issue-routine-preflight.md).
+> Until the label channel is resolved there is nothing for a nightly run to do.
 
 - **`gh` was absent from the box** in every probe that looked for it — not on
   `PATH`, and not under `find / -maxdepth 4 -name gh -type f` — and an earlier
   routine found it present in two of five runs with no trigger setting explaining
-  the difference. Measured 2026-08-24 and re-measured 2026-09-16:
-  [`dev_docs/research/2026-08-24-routine-claim-channel.md`](research/2026-08-24-routine-claim-channel.md).
+  the difference. Measured 2026-08-24, re-measured 2026-09-16
+  ([`dev_docs/research/2026-08-24-routine-claim-channel.md`](research/2026-08-24-routine-claim-channel.md))
+  and again 2026-09-21 as `command not found`.
 - **Every label write in this handler goes through `gh`.**
   `commands/handlers/assets/gh-issue-state.py` shells out to the CLI, by design —
   the enum guarantee is the CLI's, and a raw REST write silently creates an unknown
