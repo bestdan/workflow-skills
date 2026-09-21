@@ -82,6 +82,115 @@ class CollisionTests(unittest.TestCase):
         self.assertFalse(jev.is_collision(0.16))
 
 
+class NeedsSkillThresholdTests(unittest.TestCase):
+    def test_the_threshold_itself_is_a_yes(self):
+        """Same boundary rule as is_collision, so the two questions round alike.
+
+        Jev returns exactly 0.50 often enough for the difference to decide rows.
+        """
+        self.assertTrue(jev.says_needs_skill(0.50, 0.50))
+
+    def test_below_the_threshold_is_a_no(self):
+        self.assertFalse(jev.says_needs_skill(0.49, 0.50))
+
+
+class NoulInstructionsTests(unittest.TestCase):
+    def test_every_description_appears_verbatim(self):
+        """A roster that drops a skill asks about a roster this repo does not ship.
+
+        The Choice would still be scored over every description via `criteria`, so
+        the two questions would silently be answering about different option sets.
+        """
+        crit = {"a": "Use when alpha.", "b": "Use when beta."}
+        text = jev.noul_instructions(crit)
+        for name, desc in crit.items():
+            self.assertIn(name, text)
+            self.assertIn(desc, text)
+
+    def test_the_roster_is_name_ordered_not_dict_ordered(self):
+        """Two runs must send byte-identical instructions, or they are not comparable."""
+        a = jev.noul_instructions({"z": "Zed.", "m": "Em."})
+        b = jev.noul_instructions({"m": "Em.", "z": "Zed."})
+        self.assertEqual(a, b)
+        self.assertLess(a.index("m: Em."), a.index("z: Zed."))
+
+    def test_the_real_roster_covers_every_skill(self):
+        files = {
+            str(p): p.read_text() for p in sorted((ROOT / "skills").glob("*/SKILL.md"))
+        }
+        crit = jev.parse_descriptions(files)
+        text = jev.noul_instructions(crit)
+        for name in crit:
+            self.assertIn(f"- {name}: ", text)
+
+
+class ChoiceRequestIsUnchangedTests(unittest.TestCase):
+    """The Noul must not disturb the Choice, or section 1 stops being reproducible.
+
+    The roster lives in the Noul's own `instructions` for exactly this reason. Putting
+    it in `state` — the obvious place, since state is shared — would change the Choice's
+    input, and the record's measured margins were taken with the bare prompt as state.
+    """
+
+    def _payload(self):
+        captured = {}
+
+        def fake(key, payload):
+            captured["payload"] = payload
+            return {"answers": {}}
+
+        with unittest.mock.patch.object(jev, "ask_payload", fake):
+            jev.ask("k", "a prompt", {"a": "Use when alpha."})
+        return captured["payload"]
+
+    def test_state_is_still_the_bare_prompt(self):
+        self.assertEqual(self._payload()["state"], "a prompt")
+
+    def test_the_choice_criteria_are_still_the_descriptions_alone(self):
+        choice = self._payload()["questions"]["skill"]
+        self.assertEqual(choice["criteria"], {"a": "Use when alpha."})
+        self.assertEqual(choice["type"], "choice")
+
+    def test_the_roster_is_not_in_the_shared_state(self):
+        self.assertNotIn("Use when alpha.", self._payload()["state"])
+
+    def test_the_noul_rides_the_same_request(self):
+        """One request, not two — the parallel-and-isolated property is the point."""
+        questions = self._payload()["questions"]
+        self.assertEqual(set(questions), {"skill", "needs_skill"})
+        self.assertEqual(questions["needs_skill"]["type"], "noul")
+
+
+class NegativeProbeTests(unittest.TestCase):
+    def test_labels_are_unique(self):
+        """main keys the tier map by label, so a duplicate silently loses a tier."""
+        labels = [label for _, label, _ in jev.NEGATIVE_PROBES]
+        self.assertEqual(len(labels), len(set(labels)))
+
+    def test_every_probe_carries_a_known_tier(self):
+        """The two tiers are reported separately; a typo would drop a row from both."""
+        for tier, label, _ in jev.NEGATIVE_PROBES:
+            self.assertIn(tier, ("plain", "near"), label)
+
+    def test_both_tiers_are_populated(self):
+        tiers = {tier for tier, _, _ in jev.NEGATIVE_PROBES}
+        self.assertEqual(tiers, {"plain", "near"})
+
+    def test_no_negative_prompt_names_a_skill(self):
+        """A prompt naming its own skill measures nothing.
+
+        `evals/manifest.tsv`'s header states that rule for the positive cases and
+        nothing enforces it there; the negative set gets the enforcement.
+        """
+        files = {
+            str(p): p.read_text() for p in sorted((ROOT / "skills").glob("*/SKILL.md"))
+        }
+        names = set(jev.parse_descriptions(files))
+        for _, label, prompt in jev.NEGATIVE_PROBES:
+            for name in names:
+                self.assertNotIn(name, prompt.lower(), label)
+
+
 class DescriptionTests(unittest.TestCase):
     def test_folded_scalar_is_joined_into_one_line(self):
         text = (
@@ -342,6 +451,221 @@ class RedactionTests(unittest.TestCase):
 
     def test_something_that_is_not_a_full_pointer_is_left_alone(self):
         self.assertEqual(jev.redact_ref("op://Private"), "op://Private")
+
+
+def _noul_record(truth, *, noul, tier=None, fp=False, fn=False, label="row"):
+    """Only the fields report_noul reads. A real record carries a dozen more."""
+    return {
+        "label": label,
+        "tier": tier,
+        "winner": "some-skill",
+        "needs_skill": noul,
+        "needs_skill_truth": truth,
+        "false_positive": fp,
+        "false_negative": fn,
+    }
+
+
+class RateLineTests(unittest.TestCase):
+    def test_the_per_run_spread_is_printed_not_averaged(self):
+        """Section 1's finding was that the spread is the story, so it is printed."""
+        self.assertEqual(
+            jev.rate_line("false positives:", [1, 0, 2], [3, 3, 3]),
+            "false positives: 3/9 = 33.3%  (per run: 1, 0, 2)",
+        )
+
+    def test_a_single_run_omits_the_spread(self):
+        """One run has no spread; "(per run: 1)" would imply it does."""
+        self.assertEqual(
+            jev.rate_line("false positives:", [1], [4]),
+            "false positives: 1/4 = 25.0%",
+        )
+
+    def test_an_empty_denominator_is_n_a_not_a_zero_division(self):
+        """`--suite negative` alone leaves the positive half with no rows at all."""
+        self.assertEqual(
+            jev.rate_line("false negatives:", [0], [0]),
+            "false negatives: 0/0 = n/a",
+        )
+
+
+class ReportNoulTests(unittest.TestCase):
+    """The counting that produces the published rates.
+
+    The fixture is deliberately asymmetric — six negatives against four positives, four
+    `plain` against two `near`, one false positive against two false negatives — so a
+    swapped denominator or an inverted `needs_skill_truth` partition has to change a
+    printed number rather than landing on the right one by luck.
+    """
+
+    def _passes(self):
+        return [
+            {
+                "records": [
+                    _noul_record(False, noul=0.80, tier="plain", fp=True, label="p-a"),
+                    _noul_record(False, noul=0.10, tier="plain", label="p-b"),
+                    _noul_record(False, noul=0.20, tier="near", label="n-c"),
+                    _noul_record(True, noul=0.30, fn=True, label="pos-1"),
+                    _noul_record(True, noul=0.90, label="pos-2"),
+                ]
+            },
+            {
+                "records": [
+                    _noul_record(False, noul=0.20, tier="plain", label="p-a"),
+                    _noul_record(False, noul=0.10, tier="plain", label="p-b"),
+                    _noul_record(False, noul=0.30, tier="near", label="n-c"),
+                    _noul_record(True, noul=0.40, fn=True, label="pos-1"),
+                    _noul_record(True, noul=0.90, label="pos-2"),
+                ]
+            },
+        ]
+
+    def _report(self, passes):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            jev.report_noul(passes, 0.5)
+        return buf.getvalue()
+
+    def test_the_two_rates_use_their_own_denominators(self):
+        out = self._report(self._passes())
+        self.assertIn(
+            "false positives: 1/6 = 16.7%  (per run: 1, 0) negative prompts", out
+        )
+        self.assertIn(
+            "false negatives: 2/4 = 50.0%  (per run: 1, 1) positive prompts", out
+        )
+
+    def test_each_tier_is_counted_against_its_own_rows(self):
+        out = self._report(self._passes())
+        self.assertIn("plain: 1/4 = 25.0%  (per run: 1, 0)", out)
+        self.assertIn("near: 0/2 = 0.0%  (per run: 0, 0)", out)
+
+    def test_nothing_is_printed_when_neither_half_has_rows(self):
+        """A Choice-only run must not emit an empty no-skill block."""
+        self.assertEqual(self._report([{"records": []}]), "")
+
+
+class RunSuiteScoreToLabelTests(unittest.TestCase):
+    """The step that turns a score into a label: which noul meets which threshold, and
+    which way the `not` points.
+
+    The aggregation tests above inject `false_positive`/`false_negative` as fixture
+    booleans, so they cannot see an inversion in the expressions that compute them —
+    and until these cases, nothing executed `run_suite` at all. Patching `ask` rather
+    than `ask_payload` is the point: it replaces the network and the response while
+    leaving `rank`, `says_needs_skill` and the record assembly running for real, so
+    what is under test is the composition rather than the parts.
+    """
+
+    def _row(self, noul, truth, *, threshold=0.5, tiers=None):
+        def fake_ask(key, state, criteria, model=jev.MODEL):
+            return {
+                "answers": {
+                    "skill": {
+                        "probabilities": {"alpha": 0.7, "beta": 0.3},
+                        "confidence": 0.8,
+                    },
+                    "needs_skill": {"noul": noul},
+                },
+                "usage": {"input_tokens": 11},
+            }
+
+        # run_suite narrates to stderr; the verdict under test is the returned record.
+        with unittest.mock.patch.object(jev, "ask", fake_ask):
+            with contextlib.redirect_stderr(io.StringIO()):
+                out = jev.run_suite(
+                    "k",
+                    {"alpha": "Use when alpha."},
+                    [("alpha", "a prompt")],
+                    jev.DEFAULT_MARGIN,
+                    True,
+                    needs_skill_truth=truth,
+                    noul_threshold=threshold,
+                    tiers=tiers,
+                )
+        return out["results"][0]
+
+    def test_a_high_noul_on_a_no_skill_row_is_a_false_positive(self):
+        row = self._row(0.90, False)
+        self.assertTrue(row["false_positive"])
+        self.assertFalse(row["false_negative"])
+
+    def test_a_low_noul_on_a_needs_skill_row_is_a_false_negative(self):
+        row = self._row(0.10, True)
+        self.assertTrue(row["false_negative"])
+        self.assertFalse(row["false_positive"])
+
+    def test_neither_flag_fires_when_the_noul_agrees_with_the_truth(self):
+        """The common case. An inverted `not` in either expression breaks it."""
+        self.assertFalse(self._row(0.90, True)["false_negative"])
+        self.assertFalse(self._row(0.10, False)["false_positive"])
+
+    def test_a_noul_exactly_at_the_threshold_counts_as_fired(self):
+        """`says_needs_skill` is at-or-above. Its own unit test pins the predicate;
+        this pins that the record built from it rounds the same way."""
+        self.assertTrue(self._row(0.50, False, threshold=0.50)["false_positive"])
+        self.assertFalse(self._row(0.50, True, threshold=0.50)["false_negative"])
+
+    def test_the_threshold_that_was_passed_is_the_one_applied(self):
+        """A dropped `noul_threshold` would fall back to the 0.5 default in silence,
+        which is what makes `--noul-threshold` either load-bearing or a no-op."""
+        self.assertFalse(self._row(0.60, False, threshold=0.70)["false_positive"])
+        self.assertTrue(self._row(0.60, False, threshold=0.50)["false_positive"])
+
+    def test_the_tier_is_carried_onto_the_record(self):
+        """report_noul's per-tier split reads this field, and an unmapped label drops
+        the row out of both tiers rather than erroring."""
+        self.assertEqual(
+            self._row(0.10, False, tiers={"alpha": "plain"})["tier"], "plain"
+        )
+        self.assertIsNone(self._row(0.10, False)["tier"])
+
+
+class NoulThresholdRangeTests(unittest.TestCase):
+    """`--noul-threshold` is a probability, and argparse's `type=float` is not.
+
+    Out of range the run still completes and prints a rate, which is the failure mode
+    worth a check: 0/64 reads as a clean result. `nan` is the same shape and also
+    writes the bare token `NaN` into the `--json` records, which is not JSON a strict
+    parser reads back.
+    """
+
+    def _rejects(self, value):
+        """Rejection must happen before the paid path, and the test must not depend on
+        the code under test to stay hermetic.
+
+        `main` reaches `resolve_key` and then a live suite the moment the range check
+        lets a value through, so stubbing it is what keeps this suite offline even
+        against a regression that drops the guard. Without the stub, removing the
+        check turns this test into 22 paid requests — measured, not hypothesised.
+        """
+
+        def unreachable(root):
+            raise AssertionError("range check let the value through to the paid path")
+
+        with unittest.mock.patch.object(jev, "resolve_key", unreachable):
+            with contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as caught:
+                    jev.main(["--noul-threshold", value])
+        return caught.exception.code
+
+    def test_above_one_is_rejected(self):
+        self.assertEqual(self._rejects("5"), 2)
+
+    def test_below_zero_is_rejected(self):
+        self.assertEqual(self._rejects("-0.1"), 2)
+
+    def test_nan_is_rejected(self):
+        """Every comparison against nan is False, so the range check catches it."""
+        self.assertEqual(self._rejects("nan"), 2)
+
+    def test_infinity_is_rejected(self):
+        self.assertEqual(self._rejects("inf"), 2)
+
+    # The accepting side (0 and 1, the degenerate but meaningful bounds) has no test:
+    # the check is inline in main(), so a value that passes it falls through to
+    # resolve_key and a paid run. Asserting `0.0 <= 0.0 <= 1.0` instead would test
+    # Python, not this file.
 
 
 if __name__ == "__main__":
