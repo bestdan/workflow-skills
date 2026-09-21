@@ -80,8 +80,11 @@ DEV_DOCS_REF_RE = re.compile(
 )
 # Relative markdown links resolve against the linking file's own directory
 # rather than ROOT, so a link carrying the wrong number of "../" is a distinct
-# failure that the repo-root form above cannot see.
-DEV_DOCS_LINK_RE = re.compile(r"\]\((\.\./[^)]*dev_docs/[^)#]*)")
+# failure that the repo-root form above cannot see. The destination stops at
+# whitespace as well as at ")" and "#": a link may carry an optional title —
+# [doc](../dev_docs/x.md "details") — and swallowing that into the path turns
+# a valid link into a false failure.
+DEV_DOCS_LINK_RE = re.compile(r"\]\((\.\./[^)\s]*dev_docs/[^)#\s]*)")
 # --- shell logic in runtime markdown ---
 # A fenced shell block in a skill/command/handler/agent body is runtime prompt
 # text. `scripts/lint-shell.sh` globs only `*.sh`/`*.bash`/`*.bats` from
@@ -333,7 +336,14 @@ for f in plugin_root_ref_files:
             target = link.group(1)
             if "<" in target or "*" in target:
                 continue
-            if not (f.parent / target).exists():
+            # Containment, not just existence. An over-deep "../" that lands on
+            # a real dev_docs path *outside* the repo would otherwise be
+            # accepted, making the verdict depend on what sits beside the
+            # checkout rather than on the repo. .resolve() follows symlinks, so
+            # a dev_docs/ symlinked out of the tree is rejected on the same
+            # grounds.
+            resolved = (f.parent / target).resolve()
+            if not (resolved.is_relative_to(ROOT) and resolved.exists()):
                 err(rel(f), f"line {n}: relative link {target} does not resolve")
 
 

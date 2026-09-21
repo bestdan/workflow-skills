@@ -529,6 +529,9 @@ description: fixture command
 
 Read dev_docs/real.md, or [the same doc by relative link](../dev_docs/real.md).
 
+A link may carry a title, which is not part of the path:
+[the same doc, titled](../dev_docs/real.md "details").
+
 Cards live in dev_docs/tasks/<slug>.md and config in
 dev_docs/tasks/.task-config.yml; the ledger is dev_docs/co-review/ and the
 tutorial walks dev_docs/research/onboarding/decisions.md. None of those exist
@@ -551,6 +554,12 @@ fi
 DIR_N="$BASE/dev-docs-refs-fail"
 make_plugin_fixture "$DIR_N"
 echo "a real shipped doc" >"$DIR_N/dev_docs/real.md"
+# The over-deep link below resolves to "$BASE/dev_docs/real.md" — outside the
+# fixture's ROOT. Create it, so the wrong-depth case is caught by the
+# containment test rather than by that path merely being absent: without
+# containment this file makes the link exist, and the assertion fails.
+mkdir -p "$BASE/dev_docs"
+echo "a doc OUTSIDE the fixture root" >"$BASE/dev_docs/real.md"
 cat >"$DIR_N/commands/cmd.md" <<'MD'
 ---
 description: fixture command
@@ -564,12 +573,18 @@ This link names a file that does exist, but with one "../" too many, so it
 resolves outside the repo: [wrong depth](../../dev_docs/real.md).
 MD
 out_n="$(uv run "$DIR_N/scripts/validate.py" 2>&1)"
+rc_n=$?
 assert_contains "dangling dev_docs reference is flagged" "$out_n" \
   "dev_docs/gone.md does not exist"
 assert_contains "dangling relative dev_docs link is flagged" "$out_n" \
   "relative link ../dev_docs/also-gone.md does not resolve"
 assert_contains "relative link with the wrong depth is flagged" "$out_n" \
   "relative link ../../dev_docs/real.md does not resolve"
+if [ "$rc_n" -eq 1 ]; then
+  ok "dangling dev_docs references: exits 1"
+else
+  bad "dangling dev_docs references: should exit 1, got $rc_n"
+fi
 
 # --- Default (no arg): still validates this plugin's own dev_docs/tasks --
 # (preserves today's CI behavior — see validate.py module docstring)
