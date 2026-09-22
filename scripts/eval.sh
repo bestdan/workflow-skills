@@ -41,6 +41,47 @@ fi
 pass=0
 fail=0
 failed=()
+dirtied=()
+dirty_count=0
+
+# Each case runs against a writable checkout with permissions skipped, so a
+# realistic prompt can write into the repo under test — and one did: the
+# review-facts case wrote a report under skills/analysis-pipeline/example/ and
+# staged it, while the suite reported the row as a pass. Detect that and fail
+# the row, so residue is never folded silently into whatever is in flight.
+#
+# Compared per case against a rolling baseline rather than against "clean".
+# The suite is routinely run from a worktree with work already in progress, so
+# only the delta a case introduces is the harness's doing; blaming a row for
+# pre-existing edits would make the check useless exactly where it is needed.
+# A ROOT that is not a git checkout yields empty on both sides, so this
+# degrades to a no-op rather than failing every row.
+#
+# Two signals, because `git status --porcelain` reports status codes and paths
+# but not content. A case that edits a file already showing as ` M` leaves the
+# porcelain line byte-identical, and that is the likeliest miss here: the
+# rolling baseline exists to support running with work in flight, which is
+# exactly when paths are already dirty. The content hash catches it.
+#
+# `-uall` is load-bearing, not tidiness. By default porcelain collapses an
+# untracked directory to a single `?? dir/` entry, so a second file written
+# inside it leaves the output byte-identical — measured, not assumed — and
+# `diff HEAD` does not see untracked content at all. That is the shape of the
+# case actually observed (a generated report written into a directory), and it
+# would have been invisible had the target directory been untracked. `-uall`
+# lists untracked files individually, so any new file moves this signal.
+#
+# Known limit, now narrow: rewriting a file that was *already* in the untracked
+# list moves neither signal, since its `?? path` entry is unchanged and
+# `diff HEAD` skips it.
+tree_paths() {
+  git -C "$ROOT" status --porcelain -uall 2>/dev/null
+}
+tree_hash() {
+  git -C "$ROOT" diff HEAD 2>/dev/null | shasum 2>/dev/null
+}
+baseline_paths="$(tree_paths)"
+baseline_hash="$(tree_hash)"
 
 while IFS=$'\t' read -r skill prompt_file max_turns; do
   [[ -z "${skill// /}" || "$skill" == \#* ]] && continue
@@ -59,7 +100,36 @@ while IFS=$'\t' read -r skill prompt_file max_turns; do
     --output-format stream-json --verbose \
     >"$log" 2>&1 || true
 
-  if grep -q '"name":"Skill"' "$log" \
+  after_paths="$(tree_paths)"
+  after_hash="$(tree_hash)"
+  residue=""
+  if [[ "$after_paths" != "$baseline_paths" || "$after_hash" != "$baseline_hash" ]]; then
+    # Symmetric (comm -3), not just additions: a case that *reverts* an entry
+    # has also written to the checkout, and reading that as clean would let it
+    # delete work someone had in flight. comm prefixes its second column with a
+    # tab, which the sed strips.
+    residue="$(comm -3 <(printf '%s\n' "$baseline_paths" | sort -u) \
+      <(printf '%s\n' "$after_paths" | sort -u) | sed -e 's/^\t//' -e '/^$/d')"
+    if [[ -z "$residue" ]]; then
+      residue="(content changed under a path that was already modified)"
+    fi
+    # Roll the baseline forward either way, so one dirtying case does not
+    # convict every row after it.
+    baseline_paths="$after_paths"
+    baseline_hash="$after_hash"
+  fi
+
+  if [[ -n "$residue" ]]; then
+    # Reported ahead of the routing verdict on purpose: a case that wrote into
+    # the checkout has already broken the run, because a later case sees a tree
+    # this one changed. Whether it also picked the right skill is beside that.
+    echo "  ❌ FAIL — wrote into the repo under test:"
+    printf '%s\n' "$residue" | sed 's/^/       /'
+    fail=$((fail + 1))
+    failed+=("$skill")
+    dirtied+=("$skill")
+    dirty_count=$((dirty_count + 1))
+  elif grep -q '"name":"Skill"' "$log" \
     && grep -qE "\"(skill|name)\":\"([^\"]*:)?${skill}\"" "$log"; then
     echo "  ✅ PASS"
     pass=$((pass + 1))
@@ -74,6 +144,11 @@ done <"$MANIFEST"
 
 echo
 echo "evals: ${pass} passed, ${fail} failed"
+if [[ $dirty_count -ne 0 ]]; then
+  echo "dirtied the repo under test: ${dirtied[*]}" >&2
+  echo "those changes are still in the checkout — inspect and remove them before" >&2
+  echo "committing, and treat any row after the first as an unreliable result." >&2
+fi
 if [[ $fail -ne 0 ]]; then
   echo "failed: ${failed[*]}" >&2
   exit 1

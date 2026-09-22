@@ -45,6 +45,38 @@ then asserts the run log contains a `Skill` tool invocation matching the expecte
 skill (tolerant of the `workflow-skills:` plugin prefix). Pattern adapted from
 [obra/superpowers](https://github.com/obra/superpowers) `tests/skill-triggering`.
 
+## A case that writes into the repo fails that row
+
+Each case runs against a writable checkout with `--dangerously-skip-permissions`,
+so a realistic prompt can write into the repo under test — and one did, staging a
+generated report while the suite called the row a pass. The harness now reads
+`git status --porcelain` around every case and fails any row that changed the
+tree, naming the paths and listing the row again in the summary.
+
+Two things follow. A row reported this way is a **harness** failure, not a
+routing verdict: the case may well have picked the right skill, but it has
+changed what every later case sees, so treat the rest of the run as unreliable.
+And the residue is left where it is rather than reverted — the suite is often run
+from a worktree with work in flight, and a harness that reverts on its own would
+eat that work. Inspect and remove it yourself.
+
+The comparison is per case against a rolling baseline, not against a clean tree,
+so uncommitted work you already had does not convict a row. It compares the
+porcelain list **and** a hash of `git diff HEAD`, because the list carries status
+codes and paths but no content: an edit to a file already showing as modified
+leaves its line byte-identical. It is also symmetric, so a case that _reverts_
+one of your edits is reported too rather than reading as clean.
+
+The path list is read with `-uall`. By default porcelain collapses an untracked
+directory to one `?? dir/` entry, so a file written inside it would leave the
+output byte-identical — which is the shape of the case actually observed, and
+would have gone unseen had the target directory been untracked.
+
+A `<repo>` that is not a git checkout degrades to a no-op. One narrow hole
+remains: rewriting a file that was _already_ in the untracked list moves neither
+signal, since its entry is unchanged and `diff HEAD` skips untracked content.
+Covered by `test/eval-tree-guard.bats`.
+
 ## Add a case
 
 1. Write `prompts/<skill>.txt` — a realistic prompt that triggers the skill
