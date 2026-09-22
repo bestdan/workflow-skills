@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.67.4] - 2026-09-22
+
+### Fixes
+
+- retain a failing row's log and name its cause [#840] (#844) (80905b5)
+
 ## [2.67.3] - 2026-09-22
 
 ### Fixes
