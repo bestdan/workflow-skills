@@ -470,9 +470,11 @@ findings are about.
   holds, verbatim.** `gh auth status` exited `0` and printed
   `The token in GH_TOKEN is invalid.` in the same breath. `gh api user` and a
   repo-scoped `gh api repos/bestdan/workflow-skills` both succeeded (`200`) against the
-  same token in the same process — the exit-code check alone would have passed a dead
-  credential, exactly the failure mode `commands/handlers/gh-issue-claim.md` §4 step 5
-  already writes its self-check around.
+  same token in the same process — so this credential is not dead, only misreported. A
+  check that reads `gh auth status`'s exit code alone would have called it healthy just
+  as readily as it would have missed a genuinely dead one, which is exactly the
+  false-negative `commands/handlers/gh-issue-claim.md` §4 step 5 already writes its
+  self-check around.
 - **New: the GraphQL refusal (§ 2026-09-07 finding 5) is not specific to routines or to
   batch-dispatched sessions — it blocks the single-issue, foreground `/do-tasks` path
   too.** `gh issue list`, `gh issue view`, and `gh pr list` each returned the identical
