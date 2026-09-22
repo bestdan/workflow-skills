@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.67.0] - 2026-09-22
+
+### Features
+
+- stop the run standing outside the tree it writes [#827] (#831) (e45c748)
+
 ## [2.66.1] - 2026-09-21
 
 ### Fixes
