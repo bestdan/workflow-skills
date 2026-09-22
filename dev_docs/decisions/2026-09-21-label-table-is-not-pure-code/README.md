@@ -205,7 +205,7 @@ no distribution. Specifically:
   input to writing it: the eight most frequent pairs are the orderings that
   actually matter.
 - **A corpus of scored `task_profile` blocks exists.** The frequency question is
-  unanswerable today. If real cards turn out to concentrate in the 56 unambiguous
+  unanswerable today. If real cards turn out to concentrate in the 65 unambiguous
   tuples, the precedence order matters less than the counts here suggest — though
   the 8 silent tuples would still need the default branch.
 - **`select-coder` is asked whether `confidence` gates anything.** It reads
