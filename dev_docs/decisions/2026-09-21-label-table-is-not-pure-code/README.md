@@ -37,12 +37,12 @@ Read literally, over all 576 tuples:
 | rows that fire | tuples | share |
 | -------------- | ------ | ----- |
 | 0              | 8      | 1.4%  |
-| exactly 1      | 56     | 9.7%  |
-| 2 or more      | 512    | 88.9% |
+| exactly 1      | 65     | 11.3% |
+| 2 or more      | 503    | 87.3% |
 
 The table is therefore **neither total nor deterministic**, and neither failure
 is an edge case. Ambiguity is the overwhelming majority behaviour; a single
-unambiguous answer is the 9.7% exception.
+unambiguous answer is the 11.3% exception.
 
 Three specifics carry the rest of this record.
 
@@ -64,9 +64,11 @@ dimension rubric makes those mutually exclusive, so any task notable in two ways
 fires two rows. `mechanical-bulk` alone fires on **66.7%** of tuples, because the
 "and/or" reads as an inclusive or and `cost_sensitivity: high` is half the space.
 
-**The two labels describing ordinary work almost never win.** Of the 56 tuples
+**The two labels describing ordinary work almost never win.** Of the 65 tuples
 that resolve to exactly one label, `standard-pr` is the answer on **2** and
-`architecture` on **2**. Twenty go to `mechanical-bulk`. The "unremarkable
+`architecture` on **2**. Twenty-two go to `mechanical-bulk`. `standard-pr` is
+the starker case: because its third conjunct is "nothing extreme", those 2 are
+the only tuples it fires on **at all** — 0.3% of the space. The "unremarkable
 middle" the table names is, under the table's own rules, nearly unreachable.
 
 ### What a repair would and would not fix
@@ -76,10 +78,11 @@ The script also reports two readings that try to rescue the table.
 - **`architecture` widened to cover `scope: whole-codebase`** (it names only
   `multi-file`, though whole-codebase is the wider radius): changes nothing about
   totality — the same 8 tuples stay silent — and makes ambiguity slightly worse.
-- **`standard-pr` read as the default branch** — "nothing extreme" taken as "no
-  other row fired": this _does_ make the table total, 0 silent tuples. It leaves
-  **503 of 576 (87.3%)** firing two or more, and it shrinks `standard-pr` to the
-  unique answer on 10 tuples (1.7%).
+- **`standard-pr` read as a bare default branch** — dropping its `standard` /
+  `pr-sized` conjuncts so it fires whenever no other row does: this _does_ make
+  the table total, 0 silent tuples, and it widens `standard-pr` from 2 tuples to
+  10 (1.7%). It changes ambiguity not at all — **503 of 576 (87.3%)** either way,
+  since the row only ever fires alone.
 
 So the missing piece is not eight fuzzy cells. It is **one missing function**:
 a precedence order over the eight labels, which the table never states and the
@@ -131,7 +134,7 @@ which names a word rather than an enum value.
 
 **`label` is not pure code today, and must not be shipped as a lookup until a
 precedence order is written into `skills/assess-task/SKILL.md`.** The table is
-neither total (8 silent tuples) nor deterministic (88.9% ambiguous), and the
+neither total (8 silent tuples) nor deterministic (87.3% ambiguous), and the
 prose that resolves collisions delegates to a reader rather than defining a rule.
 
 **It can become pure code, with one deletion.** Add a precedence order over the
@@ -142,8 +145,11 @@ dimension rubric already puts subtle bugs. Narrow `mechanical-bulk` so
 `cost_sensitivity: high` is not sufficient alone.
 
 **Therefore do not ask a typed call for `label`.** Once the precedence order
-exists, asking a model for `label` duplicates deterministic logic over inputs the
-call already returns.
+exists, asking a model for `label` duplicates deterministic logic over inputs
+already in hand — six dimensions from the call, `scope` from code. The producer
+split matters here: three rows (`architecture`, `standard-pr`, `whole-codebase`)
+read `scope`, which the call does not return, so the lookup spans both producers
+rather than sitting inside the call's own output.
 
 **And the design's `confidence` / `runner_up` claim does not survive.** It depends
 entirely on `label` being a Choice with a probability distribution. A lookup has
@@ -152,11 +158,11 @@ no distribution. Specifically:
 - **`runner_up` survives, and is better than the claim promised** — but by a
   different mechanism. Under a precedence order it has an exact deterministic
   definition: the next-highest-priority label that also fired. It is genuinely
-  free, needs no distribution, and it almost always exists — 88.9% of tuples fire
+  free, needs no distribution, and it almost always exists — 87.3% of tuples fire
   a second row. `select-coder` consumes it by also weighing that label's row in
   `matrix.md`, which works unchanged.
 - **`confidence` does not survive, and has no producer left.** Defining it from
-  collisions collapses: "two or more rows fired" is true of 88.9% of the space, so
+  collisions collapses: "two or more rows fired" is true of 87.3% of the space, so
   `confidence: low` would be the near-constant answer and could gate nothing.
   Propagating confidence from the six input dimensions' own distributions is a
   different design that nobody has specified or measured — it is not something
@@ -224,8 +230,8 @@ than gating on it.
   lookup would return no label for exactly the tasks `assess-task` sees most.
 - **Keep asking a model for `label` as a Choice, and keep the distribution.**
   Rejected on rule 4 grounds, the same rule that took `scope` out of the call: once
-  a precedence order exists, the answer is a function of values the call already
-  returned, and code owns that. It also fails on its own terms — the Choice would be
+  a precedence order exists, the answer is a function of values already in hand —
+  the call's six dimensions plus the code-computed `scope` — and code owns that. It also fails on its own terms — the Choice would be
   fitted to a table the model can read, so its distribution would measure the
   table's ambiguity rather than the task's.
 - **Drop `label` from the contract and have `select-coder` switch on the six

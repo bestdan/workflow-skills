@@ -49,6 +49,13 @@ LABELS = [
 def fires(t, *, architecture_includes_whole_codebase=False):
     """The table read literally, keeping only what the seven dimensions express.
 
+    `standard-pr` carries three conjuncts, not two -- "`standard` complexity,
+    `pr-sized`, **nothing extreme**" -- so it is evaluated last and fires only
+    when no other row did. Dropping that third conjunct is what an earlier
+    revision of this script did, and it inflated the ambiguity count by 9
+    tuples: the row then fired beside every extreme row that happened to share
+    its complexity and scope.
+
     Two cells say things no dimension carries, and both are dropped here rather
     than guessed at:
 
@@ -56,10 +63,6 @@ def fires(t, *, architecture_includes_whole_codebase=False):
       * `mechanical-bulk`'s "high-volume simple work" -- a gloss on
         `cost_sensitivity: high`, not a further input. Its "and/or" is read as
         the inclusive or it spells.
-
-    `standard-pr`'s "nothing extreme" is dropped here too, because it is a
-    reference to the other seven rows rather than a condition on the tuple;
-    --variants reads it as the negation it implies.
     """
     out = []
     arch_scopes = {"multi-file"}
@@ -67,8 +70,6 @@ def fires(t, *, architecture_includes_whole_codebase=False):
         arch_scopes.add("whole-codebase")
     if t["complexity"] == "hard" and t["scope"] in arch_scopes:
         out.append("architecture")
-    if t["complexity"] == "standard" and t["scope"] == "pr-sized":
-        out.append("standard-pr")
     if t["complexity"] == "mechanical" or t["cost_sensitivity"] == "high":
         out.append("mechanical-bulk")
     if t["creativity"] == "high":
@@ -81,6 +82,10 @@ def fires(t, *, architecture_includes_whole_codebase=False):
         out.append("verification-sensitive")
     if t["autonomy"] == "long-horizon":
         out.append("long-horizon")
+    # Last, and only into an empty list: "nothing extreme" is the row's own
+    # third conjunct, not a tie-break this script is imposing.
+    if not out and t["complexity"] == "standard" and t["scope"] == "pr-sized":
+        out.append("standard-pr")
     return out
 
 
