@@ -56,10 +56,24 @@ dirty_count=0
 # pre-existing edits would make the check useless exactly where it is needed.
 # A ROOT that is not a git checkout yields empty on both sides, so this
 # degrades to a no-op rather than failing every row.
-tree_state() {
+#
+# Two signals, because `git status --porcelain` reports status codes and paths
+# but not content. A case that edits a file already showing as ` M` leaves the
+# porcelain line byte-identical, and that is the likeliest miss here: the
+# rolling baseline exists to support running with work in flight, which is
+# exactly when paths are already dirty. The content hash catches it.
+#
+# Known limit: rewriting a file that was already untracked moves neither
+# signal, since `diff HEAD` does not cover untracked content. New untracked
+# files — the case actually observed — do show up in the porcelain list.
+tree_paths() {
   git -C "$ROOT" status --porcelain 2>/dev/null
 }
-baseline="$(tree_state)"
+tree_hash() {
+  git -C "$ROOT" diff HEAD 2>/dev/null | shasum 2>/dev/null
+}
+baseline_paths="$(tree_paths)"
+baseline_hash="$(tree_hash)"
 
 while IFS=$'\t' read -r skill prompt_file max_turns; do
   [[ -z "${skill// /}" || "$skill" == \#* ]] && continue
@@ -78,14 +92,23 @@ while IFS=$'\t' read -r skill prompt_file max_turns; do
     --output-format stream-json --verbose \
     >"$log" 2>&1 || true
 
-  after="$(tree_state)"
+  after_paths="$(tree_paths)"
+  after_hash="$(tree_hash)"
   residue=""
-  if [[ "$after" != "$baseline" ]]; then
-    residue="$(comm -13 <(printf '%s\n' "$baseline" | sort -u) \
-      <(printf '%s\n' "$after" | sort -u) | sed '/^$/d')"
+  if [[ "$after_paths" != "$baseline_paths" || "$after_hash" != "$baseline_hash" ]]; then
+    # Symmetric (comm -3), not just additions: a case that *reverts* an entry
+    # has also written to the checkout, and reading that as clean would let it
+    # delete work someone had in flight. comm prefixes its second column with a
+    # tab, which the sed strips.
+    residue="$(comm -3 <(printf '%s\n' "$baseline_paths" | sort -u) \
+      <(printf '%s\n' "$after_paths" | sort -u) | sed -e 's/^\t//' -e '/^$/d')"
+    if [[ -z "$residue" ]]; then
+      residue="(content changed under a path that was already modified)"
+    fi
     # Roll the baseline forward either way, so one dirtying case does not
     # convict every row after it.
-    baseline="$after"
+    baseline_paths="$after_paths"
+    baseline_hash="$after_hash"
   fi
 
   if [[ -n "$residue" ]]; then

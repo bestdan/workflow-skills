@@ -86,6 +86,39 @@ SH
   refute_output --partial "wrote into the repo under test"
 }
 
+# Porcelain reports status codes and paths, not content, so a case that edits a
+# file already showing as modified leaves the porcelain line byte-identical.
+# That is the likeliest miss, because the rolling baseline exists precisely to
+# support running with work already in flight.
+@test "editing a path that was already dirty fails the row" {
+  printf 'in flight\n' >>"$FAKE/evals/prompts/demo.txt"
+  cat >"$BIN_DIR/claude" <<'SH'
+#!/usr/bin/env bash
+echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"demo"}}]}}'
+printf 'and the case appended this too\n' >>"$FAKE/evals/prompts/demo.txt"
+SH
+  chmod +x "$BIN_DIR/claude"
+  run bash "$FAKE/scripts/eval.sh"
+  assert_failure
+  assert_output --partial "wrote into the repo under test"
+  assert_output --partial "already modified"
+}
+
+# Reverting someone's in-flight edit is a write too, and reading it as clean
+# would be worse than the bug this guard was added for.
+@test "reverting a pre-existing edit fails the row" {
+  printf 'in flight\n' >>"$FAKE/evals/prompts/demo.txt"
+  cat >"$BIN_DIR/claude" <<'SH'
+#!/usr/bin/env bash
+echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"demo"}}]}}'
+git -C "$FAKE" checkout -- evals/prompts/demo.txt
+SH
+  chmod +x "$BIN_DIR/claude"
+  run bash "$FAKE/scripts/eval.sh"
+  assert_failure
+  assert_output --partial "wrote into the repo under test"
+}
+
 # A ROOT that is not a git checkout (a tarball install) must degrade to a
 # no-op rather than failing every row.
 @test "a non-git checkout degrades to a no-op instead of failing rows" {

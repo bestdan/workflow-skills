@@ -61,8 +61,15 @@ from a worktree with work in flight, and a harness that reverts on its own would
 eat that work. Inspect and remove it yourself.
 
 The comparison is per case against a rolling baseline, not against a clean tree,
-so uncommitted work you already had does not convict a row. A `<repo>` that is
-not a git checkout degrades to a no-op. Covered by `test/eval-tree-guard.bats`.
+so uncommitted work you already had does not convict a row. It compares the
+porcelain list **and** a hash of `git diff HEAD`, because the list carries status
+codes and paths but no content: an edit to a file already showing as modified
+leaves its line byte-identical. It is also symmetric, so a case that _reverts_
+one of your edits is reported too rather than reading as clean.
+
+A `<repo>` that is not a git checkout degrades to a no-op. Rewriting a file that
+was already untracked moves neither signal, which is the one known hole. Covered
+by `test/eval-tree-guard.bats`.
 
 ## Add a case
 
