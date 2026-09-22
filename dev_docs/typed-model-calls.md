@@ -8,15 +8,17 @@ questions and returns typed answers with probabilities.
 No installed user and no CI run needs a key: nothing in `skills/`, `commands/`
 or the blocking gate calls Jev. **Reproducing any measurement below does call it
 and does need one**, resolved as [`auth_key_access.md`](auth_key_access.md)
-describes. Three measurements sit behind that posture, and each one ended in a
-decision not to adopt what it measured. This file is the short version of what
-they cost to learn.
+describes. Four measurements sit behind that posture. Three ended in a decision
+not to adopt what they measured; the fourth adopted a typed call as a companion
+to an existing check rather than a replacement for it, and stayed out of the
+gate. This file is the short version of what they cost to learn.
 
 | Read this when                                                | Go to                                                                                                                                                                                                                  |
 | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | You want to know whether your judgment is Jev-shaped          | [`research/2026-09-17-jev-applications/`](research/2026-09-17-jev-applications/README.md) — seven ranked candidates, the non-fits, the vendor's own rules, and what it is documented to be bad at                      |
 | You are about to build a ladder over Jev signals              | [`research/2026-09-19-jev-tool-routing/`](research/2026-09-19-jev-tool-routing/README.md) — a ladder that scored 58% and why                                                                                           |
 | You are about to ask a model to forecast something from prose | [`research/2026-09-20-predictive-scope/`](research/2026-09-20-predictive-scope/README.md) — a forecast whose wrapper, not the model, put it on its base rate, and three instrument defects the record caught in itself |
+| You are about to replace a check with a cheaper proxy         | [`decisions/2026-09-21-jev-alongside-the-routing-evals.md`](decisions/2026-09-21-jev-alongside-the-routing-evals.md) — 120× faster, agreed on every case, and blind to the failure the check exists to catch           |
 | You want the `assess-task` adoption's shape                   | [`designs/2026-09-18-assess-task-typed-profile.md`](designs/2026-09-18-assess-task-typed-profile.md)                                                                                                                   |
 | You want the key plumbing                                     | [`auth_key_access.md`](auth_key_access.md)                                                                                                                                                                             |
 
@@ -37,7 +39,7 @@ code's, not an LLM's. Retrieval only disqualifies the typed call, which cannot
 fetch anything — and it is not a general veto, because that is precisely the flat
 signal that misrouted 10 of 12 code cases in rule 3 below.
 
-## The ten that cost us something
+## The eleven that cost us something
 
 Each of these was learned by running it, not by reading the vendor's docs. The
 vendor's own rules — one judgment per question, decompose and weight in code,
@@ -49,6 +51,13 @@ note under **Using it well**, and are not repeated here.
    A 71.6% against ground truth means nothing until you know what today's model
    scores on the same cases. This is the single most common gap in the records
    above, and the routing probe exists because of it.
+
+   **"Better" is not "more accurate."** Equal accuracy at materially lower cost
+   or latency beats the incumbent, and on these measurements that is the likelier
+   shape of the win — the typed call has matched the incumbent's accuracy every
+   time and never once beaten it. So a comparison is unfinished until it carries
+   cost and wall clock beside the score, for **both** sides. Rule 2 is the other
+   half of this: the tie that agreement produces is broken on those axes.
 
 2. **Agreement is ambiguous, and cost breaks the tie.** A both-logged rollout
    that promotes what agrees reads agreement as a green light. It is equally
@@ -114,6 +123,16 @@ note under **Using it well**, and are not repeated here.
     64.4% and under-read more — a terse title reads as small work. A number
     measured on an input the consumer never sees is a number about a different
     system, and reproducing it across runs does not make it the right one.
+
+11. **Ask what the cheap side cannot see.** Rules 1 and 2 get you to "same
+    answers, far cheaper", and that is where a replacement looks safest and is
+    most dangerous. A proxy agrees with a check by answering a narrower
+    question, so the agreement is loudest exactly where the blind spot is. The
+    typed call scored 14/14 on the manifest cases against a harness scoring
+    10/14 and 12/14, 120× faster — and the four it "won" include two skills
+    that fired **nothing** in a real session, which a Choice over the roster
+    cannot observe at all. Before swapping a check for a proxy, name the
+    failure the check exists to catch and show the proxy detecting it.
 
 ## Before you open the PR
 

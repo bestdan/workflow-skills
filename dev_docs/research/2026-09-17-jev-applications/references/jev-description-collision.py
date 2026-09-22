@@ -69,8 +69,10 @@ import argparse
 import json
 import os
 import re
+import statistics
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -514,11 +516,49 @@ def resolve_key(root: Path) -> str:
     )
 
 
+def parse_one_description(text: str) -> str | None:
+    """The `description` of a single frontmatter block, or None.
+
+    `parse_descriptions` needs a `name:` too, because it reads a whole directory of
+    SKILL.md files and has nothing else to key them by. A command file has no `name:`
+    — its filename is its name — so it needs this half on its own.
+    """
+    m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
+    if not m:
+        return None
+    desc = re.search(
+        r"^description:\s*(?:[>|][-+]?\s*\n((?:\s+.*\n?)+)|(.+))$", m.group(1), re.M
+    )
+    if not desc:
+        return None
+    body = desc.group(1) or desc.group(2) or ""
+    body = " ".join(line.strip() for line in body.strip().splitlines())
+    return body or None
+
+
 def load_descriptions(root: Path) -> dict[str, str]:
+    """name -> the description that actually reaches the model's skill listing.
+
+    Not `SKILL.md`'s, where a `commands/<name>.md` exists beside it: the command's
+    `description` is what the model routes on and the SKILL.md one never reaches the
+    listing at all. Measured 2026-09-21 and recorded in
+    `dev_docs/decisions/2026-09-21-command-descriptions-shadow-skill-descriptions.md`;
+    six names in this repo are in that position and four are eval manifest rows.
+
+    Scoring the shadowed string is scoring text the model never sees, which is exactly
+    the defect that made this instrument report 14/14 on two skills that fired nothing.
+    """
     files = {
         str(p): p.read_text() for p in sorted((root / "skills").glob("*/SKILL.md"))
     }
-    return parse_descriptions(files)
+    out = parse_descriptions(files)
+    for name in list(out):
+        command = root / "commands" / f"{name}.md"
+        if command.is_file():
+            surfaced = parse_one_description(command.read_text())
+            if surfaced:
+                out[name] = surfaced
+    return out
 
 
 def load_manifest_cases(root: Path) -> list[tuple[str, str]]:
@@ -598,7 +638,13 @@ def run_suite(
     """
     results, tokens = [], 0
     for label, prompt in rows:
+        # Wall clock around the one request, which is what a caller would wait for.
+        # It is the round trip, not the model's own service time: the API publishes no
+        # latency figure, so a number measured from here is the only one available and
+        # it carries this host's network on top of whatever the model costs.
+        started = time.perf_counter()
         data = ask(key, prompt, criteria, model)
+        latency_s = time.perf_counter() - started
         answer = data["answers"]["skill"]
         winner, p_win, runner, p_run, margin = rank(answer["probabilities"])
         noul = data["answers"]["needs_skill"]["noul"]
@@ -624,6 +670,7 @@ def run_suite(
             # scores well by saying "no" to everything cannot read as a good result.
             "false_positive": fired and not needs_skill_truth,
             "false_negative": (not fired) and needs_skill_truth,
+            "latency_s": latency_s,
         }
         results.append(record)
 
@@ -774,6 +821,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"runs:       {args.runs}")
     report_choice(passes, args.margin)
     report_noul(passes, args.noul_threshold)
+    report_latency(passes)
     print(f"tokens: {tokens} in   (~${tokens / 1e6 * 0.042:.4f})")
     return 0
 
@@ -790,6 +838,57 @@ def rate_line(name: str, hits: list[int], totals: list[int]) -> str:
     spread = ", ".join(str(h) for h in hits)
     per_run = f"  (per run: {spread})" if len(hits) > 1 else ""
     return f"{name} {sum(hits)}/{total} = {pct}{per_run}"
+
+
+def latency_summary(values: list[float]) -> dict:
+    """Per-request round trip, summarised. Empty input summarises to `n: 0` and nothing
+    else, so a report over zero requests prints a row rather than dividing by zero.
+
+    The median leads and the max is carried beside it because a caller waiting on a
+    suite waits on the sum, and one slow request moves the sum more than it moves the
+    mean. `total` is that sum: the suite's wall clock when the requests are issued
+    serially, which is how this instrument issues them.
+    """
+    if not values:
+        return {"n": 0}
+    ordered = sorted(values)
+    return {
+        "n": len(ordered),
+        "median": statistics.median(ordered),
+        "mean": statistics.fmean(ordered),
+        "min": ordered[0],
+        "max": ordered[-1],
+        "total": sum(ordered),
+    }
+
+
+def report_latency(passes: list[dict]) -> None:
+    """One row per pass, then the pooled per-request figure.
+
+    Per-pass totals are printed rather than only a pooled number for the reason
+    `rate_line` gives: the spread is the story, and a mean over four passes hides a
+    slow one as convincingly as a single pass hides everything.
+    """
+    per_pass = [
+        [r["latency_s"] for r in p["records"] if "latency_s" in r] for p in passes
+    ]
+    pooled = latency_summary([v for run in per_pass for v in run])
+    if not pooled["n"]:
+        return
+    print("")
+    print("latency (round trip, this host):")
+    for i, run in enumerate(per_pass, 1):
+        s = latency_summary(run)
+        if s["n"]:
+            print(
+                f"  run {i}: {s['n']} requests   "
+                f"median {s['median']:.2f}s   max {s['max']:.2f}s   "
+                f"suite {s['total']:.1f}s serial"
+            )
+    print(
+        f"  pooled: {pooled['n']} requests   median {pooled['median']:.2f}s   "
+        f"mean {pooled['mean']:.2f}s   min {pooled['min']:.2f}s   max {pooled['max']:.2f}s"
+    )
 
 
 def report_choice(passes: list[dict], margin: float) -> None:

@@ -621,6 +621,129 @@ class RunSuiteScoreToLabelTests(unittest.TestCase):
         self.assertIsNone(self._row(0.10, False)["tier"])
 
 
+class SurfacedDescriptionTests(unittest.TestCase):
+    """Which `description` the roster is built from.
+
+    The instrument scores the string the model routes on. Where a `commands/<name>.md`
+    sits beside `skills/<name>/SKILL.md`, that is the command's — the SKILL.md one is
+    shadowed and never reaches the listing. Scoring the shadowed string measures text
+    the model never sees, so these pin the override rather than trusting it.
+    """
+
+    SKILL = "---\nname: widget\ndescription: The shadowed one.\n---\n\nbody\n"
+    COMMAND = "---\ndescription: The surfaced one.\n---\n\nbody\n"
+
+    def _tree(self, tmp, *, with_command):
+        root = Path(tmp)
+        (root / "skills" / "widget").mkdir(parents=True)
+        (root / "skills" / "widget" / "SKILL.md").write_text(self.SKILL)
+        if with_command:
+            (root / "commands").mkdir()
+            (root / "commands" / "widget.md").write_text(self.COMMAND)
+        return root
+
+    def test_a_command_twin_shadows_the_skill_description(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._tree(tmp, with_command=True)
+            self.assertEqual(
+                jev.load_descriptions(root), {"widget": "The surfaced one."}
+            )
+
+    def test_without_a_twin_the_skill_description_is_used(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._tree(tmp, with_command=False)
+            self.assertEqual(
+                jev.load_descriptions(root), {"widget": "The shadowed one."}
+            )
+
+    def test_a_command_with_no_description_does_not_blank_the_entry(self):
+        """A twin that parses to nothing must leave the SKILL.md text in place, not
+        replace it with an empty string — an empty criterion is worse than a shadowed
+        one, because the Choice would then rank an option with no text."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._tree(tmp, with_command=True)
+            (root / "commands" / "widget.md").write_text(
+                "---\nallowed-tools: Bash\n---\n\nbody\n"
+            )
+            self.assertEqual(
+                jev.load_descriptions(root), {"widget": "The shadowed one."}
+            )
+
+    def test_parse_one_description_handles_a_block_scalar(self):
+        self.assertEqual(
+            jev.parse_one_description(
+                "---\ndescription: >\n  folded\n  across lines\n---\n\nx\n"
+            ),
+            "folded across lines",
+        )
+
+    def test_parse_one_description_returns_none_without_frontmatter(self):
+        self.assertIsNone(jev.parse_one_description("no frontmatter here\n"))
+
+
+class LatencySummaryTests(unittest.TestCase):
+    """The summary the latency report is built from.
+
+    `total` is the field the decision rests on — a serial suite's wall clock — so it is
+    pinned separately from the per-request figures rather than trusted to follow from
+    them.
+    """
+
+    def test_an_empty_run_summarises_to_n_zero_and_nothing_else(self):
+        """A report over zero requests has to print a row, not divide by zero."""
+        self.assertEqual(jev.latency_summary([]), {"n": 0})
+
+    def test_median_mean_and_extremes_come_from_the_values(self):
+        s = jev.latency_summary([0.4, 0.2, 0.9])
+        self.assertAlmostEqual(s["median"], 0.4)
+        self.assertAlmostEqual(s["mean"], 0.5)
+        self.assertAlmostEqual(s["min"], 0.2)
+        self.assertAlmostEqual(s["max"], 0.9)
+        self.assertEqual(s["n"], 3)
+
+    def test_total_is_the_serial_wall_clock_not_the_mean(self):
+        """One slow request moves the suite's total by its whole cost. A total computed
+        as mean x n would agree here; one that silently dropped a value would not."""
+        self.assertAlmostEqual(jev.latency_summary([0.5, 0.5, 4.0])["total"], 5.0)
+
+    def test_input_order_does_not_change_the_summary(self):
+        self.assertEqual(
+            jev.latency_summary([0.9, 0.2, 0.4]), jev.latency_summary([0.2, 0.4, 0.9])
+        )
+
+
+class RunSuiteLatencyTests(unittest.TestCase):
+    """That a record carries the round trip at all.
+
+    `report_latency` skips any record without `latency_s`, so a dropped field would
+    empty the report rather than fail it — the one shape of defect a report cannot show
+    you.
+    """
+
+    def test_every_record_carries_a_latency(self):
+        def fake_ask(key, state, criteria, model=jev.MODEL):
+            return {
+                "answers": {
+                    "skill": {"probabilities": {"alpha": 0.7, "beta": 0.3}},
+                    "needs_skill": {"noul": 0.9},
+                },
+                "usage": {"input_tokens": 11},
+            }
+
+        with unittest.mock.patch.object(jev, "ask", fake_ask):
+            with contextlib.redirect_stderr(io.StringIO()):
+                out = jev.run_suite(
+                    "k",
+                    {"alpha": "Use when alpha."},
+                    [("alpha", "a prompt"), ("alpha", "another prompt")],
+                    jev.DEFAULT_MARGIN,
+                    True,
+                )
+        for row in out["results"]:
+            self.assertIn("latency_s", row)
+            self.assertGreaterEqual(row["latency_s"], 0.0)
+
+
 class NoulThresholdRangeTests(unittest.TestCase):
     """`--noul-threshold` is a probability, and argparse's `type=float` is not.
 
