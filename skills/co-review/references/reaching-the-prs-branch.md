@@ -41,18 +41,18 @@ On Claude Code, the tools that move a session between trees are:
   fallback for harnesses with no worktree tool. The path is model-supplied, so it
   raises an approval prompt that no allow rule lifts.
 
-That prompt is the whole distinction between the attended and unattended cases, and
-it is why the `absent` verdict gives three answers rather than one:
+That prompt is what makes attendance matter, but it only bites in a worktree. Both
+dimensions are live, so the `absent` verdict reads off a grid rather than a list:
 
-| where                                 | route                                                               |
-| ------------------------------------- | ------------------------------------------------------------------- |
-| the main checkout                     | check the branch out here                                           |
-| a worktree-isolated session, attended | offer `git worktree add`; the user approves the path, then enter it |
-| unattended                            | no route — the prompt cannot be answered                            |
+| where             | attended                                                            | unattended                               |
+| ----------------- | ------------------------------------------------------------------- | ---------------------------------------- |
+| the main checkout | check the branch out here                                           | check the branch out here                |
+| worktree-isolated | offer `git worktree add`; the user approves the path, then enter it | no route — the prompt cannot be answered |
 
-**The unattended row is the only one with no way through**, so do not state the dead
-end unconditionally. An attended session has a working route and removing it would
-cost a recovery that exists.
+**One cell of four has no way through**, so do not state the dead end by attendance
+alone. An unattended run in the main checkout needs no prompt — a branch name is not
+a model-supplied path — and an attended isolated session has a working route that
+removing would cost a recovery it already has.
 
 ### What to do when there is no route
 
