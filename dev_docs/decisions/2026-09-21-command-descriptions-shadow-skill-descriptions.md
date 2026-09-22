@@ -6,6 +6,30 @@ issue: https://github.com/bestdan/workflow-skills/issues/828
 
 # A same-named command's `description` is what routes, not `SKILL.md`'s
 
+> **2026-09-22 — the shadowing is real; it was not the cause of the failure.**
+> The body below is left as written, because it records what was measured on
+> 2026-09-21. Two of its claims did not survive the next day's evidence (#840,
+> four full runs):
+>
+> - **"It was the third option #828 listed" overstates it.** Roughly two of the
+>   14 rows fail on every run and the cast rotates, including rows with no
+>   shadowing at all. Every failure is `skills invoked: none` — and a weak or
+>   colliding description produces the **wrong** skill, not no skill. So the
+>   no-fire class is a separate defect this record does not explain.
+> - **The three consecutive green runs proved less than claimed.** Against a
+>   ~14% per-row failure rate that moves between runs, three greens for a given
+>   row happen about 64% of the time with no fix at all. `select-coder` and
+>   `orchestrate-coders` both failed again afterwards with the descriptions
+>   below in place.
+>
+> What does survive: the shadowing itself, the six diverging pairs, and the
+> measurable improvement in separation — scored against the strings that
+> actually route, the `select-coder` vs `orchestrate-coders` margin went from
+> 0.48–0.55 to 0.95–0.96. The descriptions got better. That was not what was
+> broken.
+>
+> `evals/README.md` is the live file and wins where it disagrees with this one.
+
 ## Context
 
 `select-coder` and `orchestrate-coders` failed `scripts/eval.sh` in both full runs
