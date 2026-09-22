@@ -58,27 +58,54 @@ same six almost verbatim, so the weaker framing still wins on overlap alone.
 **So it was not the description wording, and not a collision with a neighbouring
 skill.** It was the third option #828 listed — how the plugin surfaces these two.
 
-### The 0.41 margin was a coincidence, in a specific sense
+### The 0.41 margin, which #828 asked to be measured rather than assumed
 
 #828 flagged that the tightest margin anywhere in the typed run (0.41,
-`select-coder` vs `orchestrate-coders`) sat on exactly these two skills, and asked
-for that to be measured rather than assumed. It is not the cause, and the reason is
-structural rather than statistical: `jev-description-collision.py`'s
-`load_descriptions()` globs `skills/*/SKILL.md`, so the margin is a property of
+`select-coder` vs `orchestrate-coders`) sat on exactly these two skills, and called
+two cases a coincidence until someone measured it. It got measured, accidentally,
+and the answer has two halves.
+
+**The margin itself was not the cause.** `jev-description-collision.py`'s
+`load_descriptions()` globs `skills/*/SKILL.md`, so that number is a property of
 text the live model never reads for these two names. A tight margin there cannot
 produce a live routing failure, because nothing live consumes it.
 
-The two facts share a cause instead of one causing the other — `select-coder` and
-`orchestrate-coders` genuinely are adjacent in meaning, which both narrows their
-typed margin and makes them the pair most in need of trigger phrasing in the text
-that actually routes.
+**The adjacency it reflects is real, and it does bite — in the surfaced text.**
+The first attempt at this fix widened `orchestrate-coders`' command description
+with "farm it out" / "don't write it yourself" examples. That phrasing is the
+opening clause of `select-coder`'s own eval prompt ("Before farming them out,
+figure out which agent and model is the best fit"), and `select-coder` promptly
+failed a run with `skills invoked: none` — the no-fire signature of a model that
+cannot cleanly separate two candidates, not a mis-route to the neighbour. Backing
+that out in favour of an explicit boundary clause on each description fixed it.
+
+So the two skills are genuinely adjacent in meaning; that adjacency narrows the
+typed margin _and_ makes them the pair most in need of an explicit boundary in the
+text that actually routes. The margin was a symptom of the same adjacency, read off
+the wrong string.
+
+### Measurements
+
+| stage                                   | `select-coder`       | `orchestrate-coders` |
+| --------------------------------------- | -------------------- | -------------------- |
+| before (#828's two runs)                | FAIL, FAIL           | FAIL, FAIL           |
+| trigger clause only, no boundary clause | PASS, PASS, **FAIL** | PASS, PASS, PASS     |
+| trigger clause + boundary clause        | PASS, PASS, PASS     | PASS, PASS, PASS     |
+
+The middle row is why the boundary clause is in the fix rather than only the
+trigger phrasing: two green runs looked like enough and were not, which is the
+point #828 made when it asked for three consecutive.
 
 ## Decision
 
 **Fix the surfaced string: the `description` in `commands/select-coder.md` and
 `commands/orchestrate-coders.md`.** Each now opens with its `SKILL.md`'s "Use
-when…" trigger clause and keeps its own capability tail, so the slash-command
-picker still reads well.
+when…" trigger clause, keeps its own capability tail so the slash-command picker
+still reads well, and closes with a **boundary clause naming the other skill** —
+`select-coder` says choosing is the whole job and it never dispatches, even when
+the tasks are about to be farmed out; `orchestrate-coders` says the dispatching
+is the ask, and that choosing the agent is `select-coder`. The boundary clause is
+load-bearing, not decoration: see the middle row of **Measurements** above.
 
 `SKILL.md` is deliberately left alone. Editing it would change the typed check's
 margins and nothing else — the reverse of what is wanted.
