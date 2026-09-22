@@ -191,14 +191,32 @@ def _classify(verdict, result):
 
 def render(verdict):
     """Human-readable lines for the harness's stdout."""
+    # Printed on a pass as well as a failure, because the expected name matches
+    # whichever copy served it: the eval runs `--plugin-dir <repo>` inside a
+    # session that also loads the installed plugin, so a row can be satisfied by
+    # the installed copy and report a clean pass over a tree that is not the one
+    # under test. Deliberately no `⚠` and no log retention — unlike a truncated
+    # pass, this is a property of the machine, identical for every row in the
+    # run, so keeping N logs would repeat one fact N times, and the kept log
+    # could not answer the question anyway: the Skill event does not record
+    # which copy served the call. The remedy is to run with the installed copy
+    # disabled, not to collect evidence.
+    dup = (
+        [
+            "     plugin loaded twice: "
+            + " ".join(str(p) for p in verdict["plugin_dirs"])
+        ]
+        if len(verdict["plugin_dirs"]) > 1
+        else []
+    )
     if verdict["fired"]:
         if verdict["truncated"]:
             return [
                 "  ⚠ PASS on a truncated run — the skill fired before the run was killed",
                 f"     rc={verdict['rc']}  no result event  "
                 "(a later Skill call would have failed this row)",
-            ]
-        return ["  ✅ PASS"]
+            ] + dup
+        return ["  ✅ PASS"] + dup
     invoked = " ".join(verdict["skills_invoked"]) or "none"
     lines = [f"  ❌ FAIL — skills invoked: {invoked}  (cause: {verdict['cause']})"]
     detail = [
@@ -214,11 +232,7 @@ def render(verdict):
     lines.append("     " + "  ".join(detail))
     if verdict["tools_used"]:
         lines.append("     tools: " + " ".join(verdict["tools_used"]))
-    if len(verdict["plugin_dirs"]) > 1:
-        lines.append(
-            "     plugin loaded twice: "
-            + " ".join(str(p) for p in verdict["plugin_dirs"])
-        )
+    lines.extend(dup)
     if verdict["final_text"]:
         lines.append(
             "     said instead: " + verdict["final_text"].replace("\n", " ")[:200]

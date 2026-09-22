@@ -15,8 +15,9 @@ identify the cause, and validate any fix against the rate rather than a streak.
 
 ## What the instrument now separates
 
-One string covered at least six different defects. `scripts/eval-triage.py`
-names which, from the same log the harness already had:
+Five defects collapsed into that one string. `scripts/eval-triage.py` names
+which, from the same log the harness already had — plus two the old harness
+reported some other way:
 
 | cause             | what actually happened                                                                          |
 | ----------------- | ----------------------------------------------------------------------------------------------- |
@@ -28,9 +29,14 @@ names which, from the same log the harness already had:
 | `no-skill-chosen` | surfaced, clean run, model answered anyway — the routing miss                                   |
 | `dirtied-repo`    | the row wrote into the checkout ([#829](https://github.com/bestdan/workflow-skills/issues/829)) |
 
-Only the last two are about descriptions. #834 rewrote two descriptions and the
-rows failed again, which is consistent: four of these seven causes cannot be
-moved by a description at all.
+Two of those seven never read as `none`, which is why the count above is five
+and not seven: the old harness printed the other skill's name for a
+`wrong-skill` miss (replayed against the one retained log to check), and could
+not detect `dirtied-repo` at all until #838.
+
+Only `wrong-skill` and `no-skill-chosen` are about descriptions. #834 rewrote two
+descriptions and the rows failed again, which is consistent: five of these seven
+causes cannot be moved by a description at all.
 
 ## The measurement, and what it did not show
 

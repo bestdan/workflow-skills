@@ -238,7 +238,7 @@ SH
   printf 'demo|other\tprompts/demo.txt\t6\n' >"$FAKE/evals/manifest.tsv"
   git -C "$FAKE" add -A
   git -C "$FAKE" commit -qm alt
-  stub_claude_clean # fires `demo`, the second alternative
+  stub_claude_clean # fires `demo`, the first alternative
 
   run bash "$FAKE/scripts/eval.sh"
   assert_success

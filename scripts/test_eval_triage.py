@@ -184,6 +184,60 @@ class TriageTest(unittest.TestCase):
         )
         self.assertIn("plugin loaded twice", "\n".join(eval_triage.render(verdict)))
 
+    def test_a_passing_row_still_reports_the_plugin_loaded_twice(self):
+        # The expected name matches whichever copy served it, so a pass is
+        # exactly the case where a duplicate load goes unnoticed. It reports,
+        # and deliberately does NOT carry a ⚠ — eval.sh keys log retention on
+        # that glyph, and a machine-wide constant is not worth N kept logs.
+        plugins = [
+            {"name": "workflow-skills", "path": "/repo"},
+            {
+                "name": "workflow-skills",
+                "path": "/Users/x/.claude/plugins/cache/ws/abc",
+            },
+        ]
+        verdict = eval_triage.triage(
+            log(
+                init(plugins=plugins),
+                tool_use("Skill", {"skill": "workflow-skills:co-review"}),
+                result(),
+            ),
+            "co-review",
+            plugin="workflow-skills",
+        )
+        self.assertTrue(verdict["fired"])
+        rendered = eval_triage.render(verdict)
+        self.assertIn("  ✅ PASS", rendered)
+        self.assertIn("plugin loaded twice", "\n".join(rendered))
+        self.assertNotIn("⚠", "\n".join(rendered))
+
+    def test_a_truncated_pass_also_reports_a_duplicate_load(self):
+        plugins = [
+            {"name": "workflow-skills", "path": "/repo"},
+            {"name": "workflow-skills", "path": "/other"},
+        ]
+        verdict = eval_triage.triage(
+            log(init(plugins=plugins), tool_use("Skill", {"skill": "co-review"})),
+            "co-review",
+            rc=124,
+            plugin="workflow-skills",
+        )
+        rendered = "\n".join(eval_triage.render(verdict))
+        self.assertIn("truncated", rendered)
+        self.assertIn("plugin loaded twice", rendered)
+
+    def test_a_single_loaded_copy_says_nothing(self):
+        verdict = eval_triage.triage(
+            log(
+                init(plugins=[{"name": "workflow-skills", "path": "/repo"}]),
+                tool_use("Skill", {"skill": "co-review"}),
+                result(),
+            ),
+            "co-review",
+            plugin="workflow-skills",
+        )
+        self.assertEqual(eval_triage.render(verdict), ["  ✅ PASS"])
+
     def test_long_final_text_is_truncated(self):
         verdict = eval_triage.triage(log(init(), result(result="x" * 900)), "co-review")
         self.assertEqual(len(verdict["final_text"]), eval_triage.FINAL_TEXT_LIMIT + 1)
