@@ -57,17 +57,21 @@ skill (tolerant of the `workflow-skills:` plugin prefix). Pattern adapted from
 `analysis-conventions` is intentionally absent: it's `user-invocable: false`
 (context-load only), so there's nothing to auto-route.
 
-## Companion check: description discriminability
+## Authoring feedback on descriptions
 
-A typed model call scores a prompt against every skill's **surfaced** `description` —
-the same string this suite routes on, the command's where one shadows the SKILL.md, per
-the section above — and reports two things this harness cannot: the **margin** between
-the winning description and the runner-up, and whether **any** skill should fire at
-all — measured over 16 prompts
+This suite tells you **whether** a description works, in 10 to 16 minutes, and a
+failure names no word to change. For that second half, a typed model call scores a
+prompt against every skill's **surfaced** `description` — the same string this suite
+routes on, the command's where one shadows the SKILL.md, per the section above — and
+reports two things this harness cannot: the **margin** between the winning description
+and the runner-up, which says two descriptions have converged and is responsive to an
+edit, and whether **any** skill should fire at all — measured over 16 prompts
 written to need none, which `manifest.tsv` cannot express, since every row there names
-an expected skill. Run it when a `description` changes. It makes drift visible; whether
-a narrow margin predicts a real routing failure is untested, and the decision record
-says so.
+an expected skill. Run it when a `description` changes, and read the margin as the
+thing to edit against: a narrow one means two descriptions have converged. What it
+cannot yet tell you is that **no** description reaches a prompt — the ranking always
+names a winner, however poorly every option matches (#841). And whether a narrow margin
+predicts a real routing failure is untested; the decision record says so.
 
 ```sh
 D=dev_docs/research/2026-09-17-jev-applications/references

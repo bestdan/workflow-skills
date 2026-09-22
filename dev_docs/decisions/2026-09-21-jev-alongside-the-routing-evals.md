@@ -61,12 +61,27 @@ sufficient, because the two sides are not answering one question.
 
 ## Decision
 
-Adopt the typed call as a **description-discriminability check that runs beside the
-routing evals**, and keep `scripts/eval.sh` as the only thing that answers whether
-Claude actually routes to a skill. The typed call earns its place on what the
-incumbent cannot produce at all — the margin between winner and runner-up, and the
-no-skill Noul — not on being a cheaper way to ask the incumbent's question. Neither
-becomes a blocking check: the typed call needs a key and the network, which
+Adopt the typed call as **authoring feedback on descriptions**, and keep
+`scripts/eval.sh` as the only thing that answers whether Claude actually routes to a
+skill. The two are not two ways of asking one question, which is why the word
+"companion" is wrong and was the first framing here: the harness answers **whether** a
+description works, after 10 to 16 minutes, and a failure names no word to change. The
+typed call answers **why** it is weak and which way to edit — the margin between winner
+and runner-up says two descriptions have converged, and it is demonstrably responsive
+to an edit, moving 0.48–0.55 to 0.95–0.96 when #834 added boundary clauses. That is a
+job the harness cannot do at any price, rather than a cheaper way to do the harness's.
+
+The reframing is not cosmetic. Sold as a cheaper proxy for the evals, this check
+invites "then why run the evals" — and the answer, that it is blind to the failure the
+evals exist to catch, makes it look like a worse version of the thing it sits beside.
+Sold as authoring feedback it competes with nothing, and its blindness stops being an
+apology.
+
+It is incomplete in that role today, and #841 is the gap: the Choice cannot tell a
+strong winner from the least-bad of seventeen poor options, so "no description reaches
+this prompt" — the other way a description fails — is unmeasured.
+
+Neither becomes a blocking check: the typed call needs a key and the network, which
 `just check` must not, so it joins `evals/` as opt-in and run by hand. No workflow
 dispatches it — unlike `evals/`, which has one — and wiring it into CI is a separate
 choice this record does not make.
