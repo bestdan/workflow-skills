@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.67.3] - 2026-09-22
+
+### Fixes
+
+- check the ref fixes get pushed to, and name the worktree dead end [#843] (#846) (2bef442)
+
 ## [2.67.2] - 2026-09-22
 
 ### Fixes
