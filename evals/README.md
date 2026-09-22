@@ -2,7 +2,17 @@
 
 Opt-in, non-blocking checks that Claude **auto-invokes the right skill** from a
 naive prompt that never names it. This verifies skill _routing_ — that a skill's
-`description` triggers are good enough for Claude to pick it unprompted.
+**surfaced** `description` triggers are good enough for Claude to pick it
+unprompted.
+
+**Which description is surfaced is not always `SKILL.md`'s.** Where this plugin
+ships a `commands/<name>.md` beside `skills/<name>/SKILL.md`, the **command's**
+`description` is what reaches the model's skill listing and therefore what
+decides routing; the `SKILL.md` one is shadowed and never seen. Six names are
+in that position today — `assess-task`, `auto-pilot`, `deliver-task`,
+`orchestrate-coders`, `select-coder`, `tutor` — and all six diverge. Tune the
+command's `description` for those, or the change has no effect on this suite
+(#828).
 
 These are **not** part of the blocking PR gate: they cost API tokens and are
 nondeterministic. Run them deliberately.
@@ -34,7 +44,8 @@ skill (tolerant of the `workflow-skills:` plugin prefix). Pattern adapted from
 ## Add a case
 
 1. Write `prompts/<skill>.txt` — a realistic prompt that triggers the skill
-   **without naming it** (mirror the situations in the skill's `description`).
+   **without naming it** (mirror the situations in the skill's surfaced
+   `description` — the command's, where one shadows it; see above).
 2. Add a row to `manifest.tsv`: `<skill>\t prompts/<skill>.txt \t <max_turns>`
    (tab-separated).
 3. `scripts/eval.sh <skill>` to check it.

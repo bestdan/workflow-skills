@@ -1,5 +1,5 @@
 ---
-description: Orchestrate coding work across coder agents — the session decomposes the task into packets, dispatches each to a selected coder backend (opus subagent, codex, agy, devin, or a custom CLI), verifies the diffs, and integrates the results
+description: Use when the user wants the current session to act as an orchestrator that farms coding work out to other coder agents rather than writing the code itself — e.g. "delegate this to codex", "have opus implement these", "orchestrate/supervise coders", "act as the supervisor and split this up", "don't write it yourself, farm it out", or /orchestrate-coders. The session decomposes the task into packets, dispatches each to a selected coder backend (opus subagent, codex, agy, devin, or a custom CLI), verifies the diffs, and integrates the results
 allowed-tools: Bash, Glob, Grep, Read, Write, Edit, Agent, SendMessage, AskUserQuestion, Skill
 argument-hint: "<task> [--coder <backend>[:<model>]]... [-n N] [--plan <name>]"
 ---
