@@ -8,10 +8,20 @@ convention: ../typed-model-calls.md
 
 ## Context
 
+This record is about a **typed model call** — an AI decision model that takes a state
+and typed questions and returns typed answers with probabilities, rather than prose to
+parse. [`../typed-model-calls.md`](../typed-model-calls.md) is the convention for the
+class; [Jev](https://typesafe.ai/) is the instance measured here, pinned at
+`jev-1.13.0`. Everything below is about what the class can and cannot do for this
+check, so a different model of the same shape inherits the argument; only the measured
+numbers are Jev's.
+
 `evals/` is this repo's only check that a skill's `description` makes Claude load it
 from a naive prompt. It runs one `claude -p` session per manifest row, up to six turns,
 serially, and greps the log for a `Skill` invocation. It costs API tokens and is
-nondeterministic, so it is opt-in, non-blocking, and manual-dispatch only in CI.
+nondeterministic, so it is opt-in, non-blocking, and manual-dispatch only in CI — and
+**that workflow has never run**: `gh run list --workflow=evals.yml` returns nothing as
+of 2026-09-21, so no baseline exists for any row.
 
 Section 1 of
 [`../research/2026-09-17-jev-applications/`](../research/2026-09-17-jev-applications/README.md)
@@ -61,6 +71,19 @@ becomes a blocking check: the typed call needs a key and the network, which
 dispatches it — unlike `evals/`, which has one — and wiring it into CI is a separate
 choice this record does not make.
 
+**Gating the harness on roster change is endorsed; gating it on the margin is not.**
+Skipping the expensive suite when nothing could have moved routing is worth doing, and
+it needs no model: "did any `skills/*/SKILL.md` frontmatter change" is a diff, which
+rung 1 of the convention assigns to code. Key it on the **roster**, not one skill —
+routing is a function of the whole option set, so adding a skill can move where an
+untouched one routes, and a per-description gate would skip every row on exactly the
+pull request most likely to have broken something. Two limits to state plainly: the
+harness is nondeterministic, so a green prior result the gate relies on may itself
+have been a coin flip; and this repo has no prior results at all. Using the typed
+call's **margin** as the skip signal instead — "this description did not move enough
+to re-run" — is the rejected half, and the "Revisit when" bullet below is its
+condition.
+
 ## Consequences
 
 - **Good, because** a description regression becomes cheap to notice. The companion
@@ -100,14 +123,21 @@ choice this record does not make.
   the fix.
 - **A low margin is shown to predict a routing failure.** The tightest margin in the
   run (0.40) sits on the two skills that failed to fire. Two cases is a coincidence
-  worth testing, not a signal. If it holds over more cases, the typed call becomes a
-  cheap early warning for the expensive check and this decision gets stronger; if it
-  does not, the two stay fully independent.
+  worth testing, not a signal — and the coincidence is weaker than it looks, because
+  those two are a **standing** defect rather than drift: neither description has
+  changed since 2026-08-13 and 2026-07-28, so the margin was never asked to detect a
+  change. If a correlation holds over cases where a description actually moved, the
+  typed call becomes a cheap early warning for the expensive check, the margin-based
+  skip gate above becomes buildable, and this decision gets stronger; if it does not,
+  the two checks stay fully independent and the gate stays keyed on the diff.
 - **The harness gets cheap enough to run often.** Parallelising `scripts/eval.sh`
-  across rows would cut its wall clock by most of the 120×, which weakens the speed
-  half of the case, though not the margin and Noul half.
-- **A Jev version ships whose distributions separate differently.** The pinned
-  `jev-1.13.0` is what these margins were measured on.
+  across rows would cut its **wall clock** by most of the 120× — and nothing else. The
+  14 agent sessions still run and still cost what they cost, so the money half of the
+  comparison is untouched, as is the margin and Noul half. Only the speed argument
+  weakens.
+- **A newer decision model ships whose distributions separate differently.** These
+  margins were measured on `jev-1.13.0`, and the thresholds are the model's, not the
+  class's.
 
 ## Confirmation
 
