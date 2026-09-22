@@ -27,8 +27,9 @@ and it is the first thing implementation does".
 This is that reading. The table is finite — seven dimensions over fixed enums,
 3 × 3 × 4 × 2 × 2 × 2 × 2 = **576 tuples** — so it was enumerated rather than
 argued about. [`references/enumerate-label-table.py`](references/enumerate-label-table.py)
-encodes the eight rows as written and reports, for every tuple, how many rows
-fire.
+encodes each row's tuple-expressible conditions — its docstring names the two it
+drops, both of which reach outside the seven dimensions — and reports, for every
+tuple, how many rows fire.
 
 ### What the enumeration says
 
@@ -60,8 +61,8 @@ labels fire off a _single_ dimension reaching the top of its own enum
 (`creativity: high`, `speed_sensitivity: high`, `scope: whole-codebase`,
 `verification_criticality: high`, `autonomy: long-horizon`, and
 `cost_sensitivity: high` via `mechanical-bulk`'s "and/or"). Nothing in the
-dimension rubric makes those mutually exclusive, so any task notable in two ways
-fires two rows. `mechanical-bulk` alone fires on **66.7%** of tuples, because the
+dimension rubric makes those mutually exclusive, so any task hitting two of
+**those six** fires two rows. `mechanical-bulk` alone fires on **66.7%** of tuples, because the
 "and/or" reads as an inclusive or and `cost_sensitivity: high` is half the space.
 
 **The two labels describing ordinary work almost never win.** Of the 65 tuples
@@ -121,8 +122,11 @@ which names a word rather than an enum value.
   equally. No corpus of scored `task_profile` blocks exists in this repo — every
   prior measurement in the Jev workstream scored `scope` alone — so the _frequency_
   of collisions on real work is unmeasured. What the structure does say, independent
-  of frequency, is that a tuple is unambiguous only when at most one dimension is at
-  the top of its enum.
+  of frequency, is that a tuple is unambiguous only when at most one of the **six
+  single-dimension triggers** is at the top of its enum. Not every top is a trigger:
+  `complexity: hard` tops its own enum and fires nothing on its own, since
+  `architecture` also requires a scope, so 20 tuples carry two tops and still
+  resolve to one label.
 - **Nothing about whether a model reads the table better than code would.** No
   baseline was run. This is a reading of a specification, not a comparison of
   producers.
