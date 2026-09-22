@@ -2,7 +2,21 @@
 
 Opt-in, non-blocking checks that Claude **auto-invokes the right skill** from a
 naive prompt that never names it. This verifies skill _routing_ — that a skill's
-`description` triggers are good enough for Claude to pick it unprompted.
+**surfaced** `description` triggers are good enough for Claude to pick it
+unprompted.
+
+**Which description is surfaced is not always `SKILL.md`'s.** Where this plugin
+ships a `commands/<name>.md` beside `skills/<name>/SKILL.md`, the **command's**
+`description` is what reaches the model's skill listing and therefore what
+decides routing (observed behaviour of Claude Code as of 2026-09-21, not a
+documented contract). The `SKILL.md` one never reaches that listing, so it does
+not affect the choice; its body is still loaded in full once the skill fires.
+
+**A skill is in that position whenever `commands/<name>.md` exists beside
+`skills/<name>/SKILL.md`.** Check for the twin before tuning a description, and
+tune the command's, or the change has no effect on this suite. Which names that
+covers today, and the measurement behind it:
+[the decision record](../dev_docs/decisions/2026-09-21-command-descriptions-shadow-skill-descriptions.md).
 
 These are **not** part of the blocking PR gate: they cost API tokens and are
 nondeterministic. Run them deliberately.
@@ -34,7 +48,8 @@ skill (tolerant of the `workflow-skills:` plugin prefix). Pattern adapted from
 ## Add a case
 
 1. Write `prompts/<skill>.txt` — a realistic prompt that triggers the skill
-   **without naming it** (mirror the situations in the skill's `description`).
+   **without naming it** (mirror the situations in the skill's surfaced
+   `description` — the command's, where one shadows it; see above).
 2. Add a row to `manifest.tsv`: `<skill>\t prompts/<skill>.txt \t <max_turns>`
    (tab-separated).
 3. `scripts/eval.sh <skill>` to check it.
