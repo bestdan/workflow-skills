@@ -41,6 +41,25 @@ fi
 pass=0
 fail=0
 failed=()
+dirtied=()
+dirty_count=0
+
+# Each case runs against a writable checkout with permissions skipped, so a
+# realistic prompt can write into the repo under test — and one did: the
+# review-facts case wrote a report under skills/analysis-pipeline/example/ and
+# staged it, while the suite reported the row as a pass. Detect that and fail
+# the row, so residue is never folded silently into whatever is in flight.
+#
+# Compared per case against a rolling baseline rather than against "clean".
+# The suite is routinely run from a worktree with work already in progress, so
+# only the delta a case introduces is the harness's doing; blaming a row for
+# pre-existing edits would make the check useless exactly where it is needed.
+# A ROOT that is not a git checkout yields empty on both sides, so this
+# degrades to a no-op rather than failing every row.
+tree_state() {
+  git -C "$ROOT" status --porcelain 2>/dev/null
+}
+baseline="$(tree_state)"
 
 while IFS=$'\t' read -r skill prompt_file max_turns; do
   [[ -z "${skill// /}" || "$skill" == \#* ]] && continue
@@ -59,7 +78,27 @@ while IFS=$'\t' read -r skill prompt_file max_turns; do
     --output-format stream-json --verbose \
     >"$log" 2>&1 || true
 
-  if grep -q '"name":"Skill"' "$log" \
+  after="$(tree_state)"
+  residue=""
+  if [[ "$after" != "$baseline" ]]; then
+    residue="$(comm -13 <(printf '%s\n' "$baseline" | sort -u) \
+      <(printf '%s\n' "$after" | sort -u) | sed '/^$/d')"
+    # Roll the baseline forward either way, so one dirtying case does not
+    # convict every row after it.
+    baseline="$after"
+  fi
+
+  if [[ -n "$residue" ]]; then
+    # Reported ahead of the routing verdict on purpose: a case that wrote into
+    # the checkout has already broken the run, because a later case sees a tree
+    # this one changed. Whether it also picked the right skill is beside that.
+    echo "  ❌ FAIL — wrote into the repo under test:"
+    printf '%s\n' "$residue" | sed 's/^/       /'
+    fail=$((fail + 1))
+    failed+=("$skill")
+    dirtied+=("$skill")
+    dirty_count=$((dirty_count + 1))
+  elif grep -q '"name":"Skill"' "$log" \
     && grep -qE "\"(skill|name)\":\"([^\"]*:)?${skill}\"" "$log"; then
     echo "  ✅ PASS"
     pass=$((pass + 1))
@@ -74,6 +113,11 @@ done <"$MANIFEST"
 
 echo
 echo "evals: ${pass} passed, ${fail} failed"
+if [[ $dirty_count -ne 0 ]]; then
+  echo "dirtied the repo under test: ${dirtied[*]}" >&2
+  echo "those changes are still in the checkout — inspect and remove them before" >&2
+  echo "committing, and treat any row after the first as an unreliable result." >&2
+fi
 if [[ $fail -ne 0 ]]; then
   echo "failed: ${failed[*]}" >&2
   exit 1
