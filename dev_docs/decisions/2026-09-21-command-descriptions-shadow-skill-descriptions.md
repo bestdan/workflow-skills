@@ -6,27 +6,35 @@ issue: https://github.com/bestdan/workflow-skills/issues/828
 
 # A same-named command's `description` is what routes, not `SKILL.md`'s
 
-> **2026-09-22 — the shadowing is real; it was not the cause of the failure.**
-> The body below is left as written, because it records what was measured on
-> 2026-09-21. Two of its claims did not survive the next day's evidence (#840,
-> four full runs):
+> **2026-09-22 — what this record does and does not establish.**
+> The body below is left as written: it records what was measured on
+> 2026-09-21. The next day's evidence (#840, four full runs) narrows two of its
+> claims.
 >
-> - **"It was the third option #828 listed" overstates it.** Roughly two of the
->   14 rows fail on every run and the cast rotates, including rows with no
->   shadowing at all. Every failure is `skills invoked: none` — and a weak or
->   colliding description produces the **wrong** skill, not no skill. So the
->   no-fire class is a separate defect this record does not explain.
-> - **The three consecutive green runs proved less than claimed.** Against a
->   ~14% per-row failure rate that moves between runs, three greens for a given
->   row happen about 64% of the time with no fix at all. `select-coder` and
->   `orchestrate-coders` both failed again afterwards with the descriptions
->   below in place.
+> - **The cause is not established.** #840 found roughly two of the 14 rows
+>   failing on every run with the cast rotating, including rows with no
+>   shadowing at all, and both skills fixed here failing again afterwards with
+>   the new descriptions in place. That shows shadowing is not _sufficient_ to
+>   explain the failures. It does not rule shadowing out as a contributing
+>   cause: invoking a skill is optional, so a weak surfaced description can end
+>   in nothing firing too, and #840 says its own evidence cannot separate the
+>   candidate explanations. Read the conclusion below as "shadowing was found
+>   and fixed", not as "shadowing was the cause".
+> - **The three consecutive green runs licensed less than was claimed.** They
+>   were reported here as confirmation. #840's four runs carry 10 failures
+>   across 56 row-executions, and the per-row rate for the two skills fixed
+>   here is not pinned down: #840 has `select-coder` failing 3 of 4 runs, a
+>   later 8-run sample has it failing 2 of 8. No probability quoted from that
+>   spread is worth stating, and any such figure would also assume the failures
+>   are independent, which the rotating pattern gives no basis for. What the
+>   counts do support is weaker and enough: at this failure rate a streak of
+>   three is not evidence of a fix.
 >
-> What does survive: the shadowing itself, the six diverging pairs, and the
+> What survives: the shadowing itself, the six diverging pairs, and the
 > measurable improvement in separation — scored against the strings that
 > actually route, the `select-coder` vs `orchestrate-coders` margin went from
-> 0.48–0.55 to 0.95–0.96. The descriptions got better. That was not what was
-> broken.
+> 0.48–0.55 to 0.95–0.96. The descriptions got better. Whether that fixed
+> anything is unresolved, and tracked in #840.
 >
 > `evals/README.md` is the live file and wins where it disagrees with this one.
 
