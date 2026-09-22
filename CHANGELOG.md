@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.67.1] - 2026-09-22
+
+### Fixes
+
+- trigger-phrase the command descriptions that route [#828] (#834) (9fddeed)
+
 ## [2.67.0] - 2026-09-22
 
 ### Features
