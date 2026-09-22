@@ -38,8 +38,8 @@ Six names are in that position, and all six diverge:
 The `SKILL.md` descriptions are trigger-shaped — they open "Use when…" and carry
 worked example phrasings. The command descriptions are noun-phrase capability
 summaries written for the slash-command picker, which is a different job. Four of
-the six are eval manifest rows, and they are exactly the suite's four non-clean
-rows plus its one shadowed pass:
+the six are eval manifest rows: three of the suite's four non-clean rows, plus its
+one shadowed pass.
 
 | manifest row         | shadowed | run 1 | run 2 |
 | -------------------- | -------- | ----- | ----- |
@@ -48,9 +48,9 @@ rows plus its one shadowed pass:
 | `tutor`              | yes      | FAIL  | PASS  |
 | `assess-task`        | yes      | PASS  | PASS  |
 | `task`               | no       | FAIL  | PASS  |
-| the other 9 rows     | no       | PASS  | PASS  |
+| the other 8 rows     | no       | PASS  | PASS  |
 
-Three of the four failures across the two runs sit on a shadowed row.
+Three of the four failing rows across the two runs are shadowed.
 `assess-task` survives its shadowing by luck rather than by design: its command
 description happens to list its six dimensions, and its eval prompt names those
 same six almost verbatim, so the weaker framing still wins on overlap alone.
