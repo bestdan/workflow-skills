@@ -20,9 +20,12 @@ Both halves of that were true, because they were measuring two different strings
 ## What was actually wrong
 
 Where this plugin ships a `commands/<name>.md` beside a `skills/<name>/SKILL.md`,
-the **command's** `description` is what appears in the model's skill listing. The
-`SKILL.md` `description` is shadowed and never reaches the model, so it cannot
-route anything.
+the **command's** `description` is what appeared in the model's skill listing in
+every Claude Code run measured on 2026-09-21. That is host behaviour, observed
+rather than specified — see **Revisit when**. The `SKILL.md` `description` does
+not reach that listing, so it cannot route anything; the `SKILL.md` body is still
+loaded in full once the skill is invoked, and it is only the routing decision that
+never sees it.
 
 Six names are in that position, and all six diverge:
 
@@ -55,8 +58,10 @@ Three of the four failing rows across the two runs are shadowed.
 description happens to list its six dimensions, and its eval prompt names those
 same six almost verbatim, so the weaker framing still wins on overlap alone.
 
-**So it was not the description wording, and not a collision with a neighbouring
-skill.** It was the third option #828 listed — how the plugin surfaces these two.
+**So it was not the `SKILL.md` wording the typed check measured, and not a
+collision in that text.** It was the third option #828 listed — how the plugin
+surfaces these two. The surfaced wording _was_ the problem, and the adjacency does
+bite there; both are below.
 
 ### The 0.41 margin, which #828 asked to be measured rather than assumed
 
@@ -118,13 +123,15 @@ cheap check cannot predict this suite for any of the six shadowed names.
 
 ## Revisit when
 
-- **A seventh shadowed name, or a divergence in one of the six.** Nothing enforces
-  the two descriptions staying in step; this was found by hand. A gate check and
+- **A seventh shadowed name, or a change to any of the six surfaced `commands/`
+  descriptions.** All six already diverge from their `SKILL.md` twin, and nothing
+  enforces them staying in step; this was found by hand. A gate check and
   re-pointing `jev-description-collision.py` at the surfaced text are the
-  recurrence-prevention half, deliberately left out of this change and filed
-  separately.
+  recurrence-prevention half, deliberately left out of this change and filed as
+  #836 — which also covers the fact that nothing runs this suite on a schedule or
+  records when it last passed.
 - **`tutor` flapping again.** It is shadowed and unfixed here, because #828 scoped
-  itself to the two stable failures.
+  itself to the two stable failures. Filed as #835.
 - **`task` failing again.** It is the one non-clean row this explains nothing
   about; it is unshadowed and carries two manifest rows under one skill name.
 - **The harness surfacing skills differently.** The shadowing is host behaviour,

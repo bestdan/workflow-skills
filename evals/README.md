@@ -8,11 +8,15 @@ unprompted.
 **Which description is surfaced is not always `SKILL.md`'s.** Where this plugin
 ships a `commands/<name>.md` beside `skills/<name>/SKILL.md`, the **command's**
 `description` is what reaches the model's skill listing and therefore what
-decides routing; the `SKILL.md` one is shadowed and never seen. Six names are
-in that position today — `assess-task`, `auto-pilot`, `deliver-task`,
-`orchestrate-coders`, `select-coder`, `tutor` — and all six diverge. Tune the
-command's `description` for those, or the change has no effect on this suite
-(#828).
+decides routing (observed behaviour of Claude Code as of 2026-09-21, not a
+documented contract). The `SKILL.md` one never reaches that listing, so it does
+not affect the choice; its body is still loaded in full once the skill fires.
+
+**A skill is in that position whenever `commands/<name>.md` exists beside
+`skills/<name>/SKILL.md`.** Check for the twin before tuning a description, and
+tune the command's, or the change has no effect on this suite. Which names that
+covers today, and the measurement behind it:
+[the decision record](../dev_docs/decisions/2026-09-21-command-descriptions-shadow-skill-descriptions.md).
 
 These are **not** part of the blocking PR gate: they cost API tokens and are
 nondeterministic. Run them deliberately.
