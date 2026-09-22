@@ -49,10 +49,15 @@ dimensions are live, so the `absent` verdict reads off a grid rather than a list
 | the main checkout | check the branch out here                                           | check the branch out here                |
 | worktree-isolated | offer `git worktree add`; the user approves the path, then enter it | no route — the prompt cannot be answered |
 
-**One cell of four has no way through**, so do not state the dead end by attendance
-alone. An unattended run in the main checkout needs no prompt — a branch name is not
-a model-supplied path — and an attended isolated session has a working route that
-removing would cost a recovery it already has.
+**The grid is reachability, not permission.** Only one cell is mechanically
+impossible — unattended and isolated, where the approval cannot be given. But
+co-review declines the unattended main-checkout route as policy: moving `HEAD` in
+someone's main checkout is not a default an unwatched run may pick. So `absent` is a
+hard error in both unattended cells, for two different reasons.
+
+What the grid does rule out is stating the dead end by attendance alone. An attended
+isolated session has a real route, and removing it would cost a recovery it already
+has.
 
 ### What to do when there is no route
 
