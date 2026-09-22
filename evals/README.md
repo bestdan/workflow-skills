@@ -41,7 +41,7 @@ For each manifest row, `scripts/eval.sh` runs:
 claude -p "<prompt>" --plugin-dir <repo> --max-turns N --output-format stream-json --verbose
 ```
 
-then asserts the run log contains a `Skill` tool invocation matching the expected
+then parses the run log for a `Skill` tool invocation matching the expected
 skill (tolerant of the `workflow-skills:` plugin prefix). Pattern adapted from
 [obra/superpowers](https://github.com/obra/superpowers) `tests/skill-triggering`.
 
@@ -77,6 +77,54 @@ remains: rewriting a file that was _already_ in the untracked list moves neither
 signal, since its entry is unchanged and `diff HEAD` skips untracked content.
 Covered by `test/eval-tree-guard.bats`.
 
+One more hole, found while instrumenting #840: porcelain does not list
+**ignored** paths, so a case that writes into `.claude/`, `temp/` or any other
+ignored directory moves neither signal. An eval case did create
+`skills/analysis-pipeline/example/.claude/`, and the guard cannot see it. That
+same property is why this harness keeps its own logs under `temp/` — see below.
+
+## Reading a failure
+
+A row **keeps its run log** under `temp/evals/<run-stamp>/` (ignored) and prints
+the path whenever the row failed, dirtied the repo, or passed on a truncated
+run. It has to: the suite is nondeterministic and the failing rows rotate, so
+re-running does not reproduce the row that failed — if the log is gone, the
+failure is only ever counted, never diagnosed.
+
+Each miss is also labelled with a `cause`, because `skills invoked: none` was
+the same string for five different defects with five different fixes. The
+vocabulary — `no-result-event`, `api-error`, `max-turns`, `not-surfaced`,
+`wrong-skill`, `no-skill-chosen`, plus `dirtied-repo` from the guard above — and
+what each one implies are documented in
+[`scripts/eval-triage.py`](../scripts/eval-triage.py)'s module docstring, which
+is also where the triage logic lives (with hermetic tests in
+`scripts/test_eval_triage.py`, run by `just check`).
+
+### A pass at the cap is not a result
+
+Each row is capped at 300s. A row killed there still **passes** if its `Skill`
+call happened to land before the kill, and the old harness printed the same
+`✅ PASS` whether the row took 54s or was terminated at 300s. That is reported
+as `⚠ PASS on a truncated run` and its log is kept, because it is the one
+warning that the suite is running against the wall: the same row fails the next
+time the call lands a few seconds later, and there is no way to tell that from a
+`✅`. Observed on `local-review`, which took 54s in one run and was killed at
+the cap in the next.
+
+### Validate a fix against the rate, over several runs
+
+Not against one row passing a few times. At a per-row failure rate near 14%,
+three consecutive greens for a given row happen about 64% of the time with no
+fix at all — the mistake
+[#840](https://github.com/bestdan/workflow-skills/issues/840) exists to record.
+The end-of-run `causes:` tally is the number to move.
+
+The measured rate is not stable between sittings, which is itself the point.
+Three consecutive 14-row runs on 2026-09-22 gave **41/42 rows passing** — one
+`wrong-skill` — against the ~2-per-run, always-`none` failures #840 recorded
+days earlier on the same host. Whatever drives that is not in this repo, so a
+baseline is only comparable to a fix measured in the same sitting.
+
 ## Add a case
 
 1. Write `prompts/<skill>.txt` — a realistic prompt that triggers the skill
@@ -85,6 +133,17 @@ Covered by `test/eval-tree-guard.bats`.
 2. Add a row to `manifest.tsv`: `<skill>\t prompts/<skill>.txt \t <max_turns>`
    (tab-separated).
 3. `scripts/eval.sh <skill>` to check it.
+
+**A prompt with more than one right answer takes `a|b` in the skill field**, and
+any of those firing is a pass. Use it when two skills genuinely both fit and
+nothing prefers one: `prompts/task.txt` ("don't let this fall through the
+cracks") matches the `task` umbrella and the `add-task` command that files the
+thing, and the model picked `task` in two runs and `add-task` in a third.
+Asserting one name there is a row that fails a third of the time for choosing
+correctly — a flaky red indistinguishable from a routing defect. Do **not**
+reach for it to paper over a real collision: if one of the two is wrong for the
+prompt, fix the description or the prompt. `scripts/eval.sh <name>` still
+selects such a row by either alternative.
 
 `analysis-conventions` is intentionally absent: it's `user-invocable: false`
 (context-load only), so there's nothing to auto-route.

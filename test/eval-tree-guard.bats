@@ -16,6 +16,9 @@ setup() {
   mkdir -p "$FAKE/scripts" "$FAKE/evals/prompts"
   cp "$REPO_ROOT/scripts/eval.sh" "$FAKE/scripts/eval.sh"
   chmod +x "$FAKE/scripts/eval.sh"
+  # eval.sh shells out to this sibling for the routing verdict, so the fixture
+  # is not a working copy of the harness without it.
+  cp "$REPO_ROOT/scripts/eval-triage.py" "$FAKE/scripts/eval-triage.py"
   echo "trigger the thing" >"$FAKE/evals/prompts/demo.txt"
   printf 'demo\tprompts/demo.txt\t6\n' >"$FAKE/evals/manifest.tsv"
 
@@ -28,8 +31,23 @@ setup() {
 teardown() { teardown_test; }
 
 # A stub that "passes" the routing check: it emits a Skill invocation for the
-# skill named in the manifest.
+# skill named in the manifest, then the terminal `result` event a completed run
+# ends with. That second line is not decoration — a log with no `result` event
+# is how a run killed by the wall-clock cap looks, and the harness reports such
+# a row as a truncated pass rather than a clean one.
 stub_claude_clean() {
+  cat >"$BIN_DIR/claude" <<'SH'
+#!/usr/bin/env bash
+echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"demo"}}]}}'
+echo '{"type":"result","subtype":"success","num_turns":1,"result":"done"}'
+SH
+  chmod +x "$BIN_DIR/claude"
+}
+
+# A stub whose run is cut off: the skill fired, but no `result` event ever
+# arrives. This is what `timeout` leaves behind, and the row passes only
+# because the Skill call happened to land first.
+stub_claude_truncated() {
   cat >"$BIN_DIR/claude" <<'SH'
 #!/usr/bin/env bash
 echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"demo"}}]}}'
@@ -43,6 +61,7 @@ stub_claude_dirty() {
   cat >"$BIN_DIR/claude" <<'SH'
 #!/usr/bin/env bash
 echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"demo"}}]}}'
+echo '{"type":"result","subtype":"success","num_turns":1,"result":"done"}'
 printf 'residue\n' >"$FAKE/evals/leftover.md"
 git -C "$FAKE" add evals/leftover.md
 SH
@@ -147,6 +166,107 @@ SH
   run bash "$FAKE/scripts/eval.sh"
   assert_success
   assert_output --partial "1 passed, 0 failed"
+}
+
+# --- the routing verdict and what a failing row leaves behind (#840) ---
+#
+# Before #840 a failing row deleted its own log, so `skills invoked: none` was
+# the entire record of a failure the suite cannot reproduce on demand.
+
+@test "a passing row leaves no log behind" {
+  stub_claude_clean
+  run bash "$FAKE/scripts/eval.sh"
+  assert_success
+  refute_output --partial "log: temp/evals"
+  [ ! -d "$FAKE/temp/evals" ]
+}
+
+@test "a row that fired nothing keeps its log and names a cause" {
+  cat >"$BIN_DIR/claude" <<'SH'
+#!/usr/bin/env bash
+echo '{"type":"system","subtype":"init","skills":["demo"],"slash_commands":[],"plugins":[]}'
+echo '{"type":"result","subtype":"success","num_turns":1,"result":"I just answered."}'
+SH
+  chmod +x "$BIN_DIR/claude"
+  run bash "$FAKE/scripts/eval.sh"
+  assert_failure
+  assert_output --partial "skills invoked: none"
+  # The whole point: surfaced but unchosen is a different defect from a run that
+  # never had the skill, and the cause says which.
+  assert_output --partial "cause: no-skill-chosen"
+  assert_output --partial "causes: 1×no-skill-chosen"
+  assert_output --partial "log: temp/evals"
+  run find "$FAKE/temp/evals" -name 'demo-demo.jsonl'
+  assert_output --partial "demo-demo.jsonl"
+}
+
+@test "a skill the session never listed is reported as not-surfaced, not a routing miss" {
+  cat >"$BIN_DIR/claude" <<'SH'
+#!/usr/bin/env bash
+echo '{"type":"system","subtype":"init","skills":["something-else"],"slash_commands":[],"plugins":[]}'
+echo '{"type":"result","subtype":"success","num_turns":1,"result":"no idea"}'
+SH
+  chmod +x "$BIN_DIR/claude"
+  run bash "$FAKE/scripts/eval.sh"
+  assert_failure
+  assert_output --partial "cause: not-surfaced"
+}
+
+@test "a pass on a truncated run is flagged and keeps its log" {
+  stub_claude_truncated
+  run bash "$FAKE/scripts/eval.sh"
+  # Still a pass — the skill did fire — but not a clean one.
+  assert_success
+  assert_output --partial "1 passed, 0 failed"
+  assert_output --partial "PASS on a truncated run"
+  assert_output --partial "passed on a truncated run (at the 300s cap): demo"
+  assert_output --partial "log: temp/evals"
+}
+
+@test "a row that dirtied the repo still reports what it routed to" {
+  stub_claude_dirty
+  run bash "$FAKE/scripts/eval.sh"
+  assert_failure
+  assert_output --partial "wrote into the repo under test"
+  # The residue verdict does not cost us the routing one.
+  assert_output --partial "also PASS"
+  assert_output --partial "causes: 1×dirtied-repo"
+  assert_output --partial "log: temp/evals"
+}
+
+@test "an alternatives row passes on either name and argv selects it by either" {
+  printf 'demo|other\tprompts/demo.txt\t6\n' >"$FAKE/evals/manifest.tsv"
+  git -C "$FAKE" add -A
+  git -C "$FAKE" commit -qm alt
+  stub_claude_clean # fires `demo`, the second alternative
+
+  run bash "$FAKE/scripts/eval.sh"
+  assert_success
+  assert_output --partial "1 passed, 0 failed"
+
+  # argv must select the row by either alternative, not by the literal field.
+  run bash "$FAKE/scripts/eval.sh" other
+  assert_success
+  assert_output --partial "1 passed, 0 failed"
+
+  run bash "$FAKE/scripts/eval.sh" unrelated
+  assert_success
+  assert_output --partial "0 passed, 0 failed"
+}
+
+@test "an alternatives row's kept log has no pipe in its filename" {
+  printf 'demo|other\tprompts/demo.txt\t6\n' >"$FAKE/evals/manifest.tsv"
+  git -C "$FAKE" add -A
+  git -C "$FAKE" commit -qm alt
+  cat >"$BIN_DIR/claude" <<'SH'
+#!/usr/bin/env bash
+echo '{"type":"system","subtype":"init","skills":["demo"],"slash_commands":[],"plugins":[]}'
+echo '{"type":"result","subtype":"success","num_turns":1,"result":"nope"}'
+SH
+  chmod +x "$BIN_DIR/claude"
+  run bash "$FAKE/scripts/eval.sh"
+  assert_failure
+  assert_output --partial "demo-or-other-demo.jsonl"
 }
 
 load test_helper
