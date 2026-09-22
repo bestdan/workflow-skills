@@ -334,6 +334,34 @@ are the two skills that failed to fire. Two cases is an observation. Whether a l
 margin predicts a real routing failure is the measurement that would turn it into
 something, and nothing here has made it.
 
+> [!NOTE]
+> 2026-09-22: **every Choice number in this section was scored on the wrong strings for
+> four of the fourteen manifest rows, and the conclusion survives it.** Where a
+> `commands/<name>.md` sits beside a `skills/<name>/SKILL.md`, the command's
+> `description` is what reaches the model's skill listing; the SKILL.md one routes
+> nothing. Six names here are in that position — `assess-task`, `auto-pilot`,
+> `deliver-task`, `orchestrate-coders`, `select-coder`, `tutor` — and four are manifest
+> rows. This instrument read `skills/*/SKILL.md` only, so for those four it ranked text
+> the model never sees. The shadowing was found by
+> [`../../decisions/2026-09-21-command-descriptions-shadow-skill-descriptions.md`](../../decisions/2026-09-21-command-descriptions-shadow-skill-descriptions.md);
+> `load_descriptions` now resolves the surfaced string.
+>
+> Three rosters, same prompts, three runs each
+> ([`references/ablate-shadowed-roster.py`](references/ablate-shadowed-roster.py)):
+>
+> | roster                              | misfires | `select-coder` vs `orchestrate-coders` |
+> | ----------------------------------- | -------- | -------------------------------------- |
+> | shadowed — what this section scored | 0        | 0.460, 0.350, 0.450                    |
+> | surfaced, before #834               | 0        | 0.550, 0.480, 0.520                    |
+> | surfaced, after #834                | 0        | 0.960, 0.960, 0.950                    |
+>
+> The middle row is the one that matters, and it is why the finding below stands rather
+> than being an artifact: **with the correct strings and before any description was
+> rewritten, the typed call still put `select-coder` first with no misfire** — while the
+> real session fired nothing. The blindness is structural, not a parsing bug. The margin
+> figures in this section are understated by about 0.1 as a result, and the rest of the
+> jump to 0.96 is #834's rewrite, not the fix.
+
 Both halves are retained, so neither table is a number read off a transcript:
 [`references/latency-records-2026-09-21.json`](references/latency-records-2026-09-21.json)
 (per-request round trips, four passes) and

@@ -621,6 +621,66 @@ class RunSuiteScoreToLabelTests(unittest.TestCase):
         self.assertIsNone(self._row(0.10, False)["tier"])
 
 
+class SurfacedDescriptionTests(unittest.TestCase):
+    """Which `description` the roster is built from.
+
+    The instrument scores the string the model routes on. Where a `commands/<name>.md`
+    sits beside `skills/<name>/SKILL.md`, that is the command's — the SKILL.md one is
+    shadowed and never reaches the listing. Scoring the shadowed string measures text
+    the model never sees, so these pin the override rather than trusting it.
+    """
+
+    SKILL = "---\nname: widget\ndescription: The shadowed one.\n---\n\nbody\n"
+    COMMAND = "---\ndescription: The surfaced one.\n---\n\nbody\n"
+
+    def _tree(self, tmp, *, with_command):
+        root = Path(tmp)
+        (root / "skills" / "widget").mkdir(parents=True)
+        (root / "skills" / "widget" / "SKILL.md").write_text(self.SKILL)
+        if with_command:
+            (root / "commands").mkdir()
+            (root / "commands" / "widget.md").write_text(self.COMMAND)
+        return root
+
+    def test_a_command_twin_shadows_the_skill_description(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._tree(tmp, with_command=True)
+            self.assertEqual(
+                jev.load_descriptions(root), {"widget": "The surfaced one."}
+            )
+
+    def test_without_a_twin_the_skill_description_is_used(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._tree(tmp, with_command=False)
+            self.assertEqual(
+                jev.load_descriptions(root), {"widget": "The shadowed one."}
+            )
+
+    def test_a_command_with_no_description_does_not_blank_the_entry(self):
+        """A twin that parses to nothing must leave the SKILL.md text in place, not
+        replace it with an empty string — an empty criterion is worse than a shadowed
+        one, because the Choice would then rank an option with no text."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._tree(tmp, with_command=True)
+            (root / "commands" / "widget.md").write_text(
+                "---\nallowed-tools: Bash\n---\n\nbody\n"
+            )
+            self.assertEqual(
+                jev.load_descriptions(root), {"widget": "The shadowed one."}
+            )
+
+    def test_parse_one_description_handles_a_block_scalar(self):
+        self.assertEqual(
+            jev.parse_one_description(
+                "---\ndescription: >\n  folded\n  across lines\n---\n\nx\n"
+            ),
+            "folded across lines",
+        )
+
+    def test_parse_one_description_returns_none_without_frontmatter(self):
+        self.assertIsNone(jev.parse_one_description("no frontmatter here\n"))
+
+
 class LatencySummaryTests(unittest.TestCase):
     """The summary the latency report is built from.
 

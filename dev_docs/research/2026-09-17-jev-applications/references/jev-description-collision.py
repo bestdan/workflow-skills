@@ -516,11 +516,49 @@ def resolve_key(root: Path) -> str:
     )
 
 
+def parse_one_description(text: str) -> str | None:
+    """The `description` of a single frontmatter block, or None.
+
+    `parse_descriptions` needs a `name:` too, because it reads a whole directory of
+    SKILL.md files and has nothing else to key them by. A command file has no `name:`
+    — its filename is its name — so it needs this half on its own.
+    """
+    m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
+    if not m:
+        return None
+    desc = re.search(
+        r"^description:\s*(?:[>|][-+]?\s*\n((?:\s+.*\n?)+)|(.+))$", m.group(1), re.M
+    )
+    if not desc:
+        return None
+    body = desc.group(1) or desc.group(2) or ""
+    body = " ".join(line.strip() for line in body.strip().splitlines())
+    return body or None
+
+
 def load_descriptions(root: Path) -> dict[str, str]:
+    """name -> the description that actually reaches the model's skill listing.
+
+    Not `SKILL.md`'s, where a `commands/<name>.md` exists beside it: the command's
+    `description` is what the model routes on and the SKILL.md one never reaches the
+    listing at all. Measured 2026-09-21 and recorded in
+    `dev_docs/decisions/2026-09-21-command-descriptions-shadow-skill-descriptions.md`;
+    six names in this repo are in that position and four are eval manifest rows.
+
+    Scoring the shadowed string is scoring text the model never sees, which is exactly
+    the defect that made this instrument report 14/14 on two skills that fired nothing.
+    """
     files = {
         str(p): p.read_text() for p in sorted((root / "skills").glob("*/SKILL.md"))
     }
-    return parse_descriptions(files)
+    out = parse_descriptions(files)
+    for name in list(out):
+        command = root / "commands" / f"{name}.md"
+        if command.is_file():
+            surfaced = parse_one_description(command.read_text())
+            if surfaced:
+                out[name] = surfaced
+    return out
 
 
 def load_manifest_cases(root: Path) -> list[tuple[str, str]]:

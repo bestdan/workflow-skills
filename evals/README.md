@@ -59,9 +59,11 @@ skill (tolerant of the `workflow-skills:` plugin prefix). Pattern adapted from
 
 ## Companion check: description discriminability
 
-A typed model call scores a prompt against every skill `description` and reports two
-things this harness cannot: the **margin** between the winning description and the
-runner-up, and whether **any** skill should fire at all — measured over 16 prompts
+A typed model call scores a prompt against every skill's **surfaced** `description` —
+the same string this suite routes on, the command's where one shadows the SKILL.md, per
+the section above — and reports two things this harness cannot: the **margin** between
+the winning description and the runner-up, and whether **any** skill should fire at
+all — measured over 16 prompts
 written to need none, which `manifest.tsv` cannot express, since every row there names
 an expected skill. Run it when a `description` changes. It makes drift visible; whether
 a narrow margin predicts a real routing failure is untested, and the decision record

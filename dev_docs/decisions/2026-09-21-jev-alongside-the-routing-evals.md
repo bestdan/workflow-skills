@@ -116,17 +116,25 @@ condition.
 
 ## Revisit when
 
-- **The two stable failures are fixed.** `select-coder` and `orchestrate-coders` not
-  firing is a live defect this measurement surfaced, and it is a separate piece of
-  work. If their descriptions change, both sides need re-running — the typed call
-  because its margins move, the harness because that is the check that would confirm
-  the fix.
+- **The rotating no-fire failure is fixed.** What this measurement read as two broken
+  skills is broader: across four runs the suite loses about two of fourteen rows every
+  time, always by firing nothing, and the rows change between runs. Filed as #840,
+  which supersedes the narrower #828. The strengthening this decision would take from
+  a fix is not available until then, because a green row is currently weak evidence.
+
+  > [!NOTE]
+  > 2026-09-22: #828 was closed by #834, which rewrote the two command descriptions.
+  > Re-running both sides afterwards: the typed call is unchanged at 14/14, and the
+  > harness failed those same two rows again in one of two passes, plus `co-review` and
+  > `tutor` in the other. The rewrite moved the margin — 0.48–0.55 to 0.95–0.96 on the
+  > strings that route — and did not move the firing.
 - **A low margin is shown to predict a routing failure.** The tightest margin in the
   run (0.40) sits on the two skills that failed to fire. Two cases is a coincidence
-  worth testing, not a signal — and the coincidence is weaker than it looks, because
-  those two are a **standing** defect rather than drift: neither description has
-  changed since 2026-08-13 and 2026-07-28, so the margin was never asked to detect a
-  change. If a correlation holds over cases where a description actually moved, the
+  worth testing, not a signal — and it has since weakened twice over. Those two were a
+  **standing** defect rather than drift, so the margin was never asked to detect a
+  change; and the 0.40 was measured on a shadowed string, with the surfaced one sitting
+  at 0.48–0.55. Meanwhile #840 shows rows with no margin problem at all failing the
+  same way. If a correlation holds over cases where a description actually moved, the
   typed call becomes a cheap early warning for the expensive check, the margin-based
   skip gate above becomes buildable, and this decision gets stronger; if it does not,
   the two checks stay fully independent and the gate stays keyed on the diff.
