@@ -477,18 +477,18 @@ findings are about.
   batch-dispatched sessions — it blocks the single-issue, foreground `/do-tasks` path
   too.** `gh issue list`, `gh issue view`, and `gh pr list` each returned the identical
   `HTTP 403: GitHub GraphQL is not available from Claude Code sessions; use the REST
-  API …` this file has recorded since 09-07, in a session with a *working* REST
+  API …` this file has recorded since 09-07, in a session with a _working_ REST
   credential (not the unprovisioned case findings 2 and the 09-08 section describe).
   Plain `gh api repos/{owner}/{repo}/issues?state=open` (REST, unauthenticated-shape
   list) returned issue numbers normally.
 
-  | call (this session, working REST credential) | result                        |
-  | ---------------------------------------------- | ------------------------------ |
-  | `gh api repos/<repo>` / `gh api user`          | `200`                          |
-  | `gh api repos/<repo>/issues?state=open`        | `200`, REST                    |
-  | `gh issue list --search '...' --json ...`      | `403` GraphQL refusal          |
-  | `gh issue view <n> --json ...`                 | `403` GraphQL refusal          |
-  | `gh pr list --json ...`                        | `403` GraphQL refusal          |
+  | call (this session, working REST credential) | result                |
+  | -------------------------------------------- | --------------------- |
+  | `gh api repos/<repo>` / `gh api user`        | `200`                 |
+  | `gh api repos/<repo>/issues?state=open`      | `200`, REST           |
+  | `gh issue list --search '...' --json ...`    | `403` GraphQL refusal |
+  | `gh issue view <n> --json ...`               | `403` GraphQL refusal |
+  | `gh pr list --json ...`                      | `403` GraphQL refusal |
 
 **What this changes.** The gh-issue handler's own docs (`commands/do-tasks.md` §4 step
 5, `gh-issue-claim.md` line 5) frame the `gh`-availability risk as something that
