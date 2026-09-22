@@ -286,6 +286,11 @@ comparison: the question is whether it beats **what runs today**, which is
 `scripts/eval.sh` — one `claude -p` session per manifest row, up to six turns, serial,
 grepping the run log for a `Skill` invocation.
 
+**Beating it does not mean scoring higher.** Equal accuracy at materially lower cost or
+latency beats the incumbent, and that is the likelier shape of the win here — so the
+table below reports wall clock and cost beside agreement, and a comparison carrying
+only one of those axes is not finished.
+
 **Measured 2026-09-21 on one Linux host, same 14 manifest rows, both sides.** Jev four
 passes; the eval harness twice, which is as many as its wall clock allows.
 

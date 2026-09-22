@@ -52,6 +52,13 @@ note under **Using it well**, and are not repeated here.
    scores on the same cases. This is the single most common gap in the records
    above, and the routing probe exists because of it.
 
+   **"Better" is not "more accurate."** Equal accuracy at materially lower cost
+   or latency beats the incumbent, and on these measurements that is the likelier
+   shape of the win — the typed call has matched the incumbent's accuracy every
+   time and never once beaten it. So a comparison is unfinished until it carries
+   cost and wall clock beside the score, for **both** sides. Rule 2 is the other
+   half of this: the tie that agreement produces is broken on those axes.
+
 2. **Agreement is ambiguous, and cost breaks the tie.** A both-logged rollout
    that promotes what agrees reads agreement as a green light. It is equally
    evidence the incumbent was already sufficient — that is exactly what

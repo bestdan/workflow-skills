@@ -5,10 +5,15 @@
 
 A **Claude Code plugin**. The product is prompt text, not a program:
 
-- **`skills/<name>/SKILL.md`** — auto-triggering skills. Frontmatter
-  `description` is what decides whether the skill fires, so it is interface,
-  not documentation. Body ≤500 lines (enforced); overflow goes in sibling
-  `references/` files the skill links to.
+- **`skills/<name>/SKILL.md`** — auto-triggering skills. A frontmatter
+  `description` is interface, not documentation — but **`SKILL.md`'s is not
+  always the one that decides whether the skill fires.** Where a
+  `commands/<name>.md` sits beside it, the **command's** `description` is what
+  reaches the model's skill listing and routes; the `SKILL.md` one never gets
+  there. Check for the twin before tuning either, or the edit changes nothing:
+  `dev_docs/decisions/2026-09-21-command-descriptions-shadow-skill-descriptions.md`.
+  Body ≤500 lines (enforced); overflow goes in sibling `references/` files the
+  skill links to.
 - **`commands/<name>.md`** — slash commands. `commands/handlers/` holds the
   per-tracker (`linear`, `gh-issue`, `jira`, `repo-pr`) implementations the task
   commands dispatch into.
