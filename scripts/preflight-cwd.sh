@@ -46,6 +46,10 @@
 #   3  CWD: unknown reason=worktree-list-failed
 #      `git worktree list` failed — callers should warn and let the user
 #      decide, not hard-fail.
+#   3  CWD: unknown reason=unparseable-path
+#      A worktree path contains a tab, which would fabricate a record below.
+#      Same warn-and-continue treatment: refusing to answer beats answering
+#      wrongly.
 #
 # Every run also prints one `preflight-cwd: worktree …` line per worktree of
 # this repo, marking the session's own with `<- cwd`. That inventory is the
@@ -69,7 +73,10 @@ while [ $# -gt 0 ]; do
       shift 2
       ;;
     -h | --help)
-      sed -n '2,46p' "$0"
+      # Derived, not a line number: this range broke twice in two commits —
+      # renumbered, then re-broken by header lines added in the same commit.
+      # preflight-conflict.sh:63 carries the inverse form of the same defect.
+      sed -n '2,/^set -uo pipefail/{ /^set /!p; }' "$0"
       exit 0
       ;;
     *) die "unknown argument: $1" ;;
@@ -96,6 +103,19 @@ if ! worktrees="$(git worktree list --porcelain 2>&1)"; then
 fi
 
 head_branch="$(git branch --show-current)"
+
+# A tab inside a worktree path would split the tab-delimited records below into
+# a fabricated path/branch pair — and an invented branch name can collide with
+# a real ref and win the holder lookup, producing a confident wrong verdict
+# rather than a garbled one. Refuse to answer instead, via the existing
+# warn-and-continue arm. (A newline in a path is not detectable here, since it
+# already splits the porcelain output into lines; it is left unhandled because
+# no encoding short of `--porcelain -z` would catch it.)
+if grep -q '^worktree .*	' <<<"$worktrees"; then
+  echo "preflight-cwd: a worktree path contains a tab; refusing to guess" >&2
+  echo "CWD: unknown reason=unparseable-path"
+  exit 3
+fi
 
 # `git worktree list --porcelain` emits a blank-line-separated block per
 # worktree: a `worktree <path>` line, a `HEAD <sha>` line, and then either

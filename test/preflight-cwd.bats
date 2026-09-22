@@ -47,6 +47,17 @@ add_worktree() {
   assert_output --partial "cwd=\"$(cd "$TEST_TMPDIR/main" && pwd -P)\""
 }
 
+# A tab splits the intermediate records, inventing a worktree whose made-up
+# branch name could match a real ref and win the holder lookup — a confident
+# wrong verdict, which is the one outcome this script exists to prevent.
+@test "a tab in a worktree path refuses a verdict, never fabricates one" {
+  git -C "$TEST_TMPDIR/main" worktree add -q -b tabbed "$TEST_TMPDIR/tab	tree" main
+  cwd_check "$TEST_TMPDIR/main" --ref tree
+  assert_failure 3
+  assert_output --partial 'CWD: unknown reason=unparseable-path'
+  refute_output --partial 'CWD: foreign'
+}
+
 @test "the same check from inside that worktree is ok" {
   add_worktree feature
   cwd_check "$TEST_TMPDIR/feature" --ref feature
