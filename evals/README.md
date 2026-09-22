@@ -67,9 +67,15 @@ codes and paths but no content: an edit to a file already showing as modified
 leaves its line byte-identical. It is also symmetric, so a case that _reverts_
 one of your edits is reported too rather than reading as clean.
 
-A `<repo>` that is not a git checkout degrades to a no-op. Rewriting a file that
-was already untracked moves neither signal, which is the one known hole. Covered
-by `test/eval-tree-guard.bats`.
+The path list is read with `-uall`. By default porcelain collapses an untracked
+directory to one `?? dir/` entry, so a file written inside it would leave the
+output byte-identical — which is the shape of the case actually observed, and
+would have gone unseen had the target directory been untracked.
+
+A `<repo>` that is not a git checkout degrades to a no-op. One narrow hole
+remains: rewriting a file that was _already_ in the untracked list moves neither
+signal, since its entry is unchanged and `diff HEAD` skips untracked content.
+Covered by `test/eval-tree-guard.bats`.
 
 ## Add a case
 

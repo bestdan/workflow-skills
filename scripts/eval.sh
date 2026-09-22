@@ -63,11 +63,19 @@ dirty_count=0
 # rolling baseline exists to support running with work in flight, which is
 # exactly when paths are already dirty. The content hash catches it.
 #
-# Known limit: rewriting a file that was already untracked moves neither
-# signal, since `diff HEAD` does not cover untracked content. New untracked
-# files — the case actually observed — do show up in the porcelain list.
+# `-uall` is load-bearing, not tidiness. By default porcelain collapses an
+# untracked directory to a single `?? dir/` entry, so a second file written
+# inside it leaves the output byte-identical — measured, not assumed — and
+# `diff HEAD` does not see untracked content at all. That is the shape of the
+# case actually observed (a generated report written into a directory), and it
+# would have been invisible had the target directory been untracked. `-uall`
+# lists untracked files individually, so any new file moves this signal.
+#
+# Known limit, now narrow: rewriting a file that was *already* in the untracked
+# list moves neither signal, since its `?? path` entry is unchanged and
+# `diff HEAD` skips it.
 tree_paths() {
-  git -C "$ROOT" status --porcelain 2>/dev/null
+  git -C "$ROOT" status --porcelain -uall 2>/dev/null
 }
 tree_hash() {
   git -C "$ROOT" diff HEAD 2>/dev/null | shasum 2>/dev/null

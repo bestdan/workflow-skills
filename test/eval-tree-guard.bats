@@ -119,6 +119,26 @@ SH
   assert_output --partial "wrote into the repo under test"
 }
 
+# Porcelain collapses an untracked directory to one `?? dir/` entry by default,
+# so a file written inside an already-untracked directory leaves the output
+# byte-identical — and `diff HEAD` does not cover untracked content either.
+# This is the shape of the case #829 actually observed, so it is the one that
+# most needs a regression.
+@test "a new file inside an already-untracked directory fails the row" {
+  mkdir -p "$FAKE/scratch"
+  printf 'pre-existing\n' >"$FAKE/scratch/kept.md"
+  cat >"$BIN_DIR/claude" <<'SH'
+#!/usr/bin/env bash
+echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"demo"}}]}}'
+printf 'generated\n' >"$FAKE/scratch/report.md"
+SH
+  chmod +x "$BIN_DIR/claude"
+  run bash "$FAKE/scripts/eval.sh"
+  assert_failure
+  assert_output --partial "wrote into the repo under test"
+  assert_output --partial "scratch/report.md"
+}
+
 # A ROOT that is not a git checkout (a tarball install) must degrade to a
 # no-op rather than failing every row.
 @test "a non-git checkout degrades to a no-op instead of failing rows" {
