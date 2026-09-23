@@ -72,7 +72,7 @@ import io
 import re
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 
 PROG = "research-spike"
@@ -2053,6 +2053,140 @@ def resolve_blockers(tree: Tree) -> Blockers:
     return resolved
 
 
+@dataclass(frozen=True)
+class TaintedObligations:
+    """One decision's open obligations reachable through section co-location —
+    the `#print axioms` relation, not `resolve_blockers`' `blocking:` one.
+
+    `records` excludes anything already counted as a live `blocking:` blocker
+    of the same decision (that is the `BLOCKED` note's business, not this
+    one's) and any bare `none:` block, which owes nothing (`is_none_block`).
+    `stubs` and `receipts` split the same records by their `destination:`'s
+    card kind, reported separately because a stub (work with nowhere to go)
+    and a receipt (work that went somewhere this validator cannot see) mean
+    opposite things — the same distinction `CardCounts` already draws. A
+    record whose destination does not resolve to a card counts toward the
+    total but neither subtotal.
+    """
+
+    records: tuple[Record, ...] = ()
+    stubs: int = 0
+    receipts: int = 0
+
+
+def _destination_card(
+    rec: Record, tree: Tree, cards_by_path: dict[Path, Record]
+) -> Record | None:
+    """The `card` record an obligation's `destination:` resolves to, if any.
+
+    Mirrors `check_contained_file`'s resolution (repo-relative to `tree.root`)
+    without re-running its validation — `status` derives on trees `validate`
+    has not necessarily passed, so a destination that fails to resolve is
+    reported as no card rather than raised.
+    """
+    raw = declared(rec, "destination")
+    if raw is None:
+        return None
+    try:
+        resolved = (tree.root / raw).resolve()
+    except (OSError, RuntimeError):
+        return None
+    return cards_by_path.get(resolved)
+
+
+def resolve_taint(
+    tree: Tree, resolved: Blockers
+) -> dict[tuple[str, str], TaintedObligations]:
+    """Open obligations reachable from each decision through its questions.
+
+    The `#print axioms` relation: not what *blocks* a decision
+    (`resolve_blockers`, a deliberately scarce, hand-declared set) but what it
+    *rests on* — the undischarged work that answering its gating questions
+    created. The edge needs no new field and no grammar change: a
+    `### Q<n>.` section's `question` record declares `blocks: D`, so every
+    `obligation` record in that same section is work the answer created,
+    whether or not it also declares `blocking:`.
+
+    Reported beside a decision's label rather than folded into it —
+    `decision_status` appends it as a suffix, never changing the label
+    itself, exactly as a Lean theorem depending on `sorryAx` is still proved.
+    """
+    cards_by_path = {
+        rec.path.resolve(): rec for rec in tree.records if rec.kind == "card"
+    }
+    index = records_by_file(tree)
+    taint: dict[tuple[str, str], list[Record]] = {}
+    for rel, sections in tree.sections.items():
+        file_records = index.get(rel, [])
+        for section in sections:
+            section_records = [
+                r
+                for r in file_records
+                if section.start_line <= r.line <= section.end_line
+            ]
+            question = next((r for r in section_records if r.kind == "question"), None)
+            if question is None:
+                continue
+            blocks = question.fields.get("blocks")
+            if blocks is None or blocks.is_none:
+                continue
+            obligations = [
+                r
+                for r in section_records
+                if r.kind == "obligation"
+                and not is_none_block(r)
+                and is_live_blocker(r)
+            ]
+            if not obligations:
+                continue
+            for bare in blocks.items:
+                target = (question.project, bare)
+                already_blocking = {
+                    id(r)
+                    for r in resolved.by_decision.get(target, [])
+                    if is_live_blocker(r)
+                }
+                bucket = taint.setdefault(target, [])
+                for rec in obligations:
+                    if id(rec) in already_blocking:
+                        continue
+                    if not any(r is rec for r in bucket):
+                        bucket.append(rec)
+
+    result: dict[tuple[str, str], TaintedObligations] = {}
+    for target, records in taint.items():
+        stubs = receipts = 0
+        for rec in records:
+            card = _destination_card(rec, tree, cards_by_path)
+            if card is None:
+                continue
+            kind = declared(card, "kind")
+            if kind == "stub":
+                stubs += 1
+            elif kind == "receipt":
+                receipts += 1
+        result[target] = TaintedObligations(
+            records=tuple(records), stubs=stubs, receipts=receipts
+        )
+    return result
+
+
+def taint_note(taint: TaintedObligations) -> str:
+    """The `#print axioms` suffix: what a decision rests on, stub vs receipt.
+
+    Never their sum (`resolve_taint`) — a reader needs to know whether the
+    undischarged work has nowhere to go yet or went somewhere this validator
+    cannot see, and folding them loses exactly that.
+    """
+    parts = []
+    if taint.stubs:
+        parts.append(plural(taint.stubs, "stub"))
+    if taint.receipts:
+        parts.append(plural(taint.receipts, "receipt"))
+    detail = f" ({', '.join(parts)})" if parts else ""
+    return f"rests on {plural(len(taint.records), 'open obligation')}{detail}"
+
+
 def validate_references(tree: Tree, report: Report) -> None:
     """Every `blocks:` and `blocking:` reference, checked once resolved.
 
@@ -2441,7 +2575,11 @@ class DecisionStatus:
     blockers: tuple[Record, ...] = ()
 
 
-def decision_status(rec: Record, blockers: list[Record]) -> DecisionStatus:
+def decision_status(
+    rec: Record,
+    blockers: list[Record],
+    taint: TaintedObligations | None = None,
+) -> DecisionStatus:
     """Derive one decision's status from the records naming it.
 
     Ready is **not** done: a decision with nothing outstanding against it is
@@ -2449,50 +2587,71 @@ def decision_status(rec: Record, blockers: list[Record]) -> DecisionStatus:
     `decided`. So the three labels stay distinct, and `proposed` is reported as
     the fourth thing it is — a decision the organizer has not promoted yet, not
     a decision that is nearly taken.
+
+    `taint`, when given, appends a suffix to the note regardless of which
+    label was derived — a decision can rest on open work whatever else is
+    true of it (`resolve_taint`). The label itself never changes: taint is
+    reporting, not a fifth state.
     """
     name = declared(rec, "id") or "-"
     state = declared(rec, "state")
     if state == PROPOSED_STATE:
         where = f"{TRACKS_DIRNAME}/{rec.track}" if rec.track is not None else rec.rel
-        return DecisionStatus(
+        status = DecisionStatus(
             rec, name, LABEL_PROPOSED, f"awaiting promotion (filed in {where})"
         )
-    if state == "decided":
+    elif state == "decided":
         evidence = declared(rec, "decided_in")
         note = f"decided in {evidence}" if evidence else "decided"
-        return DecisionStatus(rec, name, LABEL_DECIDED, note)
+        status = DecisionStatus(rec, name, LABEL_DECIDED, note)
+    else:
+        live = tuple(r for r in blockers if is_live_blocker(r))
+        if live:
+            counts = [
+                plural(sum(1 for r in live if r.kind == "question"), "question"),
+                plural(sum(1 for r in live if r.kind == "obligation"), "obligation"),
+            ]
+            note = "by " + ", ".join(c for c in counts if not c.startswith("0 "))
+            status = DecisionStatus(rec, name, LABEL_BLOCKED, note, live)
+        else:
+            # Rule 4's last clause. Retirement is legitimate scope reduction,
+            # but a decision that came free because a question left the board
+            # is a different fact from one whose questions were answered, and
+            # a reader deciding on this line deserves to know which. Said
+            # whenever a retired question names the decision and nothing live
+            # does — with no history, "the last blocker" is exactly that
+            # state, and this report has no history by design.
+            retired = [r for r in blockers if declared(r, "status") == "retired"]
+            if retired:
+                ids = ", ".join(
+                    r.qualified_id or declared(r, "id") or "-" for r in retired
+                )
+                status = DecisionStatus(
+                    rec,
+                    name,
+                    LABEL_READY,
+                    f"awaiting decision (unblocked by retirement: {ids})",
+                )
+            else:
+                status = DecisionStatus(rec, name, LABEL_READY, "awaiting decision")
 
-    live = tuple(r for r in blockers if is_live_blocker(r))
-    if live:
-        counts = [
-            plural(sum(1 for r in live if r.kind == "question"), "question"),
-            plural(sum(1 for r in live if r.kind == "obligation"), "obligation"),
-        ]
-        note = "by " + ", ".join(c for c in counts if not c.startswith("0 "))
-        return DecisionStatus(rec, name, LABEL_BLOCKED, note, live)
-
-    # Rule 4's last clause. Retirement is legitimate scope reduction, but a
-    # decision that came free because a question left the board is a different
-    # fact from one whose questions were answered, and a reader deciding on
-    # this line deserves to know which. Said whenever a retired question names
-    # the decision and nothing live does — with no history, "the last blocker"
-    # is exactly that state, and this report has no history by design.
-    retired = [r for r in blockers if declared(r, "status") == "retired"]
-    if retired:
-        ids = ", ".join(r.qualified_id or declared(r, "id") or "-" for r in retired)
-        return DecisionStatus(
-            rec,
-            name,
-            LABEL_READY,
-            f"awaiting decision (unblocked by retirement: {ids})",
-        )
-    return DecisionStatus(rec, name, LABEL_READY, "awaiting decision")
+    if taint is not None and taint.records:
+        status = replace(status, note=f"{status.note} — {taint_note(taint)}")
+    return status
 
 
 def decision_statuses(
-    tree: Tree, project: Project, resolved: Blockers
+    tree: Tree,
+    project: Project,
+    resolved: Blockers,
+    taint: dict[tuple[str, str], TaintedObligations] | None = None,
 ) -> list[DecisionStatus]:
-    """Every decision in one project, in tree order, with its derived status."""
+    """Every decision in one project, in tree order, with its derived status.
+
+    `taint` is omitted by every stored-ledger caller (`project_ledger_body`)
+    and supplied only by the interactive `status` report — see
+    `resolve_taint`'s docstring for why the stored ledger must not carry it.
+    """
     statuses: list[DecisionStatus] = []
     seen: set[str] = set()
     for rec in tree.records:
@@ -2508,7 +2667,11 @@ def decision_statuses(
             continue
         seen.add(bare)
         statuses.append(
-            decision_status(rec, resolved.by_decision.get((project.name, bare), []))
+            decision_status(
+                rec,
+                resolved.by_decision.get((project.name, bare), []),
+                (taint or {}).get((project.name, bare)),
+            )
         )
     return statuses
 
@@ -2730,8 +2893,13 @@ def completeness_footer(tree: Tree, report: Report, resolved: Blockers) -> str |
     )
 
 
-def print_project_status(tree: Tree, project: Project, resolved: Blockers) -> None:
-    statuses = decision_statuses(tree, project, resolved)
+def print_project_status(
+    tree: Tree,
+    project: Project,
+    resolved: Blockers,
+    taint: dict[tuple[str, str], TaintedObligations] | None = None,
+) -> None:
+    statuses = decision_statuses(tree, project, resolved, taint)
     tallied = {label: 0 for label in (LABEL_DECIDED, LABEL_READY, LABEL_BLOCKED)}
     proposed = 0
     for status in statuses:
@@ -2798,13 +2966,14 @@ def verb_status(args: argparse.Namespace, root: Path) -> int:
         )
     validate_cards(tree, report)
     resolved = resolve_blockers(tree)
+    taint = resolve_taint(tree, resolved)
     printed = False
     for project in tree.projects:
         if args.project is not None and project.name != args.project:
             continue
         if printed:
             print()
-        print_project_status(tree, project, resolved)
+        print_project_status(tree, project, resolved, taint)
         printed = True
 
     footer = completeness_footer(tree, report, resolved)
