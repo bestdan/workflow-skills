@@ -57,7 +57,8 @@ def build(source: dict) -> dict:
         cases.append({key: case[key] for key in KEEP})
     return {
         "repo": source["repo"],
-        "source": "../../2026-09-20-predictive-scope/references/measurement/corpus.json",
+        # Relative to measurement/corpus.json, where this string is written.
+        "source": "../../../2026-09-20-predictive-scope/references/measurement/corpus.json",
         "note": (
             "The predictive-scope corpus with every field describing the closing pull "
             "request removed. Cards are as filed; the edit risk that record names "

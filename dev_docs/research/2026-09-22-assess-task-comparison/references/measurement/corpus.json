@@ -1,6 +1,6 @@
 {
   "repo": "bestdan/workflow-skills",
-  "source": "../../2026-09-20-predictive-scope/references/measurement/corpus.json",
+  "source": "../../../2026-09-20-predictive-scope/references/measurement/corpus.json",
   "note": "The predictive-scope corpus with every field describing the closing pull request removed. Cards are as filed; the edit risk that record names applies here unchanged.",
   "cases": [
     {

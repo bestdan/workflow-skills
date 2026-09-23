@@ -81,7 +81,9 @@ That record names this edit risk, and it applies here unchanged.
   holds the finished work for every card. A read would give the incumbent hindsight it
   never has in production. The downside of that choice: the incumbent is measured
   with its thin-description escalation turned off, and which way that biases it is
-  unknown.
+  unknown. In this run, the fenced title and body **are** the "same assembled state"
+  #813 asks both sides to get. This record overrides #813's assembly wording on
+  purpose, because any assembly here would read the finished work.
 - **One fresh context per card, for every incumbent run.** That is the shape
   `select-coder` pays for per packet, and the latency and dollar measurements need it.
 - **The incumbent is asked for its full block and scored on six fields.** Its latency
@@ -129,16 +131,16 @@ but a read would find the finished work.
 
 For each dimension `d`, over the cards:
 
-| term           | definition                                                                                                                                                                                                      |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| panel          | `baseline/agent-{1,2,3}.json`: three incumbent runs, one fresh context per card each ([#814])                                                                                                                   |
-| `A_panel(d)`   | mean pairwise agreement among the three agents (3 pairs × cards)                                                                                                                                                |
-| `A_jev(d)`     | mean agreement between each Jev pass and each agent (passes × 3 pairs × cards; at least 3 passes, per [#813])                                                                                                   |
-| `S_jev(d)`     | mean pairwise agreement among Jev passes: its stability, set against `A_panel`, which is the incumbent's                                                                                                        |
-| `A_const(d)`   | agreement with the panel of a constant answering `d`'s most frequent value across all panel answers. **The base rate** (rule 7)                                                                                 |
-| majority       | the value at least two agents gave; a card with no majority is **contested** on `d`, counted, and left out of the direction check only                                                                          |
-| Jev's answer   | per card, the value most passes gave; gate (d) and adjudication use it. If no value has a strict plurality, the card has no Jev answer on `d`: it is counted and left out of both, as a contested panel card is |
-| missing answer | a value outside `d`'s enum, or an unparseable block, disagrees with everything. It is counted separately, so a formatting failure is never mistaken for a judgment                                              |
+| term           | definition                                                                                                                                                                                                       |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| panel          | `baseline/agent-{1,2,3}.json`: three incumbent runs, one fresh context per card each ([#814])                                                                                                                    |
+| `A_panel(d)`   | mean pairwise agreement among the three agents (3 pairs × cards)                                                                                                                                                 |
+| `A_jev(d)`     | mean agreement between each Jev pass and each agent (passes × 3 pairs × cards; at least 3 passes, per [#813])                                                                                                    |
+| `S_jev(d)`     | mean pairwise agreement among Jev passes: its stability, set against `A_panel`, which is the incumbent's                                                                                                         |
+| `A_const(d)`   | agreement with the panel of a constant answering `d`'s most frequent value across all panel answers. **The base rate** (rule 7)                                                                                  |
+| majority       | the value at least two agents gave; a card with no majority is **contested** on `d`, counted, and left out of the direction check only                                                                           |
+| Jev's answer   | per card, the value most passes gave; only adjudication uses it. If no value has a strict plurality, the card has no Jev answer on `d`: it is counted and left out of adjudication, as a contested panel card is |
+| missing answer | a value outside `d`'s enum, or an unparseable block, disagrees with everything. It is counted separately, so a formatting failure is never mistaken for a judgment                                               |
 
 The same agreement function scores agent-against-agent and Jev-against-agent. That is
 what "the same `--score` path" means here, and it is the only reason the two numbers
@@ -193,6 +195,11 @@ typed call's side it includes the caller's state assembly, as #813 and #814 meas
 them. `R` is the incumbent's p95 latency divided by the typed call's p95 latency. `R`
 measures latency only. It is a speed ratio, not a price ratio.
 
+Because nothing is fetched (see **Input**), the typed call's state assembly is zero
+in this run, and the incumbent makes none of the `related_files` reads it would make
+on a thin card in production. Both are part of the production path this run does not
+measure, and #815 carries them as a limit on `R`.
+
 **Dollars.** Tokens are recorded split into uncached input, cache-read, cache-write
 and output. Each class is priced at its own rate on the run date, and the raw counts
 are committed so the dollars can be recomputed. The incumbent's runs record whether
@@ -244,17 +251,25 @@ bounds the total.
 
 A measurable dimension `d` **matches** only when all four gates hold:
 
-| gate                   | condition                                                                                                                                                        |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| (a) agreement          | `A_jev(d) ≥ A_panel(d) − δ`                                                                                                                                      |
-| (b) stability          | `S_jev(d) ≥ A_panel(d) − δ`                                                                                                                                      |
-| (c) beats the constant | `A_jev(d) > A_const(d)`. Otherwise code can hard-wire the value                                                                                                  |
-| (d) no one-way error   | among cards where Jev's answer differs from the panel majority, if there are at least 5 and at least 80% fall on one side (lower or higher), the dimension fails |
+| gate                   | condition                                                                                                                                                                                                                                               |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| (a) agreement          | `A_jev(d) ≥ A_panel(d) − δ`                                                                                                                                                                                                                             |
+| (b) stability          | `S_jev(d) ≥ A_panel(d) − δ`                                                                                                                                                                                                                             |
+| (c) beats the constant | `A_jev(d) > A_const(d)`. Otherwise code can hard-wire the value                                                                                                                                                                                         |
+| (d) no one-way error   | pool every (pass, card) pair where that pass's value differs from the panel majority, leaving out contested cards. If the pooled pairs cover at least 5 distinct cards and at least 80% of them fall on one side (lower or higher), the dimension fails |
 
 Gate (d) is here because a rate hides direction. `scope` missed 31 of 33 times in one
 direction. If a trigger dimension errs one way, it suppresses or inflates one label
 every time it errs, which is a different failure from scattered noise at the same
 rate.
+
+Gate (d) counts passes, not Jev's per-card majority answer, because production makes
+one call per task and never votes. A vote across passes hides the directional error a
+single call makes: if each call says `high` on 30% of cards where the panel says
+`medium`, most cards come out `medium` after the vote. Gates (a) and (b) already count
+every pass, so (d) now scores the same thing they do. Pooling weights a card by how
+often Jev misses it. That is intended, because production misses it that often. The
+minimum counts distinct cards, so repeated passes cannot push one card past it.
 
 **The one revision allowed in advance:** gate (a) counts as passed if a
 source-blind human adjudicator sides with Jev on at least half of that dimension's
