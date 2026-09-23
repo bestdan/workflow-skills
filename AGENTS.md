@@ -12,7 +12,7 @@ deeper is one link away.
 | Interpret a skipped test, or add a host-dependent one          | [`dev_docs/testing.md`](dev_docs/testing.md)                                                     |
 | Speed the gate up, or add concurrency to it                    | [`dev_docs/gate-performance.md`](dev_docs/gate-performance.md)                                   |
 | Call codex/agy/devin from a workflow                           | [`dev_docs/external-agents.md`](dev_docs/external-agents.md)                                     |
-| Change what the nightly cloud routine does to the board        | [`dev_docs/nightly-gh-issue-routine.md`](dev_docs/nightly-gh-issue-routine.md)                   |
+| Change what the nightly routine does to the board              | [`dev_docs/nightly-gh-issue-routine.md`](dev_docs/nightly-gh-issue-routine.md)                   |
 | Understand secret/API-key resolution                           | [`dev_docs/auth_key_access.md`](dev_docs/auth_key_access.md)                                     |
 | Propose a typed model call (Jev) for some judgment             | [`dev_docs/typed-model-calls.md`](dev_docs/typed-model-calls.md)                                 |
 | Understand the gh-issue label/claim/completion model           | [`dev_docs/gh_issue_task_loop.md`](dev_docs/gh_issue_task_loop.md)                               |
