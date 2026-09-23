@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.67.5] - 2026-09-23
+
+### Fixes
+
+- grant the drift-check pre-flight via allowed-tools [#594] (#778) (ec199be)
+
 ## [2.67.4] - 2026-09-22
 
 ### Fixes
