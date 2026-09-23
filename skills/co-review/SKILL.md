@@ -2,7 +2,7 @@
 name: co-review
 description: Use when the user wants a collaborative review of a PR — their own read reconciled against existing bot/reviewer comments, with high-confidence fixes applied and judgment calls surfaced — typically via /co-review or asking for a "co-review". Flags — --local reviews the uncommitted working tree (no PR); --remote skips local reviewer agents; --post reviews someone else's PR and posts vetted findings to GitHub instead of editing files; --non-interactive runs unattended with no prompts and bounded reviewer waits.
 allowed-tools:
-  - Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/coreview-rule-drift.py:*)
+  - Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/coreview-rule-drift.py":*)
 ---
 
 # co-review — collaborative PR review

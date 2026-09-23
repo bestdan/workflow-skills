@@ -372,8 +372,13 @@ fi
 # Requiring every invocation to carry the flag within two following lines (the
 # documented form wraps the flag onto the next line) is what makes a
 # reintroduced bug fail, not merely a wholly removed flag.
+#
+# A `Bash(...)` line naming the script is a permission rule, not a call site —
+# SKILL.md's allowed-tools front-matter self-grants the pre-flight — so it is
+# excluded from the count. This mirrors coreview-rule-drift.py itself, which
+# only treats a string inside a ```json fence as a rule.
 for doc in "$ROOT/skills/co-review/SKILL.md" "$ROOT/commands/doctor.md"; do
-  calls=$(grep -c 'coreview-rule-drift\.py' "$doc")
+  calls=$(grep 'coreview-rule-drift\.py' "$doc" | grep -vc 'Bash(')
   flagged=$(grep -A2 'coreview-rule-drift\.py' "$doc" \
     | grep -c -- '--plugin-root "${CLAUDE_PLUGIN_ROOT}"')
   if [ "$calls" -gt 0 ] && [ "$calls" -eq "$flagged" ]; then
