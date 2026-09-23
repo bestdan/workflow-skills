@@ -1,6 +1,8 @@
 ---
 name: co-review
 description: Use when the user wants a collaborative review of a PR — their own read reconciled against existing bot/reviewer comments, with high-confidence fixes applied and judgment calls surfaced — typically via /co-review or asking for a "co-review". Flags — --local reviews the uncommitted working tree (no PR); --remote skips local reviewer agents; --post reviews someone else's PR and posts vetted findings to GitHub instead of editing files; --non-interactive runs unattended with no prompts and bounded reviewer waits.
+allowed-tools:
+  - Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/coreview-rule-drift.py":*)
 ---
 
 # co-review — collaborative PR review
@@ -103,7 +105,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/coreview-rule-drift.py" \
   --plugin-root "${CLAUDE_PLUGIN_ROOT}" --json
 ```
 
-**Pass `--plugin-root` explicitly; the script cannot read the variable itself.**
+The skill grants its own pre-flight via the `allowed-tools` entry above (if it still prompts, a `deny`/`ask` rule or a `PreToolUse` rewriter overrode the grant). **Pass `--plugin-root` explicitly; the script cannot read the variable itself.**
 `${CLAUDE_PLUGIN_ROOT}` is interpolated into this markdown when the skill is
 rendered, so the path in the command is right — but it is not exported into the
 Bash subprocess, so the script's own environment lookup finds nothing and it
