@@ -141,15 +141,22 @@ hint is already in the log. Print the lines verbatim beside the URL:
 grep '^SSH: ' <scratch>/lr_server.log
 ```
 
-The local port must equal the remote one (`ssh -L 8765:127.0.0.1:8765
-<host>`). `_origin_ok()` in `server.py` allows only origins on the bound
-port, so a tunnel on a different local port half-works: GETs are ungated and
-the page renders, but every `/submit` and `/reply` POST is rejected, and the
-reviewer loses the round when they submit it. The last `SSH:` line names the
-permanent fix: a `LocalForward` entry for the host in the user's own
-`~/.ssh/config`, after which every session carries the tunnel and the URL
-opens with no extra step. No `SSH:` lines means a local launch; nothing
-changes.
+The **remote** side of the tunnel must be the bound port, or it reaches
+nothing. The **local** side is free: `_origin_ok()` in `server.py` compares
+`Origin` against the request's own `Host` header rather than against the
+bound port, so `ssh -L 8766:127.0.0.1:8765 <host>` works — open the URL with
+8765 swapped for 8766. Give each host its own local port, because two hosts
+naming one means the second connection cannot bind it and ssh warns and then
+carries on with no forward.
+
+Do not reach for `ExitOnForwardFailure yes` to make that warning fatal: it
+escalates a cosmetic bind failure into a dropped ssh session, which is the
+worse of the two outcomes.
+
+The last `SSH:` line names the permanent fix: a `LocalForward` entry for the
+host in the user's own `~/.ssh/config`, after which every session carries the
+tunnel and the URL opens with no extra step. No `SSH:` lines means a local
+launch; nothing changes.
 
 In threads mode the server shuts itself down when the user clicks Finish. The
 recorded PID is cleanup only for an abandoned session — one the user never

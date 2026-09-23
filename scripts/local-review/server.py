@@ -2420,12 +2420,21 @@ if(THREADS_MODE) fetchThreads().then(render);
 </script></body></html>"""
 
 
+# Hostnames a review page may legitimately be served under. The server binds
+# loopback, and these are the three names that reach it: the literal address,
+# the standard alias, and the vanity host browsers resolve straight to loopback
+# with no DNS lookup (RFC 6761). Port is deliberately not part of this — see
+# _origin_ok() — but the hostname is, because it is what keeps a DNS-rebinding
+# request (`Host: evil.com`, Origin matching) from passing the same-origin test.
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "review.localhost"})
+
+
 class Handler(BaseHTTPRequestHandler):
     page = b""
     out_path = "pr_comments.json"
     vendor_dir = ""
     token = ""  # random path segment every route is mounted under
-    port = 0  # bound port, needed to validate Origin on POSTs
+    port = 0  # bound port; the port the page is REACHED on may differ (tunnel)
     # source the diff was generated from, so the server can recompute it on demand
     pr = None
     repo = None
@@ -2496,7 +2505,17 @@ class Handler(BaseHTTPRequestHandler):
         # Cookies aren't port-scoped (RFC 6265): 127.0.0.1:8765 and :8766 share
         # one jar for host 127.0.0.1. Naming the cookie after the port is how
         # two concurrent reviews avoid clobbering each other's session.
-        return f"local_review_{Handler.port}"
+        #
+        # The discriminator has to be the port the BROWSER used, not the bound
+        # one, for the same reason _origin_ok() compares against the Host
+        # header: the jar being protected is the browser's. Two tunnelled
+        # reviews whose remote servers both bound 8765 are reached on distinct
+        # local ports, and keying on Handler.port would name both cookies
+        # local_review_8765 and let them clobber each other. Falls back to the
+        # bound port when there is no Host header to read (a direct client).
+        host = self.headers.get("Host", "")
+        port = host.rsplit(":", 1)[1] if ":" in host else ""
+        return f"local_review_{port or Handler.port}"
 
     def _route_path(self):
         # Every route is mounted under /<token>/. A request whose first path
@@ -2523,18 +2542,36 @@ class Handler(BaseHTTPRequestHandler):
         # Belt-and-braces behind the path token: reject a cross-origin POST
         # outright. Requests with no Origin header (curl, urllib, and the
         # served page's own same-origin fetches, which may omit it) pass.
+        #
+        # The comparison is against the request's OWN Host header, not against
+        # the bound port. A browser's Origin on a same-origin fetch is always
+        # scheme://<the Host it sent>, so that IS the same-origin test; the
+        # bound port is only a proxy for it, and a proxy that holds exactly
+        # when nothing translates ports in between. `ssh -L 8766:127.0.0.1:8765`
+        # translates ports by construction, which is how the reviewer ends up
+        # on a legitimate tunnel whose Origin says 8766 while Handler.port says
+        # 8765. Comparing to the bound port rejected that, and rejected it in
+        # the worst available way: GETs are ungated by origin, so the page
+        # rendered and the whole diff was read before the submit POST failed.
+        #
+        # Security is unchanged. The path token is the real gate, cross-site is
+        # still refused outright above, and the hostname allowlist below still
+        # closes DNS rebinding (`Host: evil.com` with a matching Origin). Only
+        # the PORT becomes free, and the port never carried weight: anything
+        # that can reach loopback on one port can reach it on another.
         sfs = self.headers.get("Sec-Fetch-Site")
         if sfs == "cross-site":
             return False
         origin = self.headers.get("Origin")
         if origin is None:
             return True
-        allowed = {
-            f"http://127.0.0.1:{Handler.port}",
-            f"http://localhost:{Handler.port}",
-            f"http://review.localhost:{Handler.port}",
-        }
-        return origin in allowed
+        host = self.headers.get("Host", "")
+        # rsplit, because only the LAST colon separates the port. A bracketed
+        # IPv6 literal keeps its brackets and so fails the allowlist below —
+        # correct by accident today, since the server binds 127.0.0.1 and no
+        # browser reaches it as [::1], but it is a guess this does not make.
+        hostname = host.rsplit(":", 1)[0] if ":" in host else host
+        return hostname in LOOPBACK_HOSTS and origin == f"http://{host}"
 
     def do_GET(self):
         if self.path == "/" + Handler.token:
@@ -3026,9 +3063,11 @@ def ssh_hint(port):
     was launched over SSH. They go before LOCAL_REVIEW_URL= so a consumer that
     stops reading at the readiness line has already seen them.
     Loopback on the remote host is unreachable from the reviewer's browser,
-    so the URL only opens through a tunnel. The local port must equal the
-    bound one: _origin_ok() allows only origins on Handler.port, so a
-    tunnel on another local port renders the page but rejects every POST.
+    so the URL only opens through a tunnel. The LOCAL side of that tunnel is
+    free to differ from the bound port — _origin_ok() compares Origin against
+    the request's own Host header — so the hint says so, and says to pick a
+    distinct local port per host. It used to insist the two match, which is
+    what made two forwarded hosts collide on one local port.
     Empty (no output at all) outside SSH, so a local launch is unchanged."""
     if not (os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY")):
         return []
@@ -3036,10 +3075,13 @@ def ssh_hint(port):
     return [
         f"SSH: this server is on {host}'s loopback; from your own machine run:",
         f"SSH:   ssh -L {port}:127.0.0.1:{port} {host}",
-        f"SSH: then open the URL above. Keep the local port {port} — a tunnel on another "
-        "local port renders the page but the Origin check rejects every submit.",
-        f"SSH: to skip this next time, add `LocalForward {port} 127.0.0.1:{port}` under "
-        f"`Host {host}` in your own ~/.ssh/config; every session then carries the tunnel.",
+        f"SSH: then open the URL above. The local side need not be {port} — pick any free "
+        f"local port L, run `ssh -L L:127.0.0.1:{port}`, and open the URL with {port} "
+        "swapped for L. Only the remote side has to match what this server bound.",
+        f"SSH: to skip this next time, add `LocalForward L 127.0.0.1:{port}` under "
+        f"`Host {host}` in your own ~/.ssh/config; every session then carries the tunnel. "
+        "Give each host its own L, or the second connection cannot bind it and ssh "
+        "warns and carries on with no forward.",
     ]
 
 
