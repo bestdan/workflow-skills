@@ -1,6 +1,6 @@
 ---
 created: 2026-09-22
-question: "Does a typed call profile a task as well as the assess-task subagent it would replace, at a cost that pays for any difference?"
+question: "Does a typed call profile a task as well as the assess-task subagent it would replace, and are its latency and dollar gains large enough to pay for any difference?"
 ---
 
 # `assess-task`: the typed call against the subagent — method and decision rule (2026-09-22)
@@ -79,12 +79,13 @@ That record names this edit risk, and it applies here unchanged.
   give both sides the same state, so the choice is between assembling fetched context
   for both sides or for neither. It is **neither**, because the repository at HEAD
   holds the finished work for every card. A read would give the incumbent hindsight it
-  never has in production. The cost of that choice: the incumbent is measured with its
-  thin-description escalation turned off, and which way that biases it is unknown.
+  never has in production. The downside of that choice: the incumbent is measured
+  with its thin-description escalation turned off, and which way that biases it is
+  unknown.
 - **One fresh context per card, for every incumbent run.** That is the shape
-  `select-coder` pays for per packet, and the cost half of this comparison needs it.
-- **The incumbent is asked for its full block and scored on six fields.** Its cost is
-  the cost of producing what it produces today.
+  `select-coder` pays for per packet, and the latency and dollar measurements need it.
+- **The incumbent is asked for its full block and scored on six fields.** Its latency
+  and dollars are those of producing what it produces today.
 - **All three incumbent runs use one pinned model version, never a floating alias.**
   Its id is recorded beside the answers. The subagent inherits its caller's model, so
   "the production model" is not a single value. #814 names the production setup its
@@ -144,7 +145,8 @@ what "the same `--score` path" means here, and it is the only reason the two num
 can sit in one table.
 
 **Order of work:** `A_jev` needs the panel. #813 therefore reports `S_jev` and the
-typed call's cost from its own run, and the agreement terms wait for #814.
+typed call's latency and dollars from its own run, and the agreement terms wait for
+#814.
 
 ### What it can and cannot support
 
@@ -175,32 +177,56 @@ computed.
 
 ## Decision rule
 
-### Cost comes first
+### Three different things this rule weighs
 
-`R` is the incumbent's p95 wall clock per packet divided by the typed call's p95.
-Wall clock runs end to end, from "profile needed" to "profile in hand". It includes
-the spawn's context load on one side and the caller's state assembly on the other, as
-#813 and #814 measure them. Dollars per packet are taken from each side's token
-counts at the providers' prices on the run date.
+This record never says "cost" on its own, because three different things sit behind
+the word, and the rule treats each one differently:
 
-**If `R < 2`, or the typed call is not cheaper per packet in dollars: don't adopt,
-whatever the accuracy.** Adoption carries fixed costs that the per-packet saving has
-to cover:
+| term        | what it is                                                                    | unit                    | role in the rule                        |
+| ----------- | ----------------------------------------------------------------------------- | ----------------------- | --------------------------------------- |
+| **latency** | wall clock per packet, end to end, from "profile needed" to "profile in hand" | seconds, median and p95 | sets how much agreement Jev may give up |
+| **dollars** | money per packet, from token counts                                           | USD                     | pass/fail floor only                    |
+| **upkeep**  | what adopting commits the repository to, whatever the per-packet numbers are  | —                       | why the floors exist                    |
+
+**Latency.** On the incumbent's side it includes the spawn's context load, and on the
+typed call's side it includes the caller's state assembly, as #813 and #814 measure
+them. `R` is the incumbent's p95 latency divided by the typed call's p95 latency. `R`
+measures latency only. It is a speed ratio, not a price ratio.
+
+**Dollars.** Tokens are recorded split into uncached input, cache-read, cache-write
+and output. Each class is priced at its own rate on the run date, and the raw counts
+are committed so the dollars can be recomputed. The incumbent's runs record whether
+the skill prompt was already cached. A spawn under `select-coder` may or may not hit
+a warm cache, and the cache-read rate can change the incumbent's dollars per packet by
+a large factor.
+
+**Upkeep** is what the per-packet savings have to pay for:
 
 - a key for anyone who wants the fast path;
 - a second code path, and a fallback to today's model that has to keep working;
 - a vendor dependency.
 
-The routing record declined a tie because its incumbent was nearly free. `2×` is the
-smallest saving this record treats as more than nearly free.
+### The floors
 
-### The tolerance the cost buys
+**If `R < 2`, or the typed call's dollars per packet are not lower than the
+incumbent's: don't adopt, whatever the accuracy.** The routing record declined a tie
+because its incumbent was nearly free on both latency and dollars. `2×` faster is the
+smallest latency gain this record treats as enough to pay for the upkeep.
 
-| `R`    | per-dimension `δ` | whole-profile `δ_tuple` |
-| ------ | ----------------- | ----------------------- |
-| `< 2`  | no adoption       | no adoption             |
-| `2–10` | 0 points          | 0 points                |
-| `≥ 10` | 5 points          | 10 points               |
+Dollars get a floor and no sliding tolerance. That is a choice, not a finding.
+Scaling on both would need a rule for combining a latency ratio with a dollar ratio,
+and nothing measured so far would justify one. Latency is the axis the tolerance
+scales on because it is the one the incumbent's shape makes large: a spawn loads a
+skill into a fresh model context on every packet. No incumbent's dollars per packet
+have been measured, so this record does not claim they are small.
+
+### The tolerance the latency gain buys
+
+| `R` (latency ratio) | per-dimension `δ` | whole-profile `δ_tuple` |
+| ------------------- | ----------------- | ----------------------- |
+| `< 2`               | no adoption       | no adoption             |
+| `2–10`              | 0 points          | 0 points                |
+| `≥ 10`              | 5 points          | 10 points               |
 
 The top band is the likely one. The routing record timed the typed call at 0.55s
 median, and a spawn loads a skill into a fresh model context. So 5 and 10 points are
@@ -210,8 +236,9 @@ tuned to the results.
 Why 5 points: on 50 cards it is about 2–3 cards per dimension. Each of the four
 binaries is a single-dimension trigger for a label (per the label decision), so one
 disagreement can change which coder a packet goes to. Five points is the most a
-packet at least 10× cheaper is allowed to buy. Six dimensions could each lose up to
-their `δ` and add up to a large loss, so the whole-profile cap bounds the total.
+packet whose p95 latency is at least 10× lower is allowed to buy. Six dimensions
+could each lose up to their `δ` and add up to a large loss, so the whole-profile cap
+bounds the total.
 
 ### Per dimension
 
@@ -242,12 +269,13 @@ as a single dimension. It must satisfy `A_jev(tuple) ≥ A_panel(tuple) − δ_t
 
 - **Adopt:** at least one dimension is measurable, every measurable dimension
   matches, and the whole-profile gate passes. If no dimension is measurable, the
-  verdict is don't adopt: agreement over an empty set is vacuous, and cost alone is
-  not evidence that the swap goes unnoticed.
+  verdict is don't adopt: agreement over an empty set is vacuous, and a latency or
+  dollar gain alone is not evidence that the swap goes unnoticed.
 - **Adopt for these dimensions only:** allowed **only** if every failing dimension
   can come off the subagent anyway, meaning it is dropped from the contract, computed,
-  or made a constant. The cost win depends on removing the spawn. A spawn kept for one
-  dimension costs the whole spawn, and then the saving that justified `δ` is gone.
+  or made a constant. Both the latency gain and the dollar gain depend on removing
+  the spawn. A spawn kept for one dimension brings back the whole spawn's latency and
+  dollars, and then the latency gain that justified `δ` is gone.
   Otherwise a failing dimension means don't adopt.
 - **Don't adopt:** in every other case.
 

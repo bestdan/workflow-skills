@@ -22,12 +22,12 @@ Three things make this differ from a production spawn, and each is deliberate:
   would have in production. The typed call cannot fetch anything either, so the two
   sides get the same input.
 - **One fresh context per card.** `select-coder` spawns once per packet, and the
-  cost measurement needs that shape. Giving one agent all 50 cards would let it
-  compare the cards with each other, which production never does, and it would
-  spread one spawn's cost over 50 packets.
+  latency and dollar measurements need that shape. Giving one agent all 50 cards
+  would let it compare the cards with each other, which production never does, and
+  it would spread one spawn's latency and dollars over 50 packets.
 - **The full block is requested, and only six fields are scored.** The incumbent's
-  cost is the cost of producing what it produces today, so it is not asked for a
-  smaller block.
+  latency and dollars are those of producing what it produces today, so it is not
+  asked for a smaller block.
 
 ---
 
