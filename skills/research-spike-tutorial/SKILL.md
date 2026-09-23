@@ -367,7 +367,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/research-spike.py" --root "$WORK" status
 ```
 onboarding — decisions: 0 decided, 1 ready, 0 blocked
 
-  sso-rollout  READY awaiting decision
+  sso-rollout  READY awaiting decision — rests on 5 open obligations (5 stubs)
 
   auth:   Q 3 answered / 0 open / 0 retired    O 0 discharged / 5 open (5 stubs) / 0 declared none
   total:  Q 3 answered / 0 open / 0 retired    O 0 discharged / 5 open (5 stubs) / 0 declared none

@@ -3111,6 +3111,242 @@ assert_contains "the 'total' track's row and the aggregate row carry their own n
   total:    Q 2 answered / 0 open / 0 retired    O 0 discharged / 0 open / 2 declared none
   total:    Q 3 answered / 0 open / 0 retired    O 0 discharged / 0 open / 3 declared none"
 
+# --- Fixture (s20-s25): transitive obligation taint, '#print axioms' (#632) -
+# A decision can print DECIDED (or READY, or BLOCKED) while resting on work
+# that is still open and has nowhere to go — the edge is section co-location
+# with a question's `blocks:`, not the scarce, hand-declared `blocking:`. See
+# `dev_docs/designs/2026-08-14-research-spike-lean-concepts.md` §A.
+
+# The reproduction: one decided decision, one answered question that gates
+# it, and one still-open obligation in the same section pointing at a stub —
+# with no `blocking:` at all, so nothing but the new derivation sees it.
+DIR_S20="$BASE/status-taint-stub"
+status_fixture "$DIR_S20" '```decision
+id: account-provisioning
+state: decided
+decided_in: dev_docs/adr/0007-stop-semantics.md
+```' '### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: answered
+answer: yes, an isolated domain
+blocks: account-provisioning
+```
+
+```obligation
+id: keychain-invariant
+owes: the keychain invariant
+destination: dev_docs/research/alpha/tracks/account/obligations/keychain.md
+status: open
+```'
+out_s20="$(python3 "$SCRIPT" --root "$DIR_S20" status alpha 2>&1)"
+exit_s20=$?
+assert_exit "a decision resting on open work still exits 0 — reporting, not gating" \
+  "$exit_s20" 0
+assert_contains "a decided decision resting on a stub says so" "$out_s20" \
+  "account-provisioning  DECIDED decided in dev_docs/adr/0007-stop-semantics.md — rests on 1 open obligation (1 stub)"
+
+# The same shape, but the obligation's destination is a receipt, not a stub —
+# reported separately, never summed, matching `CardCounts`' own distinction.
+DIR_S21="$BASE/status-taint-receipt"
+status_fixture "$DIR_S21" '```decision
+id: account-provisioning
+state: decided
+decided_in: dev_docs/adr/0007-stop-semantics.md
+```' '### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: answered
+answer: yes, an isolated domain
+blocks: account-provisioning
+```
+
+```obligation
+id: keychain-invariant
+owes: the keychain invariant
+destination: dev_docs/research/alpha/tracks/account/obligations/handoff.md
+status: open
+```'
+write_file "$DIR_S21/dev_docs/research/alpha/tracks/account/obligations/handoff.md" '# handoff
+
+```card
+kind: receipt
+url: https://example.com/issues/1
+```'
+out_s21="$(python3 "$SCRIPT" --root "$DIR_S21" status alpha 2>&1)"
+exit_s21=$?
+assert_exit "a decision resting on a receipt still exits 0" "$exit_s21" 0
+assert_contains "a decided decision resting on a receipt says so, not 'stub'" "$out_s21" \
+  "account-provisioning  DECIDED decided in dev_docs/adr/0007-stop-semantics.md — rests on 1 open obligation (1 receipt)"
+
+# An obligation that both `blocking:`s the decision *and* is section-co-located
+# is counted once, in the `BLOCKED` note — restating it as taint would
+# double-report the same record.
+DIR_S22="$BASE/status-taint-dedupe-blocking"
+status_fixture "$DIR_S22" '```decision
+id: account-provisioning
+state: pending
+```' '### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: answered
+answer: yes, an isolated domain
+blocks: account-provisioning
+```
+
+```obligation
+id: keychain-invariant
+owes: the keychain invariant
+destination: dev_docs/research/alpha/tracks/account/obligations/keychain.md
+status: open
+blocking: account-provisioning
+```'
+out_s22="$(python3 "$SCRIPT" --root "$DIR_S22" status alpha 2>&1)"
+exit_s22=$?
+assert_exit "a dual blocking+co-located obligation still exits 0" "$exit_s22" 0
+assert_contains "it is still reported as a live blocker" "$out_s22" \
+  "account-provisioning  BLOCKED by 1 obligation"
+assert_not_contains "but never restated as taint on top of it" "$out_s22" "rests on"
+
+# A section whose question declares the `blocks: none: <reason>` sentinel
+# gates no decision, so its obligations taint nothing — even though the
+# section is otherwise a normal, covered one.
+DIR_S23="$BASE/status-taint-blocks-none"
+status_fixture "$DIR_S23" '```decision
+id: account-provisioning
+state: decided
+decided_in: dev_docs/adr/0007-stop-semantics.md
+```' '### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: answered
+answer: yes, an isolated domain
+blocks: account-provisioning
+```
+
+```obligation
+none: the answer owes nothing further
+```
+
+### Q2. Does provisioning need a staging rehearsal?
+
+```question
+id: staging-rehearsal
+status: answered
+answer: not for this rollout
+blocks: none: this question turned out to gate nothing decision-shaped
+```
+
+```obligation
+id: rehearsal-notes
+owes: a writeup of why staging was skipped
+destination: dev_docs/research/alpha/tracks/account/obligations/keychain.md
+status: open
+```'
+out_s23="$(python3 "$SCRIPT" --root "$DIR_S23" status alpha 2>&1)"
+exit_s23=$?
+assert_exit "a 'blocks: none:' section still exits 0" "$exit_s23" 0
+assert_not_contains "its open obligation taints no decision" "$out_s23" "rests on"
+
+# A bare `none:` obligation block declares nothing owed, so it taints nothing
+# either — `is_none_block` excludes it the same way `resolve_blockers` does.
+DIR_S24="$BASE/status-taint-bare-none"
+status_fixture "$DIR_S24" '```decision
+id: account-provisioning
+state: decided
+decided_in: dev_docs/adr/0007-stop-semantics.md
+```' '### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: answered
+answer: yes, an isolated domain
+blocks: account-provisioning
+```
+
+```obligation
+none: the answer owes nothing further
+```'
+out_s24="$(python3 "$SCRIPT" --root "$DIR_S24" status alpha 2>&1)"
+exit_s24=$?
+assert_exit "a bare 'none:' obligation still exits 0" "$exit_s24" 0
+assert_not_contains "a bare 'none:' obligation taints nothing" "$out_s24" "rests on"
+
+# A `blocks:` naming two decisions taints both — the edge is derived once per
+# section and fans out to every decision the question names.
+DIR_S25="$BASE/status-taint-multi-decision"
+status_fixture "$DIR_S25" '```decision
+id: account-provisioning
+state: decided
+decided_in: dev_docs/adr/0007-stop-semantics.md
+```
+
+```decision
+id: account-tooling
+state: decided
+decided_in: dev_docs/adr/0007-stop-semantics.md
+```' '### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: answered
+answer: yes, an isolated domain
+blocks: account-provisioning, account-tooling
+```
+
+```obligation
+id: keychain-invariant
+owes: the keychain invariant
+destination: dev_docs/research/alpha/tracks/account/obligations/keychain.md
+status: open
+```'
+out_s25="$(python3 "$SCRIPT" --root "$DIR_S25" status alpha 2>&1)"
+exit_s25=$?
+assert_exit "a multi-decision 'blocks:' still exits 0" "$exit_s25" 0
+assert_contains "the first named decision is tainted" "$out_s25" \
+  "account-provisioning  DECIDED decided in dev_docs/adr/0007-stop-semantics.md — rests on 1 open obligation (1 stub)"
+assert_contains "the second named decision is tainted too" "$out_s25" \
+  "account-tooling       DECIDED decided in dev_docs/adr/0007-stop-semantics.md — rests on 1 open obligation (1 stub)"
+
+# Taint is `status`-only, by contract: the stored `LEDGER.md` — `decisions`,
+# `render_decisions_list`, `Counts` — must render exactly as it did before
+# this feature existed, so a fresh tree stays ledger-fresh and nobody's
+# existing tree needs `write-ledger` just because this landed.
+DIR_S26="$BASE/status-taint-ledger-unaffected"
+status_fixture "$DIR_S26" '```decision
+id: account-provisioning
+state: decided
+decided_in: dev_docs/adr/0007-stop-semantics.md
+```' '### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: answered
+answer: yes, an isolated domain
+blocks: account-provisioning
+```
+
+```obligation
+id: keychain-invariant
+owes: the keychain invariant
+destination: dev_docs/research/alpha/tracks/account/obligations/keychain.md
+status: open
+```'
+seed_fresh_ledger "$DIR_S26"
+out_s26_validate="$(python3 "$SCRIPT" --root "$DIR_S26" validate 2>&1)"
+exit_s26_validate=$?
+assert_exit "the freshly-written ledger passes validate's freshness gate" \
+  "$exit_s26_validate" 0
+out_s26_ledger="$(cat "$DIR_S26/dev_docs/research/alpha/LEDGER.md")"
+assert_contains "the stored ledger's decision bullet carries no taint suffix" \
+  "$out_s26_ledger" "- **account-provisioning** — DECIDED"
+assert_not_contains "the stored ledger never mentions taint at all" \
+  "$out_s26_ledger" "rests on"
+
 # --- Fixture (j): --help lists all six subcommands -----------------------
 out_j="$(python3 "$SCRIPT" --help 2>&1)"
 for verb in init validate ledger write-ledger status suggest; do
@@ -4019,7 +4255,7 @@ assert_contains "tutorial step 7: status reproduces exactly what the skill quote
   "$out_aa_status" \
   "onboarding — decisions: 0 decided, 1 ready, 0 blocked
 
-  sso-rollout  READY awaiting decision
+  sso-rollout  READY awaiting decision — rests on 5 open obligations (5 stubs)
 
   auth:   Q 3 answered / 0 open / 0 retired    O 0 discharged / 5 open (5 stubs) / 0 declared none
   total:  Q 3 answered / 0 open / 0 retired    O 0 discharged / 5 open (5 stubs) / 0 declared none"
