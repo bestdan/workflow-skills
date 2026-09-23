@@ -85,6 +85,11 @@ That record names this edit risk, and it applies here unchanged.
   `select-coder` pays for per packet, and the cost half of this comparison needs it.
 - **The incumbent is asked for its full block and scored on six fields.** Its cost is
   the cost of producing what it produces today.
+- **All three incumbent runs use one pinned model version, never a floating alias.**
+  Its id is recorded beside the answers. The subagent inherits its caller's model, so
+  "the production model" is not a single value. #814 names the production setup its
+  choice stands for. Mixing models would inflate the panel's own disagreement, which
+  loosens gates (a) and (b), and it would shift `R`.
 
 The prompt is
 [`references/measurement/baseline-prompt.md`](references/measurement/baseline-prompt.md).
@@ -123,16 +128,16 @@ but a read would find the finished work.
 
 For each dimension `d`, over the cards:
 
-| term           | definition                                                                                                                                                         |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| panel          | `baseline/agent-{1,2,3}.json`: three incumbent runs, one fresh context per card each ([#814])                                                                      |
-| `A_panel(d)`   | mean pairwise agreement among the three agents (3 pairs × cards)                                                                                                   |
-| `A_jev(d)`     | mean agreement between each Jev pass and each agent (passes × 3 pairs × cards; at least 3 passes, per [#813])                                                      |
-| `S_jev(d)`     | mean pairwise agreement among Jev passes: its stability, set against `A_panel`, which is the incumbent's                                                           |
-| `A_const(d)`   | agreement with the panel of a constant answering `d`'s most frequent value across all panel answers. **The base rate** (rule 7)                                    |
-| majority       | the value at least two agents gave; a card with no majority is **contested** on `d`, counted, and left out of the direction check only                             |
-| Jev's answer   | per card, the value most passes gave; the direction check uses it                                                                                                  |
-| missing answer | a value outside `d`'s enum, or an unparseable block, disagrees with everything. It is counted separately, so a formatting failure is never mistaken for a judgment |
+| term           | definition                                                                                                                                                                                                      |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| panel          | `baseline/agent-{1,2,3}.json`: three incumbent runs, one fresh context per card each ([#814])                                                                                                                   |
+| `A_panel(d)`   | mean pairwise agreement among the three agents (3 pairs × cards)                                                                                                                                                |
+| `A_jev(d)`     | mean agreement between each Jev pass and each agent (passes × 3 pairs × cards; at least 3 passes, per [#813])                                                                                                   |
+| `S_jev(d)`     | mean pairwise agreement among Jev passes: its stability, set against `A_panel`, which is the incumbent's                                                                                                        |
+| `A_const(d)`   | agreement with the panel of a constant answering `d`'s most frequent value across all panel answers. **The base rate** (rule 7)                                                                                 |
+| majority       | the value at least two agents gave; a card with no majority is **contested** on `d`, counted, and left out of the direction check only                                                                          |
+| Jev's answer   | per card, the value most passes gave; gate (d) and adjudication use it. If no value has a strict plurality, the card has no Jev answer on `d`: it is counted and left out of both, as a contested panel card is |
+| missing answer | a value outside `d`'s enum, or an unparseable block, disagrees with everything. It is counted separately, so a formatting failure is never mistaken for a judgment                                              |
 
 The same agreement function scores agent-against-agent and Jev-against-agent. That is
 what "the same `--score` path" means here, and it is the only reason the two numbers
@@ -235,7 +240,10 @@ as a single dimension. It must satisfy `A_jev(tuple) ≥ A_panel(tuple) − δ_t
 
 ### Verdict
 
-- **Adopt:** every measurable dimension matches, and the whole-profile gate passes.
+- **Adopt:** at least one dimension is measurable, every measurable dimension
+  matches, and the whole-profile gate passes. If no dimension is measurable, the
+  verdict is don't adopt: agreement over an empty set is vacuous, and cost alone is
+  not evidence that the swap goes unnoticed.
 - **Adopt for these dimensions only:** allowed **only** if every failing dimension
   can come off the subagent anyway, meaning it is dropped from the contract, computed,
   or made a constant. The cost win depends on removing the spawn. A spawn kept for one
