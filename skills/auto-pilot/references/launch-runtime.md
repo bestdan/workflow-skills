@@ -159,20 +159,26 @@ strand a run that can no longer wake. See [`run-budget.md`](run-budget.md)
 ## Sandbox profile — sandboxed yolo
 
 The orchestrator runs `bypassPermissions` **inside** a sandbox: no per-action
-prompts, but the jail — not a human — is what bounds it. Enforcement is **two
-layers**, because no single one covers everything:
+prompts, but the jail — not a human — is what bounds it. There is **exactly one
+enforcing layer**, and network egress is **not** covered by it:
 
 - **Filesystem + process scope** → the OS sandbox (`sandbox-exec` seatbelt
   profile on macOS / bwrap on Linux). This is what confines writes and gates
-  `exec`. Seatbelt does **not** filter network by hostname (it only gates
-  network by class/socket), so it is **not** the layer that enforces the egress
-  allowlist below.
-- **Host-level network egress** → the **Claude Code harness sandbox's own
-  network allowlist** (the same mechanism `sandbox.network` configures), or a
-  local filtering proxy / PF ruleset where finer control is needed. This is the
-  layer that enforces §2's host allowlist.
+  `exec`, and it is the **only** thing enforcing anything here. Seatbelt does
+  **not** filter network by hostname (it only gates network by class/socket).
+- **Host-level network egress** → **NOTHING ENFORCES THIS. Egress from inside
+  the jail is OPEN.** The **Claude Code harness sandbox's own network
+  allowlist** (the mechanism `sandbox.network` configures) would be the layer
+  that enforces §2's host allowlist, but it **cannot run inside the profile
+  above**: macOS refuses to apply a nested Seatbelt profile (`sandbox_apply:
+  Operation not permitted`), so the harness's egress filter dies at startup and
+  then fails OPEN, silently re-running blocked commands unsandboxed. Measured
+  twice; see `scripts/orchestrator.sb.tmpl`'s header and PR #212. §2's host
+  allowlist below still **renders**, and is still worth narrowing — but treat it
+  as a declaration of intent, not a control. Closing this needs a real
+  host-allowlisting local proxy (or PF ruleset), which does not exist here.
 
-Four dimensions across those two layers.
+Six dimensions below. Only §2 is unenforced: network egress is open.
 
 ### 1. Filesystem
 
@@ -193,11 +199,11 @@ seams [`run-state.md`](run-state.md) already relies on.
 and the jail is _broken_ without it.** Three paths, each with its own failure
 mode if denied (finding #20 / task 12):
 
-| Path                              | What it is                                                           | Denied ⇒                                                                                 |
-| --------------------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `$TMPDIR/srt-mux-*.sock`          | the unix socket the harness's **own inner sandbox** binds/listens on | inner sandbox **silently disables itself** — the two-layer posture degrades to one layer |
-| `/tmp/claude-<N>/…` + `-cwd` file | its per-project/per-session scratch + cwd **tree**, and the cwd file | the Bash tool **EPERMs before running anything** — every call reports exit 1             |
-| `~/.claude/session-env/<session>` | the per-session env dir it `mkdir`s on startup                       | same — the Bash tool never executes the command at all                                   |
+| Path                              | What it is                                                           | Denied ⇒                                                                                                                                                            |
+| --------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `$TMPDIR/srt-mux-*.sock`          | the unix socket the harness's **own inner sandbox** binds/listens on | inner sandbox **silently disables itself** — no change to the egress posture, which is already open (the nested profile never applies; see "Sandbox profile" above) |
+| `/tmp/claude-<N>/…` + `-cwd` file | its per-project/per-session scratch + cwd **tree**, and the cwd file | the Bash tool **EPERMs before running anything** — every call reports exit 1                                                                                        |
+| `~/.claude/session-env/<session>` | the per-session env dir it `mkdir`s on startup                       | same — the Bash tool never executes the command at all                                                                                                              |
 
 The middle and last rows are the ones that **poison verification**: the Bash
 tool dies on its own `mkdir` _before_ the command ever runs, so **every Bash
