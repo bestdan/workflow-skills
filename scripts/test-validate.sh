@@ -535,7 +535,8 @@ A link may carry a title, which is not part of the path:
 Cards live in dev_docs/tasks/<slug>.md and config in
 dev_docs/tasks/.task-config.yml; the ledger is dev_docs/co-review/ and the
 tutorial walks dev_docs/research/onboarding/decisions.md. None of those exist
-in this repo, and none of them should be flagged.
+in this repo, and none of them should be flagged. A placeholder in a relative
+link is skipped too: [a card](../dev_docs/tasks/<slug>.md).
 
 The plugin-root form is owned by the other check: ${CLAUDE_PLUGIN_ROOT}/dev_docs/real.md
 MD
@@ -585,6 +586,8 @@ if [ "$rc_n" -eq 1 ]; then
 else
   bad "dangling dev_docs references: should exit 1, got $rc_n"
 fi
+# The outside-root target is (n)'s alone; don't leave it for a later fixture.
+rm -rf "$BASE/dev_docs"
 
 # --- Default (no arg): still validates this plugin's own dev_docs/tasks --
 # (preserves today's CI behavior — see validate.py module docstring)

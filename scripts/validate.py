@@ -72,9 +72,9 @@ DEV_DOCS_CONSUMER_PREFIXES = (
 # Repo-root-relative mentions. The lookbehind excludes a leading "/" or "." so
 # each other form is left to the check that owns it: "${CLAUDE_PLUGIN_ROOT}/
 # dev_docs/..." to PLUGIN_ROOT_REF_RE above, and "../dev_docs/..." to
-# DEV_DOCS_LINK_RE below. A shell-expansion prefix ends in ")", which the
-# lookbehind does not exclude, but every such reference names a consumer tree
-# and so lands in the exemption above.
+# DEV_DOCS_LINK_RE below. Shell-expansion forms ("$ROOT/dev_docs/...",
+# "$(...)/dev_docs/...") also put a "/" before dev_docs, so they are skipped
+# here too.
 DEV_DOCS_REF_RE = re.compile(
     r"(?<![A-Za-z0-9_/.-])(dev_docs/[A-Za-z0-9_./<>*-]*[A-Za-z0-9_/<>*-])"
 )
@@ -83,7 +83,9 @@ DEV_DOCS_REF_RE = re.compile(
 # failure that the repo-root form above cannot see. The destination stops at
 # whitespace as well as at ")" and "#": a link may carry an optional title —
 # [doc](../dev_docs/x.md "details") — and swallowing that into the path turns
-# a valid link into a false failure.
+# a valid link into a false failure. Only "../" destinations are checked: a
+# "./dev_docs/..." or bare "dev_docs/..." link cannot resolve from these files'
+# depth anyway, and none exists, so that form is a known gap, not an oversight.
 DEV_DOCS_LINK_RE = re.compile(r"\]\((\.\./[^)\s]*dev_docs/[^)#\s]*)")
 # --- shell logic in runtime markdown ---
 # A fenced shell block in a skill/command/handler/agent body is runtime prompt
