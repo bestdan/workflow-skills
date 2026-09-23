@@ -67,6 +67,11 @@ class Prompt(unittest.TestCase):
         self.assertIn("# T {x}\n\nbody with {CARD} and {0}\n" + bc.END, out)
         self.assertNotIn("{TITLE}", out)
 
+    def test_a_placeholder_in_the_title_is_not_filled(self):
+        out = bc.render(self.template, {"title": "about {CARD}", "card": "BODY"})
+        self.assertIn("# about {CARD}\n\nBODY\n" + bc.END, out)
+        self.assertEqual(out.count("BODY"), 1)
+
     def test_skill_sections_are_verbatim(self):
         skill = subprocess.run(
             [

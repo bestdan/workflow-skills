@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -43,6 +44,8 @@ KEEP = ("id", "issue", "issue_created", "title", "card")
 # silently escaping it.
 BEGIN = "=====BEGIN CARD====="
 END = "=====END CARD====="
+
+PLACEHOLDER = re.compile(r"\{(TITLE|CARD)\}")
 
 # The template is everything in baseline-prompt.md after this line.
 TEMPLATE_START = "<!-- template starts on the next line -->\n"
@@ -69,8 +72,9 @@ def build(source: dict) -> dict:
 
 
 def render(template: str, case: dict) -> str:
-    # str.replace, not str.format: a card may carry braces of its own.
-    return template.replace("{TITLE}", case["title"]).replace("{CARD}", case["card"])
+    # One pass, not str.format or chained str.replace: a card may carry braces of
+    # its own, and a title holding "{CARD}" must not be filled by the second pass.
+    return PLACEHOLDER.sub(lambda m: case[m.group(1).lower()], template)
 
 
 def template_of(prompt_md: str) -> str:
