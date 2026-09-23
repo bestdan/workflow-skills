@@ -2074,7 +2074,9 @@ class TaintedObligations:
     receipts: int = 0
 
 
-def _destination_card(rec: Record, tree: Tree, cards_by_path: dict[Path, Record]) -> Record | None:
+def _destination_card(
+    rec: Record, tree: Tree, cards_by_path: dict[Path, Record]
+) -> Record | None:
     """The `card` record an obligation's `destination:` resolves to, if any.
 
     Mirrors `check_contained_file`'s resolution (repo-relative to `tree.root`)
@@ -2092,7 +2094,9 @@ def _destination_card(rec: Record, tree: Tree, cards_by_path: dict[Path, Record]
     return cards_by_path.get(resolved)
 
 
-def resolve_taint(tree: Tree, resolved: Blockers) -> dict[tuple[str, str], TaintedObligations]:
+def resolve_taint(
+    tree: Tree, resolved: Blockers
+) -> dict[tuple[str, str], TaintedObligations]:
     """Open obligations reachable from each decision through its questions.
 
     The `#print axioms` relation: not what *blocks* a decision

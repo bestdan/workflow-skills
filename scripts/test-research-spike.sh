@@ -3341,6 +3341,7 @@ out_s26_validate="$(python3 "$SCRIPT" --root "$DIR_S26" validate 2>&1)"
 exit_s26_validate=$?
 assert_exit "the freshly-written ledger passes validate's freshness gate" \
   "$exit_s26_validate" 0
+assert_contains "the freshness gate reports OK" "$out_s26_validate" "research-spike: OK"
 out_s26_ledger="$(cat "$DIR_S26/dev_docs/research/alpha/LEDGER.md")"
 assert_contains "the stored ledger's decision bullet carries no taint suffix" \
   "$out_s26_ledger" "- **account-provisioning** — DECIDED"
