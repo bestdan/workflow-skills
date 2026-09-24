@@ -361,6 +361,22 @@ class CommittedRun(unittest.TestCase):
         for i, p in enumerate(run["passes"], 1):
             self.assertEqual(set(p["cards"]), set(ids), f"pass {i}")
 
+    def test_run_carries_the_price_it_was_made_at(self):
+        # Without the map, --analyze reports the Jev side unpriced and the quoted
+        # dollars cannot be reproduced from the committed evidence. The values are
+        # literals, not jat.PRICING_USD_PER_MTOK: that constant is the next run's
+        # price, and this file records the price of the run it holds. Source:
+        # https://docs.typesafe.ai/models, read 2026-09-24 (UTC), for jev-1.13.0.
+        path = HERE / "measurement" / "jev-run.json"
+        if not path.exists():
+            self.skipTest("measurement/jev-run.json: the evidence is not committed yet")
+        pricing = json.loads(path.read_text())["pricing_usd_per_mtok"]
+        self.assertEqual(set(pricing), set(jat._scorer.TOKEN_CLASSES))
+        self.assertEqual(
+            pricing,
+            {"uncached": 0.042, "cache_read": 0.0, "cache_write": 0.0, "output": 0.0},
+        )
+
 
 class Dependencies(unittest.TestCase):
     def test_stdlib_only(self):
