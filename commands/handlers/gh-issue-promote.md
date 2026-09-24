@@ -88,6 +88,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-ready.py" --rep
   --issue <n1> --issue <n2> ... --json
 ```
 
+Same `$CLAUDE_PLUGIN_ROOT` fallback as the other assets: Glob `**/handlers/assets/gh-issue-ready.py`.
+
 This is the same helper `/list-tasks`, `/do-tasks` and step 7a read the graph through, so every gh-issue surface answers "is it blocked?" identically. Two things about the call are deliberate:
 
 - **No `--max-estimate`.** Promotion has no size gate (step 4), so the helper reads no labels and reports no `oversized` bucket; it makes one paginated `blocked_by` read per candidate and nothing else.
@@ -142,9 +144,9 @@ As on the file path, the scope gate is **model judgment, not a deterministic rul
 
 ### 4b. Re-read the dependency graph before writing
 
-Step 3b's answer ages across step 4's model-paced scoring. In an unattended nightly run (`dev_docs/nightly-gh-issue-routine.md`) that window is unwatched; `/do-tasks` re-checks `blocked_by` at claim, so a miss there is not fatal, but a promoted-then-blocked issue sits wrongly in the ready lane until then. In four attended runs the candidate read to first write took 33–165 s (#868). The cost is one more paginated `blocked_by` read per scored issue, doubling the run's graph traffic — accepted.
+Step 3b's answer ages across step 4's model-paced scoring. `/do-tasks` re-checks `blocked_by` at claim, so a miss is not fatal, but a promoted-then-blocked issue sits wrongly in the ready lane until then.
 
-Re-read, in one batched call over every candidate step 4 scored (HIGH and LOW alike — a LOW write is still a write): same helper, same flags as step 3b, and the same "never call it with no `--issue`" rule (skip this step if step 4 scored nothing). Runs in `dry-run` too, since it only reads.
+Re-read, in one batched call over every candidate step 4 scored (HIGH and LOW alike — a LOW write is still a write): same helper path step 3b resolved, same flags, and the same "never call it with no `--issue`" rule (skip this step if step 4 scored nothing). Runs in `dry-run` too, since it only reads.
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-ready.py" --repo "<repo>" \
@@ -153,7 +155,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-ready.py" --rep
 
 Any scored candidate in the result's `blocked` array is **held**, exactly as step 3b holds one: no transition, no backfill, no comment. It stays un-scored, so the next run re-checks and re-scores it. Keep its `open_blockers` for the step-6 report.
 
-**A failed re-read holds every scored candidate and writes nothing.** Scoring is already spent, but writing on 3b's stale answer would promote exactly the issues this step exists to hold; holding costs only a re-score next run. Report the scores anyway, in each held issue's reason (step 6 gives the form), so the spent judgment stays visible, and lead the step-6 report with the quoted helper error — before the scope line, like the rollup-fallback line. Do not fall back to step 3b's answer.
+**A failed re-read holds every scored candidate and writes nothing.** Scoring is already spent, but writing on 3b's stale answer would promote exactly the issues this step exists to hold; holding costs only a re-score next run. Report the scores anyway, in each held issue's reason (step 6 gives the form), so the spent judgment stays visible, and lead the step-6 report with the quoted helper error (step 6 gives its position). Do not fall back to step 3b's answer.
 
 ### 5. Apply
 
