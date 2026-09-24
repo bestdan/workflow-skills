@@ -46,11 +46,11 @@ gh issue list --state open --search '-label:"status:1_needs_refinement" -label:"
 ```
 
 - `--state open` only — closed issues are `done` and are never scored.
-- The `--search` filter selects the **un-scored** issues by excluding every `status:` rung past `0_untriaged`. Stating it as an exclusion rather than `label:"status:0_untriaged"` is deliberate: a pre-migration issue carries no `status:` label at all and must still be a candidate, and an inclusion filter would drop it. This mirrors how `linear-promote.md` reads candidates only from the `backlog` state, and keeps the 500-item window from being consumed by already-scored issues. Quote each label value — the names contain a colon, which is also the search syntax's own separator. The filter also excludes `blocked`-labeled issues, holding them in the backlog rather than promoting them (mirroring the file path's "hold blocked cards" rule — see `commands/promote-tasks.md`). (When `--search` is used, label filters must live in the search string, not a separate `--label` flag.)
+- The `--search` filter selects the **un-scored** issues by excluding every `status:` rung past `0_untriaged`. Stating it as an exclusion rather than `label:"status:0_untriaged"` is deliberate: a pre-migration issue carries no `status:` label at all and must still be a candidate, and an inclusion filter would drop it. This mirrors how `linear-promote.md` reads candidates only from the `backlog` state, and keeps the 500-item window from being consumed by already-scored issues. Quote each label value — the names contain a colon, which is also the search syntax's own separator. The filter also excludes `blocked`-labeled issues, holding them in the backlog rather than promoting them (mirroring the file path's "hold blocked cards" rule — see `commands/promote-tasks.md`). That is only the **label** half of the hold: an open native dependency is the other, and no search term can express it, so step 3b reads it per candidate. (When `--search` is used, label filters must live in the search string, not a separate `--label` flag.)
 - `--milestone "<scope-milestone>"` only when step 2a resolved a milestone scope; omit it on an `all`/no-milestone run.
 - Limit 500 — a soft cap, not a hard page size (`gh issue list --limit` fetches through as many API pages as needed under the hood, so this is effectively exhaustive for any repo backlog short of the cap; mirrors the ceiling `gh-issue-reoptimize.md` uses for the same reason). If exactly 500 issues are returned, the query may be truncated: surface that as its own prominent report line in step 6 (not a footnote) rather than paginating further — see step 6.
 
-Set aside (do **not** score) — as a backstop to the query filter — any issue whose returned `labels` carry a `status:` rung other than `0_untriaged` and that still slips through (e.g. label-index lag, or a quoting failure in the search string): the promoter, like the file path, only acts on issues that have not yet been scored (the gh analogue of `status: new`). Keep these in a separate `skipped` list so step 6 can report them; they receive no write. Likewise, any `blocked`-labeled issue that slips through the `--search` filter is set aside with reason `blocked` (no write), reported in step 6. Report and exit if no un-scored candidates remain.
+Set aside (do **not** score) — as a backstop to the query filter — any issue whose returned `labels` carry a `status:` rung other than `0_untriaged` and that still slips through (e.g. label-index lag, or a quoting failure in the search string): the promoter, like the file path, only acts on issues that have not yet been scored (the gh analogue of `status: new`). Keep these in a separate `skipped` list so step 6 can report them; they receive no write. Likewise, any `blocked`-labeled issue that slips through the `--search` filter is **held** with reason `blocked label` (no write), reported in step 6. Report and exit if no un-scored candidates remain.
 
 ### 3a. Filter parent rollups
 
@@ -74,6 +74,26 @@ The helper paginates to exhaustion, validates every page's shape, and fails clos
 Any candidate whose number appears in the list is a parent rollup — add it to the `skipped` list with reason `parent rollup` and exclude it from scoring.
 
 **Fallback:** on `ROLLUP_OK=0`, skip parent detection and continue the run with all remaining candidates, but **lead** the step-6 report with `parent rollup detection skipped (<reason>)`, quoting the `ROLLUP_REASON` value — not as a trailing footnote. A run that could not check for rollups may promote one, so the reader has to see that before the promotion list, not after it. The most common reason is `subIssues field unavailable`: GitHub's sub-issues feature is active only on some repos and orgs.
+
+### 3b. Hold dependency-blocked candidates
+
+An issue with an open native dependency is **held**, exactly like a `blocked`-labeled one. What counts as an open dependency is defined once, in `commands/handlers/gh-issue.md` → `## List` → "Blocked has two independent sources"; this step applies that definition and does not restate it. The `blocked` label is not a substitute: a repo whose dependencies live only in the graph carries no such label, so the step-3 search term holds nothing there.
+
+Ask about **exactly** the candidates still in play after steps 3 and 3a, by number:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-ready.py" --repo "<repo>" \
+  --issue <n1> --issue <n2> ... --json
+```
+
+This is the same helper `/list-tasks`, `/do-tasks` and step 7a read the graph through, so every gh-issue surface answers "is it blocked?" identically. Two things about the call are deliberate:
+
+- **No `--max-estimate`.** Promotion has no size gate (step 4), so the helper reads no labels and reports no `oversized` bucket; it makes one paginated `blocked_by` read per candidate and nothing else.
+- **Bare numbers.** In candidate-scoped mode the helper never checks the `status:` rung, so an un-scored candidate gets a verdict like any other. Its `ready` bucket here means only "no open blocker", not `status:2_ready`.
+
+Every candidate in the result's `blocked` array is **held**: it is not scored, and it receives **no write at all** — no transition, no `prio:`/`est:` backfill, no comment — per the held-card exception in `commands/handlers/task-fill.md` → "When it runs". It stays un-scored, so the next run re-checks it and scores it once every blocker closes. Keep its `open_blockers` for the step-6 report. Candidates in `ready` go on to step 4.
+
+**A failed read stops the run before any write.** The helper exits non-zero on any `gh api` failure. Scoring without the answer would promote exactly the issues this step exists to hold, so report the error and stop; do not fall back to scoring every candidate. `dry-run` runs this step too, since it only reads.
 
 ### 4. Score each candidate
 
@@ -177,7 +197,7 @@ Print the same summary shape as the file path (`commands/promote-tasks.md` step 
 parent rollup detection skipped (subIssues field unavailable)
 scope: milestone v2.0
 ⚠ candidate query hit the 500-issue cap — some open issues may not have been scored this run.
-Promoted 5 of 8 candidates:
+Promoted 5 of 9 candidates:
   ready (3):
     - #142  Fix broken import  (backfilled: est)
     - #145  Bump eslint config  (backfilled: prio, est)
@@ -185,17 +205,19 @@ Promoted 5 of 8 candidates:
   needs_refinement (2):
     - #151  Restructure auth module  (scope exceeds size 5 — split into sub-issues)  (backfilled: est 8)
     - #152  Rewrite the config loader  (body missing acceptance criteria)
-  skipped (3):
+  held (2, blocked):
+    - #111  (blocked by #112, #115)
+    - #113  (blocked label)
+  skipped (2):
     - #109  (already scored)
     - #110  (parent rollup)
-    - #111  (blocked)
 backfilled (3):
   - #142  (est)
   - #145  (prio, est)
   - #151  (est 8)
 ```
 
-Skipped issues are reported with their reason — `already scored`, `parent rollup`, or `blocked`. The 500-cap warning (if it applied) leads the report per above, not a trailing footnote.
+Skipped issues are reported with their reason — `already scored` or `parent rollup`. Held issues are reported under `held (N, blocked)`, each naming what held it: `blocked by #<n>, …` listing the open blockers step 3b returned, or `blocked label`. Like skipped issues, held ones count toward `M` without being promoted, as on the file path. The 500-cap warning (if it applied) leads the report per above, not a trailing footnote.
 
 **If step 3a's fallback fired, `parent rollup detection skipped (<reason>)` is the report's first line**, above the scope line — as shown above, quoting the `ROLLUP_REASON` the helper printed. It leads rather than trails because such a run may have promoted a rollup, and a reader who stops before the last line must still see that.
 
