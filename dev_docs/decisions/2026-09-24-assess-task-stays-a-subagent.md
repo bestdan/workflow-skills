@@ -25,7 +25,7 @@ with a three-run incumbent panel is 17.3 points below the panel's own on
 `complexity`, 17.3 on `creativity` and 14.7 on `verification_criticality`. On the
 tuple it is 38.9 points below. The misses are not noise. Jev reads cards as harder
 on 32 of 32 pooled `complexity` misses, more creative on 25 of 28, and less
-verification-critical on 24 of 30. Those values trigger the `architecture` and
+verification-critical on 24 of 30. Those values feed the `architecture` and
 `verification-sensitive` routing labels. Jev's answers are as steady as the panel's,
 or steadier, and they are steadily different.
 
@@ -64,9 +64,10 @@ Sampling a gating number more than once is its rule 5.
 
 ## Consequences
 
-- **Good, because** routing keeps the profile its consumers are tuned to. The typed
-  call would have sent more work to `architecture` and less to
-  `verification-sensitive`, in the same direction every time.
+- **Good, because** routing keeps the profile its consumers are tuned to. Read off the
+  label table rather than measured, the typed call would likely have pushed more
+  work toward `architecture` and less toward `verification-sensitive`, mostly in
+  one direction.
 - **Good, because** no installed user gets a second code path, a fallback to keep
   working, or a vendor dependency, and the gate stays keyless.
 - **Bad, because** each packet still pays about 3.8 s median and about $0.047 cold, as

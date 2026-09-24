@@ -13,14 +13,14 @@ not to adopt what they measured; the fifth adopted a typed call as a companion
 to an existing check rather than a replacement for it, and stayed out of the
 gate. This file is the short version of what they cost to learn.
 
-| Read this when                                                     | Go to                                                                                                                                                                                                                        |
-| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| You want to know whether your judgment is Jev-shaped               | [`research/2026-09-17-jev-applications/`](research/2026-09-17-jev-applications/README.md) — seven ranked candidates, the non-fits, the vendor's own rules, and what it is documented to be bad at                            |
-| You are about to build a ladder over Jev signals                   | [`research/2026-09-19-jev-tool-routing/`](research/2026-09-19-jev-tool-routing/README.md) — a ladder that scored 58% and why                                                                                                 |
-| You are about to ask a model to forecast something from prose      | [`research/2026-09-20-predictive-scope/`](research/2026-09-20-predictive-scope/README.md) — a forecast whose wrapper, not the model, put it on its base rate, and three instrument defects the record caught in itself       |
-| You are about to replace a check with a cheaper proxy              | [`decisions/2026-09-21-jev-alongside-the-routing-evals.md`](decisions/2026-09-21-jev-alongside-the-routing-evals.md) — 120× faster, agreed on every case, and blind to the failure the check exists to catch                 |
-| You are about to swap a model judgment for a steadier, cheaper one | [`decisions/2026-09-24-assess-task-stays-a-subagent.md`](decisions/2026-09-24-assess-task-stays-a-subagent.md) — 10× faster, 780× cheaper, as self-consistent as the subagent, and different from it the same way every time |
-| You want the key plumbing                                          | [`auth_key_access.md`](auth_key_access.md)                                                                                                                                                                                   |
+| Read this when                                                     | Go to                                                                                                                                                                                                                          |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| You want to know whether your judgment is Jev-shaped               | [`research/2026-09-17-jev-applications/`](research/2026-09-17-jev-applications/README.md) — seven ranked candidates, the non-fits, the vendor's own rules, and what it is documented to be bad at                              |
+| You are about to build a ladder over Jev signals                   | [`research/2026-09-19-jev-tool-routing/`](research/2026-09-19-jev-tool-routing/README.md) — a ladder that scored 58% and why                                                                                                   |
+| You are about to ask a model to forecast something from prose      | [`research/2026-09-20-predictive-scope/`](research/2026-09-20-predictive-scope/README.md) — a forecast whose wrapper, not the model, put it on its base rate, and three instrument defects the record caught in itself         |
+| You are about to replace a check with a cheaper proxy              | [`decisions/2026-09-21-jev-alongside-the-routing-evals.md`](decisions/2026-09-21-jev-alongside-the-routing-evals.md) — 120× faster, agreed on every case, and blind to the failure the check exists to catch                   |
+| You are about to swap a model judgment for a steadier, cheaper one | [`decisions/2026-09-24-assess-task-stays-a-subagent.md`](decisions/2026-09-24-assess-task-stays-a-subagent.md) — 10× faster, 780× cheaper, as self-consistent as the subagent, and different from it in a consistent direction |
+| You want the key plumbing                                          | [`auth_key_access.md`](auth_key_access.md)                                                                                                                                                                                     |
 
 ## The rule, when you just need the answer
 
@@ -135,7 +135,7 @@ note under **Using it well**, and are not repeated here.
     failure the check exists to catch and show the proxy detecting it.
 
 12. **Stability is not agreement.** A typed call can be as self-consistent as
-    the incumbent and still give the same _different_ answer every time. On
+    the incumbent and still differ from it in a consistent direction. On
     `assess-task`, Jev's passes agreed with each other as often as the panel's
     runs did, or more, yet agreed with the panel 15–17 points less often than
     the panel's runs agreed with each other.

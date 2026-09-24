@@ -129,9 +129,9 @@ outside its enum (scorer, `cont` and `miss` columns).
 Gate (b) passes everywhere. Jev's stability ties the panel's on `complexity` (0.973
 against 0.973) and exceeds it on `creativity` (0.987 against 0.973),
 `verification_criticality` (1.000 against 0.920) and the tuple (0.960 against 0.880).
-So the typed call is not noisy. On any given card it gives the same answer across
-passes, and on the cards where it differs from the panel, it differs the same way
-every time. A stability figure cannot see that. Only agreement with the incumbent
+So the typed call is not noisy: across passes it agrees with itself at least as
+often as the panel's runs agree with each other, and its misses against the panel
+fall mostly one way. A stability figure cannot see that. Only agreement with the incumbent
 can. The tool-routing measurement
 ([`2026-09-19-jev-tool-routing/`](2026-09-19-jev-tool-routing/README.md)) found the
 reverse, with the agent as the steadier side.
@@ -152,13 +152,14 @@ reports each pool as pooled pairs / distinct cards, lower : higher:
 All five pools clear the 80% one-side threshold on at least 5 distinct cards.
 
 Why the direction matters more than the rate. This is inferred from the label table
-in `skills/assess-task/SKILL.md`, not measured. Each of these values is a
-single-dimension trigger for a routing label. `complexity: hard` fires
-`architecture`, the tier where the expensive coders sit, so an upward bias sends
-ordinary work there. `verification_criticality: high` fires `verification-sensitive`,
+in `skills/assess-task/SKILL.md`, not measured, and no labels were derived for
+either side. `complexity: hard` is one of the conditions for `architecture`, the
+tier where the expensive coders sit (with multi-file or refactor scope, or a
+genuinely hard bug), so an upward bias pushes ordinary work toward it.
+`verification_criticality: high` alone fires `verification-sensitive`,
 so a downward bias sends work whose deliverable is an honest check to a coder not
 chosen for honest checking. Scattered noise at the same rate would misroute packets
-both ways. A one-way error misroutes them the same way every time.
+both ways. A one-way error pushes them mostly one way.
 
 ### 6. Adjudication cannot change the result
 
