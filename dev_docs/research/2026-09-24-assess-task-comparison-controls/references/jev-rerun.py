@@ -10,7 +10,8 @@ questions. Needs a TypeSafe key (dev_docs/auth_key_access.md).
 Run by path, from the repository root:
 
     D=dev_docs/research/2026-09-24-assess-task-comparison-controls/references
-    python3 $D/jev-rerun.py --repeat 3 > $D/measurement/jev-run-v2.json
+    python3 $D/jev-rerun.py --repeat 3 > /tmp/jev-run-v2.json \\
+        && mv /tmp/jev-run-v2.json $D/measurement/jev-run-v2.json
     O=dev_docs/research/2026-09-22-assess-task-comparison/references
     python3 $O/compare-assess-task.py --score $D/measurement/jev-run-v2.json \\
         $O/measurement/baseline/agent-1.json $O/measurement/baseline/agent-2.json \\

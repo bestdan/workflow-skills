@@ -7,7 +7,7 @@ feeds: ../../decisions/2026-09-24-assess-task-stays-a-subagent.md
 # `assess-task` comparison: controls and a re-asked typed call (2026-09-24)
 
 **Mostly about any rater that is not the Opus panel.** Two general-purpose LLMs
-were given the incumbent's own prompt, byte for byte. Both miss gate (a) on every
+were given the incumbent's own prompt, plus a one-line instruction to follow it. Both miss gate (a) on every
 measurable dimension. Codex misses by 11–14 points and an open-weight model by
 more. Jev sits a few points below codex and above the open-weight model on all
 three dimensions, at about 15× lower latency than codex. The verdict in
@@ -47,13 +47,18 @@ python3 $D/decoder-sensitivity.py
 
 The three control arms, all run on 2026-09-24 by
 [`references/run-arms.py`](references/run-arms.py). Each makes one fresh process
-per card, with no tools, in an empty directory, on the same fenced card text:
+per card, in a fresh temporary directory, on the same fenced card text. Tool
+access differs by arm, and the table says how:
 
-| arm         | model                                   | prompt                                                                   |
-| ----------- | --------------------------------------- | ------------------------------------------------------------------------ |
-| `opus-jevq` | `claude-opus-5-5`                       | Jev's six questions (v1 `questions.json`) verbatim, as a form to fill    |
-| `codex`     | `gpt-5.6-terra`, `codex exec` read-only | the incumbent's skill prompt, byte for byte (`build-corpus.py`'s render) |
-| `crush`     | `hyper/kimi-k2.7-code` (open-weight)    | the same skill prompt                                                    |
+| arm         | model                                   | prompt                                                                                           | tools                                                                                                   |
+| ----------- | --------------------------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| `opus-jevq` | `claude-opus-5-5`                       | Jev's six questions (v1 `questions.json`) verbatim, as a form to fill                            | none (`--tools ""`)                                                                                     |
+| `codex`     | `gpt-5.6-terra`, `codex exec` read-only | the incumbent's skill prompt byte for byte on stdin, plus a one-line argument prompt (`POINTER`) | its shell remains, sandboxed read-only; only the prompt tells it not to explore or run commands         |
+| `crush`     | `hyper/kimi-k2.7-code` (open-weight)    | the same stdin payload and `POINTER`                                                             | every built-in tool disabled by `skills/co-review/reviewers/assets/crush-readonly.json`, in its own cwd |
+
+`POINTER` tells the model its input is on stdin, to follow it exactly, and not to
+explore the filesystem or run commands. So the codex and crush inputs are the
+incumbent's prompt plus that one line, not the prompt alone.
 
 All 150 calls returned a parseable block. No value was missing or outside its enum.
 
@@ -91,9 +96,12 @@ Gate (d) misses, lower : higher, against the panel majority:
 | `creativity`               | 3 : 25                | 0 : 8     | 4 : 3  | 2 : 14 |
 | `verification_criticality` | 24 : 6                | 2 : 3     | 1 : 10 | 0 : 18 |
 
-On `complexity` only Jev is one-way on every miss. On `verification_criticality`,
-codex and crush also err one way, but upward, the opposite side from Jev. Gate (d)
-would fail codex there (10 of 11, on 11 cards) and crush on two dimensions.
+On `complexity` only Jev is one-way on every miss, but codex also leans upward
+(8 of 9). On `verification_criticality`, codex and crush also err one way, but
+upward, the opposite side from Jev. Gate (d) would fail codex on both of those
+dimensions: `complexity` (8 of 9, on 9 cards) and `verification_criticality`
+(10 of 11, on 11 cards). It would fail crush on `creativity` and
+`verification_criticality`, and opus-jevq on `creativity` (0 : 8).
 
 ### 3. On `complexity` and `verification_criticality` the gap is the model; on `creativity` and `autonomy` it is the asking
 

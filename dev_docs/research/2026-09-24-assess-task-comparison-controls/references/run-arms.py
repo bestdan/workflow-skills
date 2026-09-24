@@ -3,8 +3,9 @@
 
   opus-jevq : claude-opus-5-5 given Jev's six questions (questions.json), not the skill.
               Separates the question wording from the model.
-  codex     : codex gpt-5.6-terra given the incumbent's skill prompt, byte for byte.
-  crush     : crush hyper/kimi-k2.7-code (open-weight) given the same skill prompt.
+  codex     : codex gpt-5.6-terra given the incumbent's skill prompt byte for byte on
+              stdin, plus POINTER as its argument prompt.
+  crush     : crush hyper/kimi-k2.7-code (open-weight), same stdin and POINTER.
 
 An artifact of dev_docs/research/2026-09-24-assess-task-comparison-controls/, not
 standing tooling. Spends real calls: the operator's `claude` login (opus-jevq), their
@@ -18,7 +19,10 @@ Run by path, from the repository root (network, so outside any sandbox):
     python3 $D/run-arms.py crush     $D/measurement/crush.json
     python3 $D/run-arms.py codex /tmp/probe.json --ids issue-277   # a smoke probe
 
-One fresh process per card, sequential, no tools, fresh empty cwd, up to 3 attempts.
+One fresh process per card, sequential, in a fresh temporary cwd, up to 3 attempts.
+Tools: opus-jevq has none (`--tools ""`); crush has every built-in disabled by its
+copied crush-readonly.json; codex keeps its shell under `--sandbox read-only`, and
+only POINTER tells it not to explore or run commands.
 Output is the baseline-file shape compare-assess-task.py reads (cards.<id>.raw); a
 card that never succeeds is left out and listed under `failed`.
 Tool versions at run time (2026-09-24): Claude Code 2.1.281, codex-cli 0.155.1,
