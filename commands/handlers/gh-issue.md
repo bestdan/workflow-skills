@@ -83,12 +83,23 @@ gh-issue:
    Then stamp the new issue's initial state. Take `<n>` from the trailing path segment of the URL `gh issue create` printed, and `<repo>` from `gh-issue.repo` — the writer's `--repo` is required, so when the key is unset resolve it with `gh repo view --json nameWithOwner --jq .nameWithOwner` rather than omitting the flag:
 
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-state.py" \
-     --repo "<repo>" --issue <n> \
-     --labels status:0_untriaged,auto:human-review-needed --apply
+   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-backfill.py" \
+     encode --human-set [--priority <priority>] [--estimate <size>]
    ```
 
-   If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/gh-issue-state.py`. The write replaces the whole label set but carries forward everything outside the four managed namespaces, so the configured `gh-issue.labels` (`follow-up` and friends) survive it — see `commands/handlers/assets/labels.yml` for the vocabulary and its invariants.
+   Then write the pair plus whatever names `encode` printed, as a separate call:
+
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-state.py" \
+     --repo "<repo>" --issue <n> \
+     --labels "status:0_untriaged,auto:human-review-needed[,<encode's output>]" --apply
+   ```
+
+   `encode` turns the drafted task's `priority` and `size` into its `prio:`/`est:` labels, so a vetted value lands on the issue instead of being backfilled over by `/promote-tasks` later. Pass each flag only when the drafted task carries that field. A missing field adds no label, and the promoter backfills it as usual. `--human-set` is what lets a drafted `urgent` through as `prio:0`: the never-auto-set-`urgent` rule is about the promoter guessing, and a drafted task's priority is a person's call (`commands/handlers/task-fill.md`).
+
+   Keep the two calls separate: gluing them with `$(…)` both trips the permission matcher and hides a failed `encode` behind the write's success. If `encode` exits non-zero (a refusal, a missing helper, a vocabulary that won't load), stamp the pair alone and name the dropped fields and `encode`'s stderr in the step-5 report, because the issue already exists. A `# …` note on stderr with exit `0` is a deliberate unset (priority `none`, or a size over the ladder's top); name that dropped value in the report too.
+
+   If `$CLAUDE_PLUGIN_ROOT` is unset and a path doesn't resolve, Glob `**/handlers/assets/<name>.py`. The write replaces the whole label set but carries forward everything outside the four managed namespaces, so the configured `gh-issue.labels` (`follow-up` and friends) survive it — see `commands/handlers/assets/labels.yml` for the vocabulary and its invariants.
 
    **The pair is the point.** `status:` says where the work is; `auto:` says whether automation may take it. They are independent axes, and a fresh issue is neither scored nor automation's to touch, so it gets a rung on each. That is what keeps an unscored issue _visibly_ unscored: it renders in `new`, it is exactly what `/promote-tasks` selects, and it appears in no automation queue. One conflated label could not say both, so it would have to default the issue into one of those queues by omission.
 

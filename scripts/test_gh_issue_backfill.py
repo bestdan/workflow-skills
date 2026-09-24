@@ -178,6 +178,19 @@ class EncodingTests(unittest.TestCase):
             backfill.encode(VOCAB_GROUPS, priority="urgent")
         self.assertIn("urgent", str(caught.exception))
 
+    def test_human_set_urgent_encodes_as_the_top_rung(self):
+        """A card a human drafted may say `urgent`; the guard is for guesses."""
+        labels, _notes = backfill.encode(
+            VOCAB_GROUPS, priority="urgent", human_set=True
+        )
+        self.assertEqual(labels, ["prio:0"])
+
+    def test_human_set_lifts_only_the_urgent_refusal(self):
+        with self.assertRaises(backfill.BackfillError):
+            backfill.encode(VOCAB_GROUPS, priority=3, human_set=True)
+        with self.assertRaises(backfill.BackfillError):
+            backfill.encode(VOCAB_GROUPS, estimate=7, human_set=True)
+
     def test_estimate_on_and_off_the_ladder(self):
         self.assertEqual(backfill.encode(VOCAB_GROUPS, estimate=3)[0], ["est:3"])
         self.assertEqual(backfill.encode(VOCAB_GROUPS, estimate=13)[0], ["est:13"])
@@ -516,6 +529,16 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("urgent", buf.getvalue())
 
+    def test_human_set_passes_urgent(self):
+        code, out = run_main(["encode", "--human-set", "--priority", "urgent"])
+        self.assertEqual(code, 0)
+        self.assertEqual(out.strip(), "prio:0")
+
+    def test_a_card_with_neither_field_encodes_to_nothing(self):
+        code, out = run_main(["encode", "--human-set"])
+        self.assertEqual(code, 0)
+        self.assertEqual(out.strip(), "")
+
     def test_a_quoted_estimate_is_refused_before_any_write(self):
         """The whole plan fails at load, so nothing is half-written."""
         path = plan_file([{"number": 1, "estimate": "3"}])
@@ -527,6 +550,71 @@ class CliTests(unittest.TestCase):
         path = plan_file([{"number": 1}, {"number": 1}])
         with self.assertRaises(SystemExit):
             backfill.load_plan(path)
+
+
+class CreateStampTests(unittest.TestCase):
+    """gh-issue.md step 4: a new issue's initial stamp carries the card's fields.
+
+    `/push-plan` and `/add-task` both create through that step. It composes the
+    `status:`/`auto:` pair with `encode --human-set` output and hands the result
+    to `gh-issue-state.py`; this runs that composition end to end. A card's own
+    priority and size must survive it, or `/promote-tasks` backfills defaults
+    over them.
+    """
+
+    PAIR = "status:0_untriaged,auto:human-review-needed"
+
+    def stamp(self, repo, number, encode_args):
+        code, out = run_main(["encode", "--human-set", *encode_args])
+        self.assertEqual(code, 0)
+        labels = f"{self.PAIR},{out.strip()}"
+        with wired(repo), contextlib.redirect_stdout(io.StringIO()):
+            code = gh_issue_state.main(
+                ["--repo", "o/r", "--issue", str(number), "--labels", labels, "--apply"]
+            )
+        self.assertEqual(code, 0)
+
+    def test_two_card_plan_keeps_what_each_card_says(self):
+        # Fresh issues, as `gh issue create` leaves them: configured labels only.
+        repo = FakeRepo(
+            {
+                1: {"labels": ["follow-up"]},
+                2: {"labels": ["follow-up"]},
+            }
+        )
+        self.stamp(repo, 1, ["--priority", "high", "--estimate", "2"])
+        self.stamp(repo, 2, [])
+
+        written = {number: body["labels"] for number, body in repo.patches}
+        self.assertEqual(
+            sorted(written[1]),
+            sorted(
+                [
+                    "status:0_untriaged",
+                    "auto:human-review-needed",
+                    "prio:1",
+                    "est:2",
+                    "follow-up",
+                ]
+            ),
+        )
+        # Neither field on the card: no prio:/est:, so the promoter backfills it.
+        self.assertEqual(
+            sorted(written[2]),
+            sorted(["status:0_untriaged", "auto:human-review-needed", "follow-up"]),
+        )
+
+    def test_backfill_scan_sees_the_stamped_card_as_complete(self):
+        """The second acceptance bullet: nothing left for /promote-tasks to fill."""
+        repo = FakeRepo({1: {"labels": ["follow-up"]}, 2: {"labels": ["follow-up"]}})
+        self.stamp(repo, 1, ["--priority", "high", "--estimate", "2"])
+        self.stamp(repo, 2, [])
+        for number, body in repo.patches:
+            repo.issues[number]["labels"] = body["labels"]
+        with wired(repo):
+            result = backfill.scan("o/r", LABELS_FILE, 500)
+        missing = {entry["number"] for entry in result["candidates"]}
+        self.assertEqual(missing, {2})
 
 
 if __name__ == "__main__":
