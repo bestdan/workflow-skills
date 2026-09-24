@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.69.1] - 2026-09-24
+
+### Fixes
+
+- re-read the dependency graph before the write batch [#868] (#871) (31ba1db)
+
 ## [2.69.0] - 2026-09-24
 
 ### Features
