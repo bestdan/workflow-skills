@@ -83,6 +83,19 @@ DIMENSIONS: dict[str, tuple[str, ...]] = _scorer.DIMENSIONS
 # floating id would make S_jev and the latency numbers describe an unnamed model.
 MODEL = "jev-1.13.0"
 
+# USD per million tokens, from https://docs.typesafe.ai/models, read 2026-09-24 (UTC):
+# its model table lists jev-1.13.0 at "$42 / $0.042" per Btok / per Mtok and says
+# "Charged per input token. Output tokens are free." The zeros are real prices, not
+# missing data: output is free, and Jev has no cache classes (see `token_classes`).
+# Pinned beside MODEL because the price belongs to that version, so a new version's
+# price must be a deliberate edit.
+PRICING_USD_PER_MTOK = {
+    "uncached": 0.042,
+    "cache_read": 0.0,
+    "cache_write": 0.0,
+    "output": 0.0,
+}
+
 # A Noul is P(yes), and 0.5 is where "more likely yes than no" falls. Unfitted, as the
 # predictive-scope record's SUBSYSTEM_THRESHOLD is: a cutoff tuned on the cards it is
 # then scored on is not a measurement.
@@ -209,10 +222,10 @@ def decode_answers(answers: object, questions: dict) -> dict:
 def token_classes(usage: dict) -> dict:
     """`usage` -> the record's four token classes.
 
-    The API reports `input_tokens` and `output_tokens` only; it names no cache
-    classes. So `cache_read` and `cache_write` are zero meaning "not reported, and the
-    vendor bills none that we can see", not a measured zero. The raw `usage` is kept
-    verbatim beside this in each card entry.
+    The API reports `input_tokens` and `output_tokens` only, because Jev has no cache
+    classes. So `cache_read` and `cache_write` are zero meaning "no such class", not
+    a measured zero, and `PRICING_USD_PER_MTOK` prices them at zero for the same
+    reason. The raw `usage` is kept verbatim beside this in each card entry.
 
     Interpretation: a response without both counts aborts the run. A zero written in
     their place would read as a measured zero and understate the dollars.
@@ -274,8 +287,9 @@ def ask_card(key: str, case: dict, questions: dict) -> dict:
 def run_suite(key: str, cases: list[dict], repeat: int, questions: dict) -> dict:
     """`repeat` passes over `cases`, in the scorer's run-file format.
 
-    Interpretation: pricing is left out. The scorer treats it as optional, and the
-    record prices each token class at its rate on the run date at analysis time.
+    Interpretation: the run carries `PRICING_USD_PER_MTOK`. The scorer reads prices
+    only from the run file, and a committed run is never edited, so the price is
+    recorded when the run is made, with its source beside the constant.
     """
     passes = [
         {"cards": {case["id"]: ask_card(key, case, questions) for case in cases}}
@@ -284,6 +298,7 @@ def run_suite(key: str, cases: list[dict], repeat: int, questions: dict) -> dict
     return {
         "model": MODEL,
         "run_date": datetime.datetime.now(datetime.timezone.utc).date().isoformat(),
+        "pricing_usd_per_mtok": PRICING_USD_PER_MTOK,
         "questions": questions,
         "cards": [case["id"] for case in cases],
         "passes": passes,
