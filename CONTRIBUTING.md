@@ -53,11 +53,17 @@ gate check into one invocation, and always dumps diagnostics on failure.
 `just check-fast` is for the edit loop: ~8s against the full gate's ~41s. It
 skips the two long test suites and narrows the shell lint to the files your
 branch has touched — that is skipped coverage, not sharded or sampled, so
-`just check` still has to pass before you push and CI always runs the gate with
-no flags. It announces exactly what it dropped, on entry and again at the end.
-(The lint narrowing is per-file, so a branch that adds several long shell files
-pays their lint cost on every `--fast` run — that is the narrowing working, not
-a regression.)
+`just check` still has to pass before you push. It announces exactly what it
+dropped, on entry and again at the end. (The lint narrowing is per-file, so a
+branch that adds several long shell files pays their lint cost on every
+`--fast` run — that is the narrowing working, not a regression.)
+
+`scripts/check.sh --base <ref>` classifies `<ref>..HEAD` with
+`scripts/ci-docs-only.sh` and, only when the diff is confined to `dev_docs/`,
+skips the shell/bats suites outright (a different, broader skip than
+`--fast`'s). CI's `quality` job passes `--base HEAD^1` on every pull request
+for exactly this; a push to `main` runs `scripts/check.sh` with no flags, the
+full gate, as the backstop.
 Why those particular things are slow, and what it would take to make `just check`
 itself faster, is in [`dev_docs/gate-performance.md`](dev_docs/gate-performance.md)
 — read it before adding concurrency anywhere in the gate.

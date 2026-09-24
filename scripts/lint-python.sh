@@ -45,11 +45,14 @@ RUFF_VERSION="0.14.2"
 # command sandbox that grants only the uv cache.
 export UV_TOOL_DIR="${UV_TOOL_DIR:-${UV_CACHE_DIR:-$HOME/.cache/uv}/tools}"
 
-# Both trees that hold Python. scripts/local-review/ is excluded from dprint
+# Three trees that hold Python. scripts/local-review/ is excluded from dprint
 # (see dprint.json) but not from linting — that exclusion is about formatting a
-# vendored-looking tree, not about leaving its code unchecked.
-echo "→ ruff check: scripts/ commands/handlers/assets/"
-if uvx "ruff@${RUFF_VERSION}" check scripts/ commands/handlers/assets/; then
+# vendored-looking tree, not about leaving its code unchecked. dev_docs/ holds
+# research/decision reference scripts that no linter covered until now — only
+# dprint formatting reached them; typecheck.sh's exemption of that tree stays,
+# deliberately (see its own header).
+echo "→ ruff check: scripts/ commands/handlers/assets/ dev_docs/"
+if uvx "ruff@${RUFF_VERSION}" check scripts/ commands/handlers/assets/ dev_docs/; then
   echo "lint-python: OK"
 else
   echo "lint-python: FAIL" >&2
