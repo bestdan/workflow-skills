@@ -5,22 +5,26 @@
 # `check` target wraps it, so local and CI checks can never drift. Runs every
 # check even if an earlier one fails, then exits non-zero if any failed.
 #
-# Usage: scripts/check.sh [--with-evals] [--fast]
+# Usage: scripts/check.sh [--with-evals] [--fast] [--base <ref>]
 #   --with-evals  also run the behavioral skill-triggering harness
 #                 (scripts/eval.sh; needs ANTHROPIC_API_KEY)
 #   --fast        edit-loop mode: skip the two long suites. NOT the gate — see
 #                 the fast_skips list below for exactly what stops being checked.
+#   --base <ref>  classify <ref>..HEAD with scripts/ci-docs-only.sh; when it
+#                 says the diff is dev_docs-only, skip the shell/bats suites
+#                 (see docs_skips below) instead of the --fast list. Anything
+#                 other than an exact docs-only verdict runs the full gate.
 #
 # research-spike: this repo does not gate on its own dev_docs/research/ tree.
 # scripts/test-research-spike.sh (below) exercises the script's fixture
 # harness only, under mktemp -d, never the real tree. That is deliberate, not
-# an oversight: this repo has no dev_docs/research/ tree yet, and a
-# `validate` gate over a tree that does not exist measures nothing. The
-# moment a real project is initialized here, the same PR that runs `init`
-# also adds `run python3 "$ROOT/scripts/research-spike.py" --root "$ROOT"
-# validate --strict` to the `run` list below — see
-# skills/research-spike/references/adoption.md, step 4, for the full
-# adoption sequence and why `suggest` stays out of the gate even then (a
+# an oversight: the dev_docs/research/ directories that exist here are
+# research RECORDS (the dated dev_docs layout), not research-spike projects —
+# none has a LEDGER.md, and `python3 scripts/research-spike.py --root . validate
+# --strict` fails on each with "does not look like a research project
+# directory". The gate for a real project lands in the same PR that `init`s
+# one here — see skills/research-spike/references/adoption.md, step 4, for the
+# full adoption sequence and why `suggest` stays out of the gate even then (a
 # lexical scan's false positives have nowhere legal to go in this repo's
 # check contract: no baseline file, no allowlist, no skip flag).
 set -uo pipefail
@@ -30,15 +34,26 @@ cd "$ROOT" || exit 1
 
 with_evals=0
 fast=0
-for arg in "$@"; do
-  case "$arg" in
+base_ref=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
     --with-evals) with_evals=1 ;;
     --fast) fast=1 ;;
+    --base)
+      if [[ $# -lt 2 ]]; then
+        echo "--base requires a value" >&2
+        exit 2
+      fi
+      base_ref="$2"
+      shift
+      ;;
+    --base=*) base_ref="${1#--base=}" ;;
     *)
-      echo "unknown argument: $arg" >&2
+      echo "unknown argument: $1" >&2
       exit 2
       ;;
   esac
+  shift
 done
 
 # --fast drops the two suites that dominate wall time; --with-evals adds the
@@ -74,7 +89,47 @@ fast_skips=(
   "scripts/test-spawn-orchestrator.sh (via scripts/test-shell.sh --fast)"
   "every shell/bats lint (bash -n, shfmt, shellcheck, bats --count) over files this branch has not touched (via scripts/lint-shell.sh --fast)"
 )
-if [[ "$fast" == 1 ]]; then
+# --base classifies <ref>..HEAD with scripts/ci-docs-only.sh and, only on an
+# exact `docs_only=true` line, skips the shell/bats suites entirely — nothing
+# those suites run reads the real dev_docs/ tree (their `dev_docs` references
+# are fixture paths under mktemp), so a diff confined to it cannot regress
+# them. Anything else — a non-docs-only diff, an unknown ref, or the
+# classifier exiting non-zero — runs the full gate; this flag only ever
+# narrows the gate on positive evidence, never on the absence of a reason not
+# to. Combined with --fast: docs-only skips take precedence (they are the
+# broader list below) rather than compounding with fast_skips, so the two
+# flags together behave exactly like --base alone once the diff is
+# docs-only, and exactly like --fast alone once it is not. --base combines
+# fine with --with-evals — evals are unaffected by either flag.
+docs_only=0
+if [[ -n "$base_ref" ]]; then
+  base_output="$(scripts/ci-docs-only.sh "$base_ref" HEAD)"
+  base_rc=$?
+  if [[ "$base_rc" == 0 && "$base_output" == "docs_only=true" ]]; then
+    docs_only=1
+  fi
+fi
+
+# Skip list for a dev_docs-only diff — broader than fast_skips because it can
+# be: lint-shell.sh and test-shell.sh contribute nothing when no shell/bats
+# file changed, so this drops them entirely rather than narrowing their file
+# lists the way --fast does.
+docs_skips=(
+  "scripts/lint-shell.sh"
+  "scripts/test-shell.sh"
+  "scripts/test-research-spike.sh"
+  "every other scripts/test-*.sh test harness"
+)
+if [[ "$docs_only" == 1 ]]; then
+  echo "→ --base $base_ref: dev_docs-only diff — skipping suites that cannot reach it"
+  for skipped in "${docs_skips[@]}"; do
+    echo "    skipped: $skipped"
+  done
+elif [[ -n "$base_ref" ]]; then
+  echo "→ --base $base_ref: not dev_docs-only — running the full gate"
+fi
+
+if [[ "$fast" == 1 && "$docs_only" != 1 ]]; then
   echo "→ --fast: skipping the long suites — this is NOT the full gate"
   for skipped in "${fast_skips[@]}"; do
     echo "    skipped: $skipped"
@@ -124,7 +179,9 @@ run uv run scripts/validate.py
 run scripts/dev-docs-layout.sh
 run scripts/typecheck.sh
 run scripts/lint-python.sh
-if [[ "$fast" == 1 ]]; then
+if [[ "$docs_only" == 1 ]]; then
+  : # skipped — see docs_skips above
+elif [[ "$fast" == 1 ]]; then
   run scripts/lint-shell.sh --fast
 else
   run scripts/lint-shell.sh
@@ -149,12 +206,16 @@ for test_script in scripts/test-*.sh; do
     scripts/test-*-live.sh | scripts/test-spawn-orchestrator*.sh | scripts/test-shell.sh) continue ;;
     scripts/test-research-spike.sh) [[ "$fast" == 1 ]] && continue ;;
   esac
+  # docs_only drops every remaining scripts/test-*.sh — see docs_skips above.
+  [[ "$docs_only" == 1 ]] && continue
   run "$test_script"
 done
 # Scheduled LAST because the replay loop is strictly index-ordered: this is the
 # longest check, and anything after it would have its output held back behind
 # it. At the end, the fast checks drain as they finish and only this one blocks.
-if [[ "$fast" == 1 ]]; then
+if [[ "$docs_only" == 1 ]]; then
+  : # skipped — see docs_skips above
+elif [[ "$fast" == 1 ]]; then
   run scripts/test-shell.sh --fast
 else
   run scripts/test-shell.sh
@@ -183,6 +244,17 @@ done
 if [[ "$fail" != 0 ]]; then
   echo "check.sh: FAIL" >&2
   exit 1
+fi
+if [[ "$docs_only" == 1 ]]; then
+  # Repeated at the end, not just the top: a --base run still prints a
+  # screenful of per-check output, and the caveat is worthless if it
+  # scrolled away. Takes precedence over the --fast message below — see the
+  # --base/--fast precedence comment above.
+  echo "check.sh: OK (dev_docs-only — slow suites skipped)"
+  for skipped in "${docs_skips[@]}"; do
+    echo "    skipped: $skipped"
+  done
+  exit 0
 fi
 if [[ "$fast" == 1 ]]; then
   # Repeated at the end, not just the top: a --fast run still prints a screenful

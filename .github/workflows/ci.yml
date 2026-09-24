@@ -3,7 +3,10 @@ name: CI
 # Deterministic, blocking quality gate. The `quality` job runs the exact same
 # entrypoint (scripts/check.sh) that contributors run locally via `just check`,
 # so CI and local can never drift. Behavioral evals are NOT here — they are
-# opt-in and live in evals.yml (manual workflow_dispatch).
+# opt-in and live in evals.yml (manual workflow_dispatch). On a pull_request,
+# `quality` also passes --base HEAD^1 so check.sh itself can skip the slow
+# shell/bats suites on a dev_docs-only PR (see check.sh's own comment); a push
+# to main always runs the full gate, unnarrowed, as the backstop.
 #
 # The `macos` job is deliberately NOT that entrypoint — see its own comment for
 # why running check.sh twice would buy nothing. It is a second HOST, not a
@@ -26,6 +29,11 @@ jobs:
       - uses: actions/checkout@v7
         with:
           submodules: recursive
+          # fetch-depth 2, not 1: a pull_request event checks out the PR merge
+          # ref, whose first parent is the base branch tip (same reasoning as
+          # the `changes` job below), so depth 2 makes HEAD^1..HEAD exactly the
+          # PR's changed files. check.sh passes that range to --base below.
+          fetch-depth: 2
 
       - name: Install uv
         # SHA-pinned despite this job being `contents: read`, for a tracking
@@ -79,7 +87,22 @@ jobs:
       # and drop the CLI from this gate — validate.py already covers version-sync
       # and manifest cross-consistency.
       - name: Deterministic quality gate
-        run: bash scripts/check.sh
+        # A pull_request runs --base HEAD^1 so check.sh can skip the slow
+        # shell/bats suites when the PR's diff is confined to dev_docs/ (the
+        # fetch-depth: 2 above is what makes HEAD^1 the base tip). A push to
+        # main has no PR range to narrow against, so it always runs the full
+        # gate — the backstop that keeps main's coverage complete regardless
+        # of what any individual PR skipped. The branch is on $EVENT_NAME, an
+        # env var, rather than interpolated into the run body, so a crafted
+        # event name can't inject shell.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            bash scripts/check.sh --base HEAD^1
+          else
+            bash scripts/check.sh
+          fi
 
   # Classifies a PR's diff so `macos` can skip one confined to dev_docs/ — the
   # job's runtime is almost all scripts/test-shell.sh, and nothing that suite
