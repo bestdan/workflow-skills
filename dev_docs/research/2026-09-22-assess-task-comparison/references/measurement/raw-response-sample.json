@@ -1,0 +1,51 @@
+{
+  "note": "A shape sample, not evidence: one live request with a throwaway two-question payload, dumped verbatim before the decoder was written (rule 8 of dev_docs/typed-model-calls.md). It shows what a Score answer and a Noul answer are, and what usage reports. Its answers say nothing about any card in the corpus.",
+  "request": {
+    "state": "A task card: Rename the `foo` helper to `bar` across the scripts directory.",
+    "model": "jev-1.13.0",
+    "questions": {
+      "q_score": {
+        "type": "score",
+        "instructions": "How demanding is this work to get right?",
+        "criteria": [
+          "Obvious, mechanical edits",
+          "A normal feature or fix",
+          "Subtle, cross-cutting, or unclear approach"
+        ]
+      },
+      "q_noul": {
+        "type": "noul",
+        "instructions": "Is running the checks honestly the actual deliverable of this work?"
+      }
+    }
+  },
+  "response": {
+    "model": "jev-1.13.0",
+    "answers": {
+      "q_score": {
+        "type": "score",
+        "score": 0.31,
+        "confidence": 0.53,
+        "legend": {
+          "0": "Obvious, mechanical edits",
+          "1": "A normal feature or fix",
+          "2": "Subtle, cross-cutting, or unclear approach"
+        },
+        "probabilities": {
+          "0": 0.77,
+          "1": 0.15,
+          "2": 0.08
+        }
+      },
+      "q_noul": {
+        "type": "noul",
+        "noul": 0.16
+      }
+    },
+    "usage": {
+      "input_tokens": 358,
+      "output_tokens": 36
+    }
+  },
+  "latency_s": 0.4292321049142629
+}
