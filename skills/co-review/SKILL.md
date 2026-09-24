@@ -197,7 +197,7 @@ Verdict handling:
 
 Under `--non-interactive`, `foreign` and `absent` take the same route, restricted to what needs no approval. A `ROUTE:` of `enter-path` or `none` is a **logged hard error that ends the run**, and so is `unknown` in the default disposition — see **Non-interactive mode**.
 
-**A cwd-reset notice is a hard stop, not noise.** If a Bash result reports that the shell's working directory was reset out of the directory this run is writing to (Claude Code appends `Shell cwd was reset to <path>` when a `cd` leaves the session's primary working directory), the run is editing a tree it is not in. That is this section's failure happening live, after the pre-flight passed or was skipped. Say so and stop. Re-prefixing the next command with `cd <path> &&` is not a fix; it is the thirtieth repetition of the same mistake.
+**A cwd-reset notice is a hard stop, not noise.** If a Bash result reports that the shell's working directory was reset out of the directory this run is writing to (Claude Code appends `Shell cwd was reset to <path>` when a `cd` leaves the session's primary working directory), the run is editing a tree it is not in. That is this section's failure happening live, after the pre-flight passed or was skipped. Say so and stop. Re-prefixing the next command with `cd <path> &&` repeats the failure; it does not fix it.
 
 ## Staleness pre-flight
 
