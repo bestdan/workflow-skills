@@ -559,7 +559,7 @@ class CreateStampTests(unittest.TestCase):
     `status:`/`auto:` pair with `encode --human-set` output and hands the result
     to `gh-issue-state.py`; this runs that composition end to end. A card's own
     priority and size must survive it, or `/promote-tasks` backfills defaults
-    over them (#888).
+    over them.
     """
 
     PAIR = "status:0_untriaged,auto:human-review-needed"
