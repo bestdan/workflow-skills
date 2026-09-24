@@ -193,12 +193,29 @@ def _check_cards(where: str, cards: dict, known: set[str]) -> None:
         raise ValueError(f"{where} names cards not in the corpus: {unknown}")
 
 
+def _check_amount(where: str, x: object) -> None:
+    """A latency, token count or price: a finite, non-negative number.
+
+    `json` reads a bare `NaN` or `Infinity` as a float, and either one turns `R`
+    into a value both of `tolerance`'s comparisons pass, granting the top band. A
+    negative count or price can pull one side's dollars under the other's.
+    """
+    if (
+        not isinstance(x, (int, float))
+        or isinstance(x, bool)
+        or not math.isfinite(x)
+        or x < 0
+    ):
+        raise ValueError(f"{where}: must be a finite, non-negative number, got {x!r}")
+
+
 def _check_call(where: str, entry: dict) -> None:
-    if not isinstance(entry.get("latency_s"), (int, float)):
-        raise ValueError(f"{where}: latency_s is required")
+    _check_amount(f"{where} latency_s", entry.get("latency_s"))
     tokens = entry.get("tokens")
     if not isinstance(tokens, dict) or set(tokens) != set(TOKEN_CLASSES):
         raise ValueError(f"{where}: tokens must carry exactly {TOKEN_CLASSES}")
+    for k in TOKEN_CLASSES:
+        _check_amount(f"{where} tokens.{k}", tokens[k])
 
 
 def check_run(run: dict, cards: list[str]) -> None:
@@ -485,6 +502,8 @@ def side_costs(files: list[dict], pricing: dict | None) -> dict:
     if pricing is not None:
         if set(pricing) != set(TOKEN_CLASSES):
             raise ValueError(f"pricing must carry exactly {TOKEN_CLASSES}")
+        for k in TOKEN_CLASSES:
+            _check_amount(f"pricing {k}", pricing[k])
         dollars = statistics.fmean(call_dollars(e["tokens"], pricing) for e in entries)
     return {
         "calls": len(entries),

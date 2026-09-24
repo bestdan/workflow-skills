@@ -676,6 +676,29 @@ class Loading(unittest.TestCase):
             with self.subTest(model=model), self.assertRaises(ValueError):
                 ce.format_analysis(r, CARDS)
 
+    def test_a_bad_amount_is_refused(self):
+        def jev_latency(r, bs, x):
+            r["passes"][0]["cards"]["c0"]["latency_s"] = x
+
+        def inc_latency(r, bs, x):
+            bs[1]["cards"]["c0"]["latency_s"] = x
+
+        def jev_tokens(r, bs, x):
+            r["passes"][0]["cards"]["c0"]["tokens"]["output"] = x
+
+        def jev_price(r, bs, x):
+            # a new dict: the fixture shares PRICE across every test
+            r["pricing_usd_per_mtok"] = {**r["pricing_usd_per_mtok"], "output": x}
+
+        for where in (jev_latency, inc_latency, jev_tokens, jev_price):
+            for x in (float("nan"), float("inf"), -1, True):
+                r = run([self.PANEL] * 3)
+                bs = [baseline(self.PANEL, agent=i) for i in (1, 2, 3)]
+                where(r, bs, x)
+                with self.subTest(where=where.__name__, x=x):
+                    with self.assertRaises(ValueError):
+                        ce.score(r, bs, CARDS)
+
     def test_the_panel_is_three_agents(self):
         with self.assertRaises(ValueError):
             score([self.PANEL] * 2, self.PANEL)
