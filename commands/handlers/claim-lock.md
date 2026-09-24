@@ -191,8 +191,9 @@ acquire first.
 > it assumes is an environment whose `gh` works.
 
 It also runs **one check the election below does not have**, at **two** points,
-and it is load-bearing: `git ls-remote --heads origin "<branch>"`, run **inside
-step 3** between the comment post and the marker write, and again **as part of
+and it is load-bearing: a ref probe for the issue under **any** prefix
+(`gh-issue-claim.py find-task-refs`, not a single-ref `ls-remote` of
+`<branch>`), run **inside step 3** between the comment post and the marker write, and again **as part of
 step 5's re-list**. The election cannot see a ref, so without those probes a batch session
 and a **local** ref-lock session cannot detect each other at all. `do-tasks.md`
 §4 step 6 owns both.
