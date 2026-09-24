@@ -15,6 +15,10 @@ three dimensions, at about 15× lower latency than codex. The verdict in
 stands under its rule. What this adds is that the rule's reference, three runs of
 one model, is a bar no non-Claude rater measured here clears.
 
+Re-asking Jev with the incumbent's own prior (finding 4) closed the two
+unmeasurable yes/no dimensions and left the verdict unchanged. It did not help
+either graded dimension, and it made `complexity` worse.
+
 This record sits beside that verdict and does not replace it. The method record,
 [`../2026-09-22-assess-task-comparison/README.md`](../2026-09-22-assess-task-comparison/README.md),
 allows a revised reading only in that position. Everything here was run after the
@@ -130,7 +134,52 @@ the 2026-09-22 client unchanged, with 3 passes on the same model, cards and stat
 If `complexity` or `verification_criticality` closes to within 5 points, finding 3
 is wrong about where their gap comes from.
 
-_Results: pending the run._
+**Result.** Three passes run on 2026-09-24, after the commit above. The run is
+[`references/measurement/jev-run-v2.json`](references/measurement/jev-run-v2.json),
+scored by the 2026-09-22 scorer unchanged:
+
+```
+O=dev_docs/research/2026-09-22-assess-task-comparison/references
+python3 $O/compare-assess-task.py --score $D/measurement/jev-run-v2.json \
+    $O/measurement/baseline/agent-1.json $O/measurement/baseline/agent-2.json \
+    $O/measurement/baseline/agent-3.json
+```
+
+| dimension                  | panel | `A_const` | Jev v1 | **Jev v2** | v2 misses (L : H) | predicted           |
+| -------------------------- | ----- | --------- | ------ | ---------- | ----------------- | ------------------- |
+| `autonomy`                 | 1.000 | 1.000     | 0.813  | **0.980**  | 0 : 3             | toward the panel: ✔ |
+| `cost_sensitivity`         | 0.987 | 0.953     | 0.793  | **0.947**  | 6 : 1             | not predicted       |
+| `creativity`               | 0.973 | 0.753     | 0.800  | **0.793**  | 3 : 26            | toward the panel: ✘ |
+| `complexity`               | 0.973 | 0.727     | 0.800  | **0.713**  | 0 : 45            | little movement: ✘  |
+| `verification_criticality` | 0.920 | 0.720     | 0.773  | **0.760**  | 33 : 3            | little movement: ✔  |
+| tuple of the three         | 0.880 | 0.420     | 0.491  | **0.420**  | —                 | —                   |
+
+Under the original rule the verdict is unchanged: don't adopt, with no measurable
+dimension matching. `S_jev` is 0.97–1.00 throughout, and latency and dollars are
+unchanged (p95 0.432 s, $0.000065 per packet).
+
+The prediction held for the binaries and failed for both Scores:
+
+- **The prior fixed what it was aimed at on the Nouls.** On `autonomy` and
+  `cost_sensitivity` the in-question prior did what the decoder re-fit in finding 3
+  did, and both are now within about 4 points of the panel.
+- **The prior did not move `creativity`**, although Opus given v1's wording drifted
+  up the same way Jev did. The same sentence steers a Claude model and does not
+  steer Jev's Score.
+- **`complexity` got worse, not stable.** It fell 8.7 points to below its base rate,
+  and every miss is still upward (45 of 45). The two edits were a prior toward the
+  lower levels and a looser "Standard" level, and both should have pulled
+  downward. Jev moved the other way. Which edit did it is not separable from one
+  run.
+- **`verification_criticality` barely moved**, but its misses grew more one-sided
+  (33 : 3 from 24 : 6). The prior points toward "no", which is the side Jev already
+  erred on.
+
+So finding 3's split holds for where the gap on `complexity` and
+`verification_criticality` comes from: a rewording did not close it. It does not
+hold for `creativity`. There, a wording that steers a general model left Jev
+unmoved. How Jev responds to a question's wording is not predictable from how a
+chat model responds to it.
 
 ## What this does not establish
 
