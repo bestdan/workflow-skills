@@ -79,7 +79,9 @@ Any candidate whose number appears in the list is a parent rollup — add it to 
 
 An issue with an open native dependency is **held**, exactly like a `blocked`-labeled one. What counts as an open dependency is defined once, in `commands/handlers/gh-issue.md` → `## List` → "Blocked has two independent sources"; this step applies that definition and does not restate it. The `blocked` label is not a substitute: a repo whose dependencies live only in the graph carries no such label, so the step-3 search term holds nothing there.
 
-Ask about **exactly** the candidates still in play after steps 3 and 3a, by number:
+If steps 3 and 3a left no candidates, skip this step: report and exit, as step 3 does. Never make the call with no `--issue` flag — the helper would fall back to querying the repo's whole `status:2_ready` board, and those issues would reach step 4 as `ready`.
+
+Otherwise ask about **exactly** the candidates still in play after steps 3 and 3a, by number:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-ready.py" --repo "<repo>" \
