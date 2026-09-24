@@ -129,8 +129,8 @@ capability matrix.
 
 ### Worktree lifecycle
 
-The plugin registers three hooks, so an isolated worktree is created and torn
-down without anything being typed: `WorktreeCreate` puts it where
+The plugin registers four hooks. Three of them create and tear down an
+isolated worktree without anything being typed: `WorktreeCreate` puts it where
 [`scripts/worktree-config.sh`](scripts/worktree-config.sh) says worktrees live
 (not inside the repo, which aborts in a repo that versions its own agent
 config), `WorktreeRemove` tears down only what the exiting session itself
@@ -141,6 +141,15 @@ exit fires `SessionEnd` and nothing else, and subagent worktrees are never
 handed to the hook, so both still need a manual run of the same scripts —
 they are plain scripts you can run by hand either way:
 `scripts/worktree-remove.sh <path>` and `scripts/branch-remove.sh <branch>`.
+
+The fourth, a `PreToolUse` guard
+([`scripts/guard-foreign-worktree.py`](scripts/guard-foreign-worktree.py)),
+refuses a write into a worktree of the same repo that the session never
+entered — `git -C <path> commit`, `cd <path> && …`, a redirect, or a heredoc
+naming the path — and points at `EnterWorktree` instead. Reads are allowed.
+It also warns once when write-work starts in a main checkout on its default
+branch. Bypass one command with
+`env WORKFLOW_SKILLS_ALLOW_FOREIGN_WRITE=1 <command>`.
 
 | Skill                                                      | Trigger                                                | What it does                                                                                                                                                             |
 | ---------------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
