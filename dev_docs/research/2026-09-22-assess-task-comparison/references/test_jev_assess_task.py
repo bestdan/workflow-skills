@@ -334,6 +334,48 @@ class EndToEnd(unittest.TestCase):
         self.assertIn("3 passes over 50 cards", out.stdout)
         for dim in jat.DIMENSIONS:
             self.assertRegex(out.stdout, rf"{dim}\s+[\d.]+\s+0/150")
+        # The run carries its price, so the Jev side can clear the dollar floor.
+        self.assertNotIn("unpriced", out.stdout)
+        self.assertRegex(out.stdout, r"(?m)^dollars per task: \$\d+\.\d{6}$")
+
+    def test_the_run_carries_the_pinned_pricing(self):
+        run = jat.run_suite("no-key", CORPUS[:1], 1, QUESTIONS)
+        self.assertEqual(run["pricing_usd_per_mtok"], jat.PRICING_USD_PER_MTOK)
+        self.assertEqual(
+            set(run["pricing_usd_per_mtok"]), set(jat._scorer.TOKEN_CLASSES)
+        )
+
+
+class CommittedRun(unittest.TestCase):
+    def test_run_covers_exactly_the_corpus(self):
+        # A run must cover exactly the committed corpus, or every rate is over a
+        # different denominator than the one the record quotes.
+        path = HERE / "measurement" / "jev-run.json"
+        if not path.exists():
+            self.skipTest("measurement/jev-run.json: the evidence is not committed yet")
+        run = json.loads(path.read_text())
+        ids = [c["id"] for c in CORPUS]
+        self.assertEqual(run["model"], "jev-1.13.0")
+        self.assertEqual(run["cards"], ids)
+        self.assertGreaterEqual(len(run["passes"]), 3)
+        for i, p in enumerate(run["passes"], 1):
+            self.assertEqual(set(p["cards"]), set(ids), f"pass {i}")
+
+    def test_run_carries_the_price_it_was_made_at(self):
+        # Without the map, --analyze reports the Jev side unpriced and the quoted
+        # dollars cannot be reproduced from the committed evidence. The values are
+        # literals, not jat.PRICING_USD_PER_MTOK: that constant is the next run's
+        # price, and this file records the price of the run it holds. Source:
+        # https://docs.typesafe.ai/models, read 2026-09-24 (UTC), for jev-1.13.0.
+        path = HERE / "measurement" / "jev-run.json"
+        if not path.exists():
+            self.skipTest("measurement/jev-run.json: the evidence is not committed yet")
+        pricing = json.loads(path.read_text())["pricing_usd_per_mtok"]
+        self.assertEqual(set(pricing), set(jat._scorer.TOKEN_CLASSES))
+        self.assertEqual(
+            pricing,
+            {"uncached": 0.042, "cache_read": 0.0, "cache_write": 0.0, "output": 0.0},
+        )
 
 
 class Dependencies(unittest.TestCase):
