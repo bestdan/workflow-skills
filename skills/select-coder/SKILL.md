@@ -189,7 +189,9 @@ passes `--non-interactive`, gets a guarantee this skill never prompts:
      that the orchestrator's own check run is mandatory on a Sol packet.
      Substitute `codex:gpt-5.5` when a coder's self-report must be trusted, if
      the account serves it — co-review's codex reviewer found it returning 404
-     (`../co-review/reviewers/codex.md`); otherwise route to `opus`.
+     (`../co-review/reviewers/codex.md`); otherwise route to `opus`. Under
+     `--cao-fleet`, where `opus` is excluded, leave that slot empty and say so
+     in the report — do not fill it with another codex or agy model.
    - devin packets always return unverified → fine for edits, penalize when
      the task's value is in the verification.
    - codex sandbox false-FAILs on home-dir caches → orchestrator re-runs
