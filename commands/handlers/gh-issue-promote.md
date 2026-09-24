@@ -153,7 +153,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-ready.py" --rep
 
 Any scored candidate in the result's `blocked` array is **held**, exactly as step 3b holds one: no transition, no backfill, no comment. It stays un-scored, so the next run re-checks and re-scores it. Keep its `open_blockers` for the step-6 report.
 
-**A failed re-read holds every scored candidate and writes nothing.** Scoring is already spent, but writing on 3b's stale answer would promote exactly the issues this step exists to hold; holding costs only a re-score next run. Report the scores anyway (the spent judgment stays visible), each held with reason `dependency re-read failed`, and lead the step-6 report with the quoted helper error — before the scope line, like the rollup-fallback line. Do not fall back to step 3b's answer.
+**A failed re-read holds every scored candidate and writes nothing.** Scoring is already spent, but writing on 3b's stale answer would promote exactly the issues this step exists to hold; holding costs only a re-score next run. Report the scores anyway, in each held issue's reason (step 6 gives the form), so the spent judgment stays visible, and lead the step-6 report with the quoted helper error — before the scope line, like the rollup-fallback line. Do not fall back to step 3b's answer.
 
 ### 5. Apply
 
@@ -236,9 +236,9 @@ backfilled (3):
   - #151  (est 8)
 ```
 
-On a step 4b re-read failure, the first line is instead `dependency re-read failed: <quoted helper error>`, and every scored candidate appears under `held (N, blocked)` with reason `dependency re-read failed`.
+On a step 4b re-read failure, the first line is instead `dependency re-read failed: <quoted helper error>`, and every scored candidate appears under `held (N, blocked)` with reason `dependency re-read failed (scored HIGH)` or `dependency re-read failed (scored LOW: <failed check>)`.
 
-Skipped issues are reported with their reason — `already scored` or `parent rollup`. Held issues are reported under `held (N, blocked)`, each naming what held it: `blocked by #<n>, …` listing the open blockers step 3b or 4b returned, `blocked label`, or `dependency re-read failed`. Like skipped issues, held ones count toward `M` without being promoted, as on the file path. The 500-cap warning (if it applied) leads the report per above, not a trailing footnote.
+Skipped issues are reported with their reason — `already scored` or `parent rollup`. Held issues are reported under `held (N, blocked)`, each naming what held it: `blocked by #<n>, …` listing the open blockers step 3b or 4b returned, `blocked label`, or `dependency re-read failed (scored …)`. Like skipped issues, held ones count toward `M` without being promoted, as on the file path. The 500-cap warning (if it applied) leads the report per above, not a trailing footnote.
 
 **If step 3a's fallback fired, `parent rollup detection skipped (<reason>)` is the report's first line**, above the scope line — as shown above, quoting the `ROLLUP_REASON` the helper printed. It leads rather than trails because such a run may have promoted a rollup, and a reader who stops before the last line must still see that. **A step 4b re-read failure leads ahead of that**, quoting the helper's error, since it means every scored candidate in the run was held.
 
