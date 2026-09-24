@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.69.4] - 2026-09-24
+
+### Fixes
+
+- drop contradictions in select-coder and plan-with-docs [N/A] (#897) (8c1f502)
+
 ## [2.69.3] - 2026-09-24
 
 ### Fixes
