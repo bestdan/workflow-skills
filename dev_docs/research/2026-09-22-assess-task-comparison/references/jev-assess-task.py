@@ -236,6 +236,11 @@ def ask_card(key: str, case: dict, questions: dict) -> dict:
     Interpretation: `latency_s` is wall clock from before the state is built to after
     the answers are decoded — the record's "profile needed" to "profile in hand".
     State assembly is only string formatting here, because nothing is fetched.
+
+    Interpretation: a served id other than `MODEL` warns rather than aborts. The run's
+    top-level `model` is the pinned id, so a silent mismatch would put a wrong claim
+    in the record; the warning makes it visible, and the per-card `served_model` keeps
+    the evidence without discarding the calls already made.
     """
     start = time.monotonic()
     state = render_state(case["title"], case["card"])
@@ -243,11 +248,17 @@ def ask_card(key: str, case: dict, questions: dict) -> dict:
     answers = decode_answers(data.get("answers"), questions)
     tokens = token_classes(data["usage"])
     latency = time.monotonic() - start
+    served = data.get("model")
+    if served != MODEL:
+        print(
+            f"warning: {case['id']}: asked for {MODEL}, served {served!r}",
+            file=sys.stderr,
+        )
     return {
         "latency_s": latency,
         "tokens": tokens,
         "usage": data["usage"],
-        "served_model": data.get("model"),
+        "served_model": served,
         "answers": answers,
     }
 
@@ -298,6 +309,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--ids", metavar="A,B", help="with --suite: only these card ids")
     p.add_argument("--corpus", default=str(CORPUS))
     args = p.parse_args(argv)
+    # A floor of 1, not 3: `--repeat 1 --ids …` is the cheap smoke run, and the
+    # scorer's `check_run` already refuses a run with fewer than three passes.
+    if args.repeat < 1:
+        p.error("--repeat must be at least 1")
 
     cases = json.loads(Path(args.corpus).read_text())["cases"]
     questions = load_questions()

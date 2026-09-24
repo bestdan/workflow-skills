@@ -11,7 +11,9 @@ a dumped live response (rule 8 of `dev_docs/typed-model-calls.md`).
 from __future__ import annotations
 
 import ast
+import contextlib
 import importlib.util
+import io
 import json
 import re
 import subprocess
@@ -241,6 +243,33 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(set(entry["answers"]), set(jat.DIMENSIONS))
         self.assertEqual(entry["usage"], {"input_tokens": 401, "output_tokens": 60})
         self.assertGreaterEqual(entry["latency_s"], 0)
+
+    def test_a_served_model_mismatch_warns_and_keeps_the_card(self):
+        jat.post = lambda key, payload: {
+            **canned(payload, self.calls),
+            "model": "jev-9.9.9",
+        }
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            entry = jat.ask_card("no-key", CORPUS[0], QUESTIONS)
+        self.assertIn(f"{CORPUS[0]['id']}: asked for jev-1.13.0", err.getvalue())
+        self.assertIn("jev-9.9.9", err.getvalue())
+        self.assertEqual(entry["served_model"], "jev-9.9.9")
+
+    def test_the_pinned_model_is_silent(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            jat.ask_card("no-key", CORPUS[0], QUESTIONS)
+        self.assertEqual(err.getvalue(), "")
+
+    def test_repeat_below_one_is_refused_before_the_key_is_read(self):
+        # p.error exits before main reaches resolve_key, so this needs no key.
+        for bad in ("0", "-1"):
+            with contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as cm:
+                    jat.main(["--suite", "--repeat", bad])
+            self.assertEqual(cm.exception.code, 2, bad)
+        self.assertEqual(self.calls, [])
 
     def test_select_restricts_and_refuses_unknown_ids(self):
         got = jat.select(CORPUS, "issue-277, issue-348")
