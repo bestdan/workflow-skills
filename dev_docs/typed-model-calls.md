@@ -8,19 +8,19 @@ questions and returns typed answers with probabilities.
 No installed user and no CI run needs a key: nothing in `skills/`, `commands/`
 or the blocking gate calls Jev. **Reproducing any measurement below does call it
 and does need one**, resolved as [`auth_key_access.md`](auth_key_access.md)
-describes. Four measurements sit behind that posture. Three ended in a decision
-not to adopt what they measured; the fourth adopted a typed call as a companion
+describes. Five measurements sit behind that posture. Four ended in a decision
+not to adopt what they measured; the fifth adopted a typed call as a companion
 to an existing check rather than a replacement for it, and stayed out of the
 gate. This file is the short version of what they cost to learn.
 
-| Read this when                                                | Go to                                                                                                                                                                                                                  |
-| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| You want to know whether your judgment is Jev-shaped          | [`research/2026-09-17-jev-applications/`](research/2026-09-17-jev-applications/README.md) — seven ranked candidates, the non-fits, the vendor's own rules, and what it is documented to be bad at                      |
-| You are about to build a ladder over Jev signals              | [`research/2026-09-19-jev-tool-routing/`](research/2026-09-19-jev-tool-routing/README.md) — a ladder that scored 58% and why                                                                                           |
-| You are about to ask a model to forecast something from prose | [`research/2026-09-20-predictive-scope/`](research/2026-09-20-predictive-scope/README.md) — a forecast whose wrapper, not the model, put it on its base rate, and three instrument defects the record caught in itself |
-| You are about to replace a check with a cheaper proxy         | [`decisions/2026-09-21-jev-alongside-the-routing-evals.md`](decisions/2026-09-21-jev-alongside-the-routing-evals.md) — 120× faster, agreed on every case, and blind to the failure the check exists to catch           |
-| You want the `assess-task` adoption's shape                   | [`designs/2026-09-18-assess-task-typed-profile.md`](designs/2026-09-18-assess-task-typed-profile.md)                                                                                                                   |
-| You want the key plumbing                                     | [`auth_key_access.md`](auth_key_access.md)                                                                                                                                                                             |
+| Read this when                                                     | Go to                                                                                                                                                                                                                          |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| You want to know whether your judgment is Jev-shaped               | [`research/2026-09-17-jev-applications/`](research/2026-09-17-jev-applications/README.md) — seven ranked candidates, the non-fits, the vendor's own rules, and what it is documented to be bad at                              |
+| You are about to build a ladder over Jev signals                   | [`research/2026-09-19-jev-tool-routing/`](research/2026-09-19-jev-tool-routing/README.md) — a ladder that scored 58% and why                                                                                                   |
+| You are about to ask a model to forecast something from prose      | [`research/2026-09-20-predictive-scope/`](research/2026-09-20-predictive-scope/README.md) — a forecast whose wrapper, not the model, put it on its base rate, and three instrument defects the record caught in itself         |
+| You are about to replace a check with a cheaper proxy              | [`decisions/2026-09-21-jev-alongside-the-routing-evals.md`](decisions/2026-09-21-jev-alongside-the-routing-evals.md) — 120× faster, agreed on every case, and blind to the failure the check exists to catch                   |
+| You are about to swap a model judgment for a steadier, cheaper one | [`decisions/2026-09-24-assess-task-stays-a-subagent.md`](decisions/2026-09-24-assess-task-stays-a-subagent.md) — 10× faster, 780× cheaper, as self-consistent as the subagent, and different from it in a consistent direction |
+| You want the key plumbing                                          | [`auth_key_access.md`](auth_key_access.md)                                                                                                                                                                                     |
 
 ## The rule, when you just need the answer
 
@@ -39,7 +39,7 @@ code's, not an LLM's. Retrieval only disqualifies the typed call, which cannot
 fetch anything — and it is not a general veto, because that is precisely the flat
 signal that misrouted 10 of 12 code cases in rule 3 below.
 
-## The eleven that cost us something
+## The twelve that cost us something
 
 Each of these was learned by running it, not by reading the vendor's docs. The
 vendor's own rules — one judgment per question, decompose and weight in code,
@@ -133,6 +133,16 @@ note under **Using it well**, and are not repeated here.
     that fired **nothing** in a real session, which a Choice over the roster
     cannot observe at all. Before swapping a check for a proxy, name the
     failure the check exists to catch and show the proxy detecting it.
+
+12. **Stability is not agreement.** A typed call can be as self-consistent as
+    the incumbent and still differ from it in a consistent direction. On
+    `assess-task`, Jev's passes agreed with each other as often as the panel's
+    runs did, or more, yet agreed with the panel 15–17 points less often than
+    the panel's runs agreed with each other.
+    Score agreement with the incumbent, not self-agreement, and check which way
+    the misses fall: 32 of 32 read `complexity` higher, and a one-way error on a
+    label trigger moves routing systematically, where noise at the same rate
+    would not.
 
 ## Before you open the PR
 

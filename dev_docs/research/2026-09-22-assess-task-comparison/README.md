@@ -1,6 +1,7 @@
 ---
 created: 2026-09-22
 question: "Does a typed call profile a task as well as the assess-task subagent it would replace, and are its latency and dollar gains large enough to pay for any difference?"
+feeds: ../../decisions/2026-09-24-assess-task-stays-a-subagent.md
 ---
 
 # `assess-task`: the typed call against the subagent — method and decision rule (2026-09-22)
