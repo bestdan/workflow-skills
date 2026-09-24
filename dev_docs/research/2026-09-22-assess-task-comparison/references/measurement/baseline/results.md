@@ -126,9 +126,13 @@ Some of this bears on #815 but is not decided here:
 - **`R` = 10.79 lands in the top band, but only just.** An incumbent p95 below
   4.65 s (10 × Jev's 0.465 s) would drop it to the 0-point band. The CLI's ~1 s startup is
   part of the 5.01 s, which is why the stand-in's shape (Setup, above) matters.
-- **Stability is the incumbent's.** The panel is at least as steady as Jev's own
-  passes on every measurable dimension except `verification_criticality`
-  (A_panel 0.920 against S_jev 1.000). The routing record found the same thing.
+- **Stability does not separate the two sides; agreement does.** Jev's passes are
+  as steady as the panel or steadier on all three measurable dimensions:
+  `complexity` ties at 0.973, `creativity` is S_jev 0.987 against A_panel 0.973,
+  and `verification_criticality` is 1.000 against 0.920. The whole tuple is S_jev
+  0.960 against A_panel 0.880. Where Jev falls short is agreement with the panel
+  (A_jev 0.77–0.80 against A_panel 0.92–0.97). The routing record found the
+  opposite on stability: there, the agent was the more stable side.
 - **Jev's misses have a direction.** It errs high on `complexity` in 32 of 32
   pooled misses, on `creativity` in 25 of 28, and on `autonomy` in 28 of 28. It
   errs low on `verification_criticality` in 24 of 30. That is gate (d)'s failure

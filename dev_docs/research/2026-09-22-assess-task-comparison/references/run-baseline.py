@@ -4,8 +4,8 @@
 An artifact of `dev_docs/research/2026-09-22-assess-task-comparison/`, not standing
 tooling. It is dev-only: never invoked by a skill or command at runtime, never part
 of `just check`. It spends real model calls on the operator's own `claude` login —
-one fresh `claude -p` process per card, sequentially — so a full run is 50 calls
-against the pinned model, not free and not fast.
+one fresh `claude -p` process per card, sequentially — so a clean run is 50 calls
+against the pinned model, and up to 150 with retries: not free and not fast.
 
 Run by path, from the repository root, once per agent (#814 asks for three
 independent runs):
