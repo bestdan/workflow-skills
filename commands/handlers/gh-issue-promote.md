@@ -152,6 +152,8 @@ The consequence for this flow is that a transition is a **read-modify-write on t
 gh issue view <n> --json labels --jq '[.labels[].name]' [--repo <repo>]
 ```
 
+If that read shows `blocked`, the issue was labelled after step 3 selected it: **hold** it with reason `blocked label` and write nothing — no transition, no backfill, no comment — exactly as step 3b holds a dependency-blocked one. The dependency graph is not re-read here; step 3b's answer stands for the rest of the run.
+
 Keep that issue's `prio:` and `est:` labels — **or, where step 4 backfilled one, the names `encode` printed** — drop its `status:`/`auto:` rungs, and append the new pair. An issue with `prio:1,est:3` promoted HIGH is written as `status:2_ready,auto:eligible,prio:1,est:3`; omitting `prio:1,est:3` from the `--labels` value would delete them. An issue that carried neither and was backfilled to medium/2 is written as `status:2_ready,auto:eligible,prio:2,est:2`. This is why the backfill costs no extra write: the `--labels` value is being composed anyway, and `prio:`/`est:` are two more entries in it.
 
 A backfilled label carries no marker distinguishing it from a human's, by design — `task-fill.md`'s "trusted downstream" rule. The provenance is the issue comment below, not the label.

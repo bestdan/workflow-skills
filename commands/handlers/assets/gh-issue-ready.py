@@ -26,7 +26,7 @@ against `3`) and the reason string is byte-identical to `_linear_rank.py`'s, so
 one board reads the same on both handlers.
 
 **Omitting the flag means no size gate.** Two callers are entitled to omit it.
-The first is a claim whose human already granted the override through
+The first is a claim run whose human already granted the override through
 `commands/handlers/attendedness.md`. The second is the promote hold
 (`gh-issue-promote.md` step 3b), which asks only the dependency question: promotion
 has no size gate, so there is no bound to apply. A `max-estimate=` run override is
@@ -385,7 +385,8 @@ def main(argv=None):
         help=(
             "drop candidates whose `est:` label is N or higher (EXCLUSIVE bound, "
             "matching linear-rank.py). Omitted means no size gate at all — only "
-            "for a caller whose human granted the override; see gh-issue-claim.md"
+            "for a claim whose human granted the override (gh-issue-claim.md) or "
+            "the promote dependency hold (gh-issue-promote.md step 3b)"
         ),
     )
     parser.add_argument("--labels-file", type=Path, default=DEFAULT_LABELS_FILE)
