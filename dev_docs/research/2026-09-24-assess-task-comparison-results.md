@@ -208,7 +208,7 @@ revised verdict to report beside this one.
   have changed the verdict (finding 6).
 - **Anything about the per-packet sub-tasks `orchestrate-coders` routes.** The corpus
   is 50 of this repository's issues, as the method record warns. The packets where
-  `assess-task` spends most of its spawns are shorter and narrower, and neither
+  `assess-task` spends most of its spawns are a different population, and neither
   side's agreement or direction was measured on them.
 - **The production latency on either side.** The incumbent is a `claude -p` stand-in
   for an `Agent`-tool spawn. It pays a CLI start a spawn may not pay, and it lacks the

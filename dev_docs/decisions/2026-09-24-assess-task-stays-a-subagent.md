@@ -58,7 +58,8 @@ separate change, and nobody has proposed it. The predictive-scope decision and
 stand on their own. The decision records the design's Graduation list asked for
 are not written, because their substance is already live guidance. "Jev is a fast path, never a requirement" is **Before
 you open the PR** in [`../typed-model-calls.md`](../typed-model-calls.md).
-Calibration before any threshold, and `confidence` as a tripwire, are its rule 6.
+`confidence` as a tripwire, never a threshold, is its rule 6, and a threshold fitted
+to the set it is scored on is its rule 4.
 Sampling a gating number more than once is its rule 5.
 
 ## Consequences
@@ -68,7 +69,8 @@ Sampling a gating number more than once is its rule 5.
   `verification-sensitive`, in the same direction every time.
 - **Good, because** no installed user gets a second code path, a fallback to keep
   working, or a vendor dependency, and the gate stays keyless.
-- **Bad, because** each packet still pays about 3.8 s median and about $0.047 cold,
+- **Bad, because** each packet still pays about 3.8 s median and about $0.047 cold, as
+  measured on the `claude -p` stand-in,
   which the typed call would have cut roughly tenfold and 780-fold.
 - **Bad, because** the reference is the incumbent, not ground truth, so this does
   not show that the subagent reads these cards better. It shows only that the swap
@@ -77,7 +79,7 @@ Sampling a gating number more than once is its rule 5.
 ## Revisit when
 
 - **A Jev version ships whose misses lose their direction, or shrink to within 5
-  points of the panel.** Re-running costs one pass of the 2026-09-22 record's
+  points of the panel.** Re-running costs three passes (`--repeat 3`) of the 2026-09-22 record's
   `jev-assess-task.py` over the committed corpus, then the offline
   `compare-assess-task.py --score` against the committed panel, under the same fixed
   rule.
