@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.67.6] - 2026-09-24
+
+### Fixes
+
+- hold gh-issue candidates on open dependencies [#749] (#867) (632c773)
+
 ## [2.67.5] - 2026-09-23
 
 ### Fixes
