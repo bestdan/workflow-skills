@@ -266,6 +266,76 @@ class CandidateScopedTests(unittest.TestCase):
         self.assertEqual(sorted(i["number"] for i in result["ready"]), [7, 9])
 
 
+class PromoteHoldTests(unittest.TestCase):
+    """The call gh-issue-promote.md step 3b makes: bare numbers, no size gate.
+
+    Its candidates are un-scored issues, so the verdict must not depend on the
+    `status:` rung, and promotion has no size gate, so an issue's `est:` must
+    neither be read nor drop it.
+    """
+
+    def setUp(self):
+        self._orig_run_gh = gh_issue_ready.run_gh
+        self.addCleanup(setattr, gh_issue_ready, "run_gh", self._orig_run_gh)
+
+    def _run(self, repo, numbers):
+        gh_issue_ready.run_gh = repo.run_gh
+        argv = ["--repo", "o/n", "--labels-file", str(LABELS_FILE), "--json"]
+        for n in numbers:
+            argv += ["--issue", str(n)]
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = gh_issue_ready.main(argv)
+        self.assertEqual(code, 0)
+        return json.loads(out.getvalue())
+
+    def test_open_blocker_holds_and_names_the_blocker(self):
+        repo = FakeRepo(
+            {693: "a", 707: "b"},
+            blocked_by={693: [(694, "open")], 707: [(708, "open"), (709, "open")]},
+        )
+        result = self._run(repo, [693, 707])
+        self.assertEqual(result["ready"], [])
+        self.assertEqual(
+            {i["number"]: i["open_blockers"] for i in result["blocked"]},
+            {693: [694], 707: [708, 709]},
+        )
+
+    def test_all_blockers_closed_is_not_held(self):
+        repo = FakeRepo({5: "a"}, blocked_by={5: [(4, "closed"), (3, "closed")]})
+        result = self._run(repo, [5])
+        self.assertEqual([i["number"] for i in result["ready"]], [5])
+        self.assertEqual(result["blocked"], [])
+
+    def test_mixed_blockers_hold_on_the_open_one_only(self):
+        repo = FakeRepo({5: "a"}, blocked_by={5: [(4, "closed"), (6, "open")]})
+        result = self._run(repo, [5])
+        self.assertEqual(result["blocked"][0]["open_blockers"], [6])
+
+    def test_reads_only_the_graph_and_writes_nothing(self):
+        # An over-ceiling estimate is on the issue; without --max-estimate it is
+        # neither read nor a reason to drop, so only blocked_by reads happen.
+        repo = FakeRepo({5: "a", 6: "b"}, estimates={5: 13})
+        result = self._run(repo, [5, 6])
+        self.assertEqual(sorted(i["number"] for i in result["ready"]), [5, 6])
+        self.assertEqual(result["oversized"], [])
+        self.assertEqual([c[0] for c in repo.calls], ["api", "api"])
+        self.assertEqual(repo.mutating_calls(), [])
+
+    def test_failed_graph_read_exits_nonzero_rather_than_reporting_ready(self):
+        def failing(args):
+            return 1, "", "HTTP 502"
+
+        gh_issue_ready.run_gh = failing
+        with self.assertRaises(SystemExit) as ctx:
+            with contextlib.redirect_stdout(io.StringIO()):
+                gh_issue_ready.main(
+                    ["--repo", "o/n", "--labels-file", str(LABELS_FILE)]
+                    + ["--issue", "5", "--json"]
+                )
+        self.assertNotIn(ctx.exception.code, (0, None))
+
+
 class EstimateGateTests(unittest.TestCase):
     """The claim-time size gate (bestdan/workflow-skills#746).
 

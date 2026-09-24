@@ -25,11 +25,13 @@ bestdan/workflow-skills#746 names. The bound is EXCLUSIVE (`est:3` fails
 against `3`) and the reason string is byte-identical to `_linear_rank.py`'s, so
 one board reads the same on both handlers.
 
-**Omitting the flag means no size gate**, and the only caller entitled to omit it
-is one whose human already granted the override through
-`commands/handlers/attendedness.md`. A `max-estimate=` run override is NOT such a
-caller: it replaces the bound, so it is passed here as a different `--max-estimate`
-value, never by dropping the flag. The claim flow otherwise always passes the
+**Omitting the flag means no size gate.** Two callers are entitled to omit it.
+The first is a claim run whose human already granted the override through
+`commands/handlers/attendedness.md`. The second is the promote hold
+(`gh-issue-promote.md` step 3b), which asks only the dependency question: promotion
+has no size gate, so there is no bound to apply. A `max-estimate=` run override is
+NOT such a caller: it replaces the bound, so it is passed here as a different
+`--max-estimate` value, never by dropping the flag. The claim flow otherwise always passes the
 resolved bound and offers the override on the drop, because "is a human watching?"
 is not observable and this script must not guess it (attendedness.md, "Do not
 classify the run").
@@ -55,7 +57,9 @@ board query, and re-deriving them here through a second bounded list query
 could silently drop one — `--limit` is applied by the API before anything
 local runs, so a missing verdict is indistinguishable from a ready one.
 Passing the numbers removes that window. There is no title in this mode (no
-list call was made), so each issue reports an empty title.
+list call was made), so each issue reports an empty title. Nor is the
+`status:2_ready` label checked, which is what lets the promote hold ask about
+un-scored issues: in this mode `ready` means only "no open blocker".
 """
 
 import argparse
@@ -381,7 +385,8 @@ def main(argv=None):
         help=(
             "drop candidates whose `est:` label is N or higher (EXCLUSIVE bound, "
             "matching linear-rank.py). Omitted means no size gate at all — only "
-            "for a caller whose human granted the override; see gh-issue-claim.md"
+            "for a claim whose human granted the override (gh-issue-claim.md) or "
+            "the promote dependency hold (gh-issue-promote.md step 3b)"
         ),
     )
     parser.add_argument("--labels-file", type=Path, default=DEFAULT_LABELS_FILE)
