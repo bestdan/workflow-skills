@@ -38,7 +38,9 @@ says what implements it.
 
 Missing or unset → **`medium`**. A flat static default is correct here because
 priority only **orders** work; it gates nothing. **Never auto-set `urgent`**:
-escalation is a human's call, and the promoter has no signal for it.
+escalation is a human's call, and the promoter has no signal for it. A person's
+`urgent` is not an auto-set: a drafted or plan task that says `urgent` keeps it
+at create (the gh-issue create flow encodes it with `--human-set`).
 
 The shared vocabulary is symbolic — `urgent` / `high` / `medium` / `low` / `none`
 — and every adapter encodes it on the way out. **Never carry a bare integer
@@ -205,7 +207,10 @@ reads it, and `scripts/test_gh_issue_backfill.py` pins the mapping in both
 directions so a Linear integer leaking in fails the gate instead of inverting the
 board.
 
-Two call shapes, because the write differs and the judgment does not:
+Two call shapes for the backfill, because the write differs and the judgment
+does not. A third caller is not a backfill at all: `gh-issue.md` step 4 encodes a
+drafted task's own `priority`/`size` into the new issue's initial stamp, so a card
+that arrives with both fields leaves this spec nothing to fill.
 
 - **On a transition** (the promote flow), the write is free. `gh-issue-state.py`
   already takes the **complete** managed label set in one full-set PATCH, so a

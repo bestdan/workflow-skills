@@ -83,12 +83,16 @@ gh-issue:
    Then stamp the new issue's initial state. Take `<n>` from the trailing path segment of the URL `gh issue create` printed, and `<repo>` from `gh-issue.repo` — the writer's `--repo` is required, so when the key is unset resolve it with `gh repo view --json nameWithOwner --jq .nameWithOwner` rather than omitting the flag:
 
    ```bash
+   fields=$(python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-backfill.py" \
+     encode --human-set [--priority <priority>] [--estimate <size>])
    python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-state.py" \
      --repo "<repo>" --issue <n> \
-     --labels status:0_untriaged,auto:human-review-needed --apply
+     --labels "status:0_untriaged,auto:human-review-needed,$fields" --apply
    ```
 
-   If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/gh-issue-state.py`. The write replaces the whole label set but carries forward everything outside the four managed namespaces, so the configured `gh-issue.labels` (`follow-up` and friends) survive it — see `commands/handlers/assets/labels.yml` for the vocabulary and its invariants.
+   `encode` turns the drafted task's `priority` and `size` into its `prio:`/`est:` labels, so a vetted value lands on the issue instead of being backfilled over by `/promote-tasks` later. Pass each flag only when the drafted task carries that field. A missing field adds no label, and the promoter backfills it as usual. `--human-set` is what lets a drafted `urgent` through as `prio:0`: the never-auto-set-`urgent` rule is about the promoter guessing, and a drafted task's priority is a person's call (`commands/handlers/task-fill.md`). If `encode` refuses (exit `2`: an unknown priority, or a size off the ladder), stamp the pair alone and name the dropped field in the step-5 report, because the issue already exists.
+
+   If `$CLAUDE_PLUGIN_ROOT` is unset and a path doesn't resolve, Glob `**/handlers/assets/<name>.py`. The write replaces the whole label set but carries forward everything outside the four managed namespaces, so the configured `gh-issue.labels` (`follow-up` and friends) survive it — see `commands/handlers/assets/labels.yml` for the vocabulary and its invariants.
 
    **The pair is the point.** `status:` says where the work is; `auto:` says whether automation may take it. They are independent axes, and a fresh issue is neither scored nor automation's to touch, so it gets a rung on each. That is what keeps an unscored issue _visibly_ unscored: it renders in `new`, it is exactly what `/promote-tasks` selects, and it appears in no automation queue. One conflated label could not say both, so it would have to default the issue into one of those queues by omission.
 

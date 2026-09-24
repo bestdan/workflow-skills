@@ -28,7 +28,9 @@ different amounts of it:
   This is the half `gh-issue-promote.md` needs: it is composing a full `--labels`
   value for its transition anyway, so its backfill must stay an argument change
   to that one PATCH rather than a second write. It takes the names from here
-  instead of re-deriving the table.
+  instead of re-deriving the table. The create flow (`gh-issue.md` step 4) uses
+  it too, with `--human-set`, to carry a drafted task's own priority and size
+  onto the issue's initial stamp.
 - `scan` — open issues MISSING `prio:` or `est:` at any `status:` rung, minus the
   held ones, with the body text the caller needs to estimate from.
 - `apply` — write those two labels and nothing else.
@@ -53,6 +55,7 @@ a handful of cards; at 33 it is notification noise.
 
 Usage:
   python3 gh-issue-backfill.py encode --priority medium --estimate 8
+  python3 gh-issue-backfill.py encode --human-set --priority urgent --estimate 2
   python3 gh-issue-backfill.py scan --repo owner/name --json
   python3 gh-issue-backfill.py apply --repo owner/name --plan plan.json --apply
 
@@ -135,17 +138,22 @@ def estimate_ladder(groups):
     return sorted(int(value) for value in groups.get("est", []))
 
 
-def encode(groups, priority=None, estimate=None):
+def encode(groups, priority=None, estimate=None, human_set=False):
     """The `prio:`/`est:` labels for one symbolic priority and one estimate.
 
     Returns (labels, notes). `notes` names what was deliberately NOT encoded, so
     a caller can report it: a `none` priority and an over-ladder estimate both
     mean "no label", and the two are not the same fact.
+
+    `human_set` says the values came from a person rather than a backfill guess
+    (a task card a human drafted or vetted). It lifts only the `urgent` refusal:
+    that rule stops the promoter escalating on no signal, and a human's
+    `urgent` is exactly the signal it lacks.
     """
     labels, notes = [], []
 
     if priority is not None:
-        if priority == "urgent":
+        if priority == "urgent" and not human_set:
             # task-fill.md: escalation is a human's call and the promoter has no
             # signal for it. Refusing beats silently downgrading to `high`,
             # which would look like a judgment the caller made.
@@ -537,6 +545,11 @@ def main(argv=None):
         "--priority", help=f"one of {', '.join((*PRIORITY_RANKS, PRIORITY_NONE))}"
     )
     p_encode.add_argument("--estimate", type=int)
+    p_encode.add_argument(
+        "--human-set",
+        action="store_true",
+        help="the values are a human's (a drafted task card), so `urgent` is allowed",
+    )
     p_encode.add_argument("--labels-file", type=Path, default=DEFAULT_LABELS_FILE)
     p_encode.add_argument("--json", action="store_true", dest="as_json")
 
@@ -564,7 +577,9 @@ def main(argv=None):
     if args.command == "encode":
         groups, _colors = load_vocabulary(args.labels_file)
         try:
-            labels, notes = encode(groups, args.priority, args.estimate)
+            labels, notes = encode(
+                groups, args.priority, args.estimate, human_set=args.human_set
+            )
         except BackfillError as exc:
             print(f"refusing to encode: {exc}", file=sys.stderr)
             return 2

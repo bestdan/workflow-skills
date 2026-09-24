@@ -449,6 +449,12 @@ Walk the tasks in topological order. For each:
    `--label "plan:<name>"` (fallback path), alongside any configured
    `gh-issue.labels`.
 
+   **Carry the card's `priority` and `size` into that step's initial stamp.**
+   `gh-issue.md` step 4 encodes them as `prio:`/`est:` next to the
+   `status:`/`auto:` pair. A card without one of them gets no label for it, and
+   `/promote-tasks` backfills it. `urgent` passes through as `prio:0`, because a
+   plan card is a person's call rather than a backfill guess.
+
    **Pass the TITLE here, not the resolved number.** `gh issue create` and
    `gh issue edit` document `--milestone` as "by name" and look the title up, so
    `--milestone 8` exits 1 with `could not add to milestone '8': '8' not found` —
