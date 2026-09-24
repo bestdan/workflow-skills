@@ -202,6 +202,9 @@ def _check_call(where: str, entry: dict) -> None:
 
 
 def check_run(run: dict, cards: list[str]) -> None:
+    model = run.get("model")
+    if not isinstance(model, str) or not model:
+        raise ValueError("the run must name its pinned Jev model id")
     passes = run.get("passes", [])
     if len(passes) < MIN_JEV_PASSES:
         raise ValueError(
@@ -215,15 +218,25 @@ def check_run(run: dict, cards: list[str]) -> None:
 
 
 def check_baselines(baselines: list[dict], cards: list[str]) -> None:
-    """Exactly three agents, one pinned model among them.
+    """Exactly three agents, each once, one pinned model among them.
 
     Interpretation: "a pinned model version, never a floating alias" cannot be read
     off an id string, so this checks what can be checked: every file names a model,
     and all three name the same one.
+
+    The agent ids must be exactly 1, 2 and 3. One file passed three times would
+    agree with itself on every card, so A_panel would read 1 and the whole table
+    would describe one run, not a panel.
     """
     if len(baselines) != PANEL_AGENTS:
         raise ValueError(
             f"{len(baselines)} baseline files; the panel is {PANEL_AGENTS} agents"
+        )
+    ids = [b.get("agent") for b in baselines]
+    if sorted(ids, key=str) != list(range(1, PANEL_AGENTS + 1)):
+        raise ValueError(
+            f"the panel's agent ids are {ids}; they must be 1 to {PANEL_AGENTS}, "
+            "each once"
         )
     models = {b.get("model") for b in baselines}
     if None in models or len(models) != 1:
@@ -623,10 +636,15 @@ def build_sheet(
     return sheet, {"seed": seed, "items": key_items}
 
 
-def read_adjudication(sheet: dict, key: dict) -> dict[str, dict[str, str | None]]:
-    """A filled sheet and its key -> dimension -> card -> "jev" | "panel" | "both",
-    or None where the pick is still blank."""
-    out: dict[str, dict[str, str | None]] = {}
+def read_adjudication(sheet: dict, key: dict) -> dict[str, dict[str, dict]]:
+    """A filled sheet and its key -> dimension -> card -> {"verdict", "jev", "panel"}.
+
+    `verdict` is "jev", "panel" or "both", or None where the pick is still blank.
+    `jev` and `panel` are the two answers the pick was made on, recovered from the
+    sheet's A and B through the key, so `score` can refuse a sheet whose answers no
+    longer match the run being scored.
+    """
+    out: dict[str, dict[str, dict]] = {}
     by_item = {str(i["item"]): i for i in sheet["items"]}
     if set(by_item) != set(key["items"]):
         raise ValueError("the sheet and the key hold different items")
@@ -643,7 +661,14 @@ def read_adjudication(sheet: dict, key: dict) -> dict[str, dict[str, str | None]
             verdict = "jev" if pick == k["jev"] else "panel"
         else:
             raise ValueError(f"item {n}: pick must be A, B or both, got {pick!r}")
-        out.setdefault(k["dimension"], {})[k["card"]] = verdict
+        if k["jev"] not in ("A", "B"):
+            raise ValueError(f"item {n}: the key's jev side must be A or B")
+        panel_side = "B" if k["jev"] == "A" else "A"
+        out.setdefault(k["dimension"], {})[k["card"]] = {
+            "verdict": verdict,
+            "jev": item[k["jev"]],
+            "panel": item[panel_side],
+        }
     return out
 
 
@@ -654,7 +679,7 @@ def score(
     run: dict,
     baselines: list[dict],
     cards: list[str],
-    adjudication: dict[str, dict[str, str | None]] | None = None,
+    adjudication: dict[str, dict[str, dict]] | None = None,
     can_come_off: set[str] | None = None,
 ) -> dict:
     """The whole rule: floors, tolerance, per-dimension gates, override, whole
@@ -689,18 +714,29 @@ def score(
         if not res["eligible"] or not adjudication or d not in adjudication:
             continue
         picks = adjudication[d]
-        expected = {c for c, _, _ in res["adjudication_cards"]}
-        if set(picks) != expected:
+        expected = {c: (j, m) for c, j, m in res["adjudication_cards"]}
+        if set(picks) != set(expected):
             raise ValueError(
                 f"{d}: the adjudication covers {sorted(picks)} but the cards to "
                 f"adjudicate are {sorted(expected)}; the sheet is stale"
             )
-        if any(v is None for v in picks.values()):
+        # A pick judges a pair of answers, not a card: if either answer moved since
+        # the sheet was made, the pick says nothing about the pair now being scored.
+        moved = sorted(
+            c for c, p in picks.items() if (p["jev"], p["panel"]) != expected[c]
+        )
+        if moved:
+            raise ValueError(
+                f"{d}: the answers on {moved} differ from the ones the sheet was "
+                "filled against; the sheet is stale"
+            )
+        verdicts = [p["verdict"] for p in picks.values()]
+        if any(v is None for v in verdicts):
             # Interpretation: the rule is over "every card where Jev's answer
             # differs", so a partly filled sheet moves nothing.
             res["override"] = {"incomplete": True, "passes": False}
             continue
-        res["override"] = apply_override(list(picks.values()))
+        res["override"] = apply_override(verdicts)
         if res["override"]["passes"]:
             res["gates"]["a"] = True
             res["matches"] = all(res["gates"].values())

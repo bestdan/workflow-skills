@@ -59,9 +59,9 @@ def profiles(**columns: list) -> dict[str, dict]:
     return out
 
 
-def baseline(profs: dict, latency=20.0, model="claude-pinned-20260922", **kw):
+def baseline(profs: dict, latency=20.0, model="claude-pinned-20260922", agent=1, **kw):
     return {
-        "agent": 1,
+        "agent": agent,
         "model": model,
         "run_date": "2026-09-22",
         "pricing_usd_per_mtok": kw.get("pricing", PRICE),
@@ -107,7 +107,10 @@ def score(panel_profs, jev_profs, **kw):
     passes = jev_profs if isinstance(jev_profs, list) else [jev_profs] * 3
     return ce.score(
         run(passes, **kw.get("run_kw", {})),
-        [baseline(a, **kw.get("base_kw", {})) for a in agents],
+        [
+            baseline(a, agent=i, **kw.get("base_kw", {}))
+            for i, a in enumerate(agents, 1)
+        ],
         CARDS,
         kw.get("adjudication"),
         kw.get("can_come_off"),
@@ -538,6 +541,16 @@ class Verdict(unittest.TestCase):
 # --------------------------------------------------------------- adjudication
 
 
+def picks(verdicts, jev="mechanical", panel="standard"):
+    """An adjudication as read_adjudication returns it, every pick made on the
+    same (jev, panel) pair."""
+    return {
+        "complexity": {
+            c: {"verdict": v, "jev": jev, "panel": panel} for c, v in verdicts.items()
+        }
+    }
+
+
 class Adjudication(unittest.TestCase):
     PANEL = profiles(complexity=SPLIT)
     # Jev says `mechanical` on c0 and c1: A_jev 0.90 < 0.95, every other gate holds
@@ -563,7 +576,7 @@ class Adjudication(unittest.TestCase):
         self.assertEqual(rep["verdict"]["verdict"], "don't adopt")
 
     def test_a_passing_adjudication_flips_gate_a(self):
-        adj = {"complexity": {"c0": "jev", "c1": "panel"}}
+        adj = picks({"c0": "jev", "c1": "panel"})
         rep = score(self.PANEL, self.JEV, adjudication=adj)
         res = rep["dimensions"]["complexity"]
         self.assertTrue(res["override"]["passes"])
@@ -571,24 +584,34 @@ class Adjudication(unittest.TestCase):
         self.assertEqual(rep["verdict"]["verdict"], "adopt")
 
     def test_abstentions_do_not(self):
-        adj = {"complexity": {"c0": "both", "c1": "both"}}
+        adj = picks({"c0": "both", "c1": "both"})
         rep = score(self.PANEL, self.JEV, adjudication=adj)
         self.assertFalse(rep["dimensions"]["complexity"]["gates"]["a"])
 
     def test_an_incomplete_sheet_moves_nothing(self):
-        adj = {"complexity": {"c0": "jev", "c1": None}}
+        adj = picks({"c0": "jev", "c1": None})
         rep = score(self.PANEL, self.JEV, adjudication=adj)
         self.assertTrue(rep["dimensions"]["complexity"]["override"]["incomplete"])
         self.assertFalse(rep["dimensions"]["complexity"]["gates"]["a"])
 
     def test_a_stale_sheet_is_refused(self):
         with self.assertRaises(ValueError):
-            score(self.PANEL, self.JEV, adjudication={"complexity": {"c0": "jev"}})
+            score(self.PANEL, self.JEV, adjudication=picks({"c0": "jev"}))
+
+    def test_a_sheet_filled_against_other_answers_is_refused(self):
+        # same two cards, but the sheet judged `hard` where this run says `mechanical`
+        adj = picks({"c0": "jev", "c1": "jev"}, jev="hard")
+        with self.assertRaises(ValueError):
+            score(self.PANEL, self.JEV, adjudication=adj)
+        # and a moved panel answer is refused the same way
+        adj = picks({"c0": "jev", "c1": "jev"}, panel="hard")
+        with self.assertRaises(ValueError):
+            score(self.PANEL, self.JEV, adjudication=adj)
 
     def test_an_ineligible_dimension_is_not_overridden(self):
         # six cards off, all lower: fails (a) and (d)
         jev = profiles(complexity=["mechanical"] * 6 + SPLIT[6:])
-        adj = {"complexity": {f"c{i}": "jev" for i in range(6)}}
+        adj = picks({f"c{i}": "jev" for i in range(6)})
         rep = score(self.PANEL, jev, adjudication=adj)
         res = rep["dimensions"]["complexity"]
         self.assertFalse(res["eligible"])
@@ -622,7 +645,12 @@ class Adjudication(unittest.TestCase):
             it["pick"] = jev_side if it["card"] == "c0" else "both"
         self.assertEqual(
             ce.read_adjudication(sheet, key),
-            {"complexity": {"c0": "jev"}, "autonomy": {"c1": "both"}},
+            {
+                "complexity": {
+                    "c0": {"verdict": "jev", "jev": "hard", "panel": "standard"}
+                },
+                "autonomy": {"c1": {"verdict": "both", "jev": "a", "panel": "b"}},
+            },
         )
         sheet["items"][0]["pick"] = "C"
         with self.assertRaises(ValueError):
@@ -639,20 +667,37 @@ class Loading(unittest.TestCase):
         with self.assertRaises(ValueError):
             score(self.PANEL, [self.PANEL] * 2)
 
+    def test_a_run_with_no_model_is_refused(self):
+        for model in (None, ""):
+            r = run([self.PANEL] * 3)
+            r["model"] = model
+            with self.subTest(model=model), self.assertRaises(ValueError):
+                ce.check_run(r, CARDS)
+            with self.subTest(model=model), self.assertRaises(ValueError):
+                ce.format_analysis(r, CARDS)
+
     def test_the_panel_is_three_agents(self):
         with self.assertRaises(ValueError):
             score([self.PANEL] * 2, self.PANEL)
 
     def test_one_pinned_model(self):
         r = run([self.PANEL] * 3)
-        bs = [baseline(self.PANEL) for _ in range(3)]
+        bs = [baseline(self.PANEL, agent=i) for i in (1, 2, 3)]
         bs[2]["model"] = "claude-other"
         with self.assertRaises(ValueError):
             ce.score(r, bs, CARDS)
 
+    def test_one_agent_three_times_is_refused(self):
+        r = run([self.PANEL] * 3)
+        ce.score(r, [baseline(self.PANEL, agent=i) for i in (1, 2, 3)], CARDS)
+        for ids in ((1, 1, 1), (1, 2, 2), (1, 2, 4), (1, 2, None)):
+            with self.subTest(ids=ids), self.assertRaises(ValueError):
+                ce.score(r, [baseline(self.PANEL, agent=i) for i in ids], CARDS)
+
     def test_an_unknown_card_is_refused(self):
+        bs = [baseline(self.PANEL, agent=i) for i in (1, 2, 3)]
         with self.assertRaises(ValueError):
-            ce.score(run([self.PANEL] * 3), [baseline(self.PANEL)] * 3, CARDS[:-1])
+            ce.score(run([self.PANEL] * 3), bs, CARDS[:-1])
 
     def test_an_absent_card_is_missing_not_an_error(self):
         short = {c: p for c, p in self.PANEL.items() if c != "c19"}
@@ -673,7 +718,7 @@ class Cli(unittest.TestCase):
             (t / "corpus.json").write_text(json.dumps(corpus))
             (t / "run.json").write_text(json.dumps(run([jev] * 3)))
             for i in (1, 2, 3):
-                (t / f"a{i}.json").write_text(json.dumps(baseline(panel)))
+                (t / f"a{i}.json").write_text(json.dumps(baseline(panel, agent=i)))
             base = ["--corpus", str(t / "corpus.json")]
             files = [str(t / n) for n in ("run.json", "a1.json", "a2.json", "a3.json")]
 
