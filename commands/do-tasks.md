@@ -900,8 +900,9 @@ step 5's self-check stops each session loudly on its own issue.
      concurrent batch runs; a repo that needs a hard bound should be claiming from
      one session.
    - **Also run in the session** — pre-flight (plain `git ls-remote` and
-     `gh pr list`), the claim election (plain `gh` comment calls), execute,
-     `gh pr create`, and the two label writes.
+     `gh pr list`, plus the `find-task-refs` cross-prefix probe), the claim
+     election (plain `gh` comment calls), execute, `gh pr create`, and the two
+     label writes.
 
    Everything the session runs before the claim is **verification-only**: a stale
    dependency, a pre-flight trip, a feasibility reject, or a lost claim **stops
@@ -1037,8 +1038,33 @@ step 5's self-check stops each session loudly on its own issue.
 
    **Two additions to those steps, and they are what make the mixed-path race
    detectable.** The election cannot see a ref, so the session has to look for one
-   itself — `git ls-remote --heads origin "<branch>"`, pre-flight's probe, run
-   **twice**:
+   itself — pre-flight's **cross-prefix** probe, run **twice**:
+
+   ```bash
+   python3 "$CLAUDE_PLUGIN_ROOT/commands/handlers/assets/gh-issue-claim.py" find-task-refs --issue <n>
+   ```
+
+   Not `git ls-remote --heads origin "<branch>"`: that probe is built from the same
+   inlined `<branch>` the session would claim under, so a `branch_prefix` the
+   dispatcher resolved stale or dropped probes the wrong ref, misses the local
+   holder, and walks into the election believing the issue is free — on the one
+   path nobody is watching. `find-task-refs` lists the issue's lock refs under
+   **every** prefix, already normalized to bare branch names (`gh-issue-claim.md` →
+   pre-flight). It reads `origin`, which is the lock repo here because
+   step 5 refuses remote dispatch when `gh-issue.repo` is another repository.
+
+   This session creates no ref before it pushes its work, so **any** ref the probe
+   returns is someone else's — there is no "own ref" case to compare away. Branch
+   on the exit code:
+
+   | exit | meaning                                  | do                                                                                                                                                                                                                                              |
+   | ---- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | `1`  | no lock ref for `#<n>` under any prefix  | continue                                                                                                                                                                                                                                        |
+   | `0`  | one or more refs, one bare name per line | a lost claim — act on it per the probe point below, and report per the wording below                                                                                                                                                            |
+   | `4`  | the probe could not answer               | **not** a free issue — act as on `0` (retract, stop), but report `ref probe unusable`, not a lost claim; at the second probe point add `— board markers left on #<n>`, since nothing shows anyone holds the issue and a human has to clear them |
+   | `2`  | the asset predates `find-task-refs`      | the VM's plugin is too old — act as on `4`, and report `remote handler assets too old`                                                                                                                                                          |
+
+   The two probe points:
 
    - **Before writing the board markers**, right after posting the claim comment.
      A ref here means a local session acquired after this session's pre-flight:
@@ -1062,11 +1088,16 @@ step 5's self-check stops each session loudly on its own issue.
    5 elects only among **state-backed** comments and cannot do so if the poster
    wrote nothing.
 
-   Either way report `Skipped #<n>: claim lost — <branch> already exists on
-   origin`, `claim-lock.md`'s own wording for this observation. Do **not** write
-   "acquired by another session": a bare `ls-remote` hit cannot tell a live claim
-   from a ref an earlier crash stranded, and this section is where that
-   distinction is load-bearing.
+   Either way, report by what the probe printed. A returned name equal to the
+   inlined `<branch>` → `Skipped #<n>: claim lost — <branch> already exists on
+   origin`, `claim-lock.md`'s own wording for this observation. Any **other**
+   name → `Skipped #<n>: claim lost — <the returned ref> exists but the configured
+   prefix gives <branch> — the two disagree; either another session holds this
+   issue under a different prefix, or the dispatched branch_prefix is stale`.
+   Name both causes: the probe cannot tell them apart, and stopping is right
+   either way. Do **not** write "acquired by another session": a ref hit cannot
+   tell a live claim from a ref an earlier crash stranded, and this section is
+   where that distinction is load-bearing.
 
    The session then creates its work branch itself,
    `git switch -c "<branch>" "origin/<base>"` (the case `gh-issue-claim.md`
