@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.68.0] - 2026-09-24
+
+### Features
+
+- skip the slow gate suites on a dev_docs-only PR [#864] (#870) (cdcf0d8)
+
 ## [2.67.6] - 2026-09-24
 
 ### Fixes
