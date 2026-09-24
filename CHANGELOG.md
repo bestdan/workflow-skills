@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.69.0] - 2026-09-24
+
+### Features
+
+- enter the PR branch's worktree instead of asking [#887] (#889) (d8407ae)
+
 ## [2.68.0] - 2026-09-24
 
 ### Features
