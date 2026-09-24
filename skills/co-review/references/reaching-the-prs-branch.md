@@ -54,7 +54,7 @@ On Claude Code, the tools that move a session between trees are:
   root.
 
 Neither route touches `HEAD` in the tree the session is standing in, the main
-checkout included. That is why the route needs no permission. Checking the
+checkout included. That is why co-review takes the route without asking the user first. Checking the
 branch out in place would switch someone's main checkout out from under them.
 Adding or entering a worktree leaves every existing tree as it was.
 
