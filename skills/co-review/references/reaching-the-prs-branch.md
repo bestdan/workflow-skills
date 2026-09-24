@@ -12,10 +12,11 @@ standing on — a local copy behind its remote means a rejected push, or upstrea
 commits clobbered by a force.
 
 Naming `headRefName` is only correct because the working-directory pre-flight makes
-the two the same ref. It stops on `foreign` and on `absent`, and — the part that
-matters here — it now also stops on `unknown` in the default disposition. Once all
-three non-`ok` verdicts stop, a run that reaches staleness is provably standing on
-`headRefName`, and checking it is checking the push target.
+the two the same ref. On `foreign` and `absent` it moves the session into the
+branch's tree and re-runs, continuing only on `ok`. It stops on `unknown` in the
+default disposition, and that is the part that matters here. Since no non-`ok` verdict
+continues, a run that reaches staleness is provably standing on `headRefName`, and
+checking it is checking the push target.
 
 **Getting this wrong is how #843 was filed, and the first attempt at fixing it got
 it wrong the other way.** The original checked "the current branch" while reasoning
@@ -28,36 +29,55 @@ bookkeeping that follows from it.
 So if `unknown` is ever relaxed back to warn-and-continue, this section is wrong
 again and staleness has to go back to reading the current branch.
 
-## Reaching an existing branch from a worktree-isolated session
+## Reaching the branch's tree
+
+`foreign` and `absent` are not questions for the user. The branch is somewhere
+else, and going there is mechanical, so co-review takes the route itself.
+`scripts/reach-pr-branch.sh` picks it. When the branch is not local, the helper
+fetches it first with an explicit `refs/heads/` refspec. That writes no
+tracking entry to `.git/config`.
 
 On Claude Code, the tools that move a session between trees are:
 
-- **`EnterWorktree` with `name`** — creates a **new** worktree on a **new** branch
-  cut from `main`. It cannot land on an existing branch; that is not what it is for.
-- **`EnterWorktree` with `path`** — enters a worktree that **already exists**. If the
-  PR's branch is checked out somewhere, this is the answer, and it is what the
-  `foreign` verdict says to do.
-- **`git worktree add <path> <existing-branch>`** — works, and is the documented
-  fallback for harnesses with no worktree tool. The path is model-supplied, so it
-  raises an approval prompt that no allow rule lifts.
+- **`EnterWorktree` with `name`** — runs the plugin's `WorktreeCreate` hook,
+  which puts the worktree at `<root>/<repo>/<name>` on the branch
+  `<prefix><name>` (both from `scripts/worktree-config.sh`). If that branch
+  already exists, the hook re-attaches it. If a worktree is already there on
+  it, the hook hands it back as-is. The hook supplies the path, not the model,
+  so nothing prompts. This is the preferred route. The helper returns it
+  (`enter-name`) whenever the branch carries the configured prefix.
+- **`EnterWorktree` with `path`** — enters a worktree that already exists. The
+  path is model-supplied, so the harness raises an approval prompt that no
+  allow rule lifts. The helper returns it (`enter-path`) in two cases: a
+  `foreign` tree outside the hook's layout, and an `absent` branch without the
+  prefix, after the helper has added a worktree for it under the configured
+  root.
 
-That prompt is what makes attendance matter, but it only bites in a worktree. Both
-dimensions are live, so the `absent` verdict reads off a grid rather than a list:
+Neither route touches `HEAD` in the tree the session is standing in, the main
+checkout included. That is why the route needs no permission. Checking the
+branch out in place would switch someone's main checkout out from under them.
+Adding or entering a worktree leaves every existing tree as it was.
 
-| where             | attended                                                            | unattended                               |
-| ----------------- | ------------------------------------------------------------------- | ---------------------------------------- |
-| the main checkout | check the branch out here                                           | check the branch out here                |
-| worktree-isolated | offer `git worktree add`; the user approves the path, then enter it | no route — the prompt cannot be answered |
+The helper prints one `ROUTE:` line. What to do with it depends on whether
+anyone is there to answer the `enter-path` prompt:
 
-**The grid is reachability, not permission.** Only one cell is mechanically
-impossible — unattended and isolated, where the approval cannot be given. But
-co-review declines the unattended main-checkout route as policy: moving `HEAD` in
-someone's main checkout is not a default an unwatched run may pick. So `absent` is a
-hard error in both unattended cells, for two different reasons.
+| `ROUTE:`                   | attended                                                                                   | unattended (`--non-interactive`)          |
+| -------------------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------- |
+| `here`                     | proceed                                                                                    | proceed                                   |
+| `enter-name name=<n>`      | `EnterWorktree` with `name` `<n>`; no prompt                                               | same                                      |
+| `enter-path path=<p>`      | `EnterWorktree` with `path` `<p>`; the user approves the path                              | hard error — the approval cannot be given |
+| `none reason=<r>` (exit 1) | stop and name `<r>`: `fetch-failed`, `path-exists`, `worktree-add-failed`, `config-failed` | hard error; `needs-path` is `--no-add`'s  |
 
-What the grid does rule out is stating the dead end by attendance alone. An attended
-isolated session has a real route, and removing it would cost a recovery it already
-has.
+Unattended, the helper runs with `--no-add`. An `absent` branch without the
+prefix then reports `none reason=needs-path` instead of creating a worktree the
+run could not enter. Otherwise that worktree would be left behind with nobody
+to remove it.
+
+Every route ends by re-running the pre-flight, and only `ok` proceeds. The
+re-run catches a harness without the hook, where `EnterWorktree` with `name`
+cuts a new branch rather than attaching this one. It also catches an
+`EnterWorktree` call that refused, for example a `name` call from a session
+already in a worktree session.
 
 ### What to do when there is no route
 
@@ -70,5 +90,5 @@ Trading that for posted findings is a smaller loss than abandoning a paid-for re
 
 Under `--non-interactive` this is **not** an automatic fallback: `--post` publishes to
 GitHub, and switching disposition unattended would post a review nobody asked for.
-`absent` stays a logged hard error there, and it is cheap because it fires before any
-reviewer is dispatched.
+A failed route stays a logged hard error there. It is cheap because it fires before
+any reviewer is dispatched.

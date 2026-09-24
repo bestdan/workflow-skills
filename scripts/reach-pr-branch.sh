@@ -48,12 +48,13 @@
 #     worktree WOULD go; nothing was created there.
 #   2  usage or dependency error
 #
-# The fetch (step 3, only reached when the ref is absent everywhere) uses an
-# explicit refs/heads/<ref>:refs/heads/<ref> refspec rather than a plain
-# `git fetch <remote> <ref>` or `git branch --track`: either of those writes a
-# `[branch "…"]` remote-tracking stanza into this checkout's .git/config, a
-# path the sandbox denies — see scripts/worktree-create-hook.sh for the same
-# constraint on the worktree it creates.
+# The fetch (only reached when the ref is not a local branch) uses an explicit
+# refs/heads/<ref>:refs/heads/<ref> refspec. A plain `git fetch <remote> <ref>`
+# updates only FETCH_HEAD, leaving no local branch for the hook to re-attach;
+# creating one with `--track` instead writes a `[branch "…"]` stanza into the
+# main checkout's .git/config, a path the sandbox denies (the same constraint
+# scripts/worktree-create-hook.sh documents). The fetched branch has no
+# upstream, so co-review's push sets one with `git push -u`.
 set -uo pipefail
 
 ref=""
