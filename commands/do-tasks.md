@@ -1057,12 +1057,12 @@ step 5's self-check stops each session loudly on its own issue.
    returns is someone else's — there is no "own ref" case to compare away. Branch
    on the exit code:
 
-   | exit | meaning                                  | do                                                                                                      |
-   | ---- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-   | `1`  | no lock ref for `#<n>` under any prefix  | continue                                                                                                |
-   | `0`  | one or more refs, one bare name per line | a lost claim — act on it per the probe point below, and report per the wording below                    |
-   | `4`  | the probe could not answer               | **not** a free issue — act as on `0` (retract, stop), but report `ref probe unusable`, not a lost claim |
-   | `2`  | the asset predates `find-task-refs`      | the VM's plugin is too old — act as on `4`, and report `remote handler assets too old`                  |
+   | exit | meaning                                  | do                                                                                                                                                                                                                                              |
+   | ---- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | `1`  | no lock ref for `#<n>` under any prefix  | continue                                                                                                                                                                                                                                        |
+   | `0`  | one or more refs, one bare name per line | a lost claim — act on it per the probe point below, and report per the wording below                                                                                                                                                            |
+   | `4`  | the probe could not answer               | **not** a free issue — act as on `0` (retract, stop), but report `ref probe unusable`, not a lost claim; at the second probe point add `— board markers left on #<n>`, since nothing shows anyone holds the issue and a human has to clear them |
+   | `2`  | the asset predates `find-task-refs`      | the VM's plugin is too old — act as on `4`, and report `remote handler assets too old`                                                                                                                                                          |
 
    The two probe points:
 
