@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.69.3] - 2026-09-24
+
+### Fixes
+
+- probe every prefix in the batch path's claim checks [#806] (#898) (8bc75d0)
+
 ## [2.69.2] - 2026-09-24
 
 ### Fixes
