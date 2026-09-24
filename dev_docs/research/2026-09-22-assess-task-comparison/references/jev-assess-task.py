@@ -11,14 +11,22 @@ Run by path, from the repository root:
     D=dev_docs/research/2026-09-22-assess-task-comparison/references
     python3 $D/jev-assess-task.py --ask issue-277            # one card, one request
     python3 $D/jev-assess-task.py --suite --repeat 3 > RUN.json
-    python3 $D/jev-assess-task.py --suite --repeat 3 --ids issue-277,issue-348
     python3 $D/compare-assess-task.py --analyze RUN.json
     python3 $D/test_jev_assess_task.py                       # hermetic; no key
+
+    # a smoke probe over a few cards, not a measurement
+    python3 $D/jev-assess-task.py --suite --repeat 1 --ids issue-277,issue-348
+
+A run restricted with `--ids` is a probe. `--analyze` scores against the full corpus
+by default and counts every card a run leaves out as a missing answer, which is the
+rule that catches a real run silently dropping a card. So analyse a probe with
+`--corpus` pointed at a file holding only its cards, or not at all.
 
 The run file is the format `compare-assess-task.py`'s module docstring defines. Each
 card entry also carries what the scorer ignores and a re-analysis needs: the raw
 answer behind every decoded value, the raw `usage`, and the model id the response
-named. The run as a whole carries the question set it sent.
+named. The run as a whole carries the question set it sent and the ids of the cards
+it covered, so a probe can be told from a measurement.
 
 Every choice the record leaves open is named under "Interpretation:" in the
 docstring of the function that makes it.
@@ -277,6 +285,7 @@ def run_suite(key: str, cases: list[dict], repeat: int, questions: dict) -> dict
         "model": MODEL,
         "run_date": datetime.datetime.now(datetime.timezone.utc).date().isoformat(),
         "questions": questions,
+        "cards": [case["id"] for case in cases],
         "passes": passes,
     }
 
@@ -313,6 +322,10 @@ def main(argv: list[str] | None = None) -> int:
     # scorer's `check_run` already refuses a run with fewer than three passes.
     if args.repeat < 1:
         p.error("--repeat must be at least 1")
+    # Checked here, before the key is read: `select` splits on commas, and the
+    # one-card unpacking below would otherwise fail with a traceback.
+    if args.ask is not None and len([i for i in args.ask.split(",") if i.strip()]) != 1:
+        p.error("--ask takes exactly one card id")
 
     cases = json.loads(Path(args.corpus).read_text())["cases"]
     questions = load_questions()

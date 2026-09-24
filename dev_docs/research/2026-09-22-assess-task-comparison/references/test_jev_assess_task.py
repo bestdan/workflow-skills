@@ -271,6 +271,40 @@ class EndToEnd(unittest.TestCase):
             self.assertEqual(cm.exception.code, 2, bad)
         self.assertEqual(self.calls, [])
 
+    def test_ask_takes_exactly_one_id_before_the_key_is_read(self):
+        for bad in ("issue-277,issue-348", ",", " "):
+            with contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as cm:
+                    jat.main(["--ask", bad])
+            self.assertEqual(cm.exception.code, 2, bad)
+        self.assertEqual(self.calls, [])
+
+    def test_a_probe_records_its_cards_and_scores_on_a_matching_corpus(self):
+        # The documented way to analyse an `--ids` probe: a corpus of its cards.
+        probe = jat.select(CORPUS, "issue-277,issue-348")
+        run = jat.run_suite("no-key", probe, 3, QUESTIONS)
+        self.assertEqual(run["cards"], ["issue-277", "issue-348"])
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "run.json"
+            path.write_text(json.dumps(run))
+            subset = Path(tmp) / "corpus.json"
+            subset.write_text(json.dumps({"cases": probe}))
+            out = subprocess.run(
+                [
+                    sys.executable,
+                    str(HERE / "compare-assess-task.py"),
+                    "--analyze",
+                    str(path),
+                    "--corpus",
+                    str(subset),
+                ],
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("3 passes over 2 cards", out.stdout)
+        self.assertRegex(out.stdout, r"complexity\s+[\d.]+\s+0/6")
+
     def test_select_restricts_and_refuses_unknown_ids(self):
         got = jat.select(CORPUS, "issue-277, issue-348")
         self.assertEqual([c["id"] for c in got], ["issue-277", "issue-348"])
@@ -282,6 +316,7 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(len(self.calls), 3 * len(CORPUS))
         self.assertEqual(run["model"], "jev-1.13.0")
         self.assertEqual(run["questions"], QUESTIONS)
+        self.assertEqual(run["cards"], [c["id"] for c in CORPUS])
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "run.json"
             path.write_text(json.dumps(run, indent=2))
