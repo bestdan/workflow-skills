@@ -6,6 +6,18 @@ convention: ../typed-model-calls.md
 
 # `assess-task` stays a subagent: the typed profile is not adopted
 
+> [!NOTE]
+> 2026-09-24: [`../research/2026-09-24-assess-task-comparison-controls/`](../research/2026-09-24-assess-task-comparison-controls/README.md)
+> adds the context this record read as a claim about Jev. Codex (`gpt-5.6-terra`),
+> given the incumbent's own prompt, also fails gate (a) on every measurable
+> dimension, by 11–14 points. An open-weight model fails by more. Jev falls
+> between them, so the rule's bar is close to "agree with Opus as well as Opus
+> agrees with itself". The decision stands: a swap to any of them would be visible
+> to `select-coder`, and Jev's lean on `complexity` is the most one-sided (32 of 32
+> across three passes), though codex also leans upward there (8 of 9). Re-asking
+> Jev with the incumbent's prior (v2 questions) closed `autonomy` and
+> `cost_sensitivity`, and made `complexity` worse.
+
 ## Context
 
 `select-coder` spawns the `assess-task` subagent for every packet it routes.
