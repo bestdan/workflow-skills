@@ -11,23 +11,15 @@ So the ref a staleness check must protect is whichever branch the session is
 standing on — a local copy behind its remote means a rejected push, or upstream
 commits clobbered by a force.
 
-Naming `headRefName` is only correct because the working-directory pre-flight makes
+Naming `headRefName` is correct only because the working-directory pre-flight makes
 the two the same ref. On `foreign` and `absent` it moves the session into the
 branch's tree and re-runs, continuing only on `ok`. It stops on `unknown` in the
 default disposition, and that is the part that matters here. Since no non-`ok` verdict
 continues, a run that reaches staleness is provably standing on `headRefName`, and
 checking it is checking the push target.
 
-**Getting this wrong is how #843 was filed, and the first attempt at fixing it got
-it wrong the other way.** The original checked "the current branch" while reasoning
-about "the ref step 12 pushes to", which read as a mistake but was accidentally
-correct. Swapping the name to `headRefName` without closing `unknown` made the
-reasoning read correctly while the code validated a ref that could differ from the
-push target — the same defect, relocated. The stop is the fix; the name is
-bookkeeping that follows from it.
-
-So if `unknown` is ever relaxed back to warn-and-continue, this section is wrong
-again and staleness has to go back to reading the current branch.
+The stop on `unknown` is what makes this hold, not the name. If `unknown` ever
+becomes warn-and-continue, staleness must go back to checking the current branch.
 
 ## Reaching the branch's tree
 
