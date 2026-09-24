@@ -373,6 +373,7 @@ label is the only signal of how hard each finding is meant to land.
 
 7. **Review the change yourself.** Form an independent review focused on:
    - Correctness and obvious bugs
+   - Contradictions — a claim in the diff that conflicts with another claim in the diff, or with text it quotes or cites, including in documentation and instruction files
    - Project conventions (CLAUDE.md / AGENTS.md already in context)
    - Security and perf where relevant
    - Test coverage gaps that matter
