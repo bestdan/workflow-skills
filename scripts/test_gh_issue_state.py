@@ -231,7 +231,62 @@ class WriteTests(unittest.TestCase):
         code, _, _ = self._write("prio:1,est:3", extra=["--done"])
 
         self.assertEqual(code, 0)
-        self.assertEqual(self.recorder.written_body()["state"], "closed")
+        self.assertEqual(len(self.recorder.writes()), 1)
+
+    def test_done_against_an_already_closed_issue_keeps_its_close_reason(self):
+        """Re-sending `state: closed` resets GitHub's close reason to completed.
+
+        So stripping the rungs from an issue closed as not planned must be a
+        labels-only write, or it silently reports that work as delivered.
+        """
+        self.recorder.state = "CLOSED"
+        code, _, _ = self._write("prio:1,est:3", extra=["--done"])
+
+        self.assertEqual(code, 0)
+        body = self.recorder.written_body()
+        self.assertEqual(body["labels"], ["prio:1", "est:3"])
+        self.assertNotIn("state", body)
+        self.assertNotIn("state_reason", body)
+
+    def test_done_with_reason_closes_as_not_planned_in_the_same_patch(self):
+        code, out, _ = self._write(
+            "prio:1,est:3", extra=["--done", "--reason", "not_planned"]
+        )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(len(self.recorder.writes()), 1)
+        body = self.recorder.written_body()
+        self.assertEqual(body["state"], "closed")
+        self.assertEqual(body["state_reason"], "not_planned")
+        self.assertIn("State: closed (not_planned)", out)
+
+    def test_an_explicit_reason_is_sent_even_when_already_closed(self):
+        """An explicit reason is how a caller corrects a wrong one."""
+        self.recorder.state = "CLOSED"
+        code, _, _ = self._write(
+            "prio:1,est:3", extra=["--done", "--reason", "not_planned"]
+        )
+
+        self.assertEqual(code, 0)
+        body = self.recorder.written_body()
+        self.assertEqual(body["state"], "closed")
+        self.assertEqual(body["state_reason"], "not_planned")
+
+    def test_done_without_reason_on_an_open_issue_sends_no_reason(self):
+        """The default completion write is unchanged: GitHub records completed."""
+        code, _, _ = self._write("prio:1,est:3", extra=["--done"])
+
+        self.assertEqual(code, 0)
+        body = self.recorder.written_body()
+        self.assertEqual(body["state"], "closed")
+        self.assertNotIn("state_reason", body)
+
+    def test_reason_without_done_is_refused_before_any_network_call(self):
+        code, _, err = self._write(VALID, extra=["--reason", "not_planned"])
+
+        self.assertEqual(code, 2)
+        self.assertEqual(self.recorder.calls, [])
+        self.assertIn("--reason applies only to a --done write", err)
 
     def test_a_managed_label_outside_the_vocabulary_is_reported_when_dropped(self):
         """The write deletes it — correctly — but the operator has to see that."""
