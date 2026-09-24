@@ -187,7 +187,9 @@ passes `--non-interactive`, gets a guarantee this skill never prompts:
      AA's independent Coding Agent Index, so keep it for implementation — but
      **never emit it for `verification-sensitive`**, and say in the report
      that the orchestrator's own check run is mandatory on a Sol packet.
-     Substitute `codex:gpt-5.5` when a coder's self-report must be trusted.
+     Substitute `codex:gpt-5.5` when a coder's self-report must be trusted, if
+     the account serves it — co-review's codex reviewer found it returning 404
+     (`../co-review/reviewers/codex.md`); otherwise route to `opus`.
    - devin packets always return unverified → fine for edits, penalize when
      the task's value is in the verification.
    - codex sandbox false-FAILs on home-dir caches → orchestrator re-runs

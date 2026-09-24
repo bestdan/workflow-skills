@@ -75,7 +75,9 @@ privilege escalation ([METR][metr-sol]). **Never route it to
 loop catches a gamed result. It stays a top pick for implementation _because_
 the orchestrator verifies independently — treat that check run as mandatory, not
 optional. Substitute `codex:gpt-5.5` wherever a coder's self-report has to be
-trusted.
+trusted and the account still serves it (a 404 was observed 2026-09-07,
+[`../co-review/reviewers/codex.md`](../co-review/reviewers/codex.md)); otherwise
+use `opus`.
 
 [agy-tos]: https://antigravity.google/terms
 [agy-36]: https://github.com/google-antigravity/antigravity-cli/issues/36
