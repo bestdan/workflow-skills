@@ -140,6 +140,21 @@ The backfilled `est:` is **recorded for claim-time selection**, not read by any 
 
 As on the file path, the scope gate is **model judgment, not a deterministic rule** — acceptable because `/promote-tasks` is not a blocking CI gate: a misjudged issue lands labeled `auto:human-review-needed` for a human to confirm, never silently lost.
 
+### 4b. Re-read the dependency graph before writing
+
+Step 3b's answer ages across step 4's model-paced scoring. In an unattended nightly run (`dev_docs/nightly-gh-issue-routine.md`) that window is unwatched; `/do-tasks` re-checks `blocked_by` at claim, so a miss there is not fatal, but a promoted-then-blocked issue sits wrongly in the ready lane until then. In four attended runs the candidate read to first write took 33–165 s (#868). The cost is one more paginated `blocked_by` read per scored issue, doubling the run's graph traffic — accepted.
+
+Re-read, in one batched call over every candidate step 4 scored (HIGH and LOW alike — a LOW write is still a write): same helper, same flags as step 3b, and the same "never call it with no `--issue`" rule (skip this step if step 4 scored nothing). Runs in `dry-run` too, since it only reads.
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-ready.py" --repo "<repo>" \
+  --issue <n1> --issue <n2> ... --json
+```
+
+Any scored candidate in the result's `blocked` array is **held**, exactly as step 3b holds one: no transition, no backfill, no comment. It stays un-scored, so the next run re-checks and re-scores it. Keep its `open_blockers` for the step-6 report.
+
+**A failed re-read holds every scored candidate and writes nothing.** Scoring is already spent, but writing on 3b's stale answer would promote exactly the issues this step exists to hold; holding costs only a re-score next run. Report the scores anyway (the spent judgment stays visible), each held with reason `dependency re-read failed`, and lead the step-6 report with the quoted helper error — before the scope line, like the rollup-fallback line. Do not fall back to step 3b's answer.
+
 ### 5. Apply
 
 If `$ARGUMENTS` contains `dry-run`, print the proposed transitions (per the report shape below) and exit **without** any write and **without** any `gh issue comment`.
@@ -152,7 +167,7 @@ The consequence for this flow is that a transition is a **read-modify-write on t
 gh issue view <n> --json labels --jq '[.labels[].name]' [--repo <repo>]
 ```
 
-If that read shows `blocked`, the issue was labelled after step 3 selected it: **hold** it with reason `blocked label` and write nothing — no transition, no backfill, no comment — exactly as step 3b holds a dependency-blocked one. The dependency graph is not re-read here; step 3b's answer stands for the rest of the run.
+If that read shows `blocked`, the issue was labelled after step 3 selected it: **hold** it with reason `blocked label` and write nothing — no transition, no backfill, no comment — exactly as step 3b holds a dependency-blocked one. The dependency graph itself is step 4b's read, batched over the whole scored set before this loop starts; this per-issue label read is not a second graph read.
 
 Keep that issue's `prio:` and `est:` labels — **or, where step 4 backfilled one, the names `encode` printed** — drop its `status:`/`auto:` rungs, and append the new pair. An issue with `prio:1,est:3` promoted HIGH is written as `status:2_ready,auto:eligible,prio:1,est:3`; omitting `prio:1,est:3` from the `--labels` value would delete them. An issue that carried neither and was backfilled to medium/2 is written as `status:2_ready,auto:eligible,prio:2,est:2`. This is why the backfill costs no extra write: the `--labels` value is being composed anyway, and `prio:`/`est:` are two more entries in it.
 
@@ -221,9 +236,11 @@ backfilled (3):
   - #151  (est 8)
 ```
 
-Skipped issues are reported with their reason — `already scored` or `parent rollup`. Held issues are reported under `held (N, blocked)`, each naming what held it: `blocked by #<n>, …` listing the open blockers step 3b returned, or `blocked label`. Like skipped issues, held ones count toward `M` without being promoted, as on the file path. The 500-cap warning (if it applied) leads the report per above, not a trailing footnote.
+On a step 4b re-read failure, the first line is instead `dependency re-read failed: <quoted helper error>`, and every scored candidate appears under `held (N, blocked)` with reason `dependency re-read failed`.
 
-**If step 3a's fallback fired, `parent rollup detection skipped (<reason>)` is the report's first line**, above the scope line — as shown above, quoting the `ROLLUP_REASON` the helper printed. It leads rather than trails because such a run may have promoted a rollup, and a reader who stops before the last line must still see that.
+Skipped issues are reported with their reason — `already scored` or `parent rollup`. Held issues are reported under `held (N, blocked)`, each naming what held it: `blocked by #<n>, …` listing the open blockers step 3b or 4b returned, `blocked label`, or `dependency re-read failed`. Like skipped issues, held ones count toward `M` without being promoted, as on the file path. The 500-cap warning (if it applied) leads the report per above, not a trailing footnote.
+
+**If step 3a's fallback fired, `parent rollup detection skipped (<reason>)` is the report's first line**, above the scope line — as shown above, quoting the `ROLLUP_REASON` the helper printed. It leads rather than trails because such a run may have promoted a rollup, and a reader who stops before the last line must still see that. **A step 4b re-read failure leads ahead of that**, quoting the helper's error, since it means every scored candidate in the run was held.
 
 ### 7. `backfill-only` — fill `prio:`/`est:` without a transition
 
