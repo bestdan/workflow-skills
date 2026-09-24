@@ -162,7 +162,8 @@ class UsageMapping(FakeClaudeHarness):
             {"uncached": 2, "cache_read": 531, "cache_write": 5421, "output": 205},
         )
         self.assertEqual(entry["raw"], "task_profile:\n  complexity: standard\n")
-        self.assertTrue(entry["cache_warm"])
+        # 531 read against 5423 fresh: only the CLI's own prompt was cached.
+        self.assertFalse(entry["cache_warm"])
         self.assertAlmostEqual(entry["cost_usd"], 0.0475822)
         self.assertEqual(entry["duration_api_ms"], 4321)
         self.assertEqual(entry["served_models"], ["claude-opus-5-5"])
@@ -187,6 +188,24 @@ class UsageMapping(FakeClaudeHarness):
         self.assertEqual(entry["served_models"], ["claude-opus-9-9"])
         self.assertIn("warning:", err.getvalue())
         self.assertIn("claude-opus-9-9", err.getvalue())
+
+
+class CacheWarm(unittest.TestCase):
+    def test_cold_when_only_the_cli_prompt_is_read(self):
+        usage = {
+            "input_tokens": 2,
+            "cache_read_input_tokens": 531,
+            "cache_creation_input_tokens": 5421,
+        }
+        self.assertFalse(rb.is_cache_warm(usage))
+
+    def test_warm_when_most_input_is_read_from_cache(self):
+        usage = {
+            "input_tokens": 2,
+            "cache_read_input_tokens": 5900,
+            "cache_creation_input_tokens": 60,
+        }
+        self.assertTrue(rb.is_cache_warm(usage))
 
 
 class PromptAndCwd(FakeClaudeHarness):

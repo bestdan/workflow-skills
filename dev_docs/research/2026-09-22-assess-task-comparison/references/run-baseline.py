@@ -55,6 +55,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 OUT_DIR = HERE / "measurement" / "baseline"
 MAX_ATTEMPTS = 3  # one try, plus "up to 2 more times"
+CALL_TIMEOUT_S = 600  # a hung call fails the attempt rather than stalling the run
 
 
 def _load(name: str, path: Path):
@@ -76,8 +77,9 @@ _bc = _load("build_corpus", HERE / "build-corpus.py")
 MODEL = "claude-opus-5-5"
 
 # USD per million tokens, Opus 5.5 list prices; cache_write is the 1-hour TTL rate
-# (2x the uncached input rate) because `--no-session-persistence` still lets the CLI
-# write a 1h cache entry for the skill/system prompt. Verified against a smoke call:
+# (2x the uncached input rate) because the CLI writes its cache entries with the 1h
+# TTL (`usage.cache_creation.ephemeral_1h_input_tokens`; each card records the split
+# under `cache_write_ttl`). Verified against a smoke call:
 # total_cost_usd 0.0475822 = (2 * 4 + 5421 * 8 + 531 * 0.2 + 205 * 20) / 1e6 exactly,
 # for that call's uncached/cache_write/cache_read/output token counts.
 PRICING_USD_PER_MTOK = {
@@ -149,9 +151,17 @@ def call_once(cmd: list[str], prompt: str) -> tuple[dict, float]:
     trusts a bad response."""
     with tempfile.TemporaryDirectory() as cwd:
         start = time.monotonic()
-        proc = subprocess.run(
-            cmd, input=prompt, capture_output=True, text=True, cwd=cwd
-        )
+        try:
+            proc = subprocess.run(
+                cmd,
+                input=prompt,
+                capture_output=True,
+                text=True,
+                cwd=cwd,
+                timeout=CALL_TIMEOUT_S,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise CallFailed(f"timed out after {CALL_TIMEOUT_S}s") from exc
         latency = time.monotonic() - start
     if proc.returncode != 0:
         raise CallFailed(f"exit {proc.returncode}: {proc.stderr.strip()[:2000]}")
@@ -162,6 +172,24 @@ def call_once(cmd: list[str], prompt: str) -> tuple[dict, float]:
     if data.get("is_error"):
         raise CallFailed(f"is_error: {json.dumps(data)[:2000]}")
     return data, latency
+
+
+def is_cache_warm(usage: dict) -> bool:
+    """Was the skill prompt already cached? The scorer's `cache_warm`.
+
+    Interpretation: the filled prompt is one user message, skill text first and the
+    card last, so a call can read the skill text from cache only if an earlier call
+    left a cache entry ending before the card. Measured on this CLI, none does: a
+    call reads only the CLI's own ~0.5k-token system prompt from cache and writes the
+    ~5k-token skill prompt afresh. "Any cache read" would therefore mark every call
+    warm while the skill prompt was never cached. Warm here means most of the input
+    came from cache: more read than was written or sent uncached.
+    """
+    read = int(usage.get("cache_read_input_tokens", 0))
+    fresh = int(usage.get("input_tokens", 0)) + int(
+        usage.get("cache_creation_input_tokens", 0)
+    )
+    return read > fresh
 
 
 def to_entry(data: dict, latency: float) -> dict:
@@ -178,7 +206,7 @@ def to_entry(data: dict, latency: float) -> dict:
             "cache_write": int(usage.get("cache_creation_input_tokens", 0)),
             "output": int(usage.get("output_tokens", 0)),
         },
-        "cache_warm": int(usage.get("cache_read_input_tokens", 0)) > 0,
+        "cache_warm": is_cache_warm(usage),
         "cost_usd": data.get("total_cost_usd"),
         "duration_api_ms": data.get("duration_api_ms"),
         "served_models": sorted(data.get("modelUsage", {})),
