@@ -103,6 +103,13 @@ bash_case() { expect "$1" Bash "$2" command "$3"; }
 @test "an interpreter fed inline code naming a foreign path is denied" {
   bash_case deny "$repo" "$(printf 'python3 - <<%s\nopen("%s/file.txt", "w").write("x")\nPY\n' "'PY'" "$wt")"
   bash_case deny "$repo" "python3 -c \"open('$wt/file.txt','w')\""
+  bash_case deny "$repo" "node -e 'require(\"fs\").writeFileSync(\"$wt/file.txt\", \"x\")'"
+  bash_case deny "$repo" "ruby -e 'File.write(\"$wt/file.txt\", \"x\")'"
+}
+
+# Inline-code flags are per interpreter: `perl -c` only syntax-checks.
+@test "a flag that is not inline code for that interpreter does not arm the rule" {
+  bash_case allow "$repo" "perl -c check.pl && cat $wt/file.txt"
 }
 
 # The reverse direction matters as much: a session standing in a worktree must
@@ -150,6 +157,40 @@ bash_case() { expect "$1" Bash "$2" command "$3"; }
 
 # A deleted worktree stays listed with a `prunable` line. If it won the holder
 # lookup, the guard would deny a command and name a path that no longer exists.
+# Claude Code's default worktree layout nests them under the main checkout, so
+# a path there is inside the session's own root and a foreign one at once.
+@test "a worktree nested inside the main checkout is still foreign to it" {
+  local nested="$repo/.claude/worktrees/nested"
+  git -C "$repo" worktree add -q -b nested "$nested"
+  bash_case deny "$repo" "echo x > $nested/file.txt"
+  bash_case deny "$repo" "git -C $nested commit -m x"
+  expect deny Write "$repo" file_path "$nested/new.txt"
+  expect allow Write "$nested" file_path "$nested/new.txt"
+  expect deny Write "$nested" file_path "$repo/new.txt"
+}
+
+@test "writes the parser once missed are denied" {
+  bash_case deny "$repo" "git -C $wt stash"
+  bash_case deny "$repo" "git -C $wt stash -u"
+  bash_case deny "$repo" "sed --in-place s/a/b/ $wt/file.txt"
+  bash_case deny "$repo" "sudo -n cp a $wt/copy.txt"
+  bash_case deny "$repo" "python3 -c \"open('../wt/file.txt','w')\""
+}
+
+@test "the bypass is only an assignment in command position, set to 1" {
+  bash_case allow "$repo" "WORKFLOW_SKILLS_ALLOW_FOREIGN_WRITE=1 git -C $wt commit -m x"
+  bash_case deny "$repo" "WORKFLOW_SKILLS_ALLOW_FOREIGN_WRITE=0 git -C $wt commit -m x"
+  bash_case deny "$repo" "echo WORKFLOW_SKILLS_ALLOW_FOREIGN_WRITE=1 && echo x > $wt/file.txt"
+}
+
+@test "a cd outside command position and a config lookup are reads" {
+  bash_case allow "$repo" "rg cd $wt/file.txt"
+  bash_case allow "$repo" "git -C $wt config user.name"
+  bash_case allow "$repo" "git -C $wt config get user.name"
+  bash_case deny "$repo" "git -C $wt config user.name dan"
+  bash_case deny "$repo" "git -C $wt config --unset user.name"
+}
+
 @test "a prunable worktree is not a holder" {
   local gone="$tmp/gone"
   git -C "$repo" worktree add -q -b gone-branch "$gone"

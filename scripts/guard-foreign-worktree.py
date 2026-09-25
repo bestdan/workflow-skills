@@ -223,6 +223,16 @@ _CONFIG_READ_FLAGS = {
     "--list",
     "-l",
 }
+_CONFIG_WRITE_FLAGS = {
+    "--unset",
+    "--unset-all",
+    "--add",
+    "--replace-all",
+    "--rename-section",
+    "--remove-section",
+    "-e",
+    "--edit",
+}
 
 # `git branch` / `git tag` mutate when one of these is present, and otherwise
 # when a bare positional names a ref to create.
@@ -288,6 +298,20 @@ _WRITERS = {
 # foreign path anywhere near one is treated as a write. This is the guard's one
 # deliberately fail-CLOSED rule, and the bypass exists for it.
 _INTERPRETERS = {"python", "python3", "node", "ruby", "perl", "php", "osascript", "uv"}
+
+# The flag that makes each interpreter run code given on its command line. Per
+# interpreter, because the letters collide: `python3 -E` ignores the
+# environment and `perl -c` only syntax-checks. `uv` has none; only a heredoc
+# feeds it code.
+_INLINE_FLAGS = {
+    "python": {"-c"},
+    "python3": {"-c"},
+    "node": {"-e", "--eval", "-p", "--print"},
+    "ruby": {"-e"},
+    "perl": {"-e", "-E"},
+    "php": {"-r"},
+    "osascript": {"-e"},
+}
 
 # In-place editors: the flag is what makes them writers. `sed <foreign>` reads.
 _INPLACE = {"sed", "perl", "awk", "gawk", "ruby"}
@@ -373,18 +397,17 @@ def _inside(path: str, root: str) -> bool:
 def _owning_foreign(path: str, own: str, foreign: list[str]) -> str | None:
     """The foreign worktree holding ``path``, or None.
 
-    The session's own root wins over any foreign root that also contains the
-    path, and the longest foreign root wins among the rest. Both matter only if
-    worktrees ever nest, which the usual layout does not do — but a
-    nested pair would otherwise make the verdict depend on list order.
+    The deepest root containing the path owns it, own root included. Worktrees
+    do nest: Claude Code's default puts them under the main checkout's
+    ``.claude/worktrees/``, so a session in the main checkout writing there
+    is inside its own root and a foreign one at once, and the deeper one is
+    where the write lands.
     """
-    if _inside(path, own):
-        return None
     best = None
-    for root in foreign:
+    for root in [own, *foreign]:
         if _inside(path, root) and (best is None or len(root) > len(best)):
             best = root
-    return best
+    return None if best == own else best
 
 
 def _positionals(args: list[str], flags_with_value: set[str]) -> list[str]:
@@ -406,13 +429,22 @@ def _git_writes(sub: str, args: list[str]) -> bool:
     if sub in _DUAL_READ_POSITIONALS:
         first = next((a for a in args if not a.startswith("-")), None)
         if first is None:
-            # `git remote`, `git stash`, `git reflog` with no positional each
-            # default to a listing; `git worktree` and `git submodule` print
-            # usage. Neither writes.
-            return False
+            # A bare `git stash` (or `stash -u`) is `stash push`. `git remote`
+            # and `git reflog` with no positional default to a listing, and
+            # `git worktree` and `git submodule` print usage.
+            return sub == "stash"
         return first not in _DUAL_READ_POSITIONALS[sub]
     if sub == "config":
-        return not any(a in _CONFIG_READ_FLAGS for a in args)
+        if any(a in _CONFIG_READ_FLAGS for a in args):
+            return False
+        # `config user.name` and `config get user.name` read; a second
+        # positional or a write flag writes.
+        if any(a in _CONFIG_WRITE_FLAGS for a in args):
+            return True
+        positionals = _positionals(args, set())
+        if positionals[:1] in (["get"], ["list"]):
+            return False
+        return len(positionals) != 1
     if sub in {"branch", "tag"}:
         if any(a in _REF_EDIT_FLAGS for a in args):
             return True
@@ -445,9 +477,9 @@ def _bypassed(cmd: str) -> bool:
     """
     for forms in _segments(cmd):
         for tokens in forms:
-            for token in tokens:
-                if token.startswith(f"{BYPASS}="):
-                    return True
+            head = _head_index(tokens)
+            if f"{BYPASS}=1" in tokens[:head]:
+                return True
     return False
 
 
@@ -485,13 +517,27 @@ def _git_calls(tokens: list[str]):
             yield dir_override, tokens[i], tokens[i + 1 :]
 
 
+def _head_index(tokens: list[str]) -> int:
+    """Index of a segment's command word, past any wrapper, keyword or assignment.
+
+    A wrapper's own options (`sudo -n`) are skipped too. One that takes a
+    value (`sudo -u root`) still leaves the value as the head, which fails open.
+    """
+    i = 0
+    wrapped = False
+    while i < len(tokens) and (
+        tokens[i] in _PREFIX
+        or re.match(r"^[A-Za-z_][\w]*=", tokens[i])
+        or (wrapped and tokens[i].startswith("-"))
+    ):
+        wrapped = wrapped or tokens[i] in _WRAPPERS
+        i += 1
+    return i
+
+
 def _head_word(tokens: list[str]) -> str | None:
     """The command word of a segment, past any wrapper, keyword or assignment."""
-    i = 0
-    while i < len(tokens) and (
-        tokens[i] in _PREFIX or re.match(r"^[A-Za-z_][\w]*=", tokens[i])
-    ):
-        i += 1
+    i = _head_index(tokens)
     if i >= len(tokens):
         return None
     return os.path.basename(tokens[i])
@@ -518,7 +564,7 @@ def _write_targets(cmd: str, cwd: str):
 
     The evidence, in the order it is looked for:
 
-      - ``cd <path>`` anywhere in the command (REACH). A `cd` that leaves the
+      - ``cd <path>`` as any segment's command (REACH). A `cd` that leaves the
         session's working directory does not even persist to the next Bash
         call, so this shape exists only to reach in — which is what makes a
         bare directory count here with no writer beside it.
@@ -528,7 +574,7 @@ def _write_targets(cmd: str, cwd: str):
       - a path argument of a writer command or an in-place editor (DEFINITE),
         or of an interpreter (REACH).
       - every path mentioned anywhere in a command that feeds an interpreter
-        inline, via ``-c`` or a heredoc (REACH). The code is opaque there, and
+        inline, via its inline-code flag or a heredoc (REACH). The code is opaque there, and
         that is the shape #827 actually took.
 
     Relative paths resolve against the payload's cwd rather than against a `cd`
@@ -539,18 +585,22 @@ def _write_targets(cmd: str, cwd: str):
     inline_interpreter = False
     for forms in _segments(cmd):
         for tokens in forms:
+            head_at = _head_index(tokens)
             head = _head_word(tokens)
+            operands = [t for t in tokens[head_at + 1 :] if not t.startswith("-")]
             # `<<` is asked of the whole command rather than this segment: the
             # heredoc operator is stripped along with the rest of the redirect
             # before the split, and a heredoc BODY is its own segment anyway,
             # since the splitter cuts on newlines.
-            if head in _INTERPRETERS and ("-c" in tokens or "<<" in cmd):
+            if head in _INTERPRETERS and (
+                _INLINE_FLAGS.get(head, set()) & set(tokens) or "<<" in cmd
+            ):
                 inline_interpreter = True
-            for i, token in enumerate(tokens):
-                if token == "cd" and i + 1 < len(tokens):
-                    resolved = _expand(tokens[i + 1], cwd)
-                    if resolved:
-                        yield _real(resolved), REACH
+            # Only a `cd` in command position: `rg cd <path>` is a read.
+            if head == "cd" and operands:
+                resolved = _expand(operands[0], cwd)
+                if resolved:
+                    yield _real(resolved), REACH
             for dir_override, sub, args in _git_calls(tokens):
                 if not _git_writes(sub, args):
                     continue
@@ -559,15 +609,14 @@ def _write_targets(cmd: str, cwd: str):
                     yield _real(target), DEFINITE
             grade = None
             if head in _WRITERS or (
-                head in _INPLACE and any(t.startswith("-i") for t in tokens)
+                head in _INPLACE
+                and any(t.startswith(("-i", "--in-place")) for t in tokens)
             ):
                 grade = DEFINITE
             elif head in _INTERPRETERS:
                 grade = REACH
             if grade:
-                for token in tokens[1:]:
-                    if token.startswith("-"):
-                        continue
+                for token in operands:
                     resolved = _expand(token, cwd)
                     if resolved:
                         yield _real(resolved), grade
@@ -578,9 +627,10 @@ def _write_targets(cmd: str, cwd: str):
             yield _real(resolved), DEFINITE
     if inline_interpreter:
         # The paths are inside the code, so there is nothing to tokenize. Every
-        # absolute-looking run of text in the command is offered instead, and
-        # the caller decides which of them lands in a foreign worktree.
-        for match in re.finditer(r"(?:\$HOME|~|/)[^\s\"'`,;:)\]}]*", cmd):
+        # path-looking run of text in the command — absolute, or relative with
+        # a leading `./` or `../` — is offered instead, and the caller decides
+        # which of them lands in a foreign worktree.
+        for match in re.finditer(r"(?:\.\.?/|\$HOME|~|/)[^\s\"'`,;:)\]}]*", cmd):
             resolved = _expand(match.group(0), cwd)
             if resolved:
                 yield _real(resolved), REACH
