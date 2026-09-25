@@ -40,6 +40,21 @@ names what actually closed, including a PR that closes several issues or one
 whose branch is not `<prefix>task-<n>` at all. It also self-verifies — an issue
 the merge did not close comes back open, and an open issue is skipped.
 
+A merged PR that only MENTIONS an issue — `Refs #<n>`, a partial PR — closes
+nothing, and GitHub leaves that issue exactly where it was. If it was on
+`4_needs_review`, it now sits there with no open PR, still counted by the claim
+WIP gate as work awaiting review (#892). So the merged branch also returns each
+such issue to `3_started`, the rung the closed-unmerged row writes, for the same
+reason: the review this rung signalled has ended, and the work has not.
+
+It finds them by the issue's STATE, not by any link to this PR. A candidate is
+any `#<n>` in the PR's title or body, which over-matches (issues and PRs share a
+number space), and that is safe only because of the gate each candidate must
+pass: open, on `4_needs_review`, and cross-referenced by no open PR. An issue in
+that state is wrong however it got there, so a loose mention can only ever
+correct it. The PR's head branch is no help here — #892's own case merged from
+`bestdan/eval-log-retention`, which names no issue at all.
+
 This closes the drift at its source; `gh-issue-reconcile.py`'s row 4 is the
 sweep that catches what this cannot — an issue closed by hand in the web UI, a
 repo where this workflow does not run, and anything that drifted before this
@@ -83,7 +98,8 @@ Usage:
 
 Without --apply it decides and prints what it would write, performing the read
 but no write. A no-op — any branch that is not a task branch, a closed issue, an
-unexpected current rung, a merged PR that closed nothing — exits 0 and says why:
+unexpected current rung, a merged PR that closed and stranded nothing — exits 0
+and says why:
 this runs on every PR in the repo, so "did nothing" is the common case, not a
 failure.
 """
@@ -108,6 +124,7 @@ def _load(filename, name):
 
 gh_issue_claim = _load("gh-issue-claim.py", "gh_issue_claim")
 gh_issue_state = _load("gh-issue-state.py", "gh_issue_state")
+gh_issue_graph = _load("gh-issue-graph.py", "gh_issue_graph")
 
 STARTED = "status:3_started"
 NEEDS_REVIEW = "status:4_needs_review"
@@ -155,8 +172,8 @@ def decide(event, branch):
     return issue, TRANSITIONS[event]
 
 
-def closing_issues(repo, pr):
-    """Issue numbers this PR closes, restricted to `repo`.
+def read_merged_pr(repo, pr):
+    """(issues this PR closes in `repo`, issues its title and body mention).
 
     GitHub resolves the closing keywords itself, so nothing here re-implements
     `Closes #<n>` matching — which would have to track every accepted keyword
@@ -166,9 +183,22 @@ def closing_issues(repo, pr):
     repository, and `GITHUB_TOKEN` is scoped to this one. Writing there would
     fail; reading a same-numbered local issue instead would be worse. So those
     are dropped, and the caller reports the count.
+
+    The mentions are the stranded-issue candidates, parsed by
+    `gh-issue-graph.py`'s pattern, which already refuses a repo-qualified
+    `owner/repo#<n>` and a mention inside code. The title is included because
+    the execute path puts its `[#<n>]` token there.
     """
     code, out, err = gh_issue_state.run_gh(
-        ["pr", "view", str(pr), "--repo", repo, "--json", "closingIssuesReferences"]
+        [
+            "pr",
+            "view",
+            str(pr),
+            "--repo",
+            repo,
+            "--json",
+            "closingIssuesReferences,title,body",
+        ]
     )
     if code != 0:
         raise SystemExit(
@@ -177,16 +207,178 @@ def closing_issues(repo, pr):
         )
     payload = json.loads(out or "{}")
     owner, name = repo.split("/", 1)
-    numbers = []
+    closing = []
     for ref in payload.get("closingIssuesReferences") or []:
         ref_repo = ref.get("repository") or {}
         ref_owner = (ref_repo.get("owner") or {}).get("login")
         if ref_owner == owner and ref_repo.get("name") == name:
-            numbers.append(ref["number"])
-    return numbers
+            closing.append(ref["number"])
+
+    text = f"{payload.get('title') or ''}\n{payload.get('body') or ''}"
+    mentioned = []
+    for ref in gh_issue_graph.parse_body_refs(
+        text, str(pr), gh_issue_graph.BODY_REF_ID_PATTERN
+    ):
+        number = int(ref["target"])
+        if number not in closing and number not in mentioned:
+            mentioned.append(number)
+    return closing, mentioned
 
 
-def strip_merged(repo, pr, labels_file, apply):
+# One read per candidate: its state, labels, and every PR that references it.
+# `issueOrPullRequest` rather than `issue`, because a `#<n>` mention can name a
+# pull request, and `issue(number:)` answers that with an error rather than a
+# null. `last:` because an open PR is a recent reference, and `hasPreviousPage`
+# says when older ones went unread.
+CANDIDATE_QUERY = """
+query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    issueOrPullRequest(number: $number) {
+      ... on Issue {
+        state
+        labels(first: 100) { nodes { name } }
+        timelineItems(last: 100, itemTypes: [CROSS_REFERENCED_EVENT, CONNECTED_EVENT]) {
+          pageInfo { hasPreviousPage }
+          nodes {
+            ... on CrossReferencedEvent { source { ... on PullRequest { number state } } }
+            ... on ConnectedEvent { subject { ... on PullRequest { number state } } }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+
+def read_candidate(repo, number):
+    """(labels, state, open PR numbers, complete?) — or None if not an issue."""
+    owner, name = repo.split("/", 1)
+    code, out, err = gh_issue_state.run_gh(
+        [
+            "api",
+            "graphql",
+            "-f",
+            f"query={CANDIDATE_QUERY}",
+            "-F",
+            f"owner={owner}",
+            "-F",
+            f"name={name}",
+            "-F",
+            f"number={number}",
+        ]
+    )
+    if code != 0:
+        raise SystemExit(
+            f"reading {repo}#{number} failed: {err.strip() or out.strip()}"
+        )
+    node = ((json.loads(out or "{}").get("data") or {}).get("repository") or {}).get(
+        "issueOrPullRequest"
+    ) or {}
+    if "state" not in node:
+        # A pull request, or a number that resolves to nothing.
+        return None
+    labels = [label["name"] for label in node["labels"]["nodes"]]
+    timeline = node["timelineItems"]
+    open_prs = []
+    for event in timeline["nodes"]:
+        ref = event.get("source") or event.get("subject") or {}
+        if ref.get("state") == "OPEN" and ref["number"] not in open_prs:
+            open_prs.append(ref["number"])
+    complete = not timeline["pageInfo"]["hasPreviousPage"]
+    return labels, node["state"].lower(), open_prs, complete
+
+
+def rung_write(current, rung, target, groups, vocabulary):
+    """(label set, dropped labels) that replaces `rung` with `target`.
+
+    Carries every OTHER managed label through unchanged — the `auto:` rung the
+    invariant requires, plus prio:/est:. Anything in a managed namespace that
+    the vocabulary does not define is dropped rather than echoed back, which is
+    what gh-issue-state.py would do to it anyway, and is returned so the caller
+    can name it: the full-set write is right to purge a `prio:urgent` a human
+    invented, but the deletion is invisible unless it is named — and
+    unattended, an Actions log is the only place anyone could ever see it.
+
+    Raises InvalidLabelSet rather than return a set that is still illegal.
+    """
+    managed = [target] + [
+        label
+        for label in current
+        if label != rung
+        and gh_issue_state.in_managed_namespace(label, set(groups))
+        and label in vocabulary
+    ]
+    dropped = gh_issue_state.dropped_unrecognized(current, set(groups), vocabulary)
+    gh_issue_state.validate(managed, vocabulary)
+    preserved = gh_issue_state.preserve_unmanaged(current, set(groups))
+    return managed + [label for label in preserved if label not in managed], dropped
+
+
+def return_stranded(repo, mentioned, labels_file, apply):
+    """Move each mentioned issue this merge stranded in review back to started.
+
+    Returns a list of per-issue outcome dicts, shaped like strip_merged()'s.
+    Every candidate is a no-op unless it is open, on `4_needs_review`, and
+    referenced by no open PR — see the module docstring for why that gate, and
+    not the mention, is what makes the write safe.
+    """
+    groups, colors = gh_issue_state.load_vocabulary(labels_file)
+    vocabulary = gh_issue_state.expected_labels(groups, colors)
+
+    outcomes = []
+    for issue in mentioned:
+        read = read_candidate(repo, issue)
+        if read is None:
+            continue
+        current, state, open_prs, complete = read
+        if state != "open":
+            outcomes.append({"issue": issue, "skipped": f"{repo}#{issue} is closed"})
+            continue
+        rung = status_rung(current)
+        if rung != NEEDS_REVIEW:
+            outcomes.append(
+                {
+                    "issue": issue,
+                    "skipped": f"{repo}#{issue} is on "
+                    f"{rung or 'no single status: rung'}, not {NEEDS_REVIEW}",
+                }
+            )
+            continue
+        if open_prs:
+            listed = ", ".join(f"#{n}" for n in open_prs)
+            outcomes.append(
+                {
+                    "issue": issue,
+                    "skipped": f"{repo}#{issue} still has open PR {listed}",
+                }
+            )
+            continue
+        if not complete:
+            # Over 100 references, and an open PR could be among the unread
+            # ones. Leaving the rung is the recoverable mistake.
+            outcomes.append(
+                {
+                    "issue": issue,
+                    "skipped": f"{repo}#{issue} has more references than one read covers",
+                }
+            )
+            continue
+
+        try:
+            labels, dropped = rung_write(current, rung, STARTED, groups, vocabulary)
+        except gh_issue_state.InvalidLabelSet as exc:
+            outcomes.append({"issue": issue, "refused": str(exc)})
+            continue
+        if apply:
+            gh_issue_state.patch_issue(repo, issue, labels)
+        outcomes.append(
+            {"issue": issue, "labels": labels, "dropped": dropped, "applied": apply}
+        )
+    return outcomes
+
+
+def strip_merged(repo, closing, labels_file, apply):
     """Strip the rungs from every issue this merged PR closed.
 
     Returns a list of per-issue outcome dicts. Each issue is decided on its own
@@ -199,7 +391,7 @@ def strip_merged(repo, pr, labels_file, apply):
     vocabulary = gh_issue_state.expected_labels(groups, colors)
 
     outcomes = []
-    for issue in closing_issues(repo, pr):
+    for issue in closing:
         current, state = gh_issue_state.current_issue(repo, issue)
         if state != "closed":
             # The merge did not close it — a human reopened it, or the reference
@@ -295,14 +487,38 @@ def main(argv=None):
     if args.event == "closed" and args.merged:
         if args.pr is None:
             parser.error("--merged requires --pr")
-        outcomes = strip_merged(args.repo, args.pr, args.labels_file, args.apply)
+        closing, mentioned = read_merged_pr(args.repo, args.pr)
+        outcomes = strip_merged(args.repo, closing, args.labels_file, args.apply)
+        stranded = return_stranded(args.repo, mentioned, args.labels_file, args.apply)
         if args.as_json:
             print(
                 json.dumps(
-                    {"repo": args.repo, "pr": args.pr, "merged": outcomes}, indent=2
+                    {
+                        "repo": args.repo,
+                        "pr": args.pr,
+                        "merged": outcomes,
+                        "stranded": stranded,
+                    },
+                    indent=2,
                 )
             )
-        elif not outcomes:
+            return 0
+        for outcome in stranded:
+            number = outcome["issue"]
+            if outcome.get("skipped"):
+                print(f"no-op: {outcome['skipped']}")
+            elif outcome.get("refused"):
+                print(
+                    f"refusing to write {args.repo}#{number}: {outcome['refused']}",
+                    file=sys.stderr,
+                )
+            else:
+                verb = "Returned" if args.apply else "Would return"
+                print(f"{verb} {args.repo}#{number} to {STARTED}: no open PR left")
+                if outcome["dropped"]:
+                    names = ", ".join(outcome["dropped"])
+                    print(f"Dropped (not in labels.yml): {names}")
+        if not outcomes:
             print(f"no-op: {args.repo}#{args.pr} closed no issue in this repo")
         else:
             for outcome in outcomes:
@@ -344,30 +560,12 @@ def main(argv=None):
 
     groups, colors = gh_issue_state.load_vocabulary(args.labels_file)
     vocabulary = gh_issue_state.expected_labels(groups, colors)
-    # Carry every OTHER managed label through unchanged — the `auto:` rung the
-    # invariant requires, plus prio:/est:. Anything in a managed namespace that
-    # the vocabulary does not define is dropped here rather than echoed back,
-    # which is what gh-issue-state.py would do to it anyway.
-    managed = [target] + [
-        label
-        for label in current
-        if label != rung
-        and gh_issue_state.in_managed_namespace(label, set(groups))
-        and label in vocabulary
-    ]
-    # Report those deletions. The full-set write is right to purge a `prio:urgent`
-    # a human invented, but the deletion is invisible unless it is named — and
-    # unattended, an Actions log is the only place anyone could ever see it.
-    dropped = gh_issue_state.dropped_unrecognized(current, set(groups), vocabulary)
-
     try:
-        gh_issue_state.validate(managed, vocabulary)
+        labels, dropped = rung_write(current, rung, target, groups, vocabulary)
     except gh_issue_state.InvalidLabelSet as exc:
         print(f"refusing to write {args.repo}#{issue}: {exc}", file=sys.stderr)
         return 2
 
-    preserved = gh_issue_state.preserve_unmanaged(current, set(groups))
-    labels = managed + [label for label in preserved if label not in managed]
     if args.apply:
         gh_issue_state.patch_issue(args.repo, issue, labels)
     return report(
