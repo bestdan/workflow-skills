@@ -41,6 +41,14 @@ before relying on anything below, and read finding 2 with that correction in han
 is what may be concluded from them. Each amendment says so where it sits and names the
 earlier wording, so a reader who saw the first version can tell what moved.
 
+**Amended 2026-09-22.** A scheduled `/do-tasks` run sourced from this repo confirmed
+finding 1 (`gh` absent here, present after `apt-get install`) and the `gh auth status`
+false-negative still hold, and found that the GraphQL refusal blocks single-mode,
+foreground `/do-tasks` too — not only dispatched batch sessions, which is what
+`commands/do-tasks.md` §4 and `gh-issue-claim.md` had assumed was the only exposure.
+See [2026-09-22: a scheduled `/do-tasks` run confirms both findings still
+hold](#2026-09-22-a-scheduled-do-tasks-run-confirms-both-findings-still-hold-and-finds-the-blocker-is-not-batch-only).
+
 ## Why this exists
 
 `commands/do-tasks.md` §4 held `gh-issue.remote_batch` off by default on a premise it
@@ -445,6 +453,69 @@ must connect the Claude GitHub App for this organization.` Not-a-source
 Use add_repo to request access. If add_repo answers that read access is already
 available and you need GitHub API or write access, call add_repo again with
 access:"push" to attach the repository with credentials.`
+
+### 2026-09-22: a scheduled `/do-tasks` run confirms both findings still hold, and finds the blocker is not batch-only
+
+Session `session_01JuqCTdBY7S72269nbfCMLG`, a scheduled (unattended) routine sourced
+from `bestdan/workflow-skills` itself, attempting a plain `/do-tasks` single-issue claim
+under the `gh-issue` handler — not a probe session, a real attempt at the task this file's
+findings are about.
+
+- **Finding 1 (no SessionStart `gh` install for this source repo) still holds.**
+  `gh` was absent (`rc 127`) at session start, seven days after the last measurement.
+  `apt-get install -y gh` succeeded and installed `2.45.0-1ubuntu0.3` — the same version
+  the `dotfiles` hook installs, from the same `noble-updates` archive, confirming the
+  package is reachable here too; this repo simply has no hook that runs it.
+- **The `gh auth status` false-negative (§ "`gh` is installed, and unusable") still
+  holds, verbatim.** `gh auth status` exited `0` and printed
+  `The token in GH_TOKEN is invalid.` in the same breath. `gh api user` and a
+  repo-scoped `gh api repos/bestdan/workflow-skills` both succeeded (`200`) against the
+  same token in the same process — so this credential is not dead, only misreported. A
+  check that reads `gh auth status`'s exit code alone would have called it healthy just
+  as readily as it would have missed a genuinely dead one, which is exactly the
+  false-negative `commands/do-tasks.md` §4 step 5 already writes its
+  self-check around.
+- **New: the GraphQL refusal (§ 2026-09-07 finding 5) is not specific to routines or to
+  batch-dispatched sessions — it blocks the single-issue, foreground `/do-tasks` path
+  too.** `gh issue list`, `gh issue view`, and `gh pr list` each returned the identical
+  `HTTP 403: GitHub GraphQL is not available from Claude Code sessions; use the REST
+  API …` this file has recorded since 09-07, in a session with a _working_ REST
+  credential (not the unprovisioned case finding 2 and the 09-08 section describe).
+  Plain `gh api repos/{owner}/{repo}/issues?state=open` (REST, unauthenticated-shape
+  list) returned issue numbers normally.
+
+  | call (this session, working REST credential) | result                |
+  | -------------------------------------------- | --------------------- |
+  | `gh api repos/<repo>` / `gh api user`        | `200`                 |
+  | `gh api repos/<repo>/issues?state=open`      | `200`, REST           |
+  | `gh issue list --search '...' --json ...`    | `403` GraphQL refusal |
+  | `gh issue view <n> --json ...`               | `403` GraphQL refusal |
+  | `gh pr list --json ...`                      | `403` GraphQL refusal |
+
+**What this changes.** The gh-issue handler's own docs (`commands/do-tasks.md` §4 step
+5, `gh-issue-claim.md`'s opening paragraph) frame the `gh`-availability risk as something that
+attaches to **dispatched remote batch sessions**, with foreground/single-mode `/do-tasks`
+implicitly assumed safe because it runs in "the current session." That assumption does
+not hold when the current session is itself one of these environments: "Find
+candidates" (`gh issue list`), the pre-flight in-flight check (`gh pr list`), and the
+WIP gate's `count_wip` (`gh issue list` inside `gh-issue-claim.py`) are all
+GraphQL-backed and all fail the same way here as in a dispatched or routine session —
+so a scheduled `/do-tasks` invocation sourced from `bestdan/workflow-skills` cannot run
+the gh-issue flow as written today, batch or not, until this repo gains a
+`SessionStart` hook equivalent to `dotfiles`' (which closes only the "`gh` is absent"
+half) **and** the GraphQL block is lifted or the handler's GraphQL-backed calls are
+replaced with the REST equivalents the proxy's own error message names.
+
+**What this does NOT establish.** `gh pr create` and `gh issue edit`/`gh issue
+comment` — the mutating calls "Claim the issue", "PR", and "Bail" depend on — were not
+attempted, to avoid claiming or writing to a live issue from an unattended run whose
+claim-lock race safety this file's findings already call into question. Whether they are
+REST-backed (and so would work) or also refused is unmeasured.
+`commands/handlers/claim-lock.md`'s ref-based `acquire`/`release` goes through `gh api`
+(REST), but the 2026-09-17 routine measurement above found `POST`/`DELETE` on
+`/git/refs` refused with `403 … not permitted through this proxy`, so those are expected
+to fail here too — inference from a different client and run, not a measurement taken
+in this session.
 
 ## What this settles
 
