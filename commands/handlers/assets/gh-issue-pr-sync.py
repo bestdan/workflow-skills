@@ -43,7 +43,7 @@ the merge did not close comes back open, and an open issue is skipped.
 A merged PR that only MENTIONS an issue — `Refs #<n>`, a partial PR — closes
 nothing, and GitHub leaves that issue exactly where it was. If it was on
 `4_needs_review`, it now sits there with no open PR, still counted by the claim
-WIP gate as work awaiting review (#892). So the merged branch also returns each
+WIP gate as work awaiting review. So the merged branch also returns each
 such issue to `3_started`, the rung the closed-unmerged row writes, for the same
 reason: the review this rung signalled has ended, and the work has not.
 
@@ -52,8 +52,8 @@ any `#<n>` in the PR's title or body, which over-matches (issues and PRs share a
 number space), and that is safe only because of the gate each candidate must
 pass: open, on `4_needs_review`, and cross-referenced by no open PR. An issue in
 that state is wrong however it got there, so a loose mention can only ever
-correct it. The PR's head branch is no help here — #892's own case merged from
-`bestdan/eval-log-retention`, which names no issue at all.
+correct it. The PR's head branch is no help here: a PR that only mentions an
+issue can merge from a branch that names none.
 
 This closes the drift at its source; `gh-issue-reconcile.py`'s row 4 is the
 sweep that catches what this cannot — an issue closed by hand in the web UI, a
@@ -251,6 +251,19 @@ query($owner: String!, $name: String!, $number: Int!) {
 """
 
 
+def _not_found(out):
+    """Whether a failed GraphQL read failed only because the number names nothing.
+
+    `gh` exits non-zero on any GraphQL error but still prints the response body,
+    so the error `type` is readable. Every other failure stays fatal.
+    """
+    try:
+        errors = json.loads(out or "{}").get("errors") or []
+    except ValueError:
+        return False
+    return bool(errors) and all(e.get("type") == "NOT_FOUND" for e in errors)
+
+
 def read_candidate(repo, number):
     """(labels, state, open PR numbers, complete?) — or None if not an issue."""
     owner, name = repo.split("/", 1)
@@ -269,6 +282,10 @@ def read_candidate(repo, number):
         ]
     )
     if code != 0:
+        if _not_found(out):
+            # A mention that names nothing — a typo, a deleted issue. It is free
+            # text in someone's PR body, so it must not fail the run.
+            return None
         raise SystemExit(
             f"reading {repo}#{number} failed: {err.strip() or out.strip()}"
         )
@@ -518,8 +535,10 @@ def main(argv=None):
                 if outcome["dropped"]:
                     names = ", ".join(outcome["dropped"])
                     print(f"Dropped (not in labels.yml): {names}")
-        if not outcomes:
-            print(f"no-op: {args.repo}#{args.pr} closed no issue in this repo")
+        if not outcomes and not stranded:
+            print(
+                f"no-op: {args.repo}#{args.pr} closed and stranded no issue in this repo"
+            )
         else:
             for outcome in outcomes:
                 number = outcome["issue"]

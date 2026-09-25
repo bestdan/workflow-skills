@@ -106,7 +106,9 @@ class FakeMergedRemote:
         referenced_by=None,
         pulls=(),
         truncated=(),
+        missing=(),
     ):
+        self.missing = set(missing)
         self.issues = {n: (list(ls), st) for n, (ls, st) in (issues or {}).items()}
         self.closing = list(closing)
         self.body = body
@@ -146,6 +148,13 @@ class FakeMergedRemote:
             payload = {"closingIssuesReferences": refs, "title": "", "body": self.body}
             return 0, json.dumps(payload), ""
         if args[:2] == ["api", "graphql"]:
+            number = int(next(a for a in args if a.startswith("number=")).split("=")[1])
+            if number in self.missing:
+                # gh's real shape: non-zero exit, the error body still on stdout.
+                body = {
+                    "errors": [{"type": "NOT_FOUND", "message": "Could not resolve"}]
+                }
+                return 1, json.dumps(body), "gh: Could not resolve"
             node = self._candidate(args)
             payload = {"data": {"repository": {"issueOrPullRequest": node}}}
             return 0, json.dumps(payload), ""
@@ -525,10 +534,8 @@ class MergedPRTests(unittest.TestCase):
 class StrandedIssueTests(unittest.TestCase):
     """A merged PR that only MENTIONS an in-review issue returns it to started.
 
-    #892: #844 merged as `Refs #840` because it met one of three criteria, and
-    #840 sat at `4_needs_review` with no open PR for two days, holding a WIP
-    slot. The branch was `bestdan/eval-log-retention`, so these run on a branch
-    that names no issue — the state gate, not the branch, finds the issue.
+    These run on a branch that names no issue: the state gate, not the branch,
+    finds it.
     """
 
     def _run(self, remote, apply=True):
@@ -613,6 +620,18 @@ class StrandedIssueTests(unittest.TestCase):
 
         self.assertEqual(result["stranded"], [])
         self.assertEqual(remote.labels(142), ["prio:1", "est:3"])
+
+    def test_a_mention_that_names_nothing_does_not_stop_the_run(self):
+        """A typo'd `#<n>` is free text in a PR body; the next candidate still runs."""
+        remote = FakeMergedRemote(
+            issues={840: (IN_REVIEW, "OPEN")},
+            body="See #99999, Refs #840",
+            missing=[99999],
+        )
+        code, result = self._run(remote)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(remote.labels(840), READY)
 
     def test_an_unread_page_of_references_leaves_the_rung(self):
         remote = FakeMergedRemote(
