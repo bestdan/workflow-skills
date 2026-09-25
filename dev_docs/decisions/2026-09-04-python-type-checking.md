@@ -139,6 +139,60 @@ in comments and docstrings that ruff-_format_ leaves alone by design. `B`/`SIM`/
 `C4` add 11 minor findings; one of them (`SIM102`) wants a nested guard collapsed
 whose intervening comment explains the defect it closes.
 
+## The floor stays at 3.9 (re-checked 2026-09-24)
+
+Re-checked against new cost-side evidence: `typesafe-sdk`, `httpx2`, `msgspec`,
+`tenacity` and `pydantic-core` all require `>=3.10`. The floor holds, because the
+premise it rests on still holds and raising it would not buy the thing the
+evidence asks for.
+
+**What consumers run is still 3.9.6.** Every consumer file is launched as
+`python3 <path>` from skill or command prose, or through a
+`#!/usr/bin/env python3` shebang (`worktree-teardown-reminder.py`, which
+`hooks/hooks.json` runs on every installed machine). Both resolve through the
+user's `PATH`. The plugin provisions no interpreter, and `uv` is optional:
+`/doctor` reports its absence as a `WARN`. On a machine with nothing added,
+`python3` is the Command Line Tools interpreter. Measured on macOS 27.0 (build
+26A428): `/usr/bin/python3` is **3.9.6**, from `/Library/Developer/CommandLineTools`.
+The only machines that reliably run something newer are ones where the user
+installed it, mise or Homebrew for example. That is also why a contributor's own
+runs never exercise 3.9: on the machine that measured this, `python3` on `PATH`
+is mise's 3.12.13.
+
+**Raising the floor would not unlock the SDKs.** Consumer files are stdlib-only
+(above, "Why not pydantic"), and that rule binds on its own. `typesafe-sdk` 0.7.0
+needs 3.10 _and_ four runtime dependencies. At a 3.10 floor it would still be a
+new install step on someone else's machine, so it would stay out. The same goes
+for the other four libraries: each is a third-party import first and a 3.10
+requirement second. A typed-model call hand-rolled on `urllib` is the
+consequence of the stdlib-only rule, not of the floor.
+(`dev_docs/research/2026-09-17-jev-applications/README.md`, "The SDK is out".)
+
+**What a higher floor would open, and why none of it is needed now:**
+
+| At   | Opens (stdlib only)                           | At 3.9 instead                                                                                              |
+| ---- | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| 3.10 | `X \| Y` in annotations                       | `from __future__ import annotations` (in use)                                                               |
+| 3.10 | runtime `X \| Y` in `isinstance`              | the tuple form, `isinstance(v, (X, Y))`                                                                     |
+| 3.10 | `match`                                       | `if`/`elif`                                                                                                 |
+| 3.10 | `TypeAlias` / `TypeGuard` / `ParamSpec`       | `_shape.expect()` for narrowing (in use); `typing_extensions` under `TYPE_CHECKING` ("Why not `TypeGuard`") |
+| 3.10 | `zip(strict=)`, `dataclass(slots=, kw_only=)` | an explicit length check; hand-written `__slots__` or keyword-only `__init__`                               |
+| 3.11 | `tomllib`                                     | `grok-telemetry-gate.py`'s hand scanner (in use; its docstring says why)                                    |
+| 3.11 | `typing.Self`                                 | `typing_extensions` under `TYPE_CHECKING`                                                                   |
+| 3.11 | `ExceptionGroup`                              | nothing needs it                                                                                            |
+
+Every item has a 3.9 form, in use or described above, or has no consumer use.
+All but one are
+ergonomic. `tomllib` is the exception, since it would replace a purpose-built
+parser, but that parser is one file. The cost of raising the floor is concrete:
+an install step on every stock Mac, which today runs the plugin with nothing
+added.
+
+**The floor constrains consumer code only.** The dev tier checks at 3.11, and a
+file only contributors execute — a dev script, a research probe — is not held to
+3.9. For that code the bar on a vendor SDK is the repo's ordinary
+new-dependency discussion (`AGENTS.md`), not the floor.
+
 ## Revisit when
 
 Concrete triggers, so a future contributor can recognise one rather than
@@ -152,7 +206,20 @@ re-litigate the whole question. **Any one is sufficient.**
 2. **The consumer floor moves off 3.9.** If the project decides to require a
    newer Python, ty's disqualifier may evaporate and the `TypeGuard` question
    reopens on its own merits. Raise `CONSUMER_PYTHON` only by deciding to drop
-   support — never to make a diagnostic go away.
+   support — never to make a diagnostic go away. What would justify that
+   decision, per the 2026-09-24 re-check above, is one of these:
+   - **The stock interpreter moves.** `/usr/bin/python3 --version` on a fresh
+     macOS release reports something newer than 3.9. Re-run it on each major
+     macOS release. That one command is the whole check.
+   - **The plugin provisions its interpreter.** Consumer files move to
+     `uv run --script` with a PEP 723 `requires-python`, and `uv` becomes a
+     hard prerequisite `/doctor` fails on rather than warns about. The floor is
+     then whatever the script header declares, and system `python3` stops
+     mattering.
+   - **A consumer file needs a third-party dependency.** That breaks the
+     stdlib-only rule first. Whatever answers it, most likely the previous
+     bullet, answers the floor too. A library requiring 3.10 is not a trigger
+     on its own.
 3. **The assets get annotated end to end** (a return type on every `def`). Then
    mypy's `Any`-blindness disappears and pyright's inference edge disappears with
    it — which _favours staying_, but makes promoting the consumer tier to
