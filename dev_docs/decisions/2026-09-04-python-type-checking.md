@@ -170,14 +170,23 @@ consequence of the stdlib-only rule, not of the floor.
 
 **What a higher floor would open, and why none of it is needed now:**
 
-| At   | Opens (stdlib only)                                                                                                           | Covered at 3.9 by                                                                                                |
-| ---- | ----------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| 3.10 | runtime `X \| Y` in `isinstance`, `match`, `TypeAlias`/`TypeGuard`/`ParamSpec`, `zip(strict=)`, `dataclass(slots=, kw_only=)` | `from __future__ import annotations`; `typing_extensions` under `TYPE_CHECKING`; `_shape.expect()` for narrowing |
-| 3.11 | `tomllib`, `typing.Self`, `ExceptionGroup`                                                                                    | nothing reads TOML; `Self` via `typing_extensions` under `TYPE_CHECKING`                                         |
+| At   | Opens (stdlib only)                           | At 3.9 instead                                                                                              |
+| ---- | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| 3.10 | `X \| Y` in annotations                       | `from __future__ import annotations` (in use)                                                               |
+| 3.10 | runtime `X \| Y` in `isinstance`              | the tuple form, `isinstance(v, (X, Y))`                                                                     |
+| 3.10 | `match`                                       | `if`/`elif`                                                                                                 |
+| 3.10 | `TypeAlias` / `TypeGuard` / `ParamSpec`       | `_shape.expect()` for narrowing (in use); `typing_extensions` under `TYPE_CHECKING` ("Why not `TypeGuard`") |
+| 3.10 | `zip(strict=)`, `dataclass(slots=, kw_only=)` | an explicit length check; hand-written `__slots__` or keyword-only `__init__`                               |
+| 3.11 | `tomllib`                                     | `grok-telemetry-gate.py`'s hand scanner (in use; its docstring says why)                                    |
+| 3.11 | `typing.Self`                                 | `typing_extensions` under `TYPE_CHECKING`                                                                   |
+| 3.11 | `ExceptionGroup`                              | nothing needs it                                                                                            |
 
-The gains are ergonomic, and every item has a 3.9 form already in use. The cost
-of raising the floor is concrete: an install step on every stock Mac, which
-today runs the plugin with nothing added.
+Every item has a 3.9 form, in use or described above, or has no consumer use.
+All but one are
+ergonomic. `tomllib` is the exception, since it would replace a purpose-built
+parser, but that parser is one file. The cost of raising the floor is concrete:
+an install step on every stock Mac, which today runs the plugin with nothing
+added.
 
 **The floor constrains consumer code only.** The dev tier checks at 3.11, and a
 file only contributors execute — a dev script, a research probe — is not held to
