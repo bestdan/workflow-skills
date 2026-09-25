@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.69.5] - 2026-09-25
+
+### Fixes
+
+- restore mirrored reconcile rules and drop incident history [N/A] (#901) (718378e)
+
 ## [2.69.4] - 2026-09-24
 
 ### Fixes
