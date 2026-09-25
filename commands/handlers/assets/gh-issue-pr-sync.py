@@ -241,7 +241,10 @@ query($owner: String!, $name: String!, $number: Int!) {
           pageInfo { hasPreviousPage }
           nodes {
             ... on CrossReferencedEvent { source { ... on PullRequest { number state } } }
-            ... on ConnectedEvent { subject { ... on PullRequest { number state } } }
+            ... on ConnectedEvent {
+              source { ... on PullRequest { number state } }
+              subject { ... on PullRequest { number state } }
+            }
           }
         }
       }
@@ -273,9 +276,11 @@ def read_candidate(repo, number):
             "graphql",
             "-f",
             f"query={CANDIDATE_QUERY}",
-            "-F",
+            # `-F` would send an all-digit owner or repo name as an Int, which
+            # the `String!` variable rejects; only `number` is typed.
+            "-f",
             f"owner={owner}",
-            "-F",
+            "-f",
             f"name={name}",
             "-F",
             f"number={number}",

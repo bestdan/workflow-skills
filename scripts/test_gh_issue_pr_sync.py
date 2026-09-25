@@ -93,7 +93,9 @@ class FakeMergedRemote:
 
     `body` is the PR's body; each `#<n>` in it is a stranded-issue candidate,
     read back through the GraphQL query. `referenced_by` maps an issue number to
-    the (PR number, state) pairs its timeline carries, `pulls` names numbers that
+    the (PR number, state) pairs its timeline carries, `connected_by` does the
+    same for PRs linked by hand, which arrive in `subject` with the issue's own
+    side left `{}`, `pulls` names numbers that
     are pull requests rather than issues, and `truncated` names issues whose
     timeline has more references than one read covers.
     """
@@ -104,11 +106,13 @@ class FakeMergedRemote:
         closing=(),
         body="",
         referenced_by=None,
+        connected_by=None,
         pulls=(),
         truncated=(),
         missing=(),
     ):
         self.missing = set(missing)
+        self.connected_by = connected_by or {}
         self.issues = {n: (list(ls), st) for n, (ls, st) in (issues or {}).items()}
         self.closing = list(closing)
         self.body = body
@@ -125,6 +129,10 @@ class FakeMergedRemote:
         events = [
             {"source": {"number": pr, "state": pr_state}}
             for pr, pr_state in self.referenced_by.get(number, [])
+        ]
+        events += [
+            {"source": {}, "subject": {"number": pr, "state": pr_state}}
+            for pr, pr_state in self.connected_by.get(number, [])
         ]
         return {
             "state": state,
@@ -589,6 +597,28 @@ class StrandedIssueTests(unittest.TestCase):
 
         self.assertIn("#850", result["stranded"][0]["skipped"])
         self.assertEqual(remote.patches(), [])
+
+    def test_a_pr_linked_by_hand_still_blocks_the_return(self):
+        """A ConnectedEvent carries the PR in `subject`; the issue's own side
+        comes back `{}` and the parser falls past it."""
+        remote = FakeMergedRemote(
+            issues={840: (IN_REVIEW, "OPEN")},
+            body="Refs #840",
+            connected_by={840: [(850, "OPEN")]},
+        )
+        code, result = self._run(remote)
+
+        self.assertIn("#850", result["stranded"][0]["skipped"])
+        self.assertEqual(remote.patches(), [])
+
+    def test_owner_and_name_are_sent_as_strings(self):
+        """`-F` would coerce an all-digit owner or repo name to an Int."""
+        remote = FakeMergedRemote(issues={840: (IN_REVIEW, "OPEN")}, body="Refs #840")
+        self._run(remote)
+
+        graphql = next(a for a, _ in remote.calls if a[:2] == ["api", "graphql"])
+        self.assertEqual(graphql[graphql.index("owner=o") - 1], "-f")
+        self.assertEqual(graphql[graphql.index("name=n") - 1], "-f")
 
     def test_a_mention_off_the_review_rung_is_a_no_op(self):
         """A loose `#<n>` must never move an issue the merge did not strand."""
