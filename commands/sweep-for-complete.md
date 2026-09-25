@@ -57,7 +57,10 @@ hook rather than the image — and where it is, `gh api user` answers and
 `gh auth status` exits 0 while reporting the token invalid, so neither is a
 health check. Both therefore run over the `mcp__github__*` tools, the GitHub
 channel this command speaks in a routine. Plain `curl` can also read the API
-there, but nothing in this command uses it. That MCP surface comes
+there, because the routine's proxy substitutes the real credential for the
+placeholder token, but nothing in this command uses it
+(`dev_docs/research/2026-09-05-cloud-session-plugin-and-proxy.md` → "2026-09-16:
+the same read, from a routine"). That MCP surface comes
 from the **GitHub App installed for claude.ai/code**, not from a claude.ai
 connector — so it will not appear in a routine's connector list, and there is
 nothing to "attach" there. Measurements:

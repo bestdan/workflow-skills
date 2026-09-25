@@ -28,7 +28,7 @@ most of the skip can run server-side:
 
 ## Proposed skip
 
-Mirror `linear-promote.md` step 5's cross-state `parentId` sweep:
+One bulk sweep, with an exact check as its truncation fallback:
 
 1. After the step-3 candidate query, run one extra
    `searchJiraIssuesUsingJql` over the project for children:
@@ -38,8 +38,12 @@ Mirror `linear-promote.md` step 5's cross-state `parentId` sweep:
    skip any step-3 candidate whose `key` is in it (reason `parent rollup`).
 3. If the sweep returns exactly 100, the page may be truncated. Fall back to a
    per-candidate `parent = "<KEY>"` check (`maxResults: 1`) for any candidate
-   not yet confirmed a parent — the same truncation fallback
-   `linear-promote.md` step 5 applies to its 100-item sweep.
+   not yet confirmed a parent.
 
 The sweep is server-side filtered; only the set-membership test is
-client-side, exactly as in `linear-promote.md` step 5.
+client-side.
+
+This differs on purpose from `linear-promote.md` step 5, which runs an exact
+per-candidate check (`parentId`, `limit: 1`) and no bulk sweep. Jira can
+answer the whole project's parent set in one query, which saves one call per
+candidate.
