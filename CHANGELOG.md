@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.70.1] - 2026-09-25
+
+### Fixes
+
+- escalate judgment calls to an independent reviewer [#883] (#904) (1f483d4)
+
 ## [2.70.0] - 2026-09-25
 
 ### Features
