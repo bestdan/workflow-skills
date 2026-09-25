@@ -1,9 +1,7 @@
 #!/usr/bin/env bats
 # scripts/guard-foreign-worktree.py — the PreToolUse guard that refuses a write
 # into a worktree the session has not entered, and warns once on the first
-# write in a main checkout sitting on its default branch. Ported case-for-case
-# from the suite it replaces (bestdan/dotfiles#911,
-# agents/guard_foreign_worktree.test.sh).
+# write in a main checkout sitting on its default branch.
 #
 # This cannot work on command text alone: the verdict depends on which
 # worktree of which repo a path lands in, which the guard learns by asking git.
@@ -88,6 +86,14 @@ bash_case() { expect "$1" Bash "$2" command "$3"; }
   bash_case deny "$repo" "git -C ../wt commit -m x"     # a relative -C resolving foreign
 }
 
+# A work tree override is where checkout and commit write, whatever -C says.
+@test "a work tree override naming a foreign worktree is denied" {
+  bash_case deny "$repo" "git --git-dir $repo/.git --work-tree $wt checkout -- file.txt"
+  bash_case deny "$repo" "git --work-tree=$wt checkout -- file.txt"
+  bash_case deny "$repo" "GIT_WORK_TREE=$wt git checkout -- file.txt"
+  bash_case allow "$repo" "git --work-tree $wt status"
+}
+
 @test "cd, redirects, writers and in-place editors into a foreign worktree are denied" {
   bash_case deny "$repo" "cd $wt && git commit -m x"
   bash_case deny "$repo" "cd $wt; touch a"
@@ -98,7 +104,7 @@ bash_case() { expect "$1" Bash "$2" command "$3"; }
   bash_case deny "$repo" "sed -i '' s/a/b/ $wt/file.txt"
 }
 
-# The #827 shape: auto mode steers the edit into a heredoc, so the path is
+# The usual ghost edit: auto mode steers the edit into a heredoc, so the path is
 # inside opaque code and no Edit/Write hook ever sees it.
 @test "an interpreter fed inline code naming a foreign path is denied" {
   bash_case deny "$repo" "$(printf 'python3 - <<%s\nopen("%s/file.txt", "w").write("x")\nPY\n' "'PY'" "$wt")"

@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 """PreToolUse guard: refuse a write into a worktree this session never entered.
 
-Detection alone was tried first: a statusline that notices the session's edits
-landing outside the tree it stands in annotated the problem and refused
-nothing, and that did not stop ~30 consecutive ghost-editing calls in the run
-behind #827. This is the half that refuses. It moved here from
-bestdan/dotfiles#911 because nothing in it is specific to one machine.
+Detecting the problem is not enough: an agent told its edits land outside the
+tree it stands in keeps making them. This is the half that refuses.
 
 WHAT GOES WRONG WHEN NOTHING REFUSES. An agent that edits, commits and pushes
 into a worktree it never entered diverges from the human's shell, editor,
@@ -22,9 +19,8 @@ happens elsewhere, so reaching in defeats that coordination signal, not just
 the verification.
 
 WHY THE ``Bash`` MATCHER IS THE LOAD-BEARING ONE. Auto mode instructs the model
-to prefer Bash for file changes (bestdan/dotfiles#892), so the #827 edits went
-through ``python3 - <<'PY'`` heredocs and never touched an ``Edit``/``Write``
-hook. Registering only on ``Edit|Write|NotebookEdit`` would miss the exact
+to prefer Bash for file changes, so a ghost edit typically goes through a
+``python3 - <<'PY'`` heredoc and never touches an ``Edit``/``Write`` hook. Registering only on ``Edit|Write|NotebookEdit`` would miss the exact
 failure this exists for. Both are registered; Bash is the one that fires.
 
 TWO DECISIONS, ONE HOOK.
@@ -35,8 +31,8 @@ TWO DECISIONS, ONE HOOK.
      branch emits a non-blocking warning: write-work belongs in a worktree.
      Non-blocking so a deliberate one-line fix still goes through.
 
-The second is delivered as ``hookSpecificOutput.additionalContext`` rather than
-the stderr the issue proposed. Claude Code sends stderr from a hook that exits
+The second is delivered as ``hookSpecificOutput.additionalContext``, not on
+stderr. Claude Code sends stderr from a hook that exits
 0 to the debug log only — never the transcript, and the model never sees it —
 so an exit-0 stderr warning would have been invisible to the one reader who can
 act on it. ``permissionDecision: "allow"`` is deliberately NOT set: that would
@@ -45,8 +41,7 @@ is a far larger change than the warning is worth.
 
 READS ARE NOT DENIED, WRITES ARE. Per-command path flags (``rg <pattern>
 <path>``, ``git -C <path> log``) are the recommended way to READ another tree
-without moving the session, and bestdan/dotfiles#909 qualified that advice for
-writes alone. A guard that denied reads too would contradict it and false-deny
+without moving the session; only writes must stand in the tree. A guard that denied reads too would contradict it and false-deny
 a taught idiom — and a guard that false-denies gets disabled, which costs the
 denials that matter. So a foreign path has to carry *write evidence* before it
 is refused. The evidence is enumerated in ``_write_targets`` and is a denylist:
@@ -76,13 +71,10 @@ import sys
 BYPASS = "WORKFLOW_SKILLS_ALLOW_FOREIGN_WRITE"
 
 # --- command parsing ---------------------------------------------------------
-# Copied, not reinvented, from bestdan/dotfiles' agents/guard_dangerous_git.py
-# and agents/guard_pinned_branch.py, which this guard imported from while it
-# lived there. That parser was hardened against redirects, wrappers,
-# executors, quoting and segment splitting over half a dozen issues (dotfiles
-# #620, #624, #625, #638), and a fresh one would reintroduce every one of them.
-# A plugin hook cannot import from a machine's dotfiles, so the pieces this
-# guard uses live here.
+# A copy of the parser in bestdan/dotfiles' agents/guard_dangerous_git.py and
+# agents/guard_pinned_branch.py, which is hardened against redirects, wrappers,
+# executors, quoting and segment splitting. A plugin hook cannot import from a
+# machine's dotfiles, so the pieces this guard uses live here.
 
 # Anything that ends a command and starts a new one. Deliberately quote-blind:
 # `echo "$(…; git commit)"` really does run git, and every attempt to make a
@@ -297,7 +289,7 @@ _WRITERS = {
 }
 
 # Interpreters. Their arguments are code, not paths this guard can classify —
-# the #827 shape is a foreign path inside a `python3 - <<'PY'` heredoc — so a
+# the usual ghost edit is a foreign path inside a `python3 - <<'PY'` heredoc — so a
 # foreign path anywhere near one is treated as a write. This is the guard's one
 # deliberately fail-CLOSED rule, and the bypass exists for it.
 _INTERPRETERS = {"python", "python3", "node", "ruby", "perl", "php", "osascript", "uv"}
@@ -372,8 +364,7 @@ def _real(path: str) -> str:
     not always agree on which form they print. Comparing the raw strings
     reports the session's OWN worktree as foreign — a false denial on every
     command in the session, which is the fastest possible way to get this hook
-    switched off. Carried over from #831, where the
-    shell implementation of the same check paid for it.
+    switched off.
     """
     return os.path.realpath(path)
 
@@ -476,8 +467,8 @@ def _git_writes(sub: str, args: list[str]) -> bool:
 def _segments(cmd: str):
     """Yield the token forms of each command segment.
 
-    Redirects are stripped BEFORE the split, for the reason dotfiles
-    issue #638 recorded: three redirect operators are spelled with a
+    Redirects are stripped BEFORE the split, because three redirect operators
+    are spelled with a
     character the splitter treats as a separator (`2>&1` and `>&2` on `&`,
     `>| file` on `|`), so splitting first leaves a bare fd number as the
     segment's head word and the command behind it is never reached. Redirect
@@ -511,6 +502,10 @@ def _git_calls(tokens: list[str]):
     parser's; what is kept here — and what that parser normalizes away — is
     ``-C``, which decides WHICH repo
     a command targets and is therefore the whole question.
+
+    A work tree named by ``--work-tree`` or a ``GIT_WORK_TREE=`` prefix is
+    where a mutating subcommand actually writes, so it wins over ``-C``. A
+    relative one resolves against the ``-C`` directory, as git does.
     """
     head = 0
     wrapped = False
@@ -528,12 +523,25 @@ def _git_calls(tokens: list[str]):
             continue
         i = start + 1
         dir_override = None
+        work_tree = None
+        for token in tokens[:start]:
+            if token.startswith("GIT_WORK_TREE="):
+                work_tree = token[len("GIT_WORK_TREE=") :]
         while i < len(tokens) and tokens[i].startswith("-"):
-            if tokens[i] in _GIT_OPTS_WITH_VALUE:
-                if tokens[i] == "-C" and i + 1 < len(tokens):
-                    dir_override = tokens[i + 1]
+            if tokens[i].startswith("--work-tree="):
+                work_tree = tokens[i][len("--work-tree=") :]
+            elif tokens[i] in _GIT_OPTS_WITH_VALUE:
+                if i + 1 < len(tokens):
+                    if tokens[i] == "-C":
+                        dir_override = tokens[i + 1]
+                    elif tokens[i] == "--work-tree":
+                        work_tree = tokens[i + 1]
                 i += 1
             i += 1
+        if work_tree:
+            if dir_override and not os.path.isabs(os.path.expanduser(work_tree)):
+                work_tree = os.path.join(dir_override, work_tree)
+            dir_override = work_tree
         if i < len(tokens):
             yield dir_override, tokens[i], tokens[i + 1 :]
 
@@ -595,8 +603,8 @@ def _write_targets(cmd: str, cwd: str):
       - a path argument of a writer command or an in-place editor (DEFINITE),
         or of an interpreter (REACH).
       - every path mentioned anywhere in a command that feeds an interpreter
-        inline, via its inline-code flag or a heredoc (REACH). The code is opaque there, and
-        that is the shape #827 actually took.
+        inline, via its inline-code flag or a heredoc (REACH). The code is
+        opaque there, and that is the shape a ghost edit usually takes.
 
     Relative paths resolve against the payload's cwd rather than against a `cd`
     tracked through the command. Tracking it would only matter for a relative
@@ -697,12 +705,11 @@ def _warned_already(session: str | None) -> bool:
         os.makedirs(state_dir, mode=0o700, exist_ok=True)
         os.chmod(state_dir, 0o700)
         stamp = os.path.join(state_dir, hashlib.sha256(session.encode()).hexdigest())
-        if os.path.exists(stamp):
-            return True
-        with open(stamp, "w"):
-            pass
-        os.chmod(stamp, 0o600)
+        # One atomic create, so parallel calls cannot both see no stamp.
+        os.close(os.open(stamp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
         return False
+    except FileExistsError:
+        return True
     except OSError:
         return True  # cannot remember: stay quiet rather than warn every call
 
@@ -725,7 +732,7 @@ def _deny(target: str, holder: str) -> None:
 
 def _warn() -> None:
     # No permissionDecision: this must not touch the permission flow. See the
-    # module docstring for why this is not the stderr the issue proposed.
+    # module docstring for why the warning is not written to stderr.
     _emit(
         {
             "hookSpecificOutput": {
