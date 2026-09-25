@@ -184,8 +184,12 @@ def main():
     # `cost_sensitivity: high` no longer fires it on its own. Unlike the two
     # above this is not a repair -- neither reading is more faithful, because
     # the row's "and/or" is genuinely ambiguous -- so it exists to price the
-    # default rather than to replace it. Its ambiguity figure is the floor
-    # across every defensible reading of the table.
+    # default rather than to replace it. Its figures are a price and NOT a
+    # bound: "and/or" admits narrower readings still (both conjuncts required
+    # gives 439 ambiguous, 76.2%), so adding readings one at a time can never
+    # establish a floor. The bound that does hold comes from monotonicity --
+    # any reading of a row only adds firings relative to deleting it, and with
+    # this row deleted 416 tuples (72.2%) are still ambiguous.
     report(
         "Variant: mechanical-bulk narrowed to mechanical complexity only",
         [(t, fires(t, mechanical_bulk_narrow=True)) for t in tuples()],

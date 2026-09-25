@@ -45,13 +45,24 @@ The table is therefore **neither total nor deterministic**, and neither failure
 is an edge case. Ambiguity is the overwhelming majority behaviour; a single
 unambiguous answer is the 11.3% exception.
 
-**Neither failure rests on how the table is read.** One row's conditions are
-genuinely ambiguous (`mechanical-bulk`'s "and/or"), so the headline above is one
-reading of the table rather than the only one. The script prices the alternative
-instead of arguing about it: under the narrowest defensible reading of that row,
-ambiguity falls to **462 of 576 (80.2%)** and the silent tuples _double_ to
-**16**. So 80.2% and 8 are the floors — every reading leaves at least four
-tuples in five ambiguous, and none makes the table total.
+**The two failures come apart, and only one is recoverable.** One row's
+conditions are genuinely ambiguous — `mechanical-bulk`'s "and/or" — so the
+headline above is one reading rather than the only one, and the script prices a
+narrower reading instead of arguing about it: ambiguity falls to **462 of 576
+(80.2%)** and the silent tuples double to **16**.
+
+Reading that row differently cannot rescue either failure, and the bound does not
+depend on enumerating readings. Every reading of a row can only _add_ firings
+relative to deleting it, so deleting `mechanical-bulk` outright bounds what any
+reading of it can achieve: **416 of 576 (72.2%)** still ambiguous, and 28 silent
+tuples rather than fewer. Narrowing that row trades ambiguity for silence in one
+direction only.
+
+**Totality is recoverable; determinism is not.** These are separate axes.
+Rewriting `standard-pr` as a bare default branch (below) leaves **0** silent
+tuples under every reading of `mechanical-bulk` — so the table can be made total
+by one decision. Nothing available makes it deterministic: ambiguity stays above
+**70%** however that row is read, and stays there even with the row gone.
 
 Three specifics carry the rest of this record.
 
@@ -102,7 +113,10 @@ The third is **not** a repair, and that is the point of having it:
   `cost_sensitivity: high` both to bulk work and to work merely "only worth doing
   cheaply", which can be hard or creative. So this reading exists to **price the
   default**, not to replace it: ambiguity falls to **462 (80.2%)**, silent tuples
-  rise to **16**, and the row's own firing rate halves from 66.7% to 33.3%. The
+  rise to **16**, and the row's own firing rate halves from 66.7% to 33.3%. It is
+  a price, not a bound — "and/or" admits narrower readings still (requiring both
+  conjuncts gives 439, 76.2%), which is why the bound above comes from deleting
+  the row rather than from any reading of it. The
   headline keeps the inclusive reading because it is what the row literally
   spells; this variant is what makes that choice auditable rather than buried.
 
@@ -209,9 +223,10 @@ no distribution. Specifically:
 - **Good, because** it narrows #810: `label` joins `scope` as a dimension the
   comparison should not measure, leaving six.
 - **Good, because** the conclusion does not depend on how the one genuinely
-  ambiguous row is read. The narrowing variant establishes an 80.2% ambiguity
-  floor and shows the silent set only grows, so a reader who disagrees with the
-  headline's reading of "and/or" still reaches the same decision.
+  ambiguous row is read. Deleting that row bounds what any reading of it can do —
+  72.2% still ambiguous — and along that axis the silent set only grows, so a
+  reader who disagrees with the headline's reading of "and/or" still reaches the
+  same decision.
 - **Good, because** the same enumeration that kills the claim hands `assess-task` a
   real defect list. The table has been shipping with 8 silent tuples and a
   `standard-pr` row reachable on 2, which no consumer has reported because no
