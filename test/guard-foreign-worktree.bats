@@ -107,9 +107,19 @@ bash_case() { expect "$1" Bash "$2" command "$3"; }
   bash_case deny "$repo" "ruby -e 'File.write(\"$wt/file.txt\", \"x\")'"
 }
 
+# The code follows the cluster's last letter, and a long flag may carry it
+# attached.
+@test "inline code behind a combined or attached flag is denied" {
+  bash_case deny "$repo" "node -pe 'require(\"fs\").writeFileSync(\"$wt/file.txt\", \"x\")'"
+  bash_case deny "$repo" "python3 -Bc \"open('$wt/file.txt','w')\""
+  bash_case deny "$repo" "node --eval='require(\"fs\").writeFileSync(\"$wt/file.txt\", \"x\")'"
+}
+
 # Inline-code flags are per interpreter: `perl -c` only syntax-checks.
 @test "a flag that is not inline code for that interpreter does not arm the rule" {
   bash_case allow "$repo" "perl -c check.pl && cat $wt/file.txt"
+  bash_case allow "$repo" "python3 -E x.py && cat $wt/file.txt"
+  bash_case allow "$repo" "node -r mod x.js && cat $wt/file.txt"
 }
 
 # The reverse direction matters as much: a session standing in a worktree must
@@ -189,6 +199,8 @@ bash_case() { expect "$1" Bash "$2" command "$3"; }
   bash_case allow "$repo" "git -C $wt config get user.name"
   bash_case deny "$repo" "git -C $wt config user.name dan"
   bash_case deny "$repo" "git -C $wt config --unset user.name"
+  bash_case allow "$repo" "git -C $wt config --file .gitmodules submodule.a.path"
+  bash_case deny "$repo" "git -C $wt config --file .gitmodules submodule.a.path x"
 }
 
 @test "a prunable worktree is not a holder" {

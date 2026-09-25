@@ -53,7 +53,8 @@ is refused. The evidence is enumerated in ``_write_targets`` and is a denylist:
 unknown shapes fail open. Prose covers what the parser misses; the hook covers
 what prose does not stop.
 
-Bypass one command with ``env WORKFLOW_SKILLS_ALLOW_FOREIGN_WRITE=1 <command>``.
+Bypass one Bash call with ``env WORKFLOW_SKILLS_ALLOW_FOREIGN_WRITE=1 <command>``:
+an assignment in command position anywhere in the call exempts all of it.
 The ``env`` form rather than a bare ``VAR=1`` prefix, because some setups run a
 guard that denies an assignment-prefixed git so it can still match a
 permission rule.
@@ -223,6 +224,8 @@ _CONFIG_READ_FLAGS = {
     "--list",
     "-l",
 }
+# Their value is not a key, so `config --file .gitmodules <key>` stays a read.
+_CONFIG_FLAGS_WITH_VALUE = {"-f", "--file", "--blob", "--type", "--default"}
 _CONFIG_WRITE_FLAGS = {
     "--unset",
     "--unset-all",
@@ -312,6 +315,24 @@ _INLINE_FLAGS = {
     "php": {"-r"},
     "osascript": {"-e"},
 }
+
+
+def _inline_code(head: str, args: list[str]) -> bool:
+    """Whether an interpreter's arguments carry code on the command line.
+
+    Beyond the exact flags, a short-option cluster counts when its LAST letter
+    is an inline flag (`node -pe`, `python3 -Bc`, `perl -lne`), since the code
+    follows it, and so does an attached long form (`node --eval=<code>`).
+    """
+    flags = _INLINE_FLAGS.get(head, set())
+    letters = {f[1] for f in flags if len(f) == 2}
+    for arg in args:
+        if arg in flags or arg.split("=", 1)[0] in flags:
+            return True
+        if re.fullmatch(r"-[A-Za-z]+", arg) and arg[-1] in letters:
+            return True
+    return False
+
 
 # In-place editors: the flag is what makes them writers. `sed <foreign>` reads.
 _INPLACE = {"sed", "perl", "awk", "gawk", "ruby"}
@@ -441,7 +462,7 @@ def _git_writes(sub: str, args: list[str]) -> bool:
         # positional or a write flag writes.
         if any(a in _CONFIG_WRITE_FLAGS for a in args):
             return True
-        positionals = _positionals(args, set())
+        positionals = _positionals(args, _CONFIG_FLAGS_WITH_VALUE)
         if positionals[:1] in (["get"], ["list"]):
             return False
         return len(positionals) != 1
@@ -468,7 +489,7 @@ def _segments(cmd: str):
 
 
 def _bypassed(cmd: str) -> bool:
-    """Whether the bypass is set as a real assignment on this command.
+    """Whether the bypass is set as a real assignment anywhere in this Bash call.
 
     Scoped to the assignment rather than a substring test over the command
     text, which is the point: a substring test is disarmed by anything that
@@ -593,7 +614,7 @@ def _write_targets(cmd: str, cwd: str):
             # before the split, and a heredoc BODY is its own segment anyway,
             # since the splitter cuts on newlines.
             if head in _INTERPRETERS and (
-                _INLINE_FLAGS.get(head, set()) & set(tokens) or "<<" in cmd
+                _inline_code(head, tokens[head_at + 1 :]) or "<<" in cmd
             ):
                 inline_interpreter = True
             # Only a `cd` in command position: `rg cd <path>` is a read.
@@ -648,7 +669,7 @@ def _reason(target: str, holder: str) -> str:
         "  - It also costs any sidebar or tab title its signal: this session keeps advertising "
         "the checkout it launched from while the work happens elsewhere.\n\n"
         'The rule is "stand in the tree you write" (agent-guidance, portable.md). '
-        f"To write into it from here anyway: env {BYPASS}=1 <command>."
+        f"To write into it from here anyway (exempts this whole Bash call): env {BYPASS}=1 <command>."
     )
 
 

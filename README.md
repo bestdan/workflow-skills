@@ -148,7 +148,7 @@ refuses a write into a worktree of the same repo that the session never
 entered — `git -C <path> commit`, `cd <path> && …`, a redirect, or a heredoc
 naming the path — and points at `EnterWorktree` instead. Reads are allowed.
 It also warns once when write-work starts in a main checkout on its default
-branch. Bypass one command with
+branch. Bypass one Bash call with
 `env WORKFLOW_SKILLS_ALLOW_FOREIGN_WRITE=1 <command>`.
 
 | Skill                                                      | Trigger                                                | What it does                                                                                                                                                             |
