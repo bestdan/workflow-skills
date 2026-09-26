@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.70.3] - 2026-09-26
+
+### Fixes
+
+- return an issue a merged Refs PR stranded in review [#892] (#905) (e2039d5)
+
 ## [2.70.2] - 2026-09-26
 
 ### Fixes
