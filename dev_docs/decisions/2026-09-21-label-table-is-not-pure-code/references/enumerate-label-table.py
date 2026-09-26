@@ -12,7 +12,7 @@ table by hand.
 
 Usage:
     python3 enumerate-label-table.py             # the literal reading
-    python3 enumerate-label-table.py --variants  # plus the two repair readings
+    python3 enumerate-label-table.py --variants  # plus three alternative readings
 
 Exit status is always 0; this reports, it does not gate.
 """
@@ -46,7 +46,9 @@ LABELS = [
 ]
 
 
-def fires(t, *, architecture_includes_whole_codebase=False):
+def fires(
+    t, *, architecture_includes_whole_codebase=False, mechanical_bulk_narrow=False
+):
     """The table read literally, keeping only what the seven dimensions express.
 
     `standard-pr` carries three conjuncts, not two -- "`standard` complexity,
@@ -63,6 +65,13 @@ def fires(t, *, architecture_includes_whole_codebase=False):
       * `mechanical-bulk`'s "high-volume simple work" -- a gloss on
         `cost_sensitivity: high`, not a further input. Its "and/or" is read as
         the inclusive or it spells.
+
+    That second one is the load-bearing reading in the headline counts, so
+    `mechanical_bulk_narrow` exists to price it: set it and the row fires on
+    `complexity == mechanical` alone, on the argument that the rubric also
+    assigns `cost_sensitivity: high` to work that is merely "only worth doing
+    cheaply", which can be hard or creative rather than bulk. The inclusive
+    reading stays the default because it is what the row literally spells.
     """
     out = []
     arch_scopes = {"multi-file"}
@@ -70,7 +79,9 @@ def fires(t, *, architecture_includes_whole_codebase=False):
         arch_scopes.add("whole-codebase")
     if t["complexity"] == "hard" and t["scope"] in arch_scopes:
         out.append("architecture")
-    if t["complexity"] == "mechanical" or t["cost_sensitivity"] == "high":
+    if t["complexity"] == "mechanical" or (
+        not mechanical_bulk_narrow and t["cost_sensitivity"] == "high"
+    ):
         out.append("mechanical-bulk")
     if t["creativity"] == "high":
         out.append("frontend-creative")
@@ -144,7 +155,7 @@ def main():
     ap.add_argument(
         "--variants",
         action="store_true",
-        help="also report the two readings that try to repair the table",
+        help="also report the three readings that vary how the table is read",
     )
     args = ap.parse_args()
 
@@ -168,6 +179,21 @@ def main():
         labels = [x for x in fires(t) if x != "standard-pr"]
         defaulted.append((t, labels or ["standard-pr"]))
     report("Variant: standard-pr as the default branch", defaulted)
+
+    # Reading 3: `mechanical-bulk` narrowed to `complexity == mechanical`, so
+    # `cost_sensitivity: high` no longer fires it on its own. Unlike the two
+    # above this is not a repair -- neither reading is more faithful, because
+    # the row's "and/or" is genuinely ambiguous -- so it exists to price the
+    # default rather than to replace it. Its figures are a price and NOT a
+    # bound: "and/or" admits narrower readings still (both conjuncts required
+    # gives 439 ambiguous, 76.2%), so adding readings one at a time can never
+    # establish a floor. The bound that does hold comes from monotonicity --
+    # any reading of a row only adds firings relative to deleting it, and with
+    # this row deleted 416 tuples (72.2%) are still ambiguous.
+    report(
+        "Variant: mechanical-bulk narrowed to mechanical complexity only",
+        [(t, fires(t, mechanical_bulk_narrow=True)) for t in tuples()],
+    )
 
 
 if __name__ == "__main__":

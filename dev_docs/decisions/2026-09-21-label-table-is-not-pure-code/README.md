@@ -45,6 +45,25 @@ The table is therefore **neither total nor deterministic**, and neither failure
 is an edge case. Ambiguity is the overwhelming majority behaviour; a single
 unambiguous answer is the 11.3% exception.
 
+**The two failures come apart, and only one is recoverable.** One row's
+conditions are genuinely ambiguous — `mechanical-bulk`'s "and/or" — so the
+headline above is one reading rather than the only one, and the script prices a
+narrower reading instead of arguing about it: ambiguity falls to **462 of 576
+(80.2%)** and the silent tuples double to **16**.
+
+Reading that row differently cannot rescue either failure, and the bound does not
+depend on enumerating readings. Every reading of a row can only _add_ firings
+relative to deleting it, so deleting `mechanical-bulk` outright bounds what any
+reading of it can achieve: **416 of 576 (72.2%)** still ambiguous, and 28 silent
+tuples rather than fewer. Narrowing that row trades ambiguity for silence in one
+direction only.
+
+**Totality is recoverable; determinism is not.** These are separate axes.
+Rewriting `standard-pr` as a bare default branch (below) leaves **0** silent
+tuples under every reading of `mechanical-bulk` — so the table can be made total
+by one decision. Nothing available makes it deterministic: ambiguity stays above
+**70%** however that row is read, and stays there even with the row gone.
+
 Three specifics carry the rest of this record.
 
 **The silent tuples are the ordinary ones.** All 8 have every binary at its low
@@ -72,9 +91,10 @@ the starker case: because its third conjunct is "nothing extreme", those 2 are
 the only tuples it fires on **at all** — 0.3% of the space. The "unremarkable
 middle" the table names is, under the table's own rules, nearly unreachable.
 
-### What a repair would and would not fix
+### What the other readings change
 
-The script also reports two readings that try to rescue the table.
+`--variants` reports three more readings. The first two are **repairs** — each
+widens a row the headline reads narrowly, to see whether the failures go away:
 
 - **`architecture` widened to cover `scope: whole-codebase`** (it names only
   `multi-file`, though whole-codebase is the wider radius): changes nothing about
@@ -84,6 +104,21 @@ The script also reports two readings that try to rescue the table.
   the table total, 0 silent tuples, and it widens `standard-pr` from 2 tuples to
   10 (1.7%). It changes ambiguity not at all — **503 of 576 (87.3%)** either way,
   since the row only ever fires alone.
+
+The third is **not** a repair, and that is the point of having it:
+
+- **`mechanical-bulk` narrowed to `complexity == mechanical` alone**, so
+  `cost_sensitivity: high` no longer fires it by itself. Neither reading of that
+  row is more faithful — "and/or" is ambiguous on its face, and the rubric assigns
+  `cost_sensitivity: high` both to bulk work and to work merely "only worth doing
+  cheaply", which can be hard or creative. So this reading exists to **price the
+  default**, not to replace it: ambiguity falls to **462 (80.2%)**, silent tuples
+  rise to **16**, and the row's own firing rate halves from 66.7% to 33.3%. It is
+  a price, not a bound — "and/or" admits narrower readings still (requiring both
+  conjuncts gives 439, 76.2%), which is why the bound above comes from deleting
+  the row rather than from any reading of it. The
+  headline keeps the inclusive reading because it is what the row literally
+  spells; this variant is what makes that choice auditable rather than buried.
 
 So the missing piece is not eight fuzzy cells. It is **one missing function**:
 a precedence order over the eight labels, which the table never states and the
@@ -113,8 +148,9 @@ exactly two honest readings, and both end the same way:
 
 Two lesser cells are underspecified in the same direction but are repairable by
 decision: `mechanical-bulk`'s literal "and/or" (making `cost_sensitivity: high`
-sufficient on its own, hence the 66.7%), and `architecture`'s "refactor scope",
-which names a word rather than an enum value.
+sufficient on its own, hence the 66.7% — the variant above prices that reading at
+7.1 points of ambiguity and 8 silent tuples), and `architecture`'s "refactor
+scope", which names a word rather than an enum value.
 
 ### What this does not establish
 
@@ -146,7 +182,9 @@ eight labels and read `standard-pr` as the default branch; that is a one-time
 specification decision, not a runtime judgment. Delete `architecture`'s "or a
 genuinely hard bug" disjunct, folding it into `complexity: hard` where the
 dimension rubric already puts subtle bugs. Narrow `mechanical-bulk` so
-`cost_sensitivity: high` is not sufficient alone.
+`cost_sensitivity: high` is not sufficient alone — the variant above shows what
+that buys (7.1 points of ambiguity) and what it costs (8 more silent tuples, which
+the precedence order's default branch then has to absorb).
 
 **Therefore do not ask a typed call for `label`.** Once the precedence order
 exists, asking a model for `label` duplicates deterministic logic over inputs
@@ -184,6 +222,11 @@ no distribution. Specifically:
   second), rather than a judgment about a table.
 - **Good, because** it narrows #810: `label` joins `scope` as a dimension the
   comparison should not measure, leaving six.
+- **Good, because** the conclusion does not depend on how the one genuinely
+  ambiguous row is read. Deleting that row bounds what any reading of it can do —
+  72.2% still ambiguous — and along that axis the silent set only grows, so a
+  reader who disagrees with the headline's reading of "and/or" still reaches the
+  same decision.
 - **Good, because** the same enumeration that kills the claim hands `assess-task` a
   real defect list. The table has been shipping with 8 silent tuples and a
   `standard-pr` row reachable on 2, which no consumer has reported because no
