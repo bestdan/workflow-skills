@@ -54,6 +54,11 @@ while the issue was in the other state, so rejecting a mismatch would forbid a
 legal sequence arbitrarily. The rules:
 
 - `--done` closes the issue and asserts neither rung is present
+- `--done --reason not_planned` closes it as not planned; GitHub records a close
+  without a reason as completed, which is wrong for work that will not be done
+- `--done` against an issue that is ALREADY closed, with no `--reason`, omits
+  `state`: re-sending `state: closed` resets the close reason to completed, so
+  stripping the rungs from an issue closed as not planned would misreport it
 - an ordinary write against an OPEN issue omits `state` entirely, so the default
   path never touches it
 - an ordinary write against a CLOSED issue is refused, because putting live rungs
@@ -68,6 +73,10 @@ Usage:
   # completion: closes the issue, which carries neither rung and keeps prio/est
   python3 gh-issue-state.py --repo owner/name --issue 142 \
       --labels prio:1,est:3 --done --apply
+
+  # closing work that will not be done
+  python3 gh-issue-state.py --repo owner/name --issue 142 \
+      --labels prio:1,est:3 --done --reason not_planned --apply
 
 Without --apply it validates, reads the issue, and prints what it would write. That
 path is read-only — it mutates nothing — but it is not offline: the read always runs.
@@ -251,11 +260,13 @@ def carried_rungs(labels, vocabulary):
     ]
 
 
-def patch_issue(repo, issue, labels, state=None):
+def patch_issue(repo, issue, labels, state=None, state_reason=None):
     """One PATCH carrying the complete set. Never --add-label/--remove-label."""
     payload = {"labels": labels}
     if state:
         payload["state"] = state
+    if state_reason:
+        payload["state_reason"] = state_reason
     body = json.dumps(payload)
     code, out, err = run_gh(
         ["api", "--method", "PATCH", f"repos/{repo}/issues/{issue}", "--input", "-"],
@@ -291,10 +302,27 @@ def main(argv=None):
         action="store_true",
         help="reopen a closed issue and give it these rungs",
     )
+    parser.add_argument(
+        "--reason",
+        choices=["completed", "not_planned"],
+        help=(
+            "with --done: the close reason GitHub records. Omitted, a close of an "
+            "open issue records completed, and an already-closed issue keeps its "
+            "existing reason"
+        ),
+    )
     parser.add_argument("--apply", action="store_true", help="send the PATCH")
     parser.add_argument("--labels-file", type=Path, default=DEFAULT_LABELS_FILE)
     parser.add_argument("--json", action="store_true", dest="as_json")
     args = parser.parse_args(argv)
+
+    if args.reason and not args.done:
+        print(
+            f"refusing to write {args.repo}#{args.issue}: --reason applies only "
+            "to a --done write",
+            file=sys.stderr,
+        )
+        return 2
 
     groups, colors = load_vocabulary(args.labels_file)
     vocabulary = expected_labels(groups, colors)
@@ -318,7 +346,9 @@ def main(argv=None):
     # an already-open issue omits it, so the common path cannot move it by
     # accident.
     if args.done:
-        target_state = "closed"
+        # An already-closed issue with no explicit reason is a labels-only write:
+        # re-sending `state: closed` would reset its close reason to completed.
+        target_state = None if state == "closed" and not args.reason else "closed"
     elif state == "closed":
         if not args.reopen:
             print(
@@ -333,7 +363,7 @@ def main(argv=None):
         target_state = None
 
     if args.apply:
-        patch_issue(args.repo, args.issue, labels, target_state)
+        patch_issue(args.repo, args.issue, labels, target_state, args.reason)
 
     result = {
         "repo": args.repo,
@@ -345,6 +375,10 @@ def main(argv=None):
         "state": target_state or state,
         "applied": args.apply,
     }
+    # Only the reason this run sent. The issue's existing reason is never read,
+    # so reporting null for it would claim a fact the helper does not have.
+    if args.reason:
+        result["state_reason"] = args.reason
     if args.as_json:
         print(json.dumps(result, indent=2))
     else:
@@ -355,7 +389,8 @@ def main(argv=None):
         if dropped:
             print(f"Dropped (not in labels.yml): {', '.join(dropped)}")
         if target_state:
-            print(f"State: {target_state}")
+            reason = f" ({args.reason})" if args.reason else ""
+            print(f"State: {target_state}{reason}")
     return 0
 
 
