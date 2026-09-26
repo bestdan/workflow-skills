@@ -42,7 +42,8 @@ returns no relations, so it supplies them per candidate at pre-flight
 `list_ready` stacks a dependent's branch on its in-run parent instead of
 waiting for the parent to complete, so for it a blocker that is itself a
 surviving candidate is a stack edge, not a hold. `stack_in_set()` computes
-which blockers qualify; `linear-ready.py --stack-in-set` applies it. Every
+which blockers qualify; the `--stack-in-set` flag of `linear-ready.py` (fast
+path) and `linear-rank.py` (MCP floor) applies it. Every
 other caller leaves it off.
 
 **Rank.** Sort remaining issues by Linear `priority`: urgent(1) -> high(2) ->
@@ -101,22 +102,21 @@ def stack_in_set(pairs):
     as met. `pairs` is `[(issue, max_estimate), ...]`, each issue carrying
     `identifier` and `blockedBy`.
 
-    Survival is recomputed until it stops changing, because exempting a
-    blocker is only sound while that blocker survives too: a chain whose root
-    waits on something outside the set drops whole, never leaving a child
-    whose parent was cut.
+    Built up from nothing: each round admits the issues whose every open
+    blocker is already admitted, until a round admits nothing new. So an issue
+    is admitted only when a chain of admitted blockers leads back to an issue
+    that is ready on its own. A chain whose root waits on something outside
+    the set drops whole, and so does a cycle of blockers, which has no such
+    root — starting from everything and removing would keep a cycle, each
+    member exempting the other.
     """
-    ids = {
-        issue["identifier"]
-        for issue, max_estimate in pairs
-        if gate({**issue, "blockedBy": []}, max_estimate) is None
-    }
+    ids: set[str] = set()
     while True:
-        kept = {
+        admitted = {
             issue["identifier"]
             for issue, max_estimate in pairs
-            if issue["identifier"] in ids and gate(issue, max_estimate, ids) is None
+            if gate(issue, max_estimate, ids) is None
         }
-        if kept == ids:
+        if admitted == ids:
             return ids
-        ids = kept
+        ids = admitted

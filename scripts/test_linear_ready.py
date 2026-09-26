@@ -273,7 +273,27 @@ class StackInSetTests(ReadyHarness):
         ]
         kept, dropped = self.run_set(issues, stack=True)
         self.assertEqual(kept, [])
+        self.assertEqual(dropped["P-1"], "estimate 5 >= 3")
         self.assertEqual(dropped["C-1"], "waiting on P-1")
+
+    def test_blocker_cycle_drops_both(self):
+        # Neither can precede the other, so neither is a stack edge.
+        issues = [
+            self.chain("A-1", ("B-1", "unstarted")),
+            self.chain("B-1", ("A-1", "unstarted")),
+            self.chain("R-1"),
+        ]
+        kept, dropped = self.run_set(issues, stack=True)
+        self.assertEqual(kept, ["R-1"])
+        self.assertEqual(dropped, {"A-1": "waiting on B-1", "B-1": "waiting on A-1"})
+
+    def test_chain_of_three_from_a_ready_root(self):
+        issues = [
+            self.chain("C-1", ("B-1", "unstarted")),
+            self.chain("B-1", ("A-1", "unstarted")),
+            self.chain("A-1"),
+        ]
+        self.assertEqual(self.run_set(issues, stack=True), (["A-1", "B-1", "C-1"], {}))
 
 
 if __name__ == "__main__":

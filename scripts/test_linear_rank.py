@@ -161,6 +161,42 @@ class BlockerGateTests(unittest.TestCase):
         self.assertEqual([c["id"] for c in result["candidates"]], ["A-1"])
 
 
+class StackInSetTests(unittest.TestCase):
+    """The MCP floor's `--stack-in-set`, for /auto-pilot's list_ready."""
+
+    def chain(self, id_, *blockers):
+        i = issue(id_)
+        i["blockedBy"] = [{"id": b, "statusType": s} for b, s in blockers]
+        return i
+
+    def test_in_set_blocker_is_a_stack_edge(self):
+        result = run(
+            ["--max-estimate", "3", "--stack-in-set"],
+            [self.chain("P-1"), self.chain("C-1", ("P-1", "unstarted"))],
+        )
+        self.assertEqual(result["dropped"], {})
+        self.assertEqual(sorted(c["id"] for c in result["candidates"]), ["C-1", "P-1"])
+
+    def test_out_of_set_open_blocker_drops(self):
+        result = run(
+            ["--max-estimate", "3", "--stack-in-set"],
+            [self.chain("C-1", ("OUT-1", "started"))],
+        )
+        self.assertEqual(result["dropped"], {"C-1": "waiting on OUT-1"})
+
+    def test_chain_rooted_outside_the_set_drops_whole(self):
+        result = run(
+            ["--max-estimate", "3", "--stack-in-set"],
+            [
+                self.chain("P-1", ("OUT-1", "started")),
+                self.chain("C-1", ("P-1", "unstarted")),
+            ],
+        )
+        self.assertEqual(
+            result["dropped"], {"P-1": "waiting on OUT-1", "C-1": "waiting on P-1"}
+        )
+
+
 class PerProjectMaxEstimateTests(unittest.TestCase):
     def test_project_max_estimate_overrides_the_flag(self):
         a = issue("A-1", estimate=4)
