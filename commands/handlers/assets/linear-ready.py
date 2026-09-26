@@ -36,6 +36,7 @@ Usage:
   python3 linear-ready.py --team Platform
   python3 linear-ready.py --team Platform --project <uuid> --project <uuid>:5
   python3 linear-ready.py --team Platform --max-estimate 5 --limit 100
+  python3 linear-ready.py --team Platform --stack-in-set   # /auto-pilot list_ready
 """
 
 import argparse
@@ -47,7 +48,7 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _linear_rank import gate, rank_key  # noqa: E402
+from _linear_rank import gate, rank_key, stack_in_set  # noqa: E402
 from _secret_resolve import SecretUnavailable, resolve_key  # noqa: E402
 from _shape import ShapeError, expect  # noqa: E402
 
@@ -93,6 +94,10 @@ query($cursor: String, $first: Int!, $team: ID!%s) {
       labels { nodes { name } }
       state { id type }
       project { id name }
+      inverseRelations(first: 50) {
+        nodes { type issue { identifier state { type } } }
+        pageInfo { hasNextPage }
+      }
     }
     pageInfo { hasNextPage endCursor }
   }
@@ -156,6 +161,29 @@ def resolve_team(key, team):
     return data["viewer"], node
 
 
+def blocked_by(issue):
+    """Fold `inverseRelations` into the `blockedBy` list `gate()` reads.
+
+    An inverse `blocks` relation names this issue's blocker in its `issue`
+    field (see linear-relations.py's header). A null `issue` is a blocker that
+    no longer exists, which satisfies the dependency, so it is left out. A
+    truncated page adds an entry with no state, so the unseen blockers hold
+    the issue rather than letting it through.
+    """
+    conn = issue.get("inverseRelations") or {}
+    out = [
+        {
+            "identifier": rel["issue"]["identifier"],
+            "stateType": rel["issue"]["state"]["type"],
+        }
+        for rel in conn.get("nodes") or []
+        if rel.get("type") == "blocks" and rel.get("issue")
+    ]
+    if (conn.get("pageInfo") or {}).get("hasNextPage"):
+        out.append({"identifier": "more than 50 blockers", "stateType": None})
+    return out
+
+
 def fetch_issues(key, team_id, project_id, page_size):
     var_decl = ", $project: ID" if project_id else ""
     extra = "project: { id: { eq: $project } }" if project_id else ""
@@ -210,6 +238,13 @@ def main():
         default=50,
         help="GraphQL page size only — the script paginates to exhaustion "
         "regardless, so this does not truncate results.",
+    )
+    ap.add_argument(
+        "--stack-in-set",
+        action="store_true",
+        help="Count a blocker that is itself a surviving candidate as met. "
+        "For /auto-pilot's list_ready, which stacks a dependent on its "
+        "in-run parent; see _linear_rank.py.",
     )
     args = ap.parse_args()
 
@@ -271,10 +306,14 @@ def main():
             issue["project"] = unassigned_scope_tag
             all_issues.append((issue, args.max_estimate))
 
+    for issue, _ in all_issues:
+        issue["blockedBy"] = blocked_by(issue)
+    satisfied = stack_in_set(all_issues) if args.stack_in_set else frozenset()
+
     candidates, dropped = [], []
     for issue, max_estimate in all_issues:
         labels = [n["name"] for n in issue["labels"]["nodes"]]
-        reason = gate(issue, max_estimate)
+        reason = gate(issue, max_estimate, satisfied)
         if reason:
             dropped.append({"identifier": issue["identifier"], "reason": reason})
             continue

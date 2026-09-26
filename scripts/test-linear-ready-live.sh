@@ -214,7 +214,7 @@ if d is not None:
     bn = [c.get("identifier") for c in cands if not c.get("branchName")]
     ok("every candidate carries branchName") if not bn else bad("every candidate carries branchName", str(bn[:5]))
 
-    pat = re.compile(r"^(no estimate set|already auto-claimed|human-approval-requested|blocked|estimate \d+(?:\.\d+)? >= \d+(?:\.\d+)?|assigned to .+)$")
+    pat = re.compile(r"^(no estimate set|already auto-claimed|human-approval-requested|blocked|estimate \d+(?:\.\d+)? >= \d+(?:\.\d+)?|assigned to .+|waiting on .+)$")
     dropped = d.get("dropped", [])
     if not isinstance(dropped, list):
         bad("dropped is a list", "got %s" % type(dropped).__name__); dropped = []

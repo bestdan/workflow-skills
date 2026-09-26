@@ -4,7 +4,7 @@ apply the canonical gates and rank to a set of issues the caller already
 fetched via `<linear-mcp>__list_issues`, instead of hand-walking them in
 prose. Sibling of `linear-ready.py` (the GraphQL fast path); both import the
 same `gate()`/`rank_key()` from `_linear_rank.py` — see that module's header
-for the six-gate table and the rank rule.
+for the gate table and the rank rule.
 
 Read-only. Never mutates anything, never calls the network — the caller
 already did the MCP read; this script only decides over the result.
@@ -18,6 +18,13 @@ each with at least:
   updatedAt   str   — ISO-8601, used for the tie-break
   labels      list[str]  — label names
   assigneeId  str or null (omit when unassigned)
+  blockedBy   optional list of {"id": "PRE-9", "statusType": "completed"} —
+              the issue's native blockers, each with its own state type. The
+              caller builds it at pre-flight from `get_issue` with
+              `includeRelations: true` plus one `get_issue` per blocker, since
+              relations carry no state. Omit it on the ranked pass, where
+              `list_issues` returns no relations; the blocker gate then does
+              not run. An entry with no `statusType` holds the issue.
 
 Every other key on an issue object is passed through unchanged onto the
 matching output candidate, so the caller can feed `list_issues`' own fields
@@ -73,6 +80,10 @@ def _to_gate_shape(issue, viewer_id):
         "estimate": _value(issue.get("estimate")),
         "labels": {"nodes": [{"name": name} for name in issue.get("labels") or []]},
         "assignee": assignee,
+        "blockedBy": [
+            {"identifier": b.get("id"), "stateType": b.get("statusType")}
+            for b in issue.get("blockedBy") or []
+        ],
     }
 
 
