@@ -151,10 +151,10 @@ This phase takes, in addition to the identifier:
    first would leave a note claiming a transition that a failed write never
    made.
 
-   > **`state_reason` is not part of this schema.** The old `gh issue close
-   > --reason completed` set it explicitly; the writer's PATCH carries `state`
-   > and `labels` only, so `state_reason` is left to whatever GitHub records
-   > for a close it was not given one for. Step 3 still **reads** `stateReason`
+   > **This step does not set `state_reason`.** The writer accepts
+   > `--reason completed|not_planned`, but this call passes none, so GitHub
+   > records the close as completed, its default for a close given no
+   > reason. Step 3 still **reads** `stateReason`
    > to tell an already-completed issue from one closed as not-planned or
    > duplicate, and that read is unaffected — but do not describe this step as
    > setting it.

@@ -281,6 +281,17 @@ class WriteTests(unittest.TestCase):
         self.assertEqual(body["state"], "closed")
         self.assertNotIn("state_reason", body)
 
+    def test_json_reports_a_reason_only_when_one_was_sent(self):
+        """The helper never reads the issue's reason, so it must not report one."""
+        self.recorder.state = "CLOSED"
+        _, out, _ = self._write("prio:1,est:3", extra=["--done", "--json"])
+        self.assertNotIn("state_reason", json.loads(out))
+
+        _, out, _ = self._write(
+            "prio:1,est:3", extra=["--done", "--reason", "not_planned", "--json"]
+        )
+        self.assertEqual(json.loads(out)["state_reason"], "not_planned")
+
     def test_reason_without_done_is_refused_before_any_network_call(self):
         code, _, err = self._write(VALID, extra=["--reason", "not_planned"])
 

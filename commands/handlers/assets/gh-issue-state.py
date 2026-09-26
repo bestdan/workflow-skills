@@ -373,9 +373,12 @@ def main(argv=None):
         "preserved": preserved,
         "dropped": dropped,
         "state": target_state or state,
-        "state_reason": args.reason,
         "applied": args.apply,
     }
+    # Only the reason this run sent. The issue's existing reason is never read,
+    # so reporting null for it would claim a fact the helper does not have.
+    if args.reason:
+        result["state_reason"] = args.reason
     if args.as_json:
         print(json.dumps(result, indent=2))
     else:
