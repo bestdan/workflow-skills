@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.70.4] - 2026-09-26
+
+### Fixes
+
+- let the state writer close an issue as not planned [#893] (#899) (fc10842)
+
 ## [2.70.3] - 2026-09-26
 
 ### Fixes
