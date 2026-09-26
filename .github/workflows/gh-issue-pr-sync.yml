@@ -49,6 +49,12 @@ name: gh-issue PR status sync
 # `prio:`/`est:`, and never touches issue state. Removing them is what
 # completion means here; that is why this is not the thing the rule forbids.
 #
+# A merged PR that closes NOTHING — `Refs #<n>` on a partial delivery — is the
+# stranding case the unmerged close already handles: the review has ended, the
+# issue is still open on `4_needs_review`, and no PR is left. So the merged
+# branch returns each issue the PR mentions to `3_started`, gated on the issue
+# being open, on that rung, and referenced by no open PR (#892).
+#
 # It is a backstop, not the only guard: `gh-issue-reconcile.py`'s row 4 sweeps
 # up what this cannot see — an issue closed by hand, a repo where this workflow
 # does not run. Both compute the rung-free set through the same helper.

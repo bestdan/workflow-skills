@@ -90,12 +90,58 @@ class FakeMergedRemote:
     `issues` maps number -> (label list, state). `closing` is what
     `closingIssuesReferences` returns, as (number, owner, repo name) triples, so
     a test can put a reference in ANOTHER repository and check it is dropped.
+
+    `body` is the PR's body; each `#<n>` in it is a stranded-issue candidate,
+    read back through the GraphQL query. `referenced_by` maps an issue number to
+    the (PR number, state) pairs its timeline carries, `connected_by` does the
+    same for PRs linked by hand, which arrive in `subject` with the issue's own
+    side left `{}`, `pulls` names numbers that
+    are pull requests rather than issues, and `truncated` names issues whose
+    timeline has more references than one read covers.
     """
 
-    def __init__(self, issues=None, closing=()):
+    def __init__(
+        self,
+        issues=None,
+        closing=(),
+        body="",
+        referenced_by=None,
+        connected_by=None,
+        pulls=(),
+        truncated=(),
+        missing=(),
+    ):
+        self.missing = set(missing)
+        self.connected_by = connected_by or {}
         self.issues = {n: (list(ls), st) for n, (ls, st) in (issues or {}).items()}
         self.closing = list(closing)
+        self.body = body
+        self.referenced_by = referenced_by or {}
+        self.pulls = set(pulls)
+        self.truncated = set(truncated)
         self.calls = []
+
+    def _candidate(self, args):
+        number = int(next(a for a in args if a.startswith("number=")).split("=")[1])
+        if number in self.pulls:
+            return {"number": number}
+        labels, state = self.issues[number]
+        events = [
+            {"source": {"number": pr, "state": pr_state}}
+            for pr, pr_state in self.referenced_by.get(number, [])
+        ]
+        events += [
+            {"source": {}, "subject": {"number": pr, "state": pr_state}}
+            for pr, pr_state in self.connected_by.get(number, [])
+        ]
+        return {
+            "state": state,
+            "labels": {"nodes": [{"name": name} for name in labels]},
+            "timelineItems": {
+                "pageInfo": {"hasPreviousPage": number in self.truncated},
+                "nodes": events,
+            },
+        }
 
     def run_gh(self, args, stdin=None):
         self.calls.append((args, stdin))
@@ -107,7 +153,19 @@ class FakeMergedRemote:
                 }
                 for number, owner, name in self.closing
             ]
-            return 0, json.dumps({"closingIssuesReferences": refs}), ""
+            payload = {"closingIssuesReferences": refs, "title": "", "body": self.body}
+            return 0, json.dumps(payload), ""
+        if args[:2] == ["api", "graphql"]:
+            number = int(next(a for a in args if a.startswith("number=")).split("=")[1])
+            if number in self.missing:
+                # gh's real shape: non-zero exit, the error body still on stdout.
+                body = {
+                    "errors": [{"type": "NOT_FOUND", "message": "Could not resolve"}]
+                }
+                return 1, json.dumps(body), "gh: Could not resolve"
+            node = self._candidate(args)
+            payload = {"data": {"repository": {"issueOrPullRequest": node}}}
+            return 0, json.dumps(payload), ""
         if args[:2] == ["issue", "view"]:
             labels, state = self.issues[int(args[2])]
             payload = {
@@ -462,7 +520,7 @@ class MergedPRTests(unittest.TestCase):
         finally:
             pr_sync.gh_issue_state.run_gh = original
 
-        # Pin WHICH SystemExit. `closing_issues()` raises a bare one too, so
+        # Pin WHICH SystemExit. `read_merged_pr()` raises a bare one too, so
         # asserting the type alone would let a failed `gh pr view` satisfy a
         # test named for the missing argument.
         self.assertEqual(raised.exception.code, 2)
@@ -479,6 +537,156 @@ class MergedPRTests(unittest.TestCase):
 
         self.assertEqual(sorted(remote.labels(500)), ["est:3", "prio:1"])
         self.assertEqual(remote.labels(142), READY)
+
+
+class StrandedIssueTests(unittest.TestCase):
+    """A merged PR that only MENTIONS an in-review issue returns it to started.
+
+    These run on a branch that names no issue: the state gate, not the branch,
+    finds it.
+    """
+
+    def _run(self, remote, apply=True):
+        argv = [
+            "--repo",
+            "o/n",
+            "--branch",
+            "bestdan/eval-log-retention",
+            "--event",
+            "closed",
+            "--merged",
+            "--pr",
+            "844",
+        ]
+        if apply:
+            argv.append("--apply")
+        return run(remote, argv)
+
+    def test_a_merged_refs_pr_returns_its_issue_to_started(self):
+        remote = FakeMergedRemote(
+            issues={840: (IN_REVIEW, "OPEN")},
+            body="Refs #840 — the first of three criteria.",
+            referenced_by={840: [(844, "MERGED")]},
+        )
+        code, result = self._run(remote)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(remote.labels(840), READY)
+        self.assertEqual(result["stranded"][0]["issue"], 840)
+        self.assertTrue(result["stranded"][0]["applied"])
+
+    def test_the_write_keeps_the_other_rungs_and_never_touches_state(self):
+        remote = FakeMergedRemote(
+            issues={840: (IN_REVIEW + ["follow-up"], "OPEN")}, body="Refs #840"
+        )
+        self._run(remote)
+
+        self.assertEqual(len(remote.patches()), 1)
+        self.assertNotIn("state", remote.patches()[0])
+        self.assertIn("auto:eligible", remote.labels(840))
+        self.assertIn("follow-up", remote.labels(840))
+
+    def test_an_issue_with_another_open_pr_stays_in_review(self):
+        """Its review has not ended: a second PR is still carrying it."""
+        remote = FakeMergedRemote(
+            issues={840: (IN_REVIEW, "OPEN")},
+            body="Refs #840",
+            referenced_by={840: [(844, "MERGED"), (850, "OPEN")]},
+        )
+        code, result = self._run(remote)
+
+        self.assertIn("#850", result["stranded"][0]["skipped"])
+        self.assertEqual(remote.patches(), [])
+
+    def test_a_pr_linked_by_hand_still_blocks_the_return(self):
+        """A ConnectedEvent carries the PR in `subject`; the issue's own side
+        comes back `{}` and the parser falls past it."""
+        remote = FakeMergedRemote(
+            issues={840: (IN_REVIEW, "OPEN")},
+            body="Refs #840",
+            connected_by={840: [(850, "OPEN")]},
+        )
+        code, result = self._run(remote)
+
+        self.assertIn("#850", result["stranded"][0]["skipped"])
+        self.assertEqual(remote.patches(), [])
+
+    def test_owner_and_name_are_sent_as_strings(self):
+        """`-F` would coerce an all-digit owner or repo name to an Int."""
+        remote = FakeMergedRemote(issues={840: (IN_REVIEW, "OPEN")}, body="Refs #840")
+        self._run(remote)
+
+        graphql = next(a for a, _ in remote.calls if a[:2] == ["api", "graphql"])
+        self.assertEqual(graphql[graphql.index("owner=o") - 1], "-f")
+        self.assertEqual(graphql[graphql.index("name=n") - 1], "-f")
+
+    def test_a_mention_off_the_review_rung_is_a_no_op(self):
+        """A loose `#<n>` must never move an issue the merge did not strand."""
+        remote = FakeMergedRemote(
+            issues={840: (READY, "OPEN"), 841: (IN_REVIEW, "CLOSED")},
+            body="See #840 and #841.",
+        )
+        code, result = self._run(remote)
+
+        skipped = [outcome["skipped"] for outcome in result["stranded"]]
+        self.assertEqual(len(skipped), 2)
+        self.assertEqual(remote.patches(), [])
+
+    def test_a_mentioned_pull_request_is_ignored(self):
+        """Issues and PRs share a number space; a PR has no rung to move."""
+        remote = FakeMergedRemote(body="Follows #843.", pulls=[843])
+        code, result = self._run(remote)
+
+        self.assertEqual(result["stranded"], [])
+        self.assertEqual(remote.patches(), [])
+
+    def test_an_issue_the_pr_closed_is_stripped_not_returned(self):
+        remote = FakeMergedRemote(
+            issues={142: (IN_REVIEW, "CLOSED")},
+            closing=[(142, "o", "n")],
+            body="Closes #142",
+        )
+        code, result = self._run(remote)
+
+        self.assertEqual(result["stranded"], [])
+        self.assertEqual(remote.labels(142), ["prio:1", "est:3"])
+
+    def test_a_mention_that_names_nothing_does_not_stop_the_run(self):
+        """A typo'd `#<n>` is free text in a PR body; the next candidate still runs."""
+        remote = FakeMergedRemote(
+            issues={840: (IN_REVIEW, "OPEN")},
+            body="See #99999, Refs #840",
+            missing=[99999],
+        )
+        code, result = self._run(remote)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(remote.labels(840), READY)
+
+    def test_an_unread_page_of_references_leaves_the_rung(self):
+        remote = FakeMergedRemote(
+            issues={840: (IN_REVIEW, "OPEN")}, body="Refs #840", truncated=[840]
+        )
+        code, result = self._run(remote)
+
+        self.assertIn("references", result["stranded"][0]["skipped"])
+        self.assertEqual(remote.patches(), [])
+
+    def test_qualified_and_quoted_mentions_are_not_candidates(self):
+        remote = FakeMergedRemote(body="other/repo#840, and `#841` in code.")
+        code, result = self._run(remote)
+
+        self.assertEqual(result["stranded"], [])
+        graphql = [args for args, _ in remote.calls if args[:2] == ["api", "graphql"]]
+        self.assertEqual(graphql, [])
+
+    def test_without_apply_it_reads_but_never_writes(self):
+        remote = FakeMergedRemote(issues={840: (IN_REVIEW, "OPEN")}, body="Refs #840")
+        code, result = self._run(remote, apply=False)
+
+        self.assertFalse(result["stranded"][0]["applied"])
+        self.assertEqual(remote.patches(), [])
+        self.assertEqual(remote.labels(840), IN_REVIEW)
 
 
 class NoOpGateTests(unittest.TestCase):
