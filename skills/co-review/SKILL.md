@@ -3,6 +3,15 @@ name: co-review
 description: Use when the user wants a collaborative review of a PR — their own read reconciled against existing bot/reviewer comments, with high-confidence fixes applied and judgment calls surfaced — typically via /co-review or asking for a "co-review". Flags — --local reviews the uncommitted working tree (no PR); --remote skips local reviewer agents; --post reviews someone else's PR and posts vetted findings to GitHub instead of editing files; --non-interactive runs unattended with no prompts and bounded reviewer waits.
 allowed-tools:
   - Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/coreview-rule-drift.py":*)
+  - Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/diff-anchor-check.py":*)
+  - Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/grok-telemetry-gate.py":*)
+  - Bash("${CLAUDE_PLUGIN_ROOT}/scripts/await-pr-review.sh":*)
+  - Bash("${CLAUDE_PLUGIN_ROOT}/scripts/coreview-conventions.sh":*)
+  - Bash("${CLAUDE_PLUGIN_ROOT}/scripts/pr-fix-guard.sh":*)
+  - Bash("${CLAUDE_PLUGIN_ROOT}/scripts/preflight-conflict.sh":*)
+  - Bash("${CLAUDE_PLUGIN_ROOT}/scripts/preflight-cwd.sh":*)
+  - Bash("${CLAUDE_PLUGIN_ROOT}/scripts/preflight-freshness.sh":*)
+  - Bash("${CLAUDE_PLUGIN_ROOT}/scripts/reach-pr-branch.sh":*)
 ---
 
 # co-review — collaborative PR review
@@ -442,8 +451,8 @@ The remaining steps depend on disposition.
 12. **Commit and push the changes.** Once the fixes are applied and verified, commit them and push to the current branch's upstream:
     - **Never commit/push to the default branch.** If the current branch is the repo's default branch (`main`/`master`), stop and tell the user to move the fixes onto a feature branch first — don't auto-commit or push review fixes straight to the default branch. **Under `--non-interactive`** there is no one to tell: this is a **logged hard error that ends the run** (never a prompt), preserving the no-prompt guarantee. A correct caller (the `/deliver-task` orchestrator) always runs on a feature branch, so this shouldn't trigger.
     - **Guard against pushing into a merged PR (GitHub mode only).** A PR can merge in the window between the review starting and this push. Pushing then still "succeeds" but the fixes land on a dead branch and never reach the base — silently. Two cheap checks bracket the push, both via the shared fixture (parseable trailing `PRGUARD:` line, exit-code gated; runs unsandboxed — it calls `gh` and `git fetch`):
-      - **Before committing:** `scripts/pr-fix-guard.sh check --pr <n> [--repo <owner/name>]`. On `state=merged`/`state=closed` (exit 4), **do not push** — jump straight to recovery below. On `state=unknown` (exit 3, gh offline) warn and proceed; the after-check still backstops.
-      - **After pushing:** `scripts/pr-fix-guard.sh verify --pr <n> --commit <pushed-sha> [--base <branch>] [--remote <name>] [--repo <owner/name>]`. `verdict=landed`/`verdict=open` → done. `verdict=orphaned` (exit 5) → the merge raced the push; run recovery.
+      - **Before committing:** `"${CLAUDE_PLUGIN_ROOT}/scripts/pr-fix-guard.sh" check --pr <n> [--repo <owner/name>]`. On `state=merged`/`state=closed` (exit 4), **do not push** — jump straight to recovery below. On `state=unknown` (exit 3, gh offline) warn and proceed; the after-check still backstops.
+      - **After pushing:** `"${CLAUDE_PLUGIN_ROOT}/scripts/pr-fix-guard.sh" verify --pr <n> --commit <pushed-sha> [--base <branch>] [--remote <name>] [--repo <owner/name>]`. `verdict=landed`/`verdict=open` → done. `verdict=orphaned` (exit 5) → the merge raced the push; run recovery.
       - **Recovery:** branch from fresh base (`git fetch <remote> <base>`, `git checkout -B <fix-branch> <remote>/<base>`), cherry-pick the orphaned fix commit, push it, and open a follow-up PR referencing the merged one. Interactively, tell the user and confirm the follow-up PR title; **under `--non-interactive`, open the follow-up PR automatically and record its URL in the run summary** — never prompt.
       - Detection is by **content diff, not commit ancestry** — squash merges make the branch's commits non-ancestors of base even on a healthy merge, so an `--is-ancestor` check reports every squash as orphaned. The fixture encodes this; don't second-guess it with a hand-rolled ancestry test.
     - Stage only the files you changed as part of the review fixes — don't sweep in unrelated work that was already in the working tree.
