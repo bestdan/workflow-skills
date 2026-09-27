@@ -80,6 +80,56 @@ LAND_TIMEOUT=60
   assert_success
 }
 
+@test "grace drops a reviewer that was never requested" {
+  json "$TEST_TMPDIR/none" '[]' '[]'
+  make_gh "$TEST_TMPDIR/none"
+  run "$REPO_ROOT/scripts/await-pr-review.sh" --pr 1 --repo o/r --interval 0 --timeout "$LAND_TIMEOUT" --grace 0
+  assert_failure 3
+  assert_output --partial 'AWAIT_REVIEW: not-requested reviewer=copilot'
+}
+
+@test "grace keeps waiting on a reviewer that was requested" {
+  json "$TEST_TMPDIR/wait" '[]' '[{"login":"Copilot"}]'
+  json "$TEST_TMPDIR/landed" '[{"author":{"login":"copilot-pull-request-reviewer"},"state":"COMMENTED"}]' '[]'
+  make_gh "$TEST_TMPDIR/wait" "$TEST_TMPDIR/wait" "$TEST_TMPDIR/landed"
+  run "$REPO_ROOT/scripts/await-pr-review.sh" --pr 1 --repo o/r --interval 0 --timeout "$LAND_TIMEOUT" --grace 0
+  assert_success
+  assert_output --partial 'AWAIT_REVIEW: landed reviewer=copilot'
+}
+
+@test "grace reports a dropped reviewer beside the ones that landed" {
+  json "$TEST_TMPDIR/one" '[{"author":{"login":"copilot-pull-request-reviewer"},"state":"COMMENTED"}]' '[]'
+  make_gh "$TEST_TMPDIR/one"
+  run "$REPO_ROOT/scripts/await-pr-review.sh" --pr 1 --repo o/r --reviewer Copilot --reviewer gemini-code-assist --interval 0 --timeout "$LAND_TIMEOUT" --grace 0
+  assert_success
+  assert_output --partial 'AWAIT_REVIEW: landed reviewer=copilot'
+  assert_output --partial 'not-requested=gemini-code-assist'
+}
+
+@test "commit ignores a review of an earlier push" {
+  json "$TEST_TMPDIR/old" '[{"author":{"login":"copilot-pull-request-reviewer"},"commit":{"oid":"aaaa1111"}}]' '[{"login":"Copilot"}]'
+  json "$TEST_TMPDIR/new" '[{"author":{"login":"copilot-pull-request-reviewer"},"commit":{"oid":"aaaa1111"}},{"author":{"login":"copilot-pull-request-reviewer"},"commit":{"oid":"bbbb2222"}}]' '[{"login":"Copilot"}]'
+  make_gh "$TEST_TMPDIR/old" "$TEST_TMPDIR/new"
+  run "$REPO_ROOT/scripts/await-pr-review.sh" --pr 1 --repo o/r --interval 0 --timeout "$LAND_TIMEOUT" --commit bbbb2222
+  assert_success
+  assert_output --partial 'AWAIT_REVIEW: landed'
+  [ "$(cat "$TEST_TMPDIR/responses/count")" = 2 ]
+}
+
+@test "commit with no new request is not-requested under grace" {
+  json "$TEST_TMPDIR/old" '[{"author":{"login":"copilot-pull-request-reviewer"},"commit":{"oid":"aaaa1111"}}]' '[]'
+  make_gh "$TEST_TMPDIR/old"
+  run "$REPO_ROOT/scripts/await-pr-review.sh" --pr 1 --repo o/r --interval 0 --timeout "$LAND_TIMEOUT" --grace 0 --commit bbbb2222
+  assert_failure 3
+  assert_output --partial 'AWAIT_REVIEW: not-requested'
+}
+
+@test "rejects a commit that is not a hex sha" {
+  run "$REPO_ROOT/scripts/await-pr-review.sh" --pr 1 --repo o/r --commit 'main'
+  assert_failure 2
+  assert_output --partial '--commit must be a hex commit sha'
+}
+
 @test "rejects invalid mode" {
   run "$REPO_ROOT/scripts/await-pr-review.sh" --pr 1 --repo o/r --mode neither
   assert_failure 2
