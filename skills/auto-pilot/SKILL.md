@@ -364,8 +364,8 @@ reference.
 
 **Loop termination.** The loop ends when no ready task remains, a budget
 hard-stop fires, or the pre-dispatch deadline guard above stops it with ready
-tasks still left. A run whose every remaining task was refused ends on the
-first: `skipped` tasks and their dependents are never ready. The first two are
+tasks still left. A run whose every remaining task was refused ends because no
+ready task remains: `skipped` tasks and their dependents are never ready. The first two are
 a finished run (`status: done`); the
 deadline-guard stop leaves the run `paused`, with the un-started tasks still
 ready for a later `--resume` — the `status`/`paused_until` contract and what

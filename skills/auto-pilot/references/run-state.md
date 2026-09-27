@@ -460,8 +460,8 @@ reselects the task every iteration until the blocker happens to clear, which is
 the loop this phase exists to end. Rejected alternative: a re-checkable
 `waiting` phase — it needs a poll interval and a cap to terminate, and still
 spends a `/deliver-task` pre-flight per poll. The reason in `notes` names the
-open blockers, so a human who clears one can re-queue the task with a
-`--resume`.
+open blockers, so a human who clears one can set its phase back to `pending`
+and `--resume` the run.
 
 Seven in-flight/terminal phases follow, once a task is claimed. Each names
 exactly what exists on the tracker, in git, and on disk while a task sits in
