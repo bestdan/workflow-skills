@@ -1,0 +1,7 @@
+Findings:
+
+- `scripts/spawn-orchestrator.sh:5020` — `issue (blocking): wrong variable in the status-report summary line` — the one-line summary emits `skipped=$counts_parked`, so it always reports the parked count as the skipped count (and never reports `counts_skipped` at all). Suggested fix: change to `skipped=$counts_skipped`.
+
+- `scripts/spawn-orchestrator.sh:6578` — `issue (blocking): \`skipped) break\` aborts the frozen-base divergence scan for every later row` — the loop iterates over all RUN.md rows to park chained tasks whose parent's tip diverged. `continue` (as `handed-off` uses) skips just this row; `break` exits the loop entirely, so any task materialized after a `skipped` row silently escapes the divergence check. The new I6 fixture places `t_skip` last, which masks this — reordering the fixture (skipped row before the chained child) would expose it. No ordering invariant placing `skipped` rows last is documented. Suggested fix: use `skipped) continue ;;`, and consider adding a regression row ordering where a skipped row precedes a chained one.
+
+REVIEW_COMPLETE: FINDINGS

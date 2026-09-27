@@ -97,11 +97,11 @@ assert_assembled() {
 # substituted. CONV is the <CONVENTIONS> argument string (possibly empty).
 agy_line() {
   local in="$INPUT_DIR/co-review-input.agy"
-  printf '%s' "cat \"$SKILL/review_prompt.md\"$CONV > \"$in\" && git diff HEAD >> \"$in\" && agy --sandbox --add-dir \"$INPUT_DIR\" -p \"Your entire input is the file at $in (a review rubric followed by a diff). Read that file and review ONLY it. Do NOT explore any other file, run commands, or retrieve any prior conversation or memory. If that file is missing or empty, output exactly NO INPUT and stop. Output findings as file:line, the issue, and a suggested fix. Read only.\" --model \"Gemini 3.6 Flash (High)\""
+  printf '%s' "cat \"$SKILL/review_prompt.md\"$CONV > \"$in\" && git diff HEAD >> \"$in\" && agy --sandbox --add-dir \"$INPUT_DIR\" -p \"Your entire input is the file at $in (a review rubric followed by a diff). Read that file and review ONLY it. Do NOT explore any other file, run commands, or retrieve any prior conversation or memory. If that file is missing or empty, output exactly NO INPUT and stop. Output findings as file:line, the issue, and a suggested fix. Read only.\" --model \"Gemini 3.8 Flash (High)\""
 }
 devin_line() {
   local in="$INPUT_DIR/co-review-input.devin"
-  printf '%s' "cat \"$SKILL/review_prompt.md\"$CONV > \"$in\" && git diff HEAD >> \"$in\" && [ -s \"$in\" ] && mkdir -p \"$NEUTRAL\" && cd \"$NEUTRAL\" && devin -p --prompt-file \"$in\" --permission-mode auto --respect-workspace-trust false --model \"swe-1.6\""
+  printf '%s' "cat \"$SKILL/review_prompt.md\"$CONV > \"$in\" && git diff HEAD >> \"$in\" && [ -s \"$in\" ] && mkdir -p \"$NEUTRAL\" && cd \"$NEUTRAL\" && devin -p --prompt-file \"$in\" --permission-mode auto --respect-workspace-trust false --model \"swe-2-high\""
 }
 codex_line() {
   local in="$INPUT_DIR/co-review-input.codex"

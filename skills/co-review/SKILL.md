@@ -58,12 +58,12 @@ local_reviewers:
   - crush # known agent (Charm Crush CLI, pinned to an open-weight model) → built-in default invocation
   - grok # known agent (xAI Grok Build CLI) → built-in default invocation; needs a one-time telemetry pin, see reviewers/grok.md
   - name: devin # object form for a built-in agent → optional model override
-    model: swe-1.6 # override devin's --model (defaults to swe-1.6); check `devin models list` for your tier
+    model: swe-2-max # override devin's --model (defaults to swe-2-high); check `devin models list` for your tier
   - name: my-agent # custom agent → explicit invocation
     command: "my-agent review --stdin"
 ```
 
-A built-in agent may be written as a bare string (`- devin`) or, to override its pinned `--model`, as an object with just `name:` and `model:` (`- {name: devin, model: swe-1.6}`). A `model:` override changes the reviewer command string, so it re-prompts the exact-match approval and the allow-rule must be updated to the new model. (`devin` and `copilot` read `model:` today — for `copilot` it appends an otherwise-omitted `--model`, see its note below; a `command:` still marks an agent as a custom, untrusted invocation.)
+A built-in agent may be written as a bare string (`- devin`) or, to override its pinned `--model`, as an object with just `name:` and `model:` (`- {name: devin, model: swe-2-max}`). A `model:` override changes the reviewer command string, so it re-prompts the exact-match approval and the allow-rule must be updated to the new model. (`devin` and `copilot` read `model:` today — for `copilot` it appends an otherwise-omitted `--model`, see its note below; a `command:` still marks an agent as a custom, untrusted invocation.)
 
 > **`gemini` is retired.** Google sunset the Gemini CLI, so `gemini` is no longer a built-in reviewer. If an existing config lists `gemini`, **skip it without probing** — don't probe for it, don't try to run it, and don't treat its absence as an error. Note in the run summary that the retired `gemini` entry was ignored, and offer to drop it from the config. (Treat any stray `gemini` entry exactly like a missing reviewer: noted, skipped, never fatal.)
 
