@@ -396,15 +396,24 @@ done
 # each invocation must have an `allowed-tools` entry in SKILL.md whose prefix
 # is exactly the invocation's program and path. A script added without one is
 # denied silently under `--non-interactive`.
+#
+# Every reference to a plugin script is extracted with whatever single word
+# precedes it, quoted or not. An unquoted path or a `bash …` prefix is a form no
+# grant can match, so it surfaces as "no grant" rather than slipping past. The
+# `.sh|.py` anchor keeps prose placeholders like `scripts/<name>` out. Known
+# limit: prose putting a bare word right before a quoted path fails loudly;
+# backtick the path to fix it.
 
 SKILL_MD="$ROOT/skills/co-review/SKILL.md"
-invocations=$(grep -ohE '(python3 )?"\$\{CLAUDE_PLUGIN_ROOT\}/scripts/[^"]+"' \
-  "$SKILL_MD" "$ROOT"/skills/co-review/reviewers/*.md | sort -u)
+invocations=$(grep -ohE \
+  '([A-Za-z0-9_./-]+ )?"?\$\{CLAUDE_PLUGIN_ROOT\}/scripts/[A-Za-z0-9_.-]+\.(sh|py)"?' \
+  "$SKILL_MD" "$ROOT"/skills/co-review/reviewers/*.md \
+  "$ROOT"/skills/co-review/references/*.md | sort -u)
 ungranted=0
 while IFS= read -r inv; do
   [ -n "$inv" ] || continue
   if ! grep -qxF "  - Bash($inv:*)" "$SKILL_MD"; then
-    fail "no allowed-tools grant in SKILL.md for: $inv"
+    fail "no allowed-tools grant in SKILL.md (unquoted, other interpreter, or missing) for: $inv"
     ungranted=$((ungranted + 1))
   fi
 done <<EOF
