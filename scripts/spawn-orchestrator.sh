@@ -4556,14 +4556,15 @@ _report_task_elapsed() {
 # with literal quotes and rendering as "unparseable until".
 _report_front_field() { _run_md_field "$1" "$2"; }
 
-# The seven in-flight/terminal phases (run-state.md "Task lifecycle phases"),
-# bucketed for the report's summary line.
+# The two pre-claim and seven in-flight/terminal phases (run-state.md "Task
+# lifecycle phases"), bucketed for the report's summary line.
 _report_bucket() {
   case "$1" in
     '' | pending) printf 'pending' ;;
     claimed | implementing | pr-open | in-review | iterating) printf 'in-flight' ;;
     handed-off) printf 'handed-off' ;;
     parked) printf 'parked' ;;
+    skipped) printf 'skipped' ;;
     *) printf 'unknown' ;;
   esac
 }
@@ -4680,7 +4681,7 @@ status_report() {
   # --- the phase table: the ONE shared RUN.md table parser -------------------
   _restack_read_run_md "$run_md"
   local base_branch="$_RS_BASE_BRANCH" n="${#_RS_TASK[@]}" i
-  local counts_pending=0 counts_inflight=0 counts_handed=0 counts_parked=0
+  local counts_pending=0 counts_inflight=0 counts_handed=0 counts_parked=0 counts_skipped=0
   local -a phase_lines=() cur_map=()
   for ((i = 0; i < n; i++)); do
     local task="${_RS_TASK[$i]}" phase="${_RS_PHASE[$i]}" branch="${_RS_BRANCH[$i]}" \
@@ -4692,6 +4693,7 @@ status_report() {
       in-flight) counts_inflight=$((counts_inflight + 1)) ;;
       handed-off) counts_handed=$((counts_handed + 1)) ;;
       parked) counts_parked=$((counts_parked + 1)) ;;
+      skipped) counts_skipped=$((counts_skipped + 1)) ;;
     esac
     phase_lines+=("| $task | ${phase:-pending} | ${branch:--} | ${pr:--} |")
     cur_map+=("$task: ${phase:-pending}")
@@ -4948,8 +4950,8 @@ status_report() {
     printf 'Run: %s   Report interval: every %s\n\n' "$label" "$(_fmt_duration "$interval")"
     printf '## Delta since last report\n\n'
     printf '%s\n' "${delta_lines[@]}"
-    printf '\n## Phase table (pending=%s in-flight=%s handed-off=%s parked=%s)\n\n' \
-      "$counts_pending" "$counts_inflight" "$counts_handed" "$counts_parked"
+    printf '\n## Phase table (pending=%s in-flight=%s handed-off=%s parked=%s skipped=%s)\n\n' \
+      "$counts_pending" "$counts_inflight" "$counts_handed" "$counts_parked" "$counts_skipped"
     printf '| task | phase | branch | pr |\n| ---- | ----- | ------ | -- |\n'
     if [ "${#phase_lines[@]}" -gt 0 ]; then printf '%s\n' "${phase_lines[@]}"; else printf '| (no tasks materialized yet) | | | |\n'; fi
     printf '\n## In-flight (elapsed vs per-task ceiling)\n\n'
@@ -5015,7 +5017,7 @@ status_report() {
       fi
       ;;
   esac
-  echo "spawn-orchestrator: status-report: tasks=$n pending=$counts_pending in-flight=$counts_inflight handed-off=$counts_handed parked=$counts_parked delta=${delta_lines[0]#- } reality=$reality_flag ($out)"
+  echo "spawn-orchestrator: status-report: tasks=$n pending=$counts_pending in-flight=$counts_inflight handed-off=$counts_handed parked=$counts_parked skipped=$counts_skipped delta=${delta_lines[0]#- } reality=$reality_flag ($out)"
 }
 
 # One bounded report emission, invoked by the generated wrapper's IN-WAKE

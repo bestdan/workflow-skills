@@ -449,7 +449,10 @@ operative, not pedantic: a park is a **deliberate, successful** outcome (the
 task is blocked on a human decision), so a parked task must never be counted
 as a failure and re-dispatched. Reading a park as a failure would re-dispatch
 the very task that is waiting on an answer, burn the retry bound on it, and
-then park it a second time — defeating the park and the bound together.
+then park it a second time — defeating the park and the bound together. A
+**claim refusal** is neither a failure nor a park: the loop records it as the
+pre-claim terminal `skipped` ([`run-state.md`](run-state.md) "Task lifecycle
+phases") and does not re-dispatch it.
 
 A failed delivery gets **one** re-dispatch; a second failure parks the task,
 and the run loop continues to the next ready task rather than aborting — a

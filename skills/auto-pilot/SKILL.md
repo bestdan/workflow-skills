@@ -277,7 +277,8 @@ boundaries. The loop does not attempt to intercept those opaque substeps.
 
 **Readiness + ordering.** Walk the `RUN.md` task graph
 ([`references/run-state.md`](references/run-state.md) "`RUN.md`"). A task is
-**ready** when every task it is blocked by is at phase `handed-off` — never
+**ready** when its own phase is `pending` — a `skipped` task is never selected
+again — and every task it is blocked by is at phase `handed-off` — never
 tracker done-state (per that reference's phase table, `handed-off` is the
 success terminal the run keys off, not `needs_review`'s eventual completion).
 Pick the next ready task in dependency order. Each task's `base` column
@@ -350,6 +351,12 @@ stacked-PR repair)".
 the run-state branch — the **write order**'s last step
 ([`references/run-state.md`](references/run-state.md) "Write order");
 `/deliver-task` already performed that order's push + tracker-write steps.
+When `/deliver-task` returned a **claim refusal** (its step 2) instead, write
+phase `skipped` with the refusal reason in `notes`; it holds no claim, so there
+is nothing to push or write to the tracker first. A refusal is not a failed
+delivery and never takes the per-task retry bound. Why `skipped` and not
+`parked`, and why a reopened blocker skips rather than waits:
+[`references/run-state.md`](references/run-state.md) "Task lifecycle phases".
 Then apply the budget checks in
 [`references/run-budget.md`](references/run-budget.md): a hard-stop, a
 near-cap pause, or a circuit-breaker halt writes state and exits per that
@@ -357,7 +364,9 @@ reference.
 
 **Loop termination.** The loop ends when no ready task remains, a budget
 hard-stop fires, or the pre-dispatch deadline guard above stops it with ready
-tasks still left. The first two are a finished run (`status: done`); the
+tasks still left. A run whose every remaining task was refused ends on the
+first: `skipped` tasks and their dependents are never ready. The first two are
+a finished run (`status: done`); the
 deadline-guard stop leaves the run `paused`, with the un-started tasks still
 ready for a later `--resume` — the `status`/`paused_until` contract and what
 that does to the relaunch supervisor:

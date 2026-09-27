@@ -160,10 +160,11 @@ usage_deltas: [] # rolling Claude-orchestrator consumption intervals: [{percent:
   these optional fields and use the documented defaults, preserving their
   existing state bytes. Resume reads recorded fields; it does not re-resolve
   current command-line defaults.
-- `phase` is one of the seven in-flight/terminal values below, or the pre-claim
-  `pending` marker (see "Task lifecycle phases"); of those, only the seven
-  in-flight/terminal values are what `--resume` reconciles (a `pending` task has
-  no in-flight transaction to reconcile).
+- `phase` is one of the seven in-flight/terminal values below, or one of the
+  two pre-claim values `pending` and `skipped` (see "Task lifecycle phases"); of
+  those, only the seven in-flight/terminal values are what `--resume` reconciles
+  (a pre-claim task has no in-flight transaction to reconcile). A `skipped`
+  row's `notes` cell carries the refusal reason.
 
 ### Exit contract — why the orchestrator stopped
 
@@ -189,7 +190,7 @@ branch).
 | ------------ | ------------------------------------------------- | ------------------------------ |
 | `continuing` | work remains, context exhausted                   | **relaunch**                   |
 | `paused`     | rate window / `paused_until` set                  | **relaunch** past the reset    |
-| `done`       | no ready tasks remain                             | **tear down**                  |
+| `done`       | no ready tasks remain (incl. all left `skipped`)  | **tear down**                  |
 | `systemic`   | circuit breaker / fatal auth / failed invariant   | **tear down + alarm**          |
 | `deadline`   | pre-dispatch guard stopped with tasks still ready | **tear down**; `--resume` only |
 
@@ -344,6 +345,8 @@ A deferred co-review finding that was also filed as a tracked follow-up (see
 The report, rewritten after every unit of work. Sections:
 
 1. **Outcomes** — per task: `handed-off` / `parked` / `skipped` + one line why.
+   A `skipped` line gives the refusal reason from its `notes` cell, and names
+   each task left `pending` because it is blocked by that one.
 2. **Decisions** — the highlights from `QUESTIONS.md` worth a human's eye.
 3. **Evidence** — links to the check output, screenshots, and exercised-feature
    artifacts each PR carries.
@@ -417,17 +420,48 @@ otherwise-recoverable run.
 `phase` spans all materialized tasks, but only the seven **in-flight/terminal**
 values below — from the moment a task is claimed to its terminal state —
 participate in crash reconciliation. A task materialized into the graph but not
-yet claimed carries the pre-claim marker `pending` instead; it is not one of
-those seven and is never a target of the crash-reconciliation table (there is
-nothing mid-transaction to reconcile before a claim exists). Which `pending`
-tasks are **eligible to claim next** — graph readiness — is not encoded in a
-`pending` task's own `phase`; it is computed from the graph edges and the
-blockers' phases by the adapter's `list_ready`/`dependency_graph` verbs
+yet claimed carries one of two pre-claim values instead: `pending`, or
+`skipped` once its claim has been refused. Neither is one of those seven, and
+neither is ever a target of the crash-reconciliation table (there is nothing
+mid-transaction to reconcile before a claim exists). Which `pending` tasks are
+**eligible to claim next** — graph readiness — is not encoded in a `pending`
+task's own `phase`; it is computed from the graph edges and the blockers' phases
+by the adapter's `list_ready`/`dependency_graph` verbs
 ([`adapters.md`](adapters.md)).
 
-| Phase     | Meaning                                                                     | Tracker                                                      | Git / remote | Worker worktree |
-| --------- | --------------------------------------------------------------------------- | ------------------------------------------------------------ | ------------ | --------------- |
-| `pending` | Materialized into the graph, not yet claimed; readiness computed separately | new / materialized (plan `new`\|`ready`; linear `unstarted`) | no branch    | none            |
+| Phase     | Meaning                                                                                 | Tracker                                                      | Git / remote       | Worker worktree |
+| --------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------ | ------------------ | --------------- |
+| `pending` | Materialized into the graph, not yet claimed; readiness computed separately             | new / materialized (plan `new`\|`ready`; linear `unstarted`) | no branch          | none            |
+| `skipped` | **Terminal (not claimed):** `/deliver-task` refused the claim; the reason is in `notes` | untouched by this run                                        | none of this run's | none            |
+
+**`skipped` is how a refused claim leaves the queue.** When `/deliver-task`
+returns a claim refusal (its step 2: lost race, already in flight under another
+session, open blockers, a held or oversized issue), the loop writes `skipped`
+and the handler's reason into the row. Without it the row stays `pending`,
+readiness selects it again on the next iteration, and the run ends only at its
+budget or deadline (#912). Only a `pending` task is a readiness candidate, so a
+`skipped` task is never selected again in the same run — not by the loop, and
+not by a `--resume` of it. A human who wants it retried sets the cell back to
+`pending`.
+
+It is not `parked`, though both are terminal without success. A `parked` task
+was claimed: its tracker reads started, and a branch or PR may exist. A
+`skipped` task holds nothing this run acquired, so the doctor, resume and the
+crash-reconciliation table have nothing of it to repair. The one downstream
+effect is on its dependents: their blocker never reaches `handed-off`, so they
+stay `pending` and never become ready. `REPORT.md` lists them under the skipped
+task (below).
+
+**Decision: a blocker that reopened mid-run skips the task rather than parking
+it for a later retry.** The blocker in question is outside the run's graph —
+the in-graph ones are what readiness already waits on — so nothing in the run
+signals when it clears. A "retry later" state is then a poll: readiness
+reselects the task every iteration until the blocker happens to clear, which is
+the loop this phase exists to end. Rejected alternative: a re-checkable
+`waiting` phase — it needs a poll interval and a cap to terminate, and still
+spends a `/deliver-task` pre-flight per poll. The reason in `notes` names the
+open blockers, so a human who clears one can re-queue the task with a
+`--resume`.
 
 Seven in-flight/terminal phases follow, once a task is claimed. Each names
 exactly what exists on the tracker, in git, and on disk while a task sits in
