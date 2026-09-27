@@ -899,6 +899,7 @@ GHWEOF
     printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
     printf '| t_parent | pending      | br-parent | main      | - | - | |\n'
     printf '| t_child  | implementing | br-child  | br-parent | %s | - | |\n' "$PARENT_SHA6"
+    printf '| t_skip   | skipped      | -         | br-parent | %s | - | claim refused: in flight |\n' "$PARENT_SHA6"
   } >"$D6/run/.auto-pilot/RUN.md"
   : >"$D6/run/.auto-pilot/QUESTIONS.md"
   printf '# report\n' >"$D6/run/.auto-pilot/REPORT.md"
@@ -910,6 +911,9 @@ GHWEOF
   [ "$d6rc" = 0 ] && ok "doctor I6: exits 0 (park is a repair, not a halt)" || bad "doctor I6: exits 0" "$d6out"
   have "doctor I6: parks the child whose parent's tip diverged" $'t_child  | parked' "$(cat "$D6/run/.auto-pilot/RUN.md")"
   have "doctor I6: REPORT.md explains why" 'without the parent'"'"'s PR merging' "$(cat "$D6/run/.auto-pilot/REPORT.md")"
+  have "doctor I6: a skipped chained row keeps its phase — a refused claim holds nothing to park" \
+    $'t_skip   | skipped' "$(cat "$D6/run/.auto-pilot/RUN.md")"
+  lack "doctor I6: the skipped row is never reported as parked" 'I6 parked — t_skip' "$(cat "$D6/run/.auto-pilot/REPORT.md")"
 
   # (b) the SAME divergence, but the parent's PR is MERGED -> a human merge is
   # the expected trigger; the remedy is restack, never a park.

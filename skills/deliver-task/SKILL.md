@@ -243,7 +243,10 @@ report it — never double-claim. Report it as a **claim refusal**, as
 `claim refused: <the handler's reason>`: that line is what `/auto-pilot` keys
 off to record the task `skipped` rather than leave it `pending` for reselection
 (`skills/auto-pilot/references/run-state.md` "Task lifecycle phases"). A refusal
-holds no claim, so there is nothing to bail.
+holds no claim, so there is nothing to bail. A WIP-limit decline
+(`WIP limit <n> reached …`) is **not** a claim refusal — step 2 never runs a
+handler's pre-claim WIP gate, and the cap is not about this task — so never
+report one as `claim refused:`.
 
 ## 3. Do (implement + verify)
 

@@ -429,10 +429,10 @@ task's own `phase`; it is computed from the graph edges and the blockers' phases
 by the adapter's `list_ready`/`dependency_graph` verbs
 ([`adapters.md`](adapters.md)).
 
-| Phase     | Meaning                                                                                 | Tracker                                                      | Git / remote       | Worker worktree |
-| --------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------ | ------------------ | --------------- |
-| `pending` | Materialized into the graph, not yet claimed; readiness computed separately             | new / materialized (plan `new`\|`ready`; linear `unstarted`) | no branch          | none            |
-| `skipped` | **Terminal (not claimed):** `/deliver-task` refused the claim; the reason is in `notes` | untouched by this run                                        | none of this run's | none            |
+| Phase     | Meaning                                                                                 | Tracker                                                      | Git / remote            | Worker worktree |
+| --------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------ | ----------------------- | --------------- |
+| `pending` | Materialized into the graph, not yet claimed; readiness computed separately             | new / materialized (plan `new`\|`ready`; linear `unstarted`) | no branch               | none            |
+| `skipped` | **Terminal (not claimed):** `/deliver-task` refused the claim; the reason is in `notes` | untouched by this run                                        | no branch from this run | none            |
 
 **`skipped` is how a refused claim leaves the queue.** When `/deliver-task`
 returns a claim refusal (its step 2: lost race, already in flight under another

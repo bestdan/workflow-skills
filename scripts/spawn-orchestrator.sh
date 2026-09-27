@@ -6573,7 +6573,10 @@ doctor() {
     local task="${_RS_TASK[$i]}" phase="${_RS_PHASE[$i]}" base="${_RS_BASE[$i]}" bsha="${_RS_BASE_SHA[$i]}"
     [ "$base" != "$base_branch" ] || continue # independent task — nothing frozen
     _restack_empty "$bsha" && continue        # no frozen base yet — nothing to compare
-    [ "$phase" != "handed-off" ] || continue  # terminal success — already delivered
+    case "$phase" in
+      handed-off) continue ;; # terminal success — already delivered
+      skipped) continue ;;    # claim refused — holds nothing this run acquired
+    esac
 
     local pidx=-1 j
     for ((j = 0; j < n_rows; j++)); do
