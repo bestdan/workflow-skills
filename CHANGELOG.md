@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.71.0] - 2026-09-27
+
+### Features
+
+- pin stronger reviewer models [N/A] (#920) (fad91ae)
+
 ## [2.70.7] - 2026-09-27
 
 ### Fixes
