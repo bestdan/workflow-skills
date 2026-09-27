@@ -14,9 +14,9 @@ string so a caller can report consistently:
 
 | Gate                                                                               | Reason string              |
 | ----------------------------------------------------------------------------------- | -------------------------- |
+| A native `blockedBy` issue is not in a `completed`-type state                      | `waiting on <id>[, <id>…]` |
 | `estimate` is `null`/missing                                                       | `no estimate set`          |
 | `estimate >= <max>` (candidate's resolved per-project `max_estimate`, default `3`) | `estimate <N> >= <max>`    |
-| A native `blockedBy` issue is not in a `completed`-type state                      | `waiting on <id>[, <id>…]` |
 | Has label `auto-claimed`                                                           | `already auto-claimed`     |
 | Has label `human-approval-requested`                                               | `human-approval-requested` |
 | Has label `blocked`                                                                | `blocked`                  |
@@ -59,16 +59,18 @@ def gate(issue, max_estimate, satisfied=frozenset()):
     `satisfied` names blockers to count as met whatever their state — the
     in-set exemption `stack_in_set()` computes.
     """
+    # First, so no other reason can mask a blocker. `human-approval-requested`
+    # is the one reason a direct pick can override; and linear-claim.md's
+    # Pre-flight step 6 acts only on `waiting on`, for callers such as
+    # /deliver-task that never ran the estimate gates.
+    waiting = [b for b in unmet_blockers(issue.get("blockedBy")) if b not in satisfied]
+    if waiting:
+        return "waiting on " + ", ".join(waiting)
     estimate = issue.get("estimate")
     if estimate is None:
         return "no estimate set"
     if estimate >= max_estimate:
         return f"estimate {estimate} >= {max_estimate}"
-    # Ahead of `human-approval-requested`: that is the one reason a direct
-    # pick can override, so it must not mask a blocker, which it cannot.
-    waiting = [b for b in unmet_blockers(issue.get("blockedBy")) if b not in satisfied]
-    if waiting:
-        return "waiting on " + ", ".join(waiting)
     label_names = {n["name"] for n in issue["labels"]["nodes"]}
     if "auto-claimed" in label_names:
         return "already auto-claimed"

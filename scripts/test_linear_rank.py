@@ -156,6 +156,14 @@ class BlockerGateTests(unittest.TestCase):
         )
         self.assertEqual(result["dropped"], {"A-1": "waiting on B-1"})
 
+    def test_blocker_reported_ahead_of_a_missing_estimate(self):
+        # /deliver-task never ran the estimate gates, and Pre-flight step 6
+        # acts only on `waiting on` — an estimate reason must not mask it.
+        i = self.blocked("A-1", ("B-1", "started"))
+        i["estimate"] = None
+        result = run(["--max-estimate", "3"], [i])
+        self.assertEqual(result["dropped"], {"A-1": "waiting on B-1"})
+
     def test_no_blocked_by_key_skips_the_gate(self):
         result = run(["--max-estimate", "3"], [issue("A-1")])
         self.assertEqual([c["id"] for c in result["candidates"]], ["A-1"])
