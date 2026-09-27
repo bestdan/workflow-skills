@@ -19,6 +19,9 @@
 #   - a missing plugin root exits 2, distinct from the exit 1 that means drift
 #   - the script is runnable AS DOCUMENTED, with CLAUDE_PLUGIN_ROOT unset, and
 #     both documented call sites still pass --plugin-root (issue #607)
+#   - the shared rules are checked for coverage up to a whole shell token, one
+#     diff source suffices, and a leftover plugin-cache prefix rule is DEAD
+#     (issue #475)
 #   - every plugin script co-review runs has an allowed-tools grant in its
 #     SKILL.md, since no settings rule can approve one (issue #848)
 #
@@ -390,7 +393,102 @@ for doc in "$ROOT/skills/co-review/SKILL.md" "$ROOT/commands/doctor.md"; do
   fi
 done
 
-# --- 10. every plugin script co-review runs is granted by the skill ---------
+# --- 10. shared rules --------------------------------------------------------
+# The shared rules live in references/permissions.md. They are prefix rules
+# over a class of commands, so they are checked by asking whether a settings
+# rule approves the command, matching up to a whole shell token as the
+# permission matcher does. The fixture copies the real shared-rules file, so
+# these cases check the shipped templates.
+
+SPLUGIN="$BASE/splugin"
+make_plugin "$SPLUGIN"
+mkdir -p "$SPLUGIN/skills/co-review/references"
+cp "$ROOT/skills/co-review/references/permissions.md" \
+  "$SPLUGIN/skills/co-review/references/permissions.md"
+
+SHARED_OK=(
+  "Bash(cat:*)" "Bash(gh pr diff:*)" "Bash(gh pr view:*)" "Bash(git diff:*)"
+  "Bash(git ls-remote:*)" "Bash(git status:*)"
+)
+
+run_shared() {
+  OUT="$("$SCRIPT" --plugin-root "$SPLUGIN" --settings "$1" --json 2>&1)"
+  RC=$?
+}
+shared_count() { printf '%s' "$OUT" | jq ".shared.$1 | length"; }
+
+make_settings "$BASE/shared-ok.json" "${SHARED_OK[@]}"
+run_shared "$BASE/shared-ok.json"
+if [ "$RC" -eq 0 ] && [ "$(printf '%s' "$OUT" | jq -r '.shared.templates')" = "6" ] \
+  && [ "$(shared_count missing)" = "0" ] && [ "$(shared_count dead)" = "0" ]; then
+  pass "the shipped shared rules cover every shared template"
+else
+  fail "shipped shared rules did not cover their templates (rc=$RC): $OUT"
+fi
+
+# A missing shared rule is drift once co-review is set up at all.
+make_settings "$BASE/shared-missing.json" "${SHARED_OK[@]:0:5}"
+run_shared "$BASE/shared-missing.json"
+if [ "$RC" -eq 1 ] && [ "$(printf '%s' "$OUT" | jq -r '.shared.missing[0]')" = "Bash(git status:*)" ]; then
+  pass "a missing shared rule is reported MISSING and is drift"
+else
+  fail "a missing shared rule was not reported (rc=$RC): $OUT"
+fi
+
+# One diff source suffices: permissions.md says to add only the one you use.
+make_settings "$BASE/shared-onediff.json" \
+  "Bash(cat:*)" "Bash(gh pr view:*)" "Bash(git diff:*)" \
+  "Bash(git ls-remote:*)" "Bash(git status:*)"
+run_shared "$BASE/shared-onediff.json"
+if [ "$RC" -eq 0 ] && [ "$(shared_count missing)" = "0" ]; then
+  pass "git diff alone satisfies the diff-source pair"
+else
+  fail "a single diff source reported missing (rc=$RC): $OUT"
+fi
+
+# A broader rule approves the command too, so it is coverage. One ending
+# mid-token approves nothing.
+make_settings "$BASE/shared-broad.json" "Bash(cat:*)" "Bash(gh:*)" "Bash(git *)"
+run_shared "$BASE/shared-broad.json"
+if [ "$RC" -eq 0 ] && [ "$(shared_count missing)" = "0" ]; then
+  pass "broader Bash(gh:*) and Bash(git *) rules cover the shared templates"
+else
+  fail "a broader rule was not counted as coverage (rc=$RC): $OUT"
+fi
+make_settings "$BASE/shared-midtoken.json" "${SHARED_OK[@]:0:5}" "Bash(git stat:*)"
+run_shared "$BASE/shared-midtoken.json"
+if [ "$RC" -eq 1 ] && [ "$(shared_count missing)" = "1" ]; then
+  pass "a rule ending mid-token (Bash(git stat:*)) is not coverage"
+else
+  fail "a mid-token rule was counted as coverage (rc=$RC): $OUT"
+fi
+
+# The plugin-cache prefix rules permissions.md used to prescribe end inside the
+# script's path token, so they never fired. Every spelling is DEAD, so the
+# operator deletes it. Another plugin-path rule, such as a worktree teardown
+# grant, belongs to no co-review template and is left alone.
+make_settings "$BASE/shared-cache.json" "${SHARED_OK[@]}" \
+  "Bash(/c/workflow-skills/workflow-skills/:*)" \
+  "Bash(python3 /c/workflow-skills/workflow-skills/:*)" \
+  "Bash(python3 \"/c/workflow-skills/workflow-skills/:*)" \
+  "Bash(/c/workflow-skills/workflow-skills/*/scripts/worktree-remove.sh *)"
+run_shared "$BASE/shared-cache.json"
+if [ "$RC" -eq 1 ] && [ "$(shared_count dead)" = "3" ]; then
+  pass "every plugin-cache prefix rule is DEAD; a teardown rule is not"
+else
+  fail "plugin-cache rules misclassified (rc=$RC, dead=$(shared_count dead)): $OUT"
+fi
+
+# No sign of co-review at all is "not configured", as for a reviewer.
+make_settings "$BASE/shared-none.json" "Bash(ls:*)"
+run_shared "$BASE/shared-none.json"
+if [ "$RC" -eq 0 ] && [ "$(printf '%s' "$OUT" | jq -r .shared.configured)" = "false" ]; then
+  pass "no shared or reviewer rule at all is not configured, and not drift"
+else
+  fail "unconfigured shared rules reported as drift (rc=$RC): $OUT"
+fi
+
+# --- 11. every plugin script co-review runs is granted by the skill ---------
 # No settings rule can approve a plugin script: the quoted path is one shell
 # token carrying the version, and the matcher only compares whole tokens. So
 # each invocation must have an `allowed-tools` entry in SKILL.md whose prefix

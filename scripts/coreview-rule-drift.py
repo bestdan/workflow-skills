@@ -9,7 +9,10 @@ appearing in the run summary. Nothing errors.
 
 This script compares the rule templates documented by the INSTALLED plugin's
 `skills/co-review/reviewers/*.md` against `permissions.allow` in the settings
-files, and names what drifted. It is READ-ONLY: it never writes settings. The
+files, and names what drifted. It checks the shared rules in
+`skills/co-review/references/permissions.md` too, by asking whether a settings
+rule approves the command co-review runs, since those are prefix rules that no
+exact comparison can check. It is READ-ONLY: it never writes settings. The
 repair is a human edit — the corrected string has to carry paths only the
 operator knows (`<NEUTRAL>` in particular is never documented as a fixed value),
 and on a sandboxed machine the settings file is write-denied anyway.
@@ -82,6 +85,22 @@ RULE_LINE_RE = re.compile(r'^\s*("Bash\(.*\)")\s*,?\s*$')
 # fence in the same file holds the invocation, whose lines must never be read as
 # shipped templates.
 FENCE_RE = re.compile(r"^\s*```(\w*)")
+
+# The shared rules cover every reviewer and live in one json fence in this file,
+# relative to the plugin root.
+SHARED_RULES_FILE = Path("skills") / "co-review" / "references" / "permissions.md"
+
+# The tail of the plugin-cache prefix rules that permissions.md once told
+# operators to add, `Bash([python3 ]["]<cache>/workflow-skills/workflow-skills/:*)`.
+# The matcher compares a prefix rule only up to a whole shell token, and the
+# script path is one token that runs on into the version directory, so these
+# rules never fired on any machine. SKILL.md grants the scripts instead; a
+# leftover one is reported DEAD so it gets deleted.
+PLUGIN_CACHE_RULE_TAIL = "/workflow-skills/workflow-skills/:*)"
+
+# Shared templates of which one suffices. permissions.md says to add only the
+# diff source you use: `gh pr diff` for a PR, `git diff` for `--local`.
+SHARED_ALTERNATIVES = [{"Bash(gh pr diff:*)", "Bash(git diff:*)"}]
 
 
 def die(msg) -> NoReturn:
@@ -274,8 +293,75 @@ def analyze(reviewers_dir, allow_rules):
     return findings
 
 
-def has_drift(findings):
-    """Drift is a CONFIGURED reviewer with a missing or dead rule.
+def covers(rule, command):
+    """Whether a settings rule approves the command text `command`.
+
+    Models the matcher as measured: an exact rule must equal the command, and a
+    `:*` or trailing ` *` rule must match it up to a whole shell token, so
+    `Bash(git:*)` approves `git diff` and `Bash(gi:*)` does not. Nothing is
+    unquoted or expanded first. A rule with a wildcard anywhere else is not
+    modelled and counts as no coverage.
+    """
+    if rule in ("Bash", "Bash(*)"):
+        return True
+    if not rule.startswith("Bash(") or not rule.endswith(")"):
+        return False
+    inner = rule[len("Bash(") : -1]
+    if inner.endswith(":*"):
+        head = inner[: -len(":*")]
+    elif inner.endswith(" *"):
+        head = inner[: -len(" *")]
+    else:
+        return inner == command
+    if "*" in head:
+        return False
+    return command == head or command.startswith(head + " ")
+
+
+def analyze_shared(plugin_root, allow_rules, reviewer_findings):
+    """Classify the shared rules, which every reviewer needs, against settings.
+
+    Each shared template is a `Bash(<command>:*)` prefix rule over a class of
+    commands, so the question is not whether a settings rule equals it but
+    whether that rule approves `<command>`; a broader `Bash(git:*)` covers
+    `Bash(git diff:*)`. Returns None when the installed plugin ships no
+    shared-rules file.
+    """
+    rules_file = Path(plugin_root) / SHARED_RULES_FILE
+    if not rules_file.is_file():
+        return None
+    templates = parse_templates(rules_file)
+
+    covered, matched_rules = set(), set()
+    for template in templates:
+        command = template[len("Bash(") : -1].removesuffix(":*")
+        hits = [r for r in allow_rules if covers(r, command)]
+        if hits:
+            covered.add(template)
+            matched_rules.update(hits)
+
+    missing = [
+        t
+        for t in templates
+        if t not in covered
+        and not any(t in group and group & covered for group in SHARED_ALTERNATIVES)
+    ]
+    dead = [r for r in allow_rules if r.endswith(PLUGIN_CACHE_RULE_TAIL)]
+    return {
+        "templates": len(templates),
+        "matched": len(templates) - len(missing),
+        "missing": missing,
+        "dead": dead,
+        # Like a reviewer, the shared rules are "not set up" rather than broken
+        # on a machine where co-review shows no sign of being set up at all.
+        "configured": bool(covered or dead)
+        or any(f["configured"] for f in reviewer_findings),
+    }
+
+
+def has_drift(findings, shared=None):
+    """Drift is a CONFIGURED reviewer, or configured shared rules, with a
+    missing or dead rule.
 
     Off-machine rules are deliberately excluded: on a settings file shared
     across hosts they are the other hosts' correct rules, so counting them
@@ -283,10 +369,15 @@ def has_drift(findings):
     is already reported as `missing`, which fires on exactly the hosts where it
     is true.
     """
-    return any(f["configured"] and (f["missing"] or f["dead"]) for f in findings)
+    shared_drift = bool(
+        shared and shared["configured"] and (shared["missing"] or shared["dead"])
+    )
+    return shared_drift or any(
+        f["configured"] and (f["missing"] or f["dead"]) for f in findings
+    )
 
 
-def report(findings, plugin_root, settings_read, settings_searched):
+def report(findings, shared, plugin_root, settings_read, settings_searched):
     print(f"co-review allow-rule drift — templates from {plugin_root}")
     for p in settings_read:
         print(f"  settings: {p}")
@@ -298,6 +389,27 @@ def report(findings, plugin_root, settings_read, settings_searched):
             + ", ".join(str(p) for p in settings_searched)
         )
     print()
+
+    if shared is not None:
+        if not shared["configured"]:
+            print(f"shared: no allow-rule configured ({shared['templates']} shipped)")
+        elif not shared["missing"] and not shared["dead"]:
+            print(f"shared: ok ({shared['matched']}/{shared['templates']} rules match)")
+        else:
+            print(
+                f"shared: {shared['matched']}/{shared['templates']} shipped rules covered"
+            )
+            for rule in shared["dead"]:
+                print(f"  DEAD       {rule}")
+            if shared["dead"]:
+                print(
+                    "             a plugin-cache prefix rule never fires, since it ends\n"
+                    "             inside the script's path; SKILL.md grants the plugin's\n"
+                    "             scripts, so delete it"
+                )
+            for template in shared["missing"]:
+                print(f"  MISSING    {template}")
+            print()
 
     for f in findings:
         name = f["reviewer"]
@@ -331,7 +443,7 @@ def report(findings, plugin_root, settings_read, settings_searched):
             "path is simply wrong everywhere.\n"
         )
 
-    if has_drift(findings):
+    if has_drift(findings, shared):
         print(
             "A dead rule fails silently: under `/co-review --non-interactive` the\n"
             "dispatch is denied, not queued, so the reviewer just stops appearing in\n"
@@ -383,22 +495,25 @@ def main():
     allow_rules, settings_read = load_allow_rules(settings_paths)
 
     findings = analyze(reviewers, allow_rules)
+    shared = analyze_shared(args.plugin_root, allow_rules, findings)
+    drift = has_drift(findings, shared)
     if args.as_json:
         print(
             json.dumps(
                 {
                     "plugin_root": str(args.plugin_root),
                     "settings": settings_read,
-                    "drift": has_drift(findings),
+                    "drift": drift,
+                    "shared": shared,
                     "reviewers": findings,
                 },
                 indent=2,
             )
         )
     else:
-        report(findings, args.plugin_root, settings_read, settings_paths)
+        report(findings, shared, args.plugin_root, settings_read, settings_paths)
 
-    sys.exit(1 if has_drift(findings) else 0)
+    sys.exit(1 if drift else 0)
 
 
 if __name__ == "__main__":

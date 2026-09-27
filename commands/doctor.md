@@ -409,7 +409,16 @@ in `~/.claude/settings.json` plus the repo's `.claude/settings.json` /
 - **not configured** — a reviewer with no rules at all. Reported, but **not**
   drift: an operator who doesn't use a reviewer shouldn't be nagged about it.
 
-Exit `0` → `PASS`. Exit `1` (a configured reviewer has a dead or missing rule)
+It checks the **shared** rules in `skills/co-review/references/permissions.md`
+too, reported under `shared:`. Those are prefix rules, so it asks whether a
+settings rule approves the command, matching up to a whole shell token as the
+permission matcher does: `Bash(git:*)` covers `Bash(git diff:*)`, and
+`Bash(git stat:*)` covers nothing. Only one of `gh pr diff` and `git diff` is
+required. Any `…/workflow-skills/workflow-skills/:*` plugin-cache rule is
+**DEAD** on every machine: it ends inside the script's path, so it never fired,
+and `SKILL.md` grants the plugin's scripts itself.
+
+Exit `0` → `PASS`. Exit `1` (a configured reviewer, or the shared rules, has a dead or missing rule)
 → `WARN`, quoting the script's own lines. Exit `2` → `WARN`: the
 check could not run. It prints the reason on **stderr**, so capture that
 (`2>&1`) and quote it rather than reporting a bare failure — it is usually an
