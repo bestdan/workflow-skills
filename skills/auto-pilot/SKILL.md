@@ -277,9 +277,11 @@ boundaries. The loop does not attempt to intercept those opaque substeps.
 
 **Readiness + ordering.** Walk the `RUN.md` task graph
 ([`references/run-state.md`](references/run-state.md) "`RUN.md`"). A task is
-**ready** when every task it is blocked by is at phase `handed-off` — never
-tracker done-state (per that reference's phase table, `handed-off` is the
-success terminal the run keys off, not `needs_review`'s eventual completion).
+**ready** when its own phase is `pending` and every task it is blocked by is
+at phase `handed-off` — never tracker done-state (per that reference's phase
+table, `handed-off` is the success terminal the run keys off, not
+`needs_review`'s eventual completion). A `skipped` task is never selected
+again.
 Pick the next ready task in dependency order. Each task's `base` column
 encodes whether it is independent (`main`) or chained (the parent task's
 branch) — that distinction drives the stacked-PR handling below.
@@ -350,6 +352,12 @@ stacked-PR repair)".
 the run-state branch — the **write order**'s last step
 ([`references/run-state.md`](references/run-state.md) "Write order");
 `/deliver-task` already performed that order's push + tracker-write steps.
+When `/deliver-task` returned a **claim refusal** (its step 2) instead, write
+phase `skipped` with the refusal reason in `notes`; it holds no claim, so there
+is nothing to push or write to the tracker first. A refusal is not a failed
+delivery and never takes the per-task retry bound. Why `skipped` and not
+`parked`, and why a reopened blocker skips rather than waits:
+[`references/run-state.md`](references/run-state.md) "Task lifecycle phases".
 Then apply the budget checks in
 [`references/run-budget.md`](references/run-budget.md): a hard-stop, a
 near-cap pause, or a circuit-breaker halt writes state and exits per that
@@ -363,7 +371,8 @@ ready for a later `--resume` — the `status`/`paused_until` contract and what
 that does to the relaunch supervisor:
 [`references/run-state.md`](references/run-state.md) "`RUN.md`" and
 [`references/launch-runtime.md`](references/launch-runtime.md) "Relaunchable,
-not one-shot".
+not one-shot". A run whose every remaining task was refused ends because no
+ready task remains: `skipped` tasks and their dependents are never ready.
 
 In every case the orchestrator writes and commits the final `REPORT.md`, then
 declares its exit reason and exits cleanly, emitting a one-line summary to
