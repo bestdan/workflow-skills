@@ -12,7 +12,12 @@ make_gh() {
     i=$((i + 1))
     cp "$file" "$responses/$i"
   done
-  make_stub gh "n=\$(cat '$responses/count' 2>/dev/null || echo 0)" \
+  # `gh api` serves the timeline and commit fixtures (empty by default); every
+  # `gh pr view` serves the next response in sequence, repeating the last.
+  make_stub gh \
+    "case \"\$*\" in *'/timeline'*) cat '$TEST_TMPDIR/timeline' 2>/dev/null || echo '[]'; exit ;; esac" \
+    "case \"\$*\" in *'/commits/'*) cat '$TEST_TMPDIR/commit' 2>/dev/null || echo '{}'; exit ;; esac" \
+    "n=\$(cat '$responses/count' 2>/dev/null || echo 0)" \
     'n=$((n + 1))' "echo \"\$n\" >'$responses/count'" \
     "[ \"\$n\" -gt $i ] && n=$i" "cat \"$responses/\$n\""
 }
@@ -52,13 +57,15 @@ LAND_TIMEOUT=60
   assert_output --partial 'AWAIT_REVIEW: landed'
 }
 
-@test "a requested reviewer that drops out without a review counts as landed" {
+@test "a requested reviewer that drops out without a review has not landed" {
+  # Copilot leaves reviewRequests[] when it starts work, minutes before its
+  # review exists.
   json "$TEST_TMPDIR/requested" '[]' '[{"login":"Copilot"}]'
   json "$TEST_TMPDIR/cleared" '[]' '[]'
   make_gh "$TEST_TMPDIR/requested" "$TEST_TMPDIR/cleared"
-  run "$REPO_ROOT/scripts/await-pr-review.sh" --pr 1 --repo o/r --interval 0 --timeout "$LAND_TIMEOUT"
-  assert_success
-  assert_output --partial 'AWAIT_REVIEW: landed'
+  run "$REPO_ROOT/scripts/await-pr-review.sh" --pr 1 --repo o/r --interval 0 --timeout 1
+  assert_failure 1
+  assert_output --partial 'AWAIT_REVIEW: timeout reviewer=copilot'
 }
 
 @test "times out when review never lands" {
@@ -95,6 +102,26 @@ LAND_TIMEOUT=60
   run "$REPO_ROOT/scripts/await-pr-review.sh" --pr 1 --repo o/r --interval 0 --timeout "$LAND_TIMEOUT" --grace 0
   assert_success
   assert_output --partial 'AWAIT_REVIEW: landed reviewer=copilot'
+}
+
+@test "grace keeps a reviewer the timeline shows at work" {
+  printf '%s\n' '[{"event":"review_requested","created_at":"2026-01-02T00:00:01Z","requested_reviewer":{"login":"Copilot"}},{"event":"copilot_work_started","created_at":"2026-01-02T00:00:30Z"}]' >"$TEST_TMPDIR/timeline"
+  json "$TEST_TMPDIR/working" '[]' '[]'
+  json "$TEST_TMPDIR/landed" '[{"author":{"login":"copilot-pull-request-reviewer"},"state":"COMMENTED"}]' '[]'
+  make_gh "$TEST_TMPDIR/working" "$TEST_TMPDIR/working" "$TEST_TMPDIR/landed"
+  run "$REPO_ROOT/scripts/await-pr-review.sh" --pr 1 --repo o/r --interval 0 --timeout "$LAND_TIMEOUT" --grace 0
+  assert_success
+  assert_output --partial 'AWAIT_REVIEW: landed reviewer=copilot'
+}
+
+@test "grace ignores a timeline request older than the commit" {
+  printf '%s\n' '[{"event":"review_requested","created_at":"2026-01-01T00:00:00Z","requested_reviewer":{"login":"Copilot"}}]' >"$TEST_TMPDIR/timeline"
+  printf '%s\n' '{"commit":{"committer":{"date":"2026-01-02T00:00:00Z"}}}' >"$TEST_TMPDIR/commit"
+  json "$TEST_TMPDIR/none" '[]' '[]'
+  make_gh "$TEST_TMPDIR/none"
+  run "$REPO_ROOT/scripts/await-pr-review.sh" --pr 1 --repo o/r --interval 0 --timeout "$LAND_TIMEOUT" --grace 0 --commit bbbb2222
+  assert_failure 3
+  assert_output --partial 'AWAIT_REVIEW: not-requested reviewer=copilot'
 }
 
 @test "grace reports a dropped reviewer beside the ones that landed" {

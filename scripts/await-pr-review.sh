@@ -19,16 +19,17 @@
 #               any  → return as soon as one expected reviewer lands.
 #   --interval  Seconds between polls. Default: 30.
 #   --timeout   Total seconds before giving up. Default: 900 (15m).
-#   --grace     Seconds a reviewer gets to APPEAR. Once this has elapsed, a
-#               reviewer that has neither landed nor ever shown up in
-#               reviewRequests[] is dropped as not-requested rather than waited
-#               on for the full --timeout. Default: unset (wait on every
-#               reviewer). GitHub adds an auto-requested Copilot about a second
+#   --grace     Seconds a reviewer gets to be requested. Once this has
+#               elapsed, a reviewer that has not landed and was never requested
+#               (see "Requested" below) is dropped as not-requested rather than
+#               waited on for the full --timeout. Default: unset (wait on every
+#               reviewer). GitHub requests an auto-review Copilot about a second
 #               after the PR opens, so 30 is ample.
 #   --commit    Count only reviews of this commit (a review's `commit.oid`,
-#               matched as a prefix). Pass the PR's headRefOid, so a review of
-#               an earlier push does not satisfy the wait after a re-push.
-#               Default: unset (any review counts).
+#               matched as a prefix), and only review requests made after it
+#               was committed. Pass the PR's headRefOid, so a review of an
+#               earlier push does not satisfy the wait after a re-push.
+#               Default: unset (any review or request counts).
 #
 # Exit status: 0 landed, 1 timeout, 2 usage error, 3 when --grace dropped
 # every expected reviewer as not-requested and none landed.
@@ -37,15 +38,18 @@
 #   AWAIT_REVIEW: timeout reviewer=<csv-of-missing> after=<S>s [not-requested=<csv>]
 #   AWAIT_REVIEW: not-requested reviewer=<csv> after=<S>s
 #
-# "Landed" detection (precedence, per reviewer):
-#   1. PRIMARY — a `reviews[]` entry whose author.login matches the reviewer
-#      (and, with --commit, reviewed that commit). This is
-#      authoritative: the review actually exists.
-#   2. FALLBACK — the reviewer was present in `reviewRequests[]` on an EARLIER
-#      poll but is absent now. A requested bot that drops out of
-#      reviewRequests[] has reviewed and been cleared, even in the rare window
-#      where its reviews[] entry isn't surfaced yet. (A reviewer that was never
-#      requested and never reviewed never trips this fallback.)
+# "Landed" means a `reviews[]` entry whose author.login matches the reviewer
+# (and, with --commit, reviewed that commit). Nothing else counts. In
+# particular, a reviewer leaving `reviewRequests[]` is NOT a landing signal:
+# Copilot leaves it when it STARTS work (the `copilot_work_started` timeline
+# event, ~30s after the request), and its review arrives 1-3 minutes later.
+#
+# "Requested" (the --grace test) means the reviewer appeared in
+# `reviewRequests[]` on some poll, or the PR's timeline holds a
+# `review_requested` event for it or an event whose name contains it
+# (`copilot_work_started`). The timeline is what makes a late start work:
+# polled more than ~30s after the request, `reviewRequests[]` no longer shows
+# Copilot, and only the timeline says it is reviewing.
 #
 # Login gotcha (why matching is a case-insensitive SUBSTRING, not equality):
 #   GitHub reports Copilot under TWO different identifiers. In `reviews[]` the
@@ -155,9 +159,30 @@ report() {
   echo "AWAIT_REVIEW: $1 reviewer=$2 after=${SECONDS}s$extra"
 }
 
-# Every login seen in reviewRequests[] on any poll so far. The fallback signal
-# and the --grace test both ask whether a reviewer was ever requested.
+# Everything that shows a reviewer was requested: reviewRequests[] logins from
+# every poll so far, plus timeline matches once the --grace test needs them.
 seen_requested=""
+
+# With --commit, a timeline request only counts if it came after that commit
+# was made — an earlier push's request says nothing about this one. If the
+# date can't be read, every request counts, which errs toward waiting.
+requested_since=""
+if [ -n "$grace" ] && [ -n "$commit" ]; then
+  requested_since="$(gh api "repos/$repo/commits/$commit" | jq -r '.commit.committer.date // empty')"
+fi
+
+# Print the timeline's request evidence, one lowercased entry per line: the
+# requested reviewer of each review_requested event, and every other event's
+# name (so `copilot_work_started` matches the token `copilot`). Prints nothing
+# and fails when the timeline can't be read.
+timeline_requests() {
+  local tl
+  tl="$(gh api --paginate "repos/$repo/issues/$pr/timeline")"
+  [ -n "$tl" ] || return 1
+  printf '%s' "$tl" | jq -r --arg since "$requested_since" \
+    '.[]? | select($since == "" or (.created_at // "") >= $since)
+     | if .event == "review_requested" then (.requested_reviewer.login // .requested_team.name // empty) else (.event // empty) end' | lc
+}
 
 SECONDS=0
 while :; do
@@ -171,25 +196,36 @@ while :; do
     review_logins="$(printf '%s' "$json" | jq -r --arg commit "$commit" \
       '.reviews[]? | select($commit == "" or ((.commit.oid // "") | ascii_downcase | startswith($commit | ascii_downcase))) | .author.login // empty' | lc)"
     requested_logins="$(printf '%s' "$json" | jq -r '.reviewRequests[]? | (.login // .name // empty)' | lc)"
-    # The fallback compares against polls BEFORE this one, so fold this poll's
-    # requests in only after taking that snapshot.
-    previously_requested="$seen_requested"
     seen_requested="$seen_requested
 $requested_logins"
+    timeline_read=0
 
     still_pending=()
     for token in "${pending[@]}"; do
       if grep -qiF "$token" <<<"$review_logins"; then
-        landed+=("$token") # signal 1: reviews[]
-      elif grep -qiF "$token" <<<"$previously_requested" \
-        && ! grep -qiF "$token" <<<"$requested_logins"; then
-        landed+=("$token") # signal 2: dropped out
-      elif [ -n "$grace" ] && [ "$polled_at" -ge "$grace" ] \
-        && ! grep -qiF "$token" <<<"$seen_requested"; then
-        not_requested+=("$token") # never requested within the grace window
-      else
-        still_pending+=("$token")
+        landed+=("$token")
+        continue
       fi
+      if [ -n "$grace" ] && [ "$polled_at" -ge "$grace" ] \
+        && ! grep -qiF "$token" <<<"$seen_requested"; then
+        # Read the timeline at most once per poll, and only when a reviewer is
+        # about to be dropped. An unreadable timeline drops nobody this poll.
+        if [ "$timeline_read" = 0 ]; then
+          if tl_requests="$(timeline_requests)"; then
+            timeline_read=1
+            seen_requested="$seen_requested
+$tl_requests"
+          else
+            timeline_read=2
+            echo "await-pr-review: could not read the PR timeline, retrying" >&2
+          fi
+        fi
+        if [ "$timeline_read" = 1 ] && ! grep -qiF "$token" <<<"$seen_requested"; then
+          not_requested+=("$token")
+          continue
+        fi
+      fi
+      still_pending+=("$token")
     done
     pending=("${still_pending[@]+"${still_pending[@]}"}") # empty-safe under bash 3.2 set -u
 
