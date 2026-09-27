@@ -1,0 +1,20 @@
+- `scripts/spawn-orchestrator.sh:5017`
+- issue (blocking): log line outputs `skipped=$counts_parked` instead of `skipped=$counts_skipped`.
+- suggested fix:
+```shell
+-  echo "spawn-orchestrator: status-report: tasks=$n pending=$counts_pending in-flight=$counts_inflight handed-off=$counts_handed parked=$counts_parked skipped=$counts_parked delta=${delta_lines[0]#- } reality=$reality_flag ($out)"
++  echo "spawn-orchestrator: status-report: tasks=$n pending=$counts_pending in-flight=$counts_inflight handed-off=$counts_handed parked=$counts_parked skipped=$counts_skipped delta=${delta_lines[0]#- } reality=$reality_flag ($out)"
+```
+
+- `scripts/spawn-orchestrator.sh:6578`
+- issue (blocking): `skipped` case in `doctor()` uses `break` instead of `continue`, which prematurely terminates the task iteration loop and skips inspecting any subsequent tasks.
+- suggested fix:
+```shell
+     case "$phase" in
+       handed-off) continue ;; # terminal success — already delivered
+-      skipped) break ;;       # claim refused — holds nothing this run acquired
++      skipped) continue ;;    # claim refused — holds nothing this run acquired
+     esac
+```
+
+REVIEW_COMPLETE: FINDINGS

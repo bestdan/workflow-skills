@@ -1,0 +1,419 @@
+Reading additional input from stdin...
+OpenAI Codex v0.154.0
+--------
+workdir: /Users/danielegan/src/worktrees/workflow-skills/co-review-stronger-models
+model: gpt-5.6-terra
+provider: openai
+approval: on-request
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0e39c-d5a9-71b0-85d7-a1c1262dba49
+--------
+user
+Review ONLY the rubric and diff on stdin. Do NOT explore the filesystem, run commands, or retrieve any prior conversation or memory. If stdin is empty, output exactly NO INPUT and stop. Output findings as file:line, the issue, and a suggested fix. Read only.
+
+<stdin>
+# co-review reviewer rubric
+
+You are an extra reviewer on a pull request. Below this rubric you will find the
+review conventions you are held to (when the dispatcher could attach them), then
+any reviewer-specific requests, then the change to review (everything is on
+stdin).
+
+Review the change and report findings. Focus only on:
+
+- Correctness and obvious bugs
+- Contradictions: a claim in the diff that conflicts with another claim in
+  the diff, or with text it quotes or cites, is a correctness bug —
+  including in documentation and instruction files, where wrong prose
+  changes behavior
+- Project conventions
+- Security and performance where they matter
+- Test-coverage gaps that matter
+
+Skip nitpicks, pure formatting, and pre-existing issues outside the diff.
+
+Some findings rest on facts you cannot verify from the diff alone — whether a
+version is current, a path exists, a tool behaves as described. Never withhold
+such a finding: report it and mark it UNVERIFIED instead of asserting or
+staying silent. (Example: recommending a GitHub Action be pinned — you cannot
+check the current version from the diff; say so.)
+
+For each finding, give:
+
+- `file:line`
+- the issue, stated concisely, as a
+  [conventional comment](https://conventionalcomments.org/):
+  `<label> [(decorations)]: <subject>`, where `<label>` is one of `issue`,
+  `suggestion`, `question`, `todo`, `thought`, `chore`, or `note`,
+  and `<decorations>` is `(blocking)`, `(non-blocking)`, or `(if-minor)`. The
+  label states how hard the finding is meant to land — do not soften a defect
+  or inflate a preference. (`nitpick` is a valid label but the skip rule above
+  still stands: don't report nitpicks at all. `praise` is a label in the
+  attached conventions but not here: it has no suggested fix, so it is not a
+  finding — the dispatcher writes praise into its own summary.)
+- a suggested fix
+
+Where the attached conventions and this rubric differ, this rubric wins. The
+conventions describe reviewing in general; this rubric describes the one job
+you have here, and the two lists above are its own.
+
+Output a plain list of findings, followed by the terminal verdict line below,
+and nothing else. You are read-only: do not modify files, write anything, or
+run commands — emit only the review and the verdict.
+
+Always return your findings on stdout — never rely on a file as your only
+report channel. Do not stop after a preamble, a progress update, or a tool
+result with no findings text. The verdict line below is not itself a finding
+— it is required even when you have none (`PASS`) — so end your output with
+exactly one terminal line, and nothing after it:
+
+- `REVIEW_COMPLETE: PASS` — you reviewed the change and have no findings.
+- `REVIEW_COMPLETE: FINDINGS` — you reviewed the change and are reporting findings above.
+diff --git a/scripts/spawn-orchestrator.sh b/scripts/spawn-orchestrator.sh
+index 4a56c028..c7382a55 100755
+--- a/scripts/spawn-orchestrator.sh
++++ b/scripts/spawn-orchestrator.sh
+@@ -4556,14 +4556,15 @@ _report_task_elapsed() {
+ # with literal quotes and rendering as "unparseable until".
+ _report_front_field() { _run_md_field "$1" "$2"; }
+ 
+-# The seven in-flight/terminal phases (run-state.md "Task lifecycle phases"),
+-# bucketed for the report's summary line.
++# The two pre-claim and seven in-flight/terminal phases (run-state.md "Task
++# lifecycle phases"), bucketed for the report's summary line.
+ _report_bucket() {
+   case "$1" in
+     '' | pending) printf 'pending' ;;
+     claimed | implementing | pr-open | in-review | iterating) printf 'in-flight' ;;
+     handed-off) printf 'handed-off' ;;
+     parked) printf 'parked' ;;
++    skipped) printf 'skipped' ;;
+     *) printf 'unknown' ;;
+   esac
+ }
+@@ -4680,7 +4681,7 @@ status_report() {
+   # --- the phase table: the ONE shared RUN.md table parser -------------------
+   _restack_read_run_md "$run_md"
+   local base_branch="$_RS_BASE_BRANCH" n="${#_RS_TASK[@]}" i
+-  local counts_pending=0 counts_inflight=0 counts_handed=0 counts_parked=0
++  local counts_pending=0 counts_inflight=0 counts_handed=0 counts_parked=0 counts_skipped=0
+   local -a phase_lines=() cur_map=()
+   for ((i = 0; i < n; i++)); do
+     local task="${_RS_TASK[$i]}" phase="${_RS_PHASE[$i]}" branch="${_RS_BRANCH[$i]}" \
+@@ -4692,6 +4693,7 @@ status_report() {
+       in-flight) counts_inflight=$((counts_inflight + 1)) ;;
+       handed-off) counts_handed=$((counts_handed + 1)) ;;
+       parked) counts_parked=$((counts_parked + 1)) ;;
++      skipped) counts_skipped=$((counts_skipped + 1)) ;;
+     esac
+     phase_lines+=("| $task | ${phase:-pending} | ${branch:--} | ${pr:--} |")
+     cur_map+=("$task: ${phase:-pending}")
+@@ -4948,8 +4950,8 @@ status_report() {
+     printf 'Run: %s   Report interval: every %s\n\n' "$label" "$(_fmt_duration "$interval")"
+     printf '## Delta since last report\n\n'
+     printf '%s\n' "${delta_lines[@]}"
+-    printf '\n## Phase table (pending=%s in-flight=%s handed-off=%s parked=%s)\n\n' \
+-      "$counts_pending" "$counts_inflight" "$counts_handed" "$counts_parked"
++    printf '\n## Phase table (pending=%s in-flight=%s handed-off=%s parked=%s skipped=%s)\n\n' \
++      "$counts_pending" "$counts_inflight" "$counts_handed" "$counts_parked" "$counts_skipped"
+     printf '| task | phase | branch | pr |\n| ---- | ----- | ------ | -- |\n'
+     if [ "${#phase_lines[@]}" -gt 0 ]; then printf '%s\n' "${phase_lines[@]}"; else printf '| (no tasks materialized yet) | | | |\n'; fi
+     printf '\n## In-flight (elapsed vs per-task ceiling)\n\n'
+@@ -5015,7 +5017,7 @@ status_report() {
+       fi
+       ;;
+   esac
+-  echo "spawn-orchestrator: status-report: tasks=$n pending=$counts_pending in-flight=$counts_inflight handed-off=$counts_handed parked=$counts_parked delta=${delta_lines[0]#- } reality=$reality_flag ($out)"
++  echo "spawn-orchestrator: status-report: tasks=$n pending=$counts_pending in-flight=$counts_inflight handed-off=$counts_handed parked=$counts_parked skipped=$counts_parked delta=${delta_lines[0]#- } reality=$reality_flag ($out)"
+ }
+ 
+ # One bounded report emission, invoked by the generated wrapper's IN-WAKE
+@@ -6571,7 +6573,10 @@ doctor() {
+     local task="${_RS_TASK[$i]}" phase="${_RS_PHASE[$i]}" base="${_RS_BASE[$i]}" bsha="${_RS_BASE_SHA[$i]}"
+     [ "$base" != "$base_branch" ] || continue # independent task — nothing frozen
+     _restack_empty "$bsha" && continue        # no frozen base yet — nothing to compare
+-    [ "$phase" != "handed-off" ] || continue  # terminal success — already delivered
++    case "$phase" in
++      handed-off) continue ;; # terminal success — already delivered
++      skipped) break ;;       # claim refused — holds nothing this run acquired
++    esac
+ 
+     local pidx=-1 j
+     for ((j = 0; j < n_rows; j++)); do
+diff --git a/scripts/test-spawn-orchestrator-doctor.sh b/scripts/test-spawn-orchestrator-doctor.sh
+index 369ad658..f0f2351c 100755
+--- a/scripts/test-spawn-orchestrator-doctor.sh
++++ b/scripts/test-spawn-orchestrator-doctor.sh
+@@ -899,6 +899,7 @@ GHWEOF
+     printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+     printf '| t_parent | pending      | br-parent | main      | - | - | |\n'
+     printf '| t_child  | implementing | br-child  | br-parent | %s | - | |\n' "$PARENT_SHA6"
++    printf '| t_skip   | skipped      | -         | br-parent | %s | - | claim refused: in flight |\n' "$PARENT_SHA6"
+   } >"$D6/run/.auto-pilot/RUN.md"
+   : >"$D6/run/.auto-pilot/QUESTIONS.md"
+   printf '# report\n' >"$D6/run/.auto-pilot/REPORT.md"
+@@ -910,6 +911,9 @@ GHWEOF
+   [ "$d6rc" = 0 ] && ok "doctor I6: exits 0 (park is a repair, not a halt)" || bad "doctor I6: exits 0" "$d6out"
+   have "doctor I6: parks the child whose parent's tip diverged" $'t_child  | parked' "$(cat "$D6/run/.auto-pilot/RUN.md")"
+   have "doctor I6: REPORT.md explains why" 'without the parent'"'"'s PR merging' "$(cat "$D6/run/.auto-pilot/REPORT.md")"
++  have "doctor I6: a skipped chained row keeps its phase — a refused claim holds nothing to park" \
++    $'t_skip   | skipped' "$(cat "$D6/run/.auto-pilot/RUN.md")"
++  lack "doctor I6: the skipped row is never reported as parked" 'I6 parked — t_skip' "$(cat "$D6/run/.auto-pilot/REPORT.md")"
+ 
+   # (b) the SAME divergence, but the parent's PR is MERGED -> a human merge is
+   # the expected trigger; the remedy is restack, never a park.
+diff --git a/scripts/test-spawn-orchestrator-status-report.sh b/scripts/test-spawn-orchestrator-status-report.sh
+index 7d0cae34..af0ca903 100755
+--- a/scripts/test-spawn-orchestrator-status-report.sh
++++ b/scripts/test-spawn-orchestrator-status-report.sh
+@@ -148,6 +148,7 @@ USEOF
+       printf '| task_over     | implementing | branch_over   | main         | -   | -    | |\n'
+       printf '| task_handed   | handed-off   | branch_handed | main         | -   | #201 | |\n'
+       printf '| task_parked   | parked       | branch_parked | main         | -   | -    | |\n'
++      printf '| task_skipped  | skipped      | -             | main         | -   | -    | claim refused: in flight |\n'
+       printf '| task_child    | pr-open      | branch_child  | branch_parent| -   | #202 | |\n'
+       printf '| task_claimed  | %s | branch_claimed | main       | -   | -    | |\n' "$1"
+       printf '| task_fresh    | implementing | branch_fresh  | main         | -   | -    | |\n'
+@@ -169,6 +170,8 @@ USEOF
+     --repo "$SR_REPO" --gh "$SR_GH" --usage-bin "$SR_USAGE" --task-ceiling 120 2>&1)"
+   srAmd="$(cat "$SR_RUN/.auto-pilot/STATUS.md" 2>/dev/null)"
+   have "status-report: renders the phase table" '| task_impl | implementing' "$srAmd"
++  have "status-report: counts a refused claim as skipped, not pending or unknown" \
++    'pending=1 in-flight=5 handed-off=1 parked=1 skipped=1' "$srAmd"
+   have "status-report: in-flight elapsed is reported" 'task_impl (implementing): elapsed' "$srAmd"
+   have "status-report: OVER-ceiling task is flagged" 'task_over (implementing): elapsed' "$srAmd"
+   have "status-report: OVER-ceiling task says OVER" 'OVER the per-task ceiling' "$srAmd"
+diff --git a/skills/auto-pilot/SKILL.md b/skills/auto-pilot/SKILL.md
+index cbdc2964..ab0bcbd4 100644
+--- a/skills/auto-pilot/SKILL.md
++++ b/skills/auto-pilot/SKILL.md
+@@ -277,9 +277,11 @@ boundaries. The loop does not attempt to intercept those opaque substeps.
+ 
+ **Readiness + ordering.** Walk the `RUN.md` task graph
+ ([`references/run-state.md`](references/run-state.md) "`RUN.md`"). A task is
+-**ready** when every task it is blocked by is at phase `handed-off` — never
+-tracker done-state (per that reference's phase table, `handed-off` is the
+-success terminal the run keys off, not `needs_review`'s eventual completion).
++**ready** when its own phase is `pending` and every task it is blocked by is
++at phase `handed-off` — never tracker done-state (per that reference's phase
++table, `handed-off` is the success terminal the run keys off, not
++`needs_review`'s eventual completion). A `skipped` task is never selected
++again.
+ Pick the next ready task in dependency order. Each task's `base` column
+ encodes whether it is independent (`main`) or chained (the parent task's
+ branch) — that distinction drives the stacked-PR handling below.
+@@ -350,6 +352,12 @@ stacked-PR repair)".
+ the run-state branch — the **write order**'s last step
+ ([`references/run-state.md`](references/run-state.md) "Write order");
+ `/deliver-task` already performed that order's push + tracker-write steps.
++When `/deliver-task` returned a **claim refusal** (its step 2) instead, write
++phase `skipped` with the refusal reason in `notes`; it holds no claim, so there
++is nothing to push or write to the tracker first. A refusal is not a failed
++delivery and never takes the per-task retry bound. Why `skipped` and not
++`parked`, and why a reopened blocker skips rather than waits:
++[`references/run-state.md`](references/run-state.md) "Task lifecycle phases".
+ Then apply the budget checks in
+ [`references/run-budget.md`](references/run-budget.md): a hard-stop, a
+ near-cap pause, or a circuit-breaker halt writes state and exits per that
+@@ -363,7 +371,8 @@ ready for a later `--resume` — the `status`/`paused_until` contract and what
+ that does to the relaunch supervisor:
+ [`references/run-state.md`](references/run-state.md) "`RUN.md`" and
+ [`references/launch-runtime.md`](references/launch-runtime.md) "Relaunchable,
+-not one-shot".
++not one-shot". A run whose every remaining task was refused ends because no
++ready task remains: `skipped` tasks and their dependents are never ready.
+ 
+ In every case the orchestrator writes and commits the final `REPORT.md`, then
+ declares its exit reason and exits cleanly, emitting a one-line summary to
+diff --git a/skills/auto-pilot/references/adapters.md b/skills/auto-pilot/references/adapters.md
+index 42d3a18b..24425ded 100644
+--- a/skills/auto-pilot/references/adapters.md
++++ b/skills/auto-pilot/references/adapters.md
+@@ -21,16 +21,16 @@ labels, MCP read-lag, branch naming, what "needs a human" looks like) live
+ Eight verbs. Each has a contract (what the run loop expects back) and a failure
+ behavior (what the adapter does when the underlying handler step fails).
+ 
+-| Verb               | Contract                                                                                      | Failure behavior                                                             |
+-| ------------------ | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+-| `list_ready`       | Return the source's **ready, unblocked** tasks, ranked — the loop's candidate queue           | Empty list on a clean "nothing ready"; raise only on a source read failure   |
+-| `dependency_graph` | Return the blocker edges among in-scope tasks (used to pick each task's base + stack chains)  | Missing/partial edges → treat the task as independent (base `main`), note it |
+-| `claim`            | Reserve **one** task first-writer-wins; return the claim handle + the branch name to build on | Lost race / already in flight → return "not claimed" so the loop moves on    |
+-| `link_pr`          | Attach the opened PR to the task; **leave status unchanged** (the pr-open half of hand-off)   | Attach failure → `flag_for_human` (a built-but-unlinked PR needs a human)    |
+-| `set_needs_review` | Transition the task to its **needs-review** state (the hand-off half)                         | Transition failure → `flag_for_human`; never force-complete                  |
+-| `flag_for_human`   | Task can't proceed/reconcile: keep it in flight, **raise its priority**, leave a reason       | Best-effort; if even the flag write fails, record it in `REPORT.md`          |
+-| `comment_progress` | Post a progress breadcrumb visible to a human watching the source                             | Best-effort; a failed comment never blocks the loop                          |
+-| `wip_limit`        | Return the in-flight cap for the source's scope (the loop honors it before claiming)          | Unknown → treat as the configured default; never claim past an unknown cap   |
++| Verb               | Contract                                                                                      | Failure behavior                                                                           |
++| ------------------ | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
++| `list_ready`       | Return the source's **ready, unblocked** tasks, ranked — the loop's candidate queue           | Empty list on a clean "nothing ready"; raise only on a source read failure                 |
++| `dependency_graph` | Return the blocker edges among in-scope tasks (used to pick each task's base + stack chains)  | Missing/partial edges → treat the task as independent (base `main`), note it               |
++| `claim`            | Reserve **one** task first-writer-wins; return the claim handle + the branch name to build on | Lost race / in flight / blocked → return "not claimed" + reason; the loop writes `skipped` |
++| `link_pr`          | Attach the opened PR to the task; **leave status unchanged** (the pr-open half of hand-off)   | Attach failure → `flag_for_human` (a built-but-unlinked PR needs a human)                  |
++| `set_needs_review` | Transition the task to its **needs-review** state (the hand-off half)                         | Transition failure → `flag_for_human`; never force-complete                                |
++| `flag_for_human`   | Task can't proceed/reconcile: keep it in flight, **raise its priority**, leave a reason       | Best-effort; if even the flag write fails, record it in `REPORT.md`                        |
++| `comment_progress` | Post a progress breadcrumb visible to a human watching the source                             | Best-effort; a failed comment never blocks the loop                                        |
++| `wip_limit`        | Return the in-flight cap for the source's scope (the loop honors it before claiming)          | Unknown → treat as the configured default; never claim past an unknown cap                 |
+ 
+ `set_needs_review` is the **success** hand-off; `flag_for_human` is the
+ **blocked** one. Both leave the task in flight (never `completed`/`canceled`) —
+diff --git a/skills/auto-pilot/references/run-budget.md b/skills/auto-pilot/references/run-budget.md
+index 25912007..9dcafefc 100644
+--- a/skills/auto-pilot/references/run-budget.md
++++ b/skills/auto-pilot/references/run-budget.md
+@@ -449,7 +449,10 @@ operative, not pedantic: a park is a **deliberate, successful** outcome (the
+ task is blocked on a human decision), so a parked task must never be counted
+ as a failure and re-dispatched. Reading a park as a failure would re-dispatch
+ the very task that is waiting on an answer, burn the retry bound on it, and
+-then park it a second time — defeating the park and the bound together.
++then park it a second time — defeating the park and the bound together. A
++**claim refusal** is neither a failure nor a park: the loop records it as the
++pre-claim terminal `skipped` ([`run-state.md`](run-state.md) "Task lifecycle
++phases") and does not re-dispatch it.
+ 
+ A failed delivery gets **one** re-dispatch; a second failure parks the task,
+ and the run loop continues to the next ready task rather than aborting — a
+diff --git a/skills/auto-pilot/references/run-state.md b/skills/auto-pilot/references/run-state.md
+index 686994d7..b5689548 100644
+--- a/skills/auto-pilot/references/run-state.md
++++ b/skills/auto-pilot/references/run-state.md
+@@ -160,10 +160,11 @@ usage_deltas: [] # rolling Claude-orchestrator consumption intervals: [{percent:
+   these optional fields and use the documented defaults, preserving their
+   existing state bytes. Resume reads recorded fields; it does not re-resolve
+   current command-line defaults.
+-- `phase` is one of the seven in-flight/terminal values below, or the pre-claim
+-  `pending` marker (see "Task lifecycle phases"); of those, only the seven
+-  in-flight/terminal values are what `--resume` reconciles (a `pending` task has
+-  no in-flight transaction to reconcile).
++- `phase` is one of the seven in-flight/terminal values below, or one of the
++  two pre-claim values `pending` and `skipped` (see "Task lifecycle phases"); of
++  those, only the seven in-flight/terminal values are what `--resume` reconciles
++  (a pre-claim task has no in-flight transaction to reconcile). A `skipped`
++  row's `notes` cell carries the refusal reason.
+ 
+ ### Exit contract — why the orchestrator stopped
+ 
+@@ -189,7 +190,7 @@ branch).
+ | ------------ | ------------------------------------------------- | ------------------------------ |
+ | `continuing` | work remains, context exhausted                   | **relaunch**                   |
+ | `paused`     | rate window / `paused_until` set                  | **relaunch** past the reset    |
+-| `done`       | no ready tasks remain                             | **tear down**                  |
++| `done`       | no ready tasks remain (incl. all left `skipped`)  | **tear down**                  |
+ | `systemic`   | circuit breaker / fatal auth / failed invariant   | **tear down + alarm**          |
+ | `deadline`   | pre-dispatch guard stopped with tasks still ready | **tear down**; `--resume` only |
+ 
+@@ -344,6 +345,8 @@ A deferred co-review finding that was also filed as a tracked follow-up (see
+ The report, rewritten after every unit of work. Sections:
+ 
+ 1. **Outcomes** — per task: `handed-off` / `parked` / `skipped` + one line why.
++   A `skipped` line gives the refusal reason from its `notes` cell, and names
++   each task left `pending` because it is blocked by that one.
+ 2. **Decisions** — the highlights from `QUESTIONS.md` worth a human's eye.
+ 3. **Evidence** — links to the check output, screenshots, and exercised-feature
+    artifacts each PR carries.
+@@ -417,17 +420,48 @@ otherwise-recoverable run.
+ `phase` spans all materialized tasks, but only the seven **in-flight/terminal**
+ values below — from the moment a task is claimed to its terminal state —
+ participate in crash reconciliation. A task materialized into the graph but not
+-yet claimed carries the pre-claim marker `pending` instead; it is not one of
+-those seven and is never a target of the crash-reconciliation table (there is
+-nothing mid-transaction to reconcile before a claim exists). Which `pending`
+-tasks are **eligible to claim next** — graph readiness — is not encoded in a
+-`pending` task's own `phase`; it is computed from the graph edges and the
+-blockers' phases by the adapter's `list_ready`/`dependency_graph` verbs
++yet claimed carries one of two pre-claim values instead: `pending`, or
++`skipped` once its claim has been refused. Neither is one of those seven, and
++neither is ever a target of the crash-reconciliation table (there is nothing
++mid-transaction to reconcile before a claim exists). Which `pending` tasks are
++**eligible to claim next** — graph readiness — is not encoded in a `pending`
++task's own `phase`; it is computed from the graph edges and the blockers' phases
++by the adapter's `list_ready`/`dependency_graph` verbs
+ ([`adapters.md`](adapters.md)).
+ 
+-| Phase     | Meaning                                                                     | Tracker                                                      | Git / remote | Worker worktree |
+-| --------- | --------------------------------------------------------------------------- | ------------------------------------------------------------ | ------------ | --------------- |
+-| `pending` | Materialized into the graph, not yet claimed; readiness computed separately | new / materialized (plan `new`\|`ready`; linear `unstarted`) | no branch    | none            |
++| Phase     | Meaning                                                                                 | Tracker                                                      | Git / remote            | Worker worktree |
++| --------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------ | ----------------------- | --------------- |
++| `pending` | Materialized into the graph, not yet claimed; readiness computed separately             | new / materialized (plan `new`\|`ready`; linear `unstarted`) | no branch               | none            |
++| `skipped` | **Terminal (not claimed):** `/deliver-task` refused the claim; the reason is in `notes` | untouched by this run                                        | no branch from this run | none            |
++
++**`skipped` is how a refused claim leaves the queue.** When `/deliver-task`
++returns a claim refusal (its step 2: lost race, already in flight under another
++session, open blockers, a held or oversized issue), the loop writes `skipped`
++and the handler's reason into the row. Without it the row stays `pending`,
++readiness selects it again on the next iteration, and the run ends only at its
++budget or deadline (#912). Only a `pending` task is a readiness candidate, so a
++`skipped` task is never selected again in the same run — not by the loop, and
++not by a `--resume` of it. A human who wants it retried sets the cell back to
++`pending`.
++
++It is not `parked`, though both are terminal without success. A `parked` task
++was claimed: its tracker reads started, and a branch or PR may exist. A
++`skipped` task holds nothing this run acquired, so the doctor, resume and the
++crash-reconciliation table have nothing of it to repair. The one downstream
++effect is on its dependents: their blocker never reaches `handed-off`, so they
++stay `pending` and never become ready. `REPORT.md` lists them under the skipped
++task (below).
++
++**Decision: a blocker that reopened mid-run skips the task rather than parking
++it for a later retry.** The blocker in question is outside the run's graph —
++the in-graph ones are what readiness already waits on — so nothing in the run
++signals when it clears. A "retry later" state is then a poll: readiness
++reselects the task every iteration until the blocker happens to clear, which is
++the loop this phase exists to end. Rejected alternative: a re-checkable
++`waiting` phase — it needs a poll interval and a cap to terminate, and still
++spends a `/deliver-task` pre-flight per poll. The reason in `notes` names the
++open blockers, so a human who clears one can set its phase back to `pending`
++and `--resume` the run.
+ 
+ Seven in-flight/terminal phases follow, once a task is claimed. Each names
+ exactly what exists on the tracker, in git, and on disk while a task sits in
+diff --git a/skills/deliver-task/SKILL.md b/skills/deliver-task/SKILL.md
+index eee6bdaa..75581874 100644
+--- a/skills/deliver-task/SKILL.md
++++ b/skills/deliver-task/SKILL.md
+@@ -239,7 +239,14 @@ already fetched it, so the branch starts from its current tip. Everything else i
+ the claim section is unchanged.
+ 
+ If the claim reports the task already claimed / in flight / blocked, **stop** and
+-report it — never double-claim.
++report it — never double-claim. Report it as a **claim refusal**, as
++`claim refused: <the handler's reason>`: that line is what `/auto-pilot` keys
++off to record the task `skipped` rather than leave it `pending` for reselection
++(`skills/auto-pilot/references/run-state.md` "Task lifecycle phases"). A refusal
++holds no claim, so there is nothing to bail. A WIP-limit decline
++(`WIP limit <n> reached …`) is **not** a claim refusal — step 2 never runs a
++handler's pre-claim WIP gate, and the cap is not about this task — so never
++report one as `claim refused:`.
+ 
+ ## 3. Do (implement + verify)
+ 
+</stdin>
+warning: `--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation.
+warning: `--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation.
+warning: Skill descriptions were shortened to fit the skills context budget. Codex can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest.
+hook: SessionStart
+hook: SessionStart
+hook: SessionStart Completed
+hook: SessionStart Failed
+hook: UserPromptSubmit
+hook: UserPromptSubmit
+hook: UserPromptSubmit Completed
+hook: UserPromptSubmit Failed
+codex
+scripts/spawn-orchestrator.sh:5017 — issue (blocking): reports the parked count as skipped. The terminal status line sets `skipped=$counts_parked`, so it disagrees with `STATUS.md` and hides skipped tasks. Suggested fix: pass `$counts_skipped` after `skipped=`.
+
+scripts/spawn-orchestrator.sh:6576 — issue (blocking): stops doctor checks after the first skipped task. `break` exits the outer task loop, so later chained tasks with frozen diverged bases are not repaired. Suggested fix: use `continue` to skip only the refused task.
+
+REVIEW_COMPLETE: FINDINGS
+hook: Stop
+hook: Stop Completed
+tokens used
+27,914
+scripts/spawn-orchestrator.sh:5017 — issue (blocking): reports the parked count as skipped. The terminal status line sets `skipped=$counts_parked`, so it disagrees with `STATUS.md` and hides skipped tasks. Suggested fix: pass `$counts_skipped` after `skipped=`.
+
+scripts/spawn-orchestrator.sh:6576 — issue (blocking): stops doctor checks after the first skipped task. `break` exits the outer task loop, so later chained tasks with frozen diverged bases are not repaired. Suggested fix: use `continue` to skip only the refused task.
+
+REVIEW_COMPLETE: FINDINGS
