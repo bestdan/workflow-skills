@@ -100,6 +100,111 @@ class GateTests(unittest.TestCase):
         self.assertEqual([c["id"] for c in result["candidates"]], ["A-1"])
 
 
+class BlockerGateTests(unittest.TestCase):
+    def blocked(self, id_, *blockers, labels=None):
+        i = issue(id_, labels=labels)
+        i["blockedBy"] = [
+            {"id": b, "statusType": s} if s is not None else {"id": b}
+            for b, s in blockers
+        ]
+        return i
+
+    def test_open_blocker_drops(self):
+        result = run(["--max-estimate", "3"], [self.blocked("A-1", ("B-1", "started"))])
+        self.assertEqual(result["dropped"], {"A-1": "waiting on B-1"})
+
+    def test_completed_blocker_passes(self):
+        result = run(
+            ["--max-estimate", "3"], [self.blocked("A-1", ("B-1", "completed"))]
+        )
+        self.assertEqual([c["id"] for c in result["candidates"]], ["A-1"])
+
+    def test_canceled_blocker_still_blocks(self):
+        result = run(
+            ["--max-estimate", "3"], [self.blocked("A-1", ("B-1", "canceled"))]
+        )
+        self.assertEqual(result["dropped"], {"A-1": "waiting on B-1"})
+
+    def test_blocker_with_unknown_state_blocks(self):
+        result = run(["--max-estimate", "3"], [self.blocked("A-1", ("B-1", None))])
+        self.assertEqual(result["dropped"], {"A-1": "waiting on B-1"})
+
+    def test_names_every_unmet_blocker(self):
+        result = run(
+            ["--max-estimate", "3"],
+            [
+                self.blocked(
+                    "A-1",
+                    ("B-1", "unstarted"),
+                    ("B-2", "completed"),
+                    ("B-3", "backlog"),
+                )
+            ],
+        )
+        self.assertEqual(result["dropped"], {"A-1": "waiting on B-1, B-3"})
+
+    def test_blocker_reported_ahead_of_the_overridable_hold(self):
+        # A direct pick can override `human-approval-requested`; if that reason
+        # came first, the override would claim past an open blocker.
+        result = run(
+            ["--max-estimate", "3"],
+            [
+                self.blocked(
+                    "A-1", ("B-1", "started"), labels=["human-approval-requested"]
+                )
+            ],
+        )
+        self.assertEqual(result["dropped"], {"A-1": "waiting on B-1"})
+
+    def test_blocker_reported_ahead_of_a_missing_estimate(self):
+        # /deliver-task never ran the estimate gates, and Pre-flight step 6
+        # acts only on `waiting on` — an estimate reason must not mask it.
+        i = self.blocked("A-1", ("B-1", "started"))
+        i["estimate"] = None
+        result = run(["--max-estimate", "3"], [i])
+        self.assertEqual(result["dropped"], {"A-1": "waiting on B-1"})
+
+    def test_no_blocked_by_key_skips_the_gate(self):
+        result = run(["--max-estimate", "3"], [issue("A-1")])
+        self.assertEqual([c["id"] for c in result["candidates"]], ["A-1"])
+
+
+class StackInSetTests(unittest.TestCase):
+    """The MCP floor's `--stack-in-set`, for /auto-pilot's list_ready."""
+
+    def chain(self, id_, *blockers):
+        i = issue(id_)
+        i["blockedBy"] = [{"id": b, "statusType": s} for b, s in blockers]
+        return i
+
+    def test_in_set_blocker_is_a_stack_edge(self):
+        result = run(
+            ["--max-estimate", "3", "--stack-in-set"],
+            [self.chain("P-1"), self.chain("C-1", ("P-1", "unstarted"))],
+        )
+        self.assertEqual(result["dropped"], {})
+        self.assertEqual(sorted(c["id"] for c in result["candidates"]), ["C-1", "P-1"])
+
+    def test_out_of_set_open_blocker_drops(self):
+        result = run(
+            ["--max-estimate", "3", "--stack-in-set"],
+            [self.chain("C-1", ("OUT-1", "started"))],
+        )
+        self.assertEqual(result["dropped"], {"C-1": "waiting on OUT-1"})
+
+    def test_chain_rooted_outside_the_set_drops_whole(self):
+        result = run(
+            ["--max-estimate", "3", "--stack-in-set"],
+            [
+                self.chain("P-1", ("OUT-1", "started")),
+                self.chain("C-1", ("P-1", "unstarted")),
+            ],
+        )
+        self.assertEqual(
+            result["dropped"], {"P-1": "waiting on OUT-1", "C-1": "waiting on P-1"}
+        )
+
+
 class PerProjectMaxEstimateTests(unittest.TestCase):
     def test_project_max_estimate_overrides_the_flag(self):
         a = issue("A-1", estimate=4)
