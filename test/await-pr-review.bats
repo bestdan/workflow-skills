@@ -105,7 +105,9 @@ LAND_TIMEOUT=60
 }
 
 @test "grace keeps a reviewer the timeline shows at work" {
-  printf '%s\n' '[{"event":"review_requested","created_at":"2026-01-02T00:00:01Z","requested_reviewer":{"login":"Copilot"}},{"event":"copilot_work_started","created_at":"2026-01-02T00:00:30Z"}]' >"$TEST_TMPDIR/timeline"
+  # Only the work-started event, so this covers the event-name match on its
+  # own rather than passing on a review_requested entry.
+  printf '%s\n' '[{"event":"copilot_work_started","created_at":"2026-01-02T00:00:30Z"}]' >"$TEST_TMPDIR/timeline"
   json "$TEST_TMPDIR/working" '[]' '[]'
   json "$TEST_TMPDIR/landed" '[{"author":{"login":"copilot-pull-request-reviewer"},"state":"COMMENTED"}]' '[]'
   make_gh "$TEST_TMPDIR/working" "$TEST_TMPDIR/working" "$TEST_TMPDIR/landed"
