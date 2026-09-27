@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.70.7] - 2026-09-27
+
+### Fixes
+
+- wait for Copilot only when requested for the head [N/A] (#914) (d967d2d)
+
 ## [2.70.6] - 2026-09-27
 
 ### Fixes
