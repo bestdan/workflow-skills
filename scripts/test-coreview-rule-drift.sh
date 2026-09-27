@@ -19,6 +19,8 @@
 #   - a missing plugin root exits 2, distinct from the exit 1 that means drift
 #   - the script is runnable AS DOCUMENTED, with CLAUDE_PLUGIN_ROOT unset, and
 #     both documented call sites still pass --plugin-root (issue #607)
+#   - every plugin script co-review runs has an allowed-tools grant in its
+#     SKILL.md, since no settings rule can approve one (issue #848)
 #
 # Run directly: bash scripts/test-coreview-rule-drift.sh
 set -uo pipefail
@@ -387,6 +389,40 @@ for doc in "$ROOT/skills/co-review/SKILL.md" "$ROOT/commands/doctor.md"; do
     fail "$(basename "$doc"): $flagged of $calls invocation(s) pass --plugin-root"
   fi
 done
+
+# --- 10. every plugin script co-review runs is granted by the skill ---------
+# No settings rule can approve a plugin script: the quoted path is one shell
+# token carrying the version, and the matcher only compares whole tokens. So
+# each invocation must have an `allowed-tools` entry in SKILL.md whose prefix
+# is exactly the invocation's program and path. A script added without one is
+# denied silently under `--non-interactive`.
+#
+# Every reference to a plugin script is extracted with whatever single word
+# precedes it, quoted or not. An unquoted path or a `bash …` prefix is a form no
+# grant can match, so it surfaces as "no grant" rather than slipping past. The
+# `.sh|.py` anchor keeps prose placeholders like `scripts/<name>` out. Known
+# limit: prose putting a bare word right before a quoted path fails loudly;
+# backtick the path to fix it.
+
+SKILL_MD="$ROOT/skills/co-review/SKILL.md"
+invocations=$(grep -ohE \
+  '([A-Za-z0-9_./-]+ )?"?\$\{CLAUDE_PLUGIN_ROOT\}/scripts/[A-Za-z0-9_.-]+\.(sh|py)"?' \
+  "$SKILL_MD" "$ROOT"/skills/co-review/reviewers/*.md \
+  "$ROOT"/skills/co-review/references/*.md | sort -u)
+ungranted=0
+while IFS= read -r inv; do
+  [ -n "$inv" ] || continue
+  if ! grep -qxF "  - Bash($inv:*)" "$SKILL_MD"; then
+    fail "no allowed-tools grant in SKILL.md (unquoted, other interpreter, or missing) for: $inv"
+    ungranted=$((ungranted + 1))
+  fi
+done <<EOF
+$invocations
+EOF
+count=$(printf '%s\n' "$invocations" | grep -c .)
+if [ "$ungranted" -eq 0 ] && [ "$count" -gt 0 ]; then
+  pass "all $count plugin-script invocations have an allowed-tools grant"
+fi
 
 echo
 if [ "$fails" -eq 0 ]; then
