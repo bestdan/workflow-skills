@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.70.5] - 2026-09-27
+
+### Fixes
+
+- hold claim candidates on open native blockers [#909] (#910) (0ccd127)
+
 ## [2.70.4] - 2026-09-26
 
 ### Fixes
