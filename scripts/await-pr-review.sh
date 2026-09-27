@@ -110,7 +110,7 @@ while [ $# -gt 0 ]; do
       shift 2
       ;;
     -h | --help)
-      sed -n '2,57p' "$0"
+      sed -n '2,61p' "$0"
       exit 0
       ;;
     *) die "unknown argument: $1" ;;
