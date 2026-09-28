@@ -14,7 +14,7 @@ Three stores exist; only one is authoritative for a given fact.
 - **Git is authoritative for code and PR existence** (the pushed branch and the
   open PR are the ground truth that a task's work happened).
 - **The run files are a cache + report** — a fast local read of the graph and a
-  human-facing morning summary. They are always allowed to be _behind_ the
+  human-facing live summary. They are always allowed to be _behind_ the
   tracker and git, never ahead (see **Write order**).
 
 ## The three files (+ one non-durable rendering)
@@ -26,7 +26,7 @@ the **run-state branch** (below) — never to a task branch. Paths:
 | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `.auto-pilot/RUN.md`       | The task graph + each task's current lifecycle **phase** and the run's verify tooling. The machine-readable state the run loop and `--resume` read. |
 | `.auto-pilot/QUESTIONS.md` | The decision log — one indexed entry per reversible call the run made without a human.                                                              |
-| `.auto-pilot/REPORT.md`    | The rolling human-facing report the user wakes to.                                                                                                  |
+| `.auto-pilot/REPORT.md`    | The rolling, live human-facing report, read mid-run as well as at the end.                                                                          |
 
 `.auto-pilot/STATUS.md` is a **fourth, non-durable** artifact (task 20,
 finding #28): the periodic status report, overwritten every interval by

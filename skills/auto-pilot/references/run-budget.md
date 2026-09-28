@@ -494,8 +494,8 @@ wrong, and counting them would halt a perfectly good run.
 **Why.** The per-task bounds above cap one runaway task each, but nothing
 caps _systemic_ failure — a broken `main`, a dead network, expired `gh`
 auth — where every task the loop tries parks for the same underlying
-reason. Left unchecked, the run would cheerfully burn the whole night
-parking task after task, each eating up to 45 minutes of window, and wake
-the human to a graveyard of parked tasks with no single signal pointing at
+reason. Left unchecked, the run would cheerfully burn the whole run
+parking task after task, each eating up to 45 minutes of window, and leave
+the human a graveyard of parked tasks with no single signal pointing at
 the real cause. Halting after a small consecutive-failure streak is cheap
 to implement and turns that graveyard into one legible alarm.
