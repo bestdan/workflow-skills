@@ -342,6 +342,17 @@ assert_not_contains "$calls" "add --side LEFT skips the diff fetch" "pr diff"
 assert_contains "$err" "add --side LEFT notes the skipped check" "skipping the anchor check"
 assert_contains "$calls" "add --side LEFT sends side=LEFT" "side=LEFT"
 
+# A review GitHub opens in any state but PENDING is already published; the
+# script must refuse to attach a comment to it.
+PUBLISHED="$BASE/fix-published"
+cp -R "$WITHOUT" "$PUBLISHED"
+echo '{"data":{"addPullRequestReview":{"pullRequestReview":{"id":"PRR_new","state":"COMMENTED"}}}}' >"$PUBLISHED/start-review.json"
+run "$PUBLISHED" add --pr 7 --repo test/repo --path src/app.py --line 2 --body-file "$BODY"
+assert_eq "add refuses a new review that is not PENDING" "1" "$rc"
+assert_contains "$err" "non-pending refusal says so on stderr" "not PENDING"
+assert_not_contains "$calls" "non-pending review gets no thread" "add-thread"
+assert_eq "non-pending refusal prints nothing on stdout" "" "$out"
+
 # --- never submit --------------------------------------------------------------
 echo "never submit"
 assert_not_contains "$(cat "$ALL_RAW")" "no gh call in any test submitted a review" "submitPullRequestReview"

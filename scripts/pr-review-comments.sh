@@ -33,8 +33,10 @@
 # stdout — one parseable line per action, nothing else:
 #   list    one line per comment, tab-separated columns:
 #             databaseId  nodeId  path  line  state  first-line-of-body
-#           line is "-" when GitHub has none (e.g. an outdated comment); state
-#           is PENDING or SUBMITTED; tabs in the body become spaces.
+#           line is the comment's current line, or its originalLine when it
+#           has none (an outdated comment, numbered against the commit it was
+#           made on); "-" only when both are null. state is PENDING or
+#           SUBMITTED; tabs in the body become spaces.
 #   edit    updated <databaseId>
 #   delete  deleted <databaseId>
 #   add     added <newDatabaseId> line=<l>
