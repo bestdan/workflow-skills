@@ -90,10 +90,12 @@ fast_skips=(
   "every shell/bats lint (bash -n, shfmt, shellcheck, bats --count) over files this branch has not touched (via scripts/lint-shell.sh --fast)"
 )
 # --base classifies <ref>..HEAD with scripts/ci-docs-only.sh and, only on an
-# exact `docs_only=true` line, skips the shell/bats suites entirely — nothing
-# those suites run reads the real dev_docs/ tree (their `dev_docs` references
-# are fixture paths under mktemp), so a diff confined to it cannot regress
-# them. Anything else — a non-docs-only diff, an unknown ref, or the
+# exact `docs_only=true` line, skips the shell/bats suites entirely — their
+# `dev_docs` references are fixture paths under mktemp, so a diff confined to
+# the real dev_docs/ tree cannot regress them. The one exception is
+# scripts/test-autopilot-framing.sh, which greps the real
+# dev_docs/auto-pilot*.md and so always runs; a new harness that reads the
+# real dev_docs/ tree must join that exemption in the test loop below. Anything else — a non-docs-only diff, an unknown ref, or the
 # classifier exiting non-zero — runs the full gate; this flag only ever
 # narrows the gate on positive evidence, never on the absence of a reason not
 # to. Combined with --fast: docs-only skips take precedence (they are the
@@ -118,7 +120,7 @@ docs_skips=(
   "scripts/lint-shell.sh"
   "scripts/test-shell.sh"
   "scripts/test-research-spike.sh"
-  "every other scripts/test-*.sh test harness"
+  "every other scripts/test-*.sh test harness except scripts/test-autopilot-framing.sh (reads the real dev_docs/)"
 )
 if [[ "$docs_only" == 1 ]]; then
   echo "→ --base $base_ref: dev_docs-only diff — skipping suites that cannot reach it"
@@ -205,6 +207,12 @@ for test_script in scripts/test-*.sh; do
   case "$test_script" in
     scripts/test-*-live.sh | scripts/test-spawn-orchestrator*.sh | scripts/test-shell.sh) continue ;;
     scripts/test-research-spike.sh) [[ "$fast" == 1 ]] && continue ;;
+    # Greps the REAL dev_docs/auto-pilot*.md, so a dev_docs-only diff can
+    # regress it; it is one grep, so it always runs.
+    scripts/test-autopilot-framing.sh)
+      run "$test_script"
+      continue
+      ;;
   esac
   # docs_only drops every remaining scripts/test-*.sh — see docs_skips above.
   [[ "$docs_only" == 1 ]] && continue

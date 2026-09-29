@@ -66,5 +66,5 @@ things deliberately _not_ built.
 
 Merging or tracker-completing anything unattended; `--budget` dollar/token caps
 (rate-window discipline + per-task bounds only); jira/gh-issue adapters (linear +
-plan only); reopening a frozen PR in-run; multi-run continuation beyond
+plan only); reopening a frozen PR in-run; continuation across multiple `--until` windows beyond
 `--resume`.

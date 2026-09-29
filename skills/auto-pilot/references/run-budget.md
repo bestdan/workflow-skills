@@ -119,7 +119,7 @@ console string is not.
 
 **Caveats, stated rather than hidden:**
 
-- **Strands headroom on light nights.** The proxy fallback will sometimes
+- **Strands headroom in light windows.** The proxy fallback will sometimes
   pause a run that had capacity left. This is the deliberate safe direction
   — pausing early wastes idle time; pausing late risks the wall.
 - **The direct query is account-wide, closing the proxy's blind spot.** The
@@ -494,7 +494,7 @@ wrong, and counting them would halt a perfectly good run.
 **Why.** The per-task bounds above cap one runaway task each, but nothing
 caps _systemic_ failure — a broken `main`, a dead network, expired `gh`
 auth — where every task the loop tries parks for the same underlying
-reason. Left unchecked, the run would cheerfully burn the whole run
+reason. Left unchecked, the run would cheerfully burn the whole window
 parking task after task, each eating up to 45 minutes of window, and leave
 the human a graveyard of parked tasks with no single signal pointing at
 the real cause. Halting after a small consecutive-failure streak is cheap
