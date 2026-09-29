@@ -452,7 +452,8 @@ make_settings "$BASE/shared-nodiff.json" \
   "Bash(cat:*)" "Bash(gh pr view:*)" "Bash(git ls-remote:*)" "Bash(git status:*)"
 TEXT="$("$SCRIPT" --plugin-root "$SPLUGIN" --settings "$BASE/shared-nodiff.json" 2>&1)"
 if [ "$(grep -c '^  MISSING ' <<<"$TEXT")" = "1" ] \
-  && grep -q 'one suffices' <<<"$TEXT"; then
+  && grep -q 'one suffices' <<<"$TEXT" \
+  && grep -q '^shared: 4/5 required rules covered' <<<"$TEXT"; then
   pass "an uncovered diff-source pair is reported once, as alternatives"
 else
   fail "the diff-source pair was not reported as alternatives: $TEXT"

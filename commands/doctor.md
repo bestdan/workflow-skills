@@ -413,7 +413,8 @@ It checks the **shared** rules in `skills/co-review/references/permissions.md`
 too, reported under `shared:`. Those are prefix rules, so it asks whether a
 settings rule approves the command, matching up to a whole shell token as the
 permission matcher does: `Bash(git:*)` covers `Bash(git diff:*)`, and
-`Bash(git stat:*)` covers nothing. Only one of `gh pr diff` and `git diff` is
+`Bash(git stat:*)` covers nothing. Only a prefix rule, ending `:*` or a
+space and `*`, counts; an exact rule is reported MISSING. Only one of `gh pr diff` and `git diff` is
 required. Any `…/workflow-skills/workflow-skills/:*` plugin-cache rule is
 **DEAD** on every machine: it ends inside the script's path, so it never fired.
 How the scripts are approved instead, and where that grant stops, is in

@@ -298,9 +298,10 @@ def covers(rule, command):
 
     Models the matcher as measured: a `:*` or trailing ` *` rule must match it
     up to a whole shell token, so `Bash(git:*)` approves `git diff` and
-    `Bash(gi:*)` does not. An exact rule approves no class at all: co-review
-    runs `git status --porcelain`, never bare `git status`, so `Bash(git status)`
-    denies it. Nothing is unquoted or expanded first. A rule with a wildcard
+    `Bash(gi:*)` does not. An exact rule is not counted, even one naming a full
+    invocation such as `Bash(git status --porcelain)`: the shared templates are
+    prefix rules over commands whose arguments vary per run, so only a prefix
+    rule covers one. Nothing is unquoted or expanded first. A rule with a wildcard
     anywhere else is not modelled and counts as no coverage.
     """
     if rule in ("Bash", "Bash(*)"):
@@ -365,8 +366,14 @@ def analyze_shared(plugin_root, allow_rules, reviewer_findings):
         and not any(t in group and group & covered for group in SHARED_ALTERNATIVES)
     ]
     dead = [r for r in allow_rules if r.endswith(PLUGIN_CACHE_RULE_TAIL)]
+    # What the operator must supply, counting each alternatives group once, so
+    # the report's count moves by one when one rule is added.
+    units = len(templates) - sum(
+        len(g) - 1 for g in SHARED_ALTERNATIVES if g <= set(templates)
+    )
     return {
         "templates": len(templates),
+        "units": units,
         "matched": len(templates) - len(missing),
         "missing": missing,
         "dead": dead,
@@ -412,14 +419,26 @@ def report(findings, shared, plugin_root, settings_read, settings_searched):
     print()
 
     if shared is not None:
+        # One MISSING line per unit the operator must supply: an uncovered
+        # alternatives group is named once, with its alternatives.
+        missing_lines, shown = [], set()
+        for template in shared["missing"]:
+            if template in shown:
+                continue
+            group = next((g for g in SHARED_ALTERNATIVES if template in g), set())
+            others = sorted(group - {template})
+            shown.update(group)
+            note = f"  (or {', '.join(others)}; one suffices)" if others else ""
+            missing_lines.append(f"  MISSING    {template}{note}")
+        units = shared["units"]
+        covered_units = units - len(missing_lines)
+
         if not shared["configured"]:
-            print(f"shared: no allow-rule configured ({shared['templates']} shipped)")
-        elif not shared["missing"] and not shared["dead"]:
-            print(f"shared: ok ({shared['matched']}/{shared['templates']} rules match)")
+            print(f"shared: no allow-rule configured ({units} required)")
+        elif not missing_lines and not shared["dead"]:
+            print(f"shared: ok ({covered_units}/{units} rules match)")
         else:
-            print(
-                f"shared: {shared['matched']}/{shared['templates']} shipped rules covered"
-            )
+            print(f"shared: {covered_units}/{units} required rules covered")
             for rule in shared["dead"]:
                 print(f"  DEAD       {rule}")
             if shared["dead"]:
@@ -427,15 +446,8 @@ def report(findings, shared, plugin_root, settings_read, settings_searched):
                     "             a plugin-cache prefix rule never fires, since it ends\n"
                     "             inside the script's path, so delete it"
                 )
-            shown = set()
-            for template in shared["missing"]:
-                if template in shown:
-                    continue
-                group = next((g for g in SHARED_ALTERNATIVES if template in g), set())
-                others = sorted(group - {template})
-                shown.update(group)
-                note = f"  (or {', '.join(others)}; one suffices)" if others else ""
-                print(f"  MISSING    {template}{note}")
+            for line in missing_lines:
+                print(line)
             print()
 
     for f in findings:
