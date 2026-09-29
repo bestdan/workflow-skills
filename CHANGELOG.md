@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.72.0] - 2026-09-29
+
+### Features
+
+- add pr-review-comments.sh for pending comments [#923] (#925) (aa69d04)
+
 ## [2.71.2] - 2026-09-29
 
 ### Fixes
