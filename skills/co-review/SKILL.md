@@ -8,6 +8,7 @@ allowed-tools:
   - Bash("${CLAUDE_PLUGIN_ROOT}/scripts/await-pr-review.sh":*)
   - Bash("${CLAUDE_PLUGIN_ROOT}/scripts/coreview-conventions.sh":*)
   - Bash("${CLAUDE_PLUGIN_ROOT}/scripts/pr-fix-guard.sh":*)
+  - Bash("${CLAUDE_PLUGIN_ROOT}/scripts/pr-review-comments.sh":*)
   - Bash("${CLAUDE_PLUGIN_ROOT}/scripts/preflight-conflict.sh":*)
   - Bash("${CLAUDE_PLUGIN_ROOT}/scripts/preflight-cwd.sh":*)
   - Bash("${CLAUDE_PLUGIN_ROOT}/scripts/preflight-freshness.sh":*)
