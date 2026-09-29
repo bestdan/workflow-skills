@@ -295,6 +295,12 @@ run "$WITH" delete 1001 --pr 7 --repo test/repo
 assert_eq "delete exits 0" "0" "$rc"
 assert_eq "delete prints the documented line" "deleted 1001" "$out"
 assert_contains "$calls" "delete sends deletePullRequestReviewComment with the node ID" "delete id=PRRC_1001"
+NULL_DELETE="$BASE/fix-null-delete"
+cp -R "$WITH" "$NULL_DELETE"
+echo '{"data":{"deletePullRequestReviewComment":null}}' >"$NULL_DELETE/delete.json"
+run "$NULL_DELETE" delete 1001 --pr 7 --repo test/repo
+assert_eq "delete with a null payload exits 1" "1" "$rc"
+assert_eq "delete with a null payload prints nothing on stdout" "" "$out"
 
 # --- reply ---------------------------------------------------------------------
 echo "reply"

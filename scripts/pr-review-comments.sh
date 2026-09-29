@@ -334,6 +334,8 @@ case "$cmd" in
     find_comment "$target"
     gh api graphql -f query="$DELETE_MUTATION" -f id="$C_ID" >"$WORK/out.json" \
       || fail "delete of comment $target failed"
+    jq -e '.data.deletePullRequestReviewComment' "$WORK/out.json" >/dev/null 2>&1 \
+      || fail "delete of comment $target returned no payload"
     echo "deleted $target"
     ;;
 

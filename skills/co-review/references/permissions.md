@@ -25,7 +25,7 @@ The reviewer command is **invariant**: everything that varies per PR (the diff a
 
 <a id="plugin-scripts"></a>
 
-**The plugin's own scripts need no rule: `SKILL.md` grants them.** Its `allowed-tools` front-matter names each script this skill runs — the pre-flights, `await-pr-review.sh`, `pr-fix-guard.sh`, `pr-review-comments.sh`, `coreview-conventions.sh`, the anchor-check, the grok telemetry gate and the drift checker — as `${CLAUDE_PLUGIN_ROOT}/scripts/<name>`. The variable is substituted when the skill loads, so the grant follows the plugin into each new version directory and never goes stale.
+**The plugin's own scripts need no rule: `SKILL.md` grants them.** Its `allowed-tools` front-matter names each script this skill runs — the pre-flights, `await-pr-review.sh`, `pr-fix-guard.sh`, `coreview-conventions.sh`, the anchor-check, the grok telemetry gate and the drift checker — as `${CLAUDE_PLUGIN_ROOT}/scripts/<name>`. The variable is substituted when the skill loads, so the grant follows the plugin into each new version directory and never goes stale.
 
 A settings rule cannot do this. The matcher compares a prefix rule only up to a whole shell token, and the quoted script path is one token that includes the version (`"…/workflow-skills/2.70.4/scripts/preflight-cwd.sh"`). A rule that stops above the version segment matches nothing, with or without the opening quote; only a rule naming the full path does, and that dies at the next release. Measured with `claude -p --permission-mode default` and one rule at a time: `Bash("…/ws/ws/:*)` and `Bash(…/ws/ws/:*)` were denied, `Bash("…/ws/ws/1.0/scripts/x.sh":*)` was allowed. If your settings still carry a `…/workflow-skills/workflow-skills/:*` rule, delete it; it has never fired.
 
