@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.73.0] - 2026-09-29
+
+### Features
+
+- fixed status symbols and line shapes in the output template [N/A] (#927) (b2b8139)
+
 ## [2.72.1] - 2026-09-29
 
 ### Fixes
