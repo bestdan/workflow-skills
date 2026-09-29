@@ -47,14 +47,17 @@ unambiguous answer is the 11.3% exception.
 
 **The two failures come apart, and only one is recoverable.** One row's
 conditions are genuinely ambiguous — `mechanical-bulk`'s "and/or" — so the
-headline above is one reading rather than the only one, and the script prices a
-narrower reading instead of arguing about it: ambiguity falls to **462 of 576
-(80.2%)** and the silent tuples double to **16**.
+headline above is one reading rather than the only one, and the script prices the
+two narrower readings instead of arguing about them: ambiguity falls to **462
+(80.2%)** and then **439 (76.2%)**, while the silent tuples rise to **16** and
+then **22**.
 
 Reading that row differently cannot rescue either failure, and the bound does not
-depend on enumerating readings. Every reading of a row can only _add_ firings
-relative to deleting it, so deleting `mechanical-bulk` outright bounds what any
-reading of it can achieve: **416 of 576 (72.2%)** still ambiguous, and 28 silent
+depend on enumerating readings — which matters, because each reading is narrower
+than the last, so no one of them bounds the rest. Monotonicity does that instead:
+every reading of a row can only _add_ firings relative to deleting it, so the
+script's last run deletes `mechanical-bulk` outright and reports the floor every
+reading has to clear — **416 of 576 (72.2%)** still ambiguous, and 28 silent
 tuples rather than fewer. Narrowing that row trades ambiguity for silence in one
 direction only.
 
@@ -93,7 +96,7 @@ middle" the table names is, under the table's own rules, nearly unreachable.
 
 ### What the other readings change
 
-`--variants` reports three more readings. The first two are **repairs** — each
+`--variants` reports four more readings. The first two are **repairs** — each
 widens a row the headline reads narrowly, to see whether the failures go away:
 
 - **`architecture` widened to cover `scope: whole-codebase`** (it names only
@@ -105,20 +108,25 @@ widens a row the headline reads narrowly, to see whether the failures go away:
   10 (1.7%). It changes ambiguity not at all — **503 of 576 (87.3%)** either way,
   since the row only ever fires alone.
 
-The third is **not** a repair, and that is the point of having it:
+The other two are **not** repairs, and that is the point of having them. They are
+the two narrower things `mechanical-bulk`'s "and/or" can mean, and neither is
+more faithful than the inclusive default: the rubric assigns
+`cost_sensitivity: high` both to bulk work and to work merely "only worth doing
+cheaply", which can be hard or creative.
 
-- **`mechanical-bulk` narrowed to `complexity == mechanical` alone**, so
-  `cost_sensitivity: high` no longer fires it by itself. Neither reading of that
-  row is more faithful — "and/or" is ambiguous on its face, and the rubric assigns
-  `cost_sensitivity: high` both to bulk work and to work merely "only worth doing
-  cheaply", which can be hard or creative. So this reading exists to **price the
-  default**, not to replace it: ambiguity falls to **462 (80.2%)**, silent tuples
-  rise to **16**, and the row's own firing rate halves from 66.7% to 33.3%. It is
-  a price, not a bound — "and/or" admits narrower readings still (requiring both
-  conjuncts gives 439, 76.2%), which is why the bound above comes from deleting
-  the row rather than from any reading of it. The
-  headline keeps the inclusive reading because it is what the row literally
-  spells; this variant is what makes that choice auditable rather than buried.
+| reading of `A and/or B`      | row fires | ambiguous   | silent |
+| ---------------------------- | --------- | ----------- | ------ |
+| `A or B` — inclusive default | 66.7%     | 503 (87.3%) | 8      |
+| `A` alone — the gloss binds  | 33.3%     | 462 (80.2%) | 16     |
+| `A and B` — conjunctive      | 16.7%     | 439 (76.2%) | 22     |
+
+Reading that row more narrowly trades ambiguity for silence, monotonically, in
+one direction. Both figures are **prices, not bounds** — each reading is narrower
+than the one above it, so quoting the lowest as a floor would be an error the next
+reading corrects. That is why the bound stated earlier comes from deleting the row
+rather than from any reading of it. The headline keeps the inclusive reading
+because it is what "and/or" conventionally spells; these two are what make that
+choice auditable rather than buried.
 
 So the missing piece is not eight fuzzy cells. It is **one missing function**:
 a precedence order over the eight labels, which the table never states and the
@@ -148,9 +156,9 @@ exactly two honest readings, and both end the same way:
 
 Two lesser cells are underspecified in the same direction but are repairable by
 decision: `mechanical-bulk`'s literal "and/or" (making `cost_sensitivity: high`
-sufficient on its own, hence the 66.7% — the variant above prices that reading at
-7.1 points of ambiguity and 8 silent tuples), and `architecture`'s "refactor
-scope", which names a word rather than an enum value.
+sufficient on its own, hence the 66.7% — the table above prices the two narrower
+readings), and `architecture`'s "refactor scope", which names a word rather than
+an enum value.
 
 ### What this does not establish
 
@@ -182,9 +190,10 @@ eight labels and read `standard-pr` as the default branch; that is a one-time
 specification decision, not a runtime judgment. Delete `architecture`'s "or a
 genuinely hard bug" disjunct, folding it into `complexity: hard` where the
 dimension rubric already puts subtle bugs. Narrow `mechanical-bulk` so
-`cost_sensitivity: high` is not sufficient alone — the variant above shows what
-that buys (7.1 points of ambiguity) and what it costs (8 more silent tuples, which
-the precedence order's default branch then has to absorb).
+`cost_sensitivity: high` is not sufficient alone. Which narrowing is a further
+decision, and the table above prices both: reading the gloss as binding buys 7.1
+points of ambiguity for 8 more silent tuples, and the conjunctive reading buys
+11.1 for 14. Either way the precedence order's default branch absorbs the silence.
 
 **Therefore do not ask a typed call for `label`.** Once the precedence order
 exists, asking a model for `label` duplicates deterministic logic over inputs

@@ -12,7 +12,7 @@ table by hand.
 
 Usage:
     python3 enumerate-label-table.py             # the literal reading
-    python3 enumerate-label-table.py --variants  # plus three alternative readings
+    python3 enumerate-label-table.py --variants  # plus four readings and the bound
 
 Exit status is always 0; this reports, it does not gate.
 """
@@ -46,8 +46,11 @@ LABELS = [
 ]
 
 
+MECHANICAL_BULK_READINGS = ("inclusive", "mechanical-only", "conjunctive", "deleted")
+
+
 def fires(
-    t, *, architecture_includes_whole_codebase=False, mechanical_bulk_narrow=False
+    t, *, architecture_includes_whole_codebase=False, mechanical_bulk="inclusive"
 ):
     """The table read literally, keeping only what the seven dimensions express.
 
@@ -67,21 +70,48 @@ def fires(
         the inclusive or it spells.
 
     That second one is the load-bearing reading in the headline counts, so
-    `mechanical_bulk_narrow` exists to price it: set it and the row fires on
-    `complexity == mechanical` alone, on the argument that the rubric also
-    assigns `cost_sensitivity: high` to work that is merely "only worth doing
-    cheaply", which can be hard or creative rather than bulk. The inclusive
-    reading stays the default because it is what the row literally spells.
+    `mechanical_bulk` exists to price it. Its first three values are the three
+    things "A and/or B" can be taken to mean, and none of them is the obviously
+    right one:
+
+      * `inclusive` (the default) -- `A or B`, which is what "and/or"
+        conventionally spells, and what the headline counts use.
+      * `mechanical-only` -- `A` alone, on the argument that the trailing gloss
+        "high-volume simple work" disqualifies the `cost_sensitivity: high`
+        disjunct, since the rubric also assigns `high` to work merely "only
+        worth doing cheaply", which can be hard or creative rather than bulk.
+      * `conjunctive` -- `A and B`, the "and" half read as binding.
+
+    Pricing all three is the point: each is narrower than the last, so no one of
+    them bounds the others. The fourth value is where the bound comes from
+    instead.
+
+      * `deleted` -- the row does not fire at all. Not a reading: any reading of
+        a row can only *add* firings relative to deleting it, so this is the
+        floor every reading of `mechanical-bulk` has to clear.
     """
+    if mechanical_bulk not in MECHANICAL_BULK_READINGS:
+        raise ValueError(
+            f"mechanical_bulk must be one of {MECHANICAL_BULK_READINGS}, "
+            f"got {mechanical_bulk!r}"
+        )
     out = []
     arch_scopes = {"multi-file"}
     if architecture_includes_whole_codebase:
         arch_scopes.add("whole-codebase")
     if t["complexity"] == "hard" and t["scope"] in arch_scopes:
         out.append("architecture")
-    if t["complexity"] == "mechanical" or (
-        not mechanical_bulk_narrow and t["cost_sensitivity"] == "high"
-    ):
+    mechanical = t["complexity"] == "mechanical"
+    cost_sensitive = t["cost_sensitivity"] == "high"
+    if mechanical_bulk == "inclusive":
+        bulk = mechanical or cost_sensitive
+    elif mechanical_bulk == "conjunctive":
+        bulk = mechanical and cost_sensitive
+    elif mechanical_bulk == "deleted":
+        bulk = False
+    else:
+        bulk = mechanical
+    if bulk:
         out.append("mechanical-bulk")
     if t["creativity"] == "high":
         out.append("frontend-creative")
@@ -155,7 +185,7 @@ def main():
     ap.add_argument(
         "--variants",
         action="store_true",
-        help="also report the three readings that vary how the table is read",
+        help="also report the four alternative readings and the row-deleted bound",
     )
     args = ap.parse_args()
 
@@ -180,19 +210,28 @@ def main():
         defaulted.append((t, labels or ["standard-pr"]))
     report("Variant: standard-pr as the default branch", defaulted)
 
-    # Reading 3: `mechanical-bulk` narrowed to `complexity == mechanical`, so
-    # `cost_sensitivity: high` no longer fires it on its own. Unlike the two
-    # above this is not a repair -- neither reading is more faithful, because
-    # the row's "and/or" is genuinely ambiguous -- so it exists to price the
-    # default rather than to replace it. Its figures are a price and NOT a
-    # bound: "and/or" admits narrower readings still (both conjuncts required
-    # gives 439 ambiguous, 76.2%), so adding readings one at a time can never
-    # establish a floor. The bound that does hold comes from monotonicity --
-    # any reading of a row only adds firings relative to deleting it, and with
-    # this row deleted 416 tuples (72.2%) are still ambiguous.
+    # Readings 3 and 4: the two narrower things `mechanical-bulk`'s "and/or"
+    # can mean. Unlike the two repairs above, neither is more faithful than the
+    # inclusive default -- the row is genuinely ambiguous -- so these price the
+    # default rather than replacing it.
+    #
+    # Their figures are prices and NOT bounds, which is the whole reason both
+    # are here: each is narrower than the last, so adding readings one at a
+    # time can never establish a floor, and quoting whichever happens to be
+    # lowest as one is the mistake this pair exists to make visible.
+    for reading in ("mechanical-only", "conjunctive"):
+        report(
+            f"Variant: mechanical-bulk read as {reading}",
+            [(t, fires(t, mechanical_bulk=reading)) for t in tuples()],
+        )
+
+    # The bound, which is not a reading. Monotonicity does the work: any reading
+    # of a row only adds firings relative to deleting it, so this run is the
+    # floor all three above have to clear. It is reported rather than asserted
+    # because the record's load-bearing claim quotes it.
     report(
-        "Variant: mechanical-bulk narrowed to mechanical complexity only",
-        [(t, fires(t, mechanical_bulk_narrow=True)) for t in tuples()],
+        "Bound (not a reading): mechanical-bulk deleted outright",
+        [(t, fires(t, mechanical_bulk="deleted")) for t in tuples()],
     )
 
 
