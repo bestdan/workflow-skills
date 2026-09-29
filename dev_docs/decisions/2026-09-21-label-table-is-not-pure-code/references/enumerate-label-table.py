@@ -46,7 +46,7 @@ LABELS = [
 ]
 
 
-MECHANICAL_BULK_READINGS = ("inclusive", "mechanical-only", "conjunctive", "deleted")
+MECHANICAL_BULK_MODES = ("inclusive", "mechanical-only", "conjunctive", "deleted")
 
 
 def fires(
@@ -93,9 +93,9 @@ def fires(
         fires some subset of `inclusive`'s tuples, and ambiguity falls as that
         set shrinks, so this run brackets all of them.
     """
-    if mechanical_bulk not in MECHANICAL_BULK_READINGS:
+    if mechanical_bulk not in MECHANICAL_BULK_MODES:
         raise ValueError(
-            f"mechanical_bulk must be one of {MECHANICAL_BULK_READINGS}, "
+            f"mechanical_bulk must be one of {MECHANICAL_BULK_MODES}, "
             f"got {mechanical_bulk!r}"
         )
     out = []
