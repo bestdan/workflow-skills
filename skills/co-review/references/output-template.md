@@ -1,19 +1,31 @@
+Symbols: ✅ pass / ran / done · 🟡 pass with suggestions · ⛔ blocking · ❌ failed · ⏱️ timed out · ➖ skipped / none / not applicable · ❓ needs your answer
+
 ## Overview
 
-**Verdict:** <pass | pass with suggestions | blocking — as the change will stand once the auto-fixes below are applied> — <one line of why>
-**Reviewers:** <which ran, which timed out, which were skipped and why; whether the conventions were attached, and if not, why>
+<✅ **pass** | 🟡 **pass with suggestions** | ⛔ **blocking**> — <N> fixes · <N> skipped · <N> calls · <N> checks
+<one line of why, judged as the change will stand once the auto-fixes below are applied>
+
+<reviewer> <✅ | ❌ | ⏱️ | ➖ reason> · … · conventions <✅ | ➖ reason>
 
 ## Findings & verification
 
-**Auto-fixing** (high confidence) — <what you are about to change without asking, or "none">
-**Skipped** (low confidence) — <each one named, with its reason, or "none">
-**Verification tests** — <the real-machine checks, or "none needed — <why>">
+**Will fix (<N>)**
+
+- ✅ <label> (<decoration>): <subject> — `<file:line>`
+
+**Skipped (<N>)**
+
+- ➖ <label>: <subject> — <reason>
+
+**Checks (<N>)**
+
+- ☐ `<command or action>` · <where it runs> · pass = <what a pass looks like> · runs: <you | me>
 
 ## Calls for you to make
 
-<how many are open, then the highest-priority one as a single yes/no question — or "none">
+❓ <i> of <N> — <the highest-priority call as a single question>? (y/n)
 
 ## Next round
 
-**Fix commit:** <sha, or "none — nothing was applied", or "not applicable — `--post` changes no files">
-**Recommendation:** <another round | no further round | not applicable under `--post`> — <the reason, grounded in what the fixes changed: an interface or contract, a reconciler-authored fix, collateral edits, a test never shown to fail, or the round-over-round yield that says the review has converged>
+**Fix commit:** <`sha` | ➖ none — nothing was applied | ➖ not applicable — `--post` changes no files>
+<🔁 **another round** | ✅ **no further round** | ➖ **not applicable**> — <the reason, grounded in what the fixes changed: an interface or contract, a reconciler-authored fix, collateral edits, a test never shown to fail, or the round-over-round yield that says the review has converged>
