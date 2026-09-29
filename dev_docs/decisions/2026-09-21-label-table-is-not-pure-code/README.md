@@ -53,13 +53,19 @@ two narrower readings instead of arguing about them: ambiguity falls to **462
 then **22**.
 
 Reading that row differently cannot rescue either failure, and the bound does not
-depend on enumerating readings — which matters, because each reading is narrower
-than the last, so no one of them bounds the rest. Monotonicity does that instead:
-every reading of a row can only _add_ firings relative to deleting it, so the
-script's last run deletes `mechanical-bulk` outright and reports the floor every
-reading has to clear — **416 of 576 (72.2%)** still ambiguous, and 28 silent
-tuples rather than fewer. Narrowing that row trades ambiguity for silence in one
-direction only.
+come from picking the narrowest reading on the list. The three readings below are
+strictly nested — `A and B` ⊂ `A` ⊂ `A or B` — so the narrowest of them does
+bound the other two. What it cannot bound is a reading nobody enumerated, and
+those exist: take the trailing gloss to bind `creativity: low` as well and 426
+tuples are ambiguous with 25 silent, strictly inside the conjunctive reading; add
+`scope: single-file` and it is 419 and 27. No enumeration of readings terminates,
+so the narrowest one on any list is a price rather than a bound.
+
+Monotonicity gives the bound instead. Every reading fires some subset of the
+inclusive reading's tuples, ambiguity only falls as that set shrinks, and silence
+only rises — so deleting the row outright, which the script's last run reports,
+brackets every reading at once: **416 of 576 (72.2%)** ambiguous, which no reading
+goes below, and **28** silent, which none exceeds.
 
 **Totality is recoverable; determinism is not.** These are separate axes.
 Rewriting `standard-pr` as a bare default branch (below) leaves **0** silent
@@ -121,12 +127,14 @@ cheaply", which can be hard or creative.
 | `A and B` — conjunctive      | 16.7%     | 439 (76.2%) | 22     |
 
 Reading that row more narrowly trades ambiguity for silence, monotonically, in
-one direction. Both figures are **prices, not bounds** — each reading is narrower
-than the one above it, so quoting the lowest as a floor would be an error the next
-reading corrects. That is why the bound stated earlier comes from deleting the row
-rather than from any reading of it. The headline keeps the inclusive reading
-because it is what "and/or" conventionally spells; these two are what make that
-choice auditable rather than buried.
+one direction. The two narrower figures are **prices, not bounds** — not because
+they fail to bound each other, since the rows above are nested and the last one
+bounds the two before it, but because the list does not end where it stops: the
+two unenumerated readings named earlier sit strictly inside the conjunctive one.
+That is why the bound comes from deleting the row rather than from any reading of
+it. The headline keeps the inclusive reading because it is what "and/or"
+conventionally spells; these two are what make that choice auditable rather than
+buried.
 
 So the missing piece is not eight fuzzy cells. It is **one missing function**:
 a precedence order over the eight labels, which the table never states and the

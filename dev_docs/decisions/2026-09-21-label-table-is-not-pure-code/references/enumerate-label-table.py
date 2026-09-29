@@ -82,13 +82,16 @@ def fires(
         worth doing cheaply", which can be hard or creative rather than bulk.
       * `conjunctive` -- `A and B`, the "and" half read as binding.
 
-    Pricing all three is the point: each is narrower than the last, so no one of
-    them bounds the others. The fourth value is where the bound comes from
-    instead.
+    Pricing all three is the point. They are strictly nested, so the narrowest
+    of them does bound the other two -- what it cannot bound is a reading not on
+    the list, and narrower ones exist (binding the gloss to `creativity: low`
+    fires 32 tuples; adding `scope: single-file` fires 8, both strictly inside
+    `conjunctive`). The list does not terminate, so the fourth value is where a
+    bound over readings in general has to come from.
 
-      * `deleted` -- the row does not fire at all. Not a reading: any reading of
-        a row can only *add* firings relative to deleting it, so this is the
-        floor every reading of `mechanical-bulk` has to clear.
+      * `deleted` -- the row does not fire at all. Not a reading: every reading
+        fires some subset of `inclusive`'s tuples, and ambiguity falls as that
+        set shrinks, so this run brackets all of them.
     """
     if mechanical_bulk not in MECHANICAL_BULK_READINGS:
         raise ValueError(
@@ -216,19 +219,22 @@ def main():
     # default rather than replacing it.
     #
     # Their figures are prices and NOT bounds, which is the whole reason both
-    # are here: each is narrower than the last, so adding readings one at a
-    # time can never establish a floor, and quoting whichever happens to be
-    # lowest as one is the mistake this pair exists to make visible.
+    # are here. The two are nested, so the narrower does bound the wider -- but
+    # neither bounds a reading absent from this list, and narrower ones exist.
+    # So adding readings one at a time can never establish a floor, and quoting
+    # whichever happens to be lowest as one is the mistake this pair exists to
+    # make visible.
     for reading in ("mechanical-only", "conjunctive"):
         report(
             f"Variant: mechanical-bulk read as {reading}",
             [(t, fires(t, mechanical_bulk=reading)) for t in tuples()],
         )
 
-    # The bound, which is not a reading. Monotonicity does the work: any reading
-    # of a row only adds firings relative to deleting it, so this run is the
-    # floor all three above have to clear. It is reported rather than asserted
-    # because the record's load-bearing claim quotes it.
+    # The bound, which is not a reading. Monotonicity does the work: every
+    # reading fires some subset of `inclusive`'s tuples, and ambiguity falls
+    # while silence rises as that set shrinks -- so this run brackets every
+    # reading, enumerated here or not, from both sides at once. It is reported
+    # rather than asserted because the record's load-bearing claim quotes it.
     report(
         "Bound (not a reading): mechanical-bulk deleted outright",
         [(t, fires(t, mechanical_bulk="deleted")) for t in tuples()],
