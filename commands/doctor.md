@@ -415,8 +415,9 @@ settings rule approves the command, matching up to a whole shell token as the
 permission matcher does: `Bash(git:*)` covers `Bash(git diff:*)`, and
 `Bash(git stat:*)` covers nothing. Only one of `gh pr diff` and `git diff` is
 required. Any `…/workflow-skills/workflow-skills/:*` plugin-cache rule is
-**DEAD** on every machine: it ends inside the script's path, so it never fired,
-and `SKILL.md` grants the plugin's scripts itself.
+**DEAD** on every machine: it ends inside the script's path, so it never fired.
+How the scripts are approved instead, and where that grant stops, is in
+`permissions.md`.
 
 Exit `0` → `PASS`. Exit `1` (a configured reviewer, or the shared rules, has a dead or missing rule)
 → `WARN`, quoting the script's own lines. Exit `2` → `WARN`: the

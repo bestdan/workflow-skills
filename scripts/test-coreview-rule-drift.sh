@@ -446,11 +446,27 @@ else
   fail "a single diff source reported missing (rc=$RC): $OUT"
 fi
 
+# With neither diff source covered, the text report names the pair once as
+# alternatives, so the operator is not told to add both.
+make_settings "$BASE/shared-nodiff.json" \
+  "Bash(cat:*)" "Bash(gh pr view:*)" "Bash(git ls-remote:*)" "Bash(git status:*)"
+TEXT="$("$SCRIPT" --plugin-root "$SPLUGIN" --settings "$BASE/shared-nodiff.json" 2>&1)"
+if [ "$(grep -c '^  MISSING ' <<<"$TEXT")" = "1" ] \
+  && grep -q 'one suffices' <<<"$TEXT"; then
+  pass "an uncovered diff-source pair is reported once, as alternatives"
+else
+  fail "the diff-source pair was not reported as alternatives: $TEXT"
+fi
+
 # A broader rule approves the command too, so it is coverage. One ending
 # mid-token approves nothing.
-make_settings "$BASE/shared-broad.json" "Bash(cat:*)" "Bash(gh:*)" "Bash(git *)"
+make_settings "$BASE/shared-broad.json" "Bash(agy models)" \
+  "Bash(cat:*)" "Bash(gh:*)" "Bash(git *)"
 run_shared "$BASE/shared-broad.json"
-if [ "$RC" -eq 0 ] && [ "$(shared_count missing)" = "0" ]; then
+# The agy probe rule keeps this a configured machine; agy's own missing rule
+# makes the exit code 1, so assert on the shared result directly.
+if [ "$(printf '%s' "$OUT" | jq -r .shared.configured)" = "true" ] \
+  && [ "$(shared_count missing)" = "0" ]; then
   pass "broader Bash(gh:*) and Bash(git *) rules cover the shared templates"
 else
   fail "a broader rule was not counted as coverage (rc=$RC): $OUT"
@@ -486,6 +502,40 @@ if [ "$RC" -eq 0 ] && [ "$(printf '%s' "$OUT" | jq -r .shared.configured)" = "fa
   pass "no shared or reviewer rule at all is not configured, and not drift"
 else
   fail "unconfigured shared rules reported as drift (rc=$RC): $OUT"
+fi
+
+# A generic rule is common on machines that never ran co-review, so on its own
+# it is no sign of setup.
+make_settings "$BASE/shared-generic.json" "Bash(cat:*)" "Bash(git:*)"
+run_shared "$BASE/shared-generic.json"
+if [ "$RC" -eq 0 ] && [ "$(printf '%s' "$OUT" | jq -r .shared.configured)" = "false" ]; then
+  pass "generic Bash(cat:*) and Bash(git:*) alone are not configured, and not drift"
+else
+  fail "generic rules alone reported as drift (rc=$RC): $OUT"
+fi
+
+# An exact rule approves only the bare command, and co-review always passes
+# arguments (`git status --porcelain`), so it covers no shared template. The
+# reviewer probe rule marks co-review as set up, making the gap drift.
+make_settings "$BASE/shared-exact.json" "Bash(agy models)" \
+  "Bash(cat)" "Bash(gh pr diff)" "Bash(gh pr view)" "Bash(git diff)" \
+  "Bash(git ls-remote)" "Bash(git status)"
+run_shared "$BASE/shared-exact.json"
+if [ "$RC" -eq 1 ] && [ "$(shared_count missing)" = "6" ]; then
+  pass "exact rules cover no shared template"
+else
+  fail "exact rules were counted as coverage (rc=$RC): $OUT"
+fi
+
+# A configured reviewer with no shared rule at all is set up, so every shared
+# template is missing and that is drift.
+make_settings "$BASE/shared-revonly.json" "Bash(agy models)"
+run_shared "$BASE/shared-revonly.json"
+if [ "$RC" -eq 1 ] && [ "$(printf '%s' "$OUT" | jq -r .shared.configured)" = "true" ] \
+  && [ "$(shared_count missing)" = "6" ]; then
+  pass "a configured reviewer with no shared rule reports every shared template"
+else
+  fail "a reviewer-only setup did not report the shared rules (rc=$RC): $OUT"
 fi
 
 # --- 11. every plugin script co-review runs is granted by the skill ---------

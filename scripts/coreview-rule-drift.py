@@ -94,8 +94,8 @@ SHARED_RULES_FILE = Path("skills") / "co-review" / "references" / "permissions.m
 # operators to add, `Bash([python3 ]["]<cache>/workflow-skills/workflow-skills/:*)`.
 # The matcher compares a prefix rule only up to a whole shell token, and the
 # script path is one token that runs on into the version directory, so these
-# rules never fired on any machine. SKILL.md grants the scripts instead; a
-# leftover one is reported DEAD so it gets deleted.
+# rules never fired on any machine. A leftover one is reported DEAD so it gets
+# deleted.
 PLUGIN_CACHE_RULE_TAIL = "/workflow-skills/workflow-skills/:*)"
 
 # Shared templates of which one suffices. permissions.md says to add only the
@@ -294,13 +294,14 @@ def analyze(reviewers_dir, allow_rules):
 
 
 def covers(rule, command):
-    """Whether a settings rule approves the command text `command`.
+    """Whether a settings rule approves every command beginning `command`.
 
-    Models the matcher as measured: an exact rule must equal the command, and a
-    `:*` or trailing ` *` rule must match it up to a whole shell token, so
-    `Bash(git:*)` approves `git diff` and `Bash(gi:*)` does not. Nothing is
-    unquoted or expanded first. A rule with a wildcard anywhere else is not
-    modelled and counts as no coverage.
+    Models the matcher as measured: a `:*` or trailing ` *` rule must match it
+    up to a whole shell token, so `Bash(git:*)` approves `git diff` and
+    `Bash(gi:*)` does not. An exact rule approves no class at all: co-review
+    runs `git status --porcelain`, never bare `git status`, so `Bash(git status)`
+    denies it. Nothing is unquoted or expanded first. A rule with a wildcard
+    anywhere else is not modelled and counts as no coverage.
     """
     if rule in ("Bash", "Bash(*)"):
         return True
@@ -312,10 +313,27 @@ def covers(rule, command):
     elif inner.endswith(" *"):
         head = inner[: -len(" *")]
     else:
-        return inner == command
+        return False
     if "*" in head:
         return False
     return command == head or command.startswith(head + " ")
+
+
+def is_generic_prefix(rule):
+    """Whether `rule` approves a whole general-purpose binary (`Bash`,
+    `Bash(*)`, `Bash(cat:*)`, `Bash(git *)`). Such a rule is common on machines
+    that never ran co-review, so, as in analyze(), it is no sign of setup.
+    """
+    if rule in ("Bash", "Bash(*)"):
+        return True
+    if not rule.startswith("Bash(") or not rule.endswith(")"):
+        return False
+    inner = rule[len("Bash(") : -1].strip()
+    for tail in (":*", " *"):
+        if inner.endswith(tail):
+            inner = inner[: -len(tail)].strip()
+            break
+    return inner in GENERIC_BINARIES
 
 
 def analyze_shared(plugin_root, allow_rules, reviewer_findings):
@@ -332,13 +350,13 @@ def analyze_shared(plugin_root, allow_rules, reviewer_findings):
         return None
     templates = parse_templates(rules_file)
 
-    covered, matched_rules = set(), set()
+    covered, specific = set(), False
     for template in templates:
         command = template[len("Bash(") : -1].removesuffix(":*")
         hits = [r for r in allow_rules if covers(r, command)]
         if hits:
             covered.add(template)
-            matched_rules.update(hits)
+            specific = specific or any(not is_generic_prefix(r) for r in hits)
 
     missing = [
         t
@@ -353,8 +371,11 @@ def analyze_shared(plugin_root, allow_rules, reviewer_findings):
         "missing": missing,
         "dead": dead,
         # Like a reviewer, the shared rules are "not set up" rather than broken
-        # on a machine where co-review shows no sign of being set up at all.
-        "configured": bool(covered or dead)
+        # on a machine where co-review shows no sign of being set up at all. A
+        # generic `Bash(cat:*)` is not such a sign; a co-review-shaped rule, a
+        # dead cache rule, or a configured reviewer is.
+        "configured": specific
+        or bool(dead)
         or any(f["configured"] for f in reviewer_findings),
     }
 
@@ -404,11 +425,17 @@ def report(findings, shared, plugin_root, settings_read, settings_searched):
             if shared["dead"]:
                 print(
                     "             a plugin-cache prefix rule never fires, since it ends\n"
-                    "             inside the script's path; SKILL.md grants the plugin's\n"
-                    "             scripts, so delete it"
+                    "             inside the script's path, so delete it"
                 )
+            shown = set()
             for template in shared["missing"]:
-                print(f"  MISSING    {template}")
+                if template in shown:
+                    continue
+                group = next((g for g in SHARED_ALTERNATIVES if template in g), set())
+                others = sorted(group - {template})
+                shown.update(group)
+                note = f"  (or {', '.join(others)}; one suffices)" if others else ""
+                print(f"  MISSING    {template}{note}")
             print()
 
     for f in findings:
@@ -445,13 +472,13 @@ def report(findings, shared, plugin_root, settings_read, settings_searched):
 
     if has_drift(findings, shared):
         print(
-            "A dead rule fails silently: under `/co-review --non-interactive` the\n"
-            "dispatch is denied, not queued, so the reviewer just stops appearing in\n"
-            "the run summary. To repair: copy each MISSING template verbatim,\n"
-            "substitute its placeholders with the same fixed absolute paths your\n"
-            "invocation uses — spelled `$HOME/...` wherever the path is under your\n"
-            "home directory, the form the reviewer files require — and delete the DEAD\n"
-            "rule it replaces.\n"
+            "A missing rule fails silently: under `/co-review --non-interactive` the\n"
+            "dispatch that needs it is denied, not queued, so a reviewer just stops\n"
+            "appearing in the run summary. To repair: copy each MISSING template\n"
+            "verbatim, substituting any placeholders with the same fixed absolute\n"
+            "paths your invocation uses — spelled `$HOME/...` wherever the path is\n"
+            "under your home directory, the form the reviewer files require — and\n"
+            "delete each DEAD rule.\n"
             "\n"
             "Make that edit wherever the settings file above is MANAGED, which is not\n"
             "always the file itself — a generated or dotfiles-synced settings.json\n"
