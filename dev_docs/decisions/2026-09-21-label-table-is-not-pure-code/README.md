@@ -102,7 +102,8 @@ middle" the table names is, under the table's own rules, nearly unreachable.
 
 ### What the other readings change
 
-`--variants` reports four more readings. The first two are **repairs** — each
+`--variants` reports four more readings, plus the row-deleted bound from above —
+five sections after the literal run. The first two readings are **repairs** — each
 widens a row the headline reads narrowly, to see whether the failures go away:
 
 - **`architecture` widened to cover `scope: whole-codebase`** (it names only
