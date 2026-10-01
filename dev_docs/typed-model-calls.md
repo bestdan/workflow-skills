@@ -13,14 +13,14 @@ not to adopt what they measured; the fifth adopted a typed call as a companion
 to an existing check rather than a replacement for it, and stayed out of the
 gate. This file is the short version of what they cost to learn.
 
-| Read this when                                                     | Go to                                                                                                                                                                                                                          |
-| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| You want to know whether your judgment is Jev-shaped               | [`research/2026-09-17-jev-applications/`](research/2026-09-17-jev-applications/README.md) — seven ranked candidates, the non-fits, the vendor's own rules, and what it is documented to be bad at                              |
-| You are about to build a ladder over Jev signals                   | [`research/2026-09-19-jev-tool-routing/`](research/2026-09-19-jev-tool-routing/README.md) — a ladder that scored 58% and why                                                                                                   |
-| You are about to ask a model to forecast something from prose      | [`research/2026-09-20-predictive-scope/`](research/2026-09-20-predictive-scope/README.md) — a forecast whose wrapper, not the model, put it on its base rate, and three instrument defects the record caught in itself         |
-| You are about to replace a check with a cheaper proxy              | [`decisions/2026-09-21-jev-alongside-the-routing-evals.md`](decisions/2026-09-21-jev-alongside-the-routing-evals.md) — 120× faster, agreed on every case, and blind to the failure the check exists to catch                   |
-| You are about to swap a model judgment for a steadier, cheaper one | [`decisions/2026-09-24-assess-task-stays-a-subagent.md`](decisions/2026-09-24-assess-task-stays-a-subagent.md) — 10× faster, 780× cheaper, as self-consistent as the subagent, and different from it in a consistent direction |
-| You want the key plumbing                                          | [`auth_key_access.md`](auth_key_access.md)                                                                                                                                                                                     |
+| Read this when                                                     | Go to                                                                                                                                                                                                                                                                                                                                        |
+| ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| You want to know whether your judgment is Jev-shaped               | [`research/2026-09-17-jev-applications/`](research/2026-09-17-jev-applications/README.md) — seven ranked candidates, the non-fits, the vendor's own rules, and what it is documented to be bad at                                                                                                                                            |
+| You are about to build a ladder over Jev signals                   | [`research/2026-09-19-jev-tool-routing/`](research/2026-09-19-jev-tool-routing/README.md) — a ladder that scored 58% and why                                                                                                                                                                                                                 |
+| You are about to ask a model to forecast something from prose      | [`research/2026-09-20-predictive-scope/`](research/2026-09-20-predictive-scope/README.md) — a forecast whose wrapper, not the model, put it on its base rate, and three instrument defects the record caught in itself                                                                                                                       |
+| You are about to replace a check with a cheaper proxy              | [`decisions/2026-09-21-jev-alongside-the-routing-evals.md`](decisions/2026-09-21-jev-alongside-the-routing-evals.md) — 120× faster, agreed on every case, and blind to the failure the check exists to catch                                                                                                                                 |
+| You are about to swap a model judgment for a steadier, cheaper one | [`decisions/2026-09-24-assess-task-stays-a-subagent.md`](decisions/2026-09-24-assess-task-stays-a-subagent.md) — 10× faster, 780× cheaper, as self-consistent as the subagent, and different from it in a consistent direction; [the controls](research/2026-09-24-assess-task-comparison-controls/README.md) show codex misses the same bar |
+| You want the key plumbing                                          | [`auth_key_access.md`](auth_key_access.md)                                                                                                                                                                                                                                                                                                   |
 
 ## The rule, when you just need the answer
 
@@ -30,14 +30,47 @@ The rungs are in order: the first that matches wins.
 
 1. Computable exactly from what you have → **write code**.
 2. One of a fixed set, a yes/no, or a point on a scale, judged from text you
-   already have → **a typed call**.
-3. Text a human reads, or it needs steps or fetching → **reason about it
-   yourself**.
+   already have, **and** no model makes the judgment where it is needed, or the
+   typed call supplies something the model that does cannot → **a typed call**,
+   compared first against whatever makes the judgment there now.
+3. Everything else → **reason about it yourself.** That covers text a human
+   reads, a job that needs steps or fetching, and a closed-set judgment a model
+   already makes. Replacing that last one is possible but rare, and has its own
+   bar, below.
 
 Rung 1 beats rung 3: a job that reads files and then computes an exact answer is
 code's, not an LLM's. Retrieval only disqualifies the typed call, which cannot
 fetch anything — and it is not a general veto, because that is precisely the flat
 signal that misrouted 10 of 12 code cases in rule 3 below.
+
+**Rung 2 turns on what you would be replacing, not on the question's shape.**
+Every rung-2-shaped question measured here that proposed replacing a model
+judgment already in place was declined: tool routing, predictive `scope`, and
+the `assess-task` profile. The one adoption,
+[the description check](decisions/2026-09-21-jev-alongside-the-routing-evals.md),
+did not replace a model judgment. It was taken for a job the incumbent cannot do
+at any price: a margin that says which way to edit. That gives two cases.
+
+- **Replacing a model judgment.** In this repo the incumbent is usually an agent
+  already running with the context in hand, so its marginal cost is a few lines
+  of prose. The best a typed call competes with is a spawn: about $0.047 and
+  3.8 s per packet for `assess-task`. There, a large ratio is a small absolute
+  saving, and it has to pay for a second key, a second vendor and a fallback
+  path. The bar is agreement with the incumbent. Where no outcome exists to
+  score against, that bar measures resemblance to the incumbent's model, which
+  [the controls](research/2026-09-24-assess-task-comparison-controls/README.md)
+  show no non-Claude rater cleared. Expect to decline. Adopt only when the
+  incumbent is a spawn or a round trip, not prose already in context, and when
+  the consumer tolerates the direction the typed call errs in (rule 12). Score
+  the consumer's decision where you can, not just the intermediate label.
+- **Adding a judgment where none is made.** A hook, a script, a CI step, or a
+  batch too large to spawn for has no model in the loop. There the incumbent is
+  a heuristic or nothing, and rule 1's comparison is against that. The same case
+  covers a judgment that needs a property the agent in the loop cannot supply:
+  a distribution rather than a self-report, answers that cannot anchor one
+  another, or independence from the work being graded. One adoption supports
+  this case and no measurement has contradicted it. It is the likelier home for
+  a typed call, but it is not yet a proven one.
 
 ## The twelve that cost us something
 
@@ -53,11 +86,13 @@ note under **Using it well**, and are not repeated here.
    above, and the routing probe exists because of it.
 
    **"Better" is not "more accurate."** Equal accuracy at materially lower cost
-   or latency beats the incumbent, and on these measurements that is the likelier
-   shape of the win — the typed call has matched the incumbent's accuracy every
-   time and never once beaten it. So a comparison is unfinished until it carries
-   cost and wall clock beside the score, for **both** sides. Rule 2 is the other
-   half of this: the tie that agreement produces is broken on those axes.
+   or latency beats the incumbent. Where both sides were scored on the same
+   cases, the typed call has never beaten the incumbent on the incumbent's own
+   question. It tied on tool routing. On the description check it scored higher
+   only by answering a narrower question. On `assess-task` it fell 15–17 points
+   short. So a comparison is unfinished until it carries cost and wall clock
+   beside the score, for **both** sides. Rule 2 is the other half of this: the
+   tie that agreement produces is broken on those axes.
 
 2. **Agreement is ambiguous, and cost breaks the tie.** A both-logged rollout
    that promotes what agrees reads agreement as a green light. It is equally
