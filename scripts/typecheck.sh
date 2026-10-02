@@ -76,6 +76,8 @@ STRICT_FILES=(scripts/research-spike.py)
 # skills/co-review/SKILL.md and commands/doctor.md, diff-anchor-check.py is
 # invoked the same way by skills/co-review/SKILL.md step 12,
 # grok-telemetry-gate.py the same way by skills/co-review/reviewers/grok.md,
+# co-review-record.py is the reviewer-ledger write built for /co-review to
+# invoke the same way,
 # and worktree-teardown-reminder.py and guard-foreign-worktree.py are run by
 # the harness itself — hooks/hooks.json registers them on PostToolUse and
 # PreToolUse, so they execute on every installed machine.
@@ -85,6 +87,7 @@ CONSUMER_FILES=(
   scripts/coreview-rule-drift.py
   scripts/diff-anchor-check.py
   scripts/grok-telemetry-gate.py
+  scripts/co-review-record.py
   scripts/worktree-teardown-reminder.py
   scripts/guard-foreign-worktree.py
 )
