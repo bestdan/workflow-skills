@@ -31,13 +31,15 @@ if command -v git >/dev/null 2>&1; then
   # $DOCTOR_GH_DB, same shape as restack's fake gh above but extended with
   # isDraft/labels reads and the edit/ready writes I4's repair needs.
   #
-  # `.state`/`.labels` reads always exit 0 (`; true` after the `cat`), even
-  # when the backing file is missing — that models a POSITIVE gh read that
-  # simply found nothing (D2's "PR number gh positively reports as
-  # nonexistent" case: rc 0, empty field), which is what earns the I3/I6
-  # "park" verdict. A TRANSIENT gh failure (401, rate limit, network) is a
-  # different, non-zero-rc shape — see $DOCTOR_GH_FAIL below — and must never
-  # be confused with this one.
+  # A `.state` read for a PR with no backing file reproduces real gh on a
+  # missing PR: exit 1 plus GraphQL's "Could not resolve to a PullRequest"
+  # text on stderr. Checked once against the real binary (2026-09-29):
+  #   $ gh pr view 999999 --json state --jq .state; echo $?
+  #   GraphQL: Could not resolve to a PullRequest with the number of 999999. (repository.pullRequest)
+  #   1
+  # A TRANSIENT failure (401, rate limit, network) ALSO exits 1 — see
+  # $DOCTOR_GH_FAIL below — so the error text is the only thing separating a
+  # PR that is gone (park) from a gh that is unreadable (skip, D2).
   DOCTOR_GH="$DOC/gh"
   cat >"$DOCTOR_GH" <<'GHEOF'
 #!/usr/bin/env bash
@@ -50,7 +52,10 @@ case "$sub" in
     jqexpr=""
     while [ $# -gt 0 ]; do case "$1" in --jq) jqexpr="$2"; shift 2 ;; *) shift ;; esac; done
     case "$jqexpr" in
-      .state) cat "$db/$num.state" 2>/dev/null; true ;;
+      .state)
+        # Real gh on a missing PR: non-zero exit plus this GraphQL error text.
+        [ -f "$db/$num.state" ] || { echo "GraphQL: Could not resolve to a PullRequest with the number of $num. (repository.pullRequest)" >&2; exit 1; }
+        cat "$db/$num.state" ;;
       .isDraft) cat "$db/$num.draft" 2>/dev/null || echo false ;;
       '[.labels[].name] | join(",")') cat "$db/$num.labels" 2>/dev/null; true ;;
       *) exit 1 ;;
@@ -71,12 +76,13 @@ esac
 GHEOF
   chmod +x "$DOCTOR_GH"
 
-  # A `gh` that ALWAYS fails (simulating a transient 401/rate-limit/network
-  # blip, D2): every `pr view` exits non-zero with no output, regardless of
-  # which PR is asked about. Used to prove a bad gh moment never parks a task.
+  # A `gh` that ALWAYS fails (simulating a transient 401 blip, D2): every
+  # `pr view` exits 1 with real gh's bad-credentials text, regardless of which
+  # PR is asked about. Used to prove a bad gh moment never parks a task.
   DOCTOR_GH_FAIL="$DOC/gh-fail"
   cat >"$DOCTOR_GH_FAIL" <<'GHFAILEOF'
 #!/usr/bin/env bash
+echo "HTTP 401: Bad credentials (https://api.github.com/graphql)" >&2
 exit 1
 GHFAILEOF
   chmod +x "$DOCTOR_GH_FAIL"
@@ -403,6 +409,8 @@ GHFAILEOF
     # D3: the markdown-link cell shape RUN.md's own writer actually emits —
     # must parse to a bare PR number and hold (be left alone), not park.
     printf '| t_mdlink | pr-open   | br-mdlink | main | - | [#305](https://github.com/bestdan/workflow-skills/pull/305) | |\n'
+    printf '| t_empty  | pr-open   | br-empty  | main | - | #306 | |\n'
+    printf '| t_hgone  | handed-off | br-hgone | main | - | #307 | |\n'
   } >"$D3/run/.auto-pilot/RUN.md"
   : >"$D3/run/.auto-pilot/QUESTIONS.md"
   printf '# report\n' >"$D3/run/.auto-pilot/REPORT.md"
@@ -411,8 +419,11 @@ GHFAILEOF
   I3DB="$D3/ghdb"
   mkdir -p "$I3DB"
   printf 'CLOSED\n' >"$I3DB/301.state"
-  # 302: no state file at all -> the fake gh's `.state` read still exits 0
-  # (positively reports "nonexistent") -> "does not exist"
+  # 302: no state file at all -> the fake gh fails the way real gh does on a
+  # missing PR (rc 1 + "Could not resolve to a PullRequest") -> "does not exist"
+  # 306: an EMPTY state file -> rc 0 with no state, which proves nothing -> skip
+  : >"$I3DB/306.state"
+  # 307: a handed-off row whose PR was deleted -> parked, same as 302
   printf 'OPEN\n' >"$I3DB/303.state"
   printf 'false\n' >"$I3DB/303.draft"
   printf '\n' >"$I3DB/303.labels"
@@ -432,6 +443,10 @@ GHFAILEOF
   have "doctor I3: REPORT.md records why each park happened" 'I3 parked' "$(cat "$D3/run/.auto-pilot/REPORT.md")"
   have "doctor I3 (D3): the markdown-link PR cell parses and holds (left alone)" $'t_mdlink | pr-open' "$d3run"
   lack "doctor I3 (D3): the markdown-link row is never parked" $'t_mdlink | parked' "$d3run"
+  have "doctor I3: a deleted PR on a handed-off row is parked" $'t_hgone  | parked' "$d3run"
+  have "doctor I3: REPORT.md names the missing PR as gone" 'PR #307 does not exist' "$(cat "$D3/run/.auto-pilot/REPORT.md")"
+  have "doctor I3: rc 0 with no state is left alone (undetermined, not a park)" $'t_empty  | pr-open' "$d3run"
+  have "doctor I3: rc 0 with no state is counted as skipped" 'I3: t_empty (gh returned no state)' "$d3out"
 
   # --- I3 (D2): a transient gh failure must never park an in-flight task ----
   D3G="$DOC/i3-gh-fail"
@@ -515,7 +530,10 @@ case "$sub" in
     jqexpr=""
     while [ $# -gt 0 ]; do case "$1" in --jq) jqexpr="$2"; shift 2 ;; *) shift ;; esac; done
     case "$jqexpr" in
-      .state) cat "$db/$num.state" 2>/dev/null; true ;;
+      .state)
+        # Real gh on a missing PR: non-zero exit plus this GraphQL error text.
+        [ -f "$db/$num.state" ] || { echo "GraphQL: Could not resolve to a PullRequest with the number of $num. (repository.pullRequest)" >&2; exit 1; }
+        cat "$db/$num.state" ;;
       .isDraft) cat "$db/$num.draft" 2>/dev/null || echo false ;;
       '[.labels[].name] | join(",")') cat "$db/$num.labels" 2>/dev/null; true ;;
       *) exit 1 ;;
