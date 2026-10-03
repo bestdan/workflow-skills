@@ -185,33 +185,40 @@ print(h["permissionDecisionReason"])
   assert_line --index 4 "To unpin it for good: git config --unset hooks.pinnedBranch"
 }
 
-# The bypass line keeps the target as typed, and keeps a detach a detach.
-@test "the bypass line names the typed target, with --detach when detaching" {
+# The bypass line is a command to run, so it repeats the refused call rather
+# than rebuilding one: a rebuilt `git checkout -b feat` dropped the start point,
+# and `checkout --orphan` keeps the old files staged where `switch --orphan`
+# empties the tree.
+@test "the bypass line repeats the refused call verbatim" {
+  git -C "$pinned" update-ref refs/remotes/origin/feat "$(git -C "$pinned" rev-parse other)"
   run run_hook "$pinned" 'git switch -d other'
-  assert_success
-  assert_output --partial "env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git checkout --detach other"
+  assert_output --partial "WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git switch -d other\\n"
   run run_hook "$pinned" 'git checkout other'
-  assert_success
-  assert_output --partial "env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git checkout other\\n"
-}
-
-# The bypass line is a command to run, so a refused creation offers a creation:
-# `git checkout x` fails on a branch that does not exist yet.
-@test "the bypass line carries the creating flag in checkout's spelling" {
-  run run_hook "$pinned" 'git switch -c feat'
-  assert_output --partial "git checkout -b feat\\n"
-  run run_hook "$pinned" 'git switch -Cfeat'
-  assert_output --partial "git checkout -B feat\\n"
-  run run_hook "$pinned" 'git checkout --orphan=fresh'
-  assert_output --partial "git checkout --orphan fresh\\n"
+  assert_output --partial "WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git checkout other\\n"
+  run run_hook "$pinned" 'git switch -c feat origin/feat'
+  assert_output --partial "WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git switch -c feat origin/feat\\n"
   run run_hook "$pinned" 'git switch --orphan fresh'
-  assert_output --partial "git checkout --orphan fresh\\n"
+  assert_output --partial "WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git switch --orphan fresh\\n"
 }
 
-# A ref name may hold `$` or a quote, which the shell would expand or choke on.
-@test "the bypass line shell-quotes the target" {
+# A ref name may hold `$` or a quote, which the shell would expand or choke on,
+# and a quoted name with a space must come back as one argument, not two.
+@test "the bypass line shell-quotes the arguments" {
   run run_hook "$pinned" "git checkout -b 'a\$HOME'"
   assert_output --partial "git checkout -b 'a\$HOME'\\n"
+  run run_hook "$pinned" 'git checkout -b "a b"'
+  assert_output --partial "git checkout -b 'a b'\\n"
+}
+
+# A call judged after a `cd` or a `git -C` names that directory, so the line
+# acts on the same repo when run from the session's own.
+@test "the bypass line carries -C when the call ran elsewhere" {
+  run run_hook "$tmp" 'git -C pinned checkout other'
+  assert_output --partial "WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git -C $pinned checkout other\\n"
+  run run_hook "$tmp" 'cd pinned && git checkout other'
+  assert_output --partial "WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git -C $pinned checkout other\\n"
+  run run_hook "$pinned" 'git checkout other'
+  refute_output --partial "git -C"
 }
 
 # hooks.json runs the guard by its path, so the exec bit and the shebang are

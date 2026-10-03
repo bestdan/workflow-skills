@@ -80,10 +80,6 @@ _NAMES_TARGET = {"-b", "-B", "-c", "-C", "--orphan"}
 # destination.
 _PATCH = {"-p", "--patch"}
 
-# `-d` is `--detach` on both checkout and switch. It only shapes the bypass
-# line, so the command offered moves the checkout the way the refused one would.
-_DETACH = {"-d", "--detach"}
-
 
 def _apply_cd(tokens: list[str], cwd: str | None) -> str | None:
     """The directory a `cd` segment leaves the shell in, or None if unknown.
@@ -176,8 +172,10 @@ def _git_calls(cmd: str, base: str | None):
             cwd = _apply_cd(primary, cwd)
             continue
         # Both forms can yield the same call, so a call can be seen twice; any
-        # deny prints once and returns, so a duplicate is harmless.
-        for tokens in forms:
+        # deny prints once and returns, so a duplicate is harmless. shlex's
+        # form goes first because the refusal echoes the args it was judged
+        # on: the quote-stripped split turns `-b "a b"` into `-b a b`.
+        for tokens in reversed(forms):
             if _bypassed(tokens):
                 continue
             for dir_override, subcommand, args in git_calls(tokens):
@@ -187,14 +185,8 @@ def _git_calls(cmd: str, base: str | None):
                 yield here, subcommand, args
 
 
-# The checkout spelling of each branch-creating flag, so the bypass line names
-# a command that creates the branch rather than one that fails on it. switch's
-# `-c`/`-C` are checkout's `-b`/`-B`.
-_CREATE_AS = {"-b": "-b", "-c": "-b", "-B": "-B", "-C": "-B", "--orphan": "--orphan"}
-
-
-def _target(args: list[str]) -> tuple[str, bool, str | None] | None:
-    """``(target, is_new_branch, create_flag)`` for a checkout/switch, or None.
+def _target(args: list[str]) -> tuple[str, bool] | None:
+    """``(target, is_new_branch)`` for a checkout/switch, or None for neither.
 
     None covers the shapes that move no HEAD: a file checkout (`--` present, or
     a lone `.`), and a bare `git checkout` with no target at all.
@@ -204,9 +196,6 @@ def _target(args: list[str]) -> tuple[str, bool, str | None] | None:
     it resolves to nothing yet and is unambiguously a switch; a bare target is
     a word that might be a branch, a tag, a sha — or a filename, which is the
     case that must not be treated as a switch.
-
-    The third is the creating flag in checkout's spelling (`_CREATE_AS`), or
-    None when no branch is created. Only the bypass line reads it.
     """
     if any(tok in _PATCH for tok in args):
         return None  # `git checkout -p <tree-ish>` restores hunks
@@ -216,18 +205,16 @@ def _target(args: list[str]) -> tuple[str, bool, str | None] | None:
         if tok == "--":
             return None  # `git checkout -- <path>` restores files
         if tok in _NAMES_TARGET:
-            if i + 1 >= len(args):
-                return None
-            return args[i + 1], True, _CREATE_AS[tok]
+            return (args[i + 1], True) if i + 1 < len(args) else None
         # `--orphan=<name>` is `--orphan <name>` with the value attached.
         if tok.startswith("--orphan="):
             name = tok[len("--orphan=") :]
-            return (name, True, "--orphan") if name else None
+            return (name, True) if name else None
         # git also takes a short option's value attached: `-bfeature` is
         # `-b feature`. Matching only the separate-token form let
         # `git checkout -bfeature` create and switch a branch unjudged.
         if len(tok) > 2 and tok[:2] in _NAMES_TARGET:
-            return tok[2:], True, _CREATE_AS[tok[:2]]
+            return tok[2:], True
         if tok in _FLAGS_WITH_VALUE:
             i += 2
             continue
@@ -241,7 +228,7 @@ def _target(args: list[str]) -> tuple[str, bool, str | None] | None:
         # resolving it costs a git call on every `-` to fix a shape nobody has
         # hit.
         if tok == "-":
-            return "-", True, None
+            return "-", True
         if tok.startswith("-"):
             i += 1
             continue
@@ -255,7 +242,7 @@ def _target(args: list[str]) -> tuple[str, bool, str | None] | None:
         rest = args[i + 1 :]
         if any(a == "--" or not a.startswith("-") for a in rest):
             return None
-        return tok, False, None
+        return tok, False
     return None
 
 
@@ -319,19 +306,27 @@ def _violation(cwd: str, target: str) -> tuple[str, str] | None:
     return pinned, target
 
 
-def _reason(pinned: str, target: str, detached: bool, create: str | None) -> str:
-    # The bypass line is a command to run, so it does what the refused one
-    # asked: it carries `--detach` when that detached, and the creating flag
-    # when that created a branch — `git checkout x` fails on a branch that does
-    # not exist yet. The target is shell-quoted, since a ref name may hold `$`
-    # or a quote; ordinary names render unchanged.
-    flag = f"{create} " if create else "--detach " if detached else ""
+def _reason(pinned: str, target: str, call: str) -> str:
     return (
         f"This checkout is pinned to '{pinned}' — refusing to switch it to '{target}'.\n"
         "Branch work belongs in its own worktree, not in this checkout.\n"
-        f"To move this checkout anyway: env {BYPASS}=1 git checkout {flag}{shlex.quote(target)}\n"
+        f"To move this checkout anyway: env {BYPASS}=1 {call}\n"
         "To unpin it for good: git config --unset hooks.pinnedBranch"
     )
+
+
+def _refused_call(cwd: str, base: str, subcommand: str, args: list[str]) -> str:
+    """The refused git call, re-quoted, for the bypass line to repeat.
+
+    The line is a command to run, so it repeats the refused call rather than
+    rebuilding one: a rebuilt `git checkout -b <target>` dropped the start
+    point and `--track`, and turned `switch --orphan` (an empty tree) into
+    `checkout --orphan` (the old files staged). A call judged somewhere other
+    than the session's directory, after a `cd` or a `git -C`, carries `-C` so
+    the line acts on the same repo; git's own options are otherwise dropped.
+    """
+    where = f"-C {shlex.quote(cwd)} " if cwd != base else ""
+    return f"git {where}{subcommand} {shlex.join(args)}"
 
 
 def main() -> None:
@@ -350,23 +345,21 @@ def main() -> None:
         found = _target(args)
         if not found:
             continue
-        target, is_new, create = found
+        target, is_new = found
         if not cwd or not os.path.isdir(cwd):
             continue  # a path we cannot resolve is not a repo we can judge
         if not is_new and not _moves_head(cwd, target, subcommand):
             continue
         violation = _violation(cwd, target)
         if violation:
-            detached = any(tok in _DETACH for tok in args)
+            call = _refused_call(cwd, base, subcommand, args)
             print(
                 json.dumps(
                     {
                         "hookSpecificOutput": {
                             "hookEventName": "PreToolUse",
                             "permissionDecision": "deny",
-                            "permissionDecisionReason": _reason(
-                                *violation, detached, create
-                            ),
+                            "permissionDecisionReason": _reason(*violation, call),
                         }
                     }
                 )
