@@ -355,6 +355,12 @@ line goes into the hand-off summary (step 7). If `/co-review` can't run **at all
 verified; note `co-review unavailable` and proceed to hand-off (review is
 advisory).
 
+Co-review's own scripts run without a prompt only when this delivery was started
+as the `/deliver-task` command or under `bypassPermissions`; reached through the
+Skill tool in `default` mode, each one prompts, and under `claude -p` each is
+denied silently. Why, and the measurement:
+[`../co-review/references/permissions.md`](../co-review/references/permissions.md#plugin-scripts).
+
 ## 6. Iterate (bounded)
 
 Each iteration is a full round: apply co-review's **high-confidence** fixes,
