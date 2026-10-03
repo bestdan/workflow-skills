@@ -28,6 +28,10 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/scripts/guard-foreign-worktree.py"
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/guard-pinned-branch.py"
           }
         ]
       },

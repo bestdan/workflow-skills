@@ -76,12 +76,11 @@ STRICT_FILES=(scripts/research-spike.py)
 # skills/co-review/SKILL.md and commands/doctor.md, diff-anchor-check.py is
 # invoked the same way by skills/co-review/SKILL.md step 12,
 # grok-telemetry-gate.py the same way by skills/co-review/reviewers/grok.md,
-# and worktree-teardown-reminder.py and guard-foreign-worktree.py are run by
-# the harness itself — hooks/hooks.json registers them on PostToolUse and
-# PreToolUse, so they execute on every installed machine. bash_command.py is
-# the parser guard-foreign-worktree.py imports, so it runs wherever that does.
-# guard-pinned-branch.py is not registered yet but ships as a PreToolUse hook
-# script on the same parser, so it is held to the same floor.
+# and worktree-teardown-reminder.py, guard-foreign-worktree.py and
+# guard-pinned-branch.py are run by the harness itself — hooks/hooks.json
+# registers them on PostToolUse and PreToolUse, so they execute on every
+# installed machine. bash_command.py is the parser both guards import, so it
+# runs wherever they do.
 CONSUMER_FILES=(
   commands/handlers/assets/*.py
   scripts/local-review/server.py
