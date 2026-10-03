@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.74.1] - 2026-10-03
+
+### Fixes
+
+- end hand-off reports on what needs the reader [N/A] (#949) (92f0904)
+
 ## [2.74.0] - 2026-10-03
 
 ### Features
