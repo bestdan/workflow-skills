@@ -37,11 +37,10 @@ fi
 
 URL="https://raw.githubusercontent.com/charmbracelet/crush/v${PIN}/internal/config/config.go"
 
-# Bare `mktemp -d` (no template) ignores $TMPDIR on macOS, so the first arm
-# isn't a real $TMPDIR attempt; try $TMPDIR explicitly before falling back to
+# A bare `mktemp -d` ignores $TMPDIR on macOS (see scripts/lint-mktemp.sh), so
+# use a $TMPDIR template, falling back to
 # repo-local.
-TMP="$(mktemp -d 2>/dev/null \
-  || mktemp -d "${TMPDIR:-/tmp}/crush-roster-live.XXXXXX" 2>/dev/null \
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/crush-roster-live.XXXXXX" 2>/dev/null \
   || mktemp -d "$ROOT/.crush-roster-live.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 CONFIG_GO="$TMP/config.go"

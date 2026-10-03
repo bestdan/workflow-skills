@@ -186,7 +186,9 @@ run is the exact defect this runbook exists to prevent.
      an exception for its own notes.
 
 Do not probe `gh` anywhere else in the run, and do not use it directly — the verbs
-call it themselves.
+call it themselves. This restricts only probes this runbook would add. A verb's own
+`gh auth status` preflight (for example `commands/handlers/gh-issue-promote.md`
+step 1) belongs to the verb and runs as the verb writes it.
 
 ### 1. Repair the label invariants
 
@@ -244,6 +246,7 @@ PROMOTE:   <n> ready, <n> needs_refinement
            | NOT_RUN (stopped at step <n>)
 DELIVER:   COMPLETED #<n> -> PR #<m>
            | NO_ELIGIBLE_ISSUES
+           | WIP_LIMIT (<count> in flight, limit <wip_limit>) — <ids>
            | BAILED #<n> — <reason>
            | FAILED — <verbatim error>
            | NOT_RUN (stopped at step <n>)
@@ -253,6 +256,13 @@ DELIVER:   COMPLETED #<n> -> PR #<m>
 run; `NOT_RUN` is every step after it, and naming which step stopped things is what
 keeps a half-run night from reading like a quiet one. `BAILED` is none of the above —
 it is step 3 completing normally with nothing delivered.
+
+`WIP_LIMIT` is step 3's pre-claim WIP gate declining, which `--non-interactive` makes
+it do whenever the in-flight count is at or over the limit
+(`commands/handlers/gh-issue-claim.md` § "Pre-claim WIP gate"). It is not
+`NO_ELIGIBLE_ISSUES`: ready issues may exist, and the gate never looked. Issues at
+`status:4_needs_review` count toward the limit, so open PRs waiting on a human
+merge are what usually fills it.
 
 ## Guardrails
 

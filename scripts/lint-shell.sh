@@ -135,6 +135,9 @@ lint_files=()
 # miss.
 [ "${#lint_files[@]}" -eq 0 ] || run scripts/lint-pipefail.sh "${lint_files[@]}"
 
+# A template-less `mktemp` ignores $TMPDIR on macOS and fails in the sandbox.
+[ "${#lint_files[@]}" -eq 0 ] || run scripts/lint-mktemp.sh "${lint_files[@]}"
+
 if [ "${#shell_files[@]}" -gt 0 ]; then
   run bash -n "${shell_files[@]}"
   run shfmt -i 2 -ci -bn -d "${shell_files[@]}"

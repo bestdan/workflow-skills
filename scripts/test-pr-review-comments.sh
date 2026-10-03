@@ -26,8 +26,7 @@ command -v jq >/dev/null 2>&1 || {
   exit 2
 }
 
-BASE="$(mktemp -d 2>/dev/null \
-  || mktemp -d "${TMPDIR:-/tmp}/pr-review-comments-test.XXXXXX" 2>/dev/null)"
+BASE="$(mktemp -d "${TMPDIR:-/tmp}/pr-review-comments-test.XXXXXX" 2>/dev/null)"
 [ -n "$BASE" ] && [ -d "$BASE" ] || {
   echo "test-pr-review-comments: could not create a temp dir" >&2
   exit 2

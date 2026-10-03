@@ -38,10 +38,11 @@ command -v sandbox-exec >/dev/null 2>&1 || {
 # whatever directory the script was invoked from — D becomes the caller's cwd.
 # The EXIT trap then does `rm -rf "$D"` on it: run from the repo root, that
 # deletes the checkout, .git included. Proven on a disposable tree (files ->
-# zero files -> directory gone). The fallback below covers a plain mktemp
-# rejection; the empty-guard after it covers the specific "succeeded but
-# printed nothing" shape, which the fallback's `||` alone would not catch.
-D="$(mktemp -d 2>/dev/null || mktemp -d "${TMPDIR:-/tmp}/smoke-confinement.XXXXXX")" || {
+# zero files -> directory gone). The $TMPDIR template below avoids that denial
+# and its `||` covers any other mktemp rejection; the empty-guard after it
+# covers the specific "succeeded but printed nothing" shape, which the `||`
+# alone would not catch.
+D="$(mktemp -d "${TMPDIR:-/tmp}/smoke-confinement.XXXXXX")" || {
   echo "smoke-confinement: mktemp failed — cannot create a fixture dir" >&2
   exit 2
 }

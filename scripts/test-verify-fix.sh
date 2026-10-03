@@ -30,8 +30,7 @@ SCRIPT_SRC="$ROOT/scripts/verify-fix.sh"
   exit 2
 }
 
-BASE="$(mktemp -d 2>/dev/null \
-  || mktemp -d "${TMPDIR:-/tmp}/test-verify-fix.XXXXXX" 2>/dev/null \
+BASE="$(mktemp -d "${TMPDIR:-/tmp}/test-verify-fix.XXXXXX" 2>/dev/null \
   || mktemp -d "$ROOT/.test-verify-fix.XXXXXX")"
 # Fail closed: an empty BASE would make the `cd` below a no-op (bash `cd ""`
 # exits 0), leaving BASE pointing at the repo root for the EXIT trap to delete.

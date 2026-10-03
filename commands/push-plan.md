@@ -385,6 +385,14 @@ The overview epic maps to a GitHub **milestone** (spike §3.1). Resolve it
      -f description="<overview body>" --jq '{number, url: .html_url}'
    ```
 
+   The create (and the reuse PATCH below) is a non-GET `gh api`, which some
+   machines' `PreToolUse` hooks refuse outright, sandbox or not. If yours does,
+   hand that one command to the user to run. Write the title and description to
+   files and pass them as `-F title=@<file> -F description=@<file>`, so a line
+   that wraps in their terminal cannot put a newline into the milestone title.
+   Do not take the `plan:<name>` label fallback for this: that fallback is for a
+   token without milestone write, not for a hook (#540).
+
    (Use the resolved `<repo>`, or the current repo's `OWNER/NAME` from
    `gh repo view --json nameWithOwner -q .nameWithOwner` when `gh-issue.repo` is
    unset — the `gh api` path needs an explicit repo.) `<overview body>` is the
