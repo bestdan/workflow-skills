@@ -420,7 +420,7 @@ remaining findings and proceed — don't loop.
 - **Hand-off summary** (structured — for a human, or the `/auto-pilot` morning
   report). It ends on what the human must act on, because the end is what a
   terminal leaves on screen. In order:
-  1. **Verdict line** — task id, PR URL, the tracker state set, and how many
+  1. **Verdict line** — task id, PR URL, the tracker state set (if any), and how many
      items wait in the closing section (or "nothing needs you").
   2. **What changed** — a few lines, by behavior, not by file.
   3. **Review and evidence** — reviewer classes that ran, what the rounds

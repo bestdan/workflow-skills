@@ -144,6 +144,7 @@ Promoted 5 of 8 candidates:
 backfilled (2):
   - PRE-12  (estimate)
   - PRE-18  (priority, estimate)
+note: scored project Payments revamp only — backlog in other configured projects / unassigned was not scored. Pass `all` to score the union of all configured projects; the whole-team backlog (incl. unconfigured projects / unassigned) is scored only when no projects are configured.
 ⚠ workspace at ≥250/250 non-archived issues — Linear will refuse to CREATE new issues until you run /archive-tasks. Promotions are unaffected by this cap.
 ```
 

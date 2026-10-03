@@ -371,9 +371,10 @@ goes at the very top (`run-budget.md`, "The alarm").
    before they enter work, so a hallucinated finding is caught before it costs
    anything. If `/add-task` itself fails, the run does not fail — the finding
    is recorded here as a plain bullet (task id `none`) instead.
-6. **Decisions** — the highlights from `QUESTIONS.md` worth a human's eye.
-7. **How-to-evaluate queue** — for each human-judgment checkpoint: exactly how
-   to evaluate it and what a "no" would invalidate.
+6. **For you** — everything a human must judge, numbered, highest impact
+   first: the `QUESTIONS.md` decisions worth a human's eye, and each
+   human-judgment checkpoint with exactly how to evaluate it and what a "no"
+   would invalidate.
 
 ## Run-state branch
 
@@ -411,7 +412,7 @@ uncommitted task-branch edits can block the checkout back, wedging recovery.
 restores that branch and appends a `QUESTIONS.md` entry recording the
 deviation (format above) — a run that finds itself on the wrong branch has
 already violated its recovery contract and must not silently continue. That
-entry reaches `REPORT.md`'s **Decisions** section through the normal rolling
+entry reaches `REPORT.md`'s **For you** section through the normal rolling
 rewrite; no separate `REPORT.md` format exists for it. It fails closed when the
 run worktree is **dirty** at the deviation (restoring would silently carry or
 lose the uncommitted task-branch edits) or when git itself refuses the restore —
