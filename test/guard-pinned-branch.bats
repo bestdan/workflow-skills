@@ -79,6 +79,15 @@ allowed() {
   denied "$pinned" 'git switch -d other'
 }
 
+# git takes a short option's value attached, so `-bfeature` is `-b feature`.
+@test "a new-branch flag with its name attached is denied" {
+  denied "$pinned" 'git checkout -bfeature'
+  denied "$pinned" 'git checkout -Bfeature'
+  denied "$pinned" 'git switch -cfeature'
+  denied "$pinned" 'git switch -Cfeature'
+  allowed "$pinned" 'git checkout -bmain'
+}
+
 @test "-C pointing at the pinned repo is denied, absolute or relative to the payload cwd" {
   denied "$plain" "git -C $pinned checkout other"
   denied "$tmp" "git -C pinned checkout other"
@@ -155,8 +164,9 @@ print(h["permissionDecisionReason"])
 ' <<<"$output"
   assert_success
   assert_line --index 0 "PreToolUse deny"
-  assert_line --index 1 --partial "This checkout is pinned to 'main' — refusing to switch it to 'x'."
-  assert_line --index 1 --partial "git config --unset hooks.pinnedBranch"
+  assert_line --index 1 "This checkout is pinned to 'main' — refusing to switch it to 'x'."
+  assert_line --index 2 --partial "worktree"
+  assert_line --index 3 "To unpin it for good: git config --unset hooks.pinnedBranch"
 }
 
 @test "an allowed command produces no output" {

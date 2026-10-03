@@ -89,6 +89,11 @@ def _target(args: list[str]) -> tuple[str, bool] | None:
             return None  # `git checkout -- <path>` restores files
         if tok in _NAMES_TARGET:
             return (args[i + 1], True) if i + 1 < len(args) else None
+        # git also takes a short option's value attached: `-bfeature` is
+        # `-b feature`. Matching only the separate-token form let
+        # `git checkout -bfeature` create and switch a branch unjudged.
+        if len(tok) > 2 and tok[:2] in _NAMES_TARGET:
+            return tok[2:], True
         if tok in _FLAGS_WITH_VALUE:
             i += 2
             continue
@@ -174,8 +179,8 @@ def _violation(cwd: str, target: str) -> tuple[str, str] | None:
 
 def _reason(pinned: str, target: str) -> str:
     return (
-        f"This checkout is pinned to '{pinned}' — refusing to switch it to '{target}'. "
-        "Branch work belongs in its own worktree, not in this checkout. "
+        f"This checkout is pinned to '{pinned}' — refusing to switch it to '{target}'.\n"
+        "Branch work belongs in its own worktree, not in this checkout.\n"
         "To unpin it for good: git config --unset hooks.pinnedBranch"
     )
 
