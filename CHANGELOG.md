@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.73.1] - 2026-10-03
+
+### Fixes
+
+- unblock the sandboxed gate and correct stale agent docs [N/A] (#947) (9601164)
+
 ## [2.73.0] - 2026-09-29
 
 ### Features
