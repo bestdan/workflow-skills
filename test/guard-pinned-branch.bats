@@ -181,7 +181,7 @@ print(h["permissionDecisionReason"])
   assert_line --index 0 "PreToolUse deny"
   assert_line --index 1 "This checkout is pinned to 'main' — refusing to switch it to 'x'."
   assert_line --index 2 --partial "worktree"
-  assert_line --index 3 "To move this checkout anyway: env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git checkout x"
+  assert_line --index 3 "To move this checkout anyway: env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git checkout -b x"
   assert_line --index 4 "To unpin it for good: git config --unset hooks.pinnedBranch"
 }
 
@@ -190,6 +190,28 @@ print(h["permissionDecisionReason"])
   run run_hook "$pinned" 'git switch -d other'
   assert_success
   assert_output --partial "env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git checkout --detach other"
+  run run_hook "$pinned" 'git checkout other'
+  assert_success
+  assert_output --partial "env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git checkout other\\n"
+}
+
+# The bypass line is a command to run, so a refused creation offers a creation:
+# `git checkout x` fails on a branch that does not exist yet.
+@test "the bypass line carries the creating flag in checkout's spelling" {
+  run run_hook "$pinned" 'git switch -c feat'
+  assert_output --partial "git checkout -b feat\\n"
+  run run_hook "$pinned" 'git switch -Cfeat'
+  assert_output --partial "git checkout -B feat\\n"
+  run run_hook "$pinned" 'git checkout --orphan=fresh'
+  assert_output --partial "git checkout --orphan fresh\\n"
+  run run_hook "$pinned" 'git switch --orphan fresh'
+  assert_output --partial "git checkout --orphan fresh\\n"
+}
+
+# A ref name may hold `$` or a quote, which the shell would expand or choke on.
+@test "the bypass line shell-quotes the target" {
+  run run_hook "$pinned" "git checkout -b 'a\$HOME'"
+  assert_output --partial "git checkout -b 'a\$HOME'\\n"
 }
 
 # hooks.json runs the guard by its path, so the exec bit and the shebang are
