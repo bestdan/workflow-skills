@@ -80,6 +80,8 @@ STRICT_FILES=(scripts/research-spike.py)
 # the harness itself — hooks/hooks.json registers them on PostToolUse and
 # PreToolUse, so they execute on every installed machine. bash_command.py is
 # the parser guard-foreign-worktree.py imports, so it runs wherever that does.
+# guard-pinned-branch.py is not registered yet but ships as a PreToolUse hook
+# script on the same parser, so it is held to the same floor.
 CONSUMER_FILES=(
   commands/handlers/assets/*.py
   scripts/local-review/server.py
@@ -88,6 +90,7 @@ CONSUMER_FILES=(
   scripts/grok-telemetry-gate.py
   scripts/worktree-teardown-reminder.py
   scripts/guard-foreign-worktree.py
+  scripts/guard-pinned-branch.py
   scripts/bash_command.py
 )
 CONSUMER_PYTHON=3.9
