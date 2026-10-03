@@ -129,7 +129,7 @@ capability matrix.
 
 ### Worktree lifecycle
 
-The plugin registers four hooks. Three of them create and tear down an
+The plugin registers five hooks. Three of them create and tear down an
 isolated worktree without anything being typed: `WorktreeCreate` puts it where
 [`scripts/worktree-config.sh`](scripts/worktree-config.sh) says worktrees live
 (not inside the repo, which aborts in a repo that versions its own agent
@@ -150,6 +150,16 @@ naming the path — and points at `EnterWorktree` instead. Reads are allowed.
 It also warns once when write-work starts in a main checkout on its default
 branch. Bypass one Bash call with
 `env WORKFLOW_SKILLS_ALLOW_FOREIGN_WRITE=1 <command>`.
+
+The fifth, also on `PreToolUse`
+([`scripts/guard-pinned-branch.py`](scripts/guard-pinned-branch.py)), applies
+only to a repo that opts in with `git config --local hooks.pinnedBranch main`:
+it refuses a `git checkout`/`git switch` that would move that repo's main
+checkout off the pinned branch, so branch work goes to a worktree. Each call is
+judged where it actually runs — a `cd <worktree> && git checkout -b x` is
+allowed — and linked worktrees are never pinned. Bypass one call with
+`env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git checkout <branch>`; the assignment
+has to sit on that git call.
 
 | Skill                                                      | Trigger                                                | What it does                                                                                                                                                             |
 | ---------------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

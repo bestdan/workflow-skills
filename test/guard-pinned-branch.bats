@@ -68,6 +68,8 @@ allowed() {
 
 @test "a branch switch in a pinned main worktree is denied" {
   denied "$pinned" 'git checkout -b x'
+  denied "$pinned" 'git checkout -b bestdan/feature'
+  denied "$pinned" 'git switch -c bestdan/feature'
   denied "$pinned" 'git switch other'
   denied "$pinned" 'git checkout other'
   denied "$pinned" 'git switch -c feature'
@@ -179,7 +181,154 @@ print(h["permissionDecisionReason"])
   assert_line --index 0 "PreToolUse deny"
   assert_line --index 1 "This checkout is pinned to 'main' — refusing to switch it to 'x'."
   assert_line --index 2 --partial "worktree"
-  assert_line --index 3 "To unpin it for good: git config --unset hooks.pinnedBranch"
+  assert_line --index 3 "To move this checkout anyway: env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git checkout -b x"
+  assert_line --index 4 "To unpin it for good: git config --unset hooks.pinnedBranch"
+}
+
+# The bypass line is a command to run, so it repeats the refused call rather
+# than rebuilding one: a rebuilt `git checkout -b feat` dropped the start point,
+# and `checkout --orphan` keeps the old files staged where `switch --orphan`
+# empties the tree.
+@test "the bypass line repeats the refused call verbatim" {
+  git -C "$pinned" update-ref refs/remotes/origin/feat "$(git -C "$pinned" rev-parse other)"
+  run run_hook "$pinned" 'git switch -d other'
+  assert_output --partial "WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git switch -d other\\n"
+  run run_hook "$pinned" 'git checkout other'
+  assert_output --partial "WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git checkout other\\n"
+  run run_hook "$pinned" 'git switch -c feat origin/feat'
+  assert_output --partial "WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git switch -c feat origin/feat\\n"
+  run run_hook "$pinned" 'git switch --orphan fresh'
+  assert_output --partial "WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git switch --orphan fresh\\n"
+}
+
+# A ref name may hold `$` or a quote, which the shell would expand or choke on,
+# and a quoted name with a space must come back as one argument, not two.
+@test "the bypass line shell-quotes the arguments" {
+  run run_hook "$pinned" "git checkout -b 'a\$HOME'"
+  assert_output --partial "git checkout -b 'a\$HOME'\\n"
+  run run_hook "$pinned" 'git checkout -b "a b"'
+  assert_output --partial "git checkout -b 'a b'\\n"
+}
+
+# A call judged after a `cd` or a `git -C` names that directory, so the line
+# acts on the same repo when run from the session's own.
+@test "the bypass line carries -C when the call ran elsewhere" {
+  run run_hook "$tmp" 'git -C pinned checkout other'
+  assert_output --partial "WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git -C $pinned checkout other\\n"
+  run run_hook "$tmp" 'cd pinned && git checkout other'
+  assert_output --partial "WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git -C $pinned checkout other\\n"
+  run run_hook "$pinned" 'git checkout other'
+  refute_output --partial "git -C"
+}
+
+# hooks.json runs the guard by its path, so the exec bit and the shebang are
+# what make it run at all. Every other case pipes into python3 and would pass
+# without either.
+@test "the guard runs by its path, as hooks.json invokes it" {
+  [ -x "$HOOK" ]
+  run bash -c 'python3 -c "
+import json, sys
+print(json.dumps({\"tool_name\": \"Bash\", \"cwd\": sys.argv[1],
+                  \"tool_input\": {\"command\": \"git checkout other\"}}))
+" "$1" | "$2"' _ "$pinned" "$HOOK"
+  assert_success
+  assert_output --partial '"permissionDecision": "deny"'
+}
+
+@test "hooks.json registers the guard on the Bash PreToolUse matcher" {
+  run python3 -c '
+import json, sys
+h = json.load(open(sys.argv[1]))["hooks"]["PreToolUse"]
+bash = [m for m in h if m["matcher"] == "Bash"][0]
+print("\n".join(x["command"] for x in bash["hooks"]))
+' "$REPO_ROOT/hooks/hooks.json"
+  assert_success
+  assert_line '${CLAUDE_PLUGIN_ROOT}/scripts/guard-pinned-branch.py'
+}
+
+@test "--orphan with its name attached is a new branch" {
+  denied "$pinned" 'git checkout --orphan=x'
+  denied "$pinned" 'git switch --orphan=x'
+  denied "$pinned" 'git checkout --orphan x'
+  allowed "$pinned" 'git checkout --orphan='
+}
+
+# --- cd tracking -----------------------------------------------------------
+#
+# Each git call is judged against the directory it actually runs in, so a cd
+# earlier in the command moves it.
+
+@test "a cd into the pinned repo is judged there" {
+  denied "$plain" "cd $pinned && git checkout other"
+  denied "$plain" "cd $pinned; git checkout other"
+  denied "$tmp" 'cd pinned && git checkout other'
+}
+
+# The workflow the pin pushes people toward: from a session rooted at the
+# pinned main checkout, cd into a linked worktree and branch there.
+@test "a cd into a linked worktree is judged against the worktree" {
+  git -C "$pinned" worktree add -q "$tmp/wt" -b wt-branch
+  allowed "$pinned" "cd $tmp/wt && git checkout -b x"
+  allowed "$pinned" "cd $tmp/wt; git switch other"
+  allowed "$tmp" 'cd wt && git checkout other'
+  # ...and a cd back out is judged against the pinned checkout again.
+  denied "$tmp/wt" "cd $pinned && git checkout other"
+}
+
+# An unresolvable cd must make the guard decline rather than fall back to the
+# directory the shell has just left: that fallback is a confident wrong verdict.
+@test "an unresolvable cd declines to judge" {
+  allowed "$pinned" 'cd - && git checkout other'
+  allowed "$pinned" 'cd $SOMEVAR && git checkout other'
+  allowed "$pinned" 'cd "$SOMEVAR/x"; git checkout other'
+}
+
+@test "a bare cd goes to HOME" {
+  HOME="$pinned" denied "$plain" 'cd && git checkout other'
+  HOME="$plain" allowed "$pinned" 'cd && git checkout other'
+}
+
+# $HOME and ~ arrive at a hook unexpanded, and agents are told to spell
+# worktree paths with $HOME, so both must resolve, after cd and after -C.
+@test "\$HOME and ~ resolve after cd and after -C" {
+  git -C "$pinned" worktree add -q "$tmp/wt" -b wt-branch
+  HOME="$tmp" denied "$plain" 'cd $HOME/pinned && git checkout other'
+  HOME="$tmp" denied "$plain" 'cd ~/pinned && git checkout other'
+  HOME="$tmp" denied "$plain" 'git -C $HOME/pinned checkout other'
+  HOME="$tmp" denied "$plain" 'git -C ~/pinned checkout other'
+  HOME="$tmp" allowed "$pinned" 'cd $HOME/wt && git checkout other'
+  HOME="$tmp" allowed "$pinned" 'cd ~/wt && git checkout other'
+  HOME="$tmp" allowed "$pinned" 'git -C $HOME/wt checkout other'
+  HOME="$tmp" allowed "$pinned" 'git -C ~/wt checkout other'
+}
+
+# A relative -C is relative to the shell's cwd, which a cd has moved.
+@test "a relative -C resolves against the tracked cwd" {
+  allowed "$tmp" 'cd pinned && git -C ../plain checkout other'
+  denied "$tmp" 'cd plain && git -C ../pinned checkout other'
+}
+
+@test "-C at the main checkout from inside a worktree is denied" {
+  git -C "$pinned" worktree add -q "$tmp/wt" -b wt-branch
+  denied "$tmp/wt" "git -C $pinned checkout -b x"
+}
+
+# --- the bypass, and its scope ----------------------------------------------
+
+@test "the bypass assignment on the git call allows it" {
+  allowed "$pinned" 'env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git checkout other'
+  allowed "$pinned" 'WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git checkout other'
+  allowed "$plain" "cd $pinned && env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git checkout other"
+}
+
+# The bypass is an assignment on the invocation, never a word in the command:
+# anything that merely names the variable, such as grepping the docs that
+# document it, must not disarm the guard, and the assignment disarms only the
+# call it prefixes.
+@test "the bypass covers its own invocation only" {
+  denied "$pinned" 'env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git status; git checkout other'
+  denied "$pinned" 'rg WORKFLOW_SKILLS_ALLOW_HEAD_MOVE; git checkout other'
+  denied "$pinned" 'echo WORKFLOW_SKILLS_ALLOW_HEAD_MOVE && git checkout other'
 }
 
 @test "an allowed command produces no output" {
