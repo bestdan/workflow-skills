@@ -93,7 +93,7 @@ Linear's free plan caps a workspace at a fixed number of **non-archived issues o
    **Both halves of that are measured, not assumed** — probed 2026-09-16 against the live PreThink workspace. An unfiltered call with `includeArchived: false` returned issues of every state type, `completed` among them (132 issues, `hasNextPage: false`), so omitting the `state` filter does not silently narrow to active states. And `limit: 10` returned exactly 10 with `hasNextPage: true`, confirming the count saturates at `limit` — which is why step 3 renders a lower bound rather than an exact figure.
 3. **Report, and promote regardless.** Let `remaining = active_issue_quota - issue_count`.
    - `remaining > 0` → note the headroom in step 9's report and proceed.
-   - `remaining <= 0` → the workspace is at or over the cap. **Report it as a lower bound:** step 2's call is capped at `limit: <active_issue_quota>`, so `issue_count` saturates there and can never exceed it — render `≥<active_issue_quota>/<active_issue_quota>` whenever step 2 saw `hasNextPage: true`, never an exact-looking figure that understates. **Every HIGH candidate still promotes** — the transition is legal and costs nothing. Lead step 9's report with one of two lines, chosen by whether the configured threshold **is** Linear's cap. The domain allows any value `0`–`250`, so a sub-250 threshold is an operator's own early-warning line and must never be reported as a refusal Linear will not make:
+   - `remaining <= 0` → the workspace is at or over the cap. **Report it as a lower bound:** step 2's call is capped at `limit: <active_issue_quota>`, so `issue_count` saturates there and can never exceed it — render `≥<active_issue_quota>/<active_issue_quota>` whenever step 2 saw `hasNextPage: true`, never an exact-looking figure that understates. **Every HIGH candidate still promotes** — the transition is legal and costs nothing. End step 9's report with one of two lines, chosen by whether the configured threshold **is** Linear's cap. The domain allows any value `0`–`250`, so a sub-250 threshold is an operator's own early-warning line and must never be reported as a refusal Linear will not make:
 
      - `active_issue_quota` **is 250** (Linear's real cap) — the next `/add-task` or `/push-plan` **will** be refused, so say so:
 
@@ -128,7 +128,6 @@ Print the same summary shape as the file path (`commands/promote-tasks.md` step 
 
 ```
 scope: project Payments revamp
-⚠ workspace at ≥250/250 non-archived issues — Linear will refuse to CREATE new issues until you run /archive-tasks. Promotions are unaffected by this cap.
 ⚠ candidate query for project Payments revamp hit the 500-candidate cap — some backlog issues may not have been scored this run.
 Promoted 5 of 8 candidates:
   ready (4):
@@ -145,9 +144,10 @@ Promoted 5 of 8 candidates:
 backfilled (2):
   - PRE-12  (estimate)
   - PRE-18  (priority, estimate)
+⚠ workspace at ≥250/250 non-archived issues — Linear will refuse to CREATE new issues until you run /archive-tasks. Promotions are unaffected by this cap.
 ```
 
-Skipped issues are reported with their reason — `already scored`, `parent rollup`, or `blocked`. **There is no `held (quota)` section**: a promotion spends no quota, so nothing is ever held for one (see step 7). When step 7 finds the workspace at or over the cap, its warning **leads** the report — the constraint is real, it just binds the next `/add-task` or `/push-plan` rather than this run. The 500-cap warning (if it applied) leads too; print both, quota first.
+Skipped issues are reported with their reason — `already scored`, `parent rollup`, or `blocked`. **There is no `held (quota)` section**: a promotion spends no quota, so nothing is ever held for one (see step 7). When step 7 finds the workspace at or over the cap, its warning is the report's **last line**, below the out-of-scope note: it is the one line that asks the reader to act, and the constraint binds the next `/add-task` or `/push-plan` rather than this run. The 500-cap warning (if it applied) still leads, because it qualifies this run's counts rather than asking for an action.
 
 **Out-of-scope backlog note.** When the resolved scope is **narrower than the whole team** — a single project (step 4 cases 3–4), or the all-configured union (which still excludes unconfigured projects and unassigned issues) — append a one-line note that backlog outside the scored scope was **not** examined this run, so the run's success isn't mistaken for "the whole backlog is triaged". Make the remediation **scope-aware**, and note that the whole-team backlog has **no per-run override** — it is scored only when **no** projects are configured (step 4 cases 1–2), a config-level state, not a flag. For example:
 

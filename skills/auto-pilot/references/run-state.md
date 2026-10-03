@@ -342,20 +342,20 @@ A deferred co-review finding that was also filed as a tracked follow-up (see
 
 ### `REPORT.md`
 
-The report, rewritten after every unit of work. Sections:
+The report, rewritten after every unit of work. Sections, in this order — what
+a human must judge comes last, because the end is what a reader is left on. The
+supervisor's alarm line is the one exception: it is the run's verdict, so it
+goes at the very top (`run-budget.md`, "The alarm").
 
 1. **Outcomes** — per task: `handed-off` / `parked` / `skipped` + one line why.
    A `skipped` line gives the refusal reason from its `notes` cell, and names
    each task left `pending` because it is blocked by that one.
-2. **Decisions** — the highlights from `QUESTIONS.md` worth a human's eye.
-3. **Evidence** — links to the check output, screenshots, and exercised-feature
+2. **Evidence** — links to the check output, screenshots, and exercised-feature
    artifacts each PR carries.
-4. **How-to-evaluate queue** — for each human-judgment checkpoint: exactly how
-   to evaluate it and what a "no" would invalidate.
-5. **Review classes per PR** — which reviewer classes ran / timed-out / skipped
+3. **Review classes per PR** — which reviewer classes ran / timed-out / skipped
    for each PR (the summary `/co-review --non-interactive` emits).
-6. **Spend** — usage against the rate window and any per-task bounds hit.
-7. **Follow-ups** — the index of every co-review finding filed as a tracked
+4. **Spend** — usage against the rate window and any per-task bounds hit.
+5. **Follow-ups** — the index of every co-review finding filed as a tracked
    task this run: task id, source PR, and the one-line finding. A finding is
    auto-filed via `/add-task` (tagged `auto-pilot`) when it is deferred **and**
    either **cross-cutting** (its faithful fix would touch a file outside the
@@ -371,6 +371,9 @@ The report, rewritten after every unit of work. Sections:
    before they enter work, so a hallucinated finding is caught before it costs
    anything. If `/add-task` itself fails, the run does not fail — the finding
    is recorded here as a plain bullet (task id `none`) instead.
+6. **Decisions** — the highlights from `QUESTIONS.md` worth a human's eye.
+7. **How-to-evaluate queue** — for each human-judgment checkpoint: exactly how
+   to evaluate it and what a "no" would invalidate.
 
 ## Run-state branch
 

@@ -418,10 +418,22 @@ remaining findings and proceed — don't loop.
   **hard rule** (the execute path never moves an issue to a completed/canceled
   state). This is the skill's terminal success state.
 - **Hand-off summary** (structured — for a human, or the `/auto-pilot` morning
-  report): task id, PR URL, reviewer classes that ran, outstanding findings (the
-  deferred judgment calls), any verification tests left unrun, co-review's
-  **Next round** recommendation from the last round (its verdict and reason,
-  verbatim — the human decides whether to run it), and evidence paths.
+  report). It ends on what the human must act on, because the end is what a
+  terminal leaves on screen. In order:
+  1. **Verdict line** — task id, PR URL, the tracker state set, and how many
+     items wait in the closing section (or "nothing needs you").
+  2. **What changed** — a few lines, by behavior, not by file.
+  3. **Review and evidence** — reviewer classes that ran, what the rounds
+     applied, evidence paths.
+  4. **Process notes** — deviations from the normal flow, worktree left in
+     place. Omit when empty.
+  5. **For you**, always last, numbered, highest impact first: outstanding
+     findings (the deferred judgment calls), verification tests left unrun,
+     an acceptance criterion not met, and co-review's **Next round**
+     recommendation from the last round (its verdict and reason, verbatim — the
+     human decides whether to run it). Each item carries its options and what
+     each costs, so the human can answer without scrolling up. Omit the section
+     when it is empty.
 - **Freeze rule:** once a task hands off, its PR is **frozen for the rest of a
   run** — late-arriving findings (e.g. a bot review that lands after co-review's
   timeout) are **logged, never applied**. This keeps a stacked child's base
