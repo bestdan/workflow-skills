@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.74.0] - 2026-10-03
+
+### Features
+
+- add pinned-branch guard's checkout decision, unregistered [#930] (#946) (1fa4268)
+
 ## [2.73.1] - 2026-10-03
 
 ### Fixes
