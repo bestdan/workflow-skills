@@ -447,7 +447,11 @@ it is a `WARN`. Print the corrected rules and let the human place them.
 
 ### 3. Report (and fix under `--fix`)
 
-**Report-only (default).** Print the status block and stop — no writes:
+**Report-only (default).** Print the status block and stop — no writes. Group
+the lines by status, not by check number: every `PASS` first, then `FAIL` (what
+`--fix` repairs), then `WARN` (what needs a human), each with its remediation
+hint, and the tally line last. A failing early check then still lands next to
+the tally, where the reader is left.
 
 ```
 /doctor — repo-pr handler
@@ -464,7 +468,8 @@ it is a `WARN`. Print the corrected rules and let the human place them.
 ```
 
 **`--fix`.** Apply only the **safe, mechanical** repairs, then re-print the block
-with each fixed check marked `FIXED`:
+with each fixed check marked `FIXED` and grouped with the `PASS` lines, so the
+`WARN` lines left for the human still come last:
 
 - **Legacy dirs** → run the **Legacy migration** procedure from `skills/task/SKILL.md`
   (the same one the implicit preflight uses). Because `--fix` is the explicit
