@@ -186,10 +186,9 @@ run is the exact defect this runbook exists to prevent.
      an exception for its own notes.
 
 Do not probe `gh` anywhere else in the run, and do not use it directly — the verbs
-call it themselves. That includes their own `gh auth status` preflights (for
-example `commands/handlers/gh-issue-promote.md` step 1): those belong to the verb,
-and because `gh auth status` exits 0 even when it calls the token invalid, they do
-not stop a working run. Let them run, and do not treat their output as a gate.
+call it themselves. This restricts only probes this runbook would add. A verb's own
+`gh auth status` preflight (for example `commands/handlers/gh-issue-promote.md`
+step 1) belongs to the verb and runs as the verb writes it.
 
 ### 1. Repair the label invariants
 

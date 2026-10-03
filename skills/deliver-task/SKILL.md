@@ -140,10 +140,13 @@ git fetch origin <base>:<base>          # default <base> = main
 "${CLAUDE_PLUGIN_ROOT}/scripts/preflight-freshness.sh" --ref <base>
 ```
 
-Git refuses to fetch into the branch the current checkout has checked out
-(`refusing to fetch into branch 'refs/heads/main' checked out at …`), which is the
-normal case when this runs from the main checkout. There, update it with
+Git refuses to fetch into a branch that any worktree has checked out
+(`refusing to fetch into branch 'refs/heads/main' checked out at <path>`). When
+`<path>` is this checkout (`git rev-parse --show-toplevel`), update it with
 `git pull --ff-only origin <base>` instead, then run the same freshness check.
+When `<path>` is another worktree, a pull here would move this checkout's branch,
+not `<base>`: stop and report that `<base>` is checked out at `<path>` and must be
+updated there.
 
 On `stale`, stop and surface it (the work branch would start behind); on
 `unknown`, warn and proceed.

@@ -16,7 +16,10 @@ fx() { printf '%s' "$REPO_ROOT/test/fixtures/lint-mktemp/$1"; }
 
 @test "catches mktemp with no template in every spelling" {
   # Bare, -d, -t <prefix>, backticks, a statement followed by `;`, and bundled
-  # flags all leave the file under /var/folders.
+  # flags all leave the file under /var/folders. Lines 7-8 pin that -t is
+  # flagged whatever follows it: its argument is a prefix, so even a quoted
+  # $TMPDIR path lands under /var/folders. Lines 9-10 pin that a redirection
+  # ends the options: `2>/dev/null` silences the failure without avoiding it.
   lint "$(fx violations.txt)"
   assert_failure 1
   assert_output --partial "violations.txt:1:"
@@ -25,6 +28,10 @@ fx() { printf '%s' "$REPO_ROOT/test/fixtures/lint-mktemp/$1"; }
   assert_output --partial "violations.txt:4:"
   assert_output --partial "violations.txt:5:"
   assert_output --partial "violations.txt:6:"
+  assert_output --partial "violations.txt:7:"
+  assert_output --partial "violations.txt:8:"
+  assert_output --partial "violations.txt:9:"
+  assert_output --partial "violations.txt:10:"
 }
 
 @test "the finding names the fix, not just the fault" {

@@ -18,8 +18,12 @@
 # The fix is a template under `$TMPDIR`:
 #   mktemp "${TMPDIR:-/tmp}/<name>.XXXXXX"     (add -d for a directory)
 #
-# A `mktemp` followed only by option words (and `-t <prefix>`) and then the end
-# of the command is flagged; any other argument is taken to be a template.
+# Two shapes are flagged: a `mktemp` followed only by option words and then the
+# end of the command or a redirection (`2>/dev/null` hides the failure, it does
+# not avoid it), and any `mktemp` carrying `-t` (alone or bundled, as in
+# `-dt`). `-t` is flagged whatever its argument, because its argument is a
+# prefix, not a path: `mktemp -t "$TMPDIR/x.XXXXXX"` still creates under
+# /var/folders. Any other argument is taken to be a template.
 #
 # It takes its files as ARGUMENTS rather than discovering them, for the reason
 # scripts/lint-bash4.sh gives: test/lint-mktemp.bats runs it over fixtures.
@@ -30,7 +34,7 @@ if [ "$#" -eq 0 ]; then
   exit 2
 fi
 
-mt_re='(^|[^[:alnum:]_-])mktemp([[:space:]]+(-[A-Za-z]+|-t[[:space:]]+[^[:space:]/)"]+))*[[:space:]]*($|[)&;|`])' # mktemp-lint: allow
+mt_re='(^|[^[:alnum:]_-])mktemp([[:space:]]+-[A-Za-z]+)*([[:space:]]*($|[)&;|`]|[0-9]*[<>])|[[:space:]]+-[A-Za-z]*t[A-Za-z]*([[:space:]]|$))' # mktemp-lint: allow
 
 fail=0
 # Same comment handling as scripts/lint-pipefail.sh: prose about the rule does

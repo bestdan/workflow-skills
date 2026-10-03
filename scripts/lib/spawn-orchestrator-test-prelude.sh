@@ -98,13 +98,12 @@ fi
 #
 # Bare `mktemp -d` (no template) ignores $TMPDIR on macOS — it resolves
 # _CS_DARWIN_USER_TEMP_DIR via confstr and always targets /var/folders/...,
-# which a sandbox denies regardless of what $TMPDIR is set to. So the first
-# arm alone is not a real $TMPDIR attempt; it has to fail before $TMPDIR is
-# even consulted. The second arm targets $TMPDIR explicitly (falling back to
-# /tmp if unset) so a sandboxed run actually lands fixtures in the writable
-# tree it was granted, instead of skipping straight to the repo-local
-# fallback. The repo-local fallback stays last, and is now only ever reached
-# when both temp dirs are unwritable too: under the primary checkout a
+# which a sandbox denies regardless of what $TMPDIR is set to
+# (scripts/lint-mktemp.sh rejects it). So the first arm targets $TMPDIR
+# explicitly (falling back to /tmp if unset), which lands a sandboxed run's
+# fixtures in the writable tree it was granted. The repo-local fallback stays
+# last, and is only ever reached when $TMPDIR is unwritable too: under the
+# primary checkout a
 # sandbox denies git's metadata-preserving template copy into it ("cannot
 # copy .../hooks/commit-msg.sample ... Operation not permitted"), which
 # cascaded ~139 failures through every fixture that git-inits a subdir.
@@ -121,8 +120,7 @@ fi
 # change the probe's skip conditions without noticing this, and a
 # behavioral-denial test could start passing for the same wrong reason the
 # six nested-sandbox false greens did (see the SEATBELT_OK probe below).
-BASE="$(mktemp -d 2>/dev/null \
-  || mktemp -d "${TMPDIR:-/tmp}/so-test.XXXXXX" 2>/dev/null \
+BASE="$(mktemp -d "${TMPDIR:-/tmp}/so-test.XXXXXX" 2>/dev/null \
   || mktemp -d "$ROOT/.so-test.XXXXXX")"
 trap 'rm -rf "$BASE"' EXIT
 # If the cd fails, exit rather than falling through with an empty BASE (which

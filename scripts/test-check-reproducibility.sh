@@ -23,8 +23,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="$ROOT/scripts/analysis-pipeline/check-reproducibility.sh"
 EXAMPLE="$ROOT/skills/analysis-pipeline/example"
 
-BASE="$(mktemp -d 2>/dev/null \
-  || mktemp -d "${TMPDIR:-/tmp}/check-repro-test.XXXXXX" 2>/dev/null \
+BASE="$(mktemp -d "${TMPDIR:-/tmp}/check-repro-test.XXXXXX" 2>/dev/null \
   || mktemp -d "$ROOT/.check-repro-test.XXXXXX")"
 [ -n "$BASE" ] && [ -d "$BASE" ] || {
   echo "test-check-reproducibility: could not create a temp dir" >&2
