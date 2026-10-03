@@ -355,10 +355,11 @@ line goes into the hand-off summary (step 7). If `/co-review` can't run **at all
 verified; note `co-review unavailable` and proceed to hand-off (review is
 advisory).
 
-Co-review's own scripts run without a prompt only when this delivery was started
-as the `/deliver-task` command or under `bypassPermissions`; reached through the
-Skill tool in `default` mode, each one prompts, and under `claude -p` each is
-denied silently. Why, and the measurement:
+This plugin grants co-review's own scripts when this delivery was started as the
+`/deliver-task` command, and `bypassPermissions` skips the check. Reached through
+the Skill tool in `default` mode, with no user allow rule or sandbox auto-allow
+covering them, each one is denied silently under `claude -p` (measured) and is
+expected to prompt interactively (not measured). Why, and the measurement:
 [`../co-review/references/permissions.md`](../co-review/references/permissions.md#plugin-scripts).
 
 ## 6. Iterate (bounded)

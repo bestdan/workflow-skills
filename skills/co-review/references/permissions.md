@@ -25,7 +25,7 @@ The reviewer command is **invariant**: everything that varies per PR (the diff a
 
 <a id="plugin-scripts"></a>
 
-**The plugin's own scripts need no rule: `SKILL.md` grants them.** Its `allowed-tools` front-matter names each script this skill runs — the pre-flights, `await-pr-review.sh`, `pr-fix-guard.sh`, `coreview-conventions.sh`, the anchor-check, the grok telemetry gate and the drift checker — as `${CLAUDE_PLUGIN_ROOT}/scripts/<name>`. The variable is substituted when the skill loads, so the grant follows the plugin into each new version directory and never goes stale.
+**When a slash command opens the turn, the plugin's own scripts need no rule: `SKILL.md` grants them.** When the model invokes the skill instead, the grant does not apply; see below. Its `allowed-tools` front-matter names each script this skill runs — the pre-flights, `await-pr-review.sh`, `pr-fix-guard.sh`, `coreview-conventions.sh`, the anchor-check, the grok telemetry gate and the drift checker — as `${CLAUDE_PLUGIN_ROOT}/scripts/<name>`. The variable is substituted when the skill loads, so the grant follows the plugin into each new version directory and never goes stale.
 
 A settings rule cannot do this. The matcher compares a prefix rule only up to a whole shell token, and the quoted script path is one token that includes the version (`"…/workflow-skills/2.70.4/scripts/preflight-cwd.sh"`). A rule that stops above the version segment matches nothing, with or without the opening quote; only a rule naming the full path does, and that dies at the next release. Measured with `claude -p --permission-mode default` and one rule at a time: `Bash("…/ws/ws/:*)` and `Bash(…/ws/ws/:*)` were denied, `Bash("…/ws/ws/1.0/scripts/x.sh":*)` was allowed. If your settings still carry a `…/workflow-skills/workflow-skills/:*` rule, delete it; it has never fired, and the drift checker reports it DEAD.
 
@@ -35,12 +35,13 @@ A settings rule cannot do this. The matcher compares a prefix rule only up to a 
 
 **A model-invoked skill's grant is never applied; the slash command that opened the turn is what grants.** Measured on a probe plugin under `claude -p --permission-mode default`, 2 of 2 runs per row, with user settings excluded (`--setting-sources project` and the sandbox off — with sandbox auto-allow on, every row runs, including a script no skill grants, so the measurement says nothing):
 
-| How the skill is reached                                                                           | Its script                                 |
-| -------------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| Its own slash command; the skill grants the script                                                 | ran                                        |
-| The model invokes it with the Skill tool, `Skill(<plugin>:<skill>)` allowed                        | denied                                     |
-| A slash command whose `allowed-tools` lists `Bash` or the script, then the Skill tool, 1 or 2 hops | ran, with or without the skill's own grant |
-| A slash command whose `allowed-tools` lists only `Skill`, or nothing, then the Skill tool          | denied, even with the skill's own grant    |
+| How the skill is reached                                                                  | Its script                                     |
+| ----------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| Its own slash command; the skill grants the script                                        | ran                                            |
+| The model invokes it with the Skill tool, `Skill(<plugin>:<skill>)` allowed               | denied                                         |
+| A slash command whose `allowed-tools` lists `Bash`, then the Skill tool, 1 or 2 hops      | ran, with or without the skill's own grant     |
+| A slash command whose `allowed-tools` lists the script's path, then the Skill tool, 1 hop | ran (measured only with the skill's own grant) |
+| A slash command whose `allowed-tools` lists only `Skill`, or nothing, then the Skill tool | denied, even with the skill's own grant        |
 
 So `/co-review` typed as a command runs under this skill's grant, and `/deliver-task` typed as a command covers co-review's review step through `commands/deliver-task.md`'s `allowed-tools: Bash`, which carries through both Skill hops. What stays uncovered is `/deliver-task` reached **without** its command — routed by the `task` skill from "pick up #<n>", or invoked by another skill. There each co-review script prompts in `default` mode and is denied silently under `claude -p`, and no grant in this plugin can reach it: the only grant that applies is the opening command's, and the model has no tool that opens one (a nested `claude -p "/co-review …"` would, and was not measured). Start it as `/deliver-task`, or run with `bypassPermissions` as `/auto-pilot` does. Interactive sessions were not measured.
 
