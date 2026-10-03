@@ -64,90 +64,22 @@ import hashlib
 import json
 import os
 import re
-import shlex
 import subprocess
 import sys
 
-BYPASS = "WORKFLOW_SKILLS_ALLOW_FOREIGN_WRITE"
+# A hook runs as a standalone script, not as part of a package, so the shared
+# parser is found by this file's own directory rather than by an install path.
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 
-# --- command parsing ---------------------------------------------------------
-# A copy of the parser in bestdan/dotfiles' agents/guard_dangerous_git.py and
-# agents/guard_pinned_branch.py, which is hardened against redirects, wrappers,
-# executors, quoting and segment splitting. A plugin hook cannot import from a
-# machine's dotfiles, so the pieces this guard uses live here.
-
-# Anything that ends a command and starts a new one. Deliberately quote-blind:
-# `echo "$(…; git commit)"` really does run git, and every attempt to make a
-# regex track quoting failed open.
-_SEGMENT_SPLIT = re.compile(r"[|;&\n()`{}]+")
-
-# A whole redirect — operator and target — dropped BEFORE the split, because
-# three redirect operators are spelled with a character the splitter treats as
-# a separator (`2>&1`, `>&2` on `&`; `>| file` on `|`). The target is one shell
-# word, quoted or escaped whitespace included; an fd duplication takes none.
-_REDIRECT = re.compile(
-    r"""
-    (?: & | [0-9]+ )?
-    (?: <<< | << | >> | >\| | < | > )
-    (?:
-        & [0-9]* -?
-      | [ \t]* (?: "[^"]*" | '[^']*' | (?: \\. | [^\s|;&()`{}<>] )* )
-    )
-    """,
-    re.VERBOSE,
+from bash_command import (  # noqa: E402  (needs the sys.path entry above)
+    expand,
+    git_calls,
+    head_index,
+    head_word,
+    segments,
 )
 
-# Wrappers that run the command after them, and take options of their own —
-# so a wrapped segment is scanned at every position rather than at its head.
-_WRAPPERS = {"rtk", "sudo", "command", "env", "nohup", "time", "exec", "builtin"}
-# Shell keywords that can open a segment; they take no options.
-_KEYWORDS = {"if", "elif", "then", "else", "do", "while", "until", "!"}
-_PREFIX = _WRAPPERS | _KEYWORDS
-# Head words that run their arguments, so git can sit anywhere after them.
-_EXECUTORS = {"bash", "sh", "zsh", "dash", "ksh", "eval", "xargs", "ssh"}
-# git's own options that take a separate value token.
-_GIT_OPTS_WITH_VALUE = {
-    "-C",
-    "-c",
-    "--git-dir",
-    "--work-tree",
-    "--namespace",
-    "--exec-path",
-    "--config-env",
-}
-
-
-def _tokenize(segment: str) -> list[list[str]]:
-    """Tokenize a segment both ways, because neither alone is enough.
-
-    Stripping quote characters and splitting on whitespace tears a quoted
-    argument containing a space; ``shlex`` gets that right but folds
-    ``$'…'`` into one token. Both forms are returned and either may match.
-    """
-    forms = [re.sub(r"\$?[\"']", "", segment).split()]
-    try:
-        forms.append(shlex.split(segment))
-    except ValueError:
-        pass  # segment splitting can cut a quote in half
-    return forms
-
-
-def _expand(path: str, cwd: str | None) -> str | None:
-    """Resolve a path token the way the shell would, or None if we cannot.
-
-    No shell expansion has happened by the time a hook sees the command, so
-    ``$HOME/src/...`` and ``~/src/...`` arrive literally and are expanded here.
-    Any OTHER variable makes the path unknowable, where declining beats
-    guessing.
-    """
-    if path.startswith("$HOME/") or path == "$HOME":
-        path = os.path.expanduser("~") + path[len("$HOME") :]
-    if "$" in path:
-        return None
-    path = os.path.expanduser(path)
-    if os.path.isabs(path):
-        return path
-    return os.path.join(cwd, path) if cwd else None
+BYPASS = "WORKFLOW_SKILLS_ALLOW_FOREIGN_WRITE"
 
 
 # git subcommands that change a working tree, an index, or a branch — the ones
@@ -464,21 +396,6 @@ def _git_writes(sub: str, args: list[str]) -> bool:
     return False
 
 
-def _segments(cmd: str):
-    """Yield the token forms of each command segment.
-
-    Redirects are stripped BEFORE the split, because three redirect operators
-    are spelled with a
-    character the splitter treats as a separator (`2>&1` and `>&2` on `&`,
-    `>| file` on `|`), so splitting first leaves a bare fd number as the
-    segment's head word and the command behind it is never reached. Redirect
-    *targets* are therefore recovered from the whole command instead of from a
-    segment, in `_write_targets`.
-    """
-    for segment in _SEGMENT_SPLIT.split(_REDIRECT.sub(" ", cmd)):
-        yield _tokenize(segment)
-
-
 def _bypassed(cmd: str) -> bool:
     """Whether the bypass is set as a real assignment anywhere in this Bash call.
 
@@ -487,89 +404,12 @@ def _bypassed(cmd: str) -> bool:
     merely NAMES the variable — in this repo that includes grepping the docs
     that document it.
     """
-    for forms in _segments(cmd):
+    for forms in segments(cmd):
         for tokens in forms:
-            head = _head_index(tokens)
+            head = head_index(tokens)
             if f"{BYPASS}=1" in tokens[:head]:
                 return True
     return False
-
-
-def _git_calls(tokens: list[str]):
-    """Yield ``(dir_override, subcommand, args)`` per git call in one segment.
-
-    Head-word anchoring and the wrapper/executor scan are the dotfiles
-    parser's; what is kept here — and what that parser normalizes away — is
-    ``-C``, which decides WHICH repo
-    a command targets and is therefore the whole question.
-
-    A work tree named by ``--work-tree`` or a ``GIT_WORK_TREE=`` prefix is
-    where a mutating subcommand actually writes, so it wins over ``-C``. A
-    relative one resolves against the ``-C`` directory, as git does.
-    """
-    head = 0
-    wrapped = False
-    while head < len(tokens) and (
-        tokens[head] in _PREFIX or re.match(r"^[A-Za-z_][\w]*=", tokens[head])
-    ):
-        wrapped = wrapped or tokens[head] in _WRAPPERS
-        head += 1
-    if head >= len(tokens):
-        return
-    scan_all = wrapped or tokens[head] in _EXECUTORS
-    for start in range(head, len(tokens)) if scan_all else [head]:
-        word = tokens[start]
-        if word != "git" and not word.endswith("/git"):
-            continue
-        i = start + 1
-        dir_override = None
-        work_tree = None
-        for token in tokens[:start]:
-            if token.startswith("GIT_WORK_TREE="):
-                work_tree = token[len("GIT_WORK_TREE=") :]
-        while i < len(tokens) and tokens[i].startswith("-"):
-            if tokens[i].startswith("--work-tree="):
-                work_tree = tokens[i][len("--work-tree=") :]
-            elif tokens[i] in _GIT_OPTS_WITH_VALUE:
-                if i + 1 < len(tokens):
-                    if tokens[i] == "-C":
-                        dir_override = tokens[i + 1]
-                    elif tokens[i] == "--work-tree":
-                        work_tree = tokens[i + 1]
-                i += 1
-            i += 1
-        if work_tree:
-            if dir_override and not os.path.isabs(os.path.expanduser(work_tree)):
-                work_tree = os.path.join(dir_override, work_tree)
-            dir_override = work_tree
-        if i < len(tokens):
-            yield dir_override, tokens[i], tokens[i + 1 :]
-
-
-def _head_index(tokens: list[str]) -> int:
-    """Index of a segment's command word, past any wrapper, keyword or assignment.
-
-    A wrapper's own options (`sudo -n`) are skipped too. One that takes a
-    value (`sudo -u root`) still leaves the value as the head, which fails open.
-    """
-    i = 0
-    wrapped = False
-    while i < len(tokens) and (
-        tokens[i] in _PREFIX
-        or re.match(r"^[A-Za-z_][\w]*=", tokens[i])
-        or (wrapped and tokens[i].startswith("-"))
-    ):
-        wrapped = wrapped or tokens[i] in _WRAPPERS
-        i += 1
-    return i
-
-
-def _head_word(tokens: list[str]) -> str | None:
-    """The command word of a segment, past any wrapper, keyword or assignment."""
-    i = _head_index(tokens)
-    if i >= len(tokens):
-        return None
-    return os.path.basename(tokens[i])
 
 
 # The two grades of evidence `_write_targets` yields.
@@ -612,10 +452,10 @@ def _write_targets(cmd: str, cwd: str):
     a `cd` into one that IS foreign is already denied.
     """
     inline_interpreter = False
-    for forms in _segments(cmd):
+    for forms in segments(cmd):
         for tokens in forms:
-            head_at = _head_index(tokens)
-            head = _head_word(tokens)
+            head_at = head_index(tokens)
+            head = head_word(tokens)
             operands = [t for t in tokens[head_at + 1 :] if not t.startswith("-")]
             # `<<` is asked of the whole command rather than this segment: the
             # heredoc operator is stripped along with the rest of the redirect
@@ -627,13 +467,13 @@ def _write_targets(cmd: str, cwd: str):
                 inline_interpreter = True
             # Only a `cd` in command position: `rg cd <path>` is a read.
             if head == "cd" and operands:
-                resolved = _expand(operands[0], cwd)
+                resolved = expand(operands[0], cwd)
                 if resolved:
                     yield _real(resolved), REACH
-            for dir_override, sub, args in _git_calls(tokens):
+            for dir_override, sub, args in git_calls(tokens):
                 if not _git_writes(sub, args):
                     continue
-                target = _expand(dir_override, cwd) if dir_override else cwd
+                target = expand(dir_override, cwd) if dir_override else cwd
                 if target:
                     yield _real(target), DEFINITE
             grade = None
@@ -646,12 +486,12 @@ def _write_targets(cmd: str, cwd: str):
                 grade = REACH
             if grade:
                 for token in operands:
-                    resolved = _expand(token, cwd)
+                    resolved = expand(token, cwd)
                     if resolved:
                         yield _real(resolved), grade
     for match in _WRITE_REDIRECT.finditer(cmd):
         target = match.group(1).strip("\"'")
-        resolved = _expand(target, cwd)
+        resolved = expand(target, cwd)
         if resolved:
             yield _real(resolved), DEFINITE
     if inline_interpreter:
@@ -660,7 +500,7 @@ def _write_targets(cmd: str, cwd: str):
         # a leading `./` or `../` — is offered instead, and the caller decides
         # which of them lands in a foreign worktree.
         for match in re.finditer(r"(?:\.\.?/|\$HOME|~|/)[^\s\"'`,;:)\]}]*", cmd):
-            resolved = _expand(match.group(0), cwd)
+            resolved = expand(match.group(0), cwd)
             if resolved:
                 yield _real(resolved), REACH
 
@@ -771,7 +611,7 @@ def main() -> None:
             )
             if raw is None:
                 return
-            resolved = _expand(raw, cwd)
+            resolved = expand(raw, cwd)
             if not resolved:
                 return
             targets = [(_real(resolved), DEFINITE)]
