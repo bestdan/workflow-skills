@@ -342,11 +342,11 @@ index: [`references/run-state.md`](references/run-state.md) "`REPORT.md`".
 **Human checkpoints produce artifacts, then proceed.** When a task needs
 genuine human judgment, the run still does not block: `/deliver-task` ensures
 the PR carries a working end-to-end state plus a how-to-evaluate note, the
-orchestrator records the same entry in `REPORT.md`'s _How-to-evaluate queue_,
+orchestrator records the same entry in `REPORT.md`'s _For you_ section,
 and the loop moves on.
 
 **Rolling `REPORT.md` update.** After every task's state update above, rewrite
-`REPORT.md` from the current `RUN.md` + `QUESTIONS.md` state — the seven
+`REPORT.md` from the current `RUN.md` + `QUESTIONS.md` state — the six
 sections in [`references/run-state.md`](references/run-state.md)'s "`REPORT.md`"
 order. Commit it on the run-state branch as part of that state update's commit,
 under the write order's last step. Its _Spend_ section stays a one-line

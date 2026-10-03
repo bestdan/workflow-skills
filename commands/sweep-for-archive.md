@@ -183,7 +183,7 @@ in the report; restoring it wrongly costs a re-triage.
 
 ## 6. Report
 
-One block, in leg order:
+One block: what happened, in leg order, then what the reader must act on, last.
 
 - **Scope** — `window: <since> · projects: <names> · mode: dry-run | apply`.
 - **Leg 1 — verified** — count, and the `IDENTIFIER <- PR #n` rows.
@@ -191,17 +191,19 @@ One block, in leg order:
   tripped it, plus the step 5 outcome (`restored`, `left (declined)`,
   `left (unattended)`, or `left (dry-run)`).
 - **Leg 2 — sweep** — the handler's own counts (`k completed, m open, u
-  unresolved, s no-PR skipped, c closed-unmerged`) and its out-of-scope warning
-  line verbatim when it printed one.
+  unresolved, s no-PR skipped, c closed-unmerged`).
 - **Leg 3 — archived** — count archived, any failures with their error, and
-  which ids came from leg 1 versus leg 2.
-- **Dry run** — the same block with each leg's mutations stated as _would_, and
-  one explicit closing line: "nothing changed (dry-run) — re-run with `--apply`."
+  which ids came from leg 1 versus leg 2. State the two exclusions whenever they
+  are non-empty, because their absence from the archived list is the report's
+  most load-bearing silence: `N false closure(s) excluded from the archive set`
+  and `N issue(s) left in flight (open PR)`.
+- **For you**, always last, omitted when empty — each false closure left
+  unrestored (`left (declined)`, `left (unattended)`, `left (dry-run)`) by
+  identifier, leg 2's out-of-scope warning line verbatim when it printed one,
+  and on a dry run the closing line "nothing changed (dry-run) — re-run with
+  `--apply`."
 
-State the two exclusions explicitly whenever they are non-empty, because their
-absence from the archived list is the report's most load-bearing silence:
-`N false closure(s) excluded from the archive set` and `N issue(s) left in flight
-(open PR)`.
+A dry run prints the same block with each leg's mutations stated as _would_.
 
 ## 7. Scheduling
 
