@@ -115,6 +115,19 @@ allowed() {
   allowed "$pinned" 'git checkout does-not-exist'
 }
 
+# A word that is both a branch and a path switches, in git, for checkout and
+# switch alike; a path only matters when the word is not a ref, and only to
+# checkout, which then refuses as ambiguous against a remote-only branch.
+@test "a branch sharing its name with a path is still a switch" {
+  mkdir "$pinned/docs" "$pinned/docs2"
+  git -C "$pinned" branch docs
+  git -C "$pinned" update-ref refs/remotes/origin/docs2 "$(git -C "$pinned" rev-parse main)"
+  denied "$pinned" 'git checkout docs'
+  denied "$pinned" 'git switch docs'
+  denied "$pinned" 'git switch docs2'
+  allowed "$pinned" 'git checkout docs2'
+}
+
 # A bare target only switches when it is the LAST positional.
 @test "a tree-ish followed by paths, or patch mode, restores rather than switches" {
   allowed "$pinned" 'git checkout other -- file.txt'

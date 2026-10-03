@@ -125,22 +125,30 @@ def _target(args: list[str]) -> tuple[str, bool] | None:
     return None
 
 
-def _moves_head(cwd: str, target: str) -> bool:
-    """Whether a bare `git checkout <target>` would switch rather than restore.
+def _moves_head(cwd: str, target: str, subcommand: str) -> bool:
+    """Whether a bare `git <subcommand> <target>` would switch rather than restore.
 
     Without this, `git checkout README.md` — an ordinary file restore, which
     moves no HEAD — is read as a switch to a branch called README.md and
-    denied. An existing path wins: where the word is both, git itself refuses
-    as ambiguous, and treating it as a path means the guard declines to judge
-    rather than blocking a command git was going to reject anyway.
+    denied.
+
+    The order follows git's, measured against git 2.43 with a branch and a
+    directory sharing one name. A word that resolves as a commit switches,
+    whether or not a path of that name exists, for checkout and switch alike;
+    checking the path first let `git checkout docs` move the pin whenever the
+    repo had a `docs/` directory. Only when the word is NOT a ref does a path
+    matter, and only to `checkout`: there git restores the path, or refuses
+    as ambiguous when a remote also holds the name, so declining to judge
+    blocks nothing git was going to run. `switch` takes no paths at all and
+    DWIMs the remote branch regardless.
     """
-    if os.path.exists(os.path.join(cwd, target)):
-        return False
     if (
         _git(cwd, "rev-parse", "--verify", "--quiet", f"{target}^{{commit}}")
         is not None
     ):
         return True
+    if subcommand == "checkout" and os.path.exists(os.path.join(cwd, target)):
+        return False
     # git's DWIM: `git checkout foo` with no local `foo` but exactly one
     # `<remote>/foo` creates the local branch and switches to it. That resolves
     # no local ref, so the check above misses it — and it is a common shape,
@@ -211,7 +219,7 @@ def main() -> None:
                 cwd = expand(dir_override, base) if dir_override else base
                 if not cwd or not os.path.isdir(cwd):
                     continue  # a path we cannot resolve is not a repo we can judge
-                if not is_new and not _moves_head(cwd, target):
+                if not is_new and not _moves_head(cwd, target, subcommand):
                     continue
                 violation = _violation(cwd, target)
                 if violation:
