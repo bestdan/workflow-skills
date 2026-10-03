@@ -74,6 +74,9 @@ allowed() {
   denied "$pinned" 'git checkout --quiet other'
   denied "$pinned" 'git checkout -'
   denied "$pinned" 'git fetch && git checkout other'
+  denied "$pinned" 'bash -c "git checkout other"'
+  # An explicit detach still leaves the pin.
+  denied "$pinned" 'git switch -d other'
 }
 
 @test "-C pointing at the pinned repo is denied, absolute or relative to the payload cwd" {
