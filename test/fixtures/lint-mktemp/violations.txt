@@ -1,0 +1,6 @@
+log="$(mktemp)"
+dir="$(mktemp -d)"
+f=$(mktemp -t prefix)
+tmp=`mktemp`
+mktemp -q; echo done
+out=$(mktemp -dq)

@@ -207,9 +207,10 @@ for test_script in scripts/test-*.sh; do
   case "$test_script" in
     scripts/test-*-live.sh | scripts/test-spawn-orchestrator*.sh | scripts/test-shell.sh) continue ;;
     scripts/test-research-spike.sh) [[ "$fast" == 1 ]] && continue ;;
-    # Greps the REAL dev_docs/auto-pilot*.md, so a dev_docs-only diff can
-    # regress it; it is one grep, so it always runs.
-    scripts/test-autopilot-framing.sh)
+    # Each reads the REAL dev_docs/ tree (auto-pilot*.md; the tracked
+    # .handoffs/), so a dev_docs-only diff can regress it; each is one cheap
+    # call, so it always runs.
+    scripts/test-autopilot-framing.sh | scripts/test-handoffs-untracked.sh)
       run "$test_script"
       continue
       ;;

@@ -140,13 +140,18 @@ git fetch origin <base>:<base>          # default <base> = main
 "${CLAUDE_PLUGIN_ROOT}/scripts/preflight-freshness.sh" --ref <base>
 ```
 
+Git refuses to fetch into the branch the current checkout has checked out
+(`refusing to fetch into branch 'refs/heads/main' checked out at …`), which is the
+normal case when this runs from the main checkout. There, update it with
+`git pull --ff-only origin <base>` instead, then run the same freshness check.
+
 On `stale`, stop and surface it (the work branch would start behind); on
 `unknown`, warn and proceed.
 
 **Then re-resolve the handler config from the fetched base — every value the claim
-uses is read _after_ this fetch, never before it.** `dev_docs/tasks/.task-config.yml`
-is tracked, so the base that just moved can carry a different config, and step 2 is
-the first consumer of its handler-specific keys.
+uses is read _after_ this fetch, never before it.** Where
+`dev_docs/tasks/.task-config.yml` is tracked, the base that just moved can carry a
+different config, and step 2 is the first consumer of its handler-specific keys.
 
 **It refreshes the chosen handler's _keys_, not the handler.** `handler:` itself is
 not re-resolved mid-delivery: an explicit `--handler` stays authoritative per

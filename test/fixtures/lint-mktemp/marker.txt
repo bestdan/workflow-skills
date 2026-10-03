@@ -1,0 +1,2 @@
+f="$(mktemp)" # mktemp-lint: allow
+g="$(mktemp) # mktemp-lint: allow"
