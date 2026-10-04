@@ -159,7 +159,9 @@ checkout off the pinned branch, so branch work goes to a worktree. Each call is
 judged where it actually runs — a `cd <worktree> && git checkout -b x` is
 allowed — and linked worktrees are never pinned. Bypass one call with
 `env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git checkout <branch>`; the assignment
-has to sit on that git call.
+has to be the first words of a top-level git command. A refusal of a plain git
+call prints that line ready to copy; one inside `bash -c`, `sudo` or a
+subshell says where the assignment goes instead.
 
 | Skill                                                      | Trigger                                                | What it does                                                                                                                                                             |
 | ---------------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

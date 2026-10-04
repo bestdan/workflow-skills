@@ -110,6 +110,22 @@ allowed() {
   allowed "$tmp/wt-detach" 'git switch --detach main'
 }
 
+# git accepts short flags clustered, so `-qd` detaches as `-q -d` would.
+@test "a clustered detach flag is a detach" {
+  denied "$pinned" 'git switch -qd main'
+  denied "$pinned" 'git switch -qd'
+  # A letter that takes a value ends the cluster: `-cd` creates branch `d`.
+  run python3 -c '
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("g", sys.argv[1])
+g = importlib.util.module_from_spec(spec); spec.loader.exec_module(g)
+print(g._detaches("switch", ["-qd", "main"]), g._detaches("switch", ["-cd"]),
+      g._detaches("checkout", ["-bd"]), g._detaches("switch", ["--", "-qd"]))
+' "$HOOK"
+  assert_success
+  assert_output "True False False False"
+}
+
 @test "returning to the pin is allowed" {
   git -C "$pinned" checkout -q other
   allowed "$pinned" 'git checkout main'
@@ -241,6 +257,42 @@ print(h["permissionDecisionReason"])
   assert_output --partial "To move this checkout anyway: cd $pinned && env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git checkout other\\n"
   run run_hook "$pinned" 'git checkout other'
   refute_output --partial "anyway: cd "
+}
+
+# An absolute -C fixes where git runs even when the shell's own directory is
+# unknown or missing, so the call is still refused — and the line carries no
+# `cd`, which could not run. Building that line once crashed the hook, which
+# exits nonzero and lets the checkout through.
+@test "an absolute -C after an unknown cd is refused without a cd in the line" {
+  local c
+  for c in "cd - ; git -C $pinned checkout other" "cd /missing; git -C $pinned checkout other" "cd \$X && git -C $pinned checkout other"; do
+    run run_hook "$tmp" "$c"
+    assert_success
+    assert_output --partial "To move this checkout anyway: env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git -C $pinned checkout other\\n"
+  done
+}
+
+# A call inside an executor, behind a wrapper or in a subshell cannot be
+# replayed faithfully: the splitter has thrown the structure away, and a
+# replay of `bash -c 'cd wt && git checkout other'` would act on the pinned
+# checkout itself. Those refusals say where the assignment goes and carry no
+# command to copy.
+@test "a call the guard cannot replay gets advice, not a command" {
+  git -C "$pinned" worktree add -q "$tmp/wt-gen" -b wt-gen
+  local c
+  for c in 'bash -c "git checkout other"' \
+    "bash -c 'cd $tmp/wt-gen; git checkout other; true'" \
+    "sudo -u $USER git checkout other" \
+    '(git checkout other)'; do
+    run run_hook "$pinned" "$c"
+    assert_output --partial "permissionDecision\": \"deny"
+    refute_output --partial "anyway: env"
+    refute_output --partial "anyway: cd"
+    assert_output --partial "as the first words of that line"
+  done
+  run run_hook "$plain" "env -i GIT_WORK_TREE=$pinned git checkout other"
+  refute_output --partial "anyway: env"
+  assert_output --partial "as the first words of that line"
 }
 
 # The line is offered as the way through, so the guard must honour it.

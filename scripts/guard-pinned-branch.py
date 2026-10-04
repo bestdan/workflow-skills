@@ -54,6 +54,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 
 from bash_command import (  # noqa: E402
+    EXECUTORS,
     PREFIX,
     expand,
     git_calls,
@@ -83,6 +84,32 @@ _PATCH = {"-p", "--patch"}
 # `-d` is `--detach` on switch; checkout documents only `--detach`, and git
 # rejects `checkout -d` itself, so counting it there costs nothing.
 _DETACH = {"-d", "--detach"}
+
+# Short options whose value may follow attached, so the rest of a cluster
+# after one is that value, not more flags: `-cd` creates a branch named `d`.
+# `-t` takes an optional attached value.
+_ATTACHED_VALUE = {"checkout": set("bBt"), "switch": set("cCt")}
+
+
+def _detaches(subcommand: str, args: list[str]) -> bool:
+    """Whether the call asks for a detached HEAD.
+
+    git accepts short flags clustered, so `git switch -qd main` detaches as
+    `-q -d` would; matching `-d` as a whole token missed it, and the call was
+    then waved through as a return to the pin.
+    """
+    for tok in args:
+        if tok == "--":
+            return False
+        if tok in _DETACH:
+            return True
+        if tok.startswith("-") and not tok.startswith("--") and len(tok) > 2:
+            for letter in tok[1:]:
+                if letter in _ATTACHED_VALUE.get(subcommand, set()):
+                    break
+                if letter == "d":
+                    return True
+    return False
 
 
 def _apply_cd(tokens: list[str], cwd: str | None) -> str | None:
@@ -128,7 +155,7 @@ def _bypassed(tokens: list[str]) -> bool:
 
 
 def _git_calls(cmd: str, base: str | None):
-    """Yield ``(cwd, shell_cwd, subcommand, args, call)`` per git call.
+    """Yield ``(cwd, shell_cwd, subcommand, args, call, plain)`` per git call.
 
     ``cwd`` is the directory git acts in (after any ``-C``/work tree);
     ``shell_cwd`` is where the shell stands when the call runs (after any
@@ -190,7 +217,30 @@ def _git_calls(cmd: str, base: str | None):
                 # A relative `-C` is relative to the SHELL's cwd, not to
                 # whatever directory this hook process happens to run in.
                 here = expand(dir_override, cwd) if dir_override else cwd
-                yield here, cwd, subcommand, args, call
+                # Plain: shlex parsed the segment, and nothing but NAME=value
+                # assignments stands before `git` — no wrapper or executor.
+                plain = len(forms) == 2 and tokens is forms[-1] and call == tokens
+                yield here, cwd, subcommand, args, call, plain
+
+
+def _simple(cmd: str) -> bool:
+    """Whether the whole command is shaped so that a refused call can be replayed.
+
+    The splitter is quote-blind, so a git call inside `bash -c '…'`, `$(…)`, a
+    subshell or a brace group lands in a segment of its own that looks plain,
+    and is judged against the outer directory. A replay of it would act there
+    too: for `bash -c 'cd wt && git checkout other'` it would move the pinned
+    checkout itself. This errs toward generic advice — an executor word
+    anywhere, even as a branch name, rules a replay out.
+    """
+    if any(c in cmd for c in "()`{}"):
+        return False
+    for forms in segments(cmd):
+        if len(forms) != 2:
+            return False  # shlex could not parse it: a quote was cut
+        if any(tok in EXECUTORS for tok in forms[-1]):
+            return False
+    return True
 
 
 def _target(args: list[str]) -> tuple[str, bool] | None:
@@ -316,16 +366,28 @@ def _violation(cwd: str, target: str, detached: bool) -> tuple[str, str] | None:
     return pinned, target
 
 
-def _reason(pinned: str, target: str, bypass: str) -> str:
+def _reason(pinned: str, target: str, bypass: str | None) -> str:
+    anyway = f"To move this checkout anyway: {bypass}\n" if bypass else _GENERIC_BYPASS
     return (
         f"This checkout is pinned to '{pinned}' — refusing to switch it to '{target}'.\n"
         "Branch work belongs in its own worktree, not in this checkout.\n"
-        f"To move this checkout anyway: {bypass}\n"
+        f"{anyway}"
         "To unpin it for good: git config --unset hooks.pinnedBranch"
     )
 
 
-def _bypass_line(shell_cwd: str, base: str, call: list[str]) -> str:
+# For a call the guard cannot replay faithfully (inside an executor, behind a
+# wrapper, in a subshell). No command to copy: the guard honours the
+# assignment only as the first words of a top-level segment, so the advice
+# says where it goes rather than guessing the rest.
+_GENERIC_BYPASS = (
+    "To move this checkout anyway, run the git command on a line of its own, "
+    "from the directory it should act in, with "
+    f"{BYPASS}=1 set by `env` as the first words of that line.\n"
+)
+
+
+def _bypass_line(shell_cwd: str | None, base: str, call: list[str]) -> str:
     """The refused call as written, with the bypass assignment on it.
 
     The line is a command to run, so it repeats the refused call rather than
@@ -339,8 +401,15 @@ def _bypass_line(shell_cwd: str, base: str, call: list[str]) -> str:
     assignment goes on the git segment, which is the only place the guard
     honours it.
     """
-    here = os.path.normpath(shell_cwd)
-    cd = f"cd {shlex.quote(here)} && " if here != os.path.normpath(base) else ""
+    cd = ""
+    # An unknown or missing shell directory (`cd -`, `cd /missing`) still
+    # reaches here when an absolute `-C` fixes where git runs; that call means
+    # the same from anywhere, and a `cd` to a directory that is not there
+    # could not run, so the line goes without one.
+    if shell_cwd and os.path.isdir(shell_cwd):
+        here = os.path.normpath(shell_cwd)
+        if here != os.path.normpath(base):
+            cd = f"cd {shlex.quote(here)} && "
     return f"{cd}env {BYPASS}=1 {shlex.join(call)}"
 
 
@@ -354,11 +423,12 @@ def main() -> None:
     cmd = data.get("tool_input", {}).get("command", "")
     base = data.get("cwd") or os.getcwd()
 
-    for cwd, shell_cwd, subcommand, args, call in _git_calls(cmd, base):
+    simple = _simple(cmd)
+    for cwd, shell_cwd, subcommand, args, call, plain in _git_calls(cmd, base):
         if subcommand not in {"checkout", "switch"}:
             continue
         found = _target(args)
-        detached = any(tok in _DETACH for tok in args)
+        detached = _detaches(subcommand, args)
         # A bare `--detach` names no target but still detaches HEAD where it
         # stands, so it is judged as a move to HEAD. A `--` or patch mode makes
         # it a file restore, which _target has already turned down.
@@ -373,7 +443,7 @@ def main() -> None:
             continue
         violation = _violation(cwd, target, detached)
         if violation:
-            bypass = _bypass_line(shell_cwd, base, call)
+            bypass = _bypass_line(shell_cwd, base, call) if simple and plain else None
             print(
                 json.dumps(
                     {
