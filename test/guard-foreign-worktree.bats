@@ -262,7 +262,7 @@ bash_case() { expect "$1" Bash "$2" command "$3"; }
 import json, sys
 h = json.load(open(sys.argv[1]))["hooks"]["PreToolUse"]
 print(sorted(g["matcher"] for g in h
-             if any(e["command"].endswith("guard-foreign-worktree.py") for e in g["hooks"])))
+             if any(e["command"].strip("\"").endswith("guard-foreign-worktree.py") for e in g["hooks"])))
 ' "$REPO_ROOT/hooks/hooks.json"
   assert_success
   assert_output "['Bash', 'Edit|Write|NotebookEdit']"

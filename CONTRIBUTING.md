@@ -73,8 +73,9 @@ itself faster, is in [`dev_docs/gate-performance.md`](dev_docs/gate-performance.
 Five deterministic, blocking checks, plus the shell lint and Bats suites:
 
 1. **`dprint check`** — formatting (config in `dprint.json`).
-2. **`claude plugin validate . --strict`** — official manifest/frontmatter
-   validation.
+2. **`claude plugin validate .`** — official manifest/frontmatter
+   validation. Errors fail the gate; warnings don't until #965, because the
+   validator reads `commands/handlers/*.md` as slash commands.
 3. **`uv run scripts/validate.py`** — repo-specific rules the above don't cover:
    - skill/command/agent frontmatter shape; skill `name` (if set) matches its
      directory and the `^[a-z0-9-]+$` slug rules; `description` non-empty and

@@ -70,9 +70,9 @@ fire() {
 import json, sys
 h = json.load(open(sys.argv[1]))["hooks"]["PostToolUse"]
 entries = [e for g in h for e in g["hooks"]
-           if e["command"].endswith("worktree-teardown-reminder.py")]
+           if e["command"].strip("\"").endswith("worktree-teardown-reminder.py")]
 matchers = [g["matcher"] for g in h
-            if any(e["command"].endswith("worktree-teardown-reminder.py")
+            if any(e["command"].strip("\"").endswith("worktree-teardown-reminder.py")
                    for e in g["hooks"])]
 print(len(entries), matchers)
 ' "$REPO_ROOT/hooks/hooks.json"
