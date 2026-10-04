@@ -176,12 +176,7 @@ run() {
 }
 
 run dprint check --incremental=false
-# Not --strict until #965: from Claude Code 2.1.289 the validator also scans
-# commands/handlers/*.md as slash commands (they are handler docs, with no
-# frontmatter) and flags the repo's own root CLAUDE.md, and strict mode fails
-# on those 36 warnings. Errors, such as frontmatter that does not parse,
-# still fail the gate.
-run claude plugin validate .
+run claude plugin validate . --strict
 run uv run scripts/validate.py
 run scripts/dev-docs-layout.sh
 run scripts/typecheck.sh
