@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.74.3] - 2026-10-04
+
+### Fixes
+
+- pass plugin validation under Claude Code 2.1.289 [N/A] (#966) (1521e62)
+
 ## [2.74.2] - 2026-10-03
 
 ### Fixes
