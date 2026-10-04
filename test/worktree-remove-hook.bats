@@ -214,5 +214,5 @@ e = d["WorktreeRemove"][0]["hooks"][0]
 print(e["type"], e["command"], e["timeout"])
 ' "$REPO_ROOT/hooks/hooks.json"
   assert_success
-  assert_output 'command ${CLAUDE_PLUGIN_ROOT}/scripts/worktree-remove-hook.sh 120'
+  assert_output 'command "${CLAUDE_PLUGIN_ROOT}/scripts/worktree-remove-hook.sh" 120'
 }

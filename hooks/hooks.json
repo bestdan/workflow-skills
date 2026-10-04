@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/worktree-create-hook.sh"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/worktree-create-hook.sh\""
           }
         ]
       }
@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/worktree-remove-hook.sh",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/worktree-remove-hook.sh\"",
             "timeout": 120
           }
         ]
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/guard-foreign-worktree.py"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/guard-foreign-worktree.py\""
           }
         ]
       },
@@ -36,7 +36,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/guard-foreign-worktree.py"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/guard-foreign-worktree.py\""
           }
         ]
       }
@@ -47,7 +47,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/worktree-teardown-reminder.py"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/worktree-teardown-reminder.py\""
           }
         ]
       }
