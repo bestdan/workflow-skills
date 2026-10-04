@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.75.1] - 2026-10-04
+
+### Fixes
+
+- restore strict plugin validation [N/A] (#964) (d9fe71e)
+
 ## [2.75.0] - 2026-10-04
 
 ### Features
