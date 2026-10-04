@@ -1,3 +1,9 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+user-invocable: false
+---
+
 # repo-pr handler — /do-tasks file-path execute flow
 
 Invoked from `/do-tasks` when the handler is `repo-pr` (or absent). Scan for

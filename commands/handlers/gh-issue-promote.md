@@ -1,3 +1,9 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+user-invocable: false
+---
+
 # gh-issue handler — /promote-tasks flow
 
 Invoked from `/promote-tasks` when `handler: gh-issue` is configured. Scores the repo's **open, un-scored** issues against the same confidence check the file path uses, then applies the kanban transition through the schema writer: HIGH → `status:2_ready` + `auto:eligible` (the gh analogue of moving to `Todo`); LOW → `status:1_needs_refinement` + `auto:human-review-needed`, plus a comment naming the failed check.

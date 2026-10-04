@@ -73,9 +73,11 @@ itself faster, is in [`dev_docs/gate-performance.md`](dev_docs/gate-performance.
 Five deterministic, blocking checks, plus the shell lint and Bats suites:
 
 1. **`dprint check`** — formatting (config in `dprint.json`).
-2. **`claude plugin validate .`** — official manifest/frontmatter
-   validation. Errors fail the gate; warnings don't until #965, because the
-   validator reads `commands/handlers/*.md` as slash commands.
+2. **`claude plugin validate . --strict`** — official manifest/frontmatter
+   validation; warnings fail the gate too. The validator reads
+   `commands/handlers/*.md` as slash commands, so each handler carries a stub
+   frontmatter with `disable-model-invocation: true` (out of Claude's routing)
+   and `user-invocable: false` (out of the `/` menu).
 3. **`uv run scripts/validate.py`** — repo-specific rules the above don't cover:
    - skill/command/agent frontmatter shape; skill `name` (if set) matches its
      directory and the `^[a-z0-9-]+$` slug rules; `description` non-empty and
@@ -306,6 +308,9 @@ promote, do, process), update the **handler capability matrix** in
 `commands/task-config.md` in the same PR — it's the single source of truth that
 `/task-config` reads to warn users about capability gaps, and it drifts silently
 if you don't.
+
+A new `commands/handlers/*.md` file needs the same stub frontmatter as the
+existing handlers: copy it from one. Gate item 2 above says why.
 
 ## Releasing
 

@@ -1,3 +1,9 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+user-invocable: false
+---
+
 # jira handler — /complete-task flow
 
 Invoked from `/complete-task <identifier> [--dry-run]` when `handler: jira` is
