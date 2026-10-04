@@ -89,13 +89,14 @@ run_br() {
 
 # ------------------------------------------------------------------- the gates
 
-@test "a branch that moved past its merged PR is kept" {
+@test "a branch whose tip is not its merged PR's head is kept" {
   mkbranch tipmoved
   gh_says 0 "0000000000000000000000000000000000000000 main"
   run_br "$REPO" tipmoved
   assert_failure 3
   assert has_branch tipmoved
-  assert_output --partial "moved past it"
+  assert_output --partial "different commit than this tip"
+  assert_output --partial "rebased or updated elsewhere"
   refute_output --partial "deleted branch"
 }
 
@@ -129,7 +130,7 @@ run_br() {
   assert has_branch stacked
   assert_output --partial "merged into feature/parent"
   assert_output --partial "main (per origin/HEAD)"
-  refute_output --partial "moved past it"
+  refute_output --partial "different commit than this tip"
 }
 
 @test "a parent-base PR at the tip plus an older default-base PR still keeps the branch" {

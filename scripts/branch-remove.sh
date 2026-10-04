@@ -221,7 +221,7 @@ oids=$(awk -v d="$default" '$2 == d { print $1 }' <<<"$merged")
 if ! grep -Fqx "$tip" <<<"$oids"; then
   # A merged PR whose head is this exact tip, merged somewhere other than the
   # default, is the stacked case and gets its own message: the branch really did
-  # merge, so "moved past its PR" would be a lie, and the parent has to be named
+  # merge, so "merged at a different commit" would be a lie, and the parent has to be named
   # because it is what the caller has to wait on. Nothing here can tell whether
   # the parent has since landed — a squash rebuilds the child's commit again on
   # the way in, so the child's merged OID is never an ancestor of the default
@@ -235,8 +235,15 @@ if ! grep -Fqx "$tip" <<<"$oids"; then
     cont "  git -C $root branch -D $branch"
     exit 3
   fi
-  warn "kept branch $branch — a PR with this name merged, but the"
-  cont "branch has moved past it, so -D would discard commits no PR merged:"
+  # The tip differs from every head a default-base PR merged, and this gate
+  # cannot tell which way: commits added after the merge, a PR rebased or pushed
+  # to from elsewhere (the local copy then predates what merged), or a reused
+  # name. The merged OID is often not local, so no ancestry test settles it here.
+  # Name the shapes rather than guess one; the reader is deciding whether -D is safe.
+  warn "kept branch $branch — a PR with this name merged, but at a"
+  cont "different commit than this tip: the branch gained commits after the merge,"
+  cont "or the PR was rebased or updated elsewhere. Either way -D could discard"
+  cont "commits no PR merged. Check, then:"
   cont "  git -C $root branch -D $branch"
   exit 3
 fi

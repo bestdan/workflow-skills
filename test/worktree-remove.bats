@@ -450,7 +450,7 @@ swt() {
   assert_failure
 }
 
-@test "a branch that moved past its merged PR is kept, and the removal still succeeds" {
+@test "a branch whose tip is not its merged PR's head is kept, and the removal still succeeds" {
   # A merged PR under this name is not proof about the commit the name points at
   # NOW. Reuse the name, or push past the merge, and a count-based gate would
   # still say "merged" while -D threw the new commits away.
@@ -460,7 +460,7 @@ swt() {
   assert_success
   assert [ ! -e "$target" ]
   assert has_branch branch-tipmoved
-  assert_output --partial "moved past it"
+  assert_output --partial "different commit than this tip"
   refute_output --partial "deleted branch"
 }
 
