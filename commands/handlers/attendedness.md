@@ -1,6 +1,7 @@
 ---
 description: Handler procedure read by its dispatching command; not run directly.
 disable-model-invocation: true
+user-invocable: false
 ---
 
 # Attendedness — is a human present to answer right now?

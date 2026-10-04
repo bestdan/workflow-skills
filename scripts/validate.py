@@ -269,8 +269,10 @@ for d in skill_dirs:
 # --- commands (top-level only) ---
 # commands/handlers/*.md are reference procedures bundled into the task skill,
 # not slash commands, and are intentionally skipped. The CLI still discovers
-# them as commands, so each carries a stub frontmatter with
-# disable-model-invocation: true to satisfy `claude plugin validate --strict`.
+# them as commands, so each carries a stub frontmatter that satisfies
+# `claude plugin validate --strict` and hides it from both callers:
+# disable-model-invocation: true (Claude's routing) and user-invocable: false
+# (the / menu).
 command_files = sorted((ROOT / "commands").glob("*.md"))
 for c in command_files:
     data, _ = split_frontmatter(c)

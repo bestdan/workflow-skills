@@ -1,6 +1,7 @@
 ---
 description: Handler procedure read by its dispatching command; not run directly.
 disable-model-invocation: true
+user-invocable: false
 ---
 
 # Atomic claim lock — shared by the jira and gh-issue handlers
