@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.75.0] - 2026-10-04
+
+### Features
+
+- register the pinned-branch guard with cd tracking [#931] (#951) (e108342)
+
 ## [2.74.3] - 2026-10-04
 
 ### Fixes
