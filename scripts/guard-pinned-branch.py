@@ -23,14 +23,33 @@ sequence that is genuinely before the mutation.
 It is deliberately not the only possible defence. This guard reads the Bash
 command as *text*, so it is a heuristic and fails open on shapes it cannot
 parse, and it sees Claude Code alone: another CLI agent or a human terminal
-never reaches it.
+never reaches it. The set of commands that can move HEAD has no end, so the
+guard judges a fixed set of plain shapes and leaves the rest to a check of the
+repo's actual state: a ``post-checkout`` hook where one is installed, and a
+planned state check (see
+``dev_docs/designs/2026-10-04-pinned-checkout-guard-v2.md``).
 
-NOT YET REGISTERED in hooks/hooks.json, on purpose. This version judges every
-git call against the payload's cwd (or a resolved ``git -C <dir>``) and does
-not track ``cd`` across segments. Registered as is, it would judge
-``cd <worktree> && git checkout -b x`` against the pinned main checkout and
-refuse it: a false positive on the exact workflow the pin pushes people
-toward. Registration waits for ``cd`` tracking.
+SCOPE. In scope: ``[cd <dir> &&] [env VAR=1] git [global options]
+checkout|switch ...``. Out of scope, let through by design: executors
+(``bash -c``, ``eval``, ``ssh``), subshells and ``$(...)``, wrappers with
+options (``sudo -u``, ``env -i``), an unresolvable or failed ``cd``, git
+aliases, ``git symbolic-ref``, ``git stash branch``, and scripts. Some of those
+are refused anyway, because the splitter surfaces the git call inside them;
+that is incidental, not promised. A review finding here is a defect only when
+it is a false positive or a missed refusal on an in-scope shape, or a crash (a
+crashing hook lets the command through). A miss on an out-of-scope shape is
+by design.
+
+Each git call is judged against the directory it actually runs in: a ``cd``
+earlier in the command moves it (see ``_git_calls``), and ``git -C <dir>``
+moves it again, relative to wherever the ``cd`` left the shell. So
+``cd <worktree> && git checkout -b x`` is judged against the worktree and
+allowed, which is the workflow the pin pushes people toward.
+
+Bypass one call with ``env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git checkout
+<branch>`` (a bare ``WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git ...`` prefix works
+too). Only an assignment on that git invocation counts; naming the variable
+anywhere else in the command disarms nothing.
 
 Reads the hook payload as JSON on stdin; emits a PreToolUse decision on stdout.
 Anything not matched produces no output and falls through to the normal flow.
@@ -40,6 +59,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -47,7 +67,14 @@ import sys
 # parser is found by this file's own directory rather than by an install path.
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 
-from bash_command import expand, git_calls, segments  # noqa: E402
+from bash_command import (  # noqa: E402
+    PREFIX,
+    expand,
+    git_calls,
+    segments,
+)
+
+BYPASS = "WORKFLOW_SKILLS_ALLOW_HEAD_MOVE"
 
 # Flags of `checkout`/`switch` that take a SEPARATE value token, so the token
 # after them is that value and never the switch target. `-b`/`-B`/`-c`/`-C`/
@@ -66,6 +93,140 @@ _NAMES_TARGET = {"-b", "-B", "-c", "-C", "--orphan"}
 # working tree, so a target beside it is a source to restore from, not a
 # destination.
 _PATCH = {"-p", "--patch"}
+
+# `-d` is `--detach` on switch; checkout documents only `--detach`, and git
+# rejects `checkout -d` itself, so counting it there costs nothing.
+_DETACH = {"-d", "--detach"}
+
+# Short options whose value may follow attached, so the rest of a cluster
+# after one is that value, not more flags: `-cd` creates a branch named `d`.
+# `-t` takes an optional attached value.
+_ATTACHED_VALUE = {"checkout": set("bBt"), "switch": set("cCt")}
+
+
+def _detaches(subcommand: str, args: list[str]) -> bool:
+    """Whether the call asks for a detached HEAD.
+
+    git accepts short flags clustered, so `git switch -qd main` detaches as
+    `-q -d` would; matching `-d` as a whole token missed it, and the call was
+    then waved through as a return to the pin.
+    """
+    for tok in args:
+        if tok == "--":
+            return False
+        if tok in _DETACH:
+            return True
+        if tok.startswith("-") and not tok.startswith("--") and len(tok) > 2:
+            for letter in tok[1:]:
+                if letter in _ATTACHED_VALUE.get(subcommand, set()):
+                    break
+                if letter == "d":
+                    return True
+    return False
+
+
+def _apply_cd(tokens: list[str], cwd: str | None) -> str | None:
+    """The directory a `cd` segment leaves the shell in, or None if unknown.
+
+    None is deliberate rather than a fallback to the old directory: `cd -` and
+    `cd $SOME_VAR` are unresolvable here, and judging a later git call against
+    the directory the shell has just LEFT is how a false verdict gets made with
+    full confidence. An unknown cwd makes the guard decline to judge.
+    """
+    rest = tokens[1:]
+    # `cd -` is the previous directory, which is unknowable here. It has to be
+    # tested BEFORE flags are filtered: `-` starts with a dash, so filtering
+    # first drops it, leaves no arguments, and resolves `cd -` to $HOME.
+    if "-" in rest:
+        return None
+    args = [t for t in rest if not t.startswith("-")]  # -L / -P / --
+    if not args:
+        return os.path.expanduser("~")
+    return expand(args[0], cwd)
+
+
+def _bypassed(tokens: list[str]) -> bool:
+    """Whether the segment's own prefix assigns the bypass variable.
+
+    Only the wrapper/keyword/assignment tokens ahead of the command word count
+    (`env VAR=1 git ...` or `VAR=1 git ...`), so a command that merely NAMES the
+    variable (`rg VAR docs`, `echo VAR`) is not bypassed, and the assignment
+    disarms the one invocation it prefixes, not the segments after it. Any
+    value counts, an empty one or `0` included, as in the dotfiles guard this
+    was ported from: typing the variable onto the git call is the deliberate
+    act, and the value adds no information. A wrapper option before the
+    assignment (`env -i VAR=1 git ...`) ends the prefix scan, so that shape is
+    not read as a bypass and is still judged (fail-closed), as is a bypass
+    inside an executor (`bash -c "env VAR=1 git ..."`).
+    """
+    for tok in tokens:
+        if tok.startswith(f"{BYPASS}="):
+            return True
+        if tok not in PREFIX and not re.match(r"^[A-Za-z_][\w]*=", tok):
+            return False
+    return False
+
+
+def _git_calls(cmd: str, base: str | None):
+    """Yield ``(cwd, subcommand, args)`` per git call, ``cwd`` being where git acts.
+
+    The parsing is ``bash_command``'s (segments, both token forms, and
+    ``git_calls`` with its ``-C``/``--work-tree``/``GIT_WORK_TREE`` handling)
+    and is left unchanged for its other callers. Two things are layered on
+    here, because they are this guard's decisions, not the parser's.
+
+    It tracks ``cd`` across segments, so each git call is judged against the
+    directory it actually runs in. Judging every call against the payload cwd
+    denied ``cd <worktree> && git checkout -b foo`` (a checkout inside a
+    worktree, which the pin explicitly allows) against the pinned main
+    checkout. A relative ``-C`` then resolves against the tracked directory.
+
+    And it drops any call carrying the bypass as an assignment on the
+    invocation itself (``_bypassed``).
+
+    The cd tracking is linear across segments and models no scope, because the
+    splitter has already thrown the scope away: it cuts on ``( )`` and on
+    ``&&`` inside quotes alike. So ``(cd X && git checkout foo); git checkout
+    bar`` applies X to the second call too (fail-open), and ``bash -c 'cd X &&
+    git checkout foo'`` is not seen as a cd at all, since its head word is
+    ``bash``; the call inside is judged against the outer cwd (fail-closed).
+    Neither is modelled: the only implementable fix for the executor case is
+    the same leak the subshell case already has, and neither shape has a reason
+    to be written now that a bare ``cd X && git ...`` works. ``pushd``/``popd``
+    and ``builtin cd`` are not tracked either, and ``cd -- -dashed`` resolves
+    to HOME for the same lack of a reason.
+
+    A ``cd`` into a directory that does not exist when the hook runs declines
+    to judge the calls after it, so ``cd /missing; git checkout other`` (or
+    ``||``) is fail-open: the cd fails and the checkout runs where the shell
+    already was. Keeping the previous directory instead would be a confident
+    wrong answer in the common case, because an earlier segment of the same
+    command often creates the directory: ``git worktree add <p> -b x main &&
+    cd <p> && git checkout -b y`` and ``git clone <url> d && cd d && ...``
+    would both be judged against the pinned checkout and denied. For the same
+    reason ``mkdir sub && cd sub && git checkout other`` inside the pinned
+    checkout is fail-open too.
+    """
+    cwd = base
+    for forms in segments(cmd):
+        # shlex's form when it parsed, since it keeps a quoted path with a
+        # space in it as one token; the whitespace split otherwise.
+        primary = forms[-1] if forms else []
+        if primary and primary[0] == "cd":
+            cwd = _apply_cd(primary, cwd)
+            continue
+        # Both forms can yield the same call, so a call can be seen twice; any
+        # deny prints once and returns, so a duplicate is harmless. shlex's
+        # form goes first because the refusal echoes the target it was judged
+        # on: the quote-stripped split turns `-b "a b"` into `-b a b`.
+        for tokens in reversed(forms):
+            if _bypassed(tokens):
+                continue
+            for dir_override, subcommand, args in git_calls(tokens):
+                # A relative `-C` is relative to the SHELL's cwd, not to
+                # whatever directory this hook process happens to run in.
+                here = expand(dir_override, cwd) if dir_override else cwd
+                yield here, subcommand, args
 
 
 def _target(args: list[str]) -> tuple[str, bool] | None:
@@ -89,6 +250,10 @@ def _target(args: list[str]) -> tuple[str, bool] | None:
             return None  # `git checkout -- <path>` restores files
         if tok in _NAMES_TARGET:
             return (args[i + 1], True) if i + 1 < len(args) else None
+        # `--orphan=<name>` is `--orphan <name>` with the value attached.
+        if tok.startswith("--orphan="):
+            name = tok[len("--orphan=") :]
+            return (name, True) if name else None
         # git also takes a short option's value attached: `-bfeature` is
         # `-b feature`. Matching only the separate-token form let
         # `git checkout -bfeature` create and switch a branch unjudged.
@@ -168,7 +333,7 @@ def _git(cwd: str, *args: str) -> str | None:
     return out.stdout.strip() if out.returncode == 0 else None
 
 
-def _violation(cwd: str, target: str) -> tuple[str, str] | None:
+def _violation(cwd: str, target: str, detached: bool) -> tuple[str, str] | None:
     """``(pinned, target)`` when this switch is refused, else None."""
     pinned = _git(cwd, "config", "--get", "hooks.pinnedBranch")
     if not pinned:
@@ -180,15 +345,22 @@ def _violation(cwd: str, target: str) -> tuple[str, str] | None:
     common = _git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir")
     if not git_dir or git_dir != common:
         return None
-    if target.removeprefix("refs/heads/") == pinned:
-        return None  # returning to the pin is always allowed
+    # Returning to the pin is always allowed — unless the call detaches, which
+    # leaves HEAD at the pin's commit but off the pinned branch.
+    if not detached and target.removeprefix("refs/heads/") == pinned:
+        return None
     return pinned, target
 
 
 def _reason(pinned: str, target: str) -> str:
+    # A fixed sentence rather than a command rebuilt from the parse: the agent
+    # already holds the exact command it ran, and every rebuild dropped
+    # something (a start point, `--orphan` semantics, git's own options).
     return (
         f"This checkout is pinned to '{pinned}' — refusing to switch it to '{target}'.\n"
         "Branch work belongs in its own worktree, not in this checkout.\n"
+        "To move this checkout anyway, re-run the same command with "
+        f"`env {BYPASS}=1` immediately before the `git` word.\n"
         "To unpin it for good: git config --unset hooks.pinnedBranch"
     )
 
@@ -203,38 +375,37 @@ def main() -> None:
     cmd = data.get("tool_input", {}).get("command", "")
     base = data.get("cwd") or os.getcwd()
 
-    # `segments` yields two token forms per segment, so a call can be seen
-    # twice; any deny prints once and returns, so a duplicate is harmless.
-    for forms in segments(cmd):
-        for tokens in forms:
-            for dir_override, subcommand, args in git_calls(tokens):
-                if subcommand not in {"checkout", "switch"}:
-                    continue
-                found = _target(args)
-                if not found:
-                    continue
-                target, is_new = found
-                # A relative `-C` is relative to the SHELL's cwd, not to
-                # whatever directory this hook process happens to run in.
-                cwd = expand(dir_override, base) if dir_override else base
-                if not cwd or not os.path.isdir(cwd):
-                    continue  # a path we cannot resolve is not a repo we can judge
-                if not is_new and not _moves_head(cwd, target, subcommand):
-                    continue
-                violation = _violation(cwd, target)
-                if violation:
-                    print(
-                        json.dumps(
-                            {
-                                "hookSpecificOutput": {
-                                    "hookEventName": "PreToolUse",
-                                    "permissionDecision": "deny",
-                                    "permissionDecisionReason": _reason(*violation),
-                                }
-                            }
-                        )
-                    )
-                    return
+    for cwd, subcommand, args in _git_calls(cmd, base):
+        if subcommand not in {"checkout", "switch"}:
+            continue
+        found = _target(args)
+        detached = _detaches(subcommand, args)
+        # A bare `--detach` names no target but still detaches HEAD where it
+        # stands, so it is judged as a move to HEAD. A `--` or patch mode makes
+        # it a file restore, which _target has already turned down.
+        if not found and detached and "--" not in args and not _PATCH & set(args):
+            found = ("HEAD", True)
+        if not found:
+            continue
+        target, is_new = found
+        if not cwd or not os.path.isdir(cwd):
+            continue  # a path we cannot resolve is not a repo we can judge
+        if not is_new and not _moves_head(cwd, target, subcommand):
+            continue
+        violation = _violation(cwd, target, detached)
+        if violation:
+            print(
+                json.dumps(
+                    {
+                        "hookSpecificOutput": {
+                            "hookEventName": "PreToolUse",
+                            "permissionDecision": "deny",
+                            "permissionDecisionReason": _reason(*violation),
+                        }
+                    }
+                )
+            )
+            return
 
 
 if __name__ == "__main__":
