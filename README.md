@@ -13,7 +13,7 @@ A Claude Code plugin bundling Daniel's general engineering workflow skills: coll
 
 ## What's in the box
 
-17 skills, 21 commands, and 2 subagents, organized into eight workflows. Each
+17 skills, 22 commands, and 2 subagents, organized into eight workflows. Each
 entry links to its own doc — that's where the flags, edge cases, and handler
 support live.
 
@@ -166,9 +166,9 @@ executors (`bash -c`, `eval`), subshells, wrappers with options, git aliases
 and scripts through by design. A `post-checkout` hook, where one is installed,
 is the backstop for those, and a state check is planned.
 
-| Skill                                                      | Trigger                                                | What it does                                                                                                                                                             |
-| ---------------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [**worktree-teardown**](skills/worktree-teardown/SKILL.md) | auto, when a removal fails, refuses, or half-completes | The mechanics behind the teardown scripts: the submodule force gates, the PR-evidence branch delete, and the half-deleted and locked recovery cases. Not user-invocable. |
+| Skill                                                      | Trigger                                                                                                    | What it does                                                                                                                                                                                                                       |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [**worktree-teardown**](skills/worktree-teardown/SKILL.md) | `/worktree-teardown <path> \| --branch <branch>`, or auto when a removal fails, refuses, or half-completes | Run the teardown scripts, granted by the command so a typed teardown needs no allow rule, and the mechanics behind them: the submodule force gates, the PR-evidence branch delete, and the half-deleted and locked recovery cases. |
 
 ### Bundled subagents
 
