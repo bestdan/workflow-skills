@@ -1,3 +1,8 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+---
+
 # Linear handler — /find-false-closures flow
 
 Invoked from `/find-false-closures` when `handler: linear` is configured, and

@@ -1,3 +1,8 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+---
+
 # Linear handler — /add-task flow
 
 Creates a Linear issue via `<linear-mcp>__save_issue` (called without `id` — that's the create primitive). The new issue is filed under the configured team and attached to a project.

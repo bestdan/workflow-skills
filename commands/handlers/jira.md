@@ -1,3 +1,8 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+---
+
 # Handler: jira
 
 Creates a Jira work item via the Atlassian MCP server (`mcp__claude_ai_Atlassian__*`). Foreground call, no git plumbing, no CLI install. The new ticket is placed under a selected epic.

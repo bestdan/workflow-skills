@@ -1,3 +1,8 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+---
+
 # gh-issue handler — /complete-task flow
 
 Invoked from `/complete-task <identifier>` when `handler: gh-issue` is

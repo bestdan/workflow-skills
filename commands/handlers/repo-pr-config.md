@@ -1,3 +1,8 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+---
+
 # repo-pr handler — /task-config setup
 
 The `repo-pr` handler is the default. It captures tasks as markdown files via PR (works with `/do-tasks` and `/list-tasks`). There are no prerequisites to verify here — `gh` auth and git plumbing are exercised at the time of `/add-task`, not at config time.

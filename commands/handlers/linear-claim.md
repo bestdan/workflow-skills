@@ -1,3 +1,8 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+---
+
 # Linear handler — /do-tasks tracker flow
 
 Invoked from `/do-tasks` (section 3, "Tracker path") when `handler: linear` is configured. This file holds the full tracker execute flow: **find candidates** (read-only), **pre-flight in-flight check** (read-only), **claim the issue** (mutating, before work starts — a token-comment lock), **judge feasibility** (read-only, run _while holding the claim_), **move to review on PR open** (mutating, after the PR is opened), and a **report** at the end. In **single** mode these phases run in the **current session**; in **batch** mode (`/do-tasks --all`) each issue's flow runs in its own dispatched **remote** session (see `commands/do-tasks.md` §3 "Tracker-batch subroutine"). The **bail** phase has two distinct triggers: a _feasibility reject_ on an already-claimed card **releases the claim and continues** to the next candidate, while a _mid-execution_ failure **halts** the run. `/do-tasks` orchestrates the branch-and-execute and `gh pr create` between the judge and move-to-review phases.

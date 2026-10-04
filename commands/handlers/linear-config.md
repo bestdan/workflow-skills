@@ -1,3 +1,8 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+---
+
 # linear handler — /task-config setup
 
 Configures the `linear` handler, which creates Linear issues via the official Linear MCP server (connected from `https://mcp.linear.app/mcp`) at `/add-task` time. This file owns the Linear MCP preflight and the team/projects/default_priority prompts (including migrating a pre-existing scalar `default_project`); the actual create flow lives in `linear-add.md`.

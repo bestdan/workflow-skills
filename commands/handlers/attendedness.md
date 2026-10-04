@@ -1,3 +1,8 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+---
+
 # Attendedness — is a human present to answer right now?
 
 Read by the four pre-claim WIP gates (`repo-pr-execute.md`, `gh-issue-claim.md`,

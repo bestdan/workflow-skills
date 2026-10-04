@@ -1,3 +1,8 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+---
+
 # Linear handler — /sweep-for-complete flow
 
 Invoked from `/sweep-for-complete [--apply] [--all] [--project <id|name>]`

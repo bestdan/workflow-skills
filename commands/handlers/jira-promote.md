@@ -1,3 +1,8 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+---
+
 # jira handler — /promote-tasks flow
 
 Invoked from `/promote-tasks` when `handler: jira` is configured. Scores the project's **new, un-scored** issues against the same confidence check the file path uses, then applies the kanban transitions by **status**: HIGH → transition to `ready_status` (the jira analogue of moving to `Todo`/`auto-eligible`); LOW → transition to `refinement_status` and leave a comment naming the failed check. Both target statuses are taken from config when set, or resolved dynamically and prompted for when unset (step 3a).

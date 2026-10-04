@@ -1,3 +1,8 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+---
+
 # gh-issue handler — /archive-tasks flow
 
 Invoked from `/archive-tasks` when `handler: gh-issue` is configured.

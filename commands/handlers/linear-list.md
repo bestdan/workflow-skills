@@ -1,3 +1,8 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+---
+
 # Linear handler — /list-tasks flow
 
 Invoked from `/list-tasks` when `handler: linear` is configured. Read-only — no state changes, no claims, no edits. Renders a one-shot snapshot of the team's active issues as a vertical kanban, matching the layout `/list-tasks` uses for the file-based path.

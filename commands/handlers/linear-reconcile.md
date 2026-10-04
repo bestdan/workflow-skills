@@ -1,3 +1,8 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+---
+
 # Linear handler — /reconcile-tasks flow
 
 Invoked from `/reconcile-tasks [--apply] [--all] [--project <id|name>]` when

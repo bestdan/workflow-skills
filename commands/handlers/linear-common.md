@@ -1,3 +1,8 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+---
+
 # Linear handler — shared reference
 
 Shared definitions used by `linear-add.md`, `linear-list.md`, and `linear-claim.md`. This file has no commands of its own — it only defines the config schema, the preflight pattern, and the kanban mapping table that every Linear-handled command needs.

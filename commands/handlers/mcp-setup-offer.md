@@ -1,3 +1,8 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+---
+
 # MCP setup offer — shared subroutine
 
 Called from `jira-config.md` and `linear-config.md` when the required MCP namespace isn't loaded in the current session. Inputs:

@@ -1,3 +1,8 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+---
+
 # Handler: repo-pr
 
 The default. Creates the task file on a branch from main and opens a PR — without touching local state. Lands on main (via auto-merge) decoupled from the feature branch, where `/do-tasks` can later pick it up.
