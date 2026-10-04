@@ -20,8 +20,12 @@ Arguments: `$ARGUMENTS`
 - **`--branch <branch> [<repo-root>]`** → delete the branch alone, on PR evidence:
 
   ```bash
-  "${CLAUDE_PLUGIN_ROOT}/scripts/branch-remove.sh" "<branch>" ["<repo-root>"]
+  "${CLAUDE_PLUGIN_ROOT}/scripts/branch-remove.sh" "<branch>"
+  "${CLAUDE_PLUGIN_ROOT}/scripts/branch-remove.sh" "<branch>" "<repo-root>"
   ```
+
+  The root defaults to the repository containing the cwd; pass it when the cwd is
+  not inside that repository.
 
 - **No argument** → this is a lookup, not a teardown. Read
   `${CLAUDE_PLUGIN_ROOT}/skills/worktree-teardown/SKILL.md` and answer from it.
