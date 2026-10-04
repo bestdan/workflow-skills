@@ -38,7 +38,9 @@ before co-review finished produced 10 follow-up fixes.
 
 **Goals.** Fewer owner turns spent on ritual ("merged, tidy up", bare "yes");
 no merge before review completes; agent landing for a slice that grows only on
-evidence; the owner's judgement applied where it changes outcomes.
+evidence; the owner's time spent on setup, design, naming and topology — where
+the history shows his judgement changes outcomes — rather than on reading
+diffs.
 
 **Non-goals.** A model deciding the tier. Agents widening their own
 permissions, editing rules every agent loads, or changing finplan's model
@@ -84,6 +86,25 @@ Overriding it stays possible, but becomes a deliberate click.
 
 This blocks the owner's own early merges as well as agents'. That is the point:
 those were human UI merges ("oops, I merged it").
+
+It also makes the local co-review the review cycle that gates, and GitHub's
+Copilot review an advisory input that nothing waits on. Today that review
+arrives on GitHub's schedule, if it is triggered at all. The `copilot` CLI
+already runs locally as one of co-review's reviewer classes, so its view
+arrives inside the local cycle, on a bounded timeout, like every other
+reviewer.
+
+**How we know it holds.** Three checks, cheapest first:
+
+- **Structural.** Once per repo after enabling, try to merge a PR whose
+  `co-review` status is `pending` — once in the UI, once with `gh pr merge` —
+  and confirm GitHub refuses both. That proves the ruleset, not the prose.
+- **Audit.** A weekly query lists merged PRs whose final head SHA carries no
+  `co-review` `success`. It must be empty, apart from deliberate bypasses,
+  which the query names.
+- **Outcome.** The class "follow-up fix to a PR merged mid-review" — 10 in the
+  history — should go to zero. A non-zero count means a path around the check
+  exists.
 
 ### 2. `merge-tier` script
 
@@ -154,23 +175,42 @@ always demote. `/consult` is Claude-only, so its agreement correlates with the
 author's; the higher bar is the price of that. Where a cross-family reviewer is
 available, prefer asking it.
 
+**A call whose answer reaches down a stack.** In a stack, a call on one PR can
+fix something every later PR builds on: an interface, a name, a schema, a
+convention. Such a call is never settled by `/consult`, whatever its
+confidence, because being wrong costs the whole stack, not one PR. The agent
+makes a provisional call, records it as such in the PR body and in
+`QUESTIONS.md`, and keeps building the PRs above it on that call. Building is
+reversible; landing is not. Nothing at or above that PR lands until the owner
+confirms. If he overturns the call, the stack is restacked from that point, and
+each PR above it is re-verified, as `/auto-pilot`'s restack already does. The
+PRs below it are unaffected and can land, following pstack's rule of landing
+only the contiguous verified run from the bottom. A call that touches only its
+own PR follows the rule above.
+
 ### 6. Move the owner's judgement upstream
 
 The history's real interventions were scope drift, a wrong premise, loose
 terminology, model semantics, and policy about the owner's own workflow — most
 visible **before** the PR existed. So:
 
-- **Intent checkpoint.** When a task's forecast tier is human (it will touch
-  always-human paths, a finplan model-semantics area, or produce a research or
-  decision record), the agent states in three lines what it will change, the
-  premise it rests on, and the finish condition, and waits for a yes before
-  implementing. One cheap turn up front, instead of a redirect after a
-  thousand lines.
+- **Intent check at preflight, not mid-run.** Tasks are already written in
+  detail, so the tier can be forecast from the task alone: its
+  `related_files` against the repo's merge policy, plus whether it touches a
+  finplan model-semantics area or produces a research or decision record.
+  `/promote-tasks` runs that forecast. A task forecast `human` is promoted only
+  once its intent block is confirmed. That block is three lines: what will
+  change, the premise it rests on, and the finish condition. The owner confirms
+  these in a batch while grooming the backlog, so no run stops mid-flight to
+  ask. If the implementation then touches a path the forecast missed, the
+  lander's tier still catches it at merge; the forecast only moves the
+  conversation earlier.
 - **Historical-narrative detector.** The owner's most repeated correction
   across all four repos (~25 comments) is prose written as a change history
-  instead of for the reader. A lint for its markers (dates in rule prose,
-  "previously", "was changed to", PR-number cross-references in skill bodies)
-  belongs in the gate, not in his review.
+  instead of for the reader. agent-guidance's insider-prose check has no
+  signal for it: the chronology regex was dropped for firing on correct prose.
+  It is filed as bestdan/agent-guidance#91, which proposes running it at
+  review time, where a model is already in the loop.
 
 ### 7. Batch what stays human
 
@@ -242,7 +282,8 @@ Each gate converts a class of B PRs; build them in this order, by B volume:
 1. **Phase 0** (no autonomy change): co-review status and required check in
    all four rulesets; move workflow-skills' release bypass; `merge-tier` and
    `land-pr.sh --dry-run` posting "would land: yes/no — reasons" on every
-   delivered PR; the narrative lint.
+   delivered PR; the structural check and weekly audit from component 1; the
+   tier forecast in `/promote-tasks`.
 2. **Shadow, 3–4 weeks.** Graduation per repo: at least 30 would-land PRs, none
    in which the owner made a substantive change, and no follow-up fix a gate
    could not have caught.
