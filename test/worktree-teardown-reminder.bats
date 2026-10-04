@@ -69,13 +69,11 @@ fire() {
   run python3 -c '
 import json, sys
 h = json.load(open(sys.argv[1]))["hooks"]["PostToolUse"]
-entries = [e for g in h for e in g["hooks"]
-           if e["command"].strip("\"").endswith("worktree-teardown-reminder.py")]
+entries = [e for g in h for e in g["hooks"] if e["command"] == sys.argv[2]]
 matchers = [g["matcher"] for g in h
-            if any(e["command"].strip("\"").endswith("worktree-teardown-reminder.py")
-                   for e in g["hooks"])]
+            if any(e["command"] == sys.argv[2] for e in g["hooks"])]
 print(len(entries), matchers)
-' "$REPO_ROOT/hooks/hooks.json"
+' "$REPO_ROOT/hooks/hooks.json" '"${CLAUDE_PLUGIN_ROOT}/scripts/worktree-teardown-reminder.py"'
   assert_success
   assert_output "1 ['ExitWorktree']"
 }
