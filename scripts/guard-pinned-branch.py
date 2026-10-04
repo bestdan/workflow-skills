@@ -23,7 +23,21 @@ sequence that is genuinely before the mutation.
 It is deliberately not the only possible defence. This guard reads the Bash
 command as *text*, so it is a heuristic and fails open on shapes it cannot
 parse, and it sees Claude Code alone: another CLI agent or a human terminal
-never reaches it.
+never reaches it. The set of commands that can move HEAD has no end, so the
+guard judges a fixed set of plain shapes and leaves the rest to a check of the
+repo's actual state (git's ``post-checkout`` hook; see
+``dev_docs/designs/2026-10-04-pinned-checkout-guard-v2.md``).
+
+SCOPE. In scope: ``[cd <dir> &&] [env VAR=1] git [global options]
+checkout|switch ...``. Out of scope, let through by design: executors
+(``bash -c``, ``eval``, ``ssh``), subshells and ``$(...)``, wrappers with
+options (``sudo -u``, ``env -i``), an unresolvable or failed ``cd``, git
+aliases, ``git symbolic-ref``, ``git stash branch``, and scripts. Some of those
+are refused anyway, because the splitter surfaces the git call inside them;
+that is incidental, not promised. A review finding here is a defect only when
+it is a false positive or a missed refusal on an in-scope shape, or a crash (a
+crashing hook lets the command through). A miss on an out-of-scope shape is
+by design.
 
 Each git call is judged against the directory it actually runs in: a ``cd``
 earlier in the command moves it (see ``_git_calls``), and ``git -C <dir>``
@@ -45,7 +59,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import shlex
 import subprocess
 import sys
 
@@ -54,7 +67,6 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 
 from bash_command import (  # noqa: E402
-    EXECUTORS,
     PREFIX,
     expand,
     git_calls,
@@ -155,11 +167,7 @@ def _bypassed(tokens: list[str]) -> bool:
 
 
 def _git_calls(cmd: str, base: str | None):
-    """Yield ``(cwd, shell_cwd, subcommand, args, call, plain)`` per git call.
-
-    ``cwd`` is the directory git acts in (after any ``-C``/work tree);
-    ``shell_cwd`` is where the shell stands when the call runs (after any
-    ``cd``); ``call`` is the invocation as written (``git_calls``).
+    """Yield ``(cwd, subcommand, args)`` per git call, ``cwd`` being where git acts.
 
     The parsing is ``bash_command``'s (segments, both token forms, and
     ``git_calls`` with its ``-C``/``--work-tree``/``GIT_WORK_TREE`` handling)
@@ -208,39 +216,16 @@ def _git_calls(cmd: str, base: str | None):
             continue
         # Both forms can yield the same call, so a call can be seen twice; any
         # deny prints once and returns, so a duplicate is harmless. shlex's
-        # form goes first because the refusal echoes the args it was judged
+        # form goes first because the refusal echoes the target it was judged
         # on: the quote-stripped split turns `-b "a b"` into `-b a b`.
         for tokens in reversed(forms):
             if _bypassed(tokens):
                 continue
-            for dir_override, subcommand, args, call in git_calls(tokens):
+            for dir_override, subcommand, args in git_calls(tokens):
                 # A relative `-C` is relative to the SHELL's cwd, not to
                 # whatever directory this hook process happens to run in.
                 here = expand(dir_override, cwd) if dir_override else cwd
-                # Plain: shlex parsed the segment, and nothing but NAME=value
-                # assignments stands before `git` — no wrapper or executor.
-                plain = len(forms) == 2 and tokens is forms[-1] and call == tokens
-                yield here, cwd, subcommand, args, call, plain
-
-
-def _simple(cmd: str) -> bool:
-    """Whether the whole command is shaped so that a refused call can be replayed.
-
-    The splitter is quote-blind, so a git call inside `bash -c '…'`, `$(…)`, a
-    subshell or a brace group lands in a segment of its own that looks plain,
-    and is judged against the outer directory. A replay of it would act there
-    too: for `bash -c 'cd wt && git checkout other'` it would move the pinned
-    checkout itself. This errs toward generic advice — an executor word
-    anywhere, even as a branch name, rules a replay out.
-    """
-    if any(c in cmd for c in "()`{}"):
-        return False
-    for forms in segments(cmd):
-        if len(forms) != 2:
-            return False  # shlex could not parse it: a quote was cut
-        if any(tok in EXECUTORS for tok in forms[-1]):
-            return False
-    return True
+                yield here, subcommand, args
 
 
 def _target(args: list[str]) -> tuple[str, bool] | None:
@@ -366,51 +351,17 @@ def _violation(cwd: str, target: str, detached: bool) -> tuple[str, str] | None:
     return pinned, target
 
 
-def _reason(pinned: str, target: str, bypass: str | None) -> str:
-    anyway = f"To move this checkout anyway: {bypass}\n" if bypass else _GENERIC_BYPASS
+def _reason(pinned: str, target: str) -> str:
+    # A fixed sentence rather than a command rebuilt from the parse: the agent
+    # already holds the exact command it ran, and every rebuild dropped
+    # something (a start point, `--orphan` semantics, git's own options).
     return (
         f"This checkout is pinned to '{pinned}' — refusing to switch it to '{target}'.\n"
         "Branch work belongs in its own worktree, not in this checkout.\n"
-        f"{anyway}"
+        "To move this checkout anyway, re-run the same command with "
+        f"`env {BYPASS}=1` immediately before the `git` word.\n"
         "To unpin it for good: git config --unset hooks.pinnedBranch"
     )
-
-
-# For a call the guard cannot replay faithfully (inside an executor, behind a
-# wrapper, in a subshell). No command to copy: the guard honours the
-# assignment only as the first words of a top-level segment, so the advice
-# says where it goes rather than guessing the rest.
-_GENERIC_BYPASS = (
-    "To move this checkout anyway, run the git command on a line of its own, "
-    "from the directory it should act in, with "
-    f"{BYPASS}=1 set by `env` as the first words of that line.\n"
-)
-
-
-def _bypass_line(shell_cwd: str | None, base: str, call: list[str]) -> str:
-    """The refused call as written, with the bypass assignment on it.
-
-    The line is a command to run, so it repeats the refused call rather than
-    rebuilding one. Each rebuild dropped something: a start point and
-    `--track`, `switch --orphan` (an empty tree) becoming `checkout --orphan`
-    (the old files staged), and git's own options, so a refused
-    `git -c checkout.guess=false checkout <remote-only>` was offered as a DWIM
-    switch. Repeating the call keeps every option and relative path meaning
-    what it meant, provided the shell stands where it stood: when the
-    command's own `cd` moved it, the line starts with that `cd`. The
-    assignment goes on the git segment, which is the only place the guard
-    honours it.
-    """
-    cd = ""
-    # An unknown or missing shell directory (`cd -`, `cd /missing`) still
-    # reaches here when an absolute `-C` fixes where git runs; that call means
-    # the same from anywhere, and a `cd` to a directory that is not there
-    # could not run, so the line goes without one.
-    if shell_cwd and os.path.isdir(shell_cwd):
-        here = os.path.normpath(shell_cwd)
-        if here != os.path.normpath(base):
-            cd = f"cd {shlex.quote(here)} && "
-    return f"{cd}env {BYPASS}=1 {shlex.join(call)}"
 
 
 def main() -> None:
@@ -423,8 +374,7 @@ def main() -> None:
     cmd = data.get("tool_input", {}).get("command", "")
     base = data.get("cwd") or os.getcwd()
 
-    simple = _simple(cmd)
-    for cwd, shell_cwd, subcommand, args, call, plain in _git_calls(cmd, base):
+    for cwd, subcommand, args in _git_calls(cmd, base):
         if subcommand not in {"checkout", "switch"}:
             continue
         found = _target(args)
@@ -443,14 +393,13 @@ def main() -> None:
             continue
         violation = _violation(cwd, target, detached)
         if violation:
-            bypass = _bypass_line(shell_cwd, base, call) if simple and plain else None
             print(
                 json.dumps(
                     {
                         "hookSpecificOutput": {
                             "hookEventName": "PreToolUse",
                             "permissionDecision": "deny",
-                            "permissionDecisionReason": _reason(*violation, bypass),
+                            "permissionDecisionReason": _reason(*violation),
                         }
                     }
                 )

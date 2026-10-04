@@ -470,7 +470,7 @@ def _write_targets(cmd: str, cwd: str):
                 resolved = expand(operands[0], cwd)
                 if resolved:
                     yield _real(resolved), REACH
-            for dir_override, sub, args, _call in git_calls(tokens):
+            for dir_override, sub, args in git_calls(tokens):
                 if not _git_writes(sub, args):
                     continue
                 target = expand(dir_override, cwd) if dir_override else cwd

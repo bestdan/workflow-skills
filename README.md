@@ -159,9 +159,12 @@ checkout off the pinned branch, so branch work goes to a worktree. Each call is
 judged where it actually runs — a `cd <worktree> && git checkout -b x` is
 allowed — and linked worktrees are never pinned. Bypass one call with
 `env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git checkout <branch>`; the assignment
-has to be the first words of a top-level git command. A refusal of a plain git
-call prints that line ready to copy; one inside `bash -c`, `sudo` or a
-subshell says where the assignment goes instead.
+has to sit immediately before that call's `git` word. The guard reads command
+text, so it judges plain shapes only —
+`[cd <dir> &&] [env VAR=1] git [global options] checkout|switch …` — and lets
+executors (`bash -c`, `eval`), subshells, wrappers with options, git aliases
+and scripts through by design; git's `post-checkout` hook is the backstop for
+those.
 
 | Skill                                                      | Trigger                                                | What it does                                                                                                                                                             |
 | ---------------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

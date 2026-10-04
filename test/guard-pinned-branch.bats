@@ -211,100 +211,19 @@ print(h["permissionDecisionReason"])
   assert_line --index 0 "PreToolUse deny"
   assert_line --index 1 "This checkout is pinned to 'main' — refusing to switch it to 'x'."
   assert_line --index 2 --partial "worktree"
-  assert_line --index 3 "To move this checkout anyway: env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git checkout -b x"
+  assert_line --index 3 "To move this checkout anyway, re-run the same command with \`env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1\` immediately before the \`git\` word."
   assert_line --index 4 "To unpin it for good: git config --unset hooks.pinnedBranch"
 }
 
-# The bypass line is a command to run, so it repeats the refused call rather
-# than rebuilding one: a rebuilt `git checkout -b feat` dropped the start point,
-# and `checkout --orphan` keeps the old files staged where `switch --orphan`
-# empties the tree.
-@test "the bypass line repeats the refused call verbatim" {
-  git -C "$pinned" update-ref refs/remotes/origin/feat "$(git -C "$pinned" rev-parse other)"
-  run run_hook "$pinned" 'git switch -d other'
-  assert_output --partial "WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git switch -d other\\n"
-  run run_hook "$pinned" 'git checkout other'
-  assert_output --partial "WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git checkout other\\n"
-  run run_hook "$pinned" 'git switch -c feat origin/feat'
-  assert_output --partial "WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git switch -c feat origin/feat\\n"
-  run run_hook "$pinned" 'git switch --orphan fresh'
-  assert_output --partial "WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git switch --orphan fresh\\n"
-}
-
-# A ref name may hold `$` or a quote, which the shell would expand or choke on,
-# and a quoted name with a space must come back as one argument, not two.
-@test "the bypass line shell-quotes the arguments" {
-  run run_hook "$pinned" "git checkout -b 'a\$HOME'"
-  assert_output --partial "git checkout -b 'a\$HOME'\\n"
-  run run_hook "$pinned" 'git checkout -b "a b"'
-  assert_output --partial "git checkout -b 'a b'\\n"
-}
-
-# git's own options are part of the call: a rebuilt line dropped `-c`, which
-# can turn a command git would refuse into a DWIM switch.
-@test "the bypass line keeps git's own options as written" {
-  run run_hook "$tmp" 'git -C pinned checkout other'
-  assert_output --partial "To move this checkout anyway: env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git -C pinned checkout other\\n"
-  run run_hook "$pinned" 'git -c core.quotepath=off checkout other'
-  assert_output --partial "env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git -c core.quotepath=off checkout other\\n"
-}
-
-# Relative paths in the call mean what they meant only from where the shell
-# stood, so a call after a `cd` gets that `cd`, with the assignment on the git
-# segment, the only place the guard honours it.
-@test "the bypass line repeats the cd that moved the shell" {
-  run run_hook "$tmp" 'cd pinned && git checkout other'
-  assert_output --partial "To move this checkout anyway: cd $pinned && env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git checkout other\\n"
-  run run_hook "$pinned" 'git checkout other'
-  refute_output --partial "anyway: cd "
-}
-
 # An absolute -C fixes where git runs even when the shell's own directory is
-# unknown or missing, so the call is still refused — and the line carries no
-# `cd`, which could not run. Building that line once crashed the hook, which
-# exits nonzero and lets the checkout through.
-@test "an absolute -C after an unknown cd is refused without a cd in the line" {
+# unknown or missing, so the call is still refused. A crash here would exit
+# nonzero and let the checkout through.
+@test "an absolute -C after an unknown cd is still refused" {
   local c
   for c in "cd - ; git -C $pinned checkout other" "cd /missing; git -C $pinned checkout other" "cd \$X && git -C $pinned checkout other"; do
     run run_hook "$tmp" "$c"
     assert_success
-    assert_output --partial "To move this checkout anyway: env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git -C $pinned checkout other\\n"
-  done
-}
-
-# A call inside an executor, behind a wrapper or in a subshell cannot be
-# replayed faithfully: the splitter has thrown the structure away, and a
-# replay of `bash -c 'cd wt && git checkout other'` would act on the pinned
-# checkout itself. Those refusals say where the assignment goes and carry no
-# command to copy.
-@test "a call the guard cannot replay gets advice, not a command" {
-  git -C "$pinned" worktree add -q "$tmp/wt-gen" -b wt-gen
-  local c
-  for c in 'bash -c "git checkout other"' \
-    "bash -c 'cd $tmp/wt-gen; git checkout other; true'" \
-    "sudo -u $USER git checkout other" \
-    '(git checkout other)'; do
-    run run_hook "$pinned" "$c"
-    assert_output --partial "permissionDecision\": \"deny"
-    refute_output --partial "anyway: env"
-    refute_output --partial "anyway: cd"
-    assert_output --partial "as the first words of that line"
-  done
-  run run_hook "$plain" "env -i GIT_WORK_TREE=$pinned git checkout other"
-  refute_output --partial "anyway: env"
-  assert_output --partial "as the first words of that line"
-}
-
-# The line is offered as the way through, so the guard must honour it.
-@test "the guard allows its own bypass line" {
-  local cmd line
-  for cmd in 'cd pinned && git -C . checkout -b x' 'git -C pinned switch --detach'; do
-    line=$(run_hook "$tmp" "$cmd" | python3 -c '
-import json, sys
-r = json.load(sys.stdin)["hookSpecificOutput"]["permissionDecisionReason"]
-print(next(l for l in r.splitlines() if l.startswith("To move")).split(": ", 1)[1])
-')
-    allowed "$tmp" "$line"
+    assert_output --partial '"permissionDecision": "deny"'
   done
 }
 
