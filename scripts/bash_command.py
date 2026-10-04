@@ -106,7 +106,7 @@ def segments(cmd: str):
 
 
 def git_calls(tokens: list[str]):
-    """Yield ``(dir_override, subcommand, args)`` per git call in one segment.
+    """Yield ``(dir_override, subcommand, args, call)`` per git call in one segment.
 
     Head-word anchoring and the wrapper/executor scan are the dotfiles
     parser's; what is kept here — and what that parser normalizes away — is
@@ -116,13 +116,21 @@ def git_calls(tokens: list[str]):
     A work tree named by ``--work-tree`` or a ``GIT_WORK_TREE=`` prefix is
     where a mutating subcommand actually writes, so it wins over ``-C``. A
     relative one resolves against the ``-C`` directory, as git does.
+
+    ``call`` is the invocation as written: the segment's leading ``NAME=value``
+    assignments, then every token from the ``git`` word on, global options
+    included. A caller that repeats the call back uses it rather than
+    rebuilding one from the parsed pieces, which drops what was not parsed.
     """
+    assignments = []
     head = 0
     wrapped = False
     while head < len(tokens) and (
         tokens[head] in PREFIX or re.match(r"^[A-Za-z_][\w]*=", tokens[head])
     ):
         wrapped = wrapped or tokens[head] in WRAPPERS
+        if tokens[head] not in PREFIX:
+            assignments.append(tokens[head])
         head += 1
     if head >= len(tokens):
         return
@@ -153,7 +161,7 @@ def git_calls(tokens: list[str]):
                 work_tree = os.path.join(dir_override, work_tree)
             dir_override = work_tree
         if i < len(tokens):
-            yield dir_override, tokens[i], tokens[i + 1 :]
+            yield dir_override, tokens[i], tokens[i + 1 :], assignments + tokens[start:]
 
 
 def head_index(tokens: list[str]) -> int:

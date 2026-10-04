@@ -80,6 +80,10 @@ _NAMES_TARGET = {"-b", "-B", "-c", "-C", "--orphan"}
 # destination.
 _PATCH = {"-p", "--patch"}
 
+# `-d` is `--detach` on switch; checkout documents only `--detach`, and git
+# rejects `checkout -d` itself, so counting it there costs nothing.
+_DETACH = {"-d", "--detach"}
+
 
 def _apply_cd(tokens: list[str], cwd: str | None) -> str | None:
     """The directory a `cd` segment leaves the shell in, or None if unknown.
@@ -124,7 +128,11 @@ def _bypassed(tokens: list[str]) -> bool:
 
 
 def _git_calls(cmd: str, base: str | None):
-    """Yield ``(cwd, subcommand, args)`` per git call, cwd as the shell has it.
+    """Yield ``(cwd, shell_cwd, subcommand, args, call)`` per git call.
+
+    ``cwd`` is the directory git acts in (after any ``-C``/work tree);
+    ``shell_cwd`` is where the shell stands when the call runs (after any
+    ``cd``); ``call`` is the invocation as written (``git_calls``).
 
     The parsing is ``bash_command``'s (segments, both token forms, and
     ``git_calls`` with its ``-C``/``--work-tree``/``GIT_WORK_TREE`` handling)
@@ -178,11 +186,11 @@ def _git_calls(cmd: str, base: str | None):
         for tokens in reversed(forms):
             if _bypassed(tokens):
                 continue
-            for dir_override, subcommand, args in git_calls(tokens):
+            for dir_override, subcommand, args, call in git_calls(tokens):
                 # A relative `-C` is relative to the SHELL's cwd, not to
                 # whatever directory this hook process happens to run in.
                 here = expand(dir_override, cwd) if dir_override else cwd
-                yield here, subcommand, args
+                yield here, cwd, subcommand, args, call
 
 
 def _target(args: list[str]) -> tuple[str, bool] | None:
@@ -289,7 +297,7 @@ def _git(cwd: str, *args: str) -> str | None:
     return out.stdout.strip() if out.returncode == 0 else None
 
 
-def _violation(cwd: str, target: str) -> tuple[str, str] | None:
+def _violation(cwd: str, target: str, detached: bool) -> tuple[str, str] | None:
     """``(pinned, target)`` when this switch is refused, else None."""
     pinned = _git(cwd, "config", "--get", "hooks.pinnedBranch")
     if not pinned:
@@ -301,32 +309,39 @@ def _violation(cwd: str, target: str) -> tuple[str, str] | None:
     common = _git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir")
     if not git_dir or git_dir != common:
         return None
-    if target.removeprefix("refs/heads/") == pinned:
-        return None  # returning to the pin is always allowed
+    # Returning to the pin is always allowed — unless the call detaches, which
+    # leaves HEAD at the pin's commit but off the pinned branch.
+    if not detached and target.removeprefix("refs/heads/") == pinned:
+        return None
     return pinned, target
 
 
-def _reason(pinned: str, target: str, call: str) -> str:
+def _reason(pinned: str, target: str, bypass: str) -> str:
     return (
         f"This checkout is pinned to '{pinned}' — refusing to switch it to '{target}'.\n"
         "Branch work belongs in its own worktree, not in this checkout.\n"
-        f"To move this checkout anyway: env {BYPASS}=1 {call}\n"
+        f"To move this checkout anyway: {bypass}\n"
         "To unpin it for good: git config --unset hooks.pinnedBranch"
     )
 
 
-def _refused_call(cwd: str, base: str, subcommand: str, args: list[str]) -> str:
-    """The refused git call, re-quoted, for the bypass line to repeat.
+def _bypass_line(shell_cwd: str, base: str, call: list[str]) -> str:
+    """The refused call as written, with the bypass assignment on it.
 
     The line is a command to run, so it repeats the refused call rather than
-    rebuilding one: a rebuilt `git checkout -b <target>` dropped the start
-    point and `--track`, and turned `switch --orphan` (an empty tree) into
-    `checkout --orphan` (the old files staged). A call judged somewhere other
-    than the session's directory, after a `cd` or a `git -C`, carries `-C` so
-    the line acts on the same repo; git's own options are otherwise dropped.
+    rebuilding one. Each rebuild dropped something: a start point and
+    `--track`, `switch --orphan` (an empty tree) becoming `checkout --orphan`
+    (the old files staged), and git's own options, so a refused
+    `git -c checkout.guess=false checkout <remote-only>` was offered as a DWIM
+    switch. Repeating the call keeps every option and relative path meaning
+    what it meant, provided the shell stands where it stood: when the
+    command's own `cd` moved it, the line starts with that `cd`. The
+    assignment goes on the git segment, which is the only place the guard
+    honours it.
     """
-    where = f"-C {shlex.quote(cwd)} " if cwd != base else ""
-    return f"git {where}{subcommand} {shlex.join(args)}"
+    here = os.path.normpath(shell_cwd)
+    cd = f"cd {shlex.quote(here)} && " if here != os.path.normpath(base) else ""
+    return f"{cd}env {BYPASS}=1 {shlex.join(call)}"
 
 
 def main() -> None:
@@ -339,10 +354,16 @@ def main() -> None:
     cmd = data.get("tool_input", {}).get("command", "")
     base = data.get("cwd") or os.getcwd()
 
-    for cwd, subcommand, args in _git_calls(cmd, base):
+    for cwd, shell_cwd, subcommand, args, call in _git_calls(cmd, base):
         if subcommand not in {"checkout", "switch"}:
             continue
         found = _target(args)
+        detached = any(tok in _DETACH for tok in args)
+        # A bare `--detach` names no target but still detaches HEAD where it
+        # stands, so it is judged as a move to HEAD. A `--` or patch mode makes
+        # it a file restore, which _target has already turned down.
+        if not found and detached and "--" not in args and not _PATCH & set(args):
+            found = ("HEAD", True)
         if not found:
             continue
         target, is_new = found
@@ -350,16 +371,16 @@ def main() -> None:
             continue  # a path we cannot resolve is not a repo we can judge
         if not is_new and not _moves_head(cwd, target, subcommand):
             continue
-        violation = _violation(cwd, target)
+        violation = _violation(cwd, target, detached)
         if violation:
-            call = _refused_call(cwd, base, subcommand, args)
+            bypass = _bypass_line(shell_cwd, base, call)
             print(
                 json.dumps(
                     {
                         "hookSpecificOutput": {
                             "hookEventName": "PreToolUse",
                             "permissionDecision": "deny",
-                            "permissionDecisionReason": _reason(*violation, call),
+                            "permissionDecisionReason": _reason(*violation, bypass),
                         }
                     }
                 )

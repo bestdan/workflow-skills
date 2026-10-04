@@ -96,6 +96,20 @@ allowed() {
   denied "$tmp" "git -C ./pinned checkout other"
 }
 
+# A detach leaves HEAD at a commit but off the pinned branch, so even a detach
+# at the pin is a move, and a bare `--detach` (no target) detaches in place.
+@test "a detach in a pinned main worktree is denied, even at the pin" {
+  denied "$pinned" 'git switch --detach main'
+  denied "$pinned" 'git checkout --detach main'
+  denied "$pinned" 'git switch -d main'
+  denied "$pinned" 'git switch --detach'
+  denied "$pinned" 'git checkout --detach'
+  allowed "$pinned" 'git checkout --detach -- file.txt'
+  git -C "$pinned" worktree add -q "$tmp/wt-detach" -b wt-detach
+  allowed "$tmp/wt-detach" 'git checkout --detach'
+  allowed "$tmp/wt-detach" 'git switch --detach main'
+}
+
 @test "returning to the pin is allowed" {
   git -C "$pinned" checkout -q other
   allowed "$pinned" 'git checkout main'
@@ -210,15 +224,36 @@ print(h["permissionDecisionReason"])
   assert_output --partial "git checkout -b 'a b'\\n"
 }
 
-# A call judged after a `cd` or a `git -C` names that directory, so the line
-# acts on the same repo when run from the session's own.
-@test "the bypass line carries -C when the call ran elsewhere" {
+# git's own options are part of the call: a rebuilt line dropped `-c`, which
+# can turn a command git would refuse into a DWIM switch.
+@test "the bypass line keeps git's own options as written" {
   run run_hook "$tmp" 'git -C pinned checkout other'
-  assert_output --partial "WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git -C $pinned checkout other\\n"
+  assert_output --partial "To move this checkout anyway: env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git -C pinned checkout other\\n"
+  run run_hook "$pinned" 'git -c core.quotepath=off checkout other'
+  assert_output --partial "env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git -c core.quotepath=off checkout other\\n"
+}
+
+# Relative paths in the call mean what they meant only from where the shell
+# stood, so a call after a `cd` gets that `cd`, with the assignment on the git
+# segment, the only place the guard honours it.
+@test "the bypass line repeats the cd that moved the shell" {
   run run_hook "$tmp" 'cd pinned && git checkout other'
-  assert_output --partial "WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git -C $pinned checkout other\\n"
+  assert_output --partial "To move this checkout anyway: cd $pinned && env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git checkout other\\n"
   run run_hook "$pinned" 'git checkout other'
-  refute_output --partial "git -C"
+  refute_output --partial "anyway: cd "
+}
+
+# The line is offered as the way through, so the guard must honour it.
+@test "the guard allows its own bypass line" {
+  local cmd line
+  for cmd in 'cd pinned && git -C . checkout -b x' 'git -C pinned switch --detach'; do
+    line=$(run_hook "$tmp" "$cmd" | python3 -c '
+import json, sys
+r = json.load(sys.stdin)["hookSpecificOutput"]["permissionDecisionReason"]
+print(next(l for l in r.splitlines() if l.startswith("To move")).split(": ", 1)[1])
+')
+    allowed "$tmp" "$line"
+  done
 }
 
 # hooks.json runs the guard by its path, so the exec bit and the shebang are
