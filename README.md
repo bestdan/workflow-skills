@@ -163,8 +163,8 @@ has to sit immediately before that call's `git` word. The guard reads command
 text, so it judges plain shapes only —
 `[cd <dir> &&] [env VAR=1] git [global options] checkout|switch …` — and lets
 executors (`bash -c`, `eval`), subshells, wrappers with options, git aliases
-and scripts through by design; git's `post-checkout` hook is the backstop for
-those.
+and scripts through by design. A `post-checkout` hook, where one is installed,
+is the backstop for those, and a state check is planned.
 
 | Skill                                                      | Trigger                                                | What it does                                                                                                                                                             |
 | ---------------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

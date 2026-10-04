@@ -25,7 +25,8 @@ command as *text*, so it is a heuristic and fails open on shapes it cannot
 parse, and it sees Claude Code alone: another CLI agent or a human terminal
 never reaches it. The set of commands that can move HEAD has no end, so the
 guard judges a fixed set of plain shapes and leaves the rest to a check of the
-repo's actual state (git's ``post-checkout`` hook; see
+repo's actual state: a ``post-checkout`` hook where one is installed, and a
+planned state check (see
 ``dev_docs/designs/2026-10-04-pinned-checkout-guard-v2.md``).
 
 SCOPE. In scope: ``[cd <dir> &&] [env VAR=1] git [global options]
