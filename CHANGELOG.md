@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.77.0] - 2026-10-05
+
+### Features
+
+- report dead teardown allow-rules from Check 7 [#954] (#977) (d9989c9)
+
 ## [2.76.0] - 2026-10-05
 
 ### Features
