@@ -495,8 +495,10 @@ config's `branch_prefix`), or `default (<what it was derived from>)`.
 
 **Never written by `--fix`.** Which root and prefix a repo wants is a convention
 only its owner knows, so there is no mechanical value to write. And this check
-never writes a permission rule either: no rule can name the plugin's scripts
-durably (#816).
+never writes a permission rule either: a settings rule can match a plugin script
+only by its full installed path, which carries the version and stops matching at
+the next release (#816). This command's own `allowed-tools` grant covers the
+resolver call.
 
 ### 3. Report (and fix under `--fix`)
 
