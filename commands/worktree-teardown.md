@@ -41,6 +41,8 @@ case that matches the message. Never fall back to `rm -rf` or a bare
 
 **The `allowed-tools` grant above applies only when this command is typed** as
 `/worktree-teardown`. Reached any other way — through the Skill tool, or with the
-agent running a script itself — no grant from this plugin applies, and the call
-needs a user allow rule:
+agent running a script itself — this command's grant does not apply. The call is
+then approved only by the slash command that opened the turn, if its
+`allowed-tools` lists `Bash` (as `/deliver-task` does), or else by a user allow
+rule naming the versioned script path:
 [`../skills/co-review/references/permissions.md`](../skills/co-review/references/permissions.md#plugin-scripts).
