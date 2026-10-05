@@ -20,8 +20,15 @@ and on a sandboxed machine the settings file is write-denied anyway.
 Read by `/doctor` (commands/doctor.md) as a check, and by co-review's own
 pre-flight so a denied reviewer is explained rather than silently missing.
 
+With `--teardown` it checks the worktree teardown scripts instead. A model
+running `worktree-remove.sh` or `branch-remove.sh` outside `/worktree-teardown`
+is approved only by a settings rule naming the script's full installed path,
+which carries the plugin's version directory, so the rule dies at the next
+`claude plugin update` and the denial is invisible at the tool boundary. Only
+`/doctor` asks this question; co-review's pre-flight does not run it.
+
 Usage:
-  coreview-rule-drift.py [--plugin-root PATH] [--settings PATH]... [--json]
+  coreview-rule-drift.py [--plugin-root PATH] [--settings PATH]... [--teardown] [--json]
 
   --plugin-root  the installed plugin to read templates from. Defaults to
                  $CLAUDE_PLUGIN_ROOT. This must be the INSTALLED plugin, not a
@@ -30,6 +37,7 @@ Usage:
   --settings     a settings.json to read `permissions.allow` from; repeatable.
                  Defaults to ~/.claude/settings.json plus ./.claude/settings.json
                  and ./.claude/settings.local.json when they exist.
+  --teardown     check the teardown-script rules instead of co-review's.
   --json         emit the findings as JSON instead of a report.
 
 Exit codes: 0 no drift, 1 drift found, 2 could not run (bad plugin root, etc).
@@ -101,6 +109,21 @@ PLUGIN_CACHE_RULE_TAIL = "/workflow-skills/workflow-skills/:*)"
 # Shared templates of which one suffices. permissions.md says to add only the
 # diff source you use: `gh pr diff` for a PR, `git diff` for `--local`.
 SHARED_ALTERNATIVES = [{"Bash(gh pr diff:*)", "Bash(git diff:*)"}]
+
+
+# The scripts a model runs to tear down a worktree or delete a branch. Their
+# grant in `/worktree-teardown` applies only when that command is typed, so a
+# model-started teardown needs a settings rule naming the full installed path.
+TEARDOWN_SCRIPTS = ("worktree-remove.sh", "branch-remove.sh")
+
+# A plugin-cache path to a teardown script, capturing its version segment. A
+# rule is attributed to the teardown check only when it has this shape, so a
+# rule naming a working checkout's copy of the script is left alone.
+TEARDOWN_RULE_RE = re.compile(
+    r'/workflow-skills/workflow-skills/([^/"]+)/scripts/('
+    + "|".join(re.escape(s) for s in TEARDOWN_SCRIPTS)
+    + r")"
+)
 
 
 def die(msg) -> NoReturn:
@@ -387,6 +410,146 @@ def analyze_shared(plugin_root, allow_rules, reviewer_findings):
     }
 
 
+def rule_path(rule):
+    """The script path a `Bash(<path> …)` rule names, unquoted and with `$HOME`
+    expanded, or None. Only the first shell token is the path; the rest is
+    arguments or the ` *` prefix tail."""
+    if not rule.startswith("Bash(") or not rule.endswith(")"):
+        return None
+    inner = rule[len("Bash(") : -1].strip()
+    if inner.endswith(":*"):
+        inner = inner[: -len(":*")]
+    if inner.startswith('"'):
+        end = inner.find('"', 1)
+        token = inner[1:end] if end > 0 else inner[1:]
+    else:
+        token = inner.split()[0] if inner else ""
+    return os.path.expandvars(token) or None
+
+
+def teardown_template(plugin_root, script):
+    """The rule to add for `script`, in the one form measured to fire: a quoted
+    full path with a `:*` tail (see permissions.md → plugin scripts). The path
+    is the literal installed one, because the teardown guidance has the caller
+    read `installPath` and pass it literally, and the matcher compares the two
+    strings before expanding either."""
+    return f'Bash("{Path(plugin_root) / "scripts" / script}":*)'
+
+
+def analyze_teardown(plugin_root, allow_rules):
+    """Classify the operator's teardown-script rules against the installed plugin.
+
+    LIVE names the installed script's full path. DEAD names a literal version
+    directory other than the installed one, so it stopped matching at an
+    update. UNVERIFIED names neither, typically a `*` in the version segment:
+    no measurement shows that shape fires, so it is reported and not counted as
+    coverage, and the script it was meant for shows up MISSING on its own.
+    """
+    root = Path(plugin_root)
+    installed = root.name
+    scripts = []
+    configured = False
+    for script in TEARDOWN_SCRIPTS:
+        want = str(root / "scripts" / script)
+        live, dead, unverified = [], [], []
+        for rule in allow_rules:
+            m = TEARDOWN_RULE_RE.search(rule)
+            if not m or m.group(2) != script:
+                continue
+            configured = True
+            version = m.group(1)
+            if rule_path(rule) == want:
+                live.append(rule)
+            elif "*" not in version and version != installed:
+                dead.append({"rule": rule, "version": version})
+            else:
+                unverified.append(rule)
+        scripts.append(
+            {
+                "script": script,
+                "live": live,
+                "dead": dead,
+                "unverified": unverified,
+                "missing": None if live else teardown_template(root, script),
+            }
+        )
+    return {
+        "plugin_root": str(root),
+        "installed_version": installed,
+        # No teardown rule at all is "not set up", not "broke": the plugin's
+        # hooks and a typed `/worktree-teardown` need no rule, so an operator
+        # who never has the model run the scripts should not be nagged.
+        "configured": configured,
+        "scripts": scripts,
+    }
+
+
+def teardown_drift(t):
+    """Drift is a configured teardown setup with a dead rule or an uncovered
+    script. An unverified rule is not drift on its own; the script it fails to
+    cover is already MISSING."""
+    return t["configured"] and any(s["dead"] or s["missing"] for s in t["scripts"])
+
+
+def report_teardown(t, settings_read, settings_searched):
+    print(f"teardown allow-rule drift — installed plugin {t['plugin_root']}")
+    for p in settings_read:
+        print(f"  settings: {p}")
+    if not settings_read:
+        print(
+            "  settings: none found — looked in "
+            + ", ".join(str(p) for p in settings_searched)
+        )
+    print()
+
+    if not t["configured"]:
+        print(
+            "teardown: no allow-rule configured. Only a model-started teardown\n"
+            "outside a typed `/worktree-teardown` needs one; to allow that, add:"
+        )
+        for s in t["scripts"]:
+            print(f"  {s['missing']}")
+        print()
+        print("No drift.")
+        return
+
+    for s in t["scripts"]:
+        if s["live"] and not s["dead"] and not s["unverified"]:
+            print(f"{s['script']}: ok")
+            continue
+        print(f"{s['script']}:")
+        for rule in s["live"]:
+            print(f"  LIVE       {rule}")
+        for d in s["dead"]:
+            print(f"  DEAD       {d['rule']}")
+            print(
+                f"             pinned to {d['version']}; installed is "
+                f"{t['installed_version']}"
+            )
+        for rule in s["unverified"]:
+            print(f"  UNVERIFIED {rule}")
+        if s["missing"]:
+            print(f"  MISSING    {s['missing']}")
+        print()
+
+    if any(s["unverified"] for s in t["scripts"]):
+        print(
+            "UNVERIFIED rules are not counted as coverage: only a rule naming the\n"
+            "installed script's full path has been measured to fire.\n"
+        )
+
+    if teardown_drift(t):
+        print(
+            "A dead teardown rule fails silently: the model's teardown call is\n"
+            "denied, and nothing at the tool boundary says why. To repair: delete\n"
+            "each DEAD rule and add each MISSING one, wherever the settings file\n"
+            "above is managed. The rule names a version, so it has to be\n"
+            "rewritten after every `claude plugin update`."
+        )
+    else:
+        print("No drift.")
+
+
 def has_drift(findings, shared=None):
     """Drift is a CONFIGURED reviewer, or configured shared rules, with a
     missing or dead rule.
@@ -505,6 +668,7 @@ def main():
     ap = argparse.ArgumentParser(add_help=True, description=__doc__)
     ap.add_argument("--plugin-root", default=os.environ.get("CLAUDE_PLUGIN_ROOT"))
     ap.add_argument("--settings", action="append", default=[])
+    ap.add_argument("--teardown", action="store_true")
     ap.add_argument("--json", action="store_true", dest="as_json")
     args = ap.parse_args()
 
@@ -514,7 +678,11 @@ def main():
             "is set. It must point at the INSTALLED plugin, not a checkout."
         )
     reviewers = Path(args.plugin_root) / "skills" / "co-review" / "reviewers"
-    if not reviewers.is_dir():
+    if args.teardown:
+        marker = Path(args.plugin_root) / "scripts" / TEARDOWN_SCRIPTS[0]
+        if not marker.is_file():
+            die(f"{marker} does not exist — is --plugin-root a plugin root?")
+    elif not reviewers.is_dir():
         die(f"{reviewers} is not a directory — is --plugin-root a plugin root?")
 
     if args.settings:
@@ -532,6 +700,20 @@ def main():
     # ran fine and has a more useful answer. A file that EXISTS but is
     # unreadable or invalid stays fatal — load_allow_rules handles that.
     allow_rules, settings_read = load_allow_rules(settings_paths)
+
+    if args.teardown:
+        teardown = analyze_teardown(args.plugin_root, allow_rules)
+        drift = teardown_drift(teardown)
+        if args.as_json:
+            print(
+                json.dumps(
+                    {"settings": settings_read, "drift": drift, "teardown": teardown},
+                    indent=2,
+                )
+            )
+        else:
+            report_teardown(teardown, settings_read, settings_paths)
+        sys.exit(1 if drift else 0)
 
     findings = analyze(reviewers, allow_rules)
     shared = analyze_shared(args.plugin_root, allow_rules, findings)

@@ -24,6 +24,9 @@
 #     (issue #475)
 #   - every plugin script co-review runs has an allowed-tools grant in its
 #     SKILL.md, since no settings rule can approve one (issue #848)
+#   - under --teardown, a teardown rule pinned to a stale plugin version is
+#     DEAD, one naming the installed path is live, and no rule is not drift
+#     (issue #954)
 #
 # Run directly: bash scripts/test-coreview-rule-drift.sh
 set -uo pipefail
@@ -570,6 +573,89 @@ EOF
 count=$(printf '%s\n' "$invocations" | grep -c .)
 if [ "$ungranted" -eq 0 ] && [ "$count" -gt 0 ]; then
   pass "all $count plugin-script invocations have an allowed-tools grant"
+fi
+
+# --- 12. --teardown: live, stale-version, and absent teardown rules ---------
+# A teardown rule names the full installed path, version directory included, so
+# it dies at the next plugin update. The check reports a rule pinned to another
+# version as DEAD, naming the installed one (issue #954).
+TD_CACHE="$BASE/cache/workflow-skills/workflow-skills"
+TD_PLUGIN="$TD_CACHE/2.0.0"
+mkdir -p "$TD_PLUGIN/scripts"
+touch "$TD_PLUGIN/scripts/worktree-remove.sh" "$TD_PLUGIN/scripts/branch-remove.sh"
+
+run_teardown() {
+  OUT="$("$SCRIPT" --plugin-root "$TD_PLUGIN" --settings "$1" --teardown --json 2>&1)"
+  RC=$?
+}
+# td <script> <field> — how many entries that teardown script has in that field.
+td() {
+  printf '%s' "$OUT" | jq --arg s "$1" --arg f "$2" \
+    '[.teardown.scripts[] | select(.script == $s)][0][$f] | if . == null then 0 elif type == "string" then 1 else length end'
+}
+
+make_settings "$BASE/td-live.json" \
+  "Bash(\"$TD_PLUGIN/scripts/worktree-remove.sh\":*)" \
+  "Bash(\"$TD_PLUGIN/scripts/branch-remove.sh\":*)"
+run_teardown "$BASE/td-live.json"
+if [ "$RC" -eq 0 ] && [ "$(td worktree-remove.sh live)" = "1" ] \
+  && [ "$(td branch-remove.sh live)" = "1" ] && [ "$(td worktree-remove.sh missing)" = "0" ]; then
+  pass "teardown: rules naming the installed path are live, no drift"
+else
+  fail "teardown: live rules were not recognised (rc=$RC): $OUT"
+fi
+
+make_settings "$BASE/td-stale.json" \
+  "Bash(\"$TD_CACHE/1.9.0/scripts/worktree-remove.sh\":*)" \
+  "Bash(\"$TD_PLUGIN/scripts/branch-remove.sh\":*)"
+run_teardown "$BASE/td-stale.json"
+if [ "$RC" -eq 1 ] && [ "$(td worktree-remove.sh dead)" = "1" ] \
+  && [ "$(td worktree-remove.sh missing)" = "1" ] && [ "$(td branch-remove.sh dead)" = "0" ] \
+  && [ "$(printf '%s' "$OUT" | jq -r '.teardown.scripts[0].dead[0].version')" = "1.9.0" ]; then
+  pass "teardown: a rule pinned to a stale version is DEAD and its script MISSING"
+else
+  fail "teardown: a stale-version rule was not reported dead (rc=$RC): $OUT"
+fi
+
+# The human report names the installed version beside the dead rule, which is
+# what the issue's user-run check reads.
+report=$("$SCRIPT" --plugin-root "$TD_PLUGIN" --settings "$BASE/td-stale.json" --teardown 2>&1)
+if grep -qF "pinned to 1.9.0; installed is 2.0.0" <<<"$report"; then
+  pass "teardown: the report names the installed version beside a dead rule"
+else
+  fail "teardown: the report did not name the installed version: $report"
+fi
+
+# A `*` in the version segment was never measured to fire, so it is not
+# coverage — but it is not dead either.
+make_settings "$BASE/td-wild.json" \
+  "Bash(/Users/*/.claude/plugins/cache/workflow-skills/workflow-skills/*/scripts/worktree-remove.sh *)"
+run_teardown "$BASE/td-wild.json"
+if [ "$RC" -eq 1 ] && [ "$(td worktree-remove.sh unverified)" = "1" ] \
+  && [ "$(td worktree-remove.sh dead)" = "0" ] && [ "$(td worktree-remove.sh missing)" = "1" ]; then
+  pass "teardown: a wildcard-version rule is UNVERIFIED, not coverage"
+else
+  fail "teardown: a wildcard-version rule was misclassified (rc=$RC): $OUT"
+fi
+
+make_settings "$BASE/td-none.json" "Bash(git status:*)"
+run_teardown "$BASE/td-none.json"
+if [ "$RC" -eq 0 ] && [ "$(printf '%s' "$OUT" | jq -r .teardown.configured)" = "false" ] \
+  && [ "$(td worktree-remove.sh missing)" = "1" ] && [ "$(td branch-remove.sh missing)" = "1" ]; then
+  pass "teardown: no rule is 'not configured' and names both rules to add, not drift"
+else
+  fail "teardown: the no-rule case was reported as drift or named nothing (rc=$RC): $OUT"
+fi
+
+# A checkout's copy of a teardown script is not the installed plugin's, so a
+# rule naming it is never attributed — neither coverage nor dead.
+make_settings "$BASE/td-checkout.json" \
+  "Bash(\"$HOME/src/workflow-skills/scripts/worktree-remove.sh\":*)"
+run_teardown "$BASE/td-checkout.json"
+if [ "$RC" -eq 0 ] && [ "$(printf '%s' "$OUT" | jq -r .teardown.configured)" = "false" ]; then
+  pass "teardown: a rule naming a checkout's script is not attributed"
+else
+  fail "teardown: a checkout-path rule was attributed (rc=$RC): $OUT"
 fi
 
 echo

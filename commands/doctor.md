@@ -1,5 +1,5 @@
 ---
-description: Diagnose and optionally fix the plugin setup — config validity, handler prerequisites, legacy dirs, schema drift, hygiene, and co-review allow-rule drift
+description: Diagnose and optionally fix the plugin setup — config validity, handler prerequisites, legacy dirs, schema drift, hygiene, and co-review and teardown allow-rule drift
 allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(find *), Bash(grep *), Bash(uv *), Bash(python3 *), Bash(mkdir *), Bash(rmdir *), Glob, Grep, Read, Edit, Write, AskUserQuestion, mcp__claude_ai_Linear__list_teams, mcp__linear__list_teams, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__atlassian__getAccessibleAtlassianResources
 argument-hint: "[--fix]"
 ---
@@ -7,7 +7,7 @@ argument-hint: "[--fix]"
 # Doctor
 
 One explicit "diagnose and fix my setup" entry point. It runs a set of checks
-against `dev_docs/tasks/` and the configured handler — plus one over co-review's
+against `dev_docs/tasks/` and the configured handler — plus one over co-review's and the teardown scripts'
 allow-rules, Check 7 — prints a `PASS` / `WARN` / `FAIL` line per check with a
 remediation hint, and changes **nothing** unless invoked with `--fix`.
 
@@ -356,7 +356,7 @@ auto-archive, store an API key). Report against the resolved handler:
 handler-specific prerequisite (Linear key / Jira status) is satisfied or
 not-applicable.
 
-**Check 7 — co-review allow-rules.** Whether the exact-match Bash rules that
+**Check 7 — co-review and teardown allow-rules.** Whether the exact-match Bash rules that
 approve each co-review reviewer still match the command the **installed** plugin
 dispatches. This is the one check here that is not about the task loop, and it
 earns its place on the failure mode rather than the subject: a rule that stops
@@ -426,8 +426,29 @@ check could not run. It prints the reason on **stderr**, so capture that
 (`2>&1`) and quote it rather than reporting a bare failure — it is usually an
 unresolvable plugin root.
 
-**Always `WARN`, never `FAIL`, and never touched by `--fix`.** Three independent
-reasons, each sufficient:
+**Then run it again for the teardown scripts.** A model that runs
+`worktree-remove.sh` or `branch-remove.sh` itself, rather than through a typed
+`/worktree-teardown`, is approved only by a settings rule naming the script's full
+installed path. That path carries the version directory, so the rule dies at the
+next `claude plugin update`, and the denial is just as silent:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/coreview-rule-drift.py" \
+  --plugin-root "${CLAUDE_PLUGIN_ROOT}" --teardown
+```
+
+It reads the same settings files and classifies each rule naming a plugin-cache
+copy of either script. **LIVE** names the installed path. **DEAD** names a
+different version directory, and the line names the installed version beside it.
+**UNVERIFIED** names neither, typically a `*` in the version segment: no
+measurement shows that shape fires, so it is reported but not counted as coverage.
+**MISSING** is a script with no live rule, printed as the rule to add. No teardown
+rule at all is _not configured_, which is not drift: the hooks and a typed
+`/worktree-teardown` need no rule. The exit codes are the same as above, and the
+result is reported as its own line, `teardown allow-rules`.
+
+**Always `WARN`, never `FAIL`, and never touched by `--fix`.** This applies to both
+runs, for three independent reasons, each sufficient:
 
 1. The repair needs literal absolute paths only the operator knows — `<NEUTRAL>`
    in particular is deliberately never documented as a fixed value (see
@@ -463,6 +484,7 @@ the tally, where the reader is left.
   WARN  Hygiene — 2 expired tasks; 1 orphan task/ branch
   WARN  Archive — `archive_after` unset; /archive-tasks is dry-run-only
   WARN  co-review allow-rules — agy: 1 dead, 2 missing; devin: 2 dead, 3 missing
+  WARN  teardown allow-rules — worktree-remove.sh: 1 dead (pinned to 2.70.4; installed is 2.76.0)
 
 2 fail, 3 warn, 2 pass. Re-run with `/doctor --fix` to apply the mechanical fixes.
 ```
