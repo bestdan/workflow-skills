@@ -318,10 +318,10 @@ The claim locks on an **atomic primitive** — creating the `<branch>` ref, a se
    | exit | meaning                                                                      | do                                                                                                                  |
    | ---- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
    | `0`  | acquired (HTTP 201)                                                          | proceed to step 3                                                                                                   |
-   | `3`  | lost — the ref already exists (HTTP 422)                                     | leave the issue's assignee and labels **untouched**, return `race`, fall back to the next candidate                 |
-   | `4`  | neither — 403/404, protected-ref ruleset, branch-pinned environment, network | degrade to `claim-lock.md`'s comment-token election (using `T_unclaimed` from step 1) and report the degrade reason |
+   | `3`  | lost — HTTP 422 `Reference already exists`                                   | leave the issue's assignee and labels **untouched**, return `race`, fall back to the next candidate                 |
+   | `4`  | neither — any other 422, 403/404, protected-ref ruleset, pinned env, network | degrade to `claim-lock.md`'s comment-token election (using `T_unclaimed` from step 1) and report the degrade reason |
 
-   Exit `4` is **not** a lost race and **not** a held claim; never report a claim you did not acquire atomically. On exit `0`, check the branch out before step 3: `git fetch origin "<branch>" && git switch -c "<branch>" FETCH_HEAD`. Do **not** substitute `git push origin <branch>` for this call: both racers branch from the same base sha, so the loser's push reports `Everything up-to-date` and exits 0 (measured — see the warning in `claim-lock.md`).
+   Exit `2` is a usage error (e.g. `--base-sha` is not a full 40-character sha); no request was sent — fix the call. Exit `4` is **not** a lost race and **not** a held claim; never report a claim you did not acquire atomically. On exit `0`, check the branch out before step 3: `git fetch origin "<branch>" && git switch -c "<branch>" FETCH_HEAD`. Do **not** substitute `git push origin <branch>` for this call: both racers branch from the same base sha, so the loser's push reports `Everything up-to-date` and exits 0 (measured — see the warning in `claim-lock.md`).
 
 3. **Mark it on the board** — assign yourself, then move the rung to `status:3_started` through the writer, carrying the issue's other managed labels forward:
 

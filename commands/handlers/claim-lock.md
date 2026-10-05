@@ -82,8 +82,8 @@ Branch on the exit code — it is the election, and it is the only thing that de
 | exit | meaning                                                                                                                   | do                                                                                                                                                                                                                                                   |
 | ---- | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `0`  | acquired (HTTP 201); stdout is `<branch>`                                                                                 | you hold the claim — proceed to the handler's human-visible markers (assign yourself, transition/label)                                                                                                                                              |
-| `3`  | lost — the ref already exists (HTTP 422)                                                                                  | **you lost the race.** Do not build, do not touch the issue's assignee or status: they belong to the winner. Report `Skipped <KEY>: claim lost — <branch> already exists on origin` and advance to the next candidate (in single/direct mode, stop). |
-| `4`  | neither — 403/404 from a token without write scope, a protected-ref ruleset, a branch-pinned environment, a network error | **not** a lost race and **not** a held claim. Fall back to the election below; never report a claim you did not acquire atomically.                                                                                                                  |
+| `3`  | lost — HTTP 422 `Reference already exists`                                                                                | **you lost the race.** Do not build, do not touch the issue's assignee or status: they belong to the winner. Report `Skipped <KEY>: claim lost — <branch> already exists on origin` and advance to the next candidate (in single/direct mode, stop). |
+| `4`  | neither — any other 422, 403/404 from a token without write scope, a protected-ref ruleset, a pinned env, a network error | **not** a lost race and **not** a held claim. Fall back to the election below; never report a claim you did not acquire atomically.                                                                                                                  |
 
 On exit `0`, proceed to "Branch + execute" **already on this branch** — do not create it
 a second time:
@@ -92,7 +92,10 @@ a second time:
 git fetch origin "<branch>" && git switch -c "<branch>" FETCH_HEAD
 ```
 
-Because the loser detects the loss from the 422, feasibility judging may still run
+Exit `2` is a usage error (e.g. `--base-sha` is not a full 40-character sha); no request
+was sent, so fix the call.
+
+Because the loser detects the loss from the `Reference already exists` 422, feasibility judging may still run
 **before** the claim: two sessions can both judge the same issue, but only one can
 acquire, and the other advances deterministically instead of building a duplicate.
 
@@ -207,7 +210,7 @@ and a **local** ref-lock session cannot detect each other at all. `do-tasks.md`
 ## Fallback: comment-token election (environments that cannot acquire)
 
 When the acquire call fails for an environment or permission reason
-(never on a 422 — that is a decided race), degrade to the election below and
+(never on `Reference already exists` — that is a decided race), degrade to the election below and
 **say so explicitly** in the report: `claim lock degraded to comment election: <the
 API error>`. A silent degrade would claim atomicity the run does not have.
 
