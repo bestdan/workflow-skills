@@ -486,7 +486,7 @@ the tally, where the reader is left.
   WARN  co-review allow-rules — agy: 1 dead, 2 missing; devin: 2 dead, 3 missing
   WARN  teardown allow-rules — worktree-remove.sh: 1 dead (pinned to 2.70.4; installed is 2.76.0)
 
-2 fail, 3 warn, 2 pass. Re-run with `/doctor --fix` to apply the mechanical fixes.
+2 fail, 4 warn, 2 pass. Re-run with `/doctor --fix` to apply the mechanical fixes.
 ```
 
 **`--fix`.** Apply only the **safe, mechanical** repairs, then re-print the block
