@@ -240,10 +240,19 @@ if ! grep -Fqx "$tip" <<<"$oids"; then
   # to from elsewhere (the local copy then predates what merged), or a reused
   # name. The merged OID is often not local, so no ancestry test settles it here.
   # Name the shapes rather than guess one; the reader is deciding whether -D is safe.
+  # Print both OIDs so that decision needs no second gh call: a merged head that
+  # is local and an ancestor of the tip makes `git log <head>..<tip>` list
+  # exactly what -D would discard, and one that is not local points at the
+  # other two shapes.
+  merged_heads=$(paste -sd' ' - <<<"$oids")
+  merged_heads=${merged_heads:-none into $default}
   warn "kept branch $branch — a PR with this name merged, but at a"
   cont "different commit than this tip: the branch gained commits after the merge,"
-  cont "or the PR was rebased or updated elsewhere. Either way -D could discard"
-  cont "commits no PR merged. Check, then:"
+  cont "the PR was rebased or updated elsewhere, or the name was reused. Either way"
+  cont "-D could discard commits no PR merged."
+  cont "  merged head(s): $merged_heads"
+  cont "  this tip:       $tip"
+  cont "Check, then:"
   cont "  git -C $root branch -D $branch"
   exit 3
 fi

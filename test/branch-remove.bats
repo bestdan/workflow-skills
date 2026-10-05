@@ -97,7 +97,18 @@ run_br() {
   assert has_branch tipmoved
   assert_output --partial "different commit than this tip"
   assert_output --partial "rebased or updated elsewhere"
+  assert_output --partial "merged head(s): 0000000000000000000000000000000000000000"
+  assert_output --partial "this tip:       $(tip_of tipmoved)"
   refute_output --partial "deleted branch"
+}
+
+@test "a tip matching no default-base head says none merged into the default" {
+  mkbranch otherbase
+  gh_says 0 "0000000000000000000000000000000000000000 feature/parent"
+  run_br "$REPO" otherbase
+  assert_failure 3
+  assert has_branch otherbase
+  assert_output --partial "merged head(s): none into main"
 }
 
 @test "a branch with no merged PR is kept, and the message names that gate" {
