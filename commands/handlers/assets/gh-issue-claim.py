@@ -300,7 +300,9 @@ def acquire_ref(repo, branch, base_sha):
     after this returns 0, so a lost or indeterminate race leaves the issue
     untouched. Shared by `acquire` (which derives `branch` from an issue
     number) and `acquire-ref` (which takes it directly), so the POST/422
-    dispatch has exactly one implementation.
+    dispatch has exactly one implementation. Exit 3 means the response said
+    the ref already exists; any other failure, including a 422 for an invalid
+    request, is exit 4.
     """
     body = json.dumps({"ref": f"refs/heads/{branch}", "sha": base_sha})
     code, out, err = run_gh(
@@ -311,17 +313,32 @@ def acquire_ref(repo, branch, base_sha):
         print(branch)
         return 0
 
-    combined = f"{out}\n{err}".lower()
-    if (
-        "reference already exists" in combined
-        or "http 422" in combined
-        or "(422)" in combined
-    ):
+    # Only the "already exists" message is a lost race. GitHub also answers 422
+    # for a malformed request (an abbreviated or unknown sha), and reading that
+    # as a loss makes the caller skip an issue nobody holds.
+    if "reference already exists" in f"{out}\n{err}".lower():
         print(f"lost the race for {branch}: ref already exists", file=sys.stderr)
         return 3
 
-    print(f"could not acquire {branch}: {err.strip() or out.strip()}", file=sys.stderr)
+    response = "\n".join(part for part in (out.strip(), err.strip()) if part)
+    print(f"could not acquire {branch}: {response or 'gh api failed'}", file=sys.stderr)
     return 4
+
+
+FULL_SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
+
+
+def full_sha(value):
+    """argparse type for `--base-sha`: a full 40-character hex sha, or exit 2.
+
+    The REST call rejects an abbreviated sha with a 422, which is not a lost
+    race; refusing it here means the request is never sent at all.
+    """
+    if not FULL_SHA_RE.match(value):
+        raise argparse.ArgumentTypeError(
+            f"a full 40-character sha is required, got {value!r}"
+        )
+    return value
 
 
 def cmd_acquire(args):
@@ -384,7 +401,7 @@ def main(argv=None):
     )
     p.add_argument("--repo", required=True, help="owner/name")
     p.add_argument("--issue", required=True, type=int)
-    p.add_argument("--base-sha", required=True, dest="base_sha")
+    p.add_argument("--base-sha", required=True, dest="base_sha", type=full_sha)
     p.add_argument("--prefix", default="")
     p.set_defaults(func=cmd_acquire)
 
@@ -394,7 +411,7 @@ def main(argv=None):
     )
     p.add_argument("--repo", required=True, help="owner/name")
     p.add_argument("--branch", required=True)
-    p.add_argument("--base-sha", required=True, dest="base_sha")
+    p.add_argument("--base-sha", required=True, dest="base_sha", type=full_sha)
     p.set_defaults(func=cmd_acquire_ref)
 
     p = subparsers.add_parser(

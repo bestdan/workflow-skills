@@ -216,7 +216,7 @@ The claim locks on an **atomic primitive** — pushing the `task/<KEY>` ref, a s
    Branch on the exit code (`claim-lock.md` → "Acquire" has the full table): **exit `3`**
    (HTTP 422, `Reference already exists`) → **you lost**: leave the issue's assignee and
    status untouched, return `race`, and fall back to the next candidate. **Exit `4`**
-   (403/404, protected-ref ruleset, branch-pinned environment) → degrade to
+   (any other 422, 403/404, protected-ref ruleset, branch-pinned environment) → degrade to
    `claim-lock.md`'s comment-token election (using `T_unclaimed` from step 2) and report
    the degrade reason. Only **exit `0`** proceeds to step 4 — check the branch out first
    (`git fetch origin "task/<KEY>" && git switch -c "task/<KEY>" FETCH_HEAD`). Do **not**

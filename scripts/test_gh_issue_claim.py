@@ -27,6 +27,9 @@ gh_issue_claim = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(gh_issue_claim)
 
 
+BASE_SHA = "6a77257e" + "0" * 32
+
+
 class FakeRemote:
     """A fake GitHub remote: create-only refs, plus WIP search results.
 
@@ -136,7 +139,7 @@ class AcquireConcurrencyTests(unittest.TestCase):
                     "--issue",
                     "142",
                     "--base-sha",
-                    "deadbeef",
+                    BASE_SHA,
                     "--prefix",
                     prefix,
                 ]
@@ -182,7 +185,7 @@ class AcquireConcurrencyTests(unittest.TestCase):
                     "--issue",
                     "142",
                     "--base-sha",
-                    "deadbeef",
+                    BASE_SHA,
                 ]
             )
         self.assertEqual(code, 4)
@@ -215,7 +218,7 @@ class AcquireRefTests(unittest.TestCase):
                     "--branch",
                     branch,
                     "--base-sha",
-                    "deadbeef",
+                    BASE_SHA,
                 ]
             )
         return code, out.getvalue(), err.getvalue()
@@ -237,6 +240,51 @@ class AcquireRefTests(unittest.TestCase):
         self.assertEqual(out, "", "a lost race must never print an acquired branch")
         self.assertIn("task/PLAT-142", err)
         self.assertEqual(remote.mutating_issue_calls(), [])
+
+    def test_a_422_that_is_not_an_existing_ref_is_exit_4_with_the_body(self):
+        class InvalidRequest:
+            def __init__(self):
+                self.calls = []
+
+            def run_gh(self, args, stdin=None):
+                self.calls.append((args, stdin))
+                return (
+                    1,
+                    '{"message":"Object does not exist","status":"422"}',
+                    "gh: Object does not exist (HTTP 422)",
+                )
+
+        code, out, err = self._acquire_ref(InvalidRequest())
+
+        self.assertEqual(code, 4)
+        self.assertEqual(out, "")
+        self.assertIn("Object does not exist", err)
+        self.assertIn("HTTP 422", err)
+
+    def test_an_already_exists_422_is_exit_3(self):
+        class Exists:
+            def run_gh(self, args, stdin=None):
+                return 1, "", "gh: Reference already exists (HTTP 422)"
+
+        code, _, _ = self._acquire_ref(Exists())
+
+        self.assertEqual(code, 3)
+
+    def test_an_abbreviated_base_sha_is_a_usage_error_before_any_gh_call(self):
+        for command, extra in (
+            ("acquire-ref", ["--branch", "task/PLAT-142"]),
+            ("acquire", ["--issue", "142"]),
+        ):
+            remote = FakeRemote()
+            gh_issue_claim.run_gh = remote.run_gh
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as ctx:
+                gh_issue_claim.main(
+                    [command, "--repo", "o/n", *extra, "--base-sha", "6a77257e"]
+                )
+            self.assertEqual(ctx.exception.code, 2, command)
+            self.assertIn("full 40-character sha", err.getvalue(), command)
+            self.assertEqual(remote.calls, [], command)
 
     def test_indeterminate_failure_is_exit_4_not_3(self):
         class Forbidden:
