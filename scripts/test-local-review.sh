@@ -1009,6 +1009,37 @@ check("ssh hint: under --bind offers no ssh -L command", "ssh -L" not in out_b, 
 check("ssh hint: under --bind the URL names the bound host",
       f"LOCAL_REVIEW_URL=http://127.0.0.1:{port_b}/" in out_b, out_b)
 
+# -- first-request line: one, and only one -----------------------------------
+#
+# run_startup_output makes exactly one request (a 404 on bare /), so the line
+# must be there. Without it the server is silent, and "the tunnel never
+# connected" and "the browser never loaded" are the same observation from the
+# launching agent's side -- the ambiguity that cost a review four rounds.
+# Both response headers ride on ONE end_headers override, and a second
+# `def end_headers` later in the class body would silently win and drop
+# whichever headers the first one sent -- no error, the header just stops
+# appearing. That happened while writing this, so it is pinned.
+src_text = open(server_path).read()
+check("server.py: exactly one end_headers override",
+      src_text.count("    def end_headers(self):") == 1,
+      src_text.count("    def end_headers(self):"))
+
+first_lines = [ln for ln in out_l.splitlines() if "first request received" in ln]
+check("first-request line: printed once a request arrives", len(first_lines) == 1, out_l)
+# Exactly one, however many requests follow -- the page fires several at once
+# and ThreadingHTTPServer serves them concurrently, so an unguarded flag
+# prints twice. run_startup_output's probe plus its shutdown is enough to
+# catch a missing lock on a repeat run; the count above is the assertion.
+if first_lines:
+    line = first_lines[0]
+    check("first-request line: names the method", "(GET)" in line, line)
+    # The token must never reach this line: it outlives the round in whatever
+    # log the launcher redirected stderr into, while the URL line that does
+    # carry it is understood to be ephemeral.
+    tok_l = out_l.split("LOCAL_REVIEW_URL=")[1].strip().rstrip("/").rsplit("/", 1)[1]
+    check("first-request line: carries no token", tok_l not in line, (tok_l, line))
+    check("first-request line: carries no request path", "/" not in line, line)
+
 tty_env = dict(base_env, SSH_TTY="/dev/pts/3")
 _, out_t = run_startup_output(tty_env)
 check("ssh hint: printed under SSH_TTY alone", "SSH:" in out_t, out_t)
@@ -1969,6 +2000,36 @@ try:
             check("server: GET /vendor/*.js with the session cookie returns 200", resp.status == 200, resp.status)
             check("server: GET /vendor/*.js with the session cookie returns the asset",
                   len(resp.read()) > 0, "")
+
+        # -- identifying this server from a probe -------------------------
+        #
+        # A forward that failed to bind sends every request to whatever else
+        # is on that local port, and nothing in the reply used to distinguish
+        # the two: `curl -I` returned 501 from this server (no do_HEAD) and
+        # reads as "something is listening, so the tunnel works". HEAD now
+        # answers 200 and every response carries X-Local-Review, so the probe
+        # answers the question it appears to answer.
+        class _Head(_urlrequest.Request):
+            def get_method(self):
+                return "HEAD"
+
+        with _urlrequest.urlopen(_Head(f"{base}/"), timeout=5) as resp:
+            check("server: HEAD / returns 200 rather than 501", resp.status == 200, resp.status)
+            check("server: HEAD / identifies this server with the bound port",
+                  resp.headers.get("X-Local-Review") == f"port={port}",
+                  resp.headers.get("X-Local-Review"))
+            check("server: HEAD / serves no body", resp.read() == b"", "")
+
+        # The header has to be on EVERY response, including the rejections --
+        # an unauthenticated probe gets a 404, and that is the reply a reviewer
+        # on the wrong port is most likely to be staring at.
+        try:
+            _urlrequest.urlopen(f"{base}/not-the-token/", timeout=5)
+            bad("server: a 404 still carries X-Local-Review", "request unexpectedly succeeded")
+        except _urlerror.HTTPError as e:
+            check("server: a 404 still carries X-Local-Review",
+                  e.headers.get("X-Local-Review") == f"port={port}",
+                  e.headers.get("X-Local-Review"))
 
         # slashless token alias must redirect, not serve a page whose relative
         # asset/fetch URLs resolve outside the token prefix

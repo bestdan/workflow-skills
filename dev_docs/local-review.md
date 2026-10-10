@@ -238,6 +238,29 @@ which names no host and could therefore allow none) is refused outright. And
 `[\w.\-]+\.js` fullmatch blocks traversal. The token is per-launch; showing it
 to the user is fine — it dies with the server.
 
+**Two deliberate disclosures, both bought for diagnosability.** Every response
+carries `X-Local-Review: port=<bound port>` and `HEAD` answers `200` instead
+of the `501` a missing `do_HEAD` produced, so a reviewer probing a local port
+can tell this server from whatever else is answering there — a forward that
+failed to bind routes every request elsewhere, and a `501` reads as "something
+is listening, so the tunnel works" whichever server sent it. Both are
+unauthenticated, and both reveal only that a local-review server is listening,
+which the `404` on an unauthenticated `GET` already implies to anyone who can
+reach the port. Neither names a token or a path, and the path token still
+gates every byte of the diff. The header reports the **bound** port, so
+comparing it against the port being talked to distinguishes a port-translating
+tunnel (fine) from a different server (not fine).
+
+**One log line on the first request, and no access log.** `log_message` stays
+`pass`, because the token is a path segment and a per-request log would put it
+in a file outliving the round. But total silence made "nothing ever connected"
+and "the browser never loaded the page" the same observation from the
+launching agent's side, which is how a tunnel quietly serving a different
+server took four review rounds to diagnose. `note_request()` prints one line
+to stderr on the first request of a launch — method only, no path, no token —
+behind a lock, since `ThreadingHTTPServer` serves the page's several opening
+requests concurrently and an unguarded flag prints twice.
+
 **The token leaves the URL after the first hit (#386).** A `GET /<token>/`
 302s to `/`, setting a `HttpOnly`, `SameSite=Strict` session cookie named
 `local_review_<port>=<token>` and stripping the token from `Location`. The

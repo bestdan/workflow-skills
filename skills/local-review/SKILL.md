@@ -177,14 +177,24 @@ worse of the two outcomes.
 Two symptoms worth recognising, both of which have cost whole review rounds:
 
 - **The URL 404s a token you just copied** — a _different_ server is answering
-  on the reviewer's local port, so the forward never bound. `curl -I` against
-  it returns `501 Unsupported method ('HEAD')` either way, which reads as
-  proof the tunnel works and is not.
+  on the reviewer's local port, so the forward never bound. Settle it with a
+  `HEAD`: every response carries `X-Local-Review: port=<bound port>`, so
+  `curl -I` names which server replied. A bare `501 Unsupported method` means
+  something that is _not_ local-review, since this server answers `HEAD` with
+  `200`.
 - **The hint names a host that does not resolve.** It now reports
   `$SSH_CONNECTION`'s third field, the address the session arrived on, rather
   than the local hostname — a `.local` name resolves on the LAN and nowhere
   else, so over a tailnet it sent reviewers to an unreachable host and
   `ssh -N -L` exited at once.
+
+**To tell "nothing connected" from "the page never loaded", read the log.** The
+server prints one line to stderr the first time any request arrives —
+`first request received (GET)`, carrying no path and no token, once per launch.
+Its absence means nothing reached the server at all, so the problem is the
+tunnel or the address rather than the page; its presence means the opposite.
+There is deliberately no per-request access log: the token is a path segment,
+so every real request would put it in a file that outlives the round.
 
 No `SSH:` lines means a local launch; nothing changes.
 

@@ -2471,8 +2471,62 @@ class Handler(BaseHTTPRequestHandler):
     replies_since_round = 0  # replies posted since the last submit, reset on submit
     _threads_lock = threading.Lock()
 
+    _first_request_lock = threading.Lock()
+    _saw_request = False
+
     def log_message(self, *a):
+        # Still silent per request: an access log on a diff review surface
+        # would put the token in every line, and the page polls.
         pass
+
+    def note_request(self):
+        """Print ONE line the first time any request arrives, then nothing.
+
+        Without it the server is completely silent, so from the launching
+        agent's side "the tunnel never connected" and "the browser never
+        loaded the page" are the same observation — which is how a tunnel
+        that was quietly sending every request to a different server took
+        four rounds to diagnose. One line says which side of the connection
+        the problem is on and costs nothing afterwards.
+
+        Deliberately carries no path, no query and no token: the token is in
+        the URL of every real request, and this line outlives the round in
+        whatever log the launcher redirected stderr to. The method is safe
+        and distinguishes a browser GET from a probe's HEAD.
+
+        Locked because ThreadingHTTPServer serves concurrently and the page
+        fires several requests at once, so an unguarded flag prints twice."""
+        if Handler._saw_request:
+            return
+        with Handler._first_request_lock:
+            if Handler._saw_request:
+                return
+            Handler._saw_request = True
+        print(
+            f"first request received ({self.command}) — the page is reachable "
+            "from wherever it was opened",
+            file=sys.stderr,
+            flush=True,
+        )
+
+    def do_HEAD(self):
+        """Answer HEAD so `curl -I` can identify this server.
+
+        BaseHTTPRequestHandler has no default HEAD, so every probe used to
+        come back `501 Unsupported method ('HEAD')` — which reads as "a server
+        is here and the tunnel works" and is equally what the WRONG server
+        says. Returning 200 plus the X-Local-Review header makes the probe
+        answer the question it looks like it is answering.
+
+        Ungated on purpose, and it serves no content: it discloses only that a
+        local-review server is listening, which anyone able to reach the port
+        can already infer from the 404 an unauthenticated GET returns. The
+        path token still gates every byte of the diff."""
+        self.note_request()
+        self.send_response(200)
+        self.send_header("Content-Length", "0")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
 
     def current_sig(self):
         # Recompute the signature of the live source, throttled so PR mode does not
@@ -2496,6 +2550,17 @@ class Handler(BaseHTTPRequestHandler):
         # wrote the diff. Hooked here rather than at each send_header site
         # because every response, including send_error's, funnels through this.
         self.send_header("Referrer-Policy", "no-referrer")
+        # Same hook, same reason, for identifying THIS server to a probe. A
+        # forward that failed to bind sends every request to whatever else is
+        # on that local port, and nothing in a 404 distinguishes the two —
+        # which is the wrong turn that cost a review four rounds. The port is
+        # the bound one, so comparing it against the port being talked to
+        # shows a translation (a tunnel, fine) apart from a different server
+        # (not fine). It names no token and no path.
+        #
+        # This must stay in THIS method: a second `def end_headers` later in
+        # the class body silently wins, and the header simply never appears.
+        self.send_header("X-Local-Review", f"port={Handler.port}")
         super().end_headers()
 
     def _send_json(self, code, obj):
@@ -2584,6 +2649,7 @@ class Handler(BaseHTTPRequestHandler):
         return hostname in Handler.allowed_hosts and origin == f"http://{host}"
 
     def do_GET(self):
+        self.note_request()
         if self.path == "/" + Handler.token:
             # Redirect the slashless alias: the page's asset/fetch URLs are
             # relative, so serving it here would resolve them outside the
@@ -2653,6 +2719,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
+        self.note_request()
         path = self._route_path()
         if path is None:
             self.send_response(404)
