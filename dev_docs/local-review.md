@@ -216,14 +216,24 @@ The remaining defences, for the file write and for reads: every route mounts
 under a path segment of four `secrets.choice()`-drawn words
 from the 1024-word `WORDLIST` (bare 404 otherwise, slashless alias 301s),
 POSTs reject any foreign `Origin` — it must equal `http://` plus the request's
-own `Host`, whose hostname must be one of `127.0.0.1`, `localhost`,
-`review.localhost`, so an arbitrary `*.localhost` origin (e.g.
-`evil.localhost`) is still rejected, and so is an allowlisted `Host` paired
-with a different allowlisted `Origin`. The **port** is deliberately not
-checked: `ssh -L 8766:127.0.0.1:8765` is a legitimate tunnel whose Origin
-names 8766 while the server bound 8765, and pinning the bound port rejected
-it after the page had already rendered and been read. Loopback reachable on
-one port is reachable on any, so the port never carried weight — and
+own `Host`, whose hostname must be in `Handler.allowed_hosts`: `127.0.0.1`,
+`localhost`, `review.localhost`, plus whatever `--bind` was given. So an
+arbitrary `*.localhost` origin (e.g. `evil.localhost`) is still rejected, and
+so is an allowlisted `Host` paired with a different allowlisted `Origin`. The
+**port** is deliberately not checked: `ssh -L 8766:127.0.0.1:8765` is a
+legitimate tunnel whose Origin names 8766 while the server bound 8765, and
+pinning the bound port rejected it after the page had already rendered and
+been read. Loopback reachable on one port is reachable on any, so the port
+never carried weight.
+
+`--bind` is the other half of that lesson and the preferred answer for a
+remote review. It binds a routable address rather than loopback and allows
+that name as an Origin, so a reviewer on the same tailnet opens the URL with
+no tunnel — which is the only thing that can work under **mosh**, since mosh
+carries no port forwards at all and every cmux SSH workspace is a mosh
+session. It widens exposure to anything that can route to that address, with
+the path token as the sole gate, so it is opt-in and a wildcard (`0.0.0.0`,
+which names no host and could therefore allow none) is refused outright. And
 `Sec-Fetch-Site: cross-site`, and the vendor route's
 `[\w.\-]+\.js` fullmatch blocks traversal. The token is per-launch; showing it
 to the user is fine — it dies with the server.

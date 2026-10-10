@@ -141,22 +141,52 @@ hint is already in the log. Print the lines verbatim beside the URL:
 grep '^SSH: ' <scratch>/lr_server.log
 ```
 
-The **remote** side of the tunnel must be the bound port, or it reaches
-nothing. The **local** side is free: `_origin_ok()` in `server.py` compares
-`Origin` against the request's own `Host` header rather than against the
-bound port, so `ssh -L 8766:127.0.0.1:8765 <host>` works — open the URL with
-8765 swapped for 8766. Give each host its own local port, because two hosts
-naming one means the second connection cannot bind it and ssh warns and then
-carries on with no forward.
+**Prefer `--bind` to a tunnel wherever a private network already connects the
+two machines** — a tailnet, a VPN, a trusted LAN. `--bind <host>` binds that
+address instead of loopback and adds it to the Origin allowlist, so the URL
+opens directly from the reviewer's browser with nothing forwarded:
+
+```bash
+python3 server.py --git uncommitted --bind lindev   # then open the URL printed
+```
+
+That is the only option that works under **mosh**, which carries no port
+forwards at all (`man mosh`: "does not support ... port forwarding"). Every
+cmux SSH workspace is a mosh session, so in one no `ssh -L` and no
+`LocalForward` can ever work, whatever its ports say. A wildcard is refused:
+`0.0.0.0` names no host, so nothing could go in the allowlist.
+
+`--bind` makes the page reachable by anything that can route to that address,
+with the path token as the only gate. Name a private address, never a public
+one, and prefer loopback plus a tunnel when the network is not trusted.
+
+**The tunnel remains the fallback**, for a plain `ssh` session with no private
+network in common. The **remote** side must be the bound port or it reaches
+nothing; the **local** side is free, because `_origin_ok()` compares `Origin`
+against the request's own `Host` header rather than the bound port — so
+`ssh -L 8766:127.0.0.1:8765 <host>` works, opening the URL with 8765 swapped
+for 8766. Give each host its own local port: two hosts naming one means the
+second connection cannot bind it, and ssh warns and then carries on with no
+forward. A `LocalForward L 127.0.0.1:8765` under the `Host` entry the reviewer
+actually types makes it permanent.
 
 Do not reach for `ExitOnForwardFailure yes` to make that warning fatal: it
 escalates a cosmetic bind failure into a dropped ssh session, which is the
 worse of the two outcomes.
 
-The last `SSH:` line names the permanent fix: a `LocalForward` entry for the
-host in the user's own `~/.ssh/config`, after which every session carries the
-tunnel and the URL opens with no extra step. No `SSH:` lines means a local
-launch; nothing changes.
+Two symptoms worth recognising, both of which have cost whole review rounds:
+
+- **The URL 404s a token you just copied** — a _different_ server is answering
+  on the reviewer's local port, so the forward never bound. `curl -I` against
+  it returns `501 Unsupported method ('HEAD')` either way, which reads as
+  proof the tunnel works and is not.
+- **The hint names a host that does not resolve.** It now reports
+  `$SSH_CONNECTION`'s third field, the address the session arrived on, rather
+  than the local hostname — a `.local` name resolves on the LAN and nowhere
+  else, so over a tailnet it sent reviewers to an unreachable host and
+  `ssh -N -L` exited at once.
+
+No `SSH:` lines means a local launch; nothing changes.
 
 In threads mode the server shuts itself down when the user clicks Finish. The
 recorded PID is cleanup only for an abandoned session — one the user never

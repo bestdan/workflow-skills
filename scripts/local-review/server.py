@@ -2420,12 +2420,16 @@ if(THREADS_MODE) fetchThreads().then(render);
 </script></body></html>"""
 
 
-# Hostnames a review page may legitimately be served under. The server binds
-# loopback, and these are the three names that reach it: the literal address,
-# the standard alias, and the vanity host browsers resolve straight to loopback
-# with no DNS lookup (RFC 6761). Port is deliberately not part of this — see
-# _origin_ok() — but the hostname is, because it is what keeps a DNS-rebinding
-# request (`Host: evil.com`, Origin matching) from passing the same-origin test.
+# Hostnames a review page may legitimately be served under when the server
+# binds loopback, which is the default: the literal address, the standard
+# alias, and the vanity host browsers resolve straight to loopback with no DNS
+# lookup (RFC 6761). Port is deliberately not part of this — see _origin_ok() —
+# but the hostname is, because it is what keeps a DNS-rebinding request
+# (`Host: evil.com`, Origin matching) from passing the same-origin test.
+#
+# --bind ADDS to this rather than replacing it: the loopback names still reach
+# a server bound to a routable address FROM THAT MACHINE, so an agent curling
+# its own 127.0.0.1 keeps working. Handler.allowed_hosts is the live set.
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "review.localhost"})
 
 
@@ -2435,6 +2439,7 @@ class Handler(BaseHTTPRequestHandler):
     vendor_dir = ""
     token = ""  # random path segment every route is mounted under
     port = 0  # bound port; the port the page is REACHED on may differ (tunnel)
+    allowed_hosts = LOOPBACK_HOSTS  # + the --bind names; see _origin_ok()
     # source the diff was generated from, so the server can recompute it on demand
     pr = None
     repo = None
@@ -2559,6 +2564,11 @@ class Handler(BaseHTTPRequestHandler):
         # closes DNS rebinding (`Host: evil.com` with a matching Origin). Only
         # the PORT becomes free, and the port never carried weight: anything
         # that can reach loopback on one port can reach it on another.
+        #
+        # The hostname set is Handler.allowed_hosts, not the LOOPBACK_HOSTS
+        # constant, because --bind adds the name it was given. That is the one
+        # place the set widens, it widens by names the operator typed, and the
+        # Origin==Host pair-check still has to pass on top of it.
         sfs = self.headers.get("Sec-Fetch-Site")
         if sfs == "cross-site":
             return False
@@ -2571,7 +2581,7 @@ class Handler(BaseHTTPRequestHandler):
         # correct by accident today, since the server binds 127.0.0.1 and no
         # browser reaches it as [::1], but it is a guess this does not make.
         hostname = host.rsplit(":", 1)[0] if ":" in host else host
-        return hostname in LOOPBACK_HOSTS and origin == f"http://{host}"
+        return hostname in Handler.allowed_hosts and origin == f"http://{host}"
 
     def do_GET(self):
         if self.path == "/" + Handler.token:
@@ -3043,45 +3053,100 @@ def _json_for_script(obj):
     )
 
 
-def bind_server(port):
+def resolve_bind(spec):
+    """Turn a --bind value into (address_to_bind, {names the browser may use}).
+
+    The names matter as much as the address: _origin_ok() checks the Host
+    header's hostname, so binding an address the allowlist has never heard of
+    would serve the page and then reject every submit. Both the spec as typed
+    and the address it resolves to are allowed, because either can end up in
+    the URL — `--bind lindev` is browsed as `lindev:8765` over MagicDNS, and
+    the same host reached by its tailnet IP sends that instead.
+
+    A wildcard is refused rather than supported. 0.0.0.0 names no host, so
+    there is nothing to put in the allowlist and the page would be reachable
+    on every interface while accepting submits from none of them — the
+    lost-round failure again, with a third cause. Bind the address you mean."""
+    if spec in ("0.0.0.0", "::", "*"):
+        raise SystemExit(
+            f"--bind {spec}: a wildcard names no host, so the Origin check "
+            "cannot allow it and every submit would be rejected. Pass the "
+            "address or hostname you actually reach this machine by."
+        )
+    try:
+        addr = socket.gethostbyname(spec)
+    except OSError as e:
+        raise SystemExit(f"--bind {spec}: cannot resolve ({e})")
+    return addr, {spec, addr}
+
+
+def bind_server(port, host="127.0.0.1"):
     """Bind the ThreadingHTTPServer. An explicit --port must bind exactly as
     asked, so its OSError propagates. With no --port, try the stable default
     8765 first and fall back to autoselect (port 0) if that one's busy.
-    Returns (server, fell_back)."""
+    Returns (server, fell_back).
+
+    `host` is the address to bind, 127.0.0.1 unless --bind says otherwise.
+    Binding a routable address is what lets a reviewer on the same tailnet
+    open the page directly, with no tunnel and therefore nothing for mosh to
+    fail to carry — see resolve_bind() for why the name is tracked alongside."""
     if port is not None:
-        return ThreadingHTTPServer(("127.0.0.1", port), Handler), False
+        return ThreadingHTTPServer((host, port), Handler), False
     try:
-        return ThreadingHTTPServer(("127.0.0.1", 8765), Handler), False
+        return ThreadingHTTPServer((host, 8765), Handler), False
     except OSError as e:
         if e.errno != errno.EADDRINUSE:
             raise  # permission/resource errors are not contention; fail loud
-        return ThreadingHTTPServer(("127.0.0.1", 0), Handler), True
+        return ThreadingHTTPServer((host, 0), Handler), True
 
 
-def ssh_hint(port):
+def ssh_hint(port, bound_host=None):
     """Lines to print between the URL and the readiness line when the server
     was launched over SSH. They go before LOCAL_REVIEW_URL= so a consumer that
     stops reading at the readiness line has already seen them.
-    Loopback on the remote host is unreachable from the reviewer's browser,
-    so the URL only opens through a tunnel. The LOCAL side of that tunnel is
-    free to differ from the bound port — _origin_ok() compares Origin against
-    the request's own Host header — so the hint says so, and says to pick a
-    distinct local port per host. It used to insist the two match, which is
-    what made two forwarded hosts collide on one local port.
+
+    With --bind the URL already names a routable host, so there is nothing to
+    tunnel and the hint only says so. Without it the server is on loopback and
+    unreachable from the reviewer's browser, and the hint leads with --bind
+    rather than with the tunnel, because the tunnel is the worse of the two
+    answers wherever a private network already connects the machines: mosh
+    carries no port forwards at all (`man mosh`: "does not support ... port
+    forwarding"), so any mosh-based session -- which is what cmux SSH
+    workspaces use -- cannot be fixed by a forward of any shape.
+
+    The address comes from $SSH_CONNECTION, whose third field is the address
+    this session actually arrived on, NOT from socket.gethostname(). The
+    hostname is routinely a `.local` name that resolves on the LAN and nowhere
+    else, so over a tailnet it sent reviewers to a host they could not reach
+    and `ssh -N -L` exited immediately.
     Empty (no output at all) outside SSH, so a local launch is unchanged."""
-    if not (os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY")):
+    conn = os.environ.get("SSH_CONNECTION", "")
+    if not (conn or os.environ.get("SSH_TTY")):
         return []
-    host = socket.gethostname()
+    if bound_host:
+        return [
+            f"SSH: bound to {bound_host}, so the URL above opens directly from any machine "
+            "that can route to it. No tunnel needed.",
+        ]
+    # Field 3 of SSH_CONNECTION is the server address this session came in on.
+    # Falling back to the hostname only when it is absent keeps the old
+    # behaviour for an SSH_TTY-only session, where there is nothing better.
+    parts = conn.split()
+    host = parts[2] if len(parts) >= 3 else socket.gethostname()
     return [
-        f"SSH: this server is on {host}'s loopback; from your own machine run:",
-        f"SSH:   ssh -L {port}:127.0.0.1:{port} {host}",
-        f"SSH: then open the URL above. The local side need not be {port} — pick any free "
-        f"local port L, run `ssh -L L:127.0.0.1:{port}`, and open the URL with {port} "
-        "swapped for L. Only the remote side has to match what this server bound.",
-        f"SSH: to skip this next time, add `LocalForward L 127.0.0.1:{port}` under "
-        f"`Host {host}` in your own ~/.ssh/config; every session then carries the tunnel. "
-        "Give each host its own L, or the second connection cannot bind it and ssh "
-        "warns and carries on with no forward.",
+        f"SSH: this server is on {host}'s loopback, so the URL above does not open from "
+        "your machine. Two ways out, better one first:",
+        f"SSH:   1. relaunch with `--bind {host}` and open the URL it prints. Nothing to "
+        "forward, and it is the only option that works under mosh — a mosh session "
+        "(every cmux SSH workspace) carries no port forwards at all.",
+        f"SSH:   2. or tunnel: `ssh -L L:127.0.0.1:{port} {host}` for any free local port "
+        f"L, then open the URL with {port} swapped for L. Only the remote side has to "
+        "match what this server bound.",
+        f"SSH: for 2, `LocalForward L 127.0.0.1:{port}` under the `Host` entry you type "
+        "makes it permanent — give each host its own L, or the second connection cannot "
+        "bind it and ssh warns and carries on with no forward.",
+        "SSH: if the URL 404s a token you just copied, another server is answering on "
+        "your local port, not this one.",
     ]
 
 
@@ -3092,6 +3157,15 @@ def main():
     ap.add_argument("--diff-file")
     ap.add_argument("--git", help="live diff spec: uncommitted | <ref> | <A>...<B>")
     ap.add_argument("--port", type=int, default=None)
+    ap.add_argument(
+        "--bind",
+        default=None,
+        help="address or hostname to bind instead of 127.0.0.1, so a reviewer "
+        "on the same private network (e.g. a tailnet) can open the page "
+        "directly with no ssh tunnel. The value is also allowed as an Origin. "
+        "Reachable by anything that can route to it -- the path token is then "
+        "the only gate, so name a private address, never a public one.",
+    )
     ap.add_argument("--out", default=None)
     ap.add_argument("--title", help="human title for the header (else the --diff-file path is shown)")
     ap.add_argument("--once", action="store_true", help="shut down after a successful /submit")
@@ -3152,16 +3226,29 @@ def main():
     Handler.once = args.once
     Handler.token = "-".join(secrets.choice(WORDLIST) for _ in range(4))
 
-    srv, fell_back = bind_server(args.port)
+    bind_host = "127.0.0.1"
+    if args.bind:
+        bind_host, bind_names = resolve_bind(args.bind)
+        Handler.allowed_hosts = LOOPBACK_HOSTS | bind_names
+    srv, fell_back = bind_server(args.port, bind_host)
     Handler.srv = srv
     port = srv.server_address[1]
     Handler.port = port
     if fell_back:
         print(f"port 8765 busy; using {port}", file=sys.stderr)
-    machine_url = f"http://127.0.0.1:{port}/{Handler.token}/"
-    vanity_url = f"http://review.localhost:{port}/{Handler.token}/"
+    # With --bind, the URL has to name the bound host rather than loopback:
+    # the whole point is that the reviewer opens it from another machine, where
+    # 127.0.0.1 is their own. The spec as typed goes in the URL, not the
+    # resolved address, because a name is what the reviewer can read and retype.
+    url_host = args.bind if args.bind else "127.0.0.1"
+    machine_url = f"http://{url_host}:{port}/{Handler.token}/"
+    # The vanity host only resolves to loopback, so it is useless to a remote
+    # reviewer. With --bind the headline URL is the bound one.
+    vanity_url = (
+        machine_url if args.bind else f"http://review.localhost:{port}/{Handler.token}/"
+    )
     print(f"Review UI: {vanity_url}   ({len(files)} files)  out={Handler.out_path}", flush=True)
-    for line in ssh_hint(port):
+    for line in ssh_hint(port, bound_host=args.bind):
         print(line, flush=True)
     print(f"LOCAL_REVIEW_URL={machine_url}", flush=True)
     srv.serve_forever()

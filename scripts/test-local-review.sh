@@ -891,7 +891,7 @@ finally:
         hold_sock.close()
 
 # -- SSH hint: printed only when launched over SSH, with the bound port -----
-def run_startup_output(env):
+def run_startup_output(env, extra=None):
     # Pin a port so the output can be read whole after shutdown. Readiness
     # is an HTTP response, not a TCP connect: the server listens in its
     # constructor, before the startup prints, so a connect can succeed
@@ -901,7 +901,7 @@ def run_startup_output(env):
     probe.bind(("127.0.0.1", 0))
     port = probe.getsockname()[1]
     probe.close()
-    proc, patch = start_server(["--port", str(port)], env=env)
+    proc, patch = start_server(["--port", str(port)] + list(extra or []), env=env)
     for _ in range(100):
         try:
             _urlrequest.urlopen(f"http://127.0.0.1:{port}/", timeout=0.5).close()
@@ -919,6 +919,48 @@ def run_startup_output(env):
     os.unlink(patch)
     return port, out
 
+# -- resolve_bind: the names the Origin check will accept --------------------
+#
+# Unit-tested rather than driven through a real bind, because the interesting
+# case is binding a ROUTABLE address and no CI runner has a predictable one.
+# What matters is the mapping from the --bind spec to the allowed-host set:
+# get that wrong and the page serves and then rejects every submit, which is
+# the lost-round failure this whole change exists to remove.
+addr, names = server.resolve_bind("127.0.0.1")
+check("resolve_bind: an address binds itself", addr == "127.0.0.1", addr)
+check("resolve_bind: the address is allowed", "127.0.0.1" in names, names)
+
+addr, names = server.resolve_bind("localhost")
+# Both spellings have to be allowed: the reviewer may open either the name the
+# URL printed or the address it resolved to, and only one of those is the Host
+# header the browser then sends.
+check("resolve_bind: a name resolves to an address", addr == "127.0.0.1", addr)
+check("resolve_bind: both the name and the resolved address are allowed",
+      {"localhost", "127.0.0.1"} <= names, names)
+
+for wildcard in ("0.0.0.0", "::", "*"):
+    try:
+        server.resolve_bind(wildcard)
+        bad(f"resolve_bind: {wildcard} is refused", "returned instead of exiting")
+    except SystemExit as e:
+        # Refused, not supported: a wildcard names no host, so nothing can go
+        # in the allowlist and every submit would be rejected on a page that
+        # looked reachable from everywhere.
+        check(f"resolve_bind: {wildcard} is refused", "wildcard names no host" in str(e), str(e))
+
+try:
+    server.resolve_bind("no-such-host.invalid")
+    bad("resolve_bind: an unresolvable name is refused", "returned instead of exiting")
+except SystemExit as e:
+    check("resolve_bind: an unresolvable name is refused", "cannot resolve" in str(e), str(e))
+
+# The loopback names survive --bind rather than being replaced by it: an agent
+# on the host curling its own 127.0.0.1 must keep working while a reviewer
+# reaches the same server by its routable name.
+check("resolve_bind: --bind ADDS to the loopback set, it does not replace it",
+      server.LOOPBACK_HOSTS <= (server.LOOPBACK_HOSTS | server.resolve_bind("localhost")[1]),
+      server.LOOPBACK_HOSTS)
+
 base_env = {k: v for k, v in os.environ.items() if k not in ("SSH_CONNECTION", "SSH_TTY")}
 port_l, out_l = run_startup_output(base_env)
 check("ssh hint: absent outside SSH",
@@ -927,22 +969,53 @@ check("ssh hint: absent outside SSH",
 ssh_env = dict(base_env, SSH_CONNECTION="10.0.0.2 51234 10.0.0.1 22")
 port_s, out_s = run_startup_output(ssh_env)
 check("ssh hint: printed under SSH_CONNECTION", "SSH:" in out_s, out_s)
-check("ssh hint: tunnel command pins the bound port on both sides",
-      f"ssh -L {port_s}:127.0.0.1:{port_s} " in out_s, out_s)
-# The hint used to insist the local side match the bound port, which is what
-# made two forwarded hosts collide on one local port. It now says the opposite,
-# so assert the new claim rather than merely that some prose is present: it
-# must offer a free local side and warn about the per-host collision.
-check("ssh hint: says the local side need not match the bound port",
-      "need not be" in out_s, out_s)
+
+# The address must come from SSH_CONNECTION's third field -- the address this
+# session arrived on -- and NOT from socket.gethostname(). The hostname is
+# routinely a `.local` name that resolves on the LAN and nowhere else, so over
+# a tailnet the hint named a host the reviewer could not reach and `ssh -N -L`
+# exited at once. The fixture's field 3 is 10.0.0.1, which no real machine
+# here is called, so a regression to gethostname() cannot pass by coincidence.
+check("ssh hint: names SSH_CONNECTION's server address, not the local hostname",
+      "10.0.0.1" in out_s and _socket.gethostname() not in out_s, out_s)
+
+# --bind leads, because it is the only answer that survives mosh: a mosh
+# session carries no port forwards at all, and every cmux SSH workspace is one.
+# A hint that offers only a tunnel is unactionable there.
+check("ssh hint: recommends --bind with the reachable address",
+      f"--bind 10.0.0.1" in out_s, out_s)
+check("ssh hint: says a mosh session carries no forwards",
+      "mosh" in out_s, out_s)
+
+check("ssh hint: still offers the tunnel as the second option",
+      f"ssh -L L:127.0.0.1:{port_s} 10.0.0.1" in out_s, out_s)
+# The tunnel's local side is free; it used to be pinned to the bound port,
+# which is what made two forwarded hosts collide on one local port.
 check("ssh hint: warns that two hosts sharing a local port lose the forward",
       "cannot bind" in out_s, out_s)
 check("ssh hint: offers the permanent LocalForward config against the bound port",
       f"LocalForward L 127.0.0.1:{port_s}" in out_s, out_s)
+# A 404 on a freshly-copied token means a DIFFERENT server answered on the
+# reviewer's local port. That read as "the tunnel works" for four rounds.
+check("ssh hint: names the wrong-server 404 symptom",
+      "404" in out_s, out_s)
+
+# With --bind there is nothing to tunnel, so the hint must collapse rather
+# than keep printing tunnel instructions the reviewer does not need.
+port_b, out_b = run_startup_output(ssh_env, extra=["--bind", "127.0.0.1"])
+check("ssh hint: under --bind says no tunnel is needed",
+      "No tunnel needed" in out_b, out_b)
+check("ssh hint: under --bind offers no ssh -L command", "ssh -L" not in out_b, out_b)
+check("ssh hint: under --bind the URL names the bound host",
+      f"LOCAL_REVIEW_URL=http://127.0.0.1:{port_b}/" in out_b, out_b)
 
 tty_env = dict(base_env, SSH_TTY="/dev/pts/3")
 _, out_t = run_startup_output(tty_env)
 check("ssh hint: printed under SSH_TTY alone", "SSH:" in out_t, out_t)
+# SSH_TTY carries no address, so gethostname() is the only thing left and the
+# fallback has to still produce a usable hint rather than crashing or blanking.
+check("ssh hint: falls back to the hostname when SSH_CONNECTION is absent",
+      _socket.gethostname() in out_t, out_t)
 
 # -- full round trip: GET /, POST /submit, atomic $OUT, --once exits --------
 # (--out with --once: one-shot mode)
