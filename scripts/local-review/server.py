@@ -13,6 +13,7 @@ import argparse
 import errno
 import hashlib
 import http.cookies
+import ipaddress
 import json
 import os
 import re
@@ -3133,7 +3134,22 @@ def resolve_bind(spec):
     A wildcard is refused rather than supported. 0.0.0.0 names no host, so
     there is nothing to put in the allowlist and the page would be reachable
     on every interface while accepting submits from none of them — the
-    lost-round failure again, with a third cause. Bind the address you mean."""
+    lost-round failure again, with a third cause. Bind the address you mean.
+
+    A LOOPBACK resolution is refused for a sharper reason, measured rather
+    than reasoned: a hostname resolves on the machine that owns it by its own
+    /etc/hosts, and Debian and Ubuntu conventionally map it to 127.0.1.1.
+    So `--bind lindev` ON lindev resolved to 127.0.1.1, bound loopback, and
+    printed `http://lindev:8765/` under a hint promising it "opens directly
+    from any machine that can route to it" — all three true-looking and the
+    page unreachable from anywhere. Verified on a real box: /etc/hosts held
+    `127.0.1.1 lindev` and `ss -ltn` showed the listener on 127.0.1.1:8765.
+
+    Refusing is right rather than merely safe. --bind exists to make the page
+    reachable off-box, and a loopback address cannot do that, so there is no
+    case where binding one and reporting success is the behaviour anyone
+    wanted. `--bind localhost` lands here too; that is correct, since it asks
+    for exactly what the default already does."""
     if spec in ("0.0.0.0", "::", "*"):
         raise SystemExit(
             f"--bind {spec}: a wildcard names no host, so the Origin check "
@@ -3144,7 +3160,31 @@ def resolve_bind(spec):
         addr = socket.gethostbyname(spec)
     except OSError as e:
         raise SystemExit(f"--bind {spec}: cannot resolve ({e})")
-    return addr, {spec, addr}
+    if ipaddress.ip_address(addr).is_loopback:
+        raise SystemExit(
+            f"--bind {spec}: resolves to {addr}, which is loopback — the page "
+            "would be unreachable from any other machine while looking fine "
+            "here.\n"
+            f"A host resolves its OWN name locally, and Debian/Ubuntu map it to "
+            f"127.0.1.1 in /etc/hosts, so --bind <this machine's name> always "
+            "lands here.\n"
+            "Pass the address other machines reach this one by instead — "
+            "`tailscale ip -4` on a tailnet, or `ip -4 -o addr show` to see "
+            "the candidates."
+        )
+    # The allowlist carries the spec, the resolved address AND this machine's
+    # own names, because the three can disagree about what ends up in the Host
+    # header. Binding by address prints a URL naming the address, but a
+    # reviewer who types the name instead sends `Host: <name>:<port>` — and
+    # rejecting that would be the lost-round failure wearing a fourth hat.
+    # Adding the machine's own names widens nothing meaningfully: they are
+    # names it already answers to, and Origin must still equal Host.
+    names = {spec, addr}
+    for n in (socket.gethostname(), socket.getfqdn()):
+        if n:
+            names.add(n)
+            names.add(n.split(".")[0])
+    return addr, names
 
 
 def bind_server(port, host="127.0.0.1"):
@@ -3186,6 +3226,13 @@ def ssh_hint(port, bound_host=None):
     hostname is routinely a `.local` name that resolves on the LAN and nowhere
     else, so over a tailnet it sent reviewers to a host they could not reach
     and `ssh -N -L` exited immediately.
+
+    That field now carries a second guarantee the --bind suggestion depends
+    on: it is an ADDRESS this machine is reachable at, by construction, since
+    the connection landed on it. So it is local, non-loopback and bindable --
+    unlike the hostname, which resolve_bind() refuses precisely because a host
+    resolves its own name to 127.0.1.1 on Debian and Ubuntu. Suggesting
+    `--bind <that field>` therefore cannot hit either failure.
     Empty (no output at all) outside SSH, so a local launch is unchanged."""
     conn = os.environ.get("SSH_CONNECTION", "")
     if not (conn or os.environ.get("SSH_TTY")):
@@ -3297,7 +3344,23 @@ def main():
     if args.bind:
         bind_host, bind_names = resolve_bind(args.bind)
         Handler.allowed_hosts = LOOPBACK_HOSTS | bind_names
-    srv, fell_back = bind_server(args.port, bind_host)
+    try:
+        srv, fell_back = bind_server(args.port, bind_host)
+    except OSError as e:
+        # EADDRNOTAVAIL means the address is routable-looking but not one of
+        # THIS machine's: a mistyped --bind, or an interface that is down (a
+        # tailnet that has not come up yet resolves nothing and would have
+        # failed earlier, but a hardcoded tailnet address survives the
+        # resolve and dies here). The stdlib traceback blames socketserver
+        # internals, which sends the reader into the wrong file.
+        if args.bind and e.errno == errno.EADDRNOTAVAIL:
+            raise SystemExit(
+                f"--bind {args.bind}: {bind_host} is not an address on this "
+                "machine, so there is nothing to bind. Check it with "
+                "`ip -4 -o addr show` (or `ifconfig`), and that the interface "
+                "it belongs to is up."
+            )
+        raise
     Handler.srv = srv
     port = srv.server_address[1]
     Handler.port = port

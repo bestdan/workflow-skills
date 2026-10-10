@@ -926,17 +926,56 @@ def run_startup_output(env, extra=None):
 # What matters is the mapping from the --bind spec to the allowed-host set:
 # get that wrong and the page serves and then rejects every submit, which is
 # the lost-round failure this whole change exists to remove.
-addr, names = server.resolve_bind("127.0.0.1")
-check("resolve_bind: an address binds itself", addr == "127.0.0.1", addr)
-check("resolve_bind: the address is allowed", "127.0.0.1" in names, names)
+# 203.0.113.0/24 is RFC 5737 documentation space: it parses as an address, is
+# never loopback, and is never bound by anything here -- resolve_bind only
+# resolves and classifies, so no socket is involved.
+addr, names = server.resolve_bind("203.0.113.9")
+check("resolve_bind: a routable address binds itself", addr == "203.0.113.9", addr)
+check("resolve_bind: the address is allowed", "203.0.113.9" in names, names)
+# The reviewer may open either the name the URL printed or the address it
+# resolved to, and only one of those becomes the Host header. Binding by
+# address therefore still has to accept this machine's own name, or a reviewer
+# who types the name loses the round.
+check("resolve_bind: this machine's own name is allowed alongside the address",
+      _socket.gethostname() in names
+      and _socket.gethostname().split(".")[0] in names, names)
 
-addr, names = server.resolve_bind("localhost")
-# Both spellings have to be allowed: the reviewer may open either the name the
-# URL printed or the address it resolved to, and only one of those is the Host
-# header the browser then sends.
-check("resolve_bind: a name resolves to an address", addr == "127.0.0.1", addr)
-check("resolve_bind: both the name and the resolved address are allowed",
-      {"localhost", "127.0.0.1"} <= names, names)
+# A LOOPBACK resolution is refused, and this is the case measured in the wild:
+# a Linux box resolves its OWN hostname through /etc/hosts, where Debian and
+# Ubuntu put `127.0.1.1 <hostname>`. So `--bind <this host>` bound loopback and
+# then advertised the page as reachable from anywhere. Verified on a real host
+# (/etc/hosts `127.0.1.1 lindev`, ss showed 127.0.1.1:8765). 127.0.1.1 is in
+# the list explicitly because it is the address that actually bit, and a naive
+# check for "127.0.0.1" alone would miss it.
+for lo in ("127.0.0.1", "127.0.1.1", "localhost"):
+    try:
+        server.resolve_bind(lo)
+        bad(f"resolve_bind: {lo} is refused as loopback", "returned instead of exiting")
+    except SystemExit as e:
+        check(f"resolve_bind: {lo} is refused as loopback", "loopback" in str(e), str(e))
+# The message has to name the cause, or the next person re-derives it: the
+# refusal is only useful if it says WHY the host's own name lands here.
+try:
+    server.resolve_bind("127.0.1.1")
+except SystemExit as e:
+    check("resolve_bind: the loopback refusal names /etc/hosts and 127.0.1.1",
+          "/etc/hosts" in str(e) and "127.0.1.1" in str(e), str(e))
+    check("resolve_bind: the loopback refusal says how to find a real address",
+          "tailscale ip" in str(e) or "addr show" in str(e), str(e))
+
+# An address that is routable-looking but not on this machine survives
+# resolve_bind and fails at bind(). The stdlib traceback for that blames
+# socketserver internals, which sends the reader into the wrong file, so main()
+# turns EADDRNOTAVAIL into a message naming --bind. 203.0.113.9 is documentation
+# space, so it is reliably NOT a local address on any runner.
+proc_b, patch_b = start_server(["--bind", "203.0.113.9"])
+out_b2 = proc_b.communicate(timeout=20)[0]
+os.unlink(patch_b)
+check("--bind: a non-local address fails with a message, not a traceback",
+      "is not an address on this machine" in out_b2 and "Traceback" not in out_b2,
+      out_b2)
+check("--bind: that failure names the offending --bind value",
+      "203.0.113.9" in out_b2, out_b2)
 
 for wildcard in ("0.0.0.0", "::", "*"):
     try:
@@ -958,7 +997,8 @@ except SystemExit as e:
 # on the host curling its own 127.0.0.1 must keep working while a reviewer
 # reaches the same server by its routable name.
 check("resolve_bind: --bind ADDS to the loopback set, it does not replace it",
-      server.LOOPBACK_HOSTS <= (server.LOOPBACK_HOSTS | server.resolve_bind("localhost")[1]),
+      server.LOOPBACK_HOSTS
+      <= (server.LOOPBACK_HOSTS | server.resolve_bind("203.0.113.9")[1]),
       server.LOOPBACK_HOSTS)
 
 base_env = {k: v for k, v in os.environ.items() if k not in ("SSH_CONNECTION", "SSH_TTY")}
@@ -1002,12 +1042,25 @@ check("ssh hint: names the wrong-server 404 symptom",
 
 # With --bind there is nothing to tunnel, so the hint must collapse rather
 # than keep printing tunnel instructions the reviewer does not need.
-port_b, out_b = run_startup_output(ssh_env, extra=["--bind", "127.0.0.1"])
+#
+# Called directly rather than through a live server: --bind now refuses any
+# loopback address, and no CI runner has a predictable routable one to bind
+# instead. ssh_hint() is a pure function of (port, bound_host) and the SSH
+# environment, so the direct call tests the same thing the server would print.
+os.environ["SSH_CONNECTION"] = "10.0.0.2 51234 10.0.0.1 22"
+try:
+    bound_hint = server.ssh_hint(8765, bound_host="203.0.113.9")
+finally:
+    del os.environ["SSH_CONNECTION"]
+bound_text = "\n".join(bound_hint)
 check("ssh hint: under --bind says no tunnel is needed",
-      "No tunnel needed" in out_b, out_b)
-check("ssh hint: under --bind offers no ssh -L command", "ssh -L" not in out_b, out_b)
-check("ssh hint: under --bind the URL names the bound host",
-      f"LOCAL_REVIEW_URL=http://127.0.0.1:{port_b}/" in out_b, out_b)
+      "No tunnel needed" in bound_text, bound_text)
+check("ssh hint: under --bind offers no ssh -L command",
+      "ssh -L" not in bound_text, bound_text)
+check("ssh hint: under --bind names the bound host",
+      "203.0.113.9" in bound_text, bound_text)
+check("ssh hint: under --bind collapses to a single line",
+      len(bound_hint) == 1, bound_hint)
 
 # -- first-request line: one, and only one -----------------------------------
 #

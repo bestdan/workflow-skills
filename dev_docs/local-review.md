@@ -233,7 +233,22 @@ no tunnel — which is the only thing that can work under **mosh**, since mosh
 carries no port forwards at all and every cmux SSH workspace is a mosh
 session. It widens exposure to anything that can route to that address, with
 the path token as the sole gate, so it is opt-in and a wildcard (`0.0.0.0`,
-which names no host and could therefore allow none) is refused outright. And
+which names no host and could therefore allow none) is refused outright.
+
+**`--bind` takes an address, and refuses a hostname that resolves to
+loopback.** A machine resolves its own name through its own `/etc/hosts`, and
+Debian and Ubuntu put `127.0.1.1 <hostname>` there — so `--bind lindev` run
+_on lindev_ bound loopback and then printed `http://lindev:8765/` under a hint
+promising it opened from anywhere. Measured: `/etc/hosts` held
+`127.0.1.1 lindev` and `ss -ltn` showed the listener on `127.0.1.1:8765`.
+Refusing is right rather than cautious, since `--bind` exists to make the page
+reachable off-box and a loopback address cannot. The allowlist carries the
+machine's own names alongside the bound address, so binding by address still
+accepts a reviewer who types the name. `$SSH_CONNECTION`'s third field, which
+the SSH hint suggests, is bindable by construction — the connection arrived on
+it. A routable address that is not local fails at `bind()` with
+`EADDRNOTAVAIL`, which `main()` turns into a message naming `--bind` rather
+than a traceback blaming `socketserver`. And
 `Sec-Fetch-Site: cross-site`, and the vendor route's
 `[\w.\-]+\.js` fullmatch blocks traversal. The token is per-launch; showing it
 to the user is fine — it dies with the server.

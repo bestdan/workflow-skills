@@ -129,13 +129,13 @@ Then open `$review_url` for the user:
 - Without browser tooling: print `$review_url` and ask the user to open it.
   The tool is fully usable by hand.
 
-**Over SSH, the URL is dead until the user opens a tunnel.** The server binds
-loopback on the machine it runs on; in an SSH session that is the remote
-host, and the reviewer's browser is on their own machine. The server detects
-`$SSH_CONNECTION` / `$SSH_TTY` and writes `SSH:` lines to the log before
-`LOCAL_REVIEW_URL=`, carrying the tunnel command with the bound port filled
-in. The readiness line stays last, so once the poll above has seen it the
-hint is already in the log. Print the lines verbatim beside the URL:
+**Over SSH, the default URL is dead — bind a routable address or tunnel.** The
+server binds loopback on the machine it runs on; in an SSH session that is the
+remote host, while the reviewer's browser is on their own machine. The server
+detects `$SSH_CONNECTION` / `$SSH_TTY` and writes `SSH:` lines to the log
+before `LOCAL_REVIEW_URL=`, naming both routes with the bound port filled in.
+The readiness line stays last, so once the poll above has seen it the hint is
+already in the log. Print the lines verbatim beside the URL:
 
 ```bash
 grep '^SSH: ' <scratch>/lr_server.log
@@ -147,8 +147,18 @@ address instead of loopback and adds it to the Origin allowlist, so the URL
 opens directly from the reviewer's browser with nothing forwarded:
 
 ```bash
-python3 server.py --git uncommitted --bind lindev   # then open the URL printed
+# Pass the ADDRESS other machines reach this one by, not its hostname:
+python3 server.py --git uncommitted --bind "$(tailscale ip -4 | head -1)"
 ```
+
+**Do not pass the host's own name.** A machine resolves its own hostname
+locally, and Debian/Ubuntu map it to `127.0.1.1` in `/etc/hosts` — so
+`--bind lindev` _on lindev_ binds loopback. Measured on a real box: the
+listener came up on `127.0.1.1:8765` while the URL said `http://lindev:8765/`,
+unreachable from anywhere. `--bind` now refuses any loopback resolution rather
+than advertising a page nobody can open, and the refusal names this cause.
+Binding by address still accepts a reviewer who types the name, because the
+allowlist carries the machine's own names alongside the bound address.
 
 That is the only option that works under **mosh**, which carries no port
 forwards at all (`man mosh`: "does not support ... port forwarding"). Every
