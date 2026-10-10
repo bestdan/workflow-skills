@@ -215,12 +215,66 @@ of a flagged comment, and the log must contain no write. Issue #381.
 The remaining defences, for the file write and for reads: every route mounts
 under a path segment of four `secrets.choice()`-drawn words
 from the 1024-word `WORDLIST` (bare 404 otherwise, slashless alias 301s),
-POSTs reject any foreign `Origin` — the allowlist is `127.0.0.1`, `localhost`,
-and the port-scoped vanity `http://review.localhost:<port>` only, so an
-arbitrary `*.localhost` origin (e.g. `evil.localhost`) is still rejected — and
+POSTs reject any foreign `Origin` — it must equal `http://` plus the request's
+own `Host`, whose hostname must be in `Handler.allowed_hosts`: `127.0.0.1`,
+`localhost`, `review.localhost`, plus whatever `--bind` was given. So an
+arbitrary `*.localhost` origin (e.g. `evil.localhost`) is still rejected, and
+so is an allowlisted `Host` paired with a different allowlisted `Origin`. The
+**port** is deliberately not checked: `ssh -L 8766:127.0.0.1:8765` is a
+legitimate tunnel whose Origin names 8766 while the server bound 8765, and
+pinning the bound port rejected it after the page had already rendered and
+been read. Loopback reachable on one port is reachable on any, so the port
+never carried weight.
+
+`--bind` is the other half of that lesson and the preferred answer for a
+remote review. It binds a routable address rather than loopback and allows
+that name as an Origin, so a reviewer on the same tailnet opens the URL with
+no tunnel — which is the only thing that can work under **mosh**, since mosh
+carries no port forwards at all and every cmux SSH workspace is a mosh
+session. It widens exposure to anything that can route to that address, with
+the path token as the sole gate, so it is opt-in and a wildcard (`0.0.0.0`,
+which names no host and could therefore allow none) is refused outright.
+
+**`--bind` takes an address, and refuses a hostname that resolves to
+loopback.** A machine resolves its own name through its own `/etc/hosts`, and
+Debian and Ubuntu put `127.0.1.1 <hostname>` there — so `--bind lindev` run
+_on lindev_ bound loopback and then printed `http://lindev:8765/` under a hint
+promising it opened from anywhere. Measured: `/etc/hosts` held
+`127.0.1.1 lindev` and `ss -ltn` showed the listener on `127.0.1.1:8765`.
+Refusing is right rather than cautious, since `--bind` exists to make the page
+reachable off-box and a loopback address cannot. The allowlist carries the
+machine's own names alongside the bound address, so binding by address still
+accepts a reviewer who types the name. `$SSH_CONNECTION`'s third field, which
+the SSH hint suggests, is bindable by construction — the connection arrived on
+it. A routable address that is not local fails at `bind()` with
+`EADDRNOTAVAIL`, which `main()` turns into a message naming `--bind` rather
+than a traceback blaming `socketserver`. And
 `Sec-Fetch-Site: cross-site`, and the vendor route's
 `[\w.\-]+\.js` fullmatch blocks traversal. The token is per-launch; showing it
 to the user is fine — it dies with the server.
+
+**Two deliberate disclosures, both bought for diagnosability.** Every response
+carries `X-Local-Review: port=<bound port>` and `HEAD` answers `200` instead
+of the `501` a missing `do_HEAD` produced, so a reviewer probing a local port
+can tell this server from whatever else is answering there — a forward that
+failed to bind routes every request elsewhere, and a `501` reads as "something
+is listening, so the tunnel works" whichever server sent it. Both are
+unauthenticated, and both reveal only that a local-review server is listening,
+which the `404` on an unauthenticated `GET` already implies to anyone who can
+reach the port. Neither names a token or a path, and the path token still
+gates every byte of the diff. The header reports the **bound** port, so
+comparing it against the port being talked to distinguishes a port-translating
+tunnel (fine) from a different server (not fine).
+
+**One log line on the first request, and no access log.** `log_message` stays
+`pass`, because the token is a path segment and a per-request log would put it
+in a file outliving the round. But total silence made "nothing ever connected"
+and "the browser never loaded the page" the same observation from the
+launching agent's side, which is how a tunnel quietly serving a different
+server took four review rounds to diagnose. `note_request()` prints one line
+to stderr on the first request of a launch — method only, no path, no token —
+behind a lock, since `ThreadingHTTPServer` serves the page's several opening
+requests concurrently and an unguarded flag prints twice.
 
 **The token leaves the URL after the first hit (#386).** A `GET /<token>/`
 302s to `/`, setting a `HttpOnly`, `SameSite=Strict` session cookie named

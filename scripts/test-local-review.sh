@@ -891,7 +891,7 @@ finally:
         hold_sock.close()
 
 # -- SSH hint: printed only when launched over SSH, with the bound port -----
-def run_startup_output(env):
+def run_startup_output(env, extra=None):
     # Pin a port so the output can be read whole after shutdown. Readiness
     # is an HTTP response, not a TCP connect: the server listens in its
     # constructor, before the startup prints, so a connect can succeed
@@ -901,7 +901,7 @@ def run_startup_output(env):
     probe.bind(("127.0.0.1", 0))
     port = probe.getsockname()[1]
     probe.close()
-    proc, patch = start_server(["--port", str(port)], env=env)
+    proc, patch = start_server(["--port", str(port)] + list(extra or []), env=env)
     for _ in range(100):
         try:
             _urlrequest.urlopen(f"http://127.0.0.1:{port}/", timeout=0.5).close()
@@ -919,6 +919,88 @@ def run_startup_output(env):
     os.unlink(patch)
     return port, out
 
+# -- resolve_bind: the names the Origin check will accept --------------------
+#
+# Unit-tested rather than driven through a real bind, because the interesting
+# case is binding a ROUTABLE address and no CI runner has a predictable one.
+# What matters is the mapping from the --bind spec to the allowed-host set:
+# get that wrong and the page serves and then rejects every submit, which is
+# the lost-round failure this whole change exists to remove.
+# 203.0.113.0/24 is RFC 5737 documentation space: it parses as an address, is
+# never loopback, and is never bound by anything here -- resolve_bind only
+# resolves and classifies, so no socket is involved.
+addr, names = server.resolve_bind("203.0.113.9")
+check("resolve_bind: a routable address binds itself", addr == "203.0.113.9", addr)
+check("resolve_bind: the address is allowed", "203.0.113.9" in names, names)
+# The reviewer may open either the name the URL printed or the address it
+# resolved to, and only one of those becomes the Host header. Binding by
+# address therefore still has to accept this machine's own name, or a reviewer
+# who types the name loses the round.
+check("resolve_bind: this machine's own name is allowed alongside the address",
+      _socket.gethostname() in names
+      and _socket.gethostname().split(".")[0] in names, names)
+
+# A LOOPBACK resolution is refused, and this is the case measured in the wild:
+# a Linux box resolves its OWN hostname through /etc/hosts, where Debian and
+# Ubuntu put `127.0.1.1 <hostname>`. So `--bind <this host>` bound loopback and
+# then advertised the page as reachable from anywhere. Verified on a real host
+# (/etc/hosts `127.0.1.1 lindev`, ss showed 127.0.1.1:8765). 127.0.1.1 is in
+# the list explicitly because it is the address that actually bit, and a naive
+# check for "127.0.0.1" alone would miss it.
+for lo in ("127.0.0.1", "127.0.1.1", "localhost"):
+    try:
+        server.resolve_bind(lo)
+        bad(f"resolve_bind: {lo} is refused as loopback", "returned instead of exiting")
+    except SystemExit as e:
+        check(f"resolve_bind: {lo} is refused as loopback", "loopback" in str(e), str(e))
+# The message has to name the cause, or the next person re-derives it: the
+# refusal is only useful if it says WHY the host's own name lands here.
+try:
+    server.resolve_bind("127.0.1.1")
+except SystemExit as e:
+    check("resolve_bind: the loopback refusal names /etc/hosts and 127.0.1.1",
+          "/etc/hosts" in str(e) and "127.0.1.1" in str(e), str(e))
+    check("resolve_bind: the loopback refusal says how to find a real address",
+          "tailscale ip" in str(e) or "addr show" in str(e), str(e))
+
+# An address that is routable-looking but not on this machine survives
+# resolve_bind and fails at bind(). The stdlib traceback for that blames
+# socketserver internals, which sends the reader into the wrong file, so main()
+# turns EADDRNOTAVAIL into a message naming --bind. 203.0.113.9 is documentation
+# space, so it is reliably NOT a local address on any runner.
+proc_b, patch_b = start_server(["--bind", "203.0.113.9"])
+out_b2 = proc_b.communicate(timeout=20)[0]
+os.unlink(patch_b)
+check("--bind: a non-local address fails with a message, not a traceback",
+      "is not an address on this machine" in out_b2 and "Traceback" not in out_b2,
+      out_b2)
+check("--bind: that failure names the offending --bind value",
+      "203.0.113.9" in out_b2, out_b2)
+
+for wildcard in ("0.0.0.0", "::", "*"):
+    try:
+        server.resolve_bind(wildcard)
+        bad(f"resolve_bind: {wildcard} is refused", "returned instead of exiting")
+    except SystemExit as e:
+        # Refused, not supported: a wildcard names no host, so nothing can go
+        # in the allowlist and every submit would be rejected on a page that
+        # looked reachable from everywhere.
+        check(f"resolve_bind: {wildcard} is refused", "wildcard names no host" in str(e), str(e))
+
+try:
+    server.resolve_bind("no-such-host.invalid")
+    bad("resolve_bind: an unresolvable name is refused", "returned instead of exiting")
+except SystemExit as e:
+    check("resolve_bind: an unresolvable name is refused", "cannot resolve" in str(e), str(e))
+
+# The loopback names survive --bind rather than being replaced by it: an agent
+# on the host curling its own 127.0.0.1 must keep working while a reviewer
+# reaches the same server by its routable name.
+check("resolve_bind: --bind ADDS to the loopback set, it does not replace it",
+      server.LOOPBACK_HOSTS
+      <= (server.LOOPBACK_HOSTS | server.resolve_bind("203.0.113.9")[1]),
+      server.LOOPBACK_HOSTS)
+
 base_env = {k: v for k, v in os.environ.items() if k not in ("SSH_CONNECTION", "SSH_TTY")}
 port_l, out_l = run_startup_output(base_env)
 check("ssh hint: absent outside SSH",
@@ -927,16 +1009,97 @@ check("ssh hint: absent outside SSH",
 ssh_env = dict(base_env, SSH_CONNECTION="10.0.0.2 51234 10.0.0.1 22")
 port_s, out_s = run_startup_output(ssh_env)
 check("ssh hint: printed under SSH_CONNECTION", "SSH:" in out_s, out_s)
-check("ssh hint: tunnel command pins the bound port on both sides",
-      f"ssh -L {port_s}:127.0.0.1:{port_s} " in out_s, out_s)
-check("ssh hint: names the local-port-must-match failure",
-      "Origin check" in out_s and "local port" in out_s, out_s)
-check("ssh hint: offers the permanent LocalForward config with the bound port",
-      f"LocalForward {port_s} 127.0.0.1:{port_s}" in out_s, out_s)
+
+# The address must come from SSH_CONNECTION's third field -- the address this
+# session arrived on -- and NOT from socket.gethostname(). The hostname is
+# routinely a `.local` name that resolves on the LAN and nowhere else, so over
+# a tailnet the hint named a host the reviewer could not reach and `ssh -N -L`
+# exited at once. The fixture's field 3 is 10.0.0.1, which no real machine
+# here is called, so a regression to gethostname() cannot pass by coincidence.
+check("ssh hint: names SSH_CONNECTION's server address, not the local hostname",
+      "10.0.0.1" in out_s and _socket.gethostname() not in out_s, out_s)
+
+# --bind leads, because it is the only answer that survives mosh: a mosh
+# session carries no port forwards at all, and every cmux SSH workspace is one.
+# A hint that offers only a tunnel is unactionable there.
+check("ssh hint: recommends --bind with the reachable address",
+      f"--bind 10.0.0.1" in out_s, out_s)
+check("ssh hint: says a mosh session carries no forwards",
+      "mosh" in out_s, out_s)
+
+check("ssh hint: still offers the tunnel as the second option",
+      f"ssh -L L:127.0.0.1:{port_s} 10.0.0.1" in out_s, out_s)
+# The tunnel's local side is free; it used to be pinned to the bound port,
+# which is what made two forwarded hosts collide on one local port.
+check("ssh hint: warns that two hosts sharing a local port lose the forward",
+      "cannot bind" in out_s, out_s)
+check("ssh hint: offers the permanent LocalForward config against the bound port",
+      f"LocalForward L 127.0.0.1:{port_s}" in out_s, out_s)
+# A 404 on a freshly-copied token means a DIFFERENT server answered on the
+# reviewer's local port. That read as "the tunnel works" for four rounds.
+check("ssh hint: names the wrong-server 404 symptom",
+      "404" in out_s, out_s)
+
+# With --bind there is nothing to tunnel, so the hint must collapse rather
+# than keep printing tunnel instructions the reviewer does not need.
+#
+# Called directly rather than through a live server: --bind now refuses any
+# loopback address, and no CI runner has a predictable routable one to bind
+# instead. ssh_hint() is a pure function of (port, bound_host) and the SSH
+# environment, so the direct call tests the same thing the server would print.
+os.environ["SSH_CONNECTION"] = "10.0.0.2 51234 10.0.0.1 22"
+try:
+    bound_hint = server.ssh_hint(8765, bound_host="203.0.113.9")
+finally:
+    del os.environ["SSH_CONNECTION"]
+bound_text = "\n".join(bound_hint)
+check("ssh hint: under --bind says no tunnel is needed",
+      "No tunnel needed" in bound_text, bound_text)
+check("ssh hint: under --bind offers no ssh -L command",
+      "ssh -L" not in bound_text, bound_text)
+check("ssh hint: under --bind names the bound host",
+      "203.0.113.9" in bound_text, bound_text)
+check("ssh hint: under --bind collapses to a single line",
+      len(bound_hint) == 1, bound_hint)
+
+# -- first-request line: one, and only one -----------------------------------
+#
+# run_startup_output makes exactly one request (a 404 on bare /), so the line
+# must be there. Without it the server is silent, and "the tunnel never
+# connected" and "the browser never loaded" are the same observation from the
+# launching agent's side -- the ambiguity that cost a review four rounds.
+# Both response headers ride on ONE end_headers override, and a second
+# `def end_headers` later in the class body would silently win and drop
+# whichever headers the first one sent -- no error, the header just stops
+# appearing. That happened while writing this, so it is pinned.
+src_text = open(server_path).read()
+check("server.py: exactly one end_headers override",
+      src_text.count("    def end_headers(self):") == 1,
+      src_text.count("    def end_headers(self):"))
+
+first_lines = [ln for ln in out_l.splitlines() if "first request received" in ln]
+check("first-request line: printed once a request arrives", len(first_lines) == 1, out_l)
+# Exactly one, however many requests follow -- the page fires several at once
+# and ThreadingHTTPServer serves them concurrently, so an unguarded flag
+# prints twice. run_startup_output's probe plus its shutdown is enough to
+# catch a missing lock on a repeat run; the count above is the assertion.
+if first_lines:
+    line = first_lines[0]
+    check("first-request line: names the method", "(GET)" in line, line)
+    # The token must never reach this line: it outlives the round in whatever
+    # log the launcher redirected stderr into, while the URL line that does
+    # carry it is understood to be ephemeral.
+    tok_l = out_l.split("LOCAL_REVIEW_URL=")[1].strip().rstrip("/").rsplit("/", 1)[1]
+    check("first-request line: carries no token", tok_l not in line, (tok_l, line))
+    check("first-request line: carries no request path", "/" not in line, line)
 
 tty_env = dict(base_env, SSH_TTY="/dev/pts/3")
 _, out_t = run_startup_output(tty_env)
 check("ssh hint: printed under SSH_TTY alone", "SSH:" in out_t, out_t)
+# SSH_TTY carries no address, so gethostname() is the only thing left and the
+# fallback has to still produce a usable hint rather than crashing or blanking.
+check("ssh hint: falls back to the hostname when SSH_CONNECTION is absent",
+      _socket.gethostname() in out_t, out_t)
 
 # -- full round trip: GET /, POST /submit, atomic $OUT, --once exits --------
 # (--out with --once: one-shot mode)
@@ -1891,6 +2054,36 @@ try:
             check("server: GET /vendor/*.js with the session cookie returns the asset",
                   len(resp.read()) > 0, "")
 
+        # -- identifying this server from a probe -------------------------
+        #
+        # A forward that failed to bind sends every request to whatever else
+        # is on that local port, and nothing in the reply used to distinguish
+        # the two: `curl -I` returned 501 from this server (no do_HEAD) and
+        # reads as "something is listening, so the tunnel works". HEAD now
+        # answers 200 and every response carries X-Local-Review, so the probe
+        # answers the question it appears to answer.
+        class _Head(_urlrequest.Request):
+            def get_method(self):
+                return "HEAD"
+
+        with _urlrequest.urlopen(_Head(f"{base}/"), timeout=5) as resp:
+            check("server: HEAD / returns 200 rather than 501", resp.status == 200, resp.status)
+            check("server: HEAD / identifies this server with the bound port",
+                  resp.headers.get("X-Local-Review") == f"port={port}",
+                  resp.headers.get("X-Local-Review"))
+            check("server: HEAD / serves no body", resp.read() == b"", "")
+
+        # The header has to be on EVERY response, including the rejections --
+        # an unauthenticated probe gets a 404, and that is the reply a reviewer
+        # on the wrong port is most likely to be staring at.
+        try:
+            _urlrequest.urlopen(f"{base}/not-the-token/", timeout=5)
+            bad("server: a 404 still carries X-Local-Review", "request unexpectedly succeeded")
+        except _urlerror.HTTPError as e:
+            check("server: a 404 still carries X-Local-Review",
+                  e.headers.get("X-Local-Review") == f"port={port}",
+                  e.headers.get("X-Local-Review"))
+
         # slashless token alias must redirect, not serve a page whose relative
         # asset/fetch URLs resolve outside the token prefix
         class _NoRedirect(_urlrequest.HTTPRedirectHandler):
@@ -1948,15 +2141,57 @@ try:
               os.path.exists(sec_out) and json.load(open(sec_out)).get("summary") == "sameorigin", sec_out)
         os.unlink(sec_out)
 
-        vanity_origin = f"http://review.localhost:{port}"
+        # Host travels with Origin here, because _origin_ok() is a real
+        # same-origin test: it compares Origin against the request's OWN Host.
+        # A browser on http://review.localhost:<port>/ sends both, so sending
+        # Origin alone would describe a request no browser makes.
+        vanity_host = f"review.localhost:{port}"
+        vanity_origin = f"http://{vanity_host}"
         req = _urlrequest.Request(
             f"{url}submit", data=b'{"meta":{},"summary":"vanity","comments":[]}',
-            headers={"Content-Type": "application/json", "Origin": vanity_origin}, method="POST",
+            headers={"Content-Type": "application/json", "Origin": vanity_origin,
+                     "Host": vanity_host}, method="POST",
         )
         with _urlrequest.urlopen(req, timeout=5) as resp:
             check("server: POST /submit with Origin review.localhost returns 200", resp.status == 200, resp.status)
         check("server: OUT written after review.localhost-origin submit",
               os.path.exists(sec_out) and json.load(open(sec_out)).get("summary") == "vanity", sec_out)
+        os.unlink(sec_out)
+
+        # An allowlisted hostname does NOT license a foreign Origin: Host and
+        # Origin must name the same thing. This is the DNS-rebinding shape with
+        # the names swapped, and the pair-check is the only thing rejecting it.
+        req = _urlrequest.Request(
+            f"{url}submit", data=b'{"meta":{},"summary":"mismatch","comments":[]}',
+            headers={"Content-Type": "application/json",
+                     "Origin": f"http://localhost:{port}", "Host": vanity_host}, method="POST",
+        )
+        try:
+            _urlrequest.urlopen(req, timeout=5)
+            bad("server: POST /submit with Origin and Host disagreeing returns 403",
+                "request unexpectedly succeeded")
+        except _urlerror.HTTPError as e:
+            check("server: POST /submit with Origin and Host disagreeing returns 403", e.code == 403, e.code)
+        check("server: Origin/Host mismatch POST does not write OUT", not os.path.exists(sec_out), sec_out)
+
+        # The tunnel case, and the reason _origin_ok() moved off the bound
+        # port. `ssh -L <L>:127.0.0.1:<bound>` makes the browser's Host and
+        # Origin name L while the server bound something else, which is not an
+        # attack and must be accepted. L is chosen to differ from the bound
+        # port; the request still arrives on the real socket, exactly as it
+        # does through a forward.
+        tunnel_port = port + 1 if port + 1 < 65536 else port - 1
+        tunnel_host = f"127.0.0.1:{tunnel_port}"
+        req = _urlrequest.Request(
+            f"{url}submit", data=b'{"meta":{},"summary":"tunnel","comments":[]}',
+            headers={"Content-Type": "application/json", "Origin": f"http://{tunnel_host}",
+                     "Host": tunnel_host}, method="POST",
+        )
+        with _urlrequest.urlopen(req, timeout=5) as resp:
+            check("server: POST /submit through a port-translating tunnel returns 200",
+                  resp.status == 200, resp.status)
+        check("server: OUT written after tunnelled submit",
+              os.path.exists(sec_out) and json.load(open(sec_out)).get("summary") == "tunnel", sec_out)
         os.unlink(sec_out)
 
         evil_vanity_origin = f"http://evil.localhost:{port}"

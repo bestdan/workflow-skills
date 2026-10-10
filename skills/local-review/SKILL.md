@@ -129,27 +129,84 @@ Then open `$review_url` for the user:
 - Without browser tooling: print `$review_url` and ask the user to open it.
   The tool is fully usable by hand.
 
-**Over SSH, the URL is dead until the user opens a tunnel.** The server binds
-loopback on the machine it runs on; in an SSH session that is the remote
-host, and the reviewer's browser is on their own machine. The server detects
-`$SSH_CONNECTION` / `$SSH_TTY` and writes `SSH:` lines to the log before
-`LOCAL_REVIEW_URL=`, carrying the tunnel command with the bound port filled
-in. The readiness line stays last, so once the poll above has seen it the
-hint is already in the log. Print the lines verbatim beside the URL:
+**Over SSH, the default URL is dead — bind a routable address or tunnel.** The
+server binds loopback on the machine it runs on; in an SSH session that is the
+remote host, while the reviewer's browser is on their own machine. The server
+detects `$SSH_CONNECTION` / `$SSH_TTY` and writes `SSH:` lines to the log
+before `LOCAL_REVIEW_URL=`, naming both routes with the bound port filled in.
+The readiness line stays last, so once the poll above has seen it the hint is
+already in the log. Print the lines verbatim beside the URL:
 
 ```bash
 grep '^SSH: ' <scratch>/lr_server.log
 ```
 
-The local port must equal the remote one (`ssh -L 8765:127.0.0.1:8765
-<host>`). `_origin_ok()` in `server.py` allows only origins on the bound
-port, so a tunnel on a different local port half-works: GETs are ungated and
-the page renders, but every `/submit` and `/reply` POST is rejected, and the
-reviewer loses the round when they submit it. The last `SSH:` line names the
-permanent fix: a `LocalForward` entry for the host in the user's own
-`~/.ssh/config`, after which every session carries the tunnel and the URL
-opens with no extra step. No `SSH:` lines means a local launch; nothing
-changes.
+**Prefer `--bind` to a tunnel wherever a private network already connects the
+two machines** — a tailnet, a VPN, a trusted LAN. `--bind <host>` binds that
+address instead of loopback and adds it to the Origin allowlist, so the URL
+opens directly from the reviewer's browser with nothing forwarded:
+
+```bash
+# Pass the ADDRESS other machines reach this one by, not its hostname:
+python3 server.py --git uncommitted --bind "$(tailscale ip -4 | head -1)"
+```
+
+**Do not pass the host's own name.** A machine resolves its own hostname
+locally, and Debian/Ubuntu map it to `127.0.1.1` in `/etc/hosts` — so
+`--bind lindev` _on lindev_ binds loopback. Measured on a real box: the
+listener came up on `127.0.1.1:8765` while the URL said `http://lindev:8765/`,
+unreachable from anywhere. `--bind` now refuses any loopback resolution rather
+than advertising a page nobody can open, and the refusal names this cause.
+Binding by address still accepts a reviewer who types the name, because the
+allowlist carries the machine's own names alongside the bound address.
+
+That is the only option that works under **mosh**, which carries no port
+forwards at all (`man mosh`: "does not support ... port forwarding"). Every
+cmux SSH workspace is a mosh session, so in one no `ssh -L` and no
+`LocalForward` can ever work, whatever its ports say. A wildcard is refused:
+`0.0.0.0` names no host, so nothing could go in the allowlist.
+
+`--bind` makes the page reachable by anything that can route to that address,
+with the path token as the only gate. Name a private address, never a public
+one, and prefer loopback plus a tunnel when the network is not trusted.
+
+**The tunnel remains the fallback**, for a plain `ssh` session with no private
+network in common. The **remote** side must be the bound port or it reaches
+nothing; the **local** side is free, because `_origin_ok()` compares `Origin`
+against the request's own `Host` header rather than the bound port — so
+`ssh -L 8766:127.0.0.1:8765 <host>` works, opening the URL with 8765 swapped
+for 8766. Give each host its own local port: two hosts naming one means the
+second connection cannot bind it, and ssh warns and then carries on with no
+forward. A `LocalForward L 127.0.0.1:8765` under the `Host` entry the reviewer
+actually types makes it permanent.
+
+Do not reach for `ExitOnForwardFailure yes` to make that warning fatal: it
+escalates a cosmetic bind failure into a dropped ssh session, which is the
+worse of the two outcomes.
+
+Two symptoms worth recognising, both of which have cost whole review rounds:
+
+- **The URL 404s a token you just copied** — a _different_ server is answering
+  on the reviewer's local port, so the forward never bound. Settle it with a
+  `HEAD`: every response carries `X-Local-Review: port=<bound port>`, so
+  `curl -I` names which server replied. A bare `501 Unsupported method` means
+  something that is _not_ local-review, since this server answers `HEAD` with
+  `200`.
+- **The hint names a host that does not resolve.** It now reports
+  `$SSH_CONNECTION`'s third field, the address the session arrived on, rather
+  than the local hostname — a `.local` name resolves on the LAN and nowhere
+  else, so over a tailnet it sent reviewers to an unreachable host and
+  `ssh -N -L` exited at once.
+
+**To tell "nothing connected" from "the page never loaded", read the log.** The
+server prints one line to stderr the first time any request arrives —
+`first request received (GET)`, carrying no path and no token, once per launch.
+Its absence means nothing reached the server at all, so the problem is the
+tunnel or the address rather than the page; its presence means the opposite.
+There is deliberately no per-request access log: the token is a path segment,
+so every real request would put it in a file that outlives the round.
+
+No `SSH:` lines means a local launch; nothing changes.
 
 In threads mode the server shuts itself down when the user clicks Finish. The
 recorded PID is cleanup only for an abandoned session — one the user never
