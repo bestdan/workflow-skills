@@ -6021,7 +6021,28 @@ _doctor_questions_entry() {
 # gh field readers (mirrors restack's `gh pr view <n> --json X --jq .X`
 # pattern — one call per field, so gh does the JSON extraction and neither
 # side depends on `jq` being installed).
-_doctor_pr_state() { "$1" pr view "$2" --json state --jq .state 2>/dev/null; }
+#
+# _doctor_pr_state is the one reader that must tell "gone" from "unreadable".
+# Real gh exits 1 for BOTH a missing PR and a transient failure (401, rate
+# limit, network) — measured 2026-09-29, gh 2.x:
+#   gh pr view 999999 --json state  -> "GraphQL: Could not resolve to a
+#                                       PullRequest with the number of 999999." rc=1
+#   (bad token)                     -> "HTTP 401: Bad credentials (...)" rc=1
+# so only the stderr text separates them. Return 3 for the positive not-found
+# and 1 for every other failure; callers treat anything but 0/3 as
+# undetermined (D2), and callers that only branch on 0-vs-nonzero stay safe.
+_doctor_pr_state() {
+  local errf out rc
+  errf="$(mktemp "${TMPDIR:-/tmp}/orchestrator-gh.XXXXXX")" || return 1
+  out="$("$1" pr view "$2" --json state --jq .state 2>"$errf")"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    if grep -q 'Could not resolve to a PullRequest' "$errf"; then rc=3; else rc=1; fi
+  fi
+  rm -f "$errf"
+  printf '%s\n' "$out"
+  return "$rc"
+}
 _doctor_pr_draft() { "$1" pr view "$2" --json isDraft --jq .isDraft 2>/dev/null; }
 _doctor_pr_labels() { "$1" pr view "$2" --json labels --jq '[.labels[].name] | join(",")' 2>/dev/null; }
 
@@ -6286,7 +6307,9 @@ doctor() {
     local state state_rc
     state="$(_doctor_pr_state "$gh_bin" "$pr_num")"
     state_rc=$?
-    if [ "$state_rc" -ne 0 ]; then
+    if [ "$state_rc" -eq 3 ]; then
+      state="NOT_FOUND" # gh positively reported the PR does not exist
+    elif [ "$state_rc" -ne 0 ]; then
       # D2: a non-zero gh rc (401, rate limit, network blip) is UNDETERMINED,
       # never a positive signal the PR is gone. Parking on it is the exact
       # bug that would park every in-flight task on one transient gh hiccup —
@@ -6305,12 +6328,20 @@ doctor() {
         # NOT a violation. Doctor must not "repair" a merge.
         continue
         ;;
-      CLOSED | "")
+      "")
+        # rc 0 with no state is not a shape real gh produces; it proves
+        # nothing about the PR, so it is undetermined (D2), never a park.
+        i3_skipped=1
+        skipped_notes+=("I3: $task (gh returned no state)")
+        echo "spawn-orchestrator: doctor I3: $task — gh returned no state for PR #$pr_num, skipping (undetermined)"
+        continue
+        ;;
+      CLOSED | NOT_FOUND)
         _set_task_phase "$run_md" "$task" "parked"
         i3_status="parked"
         parked_notes+=("I3: $task")
         local why="PR #$pr_num is CLOSED (unmerged)"
-        [ -z "$state" ] && why="PR #$pr_num does not exist or is unreadable"
+        [ "$state" = NOT_FOUND ] && why="PR #$pr_num does not exist"
         report_bullets+=("- **I3 parked — $task**: $why — the delivery's PR is gone; a human must look.")
         _doctor_questions_entry "$questions" "$task — $why" \
           "park the task | leave it as-is" "parked" \
