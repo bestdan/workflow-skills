@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.79.1] - 2026-10-14
+
+### Fixes
+
+- reconciler lists a finding's premises, incl. reachability [#990] (#991) (aa1b2c8)
+
 ## [2.79.0] - 2026-10-07
 
 ### Features
