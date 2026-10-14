@@ -51,7 +51,7 @@ the removed guard could never be false there. A resolver spec that builds a
 non-personalized record and calls the resolver directly made the path look
 live, though the schema can't produce it. Neither the reviewer nor the
 reconciler opened `resolve_type`: each checked every premise it was given, and
-nobody listed reachability. That is the case step 8's list-the-premises-yourself rule exists for —
+nobody listed reachability. That is the case step 8's checkable-premise rule exists for —
 a gap in which premises were checked, not in how carefully.
 
 ## What this costs when skipped
