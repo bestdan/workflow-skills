@@ -52,6 +52,16 @@
             "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/guard-foreign-worktree.py\""
           }
         ]
+      },
+      {
+        "matcher": "ExitWorktree",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/exit-worktree-guard.sh\"",
+            "timeout": 60
+          }
+        ]
       }
     ],
     "PostToolUse": [

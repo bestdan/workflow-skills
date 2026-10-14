@@ -2,11 +2,16 @@
 # Delete a local branch once a merged PR proves it is spent, and clear the
 # [branch "..."] stanza that outlives it.
 #
-#   scripts/branch-remove.sh <branch> [root]
+#   scripts/branch-remove.sh [--check] <branch> [root]
 #
 #   exit 0   deleted (or the branch was already gone and its stanza was cleared)
 #   exit 3   kept, with the reason on stderr
 #   exit 64  the caller named nothing deletable
+#
+# `--check` runs the merged-PR gate and stops before the delete: exit 0 means the
+# tip landed on the default branch, exit 3 says why not. It skips the
+# checked-out refusal, because its caller (exit-worktree-guard.sh) asks about the
+# branch of the worktree it is about to let go, which is checked out by design.
 #
 # `root` defaults to the repo containing the cwd; a caller that has already torn
 # down a worktree passes its own pinned root, because by then the cwd may be a
@@ -37,6 +42,11 @@ warn() { printf ' .. %s\n' "$1" >&2; }
 cont() { printf '    %s\n' "$1" >&2; }
 err() { printf ' !! %s\n' "$1" >&2; }
 
+check=
+if [ "${1-}" = --check ]; then
+  check=1
+  shift
+fi
 branch="${1-}"
 root="${2-}"
 
@@ -96,7 +106,7 @@ if ! git -C "$root" show-ref --quiet --verify "refs/heads/$branch"; then
   # `git branch -d` that took the ref and could not take the stanza. Clearing it
   # is the entire remaining job, so do that rather than reporting nothing to
   # delete and leaving the cruft in place.
-  if has_stanza "$branch"; then
+  if [ -z "$check" ] && has_stanza "$branch"; then
     if git -C "$root" config --remove-section "branch.$branch" 2>/dev/null; then
       say "branch $branch was already gone — cleared the [branch] stanza it left"
       exit 0
@@ -119,7 +129,7 @@ fi
 held=$(git -C "$root" worktree list --porcelain | awk -v b="branch refs/heads/$branch" '
   /^worktree / { path = substr($0, 10) }
   $0 == b { print path; exit }')
-if [ -n "$held" ]; then
+if [ -n "$held" ] && [ -z "$check" ]; then
   warn "kept branch $branch — it is checked out at $held,"
   cont "so nothing can delete it. Switch away, or remove that worktree, first."
   exit 3
@@ -255,6 +265,11 @@ if ! grep -Fqx "$tip" <<<"$oids"; then
   cont "Check, then:"
   cont "  git -C $root branch -D $branch"
   exit 3
+fi
+
+if [ -n "$check" ]; then
+  say "branch $branch landed — its tip is the head of a PR merged into $default"
+  exit 0
 fi
 
 # Trust the ref, not the exit status. The two disagree in the direction that
