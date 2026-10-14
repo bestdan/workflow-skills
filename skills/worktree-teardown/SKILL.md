@@ -1,6 +1,6 @@
 ---
 name: worktree-teardown
-description: Reference for the mechanics behind this plugin's worktree teardown — `scripts/worktree-remove.sh` and `scripts/branch-remove.sh` — covering the submodule force gates, the PR-evidence branch delete and why a plain `-d` is unsafe in a squash-merging repo, and the half-deleted and locked-worktree recovery cases. Use when a worktree removal fails, refuses, or half-completes, when deciding whether a branch is safe to delete, or on "working trees containing submodules cannot be moved or removed", "use 'remove -f -f' to override or unlock first", or a retry refused as "contains modified or untracked files".
+description: Reference for the mechanics behind this plugin's worktree teardown — `scripts/worktree-remove.sh` and `scripts/branch-remove.sh` — covering the submodule force gates, the PR-evidence branch delete and why a plain `-d` is unsafe in a squash-merging repo, and the half-deleted and locked-worktree recovery cases. Use when a worktree removal fails, refuses, or half-completes, when deciding whether a branch is safe to delete, or on "working trees containing submodules cannot be moved or removed", "use 'remove -f -f' to override or unlock first", a retry refused as "contains modified or untracked files", or an `ExitWorktree` remove refused with "Could not verify worktree state", which asks for `discard_changes`.
 user-invocable: false
 ---
 
@@ -87,11 +87,28 @@ The delete is judged by whether the ref went away, not by git's exit status, bec
 
 ## What the exit hook covers, and what it cannot reach
 
-`scripts/worktree-remove-hook.sh` runs the same script when the harness dispatches `WorktreeRemove`, so an exit through the `ExitWorktree` tool or the interactive exit dialog needs nothing typed. It runs from the main checkout, because `worktree-remove.sh` refuses to remove the worktree its caller is standing in and the hook's own cwd is that worktree.
+`scripts/worktree-remove-hook.sh` runs the same script when the harness dispatches `WorktreeRemove`, so an exit through the `ExitWorktree` tool or the interactive exit dialog needs nothing typed — apart from the `discard_changes` flag described below. It runs from the main checkout, because `worktree-remove.sh` refuses to remove the worktree its caller is standing in and the hook's own cwd is that worktree.
 
 It removes only what `scripts/worktree-create-hook.sh` made for the exiting session: the create hook stamps a session id only on a worktree it actually created, and the remove hook keeps any worktree that is outside the configured root, is not a linked worktree, whose branch no longer matches its directory, whose owner differs, or which carries no stamp at all. That ownership gate is not paranoia — the create hook hands a re-used name back rather than refusing it, so two sessions can share one checkout, and the stamp is what stops one session's exit from deleting the other's live working tree. Entering an existing worktree never claims it: a second, different session rewrites the marker to the sticky `shared`, which matches no session, and an unmarked worktree stays unmarked. Either way neither exit order can remove it, and clearing it is a manual `scripts/worktree-remove.sh`.
 
 A refusal here is **safe but invisible**: a non-zero exit does not block the harness, which re-stats the path and logs `WorktreeRemove hook did not remove worktree, kept at: <path>` to the debug log and nowhere else. That is why every keep above prints its reason to stderr.
+
+### `ExitWorktree` `remove` refuses every hook-created worktree
+
+`ExitWorktree` with `action: "remove"` answers `Could not verify worktree state at <path>. Refusing to remove without explicit confirmation. Re-invoke with discard_changes: true to proceed` for every worktree the create hook made, clean or not. The harness counts unmerged work as `<start commit>..HEAD` and gives up when the session has no start commit, and a hook-based session never records one. The plugin cannot supply it, because the hook's only output is the path on its last stdout line. The check also gives up before it reports uncommitted files, so a dirty tree gets the same message as a clean one. Read from the Claude Code 2.1.299 binary: the git-created session stores `originalHeadCommit` and the hook-based one carries no such field (#980).
+
+The flag does not discard anything by itself. It skips the harness check and dispatches `WorktreeRemove`, so the work is guarded by this plugin's script rather than by the harness: `worktree-remove.sh` first runs a plain `git worktree remove`, which refuses a tree holding modified or untracked files and leaves it in place, and the branch goes only on merged-PR evidence, so unmerged commits outlive the checkout. Verified 2026-10-14 on a fixture: an untracked file kept the tree, and a clean tree with an unmerged commit lost its checkout and kept its branch at that commit.
+
+That protection holds only when the hook does the removal, and the tool's answer cannot show whether it did — it reports "removed" for a worktree the hook kept. So check before passing the flag, and pass it only in answer to this message:
+
+1. `git status --porcelain` in the worktree prints nothing.
+2. The branch's tip, `git rev-parse HEAD`, is the `headRefOid` of a merged PR whose `baseRefName` is the default branch — the same gate `branch-remove.sh` applies:
+
+   ```bash
+   gh pr list --head <branch> --state merged --json headRefOid,baseRefName
+   ```
+
+If either check fails, use `action: "keep"`: a kept worktree costs one `worktree-remove.sh` later. Any other refusal — `Worktree has N uncommitted files…` — names real work, so confirm with the user as the tool says. Outside a hook-created worktree the same "could not verify" message means a git call failed, and the flag hands the removal to the harness with nothing checking it; don't pass it there without the user.
 
 **The hook does not reach an unattended run.** A `claude -p` session that exits inside a worktree fires `SessionEnd` and nothing else, subagent worktrees are never handed to it, and both of the harness's own sweeps skip a hook-created worktree by construction. So worktrees still accumulate under the configured root, and clearing those is still a manual `scripts/worktree-remove.sh`. Verified against Claude Code 2.1.260; see bestdan/dotfiles#677 and #679.
 

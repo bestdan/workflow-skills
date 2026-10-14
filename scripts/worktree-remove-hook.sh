@@ -23,9 +23,12 @@
 # refusal here is safe but invisible, which is why every refusal below prints
 # its reason.
 #
-# The harness checks the worktree is clean BEFORE dispatching, so a dirty tree
-# never reaches this script. worktree-remove.sh's own dirty refusal stays as a
-# backstop rather than as the primary gate.
+# The harness cannot check a hook-created worktree before dispatching: a
+# hook-based session records no start commit, so ExitWorktree's remove refuses
+# with "Could not verify worktree state" until the caller passes
+# discard_changes: true, which skips the check. worktree-remove.sh's own dirty
+# refusal is therefore the gate on this path, not a backstop. See
+# skills/worktree-teardown/SKILL.md and #980.
 #
 # Hooks run unsandboxed — `gh` is authenticated and api.github.com is
 # reachable from here — so worktree-remove.sh's merged-PR branch gate and its

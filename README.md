@@ -136,7 +136,10 @@ isolated worktree without anything being typed: `WorktreeCreate` puts it where
 config), `WorktreeRemove` tears down only what the exiting session itself
 created, and a `PostToolUse` reminder on `ExitWorktree` says teardown ends
 there. Teardown covers the paths the harness dispatches: an explicit
-`ExitWorktree` and the interactive exit dialog. An unattended (`claude -p`)
+`ExitWorktree` and the interactive exit dialog, though an `ExitWorktree`
+remove of a hook-created worktree needs `discard_changes: true` —
+[the teardown reference](skills/worktree-teardown/SKILL.md) says what to check
+first. An unattended (`claude -p`)
 exit fires `SessionEnd` and nothing else, and subagent worktrees are never
 handed to the hook, so both still need a manual run of the same scripts —
 they are plain scripts you can run by hand either way:
