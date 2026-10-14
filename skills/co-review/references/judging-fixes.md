@@ -37,7 +37,7 @@ checkable-premise rule, not the fix-judging one.
 matched them. Applying it would have taught the next editor that `**` is
 single-segment.
 
-## A fourth, where every stated premise was true
+## A fourth worked example, where every stated premise was true
 
 **A spec that exercises a path the entry point can't reach.** A `--post` run
 posted an `issue (blocking)` against a PR that removed an early
@@ -47,7 +47,8 @@ non-personalized records now reached a transform that returns nil for
 returns nil, the fields are non-null, the client selects them. The finding was
 still false. The resolver is mounted on one object type, reached only through
 `resolve_type`, which maps a non-personalized record to a different type — so
-the removed guard could never be false there. A resolver spec that builds a
+`purpose.personalized?` could never be false there and the removed early
+return could never fire. A resolver spec that builds a
 non-personalized record and calls the resolver directly made the path look
 live, though the schema can't produce it. Neither the reviewer nor the
 reconciler opened `resolve_type`: each checked every premise it was given, and
