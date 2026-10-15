@@ -105,7 +105,9 @@ hook cut stays behind as well. Clear the worktree by hand with
 `EnterWorktree` with `path` is the route only for a worktree **outside** the
 hook's layout, which is any worktree `worktree-name-for.sh` exits `1` on, and
 only when a person is at the terminal. The test is the layout, not whether the
-worktree exists.
+worktree exists. `${CLAUDE_PLUGIN_ROOT}/scripts/guard-enter-by-path.py` enforces
+it: a `path` call on a worktree that has a name is refused, and the refusal
+names the `name` route.
 
 A model-supplied path outside `.claude/worktrees/` raises an approval prompt.
 Neither a `permissions.allow` rule nor a `PreToolUse` hook answering `allow`
