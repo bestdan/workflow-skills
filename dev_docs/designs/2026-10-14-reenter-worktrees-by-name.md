@@ -114,7 +114,7 @@ bestdan/agent-guidance change prose only.
    outside the layout, with someone at the terminal. bestdan/agent-guidance
    `portable-claude.md:37` ([bestdan/agent-guidance#103](https://github.com/bestdan/agent-guidance/pull/103)) now names no tool call
    and states only the general rule, so it cannot go stale when this plugin
-   changes. [#992](https://github.com/bestdan/workflow-skills/issues/992) makes this repo the one place that describes the routes.
+   changes. [#992](https://github.com/bestdan/workflow-skills/issues/992) proposes making this repo the one place that describes the routes.
 
 With item 3 in place, every worktree still at the hook's path on the hook's
 branch, in the session's own repo, is reachable with no prompt, by any agent,
