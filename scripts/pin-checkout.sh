@@ -32,10 +32,13 @@ if [ -z "$branch" ] || [ $# -ne 1 ]; then
   err "usage: pin-checkout.sh <branch>"
   exit 64
 fi
-if ! git check-ref-format --branch "$branch" >/dev/null 2>&1; then
+# Keep the name it prints: it expands `@{-1}`, and a literal shorthand stored as
+# the pin never equals the current branch, so the hook would restore forever.
+if ! resolved="$(git check-ref-format --branch "$branch" 2>/dev/null)"; then
   err "pin-checkout: '$branch' is not a valid branch name"
   exit 64
 fi
+branch="$resolved"
 if [ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" != true ]; then
   err "pin-checkout: run this inside a repo's working tree (bare repos have no checkout to pin)"
   exit 2
@@ -43,11 +46,14 @@ fi
 
 template="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/pinned-checkout-hook.sh"
 common_dir="$(git rev-parse --path-format=absolute --git-common-dir)" || exit 2
-hooks_path="$(git config --get core.hooksPath)"
+# Set-ness comes from the exit status, not the value: an empty hooksPath still
+# stops git reading .git/hooks.
+hooks_set=0
+git config --get core.hooksPath >/dev/null && hooks_set=1
 hook="$common_dir/hooks/post-checkout"
 
 # Decide before writing anything, so a refusal leaves the repo untouched.
-if [ -z "$hooks_path" ] && [ -e "$hook" ] && ! cmp -s "$template" "$hook"; then
+if [ "$hooks_set" = 0 ] && [ -e "$hook" ] && ! cmp -s "$template" "$hook"; then
   err "pin-checkout: $hook already exists; refusing to overwrite it."
   err "  Merge the pin check from $template into it, then set the pin alone:"
   err "    git config --local hooks.pinnedBranch $branch"
@@ -57,7 +63,7 @@ fi
 git config --local hooks.pinnedBranch "$branch" || exit 1
 echo "Pinned the main checkout to '$branch' (hooks.pinnedBranch)."
 
-if [ -n "$hooks_path" ]; then
+if [ "$hooks_set" = 1 ]; then
   # --git-path resolves hooksPath the way git does when it runs a hook.
   dir="$(git rev-parse --path-format=absolute --git-path hooks)"
   err "core.hooksPath is set, so git never runs .git/hooks; installed no hook."
@@ -79,7 +85,8 @@ else
   echo "Installed post-checkout hook: $hook"
 fi
 
-current="$(git symbolic-ref --short -q HEAD)"
+current="$(git symbolic-ref -q HEAD)"
+current="${current#refs/heads/}"
 if [ "$(git rev-parse --path-format=absolute --git-dir)" = "$common_dir" ] && [ "$current" != "$branch" ]; then
   echo "Note: this checkout is on '${current:-a detached HEAD}', not '$branch'; run: git checkout $branch"
 fi

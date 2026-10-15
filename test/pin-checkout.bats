@@ -26,7 +26,8 @@ teardown() { teardown_test; }
 load test_helper
 
 pin() { (cd "${2:-$repo}" && "$SCRIPT" "$1"); }
-branch_of() { git -C "$1" symbolic-ref --short -q HEAD; }
+# Not --short, which prints heads/<name> when a tag shares the name.
+branch_of() { git -C "$1" symbolic-ref -q HEAD | sed 's|^refs/heads/||'; }
 
 @test "sets the key, installs an executable hook, and a checkout ends back on the pin" {
   run pin main
@@ -85,6 +86,13 @@ branch_of() { git -C "$1" symbolic-ref --short -q HEAD; }
   assert_equal "$(git -C "$repo" config --get hooks.pinnedBranch)" main
 }
 
+@test "an empty core.hooksPath counts as set: git skips .git/hooks then too" {
+  git -C "$repo" config core.hooksPath ""
+  run pin main
+  assert_failure 3
+  assert_file_not_exists "$hook"
+}
+
 @test "from a linked worktree it pins the main checkout, and the worktree stays free" {
   wt="$TEST_TMPDIR/wt"
   git -C "$repo" worktree add -q "$wt" -b feature
@@ -113,6 +121,32 @@ branch_of() { git -C "$1" symbolic-ref --short -q HEAD; }
   run git -C "$repo" checkout third
   assert_output --partial "switching back from 'third' FAILED"
   assert_equal "$(branch_of "$repo")" third
+}
+
+@test "a tag named like the pin does not make the restore recurse" {
+  pin main
+  git -C "$repo" tag main
+  # Unfixed, the restore re-fires itself forever; the alarm turns that into a
+  # failure. perl rather than timeout(1), which stock macOS does not ship.
+  run perl -e 'alarm shift; exec @ARGV' 20 git -C "$repo" checkout -q other
+  assert_success
+  assert_equal "$(branch_of "$repo")" main
+}
+
+@test "a shorthand like @{-1} is pinned as the branch it names" {
+  git -C "$repo" checkout -q other
+  git -C "$repo" checkout -q main
+  run pin '@{-1}'
+  assert_success
+  assert_equal "$(git -C "$repo" config --get hooks.pinnedBranch)" other
+}
+
+@test "a failed restore shows git's reason" {
+  pin nosuch
+  run git -C "$repo" checkout other
+  assert_output --partial "switching back from 'other' FAILED"
+  # git's own error line, which the hook used to discard.
+  assert_output --partial "did not match"
 }
 
 @test "refuses a bad branch name, and a bare repo" {

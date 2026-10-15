@@ -16,8 +16,11 @@
 
 pinned="$(git config --get hooks.pinnedBranch 2>/dev/null)"
 # Empty on a detached HEAD, which is left alone: rebase and bisect detach and
-# fire this hook, and yanking HEAD mid-rebase would break them.
-current="$(git symbolic-ref --short -q HEAD)"
+# fire this hook, and yanking HEAD mid-rebase would break them. Not --short:
+# with a same-named tag it prints `heads/<pin>`, which never matches the pin,
+# so the restore's own hook would restore again without end.
+current="$(git symbolic-ref -q HEAD)"
+current="${current#refs/heads/}"
 [ -n "$pinned" ] && [ -n "$current" ] && [ "$current" != "$pinned" ] || exit 0
 
 # Only the main worktree is pinned. A linked worktree's git dir differs from the
@@ -27,7 +30,7 @@ common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
 [ -n "$git_dir" ] && [ "$git_dir" = "$common_dir" ] || exit 0
 
 # No recursion guard: the restore's own post-checkout finds current == pinned.
-if git checkout --quiet "$pinned" 2>/dev/null; then
+if git checkout --quiet "$pinned"; then
   {
     echo "This checkout is pinned to '$pinned' — put back on it, after '$current'."
     echo "  Work on '$current' in a worktree instead:"
