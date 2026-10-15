@@ -140,6 +140,22 @@ hook_worktree() {
   assert_output ""
 }
 
+@test "a registered path now holding another repo's worktree has no name" {
+  # This repo's entry stays registered and non-prunable, because a .git file is
+  # back at the path — only the common-git-dir check can refuse it.
+  hook_worktree feat-x
+  rm -rf "$WT_ROOT/main/feat-x"
+  other="$TEST_TMPDIR/other/main"
+  git init -q "$other"
+  git -C "$other" commit --allow-empty -qm other
+  git -C "$other" worktree add -q -b tester/feat-x "$WT_ROOT/main/feat-x" main
+  run git -C "$MAIN" worktree list --porcelain
+  refute_output --partial "prunable"
+  name_for "$MAIN" "$WT_ROOT/main/feat-x"
+  assert_failure 1
+  assert_output ""
+}
+
 @test "an unprefixed branch has no name" {
   hook_worktree plain plain
   name_for "$MAIN" "$WT_ROOT/main/plain"
