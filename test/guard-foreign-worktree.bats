@@ -113,6 +113,70 @@ bash_case() { expect "$1" Bash "$2" command "$3"; }
   bash_case deny "$repo" "ruby -e 'File.write(\"$wt/file.txt\", \"x\")'"
 }
 
+# The two reads #987 reported as refused, from a session in a sibling worktree
+# reading the main checkout. A script's arguments are data, as they are for
+# any other program; and a heredoc that feeds no interpreter (here, one that
+# prints a note) does not make the command's paths count as written.
+@test "an interpreter that only reads a foreign path gets no decision" {
+  local snap="$repo/data/barclay/2026-10.csv"
+  bash_case allow "$wt" "python3 scripts/refresh_balances.py --snapshot $snap"
+  bash_case allow "$wt" "uv run python scripts/refresh_balances.py --snapshot $snap"
+  bash_case allow "$wt" "python3 -I - < $repo/script.py"
+  bash_case allow "$wt" "python3 -I - < ../repo/script.py"
+  bash_case allow "$wt" "$(printf 'python3 -I - < script.py && cat <<EOF\nread %s\nEOF\n' "$snap")"
+}
+
+# The narrowing must not open the routes code reaches an interpreter by: the
+# script's own location still counts, and code spelled out in the command —
+# piped from a heredoc, or written to a file and then run — is still opaque.
+@test "code an interpreter runs from this command, or a foreign script, is still denied" {
+  bash_case deny "$wt" "python3 $repo/script.py"
+  bash_case deny "$wt" "uv run $repo/script.py"
+  bash_case deny "$repo" "$(printf 'cat <<PY | python3 -\nopen("%s/file.txt", "w")\nPY\n' "$wt")"
+  bash_case deny "$repo" "$(printf 'cat > s.py <<%s\nopen("%s/file.txt", "w")\nPY\npython3 -I - < s.py\n' "'PY'" "$wt")"
+  bash_case deny "$repo" "$(printf 'cat > s.py <<%s\nopen("%s/file.txt", "w")\nPY\npython3 s.py\n' "'PY'" "$wt")"
+  bash_case deny "$repo" "$(printf 'tee s.py >/dev/null <<%s\nopen("%s/file.txt", "w")\nPY\npython3 s.py\n' "'PY'" "$wt")"
+  bash_case deny "$repo" "$(printf 'python3 - \\\n  <<%s\nopen("%s/file.txt", "w")\nPY\n' "'PY'" "$wt")"
+  bash_case deny "$repo" "$(printf 'cat <<%s |\nopen("%s/file.txt", "w")\nPY\npython3 -\n' "'PY'" "$wt")"
+  bash_case deny "$repo" "$(printf 'cat <<%s 2>&1 | python3 -\nopen("%s/file.txt", "w")\nPY\n' "'PY'" "$wt")"
+  bash_case deny "$repo" "cat <<< 'open(\"$wt/file.txt\", \"w\")' | python3 -"
+  bash_case deny "$repo" "$(printf 'cat > "s p.py" <<%s\nopen("%s/file.txt", "w")\nPY\npython3 "s p.py"\n' "'PY'" "$wt")"
+}
+
+# An option that may take a value must not be mistaken for the program and so
+# hide the real one; such a call is not narrowed at all.
+@test "an option ahead of the script does not release a foreign script" {
+  bash_case deny "$wt" "python3 -W ignore $repo/script.py"
+  bash_case deny "$wt" "uv run --with pkg $repo/script.py"
+  bash_case deny "$repo" "$(printf 'cat > s.py <<%s\nopen("%s/file.txt", "w")\nPY\npython3 -W ignore s.py\n' "'PY'" "$wt")"
+}
+
+# Stdin reaches an interpreter by more spellings than `-`: a device path as the
+# program, a `<` from one, and a heredoc that follows a file redirect (the last
+# redirect of fd 0 wins). A `<` the regex finds in a quoted argument or a
+# comment is no redirect at all.
+@test "a heredoc reaching an interpreter's stdin past a file redirect is denied" {
+  local code="open(\"$wt/file.txt\", \"w\")"
+  bash_case deny "$repo" "$(printf 'python3 /dev/stdin <<%s\n%s\nPY\n' "'PY'" "$code")"
+  bash_case deny "$repo" "$(printf 'node /dev/fd/0 <<%s\n%s\nPY\n' "'PY'" "$code")"
+  bash_case deny "$repo" "$(printf 'python3 /proc/$$/fd/0 <<%s\n%s\nPY\n' "'PY'" "$code")"
+  bash_case deny "$repo" "$(printf 'python3 //dev/./stdin <<%s\n%s\nPY\n' "'PY'" "$code")"
+  bash_case deny "$repo" "$(printf 'cat <<%s | python3 - < /dev/stdin\n%s\nPY\n' "'PY'" "$code")"
+  bash_case deny "$repo" "$(printf 'python3 - < x.py <<%s\n%s\nPY\n' "'PY'" "$code")"
+  bash_case deny "$repo" "python3 - < x.py <<< '$code'"
+  bash_case deny "$repo" "$(printf 'python3 - "<x" <<%s\n%s\nPY\n' "'PY'" "$code")"
+  bash_case deny "$repo" "$(printf 'python3 - <<%s # <x\n%s\nPY\n' "'PY'" "$code")"
+}
+
+# A named script's own heredoc is not let through as data, unlike its
+# arguments: the owner chose to keep main's refusal here (#998, round 3).
+@test "a heredoc or here-string on a named script's own command is denied" {
+  local code="open(\"$wt/file.txt\", \"w\")"
+  bash_case deny "$repo" "$(printf 'python3 x.py <<%s\n%s\nPY\n' "'PY'" "$code")"
+  bash_case deny "$repo" "$(printf 'python3 tool.py <<EOF\n%s/x\nEOF\n' "$wt")"
+  bash_case deny "$repo" "python3 tool.py <<< '$wt/x'"
+}
+
 # The code follows the cluster's last letter, and a long flag may carry it
 # attached.
 @test "inline code behind a combined or attached flag is denied" {

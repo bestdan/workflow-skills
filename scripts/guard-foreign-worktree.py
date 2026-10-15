@@ -72,11 +72,14 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 
 from bash_command import (  # noqa: E402  (needs the sys.path entry above)
+    REDIRECT,
+    SEGMENT_SPLIT,
     expand,
     git_calls,
     head_index,
     head_word,
     segments,
+    tokenize,
 )
 
 BYPASS = "WORKFLOW_SKILLS_ALLOW_FOREIGN_WRITE"
@@ -220,10 +223,17 @@ _WRITERS = {
     "unzip",
 }
 
-# Interpreters. Their arguments are code, not paths this guard can classify —
-# the usual ghost edit is a foreign path inside a `python3 - <<'PY'` heredoc — so a
-# foreign path anywhere near one is treated as a write. This is the guard's one
+# Interpreters. Code fed to one inline is opaque to this guard — the usual ghost
+# edit is a foreign path inside a `python3 - <<'PY'` heredoc — so a foreign path
+# anywhere in such a command is treated as a write. This is the guard's one
 # deliberately fail-CLOSED rule, and the bypass exists for it.
+#
+# An interpreter running a script FILE is narrower. The script's location
+# still counts (a script commonly writes relative to itself), but the
+# arguments after it are data, exactly as they are for `./script.py <path>` or
+# any other program: a foreign one carries no write evidence, so it is not
+# refused. `python3 tool.py --out <foreign>` therefore goes through; telling
+# that from `--snapshot <foreign>` would need the script's code.
 _INTERPRETERS = {"python", "python3", "node", "ruby", "perl", "php", "osascript", "uv"}
 
 # The flag that makes each interpreter run code given on its command line. Per
@@ -255,6 +265,118 @@ def _inline_code(head: str, args: list[str]) -> bool:
             return True
         if re.fullmatch(r"-[A-Za-z]+", arg) and arg[-1] in letters:
             return True
+    return False
+
+
+# Options known to take no value, so the token after one is still the program.
+# Any other option ahead of the program may take a value (`-W ignore`, `uv run
+# --with pkg`) and would be mistaken for it, so that call is not narrowed.
+_PYTHON_BARE = {"-I", "-u", "-B", "-E", "-s", "-S", "-O", "-OO", "-q", "-b", "-bb"}
+_BARE_FLAGS = {"python": _PYTHON_BARE, "python3": _PYTHON_BARE}
+
+
+def _program(head: str, args: list[str]) -> tuple[str | None, bool]:
+    """The program an interpreter call runs, and whether that is certain.
+
+    ``args`` are every token after the interpreter. The program is the first
+    operand, `-` included, and everything after it is the script's own
+    arguments. `uv run [<interpreter>] <script>` names it after a subcommand.
+    ``(None, True)`` is a call that names no program and so reads its code
+    from stdin. ``(None, False)`` is one whose program cannot be picked out:
+    another `uv` subcommand, or an option not known to be value-less ahead of
+    the program.
+    """
+    if head == "uv":
+        if args[:1] != ["run"]:
+            return None, False
+        args = args[1:]
+        if args[:1] and os.path.basename(args[0]) in _INTERPRETERS:
+            head, args = os.path.basename(args[0]), args[1:]
+    bare = _BARE_FLAGS.get(head, set())
+    for arg in args:
+        if arg == "-" or not arg.startswith("-"):
+            return arg, True
+        if arg not in bare:
+            return None, False
+    return None, True
+
+
+def _program_operands(head: str, args: list[str]) -> list[str]:
+    """The operands of an interpreter call graded as reaching in: its program,
+    or every operand, as before this narrowing, when that is uncertain."""
+    program, certain = _program(head, args)
+    if not certain:
+        return [a for a in args if not a.startswith("-")]
+    return [program] if program else []
+
+
+# A stdin redirect from a file. `<<`/`<<<` are heredocs, `<&` duplicates an fd,
+# and `<(` is process substitution.
+_STDIN_FILE = re.compile(
+    r"""
+    (?<! [<0-9&] )
+    < (?! [<&(] )
+    [ \t]*
+    ( "[^"]*" | '[^']*' | (?: \\. | [^\s|;&()`{}<>] )+ )
+    """,
+    re.VERBOSE,
+)
+
+# A program name, or a `<` source, that is stdin itself rather than a file.
+_STDIN_PATH = re.compile(r"-|/dev/stdin|/dev/fd/0|/proc/[^/]+/fd/0")
+
+
+def _is_stdin(path: str) -> bool:
+    """Whether `path` names stdin, however it is spelled (`//dev/./stdin`)."""
+    if path == "-":
+        return True
+    # normpath keeps a leading `//` on POSIX, so collapse it as well.
+    return bool(_STDIN_PATH.fullmatch(re.sub(r"^/+", "/", os.path.normpath(path))))
+
+
+def _code_in_command(cmd: str, cwd: str) -> bool:
+    """Whether an interpreter here runs code that is spelled out in this command.
+
+    Two routes put it there. A heredoc or here-string on an interpreter's own
+    command, whatever program it names. Or one anywhere in the command, when
+    some interpreter may be reading its code from stdin: it names no certain
+    program (or names `-` or a stdin device), and has no `<` file redirect.
+    Which command a heredoc feeds is not worked out — pipes, `2>&1` and line
+    continuations all move it — so `python3 -I - < script` beside a `cat
+    <<EOF` note goes through, and `cat <<PY | python3 -` does not. And a file
+    this command writes, by redirect or `tee`, that an interpreter then runs or
+    reads on stdin (`cat > s.py <<'PY' … PY` then `python3 s.py`).
+    """
+    heredoc = "<<" in cmd
+    cmd = cmd.replace("\\\n", " ")  # join line continuations, as bash does
+    files = [m.group(1).strip("\"'") for m in _WRITE_REDIRECT.finditer(cmd)]
+    for forms in segments(cmd):
+        for tokens in forms:
+            if head_word(tokens) == "tee":
+                files += [t for t in tokens[head_index(tokens) + 1 :] if t[:1] != "-"]
+    written = {os.path.normpath(p) for f in files if (p := expand(f, cwd))}
+    # Split with the redirects still in place, so each interpreter's own `<`
+    # is in its piece. A piece cut short by `2>&1` only loses a trailing fd.
+    for piece in SEGMENT_SPLIT.split(cmd):
+        stdin = [m.group(1).strip("\"'") for m in _STDIN_FILE.finditer(piece)]
+        stdin = [s for s in stdin if not _is_stdin(s)]
+        for tokens in tokenize(REDIRECT.sub(" ", piece)):
+            head = head_word(tokens)
+            if head not in _INTERPRETERS:
+                continue
+            program, certain = _program(head, tokens[head_index(tokens) + 1 :])
+            on_stdin = not certain or not program or _is_stdin(program)
+            # A heredoc on the interpreter's own command is refused whatever it
+            # runs: a `<` file does not shield it (bash applies fd 0's redirects
+            # left to right, and the `<` match is blind to quotes and comments),
+            # and a named script's stdin is not treated as data (#998).
+            if "<<" in piece or (heredoc and on_stdin and not stdin):
+                return True
+            sources = stdin + ([] if on_stdin else [program])
+            for path in sources:
+                resolved = expand(path, cwd)
+                if resolved and os.path.normpath(resolved) in written:
+                    return True
     return False
 
 
@@ -441,29 +563,30 @@ def _write_targets(cmd: str, cwd: str):
         no ``-C``, which lands in the session's cwd (DEFINITE).
       - a write redirect's target (DEFINITE).
       - a path argument of a writer command or an in-place editor (DEFINITE),
-        or of an interpreter (REACH).
+        or the script an interpreter runs (REACH). The script's own arguments
+        are data, as they are for any other program, and are not evidence.
       - every path mentioned anywhere in a command that feeds an interpreter
-        inline, via its inline-code flag or a heredoc (REACH). The code is
-        opaque there, and that is the shape a ghost edit usually takes.
+        code it spells out — an inline-code flag, a heredoc beside an
+        interpreter reading stdin, or a file the command writes and then runs
+        (REACH). The code is opaque there, and that is the shape a ghost edit
+        usually takes.
 
     Relative paths resolve against the payload's cwd rather than against a `cd`
     tracked through the command. Tracking it would only matter for a relative
     path resolved after a `cd` into a directory that is not itself foreign, and
     a `cd` into one that IS foreign is already denied.
     """
-    inline_interpreter = False
+    # A heredoc is asked of the raw command rather than this loop's segments:
+    # the operator is stripped along with the rest of the redirect before the
+    # split, and a heredoc BODY is its own segment anyway, since the splitter
+    # cuts on newlines.
+    inline_interpreter = _code_in_command(cmd, cwd)
     for forms in segments(cmd):
         for tokens in forms:
             head_at = head_index(tokens)
             head = head_word(tokens)
             operands = [t for t in tokens[head_at + 1 :] if not t.startswith("-")]
-            # `<<` is asked of the whole command rather than this segment: the
-            # heredoc operator is stripped along with the rest of the redirect
-            # before the split, and a heredoc BODY is its own segment anyway,
-            # since the splitter cuts on newlines.
-            if head in _INTERPRETERS and (
-                _inline_code(head, tokens[head_at + 1 :]) or "<<" in cmd
-            ):
+            if head in _INTERPRETERS and _inline_code(head, tokens[head_at + 1 :]):
                 inline_interpreter = True
             # Only a `cd` in command position: `rg cd <path>` is a read.
             if head == "cd" and operands:
@@ -484,6 +607,7 @@ def _write_targets(cmd: str, cwd: str):
                 grade = DEFINITE
             elif head in _INTERPRETERS:
                 grade = REACH
+                operands = _program_operands(head, tokens[head_at + 1 :])
             if grade:
                 for token in operands:
                     resolved = expand(token, cwd)
