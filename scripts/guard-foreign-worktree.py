@@ -650,7 +650,9 @@ def _name_for(holder: str, cwd: str) -> str | None:
         proc = subprocess.run(
             [RESOLVER, holder], cwd=cwd, capture_output=True, text=True, timeout=10
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        # UnicodeError: text=True decodes strictly, and an escape from here
+        # reaches main()'s fail-open handler, which would drop the denial.
         return None
     name = proc.stdout.strip()
     if proc.returncode != 0 or not _NAME_RE.match(name):

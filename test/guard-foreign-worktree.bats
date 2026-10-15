@@ -380,7 +380,8 @@ stub_hook() {
 
 @test "a missing, failing or garbled resolver still denies, with the path route" {
   local body text
-  for body in '' 'echo feat-a; exit 2' 'kill -SEGV $$' 'printf "feat a\nmore\n"'; do
+  for body in '' 'echo feat-a; exit 2' 'kill -SEGV $$' 'printf "feat a\nmore\n"' \
+    "printf '\\377'" "printf '\\377' >&2; echo feat-a"; do
     rm -rf "$tmp/stub"
     text=$(reason "$(stub_hook "$body")" "$repo" "echo x > $wt/file.txt")
     [[ "$text" == *'`EnterWorktree` with `path: '* ]] || {
