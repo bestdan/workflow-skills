@@ -49,11 +49,12 @@ worktree. So when the session is in one, call `ExitWorktree` with `keep`, then
 `EnterWorktree` with `name`. `keep` leaves the worktree and its branch on disk,
 so this costs nothing but the turn.
 
-Call `ExitWorktree` only when the session **is** in a worktree. Outside one it is
-a no-op, and it returns `is_error: true` with a message that says so ("No-op … No
-filesystem changes were made"). The agent carries on after it, so it does no
-harm, but it reads as a failure in a transcript. Measured by the #1001 probe
-(PR #1009).
+Call `ExitWorktree` only when the session **is** in a worktree it entered with
+`EnterWorktree`. Otherwise it is a no-op, and it returns `is_error: true` with a
+message that says so ("No-op: there is no active EnterWorktree session to exit …
+No filesystem changes were made."). The agent carries on after it, so it does no
+harm, but it reads as a failure in a transcript. Measured by the #1001 probe:
+[`dev_docs/research/2026-10-14-enterworktree-deny-probe/`](../../dev_docs/research/2026-10-14-enterworktree-deny-probe/README.md).
 
 ## The routes
 
