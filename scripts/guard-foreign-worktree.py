@@ -26,7 +26,8 @@ failure this exists for. Both are registered; Bash is the one that fires.
 TWO DECISIONS, ONE HOOK.
 
   1. A write into a *different* linked worktree of the session's own repo is
-     DENIED, with ``EnterWorktree`` named in the refusal.
+     DENIED, with ``EnterWorktree`` named in the refusal: by ``name`` when
+     ``worktree-name-for.sh`` gives the worktree one, else by ``path``.
   2. The first write of a session standing in a MAIN checkout on its default
      branch emits a non-blocking warning: write-work belongs in a worktree.
      Non-blocking so a deliberate one-line fix still goes through.
@@ -629,11 +630,60 @@ def _write_targets(cmd: str, cwd: str):
                 yield _real(resolved), REACH
 
 
-def _reason(target: str, holder: str) -> str:
+RESOLVER = os.path.join(
+    os.path.dirname(os.path.realpath(__file__)), "worktree-name-for.sh"
+)
+
+# The resolver only ever prints a name scripts/lib/worktree-name.sh accepts.
+# This only keeps an unexpected stdout (a stray line, a stub) out of the reason.
+_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def _name_for(holder: str, cwd: str) -> str | None:
+    """The ``EnterWorktree`` ``name`` that hands back ``holder``, if any.
+
+    ``worktree-name-for.sh`` owns the answer. A missing, failing, crashing or
+    slow resolver yields None: the refusal still stands, and only the route it
+    offers falls back to the ``path`` wording.
+    """
+    try:
+        proc = subprocess.run(
+            [RESOLVER, holder], cwd=cwd, capture_output=True, text=True, timeout=10
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    name = proc.stdout.strip()
+    if proc.returncode != 0 or not _NAME_RE.match(name):
+        return None
+    return name
+
+
+def _route(holder: str, name: str | None) -> str:
+    # The ExitWorktree step is conditional in the prose, as in
+    # guard-enter-by-path.py: outside a worktree it is a no-op that still
+    # reports is_error (#1001), and no hook input says which case applies.
+    if name:
+        return (
+            f"  - Enter it instead: `EnterWorktree` with `name: {name}` hands it back "
+            "with no approval prompt. If this session is already in a worktree, call "
+            "`ExitWorktree` with `action: keep` first; otherwise skip that step, because "
+            "outside a worktree it is a no-op that reports an error. "
+            f"Then call `EnterWorktree` with `name: {name}`.\n"
+        )
+    return (
+        f"  - Enter it instead: `EnterWorktree` with `path: {holder}`, or re-run from "
+        "inside it. Entering by `path` raises an approval prompt that no allow rule "
+        "lifts, so an unattended or Remote Control session cannot answer it.\n"
+    )
+
+
+def _reason(target: str, holder: str, name: str | None) -> str:
     return (
         f"{holder} is a worktree this session has not entered, and this command writes "
         f"into it ({target}).\n\n"
-        f"  - Enter it instead: EnterWorktree with path {holder}, or re-run from inside it.\n"
+        f"{_route(holder, name)}"
+        "  - Which `EnterWorktree` call reaches which worktree, and why: the "
+        "`worktree-entry` skill.\n"
         "  - Do not reach in with `git -C <path>`, `cd <path> && …`, or an absolute path. "
         "That succeeds quietly, so the user's shell, editor, prompt and build stay "
         "pointed at this tree while the work lands in that one — their verification "
@@ -682,13 +732,15 @@ def _emit(payload: dict) -> None:
     print(json.dumps(payload))
 
 
-def _deny(target: str, holder: str) -> None:
+def _deny(target: str, holder: str, cwd: str) -> None:
     _emit(
         {
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "deny",
-                "permissionDecisionReason": _reason(target, holder),
+                "permissionDecisionReason": _reason(
+                    target, holder, _name_for(holder, cwd)
+                ),
             }
         }
     )
@@ -758,7 +810,7 @@ def main() -> None:
         for target, _grade in targets:
             holder = _owning_foreign(target, own_top, foreign)
             if holder:
-                _deny(target, holder)
+                _deny(target, holder, cwd)
                 return
 
         # No foreign write. The remaining question is whether write-work is
