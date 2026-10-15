@@ -211,8 +211,56 @@ print(h["permissionDecisionReason"])
   assert_line --index 0 "PreToolUse deny"
   assert_line --index 1 "This checkout is pinned to 'main' — refusing to switch it to 'x'."
   assert_line --index 2 --partial "worktree"
-  assert_line --index 3 "To move this checkout anyway, re-run the same command with \`env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1\` immediately before the \`git\` word."
-  assert_line --index 4 "To unpin it for good: git config --unset hooks.pinnedBranch"
+  assert_line --index 3 --partial "EnterWorktree"
+  assert_line --index 4 --partial "worktree-entry"
+  assert_line --index 5 "To move this checkout anyway, re-run the same command with \`env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1\` immediately before the \`git\` word."
+  assert_line --index 6 "To unpin it for good: git config --unset hooks.pinnedBranch"
+}
+
+# reason <cwd> <command> — prints only the refusal text.
+reason() {
+  run_hook "$1" "$2" | python3 -c '
+import json, sys
+print(json.load(sys.stdin)["hookSpecificOutput"]["permissionDecisionReason"])
+'
+}
+
+# The one worktree suggestion is the create hook's layout, read from
+# worktree-config.sh, never a prefix or root baked into the guard.
+@test "the refusal names the configured worktree root and branch prefix" {
+  WORKFLOW_SKILLS_BRANCH_PREFIX=acme/ WORKFLOW_SKILLS_WORKTREE_ROOT="$tmp/roots" \
+    run reason "$pinned" 'git checkout -b x'
+  assert_success
+  assert_output --partial "\`EnterWorktree\` with a \`name\`: it creates $tmp/roots/pinned/<name> on the branch acme/<name>."
+  assert_output --partial "workflow-skills:worktree-entry"
+  refute_output --partial "bestdan/"
+}
+
+# A resolver failure must not turn into an allow, nor into a guessed path.
+@test "a failing worktree-config.sh still denies, and names no path" {
+  WORKFLOW_SKILLS_WORKTREE_ROOT=relative/root run reason "$pinned" 'git checkout -b x'
+  assert_success
+  assert_line --index 0 "This checkout is pinned to 'main' — refusing to switch it to 'x'."
+  assert_output --partial "EnterWorktree"
+  assert_output --partial "worktree-config.sh failed"
+  refute_output --partial "<name>"
+  refute_output --partial "relative/root"
+  refute_output --partial "$tmp"
+}
+
+# No per-target routes: only the echoed target differs between refusals.
+@test "the refusal is the same text for a new branch, an existing branch, a tag and --detach" {
+  git -C "$pinned" tag v1 other
+  local want got c
+  want="$(reason "$pinned" 'git checkout -b x' | sed "s/'x'/'T'/")"
+  [ -n "$want" ]
+  for c in "git checkout other|other" "git checkout v1|v1" "git switch --detach other|other" "git switch -c x|x"; do
+    got="$(reason "$pinned" "${c%%|*}" | sed "s/'${c##*|}'/'T'/")"
+    [ "$got" = "$want" ] || {
+      echo "differs for ${c%%|*}: $got" >&2
+      return 1
+    }
+  done
 }
 
 # An absolute -C fixes where git runs even when the shell's own directory is

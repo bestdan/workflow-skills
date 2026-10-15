@@ -334,8 +334,8 @@ def _git(cwd: str, *args: str) -> str | None:
     return out.stdout.strip() if out.returncode == 0 else None
 
 
-def _violation(cwd: str, target: str, detached: bool) -> tuple[str, str] | None:
-    """``(pinned, target)`` when this switch is refused, else None."""
+def _violation(cwd: str, target: str, detached: bool) -> tuple[str, str, str] | None:
+    """``(pinned, target, main_checkout)`` when this switch is refused, else None."""
     pinned = _git(cwd, "config", "--get", "hooks.pinnedBranch")
     if not pinned:
         return None
@@ -350,16 +350,70 @@ def _violation(cwd: str, target: str, detached: bool) -> tuple[str, str] | None:
     # leaves HEAD at the pin's commit but off the pinned branch.
     if not detached and target.removeprefix("refs/heads/") == pinned:
         return None
-    return pinned, target
+    return pinned, target, os.path.dirname(common)
 
 
-def _reason(pinned: str, target: str) -> str:
+_WORKTREE_CONFIG = os.path.join(
+    os.path.dirname(os.path.realpath(__file__)), "worktree-config.sh"
+)
+
+
+def _worktree_config(checkout: str, key: str) -> str | None:
+    """``worktree-config.sh <key>`` as resolved for the pinned repo, or None.
+
+    Run from the main checkout because the resolver reads that repo's own
+    config files, as the create hook does. None on any failure: a
+    set-but-invalid value makes the resolver exit 1, and the refusal then
+    leaves the path out rather than guessing one.
+    """
+    try:
+        out = subprocess.run(
+            ["bash", _WORKTREE_CONFIG, key],
+            cwd=checkout,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    value = out.stdout.strip()
+    return value if out.returncode == 0 and value else None
+
+
+def _new_worktree_line(checkout: str) -> str:
+    """The one worktree suggestion: what `EnterWorktree` with a name creates.
+
+    It is the same whatever the refused target was. Predicting a route per
+    target from command text does not converge (PR #951's review rounds), so
+    every other target is handed to the worktree-entry skill instead. The path
+    is the create hook's own layout, `<root>/<repo>/<name>` on the branch
+    `<prefix><name>`, `<repo>` being the main checkout's directory name.
+    """
+    root = _worktree_config(checkout, "root")
+    prefix = _worktree_config(checkout, "prefix")
+    if root and prefix:
+        repo = os.path.basename(checkout)
+        return (
+            "For new work, call `EnterWorktree` with a `name`: it creates "
+            f"{root}/{repo}/<name> on the branch {prefix}<name>.\n"
+        )
+    return (
+        "For new work, call `EnterWorktree` with a `name` (worktree-config.sh "
+        "failed, so where it will create the worktree is not shown here).\n"
+    )
+
+
+def _reason(pinned: str, target: str, checkout: str) -> str:
     # A fixed sentence rather than a command rebuilt from the parse: the agent
     # already holds the exact command it ran, and every rebuild dropped
     # something (a start point, `--orphan` semantics, git's own options).
     return (
         f"This checkout is pinned to '{pinned}' — refusing to switch it to '{target}'.\n"
         "Branch work belongs in its own worktree, not in this checkout.\n"
+        + _new_worktree_line(checkout)
+        + "For any other target — an existing branch, a remote-only or "
+        "unprefixed branch, a tag or a commit — load the "
+        "`workflow-skills:worktree-entry` skill.\n"
         "To move this checkout anyway, re-run the same command with "
         f"`env {BYPASS}=1` immediately before the `git` word.\n"
         "To unpin it for good: git config --unset hooks.pinnedBranch"

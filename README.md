@@ -155,7 +155,10 @@ The fifth, also on `PreToolUse`
 ([`scripts/guard-pinned-branch.py`](scripts/guard-pinned-branch.py)), applies
 only to a repo that opts in with `git config --local hooks.pinnedBranch main`:
 it refuses a `git checkout`/`git switch` that would move that repo's main
-checkout off the pinned branch, so branch work goes to a worktree. Each call is
+checkout off the pinned branch, so branch work goes to a worktree. The refusal
+names the worktree an `EnterWorktree` call would create, at the root and branch
+prefix `scripts/worktree-config.sh` resolves, and points at the
+`worktree-entry` skill for every other target. Each call is
 judged where it actually runs — a `cd <worktree> && git checkout -b x` is
 allowed — and linked worktrees are never pinned. Bypass one call with
 `env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git checkout <branch>`; the assignment
