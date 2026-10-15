@@ -86,7 +86,12 @@ fi
 
 keep="Use ExitWorktree with action \"keep\" instead; a kept worktree costs one scripts/worktree-remove.sh later."
 
-dirty=$(git -C "$top" status --porcelain 2>/dev/null | wc -l | tr -d ' ')
+# Captured on its own rather than piped: under pipefail a failed status would
+# abort the script, and a hook that dies passes the call it was meant to stop.
+if ! st=$(git -C "$top" status --porcelain 2>/dev/null); then
+  deny "discard_changes refused: git status failed in $top, so its state cannot be verified. $keep"
+fi
+dirty=$(grep -c . <<<"$st" || true)
 if [[ "$dirty" != 0 ]]; then
   deny "discard_changes refused: $top has $dirty uncommitted or untracked path(s), which the removal would refuse and keep. Commit or drop them first. $keep"
 fi

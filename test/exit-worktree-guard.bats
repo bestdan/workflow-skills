@@ -122,6 +122,22 @@ assert_denied() {
   assert_output --partial "2 uncommitted or untracked path(s)"
 }
 
+@test "a git status that fails is a deny, not a pass" {
+  dir=$(make_worktree corrupt s1)
+  printf 'garbage' >"$(git -C "$dir" rev-parse --path-format=absolute --git-dir)/index"
+  run_guard "$dir" s1 "$DISCARD"
+  assert_denied
+  assert_output --partial "git status failed"
+}
+
+@test "a detached HEAD is denied with its own reason" {
+  dir=$(make_worktree detached s1)
+  git -C "$dir" switch -q --detach
+  run_guard "$dir" s1 "$DISCARD"
+  assert_denied
+  assert_output --partial "detached HEAD"
+}
+
 @test "a clean tree whose branch never merged is denied with the gate's reason" {
   dir=$(make_worktree unmerged s1)
   git -C "$dir" commit -q --allow-empty -m work
