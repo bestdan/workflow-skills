@@ -72,11 +72,14 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 
 from bash_command import (  # noqa: E402  (needs the sys.path entry above)
+    REDIRECT,
+    SEGMENT_SPLIT,
     expand,
     git_calls,
     head_index,
     head_word,
     segments,
+    tokenize,
 )
 
 BYPASS = "WORKFLOW_SKILLS_ALLOW_FOREIGN_WRITE"
@@ -272,36 +275,40 @@ _PYTHON_BARE = {"-I", "-u", "-B", "-E", "-s", "-S", "-O", "-OO", "-q", "-b", "-b
 _BARE_FLAGS = {"python": _PYTHON_BARE, "python3": _PYTHON_BARE}
 
 
-def _program_operands(head: str, args: list[str]) -> list[str]:
-    """The operands of an interpreter call that name the program it runs.
+def _program(head: str, args: list[str]) -> tuple[str | None, bool]:
+    """The program an interpreter call runs, and whether that is certain.
 
-    ``args`` are every token after the interpreter. Normally the program is
-    the first operand, and everything after it is the script's own arguments.
-    `uv run [<interpreter>] <script>` names it after a subcommand. Every operand
-    is returned, as before this narrowing, when the program cannot be picked
-    out for certain: another `uv` subcommand, or an option not known to be
-    value-less ahead of the program.
+    ``args`` are every token after the interpreter. The program is the first
+    operand, `-` included, and everything after it is the script's own
+    arguments. `uv run [<interpreter>] <script>` names it after a subcommand.
+    ``(None, True)`` is a call that names no program and so reads its code
+    from stdin. ``(None, False)`` is one whose program cannot be picked out:
+    another `uv` subcommand, or an option not known to be value-less ahead of
+    the program.
     """
-    every = [a for a in args if not a.startswith("-")]
     if head == "uv":
         if args[:1] != ["run"]:
-            return every
+            return None, False
         args = args[1:]
         if args[:1] and os.path.basename(args[0]) in _INTERPRETERS:
             head, args = os.path.basename(args[0]), args[1:]
     bare = _BARE_FLAGS.get(head, set())
     for arg in args:
         if arg == "-" or not arg.startswith("-"):
-            return [arg]
+            return arg, True
         if arg not in bare:
-            return every
-    return []
+            return None, False
+    return None, True
 
 
-# Where one command ends and the next begins — `;`, `&&`, a newline — but NOT
-# `|`, so a pipeline stays whole: `cat <<PY | python3 -` feeds the heredoc to
-# the interpreter through the pipe.
-_PIPELINE_SPLIT = re.compile(r"[;&\n()`{}]+")
+def _program_operands(head: str, args: list[str]) -> list[str]:
+    """The operands of an interpreter call graded as reaching in: its program,
+    or every operand, as before this narrowing, when that is uncertain."""
+    program, certain = _program(head, args)
+    if not certain:
+        return [a for a in args if not a.startswith("-")]
+    return [program] if program else []
+
 
 # A stdin redirect from a file. `<<`/`<<<` are heredocs, `<&` duplicates an fd,
 # and `<(` is process substitution.
@@ -319,47 +326,39 @@ _STDIN_FILE = re.compile(
 def _code_in_command(cmd: str, cwd: str) -> bool:
     """Whether an interpreter here runs code that is spelled out in this command.
 
-    Two routes put it there: a heredoc or here-string in the interpreter's own
-    pipeline (`python3 - <<'PY'`, `cat <<PY | node`), and a file this command
-    writes that the interpreter then runs or reads on stdin (`cat > s.py <<'PY'
-    … PY` then `python3 -I - < s.py`). A heredoc anywhere else — `cat <<EOF`
-    printing a note beside `python3 -I - < script` — feeds no interpreter, so it
-    does not make the command's paths count as written.
+    Two routes put it there. A heredoc or here-string anywhere in the command,
+    when some interpreter may be reading its code from stdin: it names no
+    certain program (or names `-`), and has no `<` file redirect of its own.
+    Which command a heredoc feeds is not worked out — pipes, `2>&1` and line
+    continuations all move it — so `python3 -I - < script` beside a `cat
+    <<EOF` note goes through, and `cat <<PY | python3 -` does not. And a file
+    this command writes, by redirect or `tee`, that an interpreter then runs or
+    reads on stdin (`cat > s.py <<'PY' … PY` then `python3 s.py`).
     """
-    # Join line continuations, as bash does, so `python3 - \` and the `<<PY`
-    # on the next line stay one pipeline.
-    cmd = cmd.replace("\\\n", " ")
+    heredoc = "<<" in cmd
+    cmd = cmd.replace("\\\n", " ")  # join line continuations, as bash does
     files = [m.group(1).strip("\"'") for m in _WRITE_REDIRECT.finditer(cmd)]
     for forms in segments(cmd):
-        tokens = forms[0]
-        if head_word(tokens) == "tee":
-            files += [t for t in tokens[head_index(tokens) + 1 :] if t[:1] != "-"]
+        for tokens in forms:
+            if head_word(tokens) == "tee":
+                files += [t for t in tokens[head_index(tokens) + 1 :] if t[:1] != "-"]
     written = {os.path.normpath(p) for f in files if (p := expand(f, cwd))}
-    pipelines = _PIPELINE_SPLIT.split(cmd)
-    # `cat <<PY |`, the body, then `python3 -` on the line after PY: bash
-    # reads the body first and continues the pipeline after it, so the
-    # interpreter lands in a later piece here. Fail closed on that shape.
-    if any("<<" in p and p.rstrip().endswith("|") for p in pipelines) and any(
-        head_word(forms[0]) in _INTERPRETERS for forms in segments(cmd)
-    ):
-        return True
-    for pipeline in pipelines:
-        interpreter, programs = False, []
-        for forms in segments(pipeline):
-            tokens = forms[0]
+    # Split with the redirects still in place, so each interpreter's own `<`
+    # is in its piece. A piece cut short by `2>&1` only loses a trailing fd.
+    for piece in SEGMENT_SPLIT.split(cmd):
+        stdin = [m.group(1).strip("\"'") for m in _STDIN_FILE.finditer(piece)]
+        for tokens in tokenize(REDIRECT.sub(" ", piece)):
             head = head_word(tokens)
-            if head in _INTERPRETERS:
-                interpreter = True
-                programs += _program_operands(head, tokens[head_index(tokens) + 1 :])
-        if not interpreter:
-            continue
-        if "<<" in pipeline:
-            return True
-        inputs = [m.group(1).strip("\"'") for m in _STDIN_FILE.finditer(pipeline)]
-        for path in inputs + programs:
-            resolved = expand(path, cwd)
-            if resolved and os.path.normpath(resolved) in written:
+            if head not in _INTERPRETERS:
+                continue
+            program, certain = _program(head, tokens[head_index(tokens) + 1 :])
+            if heredoc and not stdin and (not certain or program in (None, "-")):
                 return True
+            sources = stdin + ([program] if program and program != "-" else [])
+            for path in sources:
+                resolved = expand(path, cwd)
+                if resolved and os.path.normpath(resolved) in written:
+                    return True
     return False
 
 
@@ -549,8 +548,8 @@ def _write_targets(cmd: str, cwd: str):
         or the script an interpreter runs (REACH). The script's own arguments
         are data, as they are for any other program, and are not evidence.
       - every path mentioned anywhere in a command that feeds an interpreter
-        code it spells out — an inline-code flag, a heredoc in the
-        interpreter's pipeline, or a file the command writes and then runs
+        code it spells out — an inline-code flag, a heredoc beside an
+        interpreter reading stdin, or a file the command writes and then runs
         (REACH). The code is opaque there, and that is the shape a ghost edit
         usually takes.
 
