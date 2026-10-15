@@ -91,7 +91,7 @@ The delete is judged by whether the ref went away, not by git's exit status, bec
 
 It removes only what `scripts/worktree-create-hook.sh` made for the exiting session: the create hook stamps a session id only on a worktree it actually created, and the remove hook keeps any worktree that is outside the configured root, is not a linked worktree, whose branch no longer matches its directory, whose owner differs, or which carries no stamp at all. That ownership gate is not paranoia — the create hook hands a re-used name back rather than refusing it, so two sessions can share one checkout, and the stamp is what stops one session's exit from deleting the other's live working tree. Entering an existing worktree never claims it: a second, different session rewrites the marker to the sticky `shared`, which matches no session, and an unmarked worktree stays unmarked. Either way neither exit order can remove it, and clearing it is a manual `scripts/worktree-remove.sh`.
 
-A refusal here is **safe but invisible**: a non-zero exit does not block the harness, which re-stats the path and logs `WorktreeRemove hook did not remove worktree, kept at: <path>` to the debug log and nowhere else. That is why every keep above prints its reason to stderr.
+A refusal here is **safe but invisible**: a non-zero exit does not block the harness, which re-stats the path and logs `WorktreeRemove hook did not remove worktree, kept at: <path>` to the debug log and nowhere else (Claude Code 2.1.260; 2.1.300 surfaces a non-zero exit, see the `ExitWorktree` section below). That is why every keep above prints its reason to stderr.
 
 ### `ExitWorktree` `remove` refuses every worktree the create hook supplied
 
@@ -108,7 +108,7 @@ That protection holds only when the hook does the removal, and the tool's answer
    gh pr list --head <branch> --state merged --json headRefOid,baseRefName
    ```
 
-If either check fails, use `action: "keep"`: a kept worktree costs one `worktree-remove.sh` later. A handed-back worktree passes both checks and is still kept by the ownership gate. After the flag, `git worktree list` from the main checkout is the only confirmation: a tree still listed was kept by one of the gates above, and the tool said removed anyway. Any other refusal — `Worktree has N uncommitted files…` — names real work, so confirm with the user as the tool says.
+If either check fails, use `action: "keep"`: a kept worktree costs one `worktree-remove.sh` later. A worktree with no stamp, or one another session has also entered (stamp `shared`), is kept by the ownership gate even when both checks pass. After the flag, `git worktree list` from the main checkout is the only confirmation of a removal: a tree still listed after "Exited and removed" was kept by an ownership gate, which exits 0 and so reads as success. A keep that exits non-zero — a dirty tree, a failed write probe — comes back as "Exited worktree but could not remove it — kept at <path>" (2.1.300). Any other refusal — `Worktree has N uncommitted files…` — names real work, so confirm with the user as the tool says.
 
 A hook-supplied worktree is one `EnterWorktree` reported under the root `scripts/worktree-config.sh` prints; the harness's own go under `.claude/worktrees/`. In a worktree the harness made itself the same "could not verify" message means a git call failed, and the flag hands the removal to the harness with nothing checking it; don't pass it there without the user.
 
