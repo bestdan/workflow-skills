@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.85.0] - 2026-10-15
+
+### Features
+
+- refuse gh pr checkout in a pinned checkout [#968] (#1029) (0d9b1b2)
+
 ## [2.84.1] - 2026-10-15
 
 ### Fixes
