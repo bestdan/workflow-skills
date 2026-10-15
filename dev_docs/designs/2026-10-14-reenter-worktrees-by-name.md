@@ -195,6 +195,14 @@ retry, and an agent that falls back to `path` meets the prompt (or, with
 item 3, a refusal). So
 neither the hook nor the agent evaluates a condition.
 
+**Amended for item 3 by [#989](https://github.com/bestdan/workflow-skills/issues/989).**
+The [#1001](https://github.com/bestdan/workflow-skills/issues/1001) probe found
+that `ExitWorktree` (`keep`) outside a worktree session is a no-op that still
+returns `is_error: true`. So `guard-enter-by-path.py`'s reason makes the exit
+step conditional in its prose: exit first only if the session is already in a
+worktree, then `EnterWorktree` with `name`. The hook still infers nothing; the
+agent, which knows whether it entered a worktree, evaluates the condition.
+
 ### Fail open
 
 A crash, a missing `python3`, an unreadable config: the hook returns no
