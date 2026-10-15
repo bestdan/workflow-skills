@@ -315,6 +315,83 @@ bash_case() { expect "$1" Bash "$2" command "$3"; }
   expect allow Write "$off_default" file_path "$off_default/new.txt"
 }
 
+# reason <hook> <cwd> <command> — the deny reason that hook gives a Bash call.
+reason() {
+  python3 -c '
+import json, sys
+print(json.dumps({"tool_name": "Bash", "cwd": sys.argv[1], "session_id": "r",
+                  "tool_input": {"command": sys.argv[2]}}))
+' "$2" "$3" \
+    | TMPDIR="$stamps/r" python3 "$1" 2>/dev/null \
+    | python3 -c '
+import json, sys
+h = json.load(sys.stdin)["hookSpecificOutput"]
+assert h["permissionDecision"] == "deny"
+print(h["permissionDecisionReason"])
+'
+}
+
+# hook_layout_worktree <n> — a worktree where the WorktreeCreate hook puts it.
+hook_layout_worktree() {
+  export WORKFLOW_SKILLS_WORKTREE_ROOT="$tmp/worktrees"
+  export WORKFLOW_SKILLS_BRANCH_PREFIX="tester/"
+  git -C "$repo" worktree add -q -b "tester/$1" "$tmp/worktrees/repo/$1"
+}
+
+@test "a write into a hook-layout worktree names the EnterWorktree name route" {
+  local text
+  hook_layout_worktree feat-a
+  text=$(reason "$HOOK" "$wt" "echo x > $tmp/worktrees/repo/feat-a/file.txt")
+  [[ "$text" == *'`EnterWorktree` with `name: feat-a`'* ]]
+  [[ "$text" == *'If this session is already in a worktree, call `ExitWorktree` with `action: keep` first'* ]]
+  [[ "$text" == *'`worktree-entry` skill'* ]]
+  [[ "$text" != *'with `path:'* ]]
+}
+
+@test "a write into a worktree with no name keeps the path route and its warning" {
+  local text
+  text=$(reason "$HOOK" "$repo" "echo x > $wt/file.txt")
+  [[ "$text" == *"\`EnterWorktree\` with \`path: $(cd "$wt" && pwd -P)\`"* ]]
+  [[ "$text" == *'an unattended or Remote Control session cannot answer it'* ]]
+  [[ "$text" == *'`worktree-entry` skill'* ]]
+  [[ "$text" != *'`name:'* ]]
+}
+
+# stub_hook <resolver body> — a copy of the hook, and the parser it imports,
+# beside a stub resolver; prints the copy's path.
+stub_hook() {
+  local dir="$tmp/stub"
+  mkdir -p "$dir"
+  cp "$HOOK" "$REPO_ROOT/scripts/bash_command.py" "$dir/"
+  if [ -n "$1" ]; then
+    printf '#!/usr/bin/env bash\n%s\n' "$1" >"$dir/worktree-name-for.sh"
+    chmod +x "$dir/worktree-name-for.sh"
+  fi
+  printf %s "$dir/guard-foreign-worktree.py"
+}
+
+@test "control: a stub resolver's name reaches the reason" {
+  # Without this, the fallback cases below would pass on a hook that never
+  # ran the sibling resolver at all.
+  local text
+  text=$(reason "$(stub_hook 'echo feat-s')" "$repo" "echo x > $wt/file.txt")
+  [[ "$text" == *'`name: feat-s`'* ]]
+}
+
+@test "a missing, failing or garbled resolver still denies, with the path route" {
+  local body text
+  for body in '' 'echo feat-a; exit 2' 'kill -SEGV $$' 'printf "feat a\nmore\n"' \
+    "printf '\\377'" "printf '\\377' >&2; echo feat-a"; do
+    rm -rf "$tmp/stub"
+    text=$(reason "$(stub_hook "$body")" "$repo" "echo x > $wt/file.txt")
+    [[ "$text" == *'`EnterWorktree` with `path: '* ]] || {
+      echo "resolver body: $body" >&2
+      return 1
+    }
+    [[ "$text" != *'`name:'* ]]
+  done
+}
+
 @test "a malformed payload fails open" {
   run bash -c 'printf "not json" | python3 "$1"' _ "$HOOK"
   assert_success
