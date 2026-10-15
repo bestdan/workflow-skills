@@ -535,7 +535,9 @@ def _reason(pinned: str, target: str, checkout: str, word: str = "git") -> str:
         "`workflow-skills:worktree-entry` skill.\n"
         "To move this checkout anyway, re-run the same command with "
         f"`env {BYPASS}=1` immediately before the `{word}` word.\n"
-        "To unpin it for good: git config --unset hooks.pinnedBranch"
+        "To unpin it for good: git config --unset hooks.pinnedBranch\n"
+        "Why this checkout is pinned, and which layer covers what: load the "
+        "`workflow-skills:pinned-checkout` skill."
     )
 
 
