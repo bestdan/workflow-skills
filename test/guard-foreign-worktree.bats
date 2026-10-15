@@ -168,6 +168,15 @@ bash_case() { expect "$1" Bash "$2" command "$3"; }
   bash_case deny "$repo" "$(printf 'python3 - <<%s # <x\n%s\nPY\n' "'PY'" "$code")"
 }
 
+# A named script's own heredoc is not let through as data, unlike its
+# arguments: the owner chose to keep main's refusal here (#998, round 3).
+@test "a heredoc or here-string on a named script's own command is denied" {
+  local code="open(\"$wt/file.txt\", \"w\")"
+  bash_case deny "$repo" "$(printf 'python3 x.py <<%s\n%s\nPY\n' "'PY'" "$code")"
+  bash_case deny "$repo" "$(printf 'python3 tool.py <<EOF\n%s/x\nEOF\n' "$wt")"
+  bash_case deny "$repo" "python3 tool.py <<< '$wt/x'"
+}
+
 # The code follows the cluster's last letter, and a long flag may carry it
 # attached.
 @test "inline code behind a combined or attached flag is denied" {

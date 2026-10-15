@@ -337,10 +337,10 @@ def _is_stdin(path: str) -> bool:
 def _code_in_command(cmd: str, cwd: str) -> bool:
     """Whether an interpreter here runs code that is spelled out in this command.
 
-    Two routes put it there. A heredoc or here-string anywhere in the command,
-    when some interpreter may be reading its code from stdin: it names no
-    certain program (or names `-` or a stdin device), and has no `<` file
-    redirect of its own, or has a heredoc of its own that may override one.
+    Two routes put it there. A heredoc or here-string on an interpreter's own
+    command, whatever program it names. Or one anywhere in the command, when
+    some interpreter may be reading its code from stdin: it names no certain
+    program (or names `-` or a stdin device), and has no `<` file redirect.
     Which command a heredoc feeds is not worked out — pipes, `2>&1` and line
     continuations all move it — so `python3 -I - < script` beside a `cat
     <<EOF` note goes through, and `cat <<PY | python3 -` does not. And a file
@@ -366,10 +366,11 @@ def _code_in_command(cmd: str, cwd: str) -> bool:
                 continue
             program, certain = _program(head, tokens[head_index(tokens) + 1 :])
             on_stdin = not certain or not program or _is_stdin(program)
-            # A `<` file does not shield this piece's own heredoc: bash applies
-            # fd 0's redirects left to right, so a later `<<` wins. And the `<`
-            # match is blind to quotes and comments, so it may be no redirect.
-            if heredoc and on_stdin and ("<<" in piece or not stdin):
+            # A heredoc on the interpreter's own command is refused whatever it
+            # runs: a `<` file does not shield it (bash applies fd 0's redirects
+            # left to right, and the `<` match is blind to quotes and comments),
+            # and a named script's stdin is not treated as data (#998).
+            if "<<" in piece or (heredoc and on_stdin and not stdin):
                 return True
             sources = stdin + ([] if on_stdin else [program])
             for path in sources:
