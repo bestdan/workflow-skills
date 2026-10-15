@@ -288,9 +288,35 @@ print(json.load(sys.stdin)["hookSpecificOutput"]["permissionDecisionReason"])
   denied "$pinned" 'env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 gh pr view 1; gh pr checkout 1'
 }
 
+@test "gh's -R/--repo before pr does not hide the checkout" {
+  denied "$pinned" 'gh -R o/r pr checkout 1'
+  denied "$pinned" 'gh --repo o/r pr checkout 1'
+  denied "$pinned" 'gh --repo=o/r pr checkout 1'
+  denied "$pinned" 'gh -Ro/r pr checkout 1'
+  denied "$pinned" 'gh -R o/r pr co 1'
+  denied "$pinned" 'gh --repo o/r pr co 1'
+  allowed "$plain" 'gh -R o/r pr checkout 1'
+  allowed "$pinned" 'gh -R o/r pr view 1'
+  allowed "$pinned" 'env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 gh -R o/r pr checkout 1'
+}
+
+# gh 2.98.0 switches an EXISTING checkout named by --worktree, the main one
+# included, so the destination is what gets judged.
+@test "gh pr checkout --worktree is judged at the destination" {
+  git -C "$pinned" worktree add -q "$tmp/wt" -b wt-branch
+  denied "$tmp/wt" "gh pr checkout 1 --detach --worktree $pinned"
+  denied "$tmp/wt" "gh pr checkout 1 --worktree=$pinned"
+  denied "$tmp/wt" "gh -R o/r pr co --worktree $pinned 1"
+  denied "$tmp/wt" "gh pr checkout 1 --worktree ../pinned"
+  denied "$plain" "gh pr checkout 1 --worktree $pinned"
+  allowed "$pinned" "gh pr checkout 1 --worktree $tmp/wt"
+  allowed "$pinned" "gh pr checkout 1 --worktree $plain"
+}
+
 @test "gh pr checkout into a worktree, and other gh pr calls, are allowed" {
   allowed "$pinned" "gh pr checkout 1 --worktree $tmp/wt-pr"
   allowed "$pinned" "gh pr checkout --worktree=$tmp/wt-pr 1"
+  allowed "$pinned" 'gh pr checkout 1 --worktree ../new-wt'
   allowed "$pinned" 'gh pr checkout --help'
   allowed "$pinned" 'gh pr checkout -h'
   denied "$pinned" 'gh pr checkout 1 -b -h'
@@ -316,7 +342,7 @@ print(json.load(sys.stdin)["hookSpecificOutput"]["permissionDecisionReason"])
 @test "the scope line names gh pr checkout in the docstring, README and design" {
   local f
   for f in scripts/guard-pinned-branch.py README.md dev_docs/designs/2026-10-04-pinned-checkout-guard-v2.md; do
-    run grep -cF -- '[cd <dir> &&] [env VAR=1] gh pr checkout' "$REPO_ROOT/$f"
+    run grep -cF -- '[cd <dir> &&] [env VAR=1] gh [-R <repo>] pr' "$REPO_ROOT/$f"
     assert_success
   done
 }

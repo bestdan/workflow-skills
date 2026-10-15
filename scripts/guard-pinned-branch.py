@@ -31,8 +31,10 @@ planned state check (see
 ``dev_docs/designs/2026-10-04-pinned-checkout-guard-v2.md``).
 
 SCOPE. In scope: ``[cd <dir> &&] [env VAR=1] git [global options]
-checkout|switch ...`` and ``[cd <dir> &&] [env VAR=1] gh pr checkout ...``
-(except ``--worktree <path>``, which leaves this checkout alone). Out of scope, let through by design: executors
+checkout|switch ...`` and ``[cd <dir> &&] [env VAR=1] gh [-R <repo>] pr
+checkout|co ...``, judged at its ``--worktree <path>`` when it names one (a
+path that does not exist yet is a new worktree and is allowed). Out of scope,
+let through by design: executors
 (``bash -c``, ``eval``, ``ssh``), subshells and ``$(...)``, wrappers with
 options (``sudo -u``, ``env -i``), an unresolvable or failed ``cd``, git
 aliases, ``git symbolic-ref``, ``git stash branch``, and scripts. Some of those
@@ -250,14 +252,43 @@ _GH_CHECKOUT_WORDS = {"checkout", "co"}
 _GH_FLAGS_WITH_VALUE = {"-b", "--branch", "-R", "--repo", "--worktree"}
 
 
-def _gh_into_worktree(args: list[str]) -> bool:
-    """Whether the call checks the PR out into a worktree (`--worktree <path>`,
-    present in gh 2.98.0).
+def _gh_worktree(args: list[str]) -> tuple[bool, str | None]:
+    """``(present, path)`` for a `--worktree <path>` / `--worktree=<path>`.
 
-    That leaves this checkout's HEAD alone, and it is the very route the pin
-    pushes toward, so refusing it would be a false positive.
+    With it (gh 2.98.0), the checkout happens in that path, not where the
+    shell stands, so the path is what gets judged. It is not exempt: gh also
+    accepts an existing checkout of the same repo there, the main one
+    included, and switches it (verified by the owner against gh 2.98.0).
     """
-    return any(a == "--worktree" or a.startswith("--worktree=") for a in args)
+    i = 0
+    while i < len(args):
+        tok = args[i]
+        if tok.startswith("--worktree="):
+            return True, tok[len("--worktree=") :]
+        if tok == "--worktree":
+            return True, args[i + 1] if i + 1 < len(args) else None
+        if tok in _GH_FLAGS_WITH_VALUE:
+            i += 2
+            continue
+        i += 1
+    return False, None
+
+
+# gh's own option that may sit before `pr`: `gh -R o/r pr checkout 1`.
+_GH_GLOBAL_WITH_VALUE = {"-R", "--repo"}
+
+
+def _skip_gh_globals(tokens: list[str], i: int) -> int:
+    """Index of the first token at or after ``i`` that is not a `-R`/`--repo`."""
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok in _GH_GLOBAL_WITH_VALUE:
+            i += 2
+        elif tok.startswith("--repo=") or (tok.startswith("-R") and len(tok) > 2):
+            i += 1
+        else:
+            break
+    return i
 
 
 def _gh_pr_checkouts(tokens: list[str]):
@@ -280,9 +311,10 @@ def _gh_pr_checkouts(tokens: list[str]):
     for start in range(head, len(tokens)) if scan_all else [head]:
         if os.path.basename(tokens[start]) != "gh":
             continue
-        rest = tokens[start + 1 : start + 3]
+        i = _skip_gh_globals(tokens, start + 1)
+        rest = tokens[i : i + 2]
         if len(rest) == 2 and rest[0] == "pr" and rest[1] in _GH_CHECKOUT_WORDS:
-            yield tokens[start + 3 :]
+            yield tokens[i + 2 :]
 
 
 def _gh_help(args: list[str]) -> bool:
@@ -521,11 +553,15 @@ def main() -> None:
         if subcommand == GH_PR_CHECKOUT:
             # Always a move off the pin: it checks out the PR's head branch,
             # so there is no file-restore or return-to-pin shape to rule out.
-            if _gh_into_worktree(args) or _gh_help(args):
+            if _gh_help(args):
                 continue
-            if not cwd or not os.path.isdir(cwd):
+            into_worktree, path = _gh_worktree(args)
+            # With --worktree the checkout happens at that path: a path that
+            # does not exist yet is a new worktree, so nothing pinned moves.
+            where = (expand(path, cwd) if path else None) if into_worktree else cwd
+            if not where or not os.path.isdir(where):
                 continue
-            violation = _violation(cwd, _gh_target(args), detached=True)
+            violation = _violation(where, _gh_target(args), detached=True)
             if violation:
                 _deny(_reason(*violation, word="gh"))
                 return

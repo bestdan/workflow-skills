@@ -138,8 +138,10 @@ state check by design. This rule goes in the guard's docstring and the README,
 and it is what ends the review loop.
 
 **In scope:** `[cd <dir> &&] [env VAR=1] git [global options] checkout|switch …`
-and `[cd <dir> &&] [env VAR=1] gh pr checkout …` (#968; `--worktree <path>`
-moves no HEAD here and is allowed).
+and `[cd <dir> &&] [env VAR=1] gh [-R <repo>] pr checkout|co …` (#968). With
+`--worktree <path>` it is judged at that path, since gh switches an existing
+checkout there too; a path that does not exist yet is a new worktree and is
+allowed.
 
 **Out of scope, let through by design:** executors (`bash -c`, `eval`, `ssh`),
 subshells and `$(…)`, wrappers with options (`sudo -u`, `env -i`), an
