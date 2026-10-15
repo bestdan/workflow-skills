@@ -19,11 +19,13 @@
 # the harness re-stats the path afterwards and logs "WorktreeRemove hook did
 # not remove worktree, kept at: <path>" to the debug log. That log is the only
 # place it appears — verified end-to-end, ExitWorktree still answered "Exited
-# and removed worktree at <path>" for a worktree this hook had just kept. So a
-# refusal here is safe but invisible, which is why every refusal below prints
-# its reason.
+# and removed worktree at <path>" for a worktree this hook had just kept. That
+# was Claude Code 2.1.260; 2.1.300 answers "could not remove it — kept at
+# <path>" for a non-zero exit, but an exit-0 keep still reads as removed. So a
+# refusal here is safe but easy to miss, which is why every refusal below
+# prints its reason.
 #
-# ExitWorktree's remove cannot check a hook-created worktree before
+# ExitWorktree's remove cannot check a hook-supplied worktree before
 # dispatching: a hook-based session records no start commit, so it refuses with
 # "Could not verify worktree state" until the caller passes
 # discard_changes: true, which skips the check. On both paths
