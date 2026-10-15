@@ -31,7 +31,8 @@ planned state check (see
 ``dev_docs/designs/2026-10-04-pinned-checkout-guard-v2.md``).
 
 SCOPE. In scope: ``[cd <dir> &&] [env VAR=1] git [global options]
-checkout|switch ...``. Out of scope, let through by design: executors
+checkout|switch ...`` and ``[cd <dir> &&] [env VAR=1] gh pr checkout ...``
+(except ``--worktree <path>``, which leaves this checkout alone). Out of scope, let through by design: executors
 (``bash -c``, ``eval``, ``ssh``), subshells and ``$(...)``, wrappers with
 options (``sudo -u``, ``env -i``), an unresolvable or failed ``cd``, git
 aliases, ``git symbolic-ref``, ``git stash branch``, and scripts. Some of those
@@ -49,8 +50,9 @@ allowed, which is the workflow the pin pushes people toward.
 
 Bypass one call with ``env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git checkout
 <branch>`` (a bare ``WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git ...`` prefix works
-too). Only an assignment on that git invocation counts; naming the variable
-anywhere else in the command disarms nothing.
+too, as does ``env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 gh pr checkout <n>``).
+Only an assignment on that invocation counts; naming the variable anywhere
+else in the command disarms nothing.
 
 Reads the hook payload as JSON on stdin; emits a PreToolUse decision on stdout.
 Anything not matched produces no output and falls through to the normal flow.
@@ -69,7 +71,9 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 
 from bash_command import (  # noqa: E402
+    EXECUTORS,
     PREFIX,
+    WRAPPERS,
     expand,
     git_calls,
     segments,
@@ -228,6 +232,69 @@ def _git_calls(cmd: str, base: str | None):
                 # whatever directory this hook process happens to run in.
                 here = expand(dir_override, cwd) if dir_override else cwd
                 yield here, subcommand, args
+            # gh has no directory flag, so its checkout acts where the shell is.
+            for args in _gh_pr_checkouts(tokens):
+                yield cwd, GH_PR_CHECKOUT, args
+
+
+# The subcommand _git_calls reports for `gh pr checkout`, which is not a git
+# call but moves HEAD in the checkout it runs in just as `git checkout` does.
+GH_PR_CHECKOUT = "gh pr checkout"
+
+# `co` is gh's built-in alias for `pr checkout`.
+_GH_CHECKOUT_WORDS = {"checkout", "co"}
+
+# Flags of `gh pr checkout` that take a separate value token.
+_GH_FLAGS_WITH_VALUE = {"-b", "--branch", "-R", "--repo", "--worktree"}
+
+
+def _gh_into_worktree(args: list[str]) -> bool:
+    """Whether the call checks the PR out into a worktree (`--worktree <path>`,
+    present in gh 2.98.0).
+
+    That leaves this checkout's HEAD alone, and it is the very route the pin
+    pushes toward, so refusing it would be a false positive.
+    """
+    return any(a == "--worktree" or a.startswith("--worktree=") for a in args)
+
+
+def _gh_pr_checkouts(tokens: list[str]):
+    """Yield the arguments of each `gh pr checkout` call in one segment.
+
+    The head-word scan mirrors ``bash_command.git_calls``: past any wrapper,
+    keyword or assignment, and through every token when a wrapper or executor
+    leads, so ``rtk gh pr checkout 1`` is seen as ``rtk git checkout`` is.
+    """
+    head = 0
+    wrapped = False
+    while head < len(tokens) and (
+        tokens[head] in PREFIX or re.match(r"^[A-Za-z_][\w]*=", tokens[head])
+    ):
+        wrapped = wrapped or tokens[head] in WRAPPERS
+        head += 1
+    if head >= len(tokens):
+        return
+    scan_all = wrapped or tokens[head] in EXECUTORS
+    for start in range(head, len(tokens)) if scan_all else [head]:
+        if os.path.basename(tokens[start]) != "gh":
+            continue
+        rest = tokens[start + 1 : start + 3]
+        if len(rest) == 2 and rest[0] == "pr" and rest[1] in _GH_CHECKOUT_WORDS:
+            yield tokens[start + 3 :]
+
+
+def _gh_target(args: list[str]) -> str:
+    """The pull request a `gh pr checkout` names, for the refusal's echo."""
+    i = 0
+    while i < len(args):
+        tok = args[i]
+        if tok in _GH_FLAGS_WITH_VALUE:
+            i += 2
+            continue
+        if not tok.startswith("-"):
+            return f"PR {tok}"
+        i += 1
+    return "a PR"
 
 
 def _target(args: list[str]) -> tuple[str, bool] | None:
@@ -403,10 +470,12 @@ def _new_worktree_line(checkout: str) -> str:
     )
 
 
-def _reason(pinned: str, target: str, checkout: str) -> str:
+def _reason(pinned: str, target: str, checkout: str, word: str = "git") -> str:
     # A fixed sentence rather than a command rebuilt from the parse: the agent
     # already holds the exact command it ran, and every rebuild dropped
     # something (a start point, `--orphan` semantics, git's own options).
+    # `word` is the command word the bypass goes in front of: `gh` for a
+    # refused `gh pr checkout`, which is otherwise refused in the same words.
     return (
         f"This checkout is pinned to '{pinned}' — refusing to switch it to '{target}'.\n"
         "Branch work belongs in its own worktree, not in this checkout.\n"
@@ -415,7 +484,7 @@ def _reason(pinned: str, target: str, checkout: str) -> str:
         "unprefixed branch, a tag or a commit — load the "
         "`workflow-skills:worktree-entry` skill.\n"
         "To move this checkout anyway, re-run the same command with "
-        f"`env {BYPASS}=1` immediately before the `git` word.\n"
+        f"`env {BYPASS}=1` immediately before the `{word}` word.\n"
         "To unpin it for good: git config --unset hooks.pinnedBranch"
     )
 
@@ -431,6 +500,16 @@ def main() -> None:
     base = data.get("cwd") or os.getcwd()
 
     for cwd, subcommand, args in _git_calls(cmd, base):
+        if subcommand == GH_PR_CHECKOUT:
+            # Always a move off the pin: it checks out the PR's head branch,
+            # so there is no file-restore or return-to-pin shape to rule out.
+            if _gh_into_worktree(args) or not cwd or not os.path.isdir(cwd):
+                continue
+            violation = _violation(cwd, _gh_target(args), detached=True)
+            if violation:
+                _deny(_reason(*violation, word="gh"))
+                return
+            continue
         if subcommand not in {"checkout", "switch"}:
             continue
         found = _target(args)
@@ -449,18 +528,22 @@ def main() -> None:
             continue
         violation = _violation(cwd, target, detached)
         if violation:
-            print(
-                json.dumps(
-                    {
-                        "hookSpecificOutput": {
-                            "hookEventName": "PreToolUse",
-                            "permissionDecision": "deny",
-                            "permissionDecisionReason": _reason(*violation),
-                        }
-                    }
-                )
-            )
+            _deny(_reason(*violation))
             return
+
+
+def _deny(reason: str) -> None:
+    print(
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": reason,
+                }
+            }
+        )
+    )
 
 
 if __name__ == "__main__":

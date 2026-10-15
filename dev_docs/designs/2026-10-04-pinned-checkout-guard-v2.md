@@ -137,7 +137,9 @@ The pre-filter judges plain commands, and everything else falls through to the
 state check by design. This rule goes in the guard's docstring and the README,
 and it is what ends the review loop.
 
-**In scope:** `[cd <dir> &&] [env VAR=1] git [global options] checkout|switch …`.
+**In scope:** `[cd <dir> &&] [env VAR=1] git [global options] checkout|switch …`
+and `[cd <dir> &&] [env VAR=1] gh pr checkout …` (#968; `--worktree <path>`
+moves no HEAD here and is allowed).
 
 **Out of scope, let through by design:** executors (`bash -c`, `eval`, `ssh`),
 subshells and `$(…)`, wrappers with options (`sudo -u`, `env -i`), an

@@ -167,7 +167,8 @@ allowed — and linked worktrees are never pinned. Bypass one call with
 `env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git checkout <branch>`; the assignment
 has to sit immediately before that call's `git` word. The guard reads command
 text, so it judges plain shapes only —
-`[cd <dir> &&] [env VAR=1] git [global options] checkout|switch …` — and lets
+`[cd <dir> &&] [env VAR=1] git [global options] checkout|switch …` and
+`[cd <dir> &&] [env VAR=1] gh pr checkout …` — and lets
 executors (`bash -c`, `eval`), subshells, wrappers with options, git aliases
 and scripts through by design. A `post-checkout` hook, where one is installed,
 is the backstop for those, and a state check is planned.
