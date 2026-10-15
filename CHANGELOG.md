@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.83.1] - 2026-10-15
+
+### Fixes
+
+- name the EnterWorktree name route in the refusal [#997] (#1026) (864bdb5)
+
 ## [2.83.0] - 2026-10-15
 
 ### Features
