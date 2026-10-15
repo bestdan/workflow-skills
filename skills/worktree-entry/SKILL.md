@@ -95,7 +95,8 @@ Enter under a name of your choosing, then inside the worktree run one of:
 - `git switch --detach <commit>` to inspect a commit.
 
 The worktree is no longer on `<prefix><n>`, so the remove hook keeps it on exit
-("on `<branch>`, not `<prefix><n>`"). `ExitWorktree` still reports it removed;
+("keeping `<path>` — on `<branch>`, not `<prefix><n>`", or after `--detach`
+"keeping `<path>` — on a detached HEAD, not `<prefix><n>`"). `ExitWorktree` still reports it removed;
 the keep shows up only in the harness's debug log. The `<prefix><n>` branch the
 hook cut stays behind as well. Clear the worktree by hand with
 `${CLAUDE_PLUGIN_ROOT}/scripts/worktree-remove.sh <path>`.
