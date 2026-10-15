@@ -166,6 +166,14 @@ executors (`bash -c`, `eval`), subshells, wrappers with options, git aliases
 and scripts through by design. A `post-checkout` hook, where one is installed,
 is the backstop for those, and a state check is planned.
 
+To opt a repo in, run
+[`scripts/pin-checkout.sh <branch>`](scripts/pin-checkout.sh) from it: it sets
+`hooks.pinnedBranch` and, when `core.hooksPath` is unset, installs that
+`post-checkout` hook in `.git/hooks`. It never overwrites an existing hook, and
+with `core.hooksPath` set it installs nothing and says where the hook belongs.
+Run it outside the Claude Code sandbox, which denies writes to `.git/config`
+and `.git/hooks`.
+
 | Skill                                                      | Trigger                                                                                                    | What it does                                                                                                                                                                                                                       |
 | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [**worktree-teardown**](skills/worktree-teardown/SKILL.md) | `/worktree-teardown <path> \| --branch <branch>`, or auto when a removal fails, refuses, or half-completes | Run the teardown scripts, granted by the command so a typed teardown needs no allow rule, and the mechanics behind them: the submodule force gates, the PR-evidence branch delete, and the half-deleted and locked recovery cases. |
