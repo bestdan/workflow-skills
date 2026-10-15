@@ -129,7 +129,7 @@ capability matrix.
 
 ### Worktree lifecycle
 
-The plugin registers five hooks. Three of them create and tear down an
+The plugin registers six hooks. Three of them create and tear down an
 isolated worktree without anything being typed: `WorktreeCreate` puts it where
 [`scripts/worktree-config.sh`](scripts/worktree-config.sh) says worktrees live
 (not inside the repo, which aborts in a repo that versions its own agent
@@ -173,6 +173,16 @@ To opt a repo in, run
 with `core.hooksPath` set it installs nothing and says where the hook belongs.
 Run it outside the Claude Code sandbox, which denies writes to `.git/config`
 and `.git/hooks`.
+
+The sixth, on `PreToolUse` for `EnterWorktree`
+([`scripts/guard-enter-by-path.py`](scripts/guard-enter-by-path.py)), refuses a
+`path` call when [`scripts/worktree-name-for.sh`](scripts/worktree-name-for.sh)
+says `EnterWorktree` with `name: <n>` would hand the same worktree back. The
+path form raises an approval prompt nothing can lift, which stops an unattended
+or Remote Control session; the refusal names the prompt-free route instead
+(`ExitWorktree` `keep` first only when already in a worktree, then `name`).
+With no name, or on any error, it stays silent and the prompt appears as
+before.
 
 | Skill                                                      | Trigger                                                                                                    | What it does                                                                                                                                                                                                                       |
 | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

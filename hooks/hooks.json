@@ -36,6 +36,15 @@
         ]
       },
       {
+        "matcher": "EnterWorktree",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/guard-enter-by-path.py\""
+          }
+        ]
+      },
+      {
         "matcher": "Edit|Write|NotebookEdit",
         "hooks": [
           {
