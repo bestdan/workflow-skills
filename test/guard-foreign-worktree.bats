@@ -151,6 +151,23 @@ bash_case() { expect "$1" Bash "$2" command "$3"; }
   bash_case deny "$repo" "$(printf 'cat > s.py <<%s\nopen("%s/file.txt", "w")\nPY\npython3 -W ignore s.py\n' "'PY'" "$wt")"
 }
 
+# Stdin reaches an interpreter by more spellings than `-`: a device path as the
+# program, a `<` from one, and a heredoc that follows a file redirect (the last
+# redirect of fd 0 wins). A `<` the regex finds in a quoted argument or a
+# comment is no redirect at all.
+@test "a heredoc reaching an interpreter's stdin past a file redirect is denied" {
+  local code="open(\"$wt/file.txt\", \"w\")"
+  bash_case deny "$repo" "$(printf 'python3 /dev/stdin <<%s\n%s\nPY\n' "'PY'" "$code")"
+  bash_case deny "$repo" "$(printf 'node /dev/fd/0 <<%s\n%s\nPY\n' "'PY'" "$code")"
+  bash_case deny "$repo" "$(printf 'python3 /proc/$$/fd/0 <<%s\n%s\nPY\n' "'PY'" "$code")"
+  bash_case deny "$repo" "$(printf 'python3 //dev/./stdin <<%s\n%s\nPY\n' "'PY'" "$code")"
+  bash_case deny "$repo" "$(printf 'cat <<%s | python3 - < /dev/stdin\n%s\nPY\n' "'PY'" "$code")"
+  bash_case deny "$repo" "$(printf 'python3 - < x.py <<%s\n%s\nPY\n' "'PY'" "$code")"
+  bash_case deny "$repo" "python3 - < x.py <<< '$code'"
+  bash_case deny "$repo" "$(printf 'python3 - "<x" <<%s\n%s\nPY\n' "'PY'" "$code")"
+  bash_case deny "$repo" "$(printf 'python3 - <<%s # <x\n%s\nPY\n' "'PY'" "$code")"
+}
+
 # The code follows the cluster's last letter, and a long flag may carry it
 # attached.
 @test "inline code behind a combined or attached flag is denied" {

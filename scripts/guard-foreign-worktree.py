@@ -322,13 +322,25 @@ _STDIN_FILE = re.compile(
     re.VERBOSE,
 )
 
+# A program name, or a `<` source, that is stdin itself rather than a file.
+_STDIN_PATH = re.compile(r"-|/dev/stdin|/dev/fd/0|/proc/[^/]+/fd/0")
+
+
+def _is_stdin(path: str) -> bool:
+    """Whether `path` names stdin, however it is spelled (`//dev/./stdin`)."""
+    if path == "-":
+        return True
+    # normpath keeps a leading `//` on POSIX, so collapse it as well.
+    return bool(_STDIN_PATH.fullmatch(re.sub(r"^/+", "/", os.path.normpath(path))))
+
 
 def _code_in_command(cmd: str, cwd: str) -> bool:
     """Whether an interpreter here runs code that is spelled out in this command.
 
     Two routes put it there. A heredoc or here-string anywhere in the command,
     when some interpreter may be reading its code from stdin: it names no
-    certain program (or names `-`), and has no `<` file redirect of its own.
+    certain program (or names `-` or a stdin device), and has no `<` file
+    redirect of its own, or has a heredoc of its own that may override one.
     Which command a heredoc feeds is not worked out — pipes, `2>&1` and line
     continuations all move it — so `python3 -I - < script` beside a `cat
     <<EOF` note goes through, and `cat <<PY | python3 -` does not. And a file
@@ -347,14 +359,19 @@ def _code_in_command(cmd: str, cwd: str) -> bool:
     # is in its piece. A piece cut short by `2>&1` only loses a trailing fd.
     for piece in SEGMENT_SPLIT.split(cmd):
         stdin = [m.group(1).strip("\"'") for m in _STDIN_FILE.finditer(piece)]
+        stdin = [s for s in stdin if not _is_stdin(s)]
         for tokens in tokenize(REDIRECT.sub(" ", piece)):
             head = head_word(tokens)
             if head not in _INTERPRETERS:
                 continue
             program, certain = _program(head, tokens[head_index(tokens) + 1 :])
-            if heredoc and not stdin and (not certain or program in (None, "-")):
+            on_stdin = not certain or not program or _is_stdin(program)
+            # A `<` file does not shield this piece's own heredoc: bash applies
+            # fd 0's redirects left to right, so a later `<<` wins. And the `<`
+            # match is blind to quotes and comments, so it may be no redirect.
+            if heredoc and on_stdin and ("<<" in piece or not stdin):
                 return True
-            sources = stdin + ([program] if program and program != "-" else [])
+            sources = stdin + ([] if on_stdin else [program])
             for path in sources:
                 resolved = expand(path, cwd)
                 if resolved and os.path.normpath(resolved) in written:
