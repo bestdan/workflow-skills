@@ -291,6 +291,9 @@ print(json.load(sys.stdin)["hookSpecificOutput"]["permissionDecisionReason"])
 @test "gh pr checkout into a worktree, and other gh pr calls, are allowed" {
   allowed "$pinned" "gh pr checkout 1 --worktree $tmp/wt-pr"
   allowed "$pinned" "gh pr checkout --worktree=$tmp/wt-pr 1"
+  allowed "$pinned" 'gh pr checkout --help'
+  allowed "$pinned" 'gh pr checkout -h'
+  denied "$pinned" 'gh pr checkout 1 -b -h'
   allowed "$pinned" 'gh pr view 1'
   allowed "$pinned" 'gh pr list --search checkout'
   allowed "$pinned" "rg 'gh pr checkout 1' README.md"

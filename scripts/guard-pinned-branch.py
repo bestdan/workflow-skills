@@ -175,6 +175,8 @@ def _bypassed(tokens: list[str]) -> bool:
 def _git_calls(cmd: str, base: str | None):
     """Yield ``(cwd, subcommand, args)`` per git call, ``cwd`` being where git acts.
 
+    A ``gh pr checkout`` is yielded too, as subcommand ``GH_PR_CHECKOUT``.
+
     The parsing is ``bash_command``'s (segments, both token forms, and
     ``git_calls`` with its ``-C``/``--work-tree``/``GIT_WORK_TREE`` handling)
     and is left unchanged for its other callers. Two things are layered on
@@ -281,6 +283,22 @@ def _gh_pr_checkouts(tokens: list[str]):
         rest = tokens[start + 1 : start + 3]
         if len(rest) == 2 and rest[0] == "pr" and rest[1] in _GH_CHECKOUT_WORDS:
             yield tokens[start + 3 :]
+
+
+def _gh_help(args: list[str]) -> bool:
+    """Whether the call only prints usage (`--help`/`-h`), moving no HEAD.
+
+    A `-h` that is the value of a flag (`-b -h`) is a branch name, not help.
+    """
+    i = 0
+    while i < len(args):
+        if args[i] in _GH_FLAGS_WITH_VALUE:
+            i += 2
+            continue
+        if args[i] in {"--help", "-h"}:
+            return True
+        i += 1
+    return False
 
 
 def _gh_target(args: list[str]) -> str:
@@ -503,7 +521,9 @@ def main() -> None:
         if subcommand == GH_PR_CHECKOUT:
             # Always a move off the pin: it checks out the PR's head branch,
             # so there is no file-restore or return-to-pin shape to rule out.
-            if _gh_into_worktree(args) or not cwd or not os.path.isdir(cwd):
+            if _gh_into_worktree(args) or _gh_help(args):
+                continue
+            if not cwd or not os.path.isdir(cwd):
                 continue
             violation = _violation(cwd, _gh_target(args), detached=True)
             if violation:
