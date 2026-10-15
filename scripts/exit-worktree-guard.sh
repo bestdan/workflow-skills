@@ -6,10 +6,11 @@
 # worktree worktree-create-hook.sh makes with "Could not verify worktree state",
 # because a hook-based session records no start commit, so the flag is the only
 # way through, and it skips the harness check entirely (#980). Passing it becomes
-# a reflex. Behind it, worktree-remove.sh still refuses a dirty tree, but that
-# refusal is invisible: ExitWorktree reports "removed" for a worktree the hook
-# kept. This hook runs the checks the teardown reference asks for before the
-# flag, and denies with the reason where the model can read it.
+# a reflex. Behind it, worktree-remove.sh still refuses a dirty tree, which
+# Claude Code 2.1.300 reports only as "could not remove it — kept at <path>",
+# and the remove hook's ownership keeps exit 0, so ExitWorktree reports those
+# as "removed". This hook runs the checks the teardown reference asks for before
+# the flag, and denies with the reason where the model can read it.
 #
 # Why here and not in input rewriting: the refusal is the tool's input
 # validation, which runs before any PreToolUse hook, so a hook cannot add the
@@ -20,8 +21,9 @@
 # the harness check. Every pass is silent; only a deny prints.
 #
 # The worktree is read from the payload's `cwd`, which in a worktree session is
-# the worktree. That holds for WorktreeRemove (verified); for PreToolUse on
-# ExitWorktree it is unverified until the first end-to-end run.
+# the worktree. That holds for WorktreeRemove (verified). For PreToolUse it was
+# read from the 2.1.300 binary: the payload's cwd is the session's current
+# directory, and the hook fires before ExitWorktree moves the session out.
 #
 # Covered by test/exit-worktree-guard.bats.
 set -euo pipefail
@@ -86,7 +88,7 @@ keep="Use ExitWorktree with action \"keep\" instead; a kept worktree costs one s
 
 dirty=$(git -C "$top" status --porcelain 2>/dev/null | wc -l | tr -d ' ')
 if [[ "$dirty" != 0 ]]; then
-  deny "discard_changes refused: $top has $dirty uncommitted or untracked path(s), which the removal would refuse silently while ExitWorktree reports success. Commit or drop them first. $keep"
+  deny "discard_changes refused: $top has $dirty uncommitted or untracked path(s), which the removal would refuse and keep. Commit or drop them first. $keep"
 fi
 
 branch=$(git -C "$top" symbolic-ref --quiet --short HEAD 2>/dev/null) || true
