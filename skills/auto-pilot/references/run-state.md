@@ -40,6 +40,10 @@ report's _absence_ meaningful — see "Heartbeat" below for the signal it's
 built on, and `_restack_orphan_scan` (task 18) for the reconciliation it
 reuses rather than re-implementing.
 
+When the run ends, the supervisor also writes a **run handoff** outside the
+run worktree, so the person who launched the run has one file to start from.
+See "Run handoff" below.
+
 ### `RUN.md`
 
 Front matter records the run's fixed parameters; a table records per-task state.
@@ -375,6 +379,41 @@ goes at the very top (`run-budget.md`, "The alarm").
    first: the `QUESTIONS.md` decisions worth a human's eye, and each
    human-judgment checkpoint with exactly how to evaluate it and what a "no"
    would invalidate.
+
+### Run handoff
+
+`REPORT.md` is for watching a run. The handoff is what the launcher picks
+up once it has ended: one file holding the final report and the full
+`QUESTIONS.md` log, plus what to do next. It sits beside the repo's worktrees
+rather than inside the run worktree, so it is still there after that worktree
+is torn down.
+
+- **Where:** `<worktree root>/<repo>/.handoffs/<date>-auto-pilot-<run_id>.md`,
+  which follows the shared handoff convention. `<repo>` is the main checkout's
+  directory name. `spawn-orchestrator.sh launch` resolves the directory in the
+  launching session through `scripts/worktree-config.sh`, because launchd's
+  environment usually lacks the variable that names the root. It then bakes
+  the result into the wrapper as `AUTO_PILOT_HANDOFF_DIR`. The supervisor
+  never reads this path from `RUN.md`, because the jailed agent can write
+  `RUN.md` and must not be able to choose where the un-jailed supervisor writes.
+  If the directory cannot be resolved, launch prints a warning and the run
+  carries on without a handoff.
+- **When:** the supervisor writes it on every terminal exit, before tearing the
+  job down: a declared `done` or `deadline`, and every supervisor halt
+  (`systemic`). This includes a halt the agent never got to declare, such as a
+  dead credential. A relaunchable exit (`continuing` or `paused`) writes
+  nothing.
+- **What:** front matter (`created`, `aim`, `repo`, `branch:
+  auto-pilot/<run_id>`, `task: <work_source>`, `expires`), a headline naming
+  the exit reason, **Next steps** for that reason (a deadline or a halt
+  points at `--resume`; a finished run points at `/sweep-for-complete` after
+  merging), and the run worktree's path. Then come the final `REPORT.md` and the
+  whole of `QUESTIONS.md`, with their headings demoted one level, and the
+  closing line telling the reader to delete the file. The handoff is a
+  snapshot, assembled in shell by `spawn-orchestrator.sh handoff` with no model
+  call, so it works even when the agent could not run.
+- **One per run:** a resumed run that ends again replaces its earlier handoff
+  instead of leaving two notes that disagree.
 
 ## Run-state branch
 

@@ -48,6 +48,15 @@
 #   spawn-orchestrator.sh exit-reason --dir <run-dir> --reason <r> [--label <label>] [--detail <text>]
 #   spawn-orchestrator.sh clear-exit-state --dir <run-dir>
 #   spawn-orchestrator.sh heartbeat --dir <run-dir> [--note <text>]
+#   spawn-orchestrator.sh handoff --dir <run-dir> --reason <r> [--out-dir <dir>]
+#
+#   handoff  Write the run handoff: one markdown file in <dir>
+#           (default $AUTO_PILOT_HANDOFF_DIR, which `launch` bakes into the
+#           wrapper) named <date>-auto-pilot-<run_id>.md, assembled in shell
+#           from RUN.md, REPORT.md and QUESTIONS.md. The supervisor calls it on
+#           every terminal exit (done, deadline, any halt). It replaces an
+#           earlier handoff for the same run rather than adding a second. No
+#           out dir is a no-op, never an error.
 #   spawn-orchestrator.sh assert-run-head --dir <run-worktree> --run-id <run_id> \
 #       [--questions <QUESTIONS.md path>]
 #
@@ -1310,7 +1319,8 @@ write_launch() {
     self="$ROOT/scripts/spawn-orchestrator.sh" no_progress_limit="3" \
     park_limit="$PARK_STORM_LIMIT_DEFAULT" \
     pause_exempt_max="$PAUSE_EXEMPT_MAX_SECONDS_DEFAULT" \
-    report_every="$DEFAULT_REPORT_INTERVAL" report_gh="" report_usage_bin=""
+    report_every="$DEFAULT_REPORT_INTERVAL" report_gh="" report_usage_bin="" \
+    handoff_dir=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --profile)
@@ -1401,6 +1411,11 @@ write_launch() {
         report_usage_bin="$2"
         shift 2
         ;;
+      --handoff-dir)
+        [ $# -ge 2 ] || die "missing value for --handoff-dir"
+        handoff_dir="$2"
+        shift 2
+        ;;
       *) die "unknown write-launch argument: $1" ;;
     esac
   done
@@ -1427,6 +1442,9 @@ write_launch() {
   [ -n "$out_script" ] && [ -n "$out_plist" ] || die "write-launch requires --out-script and --out-plist"
   [ -n "$path" ] || die "write-launch requires --path <PATH> (fail-closed): a launchd job has a minimal PATH; pass the fingerprint-resolved toolchain dirs"
   [ -n "$label" ] || die "write-launch requires --label"
+  # Explicit-only, like --report-gh: absent means no handoff, so the suite's
+  # wrappers never write into a real worktree root. `launch` resolves it.
+  case "$handoff_dir" in '' | /*) ;; *) die "--handoff-dir must be absolute (fail-closed): $handoff_dir" ;; esac
   # Pin the label to a launchd reverse-DNS charset — belt-and-suspenders against
   # plist injection on top of xml_escape, and it's what launchd expects anyway.
   case "$label" in *[!A-Za-z0-9._-]*) die "--label must be [A-Za-z0-9._-] (fail-closed): $label" ;; esac
@@ -1494,6 +1512,10 @@ write_launch() {
     # the srt-mux socket grant is anchored to — so the job's mux socket always
     # lands where the profile permits it; render and launch cannot drift apart.
     printf 'export TMPDIR=%q\n' "$tmpdir"
+    # Where the supervisor writes the run handoff on a terminal exit. Baked
+    # here, by the launcher, and never read from RUN.md: the un-jailed supervisor
+    # must not write to a path the jailed agent could choose.
+    [ -n "$handoff_dir" ] && printf 'export AUTO_PILOT_HANDOFF_DIR=%q\n' "$handoff_dir"
     printf 'mkdir -p %q\n' "$tmpdir"
     printf 'cd %q\n' "$workdir"
     # The supervisor's own bookkeeping — ABOVE the gate, so it runs on EVERY wake
@@ -2851,6 +2873,150 @@ _run_front_field() {
     | sed -e "s/^${key}: *//" -e 's/[[:space:]]*$//'
 }
 
+# The handoff dir for a run worktree: <worktree root>/<repo>/.handoffs, the
+# shared handoff convention's location. <repo> is the MAIN checkout's directory
+# name (the run worktree is a linked worktree, so its own name is the run's).
+_resolve_handoff_dir() {
+  local workdir="$1" root common
+  root="$(cd "$workdir" && "$ROOT/scripts/worktree-config.sh" root 2>/dev/null)" || return 1
+  common="$(git -C "$workdir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1
+  [ -n "$root" ] && [ -n "$common" ] || return 1
+  printf '%s/%s/.handoffs\n' "$root" "$(basename "$(dirname "$common")")"
+}
+
+# Shift every markdown heading outside a fenced block down one level, so an
+# embedded REPORT.md / QUESTIONS.md nests under the handoff's own sections.
+_demote_headings() {
+  awk '/^(```|~~~)/{f=!f} !f && /^#/{print "#" $0; next} {print}' "$1"
+}
+
+# The run handoff (see the usage header). Every input is best-effort: a
+# missing REPORT.md or QUESTIONS.md is said so in the file, never a failure.
+write_handoff() {
+  local dir="" reason="" out="${AUTO_PILOT_HANDOFF_DIR:-}"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dir)
+        [ $# -ge 2 ] || die "missing value for --dir"
+        dir="$2"
+        shift 2
+        ;;
+      --reason)
+        [ $# -ge 2 ] || die "missing value for --reason"
+        reason="$2"
+        shift 2
+        ;;
+      --out-dir)
+        [ $# -ge 2 ] || die "missing value for --out-dir"
+        out="$2"
+        shift 2
+        ;;
+      *) die "unknown handoff argument: $1" ;;
+    esac
+  done
+  [ -n "$dir" ] && [ -n "$reason" ] || die "handoff requires --dir and --reason"
+  if [ -z "$out" ]; then
+    echo "spawn-orchestrator: handoff: no handoff dir (pass --out-dir, or launch with --handoff-dir) — skipped"
+    return 0
+  fi
+  case "$out" in /*) ;; *) die "--out-dir must be absolute (fail-closed): $out" ;; esac
+
+  local ap="$dir/.auto-pilot" run_id source base detail repo today
+  run_id="$(_run_front_field "$dir" run_id | sed -e 's/[[:space:]]#.*$//')"
+  [ -n "$run_id" ] || run_id="$(basename "$dir")"
+  # The id becomes a filename: keep it to a safe charset.
+  run_id="$(printf '%s' "$run_id" | tr -c 'A-Za-z0-9._-' '-')"
+  source="$(_run_front_field "$dir" work_source | sed -e 's/[[:space:]]#.*$//')"
+  base="$(_run_front_field "$dir" base_branch | sed -e 's/[[:space:]]#.*$//')"
+  detail="$(_run_front_field "$dir" exit_reason_detail)"
+  [ -n "$detail" ] || detail="$(_run_front_field "$dir" pause_reason)"
+  case "$detail" in '#'*) detail="" ;; esac
+  repo="$(git -C "$dir" remote get-url origin 2>/dev/null \
+    | sed -E -e 's#\.git$##' -e 's#^.*[:/]([^/]+/[^/]+)$#\1#')"
+  today="$(date +%Y-%m-%d)"
+
+  local headline next
+  case "$reason" in
+    done)
+      headline="finished: no ready task remained"
+      next="Review each handed-off PR under Outcomes, answer the items under **For you**, and merge what passes. Then run \`/sweep-for-complete\` so merged tasks reach their tracker's completed state."
+      ;;
+    deadline)
+      headline="stopped at its --until deadline with tasks still ready"
+      next="Review the handed-off PRs and answer **For you** as for a finished run. The un-started tasks are still ready: run \`/auto-pilot --resume\` from the run worktree to carry on, or leave them."
+      ;;
+    systemic)
+      headline="HALTED by the supervisor — it will not relaunch on its own"
+      next="Read the ALARM in the report below first, fix its cause (an expired credential, a failed invariant, a park storm), then run \`/auto-pilot --resume\` from the run worktree. The PRs already handed off are safe to review meanwhile."
+      ;;
+    *)
+      headline="ended ($reason)"
+      next="Read the report below, then decide whether to \`/auto-pilot --resume\`."
+      ;;
+  esac
+
+  mkdir -p "$out" || die "handoff: could not create $out"
+  local dest="$out/$today-auto-pilot-$run_id.md" tmp
+  tmp="$(mktemp "$out/.handoff.XXXXXX")" || die "handoff: mktemp failed in $out"
+  {
+    printf -- '---\n'
+    printf 'created: %s\n' "$today"
+    printf 'aim: "Pick up auto-pilot run %s: review what it handed off and answer what it could not decide"\n' "$run_id"
+    [ -n "$repo" ] && printf 'repo: %s\n' "$repo"
+    printf 'branch: auto-pilot/%s\n' "$run_id"
+    [ -n "$source" ] && printf 'task: "%s"\n' "$source"
+    printf 'expires: "when every PR this run handed off is merged or closed, and its For you items are answered"\n'
+    printf -- '---\n\n'
+    printf '# Auto-pilot run %s — %s\n\n' "$run_id" "$headline"
+    printf 'Written by the auto-pilot supervisor at %s (exit reason `%s`).\n' "$(date +'%Y-%m-%d %H:%M %Z')" "$reason"
+    [ -n "$detail" ] && printf 'Recorded cause: %s\n' "$detail"
+    printf '\n## Next steps\n\n%s\n\n' "$next"
+    printf -- '- **Run worktree:** `%s`, on branch `auto-pilot/%s`%s.\n' "$dir" "$run_id" "${base:+, based on \`$base\`}"
+    printf -- "- **Run state:** \`.auto-pilot/RUN.md\` there is the task graph and each task's phase; \`.auto-pilot/orchestrator.log\` is the forensic log.\n"
+    printf -- "- **Teardown:** once nothing above needs the run worktree, remove it with the plugin's \`scripts/worktree-remove.sh\`; the \`auto-pilot/%s\` branch is never merged.\n\n" "$run_id"
+    printf '## Report\n\n'
+    if [ -f "$ap/REPORT.md" ]; then
+      _demote_headings "$ap/REPORT.md"
+    else
+      printf '_No REPORT.md was written._\n'
+    fi
+    printf '\n## Decision log\n\n'
+    printf 'Every call the run made without a human (QUESTIONS.md, in full).\n\n'
+    if [ -s "$ap/QUESTIONS.md" ]; then
+      _demote_headings "$ap/QUESTIONS.md"
+    else
+      printf '_No decisions were logged._\n'
+    fi
+    printf '\n---\n\n'
+    printf '> **When the work described above is done, delete this file.** It is a handoff,\n'
+    printf '> not a record. If what it says is worth keeping, it belongs in a commit\n'
+    printf '> message, a PR body, a decision under `dev_docs/decisions/`, or the tracker.\n'
+    printf '> Move it there first, then delete this file.\n'
+  } >"$tmp" || {
+    rm -f "$tmp"
+    die "handoff: failed to write $dest"
+  }
+  # One handoff per run: a later terminal exit (a resumed run that ends again)
+  # supersedes the earlier note instead of leaving two that disagree.
+  local old
+  for old in "$out"/*-auto-pilot-"$run_id".md; do
+    [ -f "$old" ] && [ "$old" != "$dest" ] && rm -f "$old"
+  done
+  mv "$tmp" "$dest" || {
+    rm -f "$tmp"
+    die "handoff: failed to write $dest"
+  }
+  echo "spawn-orchestrator: handoff written: $dest"
+}
+
+# The supervisor's call: subshelled so a `die` inside cannot abort the halt or
+# teardown around it — the handoff is a convenience, the teardown is not
+# optional.
+_handoff_safe() {
+  (write_handoff --dir "$1" --reason "$2") \
+    || echo "spawn-orchestrator: handoff failed (non-fatal; REPORT.md still has everything)" >&2
+}
+
 # The halt itself: write run-level `status: systemic` + `pause_reason` to
 # RUN.md, append one alarm entry to REPORT.md, raise the ALARM (task 16 —
 # notify a human, once per condition), commit both to the run-state
@@ -2978,6 +3144,9 @@ _supervisor_halt() {
           commit -q -m "auto-pilot: supervisor halt — $reason"
     ) 2>/dev/null || echo "spawn-orchestrator: supervisor halt: run-state commit failed (not a git checkout, or nothing to commit)" >&2
   fi
+
+  # The run handoff, before the teardown: a wedged bootout must not cost it.
+  _handoff_safe "$dir" systemic
 
   # The done-sentinel is ALSO the launchd relaunch sentinel (one file, by design —
   # launch-runtime.md "Logs / observability"), so a halted run must drop it too:
@@ -3352,6 +3521,7 @@ supervisor_check() {
       # identical call: it `die`s (an `exit`) if the done-sentinel write fails, and
       # an unguarded exit here would abort BEFORE `_verify_bootout` below ever
       # runs — the exact defect class this file exists to close.
+      _handoff_safe "$dir" "$declared"
       if ! (teardown --label "$label" --done-sentinel "$dir/.auto-pilot/$DONE_SENTINEL_NAME" --reason "$declared" >/dev/null); then
         echo "spawn-orchestrator: supervisor-check: teardown FAILED (see above) — verifying bootout anyway" >&2
       fi
@@ -5052,7 +5222,7 @@ launch() {
   local dry=0
   local -a wl=() sm=() dt=() rh=()
   local plist="" out_script="" out_plist="" handle="" until="" label=""
-  local report_gh_set=0 report_usage_set=0
+  local report_gh_set=0 report_usage_set=0 handoff_set=0 workdir=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --dry-run)
@@ -5079,7 +5249,17 @@ launch() {
         wl+=("$1" "$2")
         shift 2
         ;;
-      --workdir | --log | --prompt-file | --interval | --throttle | --plist-template | --claude-bin | --path | --tmpdir | --park-limit | --no-progress-limit | --pause-exempt-max | --report-every)
+      --handoff-dir)
+        handoff_set=1
+        wl+=("$1" "$2")
+        shift 2
+        ;;
+      --workdir)
+        wl+=(--workdir "$2")
+        workdir="$2"
+        shift 2
+        ;;
+      --log | --prompt-file | --interval | --throttle | --plist-template | --claude-bin | --path | --tmpdir | --park-limit | --no-progress-limit | --pause-exempt-max | --report-every)
         wl+=("$1" "$2")
         shift 2
         ;;
@@ -5128,6 +5308,18 @@ launch() {
   fi
   if [ "$report_usage_set" = 0 ] && [ -x "$ROOT/scripts/claude-usage.sh" ]; then
     wl+=(--report-usage-bin "$ROOT/scripts/claude-usage.sh")
+  fi
+  # The run handoff goes beside the repo's worktrees, outside every
+  # checkout. Resolved HERE, in the launcher's session, because the worktree
+  # root often comes from an env var that launchd's environment does not carry.
+  # Unresolvable is a warning, not a stop: the run still has REPORT.md.
+  if [ "$handoff_set" = 0 ] && [ -n "$workdir" ]; then
+    local ho_dir
+    if ho_dir="$(_resolve_handoff_dir "$workdir")"; then
+      wl+=(--handoff-dir "$ho_dir")
+    else
+      echo "spawn-orchestrator: launch: could not resolve the handoff dir — the run will end without a run handoff (REPORT.md still has everything)" >&2
+    fi
   fi
 
   if [ "$dry" = 1 ]; then
@@ -6740,6 +6932,7 @@ case "$sub" in
   exit-reason) exit_reason "$@" ;;
   clear-exit-state) clear_exit_state "$@" ;;
   heartbeat) heartbeat "$@" ;;
+  handoff) write_handoff "$@" ;;
   restack) restack "$@" ;;
   status-report) status_report "$@" ;;
   report-tick) report_tick "$@" ;;

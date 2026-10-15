@@ -399,7 +399,12 @@ declares its exit reason and exits cleanly, emitting a one-line summary to
 `.auto-pilot/orchestrator.log` — e.g. `auto-pilot done: 4 handed-off, 1
 parked, 0 skipped — see REPORT.md`
 ([`references/launch-runtime.md`](references/launch-runtime.md) "Logs /
-observability"). Nothing is merged or tracker-completed by this exit: every
+observability"). When the supervisor sees a terminal exit (including a halt),
+it then writes the **run handoff**: one file beside the repo's worktrees
+that carries the final report, every `QUESTIONS.md` decision, and the next
+steps. The orchestrator writes nothing extra for it
+([`references/run-state.md`](references/run-state.md) "Run handoff").
+Nothing is merged or tracker-completed by this exit: every
 task sits at whatever phase it reached (`handed-off` on the tracker as
 `needs_review`, or `started` for a `parked` task), ready for
 `/sweep-for-complete` once a human has reviewed and merged.
