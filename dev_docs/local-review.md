@@ -137,6 +137,19 @@ Only an explicit `--out` with no `--once` keeps the server alive.
   bad `--git` spec, and a non-repo cwd are all normalized to a one-line
   `error:` (via `sh()`'s `RuntimeError`); other failures (an unreadable
   `--diff-file`, an occupied explicit `--port`) surface as a traceback.
+- **Tailnet listener:** when `$SSH_CONNECTION`'s server address is in
+  Tailscale's ranges (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`), `bind_tailnet()`
+  adds a second listener on exactly that address and the bound port, and
+  `Review UI:` switches to the MagicDNS name from `tailscale status --self
+  --json` (the bare IP when the CLI does not answer). Those host names join
+  `_origin_ok()`'s allowlist on the same port. It binds one address rather
+  than `0.0.0.0` so the LAN still cannot reach the page; WireGuard encrypts
+  the hop and the tailnet's ACLs decide which devices can route to it, which
+  answers the plaintext-HTTP objection to binding beyond loopback. Anyone
+  the tailnet lets reach this host can try the URL, and the 40-bit token is
+  then the only gate, so a tailnet shared with other people warrants
+  `--no-tailnet`. A failed bind logs `tailnet: could not bind …` and falls
+  back to the `SSH:` tunnel hint.
 - **`--once`:** the server exits after a successful submit. When passed with
   `--out`, it selects one-shot mode (see Modes above); the skill no longer launches with it by
   default — an explicit `--out` with no `--once` is what the skill passes,

@@ -938,6 +938,56 @@ tty_env = dict(base_env, SSH_TTY="/dev/pts/3")
 _, out_t = run_startup_output(tty_env)
 check("ssh hint: printed under SSH_TTY alone", "SSH:" in out_t, out_t)
 
+# --- tailnet: SSH over Tailscale binds the tailnet address too ---------------
+def _tailnet_ip_for(conn):
+    saved = os.environ.get("SSH_CONNECTION")
+    try:
+        if conn is None:
+            os.environ.pop("SSH_CONNECTION", None)
+        else:
+            os.environ["SSH_CONNECTION"] = conn
+        return server.tailnet_ip()
+    finally:
+        if saved is None:
+            os.environ.pop("SSH_CONNECTION", None)
+        else:
+            os.environ["SSH_CONNECTION"] = saved
+
+check("tailnet_ip: tailnet server address is returned",
+      _tailnet_ip_for("100.113.19.78 5000 100.121.7.78 22") == "100.121.7.78")
+check("tailnet_ip: tailnet IPv6 server address is returned",
+      _tailnet_ip_for("fd7a:115c:a1e0::1 5000 fd7a:115c:a1e0::2 22") == "fd7a:115c:a1e0::2")
+check("tailnet_ip: LAN SSH is not tailnet", _tailnet_ip_for("10.0.0.2 5000 10.0.0.1 22") is None)
+check("tailnet_ip: no SSH is not tailnet", _tailnet_ip_for(None) is None)
+check("tailnet_ip: malformed SSH_CONNECTION is not tailnet", _tailnet_ip_for("garbage") is None)
+
+# An address this host does not own cannot be bound: the launch must fall back
+# to the tunnel hint rather than die, and still print the readiness line.
+_, out_tf = run_startup_output(dict(base_env, SSH_CONNECTION="100.64.0.2 5000 100.64.0.1 22"))
+check("tailnet: failed bind falls back to the SSH tunnel hint",
+      "tailnet: could not bind" in out_tf and "SSH:" in out_tf
+      and "LOCAL_REVIEW_URL=" in out_tf, out_tf)
+
+
+class _OriginProbe:
+    def __init__(self, origin):
+        self.headers = {"Origin": origin}
+
+
+_saved_port, _saved_hosts = server.Handler.port, server.Handler.tailnet_hosts
+try:
+    server.Handler.port = 8765
+    server.Handler.tailnet_hosts = ("box.tail1.ts.net", "box", "100.64.0.1")
+    for o in ("http://box.tail1.ts.net:8765", "http://box:8765", "http://100.64.0.1:8765"):
+        check(f"origin: tailnet host allowed ({o})", server.Handler._origin_ok(_OriginProbe(o)))
+    check("origin: tailnet host on another port rejected",
+          not server.Handler._origin_ok(_OriginProbe("http://box.tail1.ts.net:9000")))
+    server.Handler.tailnet_hosts = ()
+    check("origin: tailnet host rejected when no tailnet listener",
+          not server.Handler._origin_ok(_OriginProbe("http://box.tail1.ts.net:8765")))
+finally:
+    server.Handler.port, server.Handler.tailnet_hosts = _saved_port, _saved_hosts
+
 # -- full round trip: GET /, POST /submit, atomic $OUT, --once exits --------
 # (--out with --once: one-shot mode)
 out_fd, out_path = _tempfile.mkstemp(suffix=".json")

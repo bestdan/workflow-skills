@@ -6,6 +6,9 @@ Usage:
   python3 server.py --diff-file some.patch [--port 8765] [--out PATH]
   python3 server.py --git uncommitted|<ref>|<A>...<B> [--port 8765] [--out PATH]
 
+Launched over SSH that arrived via Tailscale, it also listens on the tailnet
+address (opt out with --no-tailnet).
+
 On Submit the page POSTs all comments to /submit; the server writes them to
 --out (JSON) and prints them to stdout. Watch that file to collect the review.
 """
@@ -13,6 +16,7 @@ import argparse
 import errno
 import hashlib
 import http.cookies
+import ipaddress
 import json
 import os
 import re
@@ -2426,6 +2430,7 @@ class Handler(BaseHTTPRequestHandler):
     vendor_dir = ""
     token = ""  # random path segment every route is mounted under
     port = 0  # bound port, needed to validate Origin on POSTs
+    tailnet_hosts: "tuple[str, ...]" = ()  # host names the tailnet listener answers on, for _origin_ok
     # source the diff was generated from, so the server can recompute it on demand
     pr = None
     repo = None
@@ -2534,6 +2539,7 @@ class Handler(BaseHTTPRequestHandler):
             f"http://localhost:{Handler.port}",
             f"http://review.localhost:{Handler.port}",
         }
+        allowed.update(f"http://{h}:{Handler.port}" for h in Handler.tailnet_hosts)
         return origin in allowed
 
     def do_GET(self):
@@ -3043,6 +3049,62 @@ def ssh_hint(port):
     ]
 
 
+# Tailscale's address ranges: IPv4 CGNAT space and its fixed ULA prefix.
+TAILNET_NETS = (ipaddress.ip_network("100.64.0.0/10"), ipaddress.ip_network("fd7a:115c:a1e0::/48"))
+
+
+def tailnet_ip():
+    """This host's tailnet address, when the SSH session reached it over
+    Tailscale, else None. SSH_CONNECTION is "client cport server sport"; the
+    server field is the address the reviewer already routes to, so binding
+    it makes the page reachable from their browser with no tunnel."""
+    parts = os.environ.get("SSH_CONNECTION", "").split()
+    if len(parts) != 4:
+        return None
+    try:
+        ip = ipaddress.ip_address(parts[2])
+    except ValueError:
+        return None
+    return str(ip) if any(ip in net for net in TAILNET_NETS) else None
+
+
+def tailnet_names(ip):
+    """Host names the reviewer can type for this machine: the MagicDNS name
+    and its short form when `tailscale` answers, then the bare IP. Best
+    effort — a missing or slow CLI just leaves the IP."""
+    names: "list[str]" = []
+    try:
+        st = json.loads(subprocess.run(
+            ["tailscale", "status", "--self", "--json"],
+            capture_output=True, text=True, timeout=3, check=True,
+        ).stdout)
+        dns = st["Self"]["DNSName"].rstrip(".")
+        if dns:
+            names += [dns, dns.split(".")[0]]
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+        pass
+    names.append(f"[{ip}]" if ":" in ip else ip)
+    return names
+
+
+class _V6Server(ThreadingHTTPServer):
+    address_family = socket.AF_INET6
+
+
+def bind_tailnet(ip, port):
+    """A second listener on the tailnet address, same port and Handler as the
+    loopback one. Binds that one address, never 0.0.0.0, so the LAN still
+    cannot reach the page; the tailnet's ACLs and WireGuard encryption cover
+    the hop the plaintext-HTTP objection was about. None when the bind
+    fails, which leaves the SSH tunnel hint as the way in."""
+    cls = _V6Server if ":" in ip else ThreadingHTTPServer
+    try:
+        return cls((ip, port), Handler)
+    except OSError as e:
+        print(f"tailnet: could not bind {ip}:{port} ({e}); use the SSH tunnel", file=sys.stderr)
+        return None
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("pr", nargs="?", help="PR number")
@@ -3053,6 +3115,8 @@ def main():
     ap.add_argument("--out", default=None)
     ap.add_argument("--title", help="human title for the header (else the --diff-file path is shown)")
     ap.add_argument("--once", action="store_true", help="shut down after a successful /submit")
+    ap.add_argument("--no-tailnet", action="store_true",
+                    help="stay loopback-only even when SSH arrived over Tailscale")
     args = ap.parse_args()
 
     if sum(bool(x) for x in (args.pr, args.diff_file, args.git)) != 1:
@@ -3118,9 +3182,19 @@ def main():
         print(f"port 8765 busy; using {port}", file=sys.stderr)
     machine_url = f"http://127.0.0.1:{port}/{Handler.token}/"
     vanity_url = f"http://review.localhost:{port}/{Handler.token}/"
+    ts_ip = None if args.no_tailnet else tailnet_ip()
+    ts_srv = bind_tailnet(ts_ip, port) if ts_ip else None
+    if ts_srv:
+        Handler.tailnet_hosts = tuple(tailnet_names(ts_ip))
+        vanity_url = f"http://{Handler.tailnet_hosts[0]}:{port}/{Handler.token}/"
+        threading.Thread(target=ts_srv.serve_forever, daemon=True).start()
     print(f"Review UI: {vanity_url}   ({len(files)} files)  out={Handler.out_path}", flush=True)
-    for line in ssh_hint(port):
-        print(line, flush=True)
+    if ts_srv:
+        print(f"TAILNET: also listening on {ts_ip}:{port}; the Review UI URL opens from any "
+              "device on your tailnet, no tunnel needed.", flush=True)
+    else:
+        for line in ssh_hint(port):
+            print(line, flush=True)
     print(f"LOCAL_REVIEW_URL={machine_url}", flush=True)
     srv.serve_forever()
 

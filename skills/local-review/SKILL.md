@@ -129,7 +129,15 @@ Then open `$review_url` for the user:
 - Without browser tooling: print `$review_url` and ask the user to open it.
   The tool is fully usable by hand.
 
-**Over SSH, the URL is dead until the user opens a tunnel.** The server binds
+**Over SSH via Tailscale, the URL just opens.** When `$SSH_CONNECTION`
+shows the session arrived on this host's tailnet address, the server also
+listens on that one address (never `0.0.0.0`), and the `Review UI:` line
+carries the MagicDNS name (`http://<host>.<tailnet>.ts.net:<port>/<token>/`)
+instead of `review.localhost`. A `TAILNET:` log line confirms it; print the
+`Review UI:` URL as usual and skip the tunnel. `LOCAL_REVIEW_URL=` stays on
+127.0.0.1 for your own calls. `--no-tailnet` keeps the server loopback-only.
+
+**Over other SSH, the URL is dead until the user opens a tunnel.** The server binds
 loopback on the machine it runs on; in an SSH session that is the remote
 host, and the reviewer's browser is on their own machine. The server detects
 `$SSH_CONNECTION` / `$SSH_TTY` and writes `SSH:` lines to the log before
