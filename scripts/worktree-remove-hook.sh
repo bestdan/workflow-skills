@@ -26,10 +26,10 @@
 # ExitWorktree's remove cannot check a hook-created worktree before
 # dispatching: a hook-based session records no start commit, so it refuses with
 # "Could not verify worktree state" until the caller passes
-# discard_changes: true, which skips the check. On that path
-# worktree-remove.sh's own dirty refusal is the gate; the interactive exit
-# dialog still checks for uncommitted files first, so there it stays a
-# backstop. See skills/worktree-teardown/SKILL.md and #980.
+# discard_changes: true, which skips the check. On both paths
+# worktree-remove.sh's own dirty refusal is the gate: the interactive exit
+# dialog counts uncommitted files and warns before the user picks remove, but
+# does not block it. See skills/worktree-teardown/SKILL.md.
 #
 # Hooks run unsandboxed — `gh` is authenticated and api.github.com is
 # reachable from here — so worktree-remove.sh's merged-PR branch gate and its
