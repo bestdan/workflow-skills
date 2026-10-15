@@ -29,21 +29,14 @@ else, and going there is mechanical, so co-review takes the route itself.
 fetches it first with an explicit `refs/heads/` refspec. That writes no
 tracking entry to `.git/config`.
 
-On Claude Code, the tools that move a session between trees are:
-
-- **`EnterWorktree` with `name`** — runs the plugin's `WorktreeCreate` hook,
-  which puts the worktree at `<root>/<repo>/<name>` on the branch
-  `<prefix><name>` (both from `scripts/worktree-config.sh`). If that branch
-  already exists, the hook re-attaches it. If a worktree is already there on
-  it, the hook hands it back as-is. The hook supplies the path, not the model,
-  so nothing prompts. This is the preferred route. The helper returns it
-  (`enter-name`) whenever the branch carries the configured prefix.
-- **`EnterWorktree` with `path`** — enters a worktree that already exists. The
-  path is model-supplied, so the harness raises an approval prompt that no
-  allow rule lifts. The helper returns it (`enter-path`) in two cases: a
-  `foreign` tree outside the hook's layout, and an `absent` branch without the
-  prefix, after the helper has added a worktree for it under the configured
-  root.
+On Claude Code, a session moves between trees with `EnterWorktree`, by `name`
+(prompt-free, through the plugin's `WorktreeCreate` hook) or by `path` (an
+approval prompt no allow rule lifts). How each behaves, and why, is the
+[`worktree-entry`](../../worktree-entry/SKILL.md) skill. For co-review the
+helper decides: it returns `enter-name` whenever the branch carries the
+configured prefix, and `enter-path` in two cases: a `foreign` tree outside the
+hook's layout, and an `absent` branch without the prefix, after the helper has
+added a worktree for it under the configured root.
 
 Neither route touches `HEAD` in the tree the session is standing in, the main
 checkout included. That is why co-review takes the route without asking the user first. Checking the
