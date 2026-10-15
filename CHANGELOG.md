@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.79.2] - 2026-10-15
+
+### Fixes
+
+- report only an existing ref as a lost race [#982] (#983) (a9dbc4e)
+
 ## [2.79.1] - 2026-10-14
 
 ### Fixes
