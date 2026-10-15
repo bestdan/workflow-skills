@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.86.0] - 2026-10-15
+
+### Features
+
+- add the reference skill and point the refusal at it [#933] (#1031) (4066498)
+
 ## [2.85.0] - 2026-10-15
 
 ### Features
