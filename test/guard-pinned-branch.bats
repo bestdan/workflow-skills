@@ -215,6 +215,18 @@ print(h["permissionDecisionReason"])
   assert_line --index 4 --partial "worktree-entry"
   assert_line --index 5 "To move this checkout anyway, re-run the same command with \`env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1\` immediately before the \`git\` word."
   assert_line --index 6 "To unpin it for good: git config --unset hooks.pinnedBranch"
+  assert_line --index 7 "Why this checkout is pinned, and which layer covers what: load the \`workflow-skills:pinned-checkout\` skill."
+}
+
+# The pointer names a skill that ships, so following it cannot dead-end (#933).
+@test "the refusal names the pinned-checkout skill, and that skill exists" {
+  run reason "$pinned" 'git checkout other'
+  assert_success
+  assert_output --partial "workflow-skills:pinned-checkout"
+  [ -f "$REPO_ROOT/skills/pinned-checkout/SKILL.md" ]
+  run reason "$pinned" 'gh pr checkout 7'
+  assert_success
+  assert_output --partial "workflow-skills:pinned-checkout"
 }
 
 # reason <cwd> <command> — prints only the refusal text.

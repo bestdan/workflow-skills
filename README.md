@@ -13,7 +13,7 @@ A Claude Code plugin bundling Daniel's general engineering workflow skills: coll
 
 ## What's in the box
 
-18 skills, 22 commands, and 2 subagents, organized into eight workflows. Each
+19 skills, 22 commands, and 2 subagents, organized into eight workflows. Each
 entry links to its own doc — that's where the flags, edge cases, and handler
 support live.
 
@@ -161,7 +161,8 @@ it refuses a `git checkout`/`git switch` (or a `gh pr checkout`) that would move
 checkout off the pinned branch, so branch work goes to a worktree. The refusal
 names the worktree an `EnterWorktree` call would create, at the root and branch
 prefix `scripts/worktree-config.sh` resolves, and points at the
-`worktree-entry` skill for every other target. Each call is
+`worktree-entry` skill for every other target, and at the
+[`pinned-checkout`](skills/pinned-checkout/SKILL.md) skill for why. Each call is
 judged where it actually runs — a `cd <worktree> && git checkout -b x` is
 allowed — and linked worktrees are never pinned. Bypass one call with
 `env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git checkout <branch>`; the assignment
@@ -196,6 +197,7 @@ before.
 | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [**worktree-teardown**](skills/worktree-teardown/SKILL.md) | `/worktree-teardown <path> \| --branch <branch>`, or auto when a removal fails, refuses, or half-completes | Run the teardown scripts, granted by the command so a typed teardown needs no allow rule, and the mechanics behind them: the submodule force gates, the PR-evidence branch delete, and the half-deleted and locked recovery cases.                      |
 | [**worktree-entry**](skills/worktree-entry/SKILL.md)       | auto when entering, re-entering, or writing into a worktree                                                | Which `EnterWorktree` call reaches a worktree or branch with no prompt, when `ExitWorktree` (`keep`) comes first, the remote-only and unprefixed branch routes, when `path` is right, and what re-entering a shared worktree costs. Not user-invocable. |
+| [**pinned-checkout**](skills/pinned-checkout/SKILL.md)     | auto on a "This checkout is pinned to" refusal, or a checkout undone by the `post-checkout` hook           | How a repo opts in and out of the branch pin, why the guard runs before `git` and no git hook can, the `reference-transaction` trap, which layer covers what the guard lets through, and the one-call override. Not user-invocable.                     |
 
 ### Bundled subagents
 
