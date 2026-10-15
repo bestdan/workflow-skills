@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.84.1] - 2026-10-15
+
+### Fixes
+
+- gate discard_changes on hook-created worktrees [#980] (#993) (5349e7f)
+
 ## [2.84.0] - 2026-10-15
 
 ### Features
