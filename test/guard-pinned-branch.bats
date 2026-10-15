@@ -263,6 +263,90 @@ print(json.load(sys.stdin)["hookSpecificOutput"]["permissionDecisionReason"])
   done
 }
 
+# --- gh pr checkout (#968) --------------------------------------------------
+# gh moves HEAD in the checkout it runs in exactly as git checkout does. These
+# never reach the network: the guard denies or allows before gh would run.
+
+@test "gh pr checkout in a pinned main checkout is denied" {
+  denied "$pinned" 'gh pr checkout 1'
+  denied "$pinned" 'gh pr co 1'
+  denied "$pinned" 'gh pr checkout 1 --detach'
+  denied "$pinned" 'gh pr checkout -b main 1'
+  denied "$pinned" 'gh pr checkout https://github.com/o/r/pull/1'
+  denied "$pinned" 'gh pr checkout'
+  denied "$pinned" 'rtk gh pr checkout 1'
+  denied "$plain" "cd $pinned && gh pr checkout 1"
+}
+
+@test "gh pr checkout in a worktree, an unpinned repo, or with the bypass is allowed" {
+  git -C "$pinned" worktree add -q "$tmp/wt" -b wt-branch
+  allowed "$tmp/wt" 'gh pr checkout 1'
+  allowed "$pinned" "cd $tmp/wt && gh pr checkout 1"
+  allowed "$plain" 'gh pr checkout 1'
+  allowed "$pinned" 'env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 gh pr checkout 1'
+  allowed "$pinned" 'WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 gh pr checkout 1'
+  denied "$pinned" 'env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 gh pr view 1; gh pr checkout 1'
+}
+
+@test "gh's -R/--repo before pr does not hide the checkout" {
+  denied "$pinned" 'gh -R o/r pr checkout 1'
+  denied "$pinned" 'gh --repo o/r pr checkout 1'
+  denied "$pinned" 'gh --repo=o/r pr checkout 1'
+  denied "$pinned" 'gh -Ro/r pr checkout 1'
+  denied "$pinned" 'gh -R o/r pr co 1'
+  denied "$pinned" 'gh --repo o/r pr co 1'
+  allowed "$plain" 'gh -R o/r pr checkout 1'
+  allowed "$pinned" 'gh -R o/r pr view 1'
+  allowed "$pinned" 'env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 gh -R o/r pr checkout 1'
+}
+
+# gh 2.98.0 switches an EXISTING checkout named by --worktree, the main one
+# included, so the destination is what gets judged.
+@test "gh pr checkout --worktree is judged at the destination" {
+  git -C "$pinned" worktree add -q "$tmp/wt" -b wt-branch
+  denied "$tmp/wt" "gh pr checkout 1 --detach --worktree $pinned"
+  denied "$tmp/wt" "gh pr checkout 1 --worktree=$pinned"
+  denied "$tmp/wt" "gh -R o/r pr co --worktree $pinned 1"
+  denied "$tmp/wt" "gh pr checkout 1 --worktree ../pinned"
+  denied "$plain" "gh pr checkout 1 --worktree $pinned"
+  allowed "$pinned" "gh pr checkout 1 --worktree $tmp/wt"
+  allowed "$pinned" "gh pr checkout 1 --worktree $plain"
+}
+
+@test "gh pr checkout into a worktree, and other gh pr calls, are allowed" {
+  allowed "$pinned" "gh pr checkout 1 --worktree $tmp/wt-pr"
+  allowed "$pinned" "gh pr checkout --worktree=$tmp/wt-pr 1"
+  allowed "$pinned" 'gh pr checkout 1 --worktree ../new-wt'
+  allowed "$pinned" 'gh pr checkout --help'
+  allowed "$pinned" 'gh pr checkout -h'
+  denied "$pinned" 'gh pr checkout 1 -b -h'
+  allowed "$pinned" 'gh pr view 1'
+  allowed "$pinned" 'gh pr list --search checkout'
+  allowed "$pinned" "rg 'gh pr checkout 1' README.md"
+}
+
+@test "a refused gh pr checkout reads as a refused git checkout" {
+  local git_reason gh_reason
+  git_reason="$(reason "$pinned" 'git checkout -b x' | sed "s/'x'/'T'/")"
+  gh_reason="$(reason "$pinned" 'gh pr checkout 7' | sed "s/'PR 7'/'T'/" | sed 's/`gh` word/`git` word/')"
+  [ -n "$git_reason" ]
+  [ "$gh_reason" = "$git_reason" ] || {
+    echo "differs: $gh_reason" >&2
+    return 1
+  }
+  run reason "$pinned" 'gh pr checkout 7'
+  assert_line --index 0 "This checkout is pinned to 'main' — refusing to switch it to 'PR 7'."
+  assert_output --partial "\`env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1\` immediately before the \`gh\` word."
+}
+
+@test "the scope line names gh pr checkout in the docstring, README and design" {
+  local f
+  for f in scripts/guard-pinned-branch.py README.md dev_docs/designs/2026-10-04-pinned-checkout-guard-v2.md; do
+    run grep -cF -- '[cd <dir> &&] [env VAR=1] gh [-R <repo>] pr' "$REPO_ROOT/$f"
+    assert_success
+  done
+}
+
 # An absolute -C fixes where git runs even when the shell's own directory is
 # unknown or missing, so the call is still refused. A crash here would exit
 # nonzero and let the checkout through.
