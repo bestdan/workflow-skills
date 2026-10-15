@@ -137,6 +137,7 @@ bash_case() { expect "$1" Bash "$2" command "$3"; }
   bash_case deny "$repo" "$(printf 'cat > s.py <<%s\nopen("%s/file.txt", "w")\nPY\npython3 s.py\n' "'PY'" "$wt")"
   bash_case deny "$repo" "$(printf 'tee s.py >/dev/null <<%s\nopen("%s/file.txt", "w")\nPY\npython3 s.py\n' "'PY'" "$wt")"
   bash_case deny "$repo" "$(printf 'python3 - \\\n  <<%s\nopen("%s/file.txt", "w")\nPY\n' "'PY'" "$wt")"
+  bash_case deny "$repo" "$(printf 'cat <<%s |\nopen("%s/file.txt", "w")\nPY\npython3 -\n' "'PY'" "$wt")"
 }
 
 # An option that may take a value must not be mistaken for the program and so

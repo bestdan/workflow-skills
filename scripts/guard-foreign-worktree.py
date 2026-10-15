@@ -335,7 +335,15 @@ def _code_in_command(cmd: str, cwd: str) -> bool:
         if head_word(tokens) == "tee":
             files += [t for t in tokens[head_index(tokens) + 1 :] if t[:1] != "-"]
     written = {os.path.normpath(p) for f in files if (p := expand(f, cwd))}
-    for pipeline in _PIPELINE_SPLIT.split(cmd):
+    pipelines = _PIPELINE_SPLIT.split(cmd)
+    # `cat <<PY |`, the body, then `python3 -` on the line after PY: bash
+    # reads the body first and continues the pipeline after it, so the
+    # interpreter lands in a later piece here. Fail closed on that shape.
+    if any("<<" in p and p.rstrip().endswith("|") for p in pipelines) and any(
+        head_word(forms[0]) in _INTERPRETERS for forms in segments(cmd)
+    ):
+        return True
+    for pipeline in pipelines:
         interpreter, programs = False, []
         for forms in segments(pipeline):
             tokens = forms[0]
