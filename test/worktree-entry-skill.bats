@@ -19,7 +19,7 @@ load test_helper
 import re, sys
 from pathlib import Path
 root, skill = Path(sys.argv[1]), Path(sys.argv[2])
-named = sorted(set(re.findall(r"scripts/[A-Za-z0-9._-]+\.(?:sh|py)", skill.read_text())))
+named = sorted(set(re.findall(r"scripts/[A-Za-z0-9._/-]+\.(?:sh|py)", skill.read_text())))
 missing = [n for n in named if not (root / n).exists()]
 print("named:", len(named))
 print("missing:", missing)

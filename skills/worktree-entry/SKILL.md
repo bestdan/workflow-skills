@@ -20,7 +20,7 @@ worktree is [`worktree-teardown`](../worktree-teardown/SKILL.md)'s subject.
 come from `${CLAUDE_PLUGIN_ROOT}/scripts/worktree-config.sh` and `<repo>` is the
 main checkout's directory name. `<n>` must be one path segment: letters, digits,
 `.`, `_` and `-`, not starting with punctuation and never containing `..`
-(`scripts/lib/worktree-name.sh`). For a given `<n>` the hook does one of three
+(`scripts/lib/worktree-name.sh`). For a given `<n>` the hook does one of four
 things:
 
 | State at `<root>/<repo>/<n>`                                    | What the hook does                                                         |
