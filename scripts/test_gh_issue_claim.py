@@ -231,7 +231,7 @@ class AcquireRefTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(out.strip(), "task/PLAT-142")
 
-    def test_422_is_a_lost_race_not_an_error(self):
+    def test_an_existing_ref_is_a_lost_race_not_an_error(self):
         remote = FakeRemote(refs={"refs/heads/task/PLAT-142"})
 
         code, out, err = self._acquire_ref(remote)
@@ -261,15 +261,6 @@ class AcquireRefTests(unittest.TestCase):
         self.assertIn("Object does not exist", err)
         self.assertIn("HTTP 422", err)
 
-    def test_an_already_exists_422_is_exit_3(self):
-        class Exists:
-            def run_gh(self, args, stdin=None):
-                return 1, "", "gh: Reference already exists (HTTP 422)"
-
-        code, _, _ = self._acquire_ref(Exists())
-
-        self.assertEqual(code, 3)
-
     def test_an_abbreviated_base_sha_is_a_usage_error_before_any_gh_call(self):
         for command, extra in (
             ("acquire-ref", ["--branch", "task/PLAT-142"]),
@@ -285,6 +276,25 @@ class AcquireRefTests(unittest.TestCase):
             self.assertEqual(ctx.exception.code, 2, command)
             self.assertIn("full 40-character sha", err.getvalue(), command)
             self.assertEqual(remote.calls, [], command)
+
+    def test_a_full_sha_with_a_trailing_newline_is_a_usage_error(self):
+        remote = FakeRemote()
+        gh_issue_claim.run_gh = remote.run_gh
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as ctx:
+            gh_issue_claim.main(
+                [
+                    "acquire-ref",
+                    "--repo",
+                    "o/n",
+                    "--branch",
+                    "task/PLAT-142",
+                    "--base-sha",
+                    BASE_SHA + "\n",
+                ]
+            )
+        self.assertEqual(ctx.exception.code, 2)
+        self.assertEqual(remote.calls, [])
 
     def test_indeterminate_failure_is_exit_4_not_3(self):
         class Forbidden:

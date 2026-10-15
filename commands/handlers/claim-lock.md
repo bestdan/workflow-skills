@@ -209,8 +209,8 @@ and a **local** ref-lock session cannot detect each other at all. `do-tasks.md`
 
 ## Fallback: comment-token election (environments that cannot acquire)
 
-When the acquire call fails for an environment or permission reason
-(never on `Reference already exists` — that is a decided race), degrade to the election below and
+When the acquire call exits `4` — any failure other than `Reference already exists`,
+which is a decided race — degrade to the election below and
 **say so explicitly** in the report: `claim lock degraded to comment election: <the
 API error>`. A silent degrade would claim atomicity the run does not have.
 

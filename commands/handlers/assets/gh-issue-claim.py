@@ -325,7 +325,7 @@ def acquire_ref(repo, branch, base_sha):
     return 4
 
 
-FULL_SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
+FULL_SHA_RE = re.compile(r"[0-9a-fA-F]{40}")
 
 
 def full_sha(value):
@@ -334,7 +334,7 @@ def full_sha(value):
     The REST call rejects an abbreviated sha with a 422, which is not a lost
     race; refusing it here means the request is never sent at all.
     """
-    if not FULL_SHA_RE.match(value):
+    if not FULL_SHA_RE.fullmatch(value):
         raise argparse.ArgumentTypeError(
             f"a full 40-character sha is required, got {value!r}"
         )
