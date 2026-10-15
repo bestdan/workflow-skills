@@ -2884,10 +2884,12 @@ _resolve_handoff_dir() {
   printf '%s/%s/.handoffs\n' "$root" "$(basename "$(dirname "$common")")"
 }
 
-# Shift every markdown heading outside a fenced block down one level, so an
-# embedded REPORT.md / QUESTIONS.md nests under the handoff's own sections.
+# Shift every markdown heading outside a fenced block down two levels, so an
+# embedded REPORT.md / QUESTIONS.md, H1 included, nests under the handoff's own
+# H2 sections. Only ATX headings (`#`s then a space) move: a line opening with
+# an issue ref such as `#123` is prose. No `{1,6}` interval: older awks lack it.
 _demote_headings() {
-  awk '/^(```|~~~)/{f=!f} !f && /^#/{print "#" $0; next} {print}' "$1"
+  awk '/^(```|~~~)/{f=!f} !f && /^#+[ \t]/{print "##" $0; next} {print}' "$1"
 }
 
 # The run handoff (see the usage header). Every input is best-effort: a
@@ -2929,11 +2931,17 @@ write_handoff() {
   source="$(_run_front_field "$dir" work_source | sed -e 's/[[:space:]]#.*$//')"
   base="$(_run_front_field "$dir" base_branch | sed -e 's/[[:space:]]#.*$//')"
   detail="$(_run_front_field "$dir" exit_reason_detail)"
-  [ -n "$detail" ] || detail="$(_run_front_field "$dir" pause_reason)"
+  # pause_reason survives a --resume, so for a finished run it can name an old
+  # rate-window pause; only a halt reads it.
+  [ -n "$detail" ] || [ "$reason" != systemic ] || detail="$(_run_front_field "$dir" pause_reason)"
   case "$detail" in '#'*) detail="" ;; esac
   repo="$(git -C "$dir" remote get-url origin 2>/dev/null \
     | sed -E -e 's#\.git$##' -e 's#^.*[:/]([^/]+/[^/]+)$#\1#')"
   today="$(date +%Y-%m-%d)"
+  # --resume takes the work source as auto-pilot's positional argument, which
+  # RUN.md stores with a `linear:` / `plan:` prefix.
+  local resume_cmd="/auto-pilot <work source> --resume"
+  [ -n "$source" ] && resume_cmd="/auto-pilot ${source#*:} --resume"
 
   local headline next
   case "$reason" in
@@ -2943,15 +2951,15 @@ write_handoff() {
       ;;
     deadline)
       headline="stopped at its --until deadline with tasks still ready"
-      next="Review the handed-off PRs and answer **For you** as for a finished run. The un-started tasks are still ready: run \`/auto-pilot --resume\` from the run worktree to carry on, or leave them."
+      next="Review the handed-off PRs and answer **For you** as for a finished run. The un-started tasks are still ready: run \`$resume_cmd\` to carry on, or leave them."
       ;;
     systemic)
       headline="HALTED by the supervisor — it will not relaunch on its own"
-      next="Read the ALARM in the report below first, fix its cause (an expired credential, a failed invariant, a park storm), then run \`/auto-pilot --resume\` from the run worktree. The PRs already handed off are safe to review meanwhile."
+      next="Read the ALARM in the report below first, fix its cause (an expired credential, a failed invariant, a park storm), then run \`$resume_cmd\`. The PRs already handed off are safe to review meanwhile."
       ;;
     *)
       headline="ended ($reason)"
-      next="Read the report below, then decide whether to \`/auto-pilot --resume\`."
+      next="Read the report below, then decide whether to run \`$resume_cmd\`."
       ;;
   esac
 
@@ -2964,7 +2972,7 @@ write_handoff() {
     printf 'aim: "Pick up auto-pilot run %s: review what it handed off and answer what it could not decide"\n' "$run_id"
     [ -n "$repo" ] && printf 'repo: %s\n' "$repo"
     printf 'branch: auto-pilot/%s\n' "$run_id"
-    [ -n "$source" ] && printf 'task: "%s"\n' "$source"
+    [ -n "$source" ] && printf 'task: "%s"\n' "$(printf '%s' "$source" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
     printf 'expires: "when every PR this run handed off is merged or closed, and its For you items are answered"\n'
     printf -- '---\n\n'
     printf '# Auto-pilot run %s — %s\n\n' "$run_id" "$headline"
@@ -2975,7 +2983,7 @@ write_handoff() {
     printf -- "- **Run state:** \`.auto-pilot/RUN.md\` there is the task graph and each task's phase; \`.auto-pilot/orchestrator.log\` is the forensic log.\n"
     printf -- "- **Teardown:** once nothing above needs the run worktree, remove it with the plugin's \`scripts/worktree-remove.sh\`; the \`auto-pilot/%s\` branch is never merged.\n\n" "$run_id"
     printf '## Report\n\n'
-    if [ -f "$ap/REPORT.md" ]; then
+    if [ -s "$ap/REPORT.md" ]; then
       _demote_headings "$ap/REPORT.md"
     else
       printf '_No REPORT.md was written._\n'
@@ -3113,6 +3121,14 @@ _supervisor_halt() {
       || echo "spawn-orchestrator: supervisor halt: could not write exit_reason: systemic (RUN.md front matter missing/malformed)" >&2
     (_upsert_front_field "$run_md" exit_reason_at "$(date +%s)") \
       || echo "spawn-orchestrator: supervisor halt: could not write exit_reason_at (RUN.md front matter missing/malformed)" >&2
+    # The detail follows the same rule as pause_reason: a declared `systemic`
+    # carries the agent's own detail from this wake, but on the other halt paths
+    # the field still holds an earlier wake's text, which the run handoff would
+    # report as the cause.
+    if [ "$preserve" != 1 ]; then
+      (_upsert_front_field "$run_md" exit_reason_detail "$reason") \
+        || echo "spawn-orchestrator: supervisor halt: could not write exit_reason_detail (RUN.md front matter missing/malformed)" >&2
+    fi
   else
     echo "spawn-orchestrator: supervisor halt: no RUN.md at $run_md, skipping run-state write" >&2
   fi
@@ -3746,6 +3762,9 @@ supervisor_gate() {
       # teardown path, reused rather than reimplemented — see
       # _supervisor_halt's identical `teardown --label` call).
       echo "spawn-orchestrator: supervisor-gate: run status is '$run_status', tearing down $label instead of relaunching"
+      # A wake that wrote the status but died before supervisor-check ends
+      # here, so this path owes the handoff too. Rewriting one is harmless.
+      _handoff_safe "$dir" "$run_status"
       teardown --label "$label"
       return 20
       ;;
@@ -5222,7 +5241,7 @@ launch() {
   local dry=0
   local -a wl=() sm=() dt=() rh=()
   local plist="" out_script="" out_plist="" handle="" until="" label=""
-  local report_gh_set=0 report_usage_set=0 handoff_set=0 workdir=""
+  local report_gh_set=0 report_usage_set=0 handoff_set=0 workdir="" handoff_dir=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --dry-run)
@@ -5251,6 +5270,7 @@ launch() {
         ;;
       --handoff-dir)
         handoff_set=1
+        handoff_dir="$2"
         wl+=("$1" "$2")
         shift 2
         ;;
@@ -5314,9 +5334,8 @@ launch() {
   # root often comes from an env var that launchd's environment does not carry.
   # Unresolvable is a warning, not a stop: the run still has REPORT.md.
   if [ "$handoff_set" = 0 ] && [ -n "$workdir" ]; then
-    local ho_dir
-    if ho_dir="$(_resolve_handoff_dir "$workdir")"; then
-      wl+=(--handoff-dir "$ho_dir")
+    if handoff_dir="$(_resolve_handoff_dir "$workdir")"; then
+      wl+=(--handoff-dir "$handoff_dir")
     else
       echo "spawn-orchestrator: launch: could not resolve the handoff dir — the run will end without a run handoff (REPORT.md still has everything)" >&2
     fi
@@ -5325,6 +5344,7 @@ launch() {
   if [ "$dry" = 1 ]; then
     printf 'launch plan (order is load-bearing — auth is verified BEFORE we spawn):\n'
     printf '  1. write-launch  -> %s %s\n' "$out_script" "$out_plist"
+    printf '     handoff dir   -> %s\n' "${handoff_dir:-none}"
     printf '  2. smoke-test    (claude -p through the sandbox wrapper + settings)\n'
     printf '  3. detach        (launchctl bootstrap %s)\n' "$plist"
     printf '  4. record-handle -> %s\n' "$handle"

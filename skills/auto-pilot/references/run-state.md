@@ -401,14 +401,20 @@ is torn down.
 - **When:** the supervisor writes it on every terminal exit, before tearing the
   job down: a declared `done` or `deadline`, and every supervisor halt
   (`systemic`). This includes a halt the agent never got to declare, such as a
-  dead credential. A relaunchable exit (`continuing` or `paused`) writes
-  nothing.
+  dead credential; for one of those the supervisor writes its own reason into
+  `exit_reason_detail`, so the handoff never shows an earlier wake's detail as
+  the cause. It also covers a wake that recorded `status: done` but died
+  before the supervisor's post-wake check: the next wake's pre-invoke gate
+  writes the handoff before it tears the job down. A relaunchable exit
+  (`continuing` or `paused`) writes nothing.
 - **What:** front matter (`created`, `aim`, `repo`, `branch:
   auto-pilot/<run_id>`, `task: <work_source>`, `expires`), a headline naming
-  the exit reason, **Next steps** for that reason (a deadline or a halt
-  points at `--resume`; a finished run points at `/sweep-for-complete` after
-  merging), and the run worktree's path. Then come the final `REPORT.md` and the
-  whole of `QUESTIONS.md`, with their headings demoted one level, and the
+  the exit reason, **Next steps** for that reason, and the run worktree's path.
+  A deadline or a halt gives the complete resume command, built from the work
+  source (`/auto-pilot <source> --resume`); a finished run points at
+  `/sweep-for-complete` after merging. Then come the final `REPORT.md` and the
+  whole of `QUESTIONS.md`, with their headings demoted two levels so they nest
+  under the handoff's own sections, and the
   closing line telling the reader to delete the file. The handoff is a
   snapshot, assembled in shell by `spawn-orchestrator.sh handoff` with no model
   call, so it works even when the agent could not run.
