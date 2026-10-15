@@ -72,9 +72,11 @@ built, measured, and reverted. Do not reach for it again.
 
 **It survived its own test suite because every fixture had the same content on
 both branches**, so every assertion about HEAD passed while the tree was wrong.
-Any test of a pin layer must build branches whose contents differ and assert the
-branch, the working tree, and `git status --porcelain` together.
-`test/guard-pinned-branch.bats` and `test/pin-checkout.bats` both do.
+Any test of a pin layer must build branches whose contents differ; a test of a
+layer that lets git run must also assert the branch, the working tree, and
+`git status --porcelain` together. `test/guard-pinned-branch.bats` and
+`test/pin-checkout.bats` both build differing branches, and
+`test/pin-checkout.bats` checks the working tree after the hook restores it.
 
 ## The layers, and what each covers
 
