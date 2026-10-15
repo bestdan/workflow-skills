@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.84.0] - 2026-10-15
+
+### Features
+
+- name the configured worktree in the refusal [#932] (#1027) (142126a)
+
 ## [2.83.1] - 2026-10-15
 
 ### Fixes
