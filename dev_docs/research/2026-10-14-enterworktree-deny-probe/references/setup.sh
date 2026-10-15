@@ -3,6 +3,10 @@
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 repo="$here/probe1001"
+# Phase A's linked worktree, made by the WorktreeCreate hook. Deleting the repo
+# below drops its admin entry with it, so a rerun starts clean only if the
+# checkout goes too.
+rm -rf "$HOME/src/worktrees/probe1001/probe"
 rm -rf "$repo"
 mkdir -p "$repo/.claude"
 cd "$repo"

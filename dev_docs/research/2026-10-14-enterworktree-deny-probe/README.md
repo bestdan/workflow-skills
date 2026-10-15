@@ -40,7 +40,8 @@ Everything ran in a throwaway directory, `/tmp/claude/autopilot-2026-10-14/probe
 The owner's settings files were not edited. The scripts are in
 [`references/`](references/):
 
-- [`setup.sh`](references/setup.sh) creates a one-commit repo `probe1001` and
+- [`setup.sh`](references/setup.sh) removes any earlier run's repo and its
+  phase A worktree, creates a one-commit repo `probe1001`, and
   writes an **untracked** `.claude/settings.json` that registers the stub on
   `PreToolUse` with matcher `EnterWorktree`.
 - [`stub-deny-enter-by-path.py`](references/stub-deny-enter-by-path.py) denies
