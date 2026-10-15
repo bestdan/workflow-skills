@@ -17,7 +17,7 @@ error", so the verdict depends on whether that means the result flag or the
 session outcome. That reading is the owner's call, so this record states the
 verdict as **inconclusive** rather than choosing one.
 
-Two runs, on Claude Code 2.1.300 with workflow-skills 2.79.2, permission mode
+Four `claude -p` sessions (two of them the probe proper, B and B2), on Claude Code 2.1.300 with workflow-skills 2.79.2, permission mode
 `auto`.
 
 ## Question
@@ -61,6 +61,10 @@ The phases:
 | B — probe                     | A fresh session outside any worktree: `EnterWorktree` `path: <that worktree>`, then follow the refusal's route exactly.                                        |
 | B2 — probe again, with marker | The same as B, after adding commit `44e4f5d` and an untracked `MARKER.txt` to the worktree, so a recreate would be visible.                                    |
 | C — control                   | The same `path` call with `--setting-sources user`, so the stub is not loaded. This shows what the agent sees without the hook.                                |
+
+The exact command line and prompt for each phase, the marker setup before B2,
+and the worktree checks after each phase with their output are in
+[`references/invocations.md`](references/invocations.md).
 
 Each transcript is in [`references/transcripts/`](references/transcripts/),
 trimmed of SessionStart hook output (machine-local guidance) and reduced to the
