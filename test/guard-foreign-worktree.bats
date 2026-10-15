@@ -113,6 +113,30 @@ bash_case() { expect "$1" Bash "$2" command "$3"; }
   bash_case deny "$repo" "ruby -e 'File.write(\"$wt/file.txt\", \"x\")'"
 }
 
+# The two reads #987 reported as refused, from a session in a sibling worktree
+# reading the main checkout. A script's arguments are data, as they are for
+# any other program; and a heredoc that feeds no interpreter (here, one that
+# prints a note) does not make the command's paths count as written.
+@test "an interpreter that only reads a foreign path gets no decision" {
+  local snap="$repo/data/barclay/2026-10.csv"
+  bash_case allow "$wt" "python3 scripts/refresh_balances.py --snapshot $snap"
+  bash_case allow "$wt" "uv run python scripts/refresh_balances.py --snapshot $snap"
+  bash_case allow "$wt" "python3 -I - < $repo/script.py"
+  bash_case allow "$wt" "python3 -I - < ../repo/script.py"
+  bash_case allow "$wt" "$(printf 'python3 -I - < script.py && cat <<EOF\nread %s\nEOF\n' "$snap")"
+}
+
+# The narrowing must not open the routes code reaches an interpreter by: the
+# script's own location still counts, and code spelled out in the command —
+# piped from a heredoc, or written to a file and then run — is still opaque.
+@test "code an interpreter runs from this command, or a foreign script, is still denied" {
+  bash_case deny "$wt" "python3 $repo/script.py"
+  bash_case deny "$wt" "uv run $repo/script.py"
+  bash_case deny "$repo" "$(printf 'cat <<PY | python3 -\nopen("%s/file.txt", "w")\nPY\n' "$wt")"
+  bash_case deny "$repo" "$(printf 'cat > s.py <<%s\nopen("%s/file.txt", "w")\nPY\npython3 -I - < s.py\n' "'PY'" "$wt")"
+  bash_case deny "$repo" "$(printf 'cat > s.py <<%s\nopen("%s/file.txt", "w")\nPY\npython3 s.py\n' "'PY'" "$wt")"
+}
+
 # The code follows the cluster's last letter, and a long flag may carry it
 # attached.
 @test "inline code behind a combined or attached flag is denied" {
