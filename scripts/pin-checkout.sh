@@ -49,7 +49,7 @@ common_dir="$(git rev-parse --path-format=absolute --git-common-dir)" || exit 2
 # Set-ness comes from the exit status, not the value: an empty hooksPath still
 # stops git reading .git/hooks.
 hooks_set=0
-git config --get core.hooksPath >/dev/null && hooks_set=1
+hooks_path="$(git config --get core.hooksPath)" && hooks_set=1
 hook="$common_dir/hooks/post-checkout"
 
 # Decide before writing anything, so a refusal leaves the repo untouched.
@@ -63,6 +63,13 @@ fi
 git config --local hooks.pinnedBranch "$branch" || exit 1
 echo "Pinned the main checkout to '$branch' (hooks.pinnedBranch)."
 
+if [ "$hooks_set" = 1 ] && [ -z "$hooks_path" ]; then
+  # rev-parse --git-path fails on an empty value, so say it directly.
+  err "core.hooksPath is set but empty, so git runs no hooks; installed no hook."
+  err "  Unset it (git config --unset core.hooksPath) and re-run, or point it at a"
+  err "  directory and put $template there as post-checkout."
+  exit 3
+fi
 if [ "$hooks_set" = 1 ]; then
   # --git-path resolves hooksPath the way git does when it runs a hook.
   dir="$(git rev-parse --path-format=absolute --git-path hooks)"

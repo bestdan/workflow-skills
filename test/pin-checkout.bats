@@ -91,6 +91,8 @@ branch_of() { git -C "$1" symbolic-ref -q HEAD | sed 's|^refs/heads/||'; }
   run pin main
   assert_failure 3
   assert_file_not_exists "$hook"
+  assert_output --partial "set but empty"
+  refute_output --partial "fatal:"
 }
 
 @test "from a linked worktree it pins the main checkout, and the worktree stays free" {
