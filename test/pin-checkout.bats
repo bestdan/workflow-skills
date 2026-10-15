@@ -52,6 +52,18 @@ branch_of() { git -C "$1" symbolic-ref -q HEAD | sed 's|^refs/heads/||'; }
   assert_output --partial "already installed"
 }
 
+@test "a copy of the hook that is not executable is made executable" {
+  mkdir -p "$repo/.git/hooks"
+  cp "$REPO_ROOT/scripts/lib/pinned-checkout-hook.sh" "$hook"
+  chmod -x "$hook"
+  run pin main
+  assert_success
+  assert_output --partial "Made the post-checkout hook executable"
+  assert_file_executable "$hook"
+  git -C "$repo" checkout -q other
+  assert_equal "$(branch_of "$repo")" main
+}
+
 @test "the bypass variable lets the checkout stand" {
   pin main
   WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git -C "$repo" checkout -q other

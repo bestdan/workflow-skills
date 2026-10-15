@@ -79,7 +79,11 @@ if [ "$hooks_set" = 1 ]; then
   exit 3
 fi
 
-if [ -e "$hook" ]; then
+if [ -e "$hook" ] && [ ! -x "$hook" ]; then
+  # Git ignores a hook it cannot execute, so a hand copy would never fire.
+  chmod +x "$hook" || exit 1
+  echo "Made the post-checkout hook executable: $hook"
+elif [ -e "$hook" ]; then
   echo "post-checkout hook already installed: $hook"
 else
   mkdir -p "$common_dir/hooks" || exit 1
