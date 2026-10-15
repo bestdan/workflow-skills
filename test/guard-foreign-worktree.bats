@@ -135,6 +135,16 @@ bash_case() { expect "$1" Bash "$2" command "$3"; }
   bash_case deny "$repo" "$(printf 'cat <<PY | python3 -\nopen("%s/file.txt", "w")\nPY\n' "$wt")"
   bash_case deny "$repo" "$(printf 'cat > s.py <<%s\nopen("%s/file.txt", "w")\nPY\npython3 -I - < s.py\n' "'PY'" "$wt")"
   bash_case deny "$repo" "$(printf 'cat > s.py <<%s\nopen("%s/file.txt", "w")\nPY\npython3 s.py\n' "'PY'" "$wt")"
+  bash_case deny "$repo" "$(printf 'tee s.py >/dev/null <<%s\nopen("%s/file.txt", "w")\nPY\npython3 s.py\n' "'PY'" "$wt")"
+  bash_case deny "$repo" "$(printf 'python3 - \\\n  <<%s\nopen("%s/file.txt", "w")\nPY\n' "'PY'" "$wt")"
+}
+
+# An option that may take a value must not be mistaken for the program and so
+# hide the real one; such a call is not narrowed at all.
+@test "an option ahead of the script does not release a foreign script" {
+  bash_case deny "$wt" "python3 -W ignore $repo/script.py"
+  bash_case deny "$wt" "uv run --with pkg $repo/script.py"
+  bash_case deny "$repo" "$(printf 'cat > s.py <<%s\nopen("%s/file.txt", "w")\nPY\npython3 -W ignore s.py\n' "'PY'" "$wt")"
 }
 
 # The code follows the cluster's last letter, and a long flag may carry it

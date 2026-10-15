@@ -265,21 +265,37 @@ def _inline_code(head: str, args: list[str]) -> bool:
     return False
 
 
-def _program_operands(head: str, operands: list[str]) -> list[str]:
+# Options known to take no value, so the token after one is still the program.
+# Any other option ahead of the program may take a value (`-W ignore`, `uv run
+# --with pkg`) and would be mistaken for it, so that call is not narrowed.
+_PYTHON_BARE = {"-I", "-u", "-B", "-E", "-s", "-S", "-O", "-OO", "-q", "-b", "-bb"}
+_BARE_FLAGS = {"python": _PYTHON_BARE, "python3": _PYTHON_BARE}
+
+
+def _program_operands(head: str, args: list[str]) -> list[str]:
     """The operands of an interpreter call that name the program it runs.
 
-    Normally the first one; everything after it is the script's own arguments.
-    `uv run [<interpreter>] <script>` names it after a subcommand, and any other
-    `uv` subcommand keeps every operand, since what it does with them is not
-    read here.
+    ``args`` are every token after the interpreter. Normally the program is
+    the first operand, and everything after it is the script's own arguments.
+    `uv run [<interpreter>] <script>` names it after a subcommand. Every operand
+    is returned, as before this narrowing, when the program cannot be picked
+    out for certain: another `uv` subcommand, or an option not known to be
+    value-less ahead of the program.
     """
+    every = [a for a in args if not a.startswith("-")]
     if head == "uv":
-        if operands[:1] != ["run"]:
-            return operands
-        operands = operands[1:]
-        if operands[:1] and os.path.basename(operands[0]) in _INTERPRETERS:
-            operands = operands[1:]
-    return operands[:1]
+        if args[:1] != ["run"]:
+            return every
+        args = args[1:]
+        if args[:1] and os.path.basename(args[0]) in _INTERPRETERS:
+            head, args = os.path.basename(args[0]), args[1:]
+    bare = _BARE_FLAGS.get(head, set())
+    for arg in args:
+        if arg == "-" or not arg.startswith("-"):
+            return [arg]
+        if arg not in bare:
+            return every
+    return []
 
 
 # Where one command ends and the next begins — `;`, `&&`, a newline — but NOT
@@ -310,11 +326,15 @@ def _code_in_command(cmd: str, cwd: str) -> bool:
     printing a note beside `python3 -I - < script` — feeds no interpreter, so it
     does not make the command's paths count as written.
     """
-    written = {
-        os.path.normpath(p)
-        for m in _WRITE_REDIRECT.finditer(cmd)
-        if (p := expand(m.group(1).strip("\"'"), cwd))
-    }
+    # Join line continuations, as bash does, so `python3 - \` and the `<<PY`
+    # on the next line stay one pipeline.
+    cmd = cmd.replace("\\\n", " ")
+    files = [m.group(1).strip("\"'") for m in _WRITE_REDIRECT.finditer(cmd)]
+    for forms in segments(cmd):
+        tokens = forms[0]
+        if head_word(tokens) == "tee":
+            files += [t for t in tokens[head_index(tokens) + 1 :] if t[:1] != "-"]
+    written = {os.path.normpath(p) for f in files if (p := expand(f, cwd))}
     for pipeline in _PIPELINE_SPLIT.split(cmd):
         interpreter, programs = False, []
         for forms in segments(pipeline):
@@ -322,10 +342,7 @@ def _code_in_command(cmd: str, cwd: str) -> bool:
             head = head_word(tokens)
             if head in _INTERPRETERS:
                 interpreter = True
-                rest = tokens[head_index(tokens) + 1 :]
-                programs += _program_operands(
-                    head, [t for t in rest if not t.startswith("-")]
-                )
+                programs += _program_operands(head, tokens[head_index(tokens) + 1 :])
         if not interpreter:
             continue
         if "<<" in pipeline:
@@ -565,7 +582,7 @@ def _write_targets(cmd: str, cwd: str):
                 grade = DEFINITE
             elif head in _INTERPRETERS:
                 grade = REACH
-                operands = _program_operands(head, operands)
+                operands = _program_operands(head, tokens[head_at + 1 :])
             if grade:
                 for token in operands:
                     resolved = expand(token, cwd)
