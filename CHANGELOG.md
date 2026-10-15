@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.81.0] - 2026-10-15
+
+### Features
+
+- add opt-in pin-checkout script with post-checkout backstop [#969] (#1007) (2f27821)
+
 ## [2.80.0] - 2026-10-15
 
 ### Features
