@@ -45,7 +45,8 @@ you have here, and the two lists above are its own.
 
 Output a plain list of findings, followed by the terminal verdict line below,
 and nothing else. You are read-only: do not modify files, write anything, or
-run commands — emit only the review and the verdict.
+run commands — emit only the review and the verdict. Review only what is below:
+do not explore the filesystem or retrieve any prior conversation or memory.
 
 Always return your findings on stdout — never rely on a file as your only
 report channel. Do not stop after a preamble, a progress update, or a tool
