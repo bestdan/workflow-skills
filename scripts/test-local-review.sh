@@ -1027,6 +1027,12 @@ check("startup: tailnet bare-IP fallback URL",
 check("startup: tailnet ACL fallback names the same-port tunnel and review.localhost",
       any(ln.startswith("TAILNET: if it does not load") and "ssh -L 8765:127.0.0.1:8765 " in ln
           and "http://review.localhost:8765/a-b-c-d/" in ln for ln in _ts), _ts)
+_ts_v6 = server.startup_lines(8765, "a-b-c-d", 3, "o.json", "fd7a:115c:a1e0::2",
+                              ("[fd7a:115c:a1e0::2]",))
+check("startup: IPv6 listening line brackets the address",
+      any(ln.startswith("TAILNET: also listening on [fd7a:115c:a1e0::2]:8765") for ln in _ts_v6), _ts_v6)
+check("startup: no bare-IP fallback line when the Review UI URL is already the IP",
+      not any("does not resolve" in ln for ln in _ts_v6), _ts_v6)
 check("startup: readiness line is last and on loopback",
       _ts[-1] == "LOCAL_REVIEW_URL=http://127.0.0.1:8765/a-b-c-d/"
       and _plain[-1] == _ts[-1], (_ts, _plain))

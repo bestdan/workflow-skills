@@ -3123,12 +3123,13 @@ def startup_lines(port, token, nfiles, out_path, ts_ip=None, ts_hosts=()):
     if ts_ip:
         lines = [
             f"Review UI: http://{ts_hosts[0]}:{port}/{token}/   ({nfiles} files)  out={out_path}",
-            f"TAILNET: also listening on {ts_ip}:{port}; the Review UI URL opens from any "
+            f"TAILNET: also listening on {ts_hosts[-1]}:{port}; the Review UI URL opens from any "
             "device on your tailnet, no tunnel needed.",
-            f"TAILNET: if the name does not resolve, open http://{ts_hosts[-1]}:{port}/{token}/",
-            f"TAILNET: if it does not load (a tailnet ACL may not allow port {port}), tunnel "
-            f"instead: {tunnel_cmd(port)} (same local port {port}), then open {url}",
         ]
+        if len(ts_hosts) > 1:  # with no MagicDNS name, the Review UI URL is already the IP
+            lines.append(f"TAILNET: if the name does not resolve, open http://{ts_hosts[-1]}:{port}/{token}/")
+        lines.append(f"TAILNET: if it does not load (a tailnet ACL may not allow port {port}), tunnel "
+                     f"instead: {tunnel_cmd(port)} (same local port {port}), then open {url}")
     else:
         lines = [f"Review UI: {url}   ({nfiles} files)  out={out_path}", *ssh_hint(port)]
     return lines + [f"LOCAL_REVIEW_URL=http://127.0.0.1:{port}/{token}/"]
