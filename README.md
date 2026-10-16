@@ -129,7 +129,7 @@ capability matrix.
 
 ### Worktree lifecycle
 
-The plugin registers six hooks. Three of them create and tear down an
+The plugin registers seven hooks. Three of them create and tear down an
 isolated worktree without anything being typed: `WorktreeCreate` puts it where
 [`scripts/worktree-config.sh`](scripts/worktree-config.sh) says worktrees live
 (not inside the repo, which aborts in a repo that versions its own agent
@@ -139,7 +139,9 @@ there. Teardown covers the paths the harness dispatches: an explicit
 `ExitWorktree` and the interactive exit dialog, though an `ExitWorktree`
 remove of a hook-supplied worktree needs `discard_changes: true` —
 [the teardown reference](skills/worktree-teardown/SKILL.md) says what to check
-first. An unattended (`claude -p`)
+first, and a `PreToolUse` guard on `ExitWorktree`
+([`scripts/exit-worktree-guard.sh`](scripts/exit-worktree-guard.sh)) denies the
+flag unless the tree is clean and its branch has landed. An unattended (`claude -p`)
 exit fires `SessionEnd` and nothing else, and subagent worktrees are never
 handed to the hook, so both still need a manual run of the same scripts —
 they are plain scripts you can run by hand either way:

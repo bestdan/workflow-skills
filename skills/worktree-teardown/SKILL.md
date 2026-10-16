@@ -108,6 +108,8 @@ That protection holds only when the hook does the removal, and the tool's answer
    gh pr list --head <branch> --state merged --json headRefOid,baseRefName
    ```
 
+`scripts/exit-worktree-guard.sh`, a `PreToolUse` hook on `ExitWorktree`, runs both checks when the flag arrives on a worktree the create hook stamped for this session, and denies the call with the failing check's reason; `branch-remove.sh --check` is its landed test. A deny is the answer, not an obstacle to rephrase around.
+
 If either check fails, use `action: "keep"`: a kept worktree costs one `worktree-remove.sh` later. A worktree with no stamp, or one another session has also entered (stamp `shared`), is kept by the ownership gate even when both checks pass. After the flag, `git worktree list` from the main checkout is the only confirmation of a removal: a tree still listed after "Exited and removed" was kept by an ownership gate, which exits 0 and so reads as success. A keep that exits non-zero — a dirty tree, a failed write probe — comes back as "Exited worktree but could not remove it — kept at <path>" (2.1.300). Any other refusal — `Worktree has N uncommitted files…` — names real work, so confirm with the user as the tool says.
 
 A hook-supplied worktree is one `EnterWorktree` reported under the root `scripts/worktree-config.sh` prints; the harness's own go under `.claude/worktrees/`. In a worktree the harness made itself the same "could not verify" message means a git call failed, and the flag hands the removal to the harness with nothing checking it; don't pass it there without the user.

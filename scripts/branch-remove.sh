@@ -2,11 +2,17 @@
 # Delete a local branch once a merged PR proves it is spent, and clear the
 # [branch "..."] stanza that outlives it.
 #
-#   scripts/branch-remove.sh <branch> [root]
+#   scripts/branch-remove.sh [--check] <branch> [root]
 #
 #   exit 0   deleted (or the branch was already gone and its stanza was cleared)
 #   exit 3   kept, with the reason on stderr
 #   exit 64  the caller named nothing deletable
+#
+# `--check` runs the merged-PR gate and stops before the delete: exit 0 means the
+# tip landed on the default branch, exit 3 says why not, and exit 64 means there
+# is no such branch (an unborn one included). It skips the
+# checked-out refusal, because its caller (exit-worktree-guard.sh) asks about the
+# branch of the worktree it is about to let go, which is checked out by design.
 #
 # `root` defaults to the repo containing the cwd; a caller that has already torn
 # down a worktree passes its own pinned root, because by then the cwd may be a
@@ -37,6 +43,16 @@ warn() { printf ' .. %s\n' "$1" >&2; }
 cont() { printf '    %s\n' "$1" >&2; }
 err() { printf ' !! %s\n' "$1" >&2; }
 
+check=
+if [ "${1-}" = --check ]; then
+  check=1
+  shift
+fi
+# Under --check nothing is kept or deleted, and the stderr becomes a deny reason
+# a model reads, so the delete advice is left out and the refusal is not "kept".
+kept="kept branch"
+[ -z "$check" ] || kept="branch"
+fix() { [ -n "$check" ] || cont "$1"; }
 branch="${1-}"
 root="${2-}"
 
@@ -96,7 +112,7 @@ if ! git -C "$root" show-ref --quiet --verify "refs/heads/$branch"; then
   # `git branch -d` that took the ref and could not take the stanza. Clearing it
   # is the entire remaining job, so do that rather than reporting nothing to
   # delete and leaving the cruft in place.
-  if has_stanza "$branch"; then
+  if [ -z "$check" ] && has_stanza "$branch"; then
     if git -C "$root" config --remove-section "branch.$branch" 2>/dev/null; then
       say "branch $branch was already gone — cleared the [branch] stanza it left"
       exit 0
@@ -119,7 +135,7 @@ fi
 held=$(git -C "$root" worktree list --porcelain | awk -v b="branch refs/heads/$branch" '
   /^worktree / { path = substr($0, 10) }
   $0 == b { print path; exit }')
-if [ -n "$held" ]; then
+if [ -n "$held" ] && [ -z "$check" ]; then
   warn "kept branch $branch — it is checked out at $held,"
   cont "so nothing can delete it. Switch away, or remove that worktree, first."
   exit 3
@@ -158,13 +174,14 @@ gh_rc=$?
 # `length` query could, would report a definite "not merged" as a gh that could
 # not be reached.
 if [ "$gh_rc" -ne 0 ]; then
-  warn "kept branch $branch — could not reach gh to check whether it"
-  cont "merged (no network sandboxed, or no auth). Delete it yourself once you know:"
-  cont "  git -C $root branch -D $branch"
+  warn "$kept $branch — could not reach gh to check whether it"
+  cont "merged (no network sandboxed, or no auth)."
+  fix "Delete it yourself once you know:"
+  fix "  git -C $root branch -D $branch"
   exit 3
 fi
 if [ -z "$merged" ]; then
-  warn "kept branch $branch — no merged PR has it as head"
+  warn "$kept $branch — no merged PR has it as head"
   exit 3
 fi
 
@@ -198,7 +215,7 @@ if [ -z "$default" ]; then
   default=$(cd "$root" 2>/dev/null && gh repo view --json defaultBranchRef --jq .defaultBranchRef.name 2>/dev/null)
 fi
 if [ -z "$default" ]; then
-  warn "kept branch $branch — could not tell which branch is the"
+  warn "$kept $branch — could not tell which branch is the"
   cont "default, and without it a PR merged into a parent branch reads the same as one"
   cont "merged into the default. Point the ref at it and retry:"
   cont "  git -C $root remote set-head origin -a"
@@ -229,10 +246,10 @@ if ! grep -Fqx "$tip" <<<"$oids"; then
   # wait is the answer.
   parent=$(awk -v d="$default" -v t="$tip" '$2 != d && $1 == t { print $2; exit }' <<<"$merged")
   if [ -n "$parent" ]; then
-    warn "kept branch $branch — its PR merged into $parent, not"
+    warn "$kept $branch — its PR merged into $parent, not"
     cont "$default (per $default_src), so the work has not reached $default."
-    cont "Once $parent lands:"
-    cont "  git -C $root branch -D $branch"
+    fix "Once $parent lands:"
+    fix "  git -C $root branch -D $branch"
     exit 3
   fi
   # The tip differs from every head a default-base PR merged, and this gate
@@ -246,15 +263,20 @@ if ! grep -Fqx "$tip" <<<"$oids"; then
   # other two shapes.
   merged_heads=$(paste -sd' ' - <<<"$oids")
   merged_heads=${merged_heads:-none into $default}
-  warn "kept branch $branch — a PR with this name merged, but at a"
+  warn "$kept $branch — a PR with this name merged, but at a"
   cont "different commit than this tip: the branch gained commits after the merge,"
   cont "the PR was rebased or updated elsewhere, or the name was reused. Either way"
   cont "-D could discard commits no PR merged."
   cont "  merged head(s): $merged_heads"
   cont "  this tip:       $tip"
-  cont "Check, then:"
-  cont "  git -C $root branch -D $branch"
+  fix "Check, then:"
+  fix "  git -C $root branch -D $branch"
   exit 3
+fi
+
+if [ -n "$check" ]; then
+  say "branch $branch landed — its tip is the head of a PR merged into $default"
+  exit 0
 fi
 
 # Trust the ref, not the exit status. The two disagree in the direction that
