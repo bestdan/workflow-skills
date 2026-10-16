@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.87.0] - 2026-10-16
+
+### Features
+
+- serve on the tailnet over Tailscale SSH [N/A] (#1016) (63ec3bb)
+
 ## [2.86.0] - 2026-10-15
 
 ### Features
