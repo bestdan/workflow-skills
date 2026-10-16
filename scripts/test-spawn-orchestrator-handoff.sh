@@ -159,8 +159,10 @@ CLEOF
   if [ -z "$(ho_note paused)" ]; then ok "supervisor: a paused exit writes no handoff"; else bad "supervisor: a paused exit writes no handoff"; fi
   # A wake that wrote `status: done` but died before supervisor-check: the next
   # wake's gate tears the job down before claude runs, and must still write it.
-  ho_wake gate continuing done
+  # The detail left by an earlier wake is not this finished run's cause.
+  HO_STALE_DETAIL='context exhausted' ho_wake gate continuing done
   if [ -n "$(ho_note gate)" ]; then ok "supervisor-gate: a done status found at wake start writes the handoff"; else bad "supervisor-gate: a done status found at wake start writes the handoff"; fi
+  lack "supervisor-gate: an earlier wake's detail is not shown as the cause" 'context exhausted' "$(cat "$(ho_note gate)" 2>/dev/null)"
 
   # launch resolves the dir by itself: <worktree root>/<main checkout name>/.handoffs,
   # even when the run's workdir is a linked worktree with a different name.

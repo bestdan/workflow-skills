@@ -2930,7 +2930,12 @@ write_handoff() {
   run_id="$(printf '%s' "$run_id" | tr -c 'A-Za-z0-9._-' '-')"
   source="$(_run_front_field "$dir" work_source | sed -e 's/[[:space:]]#.*$//')"
   base="$(_run_front_field "$dir" base_branch | sed -e 's/[[:space:]]#.*$//')"
-  detail="$(_run_front_field "$dir" exit_reason_detail)"
+  # The detail belongs to whichever exit_reason was written with it. The gate
+  # can write a handoff for a run whose last declaration was an earlier wake's,
+  # and that wake's detail is not this exit's cause.
+  detail=""
+  [ "$(_run_front_field "$dir" exit_reason | sed -e 's/[[:space:]]#.*$//')" = "$reason" ] \
+    && detail="$(_run_front_field "$dir" exit_reason_detail)"
   # pause_reason survives a --resume, so for a finished run it can name an old
   # rate-window pause; only a halt reads it.
   [ -n "$detail" ] || [ "$reason" != systemic ] || detail="$(_run_front_field "$dir" pause_reason)"
@@ -3004,16 +3009,17 @@ write_handoff() {
     rm -f "$tmp"
     die "handoff: failed to write $dest"
   }
-  # One handoff per run: a later terminal exit (a resumed run that ends again)
-  # supersedes the earlier note instead of leaving two that disagree.
-  local old
-  for old in "$out"/*-auto-pilot-"$run_id".md; do
-    [ -f "$old" ] && [ "$old" != "$dest" ] && rm -f "$old"
-  done
   mv "$tmp" "$dest" || {
     rm -f "$tmp"
     die "handoff: failed to write $dest"
   }
+  # One handoff per run: a later terminal exit (a resumed run that ends again)
+  # supersedes the earlier note instead of leaving two that disagree. Only
+  # after the new one is in place, so a failed write keeps the old one.
+  local old
+  for old in "$out"/*-auto-pilot-"$run_id".md; do
+    [ -f "$old" ] && [ "$old" != "$dest" ] && rm -f "$old"
+  done
   echo "spawn-orchestrator: handoff written: $dest"
 }
 
