@@ -118,7 +118,8 @@ host `review.localhost` (e.g. `http://review.localhost:<port>/<token>/`).
 resolve any `*.localhost` name straight to loopback with no DNS lookup
 (RFC 6761), so it opens exactly like the 127.0.0.1 form but reads far better.
 If the user's browser can't resolve it, fall back to the `LOCAL_REVIEW_URL`
-(127.0.0.1) form — the two are equivalent.
+(127.0.0.1) form — the two are equivalent. That fallback holds only off the
+tailnet; with a `TAILNET:` line, use the fallbacks below instead.
 
 Then open `$review_url` for the user:
 
@@ -129,7 +130,24 @@ Then open `$review_url` for the user:
 - Without browser tooling: print `$review_url` and ask the user to open it.
   The tool is fully usable by hand.
 
-**Over SSH, the URL is dead until the user opens a tunnel.** The server binds
+**Over SSH via Tailscale, the URL just opens — when the log has `TAILNET:`
+lines.** When `$SSH_CONNECTION` shows the session arrived on an address
+`tailscale status` lists as this host's own, the server also listens on that
+one address (never `0.0.0.0`), and the `Review UI:` line carries the MagicDNS
+name (`http://<host>.<tailnet>.ts.net:<port>/<token>/`) instead of
+`review.localhost`. Print the `Review UI:` URL as usual and skip the tunnel.
+If the user says it doesn't load, give them the fallback lines verbatim (a
+bare-IP URL, then a tunnel for a tailnet ACL that blocks the port):
+
+```bash
+grep '^TAILNET: ' <scratch>/lr_server.log
+```
+
+No `TAILNET:` lines means the tailnet listener did not start (the log says
+why) and the `SSH:` tunnel flow below applies. `LOCAL_REVIEW_URL=` stays on
+127.0.0.1 for your own calls. `--no-tailnet` keeps the server loopback-only.
+
+**Otherwise over SSH, the URL is dead until the user opens a tunnel.** The server binds
 loopback on the machine it runs on; in an SSH session that is the remote
 host, and the reviewer's browser is on their own machine. The server detects
 `$SSH_CONNECTION` / `$SSH_TTY` and writes `SSH:` lines to the log before

@@ -938,6 +938,129 @@ tty_env = dict(base_env, SSH_TTY="/dev/pts/3")
 _, out_t = run_startup_output(tty_env)
 check("ssh hint: printed under SSH_TTY alone", "SSH:" in out_t, out_t)
 
+# --- tailnet: SSH over Tailscale binds the tailnet address too ---------------
+def _tailnet_ip_for(conn):
+    saved = os.environ.get("SSH_CONNECTION")
+    try:
+        if conn is None:
+            os.environ.pop("SSH_CONNECTION", None)
+        else:
+            os.environ["SSH_CONNECTION"] = conn
+        return server.tailnet_ip()
+    finally:
+        if saved is None:
+            os.environ.pop("SSH_CONNECTION", None)
+        else:
+            os.environ["SSH_CONNECTION"] = saved
+
+check("tailnet_ip: tailnet server address is returned",
+      _tailnet_ip_for("100.113.19.78 5000 100.121.7.78 22") == "100.121.7.78")
+check("tailnet_ip: tailnet IPv6 server address is returned",
+      _tailnet_ip_for("fd7a:115c:a1e0::1 5000 fd7a:115c:a1e0::2 22") == "fd7a:115c:a1e0::2")
+check("tailnet_ip: LAN SSH is not tailnet", _tailnet_ip_for("10.0.0.2 5000 10.0.0.1 22") is None)
+check("tailnet_ip: no SSH is not tailnet", _tailnet_ip_for(None) is None)
+check("tailnet_ip: malformed SSH_CONNECTION is not tailnet", _tailnet_ip_for("garbage") is None)
+
+# A CGNAT address Tailscale does not list as this host's own gets no listener:
+# the launch falls back to the tunnel hint and still prints the readiness line.
+# 100.64.0.1 is no host's Tailscale IP here, and with no tailscale CLI (CI) the
+# check fails closed the same way.
+_, out_tf = run_startup_output(dict(base_env, SSH_CONNECTION="100.64.0.2 5000 100.64.0.1 22"))
+check("tailnet: unowned CGNAT address falls back to the SSH tunnel hint",
+      "is not this host's Tailscale address" in out_tf and "SSH:" in out_tf
+      and "TAILNET:" not in out_tf and "LOCAL_REVIEW_URL=" in out_tf, out_tf)
+
+
+def _tailnet_self_with(stdout=None, raises=None, ip="100.121.7.78"):
+    saved = server.subprocess.run
+
+    def fake(*a, **k):
+        if raises:
+            raise raises
+        return _subprocess.CompletedProcess(a[0], 0, stdout=stdout, stderr="")
+    server.subprocess.run = fake
+    try:
+        return server.tailnet_self(ip)
+    finally:
+        server.subprocess.run = saved
+
+_ts_json = json.dumps({"Self": {"DNSName": "box.tail1.ts.net.",
+                                "TailscaleIPs": ["100.121.7.78", "fd7a:115c:a1e0::be38:74f"]}})
+check("tailnet_self: owned address yields MagicDNS, short name, bare IP",
+      _tailnet_self_with(_ts_json) == ["box.tail1.ts.net", "box", "100.121.7.78"])
+check("tailnet_self: owned IPv6 address is bracketed",
+      _tailnet_self_with(_ts_json, ip="fd7a:115c:a1e0::be38:74f")
+      == ["box.tail1.ts.net", "box", "[fd7a:115c:a1e0::be38:74f]"])
+check("tailnet_self: address Tailscale does not list is refused",
+      _tailnet_self_with(_ts_json, ip="100.64.0.1") is None)
+check("tailnet_self: tailscale CLI missing is refused",
+      _tailnet_self_with(raises=FileNotFoundError("tailscale")) is None)
+check("tailnet_self: tailscale timing out is refused",
+      _tailnet_self_with(raises=_subprocess.TimeoutExpired("tailscale", 3)) is None)
+check("tailnet_self: unparseable status is refused", _tailnet_self_with("not json") is None)
+check("tailnet_self: no DNS name still yields the bare IP",
+      _tailnet_self_with(json.dumps({"Self": {"DNSName": "", "TailscaleIPs": ["100.121.7.78"]}}))
+      == ["100.121.7.78"])
+
+# A bind that fails returns None (with a stderr note) rather than raising.
+check("tailnet: failed bind returns None", server.bind_tailnet("192.0.2.1", 0) is None)
+
+# Startup lines: what main() prints, tested in-process for both shapes.
+_saved_ssh = os.environ.get("SSH_CONNECTION")
+os.environ["SSH_CONNECTION"] = "100.113.19.78 5000 100.121.7.78 22"
+try:
+    _ts = server.startup_lines(8765, "a-b-c-d", 3, "o.json", "100.121.7.78",
+                               ("box.tail1.ts.net", "box", "100.121.7.78"))
+    _plain = server.startup_lines(8765, "a-b-c-d", 3, "o.json")
+finally:
+    if _saved_ssh is None:
+        os.environ.pop("SSH_CONNECTION", None)
+    else:
+        os.environ["SSH_CONNECTION"] = _saved_ssh
+check("startup: tailnet Review UI uses the MagicDNS name",
+      _ts[0].startswith("Review UI: http://box.tail1.ts.net:8765/a-b-c-d/"), _ts)
+check("startup: tailnet bound prints TAILNET lines and no SSH hint",
+      any(ln.startswith("TAILNET: also listening on 100.121.7.78:8765") for ln in _ts)
+      and not any(ln.startswith("SSH:") for ln in _ts), _ts)
+check("startup: tailnet bare-IP fallback URL",
+      "TAILNET: if the name does not resolve, open http://100.121.7.78:8765/a-b-c-d/" in _ts, _ts)
+check("startup: tailnet ACL fallback names the same-port tunnel and review.localhost",
+      any(ln.startswith("TAILNET: if it does not load") and "ssh -L 8765:127.0.0.1:8765 " in ln
+          and "http://review.localhost:8765/a-b-c-d/" in ln for ln in _ts), _ts)
+_ts_v6 = server.startup_lines(8765, "a-b-c-d", 3, "o.json", "fd7a:115c:a1e0::2",
+                              ("[fd7a:115c:a1e0::2]",))
+check("startup: IPv6 listening line brackets the address",
+      any(ln.startswith("TAILNET: also listening on [fd7a:115c:a1e0::2]:8765") for ln in _ts_v6), _ts_v6)
+check("startup: no bare-IP fallback line when the Review UI URL is already the IP",
+      not any("does not resolve" in ln for ln in _ts_v6), _ts_v6)
+check("startup: readiness line is last and on loopback",
+      _ts[-1] == "LOCAL_REVIEW_URL=http://127.0.0.1:8765/a-b-c-d/"
+      and _plain[-1] == _ts[-1], (_ts, _plain))
+check("startup: unbound over SSH keeps review.localhost and the SSH hint",
+      _plain[0].startswith("Review UI: http://review.localhost:8765/a-b-c-d/")
+      and any(ln.startswith("SSH:") for ln in _plain)
+      and not any(ln.startswith("TAILNET:") for ln in _plain), _plain)
+
+
+class _OriginProbe:
+    def __init__(self, origin):
+        self.headers = {"Origin": origin}
+
+
+_saved_port, _saved_hosts = server.Handler.port, server.Handler.tailnet_hosts
+try:
+    server.Handler.port = 8765
+    server.Handler.tailnet_hosts = ("box.tail1.ts.net", "box", "100.64.0.1")
+    for o in ("http://box.tail1.ts.net:8765", "http://box:8765", "http://100.64.0.1:8765"):
+        check(f"origin: tailnet host allowed ({o})", server.Handler._origin_ok(_OriginProbe(o)))
+    check("origin: tailnet host on another port rejected",
+          not server.Handler._origin_ok(_OriginProbe("http://box.tail1.ts.net:9000")))
+    server.Handler.tailnet_hosts = ()
+    check("origin: tailnet host rejected when no tailnet listener",
+          not server.Handler._origin_ok(_OriginProbe("http://box.tail1.ts.net:8765")))
+finally:
+    server.Handler.port, server.Handler.tailnet_hosts = _saved_port, _saved_hosts
+
 # -- full round trip: GET /, POST /submit, atomic $OUT, --once exits --------
 # (--out with --once: one-shot mode)
 out_fd, out_path = _tempfile.mkstemp(suffix=".json")
