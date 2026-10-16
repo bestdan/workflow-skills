@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.88.0] - 2026-10-16
+
+### Features
+
+- deny discard_changes unless the tree is clean and landed [#980] (#994) (bda85de)
+
 ## [2.87.1] - 2026-10-16
 
 ### Fixes
