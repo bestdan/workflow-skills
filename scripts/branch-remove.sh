@@ -9,7 +9,8 @@
 #   exit 64  the caller named nothing deletable
 #
 # `--check` runs the merged-PR gate and stops before the delete: exit 0 means the
-# tip landed on the default branch, exit 3 says why not. It skips the
+# tip landed on the default branch, exit 3 says why not, and exit 64 means there
+# is no such branch (an unborn one included). It skips the
 # checked-out refusal, because its caller (exit-worktree-guard.sh) asks about the
 # branch of the worktree it is about to let go, which is checked out by design.
 #
