@@ -34,7 +34,8 @@
 # So the gate here is PR state, and the tip has to match a head some merged PR
 # actually merged INTO THE DEFAULT BRANCH — a name is not an identity, and a
 # merge into the wrong base is not a merge at all for the purpose of deleting.
-# See the notes on each step below.
+# The one exception needs no PR: a tip already on origin's default branch has
+# nothing left to lose. See the notes on each step below.
 
 set -uo pipefail
 
@@ -141,9 +142,97 @@ if [ -n "$held" ] && [ -z "$check" ]; then
   exit 3
 fi
 
+# The end of every path that proves the branch spent: report under --check, else
+# delete and clear the stanza. `$1` finishes "landed — …", `$2` finishes
+# "deleted branch <b> — …", so each proof names itself in both messages.
+finish() { # check-reason delete-reason
+  if [ -n "$check" ]; then
+    say "branch $branch landed — $1"
+    exit 0
+  fi
+
+  # Trust the ref, not the exit status. The two disagree in the direction that
+  # matters: a sandboxed delete removes refs/heads/<branch> and still returns 0
+  # after failing to lock .git/config (see the stanza note below), so a 0 here
+  # does not prove the branch is gone. A refusal is the honest case — it exits
+  # nonzero and leaves the ref — so asking whether the ref survived answers both,
+  # and is the only question that answers the first.
+  git -C "$root" branch -D -- "$branch" >/dev/null 2>&1
+  if git -C "$root" show-ref --quiet --verify "refs/heads/$branch"; then
+    warn "kept branch $branch — $2, but the delete"
+    cont "did not take:"
+    cont "  git -C $root branch -D $branch"
+    exit 3
+  fi
+  say "deleted branch $branch — $2"
+
+  # Repair code for one condition, and it looks dead until you know which. `git
+  # branch -D` removes the [branch "..."] stanza itself, so with a writable
+  # config there is nothing here to do and the check below finds nothing. The
+  # exception is the sandbox: deleting the stanza needs a .git/config lock, the
+  # harness denies exactly that write, and git downgrades the failure to a
+  # warning and still exits 0 — leaving the ref gone and the stanza behind. That
+  # is the state this clears, and the whole reason bare `git branch -d`
+  # accumulates residue.
+  #
+  # The deny is anchored on the session's own project repo, not on every
+  # .git/config, so against some other repo the write simply goes through. Hence
+  # attempted rather than assumed to fail. When it does fail, say so and move on:
+  # a stale stanza is inert cruft whose only effect is that a future branch of
+  # the same name inherits its upstream, which is not worth failing a completed
+  # delete over or asking for an unsandboxed re-run.
+  #
+  # has_stanza, not a prefix match and not the removal's exit code — see the
+  # note on it above.
+  if has_stanza "$branch" \
+    && ! git -C "$root" config --remove-section "branch.$branch" 2>/dev/null; then
+    warn "left [branch \"$branch\"] in .git/config — the sandbox denies"
+    cont "that write. Harmless; clear it unsandboxed if you like:"
+    cont "  git -C $root config --remove-section branch.$branch"
+  fi
+  exit 0
+}
+
+# Which branch is the default: origin/HEAD first because it is local and free.
+# The ref is written at clone time and never refreshed, so it can name a branch
+# that is no longer the default. The unsafe case is a default SWITCHED to another
+# live branch: the stale name still matches PRs merged into it, so the PR gate
+# below can delete a branch whose work never reached the current default. Nothing
+# local detects that — asking gh on every delete would, at the cost of a second
+# network call. Hence the refusals below name the SOURCE of the default, not just
+# the name, so a wrong answer is diagnosable from the message.
+#
+# A RENAMED default is deliberately not characterised here. Which way it falls
+# depends on whether GitHub rewrites baseRefName on already-merged PRs at rename
+# time — match and the gate deletes, mismatch and it refuses everything,
+# silently. GitHub documents retargeting OPEN pull requests and says nothing
+# about merged ones, so that is unverified. Do not write an outcome here without
+# testing it first.
+tip=$(git -C "$root" rev-parse --verify --quiet "refs/heads/$branch")
+default_src="origin/HEAD"
+default=$(git -C "$root" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null)
+default=${default#origin/}
+
+# A tip already on the remote default branch carries no commit the default
+# lacks, so deleting it cannot lose work, and no PR is needed to prove that. It
+# is the normal end of a scratch worktree: a branch made from main that never
+# took a commit, and so never had a PR to find (#1035). Ancestry is trusted here
+# only in this direction. The squash-merge problem in the header is ancestry
+# calling a landed branch UNMERGED; a tip that IS an ancestor of the default is
+# on it, whatever the merge style.
+#
+# The remote-tracking ref, not the local default: a local main can hold commits
+# that were never pushed, and "on main" should mean the work is somewhere a
+# deleted worktree cannot take with it. A stale remote-tracking ref only errs
+# toward keeping.
+if [ -n "$default" ] && [ -n "$tip" ] \
+  && git -C "$root" merge-base --is-ancestor "$tip" "refs/remotes/origin/$default" 2>/dev/null; then
+  finish "its tip is already on origin/$default" "its tip is already on origin/$default"
+fi
+
 # Merge state comes from the PR, never from ancestry, for the reason in the
 # header: a squash-merging repo makes `--is-ancestor` call every merged branch
-# unmerged. That is also why the delete below is -D and not -d — -d answers the
+# unmerged. That is also why the delete is -D and not -d — -d answers the
 # question this gate exists to replace, and answers it wrongly.
 #
 # The lookup is the only network call here, and it is allowed to fail. Sandboxed
@@ -185,31 +274,12 @@ if [ -z "$merged" ]; then
   exit 3
 fi
 
-# Which branch is the default is only asked once there is something to compare it
-# against, so the ordinary unmerged path still costs exactly one network call and
-# never reaches the gh fallback below. This takes a `root` and is documented
-# against any repo, so it cannot assume `main`.
-#
-# origin/HEAD first because it is local and free — and the pr-list call above
-# already proved the network is up, so the fallback is worth taking only when the
-# local answer is missing, never in preference to it. The ref is written at clone
-# time and never refreshed, so it can name a branch that is no longer the
-# default. The unsafe case is a default SWITCHED to another live branch: the
-# stale name still matches PRs merged into it, so the gate can delete a branch
-# whose work never reached the current default. Nothing local detects that —
-# asking gh on every delete would, at the cost of the second network call this
-# lookup is ordered to avoid. Hence the refusals below name the SOURCE of the
-# default, not just the name, so a wrong answer is diagnosable from the message.
-#
-# A RENAMED default is deliberately not characterised here. Which way it falls
-# depends on whether GitHub rewrites baseRefName on already-merged PRs at rename
-# time — match and the gate deletes, mismatch and it refuses everything,
-# silently. GitHub documents retargeting OPEN pull requests and says nothing
-# about merged ones, so that is unverified. Do not write an outcome here without
-# testing it first.
-default_src="origin/HEAD"
-default=$(git -C "$root" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null)
-default=${default#origin/}
+# The gh fallback for the default is only asked once there is something to
+# compare it against, so the ordinary unmerged path still costs exactly one
+# network call. This takes a `root` and is documented against any repo, so it
+# cannot assume `main` — and the pr-list call above already proved the network
+# is up, so the fallback is worth taking only when origin/HEAD is missing, never
+# in preference to it.
 if [ -z "$default" ]; then
   default_src="gh repo view"
   default=$(cd "$root" 2>/dev/null && gh repo view --json defaultBranchRef --jq .defaultBranchRef.name 2>/dev/null)
@@ -233,7 +303,6 @@ fi
 # `sh` recipe it was ported from did not. A reader that exits early — `grep -q`
 # on a match, or an awk with `exit` — kills the writer with SIGPIPE, and pipefail
 # then turns a SUCCESSFUL match into status 141, which reads as "not found".
-tip=$(git -C "$root" rev-parse --verify --quiet "refs/heads/$branch")
 oids=$(awk -v d="$default" '$2 == d { print $1 }' <<<"$merged")
 if ! grep -Fqx "$tip" <<<"$oids"; then
   # A merged PR whose head is this exact tip, merged somewhere other than the
@@ -274,46 +343,4 @@ if ! grep -Fqx "$tip" <<<"$oids"; then
   exit 3
 fi
 
-if [ -n "$check" ]; then
-  say "branch $branch landed — its tip is the head of a PR merged into $default"
-  exit 0
-fi
-
-# Trust the ref, not the exit status. The two disagree in the direction that
-# matters: a sandboxed delete removes refs/heads/<branch> and still returns 0
-# after failing to lock .git/config (see the stanza note below), so a 0 here does
-# not prove the branch is gone. A refusal is the honest case — it exits nonzero
-# and leaves the ref — so asking whether the ref survived answers both, and is
-# the only question that answers the first.
-git -C "$root" branch -D -- "$branch" >/dev/null 2>&1
-if git -C "$root" show-ref --quiet --verify "refs/heads/$branch"; then
-  warn "kept branch $branch — its PR merged, but the delete"
-  cont "did not take:"
-  cont "  git -C $root branch -D $branch"
-  exit 3
-fi
-say "deleted branch $branch — its PR merged"
-
-# Repair code for one condition, and it looks dead until you know which. `git
-# branch -D` removes the [branch "..."] stanza itself, so with a writable config
-# there is nothing here to do and the check below finds nothing. The exception is
-# the sandbox: deleting the stanza needs a .git/config lock, the harness denies
-# exactly that write, and git downgrades the failure to a warning and still exits
-# 0 — leaving the ref gone and the stanza behind. That is the state this clears,
-# and the whole reason bare `git branch -d` accumulates residue.
-#
-# The deny is anchored on the session's own project repo, not on every
-# .git/config, so against some other repo the write simply goes through. Hence
-# attempted rather than assumed to fail. When it does fail, say so and move on: a
-# stale stanza is inert cruft whose only effect is that a future branch of the
-# same name inherits its upstream, which is not worth failing a completed delete
-# over or asking for an unsandboxed re-run.
-#
-# has_stanza, not a prefix match and not the removal's exit code — see the note
-# on it above.
-if has_stanza "$branch" \
-  && ! git -C "$root" config --remove-section "branch.$branch" 2>/dev/null; then
-  warn "left [branch \"$branch\"] in .git/config — the sandbox denies"
-  cont "that write. Harmless; clear it unsandboxed if you like:"
-  cont "  git -C $root config --remove-section branch.$branch"
-fi
+finish "its tip is the head of a PR merged into $default" "its PR merged"

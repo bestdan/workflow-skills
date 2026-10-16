@@ -71,7 +71,7 @@ Teardown's real residue is the merged branch, and deleting it by hand costs appr
 
 A worktree someone already `rm -rf`'d has no checkout left to read, so the branch comes from its surviving `git worktree list --porcelain` entry instead. That entry is erased by the script's own prune, so this is the only window it can be read in — and it is the case that most needs the branch tidied, because whoever deleted the directory by hand is not coming back to run `git branch -D`.
 
-The gate is PR state, not ancestry: a squash-merging repo makes `--is-ancestor` call every merged branch unmerged, which is also why the delete is `-D` — `-d` answers a question the gate cannot depend on. `-d` deletes while `origin/<branch>` still holds the merged tip and refuses once that ref is pruned, so the same merged branch succeeds or fails by how recently a fetch ran.
+The gate is PR state, not ancestry: a squash-merging repo makes `--is-ancestor` call every merged branch unmerged, which is also why the delete is `-D` — `-d` answers a question the gate cannot depend on. Ancestry is trusted in the other direction only: a tip that is already an ancestor of `origin/<default>` carries nothing to lose, so it is deleted with no PR lookup. That is a scratch branch that never took a commit (#1035). The remote-tracking ref, not the local default, because a local `main` can hold unpushed commits. `-d` deletes while `origin/<branch>` still holds the merged tip and refuses once that ref is pruned, so the same merged branch succeeds or fails by how recently a fetch ran.
 
 ### `scripts/branch-remove.sh` is the same gate with no worktree attached
 
@@ -102,7 +102,7 @@ The flag does not discard tracked or untracked work by itself. It skips the harn
 That protection holds only when the hook does the removal, and the tool's answer cannot show whether it did — it reports "removed" for a worktree the ownership gates above kept. So check before passing the flag, and pass it only in answer to this message:
 
 1. `git status --porcelain` in the worktree prints nothing. It does not list ignored files: if `git status --porcelain --ignored` shows one you still need, copy it out or use `keep`.
-2. The branch's tip, `git rev-parse HEAD`, is the `headRefOid` of a merged PR whose `baseRefName` is the default branch — the same gate `branch-remove.sh` applies:
+2. The branch's tip, `git rev-parse HEAD`, is the `headRefOid` of a merged PR whose `baseRefName` is the default branch — the same gate `branch-remove.sh` applies — or is already on `origin/<default>` (`git merge-base --is-ancestor HEAD origin/<default>`), as a scratch branch with no commits is:
 
    ```bash
    gh pr list --head <branch> --state merged --json headRefOid,baseRefName
