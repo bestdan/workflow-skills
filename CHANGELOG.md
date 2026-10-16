@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.87.1] - 2026-10-16
+
+### Fixes
+
+- feed copilot its input as the whole prompt [#1032] (#1033) (8ca07be)
+
 ## [2.87.0] - 2026-10-16
 
 ### Features
