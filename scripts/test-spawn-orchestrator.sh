@@ -32,6 +32,7 @@ parts=(
   restack
   alarm
   reserve
+  handoff
 )
 
 # Same two-arm fallback as the prelude's BASE, and for the same reason: a

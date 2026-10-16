@@ -15,7 +15,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 1
 
-pattern='overnight|tonight|3am|goes to bed|user wakes to|whole night|morning report|morning summary|multi-night|light nights'
+pattern='overnight|tonight|3am|goes to bed|user wakes to|whole night|morning report|morning summary|morning handoff|next morning|multi-night|light nights'
 
 # grep exits 1 for "no match" and 2 for any read error — including a scanned
 # path that was renamed away, which must fail rather than pass on no input.
