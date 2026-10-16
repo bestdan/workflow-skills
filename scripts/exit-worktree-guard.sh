@@ -103,7 +103,7 @@ fi
 
 root=$(dirname -- "$common")
 if ! why=$("$script_dir/branch-remove.sh" --check "$branch" "$root" 2>&1 >/dev/null); then
-  why=$(tr '\n' ' ' <<<"$why" | sed 's/  */ /g; s/^ *//; s/ *$//')
-  deny "discard_changes refused: branch $branch has not landed on the default branch. branch-remove.sh --check: $why $keep"
+  why=$(tr '\n' ' ' <<<"$why" | sed 's/  */ /g; s/^ *//; s/ *$//; s/\.$//')
+  deny "discard_changes refused: branch $branch could not be shown to have landed on the default branch. branch-remove.sh --check: $why. $keep"
 fi
 exit 0

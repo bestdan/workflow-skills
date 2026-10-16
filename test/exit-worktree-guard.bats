@@ -144,7 +144,7 @@ assert_denied() {
   gh_says 0 ""
   run_guard "$dir" s1 "$DISCARD"
   assert_denied
-  assert_output --partial "tester/unmerged has not landed"
+  assert_output --partial "tester/unmerged could not be shown to have landed"
   assert_output --partial "no merged PR has it as head"
 }
 
@@ -153,6 +153,9 @@ assert_denied() {
   run_guard "$dir" s1 "$DISCARD"
   assert_denied
   assert_output --partial "could not reach gh"
+  # The reason is read by a model, so it must not carry the delete advice.
+  refute_output --partial "branch -D"
+  refute_output --partial "kept branch"
 }
 
 @test "a PR merged into a parent branch is not landed" {
@@ -162,6 +165,8 @@ assert_denied() {
   run_guard "$dir" s1 "$DISCARD"
   assert_denied
   assert_output --partial "merged into parent-branch"
+  refute_output --partial "branch -D"
+  refute_output --partial "kept branch"
 }
 
 @test "a clean tree whose tip merged into the default passes silently" {

@@ -47,6 +47,11 @@ if [ "${1-}" = --check ]; then
   check=1
   shift
 fi
+# Under --check nothing is kept or deleted, and the stderr becomes a deny reason
+# a model reads, so the delete advice is left out and the refusal is not "kept".
+kept="kept branch"
+[ -z "$check" ] || kept="branch"
+fix() { [ -n "$check" ] || cont "$1"; }
 branch="${1-}"
 root="${2-}"
 
@@ -168,13 +173,14 @@ gh_rc=$?
 # `length` query could, would report a definite "not merged" as a gh that could
 # not be reached.
 if [ "$gh_rc" -ne 0 ]; then
-  warn "kept branch $branch — could not reach gh to check whether it"
-  cont "merged (no network sandboxed, or no auth). Delete it yourself once you know:"
-  cont "  git -C $root branch -D $branch"
+  warn "$kept $branch — could not reach gh to check whether it"
+  cont "merged (no network sandboxed, or no auth)."
+  fix "Delete it yourself once you know:"
+  fix "  git -C $root branch -D $branch"
   exit 3
 fi
 if [ -z "$merged" ]; then
-  warn "kept branch $branch — no merged PR has it as head"
+  warn "$kept $branch — no merged PR has it as head"
   exit 3
 fi
 
@@ -208,7 +214,7 @@ if [ -z "$default" ]; then
   default=$(cd "$root" 2>/dev/null && gh repo view --json defaultBranchRef --jq .defaultBranchRef.name 2>/dev/null)
 fi
 if [ -z "$default" ]; then
-  warn "kept branch $branch — could not tell which branch is the"
+  warn "$kept $branch — could not tell which branch is the"
   cont "default, and without it a PR merged into a parent branch reads the same as one"
   cont "merged into the default. Point the ref at it and retry:"
   cont "  git -C $root remote set-head origin -a"
@@ -239,10 +245,10 @@ if ! grep -Fqx "$tip" <<<"$oids"; then
   # wait is the answer.
   parent=$(awk -v d="$default" -v t="$tip" '$2 != d && $1 == t { print $2; exit }' <<<"$merged")
   if [ -n "$parent" ]; then
-    warn "kept branch $branch — its PR merged into $parent, not"
+    warn "$kept $branch — its PR merged into $parent, not"
     cont "$default (per $default_src), so the work has not reached $default."
-    cont "Once $parent lands:"
-    cont "  git -C $root branch -D $branch"
+    fix "Once $parent lands:"
+    fix "  git -C $root branch -D $branch"
     exit 3
   fi
   # The tip differs from every head a default-base PR merged, and this gate
@@ -256,14 +262,14 @@ if ! grep -Fqx "$tip" <<<"$oids"; then
   # other two shapes.
   merged_heads=$(paste -sd' ' - <<<"$oids")
   merged_heads=${merged_heads:-none into $default}
-  warn "kept branch $branch — a PR with this name merged, but at a"
+  warn "$kept $branch — a PR with this name merged, but at a"
   cont "different commit than this tip: the branch gained commits after the merge,"
   cont "the PR was rebased or updated elsewhere, or the name was reused. Either way"
   cont "-D could discard commits no PR merged."
   cont "  merged head(s): $merged_heads"
   cont "  this tip:       $tip"
-  cont "Check, then:"
-  cont "  git -C $root branch -D $branch"
+  fix "Check, then:"
+  fix "  git -C $root branch -D $branch"
   exit 3
 fi
 

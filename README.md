@@ -129,7 +129,7 @@ capability matrix.
 
 ### Worktree lifecycle
 
-The plugin registers six hooks. Three of them create and tear down an
+The plugin registers seven hooks. Three of them create and tear down an
 isolated worktree without anything being typed: `WorktreeCreate` puts it where
 [`scripts/worktree-config.sh`](scripts/worktree-config.sh) says worktrees live
 (not inside the repo, which aborts in a repo that versions its own agent
