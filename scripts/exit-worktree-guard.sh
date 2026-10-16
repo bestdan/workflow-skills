@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Claude Code PreToolUse hook on ExitWorktree: refuse `discard_changes: true` on
-# a hook-created worktree unless the tree is clean and its branch has landed.
+# a hook-created worktree unless the tree is clean and its branch has landed —
+# a merged PR at its tip, or a tip already on origin's default branch.
 #
 # Why the flag needs a guard at all. ExitWorktree's remove refuses every
 # worktree worktree-create-hook.sh makes with "Could not verify worktree state",
