@@ -7,6 +7,8 @@
 # JSON the script emits. Covers the classifications that are easy to get wrong:
 #   - rules that match their templates exactly report NOTHING
 #   - a reordered flag is DEAD (the match is byte-for-byte outside placeholders)
+#   - but a DEAD rule beside a live one is stale, not drift: exit 0, with
+#     `stale` set and a prune prompt in the report (issue #611)
 #   - a path that does not resolve here is OFF-MACHINE, not coverage — a
 #     placeholder wildcard alone cannot tell it from a live substitution
 #   - but an off-machine rule is NOT drift: a settings file shared across hosts
@@ -152,10 +154,39 @@ make_settings "$BASE/reordered.json" \
   "Bash(agy --sandbox --add-dir \"$REAL_DIR\" --model \"M1\" -p \"read $REAL_DIR/in.agy\")" \
   "Bash(agy models)"
 run_drift "$BASE/reordered.json"
-if [ "$RC" -eq 1 ] && [ "$(count agy dead)" = "1" ] && [ "$(count agy missing)" = "1" ]; then
-  pass "a reordered flag is dead, and its template is missing"
+if [ "$RC" -eq 1 ] && [ "$(count agy dead)" = "1" ] && [ "$(count agy missing)" = "1" ] \
+  && [ "$(printf '%s' "$OUT" | jq -r .drift)" = "true" ] \
+  && [ "$(printf '%s' "$OUT" | jq -r .stale)" = "true" ]; then
+  pass "a reordered flag is dead, and its template is missing (drift and stale both set)"
 else
   fail "reordered flag misclassified (rc=$RC, dead=$(count agy dead), missing=$(count agy missing))"
+fi
+
+# --- 2b. a dead rule beside a live one is stale, not drift (issue #611) ----
+# Every template is covered, so no dispatch can be denied: the dead rule is
+# settings sediment. It is reported, `stale` is set, and the exit is 0 — a
+# permanent exit 1 here would teach the operator to skip the report.
+
+make_settings "$BASE/deadonly.json" \
+  "Bash(agy --sandbox --add-dir \"$REAL_DIR\" -p \"read $REAL_DIR/in.agy\" --model \"M1\")" \
+  "Bash(agy --sandbox --add-dir \"$REAL_DIR\" --model \"M1\" -p \"read $REAL_DIR/in.agy\")" \
+  "Bash(agy models)"
+run_drift "$BASE/deadonly.json"
+if [ "$RC" -eq 0 ] && [ "$(count agy dead)" = "1" ] && [ "$(count agy missing)" = "0" ] \
+  && [ "$(printf '%s' "$OUT" | jq -r .drift)" = "false" ] \
+  && [ "$(printf '%s' "$OUT" | jq -r .stale)" = "true" ]; then
+  pass "dead > 0 with missing == 0 is stale, not drift (exit 0)"
+else
+  fail "dead-only finding misclassified (rc=$RC, dead=$(count agy dead), missing=$(count agy missing)): $OUT"
+fi
+
+TEXT="$("$SCRIPT" --plugin-root "$PLUGIN" --settings "$BASE/deadonly.json" 2>&1)"
+if grep -q '^No drift\.$' <<<"$TEXT" \
+  && grep -q '^  DEAD ' <<<"$TEXT" \
+  && grep -q 'Delete them when convenient' <<<"$TEXT"; then
+  pass "the text report says No drift, names the DEAD rule, and prompts a prune"
+else
+  fail "dead-only text report lacks the verdict, the rule, or the prompt: $TEXT"
 fi
 
 # --- 3. an off-machine path is not coverage -------------------------------
@@ -485,16 +516,18 @@ fi
 
 # The plugin-cache prefix rules permissions.md used to prescribe end inside the
 # script's path token, so they never fired. Every spelling is DEAD, so the
-# operator deletes it. Another plugin-path rule, such as a worktree teardown
-# grant, belongs to no co-review template and is left alone.
+# operator deletes it — but dead alone is not drift (issue #611), so the exit
+# is 0 and `stale` carries the prompt. Another plugin-path rule, such as a
+# worktree teardown grant, belongs to no co-review template and is left alone.
 make_settings "$BASE/shared-cache.json" "${SHARED_OK[@]}" \
   "Bash(/c/workflow-skills/workflow-skills/:*)" \
   "Bash(python3 /c/workflow-skills/workflow-skills/:*)" \
   "Bash(python3 \"/c/workflow-skills/workflow-skills/:*)" \
   "Bash(/c/workflow-skills/workflow-skills/*/scripts/worktree-remove.sh *)"
 run_shared "$BASE/shared-cache.json"
-if [ "$RC" -eq 1 ] && [ "$(shared_count dead)" = "3" ]; then
-  pass "every plugin-cache prefix rule is DEAD; a teardown rule is not"
+if [ "$RC" -eq 0 ] && [ "$(shared_count dead)" = "3" ] \
+  && [ "$(printf '%s' "$OUT" | jq -r .stale)" = "true" ]; then
+  pass "every plugin-cache prefix rule is DEAD (stale, exit 0); a teardown rule is not"
 else
   fail "plugin-cache rules misclassified (rc=$RC, dead=$(shared_count dead)): $OUT"
 fi
