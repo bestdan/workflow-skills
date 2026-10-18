@@ -69,13 +69,15 @@ STRICT_FILES=(scripts/research-spike.py)
 # (legal 3.9 SYNTAX, TypeError at 3.9 RUNTIME) and `X | Y` annotations without
 # `from __future__ import annotations`. Raise this number only by deciding to
 # drop support, never to make a diagnostic go away.
-# Membership is decided by WHO EXECUTES THE FILE, not by where it sits. Eight of
+# Membership is decided by WHO EXECUTES THE FILE, not by where it sits. Ten of
 # these live under scripts/ and are still consumer code: server.py is launched
 # as bare `python3` by skills/local-review/SKILL.md and README.md,
 # coreview-rule-drift.py is invoked through ${CLAUDE_PLUGIN_ROOT} by
 # skills/co-review/SKILL.md and commands/doctor.md, diff-anchor-check.py is
 # invoked the same way by skills/co-review/SKILL.md step 12,
 # grok-telemetry-gate.py the same way by skills/co-review/reviewers/grok.md,
+# co-review-record.py is the reviewer-ledger write /co-review will invoke the
+# same way once #709 wires it in,
 # and worktree-teardown-reminder.py, guard-foreign-worktree.py,
 # guard-pinned-branch.py and guard-enter-by-path.py are run by the harness
 # itself — hooks/hooks.json registers them on PostToolUse and PreToolUse, so
@@ -87,6 +89,7 @@ CONSUMER_FILES=(
   scripts/coreview-rule-drift.py
   scripts/diff-anchor-check.py
   scripts/grok-telemetry-gate.py
+  scripts/co-review-record.py
   scripts/worktree-teardown-reminder.py
   scripts/guard-foreign-worktree.py
   scripts/guard-pinned-branch.py
