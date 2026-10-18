@@ -1,6 +1,6 @@
 ---
 created: 2026-10-18
-status: proposed
+status: accepted
 tracks: https://github.com/bestdan/workflow-skills/issues/1041
 ---
 
@@ -13,8 +13,9 @@ the table should count every machine's runs. A cloud session's ledger is lost
 when its container is.
 
 This design moves the rows. Each machine flushes a redacted copy of its own
-ledger to a private GitHub repo, one file per machine, and the stats read the
-union. The review path is unchanged: it still writes only to the local file,
+ledger to a private GitHub repo, `bestdan/co-review-ledgers`, one file per
+machine, and the stats read the union. It covers local machines; cloud
+sessions are a follow-up (see "Decisions"). The review path is unchanged: it still writes only to the local file,
 with no network. The flush is a separate step that runs at session end, by
 hand, and before `/co-review-stats`.
 
@@ -61,7 +62,7 @@ CO_REVIEW_LEDGER_REMOTE=git@github.com:<owner>/<repo>.git
 It goes in the synced Claude settings (`env` block), so every local machine
 that syncs settings gets it at once. Unset means sync is off: the flush exits
 0 with `ledger sync: off`, and the stats read the local file alone, as today.
-Cloud sessions do not read that block; see "Not decided here".
+Cloud sessions do not read that block; see "Decisions".
 
 The clone lives at `~/.claude/co-review/shared/`. That keeps it outside every
 working tree, and under the path the design's optional deny rule
@@ -252,9 +253,9 @@ all redirected away from the hook, to `/dev/null` or a log file; Claude Code
 refuses a hook whose background child keeps its output open. The flush then
 finishes after the session has gone, **if** the harness does not kill the
 hook's whole process group or session when it cancels the hook. Its docs do
-not say, so this is unverified, and the Tests section carries a manual check.
-Claude Code's documented alternative, an `async: true` hook, is in "Not
-decided here". In a cloud container, teardown may kill the flush first.
+not say, so this is unverified, and the Tests section carries a manual check
+that must pass before the hook ships. If it fails, the fallback is Claude
+Code's documented `async: true` hook (see "Decisions").
 
 The hook always exits 0. Its output goes to the debug log, not to any model's
 context: Claude Code keeps `SessionEnd` output out of the conversation, shows
@@ -338,35 +339,31 @@ does not exist clones with no `HEAD` at all), with
 - Stats over two hosts' files plus the local ledger: run counts are the sum of
   distinct runs, and this machine's runs count once.
 
-## Not decided here
+## Decisions
 
-These need the owner:
+Made by the owner on 2026-10-18.
 
-1. **The repo's name and owner.** Proposed: a private
-   `bestdan/co-review-ledgers`.
-2. **Whether `repo` is copied as-is.** It names work repos. The alternatives
-   are to copy a salted hash, which keeps `--repo` working only for a caller
-   who knows the salt, or to drop it and lose `--repo` on the merged data.
-   Proposed: copy it as-is, since the repo is private to its owner.
-3. **The `SessionEnd` hook.** Proposed: the detached background flush above,
-   pending the manual check. The alternatives:
-   - an `async: true` hook, which Claude Code documents as running in the
-     background with no timeout enforced. That is the documented form of the
-     same idea, but whether `SessionEnd` accepts it is unverified;
-   - asking the owner to raise the budget in their own settings (60 s at most);
-   - flushing only by hand and before `/co-review-stats`, which loses cloud
-     sessions' rows.
-4. **Cloud sessions.** Three things are unverified, and all three must hold
-   for a cloud session's rows to survive: the plugin is installed there, so
-   the hook exists; `CO_REVIEW_LEDGER_REMOTE` reaches it, since the local
-   settings `env` block does not; and the container has credentials to push
-   to the shared repo, which is not the repo the session started on. If any
-   fails, cloud rows are lost, as today, and the design still serves local
-   machines.
+1. **The shared repo is a new private `bestdan/co-review-ledgers`.** A repo of
+   its own, so the flush's resets and reclones never act on anything else.
+2. **`repo` is copied as-is.** It names work repos, but the shared repo is
+   private to its owner, and copying it keeps `--repo` working on the merged
+   data. Rejected: a salted hash (a salt to sync across machines) and dropping
+   the field (`--repo` would see only local rows).
+3. **The `SessionEnd` hook starts a detached flush**, and ships only after the
+   manual check in Tests passes. If the detached flush does not survive the
+   hook's cancellation, the fallback is an `async: true` hook, which Claude
+   Code documents as running in the background with no timeout, provided
+   `SessionEnd` accepts it. Rejected: asking the owner to raise the budget in
+   their settings, and flushing only by hand and before `/co-review-stats`.
+4. **Cloud sessions are out of scope.** Their rows stay lost, as today. Three
+   unverified conditions decide whether they can be saved: the plugin is
+   installed there, `CO_REVIEW_LEDGER_REMOTE` reaches the session, and the
+   container can push to the shared repo. Checking them is
+   [#1048](https://github.com/bestdan/workflow-skills/issues/1048).
 
 ## Graduation
 
 - When built, the sync section moves into
   [`../reviewer-quality-score-design.md`](../reviewer-quality-score-design.md)
   §2 ("Several machines, one table"), replacing its pointer to #1041.
-- The decision on `repo` redaction becomes a decision record.
+- The decision to copy `repo` as-is becomes a decision record.
