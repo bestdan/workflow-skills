@@ -67,6 +67,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/coreview-input-lock.py" agy && cat "<this
 - **GitHub mode, no requests** → drop the `"<REQUESTS>"` argument from the assembling `cat`; the dispatch tail is unchanged.
 - **`--local` mode** → swap the `gh pr diff …` segment for `git diff <base>` and append any untracked files you read, per the shared `--local` rule in SKILL.md — keeping the `&&` chain.
 
+**Type the input lock's path as SKILL.md's Built-in invocations renders it**, the absolute plugin path. `${CLAUDE_PLUGIN_ROOT}` is not expanded in this file or in the Bash tool, so a literal copy runs `/scripts/coreview-input-lock.py`, exits `2`, and the `&&` chain drops the reviewer.
+
 `<AGY-POINTER>` is agy's own pointer — the shared `<POINTER>` from SKILL.md retargeted from stdin to the input **file**, since agy has no stdin (a pointer that claims otherwise is what produced the spurious `NO INPUT`):
 
 > Your entire input is the file at `<INPUT>` (a review rubric followed by a diff). Read that file and review ONLY it. Do NOT explore any other file, run commands, or retrieve any prior conversation or memory. If that file is missing or empty, output exactly NO INPUT and stop. Output findings as file:line, the issue, and a suggested fix. Read only.

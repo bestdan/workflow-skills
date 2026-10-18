@@ -121,6 +121,8 @@ It is still a **configuration** check, not a wire check. It proves the file says
 - **GitHub mode, no requests** → drop the `"<REQUESTS>"` argument: `mkdir -p "<NEUTRAL>" && python3 "${CLAUDE_PLUGIN_ROOT}/scripts/coreview-input-lock.py" grok && cat "<this skill dir>/review_prompt.md" <CONVENTIONS> > "<INPUT>" && gh pr diff <n> --repo <owner>/<name> >> "<INPUT>" && [ -s "<INPUT>" ] && grok --cwd "<NEUTRAL>" --sandbox strict --permission-mode auto --tools read_file --prompt-file "<INPUT>" --model "grok-4.6" 2>&1`
 - **`--local` mode** → swap the `gh pr diff …` segment for `git diff <base>` and append any untracked files you read, per the shared `--local` rule in SKILL.md. Keep the `--prompt-file "<INPUT>"` tail — there is no `cat "<INPUT>" |` pipe for grok — and keep the trailing `2>&1`.
 
+**Type the input lock's path as SKILL.md's Built-in invocations renders it**, the absolute plugin path. `${CLAUDE_PLUGIN_ROOT}` is not expanded in this file or in the Bash tool, so a literal copy runs `/scripts/coreview-input-lock.py`, exits `2`, and the `&&` chain drops the reviewer.
+
 `<owner>/<name>` is the repo resolved in SKILL.md step 2 — never `cwd`'s by default, since a `--post` review commonly targets a PR that isn't checked out here.
 
 There is **no `-p "<POINTER>"` argument**: `--prompt-file` carries the whole assembled `rubric + conventions + requests + diff`, and the rubric itself carries the read-only instruction, exactly as for `devin`. The `[ -s "<INPUT>" ] &&` empty-input guard is the same one `agy` and `devin` use — never hand an agentic reviewer an empty prompt file.
