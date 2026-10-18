@@ -364,6 +364,18 @@ time.sleep(float(sys.argv[3]))' "$1/shared.lock" "$TEST_TMPDIR/held" "$2" >/dev/
   refute_output --partial "missing.git"
 }
 
+@test "--check reports a remote that refuses the SSH key as refused, not unreachable" {
+  local ssh="$TEST_TMPDIR/fake-ssh"
+  printf '#!/bin/sh\necho "git@example.invalid: Permission denied (publickey)." >&2\nexit 255\n' >"$ssh"
+  chmod +x "$ssh"
+  export GIT_SSH_COMMAND="$ssh"
+  export CO_REVIEW_LEDGER_REMOTE="git@example.invalid:org/ledgers.git"
+  sync "$A" ha check
+  assert_failure 1
+  assert_output --regexp '^WARN  co-review ledger sync — remote refused access; check the credentials'
+  refute_output --partial "example.invalid"
+}
+
 @test "--check passes on a good clone and warns on a broken one" {
   sync "$A" ha check
   assert_success
