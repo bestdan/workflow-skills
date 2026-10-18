@@ -2,7 +2,8 @@
 # scripts/exit-worktree-guard.sh — the PreToolUse hook on ExitWorktree. The
 # guarantee: `discard_changes: true` on a worktree the create hook made for this
 # session is denied, with a reason, unless the tree is clean and its tip is the
-# head of a PR merged into the default branch. Every other call passes silently.
+# head of a PR merged into the default branch or already on origin's default.
+# Every other call passes silently.
 #
 # `gh` is stubbed. The landed check asks it for merged PRs, so each case sets
 # the verdict it needs; the default stub fails, which is the deny path.
@@ -167,6 +168,27 @@ assert_denied() {
   assert_output --partial "merged into parent-branch"
   refute_output --partial "branch -D"
   refute_output --partial "kept branch"
+}
+
+@test "a scratch worktree with no commits past origin's default passes with no PR" {
+  # The normal end of a throwaway worktree (#1035): made from main, never took a
+  # commit, never had a PR. gh stays at its failing default, so a pass here can
+  # only come from the ancestry proof, not from a PR lookup.
+  git -C "$REPO" update-ref refs/remotes/origin/main main
+  dir=$(make_worktree scratch s1)
+  run_guard "$dir" s1 "$DISCARD"
+  assert_success
+  assert_output ""
+}
+
+@test "one commit past origin's default still needs a merged PR" {
+  git -C "$REPO" update-ref refs/remotes/origin/main main
+  dir=$(make_worktree onecommit s1)
+  git -C "$dir" commit -q --allow-empty -m work
+  gh_says 0 ""
+  run_guard "$dir" s1 "$DISCARD"
+  assert_denied
+  assert_output --partial "no merged PR has it as head"
 }
 
 @test "a clean tree whose tip merged into the default passes silently" {

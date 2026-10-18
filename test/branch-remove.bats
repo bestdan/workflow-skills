@@ -178,6 +178,69 @@ run_br() {
   assert_output --partial "remote set-head origin -a"
 }
 
+# ------------------------------------------- already on the remote default branch
+
+# The fixture has no remote, so origin/main exists only where a case writes it.
+# Every other case relies on its absence: mkbranch starts each branch at main,
+# so with origin/main pointing there they would all take this path.
+on_origin_main() { git -C "$REPO" update-ref refs/remotes/origin/main "${1:-main}"; }
+
+@test "a branch with no commits past origin's default is deleted without asking gh" {
+  # gh stays at its failing default: the proof is ancestry alone, so a scratch
+  # branch that never had a PR is still spent (#1035).
+  on_origin_main
+  mkbranch scratch
+  run_br "$REPO" scratch
+  assert_success
+  refute has_branch scratch
+  assert_output --partial "deleted branch scratch — its tip is already on origin/main"
+  refute_output --partial "could not reach gh"
+}
+
+@test "--check reports a branch already on origin's default as landed, and keeps it" {
+  on_origin_main
+  mkbranch scratchcheck
+  run_br "$REPO" --check scratchcheck
+  assert_success
+  assert has_branch scratchcheck
+  assert_output --partial "landed — its tip is already on origin/main"
+}
+
+@test "a commit not on origin's default still needs a merged PR" {
+  on_origin_main
+  git -C "$REPO" switch -q -c ahead main
+  git -C "$REPO" commit -q --allow-empty -m work
+  git -C "$REPO" switch -q main
+  gh_says 0 ""
+  run_br "$REPO" ahead
+  assert_failure 3
+  assert has_branch ahead
+  assert_output --partial "no merged PR"
+}
+
+@test "a tip on the local default but not origin's is not proof" {
+  # Local main can hold commits that were never pushed. A branch at its tip is on
+  # main, but not anywhere a deleted worktree cannot take with it.
+  on_origin_main
+  git -C "$REPO" commit -q --allow-empty -m unpushed
+  mkbranch localonly
+  gh_says 0 ""
+  run_br "$REPO" localonly
+  assert_failure 3
+  assert has_branch localonly
+  assert_output --partial "no merged PR"
+}
+
+@test "a checked-out branch already on origin's default is still refused" {
+  on_origin_main
+  mkbranch heldscratch
+  git -C "$REPO" worktree add -q "$TEST_TMPDIR/heldscratch" heldscratch
+  run_br "$REPO" heldscratch
+  assert_failure 3
+  assert has_branch heldscratch
+  assert_output --partial "checked out at"
+}
+
 # ------------------------------------------------------------------ checked out
 
 @test "a branch checked out in a linked worktree is kept, naming the checkout" {
