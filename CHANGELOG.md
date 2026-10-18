@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.92.0] - 2026-10-18
+
+### Features
+
+- report per-reviewer quality from the ledger [#710] (#1044) (aa565b0)
+
 ## [2.91.0] - 2026-10-18
 
 ### Features
