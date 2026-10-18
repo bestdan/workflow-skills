@@ -64,6 +64,16 @@
         ]
       }
     ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/co-review-ledger-sync.py\" --push --detach"
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "ExitWorktree",

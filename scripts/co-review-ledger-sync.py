@@ -19,6 +19,8 @@ is running, git failed, ledger unreadable, internal error.
 
 Usage:
   uv run scripts/co-review-ledger-sync.py --push    # send this machine's new runs
+  uv run scripts/co-review-ledger-sync.py --push --detach  # the SessionEnd hook:
+      # print nothing, return at once, receipt in ~/.claude/co-review/last-push.log
   uv run scripts/co-review-ledger-sync.py --pull    # --push, then fetch every host's file
   uv run scripts/co-review-ledger-sync.py --check   # one /doctor line
 
@@ -49,6 +51,7 @@ DEFAULT_DIR = Path.home() / ".claude" / "co-review"
 BRANCH = "main"
 UPSTREAM = f"refs/remotes/origin/{BRANCH}"
 NETWORK_TIMEOUT_S = 120
+LAST_PUSH_LOG = "last-push.log"
 Key = Tuple[str, str]
 
 # The allowlist. A field reaches the shared repo only by being named here, so a
@@ -453,6 +456,39 @@ def check(base: Path, remote: Optional[str]) -> int:
     return 0
 
 
+def detach(base: Path) -> bool:
+    """Fork the flush into its own session. True in the flush, False in the caller.
+
+    The SessionEnd hook gets 1.5 s and a flush can take longer, so the hook
+    returns at once and the flush finishes after the session has gone. A new
+    session keeps a kill of the hook's process group from reaching it, and the
+    flush keeps none of the hook's descriptors open, which Claude Code would
+    otherwise wait on. The receipt lands in LAST_PUSH_LOG, overwritten each time.
+    """
+    sys.stdout.flush()
+    if os.fork():
+        return False
+    try:
+        os.setsid()
+        if os.fork():
+            os._exit(0)
+        null = os.open(os.devnull, os.O_RDWR)
+        try:
+            base.mkdir(parents=True, exist_ok=True)
+            out = os.open(
+                base / LAST_PUSH_LOG, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644
+            )
+        except OSError:
+            out = null
+        os.dup2(null, 0)
+        os.dup2(out, 1)
+        os.dup2(out, 2)
+        print(time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), flush=True)
+        return True
+    except Exception:
+        os._exit(0)
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n")[0])
     mode = ap.add_mutually_exclusive_group(required=True)
@@ -460,13 +496,22 @@ def main(argv: Optional[List[str]] = None) -> int:
     mode.add_argument("--pull", action="store_true")
     mode.add_argument("--check", action="store_true")
     ap.add_argument("--dir", type=Path, default=DEFAULT_DIR)
+    ap.add_argument(
+        "--detach", action="store_true",
+        help="with --push: return at once, finish in the background, print nothing",
+    )  # fmt: skip
     args = ap.parse_args(argv)
+    if args.detach and not args.push:
+        ap.error("--detach needs --push")
     base = args.dir.expanduser()
     remote = os.environ.get("CO_REVIEW_LEDGER_REMOTE") or None
     if args.check:
         return check(base, remote)
     if not remote:
-        say("off")
+        if not args.detach:
+            say("off")
+        return 0
+    if args.detach and not detach(base):
         return 0
     try:
         lock = locked(base / "shared.lock")

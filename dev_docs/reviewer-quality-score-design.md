@@ -300,7 +300,8 @@ separate flush, `scripts/co-review-ledger-sync.py`, never part of the review.
 With `CO_REVIEW_LEDGER_REMOTE` set, it copies an allowlisted, redacted subset
 of each run to `ledgers/<host>.jsonl` in a private repo, and
 `co-review-stats.py` reads the local ledger followed by every host's file. It
-runs by hand and before `/co-review-stats`; nothing flushes at session end yet.
+runs at session end from the plugin's `SessionEnd` hook, before
+`/co-review-stats`, and by hand.
 The shared copy is a ledger like any other, so the firewall covers it too. The
 design, the allowlist, and the failure rules are
 [`designs/2026-10-18-co-review-ledger-sync.md`](designs/2026-10-18-co-review-ledger-sync.md).

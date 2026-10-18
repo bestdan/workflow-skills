@@ -377,3 +377,78 @@ time.sleep(float(sys.argv[3]))' "$1/shared.lock" "$TEST_TMPDIR/held" "$2" >/dev/
   assert_failure 1
   assert_output --partial "is not a usable clone; the next flush reclones it"
 }
+
+# timed <cmd...>: run <cmd> with stdout and stderr on pipes, wait until both
+# close, then print the seconds that took and the exit code, then its stdout. A
+# detached flush that kept either pipe open would hold this until it finished.
+timed() {
+  python3 -c '
+import subprocess, sys, time
+t = time.monotonic()
+p = subprocess.run(sys.argv[1:], capture_output=True)
+print(f"{time.monotonic() - t:.2f} rc={p.returncode}")
+sys.stdout.write(p.stdout.decode())
+' "$@"
+}
+
+# wait_for <file> <text>: up to 15 s for <file> to contain <text>.
+wait_for() {
+  local i
+  for i in $(seq 1 150); do
+    grep -qF "$2" "$1" 2>/dev/null && return 0
+    sleep 0.1
+  done
+  return 1
+}
+
+@test "--detach returns within the 1.5 s hook budget against a hanging remote, printing nothing" {
+  printf '#!/bin/sh\nsleep 30\n' >"$TEST_TMPDIR/fake-ssh"
+  chmod +x "$TEST_TMPDIR/fake-ssh"
+  add_run "$A" ha r1
+  run timed env CO_REVIEW_HOST=ha GIT_SSH_COMMAND="$TEST_TMPDIR/fake-ssh" \
+    CO_REVIEW_LEDGER_REMOTE="ssh://hang.invalid/ledgers.git" \
+    python3 "$REPO_ROOT/$SCRIPT_REL" --dir "$A" --push --detach
+  pkill -f "$TEST_TMPDIR" || true
+  assert_success
+  assert_equal "${#lines[@]}" 1
+  assert_regex "${lines[0]}" ' rc=0$'
+  run python3 -c 'import sys; sys.exit(float(sys.argv[1]) >= 1.5)' "${lines[0]%% *}"
+  assert_success
+}
+
+@test "--detach finishes the push in the background and leaves its receipt in last-push.log" {
+  add_run "$A" ha r1
+  run env CO_REVIEW_HOST=ha python3 "$REPO_ROOT/$SCRIPT_REL" --dir "$A" --push --detach
+  assert_success
+  assert_output ""
+  wait_for "$A/last-push.log" "ledger sync: pushed 1 runs"
+  assert_equal "$(commits)" 1
+  run cat "$A/last-push.log"
+  assert_regex "${lines[0]}" '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$'
+  assert_equal "${lines[1]}" "ledger sync: pushed 1 runs"
+}
+
+@test "--detach with sync off prints nothing, starts nothing, and writes no log" {
+  unset CO_REVIEW_LEDGER_REMOTE
+  add_run "$A" ha r1
+  run python3 "$REPO_ROOT/$SCRIPT_REL" --dir "$A" --push --detach
+  assert_success
+  assert_output ""
+  assert_file_not_exists "$A/last-push.log"
+}
+
+@test "--detach without --push is a usage error" {
+  run python3 "$REPO_ROOT/$SCRIPT_REL" --dir "$A" --pull --detach
+  assert_failure 2
+  assert_output --partial "--detach needs --push"
+}
+
+@test "the plugin's SessionEnd hook runs the detached push" {
+  run python3 -c '
+import json, sys
+hooks = json.load(open(sys.argv[1]))["hooks"]["SessionEnd"]
+print("\n".join(h["command"] for group in hooks for h in group["hooks"]))
+' "$REPO_ROOT/hooks/hooks.json"
+  assert_success
+  assert_output 'python3 "${CLAUDE_PLUGIN_ROOT}/scripts/co-review-ledger-sync.py" --push --detach'
+}

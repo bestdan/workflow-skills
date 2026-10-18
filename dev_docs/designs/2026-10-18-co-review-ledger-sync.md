@@ -19,9 +19,12 @@ sessions are a follow-up (see "Decisions"). The review path is unchanged: it sti
 with no network. The flush is a separate step that runs at session end, by
 hand, and before `/co-review-stats`.
 
-> **Built except the `SessionEnd` hook.** The flush, the multi-ledger read and
-> the `/doctor` check exist; the hook waits on the manual check under "Tests",
-> so for now the flush runs by hand and before `/co-review-stats`.
+> **Built.** The `SessionEnd` hook came last (#1068): it runs
+> `co-review-ledger-sync.py --push --detach`, which forks the flush into its
+> own session and leaves the receipt in `~/.claude/co-review/last-push.log`.
+> Whether the flush survives the session's exit on macOS and Linux is the
+> manual check under "Tests"; until it passes, a flush can be lost at exit and
+> lands with the next one.
 
 The ledger's format and the firewall it serves are in
 [`../reviewer-quality-score-design.md`](../reviewer-quality-score-design.md);
