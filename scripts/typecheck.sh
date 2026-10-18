@@ -90,6 +90,7 @@ CONSUMER_FILES=(
   scripts/diff-anchor-check.py
   scripts/grok-telemetry-gate.py
   scripts/co-review-record.py
+  scripts/co-review-stats.py
   scripts/worktree-teardown-reminder.py
   scripts/guard-foreign-worktree.py
   scripts/guard-pinned-branch.py
