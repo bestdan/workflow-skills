@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.96.2] - 2026-10-18
+
+### Fixes
+
+- tell a refused credential from an unreachable remote in --check [N/A] (#1072) (e9b0279)
+
 ## [2.96.1] - 2026-10-18
 
 ### Fixes
