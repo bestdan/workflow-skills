@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.93.0] - 2026-10-18
+
+### Features
+
+- add the /co-review-stats command [#708] (#1046) (8dcb115)
+
 ## [2.92.0] - 2026-10-18
 
 ### Features
