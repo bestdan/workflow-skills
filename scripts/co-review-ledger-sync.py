@@ -11,8 +11,9 @@ design, and why each rule below exists, is
 dev_docs/designs/2026-10-18-co-review-ledger-sync.md.
 
 It prints receipt lines and nothing else: never git's output, which can carry
-the remote URL, and never ledger contents. That silence is the firewall. It
-always exits 0, so no caller can fail because of it. A failure's reason is one
+the remote URL, and never ledger contents. That silence is the firewall.
+--push and --pull always exit 0, so no flush caller can fail because of it;
+--check exits 0 for PASS (including sync off) and 1 for WARN. A failure's reason is one
 of a fixed set: unreachable, clone failed, push rejected twice, another flush
 is running, git failed, ledger unreadable, internal error.
 
@@ -418,9 +419,13 @@ def check(base: Path, remote: Optional[str]) -> int:
         print(f"PASS  {name} — off (CO_REVIEW_LEDGER_REMOTE unset)")
         return 0
     clone = base / "shared"
+    try:
+        is_usable = clone.exists() and usable(clone, remote)
+    except SyncError:
+        is_usable = False
     if not clone.exists():
-        clone_note = "no clone yet (the next flush makes one)"
-    elif usable(clone, remote):
+        clone_note: Optional[str] = "no clone yet (the next flush makes one)"
+    elif is_usable:
         clone_note = "clone ok"
     else:
         clone_note = None
