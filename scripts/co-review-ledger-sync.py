@@ -86,6 +86,9 @@ def git_env() -> Dict[str, str]:
         if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_PREFIX")
     }
     env["GIT_TERMINAL_PROMPT"] = "0"
+    # attempt() tells a rejected push from an unreachable remote by git's
+    # English stderr, so a localized git must not translate it.
+    env["LC_ALL"] = "C"
     if "GIT_SSH_COMMAND" not in env and "GIT_SSH" not in env:
         env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes"
     return env
