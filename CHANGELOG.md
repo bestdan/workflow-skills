@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.97.0] - 2026-10-18
+
+### Features
+
+- flush the ledger from a detached SessionEnd hook [#1068] (#1073) (ca8b1fb)
+
 ## [2.96.2] - 2026-10-18
 
 ### Fixes
