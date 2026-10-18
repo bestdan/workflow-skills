@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.96.1] - 2026-10-18
+
+### Fixes
+
+- scope reviewer stamp files to the run [#1051] (#1069) (1eeec90)
+
 ## [2.96.0] - 2026-10-18
 
 ### Features
