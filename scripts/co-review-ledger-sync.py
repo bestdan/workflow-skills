@@ -61,6 +61,20 @@ REVIEWER_FIELDS = ("name", "disposition", "model", "duration_s")
 FINDING_FIELDS = ("type", "run_id", "host", "sources", "human_corroborated", "verdict")
 
 
+# Git's and ssh's stderr when the host answered but turned the credentials
+# down, which --check reports apart from a host it never reached. GitHub
+# answers a repository the credentials cannot see and one that does not exist
+# alike with "Repository not found", so the message names both.
+AUTH_REFUSED = (
+    "Permission denied (publickey",
+    "Authentication failed",
+    "could not read Username",
+    "Repository not found",
+    "The requested URL returned error: 401",
+    "The requested URL returned error: 403",
+)
+
+
 class SyncError(Exception):
     """A failure whose message is one of the fixed receipt reasons."""
 
@@ -437,8 +451,14 @@ def check(base: Path, remote: Optional[str]) -> int:
         cwd = base if base.is_dir() else Path.home()
         reach = git(cwd, "ls-remote", "-q", "--heads", remote, network=True)
         reachable = reach.returncode == 0
+        refused = not reachable and any(m in reach.stderr for m in AUTH_REFUSED)
     except SyncError:
-        reachable = False
+        reachable = refused = False
+    if refused:
+        print(
+            f"WARN  {name} — remote refused access or the repository does not exist; check the URL and credentials for CO_REVIEW_LEDGER_REMOTE"
+        )
+        return 1
     if not reachable:
         print(
             f"WARN  {name} — remote unreachable; check network and access to CO_REVIEW_LEDGER_REMOTE"

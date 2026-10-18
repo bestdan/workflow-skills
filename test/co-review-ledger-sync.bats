@@ -364,6 +364,42 @@ time.sleep(float(sys.argv[3]))' "$1/shared.lock" "$TEST_TMPDIR/held" "$2" >/dev/
   refute_output --partial "missing.git"
 }
 
+@test "--check reports a remote that refuses the SSH key as refused, not unreachable" {
+  local ssh="$TEST_TMPDIR/fake-ssh"
+  printf '#!/bin/sh\necho "git@example.invalid: Permission denied (publickey)." >&2\nexit 255\n' >"$ssh"
+  chmod +x "$ssh"
+  export GIT_SSH_COMMAND="$ssh"
+  export CO_REVIEW_LEDGER_REMOTE="git@example.invalid:org/ledgers.git"
+  sync "$A" ha check
+  assert_failure 1
+  assert_output --regexp '^WARN  co-review ledger sync — remote refused access or the repository does not exist; check the URL and credentials'
+  refute_output --partial "example.invalid"
+}
+
+@test "--check reports a repository the host cannot find as refused or missing" {
+  local ssh="$TEST_TMPDIR/fake-ssh"
+  printf '#!/bin/sh\necho "ERROR: Repository not found." >&2\nexit 128\n' >"$ssh"
+  chmod +x "$ssh"
+  export GIT_SSH_COMMAND="$ssh"
+  export CO_REVIEW_LEDGER_REMOTE="git@example.invalid:org/ledgers.git"
+  sync "$A" ha check
+  assert_failure 1
+  assert_output --regexp '^WARN  co-review ledger sync — remote refused access or the repository does not exist'
+  refute_output --partial "example.invalid"
+}
+
+@test "--check reports an untrusted host key as unreachable, not refused" {
+  local ssh="$TEST_TMPDIR/fake-ssh"
+  printf '#!/bin/sh\necho "Host key verification failed." >&2\nexit 255\n' >"$ssh"
+  chmod +x "$ssh"
+  export GIT_SSH_COMMAND="$ssh"
+  export CO_REVIEW_LEDGER_REMOTE="git@example.invalid:org/ledgers.git"
+  sync "$A" ha check
+  assert_failure 1
+  assert_output --regexp '^WARN  co-review ledger sync — remote unreachable'
+  refute_output --partial "example.invalid"
+}
+
 @test "--check passes on a good clone and warns on a broken one" {
   sync "$A" ha check
   assert_success
