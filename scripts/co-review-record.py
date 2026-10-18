@@ -28,6 +28,8 @@ from __future__ import annotations
 import argparse
 import fcntl
 import json
+import math
+import os
 import socket
 import sys
 from pathlib import Path
@@ -80,6 +82,7 @@ def validate_run(run) -> dict:
         if duration is not None and (
             isinstance(duration, bool)
             or not isinstance(duration, (int, float))
+            or not math.isfinite(duration)
             or duration < 0
         ):
             raise InputError(
@@ -88,7 +91,7 @@ def validate_run(run) -> dict:
     return run
 
 
-def join_findings(findings, mapping: dict, run_id: str) -> list[dict]:
+def join_findings(findings, mapping: dict, run_id: str, host: str) -> list[dict]:
     """Unblind each finding's sources; drop findings only humans raised."""
     if not isinstance(findings, list):
         raise InputError("findings: expected an array")
@@ -100,8 +103,8 @@ def join_findings(findings, mapping: dict, run_id: str) -> list[dict]:
         if verdict not in VERDICTS:
             raise InputError(f"findings[{i}]: unknown verdict {verdict!r}")
         sources = finding.get("sources")
-        if not isinstance(sources, list):
-            raise InputError(f"findings[{i}]: sources must be a list")
+        if not isinstance(sources, list) or not sources:
+            raise InputError(f"findings[{i}]: sources must be a non-empty list")
         agents, human = [], False
         for label in sources:
             if label not in mapping:
@@ -117,9 +120,10 @@ def join_findings(findings, mapping: dict, run_id: str) -> list[dict]:
             continue
         records.append(
             {
+                **{k: v for k, v in finding.items() if k != "sources"},
                 "type": "finding",
                 "run_id": run_id,
-                **{k: v for k, v in finding.items() if k != "sources"},
+                "host": host,
                 "sources": agents,
                 "human_corroborated": human,
             }
@@ -133,16 +137,36 @@ def append(ledger: Path, run: dict, findings: list[dict]) -> bool:
     with ledger.open("a+") as fh:
         fcntl.flock(fh, fcntl.LOCK_EX)
         fh.seek(0)
+        line = ""
         for line in fh:
             try:
                 rec = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if rec.get("type") == "run" and rec.get("run_id") == run["run_id"]:
+            if (
+                rec.get("type") == "run"
+                and rec.get("run_id") == run["run_id"]
+                and rec.get("host") == run["host"]
+            ):
                 return False
-        lines = [{"type": "run", "schema": 1, **run}, *findings]
-        fh.write("".join(json.dumps(r, sort_keys=True) + "\n" for r in lines))
-        fh.flush()
+        lines = [{**run, "type": "run", "schema": 1}, *findings]
+        # A crash can leave the last line unterminated; gluing the run record
+        # onto it would make the run unparseable and a retry undetectable.
+        torn = "\n" if line and not line.endswith("\n") else ""
+        payload = torn + "".join(json.dumps(r, sort_keys=True) + "\n" for r in lines)
+        # Write unbuffered bytes so a failure leaves nothing queued for close()
+        # to flush after the truncate below.
+        fd = fh.fileno()
+        data = payload.encode()
+        end = os.lseek(fd, 0, os.SEEK_END)
+        try:
+            while data:
+                data = data[os.write(fd, data) :]
+        except OSError:
+            # A partial run on disk would read as recorded and block every
+            # retry, so put the ledger back the way it was.
+            os.ftruncate(fd, end)
+            raise
     return True
 
 
@@ -157,12 +181,17 @@ def main(argv: list[str] | None = None) -> int:
         run = validate_run(load_json(args.run, "run"))
         mapping = validate_mapping(load_json(args.mapping, "mapping"))
         records = join_findings(
-            load_json(args.findings, "findings"), mapping, run["run_id"]
+            load_json(args.findings, "findings"), mapping, run["run_id"], run["host"]
         )
     except InputError as exc:
         print(f"co-review-record: {exc}", file=sys.stderr)
         return 1
-    if not append(args.ledger, run, records):
+    try:
+        written = append(args.ledger, run, records)
+    except OSError as exc:
+        print(f"co-review-record: cannot write {args.ledger}: {exc}", file=sys.stderr)
+        return 1
+    if not written:
         print("RECORDED: duplicate, skipped")
         return 0
     print(

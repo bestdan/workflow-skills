@@ -67,8 +67,8 @@ ledger_py() { python3 -c "import json,sys; recs=[json.loads(l) for l in open('$L
   assert_output "True"
   printf '{"run_id": "run-h", "host": "laptop-2", "reviewers": []}\n' >"$TEST_TMPDIR/run-run-h.json"
   record run-h
-  run ledger_py 'print([r["host"] for r in recs if r["type"] == "run"][-1])'
-  assert_output "laptop-2"
+  run ledger_py 'print([r["host"] for r in recs if r["run_id"] == "run-h"])'
+  assert_output "['laptop-2', 'laptop-2', 'laptop-2']"
 }
 
 @test "an empty host exits non-zero and writes nothing" {
@@ -87,6 +87,12 @@ ledger_py() { python3 -c "import json,sys; recs=[json.loads(l) for l in open('$L
   write_run run-str '"slow"'
   record run-str
   assert_failure
+  write_run run-nan NaN
+  record run-nan
+  assert_failure
+  write_run run-inf Infinity
+  record run-inf
+  assert_failure
   assert_file_not_exists "$LEDGER"
 }
 
@@ -97,6 +103,52 @@ ledger_py() { python3 -c "import json,sys; recs=[json.loads(l) for l in open('$L
   assert_success
   assert_output 'RECORDED: duplicate, skipped'
   assert_equal "$(shasum "$LEDGER")" "$before"
+}
+
+@test "an unterminated last line is closed off before the next run is appended" {
+  mkdir -p "$(dirname "$LEDGER")"
+  printf '{"type": "run", "run_id": "torn"' >"$LEDGER"
+  record
+  assert_success
+  record
+  assert_output 'RECORDED: duplicate, skipped'
+  run ledger_py 'pass'
+  assert_failure
+  run python3 -c "import json; ls=open('$LEDGER').read().splitlines(); print(len(ls), [json.loads(l)['type'] for l in ls[1:]])"
+  assert_output "4 ['run', 'finding', 'finding']"
+}
+
+@test "a write that fails partway leaves the ledger as it was and exits 1" {
+  mkdir -p "$(dirname "$LEDGER")"
+  # A 1 KiB file-size limit makes the append fail with EFBIG after a partial
+  # write; Python ignores SIGXFSZ, so the error surfaces as OSError.
+  python3 -c "import json; print(json.dumps({'type': 'run', 'run_id': 'old', 'pad': 'x' * 850}))" >"$LEDGER"
+  before="$(shasum "$LEDGER")"
+  run bash -c "ulimit -f 1; python3 '$REPO_ROOT/scripts/co-review-record.py' --run '$TEST_TMPDIR/run-run-1.json' \
+    --findings '$TEST_TMPDIR/recon.json' --mapping '$TEST_TMPDIR/map.json' --ledger '$LEDGER'"
+  assert_failure
+  assert_output --partial "cannot write"
+  assert_equal "$(shasum "$LEDGER")" "$before"
+}
+
+@test "the same run_id from another host is a new run, not a duplicate" {
+  printf '{"run_id": "run-1", "host": "laptop-2", "reviewers": []}\n' >"$TEST_TMPDIR/run-other.json"
+  record
+  record other
+  assert_success
+  assert_output 'RECORDED: 2 findings, 0 reviewers'
+  run ledger_py 'print(sorted(r["host"] for r in recs if r["type"] == "run") == sorted([__import__("socket").gethostname(), "laptop-2"]))'
+  assert_output "True"
+}
+
+@test "input fields cannot override the ledger's own type, run_id or schema" {
+  printf '{"run_id": "run-o", "type": "finding", "schema": 99, "reviewers": []}\n' >"$TEST_TMPDIR/run-run-o.json"
+  printf '[{"sources": ["Reviewer A"], "verdict": "high", "type": "run", "run_id": "forged"}]' \
+    >"$TEST_TMPDIR/forged.json"
+  record run-o "$TEST_TMPDIR/forged.json"
+  assert_success
+  run ledger_py 'print([(r["type"], r["run_id"], r.get("schema")) for r in recs])'
+  assert_output "[('run', 'run-o', 1), ('finding', 'run-o', None)]"
 }
 
 @test "concurrent runs leave a well-formed ledger with each run's records contiguous" {
@@ -131,6 +183,10 @@ print(len(recs), len(set(runs)), all(len(set(b)) == 1 for b in blocks))'
   record run-1 "$TEST_TMPDIR/unmapped.json"
   assert_failure
   assert_output --partial "'Reviewer Z' is not in the mapping"
+  printf '[{"sources": [], "verdict": "high"}]' >"$TEST_TMPDIR/nosources.json"
+  record run-1 "$TEST_TMPDIR/nosources.json"
+  assert_failure
+  assert_output --partial "sources must be a non-empty list"
   printf '[{' >"$TEST_TMPDIR/torn.json"
   record run-1 "$TEST_TMPDIR/torn.json"
   assert_failure
