@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.90.1] - 2026-10-18
+
+### Fixes
+
+- re-validate the crush reviewer pin at v0.98.1 (#1034) (df95498)
+
 ## [2.90.0] - 2026-10-18
 
 ### Features
