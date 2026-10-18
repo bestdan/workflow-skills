@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.90.2] - 2026-10-18
+
+### Fixes
+
+- treat a tip already on origin's default as landed [#1035] (#1037) (278be65)
+
 ## [2.90.1] - 2026-10-18
 
 ### Fixes
