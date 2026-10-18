@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.95.0] - 2026-10-18
+
+### Features
+
+- fail validate on an open obligation whose destination is done [#634] (#1050) (e9e7990)
+
 ## [2.94.2] - 2026-10-18
 
 ### Fixes
