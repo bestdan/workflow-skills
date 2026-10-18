@@ -19,6 +19,10 @@ sessions are a follow-up (see "Decisions"). The review path is unchanged: it sti
 with no network. The flush is a separate step that runs at session end, by
 hand, and before `/co-review-stats`.
 
+> **Built except the `SessionEnd` hook.** The flush, the multi-ledger read and
+> the `/doctor` check exist; the hook waits on the manual check under "Tests",
+> so for now the flush runs by hand and before `/co-review-stats`.
+
 The ledger's format and the firewall it serves are in
 [`../reviewer-quality-score-design.md`](../reviewer-quality-score-design.md);
 this design depends on both and changes neither.

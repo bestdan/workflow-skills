@@ -10,7 +10,14 @@ ledger that scripts/co-review-record.py writes, and the arithmetic lives here,
 not in a model, so every number on stdout is computed.
 
 Usage:
-  uv run scripts/co-review-stats.py [--ledger <path>] [--since <ISO date>] [--repo <name>]
+  uv run scripts/co-review-stats.py [--ledger <path>]... [--since <ISO date>] [--repo <name>]
+
+--ledger may repeat, and a directory means every *.jsonl in it, sorted. The
+default is the local ledger; with CO_REVIEW_LEDGER_REMOTE set, it is the local
+ledger followed by the shared clone's ledgers/ directory, which
+scripts/co-review-ledger-sync.py --pull keeps current. Files are read in order,
+and a (host, run_id) seen in an earlier file is dropped from a later one, so
+this machine's full rows win over its own redacted copies.
 
 Definitions (a run is identified by the pair (host, run_id), never run_id alone):
   runs         runs where the reviewer's disposition was "ran".
@@ -44,11 +51,13 @@ import argparse
 import datetime
 import json
 import math
+import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 DEFAULT_LEDGER = Path.home() / ".claude" / "co-review" / "findings.jsonl"
+SHARED_LEDGERS = Path.home() / ".claude" / "co-review" / "shared" / "ledgers"
 SCHEMA = 1
 BASE = "claude"
 DASH = "—"
@@ -80,7 +89,19 @@ def iso_date(value: str) -> str:
         raise argparse.ArgumentTypeError(f"not a YYYY-MM-DD date: {value!r}")
 
 
-def load(path: Path, since: Optional[str], repo: Optional[str]):
+def expand(values: List[str]) -> List[Path]:
+    """Each --ledger value as files: a directory is its *.jsonl, sorted."""
+    files: List[Path] = []
+    for value in values:
+        path = Path(value).expanduser()
+        if path.is_dir():
+            files.extend(sorted(p for p in path.glob("*.jsonl") if p.is_file()))
+        elif path.is_file() and path.stat().st_size > 0:
+            files.append(path)
+    return files
+
+
+def load(paths: List[Path], since: Optional[str], repo: Optional[str]):
     """Return (runs, findings, stats). runs: key -> {disp, dur}; findings: key -> [rec]."""
     runs: Dict[Key, Dict[str, Any]] = {}
     findings: Dict[Key, List[Dict[str, Any]]] = {}
@@ -89,11 +110,15 @@ def load(path: Path, since: Optional[str], repo: Optional[str]):
     # record. The writer appends a run and its findings as one block, so the
     # findings that follow a repeat are the repeat's, and are dropped with it.
     # An unknown-schema run's findings are dropped the same way, so a later
-    # valid run with its key does not inherit them.
+    # valid run with its key does not inherit them. `seen` spans every file, so
+    # a run in two files counts once; `dropping` restarts at each file, which
+    # begins with a run record of its own.
     seen: Set[Key] = set()
-    dropping: Optional[Key] = None
-    with path.open(encoding="utf-8") as fh:
-        for line in fh:
+    for path in paths:
+        dropping: Optional[Key] = None
+        with path.open(encoding="utf-8") as fh:
+            lines = list(fh)
+        for line in lines:
             if not line.strip():
                 continue
             try:
@@ -258,20 +283,28 @@ def render(rows, n_runs: int, stats) -> str:
 
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n")[0])
-    ap.add_argument("--ledger", default=str(DEFAULT_LEDGER))
+    ap.add_argument(
+        "--ledger",
+        action="append",
+        help="a ledger file, or a directory of *.jsonl ledgers; repeatable",
+    )
     ap.add_argument(
         "--since", type=iso_date, help="only runs on or after this date (YYYY-MM-DD)"
     )
     ap.add_argument("--repo", help="only runs for this repo")
     args = ap.parse_args(argv)
-    path = Path(args.ledger).expanduser()
-    if not path.is_file() or path.stat().st_size == 0:
-        print(f"No co-review ledger data at {path}.")
+    values = args.ledger or [str(DEFAULT_LEDGER)]
+    if not args.ledger and os.environ.get("CO_REVIEW_LEDGER_REMOTE"):
+        values.append(str(SHARED_LEDGERS))
+    where = ", ".join(str(Path(v).expanduser()) for v in values)
+    paths = expand(values)
+    if not paths:
+        print(f"No co-review ledger data at {where}.")
         return 0
-    runs, findings, stats = load(path, args.since, args.repo)
+    runs, findings, stats = load(paths, args.since, args.repo)
     if not runs:
         print(
-            f"No reconciled runs match in {path} (across the whole ledger: "
+            f"No reconciled runs match in {where} (across the whole ledger: "
             f"{stats['schema']} unknown-schema run(s), {stats['torn']} unparseable line(s))."
         )
         return 0

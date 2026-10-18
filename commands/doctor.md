@@ -1,5 +1,5 @@
 ---
-description: Diagnose and optionally fix the plugin setup — config validity, handler prerequisites, legacy dirs, schema drift, hygiene, co-review and teardown allow-rule drift, and the worktree root and branch prefix
+description: Diagnose and optionally fix the plugin setup — config validity, handler prerequisites, legacy dirs, schema drift, hygiene, co-review and teardown allow-rule drift, the worktree root and branch prefix, and co-review ledger sync
 allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(find *), Bash(grep *), Bash(uv *), Bash(python3 *), Bash(mkdir *), Bash(rmdir *), Bash("${CLAUDE_PLUGIN_ROOT}/scripts/worktree-config.sh":*), Glob, Grep, Read, Edit, Write, AskUserQuestion, mcp__claude_ai_Linear__list_teams, mcp__linear__list_teams, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__atlassian__getAccessibleAtlassianResources
 argument-hint: "[--fix]"
 ---
@@ -8,10 +8,10 @@ argument-hint: "[--fix]"
 
 One explicit "diagnose and fix my setup" entry point. It runs a set of checks
 against `dev_docs/tasks/` and the configured handler — plus one over co-review's and the teardown scripts'
-allow-rules, Check 7, and one over the worktree root and branch prefix, Check 8 — prints a `PASS` / `WARN` / `FAIL` line per check with a
+allow-rules, Check 7, one over the worktree root and branch prefix, Check 8, and one over co-review ledger sync, Check 9 — prints a `PASS` / `WARN` / `FAIL` line per check with a
 remediation hint, and changes **nothing** unless invoked with `--fix`.
 
-Most of what it checks is the task loop. Checks 7 and 8 are not, and that is deliberate:
+Most of what it checks is the task loop. Checks 7, 8 and 9 are not, and that is deliberate:
 each covers a failure that is **silent by construction**, so the only way anyone
 learns of it is by asking, and this is the one place people already come to ask.
 A check nobody runs does not fix a problem nobody notices. Read that as the bar
@@ -510,6 +510,21 @@ only by its full installed path, which carries the version and stops matching at
 the next release (#816). This command's own `allowed-tools` grant covers the
 resolver call.
 
+**Check 9 — co-review ledger sync.** Whether this machine's co-review rows can
+reach the shared ledger repo. A broken flush is silent too: it prints a receipt
+nobody may read and always exits 0. Run it **unsandboxed**, since it calls
+`git ls-remote`:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/co-review-ledger-sync.py" --check
+```
+
+It prints exactly one line, already in this report's shape, and never prints
+the remote URL or ledger rows; quote it as is. Exit `0` is a `PASS`, including
+sync being off because `CO_REVIEW_LEDGER_REMOTE` is unset. Exit `1` is a `WARN`:
+the remote is unreachable, or the clone at `~/.claude/co-review/shared/` is not
+a usable repo (the next flush reclones it). **Never touched by `--fix`.**
+
 ### 3. Report (and fix under `--fix`)
 
 **Report-only (default).** Print the status block and stop — no writes. Group
@@ -523,6 +538,7 @@ the tally, where the reader is left.
 
   PASS  Config valid
   PASS  Handler prerequisites (gh auth ok)
+  PASS  co-review ledger sync — off (CO_REVIEW_LEDGER_REMOTE unset)
   FAIL  Legacy dirs — dev_docs/todos/ present → migrate to dev_docs/tasks/
   FAIL  Schema drift — 1 file missing `expires` (defaultable)
   WARN  Hygiene — 2 expired tasks; 1 orphan task/ branch
@@ -531,7 +547,7 @@ the tally, where the reader is left.
   WARN  teardown allow-rules — worktree-remove.sh: 1 dead (pinned to 2.70.4; installed is 2.76.0)
   WARN  Worktree config — branch_prefix=jane/ from default (git user.email)
 
-2 fail, 5 warn, 2 pass. Re-run with `/doctor --fix` to apply the mechanical fixes.
+2 fail, 5 warn, 3 pass. Re-run with `/doctor --fix` to apply the mechanical fixes.
 ```
 
 **`--fix`.** Apply only the **safe, mechanical** repairs, then re-print the block

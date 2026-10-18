@@ -68,7 +68,7 @@ def validate_run(run) -> dict:
         raise InputError("run: run_id is required")
     # Ledgers from several machines merge on (host, run_id), so every run
     # names the machine it was recorded on.
-    run.setdefault("host", socket.gethostname())
+    run.setdefault("host", os.environ.get("CO_REVIEW_HOST") or socket.gethostname())
     if not isinstance(run["host"], str) or not run["host"]:
         raise InputError("run: host must be a non-empty string")
     reviewers = run.get("reviewers", [])

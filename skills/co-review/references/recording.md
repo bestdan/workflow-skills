@@ -186,7 +186,8 @@ script: a rejected run stays unrecorded, and the warning says why.
 
   `model` is the model the invocation pins, or `null` where it pins none.
   `command` is the reviewer's own dispatch tail as it ran, never the assembly
-  segments. The script fills in `host` itself.
+  segments. The script fills in `host` itself: the hostname, or
+  `CO_REVIEW_HOST` when set, for machines that share a hostname.
 
 Leave out anything about scores or past runs. The metadata describes this run
 only.
@@ -213,6 +214,10 @@ Read its outcome:
   mistake in your own files, the mapping or the metadata, may be corrected and
   the call rerun once; the script is idempotent on the run id, so a rerun can
   never count a run twice.
+
+Copying rows to other machines is a separate flush, never part of the review:
+[`scripts/co-review-ledger-sync.py`](../../../scripts/co-review-ledger-sync.py),
+run by hand and by `/co-review-stats`. Don't run it from a review.
 
 When aggregate reviewer scores were already in this session's context before
 the run started, add `scores were in context, discount this run` to the ledger

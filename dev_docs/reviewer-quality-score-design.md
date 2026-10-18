@@ -296,12 +296,15 @@ hostname) makes every run identifiable across machines by `(host, run_id)`.
 Findings carry `host` too, so a merged ledger can still tie each finding to its
 run when two machines happen to produce the same `run_id`. Combining ledgers is then
 concatenation plus dropping repeated pairs. Moving rows off a machine is a
-separate flush (#1041), never part of the review: it sends a **redacted** copy,
-without `issue`, `rationale`, `recommended_fix` or `file`, to a private repo
-with one file per host, and the stats read the union. That shared copy is a
-ledger like any other, so the firewall covers it too. A cloud session's
-`~/.claude/` does not outlive its container, so a co-review run there loses its
-rows unless it flushes before it ends.
+separate flush, `scripts/co-review-ledger-sync.py`, never part of the review.
+With `CO_REVIEW_LEDGER_REMOTE` set, it copies an allowlisted, redacted subset
+of each run to `ledgers/<host>.jsonl` in a private repo, and
+`co-review-stats.py` reads the local ledger followed by every host's file. It
+runs by hand and before `/co-review-stats`; nothing flushes at session end yet.
+The shared copy is a ledger like any other, so the firewall covers it too. The
+design, the allowlist, and the failure rules are
+[`designs/2026-10-18-co-review-ledger-sync.md`](designs/2026-10-18-co-review-ledger-sync.md).
+Cloud sessions are not covered: their rows are lost with the container (#1048).
 
 ### 3. The write — `scripts/co-review-record.py`
 

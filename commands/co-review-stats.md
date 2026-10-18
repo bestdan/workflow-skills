@@ -1,12 +1,25 @@
 ---
 description: Use when the user asks how useful, accurate or fast each co-review reviewer has been — e.g. "is agy worth running", "which reviewers are wrong most", "show reviewer stats", or /co-review-stats. Prints the per-reviewer quality table from the co-review findings ledger, verbatim. Never invoke it from inside a review, or to inform one; it is the human end of the feedback loop.
-allowed-tools: Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/co-review-stats.py":*)
+allowed-tools: Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/co-review-ledger-sync.py" --pull), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/co-review-stats.py":*)
 argument-hint: "[--since YYYY-MM-DD] [--repo <owner/name>]"
 ---
 
 # Co-review Stats
 
-Run the script, passing through only `--since` and `--repo` from the
+First refresh the other machines' rows. Run this **unsandboxed**: it needs the
+network and writes `~/.claude/co-review/shared/`, which the Bash sandbox denies.
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/co-review-ledger-sync.py" --pull
+```
+
+It prints only `ledger sync: …` receipt lines and always exits 0. Show them
+above the table; a `❌` line, or `ledger sync: off`, still goes on to the stats.
+This and a hand-run `--push` are the only flushes for now: nothing runs one at
+session end yet. The design is
+[`dev_docs/designs/2026-10-18-co-review-ledger-sync.md`](../dev_docs/designs/2026-10-18-co-review-ledger-sync.md).
+
+Then run the stats, passing through only `--since` and `--repo` from the
 arguments, and show its stdout **verbatim** in a code block:
 
 ```bash

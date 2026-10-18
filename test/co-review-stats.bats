@@ -2,6 +2,7 @@
 
 setup() {
   setup_test
+  unset CO_REVIEW_LEDGER_REMOTE
   LEDGER="$TEST_TMPDIR/ledger/findings.jsonl"
   mkdir -p "$TEST_TMPDIR/ledger"
 }
@@ -232,4 +233,71 @@ paired_fixture() {
   stats
   assert_success
   assert_equal "$(cksum <"$LEDGER")" "$before"
+}
+
+# Several ledgers: the local file first, then a directory of per-host files.
+multi_fixture() {
+  LOCAL="$LEDGER"
+  SHARED="$TEST_TMPDIR/shared/ledgers"
+  mkdir -p "$SHARED"
+  rec_run h1 r1 $TS org/a 1 "[$(rev claude ran 1)]"
+  rec_finding h1 r1 '["claude"]' wrong
+  # h1's own redacted copy of r1, plus h2's runs, one of them repeated in a
+  # second file.
+  LEDGER="$SHARED/h1.jsonl"
+  rec_run h1 r1 $TS org/a 1 "[$(rev claude ran 1)]"
+  rec_finding h1 r1 '["claude"]' wrong
+  LEDGER="$SHARED/h2.jsonl"
+  rec_run h2 x1 $TS org/a 1 "[$(rev claude ran 1)]"
+  rec_finding h2 x1 '["claude"]' high
+  LEDGER="$SHARED/h3.jsonl"
+  rec_run h2 x1 $TS org/a 1 "[$(rev claude ran 1)]"
+  rec_finding h2 x1 '["claude"]' high
+  rec_run h3 y1 $TS org/a 1 "[$(rev claude ran 1)]"
+  rec_finding h3 y1 '["claude"]' high
+  LEDGER="$LOCAL"
+}
+
+@test "--ledger repeats, a directory reads every *.jsonl, and a repeated run counts once" {
+  multi_fixture
+  echo 'not a ledger' >"$SHARED/README"
+  stats --ledger "$SHARED"
+  assert_success
+  # r1 (local and its copy), x1 (in two files) and y1: three runs, one finding each.
+  assert_output --partial '3 reconciled runs'
+  assert_line --regexp '^claude +3 +3 +33\.3 '
+  assert_output --partial '0 unparseable line(s)'
+}
+
+@test "with sync on, the default is the local ledger followed by the shared clone" {
+  export HOME="$TEST_TMPDIR/home"
+  mkdir -p "$HOME/.claude/co-review/shared/ledgers"
+  LEDGER="$HOME/.claude/co-review/findings.jsonl"
+  rec_run h1 r1 $TS org/a 1 "[$(rev claude ran 1)]"
+  LEDGER="$HOME/.claude/co-review/shared/ledgers/h2.jsonl"
+  rec_run h2 x1 $TS org/a 1 "[$(rev claude ran 1)]"
+  run python3 "$REPO_ROOT/scripts/co-review-stats.py"
+  assert_output --partial '1 reconciled runs'
+  CO_REVIEW_LEDGER_REMOTE=file:///nowhere run python3 "$REPO_ROOT/scripts/co-review-stats.py"
+  assert_output --partial '2 reconciled runs'
+}
+
+@test "a missing shared directory is not an error, and the empty message names every path" {
+  export HOME="$TEST_TMPDIR/home"
+  CO_REVIEW_LEDGER_REMOTE=file:///nowhere run python3 "$REPO_ROOT/scripts/co-review-stats.py"
+  assert_success
+  assert_output "No co-review ledger data at $HOME/.claude/co-review/findings.jsonl, $HOME/.claude/co-review/shared/ledgers."
+}
+
+@test "the drop-after-a-repeat state restarts at each file" {
+  # The local file ends on a repeated run, so its trailing findings are
+  # dropped. The next file's findings for its own first run must still count.
+  rec_run h r1 $TS org/a 1 "[$(rev claude ran 1)]"
+  rec_run h r1 $TS org/a 1 "[$(rev claude ran 1)]"
+  rec_finding h r1 '["claude"]' wrong
+  OTHER="$TEST_TMPDIR/other.jsonl"
+  printf '{"type": "finding", "run_id": "r1", "host": "h", "sources": ["claude"], "human_corroborated": false, "verdict": "high"}\n' >"$OTHER"
+  stats --ledger "$OTHER"
+  assert_success
+  assert_line --regexp '^claude +1 +1 +0\.0 '
 }
