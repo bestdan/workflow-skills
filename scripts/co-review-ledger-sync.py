@@ -63,14 +63,15 @@ FINDING_FIELDS = ("type", "run_id", "host", "sources", "human_corroborated", "ve
 
 # Git's and ssh's stderr when the host answered but turned the credentials
 # down, which --check reports apart from a host it never reached. GitHub
-# answers an HTTPS request it won't authorize with "Repository not found".
+# answers a repository the credentials cannot see and one that does not exist
+# alike with "Repository not found", so the message names both.
 AUTH_REFUSED = (
     "Permission denied (publickey",
-    "Host key verification failed",
     "Authentication failed",
     "could not read Username",
     "Repository not found",
-    "The requested URL returned error: 40",
+    "The requested URL returned error: 401",
+    "The requested URL returned error: 403",
 )
 
 
@@ -450,12 +451,12 @@ def check(base: Path, remote: Optional[str]) -> int:
         cwd = base if base.is_dir() else Path.home()
         reach = git(cwd, "ls-remote", "-q", "--heads", remote, network=True)
         reachable = reach.returncode == 0
-        refused = any(m in reach.stderr for m in AUTH_REFUSED)
+        refused = not reachable and any(m in reach.stderr for m in AUTH_REFUSED)
     except SyncError:
         reachable = refused = False
     if refused:
         print(
-            f"WARN  {name} — remote refused access; check the credentials for CO_REVIEW_LEDGER_REMOTE (SSH key or HTTPS helper)"
+            f"WARN  {name} — remote refused access or the repository does not exist; check the URL and credentials for CO_REVIEW_LEDGER_REMOTE"
         )
         return 1
     if not reachable:

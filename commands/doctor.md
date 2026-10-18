@@ -522,8 +522,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/co-review-ledger-sync.py" --check
 It prints exactly one line, already in this report's shape, and never prints
 the remote URL or ledger rows; quote it as is. Exit `0` is a `PASS`, including
 sync being off because `CO_REVIEW_LEDGER_REMOTE` is unset. Exit `1` is a `WARN`:
-the remote is unreachable, the remote refused this machine's credentials
-(an SSH key GitHub does not accept, or no HTTPS credential helper), or the clone at `~/.claude/co-review/shared/` is not
+the remote is unreachable, the remote refused this machine's credentials or has
+no such repository (a mistyped URL, an SSH key the host does not accept, or no
+HTTPS credential helper), or the clone at `~/.claude/co-review/shared/` is not
 a usable repo (the next flush reclones it). **Never touched by `--fix`.**
 
 ### 3. Report (and fix under `--fix`)
