@@ -156,6 +156,7 @@ Append-only, two record types.
   "type": "run",
   "schema": 1,
   "run_id": "2026-07-14T15-02-11Z-a3f9",
+  "host": "lindev",
   "ts": "2026-07-14T15:02:11Z",
   "repo": "bestdan/workflow-skills",
   "pr": 231,
@@ -276,7 +277,18 @@ catches the failure mode where every reviewer looks terrible because the
 **reconciler prompt** is miscalibrated.
 
 **Privacy.** Rows contain issue text and file paths from private repos. The
-ledger is local-only, under `~/.claude/`, never committed, never synced.
+ledger itself is local-only, under `~/.claude/`, and never committed.
+
+**Several machines, one table.** Each machine keeps its own ledger, and the run
+record's `host` (the recording script fills in the hostname) makes every run
+identifiable across machines by `(host, run_id)`. Combining ledgers is then
+concatenation plus dropping repeated pairs. Moving rows off a machine is a
+separate flush (#1041), never part of the review: it sends a **redacted** copy,
+without `issue`, `rationale`, `recommended_fix` or `file`, to a private repo
+with one file per host, and the stats read the union. That shared copy is a
+ledger like any other, so the firewall covers it too. A cloud session's
+`~/.claude/` does not outlive its container, so a co-review run there loses its
+rows unless it flushes before it ends.
 
 ### 3. The write — `scripts/co-review-record.py`
 
