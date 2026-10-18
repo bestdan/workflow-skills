@@ -2,6 +2,7 @@
 
 setup() {
   setup_test
+  unset CO_REVIEW_HOST
   LEDGER="$TEST_TMPDIR/ledger/findings.jsonl"
   cat >"$TEST_TMPDIR/map.json" <<'EOF'
 {"Reviewer A": {"name": "devin", "kind": "agent"},
@@ -67,6 +68,17 @@ ledger_py() { python3 -c "import json,sys; recs=[json.loads(l) for l in open('$L
   assert_output "True"
   printf '{"run_id": "run-h", "host": "laptop-2", "reviewers": []}\n' >"$TEST_TMPDIR/run-run-h.json"
   record run-h
+  run ledger_py 'print([r["host"] for r in recs if r["run_id"] == "run-h"])'
+  assert_output "['laptop-2', 'laptop-2', 'laptop-2']"
+}
+
+@test "CO_REVIEW_HOST overrides the hostname, and a host in the run still wins" {
+  CO_REVIEW_HOST=vm-clone record
+  assert_success
+  run ledger_py 'print(sorted({r["host"] for r in recs}))'
+  assert_output "['vm-clone']"
+  printf '{"run_id": "run-h", "host": "laptop-2", "reviewers": []}\n' >"$TEST_TMPDIR/run-run-h.json"
+  CO_REVIEW_HOST=vm-clone record run-h
   run ledger_py 'print([r["host"] for r in recs if r["run_id"] == "run-h"])'
   assert_output "['laptop-2', 'laptop-2', 'laptop-2']"
 }
