@@ -85,6 +85,11 @@ def load(path: Path, since: Optional[str], repo: Optional[str]):
     runs: Dict[Key, Dict[str, Any]] = {}
     findings: Dict[Key, List[Dict[str, Any]]] = {}
     skipped_schema = torn = 0
+    # A repeated (host, run_id) — two ledgers concatenated — keeps its first run
+    # record. The writer appends a run and its findings as one block, so the
+    # findings that follow a repeat are the repeat's, and are dropped with it.
+    seen: Set[Key] = set()
+    dropping: Optional[Key] = None
     with path.open(encoding="utf-8") as fh:
         for line in fh:
             if not line.strip():
@@ -98,11 +103,13 @@ def load(path: Path, since: Optional[str], repo: Optional[str]):
                 torn += 1
                 continue
             if rec.get("type") == "run":
+                dropping = key if key in seen else None
                 if rec.get("schema") != SCHEMA:
                     skipped_schema += 1
                     continue
-                if key in runs:
+                if dropping:
                     continue
+                seen.add(key)
                 if since is not None and not str(rec.get("ts", "")) >= since:
                     continue
                 if repo is not None and rec.get("repo") != repo:
@@ -116,7 +123,7 @@ def load(path: Path, since: Optional[str], repo: Optional[str]):
                         ok = isinstance(d, (int, float)) and not isinstance(d, bool)
                         dur[r["name"]] = d if ok else None
                 runs[key] = {"disp": disp, "dur": dur}
-            elif rec.get("type") == "finding":
+            elif rec.get("type") == "finding" and key != dropping:
                 findings.setdefault(key, []).append(rec)
     findings = {k: v for k, v in findings.items() if k in runs}
     return runs, findings, {"schema": skipped_schema, "torn": torn}
@@ -236,7 +243,7 @@ def render(rows, n_runs: int, stats) -> str:
         "are absent by design)."
     )
     lines.append(
-        f"Skipped: {stats['schema']} run(s) with unknown schema, "
+        f"Skipped across the whole ledger: {stats['schema']} run(s) with unknown schema, "
         f"{stats['torn']} unparseable line(s)."
     )
     lines.append(
@@ -261,8 +268,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     runs, findings, stats = load(path, args.since, args.repo)
     if not runs:
         print(
-            f"No reconciled runs match in {path} ({stats['schema']} unknown-schema "
-            f"run(s), {stats['torn']} unparseable line(s))."
+            f"No reconciled runs match in {path} (across the whole ledger: "
+            f"{stats['schema']} unknown-schema run(s), {stats['torn']} unparseable line(s))."
         )
         return 0
     print(render(compute(runs, findings), len(runs), stats))

@@ -135,7 +135,21 @@ paired_fixture() {
   assert_success
   assert_line --regexp '^claude +1 +1 +100\.0 '
   assert_output --partial '1 reconciled runs'
-  assert_output --partial 'Skipped: 1 run(s) with unknown schema, 0 unparseable line(s).'
+  assert_output --partial 'Skipped across the whole ledger: 1 run(s) with unknown schema, 0 unparseable line(s).'
+}
+
+@test "a repeated run counts once, and so do the findings that follow it" {
+  rec_run h r1 $TS org/a 1 "[$(rev claude ran 1)]"
+  rec_finding h r1 '["claude"]' wrong
+  rec_run h r1 $TS org/a 1 "[$(rev claude ran 1)]"
+  rec_finding h r1 '["claude"]' wrong
+  rec_run h r2 $TS org/a 1 "[$(rev claude ran 1)]"
+  rec_finding h r2 '["claude"]' high
+  stats
+  assert_success
+  # Two distinct runs, one finding each; the repeated r1 block adds nothing.
+  assert_line --regexp '^claude +2 +2 +50\.0 '
+  assert_output --partial '2 reconciled runs'
 }
 
 @test "a torn line is skipped and counted, not fatal" {
