@@ -32,13 +32,17 @@ That is already a blinded grade against a shared diff. The instrument exists; we
 simply throw its readings away. This design writes them down — and closes the
 one blinding gap that exists today: **GitHub comments currently reach the
 reconciler with their real authors.** A finding graded under the name "Copilot"
-is not a blind grade, so bot rows would be worthless. Section 1 fixes this by
+is not a blind grade, so bot rows would be worthless. The reconciler contract (Components §1) fixes this by
 relabelling _every_ source, not just the local ones.
 
 ## The firewall (the load-bearing constraint)
 
 **Nothing in the review path may ever read the ledger.** Not the reconciler, not
-the main agent, in any mode, at any step.
+the main agent, in any mode, at any step. What the rule protects is an agent's
+context, so it covers anything whose output reaches an agent. The recording
+script's own scan is the one read it allows: under its lock it looks for an
+existing `(host, run_id)` so a retry is not counted twice, and it hands back
+nothing but its one-line receipt.
 
 If any in-review agent learns that "devin is wrong 38% of the time," it stops
 grading the finding in front of it and starts grading the reviewer that produced
@@ -59,8 +63,8 @@ co-review run ──write-only──> findings.jsonl ──> /co-review-stats �
 
 Consequences, all deliberate:
 
-- co-review is **write-only** to the ledger. It never reads it — not even to warn
-  you mid-run that a reviewer looks bad.
+- co-review is **write-only** to the ledger. No agent in it reads the ledger —
+  not even to warn you mid-run that a reviewer looks bad.
 - The write is performed by a **script**, not an agent. A sub-agent would return
   text into the main context; a script returns nothing.
 - Acting on the data is a **human decision**, made deliberately against a large
@@ -72,9 +76,12 @@ ledger" is a _policy_ control, not a capability boundary — the agent retains
 earlier in a session carries the scores in context into any co-review run in
 that same session. Mitigations, strongest first:
 
-1. **Optional deny rule** (real capability boundary for direct reads): add
-   `"Read(~/.claude/co-review/**)"` to `permissions.deny`. The stats script
-   still works — it reads the file itself and is invoked via Bash.
+1. **Optional deny rule**: add `"Read(~/.claude/co-review/**)"` to
+   `permissions.deny`. It blocks the Read tool only; a Bash command such as
+   `cat` still reads the file, which is also why the stats script, invoked via
+   Bash, keeps working. So it closes the accidental path, not a deliberate one.
+   The boundary for a Bash read is `sandbox.filesystem.denyRead`, and only for
+   sandboxed commands.
 2. **Same-session rule**, stated in both `/co-review-stats` and `co-review`:
    after viewing stats, don't run a co-review in the same session; if aggregate
    reviewer scores are already in context when co-review starts, say so in the
@@ -149,7 +156,7 @@ time" is more than noise. The repo is recorded as a _field_, so slicing by repo
 
 Append-only, two record types.
 
-**`run`** — one per co-review invocation. The denominator.
+**`run`** — one per reconciled co-review invocation. The denominator.
 
 ```json
 {
@@ -186,7 +193,8 @@ Append-only, two record types.
       "reason": "auth probe failed",
       "duration_s": null
     },
-    { "name": "codex", "disposition": "timed-out", "duration_s": 600.0 }
+    { "name": "codex", "disposition": "timed-out", "duration_s": 600.0 },
+    { "name": "copilot", "disposition": "failed", "duration_s": 3.1 }
   ]
 }
 ```
@@ -211,7 +219,9 @@ run that wait. Three rules keep the number honest:
   count them separately.
 - **Failures cost time too.** A reviewer that runs and returns nothing usable
   (`disposition: failed`, e.g. answering NO INPUT) records its duration like any
-  other. Its time was spent whether or not it produced a finding.
+  other, and the stats count it in the duration percentiles. Its time was spent
+  whether or not it produced a finding, and the percentiles measure how long a
+  run waits on the reviewer.
 
 Duration is a measurement, not a grade, so recording it does not touch the
 blinding. Reading it is still a ledger read, and the firewall still forbids it
@@ -304,9 +314,14 @@ grades exist the moment reconciliation completes). The main agent writes three
 temp files and calls:
 
 ```bash
-uv run scripts/co-review-record.py \
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/co-review-record.py" \
   --run <meta.json> --findings <recon.json> --mapping <map.json>
 ```
+
+The plugin-root path is what makes the call work in any repo under review, the
+way co-review already calls its other helpers; a bare `scripts/…` path resolves
+only when the repo being reviewed is this one. The script is stdlib-only, so
+plain `python3` runs it.
 
 - `--mapping` maps each neutral label to an identity:
   `{"Reviewer A": {"name": "devin", "kind": "agent"}, "Reviewer D": {"kind": "human"}}`.
@@ -368,7 +383,7 @@ Per reviewer:
 | `high`        | Findings that survived as `high`                                    |
 | `unique-high` | `high` rows: sole automated source **and** not `human_corroborated` |
 | `finds/run`   | Volume — catches the reviewer that is quiet, not correct            |
-| `p50 s`       | Median `duration_s` over runs where the reviewer `ran`              |
+| `p50 s`       | Median `duration_s` over runs where the reviewer `ran` or `failed`  |
 | `p90 s`       | 90th-percentile `duration_s` over the same runs                     |
 | `fail %`      | (`timed-out` + `failed`) ÷ runs where the reviewer was dispatched   |
 
@@ -426,14 +441,14 @@ bump? is it fine on Python and hopeless on shell?).
 
 ## Success criteria
 
-1. A co-review run appends one `run` record and one `finding` record per
-   reconciled finding, in every mode; the write is locked, batched, and
+1. Every reconciled co-review run, in every mode, appends one `run` record and
+   one `finding` record per reconciled finding; the write is locked, batched, and
    idempotent on `(host, run_id)`; and a recording failure never breaks a run.
 2. The reconciler sees **only neutral labels** — including for GitHub bots and
    human commenters. No identifiable source name reaches the grader.
 3. No agent in the review path reads `findings.jsonl`. Enforced by there being
    no step that does, stated as an explicit rule in `co-review`'s Rules section,
-   and hardenable via the optional `permissions.deny` read rule.
+   and narrowed by the optional `permissions.deny` read rule.
 4. `/co-review-stats` reports every reviewer plus the `claude` baseline, with
    the headline comparison **paired on common runs** and all arithmetic done in
    the script.

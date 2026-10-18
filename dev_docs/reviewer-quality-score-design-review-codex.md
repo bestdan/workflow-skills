@@ -1,5 +1,12 @@
 # Architectural review: Reviewer quality score
 
+> **This reviews the first draft (2026-07-14) of
+> [`reviewer-quality-score-design.md`](reviewer-quality-score-design.md), not
+> the current one.** Every finding below has since been answered in the design,
+> some by adopting the fix and some by declining it with a reason (prompt
+> hashes and CLI versions, for example). Its verdict and its line anchors refer
+> to that draft. It is kept as a record of what was challenged.
+
 The measurement concept is useful, but the draft is not implementation-ready.
 Its blinding, control-group comparison, and ledger-integrity claims do not hold
 under the proposed architecture.
