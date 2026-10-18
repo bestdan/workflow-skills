@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.94.0] - 2026-10-18
+
+### Features
+
+- derive transitive obligation taint for decisions [#632] (#852) (a36c15b)
+
 ## [2.93.0] - 2026-10-18
 
 ### Features
