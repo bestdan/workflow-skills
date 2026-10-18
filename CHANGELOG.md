@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.89.0] - 2026-10-18
+
+### Features
+
+- write the blind-graded findings ledger [#711] (#907) (a916b8a)
+
 ## [2.88.0] - 2026-10-16
 
 ### Features
