@@ -53,13 +53,16 @@ date +%s > "<INPUT>.time"; <the reviewer's line, byte-for-byte>; date +%s >> "<I
 - The trailing stamp makes the call's exit status the stamp's, not the
   reviewer's. Judge the reviewer from its output and its `REVIEW_COMPLETE` line,
   as SKILL.md step 5 and each reviewer file already require.
-- Read `<INPUT>.time` (`cat "<INPUT>.time"`). Two lines: `duration_s` is the
-  second minus the first.
+- Read `<INPUT>.time` (`cat "<INPUT>.time"`). `duration_s` is the last line
+  minus the first. A killed reviewer can leave a third line (below), and the
+  last one is still the moment the wait ended.
 
 **A timed-out reviewer** (the `--non-interactive` 15-minute bound) never
 reaches its end stamp. When you stop waiting and kill it, append the stamp
 yourself, `date +%s >> "<INPUT>.time"`, so its duration is how long it was
-waited on.
+waited on — a lower bound on how long it would have taken. Killing only the
+reviewer process lets the dispatch's own end stamp run too; the extra line is
+harmless, since the duration reads first to last.
 
 **Your own review** (step 7) runs in this session, so stamp it with two bare
 `date +%s` calls: one immediately before you start forming the review, one
@@ -71,7 +74,7 @@ transcript; subtract.
 - a reviewer that was never dispatched: `skipped`, whatever the reason;
 - a GitHub bot: co-review never dispatches one, so there is no
   dispatch-to-result interval to measure;
-- a stamp file without exactly two lines, or a stamp call that was denied.
+- a stamp file with fewer than two lines, or a stamp call that was denied.
   Record `null` and add `duration unmeasured` to that reviewer on the reviewer
   line.
 

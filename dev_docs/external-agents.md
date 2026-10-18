@@ -86,7 +86,9 @@ completion rather than blocking a foreground call to the 7-minute ceiling.
   run. Where the prompt specifies a terminal verdict line (co-review's
   rubric requires `REVIEW_COMPLETE: PASS` / `REVIEW_COMPLETE: FINDINGS`),
   echo `tail -n 1` of the output too and check for it — missing means
-  **incomplete, not PASS**.
+  **incomplete, not PASS**. A co-review dispatch stamped for the run record
+  ends in `date +%s`, so its exit code is the stamp's: there, the byte count
+  and the verdict line are the whole check.
 - **Guard the prompt.** `[ -s "$SP/codex-prompt.txt" ]` before dispatch; never
   inline `$(cat "$TMPDIR/…")`.
 - **Run unsandboxed — but only the _Bash_ sandbox.** `codex` (and `agy`) need
