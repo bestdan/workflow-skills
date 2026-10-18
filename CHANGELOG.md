@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.91.0] - 2026-10-18
+
+### Features
+
+- write a handoff file when a run ends [N/A] (#1017) (8803bcd)
+
 ## [2.90.3] - 2026-10-18
 
 ### Fixes
