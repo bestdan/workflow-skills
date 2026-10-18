@@ -40,6 +40,7 @@ unparseable lines.
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import math
 import sys
@@ -66,6 +67,16 @@ def nearest_rank(values: List[float], p: float) -> Optional[float]:
         return None
     ordered = sorted(values)
     return ordered[max(1, math.ceil(p * len(ordered))) - 1]
+
+
+def iso_date(value: str) -> str:
+    # ts is always UTC "...Z" (co-review's recording step writes it with date -u),
+    # so a YYYY-MM-DD string compares correctly against it; anything else would
+    # compare silently wrong.
+    try:
+        return datetime.date.fromisoformat(value).isoformat()
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a YYYY-MM-DD date: {value!r}")
 
 
 def load(path: Path, since: Optional[str], repo: Optional[str]):
@@ -237,7 +248,9 @@ def render(rows, n_runs: int, stats) -> str:
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n")[0])
     ap.add_argument("--ledger", default=str(DEFAULT_LEDGER))
-    ap.add_argument("--since", help="only runs with ts >= this ISO date")
+    ap.add_argument(
+        "--since", type=iso_date, help="only runs on or after this date (YYYY-MM-DD)"
+    )
     ap.add_argument("--repo", help="only runs for this repo")
     args = ap.parse_args(argv)
     path = Path(args.ledger).expanduser()

@@ -178,6 +178,15 @@ paired_fixture() {
   assert_output --partial '1 reconciled runs'
 }
 
+@test "--since rejects a value that is not a YYYY-MM-DD date" {
+  rec_run h r1 $TS org/a 1 "[$(rev claude ran 1)]"
+  stats --since 10/01/2026
+  assert_failure 2
+  assert_output --partial 'not a YYYY-MM-DD date'
+  stats --since yesterday
+  assert_failure 2
+}
+
 @test "--repo keeps only that repo's runs, and their findings" {
   rec_run h a1 $TS org/a 1 "[$(rev claude ran 1)]"
   rec_run h b1 $TS org/b 1 "[$(rev claude ran 1)]"
