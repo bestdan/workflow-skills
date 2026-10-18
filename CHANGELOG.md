@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.94.2] - 2026-10-18
+
+### Fixes
+
+- stop counting dead allow-rules as drift [#611] (#1045) (e3f99ec)
+
 ## [2.94.1] - 2026-10-18
 
 ### Fixes
