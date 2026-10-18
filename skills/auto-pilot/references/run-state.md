@@ -541,6 +541,9 @@ G4's idempotency check is what makes resume safe to run repeatedly: a re-push or
 a second launch never opens a duplicate PR, because an existing PR for the head
 branch is detected and adopted.
 
+gh-issue only: a claim-time lock ref with no commits ahead of the row's `base` is
+"no branch" (G1/G2), not G4 — see [adapters.md](adapters.md#gh-issue-adapter).
+
 ## Run doctor
 
 Findings #22 and #23 both hit a live run and **both presented as a clean

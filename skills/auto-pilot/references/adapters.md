@@ -97,24 +97,25 @@ trust a single lagging read).
 ## gh-issue adapter
 
 Source: a GitHub **milestone**, or an explicit **label query**, in the repo
-`gh-issue.repo` names (`handler: gh-issue`); the source syntax is `SKILL.md`'s.
+`gh-issue.repo` names (`handler: gh-issue`); the source syntax lands in
+`SKILL.md` with issue #1020.
 Either one only **narrows** the handler's candidate query: a ready issue still
 needs `status:2_ready` **and** `auto:eligible`, so a human can withhold an issue
 from the run exactly as from `/do-tasks`. Native GitHub issue dependencies
 (`blocked_by`) are the dependency graph. Every verb delegates to a
-`commands/handlers/gh-issue-claim.md` section or a `commands/handlers/assets/`
-script — none are no-ops.
+`commands/handlers/gh-issue-claim.md` section, a `commands/handlers/assets/`
+script, or a plain `gh` call — none are no-ops.
 
-| Verb               | Delegates to                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `list_ready`       | `gh-issue-claim.md` **Find candidates**, with the source ANDed into its `--search` (`milestone:"<title>"`, or one `label:"<name>"` term per queried label) — never replacing its `status:2_ready` + `auto:eligible` terms — then `gh-issue-ready.py --issue <n>:<est> … --max-estimate <bound>` over exactly those candidates                                                                                                                                                                                                                                                                                                              |
-| `dependency_graph` | `gh-issue-graph.py --repo <repo> --json`, scoped with `--milestone` or `--label` to match the source (the same reader `gh-issue-reoptimize.md` **Load — build the graph** uses)                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `claim`            | `gh-issue-claim.md` **Pre-flight: is work already in flight?** then **Claim the issue** (the ref lock — see below); build on `gh-issue-claim.py branch-name --issue <n> --prefix "<branch_prefix>"`, never a hand-built name                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `link_pr`          | `gh-issue-claim.md` **PR** — **only** its `PR opened: <url>` issue comment; the rung stays `status:3_started`. The PR body's `Closes #<n>` is the native link                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `set_needs_review` | `gh pr ready <pr>` under `/deliver-task`'s write-access gate (step 4, **Open the PR**), then `gh-issue-claim.md` **Move to review on PR open** (`gh-issue-state.py` → `status:4_needs_review`). Only a PR that is actually ready gets the rung: if `viewerPermission` is not `ADMIN`/`MAINTAIN`/`WRITE`, or still cannot be determined after one re-read, or `gh pr ready` fails, write nothing and call `flag_for_human` instead (the issue stays `status:3_started`, the PR stays a draft) — unlike attended `/deliver-task`, the run never hands off a draft, since the rung on a draft PR is the state the hand-off note below forbids |
-| `flag_for_human`   | `gh-issue-claim.md` **Bail (when execution proves infeasible mid-flight)** label + comment mechanics, **diverged** — see below                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `comment_progress` | `gh issue comment <n> --repo <repo>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `wip_limit`        | `gh-issue-claim.md` **Pre-claim WIP gate** (`gh-issue-claim.py wip`, which counts this operator's `status:3_started` + `status:4_needs_review`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Verb               | Delegates to                                                                                                                                                                                                                                                                                                                  |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list_ready`       | `gh-issue-claim.md` **Find candidates**, with the source ANDed into its `--search` (`milestone:"<title>"`, or one `label:"<name>"` term per queried label) — never replacing its `status:2_ready` + `auto:eligible` terms — then `gh-issue-ready.py --issue <n>:<est> … --max-estimate <bound>` over exactly those candidates |
+| `dependency_graph` | `gh-issue-graph.py --repo <repo> --json`, scoped with `--milestone` or `--label` to match the source (the same reader `gh-issue-reoptimize.md` **Load — build the graph** uses)                                                                                                                                               |
+| `claim`            | `gh-issue-claim.md` **Pre-flight: is work already in flight?** then **Claim the issue** (the ref lock — see below); build on `gh-issue-claim.py branch-name --issue <n> --prefix "<branch_prefix>"`, never a hand-built name                                                                                                  |
+| `link_pr`          | `gh-issue-claim.md` **PR** — **only** its `PR opened: <url>` issue comment; the rung stays `status:3_started`. The PR body's `Closes #<n>` is the native link                                                                                                                                                                 |
+| `set_needs_review` | `gh pr ready <pr>` under `/deliver-task`'s write-access gate (step 4, **Open the PR**), then `gh-issue-claim.md` **Move to review on PR open** (`gh-issue-state.py` → `status:4_needs_review`); parks instead of handing off a draft — see below                                                                              |
+| `flag_for_human`   | `gh-issue-claim.md` **Bail (when execution proves infeasible mid-flight)** label + comment mechanics, **diverged** — see below                                                                                                                                                                                                |
+| `comment_progress` | `gh issue comment <n> --repo <repo>`                                                                                                                                                                                                                                                                                          |
+| `wip_limit`        | `gh-issue-claim.md` **Pre-claim WIP gate** (`gh-issue-claim.py wip`, which counts this operator's `status:3_started` + `status:4_needs_review`)                                                                                                                                                                               |
 
 **Claim mode: the ref lock, not the comment election.** `/do-tasks`'s batch
 dispatch puts its sessions on `claim-lock.md`'s comment-token election because
@@ -126,7 +127,8 @@ row ([run-state.md](run-state.md#crash-reconciliation)) — keep the ref if the 
 is still ours, release it and park if not.
 
 **The lock ref exists from the moment of claim, and resume must not read it as
-pushed work.** `acquire` creates `<branch_prefix>task-<n>` on origin at the base
+pushed work.** `claim` (via `gh-issue-claim.py acquire`) creates
+`<branch_prefix>task-<n>` in `<repo>` at the base
 sha before any implementation, so a crash before the first push leaves a remote
 branch with no PR. That matches **G4**'s observed reality ("remote branch exists;
 no PR"), whose action — open the PR — fails with no commits and parks a task that
@@ -138,7 +140,7 @@ so this reading is gh-issue's alone.
 
 What `--resume` does not cover is a crashed
 run **nobody resumes**: its `<branch_prefix>task-<n>` ref stays on origin and every
-later session skips the issue, until the crashed-claim sweep in #760 exists. Do not
+later session skips the issue, until the crashed-claim sweep in issue #760 exists. Do not
 launch unattended runs you do not intend to resume until it does.
 
 **The PR is a draft until hand-off, and that is what keeps G5 and G6 true.**
@@ -146,11 +148,16 @@ launch unattended runs you do not intend to resume until it does.
 non-draft `opened` event and from `ready_for_review` (`gh-issue-claim.md` **Move to
 review on PR open**). A PR opened ready would put the issue in needs-review before
 co-review ran — the state the [write order](run-state.md#write-order) forbids. The
-run opens the PR as a **draft** (`/deliver-task` on the gh-issue handler), so the
+run opens the PR as a **draft** (`/deliver-task` on the gh-issue handler; the
+draft-open lands with issue #1023, and until then `/auto-pilot` refuses this
+handler), so the
 Action stays silent at pr-open and `link_pr` is the URL comment alone. At hand-off
-`set_needs_review` marks the PR ready first (and parks via `flag_for_human` if it
-cannot) and then writes the rung itself —
-remote before tracker, per the write order. The Action fires on that
+`set_needs_review` marks the PR ready first and then writes the rung itself —
+remote before tracker, per the write order. Only a PR that is actually ready gets
+the rung: if `viewerPermission` is not `ADMIN`/`MAINTAIN`/`WRITE`, or still cannot
+be determined after one re-read, or `gh pr ready` fails, write nothing and call
+`flag_for_human` instead (the issue stays `status:3_started`, the PR stays a
+draft). Unlike attended `/deliver-task`, the run never hands off a draft. The Action fires on that
 `ready_for_review` and races the verb's own write: whichever lands second either
 finds the issue already on `status:4_needs_review` and writes nothing, or writes the
 same rung again, so the two never conflict. A crash between the two steps leaves a
