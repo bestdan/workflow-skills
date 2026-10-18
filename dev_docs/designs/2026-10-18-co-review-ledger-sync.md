@@ -89,8 +89,10 @@ machine's ledger, and rebuilding is simpler and safer than any repair:
   the flush deletes the clone. The check needs a fetch, so the no-network path
   cannot see a rewrite; the next fetch does, and the rewrite changes no keys,
   so a stale watermark meanwhile does no harm.
-- **Clone atomically.** A clone goes to `shared.tmp/` and is renamed to
-  `shared/` only once it succeeds, so a killed clone never looks like a clone.
+- **Clone atomically.** A clone goes to `shared.tmp/` with `-b main` and is
+  renamed to `shared/` only once it succeeds, so a killed clone never looks
+  like a clone, and a remote whose default branch is missing cannot leave a
+  clone with no `HEAD`.
 
 Deleting is always safe, because unpushed rows are rebuilt from the local
 ledger. The same property means **rows cannot be deleted from the shared repo
@@ -125,15 +127,16 @@ to `main` throughout.
    clone was missing or broken.
 4. Read the **pushed** copy of this machine's file,
    `git show @{u}:ledgers/<host>.jsonl`, and collect its `(host, run_id)` keys.
-   That pushed file is the watermark. A `does not exist in` error means the
-   remote has no file for this host yet, so the watermark is empty; with no
-   upstream at all, it is empty too (above). Any other error deletes the clone
-   and ends the flush. Reading the pushed copy rather than the working tree
+   That pushed file is the watermark. When `git cat-file -e` says the file is
+   absent from `@{u}`, the remote has no file for this host yet and the
+   watermark is empty; with no upstream at all, it is empty too (above). Any
+   other failure deletes the clone and ends the flush. Reading the pushed copy rather than the working tree
    means rows that were appended or committed but never pushed are selected
    again, so a kill at any step loses nothing.
-5. Read the local ledger under a **shared `flock` on `findings.jsonl`**, the
-   same file the writer locks exclusively, so the flush never sees a write in
-   progress. A missing ledger is an empty one. Select every run block (a run
+5. Read the local ledger, opened read-only, holding a **shared `flock` on
+   `findings.jsonl`** for the whole read. The writer locks the same file
+   exclusively, so the flush never sees a write in progress. A missing ledger
+   is an empty one. Select every run block (a run
    record and the findings after it) whose key is not in the watermark. A
    block whose last line is unterminated or unparseable is skipped whole, not
    trimmed, so a partial run is never copied and then counted as flushed.
@@ -276,6 +279,11 @@ is unset, it reports sync as off, which is not a warning.
   is the pushed file. Containers and cloned VMs are where this happens.
   Mitigation in scope: the writer and the flush both honour a `CO_REVIEW_HOST`
   override.
+- **The watermark is the pushed file, and that cuts both ways.** Step 7's reset
+  discards an unpushed commit, which is safe only while the local ledger still
+  holds those rows. A local ledger deleted between a failed push and the next
+  flush loses them. And rows removed from the remote come back from any
+  machine whose local ledger still has them (see "The clone is disposable").
 - **A cloud session's hostname may change every session** (inferred, not
   checked), so each one would add a new file. That is correct, just untidy:
   every file is a valid ledger and the union is unchanged.
@@ -314,8 +322,10 @@ does not exist clones with no `HEAD` at all), with
   untouched. The same with two machines sharing a hostname: both runs end up
   in the file.
 - An empty remote: the first `--push` runs steps 3 to 7 with no upstream and
-  creates `main`; a remote that has `main` but no file for this host gives an
-  empty watermark.
+  creates `main` without recloning in a loop; a remote that has `main` but no
+  file for this host gives an empty watermark.
+- `--pull` right after a `--push` that deleted the clone: the stats still run,
+  on the local ledger alone.
 - `--pull` on a dirty clone and on a clone whose remote was rewritten: both end
   on the fetched upstream, the rewritten one by recloning.
 - A flush that cannot get `shared.lock` within its bound prints
