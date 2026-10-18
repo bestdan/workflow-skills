@@ -5,7 +5,7 @@ Symbols: ✅ pass / ran / done · 🟡 pass with suggestions · ⛔ blocking · 
 <✅ **pass** | 🟡 **pass with suggestions** | ⛔ **blocking**> — <N> fixes · <N> skipped · <N> calls · <N> checks
 <one line of why, judged as the change will stand once the auto-fixes below are applied>
 
-<reviewer> <✅ ran | ❌ failed | ⏱️ timed out | ➖ skipped — reason> · … · conventions <✅ attached | ➖ not attached — reason>
+<reviewer> <✅ ran | ❌ failed | ⏱️ timed out | ➖ skipped — reason> · … · conventions <✅ attached | ➖ not attached — reason> · ledger <✅ <receipt> | ❌ not recorded — reason>
 
 ## Findings & verification
 
@@ -15,7 +15,7 @@ Symbols: ✅ pass / ran / done · 🟡 pass with suggestions · ⛔ blocking · 
 
 **Skipped (<N>)**
 
-- ➖ <label> [(<decoration>)]: <subject> — <reason>
+- ➖ <label> [(<decoration>)]: <subject> — <wrong | not-applicable | out-of-scope>: <reason>
 
 **Escalated (<N>)**
 
