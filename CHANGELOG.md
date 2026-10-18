@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.90.3] - 2026-10-18
+
+### Fixes
+
+- narrow the crush v0.98.1 re-run claim (#1043) (4fbddc0)
+
 ## [2.90.2] - 2026-10-18
 
 ### Fixes
