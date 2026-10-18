@@ -22,6 +22,7 @@ Definitions (a run is identified by the pair (host, run_id), never run_id alone)
                in those runs. The cohort size is printed as (n=N). It is "—"
                for the claude row, for an empty cohort, and when either side
                has zero findings in the cohort (its rate is undefined).
+  high         findings with verdict "high", whoever else is in sources.
   unique-high  verdict "high", sources == [reviewer] exactly, human_corroborated false.
   finds/run    findings / runs ("—" when runs is 0).
   p50 s, p90 s nearest-rank percentile (the ceil(p*n)-th smallest value) of
