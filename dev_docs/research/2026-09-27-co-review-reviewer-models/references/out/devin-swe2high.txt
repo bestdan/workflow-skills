@@ -1,0 +1,11 @@
+I'll verify the loop context and test counts by reading the affected sections.The files aren't on disk in this workspace, so this is a diff-only review; anything I couldn't confirm is marked UNVERIFIED.
+
+Findings:
+
+- `scripts/spawn-orchestrator.sh:5020` — issue (blocking): the console summary prints `skipped=$counts_parked`, echoing the parked count instead of the skipped count. Fix: change to `skipped=$counts_skipped`.
+
+- `scripts/spawn-orchestrator.sh:6578` — issue (blocking): `skipped) break ;;` exits the entire task-scan loop, so any chained row appearing after a `skipped` row is never examined for base divergence and can never be parked/reported by doctor. The comment ("holds nothing this run acquired") describes skipping the row, not terminating the scan — this should be `continue`, matching `handed-off`. UNVERIFIED: no ordering invariant guaranteeing `skipped` rows sort last is stated anywhere in the diff, and a skipped task's dependents (still `pending`, still chained) would naturally follow it. The new test masks the bug by placing `t_skip` after `t_child` (the row that needs parking); fix the code to `continue` and consider moving `t_skip` earlier in the fixture, or adding a diverged chained row after it, so the regression is caught.
+
+- `scripts/test-spawn-orchestrator-status-report.sh:173` — note (non-blocking): the new assertion exercises the STATUS.md header counts but not the one-line console summary, which is where the `skipped=$counts_parked` bug lives; a `have`/`lack` check on the captured stdout (`skipped=1`) would have caught finding 1. UNVERIFIED: the expected `pending=1 in-flight=5` totals depend on fixture rows outside the diff hunk, but they are consistent with the visible rows.
+
+REVIEW_COMPLETE: FINDINGS

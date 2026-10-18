@@ -2,7 +2,21 @@
 
 Opt-in, non-blocking checks that Claude **auto-invokes the right skill** from a
 naive prompt that never names it. This verifies skill _routing_ — that a skill's
-`description` triggers are good enough for Claude to pick it unprompted.
+**surfaced** `description` triggers are good enough for Claude to pick it
+unprompted.
+
+**Which description is surfaced is not always `SKILL.md`'s.** Where this plugin
+ships a `commands/<name>.md` beside `skills/<name>/SKILL.md`, the **command's**
+`description` is what reaches the model's skill listing and therefore what
+decides routing (observed behaviour of Claude Code as of 2026-09-21, not a
+documented contract). The `SKILL.md` one never reaches that listing, so it does
+not affect the choice; its body is still loaded in full once the skill fires.
+
+**A skill is in that position whenever `commands/<name>.md` exists beside
+`skills/<name>/SKILL.md`.** Check for the twin before tuning a description, and
+tune the command's, or the change has no effect on this suite. Which names that
+covers today, and the measurement behind it:
+[the decision record](../dev_docs/decisions/2026-09-21-command-descriptions-shadow-skill-descriptions.md).
 
 These are **not** part of the blocking PR gate: they cost API tokens and are
 nondeterministic. Run them deliberately.
@@ -27,20 +41,149 @@ For each manifest row, `scripts/eval.sh` runs:
 claude -p "<prompt>" --plugin-dir <repo> --max-turns N --output-format stream-json --verbose
 ```
 
-then asserts the run log contains a `Skill` tool invocation matching the expected
+then parses the run log for a `Skill` tool invocation matching the expected
 skill (tolerant of the `workflow-skills:` plugin prefix). Pattern adapted from
 [obra/superpowers](https://github.com/obra/superpowers) `tests/skill-triggering`.
+
+## A case that writes into the repo fails that row
+
+Each case runs against a writable checkout with `--dangerously-skip-permissions`,
+so a realistic prompt can write into the repo under test — and one did, staging a
+generated report while the suite called the row a pass. The harness now reads
+`git status --porcelain` around every case and fails any row that changed the
+tree, naming the paths and listing the row again in the summary.
+
+Two things follow. A row reported this way is a **harness** failure, not a
+routing verdict: the case may well have picked the right skill, but it has
+changed what every later case sees, so treat the rest of the run as unreliable.
+And the residue is left where it is rather than reverted — the suite is often run
+from a worktree with work in flight, and a harness that reverts on its own would
+eat that work. Inspect and remove it yourself.
+
+The comparison is per case against a rolling baseline, not against a clean tree,
+so uncommitted work you already had does not convict a row. It compares the
+porcelain list **and** a hash of `git diff HEAD`, because the list carries status
+codes and paths but no content: an edit to a file already showing as modified
+leaves its line byte-identical. It is also symmetric, so a case that _reverts_
+one of your edits is reported too rather than reading as clean.
+
+The path list is read with `-uall`. By default porcelain collapses an untracked
+directory to one `?? dir/` entry, so a file written inside it would leave the
+output byte-identical — which is the shape of the case actually observed, and
+would have gone unseen had the target directory been untracked.
+
+A `<repo>` that is not a git checkout degrades to a no-op. One narrow hole
+remains: rewriting a file that was _already_ in the untracked list moves neither
+signal, since its entry is unchanged and `diff HEAD` skips untracked content.
+Covered by `test/eval-tree-guard.bats`.
+
+One more hole, found while instrumenting #840: porcelain does not list
+**ignored** paths, so a case that writes into `.claude/`, `temp/` or any other
+ignored directory moves neither signal. An eval case did create
+`skills/analysis-pipeline/example/.claude/`, and the guard cannot see it. That
+same property is why this harness keeps its own logs under `temp/` — see below.
+
+## Reading a failure
+
+A row **keeps its run log** under `temp/evals/<run-stamp>/` (ignored) and prints
+the path whenever the row failed, dirtied the repo, or passed on a truncated
+run. It has to: the suite is nondeterministic and the failing rows rotate, so
+re-running does not reproduce the row that failed — if the log is gone, the
+failure is only ever counted, never diagnosed.
+
+Each miss is also labelled with a `cause`, because `skills invoked: none` was
+the same string for five different defects with five different fixes. The
+vocabulary — `no-result-event`, `api-error`, `max-turns`, `not-surfaced`,
+`wrong-skill`, `no-skill-chosen`, plus `dirtied-repo` from the guard above — and
+what each one implies are documented in
+[`scripts/eval-triage.py`](../scripts/eval-triage.py)'s module docstring, which
+is also where the triage logic lives (with hermetic tests in
+`scripts/test_eval_triage.py`, run by `just check`).
+
+### A pass at the cap is not a result
+
+Each row is capped at 300s. A row killed there still **passes** if its `Skill`
+call happened to land before the kill, and the old harness printed the same
+`✅ PASS` whether the row took 54s or was terminated at 300s. That is reported
+as `⚠ PASS on a truncated run` and its log is kept, because it is the one
+warning that the suite is running against the wall: the same row fails the next
+time the call lands a few seconds later, and there is no way to tell that from a
+`✅`. Observed on `local-review`, which took 54s in one run and was killed at
+the cap in the next.
+
+### Validate a fix against the rate, over several runs
+
+Not against one row passing a few times. At a per-row failure rate near 14%,
+three consecutive greens for a given row happen about 64% of the time with no
+fix at all — the mistake
+[#840](https://github.com/bestdan/workflow-skills/issues/840) exists to record.
+The end-of-run `causes:` tally is the number to move.
+
+The measured rate is not stable between sittings, which is itself the point.
+Three consecutive 14-row runs on 2026-09-22 gave **41/42 rows passing** — one
+`wrong-skill` — against the ~2-per-run, always-`none` failures #840 recorded
+days earlier on the same host. Whatever drives that is not in this repo, so a
+baseline is only comparable to a fix measured in the same sitting.
 
 ## Add a case
 
 1. Write `prompts/<skill>.txt` — a realistic prompt that triggers the skill
-   **without naming it** (mirror the situations in the skill's `description`).
+   **without naming it** (mirror the situations in the skill's surfaced
+   `description` — the command's, where one shadows it; see above).
 2. Add a row to `manifest.tsv`: `<skill>\t prompts/<skill>.txt \t <max_turns>`
    (tab-separated).
 3. `scripts/eval.sh <skill>` to check it.
 
+**A prompt with more than one right answer takes `a|b` in the skill field**, and
+any of those firing is a pass. Use it when two skills genuinely both fit and
+nothing prefers one: `prompts/task.txt` ("don't let this fall through the
+cracks") matches the `task` umbrella and the `add-task` command that files the
+thing, and the model picked `task` in two runs and `add-task` in a third.
+Asserting one name there is a row that fails a third of the time for choosing
+correctly — a flaky red indistinguishable from a routing defect. Do **not**
+reach for it to paper over a real collision: if one of the two is wrong for the
+prompt, fix the description or the prompt. `scripts/eval.sh <name>` still
+selects such a row by either alternative.
+
 `analysis-conventions` is intentionally absent: it's `user-invocable: false`
 (context-load only), so there's nothing to auto-route.
+
+## Authoring feedback on descriptions
+
+This suite tells you **whether** a description works, in 10 to 16 minutes, and a
+failure names no word to change. For that second half, a typed model call scores a
+prompt against every skill's **surfaced** `description` — the same string this suite
+routes on, the command's where one shadows the SKILL.md, per the section above — and
+reports two things this harness cannot: the **margin** between the winning description
+and the runner-up, which says two descriptions have converged and is responsive to an
+edit, and whether **any** skill should fire at all — measured over 16 prompts
+written to need none, which `manifest.tsv` cannot express, since every row there names
+an expected skill. Run it when a `description` changes, and read the margin as the
+thing to edit against: a narrow one means two descriptions have converged. What it
+cannot yet tell you is that **no** description reaches a prompt — the ranking always
+names a winner, however poorly every option matches (#841). And whether a narrow margin
+predicts a real routing failure is untested; the decision record says so.
+
+```sh
+D=dev_docs/research/2026-09-17-jev-applications/references
+python3 $D/jev-description-collision.py --suite all --runs 4    # needs a TypeSafe key
+```
+
+38 prompts per pass — the 14 manifest rows, 8 probes written to straddle neighbouring
+skills, and the 16 that should load nothing. Measured 2026-09-21: **19.2–19.5s per
+pass, ~$0.031 for the four-pass run.** Four passes rather than one because the answers
+move between runs, so a single pass is an anecdote.
+
+`--suite manifest` is the fast smoke check for a single description edit — the 14 rows
+only, ~7s and ~$0.003 per pass. It cannot produce the no-skill rate: the negative
+prompts run only under `--suite negative` or `--suite all`.
+
+**It does not answer this harness's question, and a clean run is not evidence that
+routing works.** It scores whether the descriptions discriminate, given that a skill
+fires. It cannot see a session that loaded no skill at all — which is how
+`select-coder` and `orchestrate-coders` failed here on 2026-09-21 while the typed call
+reported 14/14. Neither check replaces the other. Why, and the measurement:
+[`dev_docs/decisions/2026-09-21-jev-alongside-the-routing-evals.md`](../dev_docs/decisions/2026-09-21-jev-alongside-the-routing-evals.md).
 
 ## Extension point: output-quality evals
 

@@ -1,0 +1,304 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+user-invocable: false
+---
+
+# Atomic claim lock — shared by the jira and gh-issue handlers
+
+Read by `commands/handlers/jira-claim.md` and `commands/handlers/gh-issue-claim.md`
+("Claim the issue"). It defines the **one** primitive both handlers lock on, the
+fallback for environments that cannot use it, and how a claim is released.
+
+> **`<KEY>`** below is the handler's issue identifier — the Jira key (`PLAT-142`) for
+> `jira-claim.md`, the bare issue number (`142`) for `gh-issue-claim.md`. **`<branch>`**
+> is the handler's deterministic branch name, which is also the lock ref: `task/<KEY>`
+> for jira, and `<branch_prefix>task-<KEY>` for gh-issue, whose prefix comes from the
+> `gh-issue.branch_prefix` config key (see `gh-issue-claim.md` → "Branch name"). Only
+> two properties matter to this file: both racers compute the **same** name from the
+> issue alone, and the name is a legal ref. Everything below is written in terms of
+> `<branch>`.
+
+## Why the assignee cannot be the lock
+
+Both handlers used to confirm a claim by re-reading the issue and checking that the
+final assignee was **their own** account. That defeats a _different_ user racing you,
+but not a **second session authenticated as the same user** — both write the identical
+account id, both read it back, and both conclude they won, then both build the same
+issue. `linear-claim.md` documents the same reasoning and elects a winner on an
+append-only comment log instead.
+
+The check cannot be repaired in place. Jira's REST API exposes no compare-and-swap on
+issue fields (no `If-Match`/ETag on `editJiraIssue`) and GitHub's issue-edit API none
+either, so every read-then-write on `assignee` has a window — and same-account racers
+are reading for a value that is identical for both. The lock therefore has to sit on a
+primitive that _is_ atomic. Assignee, labels, and status stay on as the **human-visible**
+claim marker; they no longer decide the race.
+
+The same trap applies to any "atomic" primitive whose success is indistinguishable from
+a no-op — see the plain-`git push` warning below, which measured exactly that.
+
+## Primitive: create-only ref creation via the GitHub API (the default)
+
+`POST /repos/<owner>/<repo>/git/refs` **creates** a ref or fails — it never updates one.
+A second call for a ref that exists returns **HTTP 422 `Reference already exists`**
+regardless of the sha it names, so exactly one caller wins no matter which account each
+session is authenticated as. Both handlers already probe
+`git ls-remote --heads origin <branch>` in pre-flight; creating the ref at **claim**
+time (rather than at PR time, ~an hour of work later) is what turns that read into a
+real lock instead of a TOCTOU probe spanning the whole execution.
+
+> **Do not "simplify" this to `git push origin <branch>`.** Measured against a real
+> GitHub remote: two racers both cut `<branch>` from the same `origin/<base>` tip, so
+> they push the **identical sha** — the loser's push reports `Everything up-to-date` and
+> **exits 0**, and both sessions conclude they won. That is the same both-confirm bug
+> this file exists to fix, one layer down. `--force-with-lease=refs/heads/<branch>:`
+> (create-only lease) does **not** rescue it either: git short-circuits on
+> nothing-to-update before evaluating the lease, and also exits 0. A plain push is a
+> reliable CAS only when the two racers push **different** commits, which two sessions
+> branching from one base do not.
+
+**Acquire** — run this as the _first_ mutating step of "Claim the issue", before any
+assignee/status/label write. `<repo>` is the handler's configured repo
+(`gh-issue.repo`) or, when unset, the current one (`gh repo view --json nameWithOwner
+--jq .nameWithOwner`); `<base>` is the handler's configured base branch, else the repo
+default. The POST/422 dispatch is not hand-walked here — both handlers call the one
+implementation in `commands/handlers/assets/gh-issue-claim.py`, named for gh-issue but
+tracker-neutral at this entry point (it takes the branch name directly, not an issue
+number):
+
+```bash
+git fetch origin
+base_sha=$(git rev-parse "origin/<base>")
+python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-claim.py" acquire-ref \
+  --repo "<repo>" --branch "<branch>" --base-sha "$base_sha"
+```
+
+If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
+`**/handlers/assets/gh-issue-claim.py`.
+
+Branch on the exit code — it is the election, and it is the only thing that decides it:
+
+| exit | meaning                                                                                                                   | do                                                                                                                                                                                                                                                   |
+| ---- | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | acquired (HTTP 201); stdout is `<branch>`                                                                                 | you hold the claim — proceed to the handler's human-visible markers (assign yourself, transition/label)                                                                                                                                              |
+| `3`  | lost — HTTP 422 `Reference already exists`                                                                                | **you lost the race.** Do not build, do not touch the issue's assignee or status: they belong to the winner. Report `Skipped <KEY>: claim lost — <branch> already exists on origin` and advance to the next candidate (in single/direct mode, stop). |
+| `4`  | neither — any other 422, 403/404 from a token without write scope, a protected-ref ruleset, a pinned env, a network error | **not** a lost race and **not** a held claim. Fall back to the election below; never report a claim you did not acquire atomically.                                                                                                                  |
+
+On exit `0`, proceed to "Branch + execute" **already on this branch** — do not create it
+a second time:
+
+```bash
+git fetch origin "<branch>" && git switch -c "<branch>" FETCH_HEAD
+```
+
+Exit `2` is a usage error (e.g. `--base-sha` is not a full 40-character sha); no request
+was sent, so fix the call.
+
+Because the loser detects the loss from the `Reference already exists` 422, feasibility judging may still run
+**before** the claim: two sessions can both judge the same issue, but only one can
+acquire, and the other advances deterministically instead of building a duplicate.
+
+Every later `git push` on this branch is an ordinary fast-forward update of a ref this
+session owns — the lock is the **creation**, and it is already decided by then.
+
+## Cloud routines: use the comment election, not the ref lock
+
+A routine has two channels to GitHub, and what each can do is **per path** — not per
+channel. Read every rule below as scoped to the endpoint it names:
+
+- **Raw HTTP is effectively credentialed, and the ref path is still closed.** `$GH_TOKEN`
+  holds the literal `proxy-injected` placeholder and the egress proxy substitutes a real
+  credential, so the variable says nothing about what the channel can do. Measured
+  2026-09-16/17: `GET` on issue endpoints and a no-op `PATCH` of an issue's labels both
+  return `200`; `POST`/`DELETE` on `/git/refs` return `403 … not permitted through this
+  proxy`, and reads on that path were inconsistent between runs. `gh` is **not
+  installed**. **The `gh api` acquire form above is therefore still local-only** — now
+  for two separate reasons, no `gh` and no ref writes, either of which is sufficient.
+- **The GitHub MCP connector is the routine's real channel**, and
+  `mcp__github__create_branch` is a working acquire primitive there — create-only, and a
+  duplicate is rejected with `Reference already exists`, the same election semantics as
+  `POST /git/refs`.
+
+> **Routines still default to the comment-token election below.** The acquire primitive
+> works; the other half of the lifecycle does not.
+
+### Why it is not the default: a routine cannot release
+
+A routine **cannot release the lock it would acquire** — the connector exposes no
+delete-branch and no delete-ref tool, and `git push --delete` returns 403. So the bail
+path at the end of this file is **unavailable unattended**, and the two failures are not
+symmetric:
+
+> **Re-confirmed 2026-09-16, deliberately rather than by inheritance.** `DELETE` on
+> `/git/refs` over plain `curl`, against a ref verified to exist a second earlier, still
+> returns `403 Write access to this GitHub API path is not permitted through this
+> proxy`. `POST` returns the same. So the raw-HTTP route is closed alongside the
+> connector one, and this rule holds on all three channels.
+>
+> **It needed re-checking because the neighbouring premise fell the same day.** A
+> routine's **reads** turned out to be credentialed — it can read `blocked_by` over
+> `curl` — which overturned four claims elsewhere in this plugin. Writes are a separate
+> path with a separate refusal, and "reads work, so writes probably do" would have been
+> the same bad inference in the other direction. See
+> `dev_docs/research/2026-08-24-routine-claim-channel.md` → "Raw HTTP".
+>
+> **Sharpened 2026-09-17, and the distinction is the whole rule.** A routine is **not**
+> write-blocked in general: it `PATCH`es an issue's labels over `curl` and gets `HTTP
+> 200`. The proxy's block is **path-scoped**, and the ref path is one of the blocked ones.
+> So state the reason precisely — a routine cannot release a claim ref **because refs are
+> closed to it**, not because it cannot write. Anyone reasoning from "routines can't
+> write" will reach wrong conclusions about the label path, where a **no-op** `PATCH` of
+> an issue's labels returned `200`.
+>
+> **A mutating label write has not been observed.** The proxy is believed to decide by
+> path and method rather than payload, so a real change is **expected** to behave the
+> same — expected, not measured. Do not route real label writes here on the strength of
+> this note alone.
+
+|                  | left behind     | cost                                                                                                     |
+| ---------------- | --------------- | -------------------------------------------------------------------------------------------------------- |
+| `create_branch`  | a lock ref      | **permanent** — every later session reads it as a live claim and skips the issue forever                 |
+| comment election | a claim comment | **self-healing** — the `T_unclaimed` filter and the state-backed check in step 5 already discard orphans |
+
+"Acquire only when you intend to run to completion" is **not** a mitigation: a crash or a
+timeout is precisely the case where intent does not apply, and there is **no stale-ref
+sweep in this repo** — `scripts/claim-scan.sh` and `/doctor` both operate on `repo-pr`
+claim PRs, not refs. Flipping the default is a one-paragraph change once a sweep exists;
+until then a routine that somehow does hold a ref must be cleared from a **local**
+session (`git push origin --delete <branch>`).
+
+One caveat if the default ever flips: `create_branch` takes `from_branch`, **not a sha**,
+so it cannot pin an exact base. That does not weaken the election — the lock is the
+_name_ — but the branch may not sit at the sha the session read earlier.
+
+> **Measured 2026-08-24 against the live API.** Probe transcripts, the verbatim 403
+> texts and the full 58-tool connector inventory are in
+> [`dev_docs/research/2026-08-24-routine-claim-channel.md`](../../dev_docs/research/2026-08-24-routine-claim-channel.md).
+> **Do not re-derive routine behaviour from documentation** — this file was wrong twice
+> that way.
+
+## Batch-dispatched sessions: use the comment election, not the ref lock
+
+A session dispatched by `/do-tasks --all` takes the election below **by choice**,
+not as a degrade from a failed acquire. The reason is the same asymmetry
+the routine section gives, arriving by a different route: an unattended session
+that crashes or times out after acquiring strands its ref, every later session
+reads that ref as a live claim, and there is no stale-ref sweep. A batch fans out
+N such sessions at once. `commands/do-tasks.md` §4 step 6 owns the reasoning and
+the report string (`claim: comment election (batch dispatch)`, **not** the degrade
+line below — no API error happened). Such a session must **not** attempt the
+acquire first.
+
+> **A cloud session may not be able to acquire at all.** Probed 2026-09-05
+> ([`dev_docs/research/2026-09-05-cloud-session-plugin-and-proxy.md`](../../dev_docs/research/2026-09-05-cloud-session-plugin-and-proxy.md)):
+> `gh` is installed there but uncredentialed, and every `gh api` call — read as well as
+> write — returned 403. The same dead credential takes down the election's own
+> `gh issue comment` (same token; only `gh api` was exercised), so such a session claims
+> **nothing** by either of this file's `gh`-based primitives — `do-tasks.md` §4 step 5's
+> self-check is what stops it, before it tries. The instruction below is unchanged; what
+> it assumes is an environment whose `gh` works.
+
+It also runs **one check the election below does not have**, at **two** points,
+and it is load-bearing: a ref probe for the issue under **any** prefix
+(`gh-issue-claim.py find-task-refs`, not a single-ref `ls-remote` of
+`<branch>`), run **inside step 3** between the comment post and the marker write, and again **as part of
+step 5's re-list**. The election cannot see a ref, so without those probes a batch session
+and a **local** ref-lock session cannot detect each other at all. `do-tasks.md`
+§4 step 6 owns both.
+
+## Fallback: comment-token election (environments that cannot acquire)
+
+When the acquire call exits `4` — any failure other than `Reference already exists`,
+which is a decided race — degrade to the election below and
+**say so explicitly** in the report: `claim lock degraded to comment election: <the
+API error>`. A silent degrade would claim atomicity the run does not have.
+
+The election is `linear-claim.md`'s, ported to the handler's own comment API
+(`addCommentToJiraIssue` / `gh issue comment`). Comment ids are numeric and increase
+with creation time on both trackers, so a lowest-id-wins ordering is deterministic —
+**verified** on a live Jira instance: ids `324986` (13:02:13) < `324988` (13:02:31) <
+`325216` (next day), and editing a comment moves `updated` without changing its `id`.
+
+1. **Record `T_unclaimed`** — the wall-clock time of the last read that showed this
+   issue unclaimed (the handler's re-read guard). Claim comments older than it are
+   stale orphans from earlier attempts, not competitors.
+2. **Mint a unique session token** — `openssl rand -hex 16` (or
+   `printf '%s%s' "$(date +%s%N)" "$RANDOM"`), written as
+   `<!-- do-tasks-claim:<rand> -->`. No email, hostname, or pid — the election needs
+   only uniqueness.
+
+   > **The token is invisible on gh-issue, visible on Jira.** GitHub renders the HTML
+   > comment away; Jira does **not** — the Atlassian MCP converts the body to ADF and
+   > stores the marker as a literal text paragraph (verified: `{"type":"text","text":"<!--
+   > do-tasks-claim:… -->"}`), so it shows verbatim on the issue. Accept that on the
+   > degraded path rather than dropping the token — it is the ordering key — but do not
+   > tell the user it is hidden.
+
+3. **Post the claim comment first** — it is the lock:
+
+   ```
+   Claimed by /do-tasks. Working on branch `<branch>`; PR link will follow.
+   <!-- do-tasks-claim:<rand> -->
+   ```
+
+   Capture the comment id — the losing branch and the bail path both need it to retract
+   **this** session's comment (see step 6). **Then** write the human-visible markers
+   (assign yourself + transition/label).
+4. **Sleep a jittered ~2–3 s** so the comment and the issue write propagate and racer
+   symmetry is broken.
+5. **Re-list the comments and elect** — among comments carrying the
+   `do-tasks-claim:` marker, keep only those (a) created at or after `T_unclaimed` and
+   (b) **state-backed**: the issue currently carries this handler's claim markers
+   (assignee set, and the In-Progress status on jira / the `status:3_started` label on
+   gh-issue), proving the poster's
+   issue write landed. The winner is the **lowest comment id** (equivalently the
+   earliest `createdAt`). Both filters are load-bearing: without (a) a stale orphan
+   from a dead session is elected and the issue deadlocks with no owner; without (b) a
+   session that crashed between the comment and the issue write wins forever.
+6. **If your comment wins** → you hold the claim; proceed. **If it does not** → retract
+   your own claim comment (below), leave the assignee/status **untouched** (they are the
+   winner's), and advance to the next candidate.
+
+   **Retract, per tracker — jira cannot delete.** The Atlassian MCP exposes no
+   delete-comment tool (`addCommentToJiraIssue`, `addWorklogToJiraIssue`, … — there is
+   no `deleteJiraComment`), so a jira loser **cannot** remove its comment. Instead
+   **rewrite the body without the token**, which is what makes it inert for every future
+   election: `addCommentToJiraIssue` with `commentId: <your id>` updates in place
+   (verified — same id, `updated` advances). Use a body that says the claim was retracted
+   and no work started. On gh-issue, delete it outright:
+   `gh api --method DELETE repos/<repo>/issues/comments/<id>`.
+
+   > **In a cloud routine this retraction is impossible** — the connector exposes no
+   > delete-comment tool, and the `gh api` form cannot run there (see "Cloud routines"
+   > above). A losing routine leaves its token behind, which costs hygiene rather than
+   > correctness: a loser's id is always higher than the winner's, so it can never win
+   > its own race. Treat a leftover routine token as expected, not as a live claim.
+
+   Retraction is hygiene, not correctness: a loser's comment always has a **higher** id
+   than the winner's, so it can never win its own race. What it protects is the _next_
+   session, whose `T_unclaimed` may fall before a leftover token — the tokenless
+   rewrite means there is nothing left to elect.
+7. **Read-lag residual.** If the re-list returns **only** your own marker, treat it as
+   inconclusive and re-poll once or twice before declaring a win — no server-side CAS
+   backs this path, which is why it is the fallback and not the default.
+
+## Release the lock
+
+A claim is released on **bail** (and only there — a successful run's lock ref becomes
+the PR's head branch and is cleaned up by the merge):
+
+```bash
+git push origin --delete "<branch>"   # only if this session acquired the ref above
+```
+
+Delete the remote ref **before** clearing the issue's assignee/status, so the issue
+never sits unclaimed while a stale lock ref still blocks the next session's acquire. On
+the fallback path there is no ref to delete — **retract** this session's token comment
+instead, per step 6 above (rewrite it tokenless on jira, which cannot delete; delete it
+on gh-issue). Never delete a `<branch>` ref this session did not acquire.
+
+> **A routine cannot run this step** — which is exactly why routines do not take the
+> ref lock in the first place (see "Cloud routines" above). A stranded ref has to be
+> deleted from a local session, where both `git push origin --delete <ref>` and the
+> equivalent `DELETE .../git/refs/heads/<ref>` API call work.

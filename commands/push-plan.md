@@ -1,6 +1,6 @@
 ---
-description: Push a vetted local plan to the configured tracker — repo-pr is a no-op; Linear creates one issue per task under a project, gh-issue under a milestone, and jira under an Epic (with native blocker links), in dependency order
-allowed-tools: Bash(git *), Bash(find *), Bash(grep *), Bash(cat *), Bash(gh *), Glob, Grep, Read, Write, Edit, AskUserQuestion, mcp__linear__list_teams, mcp__linear__list_projects, mcp__linear__save_project, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__claude_ai_Linear__save_project, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__getJiraProjectIssueTypesMetadata, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Atlassian__createJiraIssue, mcp__claude_ai_Atlassian__editJiraIssue, mcp__claude_ai_Atlassian__getIssueLinkTypes, mcp__claude_ai_Atlassian__createIssueLink, mcp__claude_ai_Atlassian__getJiraIssue, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__getJiraProjectIssueTypesMetadata, mcp__atlassian__searchJiraIssuesUsingJql, mcp__atlassian__createJiraIssue, mcp__atlassian__editJiraIssue, mcp__atlassian__getIssueLinkTypes, mcp__atlassian__createIssueLink, mcp__atlassian__getJiraIssue
+description: Push a vetted local plan to the configured tracker — repo-pr is a no-op; Linear creates one issue per task under a project, gh-issue under a milestone, and jira under an Epic, in dependency order, with native blocker links on all three
+allowed-tools: Bash(git *), Bash(find *), Bash(grep *), Bash(cat *), Bash(gh *), Bash(python3 *), Glob, Grep, Read, Write, Edit, AskUserQuestion, mcp__linear__list_teams, mcp__linear__list_projects, mcp__linear__save_project, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__claude_ai_Linear__save_project, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__getJiraProjectIssueTypesMetadata, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Atlassian__createJiraIssue, mcp__claude_ai_Atlassian__editJiraIssue, mcp__claude_ai_Atlassian__getIssueLinkTypes, mcp__claude_ai_Atlassian__createIssueLink, mcp__claude_ai_Atlassian__getJiraIssue, mcp__claude_ai_Atlassian__getTransitionsForJiraIssue, mcp__claude_ai_Atlassian__transitionJiraIssue, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__getJiraProjectIssueTypesMetadata, mcp__atlassian__searchJiraIssuesUsingJql, mcp__atlassian__createJiraIssue, mcp__atlassian__editJiraIssue, mcp__atlassian__getIssueLinkTypes, mcp__atlassian__createIssueLink, mcp__atlassian__getJiraIssue, mcp__atlassian__getTransitionsForJiraIssue, mcp__atlassian__transitionJiraIssue
 argument-hint: "<plan-name> [--ready-only]"
 ---
 
@@ -10,11 +10,6 @@ Take a plan drafted locally by `/plan-with-docs` (`dev_docs/tasks/<name>_plan/`)
 and push it to the tracker configured for this repo. This is the **local-first**
 flow: plans are always drafted and vetted as files first; pushing is a separate,
 deliberate, re-runnable act — never an auto-sync on write.
-
-The design that this command implements (trigger, readiness, mapping,
-idempotency, reverse drift) is the spike
-`dev_docs/tasks/task_loop_improvements_plan/plan_tracker_sync_design.md` — read
-it for the full rationale and rejected alternatives.
 
 This command **reuses each handler's existing add-flow** to create issues rather
 than re-implementing create logic. Its own job is only: resolve the container,
@@ -30,9 +25,15 @@ record the created ids back into the files (idempotency).
 
 ## 1. Resolve the handler
 
+Resolve the handler from the **merged view** — the committed config overlaid with the optional local override (see `commands/task-config.md` → "Resolving the handler"):
+
 ```bash
-cat "$(git rev-parse --show-toplevel)/dev_docs/tasks/.task-config.yml" 2>/dev/null
+ROOT="$(git rev-parse --show-toplevel)"
+cat "$ROOT/dev_docs/tasks/.task-config.yml" 2>/dev/null       # committed config
+cat "$ROOT/dev_docs/tasks/.task-config.local.yml" 2>/dev/null # optional gitignored override
 ```
+
+Overlay the local override on the committed config — mappings merge recursively, local leaf values win — then resolve `handler:` from the merged view.
 
 - File absent, no `handler:` key, or `handler: repo-pr` → **no-op** (same default
   resolution as `/add-task`). Print exactly this one line and **stop**:
@@ -86,11 +87,11 @@ legitimately ship with tasks that still need their own sub-plan.
    > **`--ready-only` caveat — a held blocker's native link is lost.** If a
    > pushed `ready` task is blocked by a task held back this run, that blocker's
    > slug isn't in the map yet, so it falls through to the markdown footer rather
-   > than the handler's resolved form — no native `blockedBy` on Linear, a slug
-   > instead of `Blocked by: #<number>` on gh-issue. Because v1 never updates an
-   > existing issue (§6), that resolved link stays missing even after the held
-   > task is pushed later. **Warn** when this happens so the user can push the
-   > whole plan instead if the resolved links matter.
+   > than the handler's resolved form — no native `blockedBy` on Linear, no native
+   > `blocked_by` edge and a slug instead of `Blocked by: #<number>` on gh-issue.
+   > Because v1 never updates an existing issue (§6), that resolved link stays
+   > missing even after the held task is pushed later. **Warn** when this happens
+   > so the user can push the whole plan instead if the resolved links matter.
 
 Already-pushed tasks (those with a `tracker_id`) are skipped regardless — they
 still appear in the summary as `already pushed (<tracker_id>)`.
@@ -164,16 +165,26 @@ deletion on it — **not** on the shape of `tracker_id`.
 ### 4.3 Order the tasks (topological)
 
 Push in dependency order so every blocker is created before its dependents (spike
-§3.3). Build the order from `is_blocked_by` (a string or a list — honor both):
-a task comes after every task it is blocked by. Restrict edges to **slugs that
-name another task file in this plan** — entries that are already tracker ids
-(`/^[A-Z]+-\d+$/`) or point outside the plan are not ordering edges here. A bare
-slug (not a tracker id) that matches **no** task file in the plan is almost always
-a typo of an in-plan slug, not a real external reference — **warn** (name the
-offending slug and the task that references it) so a misspelled blocker isn't
-silently dropped to a footer in §4.4. If the dependencies contain a **cycle**,
-that's a plan bug — **stop** and report the cycle (the slugs involved); do not
-push a partial order.
+§3.3). This is `scripts/plan-graph.py`'s job — it is the ordering authority, not
+a hand-executed Kahn's algorithm:
+
+```bash
+scripts/plan-graph.py "<plan dir>" --id-shape linear
+```
+
+It scans the plan dir's task files (a string or list `is_blocked_by` — it honors
+both) and, for each entry, classifies it as `in-plan` (names another task file in
+this plan — becomes an ordering edge), `tracker-id` (already matches Linear's id
+shape `/^[A-Z]+-\d+$/` — not an ordering edge, passed through as-is), or
+`unknown-slug` (matches neither — almost always a typo of an in-plan slug, not a
+real external reference; **warned** on stderr, not dropped silently, so a
+misspelled blocker doesn't fall through to a footer in §4.4). It topologically
+sorts the `in-plan` edges (Kahn's algorithm) and emits one JSON doc: `order`,
+`edges`, the classified `is_blocked_by` map, `cycles`, and a seeded
+`tracker_map`. If the dependencies contain a **cycle**, the script exits
+non-zero and `cycles` names the slugs involved — that's a plan bug: **stop** and
+report it; do not push a partial order. A zero exit means `order` is safe to
+create in.
 
 ### 4.4 Create issues (reuse `linear-add.md`, create-missing-only)
 
@@ -267,14 +278,78 @@ task held by `--ready-only`, or one whose create failed — no `tracker_id`).
 
 The gh-issue path mirrors the Linear path (§4) — same topological order, same
 live slug→id map, same create-missing-only idempotency (§6). Only the container
-and the blocker encoding differ: gh-issue groups under a **milestone** and has
-**no native dependency edge**, so blockers become a `Blocked by: #<number>` body
-footer (spike §3.1 / §3.3).
+differs: gh-issue groups under a **milestone** rather than a project (spike
+§3.1).
 
-> **Value note (spike §3 / O1).** `/do-tasks` execution is Linear-only, so a
-> gh-issue push produces a board you then work **manually** — it does not become
-> auto-executable. The grouping + blocker footer are still worth pushing for
-> visibility; just don't expect the headless runner to drain it.
+Blockers are drawn as **native `blocked_by` edges** in a second pass (§5.5), the
+same shape as the jira path's §5b.5, because an edge needs the blocker's issue
+number and v1 never updates an issue after creation (§6). The
+`Blocked by: #<number>` body footer stays alongside them as a **human-readable
+echo of the edge, never a substitute for one** — the edge is what
+`/list-tasks` and `/do-tasks` read (`gh-issue.md`, `gh-issue-ready.py`), and it
+is the only encoding either one honours. The footer is worth keeping because it
+is visible in the issue body where the dependency panel is easy to miss, and
+because a blocker held back by `--ready-only` has no issue to link to and can
+only be recorded as prose.
+
+> **Its strongest reason is gone, measured 2026-09-16.** This paragraph used to
+> argue that a cloud routine cannot read the edge in any form — no `gh`, and no
+> dependency tool on the GitHub MCP connector. The premise was never wrong about
+> those two channels; it was wrong to treat them as the only ones. A routine read
+> `blocked_by` over plain `curl` (`HTTP 200`, correct data), carrying nothing but
+> the `proxy-injected` placeholder, because the egress proxy substitutes a
+> credential. A cloud session does the same. See
+> `dev_docs/research/2026-09-05-cloud-session-plugin-and-proxy.md` →
+> "2026-09-16: the same read, from a routine".
+>
+> **The footer is still written, and writing both forms is the settled design** —
+> not an oversight this note exposes. §5.5 has drawn the native edge since
+> v2.17.0 ([#444](https://github.com/bestdan/workflow-skills/pull/444), merged
+> 2026-09-02) and the footer has been kept beside it deliberately, as the
+> human-readable echo. What this note changes is only what you may say **for**
+> the footer: the remaining reasons are that it is visible in the body where the
+> dependency panel is easy to miss, and that a `--ready-only` blocker has no
+> issue to link to. Do not re-derive the unattended-reader argument; it has been
+> measured false.
+>
+> **No open issue owns removing the footer.** An earlier draft of this note
+> pointed at [#500](https://github.com/bestdan/workflow-skills/issues/500) as
+> its owner. #500 is **CLOSED/COMPLETED** and never owned that: it was already
+> delivered by #444 five days before it was filed, and its closing note records
+> keeping the footer as that issue's own option 1. Anyone who wants the footer
+> gone is reopening a settled call and should say so rather than citing a ticket.
+
+Read the footer as a hint, never as the graph: nothing keeps the
+footer and the edge in sync between writes, so a hand-edited body can claim a
+dependency the graph does not have.
+
+> **Settled by task 8 (`gh-issue-reoptimize.md`).** That flow used to write
+> footer lines for dependencies with no edge, which is what made a footer
+> unreadable as evidence — you could not tell a recorded dependency from an
+> unapplied proposal. It no longer does: it writes the edge and reconciles the
+> footer against it, in both directions (`footer_only` gets an edge,
+> `edge_only` gets a footer). So the rule is now the same on both paths —
+> **the footer follows the edge, and a footer alone is never a dependency.**
+>
+> **One gap remains, and it is this file's.** §5.3 writes the numeric footer at
+> issue-creation time, while §5.5 draws the edges in a later batched pass, so a
+> failure between the two leaves exactly the footer-without-an-edge state the
+> rule forbids. That is a narrow window rather than a routine outcome — and
+> `/reoptimize-tasks`'s `footer_only` is what finds and repairs it after the
+> fact — but it means the invariant is enforced _eventually_, not _by
+> construction_. Closing it properly means deferring the numeric footer until
+> `gh-issue-deps.py` reports each edge created or existing, and echoing only
+> those. Unowned; it is push-plan's ordering to change, not reoptimize's. Keeping it stays the right call for the reason above, and the
+> decision holds whether or not a GitHub Actions runner turns out to reach the
+> dependency endpoints (PRE-823): the deciding argument is that `/push-plan` and
+> `/reoptimize-tasks` must not disagree about what a footer means.
+
+> **Value note.** `/do-tasks` reads this board — on `gh-issue` it can batch like
+> the Linear runner where the repo opts in (`gh-issue.remote_batch: true`, off by
+> default), one dispatched remote session per dependency-ready issue
+> (`do-tasks.md` §4 "gh-issue batch"). The edges this pass draws are what
+> make its dependency gate fire at all, and the batch is where they matter
+> most: it selects across the whole ready set at once.
 
 ### 5.1 Preflight
 
@@ -310,6 +385,14 @@ The overview epic maps to a GitHub **milestone** (spike §3.1). Resolve it
      -f description="<overview body>" --jq '{number, url: .html_url}'
    ```
 
+   The create (and the reuse PATCH below) is a non-GET `gh api`, which some
+   machines' `PreToolUse` hooks refuse outright, sandbox or not. If yours does,
+   hand that one command to the user to run. Write the title and description to
+   files and pass them as `-F title=@<file> -F description=@<file>`, so a line
+   that wraps in their terminal cannot put a newline into the milestone title.
+   Do not take the `plan:<name>` label fallback for this: that fallback is for a
+   token without milestone write, not for a hook (#540).
+
    (Use the resolved `<repo>`, or the current repo's `OWNER/NAME` from
    `gh repo view --json nameWithOwner -q .nameWithOwner` when `gh-issue.repo` is
    unset — the `gh api` path needs an explicit repo.) `<overview body>` is the
@@ -332,12 +415,17 @@ The overview epic maps to a GitHub **milestone** (spike §3.1). Resolve it
 
 ### 5.3 Order the tasks (topological)
 
-Use the same ordering algorithm as **§4.3** (a task comes after every task it is
-blocked by; a cycle is a plan bug — **stop** and report it; an unresolvable bare
-slug — **warn**). The only difference is the "already an id" shape: for gh-issue
-an `is_blocked_by` entry that is already an issue reference matches
+Use `scripts/plan-graph.py`, same as **§4.3** (a task comes after every task it
+is blocked by; a cycle is a plan bug — the script exits non-zero naming the
+slugs — **stop** and report it; an unresolvable bare slug is `unknown-slug` —
+**warn**). The only difference is the "already an id" shape: for gh-issue an
+`is_blocked_by` entry that is already an issue reference matches
 `/^(\S*#)?\d+$/` (`#142`, `142`, or `owner/repo#142`) and is **not** an ordering
-edge.
+edge:
+
+```bash
+scripts/plan-graph.py "<plan dir>" --id-shape gh
+```
 
 ### 5.4 Create issues (reuse `gh-issue.md` create-flow, create-missing-only)
 
@@ -357,26 +445,98 @@ Walk the tasks in topological order. For each:
    (`#<number>`); **pass through unchanged** any entry already shaped like an
    issue ref or absent from the map. Render the resolved blockers as the footer
    `Blocked by: #<number>[, #<number>…]` (see `gh-issue.md` step 2 — passing
-   issue-ref values makes its footer read `Blocked by: …`). Blockers held back by
-   `--ready-only` aren't in the map yet, so they fall through to a slug footer and
-   never gain the `#<number>` form on a later create-missing-only run — **warn**,
-   matching the Linear `--ready-only` caveat in §3.
+   issue-ref values makes its footer read `Blocked by: …`). The footer is the
+   human-readable echo; the edge §5.5 draws is the machine-readable half, and
+   neither replaces the other. Blockers held back by `--ready-only` aren't in the
+   map yet, so they fall through to a slug footer, gain no edge, and never gain
+   the `#<number>` form on a later create-missing-only run — **warn**, matching
+   the Linear `--ready-only` caveat in §3.
 4. **Create the issue** by following `gh-issue.md` steps 2–5 (build body + footer,
    ensure labels, `gh issue create`, return the URL), adding the container from
-   §5.2: `--milestone "<milestone number>"` (milestone path — pass the resolved
-   **number**, not the title, so a title with shell-unsafe characters or a later
-   rename can't break it) or `--label "plan:<name>"` (fallback path), alongside
-   any configured `gh-issue.labels`.
+   §5.2: `--milestone "<milestone title>"` (milestone path) or
+   `--label "plan:<name>"` (fallback path), alongside any configured
+   `gh-issue.labels`.
+
+   **Carry the card's `priority` and `size` into that step's initial stamp.**
+   `gh-issue.md` step 4 encodes them as `prio:`/`est:` next to the
+   `status:`/`auto:` pair. A card without one of them gets no label for it, and
+   `/promote-tasks` backfills it. `urgent` passes through as `prio:0`, because a
+   plan card is a person's call rather than a backfill guess.
+
+   **Pass the TITLE here, not the resolved number.** `gh issue create` and
+   `gh issue edit` document `--milestone` as "by name" and look the title up, so
+   `--milestone 8` exits 1 with `could not add to milestone '8': '8' not found` —
+   measured against gh 2.98.0 on 2026-09-13, after the number cost the Linear
+   import its first create. The number §5.2 resolved is still what §5.2 needs it
+   for (reuse-before-create, and the id written back); it is only what `gh`
+   rejects at this step. Quote the title, and prefer an argv array over a shell
+   string when the caller has one.
 5. **Record the id back** into the task file's frontmatter: `tracker_id`
    (`owner/repo#<number>`, or `#<number>` when `gh-issue.repo` is unset) and
    `tracker_url` (the printed issue URL), and add `<slug> → #<number>` to the map
    so later dependents resolve.
 
-### 5.5 Cleanup — delete each migrated task file
+### 5.5 Second pass — native blocker edges
+
+After **every** issue in the batch exists (so all blocker numbers are in the map),
+walk the tasks again and translate each `is_blocked_by` through the map, exactly
+as the jira path does in §5b.5. Walk **only tasks whose own slug resolved to an
+issue number** — a task held back by `--ready-only`, or whose create failed, has
+no issue to attach an edge to and contributes no `--edge`. The helper refuses a
+non-numeric blocked side and writes nothing at all, so one held task in a batched
+call would cost every other edge in it. Unresolved **blocker** values still pass
+through: those the helper warns about and reports under `skipped`. Hand the whole resolved edge set to
+`gh-issue-deps.py` in **one** call — for a task A blocked by B, one
+`--edge <A>:<B>`; a task with a **list** of blockers contributes one `--edge` per
+blocker:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-deps.py" \
+  --repo "<repo>" --edge "<A>:<B>" [--edge "<C>:<B>" …] --apply --json
+```
+
+If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
+`**/handlers/assets/gh-issue-deps.py`. `--repo` is required: resolve it with
+`gh repo view --json nameWithOwner -q .nameWithOwner` when `gh-issue.repo` is
+unset, matching §5.2.
+
+Four things the helper settles, so don't re-derive them here:
+
+- The POST body carries the blocker's **database id**, not its `#<number>` — the
+  helper resolves it. Writing the number links the wrong issue.
+- Edge creation is **create-missing-only**, checked against the paginated
+  `blocked_by` list, so a re-push adds no duplicate.
+- An `is_blocked_by` entry that stayed a bare slug (a blocker held back by
+  `--ready-only`) or names another repo has no issue to link to. The helper
+  **warns and skips** it and reports it under `skipped` — surface that in §7,
+  matching the `--ready-only` caveat in §3.
+- A blocker number the repo does not have **fails loudly** rather than being
+  skipped, because reaching that means this pass ran before its issues existed.
+
+Without `--apply` the helper writes nothing and reports what it would create, so
+drop the flag for a rehearsal. Two limits worth stating plainly: this path is
+**local only** — a cloud routine has no `gh` and the GitHub MCP connector has no
+dependency tool (`dev_docs/research/2026-08-24-routine-claim-channel.md`) — and
+the local `sandbox-network-guard` hook blocks non-GET `gh api`, so `--apply`
+needs the sandbox escape.
+
+> **"Local only" still holds here, but check the reason before reusing it.** Both
+> clauses above are about this step, which **writes** edges. A routine's writes
+> are refused at the proxy (`403 … not permitted through this proxy`, still the
+> operative measurement). Its **reads** are not: measured 2026-09-16, a routine
+> read `blocked_by` over `curl` carrying only the `proxy-injected` placeholder.
+> So do not cite this sentence as evidence that a routine cannot _see_ the graph
+> — it cannot _write_ it.
+
+### 5.6 Cleanup — delete each migrated task file
 
 Run the **§4.5 cleanup** unchanged, using gh-issue's slug→reference map (§5.4) and
 its id shape `/^(\S*#)?\d+$/` (§5.3). Each migrated task file is deleted once its
 `tracker_id` is recorded; held/failed files stay.
+
+For gh-issue this **must run after the §5.5 edge pass**, for the reason jira's
+§5b.6 gives: the edge pass walks every task to draw its `blocked_by` edges, so the
+files and the in-memory map must still be intact when it runs.
 
 ## 5b. jira path
 
@@ -446,11 +606,17 @@ nothing new.
 
 ### 5b.3 Order the tasks (topological)
 
-Use the same ordering algorithm as **§4.3** (a task comes after every task it is
-blocked by; a cycle is a plan bug — **stop** and report it; an unresolvable bare
-slug — **warn**). The only difference is the "already an id" shape: for jira an
+Use `scripts/plan-graph.py`, same as **§4.3** (a task comes after every task it
+is blocked by; a cycle is a plan bug — the script exits non-zero naming the
+slugs — **stop** and report it; an unresolvable bare slug is `unknown-slug` —
+**warn**). The only difference is the "already an id" shape: for jira an
 `is_blocked_by` entry that is already an issue key matches `/^[A-Z][A-Z0-9]*-\d+$/`
-(e.g. `PLAT-142`, or a single-letter project key like `X-1`) and is **not** an ordering edge.
+(e.g. `PLAT-142`, or a single-letter project key like `X-1`) and is **not** an
+ordering edge:
+
+```bash
+scripts/plan-graph.py "<plan dir>" --id-shape jira
+```
 
 ### 5b.4 Create issues (reuse `jira.md` create-flow, create-missing-only)
 
@@ -465,14 +631,21 @@ Walk the tasks in topological order. For each:
    the map from the seed step.
 2. **Skip if held.** With `--ready-only`, skip non-`ready` tasks.
 3. **Build the drafted task** — the normalized contract from `commands/add-task.md`
-   step 5. The blocker translation is **deferred to §5b.5** (links are a second
-   pass), so nothing about `is_blocked_by` is passed at create time.
-4. **Create the issue** by following `jira.md` steps 3–5 (compose description,
-   `createJiraIssue`, return the url) with `issueTypeName: <jira.issue_type>`
-   (default `Task`) and **`parent: <epic key from §5b.2>`**. Because the container
-   is already resolved here, **skip `jira.md` step 2's epic-selection prompt** —
-   pass the epic key directly as `parent`. Apply `jira.labels` via
-   `additional_fields` exactly as the create flow does.
+   step 5. The blocker **translation** is deferred to §5b.5 (links are a second
+   pass), so no blocker key is passed at create time. The task's own
+   `is_blocked_by` value still travels on the drafted task, because `jira.md`
+   step 5 reads it to decide whether the new issue may land in `ready_status` —
+   that decision only needs to know a blocker exists, not which key it became.
+4. **Create the issue** by following `jira.md` steps 3–6 (compose description,
+   `createJiraIssue`, transition to ready status, return the url) with
+   `issueTypeName: <jira.issue_type>` (default `Task`) and
+   **`parent: <epic key from §5b.2>`**. Because the container is already resolved
+   here, **skip `jira.md` step 2's epic-selection prompt** — pass the epic key
+   directly as `parent`. Apply `jira.labels` and `jira.additional_fields` via
+   `additional_fields` exactly as the create flow does. Step 5 runs per issue as
+   the walk creates it, so a **complete, unblocked** plan task lands in
+   `ready_status`; a blocked one — or one still carrying open questions — waits in
+   the initial status for its links (§5b.5) and a human.
 5. **Record the key back** into the task file's frontmatter: `tracker_id: <key>`
    (e.g. `PLAT-142`) and optional `tracker_url`, and add `<slug> → <key>` to the
    map so later dependents resolve.
@@ -522,7 +695,9 @@ re-runs safely — this is **create-missing-only** (spike §4):
   held task resolves its blockers (and keeps native links) on a later push.
 - For jira, the §5b.5 link pass is create-missing-only too: it checks the
   dependent's existing `Blocks` links before adding one, so a re-push draws no
-  duplicate "is blocked by" edges.
+  duplicate "is blocked by" edges. The gh-issue §5.5 edge pass is the same:
+  `gh-issue-deps.py` reads the dependent's paginated `blocked_by` list first and
+  creates only what is missing.
 - v1 **never updates or deletes** remote **issues** (tasks). The one remote write
   on reuse is narrow and container-only: the overview is written into (overwriting)
   a **plan-dedicated** container's description (§4.2), never onto a shared one and
@@ -537,7 +712,8 @@ Print:
 - The container: created (`<title>` → `<project / milestone / Epic id>`) or reused
   (`<id>`); for gh-issue, note when the `plan:<name>` label fallback was used; for
   jira, note any blocker links skipped because the `Blocks` link type was absent
-  (§5b.5).
+  (§5b.5); for gh-issue, note any dependency edges `gh-issue-deps.py` reported as
+  `skipped` because the blocker never became an issue (§5.5).
 - **Created:** one line per new issue — `<slug> → <identifier> (<url>)`, with its
   resolved blockers if any.
 - **Deleted locally:** each migrated task file removed by the §4.5 cleanup —

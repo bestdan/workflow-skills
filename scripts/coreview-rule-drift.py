@@ -1,0 +1,741 @@
+#!/usr/bin/env python3
+"""coreview-rule-drift.py — detect co-review allow-rules that no longer match.
+
+co-review approves each reviewer with an exact-match Bash allow-rule. When a
+release changes a reviewer's dispatch string, the rule stops matching, and the
+failure is silent in the mode that matters: under `--non-interactive` an
+unapproved command is denied rather than queued, so the reviewer simply stops
+appearing in the run summary. Nothing errors.
+
+This script compares the rule templates documented by the INSTALLED plugin's
+`skills/co-review/reviewers/*.md` against `permissions.allow` in the settings
+files, and names what drifted. It checks the shared rules in
+`skills/co-review/references/permissions.md` too, by asking whether a settings
+rule approves the command co-review runs, since those are prefix rules that no
+exact comparison can check. It is READ-ONLY: it never writes settings. The
+repair is a human edit — the corrected string has to carry paths only the
+operator knows (`<NEUTRAL>` in particular is never documented as a fixed value),
+and on a sandboxed machine the settings file is write-denied anyway.
+
+Read by `/doctor` (commands/doctor.md) as a check, and by co-review's own
+pre-flight so a denied reviewer is explained rather than silently missing.
+
+With `--teardown` it checks the worktree teardown scripts instead. A model
+running `worktree-remove.sh` or `branch-remove.sh` outside `/worktree-teardown`
+is approved only by a settings rule naming the script's full installed path,
+which carries the plugin's version directory, so the rule dies at the next
+`claude plugin update` and the denial is invisible at the tool boundary. Only
+`/doctor` asks this question; co-review's pre-flight does not run it.
+
+Usage:
+  coreview-rule-drift.py [--plugin-root PATH] [--settings PATH]... [--teardown] [--json]
+
+  --plugin-root  the installed plugin to read templates from. Defaults to
+                 $CLAUDE_PLUGIN_ROOT. This must be the INSTALLED plugin, not a
+                 working checkout: the installed copy is what dispatches, and
+                 the two can differ by several releases.
+  --settings     a settings.json to read `permissions.allow` from; repeatable.
+                 Defaults to ~/.claude/settings.json plus ./.claude/settings.json
+                 and ./.claude/settings.local.json when they exist.
+  --teardown     check the teardown-script rules instead of co-review's.
+  --json         emit the findings as JSON instead of a report.
+
+Exit codes: 0 no drift, 1 drift found, 2 could not run (bad plugin root, etc).
+"""
+
+import argparse
+import json
+import os
+import re
+import sys
+from typing import NoReturn
+from pathlib import Path
+
+# Placeholders a reviewer file leaves for the operator to substitute. The
+# operator's real value is unknowable here — `<NEUTRAL>` is deliberately never
+# documented as a fixed path — so each is matched as a wildcard, bounded by
+# PLACEHOLDER_VALUE below.
+PLACEHOLDER_RE = re.compile(r"(<INPUT-DIR>|<INPUT>|<NEUTRAL>)")
+
+# Placeholders whose path is exempt from the off-machine check, because nothing
+# about them can be wrong. `<NEUTRAL>` is created by the dispatch's own
+# `mkdir -p`, which makes every missing parent, so any depth may legitimately be
+# absent before a first run. And its only requirement is to be a dedicated empty
+# directory — a mistyped `<NEUTRAL>` still yields one, so there is no failure to
+# detect. Checking it would report a valid config as broken and catch nothing.
+EXEMPT_PLACEHOLDERS = {"<NEUTRAL>"}
+
+# What a placeholder may stand for. Every reviewer file requires a fixed
+# absolute path here, written either `/`-rooted or `$HOME`-rooted, so anything
+# starting with neither is not a substitution of this template — which is what
+# stops a general-purpose `Bash(cd "$(git rev-parse --show-toplevel)")` from
+# being read as devin's neutral-cwd rule.
+#
+# The `$HOME` form is the portable one, and the reviewer files require it for a
+# home-rooted path: neither the rule nor the command is expanded before the
+# permission matcher compares them, so a literal `$HOME` on both sides matches
+# byte-for-byte and the shell expands at exec time. One rule then works on
+# every machine — and reading it as a non-substitution here would report a
+# working config as DEAD.
+PLACEHOLDER_VALUE = r'((?:/|\$HOME/)[^"]+?)'
+
+# Binaries a reviewer template shares with ordinary shell work. A settings rule
+# driving one of these is not attributable to the reviewer, so it is never
+# reported dead — but the template still has to be covered, or the reviewer's
+# dispatch is denied at that segment.
+GENERIC_BINARIES = {"cat", "cd", "gh", "git", "mkdir"}
+
+# A rule line inside a ```json fence in a reviewer file: a JSON string holding a
+# Bash() rule, optionally followed by the array comma.
+RULE_LINE_RE = re.compile(r'^\s*("Bash\(.*\)")\s*,?\s*$')
+
+# Opening fence, capturing its language. Only a `json` fence holds rules; a bash
+# fence in the same file holds the invocation, whose lines must never be read as
+# shipped templates.
+FENCE_RE = re.compile(r"^\s*```(\w*)")
+
+# The shared rules cover every reviewer and live in one json fence in this file,
+# relative to the plugin root.
+SHARED_RULES_FILE = Path("skills") / "co-review" / "references" / "permissions.md"
+
+# The tail of the plugin-cache prefix rules that permissions.md once told
+# operators to add, `Bash([python3 ]["]<cache>/workflow-skills/workflow-skills/:*)`.
+# The matcher compares a prefix rule only up to a whole shell token, and the
+# script path is one token that runs on into the version directory, so these
+# rules never fired on any machine. A leftover one is reported DEAD so it gets
+# deleted.
+PLUGIN_CACHE_RULE_TAIL = "/workflow-skills/workflow-skills/:*)"
+
+# Shared templates of which one suffices. permissions.md says to add only the
+# diff source you use: `gh pr diff` for a PR, `git diff` for `--local`.
+SHARED_ALTERNATIVES = [{"Bash(gh pr diff:*)", "Bash(git diff:*)"}]
+
+
+# The scripts a model runs to tear down a worktree or delete a branch. Their
+# grant in `/worktree-teardown` applies only when that command is typed, so a
+# model-started teardown needs a settings rule naming the full installed path.
+TEARDOWN_SCRIPTS = ("worktree-remove.sh", "branch-remove.sh")
+
+# A plugin-cache path to a teardown script, capturing its version segment. A
+# rule is attributed to the teardown check only when it has this shape, so a
+# rule naming a working checkout's copy of the script is left alone.
+TEARDOWN_RULE_RE = re.compile(
+    r'/workflow-skills/workflow-skills/([^/"]+)/scripts/('
+    + "|".join(re.escape(s) for s in TEARDOWN_SCRIPTS)
+    + r")"
+)
+
+
+def die(msg) -> NoReturn:
+    print(f"coreview-rule-drift: {msg}", file=sys.stderr)
+    sys.exit(2)
+
+
+def parse_templates(reviewer_file):
+    """Extract the Bash() rule templates from a reviewer file's ```json fences.
+
+    Only lines inside a `json` fence count, on both axes. Prose in these files
+    quotes rule fragments to explain them, and a sibling `bash` fence carries the
+    invocation itself — reading either as a template would invent rules the
+    reviewer never ships and report them missing forever.
+    """
+    templates = []
+    fence_lang = None
+    for line in reviewer_file.read_text(encoding="utf-8").splitlines():
+        m = FENCE_RE.match(line)
+        if m:
+            # An opening fence records its language; the next fence closes it.
+            fence_lang = None if fence_lang is not None else m.group(1)
+            continue
+        if fence_lang != "json":
+            continue
+        m = RULE_LINE_RE.match(line)
+        if m:
+            templates.append(json.loads(m.group(1)))
+    return templates
+
+
+def template_to_regex(template):
+    """Compile a template into a full-match regex, placeholders as captures.
+
+    Everything outside a placeholder is escaped, so the comparison stays
+    byte-for-byte wherever the template is literal — which is the whole point:
+    a reordered flag must not match. The placeholders are captured rather than
+    merely wildcarded so the substituted paths can be checked separately; the
+    pattern alone cannot tell a legitimate path from a typo'd one, because both
+    are equally well-formed absolute paths to it.
+
+    Returns `(regex, names)`, where `names[i]` is the placeholder that produced
+    capture group `i + 1`. The caller needs it because the placeholders are not
+    interchangeable: what counts as an implausible path differs by which one it
+    substitutes (see `offmachine_paths`).
+    """
+    # PLACEHOLDER_RE captures, so split interleaves: [lit, ph, lit, ph, …, lit].
+    pieces = PLACEHOLDER_RE.split(template)
+    literals, names = pieces[0::2], pieces[1::2]
+    pattern = PLACEHOLDER_VALUE.join(re.escape(p) for p in literals)
+    return re.compile(pattern + r"\Z"), names
+
+
+def offmachine_paths(rule, rx, names):
+    """Substituted absolute paths in `rule` that do not resolve on THIS machine.
+
+    A placeholder path may legitimately not exist yet: `<INPUT>` is created by
+    the dispatch's own `cat >`, which makes only the final component and needs
+    the parent to be there already. So one missing trailing level is normal and
+    two or more is not — a path that far from anything on disk cannot be written
+    or read here, so the rule it sits in can never fire on this machine.
+
+    That reasoning is specific to the `cat >` placeholders, so it is applied
+    only to them; `EXEMPT_PLACEHOLDERS` names the ones it would misjudge and why.
+    A single global threshold reported a valid deep `<NEUTRAL>` as unusable.
+
+    **This says nothing about whether the rule is wrong.** A settings file
+    shared across machines — a dotfiles repo synced to hosts whose usernames
+    differ, say — must carry each machine's rules, so every host sees the other
+    hosts' rules as unresolvable and that is correct, not drift. An off-machine
+    rule is therefore reported and never counted as drift; if it leaves a
+    template with no live rule, `missing` says so on its own, which is the
+    signal that actually matters and is true on exactly the hosts where it is.
+
+    """
+    m = rx.fullmatch(rule)
+    bad = []
+    for name, value in zip(names, m.groups()):
+        # A `$HOME`-rooted rule is expanded by the shell at exec time, so the
+        # existence question is about the expanded path. Testing the literal
+        # `$HOME/…` string would report every portable rule OFF-MACHINE, since
+        # no such directory exists anywhere. If `$HOME` is unset, expandvars
+        # leaves the string alone and the `startswith` below skips it rather
+        # than inventing a path.
+        expanded = os.path.expandvars(value)
+        if name in EXEMPT_PLACEHOLDERS or not expanded.startswith("/"):
+            continue
+        p = Path(expanded)
+        missing = 0
+        while p != p.parent and not p.exists():
+            p = p.parent
+            missing += 1
+        if missing >= 2:
+            bad.append((value, str(p)))
+    return bad
+
+
+def command_word(rule):
+    """The binary a `Bash(<cmd> ...)` rule invokes, or None if it is not one."""
+    if not rule.startswith("Bash(") or not rule.endswith(")"):
+        return None
+    inner = rule[len("Bash(") : -1].strip()
+    return inner.split()[0] if inner else None
+
+
+def load_allow_rules(paths):
+    """Union the `permissions.allow` arrays of every settings file that exists.
+
+    A settings file that is absent is normal (most repos have no local
+    override); one that is present but unparseable is a real problem the caller
+    must hear about, so it is fatal rather than silently skipped.
+    """
+    rules: list = []
+    read: list = []
+    for p in paths:
+        if not p.exists():
+            continue
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            die(f"{p} is not valid JSON: {exc}")
+        allow = data.get("permissions", {}).get("allow", [])
+        if not isinstance(allow, list):
+            die(f"{p}: permissions.allow is not a list")
+        rules.extend(r for r in allow if isinstance(r, str))
+        read.append(str(p))
+    return rules, read
+
+
+def analyze(reviewers_dir, allow_rules):
+    """Classify every reviewer's templates against the operator's allow rules."""
+    findings = []
+    for reviewer_file in sorted(reviewers_dir.glob("*.md")):
+        name = reviewer_file.stem
+        templates = parse_templates(reviewer_file)
+        if not templates:
+            continue
+
+        # The binaries this reviewer's rules invoke, minus the general-purpose
+        # ones. A rule in the operator's settings is attributed to this reviewer
+        # only when it drives one of these, so neither an unrelated
+        # `Bash(cat:*)` nor a general `Bash(cd ...)` is ever called dead.
+        binaries = {
+            w
+            for w in (command_word(t) for t in templates)
+            if w and w not in GENERIC_BINARIES
+        }
+        owned = [r for r in allow_rules if command_word(r) in binaries]
+
+        matched_rules, missing, offmachine = set(), [], []
+        for template in templates:
+            rx, ph_names = template_to_regex(template)
+            live = []
+            # Coverage is asked of every allow rule, not just the owned ones:
+            # devin's `mkdir -p` / `cd` segments are satisfied by whatever rule
+            # covers them, generic or not. Deadness is asked only of the owned
+            # ones, below.
+            for rule in allow_rules:
+                if not rx.fullmatch(rule):
+                    continue
+                bad = offmachine_paths(rule, rx, ph_names)
+                if bad:
+                    # Shape-correct but pointed somewhere this machine has no
+                    # path to, so it cannot fire here. Not coverage — otherwise
+                    # another host's rule would mask that this host has none —
+                    # but not drift either; see offmachine_paths.
+                    offmachine.append({"rule": rule, "paths": bad})
+                    matched_rules.add(rule)
+                else:
+                    live.append(rule)
+            if live:
+                matched_rules.update(live)
+            else:
+                missing.append(template)
+
+        dead = [r for r in owned if r not in matched_rules]
+        findings.append(
+            {
+                "reviewer": name,
+                "templates": len(templates),
+                "matched": len(templates) - len(missing),
+                "missing": missing,
+                "dead": dead,
+                "offmachine": offmachine,
+                # No rule at all is "not set up", not "broke" — an operator who
+                # does not use a reviewer should not be nagged about it.
+                "configured": bool(owned),
+            }
+        )
+    return findings
+
+
+def covers(rule, command):
+    """Whether a settings rule approves every command beginning `command`.
+
+    Models the matcher as measured: a `:*` or trailing ` *` rule must match it
+    up to a whole shell token, so `Bash(git:*)` approves `git diff` and
+    `Bash(gi:*)` does not. An exact rule is not counted, even one naming a full
+    invocation such as `Bash(git status --porcelain)`: the shared templates are
+    prefix rules over commands whose arguments vary per run, so only a prefix
+    rule covers one. Nothing is unquoted or expanded first. A rule with a wildcard
+    anywhere else is not modelled and counts as no coverage.
+    """
+    if rule in ("Bash", "Bash(*)"):
+        return True
+    if not rule.startswith("Bash(") or not rule.endswith(")"):
+        return False
+    inner = rule[len("Bash(") : -1]
+    if inner.endswith(":*"):
+        head = inner[: -len(":*")]
+    elif inner.endswith(" *"):
+        head = inner[: -len(" *")]
+    else:
+        return False
+    if "*" in head:
+        return False
+    return command == head or command.startswith(head + " ")
+
+
+def is_generic_prefix(rule):
+    """Whether `rule` approves a whole general-purpose binary (`Bash`,
+    `Bash(*)`, `Bash(cat:*)`, `Bash(git *)`). Such a rule is common on machines
+    that never ran co-review, so, as in analyze(), it is no sign of setup.
+    """
+    if rule in ("Bash", "Bash(*)"):
+        return True
+    if not rule.startswith("Bash(") or not rule.endswith(")"):
+        return False
+    inner = rule[len("Bash(") : -1].strip()
+    for tail in (":*", " *"):
+        if inner.endswith(tail):
+            inner = inner[: -len(tail)].strip()
+            break
+    return inner in GENERIC_BINARIES
+
+
+def analyze_shared(plugin_root, allow_rules, reviewer_findings):
+    """Classify the shared rules, which every reviewer needs, against settings.
+
+    Each shared template is a `Bash(<command>:*)` prefix rule over a class of
+    commands, so the question is not whether a settings rule equals it but
+    whether that rule approves `<command>`; a broader `Bash(git:*)` covers
+    `Bash(git diff:*)`. Returns None when the installed plugin ships no
+    shared-rules file.
+    """
+    rules_file = Path(plugin_root) / SHARED_RULES_FILE
+    if not rules_file.is_file():
+        return None
+    templates = parse_templates(rules_file)
+
+    covered, specific = set(), False
+    for template in templates:
+        command = template[len("Bash(") : -1].removesuffix(":*")
+        hits = [r for r in allow_rules if covers(r, command)]
+        if hits:
+            covered.add(template)
+            specific = specific or any(not is_generic_prefix(r) for r in hits)
+
+    missing = [
+        t
+        for t in templates
+        if t not in covered
+        and not any(t in group and group & covered for group in SHARED_ALTERNATIVES)
+    ]
+    dead = [r for r in allow_rules if r.endswith(PLUGIN_CACHE_RULE_TAIL)]
+    # What the operator must supply, counting each alternatives group once, so
+    # the report's count moves by one when one rule is added.
+    units = len(templates) - sum(
+        len(g) - 1 for g in SHARED_ALTERNATIVES if g <= set(templates)
+    )
+    return {
+        "templates": len(templates),
+        "units": units,
+        "matched": len(templates) - len(missing),
+        "missing": missing,
+        "dead": dead,
+        # Like a reviewer, the shared rules are "not set up" rather than broken
+        # on a machine where co-review shows no sign of being set up at all. A
+        # generic `Bash(cat:*)` is not such a sign; a co-review-shaped rule, a
+        # dead cache rule, or a configured reviewer is.
+        "configured": specific
+        or bool(dead)
+        or any(f["configured"] for f in reviewer_findings),
+    }
+
+
+def rule_path(rule):
+    """The script path a `Bash(<path> …)` rule names, unquoted and with `$HOME`
+    expanded, or None. Only the first shell token is the path; the rest is
+    arguments or the ` *` prefix tail."""
+    if not rule.startswith("Bash(") or not rule.endswith(")"):
+        return None
+    inner = rule[len("Bash(") : -1].strip()
+    if inner.endswith(":*"):
+        inner = inner[: -len(":*")]
+    if inner.startswith('"'):
+        end = inner.find('"', 1)
+        token = inner[1:end] if end > 0 else inner[1:]
+    else:
+        token = inner.split()[0] if inner else ""
+    return os.path.expandvars(token) or None
+
+
+def teardown_template(plugin_root, script):
+    """The rule to add for `script`, in the one form measured to fire: a quoted
+    full path with a `:*` tail (see permissions.md → plugin scripts). The path
+    is the literal installed one, because the teardown guidance has the caller
+    read `installPath` and pass it literally, and the matcher compares the two
+    strings before expanding either."""
+    return f'Bash("{Path(plugin_root) / "scripts" / script}":*)'
+
+
+def analyze_teardown(plugin_root, allow_rules):
+    """Classify the operator's teardown-script rules against the installed plugin.
+
+    LIVE names the installed script's full path. DEAD names a literal version
+    directory other than the installed one, so it stopped matching at an
+    update. UNVERIFIED names neither, typically a `*` in the version segment:
+    no measurement shows that shape fires, so it is reported and not counted as
+    coverage, and the script it was meant for shows up MISSING on its own.
+    """
+    root = Path(plugin_root)
+    installed = root.name
+    scripts = []
+    configured = False
+    for script in TEARDOWN_SCRIPTS:
+        want = str(root / "scripts" / script)
+        live, dead, unverified = [], [], []
+        for rule in allow_rules:
+            m = TEARDOWN_RULE_RE.search(rule)
+            if not m or m.group(2) != script:
+                continue
+            configured = True
+            version = m.group(1)
+            if rule_path(rule) == want:
+                live.append(rule)
+            elif "*" not in version and version != installed:
+                dead.append({"rule": rule, "version": version})
+            else:
+                unverified.append(rule)
+        scripts.append(
+            {
+                "script": script,
+                "live": live,
+                "dead": dead,
+                "unverified": unverified,
+                "missing": None if live else teardown_template(root, script),
+            }
+        )
+    return {
+        "plugin_root": str(root),
+        "installed_version": installed,
+        # No teardown rule at all is "not set up", not "broke": the plugin's
+        # hooks and a typed `/worktree-teardown` need no rule, so an operator
+        # who never has the model run the scripts should not be nagged.
+        "configured": configured,
+        "scripts": scripts,
+    }
+
+
+def teardown_drift(t):
+    """Drift is a configured teardown setup with a dead rule or an uncovered
+    script. An unverified rule is not drift on its own; the script it fails to
+    cover is already MISSING."""
+    return t["configured"] and any(s["dead"] or s["missing"] for s in t["scripts"])
+
+
+def report_teardown(t, settings_read, settings_searched):
+    print(f"teardown allow-rule drift — installed plugin {t['plugin_root']}")
+    for p in settings_read:
+        print(f"  settings: {p}")
+    if not settings_read:
+        print(
+            "  settings: none found — looked in "
+            + ", ".join(str(p) for p in settings_searched)
+        )
+    print()
+
+    if not t["configured"]:
+        print(
+            "teardown: no allow-rule configured. Only a model-started teardown\n"
+            "outside a typed `/worktree-teardown` needs one; to allow that, add:"
+        )
+        for s in t["scripts"]:
+            print(f"  {s['missing']}")
+        print()
+        print("No drift.")
+        return
+
+    for s in t["scripts"]:
+        if s["live"] and not s["dead"] and not s["unverified"]:
+            print(f"{s['script']}: ok")
+            continue
+        print(f"{s['script']}:")
+        for rule in s["live"]:
+            print(f"  LIVE       {rule}")
+        for d in s["dead"]:
+            print(f"  DEAD       {d['rule']}")
+            print(
+                f"             pinned to {d['version']}; installed is "
+                f"{t['installed_version']}"
+            )
+        for rule in s["unverified"]:
+            print(f"  UNVERIFIED {rule}")
+        if s["missing"]:
+            print(f"  MISSING    {s['missing']}")
+        print()
+
+    if any(s["unverified"] for s in t["scripts"]):
+        print(
+            "UNVERIFIED rules are not counted as coverage: only a rule naming the\n"
+            "installed script's full path has been measured to fire.\n"
+        )
+
+    if teardown_drift(t):
+        print(
+            "A dead teardown rule fails silently: the model's teardown call is\n"
+            "denied, and nothing at the tool boundary says why. To repair: delete\n"
+            "each DEAD rule and add each MISSING one, wherever the settings file\n"
+            "above is managed. The rule names a version, so it has to be\n"
+            "rewritten after every `claude plugin update`."
+        )
+    else:
+        print("No drift.")
+
+
+def has_drift(findings, shared=None):
+    """Drift is a CONFIGURED reviewer, or configured shared rules, with a
+    missing or dead rule.
+
+    Off-machine rules are deliberately excluded: on a settings file shared
+    across hosts they are the other hosts' correct rules, so counting them
+    would report drift on every machine forever. A template they fail to cover
+    is already reported as `missing`, which fires on exactly the hosts where it
+    is true.
+    """
+    shared_drift = bool(
+        shared and shared["configured"] and (shared["missing"] or shared["dead"])
+    )
+    return shared_drift or any(
+        f["configured"] and (f["missing"] or f["dead"]) for f in findings
+    )
+
+
+def report(findings, shared, plugin_root, settings_read, settings_searched):
+    print(f"co-review allow-rule drift — templates from {plugin_root}")
+    for p in settings_read:
+        print(f"  settings: {p}")
+    if not settings_read:
+        # Say where it looked. Silence here reads as "settings were consulted
+        # and were empty", which is a different diagnosis from "there are none".
+        print(
+            "  settings: none found — looked in "
+            + ", ".join(str(p) for p in settings_searched)
+        )
+    print()
+
+    if shared is not None:
+        # One MISSING line per unit the operator must supply: an uncovered
+        # alternatives group is named once, with its alternatives.
+        missing_lines, shown = [], set()
+        for template in shared["missing"]:
+            if template in shown:
+                continue
+            group = next((g for g in SHARED_ALTERNATIVES if template in g), set())
+            others = sorted(group - {template})
+            shown.update(group)
+            note = f"  (or {', '.join(others)}; one suffices)" if others else ""
+            missing_lines.append(f"  MISSING    {template}{note}")
+        units = shared["units"]
+        covered_units = units - len(missing_lines)
+
+        if not shared["configured"]:
+            print(f"shared: no allow-rule configured ({units} required)")
+        elif not missing_lines and not shared["dead"]:
+            print(f"shared: ok ({covered_units}/{units} rules match)")
+        else:
+            print(f"shared: {covered_units}/{units} required rules covered")
+            for rule in shared["dead"]:
+                print(f"  DEAD       {rule}")
+            if shared["dead"]:
+                print(
+                    "             a plugin-cache prefix rule never fires, since it ends\n"
+                    "             inside the script's path, so delete it"
+                )
+            for line in missing_lines:
+                print(line)
+            print()
+
+    for f in findings:
+        name = f["reviewer"]
+        if not f["configured"]:
+            print(
+                f"{name}: no allow-rule configured ({f['templates']} shipped) — "
+                f"this reviewer cannot run"
+            )
+            continue
+        if not f["missing"] and not f["dead"] and not f["offmachine"]:
+            print(f"{name}: ok ({f['matched']}/{f['templates']} rules match)")
+            continue
+
+        print(f"{name}: {f['matched']}/{f['templates']} shipped rules covered")
+        for rule in f["dead"]:
+            print(f"  DEAD       {rule}")
+        for s in f["offmachine"]:
+            print(f"  OFF-MACHINE {s['rule']}")
+            for value, deepest in s["paths"]:
+                print(f"              no such path here: {value}")
+                print(f"              deepest that exists: {deepest}")
+        for template in f["missing"]:
+            print(f"  MISSING    {template}")
+        print()
+
+    if any(f["offmachine"] for f in findings):
+        print(
+            "OFF-MACHINE rules are reported, never counted as drift. On a settings\n"
+            "file shared across hosts they are another host's correct rules, and\n"
+            "'fixing' one here breaks it there. Leave them alone unless you know the\n"
+            "path is simply wrong everywhere.\n"
+        )
+
+    if has_drift(findings, shared):
+        print(
+            "A missing rule fails silently: under `/co-review --non-interactive` the\n"
+            "dispatch that needs it is denied, not queued, so a reviewer just stops\n"
+            "appearing in the run summary. To repair: copy each MISSING template\n"
+            "verbatim, substituting any placeholders with the same fixed absolute\n"
+            "paths your invocation uses — spelled `$HOME/...` wherever the path is\n"
+            "under your home directory, the form the reviewer files require — and\n"
+            "delete each DEAD rule.\n"
+            "\n"
+            "Make that edit wherever the settings file above is MANAGED, which is not\n"
+            "always the file itself — a generated or dotfiles-synced settings.json\n"
+            "loses an in-place edit at the next sync, and the drift comes back with no\n"
+            "sign of why. Nothing here writes settings for you."
+        )
+    else:
+        print("No drift.")
+
+
+def main():
+    ap = argparse.ArgumentParser(add_help=True, description=__doc__)
+    ap.add_argument("--plugin-root", default=os.environ.get("CLAUDE_PLUGIN_ROOT"))
+    ap.add_argument("--settings", action="append", default=[])
+    ap.add_argument("--teardown", action="store_true")
+    ap.add_argument("--json", action="store_true", dest="as_json")
+    args = ap.parse_args()
+
+    if not args.plugin_root:
+        die(
+            "no plugin root — pass --plugin-root or run where $CLAUDE_PLUGIN_ROOT "
+            "is set. It must point at the INSTALLED plugin, not a checkout."
+        )
+    reviewers = Path(args.plugin_root) / "skills" / "co-review" / "reviewers"
+    if args.teardown:
+        marker = Path(args.plugin_root) / "scripts" / TEARDOWN_SCRIPTS[0]
+        if not marker.is_file():
+            die(f"{marker} does not exist — is --plugin-root a plugin root?")
+    elif not reviewers.is_dir():
+        die(f"{reviewers} is not a directory — is --plugin-root a plugin root?")
+
+    if args.settings:
+        settings_paths = [Path(p) for p in args.settings]
+    else:
+        settings_paths = [
+            Path.home() / ".claude" / "settings.json",
+            Path(".claude") / "settings.json",
+            Path(".claude") / "settings.local.json",
+        ]
+
+    # No settings file at all is not a failure to run: it is a machine with zero
+    # allow-rules, which every reviewer already reports as "not configured".
+    # Exiting 2 here would render as "the check could not run" when the check
+    # ran fine and has a more useful answer. A file that EXISTS but is
+    # unreadable or invalid stays fatal — load_allow_rules handles that.
+    allow_rules, settings_read = load_allow_rules(settings_paths)
+
+    if args.teardown:
+        teardown = analyze_teardown(args.plugin_root, allow_rules)
+        drift = teardown_drift(teardown)
+        if args.as_json:
+            print(
+                json.dumps(
+                    {"settings": settings_read, "drift": drift, "teardown": teardown},
+                    indent=2,
+                )
+            )
+        else:
+            report_teardown(teardown, settings_read, settings_paths)
+        sys.exit(1 if drift else 0)
+
+    findings = analyze(reviewers, allow_rules)
+    shared = analyze_shared(args.plugin_root, allow_rules, findings)
+    drift = has_drift(findings, shared)
+    if args.as_json:
+        print(
+            json.dumps(
+                {
+                    "plugin_root": str(args.plugin_root),
+                    "settings": settings_read,
+                    "drift": drift,
+                    "shared": shared,
+                    "reviewers": findings,
+                },
+                indent=2,
+            )
+        )
+    else:
+        report(findings, shared, args.plugin_root, settings_read, settings_paths)
+
+    sys.exit(1 if drift else 0)
+
+
+if __name__ == "__main__":
+    main()

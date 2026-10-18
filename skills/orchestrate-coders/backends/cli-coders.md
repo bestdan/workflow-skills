@@ -29,7 +29,9 @@ Per packet:
    root is <dir>; edit only files under that directory. Implement the task below,
    run the verification command if your tool permissions allow it, and finish
    with a short report listing changed files, verification status, and any
-   environmental failures separately from content failures.
+   environmental failures separately from content failures. End your report with
+   exactly one terminal line: `PACKET_COMPLETE: DONE` if you finished the task,
+   or `PACKET_COMPLETE: PARTIAL` if you stopped short of it.
    ```
 3. **Invoke** the coder with cwd `<dir>` (invocations below). **Capture both
    stdout and stderr, and read only the final message / tail** — coders stream
@@ -45,12 +47,27 @@ Per packet:
    run the main-checkout containment check (SKILL.md step 5) — a CLI coder
    (notably agy) can land correct edits in the user's main checkout instead of
    its worktree. Empty diff **and** clean main checkout = failed packet.
+   The coder's own report is never the success signal — the diff plus the
+   verify command (step 5 below) are — but a report that stops after a
+   preamble or a tool result, with no terminal `PACKET_COMPLETE: DONE` /
+   `PACKET_COMPLETE: PARTIAL` line (per the initial prompt in step 2), is
+   itself a signal the coder cut off mid-task: note it alongside the
+   verification result rather than reading silence as a clean finish. An
+   explicit `PACKET_COMPLETE: PARTIAL` is that same signal stated outright:
+   record the packet as incomplete even if the step-5 verify passes — a green
+   check on half the task is exactly what PARTIAL warns about — and route it
+   through the content-failure branch of the retry protocol (SKILL.md step 5):
+   back to the **same** coder once with the unfinished remainder appended to
+   the spec.
 5. **Verify** in `<dir>` per the packet spec, then **commit the packet's
    changes to its branch** — `git -C <dir> add -A -- ':!.packet-spec.md'` and
    commit — so the branch actually carries the work that SKILL.md step 6
    merges. Then hand the branch back to the orchestrator's integrate step.
-   After integration, remove the worktree with `git worktree remove <dir>`
-   (not a manual `rm`, which leaves stale `.git/worktrees` metadata).
+   After integration, remove the worktree with `git worktree remove --force
+   <dir>` (plain `remove` refuses if the packet's verify step populated any
+   submodules; `--force` discards anything uncommitted, gitignored files and
+   submodule stashes included, so commit everything the branch needs first) —
+   not a manual `rm`, which leaves stale `.git/worktrees` metadata.
 
 ## Known invocations
 
@@ -78,11 +95,11 @@ learned in co-review:
 - Guard against empty input: on empty stdin agy silently resumes a **prior
   conversation** and works on stale code with full confidence. Always
   `[ -s "<dir>/.packet-spec.md" ] && cat "<dir>/.packet-spec.md" | agy ...`.
-- Pin `--model` (default `"Gemini 3.5 Flash (High)"`; the `agy:<model>` suffix
+- Pin `--model` (default `"Gemini 3.6 Flash (High)"`; the `agy:<model>` suffix
   overrides) so the coder identity doesn't drift between runs.
 
 ```sh
-[ -s "<dir>/.packet-spec.md" ] && cat "<dir>/.packet-spec.md" | agy --model "Gemini 3.5 Flash (High)" -p "Your workspace root is <dir>. Every file you touch must be under it — do not edit any path outside it. Implement the task specified on stdin inside this directory only. If stdin is empty, output exactly NO INPUT and stop."
+[ -s "<dir>/.packet-spec.md" ] && cat "<dir>/.packet-spec.md" | agy -p "Your workspace root is <dir>. Every file you touch must be under it — do not edit any path outside it. Implement the task specified on stdin inside this directory only. If stdin is empty, output exactly NO INPUT and stop." --model "Gemini 3.6 Flash (High)"
 ```
 
 Run it with cwd `<dir>`. Do **not** pass `--sandbox` here (unlike co-review's
@@ -98,15 +115,46 @@ directly in the worktree cwd; the older cloud-session model below is a
 fallback). Canonical invocation, cwd `<dir>`:
 
 ```sh
-[ -s "<dir>/.packet-spec.md" ] && devin -p --prompt-file "<dir>/.packet-spec.md" --model swe-1.6 --permission-mode accept-edits
+[ -s "<dir>/.packet-spec.md" ] && devin -p --prompt-file "<dir>/.packet-spec.md" --permission-mode accept-edits --respect-workspace-trust false --model swe-1.6
 ```
 
 Use `--prompt-file`, **not** piped stdin — `devin -p` with piped stdin panics.
+Pass `--respect-workspace-trust false` or the packet dies before the model:
+devin refuses an untrusted workspace, `-p` cannot show its trust prompt, and
+`<dir>` is a fresh worktree, which is exactly what a trusted-path prefix does
+not cover unless its parent happens to be trusted. Verified — without the flag
+the dispatch returns `Refusing to run in an untrusted workspace: <dir>`.
+Unlike the co-review reviewer, this coder **must** run with `<dir>` as cwd, so
+the neutral-cwd guard used there does not apply: the packet's own repo config
+(`.windsurf/rules/*.md`, `.devin/skills/<name>/SKILL.md`) reaches a coder that
+holds `accept-edits`. That is your own worktree of your own repo, so the
+exposure is the code you already chose to work on — but do not extend this
+invocation to a repo you would not run unreviewed.
 Under `accept-edits`, devin makes edits but **cannot run the verify command**
 (permission restrictions), so **devin packets always return unverified** — the
 orchestrator's check run (SKILL.md step 5) is the verification, not optional.
-(Open: whether a permission mode grants worktree verify access, and whether
-`swe-1.6` is the right pinned default.)
+(Open: whether a permission mode grants worktree verify access.)
+
+**Always pin `--model` explicitly on devin.** As of 2026-07 the CLI exposes a
+**model marketplace** — 37 families across Anthropic, OpenAI, Google, xAI,
+Moonshot, Zhipu, DeepSeek, NVIDIA, and Thinking Machines — so the model suffix
+selects a _vendor and jurisdiction_, not merely a capability tier. Two traps
+that follow from that:
+
+- **The bare `swe` alias now resolves to `swe-1.7-lightning`, which is billed
+  ($2.50/$12.50 per Mtok), not to a free tier.** Relying on the alias silently
+  moves a "cheap" packet onto a paid model. `swe-1.6` (pinned above) and
+  `swe-1.7` are the free ones on Pro; `swe-1.7` is newer but **beta** and
+  carries no published absolute benchmark, which is why the pin stays at
+  `swe-1.6` — changing it would also re-prompt the exact-match approval.
+- **Routing a frontier model through devin is the wrong call.** Devin passes
+  through `claude-opus-5`, `gpt-5.6-*`, and `gemini-3.6-flash` at roughly
+  native list price, so there is no economic argument for it — it just inserts
+  an undocumented intermediary in front of a vendor you can reach directly.
+  Use the native backend.
+
+Which passthroughs are worth reaching for, and which the secret-exposure gate
+removes, is in [`select-coder/matrix.md`](../../select-coder/matrix.md) → devin.
 
 Fallback — cloud session: if only a remote/API surface is installed, create a
 session from the packet spec against the repo, poll to completion, and fetch

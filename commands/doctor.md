@@ -1,15 +1,22 @@
 ---
-description: Diagnose and optionally fix the task-loop setup — config validity, handler prerequisites, legacy dirs, schema drift, and hygiene
-allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(find *), Bash(grep *), Bash(uv *), Bash(mkdir *), Bash(rmdir *), Glob, Grep, Read, Edit, Write, AskUserQuestion, mcp__claude_ai_Linear__list_teams, mcp__linear__list_teams, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__atlassian__getAccessibleAtlassianResources
+description: Diagnose and optionally fix the plugin setup — config validity, handler prerequisites, legacy dirs, schema drift, hygiene, co-review and teardown allow-rule drift, and the worktree root and branch prefix
+allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(find *), Bash(grep *), Bash(uv *), Bash(python3 *), Bash(mkdir *), Bash(rmdir *), Bash("${CLAUDE_PLUGIN_ROOT}/scripts/worktree-config.sh":*), Glob, Grep, Read, Edit, Write, AskUserQuestion, mcp__claude_ai_Linear__list_teams, mcp__linear__list_teams, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__atlassian__getAccessibleAtlassianResources
 argument-hint: "[--fix]"
 ---
 
 # Doctor
 
-One explicit "diagnose and fix my task-loop setup" entry point. It runs a set of
-checks against `dev_docs/tasks/` and the configured handler, prints a
-`PASS` / `WARN` / `FAIL` line per check with a remediation hint, and changes
-**nothing** unless invoked with `--fix`.
+One explicit "diagnose and fix my setup" entry point. It runs a set of checks
+against `dev_docs/tasks/` and the configured handler — plus one over co-review's and the teardown scripts'
+allow-rules, Check 7, and one over the worktree root and branch prefix, Check 8 — prints a `PASS` / `WARN` / `FAIL` line per check with a
+remediation hint, and changes **nothing** unless invoked with `--fix`.
+
+Most of what it checks is the task loop. Checks 7 and 8 are not, and that is deliberate:
+each covers a failure that is **silent by construction**, so the only way anyone
+learns of it is by asking, and this is the one place people already come to ask.
+A check nobody runs does not fix a problem nobody notices. Read that as the bar
+for widening the scope again, not as an invitation — a diagnosable failure that
+announces itself does not belong here.
 
 `/doctor` does **not** replace the migrate-on-contact preflight that the other
 commands run — that implicit auto-heal stays, so a stale setup keeps working
@@ -52,10 +59,17 @@ cat "$ROOT/dev_docs/tasks/.task-config.local.yml" 2>/dev/null # optional gitigno
 
 A missing file is not an error — it means the default `repo-pr` handler. **Overlay
 the local override on the committed config** — mappings merge recursively, local
-leaf values win (see `task-config.md` → "Local override") — and use this **merged**
+leaf values win (see `commands/task-config.md` → "Local override") — and use this **merged**
 view for every check below (the linear `api_key_ref` resolution check in particular
 depends on it). Hold the parsed `handler:` value (default `repo-pr`) for checks 1
 and 2.
+
+**One exception to "use the merged view":** `linear.api_key` and
+`linear.api_key_resolver` are machine-scoped — a raw secret and the name of a
+program to run — so they are honored only from the **raw `.task-config.local.yml`
+leaf**, never from the committed file. Keep the two files distinguishable rather
+than only their merge, since the archive-key check reports a committed one as a
+provenance `WARN` (see `dev_docs/auth_key_access.md` → "Provenance").
 
 ### 2. Run the checks
 
@@ -71,7 +85,73 @@ its `handler:` is a known value (`repo-pr` / `gh-issue` / `jira` / `linear`).
 - A parsed but unknown `handler:` value → `WARN`: "Unknown handler `<value>` — run
   `/task-config` to fix it."
 
-Either WARN means Check 1 did **not** resolve a known handler — Check 2 keys off that.
+Either WARN **above** means Check 1 did **not** resolve a known handler — Check 2 keys
+off that. Check 1b below never affects it: it runs only once the handler already
+resolved to `linear`, so its statuses say nothing about handler resolution.
+
+**Check 1b (linear only) — `projects` shape.** When the resolved handler is `linear`,
+also validate the `linear:` block's project config (see `linear-common.md` → "Config
+block" for the full schema). It reports its own status line, separate from Check 1,
+carrying the **worst** status among the bullets below (`WARN` beats `PASS`) — a
+config can trip more than one:
+
+- A lingering scalar `linear.default_project` → `WARN`: "scalar `default_project` is
+  deprecated — run `/task-config` to migrate to `linear.projects`." (`/task-config`
+  performs the rewrite itself — see `linear-config.md` "Migrate an existing scalar
+  `default_project` first" — so this is never auto-fixed here.)
+- `linear.projects`, when present, must be a list; each entry must have a string
+  `id`; the `id` values must be **unique** across the list (consumers query once per
+  resolved scope and assume the scopes are disjoint — a duplicate fires redundant
+  `list_issues` queries and subtracts the same in-flight count twice, see
+  `linear-common.md` → "Resolve configured projects"); each entry's `wip_limit` /
+  `max_estimate`, when present, must be positive integers.
+- `linear.global_wip_limit`, when set, must be a positive integer. When it is **less
+  than** the largest per-project `wip_limit` it silently masks that cap — flag it.
+- Any of the above → `WARN` (never `FAIL`: the repair is a config rewrite that only
+  the interactive `/task-config` can make, and every `FAIL` must be repairable under
+  `--fix`): "`.task-config.yml` — `linear.projects[<n>]` <what's wrong> — run
+  `/task-config` to fix it." An absent or empty `projects: []` is a legitimate
+  whole-team scope, not an error → `PASS`.
+
+**Check 1c (gh-issue only) — `branch_prefix` matches what the repo actually pushes.**
+When the resolved handler is `gh-issue` and `gh-issue.branch_prefix` is **unset**,
+check whether the repo's own branches say it should be set. Its own status line,
+separate from Check 1.
+
+The key is not cosmetic: `<branch_prefix>task-<n>` is the claim **lock ref**
+(`commands/handlers/claim-lock.md`), so two callers that disagree about the prefix
+acquire different refs, neither sees the other, and both believe they hold the
+claim. Unset means empty, and empty is only correct for a repo that really does
+push bare `task-<n>` branches.
+
+Read what the repo pushes rather than guessing. `<repo>` is `gh-issue.repo` if set,
+else `gh repo view --json nameWithOwner --jq .nameWithOwner`:
+
+```bash
+gh pr list --repo "<repo>" --state merged --limit 20 --json headRefName,isCrossRepository \
+  --jq '[.[] | select(.isCrossRepository | not) | .headRefName
+        | capture("^(?<p>[^/]+/)") // {p:""} | .p] | unique'
+```
+
+Each head maps to its prefix **including the trailing slash**, and a bare head maps
+to `""`. Two filters carry the weight. Keeping bare heads in the sample is the point:
+dropping them first is what would let one prefixed branch in a mixed repo pass for
+unanimity. Dropping **fork** heads is the opposite move — a cross-repository PR's
+branch name belongs to the contributor's fork, not to this repo, so it is evidence
+about someone else's naming and would pin a prefix this repo never pushes.
+
+- `branch_prefix` already set → `PASS`; the query is not needed.
+- Exactly one element and it is non-empty (`["bestdan/"]`) → `WARN`:
+  "`gh-issue.branch_prefix` is unset, so the claim lock ref is `task-<n>` — but this
+  repo's merged PRs all use `<p>`. Set `gh-issue.branch_prefix: <p>` in
+  `.task-config.yml`." Never auto-fixed: which prefix a repo wants is a judgment, and
+  writing the wrong one moves the lock rather than fixing it.
+- Anything else → `PASS`: more than one element means no single convention, and a
+  lone `""` means the repo really does push bare `task-<n>` branches.
+- The `gh` call fails (auth, network, a repo with no merged PRs) → `WARN`:
+  "`branch_prefix` check skipped — `gh pr list` unavailable." Same treatment Check 4
+  gives an unavailable `validate.py`: a check that could not run is reported, not
+  folded into `PASS`, because the vocabulary has no third state to hide it in.
 
 **Check 2 — Handler prerequisites.** If Check 1 did **not** resolve a known handler
 (invalid YAML or an unknown value), **skip this check and report `WARN`** ("handler
@@ -106,42 +186,52 @@ the handler doc's own remediation.
   it; do not restate the `git mv` steps). This is one check among many — not the
   command's reason to exist.
 
-**Check 4 — Schema drift.** Task files whose frontmatter is invalid. This is **two
-sub-checks** because they have different sources of truth:
+**Check 4 — Schema drift.** Task files whose frontmatter is invalid. Delegate entirely
+to `scripts/validate.py`, passing the **consumer repo's** task dir explicitly (its
+default is this plugin's own `dev_docs/tasks`, which is not what a consumer-repo
+`/doctor` run should validate) and resolving the script via the **plugin install
+dir**, not the consumer repo's git root — a consumer repo has no `scripts/validate.py`
+at its own root:
 
-1. **Present-but-invalid fields** — reuse `scripts/validate.py`'s rules (out-of-range
-   `size`/`impact`, bad `status`/`priority`, malformed `is_blocked_by`, mistyped
-   `assignee`/`parent`, epic-shape violations). Run it and surface its
-   `dev_docs/tasks/**` failures:
+```bash
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/validate.py" "$(git rev-parse --show-toplevel)/dev_docs/tasks" 2>&1
+```
 
-   ```bash
-   uv run "$(git rev-parse --show-toplevel)/scripts/validate.py" 2>&1
-   ```
+`validate.py` covers both present-but-invalid fields (out-of-range `size`/`impact`,
+bad `status`/`priority`, malformed `is_blocked_by`, mistyped `assignee`/`parent`,
+epic-shape violations) and missing required fields / `expires` shape — no separate
+hand-check against the **Field reference** in `skills/task/SKILL.md` is needed; that
+table is `validate.py`'s source of truth for the same rule.
 
-2. **Missing required fields** — `validate.py` is deliberately **lenient**: it only
-   validates a field's shape _when present_ and never checks `expires` at all, so it
-   does **not** report a card missing a required field. So `/doctor` must check this
-   itself, against the **Field reference** in `skills/task/SKILL.md` (required:
-   `title`, `priority`, `size`, `status`, `created`, `source_branch`, `related_files`,
-   `expires`). Read each non-epic card's frontmatter and flag any required field that
-   is absent.
+Classify the reported findings (`✘` = error, `⚠` = warning in `validate.py`'s output),
+but **ignore any `⚠ expired:` warnings here** — those are hygiene, owned by Check 5
+(via `task-scan.py`); classifying them here too would double-report the same card:
 
-Classify the combined findings:
-
-- **Defaultable / mechanical** (a missing `expires` — default 30 days from `created`)
-  → `FAIL`, fixable under `--fix`.
+- **Defaultable / mechanical** (`missing required field 'expires'`) → `FAIL`, fixable
+  under `--fix` (default 30 days from `created`).
 - **Needs judgment** (an out-of-range `size`, an unknown `status` value, a missing
   field with no safe default like `title` or `source_branch`) → `WARN`; point at the
   file and the rule.
 
-No drift → `PASS`. If `uv` is unavailable, fall back to reading the frontmatter shape
-rules from `scripts/validate.py` and applying them yourself.
+No drift → `PASS`. If `uv` or the script is unavailable, report this check as
+`WARN`: "Schema drift check skipped — uv/scripts/validate.py unavailable." Do **not**
+fall back to re-deriving the frontmatter rules by hand. (Schema drift stays a
+`validate.py` job — it owns frontmatter **shape**; the `scripts/task-scan.py` scanner
+that check 5 uses for expiry owns **scan/rank/readiness**. They are deliberately
+separate authorities, so `/doctor` calls both.)
 
 **Check 5 — Hygiene.** Lower-stakes cruft:
 
-- **Expired tasks** — files with `expires` < today while `status` is non-terminal
-  (not `done`). These are pruning candidates (see the lifecycle note in
-  `skills/task/SKILL.md`). `FAIL`, prunable under `--fix`.
+- **Expired tasks** — the scanner's `expired: true` cards. It computes expiry per
+  card (`expires` < today while `status` is non-terminal, not `done`), so read the
+  flag rather than recomputing the date arithmetic here:
+
+  ```bash
+  "${CLAUDE_PLUGIN_ROOT}/scripts/task-scan.py" "$(git rev-parse --show-toplevel)/dev_docs/tasks"
+  ```
+
+  These are pruning candidates (see the lifecycle note in `skills/task/SKILL.md`).
+  `FAIL`, prunable under `--fix`.
 - **Orphan branches / PRs** — cruft from aborted/crashed sessions. **Do not** use
   "open PR with no matching task file" as the signal: by design the task file is
   deleted when the claim PR is converted to the `task-loop` review PR, so an open
@@ -151,11 +241,19 @@ rules from `scripts/validate.py` and applying them yourself.
   an orphan. Instead surface:
   - **Stale `task-claim` PRs** — an open `task-claim` PR that never advanced to
     `task-loop` (work finished) or `task-blocked` (parked for a human) is a likely
-    abandoned claim. Query it the same way the Claim protocol does and parse the slug
-    from the **whole-line** `Claims-task: <slug>` marker (or `headRefName == task/<slug>`),
-    not a substring — see the Claim protocol in `commands/handlers/repo-pr-execute.md`:
-    `gh pr list --state open --label task-claim --limit 100 --json number,headRefName,body,updatedAt`.
-    Surface ones untouched for a while (stale `updatedAt`).
+    abandoned claim. Use the same scanner the Claim protocol uses (so the whole-line
+    `Claims-task: <slug>` / `headRefName == task/<slug>` matching rule lives in one
+    tested place, not a hand-rolled `gh pr list` here):
+
+    ```bash
+    "${CLAUDE_PLUGIN_ROOT}/scripts/claim-scan.sh" --task-dir "$(git rev-parse --show-toplevel)/dev_docs/tasks"
+    ```
+
+    Its `STALE pr=<n> slug=<slug> updated=<ts>` lines flag task-claim PRs with no
+    matching local `in_progress` task file — a heuristic (see the script's header for
+    why it can't be conclusive from a fresh `main` checkout). Corroborate with the
+    `updated=` timestamp on the matching `CLAIMED` line and surface ones untouched for
+    a while; never auto-delete.
   - **Merged-work local branches** — local `task/<slug>` branches whose PR has already
     merged or closed (`git branch --list 'task/*'` cross-checked against
     `gh pr list --state merged|closed`), safe to delete.
@@ -179,7 +277,7 @@ Nothing found → `PASS`.
 
 **Check 6 — Archive health.** Whether `/archive-tasks` can retire completed work
 so the tracker doesn't fill up (acute for `linear`, whose free plan caps a
-workspace at 250 _active_ issues). Read-only signal, **`WARN`/`PASS` only** —
+workspace at 250 non-archived issues of any state — completing or cancelling one frees nothing, only archiving does; see `linear-common.md` → `active_issue_quota` for why that figure is dated rather than fixed). Read-only signal, **`WARN`/`PASS` only** —
 never auto-fixed, since every remedy is a human decision (set a threshold, enable
 auto-archive, store an API key). Report against the resolved handler:
 
@@ -195,23 +293,60 @@ auto-archive, store an API key). Report against the resolved handler:
   mechanism and the GraphQL script is the backstop (state this, since `/doctor`
   can't read Linear's team settings). Read `linear.api_key_ref` from the **merged
   config** (`.task-config.yml` overlaid with the gitignored
-  `.task-config.local.yml`, its canonical home). Then:
-  - **Unset** (in neither file) → `WARN`: "no `linear.api_key_ref` — the GraphQL
-    archive backstop is unavailable; rely on native auto-archive or add a key to
-    `.task-config.local.yml` (see `linear-config.md` → 'Archive key')."
+  `.task-config.local.yml`, its canonical home), and `linear.api_key` from the
+  **raw `.task-config.local.yml` leaf** — it is machine-scoped, so a value in the
+  committed file is refused rather than merged (see the provenance bullet below).
+  Then:
+  - **Unset** (no key and no ref in either file) → `WARN`: "no `linear.api_key_ref`
+    — the GraphQL archive backstop is unavailable; rely on native auto-archive or
+    add a key to `.task-config.local.yml` (see `linear-config.md` → 'Archive key')."
   - **Set** → confirm it actually **resolves**, don't just accept the string.
-    Test resolution without revealing the secret: if `$LINEAR_API_KEY` is already
-    exported, `PASS` (the script will use it directly). Else probe the ref with
-    `op read "<ref>" >/dev/null 2>&1` (redirect — never print the key). Exit 0 →
-    `PASS` "backstop wired; key resolves." Non-zero → `WARN`: "`api_key_ref` is
-    set but did not resolve from this shell. This may be the `op`-in-agent-shell
-    gotcha (1Password desktop-app integration) rather than a bad ref — verify with
-    `! op read <ref>` in your own terminal, or set `OP_SERVICE_ACCOUNT_TOKEN`. If
-    it fails there too, fix the `op://vault/item/field` reference." (Still a
-    `WARN`, never a failure — this whole check is `WARN`/`PASS` only.)
-    The same key, when set, also enables the `/do-tasks` read-only GraphQL fast-path
-    for find-candidates (see `linear-claim.md` "Find candidates") — informational
-    only, no separate check.
+    Bridge the config exactly as `linear-common.md` → "Key resolution" does — **all
+    three rungs**, not just the ref, or a host configured with a plaintext
+    `linear.api_key` probes with nothing bridged and gets a false `WARN` for a
+    correct setup. Then probe with the shared helper, which honors the configured
+    resolver and never writes a secret to stdout:
+
+    ```bash
+    LINEAR_API_KEY="${LINEAR_API_KEY:-<linear.api_key from .task-config.local.yml>}" \
+      LINEAR_API_KEY_REF='<from merged config>' LINEAR_API_KEY_RESOLVER='<from .task-config.local.yml>' \
+      python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/_secret_resolve.py" --probe LINEAR_API_KEY
+    ```
+
+    Omit any assignment whose source is unset — an empty value is not the same as an
+    absent one — and keep the `${LINEAR_API_KEY:-…}` form so an already-exported key
+    still wins over config, as the ladder requires.
+
+    **Do not probe with a bare `op read "<ref>"`.** That ignores a configured
+    resolver, so a machine using an approval-based one (`opx`) gets a false `WARN`
+    saying its key doesn't resolve when the real fast paths work fine.
+
+    Exit 0 → `PASS` "backstop wired; key resolves." Non-zero → the helper prints one
+    reason **category** on stderr; report the fix that matches it (`no-session` →
+    run `op signin` in your own terminal, or set `OP_SERVICE_ACCOUNT_TOKEN` for a
+    headless run; `not-found` → fix the reference; `no-binary` → the configured
+    resolver isn't installed; `malformed-ref` → the value isn't a `<scheme>://…`
+    reference, and a command-prefixed one like `opx op://…` belongs in
+    `api_key_resolver` instead; `unknown-resolver` → `api_key_resolver` names
+    something not on the allow-list; `timeout` → an approval dialog went unanswered).
+    (Still a `WARN`, never a failure — this whole check is `WARN`/`PASS` only.)
+
+    Two notes worth stating in the output when they apply. A resolver that raises an
+    approval dialog will raise one **for this probe too**, and `opx` invalidates the
+    `op` session afterwards — so a later plain `op read` in the same shell failing is
+    expected, not a broken session. And if `$LINEAR_API_KEY` is already exported, the
+    probe passes on that alone without exercising the ref at all; say so rather than
+    implying the ref was verified.
+  - **Provenance** → if `api_key` or `api_key_resolver` appears in the **committed**
+    `.task-config.yml`, `WARN` regardless of whether anything resolves: "`<key>` is
+    machine-scoped and is refused from the committed config — move it to
+    `.task-config.local.yml` (see `dev_docs/auth_key_access.md` → 'Provenance')." A
+    raw key there is worse than ignored — it is a full-account token in a tracked
+    file, so say that plainly and recommend rotating it.
+    The same key, when set, also enables the read-only GraphQL fast paths
+    (`/do-tasks` find-candidates, `/sweep-for-complete`, `/reconcile-tasks`,
+    `/reoptimize-tasks`) via `linear-common.md`'s "Key resolution" step —
+    informational only, no separate check.
 - **`jira` specifics** — if `jira.archive_status` is unset, note `/archive-tasks`
   is a no-op for jira (native archival is Premium) — informational `WARN`.
 - **`gh-issue`** — informational `PASS`: GitHub has no cap; archiving is hygiene
@@ -221,9 +356,157 @@ auto-archive, store an API key). Report against the resolved handler:
 handler-specific prerequisite (Linear key / Jira status) is satisfied or
 not-applicable.
 
+**Check 7 — co-review and teardown allow-rules.** Whether the exact-match Bash rules that
+approve each co-review reviewer still match the command the **installed** plugin
+dispatches. This is the one check here that is not about the task loop, and it
+earns its place on the failure mode rather than the subject: a rule that stops
+matching fails **silently** in the mode that matters — under `/co-review
+--non-interactive` an unapproved command is denied rather than queued, so the
+reviewer just stops appearing in the run summary and nothing errors. There is no
+moment at which a human is told, so it has to be asked for. With `autoUpdate`
+enabled on the marketplace the shipped strings move without anyone present, which
+makes it a standing hazard rather than an occasional one.
+
+Run the deterministic checker (read-only; it never writes settings):
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/coreview-rule-drift.py" \
+  --plugin-root "${CLAUDE_PLUGIN_ROOT}"
+```
+
+`${CLAUDE_PLUGIN_ROOT}` is load-bearing, not incidental: it resolves to the
+**installed** plugin, which is what actually dispatches. A working checkout can be
+several releases ahead of it, so a check run against the checkout answers a
+question nobody asked.
+
+**Spell it twice — once in the path, once as `--plugin-root`.** The variable is
+interpolated into this markdown when the command is rendered, so the path is
+correct and the script does run; it is **not** exported into the Bash subprocess,
+so the script's own environment lookup finds nothing and it exits `2` — reporting
+no plugin root from inside the plugin root. The flag carries the same interpolated
+value the path already proves is right, so the installed-versus-checkout property
+above is preserved rather than traded away. Point `--plugin-root` at anything
+**other** than `${CLAUDE_PLUGIN_ROOT}` only to test the script itself.
+
+It compares each reviewer's shipped rule templates against `permissions.allow`
+in `~/.claude/settings.json` plus the repo's `.claude/settings.json` /
+`settings.local.json`, and classifies every rule:
+
+- **DEAD** — an existing rule matching no shipped template (a reordered flag, a
+  dropped one, a stale pinned model). It will never fire again.
+- **OFF-MACHINE** — a rule matching a template's _shape_ but substituting a path
+  this machine has no route to (missing two or more trailing levels; one is fine,
+  the dispatch's own `cat >` creates it). `<NEUTRAL>` is exempt from this
+  entirely — its dispatch runs `mkdir -p`, which creates every missing parent, and
+  any dedicated empty directory serves, so no depth there is wrong. It cannot fire here, so it is not
+  coverage — but it is **reported and never counted as drift**. A settings file
+  shared across hosts with different usernames must carry every host's rules, so
+  each host sees the others' as unresolvable: correct, not broken, and "fixing"
+  one here breaks it there. Where such a rule leaves a template with no live
+  rule, MISSING says so on its own — on exactly the hosts where that is true.
+- **MISSING** — a shipped template no rule covers, printed verbatim so it can be
+  copied into settings.
+- **not configured** — a reviewer with no rules at all. Reported, but **not**
+  drift: an operator who doesn't use a reviewer shouldn't be nagged about it.
+
+It checks the **shared** rules in `skills/co-review/references/permissions.md`
+too, reported under `shared:`. Those are prefix rules, so it asks whether a
+settings rule approves the command, matching up to a whole shell token as the
+permission matcher does: `Bash(git:*)` covers `Bash(git diff:*)`, and
+`Bash(git stat:*)` covers nothing. Only a prefix rule, ending `:*` or a
+space and `*`, counts; an exact rule is reported MISSING. Only one of `gh pr diff` and `git diff` is
+required. Any `…/workflow-skills/workflow-skills/:*` plugin-cache rule is
+**DEAD** on every machine: it ends inside the script's path, so it never fired.
+How the scripts are approved instead, and where that grant stops, is in
+`permissions.md`.
+
+Exit `0` → `PASS`. Exit `1` (a configured reviewer, or the shared rules, has a dead or missing rule)
+→ `WARN`, quoting the script's own lines. Exit `2` → `WARN`: the
+check could not run. It prints the reason on **stderr**, so capture that
+(`2>&1`) and quote it rather than reporting a bare failure — it is usually an
+unresolvable plugin root.
+
+**Then run it again for the teardown scripts.** A model that runs
+`worktree-remove.sh` or `branch-remove.sh` itself, rather than through a typed
+`/worktree-teardown`, is approved only by a settings rule naming the script's full
+installed path. That path carries the version directory, so the rule dies at the
+next `claude plugin update`, and the denial is just as silent:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/coreview-rule-drift.py" \
+  --plugin-root "${CLAUDE_PLUGIN_ROOT}" --teardown
+```
+
+It reads the same settings files and classifies each rule naming a plugin-cache
+copy of either script. **LIVE** names the installed path. **DEAD** names a
+different version directory, and the line names the installed version beside it.
+**UNVERIFIED** names neither, typically a `*` in the version segment: no
+measurement shows that shape fires, so it is reported but not counted as coverage.
+**MISSING** is a script with no live rule, printed as the rule to add. No teardown
+rule at all is _not configured_, which is not drift: the hooks and a typed
+`/worktree-teardown` need no rule. The exit codes are the same as above, and the
+result is reported as its own line, `teardown allow-rules`.
+
+**Always `WARN`, never `FAIL`, and never touched by `--fix`.** This applies to both
+runs, for three independent reasons, each sufficient:
+
+1. The repair needs literal absolute paths only the operator knows — `<NEUTRAL>`
+   in particular is deliberately never documented as a fixed value (see
+   `skills/co-review/reviewers/devin.md`) — so there is no mechanical edit to
+   apply.
+2. **A settings file is frequently generated or dotfiles-synced, not
+   hand-edited.** Writing to it in place would be undone at the next sync, and
+   the drift would return with nothing to show why — a silent failure of the
+   same kind this check exists to catch. The check reads the live file, because
+   that is what the permission matcher reads; the repair belongs upstream of it,
+   and only the operator knows where that is.
+3. The settings file is write-denied under the sandbox on the machines this runs
+   on, so a `--fix` would fail exactly where it was needed.
+
+Every `FAIL` in this command must be repairable under `--fix`; this one isn't, so
+it is a `WARN`. Print the corrected rules and let the human place them.
+
+**Check 8 — worktree root and branch prefix.** Where this repo's worktrees will be
+created and what their branches will be called, and **where each value came
+from**. A fresh clone gets both wrong without anything saying so: unset, the root
+resolves to an XDG state directory and the prefix to the git identity, which
+neither matches a repo whose branches follow some other convention.
+
+Read both from the resolver the worktree hooks use, so the report and the
+resolution cannot disagree:
+
+```bash
+"${CLAUDE_PLUGIN_ROOT}/scripts/worktree-config.sh" explain
+```
+
+It prints `root=<value>` and `branch_prefix=<value>`, each followed by a tab and
+its source: `env <VAR>`, `repo config <path>` (the worktree config, or the task
+config's `branch_prefix`), or `default (<what it was derived from>)`.
+
+- Both from an env var or a repo config → `PASS`, naming the two values.
+- Either from a `default (…)` → `WARN`, naming the value and its source. To pin
+  it, set `root:` and `branch_prefix:` as flat `key: value` lines in the repo's
+  worktree config file, the path `scripts/worktree-config.sh` names as
+  `CONFIG_REL`, or export `WORKFLOW_SKILLS_WORKTREE_ROOT` /
+  `WORKFLOW_SKILLS_BRANCH_PREFIX`. A default is not wrong as such, so this stays a
+  `WARN` for a human to confirm.
+- A nonzero exit → `WARN`, quoting its stderr: an env var or config value is set
+  but invalid, and the hooks will refuse it too.
+
+**Never written by `--fix`.** Which root and prefix a repo wants is a convention
+only its owner knows, so there is no mechanical value to write. And this check
+never writes a permission rule either: a settings rule can match a plugin script
+only by its full installed path, which carries the version and stops matching at
+the next release (#816). This command's own `allowed-tools` grant covers the
+resolver call.
+
 ### 3. Report (and fix under `--fix`)
 
-**Report-only (default).** Print the status block and stop — no writes:
+**Report-only (default).** Print the status block and stop — no writes. Group
+the lines by status, not by check number: every `PASS` first, then `FAIL` (what
+`--fix` repairs), then `WARN` (what needs a human), each with its remediation
+hint, and the tally line last. A failing early check then still lands next to
+the tally, where the reader is left.
 
 ```
 /doctor — repo-pr handler
@@ -234,12 +517,16 @@ not-applicable.
   FAIL  Schema drift — 1 file missing `expires` (defaultable)
   WARN  Hygiene — 2 expired tasks; 1 orphan task/ branch
   WARN  Archive — `archive_after` unset; /archive-tasks is dry-run-only
+  WARN  co-review allow-rules — agy: 1 dead, 2 missing; devin: 2 dead, 3 missing
+  WARN  teardown allow-rules — worktree-remove.sh: 1 dead (pinned to 2.70.4; installed is 2.76.0)
+  WARN  Worktree config — branch_prefix=jane/ from default (git user.email)
 
-2 fail, 2 warn, 2 pass. Re-run with `/doctor --fix` to apply the mechanical fixes.
+2 fail, 5 warn, 2 pass. Re-run with `/doctor --fix` to apply the mechanical fixes.
 ```
 
 **`--fix`.** Apply only the **safe, mechanical** repairs, then re-print the block
-with each fixed check marked `FIXED`:
+with each fixed check marked `FIXED` and grouped with the `PASS` lines, so the
+`WARN` lines left for the human still come last:
 
 - **Legacy dirs** → run the **Legacy migration** procedure from `skills/task/SKILL.md`
   (the same one the implicit preflight uses). Because `--fix` is the explicit
@@ -254,8 +541,8 @@ with each fixed check marked `FIXED`:
   `$(git rev-parse --git-dir)/info/exclude` (skip for `repo-pr`, or if the config is
   tracked, per the check above).
 
-Leave every `WARN` (unknown handler, failing auth/MCP, orphan branches) untouched
-and still reported — those need a human. Do **not** stage or commit; the next git
+Leave every `WARN` (unknown handler, failing auth/MCP, orphan branches,
+co-review allow-rules) untouched and still reported — those need a human. Do **not** stage or commit; the next git
 operation picks up the changes (mirrors `/promote-tasks` step 3).
 
 > If the check set later grows past the size budget, split **Hygiene** into a

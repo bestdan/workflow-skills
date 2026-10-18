@@ -1,0 +1,10 @@
+log="$(mktemp)"
+dir="$(mktemp -d)"
+f=$(mktemp -t prefix)
+tmp=`mktemp`
+mktemp -q; echo done
+out=$(mktemp -dq)
+f=$(mktemp -t "$TMPDIR/x.XXXXXX")
+d=$(mktemp -dt prefix)
+d=$(mktemp -d 2>/dev/null || true)
+mktemp >out

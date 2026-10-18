@@ -1,0 +1,1029 @@
+{
+  "agent": 3,
+  "model": "claude-opus-5-5",
+  "run_date": "2026-09-23",
+  "pricing_usd_per_mtok": {
+    "uncached": 4.0,
+    "cache_read": 0.2,
+    "cache_write": 8.0,
+    "output": 20.0
+  },
+  "claude_cli_version": "2.1.281 (Claude Code)",
+  "invocation": [
+    "claude",
+    "-p",
+    "--setting-sources",
+    "",
+    "--strict-mcp-config",
+    "--tools",
+    "",
+    "--model",
+    "claude-opus-5-5",
+    "--output-format",
+    "json",
+    "--no-session-persistence"
+  ],
+  "cards": {
+    "issue-277": {
+      "raw": "```yaml\ntask_profile:\n  complexity: hard\n  creativity: medium\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: architecture\n  confidence: low\n  runner_up: standard-pr\n  notes: Concurrency/TOCTOU lock redesign across two markdown handler specs (jira-claim, gh-issue-claim) with branch-pinned fallback; reasoning is subtle, but the diff is a handful of prose/procedure files, hence standard-pr as runner-up.\n```",
+      "latency_s": 3.723256770055741,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 5330,
+        "output": 207
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0468942,
+      "duration_api_ms": 2745,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 5330
+      }
+    },
+    "issue-348": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: Skill-prose fix with a prescribed shape; switch the reconciler dispatch in co-review SKILL.md step 8 to a read-only agent type/tools list, add a read-only line, optionally add a post-dispatch git-status check; likely touches SKILL.md plus maybe an agent definition.\n```",
+      "latency_s": 5.112280932953581,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 5444,
+        "output": 211
+      },
+      "cache_warm": false,
+      "cost_usd": 0.047886200000000004,
+      "duration_api_ms": 3936,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 5444
+      }
+    },
+    "issue-381": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: Well-specified security-surface reduction touching server.py, frontend button payload, SKILL.md, dev doc, and test script; removal-heavy with clear acceptance criteria, shape dictated.\n```",
+      "latency_s": 3.3552289640065283,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 4909,
+        "output": 176
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0429062,
+      "duration_api_ms": 2325,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 4909
+      }
+    },
+    "issue-382": {
+      "raw": "```yaml\ntask_profile:\n  complexity: hard\n  creativity: medium\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: architecture\n  confidence: low\n  runner_up: frontend-creative\n  notes: Design is settled, but the task needs subtle correctness work. That includes lexer-raw line-offset anchoring at leaf granularity, which fails silently and destructively, plus an XSS sanitization allowlist and comment symmetry across modes. The frontend preview UI adds some visual latitude. It touches several files (vendoring, JS view, payload, test, docs) within one tool and stacks on #380.\n```",
+      "latency_s": 4.296188341919333,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 5572,
+        "output": 247
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0496302,
+      "duration_api_ms": 3216,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 5572
+      }
+    },
+    "issue-385": {
+      "raw": "```yaml\ntask_profile:\n  complexity: hard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: verification-sensitive\n  confidence: low\n  runner_up: architecture\n  notes: Security hardening replaces the hljs HTML-string path with token-tree-to-DOM rendering in both the diff and preview views, touching server.py, the test script and docs. It is a subtle XSS boundary where inert-rendering assertions are the proof. The comment-token detection at :770 also needs reworking, which is not trivial. The main tension is verification-sensitive versus architecture.\n```",
+      "latency_s": 4.334924089023843,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 5201,
+        "output": 241
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0465422,
+      "duration_api_ms": 3339,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 5201
+      }
+    },
+    "issue-386": {
+      "raw": "```yaml\ntask_profile:\n  complexity: hard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: architecture\n  confidence: low\n  runner_up: verification-sensitive\n  notes: The shape is dictated, but the security reasoning is subtle. Cookies are scoped by host, not port, so the \"scoped to the port\" and concurrent-review criteria need a per-port cookie name. SameSite and the Origin/Sec-Fetch-Site checks overlap, and the agent URL contract must keep working. The work spans the server, the test script and two docs, and proving the existing rejections still pass is a core deliverable.\n```",
+      "latency_s": 5.931903085205704,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 5262,
+        "output": 412
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0504502,
+      "duration_api_ms": 4969,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 5262
+      }
+    },
+    "issue-390": {
+      "raw": "```yaml\ntask_profile:\n  complexity: mechanical\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: mechanical-bulk\n  confidence: low\n  runner_up: standard-pr\n  notes: Same prescribed three-step shell fix applied identically to three test scripts in one subsystem, with an exact template from #367; the shape is dictated, and correctness is easy to eyeball plus a just-check run. Safety-relevant (rm -rf) but low-risk to implement.\n```",
+      "latency_s": 5.102661298820749,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 5229,
+        "output": 211
+      },
+      "cache_warm": false,
+      "cost_usd": 0.046166200000000004,
+      "duration_api_ms": 4196,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 5229
+      }
+    },
+    "issue-406": {
+      "raw": "```yaml\ntask_profile:\n  complexity: mechanical\n  creativity: low\n  scope: single-file\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: mechanical-bulk\n  confidence: high\n  runner_up: null\n  notes: Doc-only fix; change four parentheticals in one SKILL.md table, keep gh-issue/jira degradation note, run just check \u2014 shape fully dictated by the card.\n```",
+      "latency_s": 3.2853897269815207,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 4878,
+        "output": 170
+      },
+      "cache_warm": false,
+      "cost_usd": 0.042538200000000005,
+      "duration_api_ms": 2300,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 4878
+      }
+    },
+    "issue-429": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: medium\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: New anchorless per-round summary thread type touching server reply route, page rendering, two docs, and test script; some design latitude in thread shape and rendering but the approach is suggested; size 3 fits a normal PR.\n```",
+      "latency_s": 3.3563177259638906,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 4621,
+        "output": 181
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0407022,
+      "duration_api_ms": 2437,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 4621
+      }
+    },
+    "issue-430": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: Small feature adding a reply count to the submit confirmation (and optionally the round echo), plus a doc update and a test in test-local-review.sh; the format is suggested by the card, so it's a few files with an obvious shape.\n```",
+      "latency_s": 3.6446411840151995,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 4601,
+        "output": 183
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0405822,
+      "duration_api_ms": 2702,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 4601
+      }
+    },
+    "issue-445": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: medium\n  scope: single-file\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: Localized fix in server.py's embedded JS (safeHref/describeInline link case plus md-deadlink CSS); needs care to keep the javascript:/data: scheme blocking while rendering relative links inert, with some styling latitude; optional link-to-diff is a small stretch.\n```",
+      "latency_s": 3.7706464240327477,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 5141,
+        "output": 203
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0453022,
+      "duration_api_ms": 2755,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 5141
+      }
+    },
+    "issue-446": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: medium\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: Docs/skill-convention edit adding a \"derive the claim\" rule to analysis-pipeline (plus a matching line in analysis-conventions); text is largely drafted, so the work is careful wording and placement, not code.\n```",
+      "latency_s": 4.688399009872228,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 5679,
+        "output": 184
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0492262,
+      "duration_api_ms": 3575,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 5679
+      }
+    },
+    "issue-465": {
+      "raw": "```yaml\ntask_profile:\n  complexity: hard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: verification-sensitive\n  confidence: low\n  runner_up: standard-pr\n  notes: Extract a ~36-line GraphQL pagination loop into a Python asset plus test pair, edit the handler prose, and delete the old harness (about 5 files, one subsystem). The shape is dictated by existing conventions. The deliverable is mostly honest verification \u2014 mutation-tested guards, cursor-propagation red-on-mutation, stub false-pass checks, just check green \u2014 after seven defects slipped past review. Complexity is hard because of subtle failure-vs-empty semantics, not because of architecture.\n```",
+      "latency_s": 4.198900694958866,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 7829,
+        "output": 284
+      },
+      "cache_warm": false,
+      "cost_usd": 0.06842619999999999,
+      "duration_api_ms": 3226,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 7829
+      }
+    },
+    "issue-477": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: medium\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: low\n  runner_up: architecture\n  notes: Skill-prose design change touching co-review and deliver-task (plus possibly a new skill); discussion-first with an open placement question, so it has design latitude but modest blast radius. Despite the topic, the deliverable is workflow text, not running checks.\n```",
+      "latency_s": 3.6827368999365717,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 5585,
+        "output": 195
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0486942,
+      "duration_api_ms": 2667,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 5585
+      }
+    },
+    "issue-486": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: medium\n  scope: single-file\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: low\n  runner_up: mechanical-bulk\n  notes: Docs/contract wording fix; (A) is a one-sentence mechanical edit, (B) adds a checklist item needing judgment on cost/false positives \u2014 assumed a choice between them is required, so standard over mechanical.\n```",
+      "latency_s": 7.599979993887246,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 5108,
+        "output": 189
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0447582,
+      "duration_api_ms": 6734,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 5108
+      }
+    },
+    "issue-491": {
+      "raw": "```yaml\ntask_profile:\n  complexity: mechanical\n  creativity: low\n  scope: multi-file\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: high\n  verification_criticality: low\n  label: mechanical-bulk\n  confidence: low\n  runner_up: standard-pr\n  notes: ~50 same-shape rewrites (pipe-to-grep -q \u2192 case/herestring) across 7 shell files. Diagnosis and fix are already given. Care is needed at the -i/nocasematch sites, any regex sites, and the two runtime sites in spawn-orchestrator.sh. The optional lint rule adds a little design work.\n```",
+      "latency_s": 3.881175994174555,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 5622,
+        "output": 231
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0497102,
+      "duration_api_ms": 2915,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 5622
+      }
+    },
+    "issue-496": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: Recommended scope is option 1 only \u2014 SSH env detection plus printing the forwarding command in server.py and a SKILL.md step-2 doc update; shape is well-specified, the main subtlety is keeping non-SSH output byte-identical and explaining the Origin/port-match caveat; optional --host path would raise security care but is explicitly deferred.\n```",
+      "latency_s": 3.95470022293739,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 6174,
+        "output": 226
+      },
+      "cache_warm": false,
+      "cost_usd": 0.054026199999999996,
+      "duration_api_ms": 2934,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 6174
+      }
+    },
+    "issue-502": {
+      "raw": "```yaml\ntask_profile:\n  complexity: mechanical\n  creativity: low\n  scope: single-file\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: verification-sensitive\n  confidence: low\n  runner_up: mechanical-bulk\n  notes: Shape is fully dictated (a few gh label create calls plus a one-line config flip), but the acceptance criteria are live checks (spot-check label resolution, /promote-tasks returns GH issues) against external repo state, so honest verification dominates; mechanical-bulk is the runner-up.\n```",
+      "latency_s": 3.9408715709578246,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 5621,
+        "output": 216
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0494022,
+      "duration_api_ms": 2916,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 5621
+      }
+    },
+    "issue-504": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: Port an existing --all override from gh-issue-reconcile.md to the archive command/handler docs (plus possibly the task-config matrix); shape and wording are dictated, a few markdown command files, with a small safety nuance in keeping the default refusal.\n```",
+      "latency_s": 3.7864183268975466,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 4992,
+        "output": 193
+      },
+      "cache_warm": false,
+      "cost_usd": 0.043910199999999996,
+      "duration_api_ms": 2747,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 4992
+      }
+    },
+    "issue-511": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: low\n  runner_up: architecture\n  notes: New script plus tests encoding a dictated crosswalk; many detailed rules (reopen detection, label validation via importlib, milestone mapping, footer rewriting) raise accuracy demand but the shape is fully specified; a handful of files.\n```",
+      "latency_s": 3.8016406630631536,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 6345,
+        "output": 192
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0547142,
+      "duration_api_ms": 2711,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 6345
+      }
+    },
+    "issue-512": {
+      "raw": "```yaml\ntask_profile:\n  complexity: hard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: architecture\n  confidence: low\n  runner_up: verification-sensitive\n  notes: Resumable, idempotent phased GitHub writes (marker-based dedupe, atomic mapping, reopen guards, 403 retry) make correctness subtle though shape is dictated; mostly one script plus tests, and the Recorder-stub test suite asserting no double-writes is a close second driver.\n```",
+      "latency_s": 4.139530865009874,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 6051,
+        "output": 214
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0528022,
+      "duration_api_ms": 3095,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 6051
+      }
+    },
+    "issue-513": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: standard-pr\n  confidence: low\n  runner_up: verification-sensitive\n  notes: New --link mode in one script plus tests; plan/mapping join, idempotent sub-issue POST, and body rewrite are well-specified. Live-repo side effects (edges, sub-issues, body edits) and an unmeasured endpoint that must be probed and reported honestly raise verification weight.\n```",
+      "latency_s": 4.288854487007484,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 5392,
+        "output": 214
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0475302,
+      "duration_api_ms": 2735,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 5392
+      }
+    },
+    "issue-514": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: verification-sensitive\n  confidence: low\n  runner_up: standard-pr\n  notes: New read-only verifier script plus tests (~3 files) with a dictated shape; the deliverable is an honest check of the import (set-based edge diff, field equality, label cardinality), so verification dominates, though the build itself is an ordinary PR.\n```",
+      "latency_s": 3.6746177109889686,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 5281,
+        "output": 197
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0463022,
+      "duration_api_ms": 2674,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 5281
+      }
+    },
+    "issue-515": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: New script plus tests reusing gql(); per-write idempotency and resolving the state by type need care but the shape is fully specified; the live apply is user-run.\n```",
+      "latency_s": 3.4106028620153666,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 5205,
+        "output": 161
+      },
+      "cache_warm": false,
+      "cost_usd": 0.044974200000000006,
+      "duration_api_ms": 2403,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 5205
+      }
+    },
+    "issue-524": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: low\n  runner_up: verification-sensitive\n  notes: Well-specified stdlib helper plus unittest fixtures and five prose call-site rewrites in one subsystem; the spec dictates the shape, but the order-sensitive Canceled-only test and the rg check add verification weight.\n```",
+      "latency_s": 5.067562171025202,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 5394,
+        "output": 192
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0471062,
+      "duration_api_ms": 4039,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 5394
+      }
+    },
+    "issue-525": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: New deterministic helper script reusing server.py's parse_diff, plus tests for five pinned cases, a SKILL.md step rewrite and a permissions check; about 5 files with a clear shape, and the tests are a normal part of the work, not the deliverable itself.\n```",
+      "latency_s": 3.7031699870713055,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 5111,
+        "output": 198
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0449622,
+      "duration_api_ms": 2664,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 5111
+      }
+    },
+    "issue-526": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: standard-pr\n  confidence: low\n  runner_up: verification-sensitive\n  notes: Small guard script + fixture test + two SKILL.md edits (3 files); shape fully dictated, but safety guard for rm -rf with code-enforced acceptance (inside-repo exits 1, just check) makes honest test execution matter.\n```",
+      "latency_s": 3.8684775929432362,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 4871,
+        "output": 196
+      },
+      "cache_warm": false,
+      "cost_usd": 0.043002200000000004,
+      "duration_api_ms": 2718,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 4871
+      }
+    },
+    "issue-527": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: New helper script (cycles, Kahn's topo sort with tie-break, inversion sweep) reusing existing find_cycles/Kahn code, plus tests and a prose rewrite; output shape and ordering rules fully specified, so it's a well-bounded ~4-file PR.\n```",
+      "latency_s": 3.734124317066744,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 5113,
+        "output": 204
+      },
+      "cache_warm": false,
+      "cost_usd": 0.045098200000000005,
+      "duration_api_ms": 2760,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 5113
+      }
+    },
+    "issue-528": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: Port an already-specified topo-sort-with-tie-break (mirrors task 4) into one script plus its tests and a prose doc rewrite; shape is dictated and tests are ordinary acceptance, not the deliverable.\n```",
+      "latency_s": 3.565568709978834,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 4809,
+        "output": 185
+      },
+      "cache_warm": false,
+      "cost_usd": 0.042286199999999996,
+      "duration_api_ms": 2586,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 4809
+      }
+    },
+    "issue-529": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: New Python helper plus tests (stubbed gh seam), shared helpers from linear-false-closures.py, and prose rewrites in two .md files; the spec dictates the shape (regex, precedence, I/O), so this is a normal PR-sized feature with a clear regression fixture.\n```",
+      "latency_s": 3.7239148810040206,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 5283,
+        "output": 204
+      },
+      "cache_warm": false,
+      "cost_usd": 0.046458200000000005,
+      "duration_api_ms": 2667,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 5283
+      }
+    },
+    "issue-530": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: low\n  runner_up: verification-sensitive\n  notes: Well-specified bash subcommand with dictated formula/CLI/output, six pinned test cases, plus doc collapse across skill+two refs; shell frontmatter RMW and edge cases (epoch mismatch, negative delta, cap) add care but approach is clear; tests are part of deliverable, hence runner-up.\n```",
+      "latency_s": 3.9265897748991847,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 5230,
+        "output": 223
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0464142,
+      "duration_api_ms": 2990,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 5230
+      }
+    },
+    "issue-531": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: Well-specified data transform flag (join, rename, null-coerce) plus tests and a doc rewrite across ~3 files; shape is dictated by the card, checks are routine `just check`.\n```",
+      "latency_s": 3.5683487991336733,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 4981,
+        "output": 173
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0434222,
+      "duration_api_ms": 2421,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 4981
+      }
+    },
+    "issue-532": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: verification-sensitive\n  confidence: low\n  runner_up: standard-pr\n  notes: Shell script plus a git fixture test and a one-section agent doc rewrite, with the shape fully dictated. The deliverable is a reproducibility check with a mandatory trap-based restore, and the fixture tests (pass/fail/n/a, clean tree after failure) have to be run honestly, so verification dominates; otherwise it's an ordinary PR.\n```",
+      "latency_s": 4.075316559989005,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 5005,
+        "output": 235
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0448542,
+      "duration_api_ms": 2886,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 5005
+      }
+    },
+    "issue-533": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: Extract-module refactor plus a small CLI entry point, targeted tests, and prose rewrites in ~6-7 files; shape is dictated. Tests guard a known sort bug, but they support the edit rather than being the deliverable.\n```",
+      "latency_s": 3.8965992559678853,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 4900,
+        "output": 188
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0430742,
+      "duration_api_ms": 2650,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 4900
+      }
+    },
+    "issue-534": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: low\n  runner_up: verification-sensitive\n  notes: New shared parser module + wiring into two graph scripts + tests + prose rewrite of two handlers; phrase\u2192direction table is dictated, but the unblocks-reversal correctness (silent backwards edges) gives tests extra weight.\n```",
+      "latency_s": 3.699540080036968,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 5157,
+        "output": 194
+      },
+      "cache_warm": false,
+      "cost_usd": 0.045250200000000004,
+      "duration_api_ms": 2644,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 5157
+      }
+    },
+    "issue-535": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: Refactor an existing tested acquire into a shared body with a new acquire-ref subcommand, extend stubbed tests, and repoint two prose docs; the shape is dictated and it touches about 4 files; race-critical but already implemented and pinned by tests.\n```",
+      "latency_s": 3.698790563037619,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 4844,
+        "output": 196
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0427862,
+      "duration_api_ms": 2740,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 4844
+      }
+    },
+    "issue-536": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: Add a shell flag that parses RUN.md, probes backends with command -v, and runs the CAO gate; add PATH-fixture tests; collapse the duplicated prose into one call each. The output format is fixed by the existing PREFLIGHT VERDICT convention, and the change touches a handful of files (preflight.sh, test-shell.sh, launch/resume docs).\n```",
+      "latency_s": 4.086649836041033,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 4875,
+        "output": 234
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0437942,
+      "duration_api_ms": 3061,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 4875
+      }
+    },
+    "issue-537": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: low\n  runner_up: architecture\n  notes: New helper script plus tests plus prose rewrites in three handlers; the table-diff/drift-vs-tracker-fact judgment and cross-handler consolidation push toward hard, but the shape is well specified and the files number a handful.\n```",
+      "latency_s": 3.8348190649412572,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 4923,
+        "output": 189
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0432782,
+      "duration_api_ms": 2622,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 4923
+      }
+    },
+    "issue-538": {
+      "raw": "```yaml\ntask_profile:\n  complexity: mechanical\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: high\n  verification_criticality: low\n  label: mechanical-bulk\n  confidence: high\n  runner_up: null\n  notes: Docs graduation \u2014 append a summary section mirroring an existing table format, add PR links to index rows without rewriting, verify-then-delete a plan folder; shape is dictated, gated only by `just check`.\n```",
+      "latency_s": 3.555485747056082,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 4762,
+        "output": 182
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0418502,
+      "duration_api_ms": 2492,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 4762
+      }
+    },
+    "issue-586": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: medium\n  scope: single-file\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: low\n  runner_up: frontend-creative\n  notes: Prose edit to one skill doc (co-review SKILL.md step 9 + --post/--non-interactive disposition) restructuring output into a fixed three-section template; design is largely specified in the card, but wording the rules and reconciling with conventional-comments/verdict vocab carries some output-ergonomics taste.\n```",
+      "latency_s": 3.918529424117878,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 5531,
+        "output": 218
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0487222,
+      "duration_api_ms": 2852,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 5531
+      }
+    },
+    "issue-595": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: verification-sensitive\n  confidence: low\n  runner_up: standard-pr\n  notes: Regex widening + expandvars + reviewer-doc wording and JSON updates across a handful of files; shape is dictated. The standout is honest verification \u2014 discriminating OFF-MACHINE tests, release cut and confirmed install version, since failures are silent under --non-interactive.\n```",
+      "latency_s": 3.7790117368567735,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 6049,
+        "output": 208
+      },
+      "cache_warm": false,
+      "cost_usd": 0.052666199999999996,
+      "duration_api_ms": 2694,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 6049
+      }
+    },
+    "issue-607": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: medium\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: standard-pr\n  confidence: low\n  runner_up: verification-sensitive\n  notes: Root cause is already diagnosed; the fix touches a script, two doc call sites, doctor.md prose and a new test, and requires choosing among 4 options while keeping the install-vs-checkout guard. A test that runs the script as documented is part of the deliverable, so verification is a strong runner-up.\n```",
+      "latency_s": 4.138349248096347,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 6205,
+        "output": 216
+      },
+      "cache_warm": false,
+      "cost_usd": 0.054074199999999996,
+      "duration_api_ms": 2948,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 6205
+      }
+    },
+    "issue-608": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: standard-pr\n  confidence: low\n  runner_up: verification-sensitive\n  notes: New reconcile row plus asset impl, test, doc fix, and backfill of 19 live issues; shape is dictated. Backfill mutates real GitHub state and acceptance needs the re-measured 0-affected count honestly reported, which pulls toward verification-sensitive.\n```",
+      "latency_s": 3.7812366092111915,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 5712,
+        "output": 208
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0499702,
+      "duration_api_ms": 2733,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 5712
+      }
+    },
+    "issue-613": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: Decision is effectively pre-argued toward A; extend existing workflow + python asset with a merged-PR branch using closingIssuesReferences, add test, doc the decision \u2014 a handful of files in one subsystem.\n```",
+      "latency_s": 3.557276097126305,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 5333,
+        "output": 180
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0463782,
+      "duration_api_ms": 2597,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 5333
+      }
+    },
+    "issue-742": {
+      "raw": "```yaml\ntask_profile:\n  complexity: hard\n  creativity: medium\n  scope: multi-file\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: architecture\n  confidence: low\n  runner_up: standard-pr\n  notes: Cross-cutting extraction of a shared spec across four handler promote flows (repo-pr, linear, gh-issue, jira) plus a gh-issue-state.py arg change; subtle unit/encoding hazards (priority-0 inversion, differing estimate ladders, reason precedence) make it more than mechanical, though the design is largely laid out in the card, so it may read as a large standard PR.\n```",
+      "latency_s": 4.238599864998832,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 6491,
+        "output": 244
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0569222,
+      "duration_api_ms": 3134,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 6491
+      }
+    },
+    "issue-746": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: medium\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: low\n  runner_up: architecture\n  notes: Policy decision (promote- vs claim-time gate) plus doc edits across ~4 handler markdown files and possibly linear-ready.py; design judgment and cross-handler consistency push it toward architecture, but the diff itself is small.\n```",
+      "latency_s": 4.020191699033603,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 5451,
+        "output": 192
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0475622,
+      "duration_api_ms": 2572,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 5451
+      }
+    },
+    "issue-750": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: medium\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: standard-pr\n  confidence: low\n  runner_up: verification-sensitive\n  notes: New typed asset/flag + handler doc edits + test pair; design choice between two entry-point shapes and provenance location; test pinning prio inversion and byte-identical status labels is central but the deliverable is primarily the feature; depends on #749 hold semantics.\n```",
+      "latency_s": 3.658185119042173,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 6095,
+        "output": 203
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0529342,
+      "duration_api_ms": 2713,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 6095
+      }
+    },
+    "issue-766": {
+      "raw": "```yaml\ntask_profile:\n  complexity: hard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: architecture\n  confidence: low\n  runner_up: verification-sensitive\n  notes: The hard part is simulating launchd/TCC attribution (detached, no TTY, closed stdin, sandbox wrapper) in a testable way on macOS, and consent gates are subtle platform behavior. The work touches the preflight script, the launch-runtime doc, the fingerprint/resume path and tests. The deliverable is a check that must honestly fail under the real attribution, so verification is a close runner-up.\n```",
+      "latency_s": 4.3297640648670495,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 5866,
+        "output": 250
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0520422,
+      "duration_api_ms": 3216,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 5866
+      }
+    },
+    "issue-786": {
+      "raw": "```yaml\ntask_profile:\n  complexity: mechanical\n  creativity: low\n  scope: single-file\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: verification-sensitive\n  confidence: low\n  runner_up: mechanical-bulk\n  notes: Fix is fully diagnosed (drop one flag or raise gate) in one script; the deliverable hinges on honestly re-running bats 9/9 and just check on git 2.43 since CI's newer git masks the bug.\n```",
+      "latency_s": 3.4973777120467275,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 5465,
+        "output": 193
+      },
+      "cache_warm": false,
+      "cost_usd": 0.047694200000000006,
+      "duration_api_ms": 2417,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 5465
+      }
+    },
+    "issue-791": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: medium\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: Prompt/skill-doc edit to SKILL.md step 12, non-interactive policy, and output-template.md; wording judgment (a legitimate \"stop\" answer, no numeric rubric) gives some design latitude, but the shape is well specified.\n```",
+      "latency_s": 3.626942452043295,
+      "tokens": {
+        "uncached": 2,
+        "cache_read": 531,
+        "cache_write": 5651,
+        "output": 194
+      },
+      "cache_warm": false,
+      "cost_usd": 0.0492022,
+      "duration_api_ms": 2607,
+      "served_models": [
+        "claude-opus-5-5"
+      ],
+      "cache_write_ttl": {
+        "ephemeral_5m": 0,
+        "ephemeral_1h": 5651
+      }
+    }
+  },
+  "failed": {}
+}

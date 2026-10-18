@@ -4,6 +4,1391 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.88.0] - 2026-10-16
+
+### Features
+
+- deny discard_changes unless the tree is clean and landed [#980] (#994) (bda85de)
+
+## [2.87.1] - 2026-10-16
+
+### Fixes
+
+- feed copilot its input as the whole prompt [#1032] (#1033) (8ca07be)
+
+## [2.87.0] - 2026-10-16
+
+### Features
+
+- serve on the tailnet over Tailscale SSH [N/A] (#1016) (63ec3bb)
+
+## [2.86.0] - 2026-10-15
+
+### Features
+
+- add the reference skill and point the refusal at it [#933] (#1031) (4066498)
+
+## [2.85.0] - 2026-10-15
+
+### Features
+
+- refuse gh pr checkout in a pinned checkout [#968] (#1029) (0d9b1b2)
+
+## [2.84.1] - 2026-10-15
+
+### Fixes
+
+- gate discard_changes on hook-created worktrees [#980] (#993) (5349e7f)
+
+## [2.84.0] - 2026-10-15
+
+### Features
+
+- name the configured worktree in the refusal [#932] (#1027) (142126a)
+
+## [2.83.1] - 2026-10-15
+
+### Fixes
+
+- name the EnterWorktree name route in the refusal [#997] (#1026) (864bdb5)
+
+## [2.83.0] - 2026-10-15
+
+### Features
+
+- add the worktree-entry reference skill [#996] (#1018) (54c4e5d)
+
+## [2.82.0] - 2026-10-15
+
+### Features
+
+- refuse EnterWorktree path when a name route exists [#989] (#1021) (7d8b3b9)
+
+### Fixes
+
+- stop refusing interpreter reads [#998] (#1008) (21335b5)
+
+## [2.81.0] - 2026-10-15
+
+### Features
+
+- add opt-in pin-checkout script with post-checkout backstop [#969] (#1007) (2f27821)
+
+## [2.80.0] - 2026-10-15
+
+### Features
+
+- add worktree-name-for.sh resolver [#995] (#1006) (9cd4017)
+
+## [2.79.2] - 2026-10-15
+
+### Fixes
+
+- report only an existing ref as a lost race [#982] (#983) (a9dbc4e)
+
+## [2.79.1] - 2026-10-14
+
+### Fixes
+
+- reconciler lists a finding's premises, incl. reachability [#990] (#991) (aa1b2c8)
+
+## [2.79.0] - 2026-10-07
+
+### Features
+
+- post APPROVE or REQUEST_CHANGES, never COMMENT (#984) (85a5179)
+
+## [2.78.0] - 2026-10-05
+
+### Features
+
+- report the resolved worktree root and branch prefix [#955] (#978) (aeade0d)
+
+## [2.77.0] - 2026-10-05
+
+### Features
+
+- report dead teardown allow-rules from Check 7 [#954] (#977) (d9989c9)
+
+## [2.76.0] - 2026-10-05
+
+### Features
+
+- add a command that grants the teardown scripts [#953] (#971) (d250df8)
+
+## [2.75.2] - 2026-10-05
+
+### Fixes
+
+- name every shape the kept-branch tip can take [N/A] (#972) (2b2a124)
+
+## [2.75.1] - 2026-10-04
+
+### Fixes
+
+- restore strict plugin validation [N/A] (#964) (d9fe71e)
+
+## [2.75.0] - 2026-10-04
+
+### Features
+
+- register the pinned-branch guard with cd tracking [#931] (#951) (e108342)
+
+## [2.74.3] - 2026-10-04
+
+### Fixes
+
+- pass plugin validation under Claude Code 2.1.289 [N/A] (#966) (1521e62)
+
+## [2.74.2] - 2026-10-03
+
+### Fixes
+
+- group the status block so failures sit above the tally (#950) (2a51e92)
+
+## [2.74.1] - 2026-10-03
+
+### Fixes
+
+- end hand-off reports on what needs the reader [N/A] (#949) (92f0904)
+
+## [2.74.0] - 2026-10-03
+
+### Features
+
+- add pinned-branch guard's checkout decision, unregistered [#930] (#946) (1fa4268)
+
+## [2.73.1] - 2026-10-03
+
+### Fixes
+
+- unblock the sandboxed gate and correct stale agent docs [N/A] (#947) (9601164)
+
+## [2.73.0] - 2026-09-29
+
+### Features
+
+- fixed status symbols and line shapes in the output template [N/A] (#927) (b2b8139)
+
+## [2.72.1] - 2026-09-29
+
+### Fixes
+
+- check the shared allow-rules in the drift pre-flight [#475] (#918) (7ff5962)
+
+## [2.72.0] - 2026-09-29
+
+### Features
+
+- add pr-review-comments.sh for pending comments [#923] (#925) (aa69d04)
+
+## [2.71.2] - 2026-09-29
+
+### Fixes
+
+- describe an unattended run, not a nocturnal one [#767] (#922) (5248d2c)
+
+## [2.71.1] - 2026-09-27
+
+### Fixes
+
+- grant the plugin's scripts from the skill [#848] (#917) (b606ba1)
+
+## [2.71.0] - 2026-09-27
+
+### Features
+
+- pin stronger reviewer models [N/A] (#920) (fad91ae)
+
+## [2.70.7] - 2026-09-27
+
+### Fixes
+
+- wait for Copilot only when requested for the head [N/A] (#914) (d967d2d)
+
+## [2.70.6] - 2026-09-27
+
+### Fixes
+
+- record a refused claim as skipped [#912] (#913) (9e1e5ea)
+
+## [2.70.5] - 2026-09-27
+
+### Fixes
+
+- hold claim candidates on open native blockers [#909] (#910) (0ccd127)
+
+## [2.70.4] - 2026-09-26
+
+### Fixes
+
+- let the state writer close an issue as not planned [#893] (#899) (fc10842)
+
+## [2.70.3] - 2026-09-26
+
+### Fixes
+
+- return an issue a merged Refs PR stranded in review [#892] (#905) (e2039d5)
+
+## [2.70.2] - 2026-09-26
+
+### Fixes
+
+- drop stale jira-promote and sweep-for-complete notes [#876] (#906) (edaad93)
+
+## [2.70.1] - 2026-09-25
+
+### Fixes
+
+- escalate judgment calls to an independent reviewer [#883] (#904) (1f483d4)
+
+## [2.70.0] - 2026-09-25
+
+### Features
+
+- refuse a write into a worktree not entered [#827] (#859) (01cdee0)
+
+## [2.69.5] - 2026-09-25
+
+### Fixes
+
+- restore mirrored reconcile rules and drop incident history [N/A] (#901) (718378e)
+
+## [2.69.4] - 2026-09-24
+
+### Fixes
+
+- drop contradictions in select-coder and plan-with-docs [N/A] (#897) (8c1f502)
+
+## [2.69.3] - 2026-09-24
+
+### Fixes
+
+- probe every prefix in the batch path's claim checks [#806] (#898) (8bc75d0)
+
+## [2.69.2] - 2026-09-24
+
+### Fixes
+
+- stamp a new issue with its card's prio:/est: labels [#888] (#890) (3ecd079)
+
+## [2.69.1] - 2026-09-24
+
+### Fixes
+
+- re-read the dependency graph before the write batch [#868] (#871) (31ba1db)
+
+## [2.69.0] - 2026-09-24
+
+### Features
+
+- enter the PR branch's worktree instead of asking [#887] (#889) (d8407ae)
+
+## [2.68.0] - 2026-09-24
+
+### Features
+
+- skip the slow gate suites on a dev_docs-only PR [#864] (#870) (cdcf0d8)
+
+## [2.67.6] - 2026-09-24
+
+### Fixes
+
+- hold gh-issue candidates on open dependencies [#749] (#867) (632c773)
+
+## [2.67.5] - 2026-09-23
+
+### Fixes
+
+- grant the drift-check pre-flight via allowed-tools [#594] (#778) (ec199be)
+
+## [2.67.4] - 2026-09-22
+
+### Fixes
+
+- retain a failing row's log and name its cause [#840] (#844) (80905b5)
+
+## [2.67.3] - 2026-09-22
+
+### Fixes
+
+- check the ref fixes get pushed to, and name the worktree dead end [#843] (#846) (2bef442)
+
+## [2.67.2] - 2026-09-22
+
+### Fixes
+
+- fail a row that writes into the repo under test [#829] (#838) (54b3912)
+
+## [2.67.1] - 2026-09-22
+
+### Fixes
+
+- trigger-phrase the command descriptions that route [#828] (#834) (9fddeed)
+
+## [2.67.0] - 2026-09-22
+
+### Features
+
+- stop the run standing outside the tree it writes [#827] (#831) (e45c748)
+
+## [2.66.1] - 2026-09-21
+
+### Fixes
+
+- resolve branch_prefix after the base fetch, not before [#748] (#805) (25bef7f)
+
+## [2.66.0] - 2026-09-21
+
+### Features
+
+- port the teardown reminder hook and the worktree-teardown skill [N/A] (#803) (930c5a0)
+
+## [2.65.1] - 2026-09-21
+
+### Fixes
+
+- read the task config from the run root, not the plugin dir [#780] (#797) (56aff45)
+
+## [2.65.0] - 2026-09-21
+
+### Features
+
+- add grok as a built-in reviewer [N/A] (#799) (88a6f57)
+
+## [2.64.0] - 2026-09-20
+
+### Features
+
+- port the lifecycle hooks and register them in hooks.json [N/A] (#800) (96056e6)
+
+## [2.63.0] - 2026-09-20
+
+### Features
+
+- port worktree-remove to a plain script [N/A] (#796) (81f5f12)
+
+## [2.62.0] - 2026-09-20
+
+### Features
+
+- recommend whether another round is warranted [#791] (#792) (4b639c8)
+
+## [2.61.0] - 2026-09-20
+
+### Features
+
+- port branch-remove to a plain script [N/A] (#789) (abb9d0a)
+
+## [2.60.0] - 2026-09-20
+
+### Features
+
+- probe for consent gates under launchd attribution [#766] (#779) (979da31)
+
+## [2.59.1] - 2026-09-20
+
+### Fixes
+
+- drop merge-tree --quiet to hold the 2.38 floor [#786] (#788) (7b73f7d)
+
+## [2.59.0] - 2026-09-20
+
+### Features
+
+- resolve the root and branch prefix from config [N/A] (#784) (1f03ca5)
+
+## [2.58.4] - 2026-09-20
+
+### Fixes
+
+- gate max_estimate at claim, add run-scoped overrides [#746] (#785) (d8792a1)
+
+## [2.58.3] - 2026-09-19
+
+### Fixes
+
+- accept $HOME-rooted paths in reviewer allow-rules [#595] (#776) (da39522)
+
+## [2.58.2] - 2026-09-17
+
+### Fixes
+
+- stop citing #500 as the owner of footer removal (#754) (3fba552)
+
+## [2.58.1] - 2026-09-17
+
+### Fixes
+
+- the proxy's write block is path-scoped, not blanket [N/A] (#751) (96c9298)
+
+## [2.58.0] - 2026-09-17
+
+### Features
+
+- backfill prio and est on an already-scored issue [#750] (#752) (def993b)
+
+## [2.57.1] - 2026-09-17
+
+### Fixes
+
+- the API is reachable without gh, from sessions and routines alike [N/A] (#741) (3f6b5ea)
+
+## [2.57.0] - 2026-09-17
+
+### Features
+
+- fill prio and est in one shared filler [#742] (#747) (753ed1f)
+
+## [2.56.1] - 2026-09-16
+
+### Fixes
+
+- the free-plan cap counts every non-archived issue, not just active ones [N/A] (#739) (5372ab6)
+
+## [2.56.0] - 2026-09-16
+
+### Features
+
+- point migrated Linear issues at their successors [#515] (#736) (c090c59)
+
+## [2.55.0] - 2026-09-14
+
+### Features
+
+- verify the landed import with linear-verify.py [#514] (#735) (c962ffb)
+
+## [2.54.0] - 2026-09-14
+
+### Features
+
+- write the import graph with linear-import.py --link [#513] (#734) (2d9fe39)
+
+## [2.53.2] - 2026-09-14
+
+### Fixes
+
+- correct what disabled Linear's integration and what over-closed (#509) (3bec0a2)
+
+## [2.53.1] - 2026-09-14
+
+### Fixes
+
+- correct /do-tasks flag matrix — batch flags aren't file-path-only (#521) (aaf0415)
+
+## [2.53.0] - 2026-09-14
+
+### Features
+
+- record how to weigh a reviewer's proposed fix (#558) (3e0e38c)
+
+## [2.52.0] - 2026-09-14
+
+### Features
+
+- land the Linear import plan with linear-import.py --apply [#512] (#616) (9defa2e)
+
+## [2.51.0] - 2026-09-14
+
+### Features
+
+- strip status:/auto: rungs at merge time [#613] (#615) (4886ffa)
+
+## [2.50.0] - 2026-09-14
+
+### Features
+
+- give the round summary its own thread [#429] (#585) (cae26d2)
+
+## [2.49.0] - 2026-09-13
+
+### Features
+
+- build the reviewable Linear-to-GitHub import plan (#597) (32f8523)
+
+## [2.48.6] - 2026-09-13
+
+### Fixes
+
+- reconcile row 4 strips rungs from closed issues [#608] (#612) (ec673df)
+
+## [2.48.5] - 2026-09-13
+
+### Fixes
+
+- pass --plugin-root so the allow-rule pre-flight runs [#607] (#609) (9ce1b9b)
+
+## [2.48.4] - 2026-09-13
+
+### Fixes
+
+- set branch_prefix so the claim lock is not caller-dependent [#599] (#605) (2cd2764)
+
+## [2.48.3] - 2026-09-13
+
+### Fixes
+
+- devin's auth probe gates login, not model entitlement [N/A] (#592) (c41288b)
+
+## [2.48.2] - 2026-09-13
+
+### Fixes
+
+- name the context window behind crush's opaque oversize error [N/A] (#603) (4548842)
+
+## [2.48.1] - 2026-09-13
+
+### Fixes
+
+- deliver the trailing-key title grammar to installs (#593) (b9569f8)
+
+## [2.48.0] - 2026-09-13
+
+### Features
+
+- append the review conventions to every assembled <INPUT> (#591) (510bc1c)
+
+## [2.47.0] - 2026-09-13
+
+### Features
+
+- export every PreThink issue to a date-named JSON file (#590) (d57d51c)
+
+## [2.46.0] - 2026-09-13
+
+### Features
+
+- resolve the installed agent-guidance plugin (#588) (e679c8a)
+
+## [2.45.2] - 2026-09-11
+
+### Fixes
+
+- present the review in a fixed three-section template (#587) (6251b96)
+
+## [2.45.1] - 2026-09-10
+
+### Fixes
+
+- the remote self-check passes on a dead credential (#507) (0fe235a)
+
+## [2.45.0] - 2026-09-10
+
+### Features
+
+- offer a held issue to a direct pick instead of refusing (#584) (2ac4468)
+
+## [2.44.0] - 2026-09-10
+
+### Features
+
+- add min-task-budget.sh and cut the archive handler's prose walk (#579) (d1b022d)
+
+## [2.43.0] - 2026-09-09
+
+### Features
+
+- add preflight.sh --scout-run-md for the per-task capability join (#557) (12135da)
+
+## [2.42.0] - 2026-09-09
+
+### Features
+
+- generate Copilot review instructions from the canonical docs (#556) (df88afd)
+
+## [2.41.0] - 2026-09-09
+
+### Features
+
+- add spawn-orchestrator.sh reserve-gate for the usage_delta bookkeeping (#551) (52f58a0)
+
+## [2.40.1] - 2026-09-09
+
+### Fixes
+
+- drop a dead import and an inaccurate noqa (#554) (e4b25a2)
+
+## [2.40.0] - 2026-09-09
+
+### Features
+
+- script the reproducibility re-run and restore (#553) (f615462)
+
+## [2.39.0] - 2026-09-09
+
+### Features
+
+- add --from-mcp-json to build the PR file (#552) (89a0ffc)
+
+## [2.38.0] - 2026-09-09
+
+### Features
+
+- resolve PRs and merge state in a tested script (#550) (4f6dc5d)
+
+## [2.37.0] - 2026-09-09
+
+### Features
+
+- generalise gh-issue-claim.py acquire for shared claim-lock prose (#549) (61d77db)
+
+## [2.36.0] - 2026-09-09
+
+### Features
+
+- share one kanban-classify.py across linear/gh-issue/jira (#548) (e2adb16)
+
+## [2.35.0] - 2026-09-09
+
+### Features
+
+- extract dependency-phrase body parsing into _body_refs.py (#547) (c44d2c9)
+
+## [2.34.0] - 2026-09-09
+
+### Features
+
+- add diff-anchor-check.py for the batched review POST (#546) (c2632a5)
+
+## [2.33.0] - 2026-09-09
+
+### Features
+
+- extract transition-id resolution into jira-resolve-transition.py (#545) (b7e37ab)
+
+## [2.32.0] - 2026-09-09
+
+### Features
+
+- script the $WORK root guard (#544) (92e4903)
+
+## [2.31.0] - 2026-09-09
+
+### Features
+
+- split gate()/rank_key() out of linear-ready.py for the MCP floor (#543) (72b405f)
+
+## [2.30.0] - 2026-09-09
+
+### Features
+
+- add --sort to gh-issue-graph.py for Dimension 3 (#542) (7df91ff)
+
+## [2.29.0] - 2026-09-09
+
+### Features
+
+- add linear-graph-analyze.py for cycles, order, inversions (#541) (33cbbd2)
+
+## [2.28.1] - 2026-09-08
+
+### Fixes
+
+- close the three tools crush's denylist never named (#518) (e654ed7)
+
+## [2.28.0] - 2026-09-08
+
+### Features
+
+- add the --all scope override gh-issue already needed (#506) (ce50ae2)
+
+## [2.27.0] - 2026-09-07
+
+### Features
+
+- accept a pre-fetched merged-PR list (#505) (49e5601)
+
+## [2.26.3] - 2026-09-07
+
+### Fixes
+
+- correct the claims #492 introduced while removing one (#501) (66bbcd5)
+
+## [2.26.2] - 2026-09-07
+
+### Fixes
+
+- pin codex to gpt-5.6-terra, which the account can serve (#499) (d61a0d7)
+
+## [2.26.1] - 2026-09-07
+
+### Fixes
+
+- print the SSH tunnel command when launched over SSH (#497) (abcb516)
+
+## [2.26.0] - 2026-09-07
+
+### Features
+
+- count bare none: obligation blocks in status (#413) (495166c)
+
+## [2.25.0] - 2026-09-06
+
+### Features
+
+- contract the descriptor audit (#494) (3133516)
+
+## [2.24.3] - 2026-09-06
+
+### Fixes
+
+- stop pipefail turning a matching grep -q into a miss (#493) (e045ee8)
+
+## [2.24.2] - 2026-09-05
+
+### Fixes
+
+- stop naming the vault that holds a full-account Linear key (#489) (6e56071)
+
+## [2.24.1] - 2026-09-05
+
+### Fixes
+
+- resolve sweep PR discovery against each project's repo (#450) (ad46d3f)
+
+## [2.24.0] - 2026-09-05
+
+### Features
+
+- wire batch execution into the tracker-batch subroutine (#482) (547f776)
+
+## [2.23.0] - 2026-09-04
+
+### Features
+
+- add crush as a built-in local reviewer (#485) (8a18df5)
+
+## [2.22.0] - 2026-09-04
+
+### Features
+
+- derive verification tests during review (#484) (14dfdb9)
+
+## [2.21.2] - 2026-09-04
+
+### Fixes
+
+- render relative preview links inert (#445) (#481) (a945733)
+
+## [2.21.1] - 2026-09-04
+
+### Fixes
+
+- void a reconciler row whose label was never provisioned (#479) (446b45f)
+
+## [2.21.0] - 2026-09-04
+
+### Features
+
+- reoptimize reads and writes the native dependency graph (#478) (2e64e0a)
+
+## [2.20.0] - 2026-09-04
+
+### Features
+
+- stop a review before it lands on contested text (#474) (f6d4762)
+
+## [2.19.0] - 2026-09-04
+
+### Features
+
+- reconcile the label invariants (#464) (afd2d00)
+
+## [2.18.1] - 2026-09-04
+
+### Fixes
+
+- extract the parent-rollup loop into a tested handler asset (#466) (cc92042)
+
+## [2.18.0] - 2026-09-03
+
+### Features
+
+- sync an issue's status rung to its PR's lifecycle (#447) (4261eb6)
+
+## [2.17.0] - 2026-09-02
+
+### Features
+
+- write native blocked_by edges on the gh-issue path (#444) (09aa71f)
+
+## [2.16.0] - 2026-09-01
+
+### Features
+
+- precheck workspace active-issue quota in /promote-tasks (#436) (6131b9f)
+
+## [2.15.1] - 2026-08-31
+
+### Fixes
+
+- point --no-claim at the branch the claim actually creates (#443) (62a1141)
+
+## [2.15.0] - 2026-08-31
+
+### Features
+
+- move the claim lifecycle onto the status vocabulary (#442) (06fd72c)
+
+## [2.14.0] - 2026-08-31
+
+### Features
+
+- carry the state model through add, list, promote and complete (#439) (a4815d7)
+
+## [2.13.2] - 2026-08-31
+
+### Fixes
+
+- devin cannot start in a fresh worktree (#438) (082df6e)
+
+## [2.13.1] - 2026-08-30
+
+### Fixes
+
+- let devin review from an untrusted workspace (#437) (4541595)
+
+## [2.13.0] - 2026-08-30
+
+### Features
+
+- label state model primitives for the Linear migration (#415) (d7aa23a)
+
+## [2.12.0] - 2026-08-27
+
+### Features
+
+- land complete tasks in ready_status at capture (#433) (b520c78)
+
+## [2.11.0] - 2026-08-27
+
+### Features
+
+- count replies in the submit confirmation (#431) (813d9f7)
+
+## [2.10.0] - 2026-08-26
+
+### Features
+
+- re-place threads across a refresh (#424) (4ca6f71)
+- Submit and Finish session controls (#423) (40a89ef)
+
+## [2.9.0] - 2026-08-26
+
+### Features
+
+- Reply, Resolve, and Reopen controls (#422) (430155b)
+
+## [2.8.0] - 2026-08-25
+
+### Features
+
+- render replies under their comment in both chip paths (#421) (9437d69)
+
+## [2.7.0] - 2026-08-25
+
+### Features
+
+- thread endpoints — /threads, /reply, /resolve (#420) (e466be6)
+
+## [2.6.0] - 2026-08-25
+
+### Features
+
+- thread store, minted ids, and the round payload (#419) (8bd7e7f)
+
+## [2.5.0] - 2026-08-25
+
+### Features
+
+- derive the server mode from --out (#418) (5356db4)
+
+## [2.4.0] - 2026-08-25
+
+### Features
+
+- remove the verdict from the review server (#417) (3406e73)
+
+## [2.3.0] - 2026-08-22
+
+### Features
+
+- fail on stale ${CLAUDE_PLUGIN_ROOT} path references (#410) (3de8461)
+
+## [2.2.1] - 2026-08-21
+
+### Fixes
+
+- stop the rubric screening prose contradictions out of scope (#407) (48a7657)
+
+## [2.2.0] - 2026-08-21
+
+### Features
+
+- let a present human override the WIP gate on a single claim (#405) (c9c7838)
+
+## [2.1.4] - 2026-08-21
+
+### Fixes
+
+- scope the pre-claim WIP gate to the claiming operator (#402) (3d852b8)
+
+## [2.1.3] - 2026-08-21
+
+### Fixes
+
+- render inline markup inside tight list items (#401) (9ec53ed)
+
+## [2.1.2] - 2026-08-20
+
+### Fixes
+
+- highlight code structurally, not through innerHTML (#400) (5158c24)
+
+## [2.1.1] - 2026-08-20
+
+### Fixes
+
+- constrain the reconciler structurally, not by prose (#398) (80d23c0)
+
+## [2.1.0] - 2026-08-20
+
+### Features
+
+- move the token out of the URL into an HttpOnly cookie (#397) (ea6eec7)
+
+## [2.0.2] - 2026-08-20
+
+### Fixes
+
+- arm the temp-dir EXIT trap only after BASE is known good (#396) (0dd497e)
+
+## [2.0.1] - 2026-08-20
+
+### Fixes
+
+- fail closed on an empty BASE before arming the rm -rf trap (#395) (51b23dc)
+
+## [2.0.0] - 2026-08-20
+
+### ⚠ Breaking Changes
+
+- the server no longer posts to GitHub (#393) (71e4a1e)
+
+## [1.95.3] - 2026-08-20
+
+### Fixes
+
+- stop a healthy smoke test from failing closed (#394) (e1d36d2)
+
+## [1.95.2] - 2026-08-20
+
+### Fixes
+
+- pin codex reviews to gpt-5.5 (#389) (43b8d99)
+
+## [1.95.1] - 2026-08-20
+
+### Fixes
+
+- close the preview findings from co-review (#391) (9827601)
+
+## [1.95.0] - 2026-08-20
+
+### Features
+
+- render wholly-added markdown as a document (#388) (94dc196)
+
+## [1.94.0] - 2026-08-19
+
+### Features
+
+- single-column view for one-sided files (#380) (973aba8)
+
+## [1.93.0] - 2026-08-19
+
+### Features
+
+- dogfood round — --git live mode, --title, header cleanup (407dcbd)
+
+## [1.92.0] - 2026-08-19
+
+### Features
+
+- human-readable review URL (ab23b41)
+
+## [1.91.1] - 2026-08-19
+
+### Fixes
+
+- left-side comments no longer split the diff row (1e2c344)
+
+## [1.91.0] - 2026-08-19
+
+### Features
+
+- parse plain unified diffs and quoted git headers (3bdf7df)
+
+## [1.90.1] - 2026-08-18
+
+### Fixes
+
+- release the submission slot before the response, not after (308a467)
+
+## [1.90.0] - 2026-08-18
+
+### Features
+
+- generalize generated-file detection beyond Flutter (46ae349)
+
+## [1.89.0] - 2026-08-18
+
+### Features
+
+- lock down the loopback server and fix HTML escaping (7a613ba)
+
+## [1.88.0] - 2026-08-18
+
+### Features
+
+- harden the agent-facing handoff contract (3a6ae7d)
+
+## [1.87.0] - 2026-08-18
+
+### Features
+
+- port CaseyDiff as a human-in-the-loop diff review skill (5ea10b4)
+
+## [1.86.0] - 2026-08-16
+
+### Features
+
+- ban bash-4+ constructs so the 3.2 floor covers unexercised code (#365) (767b587)
+
+## [1.85.0] - 2026-08-15
+
+### Features
+
+- add a --fast edit-loop gate (#356) (b786e7b)
+
+## [1.84.0] - 2026-08-15
+
+### Features
+
+- add a pinned mypy type gate, and fix what it found (#357) (32f9629)
+
+## [1.83.2] - 2026-08-14
+
+### Fixes
+
+- use exact-match allow-rules for agy/devin dispatch, one per pinned model (#347) (41a9946)
+
+## [1.83.1] - 2026-08-13
+
+### Fixes
+
+- repair the cross-references and markers the matrix split left behind (#354) (4149323)
+
+## [1.83.0] - 2026-08-12
+
+### Features
+
+- split the coder matrix, then correct the figures the split inherited (#353) (ffe3902)
+
+## [1.82.6] - 2026-08-08
+
+### Fixes
+
+- smoke-confinement must not rm -rf the caller's cwd (#344) (337aa54)
+
+## [1.82.5] - 2026-08-07
+
+### Fixes
+
+- place remaining suites' fixtures outside the repo (#343) (9daaedb)
+
+## [1.82.4] - 2026-08-07
+
+### Fixes
+
+- build fixtures outside the repo, gate seatbelt tests on capability (#341) (c28c3ae)
+
+## [1.82.3] - 2026-08-07
+
+### Fixes
+
+- never prune a live worktree on an unreadable start-time probe (#340) (4fb3c8f)
+
+## [1.82.2] - 2026-08-03
+
+### Fixes
+
+- unbreak the dprint gate and cut its wall-clock in half (#337) (990cff4)
+
+## [1.82.1] - 2026-08-03
+
+### Fixes
+
+- pace the walk so the learner can actually watch it (#336) (02fa785)
+
+## [1.82.0] - 2026-08-03
+
+### Features
+
+- a guided walk that runs the real script (#335) (ef45a1c)
+
+## [1.81.0] - 2026-08-02
+
+### Features
+
+- the adoption playbook, with the backfill as its payload (#333) (2cd7b3d)
+
+## [1.80.0] - 2026-08-02
+
+### Features
+
+- packaging — README entry, trigger eval, claude.ai zip (#331) (3daa3ee)
+
+## [1.79.0] - 2026-08-02
+
+### Features
+
+- the two task-loop bridges, via receipt cards (#330) (c804fb3)
+
+## [1.78.0] - 2026-08-02
+
+### Features
+
+- SKILL.md — the five procedures and the script/LLM boundary (#329) (544534e)
+
+## [1.77.0] - 2026-08-02
+
+### Features
+
+- the ledgers — derive, store, scoped freshness, --strict tier (#327) (0826945)
+
+## [1.76.0] - 2026-08-02
+
+### Features
+
+- status — derived readiness and the convergence report (#326) (97a16bd)
+
+## [1.75.0] - 2026-08-02
+
+### Features
+
+- decisions and cross-record referential integrity (#325) (3575279)
+
+## [1.74.0] - 2026-08-02
+
+### Features
+
+- suggest — the advisory scan that cannot fail a run (#324) (6129c8d)
+
+## [1.73.0] - 2026-08-02
+
+### Features
+
+- validate questions and enforce the coverage rule (#323) (1731ae8)
+
+## [1.72.0] - 2026-08-02
+
+### Features
+
+- validate obligations and cards — the destination-must-exist rule (#322) (93a2afb)
+
+## [1.71.0] - 2026-08-01
+
+### Features
+
+- init — scaffold a project, add tracks, install the convention (#320) (f07e986)
+
+## [1.70.0] - 2026-08-01
+
+### Features
+
+- script skeleton — CLI, discovery, block parser, harness (#319) (a1313e6)
+
+## [1.69.3] - 2026-08-01
+
+### Fixes
+
+- disable patsub_replacement so plists escape correctly (#315) (af9d0db)
+
+## [1.69.2] - 2026-08-01
+
+### Fixes
+
+- lock the jira/gh-issue claim on an atomic primitive (#278) (2ab0747)
+
+## [1.69.1] - 2026-08-01
+
+### Fixes
+
+- agy allow-rule pinned a model the invocation never uses (#313) (8a1ef96)
+
+## [1.69.0] - 2026-08-01
+
+### Features
+
+- resolve auth keys through a shared, configurable resolver (#310) (8f45273)
+
+## [1.68.0] - 2026-08-01
+
+### Features
+
+- close-out sweep that carries the verified id set into archive (#309) (6892060)
+
+## [1.67.1] - 2026-08-01
+
+### Fixes
+
+- auto-init bats submodules instead of failing the suite (#306) (d69fa76)
+
+## [1.67.0] - 2026-07-31
+
+### Features
+
+- [PRE-217] add gh-issue handler (report-only) (#130) (78b551b)
+
+## [1.66.1] - 2026-07-31
+
+### Fixes
+
+- tell "already archived" apart from "not found" (#280) (0b7d40e)
+
+## [1.66.0] - 2026-07-31
+
+### Features
+
+- archive named issues without an age threshold (#279) (ab9f740)
+
+## [1.65.2] - 2026-07-31
+
+### Fixes
+
+- route named tracker issues to the claim path, and unstale the jira docs (#276) (7bb4ecb)
+
+## [1.65.1] - 2026-07-30
+
+### Fixes
+
+- drop devin --sandbox, which now fails the ACP handshake (#274) (db728ea)
+
+## [1.65.0] - 2026-07-30
+
+### Features
+
+- stop blocking promotion on missing or urgent estimates (#272) (632e46a)
+
+## [1.64.10] - 2026-07-28
+
+### Fixes
+
+- make a configured api_key_ref actually reach the read fast paths (#269) (3b335eb)
+
+## [1.64.9] - 2026-07-28
+
+### Fixes
+
+- reap bounded-command children on TERM, and isolate fixture git state (#264) (ba8529c)
+
+## [1.64.8] - 2026-07-27
+
+### Fixes
+
+- sweep every terminal state when archiving (#263) (60ef9b7)
+
+## [1.64.7] - 2026-07-22
+
+### Fixes
+
+- add --add-dir to agy so headless read_file auto-allows (#259) (d9378d4)
+
+## [1.64.6] - 2026-07-22
+
+### Fixes
+
+- note out-of-scope backlog instead of silent skip (PRE-607) (#252) (80c17fe)
+
+## [1.64.5] - 2026-07-22
+
+### Fixes
+
+- warn up front when task files are gitignored (PRE-603) (#251) (e338832)
+
+## [1.64.4] - 2026-07-22
+
+### Fixes
+
+- resolve agent-run asset scripts via $CLAUDE_PLUGIN_ROOT (PRE-598) (#250) (05a1e75)
+
+## [1.64.3] - 2026-07-21
+
+### Fixes
+
+- hold dependency-blocked cards in backlog (#246) (08b51d0)
+
+## [1.64.2] - 2026-07-20
+
+### Fixes
+
+- report Linear API HTTP errors readably (#144) (f69a714)
+
+## [1.64.1] - 2026-07-18
+
+### Fixes
+
+- resolve handler from merged view, not committed file alone (#232) (5c263d2)
+
+## [1.64.0] - 2026-07-17
+
+### Features
+
+- measured reserve term + per-task usage instrumentation (#228) (34d783e)
+
+## [1.63.0] - 2026-07-17
+
+### Features
+
+- less-claude run profile (CAO coder + review/verify knobs) (#227) (371cd41)
+
+## [1.62.0] - 2026-07-17
+
+### Features
+
+- validate reset_epoch and add resume grace at the pause writer (#226) (e6eed6a)
+
+## [1.61.0] - 2026-07-17
+
+### Features
+
+- pre-invoke reserve gate before Claude-heavy turns (#225) (2d0a3d0)
+
+## [1.60.0] - 2026-07-17
+
+### Features
+
+- add CAO coder backend (cao-coder.sh) (#224) (b03bfd8)
+
+## [1.59.0] - 2026-07-15
+
+### Features
+
+- guard review fixes against a PR merged mid-flow (#220) (5b7d695)
+
+## [1.58.0] - 2026-07-15
+
+### Features
+
+- add car overnight auto-resume launcher (#221) (1061828)
+
+## [1.57.0] - 2026-07-15
+
+### Features
+
+- add Linear false-closures detection backstop (#218) (a3581d2)
+
 ## [1.56.1] - 2026-07-14
 
 ### Fixes

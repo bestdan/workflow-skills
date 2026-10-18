@@ -1,0 +1,39 @@
+{
+  "note": "Revision of ../../2026-09-22-assess-task-comparison/references/questions.json, committed before any request with it is sent. Two changes and no others. (1) Every question carries the incumbent's own prior, from the skill's rubric: 'Most tasks are obvious; reach for the harder value only when the description warrants it.' The v1 set omitted it, and the incumbent always had it. (2) complexity's Standard criterion drops ', with a clear approach', a clause v1 added that the skill's rubric does not have. Everything else is v1 verbatim. Written after the 2026-09-24 results were seen, so a run of this set on the same 50 cards is a sensitivity check reported beside the original verdict, not an independent test.",
+  "questions": {
+    "complexity": {
+      "type": "score",
+      "instructions": "How hard is the work this card describes to get right? Judge the work, not the length of the card. Most tasks are ordinary: pick a higher level only when the card clearly calls for it.",
+      "criteria": [
+        "Mechanical: a rename, configuration churn, or repetitive edits whose shape is obvious from the start",
+        "Standard: an ordinary feature or fix of normal size",
+        "Hard: architecture, a refactor that cuts across the codebase, a subtle bug, or an approach that is not yet clear"
+      ]
+    },
+    "creativity": {
+      "type": "score",
+      "instructions": "How much of this work's value rests on taste and design choices, rather than on a shape the task already dictates? Most tasks are ordinary: pick a higher level only when the card clearly calls for it.",
+      "criteria": [
+        "Little: the shape of the result is dictated, and there is a single reasonable way to build it",
+        "Some: there is some room for design choices, but the shape of the result is mostly set",
+        "Much: taste is the deliverable, as in visual or user-facing design, the shape of an interface others will call, or naming"
+      ]
+    },
+    "autonomy": {
+      "type": "noul",
+      "instructions": "Will this work run through many dependent steps over a long stretch, with little chance for anyone to steer it midway, rather than finishing in a single focused pass? Most tasks are not: answer yes only when the card clearly says so."
+    },
+    "speed_sensitivity": {
+      "type": "noul",
+      "instructions": "Is this work a tight iteration loop, where how quickly each turn comes back matters more than anything else about it? Most tasks are not: answer yes only when the card clearly says so."
+    },
+    "cost_sensitivity": {
+      "type": "noul",
+      "instructions": "Is this bulk, high-volume work, or work that is only worth doing if it can be done cheaply? Most tasks are not: answer yes only when the card clearly says so."
+    },
+    "verification_criticality": {
+      "type": "noul",
+      "instructions": "Is honestly running and reporting the checks the actual deliverable of this work, so that the check is the point, rather than an edit whose correctness is easy to eyeball or re-run later? Most tasks are not: answer yes only when the card clearly says so."
+    }
+  }
+}

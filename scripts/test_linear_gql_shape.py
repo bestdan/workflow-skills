@@ -1,0 +1,146 @@
+#!/usr/bin/env python3
+"""Every linear asset's gql() must fail with a message, not a traceback.
+
+All five `linear-*.py` assets share one seam: `gql()` posts a query and unwraps
+the reply. Until recently each did a bare `return payload["data"]`, so a
+malformed or unexpected response surfaced as a `KeyError` — and then as a chain
+of further `KeyError`s at every caller that indexed the result. A handler run by
+an agent got a traceback instead of a reason.
+
+This tests that seam across ALL FIVE at once, which matters because
+`linear-false-closures.py`, `linear-relations.py` and `linear-scan.py` have no
+test file of their own. The parametrization is the point: a sixth
+GraphQL-calling linear asset added tomorrow is covered by the glob without
+anyone remembering to add it. The glob is narrowed to assets that define
+`gql()` at all — `linear-rank.py` matches `linear-*.py` but is a pure
+JSON-in/JSON-out decision script with no network call and no `gql()` seam
+(see its own docstring), so it has nothing for this test to cover.
+
+Hermetic — `urllib.request.urlopen` is stubbed, so nothing reaches the network
+and no API key is needed.
+"""
+
+import importlib.util
+import io
+import json
+import unittest
+import urllib.request
+from pathlib import Path
+from unittest import mock
+
+ROOT = Path(__file__).resolve().parents[1]
+ASSET_DIR = ROOT / "commands" / "handlers" / "assets"
+
+
+def load(path):
+    spec = importlib.util.spec_from_file_location(path.stem.replace("-", "_"), path)
+    assert spec is not None and spec.loader is not None, f"cannot load {path}"
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+# `linear-graph-analyze.py` matches the glob but never calls Linear's API — it
+# is a local, offline JSON->JSON transform (its input is another asset's
+# stdout), so it has no `gql()` seam to share. Filtering on the attribute
+# rather than hand-naming an exclusion list keeps "a sixth linear asset added
+# tomorrow is covered by the glob" true for the assets the claim is actually
+# about.
+LINEAR_ASSETS = sorted(
+    p for p in ASSET_DIR.glob("linear-*.py") if hasattr(load(p), "gql")
+)
+
+
+class FakeResponse(io.BytesIO):
+    """Enough of an http response for `with urlopen(req) as r: r.read()`."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def serving(payload):
+    """Stub urlopen to return `payload` as the decoded JSON body."""
+    return mock.patch.object(
+        urllib.request,
+        "urlopen",
+        lambda *a, **k: FakeResponse(json.dumps(payload).encode()),
+    )
+
+
+class TestEveryLinearAssetUnwrapsSafely(unittest.TestCase):
+    def test_the_glob_found_the_assets(self):
+        """A rename that empties the glob would make every case below vacuous."""
+        self.assertGreaterEqual(len(LINEAR_ASSETS), 5, LINEAR_ASSETS)
+        for path in LINEAR_ASSETS:
+            self.assertTrue((ASSET_DIR / path.name).exists())
+
+    def test_a_good_payload_returns_the_data_object(self):
+        for path in LINEAR_ASSETS:
+            with self.subTest(asset=path.name):
+                mod = load(path)
+                with serving({"data": {"ok": True}}):
+                    self.assertEqual(mod.gql("key", "query {}"), {"ok": True})
+
+    def test_a_payload_with_no_data_key_exits_with_a_message(self):
+        for path in LINEAR_ASSETS:
+            with self.subTest(asset=path.name):
+                mod = load(path)
+                with serving({"nothing": "here"}):
+                    with self.assertRaises(SystemExit) as ctx:
+                        mod.gql("key", "query {}")
+                # SystemExit carrying a string is a message; carrying an int
+                # or None would be a bare exit with nothing to read. A plain
+                # assert, not assertIsInstance, because this has to narrow the
+                # `str | int | None` for the assertIn below.
+                code = ctx.exception.code
+                assert isinstance(code, str), f"bare exit, no message: {code!r}"
+                self.assertIn("GraphQL response.data", code)
+
+    def test_a_non_object_data_exits_with_a_message(self):
+        for path in LINEAR_ASSETS:
+            with self.subTest(asset=path.name):
+                mod = load(path)
+                with serving({"data": "unexpected"}):
+                    with self.assertRaises(SystemExit) as ctx:
+                        mod.gql("key", "query {}")
+                code = ctx.exception.code
+                assert isinstance(code, str), f"bare exit, no message: {code!r}"
+                self.assertIn("expected dict, got str", code)
+
+    def test_a_scalar_or_list_root_exits_with_a_message(self):
+        """The case this suite originally missed. Both malformed payloads it
+        covered were dicts, so nothing exercised a scalar root — and
+        `"errors" in None` raises TypeError *before* the shape check, which is
+        the traceback the whole seam exists to remove. `[]` and `"str"` reach
+        the shape check by a different route (`in` works on both), so all four
+        shapes are here to pin the guard rather than one path through it."""
+        for path in LINEAR_ASSETS:
+            for body in (None, 5, [1, 2], "a string"):
+                with self.subTest(asset=path.name, body=body):
+                    mod = load(path)
+                    with serving(body):
+                        with self.assertRaises(SystemExit) as ctx:
+                            mod.gql("key", "query {}")
+                    code = ctx.exception.code
+                    assert isinstance(code, str), f"bare exit, no message: {code!r}"
+                    self.assertIn("GraphQL response", code)
+
+    def test_a_graphql_errors_envelope_still_exits(self):
+        """Pre-existing behaviour that must survive the unwrap change: an
+        `errors` envelope arrives with HTTP 200 and has to stop the run."""
+        for path in LINEAR_ASSETS:
+            with self.subTest(asset=path.name):
+                mod = load(path)
+                with serving({"errors": [{"message": "rate limited"}]}):
+                    with self.assertRaises(SystemExit) as ctx:
+                        mod.gql("key", "query {}")
+                code = ctx.exception.code
+                assert isinstance(code, str), f"bare exit, no message: {code!r}"
+                self.assertIn("rate limited", code)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

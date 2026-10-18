@@ -14,7 +14,7 @@ Three stores exist; only one is authoritative for a given fact.
 - **Git is authoritative for code and PR existence** (the pushed branch and the
   open PR are the ground truth that a task's work happened).
 - **The run files are a cache + report** — a fast local read of the graph and a
-  human-facing morning summary. They are always allowed to be _behind_ the
+  human-facing live summary. They are always allowed to be _behind_ the
   tracker and git, never ahead (see **Write order**).
 
 ## The three files (+ one non-durable rendering)
@@ -26,7 +26,7 @@ the **run-state branch** (below) — never to a task branch. Paths:
 | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `.auto-pilot/RUN.md`       | The task graph + each task's current lifecycle **phase** and the run's verify tooling. The machine-readable state the run loop and `--resume` read. |
 | `.auto-pilot/QUESTIONS.md` | The decision log — one indexed entry per reversible call the run made without a human.                                                              |
-| `.auto-pilot/REPORT.md`    | The rolling human-facing report the user wakes to.                                                                                                  |
+| `.auto-pilot/REPORT.md`    | The rolling, live human-facing report, read mid-run as well as at the end.                                                                          |
 
 `.auto-pilot/STATUS.md` is a **fourth, non-durable** artifact (task 20,
 finding #28): the periodic status report, overwritten every interval by
@@ -51,8 +51,14 @@ work_source: linear:d0598803-… # linear:<projectId> or plan:<dir>
 base_branch: main
 verify_command: dli check # the named check (design pre-flight §5); the PINNED command the un-jailed verify broker runs (launch-runtime.md §5) — resolved once at launch, never agent-composed
 exercise_path: "drive /co-review --non-interactive on a scratch PR" # end-to-end check
+run_profile: default # default | less-claude; fixed at launch and authoritative on resume
+cao_coder_mapping: {} # default; less-claude: {codex: cao-codex, agy: cao-agy}
+co_review_mode: default # default | off | cheap-single
+diff_judgment_tier: orchestrator # default | sonnet; model that judges an integrated worker diff
 status: active # run-level: active | paused | systemic | done
-paused_until: # ISO-8601 UTC, canonically 2026-07-12T07:52:04Z — the time the orchestrator may resume past a rate-window pause; empty unless status is paused. Write the Z form; the supervisor also accepts an offset, a space separator, or an omitted zone, but an UNPARSEABLE value forfeits the pause exemption and re-arms the no-progress guard
+paused_until: # ISO-8601 UTC, canonically 2026-07-12T07:52:04Z — the time the orchestrator may resume past a rate-window pause; successful session-status pauses write reset_epoch + grace, failed reads that warrant a pause write now + 3600, and it is empty unless status is paused. Write the Z form; the supervisor also accepts an offset, a space separator, or an omitted zone, but an UNPARSEABLE value forfeits the pause exemption and re-arms the no-progress guard
+pause_observed_at: # epoch seconds when the signal that produced paused_until was observed; atomically write it with paused_until, pause_source, status, and pause_reason
+pause_source: # source of that signal, e.g. claude-usage:session-status or supervisor:rate-limit; atomically write it with paused_until, pause_observed_at, status, and pause_reason
 pause_reason: # why the run paused/halted; set with status=paused (rate window) or status=systemic (circuit breaker)
 exit_reason: continuing # why the orchestrator last exited: continuing | paused | done | systemic | deadline (see "Exit contract" below)
 exit_reason_at: 1783823504 # epoch seconds the reason was declared — how the supervisor tells THIS wake's declaration from a stale one
@@ -60,15 +66,26 @@ exit_reason_detail: "context exhausted mid-task T-3" # optional one-line human n
 orchestrator_pid: 48213 # the spawned orchestrator's PID (launch step 7)
 orchestrator_started_at: "Wed Jul  9 20:00:00 2026" # its process start-time — guards a recycled PID (launch-runtime "Orphan / stale detection")
 until: 2026-07-10T06:00:00 # the run's --until deadline
-min_task_budget: 20m # pre-dispatch floor, computed from the resolved reviewer set (launch step 3; run-budget.md); only written for a time-boxed (--until) run
+min_task_budget: 24m # pre-dispatch floor, computed from the resolved reviewer set (launch step 3; min-task-budget.sh); only written for a time-boxed (--until) run
+reserve: 15 # minimum session-window headroom percent before claim, verify, or enabled co-review; --reserve overrides this fixed default
+usage_delta_baseline: # last successful session-status sample: {percent: 42, reset_epoch: 1783823504}; empty when cleared. Written ONLY by `spawn-orchestrator.sh reserve-gate`
+usage_deltas: [] # rolling Claude-orchestrator consumption intervals: [{percent: 8, reset_epoch: 1783823504}]. Written ONLY by `spawn-orchestrator.sh reserve-gate`
 ---
 
-| task    | phase        | branch            | base              | base_sha | pr   | notes                  |
-| ------- | ------------ | ----------------- | ----------------- | -------- | ---- | ---------------------- |
-| PRE-459 | handed-off   | bestdan/pre-459-… | main              | —        | #140 | 2 co-review rounds     |
-| PRE-460 | implementing | bestdan/pre-460-… | bestdan/pre-459-… | a1b2c3d  | —    | chained on PRE-459 tip |
+| task    | phase        | branch            | base              | base_sha | pr   | notes                  | coder |
+| ------- | ------------ | ----------------- | ----------------- | -------- | ---- | ---------------------- | ----- |
+| PRE-459 | handed-off   | bestdan/pre-459-… | main              | —        | #140 | 2 co-review rounds     | opus  |
+| PRE-460 | implementing | bestdan/pre-460-… | bestdan/pre-459-… | a1b2c3d  | —    | chained on PRE-459 tip | codex |
 ```
 
+- `coder` is the `<backend>` launch step 3 resolved for this task (`select-coder`
+  per task); `opus`, `codex`, `agy`, `devin`, or `cao` (the generic marker for a
+  less-claude task dispatched through the CAO fleet — which named `cao-*` entry
+  actually runs it is a run-level detail in `cao_coder_mapping`, not a per-task
+  one). Empty (`—`) means not yet resolved. This is the column the scout
+  (`"${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh" --scout-run-md`,
+  [`launch-preflight.md`](launch-preflight.md) "Step 6") joins against the
+  environment fingerprint.
 - `base` encodes the dependency edge for a stacked task: `main` for an
   independent task, or the parent task's branch for a chained one.
 - `base_sha` is the parent branch's **frozen-tip SHA**, recorded when the parent
@@ -84,8 +101,9 @@ min_task_budget: 20m # pre-dispatch floor, computed from the resolved reviewer s
   never the error, and out-of-order/orphaned stacks are fixed mechanically
   rather than by asking a human to merge bottom-up from memory (run #1's
   finding #14, closed by automation, not by prose).
-- `status` / `paused_until` / `pause_reason` are the **run-level** fields the run
-  loop writes: `status: paused` + `paused_until` (+ reason) at a rate-window pause,
+- `status` / `paused_until` / `pause_observed_at` / `pause_source` / `pause_reason`
+  are the **run-level** fields the run loop writes atomically: `status: paused` +
+  `paused_until` + observation time/source (+ reason) at a rate-window pause,
   `status: systemic` (+ reason) when the circuit breaker halts, `status: paused`
   (+ reason, `paused_until` empty) when the pre-dispatch deadline guard stops with
   ready tasks left — resumable only by an explicit `--resume`, never a timer — and
@@ -117,12 +135,36 @@ min_task_budget: 20m # pre-dispatch floor, computed from the resolved reviewer s
   `--until` kill would sever mid-delivery. Present only when `until` is set — a
   run with no `--until` has no deadline to guard. Launch step 3 computes it from
   the resolved co-review reviewer set (it is reviewer-latency-coupled, not a
-  constant) and writes it here; formula and defaults live in
-  [`run-budget.md`](run-budget.md) "Minimum task budget".
-- `phase` is one of the seven in-flight/terminal values below, or the pre-claim
-  `pending` marker (see "Task lifecycle phases"); of those, only the seven
-  in-flight/terminal values are what `--resume` reconciles (a `pending` task has
-  no in-flight transaction to reconcile).
+  constant) and writes it here; the formula lives in
+  [`scripts/min-task-budget.sh`](../../../scripts/min-task-budget.sh);
+  [`run-budget.md`](run-budget.md) carries the reasoning.
+- `reserve` remains the task-3-owned **fixed floor** (15 by default, or the
+  launch/resume `--reserve` override). The gate derives its effective reserve
+  from it and `usage_deltas`; it never overwrites this configured floor.
+- `usage_delta_baseline` and `usage_deltas` are the reserve gate's own
+  bookkeeping: the last successful validated `--session-status` sample, and the
+  rolling capped record of Claude-orchestrator consumption intervals it forms.
+  **`spawn-orchestrator.sh reserve-gate` is the only writer and the only
+  specification of the update rules** — which readings become a delta, which
+  are discarded, when the baseline is cleared, and how deep the record goes all
+  live in that subcommand's header comment, so there is exactly one home for
+  them. Read it there rather than restating it here; `/deliver-task` calls the
+  subcommand rather than hand-walking any of it. The entries measure only the
+  Claude orchestrator's consumed session percent; never Codex/Antigravity
+  worker usage.
+- `run_profile`, `cao_coder_mapping`, `co_review_mode`, and
+  `diff_judgment_tier` are fixed per-run delivery settings. Defaults preserve
+  ordinary auto-pilot. A `less-claude` run records the named mapping (`codex` →
+  `cao-codex`, `agy` → `cao-agy`), `off` (or the explicitly selected
+  `cheap-single`) co-review, and `sonnet` diff judgment. Ordinary runs omit
+  these optional fields and use the documented defaults, preserving their
+  existing state bytes. Resume reads recorded fields; it does not re-resolve
+  current command-line defaults.
+- `phase` is one of the seven in-flight/terminal values below, or one of the
+  two pre-claim values `pending` and `skipped` (see "Task lifecycle phases"); of
+  those, only the seven in-flight/terminal values are what `--resume` reconciles
+  (a pre-claim task has no in-flight transaction to reconcile). A `skipped`
+  row's `notes` cell carries the refusal reason.
 
 ### Exit contract — why the orchestrator stopped
 
@@ -138,7 +180,7 @@ most important distinction invisible:
 Everything downstream was guessing: the supervisor relaunched on a **blind timer**
 because it could not tell them apart, and a human reading `exit code = 0` could not
 tell whether the run was done or dead. So the orchestrator **declares** its reason —
-`spawn-orchestrator.sh exit-reason --dir <run worktree> --reason <r> [--detail …]` —
+`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" exit-reason --dir <run worktree> --reason <r> [--detail …]` —
 **before** it exits, on **every** termination path. The reason is written to
 `RUN.md`'s front matter and committed to the run-state branch (it must outlive the
 process; a local file would be invisible to `--resume` and to a human reading the
@@ -148,7 +190,7 @@ branch).
 | ------------ | ------------------------------------------------- | ------------------------------ |
 | `continuing` | work remains, context exhausted                   | **relaunch**                   |
 | `paused`     | rate window / `paused_until` set                  | **relaunch** past the reset    |
-| `done`       | no ready tasks remain                             | **tear down**                  |
+| `done`       | no ready tasks remain (incl. all left `skipped`)  | **tear down**                  |
 | `systemic`   | circuit breaker / fatal auth / failed invariant   | **tear down + alarm**          |
 | `deadline`   | pre-dispatch guard stopped with tasks still ready | **tear down**; `--resume` only |
 
@@ -180,7 +222,7 @@ does the bootout.
 ### Heartbeat — telling _slow_ from _wedged_
 
 `.auto-pilot/heartbeat` is a timestamp the orchestrator touches
-(`spawn-orchestrator.sh heartbeat --dir <run worktree> --note <where>`) at **each
+(`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" heartbeat --dir <run worktree> --note <where>`) at **each
 loop iteration** and **each `/deliver-task` sub-step boundary**; the launch wrapper
 also beats it at the top of every wake, so a `claude` that wedges before its first
 iteration still leaves an ageable timestamp. `status` ages it against the per-task
@@ -208,7 +250,7 @@ deletes the parent's branch → the child, still based on it, gets closed) or
 **quietly** (the child still targets the parent's _branch_, so merging it lands
 on that branch, never on `base_branch` — the PR looks healthy while doing
 nothing). Finding #25 hit the loud case for real, on a P1 PR. `restack`
-(`scripts/spawn-orchestrator.sh restack --run-dir <dir> --repo <path>`) reads
+(`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" restack --run-dir <dir> --repo <path>`) reads
 this table's `base`/`base_sha`/`pr` columns and, for every chained task whose
 parent PR has merged, runs the incantation a human would otherwise have to
 remember at the exact right moment: fetch, `rebase --onto <base_branch>
@@ -300,18 +342,20 @@ A deferred co-review finding that was also filed as a tracked follow-up (see
 
 ### `REPORT.md`
 
-The report, rewritten after every unit of work. Sections:
+The report, rewritten after every unit of work. Sections, in this order — what
+a human must judge comes last, because the end is what a reader is left on. The
+supervisor's alarm line is the one exception: it is the run's verdict, so it
+goes at the very top (`run-budget.md`, "The alarm").
 
 1. **Outcomes** — per task: `handed-off` / `parked` / `skipped` + one line why.
-2. **Decisions** — the highlights from `QUESTIONS.md` worth a human's eye.
-3. **Evidence** — links to the check output, screenshots, and exercised-feature
+   A `skipped` line gives the refusal reason from its `notes` cell, and names
+   each task left `pending` because it is blocked by that one.
+2. **Evidence** — links to the check output, screenshots, and exercised-feature
    artifacts each PR carries.
-4. **How-to-evaluate queue** — for each human-judgment checkpoint: exactly how
-   to evaluate it and what a "no" would invalidate.
-5. **Review classes per PR** — which reviewer classes ran / timed-out / skipped
+3. **Review classes per PR** — which reviewer classes ran / timed-out / skipped
    for each PR (the summary `/co-review --non-interactive` emits).
-6. **Spend** — usage against the rate window and any per-task bounds hit.
-7. **Follow-ups** — the index of every co-review finding filed as a tracked
+4. **Spend** — usage against the rate window and any per-task bounds hit.
+5. **Follow-ups** — the index of every co-review finding filed as a tracked
    task this run: task id, source PR, and the one-line finding. A finding is
    auto-filed via `/add-task` (tagged `auto-pilot`) when it is deferred **and**
    either **cross-cutting** (its faithful fix would touch a file outside the
@@ -327,6 +371,10 @@ The report, rewritten after every unit of work. Sections:
    before they enter work, so a hallucinated finding is caught before it costs
    anything. If `/add-task` itself fails, the run does not fail — the finding
    is recorded here as a plain bullet (task id `none`) instead.
+6. **For you** — everything a human must judge, numbered, highest impact
+   first: the `QUESTIONS.md` decisions worth a human's eye, and each
+   human-judgment checkpoint with exactly how to evaluate it and what a "no"
+   would invalidate.
 
 ## Run-state branch
 
@@ -358,13 +406,13 @@ uncommitted task-branch edits can block the checkout back, wedging recovery.
 
 **Guard.** Each run-loop iteration, and the top of `--resume`
 ([`resume.md`](resume.md)), calls
-`scripts/spawn-orchestrator.sh assert-run-head --dir <run-worktree> --run-id
+`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" assert-run-head --dir <run-worktree> --run-id
 <run_id> --questions .auto-pilot/QUESTIONS.md`. It asserts `git rev-parse
 --abbrev-ref HEAD` in the run worktree equals `auto-pilot/<run_id>`; if not, it
 restores that branch and appends a `QUESTIONS.md` entry recording the
 deviation (format above) — a run that finds itself on the wrong branch has
 already violated its recovery contract and must not silently continue. That
-entry reaches `REPORT.md`'s **Decisions** section through the normal rolling
+entry reaches `REPORT.md`'s **For you** section through the normal rolling
 rewrite; no separate `REPORT.md` format exists for it. It fails closed when the
 run worktree is **dirty** at the deviation (restoring would silently carry or
 lose the uncommitted task-branch edits) or when git itself refuses the restore —
@@ -376,17 +424,48 @@ otherwise-recoverable run.
 `phase` spans all materialized tasks, but only the seven **in-flight/terminal**
 values below — from the moment a task is claimed to its terminal state —
 participate in crash reconciliation. A task materialized into the graph but not
-yet claimed carries the pre-claim marker `pending` instead; it is not one of
-those seven and is never a target of the crash-reconciliation table (there is
-nothing mid-transaction to reconcile before a claim exists). Which `pending`
-tasks are **eligible to claim next** — graph readiness — is not encoded in a
-`pending` task's own `phase`; it is computed from the graph edges and the
-blockers' phases by the adapter's `list_ready`/`dependency_graph` verbs
+yet claimed carries one of two pre-claim values instead: `pending`, or
+`skipped` once its claim has been refused. Neither is one of those seven, and
+neither is ever a target of the crash-reconciliation table (there is nothing
+mid-transaction to reconcile before a claim exists). Which `pending` tasks are
+**eligible to claim next** — graph readiness — is not encoded in a `pending`
+task's own `phase`; it is computed from the graph edges and the blockers' phases
+by the adapter's `list_ready`/`dependency_graph` verbs
 ([`adapters.md`](adapters.md)).
 
-| Phase     | Meaning                                                                     | Tracker                                                      | Git / remote | Worker worktree |
-| --------- | --------------------------------------------------------------------------- | ------------------------------------------------------------ | ------------ | --------------- |
-| `pending` | Materialized into the graph, not yet claimed; readiness computed separately | new / materialized (plan `new`\|`ready`; linear `unstarted`) | no branch    | none            |
+| Phase     | Meaning                                                                                 | Tracker                                                      | Git / remote            | Worker worktree |
+| --------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------ | ----------------------- | --------------- |
+| `pending` | Materialized into the graph, not yet claimed; readiness computed separately             | new / materialized (plan `new`\|`ready`; linear `unstarted`) | no branch               | none            |
+| `skipped` | **Terminal (not claimed):** `/deliver-task` refused the claim; the reason is in `notes` | untouched by this run                                        | no branch from this run | none            |
+
+**`skipped` is how a refused claim leaves the queue.** When `/deliver-task`
+returns a claim refusal (its step 2: lost race, already in flight under another
+session, open blockers, a held or oversized issue), the loop writes `skipped`
+and the handler's reason into the row. Without it the row stays `pending`,
+readiness selects it again on the next iteration, and the run ends only at its
+budget or deadline (#912). Only a `pending` task is a readiness candidate, so a
+`skipped` task is never selected again in the same run — not by the loop, and
+not by a `--resume` of it. A human who wants it retried sets the cell back to
+`pending`.
+
+It is not `parked`, though both are terminal without success. A `parked` task
+was claimed: its tracker reads started, and a branch or PR may exist. A
+`skipped` task holds nothing this run acquired, so the doctor, resume and the
+crash-reconciliation table have nothing of it to repair. The one downstream
+effect is on its dependents: their blocker never reaches `handed-off`, so they
+stay `pending` and never become ready. `REPORT.md` lists them under the skipped
+task (below).
+
+**Decision: a blocker that reopened mid-run skips the task rather than parking
+it for a later retry.** The blocker in question is outside the run's graph —
+the in-graph ones are what readiness already waits on — so nothing in the run
+signals when it clears. A "retry later" state is then a poll: readiness
+reselects the task every iteration until the blocker happens to clear, which is
+the loop this phase exists to end. Rejected alternative: a re-checkable
+`waiting` phase — it needs a poll interval and a cap to terminate, and still
+spends a `/deliver-task` pre-flight per poll. The reason in `notes` names the
+open blockers, so a human who clears one can set its phase back to `pending`
+and `--resume` the run.
 
 Seven in-flight/terminal phases follow, once a task is claimed. Each names
 exactly what exists on the tracker, in git, and on disk while a task sits in
@@ -469,7 +548,7 @@ Findings #22 and #23 both hit a live run and **both presented as a clean
 was `exit 0`, `terminal_reason: completed`. Neither tripped the circuit
 breaker, because the circuit breaker counts _delivery_ failures and neither of
 these was one. The run never asked "am I still a valid run?" — `doctor`
-(`scripts/spawn-orchestrator.sh doctor --dir <run worktree> --run-id <run_id>
+(`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" doctor --dir <run worktree> --run-id <run_id>
 [--label <launchd label>] [--questions <path>] [--handler repo-pr|linear]
 [--gh <path>] [--no-progress-limit N] [--context loop|resume]`) is that
 question, asked seven ways, run at the **top of every run-loop iteration**
@@ -594,7 +673,8 @@ the request the doctor just filed.
    "Stale-orchestrator guard"; [`launch-runtime.md`](launch-runtime.md) "Orphan /
    stale detection"): `RUN.md`'s `orchestrator_pid` + `orchestrator_started_at`,
    where a **recycled** pid (start-time mismatch) counts as dead but an
-   **undetermined** read — no pid recorded, `ps` unreadable — does **not**, and
+   **undetermined** read — no pid recorded, no start time recorded, or `ps`
+   unreadable — does **not**, and
    fails closed to `skipped`, the same D2 posture as invariants 3 and 6. This
    duplicates `resume.md`'s own guard on purpose: a `git worktree remove
    --force` must not depend for its safety on a step ordering that no code

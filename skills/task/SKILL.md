@@ -1,6 +1,6 @@
 ---
 name: task
-description: Use when a user notices incidental work during development (stale config, tech debt, dead code, test gaps) they want to defer without losing context, says "task"/"todo"/"follow-up"/"we should come back to this", or runs /add-task, /do-tasks, /list-tasks, or /promote-tasks.
+description: Use when a user notices incidental work during development (stale config, tech debt, dead code, test gaps) they want to defer without losing context, says "task"/"todo"/"follow-up"/"we should come back to this", or runs /add-task, /do-tasks, /list-tasks, or /promote-tasks. ALSO use when the user starts work on an existing tracker issue by naming its key — "work on PRE-683", "let's do ABC-142", "pick up ENG-9", or pasting a Jira/Linear issue URL — because the issue must be claimed (assigned to the user, moved to its tracker's started state) before work begins.
 ---
 
 # Task Loop — Capture and Process Follow-Up Work
@@ -12,6 +12,53 @@ Repo-native system for capturing follow-up work with full context and processing
 - User notices incidental work during a feature branch (stale flags, dead code, missing tests)
 - User says "task", "todo", "follow-up", "we should come back to this", "add a task for this"
 - User runs `/add-task` or `/do-tasks`
+- User starts work on an existing tracker issue by naming its key or URL — see **Starting work on a named issue** below
+
+## Starting work on a named issue
+
+When the user opens work on an issue that already exists in the tracker — "work on
+PRE-683", "let's do ABC-142", "pick up ENG-9", or a pasted Jira/Linear issue URL —
+that issue must be **claimed before the first edit**: assigned to the user and moved
+into its tracker's started state (`In Progress` on Jira/Linear; the `status:3_started`
+label on gh-issue, which has no status field). Without that, the board silently shows the
+work as unstarted and unowned for its whole lifetime, and a parallel session can
+claim the same issue.
+
+Do not hand-roll the claim, and do not skip it because the user asked for code rather
+than for bookkeeping. Route to the existing verbs:
+
+- **`/deliver-task <KEY>`** — the default. Claims, implements, verifies, opens a PR,
+  co-reviews, hands off at `needs_review`. Use when the ask is "do this issue".
+- **`/do-tasks <KEY>`** — the batch-flow equivalent; same claim/execute path.
+- **`/do-tasks <KEY> --claim-only`** — claim now, no execution. Use when the user
+  wants to work the issue themselves (or interactively with you) but still wants the
+  board correct. Resume later with `/do-tasks <KEY> --no-claim`.
+
+The claim mechanics are the handler's, not this skill's: `commands/handlers/jira-claim.md`
+("Claim the issue"), `commands/handlers/linear-claim.md`, `commands/handlers/gh-issue-claim.md`.
+Each claims on a primitive that can elect one winner among sessions authenticated as the
+**same** tracker account, and each refuses to move an issue to a completed status —
+merge is the only completion signal.
+
+The primitive differs per handler, and reporting a claim means reporting which one held:
+jira and gh-issue create the claim ref through GitHub's create-ref API, which
+returns 422 rather than updating a ref that exists (a plain `git push` is **not** the
+lock — see `commands/handlers/claim-lock.md`), and linear runs a
+first-writer-wins election on a comment log carrying a unique per-session token. An
+assignee re-read is **not** a lock on any of them: it confirms only that the final
+assignee is your own account, which is identical for two sessions on the same account.
+In a branch-pinned environment that cannot create that ref, jira and gh-issue degrade
+to the same comment-token election and say so explicitly — never report an atomic claim
+the run did not make.
+
+**Resolve the handler from the merged view** — `dev_docs/tasks/.task-config.yml`
+overlaid with the optional `dev_docs/tasks/.task-config.local.yml` — never from the
+committed file alone (see `commands/task-config.md` → "Resolving the handler"). If the
+resolved handler isn't the issue's tracker — including the missing-config case, which
+resolves to `repo-pr` rather than to "no handler" — say so and offer
+`/task-config jira` (or the right tracker) rather than editing the issue ad hoc over
+the MCP. A handler that doesn't match the tracker is the usual reason a Jira issue
+never gets claimed.
 
 ## How it works
 
@@ -24,20 +71,26 @@ Repo-native system for capturing follow-up work with full context and processing
 
 Capture is destination-agnostic; only the handler decides where the task lands.
 
+A research spike's `defer` procedure offers `/add-task` as an alternative to a stub when the merged config resolves to an external tracker handler — see the two bridges in `skills/research-spike/SKILL.md`.
+
 ### Handlers and config
 
 The delivery destination is a **handler** named in `dev_docs/tasks/.task-config.yml` — for `repo-pr` this is committed and shared; for the external-tracker handlers (`gh-issue`/`jira`/`linear`) `/task-config` adds it to the repo's local git exclude as local config (see that command for the `repo-pr` exception):
 
 ```yaml
 handler: repo-pr # repo-pr (default) | gh-issue | jira | linear
-wip_limit: 3 # optional — bounds /do-tasks in-flight work (repo-pr batch dispatch + linear pre-claim gate); default 3
+wip_limit: 3 # optional — bounds /do-tasks in-flight work (repo-pr batch dispatch: shared; tracker pre-claim gates: per-operator); default 3
 auto_execute_max_size: 2 # optional — repo-pr batch auto-routing: auto-execute size <= this, reserve bigger for a human; default 2
 # handler-specific blocks (gh-issue / jira / linear) live under their own keys
 ```
 
 Resolution: file absent or no `handler:` → `repo-pr`; unknown value → `/add-task` stops and points to `/task-config`. Every handler receives the same drafted task (`title`, body, `priority`, `tags`, `source_branch`, `source_pr`, `is_blocked_by`, …) and returns the URL of what it created.
 
-`wip_limit` (default `3`) bounds in-flight work for `/do-tasks`. On the `repo-pr` file path it caps **batch** dispatch (`--all` / `-n N`) to `wip_limit - current_wip` so the human review bottleneck stays bounded; single-task dispatch is ungated. On the `linear` path it's a **pre-claim gate** that declines a claim — even a single one — once in-flight work meets the limit. How `current_wip` is counted: `commands/handlers/repo-pr-execute.md` (for `repo-pr`) and `commands/do-tasks.md` (for `linear`).
+`wip_limit` (default `3`) bounds in-flight work for `/do-tasks`. On the `repo-pr` file path it caps **batch** dispatch (`--all` / `-n N`) to `wip_limit - current_wip` so the human review bottleneck stays bounded; single-task dispatch is ungated. On the `gh-issue`, `jira`, and `linear` paths it's a **pre-claim gate** that runs on every claiming run, single ones included, and declines once in-flight work meets the limit (see the next paragraph for the one case that offers an override instead) — **except a `gh-issue` batch dispatch**, which takes the `repo-pr` shape above instead: the dispatcher reads the slack once and caps the batch, and the dispatched sessions run no **WIP** gate of their own (`commands/do-tasks.md` §4 step 5, which also says what that costs; they do re-check dependency readiness before claiming). How `current_wip` is counted: `commands/handlers/repo-pr-execute.md` (`repo-pr`), `commands/handlers/gh-issue-claim.md`, `commands/handlers/jira-claim.md`, and `commands/do-tasks.md` (`linear`).
+
+**When the limit is met, a batch is bounded and a present human is asked.** The gate always runs, but what it does at the limit depends on the action. A **batch** — `--all`, `-n N`, a `--claim-only` batch, any batch remote dispatch — is bounded or declined unconditionally: presence at dispatch says nothing about the pull requests that land later. (It is the batch, never the transport, that decides: `repo-pr` dispatches single tasks remotely and those stay ungated.) A **single** claim in an attended session gets a one-keystroke override, because the human the cap protects is right there and can see the queue. The gate is never simply skipped, so an unattended run that misjudges itself declines rather than flooding the queue. `commands/handlers/attendedness.md` owns the rule and the reasoning; `--non-interactive` declares a run unattended outright.
+
+**What counts as in-flight: this caller's own work, and only work that is actually moving.** Every tracker gate scopes its count to the claiming account (`assignee = currentUser()` in jira, `assignee:@me` in gh-issue, the viewer's id as `assignee` in linear) and drops parked issues (Jira's Impediment flag, and any status named in `jira.blocked_statuses`). A project-wide count is not a usable bound: on a shared team board other people's work alone exceeds any plausible limit, so the gate never opens and nothing is ever claimed. The trade is explicit — the limit budgets one operator, so N operators on one board hold N × `wip_limit` between them.
 
 `auto_execute_max_size` (default `2`, `repo-pr` only) size-gates **batch** auto-routing: after ranking and the WIP gate, tasks with `size <= auto_execute_max_size` are claimed and executed (headless); bigger ones are **reserved** (claimed but not executed, `--claim-only` semantics) for a human to resume with `/do-tasks <slug> --no-claim`. Single-task mode is never gated, and explicit `--claim-only` / `--no-claim` override it. See `commands/handlers/repo-pr-config.md`.
 
@@ -47,12 +100,12 @@ Available handlers — each owns its own auth/preflight, config schema, prerequi
 | ---------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `repo-pr`  | a committed markdown file in `dev_docs/tasks/` via PR (default) | `commands/handlers/repo-pr.md`                                                                                                                                                     |
 | `gh-issue` | a GitHub Issue                                                  | `commands/handlers/gh-issue.md`                                                                                                                                                    |
-| `jira`     | a Jira work item under an epic                                  | `commands/handlers/jira.md`                                                                                                                                                        |
+| `jira`     | a Jira work item under an epic                                  | `commands/handlers/jira.md` + per-verb `jira-claim.md` / `jira-promote.md` / `jira-archive.md`                                                                                     |
 | `linear`   | a Linear issue under a team                                     | `commands/handlers/linear-common.md` + per-verb `linear-add.md` / `linear-list.md` / `linear-claim.md` / `linear-complete.md` / `linear-sweep-complete.md` / `linear-reconcile.md` |
 
 Set the handler with `/task-config` (which dispatches to `commands/handlers/<handler>-config.md`).
 
-> Different handlers support different downstream commands. `/list-tasks` and `/do-tasks` dispatch to whichever handler is configured, but a handler may legitimately decline a verb. `/do-tasks` runs the file path for `repo-pr`, the tracker path for `linear`, and the gh-issue path for `gh-issue`; `jira` has no execute path yet. The reconciler verbs — `/complete-task`, `/sweep-for-complete`, and `/reconcile-tasks` — are `linear`-only in v1. The handler files document what they do and don't support.
+> Different handlers support different downstream commands. `/list-tasks` and `/do-tasks` dispatch to whichever handler is configured, but a handler may legitimately decline a verb. `/do-tasks` runs the file path for `repo-pr`, the tracker path for `linear`, the gh-issue path for `gh-issue`, and the jira path for `jira` (single only — needs `jira.ready_status` set). Of the reconciler verbs, `/complete-task` supports all four handlers (`linear`, `gh-issue`, `repo-pr`, and `jira`); `/sweep-for-complete` remains `linear`-only in v1, and `/reconcile-tasks` supports `linear` and `gh-issue` against a different rule table each — `linear` repairs PR-versus-column drift, `gh-issue` audits the `labels.yml` invariants. The handler files document what they do and don't support.
 
 ### Promote (`/promote-tasks`)
 
@@ -63,20 +116,21 @@ Set the handler with `/task-config` (which dispatches to `commands/handlers/<han
 
 ### Execute (`/do-tasks`)
 
-`/do-tasks` is the **single execute verb** for turning ready tasks into PRs. It resolves the handler from `.task-config.yml` and dispatches like `/add-task` / `/list-tasks`, then runs the file path (`repo-pr`), the tracker path (`linear`), or the gh-issue path (`gh-issue`). `jira` has no execute path yet. See `commands/do-tasks.md`; the per-handler mechanics live in `commands/handlers/repo-pr-execute.md` (file path), `commands/handlers/linear-claim.md` (tracker path), and `commands/handlers/gh-issue-claim.md` (gh-issue path).
+`/do-tasks` is the **single execute verb** for turning ready tasks into PRs. It resolves the handler from `.task-config.yml` and dispatches like `/add-task` / `/list-tasks`, then runs the file path (`repo-pr`), the tracker path (`linear`), the gh-issue path (`gh-issue`), or the jira path (`jira`). See `commands/do-tasks.md`; the per-handler mechanics live in `commands/handlers/repo-pr-execute.md` (file path), `commands/handlers/linear-claim.md` (tracker path), `commands/handlers/gh-issue-claim.md` (gh-issue path), and `commands/handlers/jira-claim.md` (jira path).
 
 Flag matrix:
 
-|                      | What it does                                                                  |
-| -------------------- | ----------------------------------------------------------------------------- |
-| `/do-tasks`          | execute the single highest-ranked dependency-ready task                       |
-| `/do-tasks <slug>`   | execute a specific task (or, for `linear`, a specific issue id like `PRE-12`) |
-| `/do-tasks --all`    | batch: all dependency-ready tasks, bounded by `wip_limit` (file path only)    |
-| `/do-tasks -n N`     | batch capped at the top `N`, then bounded by `wip_limit` (file path only)     |
-| `--remote` (default) | dispatch each task to its own cloud VM (file path)                            |
-| `--local`            | run in the current session; caps the batch at 1 (file path)                   |
-| `--claim-only`       | run only the claim step (reserve the task); no execution, no PR. Batchable    |
-| `--no-claim`         | skip the claim step; execute a task this caller already claimed. Single only  |
+|                      | What it does                                                                                        |
+| -------------------- | --------------------------------------------------------------------------------------------------- |
+| `/do-tasks`          | execute the single highest-ranked dependency-ready task                                             |
+| `/do-tasks <slug>`   | execute a specific task (or, for `linear`, a specific issue id like `PRE-12`)                       |
+| `/do-tasks --all`    | batch: all dependency-ready tasks, bounded by `wip_limit` (file path and linear)                    |
+| `/do-tasks -n N`     | batch capped at the top `N`, then bounded by `wip_limit` (file path and linear)                     |
+| `--remote` (default) | dispatch each task to its own cloud VM (file path and linear)                                       |
+| `--local`            | run in the current session; caps the batch at 1 (file path and linear)                              |
+| `--claim-only`       | run only the claim step (reserve the task); no execution, no PR. Batchable                          |
+| `--no-claim`         | skip the claim step; execute a task this caller already claimed. Single only                        |
+| `--non-interactive`  | declare no human present: never prompt, and the WIP gate declines rather than offering its override |
 
 **Claim / execute split (`--claim-only`, `--no-claim`).** `/do-tasks` claims and executes atomically by default. These two **mutually exclusive** flags split that into composable steps: a `--claim-only` now plus a `--no-claim` later add up to one normal run. `--claim-only` runs only the claim half and stops (no file delete, no review PR). `--no-claim` skips claiming and executes a task the caller already claimed, guarding that it's already `in_progress` (`repo-pr`) or assigned in a `started` state (`linear`) — otherwise it stops, since executing an unclaimed task reopens the claim race. `--claim-only` is the one execute-family action safe to batch (bounded by the WIP gate); `--no-claim` is always single. Per-handler steps: `commands/do-tasks.md`.
 
@@ -87,7 +141,7 @@ Per-handler support:
 | Where it runs     | **Remote** cloud agents (one per task), or `--local`     | **Foreground** in the current session                                                             |
 | How many per call | Batch — one, several, or all dependency-ready (`--all`)  | At most one for execution; `--all` / `-n N --claim-only` may reserve several (pre-claim WIP gate) |
 | Selection         | Anything in `status: ready` whose dependencies are clear | Model-judged feasibility — "can I finish this in-session?"                                        |
-| WIP cap           | Batch dispatch bounded by `wip_limit`                    | Pre-claim gate: declines if in-flight work ≥ `wip_limit`                                          |
+| WIP cap           | Batch dispatch bounded by `wip_limit`                    | Pre-claim gate: declines if **this caller's** in-flight work ≥ `wip_limit`                        |
 
 **File path (`repo-pr`).** See `commands/handlers/repo-pr-execute.md`.
 
@@ -111,7 +165,9 @@ Renders a kanban view grouped by `status` column with priority, dependency block
 
 ### Diagnostics (`/doctor`)
 
-`/doctor` is the **explicit** "diagnose and fix my setup" entry point (see `commands/doctor.md`). It runs a set of checks — config validity (known `handler:`), handler prerequisites (gh auth / MCP reachability), legacy dirs, schema drift (reusing `scripts/validate.py`'s rules), and hygiene (expired tasks, orphan branches) — and reports `PASS`/`WARN`/`FAIL` per check. It is **read-only by default**; `/doctor --fix` applies the safe mechanical repairs (run the legacy migration, prune expired tasks, fill defaulted fields) and leaves judgment calls (unknown handler, failing auth) as reported warnings.
+`/doctor` is the **explicit** "diagnose and fix my setup" entry point (see `commands/doctor.md`). It runs a set of checks — config validity (known `handler:`), handler prerequisites (gh auth / MCP reachability), legacy dirs, schema drift (reusing `scripts/validate.py`'s rules), hygiene (expired tasks, orphan branches), and co-review allow-rule drift — and reports `PASS`/`WARN`/`FAIL` per check. It is **read-only by default**; `/doctor --fix` applies the safe mechanical repairs (run the legacy migration, prune expired tasks, fill defaulted fields) and leaves judgment calls (unknown handler, failing auth, allow-rule drift) as reported warnings.
+
+The allow-rule check is the one that isn't about the task loop; it is there because its failure is silent by construction, so nothing else would ever surface it. See `commands/doctor.md` → Check 7.
 
 It **complements, not replaces, migrate-on-contact** (below): that implicit preflight keeps stale setups working without anyone invoking `/doctor`, while `/doctor` surfaces the same drift — and more — in one place on demand. Both reference the single migration procedure in this file.
 
@@ -129,11 +185,13 @@ Every task carries a **size** — a Fibonacci story-point estimate of its scope:
 
 This single scale governs the promotion confidence check (below), the `/do-tasks` tracker-path feasibility gate (which maps to a tracker's native estimate — Linear's `estimate` is the same Fibonacci scale), and the granularity rule in `plan-with-docs`. They point here rather than restating a threshold.
 
+**Subsystem count is a split signal independent of raw line/file count.** A task can stay under the size-5 ceiling by lines/files while still crossing several unrelated subsystems — e.g. a sync/build script, a test suite, formatter/tooling config, and domain logic/routine definitions, in any combination. Treat **3+ unrelated subsystems** as a split trigger on its own: default to splitting along subsystem boundaries unless each component is individually small (size ≤2 on its own). `skills/assess-task/SKILL.md`'s `scope` dimension and `skills/break-down-task/SKILL.md`'s **When to use** triggers both apply this signal — see those skills for how each surfaces it.
+
 ## Ranking
 
 When a command picks the "next" task or orders a list, it ranks tasks by, in order:
 
-1. **`priority`** — `urgent` > `high` > `medium` > `low` (urgent is human-only, so the auto-execute path never selects it, but it still sorts first in `/list-tasks`).
+1. **`priority`** — `urgent` > `high` > `medium` > `low` (urgent both sorts first in `/list-tasks` and is auto-promotable/auto-executable like any other tier — see the Confidence check's urgent-eligibility decision).
 2. **Value/effort score** — `impact / size`, **descending** (`size` is effort, `impact` is value; both Fibonacci `1`/`2`/`3`/`5`). A task with no `impact` set, or a missing/invalid `size` (e.g. an unpromoted card that hasn't passed validation), has no score and ranks **last within its priority tier** — never dropped.
 3. **Age** — oldest `created` first.
 
@@ -184,7 +242,7 @@ Why this exists. What you saw. Written for someone who has never seen this code.
 | Field                      | Required | Description                                                                                                                                                                                                                                |
 | -------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `title`                    | yes      | Imperative description, < 80 chars                                                                                                                                                                                                         |
-| `priority`                 | yes      | `low` / `medium` / `high` / `urgent` (urgent = human-only)                                                                                                                                                                                 |
+| `priority`                 | yes      | `low` / `medium` / `high` / `urgent`                                                                                                                                                                                                       |
 | `assignee`                 | no       | Human or agent accountable for the task. Mirrors gh-issue/Linear assignee for handler parity                                                                                                                                               |
 | `size`                     | yes      | Fibonacci story points: `1` / `2` / `3` / `5`. Larger ⇒ split into sub-tasks. See **Task size**                                                                                                                                            |
 | `impact`                   | no       | Fibonacci value estimate: `1` / `2` / `3` / `5`, mirroring `size`. Used for value/effort ranking. See **Task size**                                                                                                                        |
@@ -255,16 +313,34 @@ The seven `status` values form a kanban flow. Cards move between columns via spe
 
 > **`needs_review` and `done` are PR-derived for the `repo-pr` handler.** The task file is deleted as part of readying the review PR, so it cannot carry these statuses in the file system. `/list-tasks` populates these two columns by querying `gh pr list --label task-loop --state open` (needs_review) and `--state merged` (recent done). An in-flight **claim** uses the separate `task-claim` label (and keeps its `in_progress` file), so it does **not** appear in `needs_review` — the claim PR only becomes a `task-loop` PR once the work is done and the file is deleted. For external handlers (Linear, Jira, GH Issues) the external tool carries the state directly.
 >
-> For the `linear` handler specifically, `done` is not entered by a native merge integration in v1. The issue reaches `done` when `/sweep-for-complete` or `/reconcile-tasks` detects that issue's own linked PR merged and then drives `/complete-task`. The `repo-pr` and `gh-issue` paths keep their native merge-derived completion; `jira` completion stays with Jira's GitHub integration or smart commits where configured (it has no execute path here yet).
+> For the `linear` handler specifically, `done` is not entered by a native merge integration in v1. The issue reaches `done` when `/sweep-for-complete` or `/reconcile-tasks` detects that issue's own linked PR merged and then drives `/complete-task`. The `repo-pr`, `gh-issue`, and `jira` paths keep their native merge-derived completion, with `/complete-task` as the explicit fallback when that auto-close doesn't fire — for `gh-issue` when `Closes #<n>` didn't close the issue, and for `jira` when its GitHub integration or smart commits aren't configured or didn't transition it. The jira **execute** path still deliberately never transitions an issue to a `Done`-category status itself (see `commands/handlers/jira-claim.md`); `/complete-task` → `commands/handlers/jira-complete.md` is the one place allowed to.
 
 ### Confidence check (used by `/promote-tasks`)
 
-- **HIGH** (→ `ready`): all required fields present; `size` is one of `1` / `2` / `3` / `5`; Acceptance Criteria section has ≥ 1 bullet; body contains no `Open Questions` / `TBD` section with content; `priority` ≠ `urgent`; and the promoter **judges** the described scope to plausibly fit within size `5` (~300 lines / ~5 files — see **Task size**), weighing the stated `size`, the `## Task` steps, and `related_files` breadth. This last gate is model judgment, not a keyword scan: a title merely containing "migrate"/"refactor" does not fail it, while one implying multi-file rework that exceeds size `5` does (reason: `scope exceeds size 5 — split into sub-tasks`).
+**Decision: `urgent` is auto-promotable.** `priority: urgent` is scored exactly
+like `high`/`medium`/`low` — there is no `priority ≠ urgent` HIGH condition.
+Reading `urgent` as "escalate to a human" made the highest-priority tier the
+_only_ one that could never be picked up autonomously, which is backwards: an
+equally valid reading is "do this fastest, by whatever capacity is available,
+including an agent." The one real tension — auto-promoting urgent makes it
+eligible for **unattended** auto-execution — is already covered by the
+existing per-task `human_approval_requested: true` HIGH check
+(`human_approval_not_requested`): a task that genuinely needs human eyes is
+held by that escape hatch regardless of priority, so no separate urgent-only
+gate is needed. **Rejected alternative:** keep urgent human-only (status quo)
+— rejected because it inverted the priority signal (highest priority ⇒ least
+autonomous), for no benefit `human_approval_requested` didn't already provide.
+
+**Backfill (before scoring).** The promoter fills in a missing `priority` and `size` before it scores, so a card that lands in `needs_refinement` still arrives with its two cheapest fields answered. `commands/handlers/task-fill.md` is the single definition of that backfill — the static `medium` default, the model-produced Fibonacci estimate, the over-ceiling rule, reason precedence, provenance, the held-card exception, and the fact that a backfilled value is **fully trusted downstream** (eligible for `auto_execute_max_size` headless auto-execution, and read by the `max_estimate` gates, exactly like a human-set one). It also carries the per-handler adapters: which of the two fields each tracker can hold, how a symbolic priority encodes, and how a value is written. **Change a backfill rule there, not here.**
+
+- **HIGH** (→ `ready`): all required fields present (after backfill); `size` is one of `1` / `2` / `3` / `5` (after backfill); Acceptance Criteria section has ≥ 1 bullet; body contains no `Open Questions` / `TBD` section with content; and the promoter **judges** the described scope to plausibly fit within size `5` (~300 lines / ~5 files — see **Task size**), weighing the stated `size`, the `## Task` steps, and `related_files` breadth. This last gate is model judgment, not a keyword scan: a title merely containing "migrate"/"refactor" does not fail it, while one implying multi-file rework that exceeds size `5` does (reason: `scope exceeds size 5 — split into sub-tasks`).
 - **LOW** (→ `needs_refinement`, set `human_approval_requested: true`): any of the above fails, or `human_approval_requested` is already true.
 
 The scope gate is judgment, not a deterministic rule — acceptable because `/promote-tasks` is not a blocking CI gate; a misjudged card waits in `needs_refinement` for a human rather than being lost. The other HIGH checks remain deterministic.
 
-Note: `is_blocked_by` is intentionally **not** checked here. `/do-tasks`'s runtime filter already skips dependency-blocked cards, and re-evaluating blockers would strand otherwise-ready cards in `needs_refinement` forever (the promoter only scans `status: new`).
+On the file path, `scripts/task-scan.py` computes `promote_gate` from the file **before** backfill and is not re-run after — so the promoter must re-evaluate `required_fields_present` and `size_valid` itself against the backfilled values rather than trusting `promote_gate.high` as-is; every other check in `promote_gate` is unaffected by backfill and stays trusted (see `commands/promote-tasks.md` step 2).
+
+A card with an unresolved `is_blocked_by` entry (target card present and not `done`) is **held** instead of scored: it is left in `status: new`, not promoted to `ready` and not demoted to `needs_refinement`, so it stays in the scanned pool and auto-promotes once the blocker clears. Demoting to `needs_refinement` is deliberately avoided — the promoter only scans `status: new`, so a demoted card would never be re-checked.
 
 ## Lifecycle
 

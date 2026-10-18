@@ -27,7 +27,7 @@ copied.
 | Claim                                           | the handler's own claim section (see step 2) — never a bespoke claim                            |
 | Route the worker                                | `select-coder` (`skills/select-coder/SKILL.md`), non-interactive                                |
 | Run the worker in isolation, integrate the diff | the worktree + integrate rules in `orchestrate-coders` (`skills/orchestrate-coders/SKILL.md`)   |
-| Base-freshness                                  | `scripts/preflight-freshness.sh`                                                                |
+| Base-freshness                                  | `"${CLAUDE_PLUGIN_ROOT}/scripts/preflight-freshness.sh"`                                        |
 | Exercise the feature                            | driving the changed behavior end-to-end, inline (see step 3)                                    |
 | Review the PR                                   | `/co-review --non-interactive` (`skills/co-review/SKILL.md`)                                    |
 | Open the PR + hand off                          | the handler's own PR-link + review-state sections (see steps 4, 7) — never a bespoke transition |
@@ -44,6 +44,12 @@ copied.
   judgment calls to (step 6). The `/auto-pilot` orchestrator passes its run's
   log; standalone, omit it and the calls ride out in the hand-off summary
   instead (this skill never writes run-state files itself).
+- `--run-state <RUN.md>` — the auto-pilot run's durable state. Optional and
+  used only by `/auto-pilot`; when absent, standalone behavior is unchanged.
+  When present, it enables the auto-pilot reserve gate below and this skill
+  reads any recorded less-claude profile fields only at their named lifecycle
+  steps. It does not otherwise define or rewrite run state; the reserve gate's
+  one atomic usage-baseline/delta update is the explicit exception.
 - `--handler <h>` — override the §0 config read; one of `repo-pr | linear |
   gh-issue | jira`. Omit to resolve from `.task-config.yml` as today. The
   `/auto-pilot` orchestrator passes its run's effective handler (a plan source
@@ -51,15 +57,62 @@ copied.
   mis-derived from a repo whose `.task-config.yml` default differs from the
   run's source.
 
+## Auto-pilot reserve gate
+
+Only when `--run-state <RUN.md>` is supplied. Obtain
+`"${CLAUDE_PLUGIN_ROOT}/scripts/claude-usage.sh" --session-status` **once** at
+the start of this delivery cycle and cache that cycle's successful `<percent>
+<reset_epoch>`; do not re-read it at later lifecycle boundaries. Then each
+Claude-consuming boundary is **one call**:
+
+```bash
+# a successful --session-status read
+"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" reserve-gate \
+  --run-md <RUN.md> --percent <percent> --reset-epoch <reset_epoch>
+# a failed (non-zero) one
+"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" reserve-gate \
+  --run-md <RUN.md> --read-failed
+```
+
+That subcommand owns **both** halves of the boundary — the atomic
+`usage_delta_baseline` / `usage_deltas` rewrite and the go/no-go — and its
+header comment in `scripts/spawn-orchestrator.sh` is the **one home** of the
+arithmetic: the floor, the 1.25 safety factor, the five-sample threshold, the
+epoch-match rule and the 20-entry cap. Do not restate or hand-walk any of it.
+Re-presenting the one cached reading at all four boundaries is deliberate: the
+subcommand records one interval per cycle, not one per call. It reads the
+persisted `reserve` as its fixed floor and never rewrites it, and the record
+measures only this Claude orchestrator — never Codex/Antigravity worker usage.
+
+Branch on the exit code and nothing else:
+
+| exit | stdout             | do                                                                                                                                                                                                                                                                                                                                                                                             |
+| ---- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | `verdict=proceed`  | cross the boundary.                                                                                                                                                                                                                                                                                                                                                                            |
+| `1`  | `verdict=pause`    | follow auto-pilot's [`run-budget.md`](../auto-pilot/references/run-budget.md) "Near-cap → pause + relaunch past reset" checkpoint-then-exit protocol — atomically write `paused_until = reset_epoch + grace` (with `pause_observed_at` and `pause_source`) in canonical ISO-8601 form — and stop this lifecycle before the boundary. An expected auto-pilot pause, **not a delivery failure**. |
+| `2`  | —                  | malformed input or an unrewritable `RUN.md`. Fail-closed: a delivery error, not a proceed.                                                                                                                                                                                                                                                                                                     |
+| `3`  | `verdict=fallback` | the usage read failed, so the gate did not decide. The baseline is cleared and nothing recorded; use auto-pilot's existing conservative time/dispatch proxy for this boundary, and if that crosses its threshold take the same near-cap path. Never read this as headroom or as a sample.                                                                                                      |
+
+Call it immediately before step 2 **Claim**, step 3 **Verify**, step 5
+**Co-review**, and — in step 6 **Iterate** — every **re-verify** and every
+repeated **co-review**. The usage query is predictive only; an actual 429
+remains authoritatively classified by auto-pilot's `supervisor-check` /
+`classify-exit` path.
+
 ## 0. Resolve the handler
 
 If `--handler <h>` was given, it is authoritative — skip the config read and
-map `<h>` directly (below). Otherwise read `dev_docs/tasks/.task-config.yml`
-(absent → `repo-pr`), exactly as `/do-tasks` does:
+map `<h>` directly (below). Otherwise resolve `handler:` from the **merged
+view** (absent → `repo-pr`), exactly as `/do-tasks` does (see
+`commands/task-config.md` → "Resolving the handler"):
 
 ```bash
-cat "$(git rev-parse --show-toplevel)/dev_docs/tasks/.task-config.yml" 2>/dev/null
+ROOT="$(git rev-parse --show-toplevel)"
+cat "$ROOT/dev_docs/tasks/.task-config.yml" 2>/dev/null       # committed config
+cat "$ROOT/dev_docs/tasks/.task-config.local.yml" 2>/dev/null # optional gitignored override
 ```
+
+Overlay the local override on the committed config — mappings merge recursively, local leaf values win — then resolve `handler:` from the merged view.
 
 - absent / `handler: repo-pr` → `commands/handlers/repo-pr-execute.md`
 - `handler: linear` → `commands/handlers/linear-claim.md` (+ `linear-common.md`)
@@ -70,6 +123,11 @@ cat "$(git rev-parse --show-toplevel)/dev_docs/tasks/.task-config.yml" 2>/dev/nu
 If a relative path doesn't resolve, find it with **Glob**
 (`**/commands/handlers/<name>.md`) and Read it.
 
+**This read is provisional.** Where `.task-config.yml` is tracked, step 1's fetch
+can move it — so resolve which handler file to read here, but do not carry any
+**value** out of this step into the claim. Step 1 owns that rule, including the
+case where the file is untracked and the fetch therefore cannot move it at all.
+
 ## 1. Fetch the base (before the claim)
 
 The claim step (below) acquires the work branch, so the base must be fresh
@@ -79,11 +137,90 @@ the local base ref **explicitly** (a bare `git fetch` may not move the local
 
 ```bash
 git fetch origin <base>:<base>          # default <base> = main
-scripts/preflight-freshness.sh --ref <base>
+"${CLAUDE_PLUGIN_ROOT}/scripts/preflight-freshness.sh" --ref <base>
 ```
+
+Git refuses to fetch into a branch that any worktree has checked out
+(`refusing to fetch into branch 'refs/heads/main' checked out at <path>`). When
+`<path>` is this checkout (`git rev-parse --show-toplevel`), update it with
+`git pull --ff-only origin <base>` instead, then run the same freshness check.
+When `<path>` is another worktree, a pull here would move this checkout's branch,
+not `<base>`: stop and report that `<base>` is checked out at `<path>` and must be
+updated there.
 
 On `stale`, stop and surface it (the work branch would start behind); on
 `unknown`, warn and proceed.
+
+**Then re-resolve the handler config from the fetched base — every value the claim
+uses is read _after_ this fetch, never before it.** Where
+`dev_docs/tasks/.task-config.yml` is tracked, the base that just moved can carry a
+different config, and step 2 is the first consumer of its handler-specific keys.
+
+**It refreshes the chosen handler's _keys_, not the handler.** `handler:` itself is
+not re-resolved mid-delivery: an explicit `--handler` stays authoritative per
+**Arguments**, and a handler flip inside this window would be incoherent anyway,
+since the `<slug>`/`<identifier>` this skill was invoked with is handler-specific —
+a `PRE-12` cannot be delivered by `gh-issue`. What the re-read is for is the keys
+under the already-chosen handler, `gh-issue.branch_prefix` above all.
+
+**Which source is correct has three cases, not two, so ask the helper:**
+
+```bash
+ROOT="$(git rev-parse --show-toplevel)"
+python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/task-config-resolve.py" committed --base <base> --root "$ROOT"
+cat "$ROOT/dev_docs/tasks/.task-config.local.yml" 2>/dev/null   # override — always untracked
+```
+
+`ROOT` is re-assigned here on purpose: steps run as separate tool calls with no
+shared shell state, so step 0's copy is not in scope, and the `2>/dev/null` on
+the override would hide the miss rather than report it. If `$CLAUDE_PLUGIN_ROOT`
+is unset, find the helper with **Glob** (`**/handlers/assets/task-config-resolve.py`).
+
+Overlay them as step 0 does. The helper prints the committed layer on stdout
+(possibly empty) and names the source it chose on stderr; **exit `4` means git
+could not answer, so stop rather than overlaying a guessed layer.** The three
+cases it exists to keep apart, any pair of which collapses back into #748:
+
+- **Tracked and present in `<base>`** — only the fetched revision sees the new
+  value, because a fetch updates a ref and leaves the index and working tree
+  alone.
+- **Untracked** (`gh-issue`, `jira`, `linear`, since `/task-config` puts
+  `dev_docs/tasks/` in the repo's local exclude for every handler but `repo-pr`)
+  — a fetch cannot move a file git does not track, so the working tree is both
+  the only and the correct source.
+- **Tracked but deleted in `<base>`** — the committed layer is **empty**. This is
+  the one that reads backwards: the old file is still checked out, so falling
+  back to the working tree succeeds and hands back a stale `branch_prefix`.
+
+Tracked-ness is decided by the index, never by presence in `<base>` — those are
+different questions, and only the first separates the second case from the third.
+The override stays a plain `cat`: it is gitignored by construction, so no
+revision holds it and a fetch can never move it.
+
+This is a script rather than three lines of shell here for the reason the
+cross-prefix probe is: as markdown shell it is unlinted by the gate, and both of
+this step's earlier shell forms shipped a defect that a reviewer rather than the
+gate had to catch.
+
+The key that makes this load-bearing rather than tidy is `gh-issue.branch_prefix`:
+it is the claim **lock ref**, not just a branch name. A prefix read before the
+fetch and used after it locks `task-<n>` where the fetched config says
+`<prefix>task-<n>` — so this session and a concurrent one each acquire a ref the
+other cannot see, and both conclude they won the claim. The `<branch>`-derived
+pre-flight probe cannot catch it: it probes the mis-derived ref and reports the
+issue free. Only the prefix-agnostic probe in `gh-issue-claim.md` → pre-flight
+can, and only once the other session's ref already exists; `/doctor` Check 1c
+flags the inverse case. Recovery is not free either: renaming the work branch to
+the correct ref **closes** the open PR, because GitHub retargets a pull request
+whose _base_ is renamed, not whose _head_ is — so a replacement PR has to be
+opened. See `gh-issue-claim.md` → "Branch name", and #748 for the delivery where
+both the split and that recovery cost were measured.
+
+**Known gap:** the claim's step 2 fetches again and cuts the ref at
+`origin/<base>`, so the prefix and the `base_sha` can come from different
+revisions. The cross-prefix probe contains it — the later session stops and
+reports rather than double-claiming — and closing it properly means pinning one
+SHA through the `claim-lock.md` contract the jira handler shares (#818).
 
 ## 2. Claim (the handler's protocol, verbatim)
 
@@ -98,8 +235,11 @@ version has hard-won race handling that must not be forked:
 - **linear** → "Pre-flight: is work already in flight?" then "Claim the issue" in
   `linear-claim.md` (the token-comment election with the live-window + state-backed
   eligibility filters).
-- **gh-issue** / **jira** → "Claim the issue" in the respective handler file
-  (read-then-write assign + label/transition).
+- **gh-issue** / **jira** → "Claim the issue" in the respective handler file (acquire
+  the atomic `task/<KEY>` ref lock per `commands/handlers/claim-lock.md`, then write the
+  assignee + label/transition board marker). The lock is the ref **creation**, not the
+  assignee; a 422 is a lost race, and a create blocked by a branch-pinned environment
+  degrades to the comment-token election with an explicit note.
 
 **`--base`:** when the handler's claim acquires the work branch, base it on
 `--base` (default `main`) instead of the handler's default base — step 1 has
@@ -107,7 +247,14 @@ already fetched it, so the branch starts from its current tip. Everything else i
 the claim section is unchanged.
 
 If the claim reports the task already claimed / in flight / blocked, **stop** and
-report it — never double-claim.
+report it — never double-claim. Report it as a **claim refusal**, as
+`claim refused: <the handler's reason>`: that line is what `/auto-pilot` keys
+off to record the task `skipped` rather than leave it `pending` for reselection
+(`skills/auto-pilot/references/run-state.md` "Task lifecycle phases"). A refusal
+holds no claim, so there is nothing to bail. A WIP-limit decline
+(`WIP limit <n> reached …`) is **not** a claim refusal — step 2 never runs a
+handler's pre-claim WIP gate, and the cap is not about this task — so never
+report one as `claim refused:`.
 
 ## 3. Do (implement + verify)
 
@@ -118,14 +265,34 @@ With the base fetched (step 1), the claim held, and the work branch checked out:
    slug/id, which carries no signal) to `select-coder --non-interactive` (via the
    `Skill` tool) to pick the coder backend/model. The non-interactive path never
    prompts and reads the resolved `.coders.yml` (`/auto-pilot`'s launch phase
-   populates it). Route mechanical work cheap, judgment-heavy work strong.
+   populates it). Route mechanical work cheap, judgment-heavy work strong. If
+   the same `--run-state` says `run_profile: less-claude`, invoke
+   `select-coder --cao-fleet --non-interactive`, then map its `codex:*` result
+   to the recorded `cao-codex` or its `agy:*` result to `cao-agy`; set
+   `orchestrate-coders`' `default_coder` to that named entry for this dispatch.
+   Do not substitute a model placeholder: the named CAO command pins it. A
+   result outside the recorded mapping is a fail-closed delivery error.
 2. **Dispatch in isolation, then integrate.** Dispatch the implementation to the
    chosen coder **in its own git worktree on its own branch**, per the
    `orchestrate-coders` dispatch + integrate rules — the worker never edits this
    session's checkout. The orchestrating session then **owns the task branch**:
    read the worker's diff, integrate it onto the task branch, and **clean up the
    worker worktree**.
-3. **Verify.** Run the project's named check command — the caller/config names it;
+3. **Diff judgment, then verify.** For an auto-pilot invocation, run the one
+   `reserve-gate` call immediately before this diff-judgment / verify
+   boundary. After
+   integration and before the shell check, inspect the worker diff against the
+   task packet and evidence. By default the
+   orchestrator keeps its existing judgment. If the same `--run-state` says
+   `diff_judgment_tier: sonnet`, the orchestrator **must spawn the judgment
+   subagent with `model: sonnet`** and give it only the packet, changed-file
+   summary/diff, and this bounded checklist: task scope satisfied; no unrelated
+   changes; stated acceptance criteria addressed; verification plan is adequate.
+   Require exactly `accept`, `iterate`, or `escalate` plus short evidence.
+   `accept` proceeds to verify; `iterate` returns bounded feedback to the
+   worker; only `escalate` / park decisions return to the Opus orchestrator.
+   This is the model-override hook; never merely record the tier without
+   spawning the Sonnet judgment subagent. Run the project's named check command — the caller/config names it;
    else detect it (a `just check` recipe, an executable `scripts/check.sh` /
    `scripts/check.py`, or `dli check` — locate the actual file before running it,
    don't shell-glob `scripts/check.*`) — **and exercise the feature itself**:
@@ -138,7 +305,7 @@ With the base fetched (step 1), the claim held, and the work branch checked out:
    broker.** A `sandbox-exec`-jailed orchestrator can't run `bash scripts/check.sh`
    directly — the harnesses execve-deny (`bad interpreter`, exit 126) and children
    inherit the jail — so when the run installed a verify broker
-   (`scripts/spawn-orchestrator.sh write-verify-broker`,
+   (`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" write-verify-broker`,
    [`launch-runtime.md`](../auto-pilot/references/launch-runtime.md) §5), verify is:
    drop a request (`verify-request --worktree <task worktree> --cmd-hash <hash of
    the pinned verify_command>`), then block on `verify-await` and gate on the
@@ -172,7 +339,9 @@ to **draft** — the safe choice.
   (the same `ADMIN`/`MAINTAIN`/`WRITE` gate); otherwise leave it a draft and hand
   off in that state — never fail trying to ready a PR you lack permission to. On
   **linear/gh-issue/jira**, open the PR with the handler's own title/link
-  conventions (e.g. `[PRE-12]` + the linked issue), draft per the same gate.
+  conventions (e.g. `fix(scope): … [PRE-12]` + the linked issue), draft per the
+  same gate. The title grammar is the `agent-guidance` plugin's
+  `portable.md` (`Git:` bullet), not this file.
 - **PR body:** the evidence captured in step 3 (check output, screenshots,
   artifact paths) **plus how-to-evaluate steps** for any human-judgment item —
   exactly how to judge it and what a "no" would invalidate.
@@ -182,7 +351,11 @@ to **draft** — the safe choice.
 
 ## 5. Co-review
 
-Run `/co-review --non-interactive` on the PR (via the `Skill` tool). Its
+For an auto-pilot invocation, run the one `reserve-gate` call immediately
+before this co-review boundary. Read `co_review_mode` from the same `--run-state` at this
+step. `off` means **skip `/co-review` entirely** and record `co-review skipped (profile)` in the hand-off summary. `cheap-single` means run `/co-review
+--non-interactive --reviewer-set cheap-single`; `default` (or no `--run-state`)
+runs `/co-review --non-interactive` exactly as before. Its
 never-prompt guarantee and bounded per-class timeouts are what make it safe in an
 unattended run. **Record which reviewer classes ran / timed-out / skipped** — that
 line goes into the hand-off summary (step 7). If `/co-review` can't run **at all**
@@ -190,17 +363,48 @@ line goes into the hand-off summary (step 7). If `/co-review` can't run **at all
 verified; note `co-review unavailable` and proceed to hand-off (review is
 advisory).
 
+This plugin grants co-review's own scripts when this delivery was started as the
+`/deliver-task` command, and `bypassPermissions` skips the check. Reached through
+the Skill tool in `default` mode, with no user allow rule or sandbox auto-allow
+covering them, each one is denied silently under `claude -p` (measured) and is
+expected to prompt interactively (not measured). Why, and the measurement:
+[`../co-review/references/permissions.md`](../co-review/references/permissions.md#plugin-scripts).
+
 ## 6. Iterate (bounded)
 
 Each iteration is a full round: apply co-review's **high-confidence** fixes,
-re-verify (step 3's check), re-push, then **re-run `/co-review --non-interactive`
-on the updated PR** to gather fresh findings. **Judgment calls** (medium findings)
+then, for an auto-pilot invocation, run the one `reserve-gate` call
+immediately before the **re-verify** (step 3's check), re-push, and run it
+again immediately before every repeated **co-review** when re-running `/co-review --non-interactive`
+on the updated PR to gather fresh findings. **Judgment calls** (medium findings)
 are never applied silently:
 
 - append each to the **caller-provided** `--questions <path>` decision log when
   one is passed (the `/auto-pilot` orchestrator's `QUESTIONS.md`);
 - **standalone (no `--questions`)**, carry them in the hand-off summary instead —
   this skill never writes run-state files itself.
+
+**Co-review's Next round recommendation rides the same path.** After the last
+round, append it to `--questions <path>` as one more entry — the question is
+whether to run another co-review round on this PR, the options are
+`another round` | `no further round`, the call is deferred to the human, and
+the reasoning is co-review's stated reason verbatim. The hand-off summary
+(step 7) is never written to run state, and `REPORT.md` is rebuilt from
+`RUN.md` and `QUESTIONS.md` alone, so this entry is what puts the
+recommendation in front of the morning reader; without it the recommendation
+exists only in transient command output. Standalone, it rides in the hand-off
+summary like the judgment calls above.
+
+**Verification tests come back with the findings.** Co-review's step 9 hands
+over a list of real-machine checks, each naming the environment it needs and
+who runs it. Run the items marked as yours once, against the final branch tip
+— after the last round that changes it, or straight after step 5 when no round
+does — and record what each produced; leave the user's items unrun, since you
+are not the human they need.
+Then refresh the PR body's **how-to-evaluate steps** slot (step 4) with the
+results and the still-unrun items: that body was written before this list
+existed, so it does not yet describe them. Unrun items ride out in the hand-off
+summary (step 7).
 
 **Cross-cutting or round-bound deferrals also get filed.** When `--questions`
 is passed (running under `/auto-pilot`) and a deferred finding is
@@ -229,8 +433,22 @@ remaining findings and proceed — don't loop.
   **hard rule** (the execute path never moves an issue to a completed/canceled
   state). This is the skill's terminal success state.
 - **Hand-off summary** (structured — for a human, or the `/auto-pilot` morning
-  report): task id, PR URL, reviewer classes that ran, outstanding findings (the
-  deferred judgment calls), and evidence paths.
+  report). It ends on what the human must act on, because the end is what a
+  terminal leaves on screen. In order:
+  1. **Verdict line** — task id, PR URL, the tracker state set (if any), and how many
+     items wait in the closing section (or "nothing needs you").
+  2. **What changed** — a few lines, by behavior, not by file.
+  3. **Review and evidence** — reviewer classes that ran, what the rounds
+     applied, evidence paths.
+  4. **Process notes** — deviations from the normal flow, worktree left in
+     place. Omit when empty.
+  5. **For you**, always last, numbered, highest impact first: outstanding
+     findings (the deferred judgment calls), verification tests left unrun,
+     an acceptance criterion not met, and co-review's **Next round**
+     recommendation from the last round (its verdict and reason, verbatim — the
+     human decides whether to run it). Each item carries its options and what
+     each costs, so the human can answer without scrolling up. Omit the section
+     when it is empty.
 - **Freeze rule:** once a task hands off, its PR is **frozen for the rest of a
   run** — late-arriving findings (e.g. a bot review that lands after co-review's
   timeout) are **logged, never applied**. This keeps a stacked child's base

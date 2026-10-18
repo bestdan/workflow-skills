@@ -1,0 +1,445 @@
+# Auth key access
+
+How a credential reference becomes a credential in this plugin. Follow this for **any**
+secret a skill, command, or asset script needs — the Linear API key today, a Jira token
+or a GitHub token tomorrow.
+
+The design rationale, the alternatives that were rejected, and why the rules are shaped
+this way live in [`dev_docs/designs/2026-08-01-auth-key-resolution.md`](designs/2026-08-01-auth-key-resolution.md).
+This document is the contract itself.
+
+## The three names
+
+For a credential belonging to service `<SERVICE>`:
+
+| Layer    | Environment                        | Config                            | Holds                              |
+| -------- | ---------------------------------- | --------------------------------- | ---------------------------------- |
+| Secret   | `$<SERVICE>_<CREDENTIAL>`          | local file only                   | the raw secret value               |
+| Pointer  | `$<SERVICE>_<CREDENTIAL>_REF`      | `<service>.<credential>_ref`      | an opaque `<scheme>://…` reference |
+| Resolver | `$<SERVICE>_<CREDENTIAL>_RESOLVER` | `<service>.<credential>_resolver` | an identifier from the allow-list  |
+
+For the Linear key that is `$LINEAR_API_KEY`, `$LINEAR_API_KEY_REF` /
+`linear.api_key_ref`, and `$LINEAR_API_KEY_RESOLVER` / `linear.api_key_resolver`.
+
+**A raw secret never goes in the committed config or in a tracked file.** It is accepted
+in the **gitignored `.task-config.local.yml`** for operators who would rather not run a
+secret manager — see [Plaintext keys](#plaintext-keys) for what that costs — and refused
+in the committed `.task-config.yml`.
+
+A pointer is not a secret, but it is still sensitive — it advertises where a full-account
+token lives — so its canonical home is that same gitignored file, never the committed
+one. See [What may appear in a committed file](#what-may-appear-in-a-committed-file) for
+what to write in docs and tests instead, and what to do if a real one lands in the tree.
+
+## Two ladders
+
+The pointer and the resolver are resolved **independently**. A pointer says _which
+secret_ and belongs to the checkout or the launching environment; a resolver says _how
+this machine unlocks secrets_ and belongs to the machine. Pairing them would mean an
+inherited `$..._REF` silently suppressed the operator's configured resolver.
+
+**Secret / pointer** — first hit wins:
+
+0. `<service>.<credential>` from `.task-config.local.yml` — a raw secret in the local
+   config, bridged by the agent into `$<NAME>`. Local file only; refused in the committed
+   config. See [Plaintext keys](#plaintext-keys).
+1. `$<NAME>` — the raw secret. Used directly; no resolver runs.
+2. `$<NAME>_REF` — resolve it.
+3. `<service>.<credential>_ref` from the **merged** config, bridged by the agent onto the
+   same Bash invocation that runs the script.
+4. Nothing → unavailable (`unconfigured`).
+
+Rung 0 is numbered from zero because it is not something the helper sees: like rung 3, it
+is a config value the **agent** bridges into the environment. An inherited `$<NAME>`
+(rung 1) is what the helper actually reads in both cases.
+
+A consumer **may** also read an [operator key file](#three-shapes-and-which-to-pick)
+between rungs 1 and 2 — the same raw secret as rung 0, kept outside every checkout and
+read directly rather than bridged. It is unnumbered because it is optional and not every
+consumer has it: `_secret_resolve.py` does not, so the handler assets never see it, while
+the Class A instruments under `dev_docs/research/` do, which is what lets a human run one
+by hand. A consumer that implements it says so; one that does not is still conformant.
+
+**Resolver** — first hit wins:
+
+1. `$<NAME>_RESOLVER`.
+2. `<service>.<credential>_resolver` from `.task-config.local.yml` — see
+   [Provenance](#provenance).
+3. Default: `op`.
+
+A **failed** resolve never falls through to the next rung. Falling through would make a
+misconfigured pointer look identical to a host that simply has no key — the exact bug
+this contract exists to prevent.
+
+## The resolver allow-list
+
+| Identifier     | argv invoked          |
+| -------------- | --------------------- |
+| `op` (default) | `["op", "read", ref]` |
+| `opx`          | `["opx", ref]`        |
+
+The config names an **identifier**, never a command line. The argv is built in
+`commands/handlers/assets/_secret_resolve.py`. An identifier not on the list fails with
+`unknown-resolver` — it never falls back to `op`.
+
+**Adding a backend.** Add an entry to the allow-list in `_secret_resolve.py`, with a
+test. It must take the reference as its **final** argument, write exactly one secret
+value to stdout, and exit non-zero when it cannot. Until a backend is on the list, its
+users inject the resolved value into the environment instead (ladder rung 1) — for
+example `op run`, `opx run --env NAME=op://… -- CMD`, or a plain export. **Arbitrary
+command execution never becomes a config feature.**
+
+## Reference grammar
+
+A reference must start with a scheme — `^[a-z][a-z0-9+.-]*://` at position 0 — with no
+leading or trailing whitespace and no newline.
+
+Whitespace **inside** a reference is legal and must stay legal: 1Password item titles
+routinely contain spaces, so `op://Private/Linear API/credential` — note the space in
+the item title — is valid. What the rule rejects is a value
+that begins with something other than a scheme — notably a command-prefixed one like
+`opx op://Private/x/y`, which is a `malformed-ref` failure with its own distinct message
+rather than a generic "no key" error.
+
+## Provenance
+
+`*_resolver` is honored **only** from the environment or the gitignored
+`.task-config.local.yml`. Never from the committed `.task-config.yml`.
+
+A resolver key found in the committed config is a **loud error** — report it, do not
+bridge it. Silently ignoring it recreates the failure mode this contract exists to kill.
+
+Enforcement lives in the **bridging agent**, not in the helper: the helper receives
+environment variables and cannot see where they came from. So the agent must read
+`*_resolver` from the raw `.task-config.local.yml` leaf in isolation — a deliberate
+exception to the repo-wide "always read the merged view" rule, and the only key that has
+one.
+
+What this buys, precisely: it stops an **untrusted checkout** from naming the program
+that runs on your machine. It does not defend against a hostile environment — anyone who
+can set `$..._RESOLVER` can already run commands. And with `op` as the default, a
+committed pointer is **not** inert on a machine with a live `op` session; it resolves.
+The guarantee is that the committed config cannot choose the _program_.
+
+## Plaintext keys
+
+`<service>.<credential>` — a raw secret in `.task-config.local.yml` — is **supported**,
+for operators who don't want to run a secret manager for a single key. It takes
+precedence over the pointer: nothing needs resolving, so no resolver runs and no approval
+is raised.
+
+Two rules, both enforced the same way as the resolver's provenance rule:
+
+- **Local file only.** In the committed `.task-config.yml` a raw secret is refused with a
+  loud error, never merged and never used. The agent must read this key from the raw
+  `.task-config.local.yml` leaf in isolation, not from the merged view.
+- **Never echoed in prose.** It is a secret, so it never appears in a diagnostic, a log
+  line, or a summary — the same rule that governs a resolved value.
+
+There is a third consequence, and it is the one most easily missed: bridging a config
+value into the environment means the agent writes it into the **command it runs**, so a
+plaintext key lands in the session transcript and is briefly visible in `ps`. A pointer
+does not have that problem — only the reference is bridged, and the resolver hands the
+secret to the process directly. This is inherent to the **bridge**, not a defect in it,
+and it is part of what you accept.
+
+It follows from the bridge rather than from plaintext as such, which is worth stating
+because the two get conflated. A script that reads the raw `.task-config.local.yml` leaf
+**itself**, in-process, pays the repo-tree cost below and not this one: nothing is
+bridged, so nothing reaches a command line. `_secret_resolve.py` never does this — it
+reads only the environment, which is why rung 0 needs the agent at all — but a Class A
+script outside `commands/handlers/assets/` may, and one does: the instrument in
+[`research/2026-09-17-jev-applications/`](research/2026-09-17-jev-applications/README.md#the-secret-plumbing-already-exists-and-the-name-already-matches),
+which defines its own `resolve_key` and reads the config leaf in-process.
+
+The trade, stated plainly so the choice is informed. `.task-config.local.yml` is ignored
+robustly: `.gitignore` ignores `dev_docs/tasks/*` wholesale and negates only the committed
+config, so this is not one forgotten ignore line away from being committed, and
+`git stash -u` does not sweep ignored files — though `git add -f` would still stage it,
+so this is exclusion from ordinary staging rather than an absolute. What you accept
+instead is twofold: a plaintext full-account token **inside the repo tree**, where every
+agent session, editor index, directory-wide grep, and backup of that folder can read it —
+and, wherever the agent bridges it into the command it runs, the token also appears in the
+**session transcript**.
+
+### Three shapes, and which to pick
+
+All three are legitimate and the plugin nags about none of them. They differ only in what
+they expose.
+
+| Shape                                                 | Rung    | Exposure you accept                                                             |
+| ----------------------------------------------------- | ------- | ------------------------------------------------------------------------------- |
+| Raw value in `.task-config.local.yml`                 | 0       | In the repo tree; in the transcript wherever the agent bridges it               |
+| `export $<NAME>` from the shell profile               | 1       | Every process of every login session, for as long as the line is in the profile |
+| A mode-600 **operator key file** outside any checkout | after 1 | Whatever reads the file, at the moment it reads it                              |
+
+The third is the default worth reaching for, and the one the other two are usually chosen
+instead of by accident. It lives at `~/.config/<tool>/<name>`, mode 600 under a 700
+directory, and is reached two ways.
+
+**A consumer reads it directly.** This is the shape to prefer, because there is nothing to
+remember and nothing to type:
+
+```python
+OPERATOR_KEY_FILE = Path.home() / ".config" / "workflow-skills" / "typesafe_api_key"
+```
+
+placed **after** `$<NAME>` in the consumer's ladder — so a one-off prefix can still
+override it — and **before** any pointer, because a raw secret beats a reference, the same
+precedence rung 0 has over rung 3. `_secret_resolve.py` does **not** do this: it reads
+only the environment, and its callers get config values bridged by the agent. The Class A
+instruments under `dev_docs/research/` do, which is what lets a human run one by hand.
+
+**Or bridge it on the command line**, for a consumer that reads only `$<NAME>`:
+
+```bash
+TYPESAFE_API_KEY="$(cat ~/.config/<tool>/<name>)" <command>
+```
+
+Use `$(cat …)`, not bash's `$(<…)` shorthand: it is not POSIX, and where `/bin/sh` is
+`dash` it yields an empty value and **exits 0**. It fails silently, in exactly the place
+this sends a reader who wants the shape unattended.
+
+What it buys, and what it does not:
+
+- **It is not in a checkout.** That closes the repo-tree vectors and only those — a
+  checkout-wide grep, an editor's project index, a backup of the repo folder. A home-wide
+  grep or a backup of `$HOME` still reaches it; `~/.config` is not a hiding place. Against
+  other users, mode 600 under a 700 directory is what narrows it. Against root and your
+  own processes, nothing here does.
+- **It is not exported.** A consumer that reads the file holds the value in its own
+  process and nowhere else; a command-prefix assignment scopes it to the invoked command
+  and its descendants, for that one invocation. The difference from a profile `export` is
+  scope and lifetime, not a count of processes.
+- **It needs no new rung, and no new name.** It is the same raw secret rung 0 holds, in a
+  different place. A consumer that only reads `$<NAME>` still works via the prefix.
+
+The cost is **one branch in each consumer that wants to read it directly** — about five
+lines, and none at all for a consumer reached through the prefix. An earlier draft of this
+section priced the cost as "you must type the prefix" and argued the friction was load-
+bearing. It is not: an operator who will not type it reaches for a profile `export`
+instead, which is the broadest shape here. Making the file directly readable removes the
+friction without widening anything, because the value's lifetime is still one process.
+
+A wrapper script that sets the variable and runs the command is also fine — its assignment
+dies with the command it ran. What it must not become is an `export` in a shell profile,
+which lives in every login session for as long as the line is there.
+
+Unattended, the two split: **cron** hands each entry to a shell, so a crontab line can
+carry the prefix directly — mind `%`, which cron reads as a newline, and the `dash` point
+above. **launchd** execs `ProgramArguments` with no shell at all, so it needs a wrapper or
+an explicit `sh -c`. Where neither is wanted, a service-account token is the answer — see
+[Unattended and cloud](#unattended-and-cloud).
+
+This narrows _location_, not _principals_. Where an audit trail, independent revocation,
+or rotation without touching disk matters, the answer is still a pointer plus a resolver
+(rungs 2–3).
+
+### They do not collide, but they do shadow
+
+Nothing stops you configuring more than one shape, and nothing warns you when you do.
+Across **distinct rungs** the ladder's precedence decides, first hit wins, and a lower
+shape is never wrong — only **inert**.
+
+Two shapes that set the **same variable** are not ranked by the ladder at all. A profile
+`export` and a command-prefix assignment are both `$<NAME>`, so the shell decides: the
+per-command assignment wins for that one invocation, and the export answers every
+invocation made without it. Neither is inert — each is live in different runs. That is
+why adopting the prefix does not retire the export, and why "it worked when I tested it"
+does not establish which one answered.
+
+The hazard in both cases is silence. Adopt a new shape without removing the ones above it
+and the old one keeps answering while you believe the new one is in effect. So:
+
+- **Remove the higher rungs when you adopt a lower one.** Moving from a raw config value
+  to either rung-1 shape means deleting that line in the same change, or nothing has
+  changed at all.
+- **Remove it everywhere the ladder looks**, which is more than one file. A consumer that
+  resolves a config path from `git rev-parse --git-common-dir` scans **both** the checkout
+  it is standing in and the main checkout, in that order — so from a linked worktree the
+  worktree's own copy is read first and shadows the main one, and a raw value in either
+  beats rung 1. Delete the line from both.
+- **Verify by running the consumer with the new shape absent.** What a clean removal looks
+  like depends on what else is configured:
+
+  | Configuration                 | A clean removal looks like                                                       |
+  | ----------------------------- | -------------------------------------------------------------------------------- |
+  | No pointer configured         | the ladder reaches its own "no key" error                                        |
+  | An `op://` pointer configured | resolution **through the pointer** — an approval, or a resolver-specific failure |
+
+  A key returned **without invoking the configured resolver** means a raw value survives
+  in a scanned config — the resolver, not `op` specifically, since `$<NAME>_RESOLVER` may
+  select `opx`. This check errs toward a false alarm rather than a false clear: a raw
+  value returns before the environment is read, so the consumer cannot report "no key"
+  while one survives anywhere the ladder looks. Don't disable the other rungs to isolate
+  rung 0 — the step is easy to forget to undo.
+
+## What may appear in a committed file
+
+Three kinds of secret configuration, and none of them may be committed:
+
+|                                  | Where it belongs                             | Enforced by                                                         |
+| -------------------------------- | -------------------------------------------- | ------------------------------------------------------------------- |
+| A raw secret                     | `.task-config.local.yml`, or `$<NAME>`       | [Plaintext keys](#plaintext-keys) — refused in the committed config |
+| A `*_resolver` identifier        | `.task-config.local.yml`, or the environment | [Provenance](#provenance) — a loud error in the committed config    |
+| **A personal `op://` reference** | `.task-config.local.yml`                     | **nothing — prose only**                                            |
+
+The third is the one that gets committed, because it looks harmless. It is a
+pointer, not a key: reading it requires an authorized `op` session for the
+account that owns the vault. That is exactly why it slips through review.
+
+Commit it anyway and you publish the **location** of a full-account bearer
+token — which vault, which item, which field. A credential can be rotated; the
+fact that a particular named item in a particular named vault is worth
+attacking cannot be. That is what a targeted phishing or social-engineering
+attempt wants, and `commands/handlers/linear-config.md:78` already forbids
+advertising it. Note also that a committed pointer is **not inert**: as
+[Provenance](#provenance) says, on any machine with a live `op` session it
+resolves.
+
+This applies to prose and test fixtures, not only to config. A reference in a
+design doc or an assertion is as public as one in a YAML file.
+
+**Use a non-resolving form in anything committed.** Three are sanctioned:
+
+| Form                                      | Use                               |
+| ----------------------------------------- | --------------------------------- |
+| `op://Private/Linear API/credential`      | the canonical example in prose    |
+| `op://TestVault/Item With Spaces/<field>` | tests and fixtures                |
+| `op://<vault>/<item>/<field>`             | when the shape alone is the point |
+
+The first two keep a **space in the item title** on purpose. That space is the
+property [Reference grammar](#reference-grammar) exists to protect — whitespace
+inside a reference is legal and must stay legal — so a placeholder that drops it
+stops exercising the thing the passage is about. Reach for the bracketed form
+only where no resolution behavior is being demonstrated.
+
+## If a reference reaches the tree anyway
+
+**Rotate the referent. Do not reach for a history rewrite.**
+
+Removing it at `HEAD` is worth doing and is not the fix. The reference stays in
+history, in every clone taken since it landed, and in every fork — none of which
+a rewrite can reach.
+
+Rotation can. **Revoke the key and issue a new one**, then update the reference
+in `.task-config.local.yml`. Every copy of the old pointer now names a dead
+credential: the disclosure is not hidden, it is made worthless.
+
+Revocation is the whole mitigation. Renaming a segment of the reference is
+**not** a substitute and is easy to overrate — resolution needs all three
+segments to match, so renaming any one of them breaks the disclosed reference
+equally, and none of it reaches someone who already read the value while it was
+live. Renaming the **item** buys a little residual hygiene, since it is the
+segment that identifies what the item holds; renaming the field buys almost
+none. Neither is worth doing in place of revoking, and after revoking neither is
+worth much at all.
+
+A rewrite, by contrast, renumbers every commit since the reference landed,
+breaks existing clones and forks, invalidates any commit hash cited in
+`dev_docs/`, and still leaves the blob fetchable by SHA until GitHub purges
+unreachable objects. It buys partial removal at high cost, and buys nothing once
+the pointer is already false.
+
+The general rule: **for a leaked pointer or credential, invalidate the referent.**
+Rewriting history is at best cleanup afterwards, never the remedy.
+
+### Searching for one correctly
+
+A search for the whole reference **under-counts**, and will tell you the tree is
+clean when it is not. Two shapes escape it:
+
+- A reference **assembled at runtime** — `f"op://{vault}/{item}/{secret}"` in a
+  test — contains no literal to match.
+- A **truncated** occurrence that keeps the vault/item pair and elides the
+  field, which is common in comments and shell fixtures.
+
+Search for the **vault/item prefix**, not the full reference, and read every hit
+rather than counting them. An audit that missed both shapes once reported a
+third of the real number.
+
+## Failure semantics
+
+Unavailable means the helper raises `SecretUnavailable`; the script exits non-zero with
+an already-redacted message. **What that means is the caller's decision**, and callers
+differ:
+
+| Consumer                                                   | On unavailable                                          |
+| ---------------------------------------------------------- | ------------------------------------------------------- |
+| `linear-ready.py`, `linear-scan.py`, `linear-relations.py` | floor to the MCP path; non-fatal, reported once per run |
+| `linear-archive.py`, `linear-false-closures.py`            | fatal — these have no MCP floor, so the command stops   |
+
+If you add a consumer, say which of these it is in its own documentation. Do not assume
+"floors" is the default.
+
+## Timeouts
+
+The resolver call is bounded at **120 seconds** — one value for all resolvers. The bound
+has to clear a **human**: `op read` blocks on desktop-app approval and `opx` deliberately
+blocks on a native approval dialog, so a few-second timeout would kill a resolve
+mid-approval. A timeout is unavailability, category `timeout`.
+
+## Diagnostics
+
+- **Never** print a full reference. Reduce it: `op://<vault>/…` for `op://` refs, the
+  phrase "configured secret reference" for anything else.
+- **Never** pass a resolver's stderr through verbatim — it can contain the pointer or
+  worse.
+- Report the **reason category** instead, which is what makes a failure actionable.
+  `unconfigured` is the one category a caller should stay **quiet** about: it means the
+  host named no credential at all, which is a legitimate configuration, not a fault.
+  Every other category means something was configured and did not work, and deserves a
+  line.
+
+| Category           | Means                                      | Usual fix                                     |
+| ------------------ | ------------------------------------------ | --------------------------------------------- |
+| `unconfigured`     | nothing named a secret or a reference      | none — this host is deliberately keyless      |
+| `no-session`       | no authorized 1Password session            | run `op signin` in your own terminal          |
+| `not-found`        | the vault/item/field doesn't exist         | fix the reference                             |
+| `denied`           | the resolver refused                       | approve the prompt, or check vault access     |
+| `no-binary`        | the resolver isn't installed               | install it, or change the resolver identifier |
+| `timeout`          | no answer within 120s                      | approve the dialog, or use an unattended path |
+| `empty`            | resolver succeeded but returned nothing    | check the field name                          |
+| `malformed-ref`    | the reference isn't a `<scheme>://…` value | fix the reference (see grammar above)         |
+| `unknown-resolver` | identifier not on the allow-list           | fix it, or add the backend in code            |
+
+## Unattended and cloud
+
+- **Unattended** (cron, `/auto-pilot`, CI) has no UI and therefore no approval dialog.
+  Use the raw secret directly, or `$OP_SERVICE_ACCOUNT_TOKEN` plus a pointer under the
+  default `op` resolver. An approval-based resolver like `opx` correctly fails closed
+  there; a cron that needs it must set the resolver to `op` or inject the secret.
+- **Cloud** sandboxes must never receive a full-account key. The guarantee is enforced by
+  **delivery**, not by this contract: cloud launches receive no `.local.yml`, no
+  `*_REF`, no `*_RESOLVER`, and no raw secret, so resolution fails before any API call
+  and the run floors to the OAuth-scoped MCP path. No resolver design can protect an
+  environment that is deliberately handed the raw secret — so don't hand it one.
+
+## Using it
+
+```python
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _secret_resolve import SecretUnavailable, resolve_key
+
+try:
+    key = resolve_key("LINEAR_API_KEY")
+except SecretUnavailable as e:
+    sys.exit(str(e))  # already redacted
+```
+
+To check whether a credential resolves **without** revealing it — this is what
+`/doctor` uses:
+
+```sh
+python3 commands/handlers/assets/_secret_resolve.py --probe LINEAR_API_KEY
+```
+
+It writes nothing to stdout ever, prints only a reason category to stderr on failure, and
+exits non-zero when the credential is unavailable.
+
+## One gotcha worth knowing
+
+`opx` invalidates the `op` session after every read. So once something resolves through
+`opx`, the next plain `op read` in that shell — `/doctor`'s probe, a live smoke test, a
+manual read — fails until the next approval. That is `opx` working as designed, not a
+broken session.

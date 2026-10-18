@@ -1,0 +1,2 @@
+echo "a: b: c"
+mapfile -t lines <in

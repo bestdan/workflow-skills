@@ -7,39 +7,50 @@ gates, and rank the survivors — with one filtered GraphQL query per scope
 get_user -> lazy get_issue for branchName).
 
 Read-only. Never mutates anything. This is the sibling of linear-archive.py; it
-reuses that script's get_key()/gql() helpers verbatim.
+reuses that script's gql() helper verbatim, and both call the shared
+_secret_resolve.py for get_key().
 
-Gate + rank rules mirror commands/handlers/linear-common.md's "Ready-candidate
-selection" block exactly. Change them there first and update both consumers
-(linear-claim.md and this file) in lockstep.
+Gate + rank rules live in commands/handlers/assets/_linear_rank.py, this
+script's sibling module — its header docstring is the single source of truth
+for commands/handlers/linear-common.md's "Ready-candidate selection" block.
+Change them there first; both this script and linear-rank.py (the MCP-floor
+entry point) import from it.
 
-The API key is read, in order, from:
-  1. $LINEAR_API_KEY, else
-  2. `op read "$LINEAR_API_KEY_REF"` (a full op://vault/item/field reference).
+The API key is resolved by commands/handlers/assets/_secret_resolve.py, which
+walks two independent ladders: secret/pointer (`$LINEAR_API_KEY` ->
+`$LINEAR_API_KEY_REF` -> unavailable) and resolver (`$LINEAR_API_KEY_RESOLVER`
+-> default `op`), against an allow-list of resolver identifiers (`op`, `opx`).
+A failed resolve never falls through to the next rung. See
+dev_docs/auth_key_access.md for the full contract.
 
-IMPORTANT: under 1Password desktop-app integration, `op` only unlocks in an
-authorized terminal — NOT in an agent's tool-spawned subshell. Run this from your
-own terminal, or headless with $LINEAR_API_KEY set directly, or
-$OP_SERVICE_ACCOUNT_TOKEN + $LINEAR_API_KEY_REF (so `op read` resolves the key).
+A configured `linear.api_key` / `linear.api_key_ref` / `linear.api_key_resolver`
+reaches this
+script only because the caller bridges them onto the environment — see
+linear-common.md's "Key resolution" step. This script reads no config.
 
 On any failure (missing key, GraphQL error, team not found) this exits non-zero
 with the reason on stderr, so the caller can fall back to the MCP floor. Stdout
 carries exactly one JSON object and nothing else.
 
 Usage:
-  python3 linear-ready.py --team PreThink
-  python3 linear-ready.py --team PreThink --project <uuid> --project <uuid>:5
-  python3 linear-ready.py --team PreThink --max-estimate 5 --limit 100
+  python3 linear-ready.py --team Platform
+  python3 linear-ready.py --team Platform --project <uuid> --project <uuid>:5
+  python3 linear-ready.py --team Platform --max-estimate 5 --limit 100
+  python3 linear-ready.py --team Platform --stack-in-set   # /auto-pilot list_ready
 """
 
 import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 import urllib.error
 import urllib.request
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _linear_rank import gate, rank_key, stack_in_set  # noqa: E402
+from _secret_resolve import SecretUnavailable, resolve_key  # noqa: E402
+from _shape import ShapeError, expect  # noqa: E402
 
 API = "https://api.linear.app/graphql"
 
@@ -83,6 +94,10 @@ query($cursor: String, $first: Int!, $team: ID!%s) {
       labels { nodes { name } }
       state { id type }
       project { id name }
+      inverseRelations(first: 50) {
+        nodes { type issue { identifier state { type } } }
+        pageInfo { hasNextPage }
+      }
     }
     pageInfo { hasNextPage endCursor }
   }
@@ -90,21 +105,10 @@ query($cursor: String, $first: Int!, $team: ID!%s) {
 
 
 def get_key():
-    key = os.environ.get("LINEAR_API_KEY")
-    if key:
-        return key.strip()
-    ref = os.environ.get("LINEAR_API_KEY_REF")
-    if not ref:
-        sys.exit(
-            "No Linear API key. Set $LINEAR_API_KEY, or $LINEAR_API_KEY_REF to a "
-            "full op://vault/item/field reference. (op must run in an authorized "
-            "shell — see this file's header.)"
-        )
-    out = subprocess.run(["op", "read", ref], capture_output=True, text=True)
-    key = out.stdout.strip()
-    if not key:
-        sys.exit(f"Could not read key from 1Password ({ref}): {out.stderr.strip()}")
-    return key
+    try:
+        return resolve_key("LINEAR_API_KEY")
+    except SecretUnavailable as e:
+        sys.exit(str(e))
 
 
 def gql(key, query, variables=None):
@@ -128,9 +132,21 @@ def gql(key, query, variables=None):
         # Network failure or the timeout above — exit non-zero (not a hang) so the
         # caller falls back to the MCP floor per this script's contract.
         sys.exit(f"GraphQL request failed: {e.reason}")
+    # Guard the root BEFORE the membership test: `"errors" in None` and
+    # `"errors" in 5` raise TypeError, so a scalar JSON body would reach neither
+    # this check nor expect() below and would surface as the traceback this
+    # whole seam exists to remove. gh-issue-rollups.py guards in the same order.
+    if not isinstance(payload, dict):
+        sys.exit(f"GraphQL response: expected an object, got {type(payload).__name__}")
     if "errors" in payload:
         sys.exit("GraphQL error: " + json.dumps(payload["errors"], indent=2))
-    return payload["data"]
+    # A malformed response used to surface as a KeyError traceback here, and
+    # then as a chain of KeyErrors at every caller that indexed into the result.
+    # expect() makes it one sentence naming the field.
+    try:
+        return expect(payload, "data", dict, "GraphQL response")
+    except ShapeError as exc:
+        sys.exit(str(exc))
 
 
 def resolve_team(key, team):
@@ -143,6 +159,29 @@ def resolve_team(key, team):
     if not node:
         sys.exit(f"Team not found: {team}")
     return data["viewer"], node
+
+
+def blocked_by(issue):
+    """Fold `inverseRelations` into the `blockedBy` list `gate()` reads.
+
+    An inverse `blocks` relation names this issue's blocker in its `issue`
+    field (see linear-relations.py's header). A null `issue` is a blocker that
+    no longer exists, which satisfies the dependency, so it is left out. A
+    truncated page adds an entry with no state, so the unseen blockers hold
+    the issue rather than letting it through.
+    """
+    conn = issue.get("inverseRelations") or {}
+    out = [
+        {
+            "identifier": rel["issue"]["identifier"],
+            "stateType": rel["issue"]["state"]["type"],
+        }
+        for rel in conn.get("nodes") or []
+        if rel.get("type") == "blocks" and rel.get("issue")
+    ]
+    if (conn.get("pageInfo") or {}).get("hasNextPage"):
+        out.append({"identifier": "more than 50 blockers", "stateType": None})
+    return out
 
 
 def fetch_issues(key, team_id, project_id, page_size):
@@ -169,32 +208,6 @@ def parse_project_arg(raw, default_max):
     return raw, default_max
 
 
-def gate(issue, max_estimate):
-    """Return a drop reason string, or None if the issue survives the gates."""
-    estimate = issue.get("estimate")
-    if estimate is None:
-        return "no estimate set"
-    if estimate >= max_estimate:
-        return f"estimate {estimate} >= {max_estimate}"
-    label_names = {n["name"] for n in issue["labels"]["nodes"]}
-    if "auto-claimed" in label_names:
-        return "already auto-claimed"
-    if "human-approval-requested" in label_names:
-        return "human-approval-requested"
-    if "blocked" in label_names:
-        return "blocked"
-    assignee = issue.get("assignee")
-    if assignee and not assignee.get("isMe"):
-        who = assignee.get("displayName") or assignee.get("id") or "unknown"
-        return f"assigned to {who}"
-    return None
-
-
-def rank_key(candidate):
-    priority = candidate["priority"] or 0
-    return (priority if priority != 0 else float("inf"), candidate["_updatedAt"])
-
-
 def main():
     ap = argparse.ArgumentParser(
         description="Resolve ready Linear candidates via a GraphQL fast-path."
@@ -203,7 +216,7 @@ def main():
         "--team",
         default=os.environ.get("LINEAR_TEAM"),
         required=os.environ.get("LINEAR_TEAM") is None,
-        help="Team name (e.g. PreThink) or UUID id, or $LINEAR_TEAM.",
+        help="Team name (e.g. Platform) or UUID id, or $LINEAR_TEAM.",
     )
     ap.add_argument(
         "--project",
@@ -225,6 +238,13 @@ def main():
         default=50,
         help="GraphQL page size only — the script paginates to exhaustion "
         "regardless, so this does not truncate results.",
+    )
+    ap.add_argument(
+        "--stack-in-set",
+        action="store_true",
+        help="Count a blocker that is itself a surviving candidate as met. "
+        "For /auto-pilot's list_ready, which stacks a dependent on its "
+        "in-run parent; see _linear_rank.py.",
     )
     args = ap.parse_args()
 
@@ -264,10 +284,36 @@ def main():
             issue["project"] = scope_tag
             all_issues.append((issue, scope["max_estimate"]))
 
+    # Unassigned bucket exclusion pass — mirrors linear-common.md's "The
+    # Unassigned bucket" (claim variant): only runs when 1+ projects are
+    # configured (bare --project args), since with none the whole-team scope
+    # above already covers everything. One extra whole-team query, keeping
+    # only issues whose project is null or outside the configured id set.
+    # Unlike the MCP floor's single capped list_issues call, fetch_issues
+    # paginates to exhaustion, so this pass has no truncation blind spot.
+    if args.project:
+        configured_ids = {scope["id"] for scope in scopes}
+        unassigned_scope_tag = {
+            "id": "__unassigned__",
+            "name": "Unassigned",
+            "max_estimate": args.max_estimate,
+        }
+        for issue in fetch_issues(key, team_node["id"], None, args.limit):
+            project = issue.get("project")
+            project_id = project["id"] if project else None
+            if project_id is not None and project_id in configured_ids:
+                continue
+            issue["project"] = unassigned_scope_tag
+            all_issues.append((issue, args.max_estimate))
+
+    for issue, _ in all_issues:
+        issue["blockedBy"] = blocked_by(issue)
+    satisfied = stack_in_set(all_issues) if args.stack_in_set else frozenset()
+
     candidates, dropped = [], []
     for issue, max_estimate in all_issues:
         labels = [n["name"] for n in issue["labels"]["nodes"]]
-        reason = gate(issue, max_estimate)
+        reason = gate(issue, max_estimate, satisfied)
         if reason:
             dropped.append({"identifier": issue["identifier"], "reason": reason})
             continue

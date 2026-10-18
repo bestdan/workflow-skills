@@ -1,38 +1,65 @@
 #!/usr/bin/env python3
-"""Archive terminal-state Linear issues older than N days, to keep a workspace
-under Linear's free-plan cap of 250 *active* issues (archived issues are
-unlimited and excluded from the cap).
+"""Archive terminal-state Linear issues — either every one older than N days, or
+just the ones named with --issues — to keep a workspace under Linear's free-plan
+cap of 250 *active* issues (archived issues are unlimited and excluded from the
+cap).
+
+The age threshold is the bulk-hygiene mode and is mandatory *for that mode*, so a
+sweep can never run unbounded. --issues is the other mode: the caller has named
+the issues, so age stops being the gate (issues closed minutes ago archive fine)
+— but terminal state still is, and a named issue that is still open is skipped.
 
 This is the standalone backstop for the `linear` handler's `/archive-tasks` flow
 (see commands/handlers/linear-archive.md). The Linear MCP exposes no archive
 mutation, so this talks to the GraphQL API directly with a personal API key.
 
 Safety: DRY RUN by default — lists candidates and changes nothing. Pass --apply
-to actually archive. Re-running is idempotent (archived issues are excluded from
-the query by default).
+to actually archive. Re-running --older-than is idempotent: the sweep query
+excludes archived issues by default, so an already-archived issue is simply not
+a candidate. --issues cannot lean on that — the caller named those issues, and
+silence about them would read as failure — so it looks them up with
+includeArchived and reports the already-archived ones as done, not missing.
 
-The API key is read, in order, from:
-  1. $LINEAR_API_KEY, else
-  2. `op read "$LINEAR_API_KEY_REF"` (a full op://vault/item/field reference).
+The API key is resolved by commands/handlers/assets/_secret_resolve.py, which
+walks two independent ladders: secret/pointer (`$LINEAR_API_KEY` ->
+`$LINEAR_API_KEY_REF` -> unavailable) and resolver (`$LINEAR_API_KEY_RESOLVER`
+-> default `op`), against an allow-list of resolver identifiers (`op`, `opx`).
+A failed resolve never falls through to the next rung. See
+dev_docs/auth_key_access.md for the full contract.
 
-IMPORTANT: under 1Password desktop-app integration, `op` only unlocks in an
-authorized terminal — NOT in an agent's tool-spawned subshell. Run this from your
-own terminal, or headless with $OP_SERVICE_ACCOUNT_TOKEN / $LINEAR_API_KEY set.
+A configured `linear.api_key` / `linear.api_key_ref` / `linear.api_key_resolver`
+reaches this
+script only because the caller bridges them onto the environment — see
+linear-common.md's "Key resolution" step. This script reads no config.
 
 Usage:
-  python3 linear-archive.py --team PreThink --older-than 10
-  python3 linear-archive.py --team PreThink --older-than 10 --apply
-  python3 linear-archive.py --team PreThink --older-than 30 --project <uuid> --include-canceled --apply
+  python3 linear-archive.py --team Platform --older-than 10
+  python3 linear-archive.py --team Platform --older-than 10 --apply
+  python3 linear-archive.py --team Platform --older-than 30 --project <uuid> --apply
+  python3 linear-archive.py --team Platform --older-than 30 \
+    --project <uuid-1> --project <uuid-2> --apply
+  python3 linear-archive.py --team Platform --issues PRE-12,PRE-13 --apply
+
+--project is repeatable. No --project sweeps the whole team (unchanged
+default); one or more scope the sweep to exactly those projects, looping the
+query once per id and unioning the results (deduped by issue id) — this is how
+a caller resolves `linear.projects` from `.task-config.yml` (see
+linear-common.md "Resolve configured projects") into a scope this
+script understands, without the script itself reading any config.
 """
 
 import argparse
 import json
 import os
 import re
-import subprocess
 import sys
+import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _secret_resolve import SecretUnavailable, resolve_key  # noqa: E402
+from _shape import ShapeError, expect  # noqa: E402
 
 API = "https://api.linear.app/graphql"
 
@@ -60,23 +87,52 @@ query($cursor: String, $cutoff: DateTimeOrDuration!, $team: String!, $type: Stri
 
 ARCHIVE = "mutation($id: String!) { issueArchive(id: $id, trash: false) { success } }"
 
+# Explicit-issue lookup (--issues). No age filter — the caller named the issues,
+# so the cutoff is not the gate; terminal state still is (checked client-side
+# against the returned state.type). Two shapes because the identifier form
+# (PRE-12) filters on the team-scoped issue `number`, while a pasted UUID filters
+# on `id` — a global key, so its query cannot bind the team and the match is
+# checked client-side against the returned `team` instead. Same
+# declared-vars-must-be-used rule as QUERY: each shape declares only the
+# variables it references.
+#
+# Both shapes pass includeArchived (the `issues` query drops archived rows
+# otherwise) and select archivedAt, so a re-run of --issues can tell "already
+# archived" apart from "no such issue" instead of reporting both as missing.
+NODE_FIELDS = "id identifier title completedAt canceledAt archivedAt state { type } team { id name }"
+
+# One page, no cursor loop: collect_named rejects a ref list longer than this, so
+# a named lookup can never overflow it. Substituted into both queries rather than
+# written twice, so the guard and the queries can't drift apart.
+PAGE = 250
+
+LOOKUP_BY_NUMBER = """
+query($team: String!, $numbers: [Float!]) {
+  issues(first: %d, includeArchived: true, filter: {
+    team: { %s: { eq: $team } }
+    number: { in: $numbers }
+  }) {
+    nodes { %s }
+  }
+}"""
+
+LOOKUP_BY_ID = """
+query($ids: [ID!]) {
+  issues(first: %d, includeArchived: true, filter: { id: { in: $ids } }) {
+    nodes { %s }
+  }
+}"""
+
+TERMINAL_TYPES = {"completed", "canceled", "duplicate"}
+
+IDENTIFIER_RE = re.compile(r"^([A-Z][A-Z0-9_]*)-(\d+)$", re.I)
+
 
 def get_key():
-    key = os.environ.get("LINEAR_API_KEY")
-    if key:
-        return key.strip()
-    ref = os.environ.get("LINEAR_API_KEY_REF")
-    if not ref:
-        sys.exit(
-            "No Linear API key. Set $LINEAR_API_KEY, or $LINEAR_API_KEY_REF to a "
-            "full op://vault/item/field reference. (op must run in an authorized "
-            "shell — see this file's header.)"
-        )
-    out = subprocess.run(["op", "read", ref], capture_output=True, text=True)
-    key = out.stdout.strip()
-    if not key:
-        sys.exit(f"Could not read key from 1Password ({ref}): {out.stderr.strip()}")
-    return key
+    try:
+        return resolve_key("LINEAR_API_KEY")
+    except SecretUnavailable as e:
+        sys.exit(str(e))
 
 
 def gql(key, query, variables=None):
@@ -89,11 +145,47 @@ def gql(key, query, variables=None):
             "Content-Type": "application/json",
         },  # personal key, no "Bearer"
     )
-    with urllib.request.urlopen(req) as r:
-        payload = json.loads(r.read())
+    try:
+        with urllib.request.urlopen(req) as r:
+            payload = json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        sys.exit(f"Linear API error {e.code}: {e.read().decode(errors='replace')}")
+    except urllib.error.URLError as e:
+        sys.exit(f"Network error: {e.reason}")
+    # Guard the root BEFORE the membership test: `"errors" in None` and
+    # `"errors" in 5` raise TypeError, so a scalar JSON body would reach neither
+    # this check nor expect() below and would surface as the traceback this
+    # whole seam exists to remove. gh-issue-rollups.py guards in the same order.
+    if not isinstance(payload, dict):
+        sys.exit(f"GraphQL response: expected an object, got {type(payload).__name__}")
     if "errors" in payload:
         sys.exit("GraphQL error: " + json.dumps(payload["errors"], indent=2))
-    return payload["data"]
+    # A malformed response used to surface as a KeyError traceback here, and
+    # then as a chain of KeyErrors at every caller that indexed into the result.
+    # expect() makes it one sentence naming the field.
+    try:
+        return expect(payload, "data", dict, "GraphQL response")
+    except ShapeError as exc:
+        sys.exit(str(exc))
+
+
+def terminal_passes():
+    """(state_type, timestamp_field) pairs to sweep — every terminal state.
+
+    Linear has three terminal state types and all of them mean "this issue is
+    settled": `completed` (timestamped by completedAt), `canceled`, and
+    `duplicate` (both timestamped by canceledAt). `duplicate` is its own type,
+    not a flavour of `canceled`.
+
+    All three are swept unconditionally. Anything left unswept can never be
+    archived and consumes the workspace issue cap permanently — which is exactly
+    what happened to duplicate-closed issues while this was opt-in.
+    """
+    return [
+        ("completed", "completedAt"),
+        ("canceled", "canceledAt"),
+        ("duplicate", "canceledAt"),
+    ]
 
 
 def find(key, team, project, state_type, ts_field, cutoff):
@@ -118,15 +210,184 @@ def find(key, team, project, state_type, ts_field, cutoff):
         cursor = page["pageInfo"]["endCursor"]
 
 
+def parse_issue_refs(raw):
+    """Split --issues values into (identifiers, uuids), preserving caller order.
+
+    Accepts repeated flags and comma/whitespace-separated lists of either
+    identifiers (`PRE-12`, case-insensitive) or issue UUIDs. Anything else is a
+    typo — reject it rather than silently dropping it from the archive set.
+
+    Both forms are case-normalized to the case Linear returns (identifiers
+    upper, UUIDs lower) so find_by_ref can match refs against returned nodes by
+    plain set membership — an un-normalized ref matches nothing and gets
+    reported "not found" even as the issue it names is archived.
+    """
+    identifiers, uuids, bad = [], [], []
+    for chunk in raw:
+        for ref in re.split(r"[,\s]+", chunk.strip()):
+            if not ref:
+                continue
+            if UUID_RE.match(ref):
+                uuids.append(ref.lower())
+            elif IDENTIFIER_RE.match(ref):
+                identifiers.append(ref.upper())
+            else:
+                bad.append(ref)
+    if bad:
+        sys.exit(
+            "Not an issue identifier or UUID: "
+            + ", ".join(bad)
+            + " (expected e.g. PRE-12, or an issue UUID)"
+        )
+    return identifiers, uuids
+
+
+def find_by_ref(key, team, identifiers, uuids):
+    """Look up explicitly named issues. Returns (nodes, archived, missing_refs).
+
+    Every ref is confined to `--team`, by two different mechanisms. The `number`
+    filter is team-scoped server-side, so another team's `OTH-12` matches
+    nothing. An issue `id` is a global key whose query cannot bind the team, so
+    that half is checked client-side against the returned `team` instead —
+    without it, a pasted UUID would archive an issue on a team the caller never
+    named. Either way an out-of-team ref lands in `missing` rather than being
+    archived, which is also why returned identifiers are re-checked against what
+    was asked for. The team check runs before the archived split, so an archived
+    out-of-team ref is still missing, not "already archived".
+
+    Archived matches come back separately from live ones: the queries ask for
+    them explicitly, so an already-archived issue is a no-op to report rather
+    than a lookup failure. Only `nodes` are archive candidates.
+    """
+    nodes: list = []
+    archived: list = []
+    seen = set()
+    if identifiers:
+        team_field = "id" if UUID_RE.match(team) else "name"
+        query = LOOKUP_BY_NUMBER % (PAGE, team_field, NODE_FIELDS)
+        # parse_issue_refs() already rejected every ref that does not match
+        # IDENTIFIER_RE, so each match here is non-None. Assert it rather than
+        # dereferencing blind: a future caller reaching find_by_ref() directly
+        # gets this line instead of `NoneType has no attribute 'group'`.
+        matches = [IDENTIFIER_RE.match(i) for i in identifiers]
+        assert all(matches), f"unparsed identifier in {identifiers}"
+        numbers = sorted({int(m.group(2)) for m in matches if m})
+        wanted = set(identifiers)
+        for node in gql(key, query, {"team": team, "numbers": numbers})["issues"][
+            "nodes"
+        ]:
+            if node["identifier"].upper() in wanted and node["id"] not in seen:
+                seen.add(node["id"])
+                (archived if node.get("archivedAt") else nodes).append(node)
+    if uuids:
+        team_field = "id" if UUID_RE.match(team) else "name"
+        query = LOOKUP_BY_ID % (PAGE, NODE_FIELDS)
+        for node in gql(key, query, {"ids": sorted(set(uuids))})["issues"]["nodes"]:
+            if node["team"][team_field] != team or node["id"] in seen:
+                continue
+            seen.add(node["id"])
+            (archived if node.get("archivedAt") else nodes).append(node)
+
+    # Both sides are already in Linear's case (parse_issue_refs normalizes the
+    # refs), so plain membership is enough.
+    matched = nodes + archived
+    found = {n["identifier"].upper() for n in matched} | {
+        n["id"].lower() for n in matched
+    }
+    return nodes, archived, [r for r in identifiers + uuids if r not in found]
+
+
+def collect_aged(key, args):
+    """Age-threshold sweep: every terminal state, older than the cutoff.
+
+    --project may be repeated to scope the sweep to several projects — the
+    query loops once per id and the results are unioned, deduped by issue id
+    (an issue could otherwise appear twice if scopes ever overlapped). No
+    --project sweeps the whole team, unchanged. A project id repeated in
+    --project (a caller mistake) is deduped before the loop, same as
+    linear-relations.py / linear-ready.py — otherwise it would re-run all
+    three paginated terminal-state queries for no new candidates.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=args.older_than)).strftime(
+        "%Y-%m-%dT%H:%M:%S.000Z"
+    )
+    projects = list(dict.fromkeys(args.project)) or [None]
+    seen = set()
+    candidates = []
+    for project in projects:
+        for state_type, ts_field in terminal_passes():
+            for issue in find(key, args.team, project, state_type, ts_field, cutoff):
+                if issue["id"] in seen:
+                    continue
+                seen.add(issue["id"])
+                issue["_when"] = (issue.get(ts_field) or "")[:10]
+                candidates.append(issue)
+
+    scope = f"team={args.team}" + (
+        f", projects={','.join(projects)}" if args.project else ""
+    )
+    print(f"Cutoff: {cutoff}  ({scope}, Done + Canceled + Duplicate)\n")
+    return candidates
+
+
+def collect_named(key, args):
+    """Explicit `--issues` set: no cutoff, but still terminal-state only.
+
+    Age is the caller's business here — they named the issues. Terminal state is
+    not: archiving an issue that is still open hides live work, so a non-terminal
+    ref is reported and skipped rather than archived.
+    """
+    for flag in (
+        "--project" if args.project else "",
+        "--older-than" if args.older_than else "",
+    ):
+        if flag:
+            print(f"Note: {flag} is ignored when --issues names specific issues.")
+    identifiers, uuids = parse_issue_refs(args.issues)
+
+    # Both lookups ask for one page. Rejecting an oversized list beats paging it:
+    # the overflow would otherwise come back as "not found" and quietly go
+    # unarchived, which reads identical to a clean run.
+    if len(identifiers) + len(uuids) > PAGE:
+        sys.exit(
+            f"--issues takes at most {PAGE} refs at once "
+            f"(got {len(identifiers) + len(uuids)}); split the list, or use "
+            "--older-than for a bulk sweep."
+        )
+    nodes, archived, missing = find_by_ref(key, args.team, identifiers, uuids)
+
+    candidates, open_refs = [], []
+    for node in nodes:
+        if node["state"]["type"] not in TERMINAL_TYPES:
+            open_refs.append(f"{node['identifier']} ({node['state']['type']})")
+            continue
+        node["_when"] = (node.get("completedAt") or node.get("canceledAt") or "")[:10]
+        candidates.append(node)
+
+    print(f"Named issues (team={args.team}, no age threshold)\n")
+    if archived:
+        print(
+            "Already archived (nothing to do): "
+            + ", ".join(n["identifier"] for n in archived)
+        )
+    if missing:
+        print(f"Not found on this team: {', '.join(missing)}")
+    if open_refs:
+        print(f"Skipped — not in a terminal state: {', '.join(open_refs)}")
+    if archived or missing or open_refs:
+        print()
+    return candidates
+
+
 def main():
     ap = argparse.ArgumentParser(
-        description="Archive old terminal-state Linear issues."
+        description="Archive terminal-state Linear issues — by age, or by name."
     )
     ap.add_argument(
         "--team",
         default=os.environ.get("LINEAR_TEAM"),
         required=os.environ.get("LINEAR_TEAM") is None,
-        help="Team name (e.g. PreThink) or $LINEAR_TEAM.",
+        help="Team name (e.g. Platform) or $LINEAR_TEAM.",
     )
     ap.add_argument(
         "--older-than",
@@ -135,43 +396,38 @@ def main():
         help="Age threshold in days (or $ARCHIVE_AFTER).",
     )
     ap.add_argument(
-        "--project", default=None, help="Optional project UUID to scope to."
+        "--issues",
+        action="append",
+        default=[],
+        metavar="REFS",
+        help="Archive these issues by identifier (PRE-12) or UUID, regardless of "
+        "age. Comma-separated and/or repeated. Ignores --older-than/--project.",
     )
     ap.add_argument(
-        "--include-canceled",
-        action="store_true",
-        help="Also sweep Canceled issues (by canceledAt). Default: Done only.",
+        "--project",
+        action="append",
+        default=[],
+        metavar="UUID",
+        help="Project UUID to scope to. Repeatable — one per configured "
+        "project; the sweep loops per id and unions the results. Omit for "
+        "the whole team.",
     )
     ap.add_argument(
         "--apply", action="store_true", help="Archive. Without it, DRY RUN."
     )
     args = ap.parse_args()
 
-    if not args.older_than or args.older_than <= 0:
+    if not args.issues and (not args.older_than or args.older_than <= 0):
         sys.exit(
-            "Refusing to run without an age threshold. Pass --older-than <N> (or set $ARCHIVE_AFTER)."
+            "Refusing to run without an age threshold. Pass --older-than <N> (or set "
+            "$ARCHIVE_AFTER), or name the issues to archive with --issues <refs>."
         )
 
     key = get_key()
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=args.older_than)).strftime(
-        "%Y-%m-%dT%H:%M:%S.000Z"
-    )
-    passes = [("completed", "completedAt")]
-    if args.include_canceled:
-        passes.append(("canceled", "canceledAt"))
-
-    candidates = []
-    for state_type, ts_field in passes:
-        for issue in find(key, args.team, args.project, state_type, ts_field, cutoff):
-            issue["_when"] = issue.get(ts_field, "")[:10]
-            candidates.append(issue)
-
-    scope = f"team={args.team}" + (f", project={args.project}" if args.project else "")
-    types = "Done + Canceled" if args.include_canceled else "Done"
-    print(f"Cutoff: {cutoff}  ({scope}, {types})\n")
+    candidates = collect_named(key, args) if args.issues else collect_aged(key, args)
 
     if not candidates:
-        print("No terminal-state issues older than the cutoff. Nothing to archive.")
+        print("Nothing to archive.")
         return
 
     candidates.sort(key=lambda i: i["_when"])

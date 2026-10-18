@@ -1,0 +1,7 @@
+declare -i A=1
+local -r plain=1
+arr=(one two)
+echo "${arr[@]}"
+case x in a) : ;; esac
+foo; bar &
+echo hi >>out 2>&1

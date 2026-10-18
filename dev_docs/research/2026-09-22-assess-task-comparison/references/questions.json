@@ -1,0 +1,39 @@
+{
+  "note": "The six questions the typed call is asked, one request per card, committed before any run and fixed once a run starts. Written from the rubric in skills/assess-task/SKILL.md. The two ordered dimensions are Scores whose criteria run in the scorer's enum order, lowest first. The four binaries are Nouls phrased so that yes means the higher value. No question names a tool or quotes a number: a question that names a tool is a question about that tool, and a quoted number invites the answer to be arithmetic.",
+  "questions": {
+    "complexity": {
+      "type": "score",
+      "instructions": "How hard is the work this card describes to get right? Judge the work, not the length of the card.",
+      "criteria": [
+        "Mechanical: a rename, configuration churn, or repetitive edits whose shape is obvious from the start",
+        "Standard: an ordinary feature or fix of normal size, with a clear approach",
+        "Hard: architecture, a refactor that cuts across the codebase, a subtle bug, or an approach that is not yet clear"
+      ]
+    },
+    "creativity": {
+      "type": "score",
+      "instructions": "How much of this work's value rests on taste and design choices, rather than on a shape the task already dictates?",
+      "criteria": [
+        "Little: the shape of the result is dictated, and there is a single reasonable way to build it",
+        "Some: there is some room for design choices, but the shape of the result is mostly set",
+        "Much: taste is the deliverable, as in visual or user-facing design, the shape of an interface others will call, or naming"
+      ]
+    },
+    "autonomy": {
+      "type": "noul",
+      "instructions": "Will this work run through many dependent steps over a long stretch, with little chance for anyone to steer it midway, rather than finishing in a single focused pass?"
+    },
+    "speed_sensitivity": {
+      "type": "noul",
+      "instructions": "Is this work a tight iteration loop, where how quickly each turn comes back matters more than anything else about it?"
+    },
+    "cost_sensitivity": {
+      "type": "noul",
+      "instructions": "Is this bulk, high-volume work, or work that is only worth doing if it can be done cheaply?"
+    },
+    "verification_criticality": {
+      "type": "noul",
+      "instructions": "Is honestly running and reporting the checks the actual deliverable of this work, so that the check is the point, rather than an edit whose correctness is easy to eyeball or re-run later?"
+    }
+  }
+}

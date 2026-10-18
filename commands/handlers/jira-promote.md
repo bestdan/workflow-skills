@@ -1,3 +1,9 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+user-invocable: false
+---
+
 # jira handler — /promote-tasks flow
 
 Invoked from `/promote-tasks` when `handler: jira` is configured. Scores the project's **new, un-scored** issues against the same confidence check the file path uses, then applies the kanban transitions by **status**: HIGH → transition to `ready_status` (the jira analogue of moving to `Todo`/`auto-eligible`); LOW → transition to `refinement_status` and leave a comment naming the failed check. Both target statuses are taken from config when set, or resolved dynamically and prompted for when unset (step 3a).
@@ -41,7 +47,7 @@ By default this flow scores a **single** epic's children, not the whole project 
    - **Multiple** → ask via `AskUserQuestion` (header `Epic`) which epic to score: offer the most recently updated epics labeled `<KEY> — <summary>` (cap at 3, so 3 + the escape option fits the 4-option max) plus an explicit **`All — whole backlog`** option. If the user picks `All — whole backlog`, set **no** `<scope-epic>` (as in the `all` override). Otherwise use the chosen epic's `key`.
    - **Zero** → set **no** `<scope-epic>`; fall back to the whole project backlog. Note `scope: whole backlog (no epics)` in the report.
 
-When `<scope-epic>` is set, step 3 adds `AND parent = "<scope-epic>"` to the candidate JQL — on modern Jira Cloud the unified `parent` field links an epic to its children (the same field the PRE-129 parent-rollup note uses). When unset, no `parent` clause is added.
+When `<scope-epic>` is set, step 3 adds `AND parent = "<scope-epic>"` to the candidate JQL — on modern Jira Cloud the unified `parent` field links an epic to its children (the same field Jira uses for sub-task parents). When unset, no `parent` clause is added.
 
 ### 3. Query candidates
 
@@ -54,20 +60,9 @@ Call `<atlassian-mcp>__searchJiraIssuesUsingJql` with:
 
 The `status !=` clauses exclude issues already transitioned into a configured status **at query time** — mirroring how `linear-promote.md` reads candidates only from `backlog` and `gh-issue-promote.md` excludes already-labeled issues — so the 50-item window isn't consumed by already-scored issues. On the prompt-when-unset path the clause for an unset key is omitted (its value isn't known yet); step 3a's backstop sets those aside once the status is chosen. Read the issues from whichever key the server returns (`issues[]` or `issues.nodes[]`; the create flow reads `issues.nodes[0]`).
 
-The `Flagged IS EMPTY` and `status NOT IN (…)` clauses keep **blocked** issues out of the candidate set — without them, an issue someone marked blocked but left in the project's initial (`statusCategory = "To Do"`) category would be scored as fresh backlog and transitioned to `ready_status`. `Flagged` is a native, site-level Jira field, so `Flagged IS EMPTY` is safe to apply on any board unconditionally. A dedicated **blocked status** is the other common encoding, but the same status name can sit in different `statusCategory` values across boards (`Blocked` lands in `To Do` on some, `In Progress` on others), so it can't be hard-coded — list those names in `jira.blocked_statuses` (`jira-config.md`) and the `status NOT IN (…)` clause is added only when that key is non-empty. Both clauses are server-side. (The `blocked` **label** is the least reliable signal and is not used here; an unresolved `is blocked by` link is the most precise but isn't expressible in core JQL.)
+The `Flagged IS EMPTY` and `status NOT IN (…)` clauses keep **blocked** issues out of the candidate set — without them, an issue someone marked blocked but left in the project's initial (`statusCategory = "To Do"`) category would be scored as fresh backlog and transitioned to `ready_status`. `Flagged` is a native, site-level Jira field, so `Flagged IS EMPTY` is safe to apply on any board unconditionally. A dedicated **blocked status** is the other common encoding, but the same status name can sit in different `statusCategory` values across boards (`Blocked` lands in `To Do` on some, `In Progress` on others), so it can't be hard-coded — list those names in `jira.blocked_statuses` (`jira-config.md`) and the `status NOT IN (…)` clause is added only when that key is non-empty. Both clauses are server-side. (The `blocked` **label** is the least reliable signal and is not used here; an unresolved `is blocked by` link is the most precise but isn't expressible in core JQL.) This already satisfies the same cross-handler "hold blocked cards in the backlog, do not promote" rule `commands/promote-tasks.md` defines for the file path — the behavior is already consistent here, so no separate hold step is needed.
 
-> **Parent rollup guard — JQL finding (PRE-129).** This flow does not yet skip **parent rollups** (issues `/break-down-task` has decomposed into children), the way `linear-promote.md` step 5 does. When that skip is wired in, it can run **server-side** — unlike gh-issue (whose sub-issue link isn't bulk-filterable, see `gh-issue-promote.md` step 3), Jira exposes the parent relationship to JQL:
->
-> - `parent IS EMPTY` / `parent IS NOT EMPTY`, `parent = <KEY>`, and `parent IN (…)` are **native** JQL — the unified `parent` field covers both sub-tasks and epic children on modern Jira Cloud; `issuetype IN subTaskIssueTypes()` is a native function for the sub-task issue types.
-> - There is **no native "has subtasks" predicate** ([JRACLOUD-67108](https://jira.atlassian.com/browse/JRACLOUD-67108)) — `hasSubtasks()`, `subtasksOf()`, `parentsOf()`, and `linkedIssuesOf()` are ScriptRunner `issueFunction` add-on functions and must **not** be assumed present.
-> - So the native pattern mirrors `linear-promote.md`'s cross-state `parentId` sweep: after the step-3 query, run one extra `searchJiraIssuesUsingJql` over the project for children (`project = "<project>" AND parent IS NOT EMPTY`, `fields: ["parent"]`, `maxResults: 100`), collect the distinct `fields.parent.key` values into a parent-key set, and skip any step-3 candidate whose `key` is in that set (reason `parent rollup`). If that sweep returns exactly 100 the page may be truncated, so fall back to a per-candidate `parent = "<KEY>"` check (`maxResults: 1`) for any candidate not yet confirmed a parent — the same truncation fallback `linear-promote.md` step 5 applies to its 100-item `parentId` sweep. The sweep is itself server-side filtered; only the set-membership test is client-side — exactly as in `linear-promote.md` step 5.
-
-> **Blocked-in-To-Do leak — JQL finding (PRE-129).** The `statusCategory = "To Do"` candidate filter assumes everything in the project's initial category is _fresh, un-scored_ work — but a board can park an explicitly **blocked** state in the `new` / To-Do category, so blocked issues leak into the candidate set and get scored and transitioned to `ready_status`. Two encodings to watch — both observed on live Jira Cloud boards, both **server-side** filterable, neither caught by the current query:
->
-> - **Flagged / Impediment field** — `Flagged IS NOT EMPTY` (or `Flagged = Impediment`) is **native** JQL, and `Flagged` is a site-level system field, so `AND Flagged IS EMPTY` is safe to append to the candidate query on any board. (Contrast a custom field such as `"Story Points"`, which _is_ native where defined but errors the whole JQL on a board that lacks it — so a size gate can only be pushed server-side per-board, not unconditionally.)
-> - **A dedicated `Blocked` status in the To-Do category** — the same status _name_ lands in different `statusCategory` values across boards (`Blocked` → `new` on some, `On Hold/Blocked` → `indeterminate` on others), so its category can't be assumed. Excluding it needs the board's blocked status name(s) as a `jira-config` value, added as `AND status NOT IN ("<blocked-status>", …)`; it can't be hard-coded.
->
-> The `blocked` **label** the list/claim flows key on is the _least_ common of the three signals in practice, so label-absence does not mean "not blocked." When this guard is wired in, prefer the native `Flagged IS EMPTY` arm plus a config-declared blocked-status exclusion.
+> This flow does not skip **parent rollups** (unlike `linear-promote.md` step 5). The proposed skip is [`dev_docs/designs/2026-09-25-jira-parent-rollup-skip.md`](../../dev_docs/designs/2026-09-25-jira-parent-rollup-skip.md).
 
 As a backstop to the JQL filter, set aside (do **not** score) any returned issue whose current `fields.status.name` already equals `ready_status` or `refinement_status` (e.g. if those values are status names the `status !=` filter didn't catch as transitions). Keep these in a separate `skipped` list so step 6 can report them; they receive no transition. Limit 50 — if exactly 50 are returned the page may be truncated; note possible truncation in the report and do not paginate. Report and exit if no un-scored candidates remain.
 
@@ -95,23 +90,26 @@ After step 3a, `ready_status` and `refinement_status` are both resolved for the 
 
 ### 4. Score each candidate
 
-For each candidate, run the **confidence check** from `skills/task/SKILL.md` — the **same judgment-based gate the file path uses** (`commands/promote-tasks.md` step 2), read against the Jira issue per the field mapping `linear-promote.md` step 6 defines. Jira issues carry a native `priority` but no `size`/`estimate` field (story points, when present, are a custom field), so size folds into the scope judgment.
+For each candidate, run the **confidence check** from `skills/task/SKILL.md` — the **same judgment-based gate the file path uses** (`commands/promote-tasks.md` step 2), read against the Jira issue per the field mapping `linear-promote.md` step 6 defines.
+
+**This path backfills neither field, and that is a declared property, not an omission.** `commands/handlers/task-fill.md` defines the shared backfill and carries a **`jira` adapter** saying why jira opts out of both halves: there is no estimate field to write (story points, when a project exposes them, are a per-project custom field this handler does not resolve), and `priority`, though native and read, has site-configured scheme names that the symbolic vocabulary has no fixed encoding for without a config key this handler does not yet have. Size therefore folds into the scope judgment below, and priority is read as found.
 
 **HIGH (→ promote)** requires ALL of:
 
 - `fields.summary` present and non-empty.
-- `fields.priority.name` is **not** the project's top/urgent level (`Highest`, or `P1` under the `P`-scheme — the same mapping `jira.md`'s List section documents). A non-urgent or unset priority passes — Jira priority is coarse metadata here, like gh-issue's optional priority label.
 - `fields.description` contains acceptance-style content — a `## Acceptance Criteria` section (or an equivalent concrete, checkable outcome). A bare summary or an "investigate X" description fails with `description missing acceptance criteria`.
 - `fields.description` has no unresolved `## Open Questions` / `## TBD` content (an empty heading is fine) → otherwise `unresolved open questions`.
 - **Scope fits one PR (~size 5), judgment not keywords.** Weigh the description's breadth against ~300 lines / ~5 files (see **Task size** in `skills/task/SKILL.md`); a story-points custom field, if the project exposes one, is a hint. If the scope clearly exceeds size `5`, score LOW with reason `scope exceeds size 5 — split into sub-issues`. The `break-down-task` skill (`skills/break-down-task/SKILL.md`) performs that split.
 
-**LOW** if any HIGH condition fails. Record the first failed check as the reason (e.g. `description missing acceptance criteria`, `priority is urgent`, `unresolved open questions`).
+**LOW** if any HIGH condition fails. Record the first failed check as the reason (e.g. `description missing acceptance criteria`, `unresolved open questions`).
 
 As on the file path, the scope gate is **model judgment, not a deterministic rule** — acceptable because `/promote-tasks` is not a blocking CI gate: a misjudged issue lands in `refinement_status` for a human to confirm, never silently lost.
 
 ### 5. Apply
 
 If `$ARGUMENTS` contains `dry-run`, print the proposed transitions (per the report shape below) and exit **without** any `transitionJiraIssue`/`addCommentToJiraIssue` call.
+
+**Batch writes — never fire them all in parallel.** Issuing `transitionJiraIssue`/`addCommentToJiraIssue` for every scored candidate at once can saturate the Atlassian MCP transport, causing cascading timeouts and partial-state corruption — some candidates end up transitioned while their siblings silently fail mid-batch. Apply writes serially, or in small concurrent groups — 2–5 candidates at a time is a judgment call, not a measured limit, and what matters is that the fan-out is bounded (the incident behind this rule fired ~36 writes in a single turn). Wait for each group to finish before starting the next.
 
 Otherwise, for each scored candidate, first **resolve the target status name to a transition id** — `transitionJiraIssue` accepts a transition **id** (`transition: { id: "<id>" }`), not a status name:
 
@@ -121,7 +119,16 @@ Otherwise, for each scored candidate, first **resolve the target status name to 
   issueIdOrKey: <KEY>
 ```
 
-From the returned `transitions[]`, pick the entry whose **target status** matches the resolved target status name (`ready_status`/`refinement_status`, whether set in config or chosen in step 3a) — `to.name == <status>` (fall back to the transition's own `name == <status>` for sites where they coincide). `<status>` is `ready_status` for HIGH, `refinement_status` for LOW. Capture its `id` as `<transition-id>`. If no transition matches, **do not guess** — surface the configured key and the available transition names so the user can fix the config, and skip that issue.
+Write the response to a file and let the helper match the resolved target status name (`ready_status`/`refinement_status`, whether set in config or chosen in step 3a) against `to.name`, falling back to the transition's own `name` for sites where they coincide:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-resolve-transition.py" \
+  --exact "<status>" \
+  < <transitions-response.json>
+```
+
+If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
+`**/handlers/assets/jira-resolve-transition.py`. `<status>` is `ready_status` for HIGH, `refinement_status` for LOW. On success the helper prints `<id>\t<to.name>` — capture the id as `<transition-id>`. On exit 2 (`NONE` or `AMBIGUOUS`), **do not guess** — surface the configured key and every transition's target name from the fetched response so the user can fix the config, and skip that issue.
 
 Then transition:
 

@@ -1,0 +1,13 @@
+- `scripts/spawn-orchestrator.sh:5020`
+- `issue (blocking): wrong variable used for skipped count in status-report log line`
+- Change `skipped=$counts_parked` to `skipped=$counts_skipped`.
+
+- `scripts/spawn-orchestrator.sh:6578`
+- `issue (blocking): break aborts the doctor divergence loop for all subsequent tasks`
+- Change `break ;;` to `continue ;;` so the loop skips the current task but continues to evaluate the remaining tasks.
+
+- `scripts/test-spawn-orchestrator-doctor.sh:902`
+- `issue (non-blocking): test placement masks the doctor loop bug`
+- Move the `t_skip` row before `t_child` in the mock `RUN.md`. Because `t_skip` is placed last, the `break` bug in `doctor()` goes uncaught since there are no subsequent tasks to evaluate.
+
+REVIEW_COMPLETE: FINDINGS

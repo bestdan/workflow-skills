@@ -1,6 +1,6 @@
 ---
 description: Configure where /add-task delivers tasks (repo PR, GitHub issue, Jira, or Linear)
-allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(mkdir *), Read, Write, Glob, AskUserQuestion, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__getVisibleJiraProjects, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__getVisibleJiraProjects, mcp__atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__linear__list_teams, mcp__linear__list_projects
+allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(mkdir *), Bash(python3 *), Read, Write, Glob, AskUserQuestion, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__getVisibleJiraProjects, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__getVisibleJiraProjects, mcp__atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__linear__list_teams, mcp__linear__list_projects
 argument-hint: [repo-pr | gh-issue | jira | linear]
 ---
 
@@ -14,25 +14,30 @@ This command is a thin dispatcher. The per-handler setup logic (preflight checks
 
 ## Handler capability matrix
 
-Handler feature parity is jagged — only `repo-pr` runs the full loop. This table is the **single source of truth** for which verbs each handler supports; step 5 reads it to warn the user about what they're opting out of. Keep it in sync as handlers gain verbs (see "Adding a handler" in `CONTRIBUTING.md`).
+Handler feature parity is jagged — `linear` now supports every verb in the table, `repo-pr` supports all but `reoptimize`, and the CLI-backed `gh-issue`/`jira` are thinner still (`gh-issue` less so since it gained native reoptimize). This table is the **single source of truth** for which verbs each handler supports; step 5 reads it to warn the user about what they're opting out of. Keep it in sync as handlers gain verbs (see "Adding a handler" in `CONTRIBUTING.md`).
 
-| Verb (command)                      | `repo-pr` | `gh-issue` | `jira` | `linear` |
-| ----------------------------------- | --------- | ---------- | ------ | -------- |
-| capture (`/add-task`)               | yes       | yes        | yes    | yes      |
-| list (`/list-tasks`)                | yes       | yes        | yes    | yes      |
-| promote (`/promote-tasks`)          | yes       | yes        | yes    | yes      |
-| do — single (`/do-tasks`)           | yes       | yes        | yes    | yes      |
-| process — batch (`/do-tasks --all`) | yes       | no         | no     | no       |
-| archive (`/archive-tasks`)          | yes       | hygiene    | opt    | yes      |
-| reoptimize (`/reoptimize-tasks`)    | no        | no         | no     | yes      |
+| Verb (command)                      | `repo-pr` | `gh-issue` | `jira`  | `linear` |
+| ----------------------------------- | --------- | ---------- | ------- | -------- |
+| capture (`/add-task`)               | yes       | yes        | yes     | yes      |
+| list (`/list-tasks`)                | yes       | yes        | yes     | yes      |
+| promote (`/promote-tasks`)          | yes       | yes        | yes     | yes      |
+| ↳ backfills priority/estimate       | both      | both       | neither | both     |
+| ↳ backfill-only (any rung)          | no        | yes        | no      | no       |
+| do — single (`/do-tasks`)           | yes       | yes        | yes     | yes      |
+| process — batch (`/do-tasks --all`) | yes       | opt        | no      | yes      |
+| archive (`/archive-tasks`)          | yes       | hygiene    | opt     | yes      |
+| reoptimize (`/reoptimize-tasks`)    | no        | yes        | no      | yes      |
+| reconcile (`/reconcile-tasks`)      | no        | audit      | no      | yes      |
 
-`repo-pr` is the only full-loop handler. `jira`, `gh-issue`, and `linear` all add list, promote, and single `do` (but not batch process). Unsupported verbs aren't broken — the work just lives in the external tracker (your Jira board, `gh issue list`, Linear) instead of through these commands.
+`linear` is the most complete handler — it now supports **every** verb in the table, including batch process and reoptimize. `repo-pr` supports all but `reoptimize` (its tasks are local plan files — reoptimize those directly). `gh-issue` batch process is **`opt`** — the machinery is there (one dispatched cloud session per dependency-ready issue, blockers read off GitHub's native `blocked_by` graph), but it is **off by default**: this handler's label writes run a plugin script, and a cloud session does **not** install this plugin from a committed `.claude/settings.json` — probed 2026-09-05, `dev_docs/research/2026-09-05-cloud-session-plugin-and-proxy.md`. Installing the plugin is necessary but not sufficient: every phase of this handler shells out to `gh`, and the probed session's `gh` credential failed on reads as well as writes. A repo whose cloud environment installs the plugin some other way **and** whose sessions have a working `gh` credential sets `gh-issue.remote_batch: true`; otherwise `--all` degrades to a single foreground claim. `jira` adds list, promote, and single `do` but **not** batch process. The one sub-row is the promoter's priority/estimate **backfill**, defined once in `commands/handlers/task-fill.md`: three handlers fill both fields, and `jira` fills **neither** — it has no estimate field at all, and its priority scheme names are site-configured, so the shared symbolic vocabulary has no encoding for it yet. That gap is the reason the row is here rather than folded into `promote: yes`. The second sub-row is `/promote-tasks backfill-only`, which fills those same two fields on a card the promoter has **already scored** and writes nothing else — no transition, no `auto:` change. Only `gh-issue` implements it: promotion is one-way and one-time, so a card scored before backfill existed is otherwise unreachable, and on `repo-pr` that card is a local file a human can edit directly. Unsupported verbs aren't broken — the work just lives in the external tracker (your Jira board, `gh issue list`, Linear) instead of through these commands.
 
-**Archive** (`/archive-tasks`) retires terminal-state work past an age threshold; support is jagged: `repo-pr` moves stale `done` files to `dev_docs/tasks/_archive/`; `linear` is the load-bearing case (native team auto-archive plus a GraphQL `issueArchive` backstop) because Linear's free plan caps a workspace at **250 active issues**; `gh-issue` is **hygiene only** (GitHub has no cap and no true archive — it just labels long-closed issues `archived`); `jira` transitions terminal issues to a configured `archive_status` where the project has one and is otherwise an **opt-in no-op** (native archival is Jira Premium). See each handler's `*-archive.md`.
+**Archive** (`/archive-tasks`) retires terminal-state work past an age threshold; support is jagged: `repo-pr` moves stale `done` files to `dev_docs/tasks/_archive/`; `linear` is the load-bearing case (native team auto-archive plus a GraphQL `issueArchive` backstop) because Linear's free plan caps a workspace at **250 non-archived issues of any state** — completing or cancelling one does not free a slot, only archiving does; `gh-issue` is **hygiene only** (GitHub has no cap and no true archive — it just labels long-closed issues `archived`); `jira` transitions terminal issues to a configured `archive_status` where the project has one and is otherwise an **opt-in no-op** (native archival is Jira Premium). See each handler's `*-archive.md`.
 
-`reoptimize` (`/reoptimize-tasks`) is the exception that runs _against_ the tracker graph rather than the local files. **v1 implements `linear` only** (relation edits, priority, duplicates applied natively); `jira` and `gh-issue` re-optimize are planned follow-ups, and `repo-pr` is `no` because its tasks are local plan files — re-optimize those directly (or `/push-plan` to a tracker first).
+`reoptimize` (`/reoptimize-tasks`) is the exception that runs _against_ the tracker graph rather than the local files. **`linear`** applies relation edits, priority, and duplicates natively. **`gh-issue`** applies dependency edits natively too: it reads, creates and removes the same `blocked_by` edge `/push-plan` draws and `/do-tasks` reads, and detects cycles over that real graph. The `Blocked by:` body footer is a human-readable echo of an edge that exists, never a substitute for one. `Related:` and `duplicateOf` have no native counterpart on GitHub and stay prose. `jira` re-optimize is a planned follow-up, and `repo-pr` is `no` because its tasks are local plan files — re-optimize those directly (or `/push-plan` to a tracker first).
 
-`/do-tasks` is the single execute verb across handlers: executes a single task by default, `--all` / `-n N` for batch dispatch on `repo-pr`. On `linear`, `gh-issue`, and `jira` it claims and executes one issue in the current session.
+`reconcile` (`/reconcile-tasks`) fixes issues sitting in the wrong state against a **closed** rule table, and the two supporting handlers reconcile different things. **`linear`** repairs drift between an issue's column and its PR — the four rows in `commands/handlers/linear-reconcile.md`. **`gh-issue`** is `audit`: on GitHub the open PR **is** the review state and a merge closes the issue natively, so that drift cannot occur; what can drift is the label state model, which the web UI can edit by hand. Its four rows check the `labels.yml` invariants, and two of them write — row 1 and row 4 (see `commands/handlers/gh-issue-reconcile.md`). `repo-pr` is `no` because a merged PR **is** its done signal, and `jira` is `no` because its GitHub integration or smart commits transition the issue natively.
+
+`/do-tasks` is the single execute verb across handlers: executes a single task by default, `--all` / `-n N` for batch dispatch on `repo-pr` and `linear` (each dispatches one remote session per dependency-ready task or issue, bounded by the WIP limit), and on `gh-issue` **when the repo opts in** (`gh-issue.remote_batch: true`) — absent or `false`, `gh-issue` `--all` degrades to a single foreground claim in the current session. On `jira` it claims and executes one issue in the current session.
 
 ## Steps
 
@@ -95,6 +100,7 @@ gh-issue:
   repo: owner/name
   labels: [follow-up]
   assignees: []
+  # branch_prefix: bestdan/   # optional — prepended to the /do-tasks claim branch, which is `<branch_prefix>task-<issue number>`; must end in `/` (the claim parser reads the segment after the last `/`), empty by default, giving `task-142`
 # archive_after: 30          # optional, top-level — default /archive-tasks age threshold (days)
 ```
 
@@ -107,6 +113,8 @@ jira:
   issue_type: Task
   default_epic: PLAT-100
   labels: []
+  # additional_fields: {}    # optional — extra createJiraIssue fields (Team, components, custom fields)
+  # ready_status: Selected for Development # optional — where a complete, unblocked issue lands at capture
   # archive_status: Archived # optional — terminal-category status /archive-tasks transitions to
 # archive_after: 30          # optional, top-level — default /archive-tasks age threshold (days)
 ```
@@ -116,7 +124,7 @@ jira:
 handler: linear
 wip_limit: 3 # top-level — per-project default each linear.projects entry inherits unless overridden
 linear:
-  team: PreThink # team NAME (as shown in Linear) or UUID id — never the team key like "PRE"
+  team: Platform # team NAME (as shown in Linear) or UUID id — never the team key like "PLAT"
   default_priority: 3
   projects: # replaces scalar default_project; absent/empty → whole team
     - id: ebbc284b-0000-0000-0000-000000000000 # required id/UUID; optional per-entry wip_limit/max_estimate
@@ -125,7 +133,7 @@ linear:
 # archive_after: 30          # optional, top-level — default /archive-tasks age threshold (days)
 ```
 
-**`archive_after`** is a top-level key (sibling of `wip_limit`), shared by every handler: the default age threshold `/archive-tasks` uses when `--older-than` is omitted. With neither set, `/archive-tasks` refuses to mutate (dry-run-only) to avoid a surprise bulk archive. The per-handler archive keys (`jira.archive_status`, `linear.api_key_ref`) are documented in each handler's `*-config.md`. (`repo-pr` has no archive key — it parks files in the fixed `dev_docs/tasks/_archive/`.)
+**`archive_after`** is a top-level key (sibling of `wip_limit`), shared by every handler: the default age threshold `/archive-tasks` uses when `--older-than` is omitted. With neither set, an `/archive-tasks` **sweep** refuses to mutate (dry-run-only) to avoid a surprise bulk archive — `/archive-tasks --issues <refs>` needs no threshold, since the named list is its own bound. The per-handler archive keys (`jira.archive_status`, `linear.api_key_ref`) are documented in each handler's `*-config.md`. (`repo-pr` has no archive key — it parks files in the fixed `dev_docs/tasks/_archive/`.)
 
 Omit optional keys the user didn't set (the per-handler file already handles this in what it returns).
 
@@ -133,11 +141,89 @@ Omit optional keys the user didn't set (the per-handler file already handles thi
 
 Alongside the committed `.task-config.yml`, commands also read an **optional, gitignored** `dev_docs/tasks/.task-config.local.yml`. It uses the **same schema** and is **deep-merged over** the committed file. The merge is **recursive for mappings**: a local `linear:` block that sets only `api_key_ref` overlays that one leaf and **preserves** the committed `linear.team`/`linear.projects` — you do not restate the rest of `linear:`. At each leaf the local value wins; scalars and lists are replaced wholesale; keys absent from the local file are kept. Every command that reads the task config reads this **merged view** — `.task-config.yml` overlaid with `.task-config.local.yml`.
 
-Its purpose is **personal, machine-specific, or secret** keys that must not be committed — chiefly `linear.api_key_ref` (a pointer to a full-account Linear bearer token). Put those there, not in the shared `.task-config.yml`. It is never written by `/task-config`'s setup flow (which only writes the committed file); the user maintains it by hand. When `handler: linear` and the repo excludes `dev_docs/tasks/` entirely (the non-`repo-pr` default), `api_key_ref` can live in either file since neither is committed — but the local override is the canonical home so the shared file stays portable. Ensure `.task-config.local.yml` is git-ignored:
+> **Two keys are the exception: `linear.api_key` and `linear.api_key_resolver`.** They are read from the **raw `.task-config.local.yml` leaf**, never from the merged view, and are **refused** — reported, not silently dropped — if they appear in the committed file. One is a raw full-account token and the other names a program to run, so neither may come from a checkout you don't control. Everything else, including `api_key_ref`, uses the merged view as described above. See `dev_docs/auth_key_access.md` → "Provenance".
+
+Its purpose is **personal, machine-specific, or secret** keys that must not be committed — chiefly `linear.api_key_ref` (a pointer to a full-account Linear bearer token), plus the local-only `linear.api_key_resolver` and `linear.api_key`. Put those there, not in the shared `.task-config.yml`. It is never written by `/task-config`'s setup flow (which only writes the committed file); the user maintains it by hand. When `handler: linear` and the repo excludes `dev_docs/tasks/` entirely (the non-`repo-pr` default), `api_key_ref` can live in either file since neither is committed — but the local override is the canonical home so the shared file stays portable. Ensure `.task-config.local.yml` is git-ignored:
 
 ```bash
 git check-ignore -q dev_docs/tasks/.task-config.local.yml || echo 'dev_docs/tasks/.task-config.local.yml' >> "$(git rev-parse --git-dir)/info/exclude"
 ```
+
+### Resolving the handler (merged view)
+
+Every command or skill that dispatches on `handler:` resolves it from the **merged view**, not the committed file alone — otherwise a local override of `handler:` would be silently ignored. The canonical resolution step (pasted identically into each dispatching command's and skill's "Resolve the handler" section, and matching what `doctor.md` does) is:
+
+```bash
+ROOT="$(git rev-parse --show-toplevel)"
+cat "$ROOT/dev_docs/tasks/.task-config.yml" 2>/dev/null       # committed config
+cat "$ROOT/dev_docs/tasks/.task-config.local.yml" 2>/dev/null # optional gitignored override
+```
+
+Overlay the local override on the committed config (mappings merge recursively, local leaf values win, per "Local override" above), then read `handler:` from the result. A missing or empty value → the default `repo-pr`. Commands and skills must not resolve `handler:` from `.task-config.yml` alone.
+
+### Run-scoped overrides
+
+There is a **third and highest-precedence layer**: a `key=value` token in the
+command's own arguments, which applies to that one run and is written nowhere.
+
+```
+/do-tasks max-estimate=8 wip-limit=5
+```
+
+Precedence, lowest to highest: **committed config → `.task-config.local.yml` →
+per-project override → run-scoped token.**
+
+**The token overrides the _resolved effective_ cap, not a config layer.** That
+distinction is load-bearing on `linear`, where a per-project `wip_limit` /
+`max_estimate` (`linear-common.md` → "Resolve configured projects") is applied
+_after_ the handler default: a token that merely replaced the handler default
+would be silently beaten by any project carrying its own value, which is the
+common case. Apply the token last, to every scope, after all inheritance has
+resolved — so `max-estimate=8` means 8 for each scope in the run, whatever each
+one's configured value was.
+
+**Why this layer exists.** Without it, changing a bound to get past it means
+editing committed config — which in a protected-branch repo means a branch, a
+PR, a review and a merge, to change one integer for one command. That cost is
+paid at exactly the moment someone is trying to get work done, and it is paid in
+a currency (a permanent config change) far larger than the need (this run).
+Measured 2026-09-20: clearing five wrongly-demoted cards on `bestdan/dotfiles`
+required opening a config PR and waiting for it to merge before the command
+could be re-run.
+
+**Rules.**
+
+- **The allowlist is closed, and it is this table.** "Bounds and caps, and the
+  like" is not a rule a runtime can apply — a model asked whether
+  `global-wip-limit` or `active-issue-quota` is supported has to guess, and a
+  guess in either direction is a silent wrong answer. Every overridable key is
+  named here, with the config key it resolves to and the commands that read it.
+  A token outside this table is **refused by name**, whether it is a typo or a
+  real config key nobody wired up — never silently dropped, because a dropped
+  override reads as a bound that did not apply.
+
+  | Token          | Resolves to              | Read by                       |
+  | -------------- | ------------------------ | ----------------------------- |
+  | `max-estimate` | `<handler>.max_estimate` | `/do-tasks` (claim-time gate) |
+  | `wip-limit`    | top-level `wip_limit`    | `/do-tasks` (pre-claim gate)  |
+
+  Two things the table says that prose kept getting wrong. `wip_limit` is a
+  **top-level** key shared across handlers, not `<handler>.wip_limit`
+  (`linear-common.md` → "Config block"; `gh-issue-claim.md` reads it there too) —
+  so a token written against the nested path would resolve to nothing. And
+  `max-estimate` is **not read by `/promote-tasks`**: since the gate moved to
+  claim time (`commands/handlers/task-fill.md` → "Where the estimate gate
+  lives"), no promoter path consumes it, so passing it there is refused rather
+  than accepted and quietly ignored.
+
+- **Report what was overridden, and to what**, in the run report — an override
+  nobody can see in the output is indistinguishable from a bug.
+- **It works unattended, deliberately.** A dispatched or scheduled run can carry
+  one in its own prompt, which is how an `/auto-pilot` run raises a bound
+  without a config change. This is not a hole in `attendedness.md`: that file
+  governs whether an _unanswered prompt_ may be treated as consent, and a token
+  is an explicit instruction, not an inferred one. What it must never become is
+  a default — a run with no token gets the configured bound.
 
 ### 5. Confirm
 
@@ -146,9 +232,9 @@ Tell the user:
 - Which handler is now configured and where the file lives.
 - **The handler's supported and unsupported verbs**, read from the capability matrix above. Name them explicitly so the user knows what they've opted into. For example:
   - `repo-pr`: "`repo-pr` runs the full loop: /add-task, /list-tasks, /promote-tasks, /do-tasks, /archive-tasks (moves stale done files to dev_docs/tasks/_archive/)."
-  - `jira`: "`jira` supports: /add-task, /list-tasks, /promote-tasks (uses `ready_status`/`refinement_status` if set, else prompts), /do-tasks (single — needs `ready_status` set), /archive-tasks (only when `archive_status` is set — native Jira archival is Premium). Not supported: batch /do-tasks --all. You can still manage these in Jira directly."
-  - `gh-issue`: "`gh-issue` supports: /add-task, /list-tasks, /promote-tasks, /do-tasks (single), /archive-tasks (hygiene only — GitHub has no issue cap; it just labels long-closed issues). Not supported: batch /do-tasks --all. You can still manage these in GitHub directly."
-  - `linear`: "`linear` supports: /add-task, /list-tasks, /promote-tasks, /do-tasks (single), /archive-tasks (native auto-archive + a GraphQL backstop to stay under Linear's 250-active-issue cap). Not supported: batch /do-tasks --all. You can still manage these in Linear directly."
+  - `jira`: "`jira` supports: /add-task (lands a complete, unblocked task in `ready_status` when that key is set — otherwise it stays in the project's initial status), /list-tasks, /promote-tasks (uses `ready_status`/`refinement_status` if set, else prompts; unlike the other three handlers it backfills neither priority nor estimate — Jira has no estimate field, and its priority scheme is site-configured), /do-tasks (single — needs `ready_status` set), /archive-tasks (only when `archive_status` is set — native Jira archival is Premium). Not supported: batch /do-tasks --all. You can still manage these in Jira directly."
+  - `gh-issue`: "`gh-issue` supports: /add-task, /list-tasks, /promote-tasks (including `/promote-tasks backfill-only`, the one handler that can fill priority/estimate on an already-scored issue without moving it between rungs), /do-tasks (single; batch /do-tasks --all is opt-in via `gh-issue.remote_batch: true`, and leave it off unless your cloud environment installs this plugin itself and gives sessions a working gh credential — probed 2026-09-05, a committed .claude/settings.json did not install the plugin, and the session's gh was uncredentialed on reads as well as writes), /archive-tasks (hygiene only — GitHub has no issue cap; it just labels long-closed issues). You can still manage these in GitHub directly."
+  - `linear`: "`linear` supports: /add-task, /list-tasks, /promote-tasks, /do-tasks (single and batch /do-tasks --all — one remote session per dependency-ready issue, bounded by the WIP limit), /archive-tasks (native auto-archive + a GraphQL backstop to stay under Linear's non-archived-issue cap). You can still manage issues in Linear directly."
 - **For `repo-pr`:** that the config (and the task files under `dev_docs/tasks/`) are meant to be **committed and shared** — no exclude was added — so they should commit `.task-config.yml` for teammates to pick up the same destination.
 - **For `gh-issue` / `jira` / `linear`:** that `dev_docs/tasks/` was added to the repo's local git exclude, so the config stays local and out of `git status` (rerun the guarded `git check-ignore … || echo …` command above on any other clone). If they instead want teammates to share this destination, they can **commit** `.task-config.yml` rather than excluding it.
 - They can now run `/add-task`, or re-run `/task-config` to switch handlers.

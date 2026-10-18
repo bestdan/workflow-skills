@@ -1,0 +1,3 @@
+declare -Ar table
+local -r -A other
+typeset -A third

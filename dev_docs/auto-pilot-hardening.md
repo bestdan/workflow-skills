@@ -8,8 +8,7 @@ contract of the spawn helper, the posture on verification, the pre-flight, and
 the handful of invariants the loop must not violate.
 
 It exists because the first fully detached run (findings recorded in
-`dev_docs/autopilot-detached-run-1-findings.md` on the run-state branch
-`auto-pilot/2026-07-10-autopilot-hardening`, not on `main` — see "See also")
+`dev_docs/research/2026-07-10-autopilot-detached-run-1-findings.md`)
 succeeded only after three fatal spawn bugs were hand-patched at launch and five
 judgment calls were made live. Everything below is the graduated form of that
 backlog: the design a new dev should be able to follow without reading the run
@@ -160,7 +159,7 @@ the protocol, is the design.
 ## The spawn contract
 
 `scripts/spawn-orchestrator.sh` exists so no agent hand-authors a
-`bypassPermissions` jail at 3am. Every subcommand is **fail-closed**: paths must
+`bypassPermissions` jail with no human attached. Every subcommand is **fail-closed**: paths must
 be absolute and exist, and nothing partial is ever written.
 
 | Subcommand            | Contract                                                                                                                                                      |
@@ -191,7 +190,7 @@ Four of those details are load-bearing and were each a fatal bug:
   `write-launch --path`.
 - **The ordering inside `launch` is the safety property (#8).** Smoke-test auth
   _through the wrapper_ before detaching: a dead credential must fail loudly now,
-  not silently at 3am. `launch` was originally unusable precisely because the
+  not silently once no human can answer. `launch` was originally unusable precisely because the
   above two bugs forced hand-editing the script _between_ write-launch and
   detach; folding the fixes into `write-launch` is what makes the atomic
   subcommand usable again.
@@ -214,7 +213,8 @@ minimal settings hook set) rather than leaving the noise to be re-diagnosed.
 ## The pre-flight
 
 `scripts/preflight.sh` (task_5 / PR #173, #7 and #10) collapses ~20 manual
-launch steps into one call: `preflight.sh --source <plan|linear> [--base <branch>]`.
+launch steps into one call:
+`preflight.sh --source <plan|linear> --run-root <the run worktree> [--base <branch>]`.
 
 Two properties define it:
 
@@ -232,7 +232,12 @@ Output is parseable `PREFLIGHT <KEY>: <val>` lines ending in a single
 The keys double as the environment fingerprint the launch consumes: `GH_AUTH`,
 `VIEWER_PERMISSION` (draft-vs-ready capability), `ENV_CLASS`, `CODER <name>`,
 `FRESHNESS`, `PATH_DIR` / `EXEC_DIR` (fed straight to `write-launch --path` and
-`render-profile --exec-dir`), `DEST_HOST`, `HANDLER`, and the smoke results.
+`render-profile --exec-dir`), `DEST_HOST`, `HANDLER`, `HANDLER_SOURCE` (the
+config file that set the handler, or `default (…)` when neither place carries
+one — each file is read from `--run-root` first, then from that run root's
+main checkout, since a linked run worktree never receives the git-excluded
+external-handler config; never from the plugin directory, which ships this
+repo's own config), and the smoke results.
 
 Blocker classes:
 
@@ -266,7 +271,7 @@ resolutions outright rather than making each run re-derive them (task_6 / PR
   no race to arbitrate. **The run-state branch is the lock.** Still do the
   pre-claim `gh` PR scan, for `--resume` idempotency.
 - **The code PR carries only code** (a seam the attended dry-run surfaced; see
-  `autopilot-dry-run.md` on the run-state branch). Task files live on the
+  `dev_docs/research/2026-07-09-autopilot-dry-run.md`). Task files live on the
   run-state branch, so the `ready → in_progress → needs_review` status flips are
   committed **on the run-state branch**, never in the code PR's diff. repo-pr's
   "task file on `main`, deleted on merge" model does not apply.
@@ -333,13 +338,10 @@ rule above had no live chain left to constrain.
 
 ## See also
 
-- `dev_docs/autopilot-detached-run-1-findings.md` — the ranked findings this doc
-  graduates; the inline `#N` citations resolve to it. It lives on the run-state
-  branch `auto-pilot/2026-07-10-autopilot-hardening`, not on `main` (run
-  scaffolding stays on that branch — see "Scaffolding deletion is run-level
-  teardown" above).
-- `dev_docs/autopilot-dry-run.md` — the earlier attended dry-run, which surfaced
+- `dev_docs/research/2026-07-10-autopilot-detached-run-1-findings.md` — the ranked findings this doc
+  graduates; the inline `#N` citations resolve to it.
+- `dev_docs/research/2026-07-09-autopilot-dry-run.md` — the earlier attended dry-run, which surfaced
   the plan-source seams (handler resolution, task files off `main`, `--until`
-  sizing) before the detached run hit the jail. Same run-state branch as above.
+  sizing) before the detached run hit the jail.
 - [`auto-pilot.md`](./auto-pilot.md) — the mode's own design decisions, and the
   map to the authoritative skill references.

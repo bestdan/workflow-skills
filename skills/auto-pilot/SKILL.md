@@ -1,11 +1,11 @@
 ---
 name: auto-pilot
-description: Unattended autonomous mode — "pick up this Project and grind on it overnight." Runs a task graph (a Linear project or a plan-with-docs directory) task-by-task in an isolated worktree, taking each through /deliver-task (claim → implement → PR → co-review → hand-off) with durable, crash-resumable state and no human in the loop. Use when the user wants a body of work advanced autonomously and unattended. NOTE - v1 is under construction; this entry establishes the skill home and the run-state reference. Launch, run, and resume are implemented.
+description: Unattended autonomous mode — "pick up this Project and advance it with no human attached." Runs a task graph (a Linear project or a plan-with-docs directory) task-by-task in an isolated worktree, taking each through /deliver-task (claim → implement → PR → co-review → hand-off) with durable, crash-resumable state and no human in the loop. Use when the user wants a body of work advanced autonomously and unattended. NOTE - v1 is under construction; this entry establishes the skill home and the run-state reference. Launch, run, and resume are implemented.
 ---
 
 # auto-pilot — unattended autonomous runs
 
-"Claude, pick up this Project and grind on it overnight."
+"Claude, pick up this Project and advance it unattended."
 
 Auto-pilot advances a whole task graph without a human in the loop: an isolated
 worktree, a thin orchestrator that walks the graph, and `/deliver-task` per task
@@ -13,6 +13,26 @@ worktree, a thin orchestrator that walks the graph, and `/deliver-task` per task
 battle-tested skills and handler protocols rather than duplicating them.
 
 Design: [`../../dev_docs/auto-pilot.md`](../../dev_docs/auto-pilot.md).
+
+**Unattended is about attention, not the hour.** The property every guarantee
+below serves is that no human is attached to the orchestrator process — true
+at 3 in the morning and equally at 10 while its launcher is in a meeting. A run
+meets a human in one of three modes, and the guarantees are sized for the
+hardest one it may be in:
+
+- **Attended** — a human is at the launching session. Prompts are fine; only
+  launch runs this way.
+- **Partially attended** — a human dips in every so often. This is the common
+  case: the run needs a live status surface (`spawn-orchestrator.sh status`,
+  the heartbeat, the rolling `REPORT.md`) and an alarm, and it must never
+  _block_ on a human.
+- **Unattended** — nobody looks until the run ends. It needs both of the
+  above, plus the fail-closed launch pre-flight and self-halt on the
+  unrecoverable (`references/run-budget.md`).
+
+Detachment outliving the launching session is a fact about process lifetime.
+The one physical constraint is power: the machine must stay awake
+(`references/launch-runtime.md` "Laptop sleep").
 
 > **Status:** v1 is being built. This SKILL.md establishes the skill home, the
 > references below, the interactive **launch** phase, the unattended **run**
@@ -40,6 +60,13 @@ Design: [`../../dev_docs/auto-pilot.md`](../../dev_docs/auto-pilot.md).
   `claude -p`, not an in-session Agent) and the sandbox profile it runs under
   (worktree-confined writes, a default-deny network egress allowlist, and the
   non-interactive credential model). Launch's spawn step reads this.
+- [`references/launch-preflight.md`](references/launch-preflight.md) — the
+  ordered, fail-closed launch pre-flight (steps 1–7): worktree + run-state
+  branch, non-interactive auth probes and the environment-class fingerprint,
+  config resolution into non-interactive choices, the gitignore/verify-tooling
+  capture, task-graph materialization with the capability-join scout, and the
+  detached-orchestrator spawn. The Launch phase summarizes these; the per-step
+  mechanics live here.
 - [`references/run-budget.md`](references/run-budget.md) — the run's resource
   bounds: rate-window checks (proxy + rate-limit-error backstop), the
   near-cap checkpoint-then-exit-then-relaunch pause, the hard-stop before
@@ -55,19 +82,71 @@ Design: [`../../dev_docs/auto-pilot.md`](../../dev_docs/auto-pilot.md).
   against run-state.md's crash-reconciliation table before falling into the run
   loop. The Resume phase summarizes this; the mechanics live here.
 
+## Script paths
+
+A script reference's path form is decided by **who executes the line, and in
+what environment** — not by how the line reads. There are three contexts, and
+a reference in the wrong form for its context is a real bug.
+
+**1. Agent-executed — pin to `"${CLAUDE_PLUGIN_ROOT}/scripts/<name>.sh"`.**
+Any plugin-shipped helper the orchestrator itself runs: `preflight.sh`,
+`spawn-orchestrator.sh`, `probe-coders.sh`, `claude-usage.sh`, and the rest of
+this repo's `scripts/`. The orchestrator runs with cwd = the **target repo**,
+not this plugin, so a bare `scripts/<name>.sh` resolves against the target
+repo's tree, where the file doesn't exist — and it fails as "not found" rather
+than as "wrong repo", which is how it went undiagnosed. If
+`$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
+`**/scripts/<name>.sh`. Prose that names a subcommand without giving a command
+to run (`spawn-orchestrator.sh status`, `claude-usage.sh --session-status`)
+belongs to this context too — same script, same resolution, just not a command.
+A markdown **link** to a file in this repo
+([`scripts/claude-usage.sh`](../../scripts/claude-usage.sh) in
+[`references/run-budget.md`](references/run-budget.md), say) names a path for a
+reader, not an executor; it stays repo-relative and is never pinned.
+
+**2. The target repo's own scripts — repo-relative, correctly.** E.g.
+`bash scripts/check.sh` in
+[`references/launch-runtime.md`](references/launch-runtime.md) "Verify broker",
+which is the repo-under-automation's declared verify command. It runs in that
+repo, so `${CLAUDE_PLUGIN_ROOT}` would be flatly wrong.
+
+**3. Inside the generated launchd wrapper — bare, standing for a baked-in
+absolute path.** `spawn-orchestrator.sh write-launch` bakes its own absolute
+path into the wrapper it generates (`self="$ROOT/scripts/spawn-orchestrator.sh"`,
+`printf '%q'`-quoted into the script). That wrapper runs under **launchd**,
+where `$CLAUDE_PLUGIN_ROOT` is **not set** — so docs quoting the wrapper's
+contents show the bare name as shorthand for that absolute path, and pinning
+them would document something false.
+
+The alarm table in [`references/launch-runtime.md`](references/launch-runtime.md)
+"The alarm" is the case that makes the taxonomy worth stating: two adjacent rows
+for the **same script** correctly take **opposite** forms — the supervisor row
+bare (context 3, wrapper-executed) and the orchestrator row pinned (context 1,
+agent-executed). No list of exemptions can express that; the executor is the
+only axis that explains it.
+
 ## Launch phase (interactive)
 
-Invoked by `/auto-pilot <linear-project | plan-dir> [--until <time>] [--resume]`
-(`commands/auto-pilot.md`). Launch runs **interactively, tonight, while the human
-can still fix failures** — so it is **fail-closed**: any hard pre-flight failure
+Invoked by `/auto-pilot <linear-project | plan-dir> [--until <time>]
+[--reserve <pct>] [--profile less-claude] [--resume]`
+(`commands/auto-pilot.md`). Launch runs **interactively, while a human is attached
+and can still fix failures** — so it is **fail-closed**: any hard pre-flight failure
 **BLOCKS LAUNCH** with a specific, fixable message rather than deferring the
-problem to 3am. It ends by spawning the detached, unattended orchestrator and
+problem to a point where no human can answer. It ends by spawning the detached, unattended orchestrator and
 telling the user the run is underway. The unattended **run** loop is what the
 spawned orchestrator executes; **`--resume`** reconciles a crashed or paused
 run's state and then falls into that same loop (see "Resume phase" below).
 
-**Preamble — parse + resolve.** Parse `<source>`, `--until`, `--resume`.
-`--until` accepts an absolute ISO-8601 time or a relative `now+<duration>`
+**Preamble — parse + resolve.** Parse `<source>`, `--until`, `--reserve`,
+`--profile less-claude`, `--resume`. `--profile` is optional and only accepts
+`less-claude`; without it, preserve the existing launch behavior exactly. On a
+fresh less-claude launch, resolve and persist the profile settings in step 3.
+On `--resume`, read those settings from the selected `RUN.md` rather than
+re-parsing a profile choice. `--reserve <pct>` is the run's fixed rate-window headroom floor;
+default it to `15`, require a numeric percentage from 0 through 100, and
+persist the resolved value in `RUN.md`. On resume, use that persisted value
+unless an explicit, validated `--reserve` replaces it. `--until` accepts an
+absolute ISO-8601 time or a relative `now+<duration>`
 offset; launch resolves either to the absolute time recorded in `RUN.md`. If
 `--resume` is present, route to the **Resume phase** section below instead of
 running the rest of this launch pre-flight. Detect the source (existing
@@ -82,9 +161,10 @@ correct even when the repo's own `.task-config.yml` default is `linear`.
 
 **Size `--until` realistically.** A single `/deliver-task` floors well above a
 naive "a few minutes" guess once the resolved reviewer set includes a cloud
-reviewer (step 3 computes the exact number as `min_task_budget`; the formula
-is [`references/run-budget.md`](references/run-budget.md) "Minimum task
-budget"). An under-provisioned `--until` isn't fatal: the pre-dispatch guard
+reviewer (step 3 computes the exact number as `min_task_budget` by running
+`"${CLAUDE_PLUGIN_ROOT}/scripts/min-task-budget.sh"`;
+[`references/run-budget.md`](references/run-budget.md) "Minimum task budget"
+carries the reasoning). An under-provisioned `--until` isn't fatal: the pre-dispatch guard
 (Run phase) just declines to start the next task, so a too-tight window
 yields fewer tasks, not a hard-killed one. Provision at least one
 `min_task_budget` per task you expect to finish.
@@ -93,177 +173,36 @@ The pre-flight is an **ordered, fail-closed** sequence, steps 1–7 below. It is
 **supply-and-demand**: steps 2–3 probe what the configured environment can
 _supply_ (auth, resolved config), and the **scout** in step 6 checks what the
 _plan_ will _demand_ (which coder each task routes to) against that supply — the
-join is where a run that would otherwise pass green but die at 3am gets caught
-tonight.
+join is where a run that would otherwise pass green but fail with no human
+attached gets caught at launch.
 
-### Step 1 — Worktree + run-state branch (BLOCKS LAUNCH)
+The full mechanics of each step are in
+[`references/launch-preflight.md`](references/launch-preflight.md); in brief:
 
-Create the dedicated run **worktree** and the **run-state branch**
-`auto-pilot/<run_id>` (branch convention:
-[`references/run-state.md`](references/run-state.md) "Run-state branch").
-Confirm the plan / task instructions are **committed and present in the
-worktree** — an **untracked plan is a launch blocker**, since a plan that
-lives only in an uncommitted file never reaches the detached orchestrator. If
-the source is a plan directory, the plan files must be committed on the
-branch the run builds from; if Linear, the project must resolve and be
-reachable. Fail here with the specific missing artifact, not a generic error.
-
-### Step 2 — Non-interactive auth probes (BLOCKS LAUNCH)
-
-Run `scripts/preflight.sh --source <plan|linear> --base <base branch>` first
-— the read-only pre-flight helper this step extracts to. Its `PREFLIGHT …`
-output and `PREFLIGHT VERDICT: go` / `no-go — <reason>` line cover the binary
-fingerprint / environment class, coder availability, base freshness, the
-resolved PATH/exec dirs, the add-task host, and the confinement smoke. A
-`no-go` **BLOCKS LAUNCH** with the reason it names; treat its output as the
-source of truth rather than re-deriving these facts by hand.
-
-Probe every credential the run will need, each **non-interactively** — a probe
-that would open a prompt (a browser OAuth, a biometric `op signin`) is itself the
-failure (see [`references/launch-runtime.md`](references/launch-runtime.md) §3).
-The probe path depends on the **environment class** (below): `local-full`
-authenticates through CLIs, `claude-web` through **MCP**. Probe whichever applies:
-
-- **GitHub** — `local-full`: `gh auth status` (PRs + git push). `claude-web`:
-  confirm the **GitHub MCP** is connected (no `gh` CLI exists there).
-- **Linear** (linear source) — `local-full`: resolve the API key from its
-  `op://` reference (`api_key_ref` in `commands/handlers/linear-common.md`) via
-  `op read`. `claude-web`: use the **Linear MCP** connection (no `op`/CLI).
-  Either way, run `linear-common.md`'s shared **preflight** (`list_teams` → match
-  the team) to confirm auth actually works, not just that it resolves.
-- **Coder CLIs** (`local-full` only — a `claude-web` run has none) — run each
-  configured coder's auth probe via `scripts/probe-coders.sh`, the **single
-  source of truth** (don't restate its per-coder commands here — they'd drift).
-  A logged-out coder the run depends on is a blocker, not a silent skip.
-- **MCP** — any MCP the tasks touch: one cheap read call to confirm a live token.
-
-Each probe runs **through the sandbox wrapper** the orchestrator will use (per
-§"Step 7"), so a probe can't pass outside the jail while failing inside it. Any
-interactive-only or failing auth **BLOCKS LAUNCH**, naming the dependency.
-
-While probing, capture the **environment fingerprint** — which coder/tool
-binaries exist on `PATH` (`codex`, `devin`, `agy`, `op`, `gh`) and the resulting
-**environment class** (`local-full` = CLIs on `PATH`; `claude-web` = cloud/web,
-no local CLIs, narrower permission surface). **Detect** the facts (a
-`command -v` probe can't lie) rather than trusting a declared class. Record it
-on the run-state branch — the step-6 scout joins against it, and `--resume` in
-a different environment re-runs that join.
-
-Also confirm **unattended viability** here, up front while the human is
-present rather than at spawn: a `local-full` run needs the machine to stay
-awake for the run's duration — a human judgment call, not a probe, so it
-stays here rather than in `scripts/preflight.sh`
-([`references/launch-runtime.md`](references/launch-runtime.md) "Laptop
-sleep"). If it can't be guaranteed, **BLOCKS LAUNCH**.
-
-### Step 3 — Resolve config into non-interactive choices (BLOCKS LAUNCH)
-
-Collapse every config decision the unattended run could hit into a fixed choice,
-so nothing prompts at 3am:
-
-- **Co-review reviewer set** — resolve `/co-review`'s reviewer set from
-  `.co-review.yml` into the concrete list that will run under `--non-interactive`
-  (bounded per-reviewer timeouts; the reviewer prompt is never asked mid-run).
-  For a **time-boxed run** (`--until` set), default to a **fast reviewer set**
-  (codex + Claude + reconciler) over one that includes the slower cloud
-  reviewers (`devin` / `agy`); cloud reviewers are **optional/skippable** in
-  this set — a skipped reviewer is never fatal and is recorded (`REPORT.md`
-  review classes). Then **compute `min_task_budget` from this resolved
-  set** — the pre-dispatch floor is coupled to reviewer latency, not a
-  constant; formula in
-  [`references/run-budget.md`](references/run-budget.md) "Minimum task
-  budget" — and write it to `RUN.md` front matter (step 6) so the run loop's
-  pre-dispatch deadline guard reads a concrete number.
-- **Coder config** — run `select-coder` once to resolve each task's
-  `<backend>:<model>` from the capability matrix, so `orchestrate-coders`
-  dispatches without prompting for a missing default.
-- **Custom/local commands** are **disabled** for the run unless explicitly
-  approved at this step (untrusted-config posture, matching co-review's rule).
-
-Any decision that can't be resolved here — and would therefore prompt mid-run —
-**BLOCKS LAUNCH**.
-
-### Step 4 — Gitignore sanity check
-
-Check the file types the tasks will produce (the plan's `related_files` and
-any expected build/output artifacts) against the repo's ignore rules with
-`git check-ignore`. A match does **not** block launch, but **record the matched
-paths in run state** so the run phase commits them with `git add -f` and the work
-lands despite the ignore rule. Surface the list in the launch summary too, so the
-human can still catch a genuinely wrong ignore while awake.
-
-### Step 5 — Record verify tooling + exercise path
-
-Resolve the project's named check command (`dli check` → `just check` →
-`scripts/check.*`, the same precedence the repo's check tooling uses) and the
-end-to-end **exercise path** (how a task's feature is driven, not just its
-tests). Write both into `RUN.md`'s `verify_command` and `exercise_path`
-front-matter fields (format per
-[`references/run-state.md`](references/run-state.md) "`RUN.md`"), so every
-task's `/deliver-task` verifies the same way.
-
-Because the orchestrator runs **jailed** and `verify_command` can't pass
-inside the jail (execve-deny, exit 126), install the **verify broker** here
-so verify runs **outside** the jail: `scripts/spawn-orchestrator.sh
-write-verify-broker` registers a second, un-jailed launchd job that runs the
-**pinned** `verify_command` in a run-root-confined worktree, and each task's
-verify becomes a `verify-request` → `verify-await` handshake
-([`references/launch-runtime.md`](references/launch-runtime.md) §5). Tear
-the broker job down alongside the orchestrator supervisor at loop
-termination.
-
-### Step 6 — Materialize the task graph into run state
-
-Run the adapter's `list_ready` and `dependency_graph`
-([`references/adapters.md`](references/adapters.md)) to build the run's task
-graph and its blocker edges. Write `.auto-pilot/RUN.md` — front matter
-(`run_id`, `work_source`, `base_branch`, `verify_command`/`exercise_path` from
-step 5, `min_task_budget` from step 3) plus the per-task table, in the exact
-format defined in
-[`references/run-state.md`](references/run-state.md) "`RUN.md`" — do **not**
-restate that format here. Also seed empty `.auto-pilot/QUESTIONS.md` and
-`.auto-pilot/REPORT.md`. **Commit** all three to the run-state branch (the
-first write under the run-state branch's fixed write order).
-
-**Scout — per-task capability join (BLOCKS LAUNCH).** With the graph now
-materialized and each task's coder resolved (step 3) against the environment
-fingerprint (step 2), check the **demand** side the auth probes structurally
-can't see: for **each** task, take the `<backend>` it routes to and confirm
-it **exists in this environment** — the motivating case is a `codex` task in
-a `claude-web` run with no `codex` binary. A task routed to an absent backend
-**BLOCKS LAUNCH**, naming the task, the missing backend, and the fix (install
-it, or re-route the task). This is a **deterministic** check only: it blocks
-on a provable route-vs-environment gap, never a guess about what a task's
-prose might need — inferring demands from task _text_ is a separate,
-warn-only predictive scout, deliberately not here.
-
-**v1 treats every route as _required_** — an absent backend blocks. A planned
-follow-up softens this to **required-vs-preferred** (a _preferred_ backend
-that's absent warns and falls back to the next-ranked `select-coder` spec
-instead of blocking): the fallback order already exists, the missing piece is
-the require/prefer bit on the task route.
-
-### Step 7 — Spawn the detached orchestrator
-
-Per [`references/launch-runtime.md`](references/launch-runtime.md):
-
-1. Write the self-contained **launch script** — env, the sandbox wrapper (the
-   two-layer profile: seatbelt/bwrap for filesystem+process, the harness network
-   allowlist narrowed to this run's tools for host egress), and log redirection
-   to `.auto-pilot/orchestrator.log`. The egress allowlist also gets the
-   pre-flight's resolved `/add-task` destination host via `render-settings
-   --add-task-host`, so the run's own settings never deny its own follow-up
-   filing regardless of work source.
-2. Run the **auth smoke test through that exact sandbox wrapper + env** (not
-   bare) — a failure here is a launch blocker (ties to step 2). Machine-stays-
-   awake was already confirmed in the pre-flight (step 2).
-3. **Detach** via the OS-appropriate primitive (`launchd`/`launchctl` on macOS,
-   `setsid` on Linux) so the orchestrator outlives this session; record its
-   **PID + process start-time + `--until` deadline** on the run-state branch for
-   later stale-run detection (the start-time guards against a recycled PID being
-   mistaken for a live run).
-4. Print **where state lives** — the run-state branch name, the `.auto-pilot/`
-   files, and the log path — and tell the user the run is going.
+1. **Worktree + run-state branch** (BLOCKS LAUNCH) — create the run worktree
+   and the `auto-pilot/<run_id>` branch; an untracked plan is a blocker.
+2. **Non-interactive auth probes** (BLOCKS LAUNCH) — `"${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh"`
+   plus per-credential probes (GitHub, Linear, coder CLIs, MCP), each through
+   the run's sandbox wrapper; capture the environment fingerprint / class; a
+   probe that would prompt is itself the failure. Includes the
+   machine-stays-awake check; the less-claude CAO gate runs as part of step 6's
+   scout below.
+3. **Resolve config into non-interactive choices** (BLOCKS LAUNCH) — reviewer
+   set + `min_task_budget`, `select-coder` per task, the less-claude profile
+   fields, and the custom-commands posture; anything left unresolved would
+   prompt when no human can answer, so it blocks.
+4. **Gitignore sanity check** — record ignored output paths for `git add -f`;
+   warn-only, never blocks.
+5. **Record verify tooling + exercise path** — pin `verify_command` /
+   `exercise_path` into `RUN.md` and install the un-jailed verify broker.
+6. **Materialize the task graph into run state** — write `RUN.md` /
+   `QUESTIONS.md` / `REPORT.md`, then the deterministic capability-join
+   **scout** (`"${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh" --scout-run-md`,
+   including the less-claude CAO gate; BLOCKS LAUNCH on a route-vs-environment
+   gap).
+7. **Spawn the detached orchestrator** — launch script + sandbox wrapper, the
+   auth smoke test through that wrapper, OS-level detach with PID/start-time
+   recorded, and print where state lives.
 
 ## Resume phase (--resume)
 
@@ -282,11 +221,11 @@ procedure is in [`references/resume.md`](references/resume.md); in short:
   (zero or many is fail-closed), and **guard against a live orchestrator** at the
   recorded PID + start-time — **before the doctor**, which _repairs_ and so must
   never run against a run someone else is still driving.
-- **Clear the run's alarms** (`spawn-orchestrator.sh alarm-clear --dir
-  <run-dir>`) — after that guard, **before the doctor**, so clearing never
+- **Clear the run's alarms** (`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh"
+  alarm-clear --dir <run-dir>`) — after that guard, **before the doctor**, so clearing never
   deletes an `alarm-request` a doctor halt is about to file
   ([`references/resume.md`](references/resume.md)).
-- **Clear the terminal exit state too** (`spawn-orchestrator.sh
+- **Clear the terminal exit state too** (`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh"
   clear-exit-state --dir <run-worktree>`) — the done-sentinel and
   `exit_reason*` are durable and would otherwise make a resumed live run read
   back as finished ([`references/resume.md`](references/resume.md)).
@@ -319,22 +258,23 @@ while unblocked tasks remain and inside budget bounds:
     pick next unblocked task (phase-based readiness)
     if until is set and now + min_task_budget > until:   # pre-dispatch deadline guard
         stop the loop cleanly (record "N left, M min to deadline, not starting")
-    /deliver-task it (with per-task wall-clock + retry bounds)
+    /deliver-task it --run-state .auto-pilot/RUN.md (with per-task wall-clock + retry bounds)
     update run state on the run-state branch
     check rate-window usage
 declare the exit reason, then exit          # every termination path, no exceptions
 ```
 
 **The exit contract.** Before exiting, for any reason, run
-`scripts/spawn-orchestrator.sh exit-reason --dir <run worktree> --reason <r>`
+`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" exit-reason --dir <run worktree> --reason <r>`
 (`continuing` | `paused` | `done` | `systemic` | `deadline`), and beat the
-heartbeat (`spawn-orchestrator.sh heartbeat --dir <run worktree> --note
-<where>`) at each loop iteration and `/deliver-task` sub-step boundary. Full
+heartbeat (`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" heartbeat
+--dir <run worktree> --note <where>`) at each loop iteration and
+`/deliver-task` sub-step boundary. Full
 semantics, precedence, and fail-safe rules:
 [`references/run-state.md`](references/run-state.md) "Exit contract" and
 "Heartbeat".
 
-**Every iteration opens with the run doctor**, `scripts/spawn-orchestrator.sh
+**Every iteration opens with the run doctor**, `"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh"
 doctor` — a cheap, deterministic, no-model-call audit of seven invariants
 (HALT on `status: systemic`, exit 30 — the loop must not dispatch). The
 invariant table, each one's repair, the exit codes, and the finding-#22/#23
@@ -349,11 +289,19 @@ at launch (step 3) and read from `RUN.md` front matter, never a constant; why
 this guard exists and the floor's derivation:
 [`references/run-budget.md`](references/run-budget.md) "Minimum task budget".
 
+**Pre-invoke reserve gate.** The outer loop dispatches each delivery with its
+`RUN.md` path; `/deliver-task`, as lifecycle owner, applies
+[`references/run-budget.md`](references/run-budget.md) "Pre-invoke reserve"
+at its internal claim, verify, co-review, re-verify, and repeated co-review
+boundaries. The loop does not attempt to intercept those opaque substeps.
+
 **Readiness + ordering.** Walk the `RUN.md` task graph
 ([`references/run-state.md`](references/run-state.md) "`RUN.md`"). A task is
-**ready** when every task it is blocked by is at phase `handed-off` — never
-tracker done-state (per that reference's phase table, `handed-off` is the
-success terminal the run keys off, not `needs_review`'s eventual completion).
+**ready** when its own phase is `pending` and every task it is blocked by is
+at phase `handed-off` — never tracker done-state (per that reference's phase
+table, `handed-off` is the success terminal the run keys off, not
+`needs_review`'s eventual completion). A `skipped` task is never selected
+again.
 Pick the next ready task in dependency order. Each task's `base` column
 encodes whether it is independent (`main`) or chained (the parent task's
 branch) — that distinction drives the stacked-PR handling below.
@@ -361,7 +309,7 @@ branch) — that distinction drives the stacked-PR handling below.
 **The per-task step.** Dispatch exactly one call per task:
 
 ```
-/deliver-task <id> --base <branch> --handler <handler> --questions .auto-pilot/QUESTIONS.md
+/deliver-task <id> --base <branch> --handler <handler> --questions .auto-pilot/QUESTIONS.md --run-state .auto-pilot/RUN.md
 ```
 
 where `<branch>` is the task's `base` from `RUN.md` and `<handler>` is the
@@ -369,7 +317,8 @@ run's effective handler resolved from the run's (normalized) source (plan ⇒
 `repo-pr`, linear ⇒ `linear`), never re-derived by `/deliver-task` itself.
 `/deliver-task` ([`commands/deliver-task.md`](../../commands/deliver-task.md))
 owns the entire per-task lifecycle — claim, implement, PR, co-review, iterate,
-hand-off — the run loop does not re-derive any of it; the `--questions` path
+hand-off — including the internal reserve boundaries enabled by `--run-state`;
+the outer loop does not intercept those opaque substeps. The `--questions` path
 is where the non-blocking decision protocol below appends entries. A
 `/deliver-task` call that **fails outright** gets the per-task retry bound
 (one re-dispatch, then **park**;
@@ -393,11 +342,11 @@ index: [`references/run-state.md`](references/run-state.md) "`REPORT.md`".
 **Human checkpoints produce artifacts, then proceed.** When a task needs
 genuine human judgment, the run still does not block: `/deliver-task` ensures
 the PR carries a working end-to-end state plus a how-to-evaluate note, the
-orchestrator records the same entry in `REPORT.md`'s _How-to-evaluate queue_,
+orchestrator records the same entry in `REPORT.md`'s _For you_ section,
 and the loop moves on.
 
 **Rolling `REPORT.md` update.** After every task's state update above, rewrite
-`REPORT.md` from the current `RUN.md` + `QUESTIONS.md` state — the seven
+`REPORT.md` from the current `RUN.md` + `QUESTIONS.md` state — the six
 sections in [`references/run-state.md`](references/run-state.md)'s "`REPORT.md`"
 order. Commit it on the run-state branch as part of that state update's commit,
 under the write order's last step. Its _Spend_ section stays a one-line
@@ -423,6 +372,12 @@ stacked-PR repair)".
 the run-state branch — the **write order**'s last step
 ([`references/run-state.md`](references/run-state.md) "Write order");
 `/deliver-task` already performed that order's push + tracker-write steps.
+When `/deliver-task` returned a **claim refusal** (its step 2) instead, write
+phase `skipped` with the refusal reason in `notes`; it holds no claim, so there
+is nothing to push or write to the tracker first. A refusal is not a failed
+delivery and never takes the per-task retry bound. Why `skipped` and not
+`parked`, and why a reopened blocker skips rather than waits:
+[`references/run-state.md`](references/run-state.md) "Task lifecycle phases".
 Then apply the budget checks in
 [`references/run-budget.md`](references/run-budget.md): a hard-stop, a
 near-cap pause, or a circuit-breaker halt writes state and exits per that
@@ -436,7 +391,8 @@ ready for a later `--resume` — the `status`/`paused_until` contract and what
 that does to the relaunch supervisor:
 [`references/run-state.md`](references/run-state.md) "`RUN.md`" and
 [`references/launch-runtime.md`](references/launch-runtime.md) "Relaunchable,
-not one-shot".
+not one-shot". A run whose every remaining task was refused ends because no
+ready task remains: `skipped` tasks and their dependents are never ready.
 
 In every case the orchestrator writes and commits the final `REPORT.md`, then
 declares its exit reason and exits cleanly, emitting a one-line summary to

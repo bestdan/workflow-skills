@@ -1,9 +1,17 @@
 name: CI
 
-# Deterministic, blocking quality gate. Runs the exact same entrypoint
-# (scripts/check.sh) that contributors run locally via `just check`, so CI and
-# local can never drift. Behavioral evals are NOT here — they are opt-in and
-# live in evals.yml (manual workflow_dispatch).
+# Deterministic, blocking quality gate. The `quality` job runs the exact same
+# entrypoint (scripts/check.sh) that contributors run locally via `just check`,
+# so CI and local can never drift. Behavioral evals are NOT here — they are
+# opt-in and live in evals.yml (manual workflow_dispatch). On a pull_request,
+# `quality` also passes --base HEAD^1 so check.sh itself can skip the slow
+# shell/bats suites on a dev_docs-only PR (see check.sh's own comment); a push
+# to main always runs the full gate, unnarrowed, as the backstop.
+#
+# The `macos` job is deliberately NOT that entrypoint — see its own comment for
+# why running check.sh twice would buy nothing. It is a second HOST, not a
+# second gate: the union of the two jobs is the coverage, because neither
+# platform is a superset of the other.
 
 on:
   pull_request:
@@ -18,43 +26,60 @@ jobs:
     name: Deterministic gate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
+          # fetch-depth 2, not 1: a pull_request event checks out the PR merge
+          # ref, whose first parent is the base branch tip (same reasoning as
+          # the `changes` job below), so depth 2 makes HEAD^1..HEAD exactly the
+          # PR's changed files. check.sh passes that range to --base below.
+          fetch-depth: 2
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        # SHA-pinned despite this job being `contents: read`, for a tracking
+        # reason rather than a security one: astral-sh stopped publishing
+        # floating major tags after v7, so `@v7` is a dead end pointing at
+        # v7.6.0 while upstream ships v9 -- and Dependabot cannot see past a
+        # floating tag. Pinning the SHA makes it track real releases again
+        # (it rewrites the SHA and the trailing version comment together).
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           version: "0.11.16"
           # Nothing cacheable here (the only lockfile is a uv *script* lock);
           # disabling avoids a spurious "no cache dependency matched" warning.
           enable-cache: false
 
-      - name: Install dprint + claude CLI
-        # dprint is pinned to match the local toolchain; claude provides
-        # `plugin validate`. Node/npm are preinstalled on ubuntu-latest.
-        run: npm install -g dprint@0.54.0 @anthropic-ai/claude-code
+      - name: Install shell + format tools
+        # dprint, shellcheck and shfmt all come from mise.toml, so CI and a
+        # contributor's laptop resolve identical versions instead of drifting
+        # between npm, tarballs and a local mise. cache: true keeps the
+        # installed toolchain across runs.
+        #
+        # This replaced a hand-rolled curl + sha256sum block that pinned exact
+        # bytes. mise's aqua backend does verify a checksum per download, but
+        # against the aqua registry rather than a sha committed here, so the
+        # trust root moved from this file to that registry. Commit a mise.lock
+        # (`mise settings lockfile=true`) if that tradeoff stops being
+        # acceptable.
+        uses: jdx/mise-action@v4
+        with:
+          cache: true
 
-      - name: Install shell tools
-        # Both artifacts are download-then-verify: the checksums pin the exact
-        # bytes, so a retagged or tampered release fails the gate instead of
-        # executing. Bump the sha alongside the version on every upgrade.
-        env:
-          SHELLCHECK_VERSION: v0.10.0
-          SHELLCHECK_SHA256: 6c881ab0698e4e6ea235245f22832860544f17ba386442fe7e9d629f8cbedf87
-          SHFMT_VERSION: v3.10.0
-          SHFMT_SHA256: 1f57a384d59542f8fac5f503da1f3ea44242f46dff969569e80b524d64b71dbc
+      - name: Install claude CLI
+        # Still npm: claude provides `plugin validate` and has no mise plugin.
+        # Node/npm are preinstalled on ubuntu-latest.
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Fetch agent-guidance (dev_docs layout checker)
+        # scripts/dev-docs-layout.sh runs the checker that ships in the
+        # agent-guidance plugin, and fails rather than skips when it cannot
+        # find one. A runner has no plugin install, so clone the public repo
+        # and point the resolver at it. Shallow: the checker and the
+        # conventions beside it are all that gets read.
         run: |
-          curl -fsSL -o /tmp/shellcheck.tar.xz \
-            "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
-          echo "${SHELLCHECK_SHA256}  /tmp/shellcheck.tar.xz" | sha256sum -c -
-          sudo tar -xJ --strip-components=1 -C /usr/local/bin \
-            -f /tmp/shellcheck.tar.xz "shellcheck-${SHELLCHECK_VERSION}/shellcheck"
-
-          curl -fsSL -o /tmp/shfmt \
-            "https://github.com/mvdan/sh/releases/download/${SHFMT_VERSION}/shfmt_${SHFMT_VERSION}_linux_amd64"
-          echo "${SHFMT_SHA256}  /tmp/shfmt" | sha256sum -c -
-          sudo install -m 0755 /tmp/shfmt /usr/local/bin/shfmt
+          clone="$RUNNER_TEMP/agent-guidance"
+          git clone --depth 1 https://github.com/bestdan/agent-guidance.git "$clone"
+          echo "AGENT_GUIDANCE_DIR=$clone" >>"$GITHUB_ENV"
 
       # NOTE (tracked in dev_docs/.../step_3.md): first CI run verifies whether
       # `claude plugin validate` works headless (no auth) on a GitHub runner. If
@@ -62,7 +87,109 @@ jobs:
       # and drop the CLI from this gate — validate.py already covers version-sync
       # and manifest cross-consistency.
       - name: Deterministic quality gate
-        run: bash scripts/check.sh
+        # A pull_request runs --base HEAD^1 so check.sh can skip the slow
+        # shell/bats suites when the PR's diff is confined to dev_docs/ (the
+        # fetch-depth: 2 above is what makes HEAD^1 the base tip). A push to
+        # main has no PR range to narrow against, so it always runs the full
+        # gate — the backstop that keeps main's coverage complete regardless
+        # of what any individual PR skipped. The branch is on $EVENT_NAME, an
+        # env var, rather than interpolated into the run body, so a crafted
+        # event name can't inject shell.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            bash scripts/check.sh --base HEAD^1
+          else
+            bash scripts/check.sh
+          fi
+
+  # Classifies a PR's diff so `macos` can skip one confined to dev_docs/ — the
+  # job's runtime is almost all scripts/test-shell.sh, and nothing that suite
+  # runs reads the real dev_docs/ tree. PRs only: a push to main skips this job,
+  # which leaves its output empty, which runs `macos` — so main always gets the
+  # full coverage as a backstop.
+  changes:
+    name: Classify changed files
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+    steps:
+      # The PR merge ref's first parent is the base branch tip, so depth 2 is
+      # enough for HEAD^1..HEAD to be exactly the PR's change. GitHub rebuilds
+      # that ref on every push, force-pushes and rebases included.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      - id: classify
+        run: bash scripts/ci-docs-only.sh HEAD^1 HEAD >>"$GITHUB_OUTPUT"
+
+  macos:
+    name: Host-sensitive suites (macOS)
+    needs: changes
+    # Skipped by a job-level `if` rather than workflow `paths-ignore`: a job
+    # skipped this way reports as passing, where a workflow skipped by path
+    # filters leaves a required check pending forever. `!cancelled()` lets it
+    # run when `changes` itself was skipped (a push) or failed — the empty
+    # output then reads as not-docs-only, so every failure runs the suites.
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      # Runs the shell/bats layer only, NOT scripts/check.sh. Everything else
+      # in that script (dprint, validate.py, typecheck, the python suites) is
+      # host-independent, so a second run of it would cost a mise + uv + npm
+      # toolchain install on macOS to re-assert what `quality` already proved.
+      # This job exists for the assertions that are host-DEPENDENT, and
+      # scripts/test-shell.sh is exactly those: the bats files plus the
+      # orchestrator suite. It needs only bash, git and the vendored bats
+      # submodules, which is why there are no install steps above.
+      #
+      # SO_TEST_REQUIRE_SEATBELT=1 is the point of the job. Without it the
+      # suite reports a green "N passed, 14 skipped" on a host that never
+      # applied a profile, which is precisely the false comfort this job is
+      # meant to remove; with it, a run is green only when ZERO
+      # seatbelt-behavioral assertions were skipped. Verified reachable before
+      # this job was written rather than assumed — a throwaway probe on this
+      # branch (runs 31872616800 / 31872828322) confirmed macos-latest can
+      # apply a profile and that the flag passes there.
+      #
+      # Note the flag gates on the SKIP COUNT, not on seatbelt capability, and
+      # several skip sites are host-fixture ones (launchctl, plutil, distinct
+      # fixture binaries). All were present on the macos26 image; a future
+      # runner image that drops one would fail this job for a reason unrelated
+      # to seatbelt. Read the skip reasons before assuming a regression.
+      # This job is also the ONLY place the Bash 3.2 floor that AGENTS.md
+      # requires is exercised — the ubuntu job runs Bash 5, and no script
+      # asserts a version. That used to hold incidentally, because this image
+      # happens to keep /bin/bash ahead of Homebrew's bash on PATH, so the
+      # `#!/usr/bin/env bash` scripts landed on 3.2. An image that reordered
+      # PATH would have retired the check silently. Invoking /bin/bash by name
+      # makes it a contract instead. The pin is carried down by hand —
+      # test-shell.sh to the orchestrator driver, the driver to each of its
+      # seven parts, both hops via "$BASH" — because every bare `bash` on that
+      # path re-resolves through PATH. SO_TEST_REQUIRE_BASH3 is what makes that
+      # chain trustworthy: the suites assert on arrival, so a hop dropped by a
+      # future edit fails the job instead of silently reopening the hole.
+      - name: Assert /bin/bash is the 3.2 floor
+        run: |
+          /bin/bash -c '
+            printf "%s\n" "$BASH_VERSION"
+            [ "${BASH_VERSINFO[0]}" -eq 3 ] || {
+              echo "::error::/bin/bash is no longer 3.2 — the Bash floor this job pins is not being exercised. Re-read dev_docs/testing.md before deciding what to do." >&2
+              exit 1
+            }'
+
+      - name: Shell + bats suites, full seatbelt coverage required
+        env:
+          SO_TEST_REQUIRE_SEATBELT: 1
+          SO_TEST_REQUIRE_BASH3: 1
+        run: /bin/bash scripts/test-shell.sh
 
   # NOTE: a relative-link-integrity job (lychee --offline) was intentionally
   # dropped — the shipped docs (README, skills, commands, agents) contain no

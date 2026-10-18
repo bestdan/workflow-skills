@@ -1,0 +1,8 @@
+if printf '%s' "$out" | grep -q 'needle'; then echo hit; fi
+if printf '%s' "$out" | grep -qF "$want"; then echo hit; fi
+if printf '%s' "$h" | grep -Eq '^host$'; then echo hit; fi
+if printf '%s\n' "$list" | grep -qxF -- "$file"; then echo hit; fi
+if printf '%s\n' "$logins" | grep -qiF "$token"; then echo hit; fi
+if git worktree list | grep -q 'wt'; then echo hit; fi
+if printf '%s' "$out" | grep --quiet 'needle'; then echo hit; fi
+if printf '%s' "$out" | grep -i --silent 'needle'; then echo hit; fi

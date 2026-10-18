@@ -8,7 +8,7 @@ description: Use when choosing which coder agent and model should execute a codi
 Given a task (or a set of orchestrate-coders packets), recommend which coder
 backend and model should execute it. The output is one or more ranked coder
 specs in orchestrate-coders syntax — `opus:claude-sonnet-5`,
-`codex:gpt-5.6-luna`, `agy:Gemini 3.5 Flash (High)` — with a one-line
+`codex:gpt-5.6-luna`, `agy:Gemini 3.6 Flash (High)` — with a one-line
 rationale each, directly usable as `--coder` arguments.
 
 Two inputs drive the choice:
@@ -17,7 +17,9 @@ Two inputs drive the choice:
    `dev_docs/orchestrate-coders/.coders.yml` (pre-flight below). Never
    recommend a backend/model the machine can't run.
 2. **What the task needs** — scored against the capability matrix in
-   [`matrix.md`](matrix.md).
+   [`matrix.md`](matrix.md). The matrix is decisions only; its numbers are
+   re-researched by [`refresh-coder-comparison.md`](refresh-coder-comparison.md)
+   (`/refresh-coder-comparison`), not by this skill.
 
 Availability means "runnable by the orchestrator," not "registered as a Claude
 `Agent` tool subagent." `opus` is native to the Agent tool. `codex`, `agy`, and
@@ -25,6 +27,14 @@ Availability means "runnable by the orchestrator," not "registered as a Claude
 command exists and any required auth is valid. Recommend them as
 `<backend>:<model>` specs for `orchestrate-coders`; do not reject them merely
 because Claude Code cannot spawn them through the Agent tool.
+
+When a run is CAO-routed, `--cao-fleet` constrains the candidate set **before
+ranking** to `codex` and `agy`; never emit `opus` or `devin` for that call.
+Keep this skill's normal `codex:<model>` or
+`agy:<model>` recommendation for scoring, then select the matching named
+`cao-codex` or `cao-agy` entry from `.coders.yml` for dispatch. Those names
+are pinned backend/model custom commands; this is a routing pointer only, not
+additional scoring logic.
 
 ## Pre-flight: availability probe
 
@@ -34,17 +44,18 @@ config orchestrate-coders uses) under an `availability:` block:
 
 ```yaml
 availability:
-  probed_at: 2026-07-03
+  probed_at: 2026-07-28
   opus: # always available (Agent tool) — models per session availableModels
     models: [
-      claude-opus-4-8,
+      claude-opus-5,
+      claude-fable-5,
       claude-sonnet-5,
-      claude-sonnet-4-6,
+      claude-opus-4-8,
       claude-haiku-4-5,
     ]
   codex:
     installed: true
-    default_model: gpt-5.6 # from `codex config get model` or config.toml; alias for gpt-5.6-terra
+    default_model: gpt-5.6-sol # from `~/.codex/config.toml`; `gpt-5.6` is an alias for the terra tier
     auth: chatgpt # api-key | chatgpt | unknown — from `codex login status` (prints to stderr); ranks codex within the secret-exposure gate
   agy:
     installed: true
@@ -52,8 +63,14 @@ availability:
   devin:
     installed: true
     logged_in: true # script-probed via `devin auth status`; false when creds are dead
-    tier: pro # free tier pins swe-1.6-slow; pro unlocks swe-1.6/-fast + passthroughs
+    tier: pro # free tier is limited; pro unlocks the full marketplace (37 model families)
 ```
+
+**`devin` is a model marketplace, not a model vendor.** `devin models list`
+enumerates dozens of families across nine-plus labs, so `devin:<model>` picks a
+_vendor and jurisdiction_, not just a capability tier — always name the model
+explicitly. See `matrix.md` → devin for which ones are worth reaching for and
+which the secret-exposure gate removes.
 
 **When to (re)probe:** block absent, `--refresh` passed, `probed_at` older
 than 30 days, or a recommendation just failed because a model turned out to
@@ -79,8 +96,9 @@ script can't know, fill in yourself before merging:
 - `opus.models` — the script emits `[]`; populate from the session's
   `availableModels` (opus itself is always available).
 
-A devin `tier: unknown` still resolves on first use (an `/upgrade to access
-this model` error means free tier → `swe-1.6-slow` only).
+A devin `tier: unknown` resolves with `devin models list`, which enumerates
+exactly what the account can reach; an `/upgrade to access this model` error on
+a listed model means the tier is gated below it.
 
 Write the block back after probing. Create
 `dev_docs/orchestrate-coders/.coders.yml` if absent — the file may then hold
@@ -130,8 +148,12 @@ passes `--non-interactive`, gets a guarantee this skill never prompts:
    the `cross-vendor` row is a select-coder-only modifier, not an assess-task
    label), filtered to what's available. Produce a ranked list (best first),
    max 3 per task. On `confidence: low`, also consider the `runner_up` row.
+   **When `--cao-fleet` is set**, restrict this candidate list to `codex` and
+   `agy` (the CAO-dispatchable backends) _before_ scoring, so `opus`/`devin`
+   can never rank — a non-CAO winner would have no named `cao-*` coder and
+   force the unattended run into a re-dispatch loop or park.
 
-3. **Run the two gates first** (`matrix.md` → "Secret exposure and containment").
+3. **Run the two gates first** (`matrix.md` → "Gates — run before ranking").
    They filter candidates rather than penalize them, and they are the only
    dimensions that can disqualify a backend outright.
    - **Secret exposure.** The trigger is whether the agent could read a live
@@ -145,7 +167,11 @@ passes `--non-interactive`, gets a guarantee this skill never prompts:
      keep `.env` out of the worktree: that, not the vendor choice, is what
      prevents the leak.
    - **Containment.** Unattended or parallel work near the main checkout rules out
-     `agy`, whose workspace boundary is not enforceable.
+     `agy`, whose workspace boundary is not enforceable. **Exception under
+     `--cao-fleet`:** a CAO-dispatched `agy` runs inside CAO's own isolated
+     worktree (that worktree is the containment boundary, per
+     `orchestrate-coders/SKILL.md`), not the main checkout, so this gate does
+     not fire for it.
    - **Non-interactive runs never prompt** (see above). Check for secrets cheaply
      instead (a present `.env`, an ignored credential file); if inconclusive,
      assume the gate fires and say so. `.coders.yml` can set
@@ -154,7 +180,18 @@ passes `--non-interactive`, gets a guarantee this skill never prompts:
    Name the gate that removed each dropped backend. A gate is not a tiebreak.
 
 4. **Apply the operational modifiers** (also in `matrix.md`) — these come
-   from real pilot runs and outrank benchmark deltas:
+   from real pilot runs and published evaluations, and outrank benchmark
+   deltas:
+   - **`codex:gpt-5.6-sol` games evaluations at the highest rate METR has
+     recorded** (55.4% honesty-suite vs 41.2% for GPT-5.5). It is still #1 on
+     AA's independent Coding Agent Index, so keep it for implementation — but
+     **never emit it for `verification-sensitive`**, and say in the report
+     that the orchestrator's own check run is mandatory on a Sol packet.
+     Substitute `codex:gpt-5.5` when a coder's self-report must be trusted, if
+     the account serves it — co-review's codex reviewer found it returning 404
+     (`../co-review/reviewers/codex.md`); otherwise route to `opus`. Under
+     `--cao-fleet`, where `opus` is excluded, leave that slot empty and say so
+     in the report — do not fill it with another codex or agy model.
    - devin packets always return unverified → fine for edits, penalize when
      the task's value is in the verification.
    - codex sandbox false-FAILs on home-dir caches → orchestrator re-runs
@@ -176,7 +213,7 @@ passes `--non-interactive`, gets a guarantee this skill never prompts:
 ## Invocation
 
 ```
-/select-coder <task description> [--plan <name>] [--refresh] [-n N] [--non-interactive]
+/select-coder <task description> [--plan <name>] [--refresh] [-n N] [--cao-fleet] [--non-interactive]
 ```
 
 - `<task description>` — the task to route. With `--plan <name>`, score each
@@ -185,6 +222,8 @@ passes `--non-interactive`, gets a guarantee this skill never prompts:
   round-robin override.
 - `--refresh` — force a re-probe of availability.
 - `-n N` — return the top N candidates per task (default 3).
+- `--cao-fleet` — constrain candidates to the CAO-dispatchable `codex` and
+  `agy` backends. `/auto-pilot --profile less-claude` passes this flag.
 - `--non-interactive` — never prompt; see "Resolved config (non-interactive
   callers)" above.
 
@@ -192,9 +231,11 @@ passes `--non-interactive`, gets a guarantee this skill never prompts:
 
 - Never recommend an unavailable backend/model without flagging it as such.
 - The matrix carries a cache date. If it is older than ~2 months, or the
-  user asks about a model the matrix doesn't list, refresh per the protocol
-  at the top of `matrix.md` before recommending — don't answer from a stale
-  table as if it were current.
+  user asks about a model the matrix doesn't list, refresh before
+  recommending — run `/refresh-coder-comparison` (procedure:
+  [`refresh-coder-comparison.md`](refresh-coder-comparison.md)) — and don't
+  answer from a stale table as if it were current. That is a different clock
+  from `--refresh` above, which re-probes local availability only.
 - Cost figures are directional, not billing-grade: subscription-quota
   backends (agy, devin) don't map cleanly to $/Mtok. Use the tiers.
 - When two candidates are within noise on the task's primary dimension,

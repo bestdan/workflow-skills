@@ -1,0 +1,190 @@
+# AGENTS.md
+
+Guidance for anyone — human or agent — working **on** this repository. It is
+the map and the short list of rules that are load-bearing here; everything
+deeper is one link away.
+
+| You want to…                                                   | Go to                                                                                            |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Install and use the plugin                                     | [`README.md`](README.md)                                                                         |
+| Set up the dev loop, run the gate, add a skill/command/handler | [`CONTRIBUTING.md`](CONTRIBUTING.md)                                                             |
+| Cut a release, fix a failed one, land a stack of PRs           | [`dev_docs/releasing.md`](dev_docs/releasing.md)                                                 |
+| Interpret a skipped test, or add a host-dependent one          | [`dev_docs/testing.md`](dev_docs/testing.md)                                                     |
+| Speed the gate up, or add concurrency to it                    | [`dev_docs/gate-performance.md`](dev_docs/gate-performance.md)                                   |
+| Call codex/agy/devin from a workflow                           | [`dev_docs/external-agents.md`](dev_docs/external-agents.md)                                     |
+| Change what the nightly routine does to the board              | [`dev_docs/nightly-gh-issue-routine.md`](dev_docs/nightly-gh-issue-routine.md)                   |
+| Understand secret/API-key resolution                           | [`dev_docs/auth_key_access.md`](dev_docs/auth_key_access.md)                                     |
+| Propose a typed model call (Jev) for some judgment             | [`dev_docs/typed-model-calls.md`](dev_docs/typed-model-calls.md)                                 |
+| Understand the gh-issue label/claim/completion model           | [`dev_docs/gh_issue_task_loop.md`](dev_docs/gh_issue_task_loop.md)                               |
+| Find prose that should be a helper script, and extract it      | [`dev_docs/finding-prose-that-should-be-code.md`](dev_docs/finding-prose-that-should-be-code.md) |
+| Read a design decision, or file a doc under `dev_docs/`        | [`dev_docs/README.md`](dev_docs/README.md)                                                       |
+| Pick up work a previous session left for you                   | [`dev_docs/.handoffs/README.md`](dev_docs/.handoffs/README.md)                                   |
+
+## What this repo is
+
+<!-- copilot:begin id=repo-shape -->
+
+A **Claude Code plugin**. The product is prompt text, not a program:
+
+- **`skills/<name>/SKILL.md`** — auto-triggering skills. A frontmatter
+  `description` is interface, not documentation — but **`SKILL.md`'s is not
+  always the one that decides whether the skill fires.** Where a
+  `commands/<name>.md` sits beside it, the **command's** `description` is what
+  reaches the model's skill listing and routes; the `SKILL.md` one never gets
+  there. Check for the twin before tuning either, or the edit changes nothing:
+  [`dev_docs/decisions/2026-09-21-command-descriptions-shadow-skill-descriptions.md`](dev_docs/decisions/2026-09-21-command-descriptions-shadow-skill-descriptions.md).
+  Body ≤500 lines (enforced); overflow goes in sibling `references/` files the
+  skill links to.
+- **`commands/<name>.md`** — slash commands. `commands/handlers/` holds the
+  per-tracker (`linear`, `gh-issue`, `jira`, `repo-pr`) implementations the task
+  commands dispatch into.
+- **`agents/<name>.md`** — bundled subagents.
+- **`scripts/`** — dev/CI tooling _and_ runtime helpers the skills shell out to
+  (`research-spike.py`, `task-scan.py`, `spawn-orchestrator.sh`, …). Not all of
+  it is dev-only; check who calls a script before treating it as disposable.
+- **`evals/`** — behavioral checks that each skill auto-triggers from a naive
+  prompt. Opt-in, never blocking.
+- **`dev_docs/`** — durable design docs and runbooks.
+
+The practical consequence: **editing a skill or command body changes agent
+behavior at runtime for every installed user.** Treat those files with the care
+you'd give production code, and treat their length as a cost — every line is
+tokens in someone's context window.
+
+<!-- copilot:end -->
+
+## Progressive disclosure is the house style
+
+It applies to the docs _and_ to the skills, for the same reason: an agent pays
+for what it loads.
+
+<!-- copilot:begin id=progressive-disclosure -->
+
+- A top-level file states the rule and links to the detail. It does not inline
+  the detail.
+- A SKILL.md body carries the judgment; procedures, tables, and worked examples
+  go in `references/` and are loaded only when needed. The loading mechanics —
+  and the rule they impose on where a fix lands — are in
+  [CONTRIBUTING.md](CONTRIBUTING.md#what-loads-at-runtime-vs-contributor-only).
+- One fact, one home. If something is already true in `commands/task-config.md`,
+  `dev_docs/releasing.md`, or a skill's own reference file, **link to it** — a
+  second copy rots silently and there is no invalidation.
+
+<!-- copilot:end -->
+
+Before adding a section to `README.md`, `CONTRIBUTING.md`, or this file, ask
+whether it belongs one level down instead. The answer is usually yes.
+
+## Rules that bite here
+
+<!-- copilot:begin id=rules-that-bite -->
+
+- **Run `just check` before pushing.** It is exactly what CI runs
+  (`scripts/check.sh`), it runs everything concurrently, and it reports every
+  failure rather than stopping at the first. Don't discover formatting drift in
+  CI — `just fmt` fixes it. It needs network (`uvx` reaches pypi on every run),
+  so under Claude Code's Bash sandbox run it unsandboxed from the first call: a
+  sandboxed run fails in unrelated suites and costs a full rerun to diagnose.
+- **Never commit to `main`.** It's protected, and every qualifying merge
+  auto-bumps the version. Branch (`bestdan/...` for this repo's owner),
+  PR, squash-merge.
+- **The PR title is the release lever.** Merges are squashed, so the title's
+  [Conventional Commit](https://www.conventionalcommits.org/) type
+  (`feat` / `fix` / `chore` / …) is what decides whether a version ships and how
+  big the bump is. Getting it wrong ships a wrong release, not a wrong label.
+- **Logic goes in a typed file, not a fenced block.** A skill/command/handler
+  body is runtime prompt text, and nothing in the gate lints or runs shell
+  inside markdown — that gap shipped seven defects in one 36-line block. Put the
+  code in `commands/handlers/assets/<name>.py` (or `scripts/<name>.sh`), give it
+  a test pair, and call it from the prose. `validate.py` fails a fenced block
+  that carries two or more control-flow statements and closes one on its own
+  line. Full rule, including what stays inline:
+  [CONTRIBUTING.md](CONTRIBUTING.md#logic-goes-in-a-typed-file).
+- **Adding a skill or command means editing `README.md` in the same PR.**
+  `validate.py` fails the build if the "N skills, M commands, and K subagent"
+  sentence drifts from reality.
+- **Adding or extending a handler means editing the capability matrix in
+  `commands/task-config.md` in the same PR.** That table is the single source of
+  truth `/task-config` reads to warn users about gaps; nothing detects its drift.
+- **`plugin.json` and `marketplace.json` versions must stay equal**, as plain
+  `X.Y.Z` — `validate.py` rejects a `v` prefix. The Release workflow normally
+  owns both; if you bump by hand, bump both.
+- **`dev_docs/` follows the shared layout, and `just check` enforces it.** A
+  date in a filename means a record; no date means a live file kept current.
+  Which directory holds what is [`dev_docs/README.md`](dev_docs/README.md), and
+  the convention itself is `dev_docs_layout.md` in the `agent-guidance` plugin.
+  `scripts/dev-docs-layout.sh` runs that plugin's checker and **fails when the
+  plugin is missing** rather than skipping, so CI clones it.
+- **`dev_docs/tasks/` is ignored except `.task-config.yml`.** Plan scaffolding
+  there is ephemeral in-flight state — durable wisdom graduates to a top-level
+  `dev_docs/<name>.md`. See the comment block in `.gitignore` before trying to
+  force-track anything under it.
+- **`.github/copilot-instructions.md` and `.github/instructions/` are
+  generated.** Copilot code review cannot follow links, so those files are a
+  flat copy of the marked spans in `AGENTS.md` and `CONTRIBUTING.md`. Edit the
+  rule where it lives, then rerun
+  `python3 scripts/build-copilot-instructions.py`; the gate fails on drift.
+- **Don't commit state another system owns.** Linear, GitHub, and the changelog
+  already know their own facts; write a link, not a copy. A file that records a
+  moment carries its date in the name.
+
+<!-- copilot:end -->
+
+## Working style
+
+- Read a file before modifying it. Read `origin/main`'s `.gitignore` and a
+  file's history before untracking or deleting it — several things here are
+  tracked on purpose.
+
+<!-- copilot:begin id=working-style-code -->
+
+- Don't over-engineer: no error handling for impossible cases, no feature flags,
+  no backwards-compat shims. Three similar lines beat a premature abstraction.
+- Don't refactor surrounding code, add comments/docstrings/type annotations to
+  code you didn't change, or add unasked-for functionality.
+- Don't disable or delete tests to make the gate pass.
+- Don't add dependencies without discussing it first. `scripts/validate.py`'s
+  single dependency is hash-locked in `scripts/validate.py.lock`.
+
+<!-- copilot:end -->
+
+- **Resolve uncertainty by running something.** A question about behavior, an
+  API, or an assumption is usually cheaper to settle with a one-liner or a
+  targeted test than with another round of speculation.
+- **Verify before asserting a diagnosis — especially an absence.** "There's no
+  X", "it doesn't support Y", "that branch is protected" are claims about the
+  state of the world; run the one cheap check that would falsify it first.
+  Inference can't tell "not there" from "not where I looked".
+- **Verify before claiming success.** Run the gate, name the smallest command
+  that shows the change working, and report what it actually printed.
+
+<!-- copilot:begin id=merge-status -->
+
+- **Determine merge status from PR state, not commit ancestry.** This repo
+  squash-merges, so `git merge-base --is-ancestor` reports every landed branch
+  as unmerged. Use `gh pr list --head <branch> --state all --json state`.
+
+<!-- copilot:end -->
+
+## Shell and script conventions
+
+<!-- copilot:begin id=shell-conventions -->
+
+- Shell is formatted with `shfmt -i 2 -ci -bn` and linted with ShellCheck via
+  `scripts/lint-shell.sh`; both run in `just check`.
+- macOS ships Bash 3.2 and `scripts/test-shell.sh` deliberately exercises that
+  floor — no associative arrays, no `declare -A`. Prefer indexed arrays and
+  plain loops. CI's macOS job runs that suite under `/bin/bash` 3.2, so a
+  violation fails the PR rather than only a maintainer's laptop — see
+  [`dev_docs/testing.md`](dev_docs/testing.md) for why that holds incidentally
+  rather than by contract.
+- Test harnesses that build git fixtures must pin `GIT_CONFIG_GLOBAL=/dev/null`.
+  A `git init` fixture otherwise inherits the developer's global config — a
+  machine-wide `core.hooksPath` with a `pre-commit` that refuses commits to
+  `main` is exactly what a fresh fixture does, and the suite then passes in CI
+  while failing on a laptop.
+- Never redirect a failable command into a tracked file. `cmd > real_file`
+  truncates the destination even when `cmd` fails; write to a temp path and
+  `mv` on success.
+
+<!-- copilot:end -->

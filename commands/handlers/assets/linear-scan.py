@@ -11,35 +11,42 @@ per-issue `get_issue` attachment-fetch loop with one paginated GraphQL query
 per scope (project, or whole-team when no --project is given).
 
 Read-only. Never mutates anything. This is a sibling of linear-ready.py and
-linear-archive.py; it reuses linear-archive.py's get_key()/gql() verbatim.
+linear-archive.py; it reuses linear-archive.py's gql() helper verbatim, and
+all three call the shared _secret_resolve.py for get_key().
 
-The API key is read, in order, from:
-  1. $LINEAR_API_KEY, else
-  2. `op read "$LINEAR_API_KEY_REF"` (a full op://vault/item/field reference).
+The API key is resolved by commands/handlers/assets/_secret_resolve.py, which
+walks two independent ladders: secret/pointer (`$LINEAR_API_KEY` ->
+`$LINEAR_API_KEY_REF` -> unavailable) and resolver (`$LINEAR_API_KEY_RESOLVER`
+-> default `op`), against an allow-list of resolver identifiers (`op`, `opx`).
+A failed resolve never falls through to the next rung. See
+dev_docs/auth_key_access.md for the full contract.
 
-IMPORTANT: under 1Password desktop-app integration, `op` only unlocks in an
-authorized terminal — NOT in an agent's tool-spawned subshell. Run this from
-your own terminal, or headless with $LINEAR_API_KEY set directly, or
-$OP_SERVICE_ACCOUNT_TOKEN + $LINEAR_API_KEY_REF (so `op read` resolves the key).
+A configured `linear.api_key` / `linear.api_key_ref` / `linear.api_key_resolver`
+reaches this
+script only because the caller bridges them onto the environment — see
+linear-common.md's "Key resolution" step. This script reads no config.
 
 On any failure (missing key, GraphQL error, team not found) this exits
 non-zero with the reason on stderr, so the caller can fall back to the MCP
 floor. Stdout carries exactly one JSON object and nothing else.
 
 Usage:
-  python3 linear-scan.py --team PreThink
-  python3 linear-scan.py --team PreThink --state-type started --state-type unstarted
-  python3 linear-scan.py --team PreThink --project <uuid> --project <uuid>
+  python3 linear-scan.py --team Platform
+  python3 linear-scan.py --team Platform --state-type started --state-type unstarted
+  python3 linear-scan.py --team Platform --project <uuid> --project <uuid>
 """
 
 import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 import urllib.error
 import urllib.request
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _secret_resolve import SecretUnavailable, resolve_key  # noqa: E402
+from _shape import ShapeError, expect  # noqa: E402
 
 API = "https://api.linear.app/graphql"
 
@@ -69,8 +76,13 @@ query($name: String!) {
 }"""
 
 # %s slot: project var decl + extra filter. Skinny fields per linear-common.md's
-# "In-flight scan": id identifier title url state { id type } plus attachments —
-# explicitly no `description`.
+# "In-flight scan": id identifier title url state { id type } plus attachments and
+# the issue's own project — explicitly no `description`.
+#
+# `project { id name }` is the issue's REAL project, not the scope that returned
+# it. Consumers map an issue to its per-project config (e.g. `repo:`) by this id,
+# and a whole-team query — which is what `--all` runs — has no scope id to fall
+# back on, so asking the API per issue is the only thing that answers there.
 ISSUES_QUERY = """
 query($cursor: String, $first: Int!, $team: ID!, $types: [String!]%s) {
   issues(first: $first, after: $cursor, filter: {
@@ -81,6 +93,7 @@ query($cursor: String, $first: Int!, $team: ID!, $types: [String!]%s) {
     nodes {
       id identifier title url
       state { id type }
+      project { id name }
       attachments { nodes { url } }
     }
     pageInfo { hasNextPage endCursor }
@@ -89,21 +102,10 @@ query($cursor: String, $first: Int!, $team: ID!, $types: [String!]%s) {
 
 
 def get_key():
-    key = os.environ.get("LINEAR_API_KEY")
-    if key:
-        return key.strip()
-    ref = os.environ.get("LINEAR_API_KEY_REF")
-    if not ref:
-        sys.exit(
-            "No Linear API key. Set $LINEAR_API_KEY, or $LINEAR_API_KEY_REF to a "
-            "full op://vault/item/field reference. (op must run in an authorized "
-            "shell — see this file's header.)"
-        )
-    out = subprocess.run(["op", "read", ref], capture_output=True, text=True)
-    key = out.stdout.strip()
-    if not key:
-        sys.exit(f"Could not read key from 1Password ({ref}): {out.stderr.strip()}")
-    return key
+    try:
+        return resolve_key("LINEAR_API_KEY")
+    except SecretUnavailable as e:
+        sys.exit(str(e))
 
 
 def gql(key, query, variables=None):
@@ -127,9 +129,21 @@ def gql(key, query, variables=None):
         # Network failure or the timeout above — exit non-zero (not a hang) so the
         # caller falls back to the MCP floor per this script's contract.
         sys.exit(f"GraphQL request failed: {e.reason}")
+    # Guard the root BEFORE the membership test: `"errors" in None` and
+    # `"errors" in 5` raise TypeError, so a scalar JSON body would reach neither
+    # this check nor expect() below and would surface as the traceback this
+    # whole seam exists to remove. gh-issue-rollups.py guards in the same order.
+    if not isinstance(payload, dict):
+        sys.exit(f"GraphQL response: expected an object, got {type(payload).__name__}")
     if "errors" in payload:
         sys.exit("GraphQL error: " + json.dumps(payload["errors"], indent=2))
-    return payload["data"]
+    # A malformed response used to surface as a KeyError traceback here, and
+    # then as a chain of KeyErrors at every caller that indexed into the result.
+    # expect() makes it one sentence naming the field.
+    try:
+        return expect(payload, "data", dict, "GraphQL response")
+    except ShapeError as exc:
+        sys.exit(str(exc))
 
 
 def resolve_team(key, team):
@@ -180,7 +194,7 @@ def main():
         "--team",
         default=os.environ.get("LINEAR_TEAM"),
         required=os.environ.get("LINEAR_TEAM") is None,
-        help="Team name (e.g. PreThink) or UUID id, or $LINEAR_TEAM.",
+        help="Team name (e.g. Platform) or UUID id, or $LINEAR_TEAM.",
     )
     ap.add_argument(
         "--project",
@@ -229,7 +243,12 @@ def main():
             key, team_node["id"], state_types, scope["id"], args.limit
         )
         for issue in issues:
-            issue["project"] = scope["name"]
+            # `project` comes from the API and stays untouched: the issue's own
+            # project as {id, name}, or null when it has none. `scope` records
+            # which query returned it, which is what this used to overwrite
+            # `project` with — a scope name, identical for every issue under a
+            # whole-team query and therefore useless for per-project lookup.
+            issue["scope"] = scope["name"]
             issue["attachments"] = [n["url"] for n in issue["attachments"]["nodes"]]
             all_issues.append(issue)
 

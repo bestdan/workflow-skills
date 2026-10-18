@@ -7,8 +7,8 @@ issue's native relation edges, in one filtered GraphQL query per scope
 this codebase, since reoptimize reads every issue in scope including terminal
 (`Done`/`Canceled`) ones.
 
-Read-only. Never mutates anything. Reuses linear-archive.py's get_key()/gql()
-helpers verbatim (same key resolution + the "No Linear API key…" guidance).
+Read-only. Never mutates anything. Reuses linear-archive.py's gql() helper
+verbatim; both call the shared _secret_resolve.py for get_key().
 
 SCHEMA NOTE — verified-pending. This script derives the four logical edges
 (`blockedBy`/`blocks`/`relatedTo`/`duplicateOf`) from Linear's `relations` and
@@ -24,7 +24,11 @@ a real key.
 Derivation:
   blocks      = relations,        type == "blocks"   -> relatedIssue
   blockedBy   = inverseRelations, type == "blocks"    -> issue
-  relatedTo   = either connection, type == "related"  -> relatedIssue / issue
+  relatedTo   = either connection, type in ("related", "similar")
+                -> relatedIssue / issue. Linear's `similar` is a weaker
+                "these are connected" signal with no separate consumer, so it
+                folds in here rather than being dropped (deduped against
+                `related`, since an issue can carry both).
   duplicateOf = relations,         type == "duplicate" -> relatedIssue
                 (inverse duplicates are "duplicated by" THIS issue, not the
                 other way round — directional like blocks, so dropped here)
@@ -37,36 +41,56 @@ judgment, and it runs as a rare, deliberate whole-backlog pass (not a
 per-request hot path), so the bigger per-issue payload is a justified
 tradeoff, not an oversight.
 
-The API key is read, in order, from:
-  1. $LINEAR_API_KEY, else
-  2. `op read "$LINEAR_API_KEY_REF"` (a full op://vault/item/field reference).
+The API key is resolved by commands/handlers/assets/_secret_resolve.py, which
+walks two independent ladders: secret/pointer (`$LINEAR_API_KEY` ->
+`$LINEAR_API_KEY_REF` -> unavailable) and resolver (`$LINEAR_API_KEY_RESOLVER`
+-> default `op`), against an allow-list of resolver identifiers (`op`, `opx`).
+A failed resolve never falls through to the next rung. See
+dev_docs/auth_key_access.md for the full contract.
 
-IMPORTANT: under 1Password desktop-app integration, `op` only unlocks in an
-authorized terminal — NOT in an agent's tool-spawned subshell. Run this from
-your own terminal, or headless with $LINEAR_API_KEY set directly, or
-$OP_SERVICE_ACCOUNT_TOKEN + $LINEAR_API_KEY_REF (so `op read` resolves the
-key).
+A configured `linear.api_key` / `linear.api_key_ref` / `linear.api_key_resolver`
+reaches this
+script only because the caller bridges them onto the environment — see
+linear-common.md's "Key resolution" step. This script reads no config.
 
 On any failure (missing key, GraphQL error, team not found) this exits
 non-zero with the reason on stderr, so the caller can fall back to the MCP
 floor. Stdout carries exactly one JSON object and nothing else.
 
 Usage:
-  python3 linear-relations.py --team PreThink
-  python3 linear-relations.py --team PreThink --project <uuid> --project <uuid>
-  python3 linear-relations.py --team PreThink --limit 100
+  python3 linear-relations.py --team Platform
+  python3 linear-relations.py --team Platform --project <uuid> --project <uuid>
+  python3 linear-relations.py --team Platform --limit 100
 """
 
 import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 import urllib.error
 import urllib.request
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _body_refs import parse as parse_body_refs  # noqa: E402
+from _secret_resolve import SecretUnavailable, resolve_key  # noqa: E402
+from _shape import ShapeError, expect  # noqa: E402
+
 API = "https://api.linear.app/graphql"
+
+# `_body_refs.parse()`'s `id_pattern` for this handler: an embedded
+# `<issue id="PRE-NNN" href="…">` mention (the `tag_id` group) or a bare
+# `PRE-NNN` (the `bare_id` group), never a fragment of a longer word —
+# `(?<![\w-])`/`(?![\w-])` refuse a match inside e.g. `PRE-142a` or
+# `subPRE-142`. `re.I` so a hand-typed lowercase mention (`pre-142`) still
+# matches; `_body_refs.parse()`'s self-exclusion already compares
+# case-insensitively, but that's moot if the pattern never matches lowercase
+# in the first place.
+LINEAR_BODY_REF_PATTERN = re.compile(
+    r'<issue\b[^>]*\bid="(?P<tag_id>[A-Z]+-\d+)"[^>]*>'
+    r"|(?<![\w-])(?P<bare_id>[A-Z]+-\d+)(?![\w-])",
+    re.I,
+)
 
 # linear.team may be a team NAME or a UUID id (see linear-common.md / linear-config.md).
 UUID_RE = re.compile(
@@ -114,35 +138,10 @@ query($cursor: String, $first: Int!, $team: ID!%s) {
 
 
 def get_key():
-    key = os.environ.get("LINEAR_API_KEY")
-    if key:
-        return key.strip()
-    ref = os.environ.get("LINEAR_API_KEY_REF")
-    if not ref:
-        sys.exit(
-            "No Linear API key. Set $LINEAR_API_KEY, or $LINEAR_API_KEY_REF to a "
-            "full op://vault/item/field reference. (op must run in an authorized "
-            "shell — see this file's header.)"
-        )
     try:
-        out = subprocess.run(
-            ["op", "read", ref], capture_output=True, text=True, timeout=15
-        )
-    except FileNotFoundError:
-        sys.exit(
-            "1Password CLI 'op' not found. Install it, or set $LINEAR_API_KEY "
-            "directly (see this file's header)."
-        )
-    except subprocess.TimeoutExpired:
-        # A locked 1Password desktop session can block `op read` on a biometric
-        # prompt this non-interactive subshell can't answer. Exit non-zero (not
-        # a hang) so the caller falls back to the MCP floor per this script's
-        # contract.
-        sys.exit(f"Timed out reading key from 1Password ({ref}).")
-    key = out.stdout.strip()
-    if not key:
-        sys.exit(f"Could not read key from 1Password ({ref}): {out.stderr.strip()}")
-    return key
+        return resolve_key("LINEAR_API_KEY")
+    except SecretUnavailable as e:
+        sys.exit(str(e))
 
 
 def gql(key, query, variables=None):
@@ -166,9 +165,21 @@ def gql(key, query, variables=None):
         # Network failure or the timeout above — exit non-zero (not a hang) so the
         # caller falls back to the MCP floor per this script's contract.
         sys.exit(f"GraphQL request failed: {e.reason}")
+    # Guard the root BEFORE the membership test: `"errors" in None` and
+    # `"errors" in 5` raise TypeError, so a scalar JSON body would reach neither
+    # this check nor expect() below and would surface as the traceback this
+    # whole seam exists to remove. gh-issue-rollups.py guards in the same order.
+    if not isinstance(payload, dict):
+        sys.exit(f"GraphQL response: expected an object, got {type(payload).__name__}")
     if "errors" in payload:
         sys.exit("GraphQL error: " + json.dumps(payload["errors"], indent=2))
-    return payload["data"]
+    # A malformed response used to surface as a KeyError traceback here, and
+    # then as a chain of KeyErrors at every caller that indexed into the result.
+    # expect() makes it one sentence naming the field.
+    try:
+        return expect(payload, "data", dict, "GraphQL response")
+    except ShapeError as exc:
+        sys.exit(str(exc))
 
 
 def resolve_team(key, team):
@@ -215,8 +226,13 @@ def derive_edges(issue):
         ref = _ref(target)
         if edge.get("type") == "blocks":
             blocks.append(ref)
-        elif edge.get("type") == "related":
-            related_to.append(ref)
+        # `similar` folds into related_to: it is a weaker "these are connected"
+        # signal with no separate consumer, and dropping it would silently lose
+        # edges from the graph (which is what happened until the enum-drift
+        # guard in test-linear-relations-live.sh started running again).
+        elif edge.get("type") in ("related", "similar"):
+            if ref not in related_to:
+                related_to.append(ref)
         elif edge.get("type") == "duplicate":
             duplicate_of.append(ref)
 
@@ -227,7 +243,7 @@ def derive_edges(issue):
         ref = _ref(target)
         if edge.get("type") == "blocks":
             blocked_by.append(ref)
-        elif edge.get("type") == "related":
+        elif edge.get("type") in ("related", "similar"):
             if ref not in related_to:
                 related_to.append(ref)
         # An inverse `duplicate` means the OTHER issue is a duplicate of THIS
@@ -248,7 +264,7 @@ def main():
         "--team",
         default=os.environ.get("LINEAR_TEAM"),
         required=os.environ.get("LINEAR_TEAM") is None,
-        help="Team name (e.g. PreThink) or UUID id, or $LINEAR_TEAM.",
+        help="Team name (e.g. Platform) or UUID id, or $LINEAR_TEAM.",
     )
     ap.add_argument(
         "--project",
@@ -310,8 +326,46 @@ def main():
                 "blocks": blocks,
                 "relatedTo": related_to,
                 "duplicateOf": duplicate_of,
+                # Every dependency-phrase reference the description makes,
+                # direction- and strength-classified by the shared
+                # `_body_refs` table — the fixed phrase list
+                # `linear-reoptimize.md` Dimensions 1-2 used to hand-walk.
+                "body_references": parse_body_refs(
+                    issue.get("description") or "",
+                    issue["identifier"],
+                    LINEAR_BODY_REF_PATTERN,
+                ),
             }
         )
+
+    # `body_references` with no matching native relation yet — Dimension 1-2's
+    # "prose -> native reconciliation" and "hidden cross-project dependencies"
+    # both read this instead of re-parsing descriptions themselves. Covered by
+    # `blockedBy`/`blocks`/`relatedTo` respectively, compared case-insensitively
+    # since a hand-typed mention's case need not match the real identifier's.
+    by_identifier = {issue["identifier"].casefold(): issue for issue in issues_out}
+    proposed = []
+    for issue in issues_out:
+        for ref in issue["body_references"]:
+            target_norm = ref["target"].casefold()
+            if ref["direction"] == "blocked_by":
+                native_list = issue["blockedBy"]
+            elif ref["direction"] == "blocks":
+                native_list = issue["blocks"]
+            else:
+                native_list = issue["relatedTo"]
+            covered = any(t.casefold() == target_norm for t in native_list)
+            if not covered:
+                target = by_identifier.get(target_norm)
+                proposed.append(
+                    {
+                        "from": issue["identifier"],
+                        "target": target["identifier"] if target else ref["target"],
+                        "phrase": ref["phrase"],
+                        "direction": ref["direction"],
+                        "strength": ref["strength"],
+                    }
+                )
 
     print(
         f"Resolved team={team_node['name']} scopes={len(project_ids)} "
@@ -326,6 +380,7 @@ def main():
             "states": team_node["states"]["nodes"],
         },
         "issues": issues_out,
+        "proposed": proposed,
     }
     print(json.dumps(result))
 

@@ -1,0 +1,2 @@
+mapfile -t kept <in # bash4-lint: allow
+echo "docs say bash4-lint: allow here"; mapfile -t sneaky <in

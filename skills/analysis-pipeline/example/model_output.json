@@ -24,6 +24,10 @@
       "storage_gb": 2400,
       "monthly_api_requests": 8500000,
       "note": "assumption \u2014 revisit with infra team"
+    },
+    "reporting_thresholds": {
+      "decisive_margin_pct": "5%",
+      "note": "assumption \u2014 a lead under this is within pricing noise"
     }
   },
   "derived": {
@@ -48,6 +52,10 @@
     "monthly_cost": "$183.10",
     "annual_cost": "$2,197.20",
     "most_expensive_annual": "$2,626.80",
-    "max_annual_savings": "$429.60"
+    "max_annual_savings": "$429.60",
+    "runner_up": "Nimbus Cloud",
+    "margin_vs_runner_up": "$313.20",
+    "margin_vs_runner_up_pct": "12.5%",
+    "margin_verdict": "decisive"
   }
 }

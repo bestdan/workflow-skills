@@ -1,0 +1,31 @@
+# mise tool dependencies for this repo.
+#
+# These are the tools scripts/check.sh shells out to. Pinning them here means
+# CI and a contributor's laptop resolve the same bytes — before this file, CI
+# installed dprint from npm and shellcheck/shfmt from tagged tarballs, while a
+# Mac got them from mise via bestdan/dotfiles, and the two drifted (CI sat on
+# dprint 0.54.0 for a while after dotfiles moved to 0.55.2).
+#
+# These are hand-bumped. Automating it would mean a cross-repo token between
+# this public repo and a private dotfiles repo, in one direction or the other,
+# which isn't worth it for three version strings that move a few times a year.
+# When you bump one, run `just check` before pushing — a dprint minor can change
+# markdown rules and dirty the whole tree.
+#
+# node is here for `node --check` over the local-review page's inline <script>
+# (scripts/test-local-review.sh). ubuntu-latest preinstalls a node, so CI would
+# find one regardless — pinning it is what stops CI and a laptop from parsing
+# the same file with different parsers, which is this file's whole point. The
+# test skips when no node resolves, so a contributor without mise still gets a
+# green gate, just one assertion lighter.
+#
+# Not everything CI needs lives here: uv comes from astral-sh/setup-uv (a
+# first-party action with its own caching) and the claude CLI from npm (no
+# mise plugin exists). Both are installed from .github/workflows/ci.yml — uv is
+# version-pinned there; the claude CLI deliberately is not.
+
+[tools]
+dprint = "0.55.2"
+node = "22.22.3"
+shellcheck = "0.11.0"
+shfmt = "3.10.0"

@@ -1,0 +1,21 @@
+- `scripts/spawn-orchestrator.sh:5017`
+- issue: `issue (blocking): status report log outputs $counts_parked instead of $counts_skipped for skipped tasks`
+  In `status_report()`, the stdout log string formats `skipped=$counts_parked` instead of `skipped=$counts_skipped`, causing the logged skipped count to duplicate the parked count and misreport skipped tasks.
+- suggested fix: Change `skipped=$counts_parked` to `skipped=$counts_skipped`.
+
+- `scripts/spawn-orchestrator.sh:6578`
+- issue: `issue (blocking): break terminates the doctor task loop prematurely upon encountering a skipped task`
+  In bash, `case` statements do not create a loop scope; executing `break` inside a `case` terminates the enclosing `for` loop over tasks. When `doctor()` encounters any task with phase `skipped`, `break` causes doctor to abort checking all subsequent tasks in the run. Like `handed-off`, a `skipped` task holds nothing this run acquired to repair and should `continue` to inspect the next task.
+- suggested fix: Replace `skipped) break ;;` with `skipped) continue ;;` (or merge branches into `handed-off | skipped) continue ;;`).
+
+- `scripts/test-spawn-orchestrator-doctor.sh:902`
+- issue: `suggestion (non-blocking): position skipped task before an unparked task to verify doctor loop continuation`
+  In the `doctor I6` test fixture, `t_skip` is placed as the final row of the `RUN.md` table after `t_child`. Because `t_skip` was the last task, breaking the loop on `t_skip` did not prevent `t_child` from being inspected and parked, masking the control flow defect. Positioning `t_skip` before `t_child` or adding a subsequent task to the fixture would ensure the test exercises loop continuation after a skipped row.
+- suggested fix: Move the `t_skip` row before `t_child` in the test fixture (or append a subsequent task requiring doctor evaluation).
+
+- `scripts/test-spawn-orchestrator-status-report.sh:167`
+- issue: `suggestion (if-minor): assert on stdout log line in status-report test with distinct counts`
+  The status report test only verifies the markdown output in `STATUS.md` and does not check the stdout status string emitted by `status_report()`. In addition, both `counts_parked` and `counts_skipped` are 1 in the test fixture, masking the variable copy-paste error.
+- suggested fix: Assert on the stdout output from `status_report` in the test and ensure the fixture has different counts for parked and skipped tasks.
+
+REVIEW_COMPLETE: FINDINGS

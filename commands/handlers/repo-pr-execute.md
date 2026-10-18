@@ -1,3 +1,9 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+user-invocable: false
+---
+
 # repo-pr handler — /do-tasks file-path execute flow
 
 Invoked from `/do-tasks` when the handler is `repo-pr` (or absent). Scan for
@@ -46,25 +52,29 @@ not depend on the claimer controlling the branch name.
 Every claim path below (remote dispatch, `--local`, and the size-gate **reserve**)
 uses these exact steps:
 
-1. **Pre-claim check.** Query open claim/loop/blocked PRs and bail if this slug is
-   already claimed or parked as blocked. Pass `--limit 100` so an active repo's open
-   PRs aren't truncated past the default 30 (a missed marker would let a second agent
-   double-claim):
+1. **Pre-claim check.** Run the deterministic scanner — it is the single executable
+   implementation of the claim/WIP query, so this whole-line `Claims-task: <slug>`
+   matching rule (see below) lives in one tested place instead of being re-derived by
+   hand at every call site:
 
    ```bash
-   gh pr list --state open --label task-claim   --limit 100 --json number,headRefName,body
-   gh pr list --state open --label task-loop     --limit 100 --json number,headRefName,body
-   gh pr list --state open --label task-blocked  --limit 100 --json number,headRefName,body
+   "${CLAUDE_PLUGIN_ROOT}/scripts/claim-scan.sh" --task-dir "$(git rev-parse --show-toplevel)/dev_docs/tasks"
    ```
 
-   A PR claims `<slug>` when one of its body lines is **exactly** `Claims-task: <slug>`
-   **or** its `headRefName` is `task/<slug>`. Match the **whole line**, not a substring
-   (`grep -Fxq` on trimmed body lines, or `^Claims-task: <slug>$`) — a substring test
-   would let slug `task_1` falsely match a `Claims-task: task_13` line and skip a claim
-   it shouldn't. If any open PR (any of the three labels) claims it, **STOP** — report
-   `already claimed by PR #<n>` (or `blocked — see PR #<n>` for a `task-blocked` match)
-   and move to the next candidate. A `task-blocked` match needs a human to resolve the
-   block, so never auto-re-claim it.
+   It runs the three `gh pr list --label task-{claim,loop,blocked} --limit 100` queries
+   for you (pass `--repo <owner/name>` if not running inside the target repo's
+   checkout) and emits one `CLAIMED label=<task-claim|task-loop|task-blocked> pr=<n>
+   slug=<slug> match=<body|branch> updated=<ts>` line per claiming PR. A PR claims
+   `<slug>` when one of its body lines is **exactly** `Claims-task: <slug>` **or** its
+   `headRefName` is `task/<slug>` — the script matches the **whole line**, never a
+   substring (a substring test would let slug `task_1` falsely match a
+   `Claims-task: task_13` line and skip a claim it shouldn't; see the script's header
+   comment for how it provably can't). Check for your candidate slug with
+   `grep -F "slug=<slug> "` (the trailing space matters — it is what keeps `task_1`
+   from matching a `slug=task_13` line). If any `CLAIMED` line names it, **STOP** —
+   report `already claimed by PR #<n>` (or `blocked — see PR #<n>` for a `label=
+   task-blocked` match) and move to the next candidate. A `task-blocked` match needs a
+   human to resolve the block, so never auto-re-claim it.
 
    Also probe for an **in-flight branch with no PR yet** — a `task/<slug>` pushed by a
    session that has not yet opened its claim PR (or whose PR was closed leaving the
@@ -133,26 +143,17 @@ PR's `headRefName`.
 
 ## 1. Scan for tasks
 
+Run the deterministic scanner — it is the single executable implementation of the scan → parse → classify → **readiness** → **rank** procedure (the canonical **Ranking** and multi-blocker readiness rules live in `skills/task/SKILL.md`), so this path no longer re-derives that arithmetic by hand:
+
 ```bash
-find "$(git rev-parse --show-toplevel)/dev_docs/tasks" -name '*.md' -type f \
-  -not -path '*/_archive/*' 2>/dev/null
+"${CLAUDE_PLUGIN_ROOT}/scripts/task-scan.py" "$(git rev-parse --show-toplevel)/dev_docs/tasks"
 ```
 
-The `-not -path '*/_archive/*'` guard skips `dev_docs/tasks/_archive/`, where
-`/archive-tasks` moves stale `done` task files (see
-`commands/handlers/repo-pr-archive.md`), so retired work never re-enters the
-scan. Parse YAML frontmatter from each file. Skip any file with `type: epic` (those are
-epic rollups, not task cards) and any with no frontmatter (e.g. a plan overview).
-Filter to `status: ready`. Sort by:
+It emits one JSON document: `cards` grouped by status, each card carrying a computed `rank` (within its status group), `dependency_ready` + `unresolved_blockers`, and an `expired` flag, plus epic rollups. The script takes the task dir as an **argument** (not a hardcoded root), skips `type: epic` files (epic rollups, not task cards), skips `_archive/` (where `/archive-tasks` parks stale `done` files — see `commands/handlers/repo-pr-archive.md`) and files with no frontmatter, and **fails closed** (non-zero exit) on malformed frontmatter — treat a non-zero exit as a hard stop, not an empty scan.
 
-1. Dependency readiness: a task is eligible only when **every** `is_blocked_by` entry is satisfied (target absent or `done`); a task with any still-active blocker is not
-2. Priority: `high` > `medium` > `low` (`urgent` is human-only and is never picked up here)
-3. Value/effort score: `impact / size` descending (`impact` and `size` are both Fibonacci `1`/`2`/`3`/`5`); a task with no `impact` set has no score and ranks **last within its priority tier** (never dropped). See **Ranking** in `skills/task/SKILL.md`.
-4. Age: oldest `created` date first
+Select from `cards.ready`: a card is eligible when its `dependency_ready` is true **and** its `human_approval_requested` is not true (the scanner emits both fields on every card). `urgent` cards are eligible like any other priority tier — see the urgent-eligibility decision in `skills/task/SKILL.md`'s Confidence check. That decision rests on `human_approval_requested` being the per-task escape hatch, so this path must actually honor it: `/promote-tasks` only ever sets the flag alongside `needs_refinement`, but a human can mark an already-`ready` card, and without this clause that card would still be selected and executed unattended. The script resolves every `is_blocked_by` slug — a single string or a list — against `dev_docs/tasks/**/*.md`, marking it satisfied when the target file is absent or `status: done`, and lists any still-active blockers in `unresolved_blockers`. Among eligible cards, the one with the lowest `rank` wins; the rank encodes priority tier (`urgent` > `high` > `medium` > `low`) → value/effort `impact/size` descending (no-`impact`/invalid-`size` cards last within tier, never dropped) → oldest `created` first.
 
-Treat `is_blocked_by` as a reference to another task's slug, **or a list of slugs** (`[a, b]`). A single string behaves exactly as a one-element list. Each slug is satisfied when no task file with that slug exists under `dev_docs/tasks/**/*.md`, or it exists with `status: done`. A task is dependency-ready only when **all** of its blockers are satisfied; if any referenced blocker file still exists in another state, the dependent task must not be dispatched yet. When reporting a blocked task, list **every** unresolved blocker (e.g. `waiting on b, c`).
-
-If no ready, dependency-ready tasks exist, report that and stop. Hint the user to run `/promote-tasks` if there are cards sitting in `new` or `needs_refinement`. If the only remaining ready tasks are waiting on dependencies, say which blockers each one is waiting for.
+If no ready, dependency-ready tasks exist, report that and stop. Hint the user to run `/promote-tasks` if there are cards sitting in `new` or `needs_refinement`. If the only remaining ready tasks are waiting on dependencies, name each one's `unresolved_blockers` (e.g. `waiting on b, c`).
 
 ## 2. Select tasks to process
 
@@ -175,26 +176,31 @@ If this fails (token invalid, TLS errors, network issues), **stop** and tell the
 
 **WIP limit (batch only — `--all` / `-n N`).** Before dispatching a batch, bound it by the kanban WIP limit so you don't flood the human PR-review bottleneck (the `needs_review` column). Single-task mode (`/do-tasks` / `/do-tasks <slug>`) is **not** gated — skip this paragraph there.
 
+> **The single-mode exemption is deliberate, and it is not the same rule.** `commands/handlers/attendedness.md` gates batches always and lets a present human override a single claim. repo-pr's single mode has simply never been gated: that **matches** the attended outcome and **diverges** from the unattended one — an unattended single claim at the limit declines under that rule, while repo-pr single mode claims, because it never counts. So this handler needs no attendedness check, but do not read the two as equivalent. The open consequence: a cron invoking bare `/do-tasks` repeatedly can dispatch past `wip_limit` here. That is pre-existing behavior, not something the attendedness work introduced, and closing it would change the default handler for every installed user — so it is a follow-up, not a silent fix. Note also it is the **batch/single** split that decides, never `--remote` vs `--local`: repo-pr dispatches single tasks remotely by default, and those stay ungated. Do not "fix" this by gating remote dispatch.
+
 1. Resolve `wip_limit` from `dev_docs/tasks/.task-config.yml` (the repo-pr handler config). Default to `3` if the key is absent.
 2. Count current WIP = the number of **distinct in-flight tasks**, deduped by slug
    across three sources: open `task-claim` PRs (claimed, work underway), open
    `task-loop` PRs (finished, in review), and task files with `status: in_progress` in
-   the current checkout:
+   the current checkout. The same scanner used for the pre-claim check computes this in
+   one pass — read its `WIP_COUNT:`/`WIP_SLUGS:` lines instead of re-deriving the dedupe
+   by hand:
 
    ```bash
-   gh pr list --label task-claim --state open --limit 100 --json number,headRefName,body
-   gh pr list --label task-loop  --state open --limit 100 --json number,headRefName,body
+   "${CLAUDE_PLUGIN_ROOT}/scripts/claim-scan.sh" --task-dir "$(git rev-parse --show-toplevel)/dev_docs/tasks"
    ```
 
-   **Dedupe by slug** — a task mid-finish can momentarily appear as both an
-   `in_progress` file and a `task-claim`/`task-loop` PR; count each slug once.
-   Counting open `task-claim` PRs matters because a claim's `in_progress` flip lives on
-   an unmerged branch and is **invisible to a fresh-clone batch scan**, so the open
+   It already **dedupes by slug** — a task mid-finish can momentarily appear as both an
+   `in_progress` file and a `task-claim`/`task-loop` PR; each slug counts once. It
+   counts open `task-claim` PRs because a claim's `in_progress` flip lives on an
+   unmerged branch and is **invisible to a fresh-clone batch scan**, so the open
    `task-claim` PR — not the `in_progress` file — is the reliable in-flight signal for
-   work claimed by other sessions. If the `gh pr list` queries fail (API error or rate
-   limit — step 3 has already confirmed `gh` is installed and authenticated), count only
-   the `in_progress` files and note in the report that the count may undercount open PRs
-   (so the effective cap is looser than intended).
+   work claimed by other sessions (`task-blocked` is excluded from `WIP_COUNT`; a
+   blocked claim is parked for a human, not in flight). If the underlying `gh pr list`
+   queries fail (API error or rate limit — step 3 has already confirmed `gh` is
+   installed and authenticated), the script exits non-zero — fall back to counting only
+   the `in_progress` files yourself and note in the report that the count may
+   undercount open PRs (so the effective cap is looser than intended).
 3. Dispatch only the top `wip_limit - current_wip` selected tasks, highest-ranked first (priority, then value/effort score, then age — as sorted in step 1). For `-n N` the batch is `min(N, wip_limit - current_wip)`. If that slack is `0` or negative, dispatch nothing and report `WIP limit <wip_limit> reached (<current_wip> in flight) — nothing dispatched`.
 4. Report every task you did **not** dispatch as `held (WIP limit N reached)` or `held (-n N ceiling)`, listed under the dispatched ones in step 5.
 
@@ -233,10 +239,21 @@ For each selected task routed to **execute**, read its full content (frontmatter
 
 The remote session prompt must be self-contained because the remote VM won't have this plugin installed. Include the task content and all processing instructions inline.
 
+**The template's unattended declaration is load-bearing — keep it in the quoted prompt.** A dispatched worker otherwise sees an ordinary user-role prompt and concludes a human is watching (`commands/handlers/attendedness.md`); the dispatching session's attendedness does **not** transfer to the sessions it dispatches. It lives _inside_ the template below rather than in this prose deliberately: the template is what gets copied, so a declaration sitting only out here is dropped by anyone who copies it. This handler's own gate is batch-only, so nothing currently offers an override to lose — the line keeps that true if a worker ever reaches a gated path.
+
 **Important:** Do NOT pass `--print` to `claude --remote` — it is not supported.
+
+**This prompt block stays inline prose — do not wire it to `scripts/claim-scan.sh`.**
+The remote VM does not have this plugin installed, so it cannot call any plugin
+script; the whole-line `Claims-task: <slug>` matching rule below (step 1a) must
+stay spelled out in full for the remote session to follow. `claim-scan.sh` is
+for the orchestrator-side paths only (the pre-claim check and WIP count above,
+`--local` mode, and `/doctor`'s stale-claim check).
 
 ```bash
 claude --remote "You are processing a task for the task plugin system.
+
+No human is present in this session — never prompt. If a WIP gate or any other check is met, decline and report it rather than asking.
 
 ## The task file
 

@@ -1,3 +1,9 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+user-invocable: false
+---
+
 # gh-issue handler — /task-config setup
 
 Configures the `gh-issue` handler, which creates GitHub Issues via `gh issue create` at `/add-task` time. This file owns the prerequisite check (`gh auth status`) and the optional-fields prompt; the actual create flow lives in `gh-issue.md`.
@@ -14,7 +20,16 @@ Configures the `gh-issue` handler, which creates GitHub Issues via `gh issue cre
    - `labels` — list, e.g. `[follow-up]`. Plain text prompt (comma-separated); skip if blank.
    - `assignees` — list of GitHub usernames. Plain text prompt (comma-separated); skip if blank.
 
-3. **Return the config block** to `/task-config`:
+3. **Provision the repo's label vocabulary.** The handler will store status, priority and estimate as labels, and GitHub label namespaces are **per-repo**. This is a prerequisite for the schema-aware writes. `/add-task` creates each configured label itself (`gh-issue.md` step 3) and then stamps the new issue `status:0_untriaged` + `auto:human-review-needed` through the writer (`gh-issue.md` step 4), so an unprovisioned repo does **not** fail that write — the schema-aware writer goes through a raw `gh api` PATCH, which auto-creates a missing label in the default grey rather than rejecting it. Provisioning is therefore what gives the vocabulary its intended colors, instead of the labels appearing one grey one at a time. It colors what it **creates**: a label already auto-created in grey keeps that color, because the sync compares names and never edits an existing label. It also protects a move: `gh issue transfer` silently drops labels the target repo lacks, which for this schema means losing an issue's entire state. Run the sync against the `repo` resolved in step 2:
+
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-label-sync.py" \
+     --repo <gh-issue.repo> --apply
+   ```
+
+   If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/gh-label-sync.py`. The vocabulary lives in the sibling `labels.yml` and is the single source for these names — never hardcode a label name. The script is idempotent, so re-running `/task-config` creates nothing. It **reports** labels it does not recognise and never deletes them; a repo may carry unrelated labels of its own. Drop `--apply` to see what it would create without touching the repo.
+
+4. **Return the config block** to `/task-config`:
 
    ```yaml
    handler: gh-issue

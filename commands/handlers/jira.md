@@ -1,3 +1,9 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+user-invocable: false
+---
+
 # Handler: jira
 
 Creates a Jira work item via the Atlassian MCP server (`mcp__claude_ai_Atlassian__*`). Foreground call, no git plumbing, no CLI install. The new ticket is placed under a selected epic.
@@ -14,12 +20,13 @@ jira:
   issue_type: Task # default Task
   default_epic: PLAT-100 # optional; skips the epic prompt (explicit key, not a name)
   labels: [] # optional — passed via additional_fields.labels
+  additional_fields: {} # optional — extra createJiraIssue fields, merged under labels (Team, components, custom fields)
   blocked_statuses: [] # optional — status names that mean "blocked"; excluded from /promote-tasks candidates
-  ready_status: Selected for Development # optional — used by /promote-tasks; target status for HIGH-confidence promotions (must differ from the initial/new status). Prompted when unset.
+  ready_status: Selected for Development # optional — target status for a complete, unblocked issue. Used by /add-task (step 5) and /promote-tasks.
   refinement_status: Needs Refinement # optional — used by /promote-tasks; target status for LOW-confidence (underspecified) issues. Prompted when unset.
 ```
 
-The `ready_status` / `refinement_status` keys are consumed only by the promote flow (`jira-promote.md`); `/add-task` ignores them.
+`ready_status` is read by **both** the create flow (step 5 below, which transitions a complete, unblocked new issue out of the project's initial status) and the promote flow (`jira-promote.md`). `refinement_status` is read only by the promote flow. Both keys are optional; when `ready_status` is unset, step 5 is skipped and a new issue stays in the project's initial status for `/promote-tasks` to score.
 
 `site` is passed directly as `cloudId` to the MCP tools (they accept either a UUID or a site URL/hostname).
 
@@ -64,9 +71,35 @@ The `ready_status` / `refinement_status` keys are consumed only by the promote f
    - `description`: the composed description from step 3
    - `contentFormat`: `"markdown"`
    - `parent`: the chosen `<EPIC-KEY>` (omit entirely if the user picked "No epic")
-   - `additional_fields`: `{ "labels": <jira.labels list> }` (omit if no labels configured)
+   - `additional_fields`: the `jira.additional_fields` mapping with `{ "labels": <jira.labels list> }` merged in (omit the whole argument when neither key is configured; omit `labels` alone when only `additional_fields` is set, and vice versa). A `labels` entry inside `additional_fields` loses to the dedicated `jira.labels` key — do not send both spellings.
 
-5. **Return the URL.** The response wraps the new issue as `issues.nodes[0]`. Return `issues.nodes[0].webUrl` directly as this handler's artifact URL for `/add-task` step 8. (Fallback: build `https://<jira.site>/browse/<issues.nodes[0].key>` if `webUrl` is missing.)
+     `additional_fields` is a **verbatim passthrough**, so whatever the config holds is what `createJiraIssue` receives — this step neither resolves nor validates a field id. How a site's ids are found and written is setup-time work, defined in `commands/handlers/jira-config.md` → "Team and other custom fields". If `createJiraIssue` rejects a field, there are three causes and the error text distinguishes them: the id is wrong, the field is absent from the project's create screen ("field cannot be set" / "not on the appropriate screen"), or the id is right and the **value shape** is wrong — a `team` field sent a display name instead of a team id, say. Do not report a shape error as a bad id; that sends the user to re-resolve an id that was already correct. Quote the rejection, including its `expectedShape` and `currentValue` when Jira returns them, and point at `commands/handlers/jira-config.md` → "Team and other custom fields" for the shape rules. **Stop** either way — do not retry the create without the field, because that lands a work item missing what the user configured.
+
+5. **Transition to ready status.** Jira creates every issue in the project's initial status, which on many boards means a refinement lane. When the captured task is already complete, move it out of that lane rather than leaving it for `/promote-tasks`.
+
+   **Skip this step entirely** — leave the issue where `createJiraIssue` put it — when any of these holds:
+   - `jira.ready_status` is unset or empty (nothing to transition to; the promoter owns the issue).
+   - The drafted task carries an `is_blocked_by` entry. Blocked work is not ready, and this handler cannot tell whether the blocker is resolved — `/promote-tasks` holds blocked cards for the same reason.
+   - The drafted task fails the capture gate: `title`, `body`, and `priority` present; `size` present and one of `1`/`2`/`3`/`5`; the body's **Acceptance Criteria** section carries at least one bullet; and the body has no **Open Questions** / **TBD** section with content in it. This is the deterministic half of the confidence check in `skills/task/SKILL.md` — read it against the drafted task instead of a task file, and keep the two lists identical, or a task this step promotes is one `/promote-tasks` would have scored LOW. `/add-task` step 5 has the user confirm every one of these fields, so the normal path passes; a plan task pushed by `/push-plan` is the case most likely to still carry open questions.
+
+   Otherwise transition the issue to `ready_status`:
+
+   1. Call `<atlassian-mcp>__getTransitionsForJiraIssue` (`cloudId: <jira.site>`, `issueIdOrKey: <new key>`), write the response to a file, and resolve the transition whose target status matches `jira.ready_status`:
+
+      ```bash
+      python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-resolve-transition.py" \
+        --exact "<jira.ready_status>" \
+        < <transitions-response.json>
+      ```
+
+      If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/jira-resolve-transition.py`. On success it prints `<id>\t<to.name>`; on exit 2 (`NONE` or `AMBIGUOUS`), no single transition leads to `jira.ready_status` — fall to the first bullet below.
+   2. Call `<atlassian-mcp>__transitionJiraIssue` (`cloudId: <jira.site>`, `issueIdOrKey: <new key>`, `transition: { id: <transition id> }`).
+
+   Either call can fail, and neither failure is fatal: the issue is already created, and a capture flow must not fail after its artifact exists. **Do not stop and do not guess a different status** — leave the issue where it is and surface the reason in the `/add-task` step 8 report. Report the causes apart, because they send the user to different places:
+   - No available transition leads to `ready_status` (`NONE`), or more than one does (`AMBIGUOUS`, naming the candidates) — the board's workflow has no single path there from the initial status. "`<key>` created but left in `<current status>` — no unambiguous transition to `<ready_status>` is available from it."
+   - `transitionJiraIssue` errored — a permission, validator, or required-field failure on a transition that does exist. "`<key>` created but left in `<current status>` — the transition to `<ready_status>` failed: `<error>`."
+
+6. **Return the URL.** The response wraps the new issue as `issues.nodes[0]`. Return `issues.nodes[0].webUrl` directly as this handler's artifact URL for `/add-task` step 8. (Fallback: build `https://<jira.site>/browse/<issues.nodes[0].key>` if `webUrl` is missing.) When step 5 transitioned the issue, name the status it landed in; when step 5 was skipped or failed, say so per the rules above.
 
 This handler does **not** create any `dev_docs/tasks/*.md` file, branch, or PR.
 
@@ -74,7 +107,7 @@ This handler does **not** create any `dev_docs/tasks/*.md` file, branch, or PR.
 
 Invoked from `/list-tasks` when `handler: jira` is configured. Read-only — one `searchJiraIssuesUsingJql` query, no edits, no claims. Renders the configured project's issues as the same vertical-section kanban the file-based path uses, so `$ARGUMENTS` and the layout match `commands/list-tasks.md` step 4.
 
-> **Coverage note.** `jira` now supports capture (`/add-task`), promote (`jira-promote.md`), and single `/do-tasks` execute (`jira-claim.md`) — promote and claim move issues by **status transition** (To Do → `ready_status`/`refinement_status` → In Progress → In Review), not by status labels. So an actively-driven board populates the `in_progress`/`needs_review` sections via `statusCategory`. The status-**label** mapping below is still honored when those labels happen to be present (e.g. set by hand or a board automation); a board only ever touched by `/add-task` renders mostly `new`/`done`, the same fallback the gh-issue `## List` path has.
+> **Coverage note.** `jira` now supports capture (`/add-task`), promote (`jira-promote.md`), single `/do-tasks` execute (`jira-claim.md`), and explicit completion (`/complete-task` → `jira-complete.md`, the fallback for when Jira's GitHub integration or smart commits didn't fire) — create, promote, and claim move issues by **status transition** (To Do → `ready_status`/`refinement_status` → In Progress → In Review), not by status labels. So an actively-driven board populates the `in_progress`/`needs_review` sections via `statusCategory`. The status-**label** mapping below is still honored when those labels happen to be present (e.g. set by hand or a board automation); a board only ever touched by `/add-task` renders mostly `new`/`ready`/`done`, the same fallback the gh-issue `## List` path has.
 
 1. **Preflight.** Reuse the create flow's step 1 preflight: call `mcp__claude_ai_Atlassian__getAccessibleAtlassianResources` (no args) and confirm a resource whose `url` matches `https://<jira.site>`. On either failure, **stop** with the same messages ("Jira handler needs the Atlassian MCP…" / "Configured Jira site `<site>` is not in your accessible Atlassian resources."). Do not fall back to another handler.
 
@@ -86,28 +119,32 @@ Invoked from `/list-tasks` when `handler: jira` is configured. Read-only — one
 
    The response is an `issues[]` array — each element has `key`, `fields.summary`, `fields.status.statusCategory.key` (`new` / `indeterminate` / `done`), `fields.assignee.displayName` (or `null` when unassigned), `fields.priority.name`, `fields.labels[]` (plain strings), and `fields.created`. Some Atlassian MCP servers wrap the array as `issues.nodes[]` instead (the create flow above reads `issues.nodes[0]`); read whichever key the server returns.
 
-> **Server-side filtering (audit, PRE-129).** Every `searchJiraIssuesUsingJql` surface in this handler already pushes **all candidate filtering** into JQL — nothing JQL could express is filtered post-fetch:
+> **Server-side filtering (audit).** Every `searchJiraIssuesUsingJql` surface in this handler already pushes **all candidate filtering** into JQL — nothing JQL could express is filtered post-fetch:
 >
 > - **List (this query):** `project` plus one AND-joined `labels = "<label>"` clause per configured label (step 2). The kanban split in step 3 and the `$ARGUMENTS` section filter in step 6 only **group and render** the already-fetched 50-issue window by `statusCategory`/label — that is presentation, not candidate filtering, and can't move to JQL without breaking either the single-query summary line (one fetch feeds all section counts in step 5) or the new/`needs_refinement`/`ready` split, which share one `statusCategory` and separate only by label. The "10 most recent done" cap (step 3) is likewise a display cap over the fetched set, not a dropped candidate.
 > - **Epic lookup (add flow, step 2):** `project = … AND issuetype = Epic AND statusCategory != Done ORDER BY updated DESC` — fully server-side; the response is presented directly with no post-filter.
 > - **Promote / claim (added after this audit was scoped):** `jira-promote.md` step 3 (`project` + `statusCategory = "To Do"` + per-key `status !=`), the WIP gate (`statusCategory = "In Progress"`), and `jira-claim.md` step 2 (`status = "<ready_status>" AND assignee IS EMPTY AND Flagged IS EMPTY AND (labels IS EMPTY OR labels NOT IN ("human-approval-requested", "blocked"))`) are all server-side. The step-2 label clause is the **primary** server-side filter for the `human-approval-requested` / `blocked` conditions — orthogonal to `assignee IS EMPTY`, which only excludes already-claimed work (an unassigned issue can still carry those labels). `jira-claim.md` step 3 repeats the same label drop post-fetch as a **defensive** backstop against JQL index lag. The `labels IS EMPTY` arm in the JQL clause is **required** — JQL `NOT IN` does not match issues whose field is empty, so omitting it would drop unlabeled issues (the common case in the ready lane).
-> - **Blocked signals beyond the label (live-config finding, PRE-129).** The kanban `blocked` row (step 3) matches only `statusCategory indeterminate` **plus** the `blocked` label, so it misses the three more reliable blocked encodings seen on real boards: the native `Flagged` / Impediment field (`Flagged IS NOT EMPTY`, server-side); a dedicated `Blocked` / `On Hold/Blocked` **status** (sometimes filed under the `new` / To-Do category, where it also leaks into the promoter — see `jira-promote.md`'s "Blocked-in-To-Do leak" finding); and an **unresolved "is blocked by" link** (the most semantically precise — and, unlike a status that someone forgot to clear, it self-resolves when the blocker closes). The `Flagged` and status signals are JQL-expressible; the link signal is **not** filterable in core JQL (`linkedIssues`/`issueFunction` are ScriptRunner add-ons — see `jira-promote.md`'s parent-rollup finding), so it requires reading each issue's `issuelinks[]` and testing inward `Blocks` links whose source is unresolved (`statusCategory != done`). Surfacing any of these in the `blocked` section would extend the step-3 mapping beyond the single label.
+> - **Blocked signals beyond the label (live-config finding).** The kanban `blocked` row (step 3) matches only `statusCategory indeterminate` **plus** the `blocked` label, so it misses the three more reliable blocked encodings seen on real boards: the native `Flagged` / Impediment field (`Flagged IS NOT EMPTY`, server-side); a dedicated `Blocked` / `On Hold/Blocked` **status** (sometimes filed under the `new` / To-Do category, which `jira-promote.md` step 3 excludes through `jira.blocked_statuses`); and an **unresolved "is blocked by" link** (the most semantically precise — and, unlike a status that someone forgot to clear, it self-resolves when the blocker closes). The `Flagged` and status signals are JQL-expressible; the link signal is **not** filterable in core JQL (`linkedIssues`/`issueFunction` are ScriptRunner add-ons — see `dev_docs/designs/2026-09-25-jira-parent-rollup-skip.md`), so it requires reading each issue's `issuelinks[]` and testing inward `Blocks` links whose source is unresolved (`statusCategory != done`). Surfacing any of these in the `blocked` section would extend the step-3 mapping beyond the single label.
 
-3. **Group into kanban sections.** Classify each issue by its `statusCategory.key` (the coarse split, like gh-issue's open/closed `state`) plus label presence. Reuse the same status-label vocabulary as the gh-issue `## List` and the Linear mapping in `linear-common.md` so a board behaves consistently across trackers:
+3. **Group into kanban sections.** Map each issue into a row and classify with the shared helper, `commands/handlers/assets/kanban-classify.py`, rather than hand-walking the section table. Reuse the same status-label vocabulary as the gh-issue `## List` and the Linear mapping in `linear-common.md` so a board behaves consistently across trackers:
 
-   | Section            | Match rule                                                                                     |
-   | ------------------ | ---------------------------------------------------------------------------------------------- |
-   | `new`              | statusCategory `new`, none of the status labels below present                                  |
-   | `needs_refinement` | statusCategory `new`, has `human-approval-requested`                                           |
-   | `ready`            | statusCategory `new`, has `auto-eligible`                                                      |
-   | `in_progress`      | statusCategory `indeterminate`, no `blocked` or `needs-review` (the default for indeterminate) |
-   | `blocked`          | statusCategory `indeterminate`, has `blocked`                                                  |
-   | `needs_review`     | statusCategory `indeterminate`, has `needs-review`                                             |
-   | `done`             | statusCategory `done` — select the 10 most recent by `created`, then sort per step 4           |
+   | Row field   | Source                                                                                        |
+   | ----------- | --------------------------------------------------------------------------------------------- |
+   | `id`        | issue `key`                                                                                   |
+   | `category`  | `fields.status.statusCategory.key` — `new` \| `indeterminate` \| `done`                       |
+   | `labels`    | `fields.labels[]`                                                                             |
+   | `priority`  | `fields.priority.name` mapped to `urgent`/`high`/`medium`/`low` per step 4's table, or `null` |
+   | `sort_date` | `fields.created`                                                                              |
 
-`in_progress` is the default for any `indeterminate` issue (work is underway by definition); the `blocked` and `needs-review` labels override it into their respective sections. Unlike gh-issue's binary open/closed `state`, Jira's `statusCategory` distinguishes To Do from In Progress natively, so no claim label is needed to land in `in_progress`. If an issue matches more than one rule, prefer the more actionable signal in this order: `blocked` > `needs_review` > `in_progress` > `ready` > `needs_refinement`.
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/kanban-classify.py" --tracker jira
+   ```
 
-4. **Render** as stacked vertical sections in the fixed order `new → needs_refinement → ready → in_progress → blocked → needs_review → done`, using the same `## <section> (N)` header, single-line bullet, and `---` separator layout as `commands/list-tasks.md` step 4 (don't re-specify it). Card line:
+   (If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/kanban-classify.py`.) The helper's header carries the fixed render order and the canonical precedence sentence (`blocked > needs_review > in_progress > ready > needs_refinement`) — link there rather than restating it, matching the Linear and gh-issue handlers. `in_progress` is the helper's default for any `indeterminate` issue (work is underway by definition); the `blocked` and `needs-review` labels override it into their respective sections. Unlike gh-issue's binary open/closed `state`, Jira's `statusCategory` distinguishes To Do from In Progress natively, so no claim label is needed to land in `in_progress`.
+
+   Select the `done` category's rows down to the 10 most recent by `created` before building rows — the helper classifies and ranks whatever it's given, so this selection cap runs before the call, not after.
+
+4. **Render** the helper's `sections` in the fixed render order stated in its header, using the same `## <section> (N)` header, single-line bullet, and `---` separator layout as `commands/list-tasks.md` step 4 (don't re-specify it). Card line:
 
    ```
    - [high] PLAT-142 Fix broken import — assignee dan
@@ -123,7 +160,7 @@ Invoked from `/list-tasks` when `handler: jira` is configured. Read-only — one
    | Assignee    | `fields.assignee.displayName` (omit `— assignee …` when unassigned)                                                                                                                                                                                                                                                    |
    | Annotations | `human-approval-requested`, `blocked`, `needs-review` — bare label name when present, comma-separated and appended after the assignee with `—`                                                                                                                                                                         |
 
-   Sort within each section by priority (`urgent > high > medium > low`, none last), then `created` (oldest first).
+   The helper already sorted each section (priority `urgent > high > medium > low`, none last, then `created` oldest first) — render its order as-is.
 
 5. **Summary line.** Same shape as the file-based path:
 

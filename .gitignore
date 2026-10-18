@@ -1,12 +1,34 @@
 .DS_Store
 temp/
 .claude/
+# Nested git worktrees of this same repo. Git already refuses to recurse into
+# them (each has its own .git file), but they still show up as one untracked
+# entry, and file-walking tools that don't read .git — dprint especially —
+# happily descend and lint another branch's checkout. See dprint.json's
+# matching exclude.
+.worktrees/
 .firecrawl/
 dist/
+__pycache__/
+*.pyc
 
 # co-review local-reviewer config — which local agents (gemini, codex, …) are
 # available is machine-specific, so this is not committed/shared.
 dev_docs/co-review/
+
+# orchestrate-coders local config — which coder backends (codex, agy, devin, …)
+# this machine can run, probed per machine. The layout's one ignore channel for
+# a skill's machine-local directory is this file, so it travels with the repo.
+dev_docs/orchestrate-coders/
+
+# Worktree lifecycle local config — where this machine puts worktrees and what
+# branch prefix they carry, read by scripts/worktree-config.sh. Personal to a
+# machine and a person, never shared; same ignore channel as the two above.
+dev_docs/worktrees/
+
+# Session-to-session handoff notes — local by design; only the README is
+# tracked (force-added). See dev_docs/.handoffs/README.md.
+dev_docs/.handoffs/
 
 # Plan scaffolding under dev_docs/tasks/ is ephemeral, in-flight project-tracker
 # working state (see skills/plan-with-docs) — it graduates to a permanent
@@ -22,3 +44,13 @@ dev_docs/co-review/
 #   !dev_docs/tasks/<name>_plan/keep-me.md
 dev_docs/tasks/*
 !dev_docs/tasks/.task-config.yml
+
+# Repo-local mktemp fallback dirs for the shell test suites, used when the
+# system temp dir is denied (e.g. sandboxed runs) — trap-cleaned on exit, but
+# ignore them explicitly in case a run is killed before the trap fires.
+.so-test.*
+.task-scan-test.*
+.validate-test.*
+.plan-graph-test.*
+.claim-scan-test.*
+.research-spike-test.*

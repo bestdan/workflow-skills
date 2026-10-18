@@ -10,7 +10,7 @@ One Agent call per packet:
 
 - `subagent_type: general-purpose` (full tool access — the coder must edit
   files and run checks).
-- `model:` the pinned model — `claude-opus-4-8` for plain `opus`, or whatever
+- `model:` the pinned model — `claude-opus-5` for plain `opus`, or whatever
   the `opus:<model>` suffix named. Any Anthropic alias or full model ID the
   session's `availableModels` allows is valid here.
 - **Worktree strategy:**

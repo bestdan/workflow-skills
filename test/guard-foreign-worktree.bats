@@ -1,0 +1,410 @@
+#!/usr/bin/env bats
+# scripts/guard-foreign-worktree.py — the PreToolUse guard that refuses a write
+# into a worktree the session has not entered, and warns once on the first
+# write in a main checkout sitting on its default branch.
+#
+# This cannot work on command text alone: the verdict depends on which
+# worktree of which repo a path lands in, which the guard learns by asking git.
+# So every case runs against real throwaway repos, and the payload's `cwd`
+# field — the one Claude Code fills with the session's working directory — is
+# what points the guard at them.
+
+setup() {
+  setup_test
+  HOOK="$REPO_ROOT/scripts/guard-foreign-worktree.py"
+  tmp="$TEST_TMPDIR"
+  # Each case gets its own stamp directory unless it is explicitly testing
+  # the once-per-session behaviour, so the warning is never suppressed by a
+  # previous case's stamp.
+  stamps="$tmp/stamps"
+  mkdir -p "$stamps"
+  repo="$(new_repo repo)"
+  wt="$tmp/wt"
+  git -C "$repo" worktree add -q -b feature "$wt"
+  echo body >"$repo/file.txt"
+  echo body >"$wt/file.txt"
+  git -C "$repo" add file.txt
+  git -C "$repo" commit -q -m file
+}
+teardown() { teardown_test; }
+load test_helper
+
+new_repo() {
+  local dir="$tmp/$1"
+  git init -q -b main "$dir"
+  git -C "$dir" commit -q --allow-empty -m init
+  printf %s "$dir"
+}
+
+# verdict <tool> <cwd> <payload-field> <value> [session] -> deny|warn|allow
+verdict() {
+  local tool=$1 cwd=$2 key=$3 value=$4 session=${5:-$RANDOM.$RANDOM} out
+  out=$(python3 -c '
+import json, sys
+tool, cwd, session, key, value = sys.argv[1:]
+print(json.dumps({"tool_name": tool, "cwd": cwd, "session_id": session,
+                  "tool_input": {key: value}}))
+' "$tool" "$cwd" "$session" "$key" "$value" \
+    | TMPDIR="$stamps/$session" python3 "$HOOK" 2>/dev/null)
+  if [ -z "$out" ]; then
+    printf 'allow'
+    return
+  fi
+  printf %s "$out" | python3 -c '
+import json, sys
+h = json.load(sys.stdin).get("hookSpecificOutput", {})
+if h.get("permissionDecision") == "deny":
+    print("deny", end="")
+elif h.get("additionalContext"):
+    print("warn", end="")
+else:
+    print("unexpected", end="")
+'
+}
+
+# expect <want> <tool> <cwd> <payload-field> <value> [session]
+expect() {
+  local want=$1 got
+  shift
+  got=$(verdict "$@")
+  if [ "$got" != "$want" ]; then
+    echo "want $want, got $got: $*" >&2
+    return 1
+  fi
+}
+
+# bash_case <want> <cwd> <command>
+bash_case() { expect "$1" Bash "$2" command "$3"; }
+
+@test "a mutating git call into a foreign worktree is denied" {
+  bash_case deny "$repo" "git -C $wt commit -m x"
+  bash_case deny "$repo" "git -C $wt add ."
+  bash_case deny "$repo" "git -C $wt push"
+  bash_case deny "$repo" "git -C $wt reset --hard"
+  bash_case deny "$repo" "git -C $wt branch -d feature" # a mutating branch flag
+  bash_case deny "$repo" "git -C $wt tag v1"            # a positional creates a tag
+  bash_case deny "$repo" "git -C ../wt commit -m x"     # a relative -C resolving foreign
+}
+
+# A work tree override is where checkout and commit write, whatever -C says.
+@test "a work tree override naming a foreign worktree is denied" {
+  bash_case deny "$repo" "git --git-dir $repo/.git --work-tree $wt checkout -- file.txt"
+  bash_case deny "$repo" "git --work-tree=$wt checkout -- file.txt"
+  bash_case deny "$repo" "GIT_WORK_TREE=$wt git checkout -- file.txt"
+  bash_case allow "$repo" "git --work-tree $wt status"
+}
+
+@test "cd, redirects, writers and in-place editors into a foreign worktree are denied" {
+  bash_case deny "$repo" "cd $wt && git commit -m x"
+  bash_case deny "$repo" "cd $wt; touch a"
+  bash_case deny "$repo" "echo hi > $wt/file.txt"
+  bash_case deny "$repo" "echo hi >> $wt/file.txt"
+  bash_case deny "$repo" "cp $repo/file.txt $wt/copy.txt"
+  bash_case deny "$repo" "rm $wt/file.txt"
+  bash_case deny "$repo" "sed -i '' s/a/b/ $wt/file.txt"
+}
+
+# The usual ghost edit: auto mode steers the edit into a heredoc, so the path is
+# inside opaque code and no Edit/Write hook ever sees it.
+@test "an interpreter fed inline code naming a foreign path is denied" {
+  bash_case deny "$repo" "$(printf 'python3 - <<%s\nopen("%s/file.txt", "w").write("x")\nPY\n' "'PY'" "$wt")"
+  bash_case deny "$repo" "python3 -c \"open('$wt/file.txt','w')\""
+  bash_case deny "$repo" "node -e 'require(\"fs\").writeFileSync(\"$wt/file.txt\", \"x\")'"
+  bash_case deny "$repo" "ruby -e 'File.write(\"$wt/file.txt\", \"x\")'"
+}
+
+# The two reads #987 reported as refused, from a session in a sibling worktree
+# reading the main checkout. A script's arguments are data, as they are for
+# any other program; and a heredoc that feeds no interpreter (here, one that
+# prints a note) does not make the command's paths count as written.
+@test "an interpreter that only reads a foreign path gets no decision" {
+  local snap="$repo/data/barclay/2026-10.csv"
+  bash_case allow "$wt" "python3 scripts/refresh_balances.py --snapshot $snap"
+  bash_case allow "$wt" "uv run python scripts/refresh_balances.py --snapshot $snap"
+  bash_case allow "$wt" "python3 -I - < $repo/script.py"
+  bash_case allow "$wt" "python3 -I - < ../repo/script.py"
+  bash_case allow "$wt" "$(printf 'python3 -I - < script.py && cat <<EOF\nread %s\nEOF\n' "$snap")"
+}
+
+# The narrowing must not open the routes code reaches an interpreter by: the
+# script's own location still counts, and code spelled out in the command —
+# piped from a heredoc, or written to a file and then run — is still opaque.
+@test "code an interpreter runs from this command, or a foreign script, is still denied" {
+  bash_case deny "$wt" "python3 $repo/script.py"
+  bash_case deny "$wt" "uv run $repo/script.py"
+  bash_case deny "$repo" "$(printf 'cat <<PY | python3 -\nopen("%s/file.txt", "w")\nPY\n' "$wt")"
+  bash_case deny "$repo" "$(printf 'cat > s.py <<%s\nopen("%s/file.txt", "w")\nPY\npython3 -I - < s.py\n' "'PY'" "$wt")"
+  bash_case deny "$repo" "$(printf 'cat > s.py <<%s\nopen("%s/file.txt", "w")\nPY\npython3 s.py\n' "'PY'" "$wt")"
+  bash_case deny "$repo" "$(printf 'tee s.py >/dev/null <<%s\nopen("%s/file.txt", "w")\nPY\npython3 s.py\n' "'PY'" "$wt")"
+  bash_case deny "$repo" "$(printf 'python3 - \\\n  <<%s\nopen("%s/file.txt", "w")\nPY\n' "'PY'" "$wt")"
+  bash_case deny "$repo" "$(printf 'cat <<%s |\nopen("%s/file.txt", "w")\nPY\npython3 -\n' "'PY'" "$wt")"
+  bash_case deny "$repo" "$(printf 'cat <<%s 2>&1 | python3 -\nopen("%s/file.txt", "w")\nPY\n' "'PY'" "$wt")"
+  bash_case deny "$repo" "cat <<< 'open(\"$wt/file.txt\", \"w\")' | python3 -"
+  bash_case deny "$repo" "$(printf 'cat > "s p.py" <<%s\nopen("%s/file.txt", "w")\nPY\npython3 "s p.py"\n' "'PY'" "$wt")"
+}
+
+# An option that may take a value must not be mistaken for the program and so
+# hide the real one; such a call is not narrowed at all.
+@test "an option ahead of the script does not release a foreign script" {
+  bash_case deny "$wt" "python3 -W ignore $repo/script.py"
+  bash_case deny "$wt" "uv run --with pkg $repo/script.py"
+  bash_case deny "$repo" "$(printf 'cat > s.py <<%s\nopen("%s/file.txt", "w")\nPY\npython3 -W ignore s.py\n' "'PY'" "$wt")"
+}
+
+# Stdin reaches an interpreter by more spellings than `-`: a device path as the
+# program, a `<` from one, and a heredoc that follows a file redirect (the last
+# redirect of fd 0 wins). A `<` the regex finds in a quoted argument or a
+# comment is no redirect at all.
+@test "a heredoc reaching an interpreter's stdin past a file redirect is denied" {
+  local code="open(\"$wt/file.txt\", \"w\")"
+  bash_case deny "$repo" "$(printf 'python3 /dev/stdin <<%s\n%s\nPY\n' "'PY'" "$code")"
+  bash_case deny "$repo" "$(printf 'node /dev/fd/0 <<%s\n%s\nPY\n' "'PY'" "$code")"
+  bash_case deny "$repo" "$(printf 'python3 /proc/$$/fd/0 <<%s\n%s\nPY\n' "'PY'" "$code")"
+  bash_case deny "$repo" "$(printf 'python3 //dev/./stdin <<%s\n%s\nPY\n' "'PY'" "$code")"
+  bash_case deny "$repo" "$(printf 'cat <<%s | python3 - < /dev/stdin\n%s\nPY\n' "'PY'" "$code")"
+  bash_case deny "$repo" "$(printf 'python3 - < x.py <<%s\n%s\nPY\n' "'PY'" "$code")"
+  bash_case deny "$repo" "python3 - < x.py <<< '$code'"
+  bash_case deny "$repo" "$(printf 'python3 - "<x" <<%s\n%s\nPY\n' "'PY'" "$code")"
+  bash_case deny "$repo" "$(printf 'python3 - <<%s # <x\n%s\nPY\n' "'PY'" "$code")"
+}
+
+# A named script's own heredoc is not let through as data, unlike its
+# arguments: the owner chose to keep main's refusal here (#998, round 3).
+@test "a heredoc or here-string on a named script's own command is denied" {
+  local code="open(\"$wt/file.txt\", \"w\")"
+  bash_case deny "$repo" "$(printf 'python3 x.py <<%s\n%s\nPY\n' "'PY'" "$code")"
+  bash_case deny "$repo" "$(printf 'python3 tool.py <<EOF\n%s/x\nEOF\n' "$wt")"
+  bash_case deny "$repo" "python3 tool.py <<< '$wt/x'"
+}
+
+# The code follows the cluster's last letter, and a long flag may carry it
+# attached.
+@test "inline code behind a combined or attached flag is denied" {
+  bash_case deny "$repo" "node -pe 'require(\"fs\").writeFileSync(\"$wt/file.txt\", \"x\")'"
+  bash_case deny "$repo" "python3 -Bc \"open('$wt/file.txt','w')\""
+  bash_case deny "$repo" "node --eval='require(\"fs\").writeFileSync(\"$wt/file.txt\", \"x\")'"
+}
+
+# Inline-code flags are per interpreter: `perl -c` only syntax-checks.
+@test "a flag that is not inline code for that interpreter does not arm the rule" {
+  bash_case allow "$repo" "perl -c check.pl && cat $wt/file.txt"
+  bash_case allow "$repo" "python3 -E x.py && cat $wt/file.txt"
+  bash_case allow "$repo" "node -r mod x.js && cat $wt/file.txt"
+}
+
+# The reverse direction matters as much: a session standing in a worktree must
+# not reach back into the main checkout either.
+@test "a worktree session reaching back into the main checkout is denied" {
+  bash_case deny "$wt" "git -C $repo commit -m x"
+  bash_case deny "$wt" "echo x > $repo/file.txt"
+}
+
+@test "Edit, Write and NotebookEdit into a foreign worktree are denied" {
+  expect deny Edit "$repo" file_path "$wt/file.txt"
+  expect deny Write "$repo" file_path "$wt/new.txt"
+  expect deny NotebookEdit "$repo" notebook_path "$wt/nb.ipynb"
+  # $HOME is the recommended spelling, and no shell has expanded it by the
+  # time a hook sees it.
+  HOME="$tmp" expect deny Write "$repo" file_path '$HOME/wt/new.txt'
+}
+
+# Per-command path flags are the recommended way to read another tree, so
+# denying these would false-deny a taught idiom.
+@test "reads into a foreign worktree are allowed" {
+  bash_case allow "$repo" "git -C $wt status"
+  bash_case allow "$repo" "git -C $wt log --oneline"
+  bash_case allow "$repo" "git -C $wt diff"
+  bash_case allow "$repo" "git -C $wt worktree list"
+  bash_case allow "$repo" "git -C $wt stash list"
+  bash_case allow "$repo" "git -C $wt config --get user.name"
+  bash_case allow "$repo" "git -C $wt branch --show-current"
+  bash_case allow "$repo" "git -C $wt branch --contains HEAD" # a value flag is not a new branch
+  bash_case allow "$repo" "git -C $wt tag -l"
+  bash_case allow "$repo" "git -C $wt fetch" # fetch writes only the shared object store
+  bash_case allow "$repo" "rg pattern $wt"
+  bash_case allow "$repo" "cat $wt/file.txt"
+  bash_case allow "$repo" "diff $repo/file.txt $wt/file.txt"
+}
+
+@test "the bypass, another repo, no repo, and a path outside every worktree are allowed" {
+  local other
+  other="$(new_repo other)"
+  bash_case allow "$repo" "env WORKFLOW_SKILLS_ALLOW_FOREIGN_WRITE=1 git -C $wt commit -m x"
+  bash_case allow "$other" "echo x > $wt/file.txt"
+  bash_case allow "$tmp" "echo x > $wt/file.txt"
+  bash_case allow "$repo" "echo x > $tmp/scratch.txt"
+}
+
+# A deleted worktree stays listed with a `prunable` line. If it won the holder
+# lookup, the guard would deny a command and name a path that no longer exists.
+# Claude Code's default worktree layout nests them under the main checkout, so
+# a path there is inside the session's own root and a foreign one at once.
+@test "a worktree nested inside the main checkout is still foreign to it" {
+  local nested="$repo/.claude/worktrees/nested"
+  git -C "$repo" worktree add -q -b nested "$nested"
+  bash_case deny "$repo" "echo x > $nested/file.txt"
+  bash_case deny "$repo" "git -C $nested commit -m x"
+  expect deny Write "$repo" file_path "$nested/new.txt"
+  expect allow Write "$nested" file_path "$nested/new.txt"
+  expect deny Write "$nested" file_path "$repo/new.txt"
+}
+
+@test "writes the parser once missed are denied" {
+  bash_case deny "$repo" "git -C $wt stash"
+  bash_case deny "$repo" "git -C $wt stash -u"
+  bash_case deny "$repo" "sed --in-place s/a/b/ $wt/file.txt"
+  bash_case deny "$repo" "sudo -n cp a $wt/copy.txt"
+  bash_case deny "$repo" "python3 -c \"open('../wt/file.txt','w')\""
+}
+
+@test "the bypass is only an assignment in command position, set to 1" {
+  bash_case allow "$repo" "WORKFLOW_SKILLS_ALLOW_FOREIGN_WRITE=1 git -C $wt commit -m x"
+  bash_case deny "$repo" "WORKFLOW_SKILLS_ALLOW_FOREIGN_WRITE=0 git -C $wt commit -m x"
+  bash_case deny "$repo" "echo WORKFLOW_SKILLS_ALLOW_FOREIGN_WRITE=1 && echo x > $wt/file.txt"
+}
+
+@test "a cd outside command position and a config lookup are reads" {
+  bash_case allow "$repo" "rg cd $wt/file.txt"
+  bash_case allow "$repo" "git -C $wt config user.name"
+  bash_case allow "$repo" "git -C $wt config get user.name"
+  bash_case deny "$repo" "git -C $wt config user.name dan"
+  bash_case deny "$repo" "git -C $wt config --unset user.name"
+  bash_case allow "$repo" "git -C $wt config --file .gitmodules submodule.a.path"
+  bash_case deny "$repo" "git -C $wt config --file .gitmodules submodule.a.path x"
+}
+
+@test "a prunable worktree is not a holder" {
+  local gone="$tmp/gone"
+  git -C "$repo" worktree add -q -b gone-branch "$gone"
+  rm -rf "$gone"
+  bash_case allow "$repo" "echo x > $gone/file.txt"
+}
+
+@test "a tab in a worktree path is read intact" {
+  local tabbed
+  tabbed="$(printf '%s/ta\tb' "$tmp")"
+  git -C "$repo" worktree add -q -b tabbed "$tabbed"
+  bash_case deny "$repo" "$(printf 'echo x > "%s/file.txt"' "$tabbed")"
+}
+
+# A NEWLINE is the case `--porcelain -z` is actually for: without `-z` the
+# record splits, the guard learns a root that is a PREFIX of the real one, and
+# misses everything under it. Asserted through a Write payload, because a
+# command carrying a literal newline is split into segments long before this.
+@test "a newline in a worktree path is read intact" {
+  local newlined
+  newlined="$(printf '%s/new\nline' "$tmp")"
+  git -C "$repo" worktree add -q -b newlined "$newlined"
+  expect deny Write "$repo" file_path "$newlined/file.txt"
+}
+
+@test "the first write in a main checkout on the default branch warns, once" {
+  expect warn Write "$repo" file_path "$repo/new.txt" warn-once
+  expect allow Write "$repo" file_path "$repo/second.txt" warn-once
+  bash_case warn "$repo" "echo x > $repo/new.txt"
+  bash_case warn "$repo" 'git commit -m x'
+}
+
+@test "reads, bare interpreters, linked worktrees and off-default checkouts do not warn" {
+  local off_default
+  bash_case allow "$repo" 'git status'
+  bash_case allow "$repo" 'python3 scripts/foo.py'
+  expect allow Write "$wt" file_path "$wt/new.txt"
+  off_default="$(new_repo off-default)"
+  git -C "$off_default" checkout -q -b topic
+  expect allow Write "$off_default" file_path "$off_default/new.txt"
+}
+
+# reason <hook> <cwd> <command> — the deny reason that hook gives a Bash call.
+reason() {
+  python3 -c '
+import json, sys
+print(json.dumps({"tool_name": "Bash", "cwd": sys.argv[1], "session_id": "r",
+                  "tool_input": {"command": sys.argv[2]}}))
+' "$2" "$3" \
+    | TMPDIR="$stamps/r" python3 "$1" 2>/dev/null \
+    | python3 -c '
+import json, sys
+h = json.load(sys.stdin)["hookSpecificOutput"]
+assert h["permissionDecision"] == "deny"
+print(h["permissionDecisionReason"])
+'
+}
+
+# hook_layout_worktree <n> — a worktree where the WorktreeCreate hook puts it.
+hook_layout_worktree() {
+  export WORKFLOW_SKILLS_WORKTREE_ROOT="$tmp/worktrees"
+  export WORKFLOW_SKILLS_BRANCH_PREFIX="tester/"
+  git -C "$repo" worktree add -q -b "tester/$1" "$tmp/worktrees/repo/$1"
+}
+
+@test "a write into a hook-layout worktree names the EnterWorktree name route" {
+  local text
+  hook_layout_worktree feat-a
+  text=$(reason "$HOOK" "$wt" "echo x > $tmp/worktrees/repo/feat-a/file.txt")
+  [[ "$text" == *'`EnterWorktree` with `name: feat-a`'* ]]
+  [[ "$text" == *'If this session is already in a worktree, call `ExitWorktree` with `action: keep` first'* ]]
+  [[ "$text" == *'`worktree-entry` skill'* ]]
+  [[ "$text" != *'with `path:'* ]]
+}
+
+@test "a write into a worktree with no name keeps the path route and its warning" {
+  local text
+  text=$(reason "$HOOK" "$repo" "echo x > $wt/file.txt")
+  [[ "$text" == *"\`EnterWorktree\` with \`path: $(cd "$wt" && pwd -P)\`"* ]]
+  [[ "$text" == *'an unattended or Remote Control session cannot answer it'* ]]
+  [[ "$text" == *'`worktree-entry` skill'* ]]
+  [[ "$text" != *'`name:'* ]]
+}
+
+# stub_hook <resolver body> — a copy of the hook, and the parser it imports,
+# beside a stub resolver; prints the copy's path.
+stub_hook() {
+  local dir="$tmp/stub"
+  mkdir -p "$dir"
+  cp "$HOOK" "$REPO_ROOT/scripts/bash_command.py" "$dir/"
+  if [ -n "$1" ]; then
+    printf '#!/usr/bin/env bash\n%s\n' "$1" >"$dir/worktree-name-for.sh"
+    chmod +x "$dir/worktree-name-for.sh"
+  fi
+  printf %s "$dir/guard-foreign-worktree.py"
+}
+
+@test "control: a stub resolver's name reaches the reason" {
+  # Without this, the fallback cases below would pass on a hook that never
+  # ran the sibling resolver at all.
+  local text
+  text=$(reason "$(stub_hook 'echo feat-s')" "$repo" "echo x > $wt/file.txt")
+  [[ "$text" == *'`name: feat-s`'* ]]
+}
+
+@test "a missing, failing or garbled resolver still denies, with the path route" {
+  local body text
+  for body in '' 'echo feat-a; exit 2' 'kill -SEGV $$' 'printf "feat a\nmore\n"' \
+    "printf '\\377'" "printf '\\377' >&2; echo feat-a"; do
+    rm -rf "$tmp/stub"
+    text=$(reason "$(stub_hook "$body")" "$repo" "echo x > $wt/file.txt")
+    [[ "$text" == *'`EnterWorktree` with `path: '* ]] || {
+      echo "resolver body: $body" >&2
+      return 1
+    }
+    [[ "$text" != *'`name:'* ]]
+  done
+}
+
+@test "a malformed payload fails open" {
+  run bash -c 'printf "not json" | python3 "$1"' _ "$HOOK"
+  assert_success
+  assert_output ""
+}
+
+@test "the hook is registered for PreToolUse on Bash and on Edit|Write|NotebookEdit" {
+  run python3 -c '
+import json, sys
+h = json.load(open(sys.argv[1]))["hooks"]["PreToolUse"]
+print(sorted(g["matcher"] for g in h
+             if any(e["command"] == sys.argv[2] for e in g["hooks"])))
+' "$REPO_ROOT/hooks/hooks.json" '"${CLAUDE_PLUGIN_ROOT}/scripts/guard-foreign-worktree.py"'
+  assert_success
+  assert_output "['Bash', 'Edit|Write|NotebookEdit']"
+}

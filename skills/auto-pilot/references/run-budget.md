@@ -12,8 +12,14 @@ stop below; everything else governs the free rate window and per-task time.
 
 ## Rate-window check
 
-Run after every task's state update (the run loop's hook point). Headroom is
-read two ways, layered because neither alone is enough:
+Run at two hook points: **inside `/deliver-task` before each Claude-consuming
+delivery operation** (claim, verify, co-review, every re-verify, and every
+repeated co-review), and **after every task's state update**. `/deliver-task`
+is the enforcement site when auto-pilot supplies `--run-state`; the outer loop
+cannot intercept those opaque lifecycle substeps. The pre-invoke hook prevents
+beginning a large turn without enough window left; the post-task hook remains
+the accounting and backstop check. Headroom is read two ways, layered because
+neither alone is enough:
 
 - **Primary — a direct usage query.** [`scripts/claude-usage.sh`](../../../scripts/claude-usage.sh)
   performs it and is the orchestrator's entry point: it queries `GET
@@ -55,6 +61,52 @@ read two ways, layered because neither alone is enough:
   reschedule. The agent never self-handles a rate-limit — if a subagent dispatch
   returns one, it simply exits non-zero and lets the supervisor classify it.
 
+### Pre-invoke reserve
+
+The run keeps a fixed **reserve floor** of **15% headroom** by default. Launch
+and resume accept `--reserve <pct>` to replace that floor for this run; require
+a numeric percentage from 0 through 100 and record the resolved value in the
+run's durable `reserve` configuration. Nothing rewrites that fixed floor
+afterwards.
+
+**The gate itself is a script, and its header comment is the one home of the
+arithmetic.** `scripts/spawn-orchestrator.sh reserve-gate` computes the
+effective reserve from that floor and the run's recorded intervals, does the
+bookkeeping those intervals need, and prints its verdict; how it derives one
+from the other — the safety factor, the sample threshold, the window rule, the
+record depth — is specified there and nowhere else. It was specified twice
+here and in [`run-state.md`](run-state.md) and hand-walked at four
+`/deliver-task` boundaries, which is exactly how two copies of one rule drift.
+
+What stays true at this level: the reserve is a **headroom** threshold, not a
+consumed-percent one, and a short or missing record never lowers the fixed
+floor.
+
+At the start of a delivery cycle, `/deliver-task` calls
+`"${CLAUDE_PLUGIN_ROOT}/scripts/claude-usage.sh" --session-status` once and caches its successful
+`percent` and raw `reset_epoch` for that cycle. It passes that one cached
+reading to a `reserve-gate` call before **claim**, **verify**, enabled
+**co-review**, and every iterate-round **re-verify** and repeated
+**co-review**; it makes no equivalent usage read anywhere else in the cycle,
+and it discards the cache at the next cycle and reads again. A failed
+(non-zero exit) usage read is not permission to proceed: it goes to the same
+subcommand as `--read-failed`, which decides nothing, and the caller falls
+back to the existing conservative time/dispatch proxy for that hook — taking
+the same near-cap path if that crosses its threshold. See
+[`deliver-task/SKILL.md`](../../deliver-task/SKILL.md) "Auto-pilot reserve
+gate" for the call and its exit codes.
+
+If either the direct reading or that fallback says near-cap, use **exactly**
+the checkpoint-then-exit path below: write the pause state with
+`paused_until` from the raw `reset_epoch` as specified below, to its canonical ISO-8601 form,
+commit it, and exit before the operation. There is no separate pre-invoke
+pause implementation.
+
+The query is predictive and advisory; it cannot make an actual rate-limit
+error safe. A 429 encountered during a turn remains authoritative and is
+classified by `supervisor-check` / `classify-exit`, which owns the supervisor
+pause path.
+
 The same response's `spend.used.amount_minor` feeds the hard-stop below
 ("Hard-stop before paid/overflow credits") — one query serves both checks.
 
@@ -67,7 +119,7 @@ console string is not.
 
 **Caveats, stated rather than hidden:**
 
-- **Strands headroom on light nights.** The proxy fallback will sometimes
+- **Strands headroom in light windows.** The proxy fallback will sometimes
   pause a run that had capacity left. This is the deliberate safe direction
   — pausing early wastes idle time; pausing late risks the wall.
 - **The direct query is account-wide, closing the proxy's blind spot.** The
@@ -82,7 +134,18 @@ console string is not.
 When the proxy crosses its near-cap threshold, or the error backstop fires:
 
 1. **Write state first**, per [`run-state.md`](run-state.md) "Write order" —
-   including `paused_until: <reset>` and the pause reason — then **exit**.
+   including `paused_until: <pause deadline>`, `pause_observed_at`,
+   `pause_source`, and the pause reason — in one atomic RUN.md rewrite, then
+   **exit**. `claude-usage.sh --session-status` validates the external
+   `resets_at`: it must be in the future but less than six hours away, and may
+   not move backward before the previously observed reset has passed. The reader
+   returns the raw validated `reset_epoch`; the pause writer sets
+   `paused_until = reset_epoch + grace`, with grace configurable from 60 through
+   180 seconds (default 120; `CLAUDE_USAGE_RESUME_GRACE_SECONDS`). It atomically
+   writes that deadline with `pause_observed_at` and `pause_source`. If a failed
+   read still warrants a pause, the pause writer instead sets `paused_until = now + 3600`
+   as the fail-safe. Early timer wakes are free because `supervisor-gate`
+   is a shell gate, so grace exists only to remove reset-boundary races.
    This is a **checkpoint-then-exit**, not an in-process sleep: the process
    holding hours of context does not sit and wait, it dies and lets a
    relaunch reconstruct everything from the run-state branch. When the
@@ -157,8 +220,11 @@ So the supervisor carries a **third** kind, neither an agent pause nor a
 supervisor pause: a **supervisor halt**. It is implemented entirely in shell,
 before or on `claude -p`'s exit — a rate-limited or auth-dead agent cannot run
 its own bookkeeping, so the supervisor decides in shell what it can decide in
-shell (`scripts/spawn-orchestrator.sh classify-exit` / `supervisor-check`,
-called by the generated launch script after every wake):
+shell (`spawn-orchestrator.sh classify-exit` / `supervisor-check` — bare on
+purpose: `write-launch` bakes its own absolute path into the generated wrapper,
+and `$CLAUDE_PLUGIN_ROOT` does not exist under launchd
+([`../SKILL.md`](../SKILL.md) "Script paths", context 3) — called by the
+generated launch script after every wake):
 
 - **Fatal, non-retryable** — the exit's captured stdout+stderr names an auth
   failure (`authentication_failed`, `Invalid authentication credentials`,
@@ -360,21 +426,13 @@ recorded) **and at a paused resume's wake**. Nothing else checks it between
 dispatches. A future change that "fixes" or removes this guard on the assumption
 that the deadline is enforced somewhere else is removing the enforcement.
 
-`min_task_budget` is **not a constant**. A single delivery is coder dispatch +
-independent verify + PR + co-review (bounded **per reviewer**) + up to 2 iterate
-rounds, and the co-review term is dominated by the **resolved reviewer set's**
-latency:
-
-- **Fast set** (codex + Claude + reconciler): codex is ~1–2 min, stateless and
-  sandboxed; the floor is ~**20 min**.
-- **With cloud reviewers** (`devin` / `agy`): each hits the `--non-interactive`
-  **15-min bound**, so they dominate a short run and push the floor to ~**45 min+**.
-
-As an approximation, `min_task_budget ≈ delivery overhead (coder implement +
-verify + PR, ~18 min) + co-review latency`, where the co-review term is the
-**slowest per-reviewer bound in the resolved set** carried across the initial
-review plus up to 2 iterate rounds: a ~2-min codex term keeps the fast-set floor
-near **20 min**, while a 15-min cloud-reviewer bound pushes it past **45 min**.
+`min_task_budget` is **not a constant** — it is coupled to the **resolved
+reviewer set's** latency, and is produced by running
+`"${CLAUDE_PLUGIN_ROOT}/scripts/min-task-budget.sh" <resolved local_reviewers…>`.
+The formula and the per-reviewer terms live in that script's header comment
+and are not restated here. Two anchor results: the **fast set** (codex +
+Claude + reconciler) → `24m`; **any cloud reviewer** (`agy` / `devin` /
+`copilot` / `crush` / `grok`) → `63m`.
 
 Because it is coupled to that set, `min_task_budget` is **computed at launch from
 the resolved reviewer set** (Launch step 3) and recorded in `RUN.md`'s front
@@ -391,7 +449,10 @@ operative, not pedantic: a park is a **deliberate, successful** outcome (the
 task is blocked on a human decision), so a parked task must never be counted
 as a failure and re-dispatched. Reading a park as a failure would re-dispatch
 the very task that is waiting on an answer, burn the retry bound on it, and
-then park it a second time — defeating the park and the bound together.
+then park it a second time — defeating the park and the bound together. A
+**claim refusal** is neither a failure nor a park: the loop records it as the
+pre-claim terminal `skipped` ([`run-state.md`](run-state.md) "Task lifecycle
+phases") and does not re-dispatch it.
 
 A failed delivery gets **one** re-dispatch; a second failure parks the task,
 and the run loop continues to the next ready task rather than aborting — a
@@ -433,8 +494,8 @@ wrong, and counting them would halt a perfectly good run.
 **Why.** The per-task bounds above cap one runaway task each, but nothing
 caps _systemic_ failure — a broken `main`, a dead network, expired `gh`
 auth — where every task the loop tries parks for the same underlying
-reason. Left unchecked, the run would cheerfully burn the whole night
-parking task after task, each eating up to 45 minutes of window, and wake
-the human to a graveyard of parked tasks with no single signal pointing at
+reason. Left unchecked, the run would cheerfully burn the whole window
+parking task after task, each eating up to 45 minutes of window, and leave
+the human a graveyard of parked tasks with no single signal pointing at
 the real cause. Halting after a small consecutive-failure streak is cheap
 to implement and turns that graveyard into one legible alarm.

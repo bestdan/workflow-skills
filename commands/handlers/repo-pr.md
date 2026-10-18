@@ -1,8 +1,14 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+user-invocable: false
+---
+
 # Handler: repo-pr
 
 The default. Creates the task file on a branch from main and opens a PR — without touching local state. Lands on main (via auto-merge) decoupled from the feature branch, where `/do-tasks` can later pick it up.
 
-This is the only handler that uses an agent + the remote/subagent/local cascade, because it is the only one that does git plumbing. The CLI/MCP handlers (`gh-issue`, `jira`) are single foreground calls.
+It does git plumbing, so it uses an agent + the remote/subagent/local cascade. The `linear` and `gh-issue` tracker handlers also dispatch **remote** sessions, but only for batch `/do-tasks --all` — and on `gh-issue` only where the repo opts in (`gh-issue.remote_batch: true`, off by default). See `commands/do-tasks.md` §3 "Tracker-batch subroutine" and its gh-issue instantiation in §4; their single paths, and the `jira` handler, are single foreground calls.
 
 ## Detect dispatch mode
 

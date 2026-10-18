@@ -1,12 +1,24 @@
-handler: linear
-linear:
-  team: PreThink
-  projects: # replaces the deprecated scalar default_project (handlers now read only this list)
-    - id: ebbc284b-a1c1-4cb3-96e0-914e210a79a2
-      name: Handler parity follow-ups
-# api_key_ref (the op:// pointer to a Linear personal API key) is PERSONAL and
-# machine-specific — it does NOT belong in this committed, public config.
-# Put it in the gitignored local override instead: dev_docs/tasks/.task-config.local.yml
-#   linear:
-#     api_key_ref: op://<vault>/<item>/<field>
-# (or just export $LINEAR_API_KEY / $LINEAR_API_KEY_REF). Unset → the MCP floor.
+handler: gh-issue
+gh-issue:
+  repo: bestdan/workflow-skills
+  # Unscoped on purpose. gh-issue.labels is an AND filter on /list-tasks, not
+  # just a label applied to new issues, and every issue in this repo is a task
+  # issue — so any marker would hide part of the board rather than focus it.
+  # /reconcile-tasks needs --all here; /archive-tasks has no such override yet.
+  labels: []
+  assignees: []
+  # Required here, not cosmetic. The claim branch IS the claim lock ref
+  # (`commands/handlers/claim-lock.md`), and it is built as
+  # `<branch_prefix>task-<n>`. Unset, it defaults to empty and the lock becomes
+  # `task-<n>` — while this repo's branches are all `bestdan/`-prefixed, so a
+  # caller following that convention locks `bestdan/task-<n>` instead. Two
+  # sessions that disagree about the prefix each acquire a ref the other cannot
+  # see, and both think they won.
+  branch_prefix: bestdan/
+  # Raised from the default 3 because /promote-tasks now backfills `est:`
+  # (commands/handlers/task-fill.md). The gate is exclusive, so the default
+  # would fail `est:3` — and on a 1/2/3/5 ladder 3 is the modal size, not an
+  # oversized task. At 5 the gate still catches est:5 and the over-ceiling
+  # est:8/est:13 the backfill records, which is the backstop it exists to be.
+  # The backlog measurement behind the number is in #742's pull request.
+  max_estimate: 5

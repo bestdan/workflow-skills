@@ -1,17 +1,23 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2034 # Some state arrays are consumed indirectly by generated scripts.
 # spawn-orchestrator.sh — materialize the auto-pilot detached orchestrator's
-# launch wrapper and its two-layer jail from a run's resolved inputs, so an
-# agent never hand-authors a sandbox-exec profile at launch (PRE-484).
+# launch wrapper and its jail from a run's resolved inputs, so an agent never
+# hand-authors a sandbox-exec profile at launch (PRE-484).
 #
-# The jail is two layers (skills/auto-pilot/references/launch-runtime.md
-# "Sandbox profile"):
-#   1. filesystem + process/exec  → this script's Seatbelt profile (below)
-#   2. host-level network egress  → the detached `claude -p`'s own
-#      sandbox.network allowlist (added by a later task)
+# RETIRED — SUPERSEDED BY nono (https://nono.sh) IN THE aiutopilot REPO, whose
+# docs/charter §3.2 retires this renderer by name. This harness stays here as an
+# explicitly unsupported fallback and dies in place. Do not build on it.
 #
-# Ships the layer-1 profile renderer + compile check (render-profile /
-# check-profile) and the layer-2 egress-allowlist emitter (render-settings).
+# THE JAIL HAS ONE ENFORCING LAYER, NOT TWO. This file's Seatbelt profile
+# confines filesystem + process/exec, and that part demonstrably works. The
+# "layer 2" this header used to promise — the detached `claude -p`'s own
+# sandbox.network allowlist — CANNOT run inside layer 1: macOS refuses to apply
+# a nested Seatbelt profile, so Claude Code's egress filter dies at startup and
+# the harness then fails OPEN, re-running blocked commands unsandboxed. Network
+# egress from inside this jail is therefore UNFILTERED. See PR #212's plan doc
+# for the measurements; use nono if you need egress actually closed.
+#
+# Ships the profile renderer + compile check (render-profile / check-profile).
 # Subcommands added by sibling tasks: write-launch, detach, teardown.
 #
 # Verify broker (task 4 — run the run's verify_command OUTSIDE the jail): the
@@ -58,6 +64,14 @@
 #       --dir <run-dir> --label <label> --state <file> [--no-progress-limit <n>] \
 #       [--park-limit <n>]
 #   spawn-orchestrator.sh supervisor-gate --dir <run-dir> --label <label>
+#   spawn-orchestrator.sh reserve-gate --run-md <path> \
+#       {--percent <p> --reset-epoch <e> | --read-failed} \
+#       [--floor <n>] [--samples <n>]
+#
+#   reserve-gate  The auto-pilot pre-invoke reserve gate: one call does the
+#                 usage_delta bookkeeping rewrite AND the go/no-go. Its own
+#                 comment block below is the ONE home of the formula --
+#                 run-budget.md and run-state.md point at it.
 #   spawn-orchestrator.sh supervisor-scan --dir <run-dir> --label <label> \
 #       [--park-limit <n>] [--pause-exempt-max <seconds>] [--report-every <dur>]
 #   spawn-orchestrator.sh status-report --dir <run-dir> --label <label> \
@@ -322,10 +336,13 @@
 #             the sentinel is the single file, so it carries the distinction
 #             rather than a sibling marker being invented for it.
 #
-#   render-settings  Emit the ephemeral `claude -p --settings` JSON: layer-2
-#                    network egress (sandbox.network.allowedDomains) narrowed to
-#                    the resolved coders + source, deny-by-default. Fail-closed on
-#                    an unresolvable required host (e.g. agy without --agy-host).
+#   render-settings  Emit the ephemeral `claude -p --settings` JSON: a
+#                    sandbox.network.allowedDomains set narrowed to the resolved
+#                    coders + source. Fail-closed on an unresolvable required
+#                    host (e.g. agy without --agy-host). NOTE: this allowlist
+#                    ENFORCES NOTHING inside this jail — Claude Code's sandbox
+#                    cannot start under a nested Seatbelt profile, so it is an
+#                    emitted artifact, not a containment layer (see header).
 #
 #   render-profile  Render the Seatbelt (.sb) profile from resolved paths into
 #                   --out. Every path must be ABSOLUTE and EXIST; a relative or
@@ -373,6 +390,13 @@
 #   0  spawn-orchestrator: profile OK <path>       render/check succeeded
 #   2  usage, dependency, or fail-closed path error (nothing partial written)
 set -uo pipefail
+# bash >= 5.2 turns `&` in a ${var//pat/repl} replacement into the matched text.
+# BOTH xml_escape (whose replacements are `&amp;`/`&lt;`/…, so `${s//</&lt;}`
+# yields `<lt;`) and render_plist (which substitutes those escaped values, yielding
+# `@@WORKDIR@@amp;`) depend on this being off — don't remove the guard on the
+# strength of fixing only one of them. Absent in 3.2 (the macOS system bash),
+# where the shopt name itself is an error — hence the `|| true`.
+shopt -u patsub_replacement 2>/dev/null || true
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEMPLATE_DEFAULT="$ROOT/scripts/orchestrator.sb.tmpl"
@@ -444,6 +468,30 @@ _run_bounded() {
   local secs="$1"
   shift
   local rc=0 job wd
+  # Installed BEFORE the spawns, not after: a TERM landing between `"$@" &` and
+  # the trap would take the default action, and this shell would die leaving the
+  # very children the trap exists to reap. The guards make it safe to fire
+  # before either variable is assigned — an unguarded `kill -TERM -"${job:-0}"`
+  # expands to a literal `-0`, which POSIX defines as the SENDER's process
+  # group. (A real-but-non-leader pid is a different and harmless case: `set -m`
+  # has bash setpgid in both parent and child, and a group-kill on a non-leader
+  # pid fails ESRCH and signals nothing — it does not fall back to group 0.)
+  #
+  # The handler escalates on its OWN before killing the watchdog. The watchdog
+  # is the only thing that turns a refused TERM into a KILL, so killing it first
+  # orphans precisely the job that ignores TERM — the case this helper exists to
+  # bound. The grace is a short fixed 0.2s rather than the watchdog's 2s or a
+  # detached escalator subshell: this is teardown (the run being reported on has
+  # already ended), status_report writes tmp+mv so a hard KILL cannot tear
+  # STATUS.md, and a forked escalator would inherit this process's argv and so
+  # match the reaper test's `pgrep -f report-tick` for its whole life.
+  trap '[ -n "${job:-}" ] && {
+          kill -TERM -"$job" 2>/dev/null
+          sleep 0.2
+          kill -KILL -"$job" 2>/dev/null
+        }
+        [ -n "${wd:-}" ] && kill -KILL -"$wd" 2>/dev/null
+        exit 143' TERM INT HUP
   set -m
   "$@" &
   job=$!
@@ -455,11 +503,29 @@ _run_bounded() {
   ) >/dev/null 2>&1 &
   wd=$!
   set +m
+  # The trap above forwards a TERM to both groups instead of letting this shell
+  # die alone in the wait below. The `set -m` is what lets a hung job be
+  # group-killed — but it also puts the job and the watchdog in groups of their
+  # OWN, outside the group of whoever called us. So when the in-wake reporter is
+  # reaped (`kill -TERM -"$rpt"` in the generated wrapper), that TERM reaches
+  # this shell and not them: without the trap this shell dies blocked in `wait`,
+  # the cleanup below never runs, and both children re-parent to init — verified
+  # by watching `ps -o pid,ppid,pgid` across a reap (PPID flips to 1, PGID stays
+  # their own, and the watchdog then lingers its full `secs`+2, 62s by default,
+  # firing gh at a run that has already ended). `exit`, not fall-through: a
+  # handled TERM that returned would leave this process alive past the reaper
+  # that just signalled it.
   wait "$job" 2>/dev/null || rc=$?
   # The watchdog fired iff the job died on our TERM/KILL (128+15 / 128+9).
   case "$rc" in 143 | 137) rc=124 ;; esac
   kill -KILL -"$wd" 2>/dev/null
   wait "$wd" 2>/dev/null || true
+  # Cleared HERE, not straight after the `wait` above: a TERM in that gap would
+  # take the default action and leave the watchdog to linger its full secs+2 —
+  # the same class as the bug this trap fixes, and moving the line costs
+  # nothing. `wd` stays this shell's own unreaped child until the `wait` above,
+  # so neither kill can land on a recycled pid.
+  trap - TERM INT HUP
   return "$rc"
 }
 
@@ -1022,11 +1088,16 @@ $(emit_allow "file-write*" ${rw_c[@]+"${rw_c[@]}"})"
   echo "spawn-orchestrator: profile OK $out"
 }
 
-# Build the narrowed egress host set (sorted, unique), fail-closed. This is
-# layer 2 of the jail: Seatbelt can't filter by hostname, so egress is enforced
-# by the detached `claude -p`'s own sandbox.network allowlist. The set is
+# Build the narrowed egress host set (sorted, unique), fail-closed. The set is
 # narrowed to the run's resolved coders + source so a linear+codex run never
 # opens devin's or agy's endpoints. Args are parsed by render_settings below.
+#
+# THIS ENFORCES NOTHING HERE. It feeds `claude -p`'s own sandbox.network
+# allowlist, and that sandbox cannot initialize inside this jail (nested
+# Seatbelt; see the file header) — it dies at startup and the harness then runs
+# blocked commands unsandboxed. Egress from inside the jail is UNFILTERED
+# regardless of what this computes. The host set is still worth keeping: it is
+# the input a real allowlisting proxy (nono, in aiutopilot) needs.
 render_network_allowlist() {
   local source="" agy_host="" npm=0
   local -a coders=() mcp=() add_task=()
@@ -1110,7 +1181,7 @@ render_network_allowlist() {
     # hosts_to_json_array splits it into a second, unvalidated host — smuggling a
     # wildcard past the allowlist. A real hostname never contains a newline.
     case "$h" in *$'\n'*) die "invalid egress host (embedded newline, fail-closed): $h" ;; esac
-    printf '%s' "$h" | grep -Eq '^(\*\.)?[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$' \
+    grep -Eq '^(\*\.)?[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$' <<<"$h" \
       || die "invalid egress host (fail-closed): $h"
   done
 
@@ -1203,6 +1274,10 @@ xml_escape() {
 
 # Inline token replacement (bash, not sed) so arbitrary paths with regex-special
 # chars can't corrupt the render; every substituted string value is XML-escaped.
+# Relies on patsub_replacement being off (see the shopt near `set -uo pipefail`):
+# xml_escape emits `&amp;`, and with that option on the bare `&` would expand to
+# the matched token, rendering `@@WORKDIR@@amp;` and breaking the plist. Quoting
+# the replacement is NOT the fix — bash 3.2 keeps the quotes literally.
 render_plist() {
   local label launch_script workdir log
   label="$(xml_escape "$1")"
@@ -1225,8 +1300,9 @@ render_plist() {
 # Emit the self-contained launch script + the launchd plist from resolved inputs.
 # The launch script is what the plist runs: it composes the jail
 # (sandbox-exec -f <profile>) around `claude -p --permission-mode bypassPermissions`
-# with the layer-2 --settings, reads the run prompt from a file, and redirects to
-# the log. %q-quoting keeps every interpolated path/string shell-safe.
+# with the rendered --settings (passed through, but non-enforcing inside the jail
+# — see the file header), reads the run prompt from a file, and redirects to the
+# log. %q-quoting keeps every interpolated path/string shell-safe.
 write_launch() {
   local profile="" settings="" workdir="" log="" prompt="" until="" \
     label="" interval="300" throttle="30" out_script="" out_plist="" \
@@ -1627,7 +1703,13 @@ smoke_test() {
   # Assert the output is actually parseable stream-json (a line beginning with
   # `{` and containing "type"), not just non-empty: a degraded claude could print
   # a plain-text error to stdout and false-pass the emptiness check above.
-  printf '%s\n' "$out" | grep -Eq '^\{.*"type"' \
+  # Read $out with a here-string, never `printf … | grep -Eq`. The pattern hits
+  # the first line, so grep exits at once; once $out outgrows the pipe buffer the
+  # printf dies of SIGPIPE and `set -o pipefail` turns a HEALTHY smoke test into
+  # 141 — a refusal to detach that blames the jail. Measured: this capture is
+  # ~30KB today and the piped form starts failing between 32KB and 64KB, so the
+  # margin is one growth spurt of the tool roster wide.
+  grep -Eq '^\{.*"type"' <<<"$out" \
     || die "auth smoke-test produced non-stream-json output THROUGH the wrapper — flag/jail suspect; not detaching"
   echo "spawn-orchestrator: smoke-test OK"
 }
@@ -2361,21 +2443,22 @@ _run_md_parked_count() {
   awk -F'|' '/^\|/ { p=$3; gsub(/^[[:space:]]+|[[:space:]]+$/, "", p); if (p == "parked") n++ } END { print n+0 }' "$f"
 }
 
-# True (0) iff the run's `--until` deadline is in the past. `until` is a local
-# ISO-8601 timestamp (run-state.md), and so is `date +%Y-%m-%dT%H:%M:%S`, so a
-# LEXICOGRAPHIC compare is a correct time compare — no date-parsing dependency
-# (`date -d` / `date -j` differ across platforms, and a supervisor that can't
-# parse a date must not be the reason nobody gets told). A value that isn't
-# ISO-shaped is not "blown", it's unreadable — never alarm on garbage.
+# True (0) iff the run's `--until` deadline is in the past. Normalize `until` to an
+# epoch with the SAME shared parser supervisor_gate uses for `paused_until` on this
+# wake path (_parse_iso8601_utc), then compare against `date -u +%s`. Both fields
+# are RUN.md UTC timestamps, so routing them through one parser keeps them
+# consistent and correct for every ISO form RUN.md may carry — a trailing `Z`, a
+# numeric `+HH:MM`/`-HH:MM` offset, a space separator, omitted seconds, or a
+# zone-less value (which the parser maps to UTC, per its own note). A hand-rolled
+# lexicographic compare could not: it needs both sides in one zone, and only ever
+# stripped `Z` — a local `now` (the original bug) misfired by the machine's offset,
+# halting a live run hours early east of UTC, and an offset-bearing `until` was
+# never normalized at all. A value the parser can't read is not "blown", it's
+# unreadable — return false so we never alarm on garbage.
 _deadline_blown() {
-  local u="${1%Z}"
-  case "$u" in
-    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]*) ;;
-    *) return 1 ;;
-  esac
-  local now
-  now="$(date +%Y-%m-%dT%H:%M:%S)"
-  [ "$now" \> "$u" ]
+  local until_epoch
+  until_epoch="$(_parse_iso8601_utc "$1")" || return 1
+  [ "$(date -u +%s)" -gt "$until_epoch" ]
 }
 
 # Set by _supervisor_alarm_scan when the condition it found is TERMINAL (the run
@@ -3518,6 +3601,330 @@ supervisor_gate() {
 }
 
 # ---------------------------------------------------------------------------
+# reserve-gate — the auto-pilot pre-invoke reserve gate (prose-to-code index
+# row 5). THIS COMMENT IS THE ONE HOME OF THE FORMULA. It used to be specified
+# twice (run-budget.md "Pre-invoke reserve", run-state.md "`RUN.md`") and
+# hand-walked at four /deliver-task boundaries, so a rule could be restated
+# with a drifting exception in one copy and nobody would see it. Those files
+# now point here; keep the arithmetic in this file only.
+#
+# Usage:
+#   spawn-orchestrator.sh reserve-gate --run-md <path> \
+#       --percent <p> --reset-epoch <e> [--floor <n>] [--samples <n>]
+#   spawn-orchestrator.sh reserve-gate --run-md <path> --read-failed
+#
+# One call does BOTH halves of a boundary: the bookkeeping rewrite, then the
+# go/no-go. It is one read-modify-write of RUN.md's front matter (temp file +
+# mv, the same atomic replace _set_front_field uses), on the run-state.md
+# assumption that one orchestrator process writes RUN.md at a time.
+#
+# Bookkeeping — `usage_delta_baseline` is the previous successful
+# `claude-usage.sh --session-status` sample, kept only to close the next
+# interval:
+#   * no stored baseline            → append nothing; baseline := current.
+#   * stored epoch != --reset-epoch → the interval straddles a rate window, so
+#                                     DISCARD it; append nothing; baseline :=
+#                                     current. A fresh window starts fresh.
+#   * epochs match, delta > 0       → append {percent: delta, reset_epoch: e}
+#                                     to `usage_deltas`, keep the newest 20,
+#                                     baseline := current.
+#   * epochs match, delta == 0      → append nothing. THIS IS WHAT MAKES ONE
+#                                     CALL PER BOUNDARY SAFE: /deliver-task
+#                                     reads --session-status once per cycle and
+#                                     re-presents that one cached reading at
+#                                     each of its four boundaries, so calls 2-4
+#                                     see the baseline they just wrote. Recording
+#                                     them would put four entries in the record
+#                                     per task, spuriously reaching the
+#                                     five-sample threshold and evicting real
+#                                     intervals from the 20-entry cap. A
+#                                     genuinely idle interval is discarded too,
+#                                     which costs nothing: the reserve is a max,
+#                                     and a zero never raises one.
+#   * epochs match, delta < 0       → an inconsistent same-window reading:
+#                                     CLEAR the baseline (do not replace it
+#                                     with the anomalous value) and append
+#                                     nothing, so a corrupt read cannot
+#                                     inflate a later interval.
+#   * --read-failed                 → a non-zero usage read is never a sample:
+#                                     CLEAR the baseline, append nothing,
+#                                     synthesize no percent or epoch.
+#
+# Verdict — the effective reserve is a headroom threshold, not a
+# consumed-percent one:
+#   observed_worst = max(usage_deltas whose reset_epoch == --reset-epoch)
+#   reserve        = max(floor, ceil(observed_worst * 1.25))
+#   headroom       = 100 - percent      → pause when headroom < reserve
+# `max` is deliberate: it sizes for the costliest retained task rather than
+# averaging one away. Fewer than --samples (default 5) in-window deltas means
+# the effective reserve is exactly the floor — an empty, short, or
+# cross-window record never LOWERS it. The 1.25 safety factor is applied as a
+# ceiling, the conservative direction, because these are integer percents.
+# The floor defaults to RUN.md's `reserve` field (the launch/resume --reserve
+# value, 15 by default); --floor overrides it for a caller that has one in
+# hand. This never rewrites that configured floor.
+#
+# stdout is the contract:
+#   RESERVE: reserve=<n> headroom=<n> verdict=proceed|pause samples=<n>
+# exit 0  proceed
+# exit 1  pause — the caller takes run-budget.md's "Near-cap → pause +
+#         relaunch past reset" checkpoint-then-exit path
+# exit 2  malformed input (bad flag, bad number, missing/!front-matter RUN.md)
+# exit 3  --read-failed: headroom=unknown, verdict=fallback. NOT proceed and
+#         NOT a measured pause — the caller falls back to auto-pilot's
+#         conservative time/dispatch proxy for this boundary. A distinct code
+#         is what stops "the query failed" from being read as headroom, which
+#         exit 0 would do.
+# ---------------------------------------------------------------------------
+RESERVE_FLOOR_DEFAULT=15
+RESERVE_MIN_SAMPLES_DEFAULT=5
+# The 1.25 safety factor, as an integer percent so the arithmetic stays in the
+# shell (Bash has no floats).
+RESERVE_SAFETY_PERCENT=125
+RESERVE_DELTA_CAP=20
+
+_reserve_uint() { # <value> — true iff a non-empty run of digits
+  case "$1" in
+    '' | *[!0-9]*) return 1 ;;
+  esac
+  return 0
+}
+
+# True iff <key> is declared in <file>'s front matter. Presence and emptiness
+# are different answers here: `usage_delta_baseline:` with no value is the
+# normal cleared state, while a MISSING key means the file is not a RUN.md this
+# subcommand can safely rewrite — so the caller fails closed on absence only.
+_reserve_has_key() {
+  local front
+  front="$(awk '/^---$/{c++; next} c==1{print}' "$1")"
+  grep -qE "^$2:" <<<"$front"
+}
+
+# Expand a `usage_deltas` flow list into one `percent epoch` line per entry.
+# exit 3 on anything that is not exactly the shape run-state.md documents —
+# this field is written only by this subcommand, so a garbled value is a
+# corrupted RUN.md, not input to guess at.
+_reserve_parse_deltas() {
+  awk -v raw="$1" 'BEGIN {
+    gsub(/^[[:space:]]*/, "", raw); gsub(/[[:space:]]*$/, "", raw)
+    if (raw == "") exit 0
+    if (raw !~ /^\[.*\]$/) exit 3
+    raw = substr(raw, 2, length(raw) - 2)
+    gsub(/^[[:space:]]*/, "", raw); gsub(/[[:space:]]*$/, "", raw)
+    if (raw == "") exit 0
+    n = split(raw, parts, /\}[[:space:]]*,[[:space:]]*/)
+    for (i = 1; i <= n; i++) {
+      s = parts[i]
+      if (i < n) s = s "}"
+      if (s !~ /^\{percent:[[:space:]]*[0-9]+,[[:space:]]*reset_epoch:[[:space:]]*[0-9]+\}$/) exit 3
+      p = s; sub(/^\{percent:[[:space:]]*/, "", p); sub(/,.*$/, "", p)
+      e = s; sub(/^.*reset_epoch:[[:space:]]*/, "", e); sub(/\}$/, "", e)
+      print p, e
+    }
+  }'
+}
+
+# Same, for the single-object `usage_delta_baseline`. Prints nothing when the
+# field is empty (the cleared state); exit 3 on a malformed value.
+_reserve_parse_baseline() {
+  awk -v raw="$1" 'BEGIN {
+    gsub(/^[[:space:]]*/, "", raw); gsub(/[[:space:]]*$/, "", raw)
+    if (raw == "") exit 0
+    if (raw !~ /^\{percent:[[:space:]]*[0-9]+,[[:space:]]*reset_epoch:[[:space:]]*[0-9]+\}$/) exit 3
+    p = raw; sub(/^\{percent:[[:space:]]*/, "", p); sub(/,.*$/, "", p)
+    e = raw; sub(/^.*reset_epoch:[[:space:]]*/, "", e); sub(/\}$/, "", e)
+    print p, e
+  }'
+}
+
+# Rewrite both fields in ONE pass, so the baseline and the deltas can never
+# disagree about which interval has been accounted for. Same temp-file + mv
+# replace as _set_front_field, and fail-closed the same way.
+_reserve_write() { # <file> <baseline value or ""> <deltas value>
+  local f="$1" b="$2" d="$3" dir tmp
+  dir="$(dirname "$f")"
+  tmp="$(mktemp "$dir/.runmd.XXXXXX")" || die "mktemp failed"
+  awk -v b="$b" -v d="$d" '
+    /^---$/ { dashes++; print; next }
+    dashes==1 && /^usage_delta_baseline:/ { print (b == "" ? "usage_delta_baseline:" : "usage_delta_baseline: " b); next }
+    dashes==1 && /^usage_deltas:/ { print "usage_deltas: " d; next }
+    { print }
+  ' "$f" >"$tmp" || {
+    rm -f "$tmp"
+    die "failed to render reserve update for $f"
+  }
+  grep -qE '^usage_deltas: ' "$tmp" || {
+    rm -f "$tmp"
+    die "front-matter key not found (fail-closed): usage_deltas in $f"
+  }
+  mv "$tmp" "$f" || {
+    rm -f "$tmp"
+    die "failed to write $f"
+  }
+}
+
+reserve_gate() {
+  local run_md="" percent="" reset_epoch="" floor="" min_samples="" read_failed=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --run-md)
+        [ $# -ge 2 ] || die "missing value for --run-md"
+        run_md="$2"
+        shift 2
+        ;;
+      --percent)
+        [ $# -ge 2 ] || die "missing value for --percent"
+        percent="$2"
+        shift 2
+        ;;
+      --reset-epoch)
+        [ $# -ge 2 ] || die "missing value for --reset-epoch"
+        reset_epoch="$2"
+        shift 2
+        ;;
+      --floor)
+        [ $# -ge 2 ] || die "missing value for --floor"
+        floor="$2"
+        shift 2
+        ;;
+      --samples)
+        [ $# -ge 2 ] || die "missing value for --samples"
+        min_samples="$2"
+        shift 2
+        ;;
+      --read-failed)
+        read_failed=1
+        shift
+        ;;
+      *) die "unknown reserve-gate argument: $1" ;;
+    esac
+  done
+
+  [ -n "$run_md" ] || die "reserve-gate requires --run-md"
+  [ -f "$run_md" ] || die "no run state found (fail-closed): $run_md"
+  if [ "$read_failed" = 1 ]; then
+    [ -z "$percent" ] && [ -z "$reset_epoch" ] \
+      || die "--read-failed takes no --percent/--reset-epoch (a failed read has neither)"
+  else
+    [ -n "$percent" ] && [ -n "$reset_epoch" ] \
+      || die "reserve-gate requires --percent and --reset-epoch (or --read-failed)"
+    _reserve_uint "$percent" && [ "$percent" -le 100 ] \
+      || die "--percent must be an integer 0-100: $percent"
+    _reserve_uint "$reset_epoch" || die "--reset-epoch must be an integer: $reset_epoch"
+  fi
+  if [ -n "$min_samples" ]; then
+    _reserve_uint "$min_samples" && [ "$min_samples" -ge 1 ] \
+      || die "--samples must be a positive integer: $min_samples"
+  else
+    min_samples="$RESERVE_MIN_SAMPLES_DEFAULT"
+  fi
+
+  _reserve_has_key "$run_md" usage_delta_baseline \
+    || die "front-matter key not found (fail-closed): usage_delta_baseline in $run_md"
+  _reserve_has_key "$run_md" usage_deltas \
+    || die "front-matter key not found (fail-closed): usage_deltas in $run_md"
+
+  # The floor: --floor wins, else RUN.md's configured `reserve`, else 15. A
+  # RUN.md carrying a non-numeric `reserve` is malformed, not a reason to
+  # silently substitute the default — that would lower a floor an operator set.
+  if [ -z "$floor" ]; then
+    floor="$(_run_md_field "$run_md" reserve)"
+    [ -n "$floor" ] || floor="$RESERVE_FLOOR_DEFAULT"
+  fi
+  _reserve_uint "$floor" && [ "$floor" -le 100 ] \
+    || die "reserve floor must be an integer 0-100: $floor"
+
+  local deltas_raw baseline_raw parsed
+  deltas_raw="$(_run_md_field "$run_md" usage_deltas)"
+  baseline_raw="$(_run_md_field "$run_md" usage_delta_baseline)"
+  parsed="$(_reserve_parse_deltas "$deltas_raw")" \
+    || die "malformed usage_deltas in $run_md: $deltas_raw"
+
+  local d_pct d_epoch n
+  d_pct=()
+  d_epoch=()
+  n=0
+  local p e
+  while read -r p e; do
+    [ -n "$p" ] || continue
+    d_pct[n]="$p"
+    d_epoch[n]="$e"
+    n=$((n + 1))
+  done <<EOF
+$parsed
+EOF
+
+  local b_pct="" b_epoch="" bparsed
+  bparsed="$(_reserve_parse_baseline "$baseline_raw")" \
+    || die "malformed usage_delta_baseline in $run_md: $baseline_raw"
+  if [ -n "$bparsed" ]; then
+    b_pct="${bparsed%% *}"
+    b_epoch="${bparsed##* }"
+  fi
+
+  # --- bookkeeping (see the formula block above) ---
+  local new_b="" delta
+  if [ "$read_failed" = 0 ]; then
+    new_b="{percent: $percent, reset_epoch: $reset_epoch}"
+    if [ -n "$b_epoch" ] && [ "$b_epoch" = "$reset_epoch" ]; then
+      delta=$((percent - b_pct))
+      if [ "$delta" -lt 0 ]; then
+        new_b=""
+      elif [ "$delta" -gt 0 ]; then
+        d_pct[n]="$delta"
+        d_epoch[n]="$reset_epoch"
+        n=$((n + 1))
+      fi
+    fi
+  fi
+
+  # Keep the newest RESERVE_DELTA_CAP entries.
+  local first=0
+  [ "$n" -gt "$RESERVE_DELTA_CAP" ] && first=$((n - RESERVE_DELTA_CAP))
+
+  local rendered="" i
+  i="$first"
+  while [ "$i" -lt "$n" ]; do
+    [ -z "$rendered" ] || rendered="$rendered, "
+    rendered="$rendered{percent: ${d_pct[i]}, reset_epoch: ${d_epoch[i]}}"
+    i=$((i + 1))
+  done
+  _reserve_write "$run_md" "$new_b" "[$rendered]"
+
+  # --- verdict ---
+  local samples=0 worst=0
+  if [ "$read_failed" = 0 ]; then
+    i="$first"
+    while [ "$i" -lt "$n" ]; do
+      if [ "${d_epoch[i]}" = "$reset_epoch" ]; then
+        samples=$((samples + 1))
+        [ "${d_pct[i]}" -gt "$worst" ] && worst="${d_pct[i]}"
+      fi
+      i=$((i + 1))
+    done
+  fi
+
+  local reserve="$floor"
+  if [ "$samples" -ge "$min_samples" ]; then
+    # ceil(worst * 1.25), the conservative rounding direction.
+    local scaled=$(((worst * RESERVE_SAFETY_PERCENT + 99) / 100))
+    [ "$scaled" -gt "$reserve" ] && reserve="$scaled"
+  fi
+
+  if [ "$read_failed" = 1 ]; then
+    echo "RESERVE: reserve=$reserve headroom=unknown verdict=fallback samples=$samples"
+    return 3
+  fi
+  local headroom=$((100 - percent))
+  if [ "$headroom" -lt "$reserve" ]; then
+    echo "RESERVE: reserve=$reserve headroom=$headroom verdict=pause samples=$samples"
+    return 1
+  fi
+  echo "RESERVE: reserve=$reserve headroom=$headroom verdict=proceed samples=$samples"
+  return 0
+}
+
+# ---------------------------------------------------------------------------
 # Task 18 — post-merge restack of stacked PRs (finding #25). Squash-merging a
 # parent orphans a child two ways: LOUD (GitHub deletes the parent's branch,
 # closing a child still based on it) and QUIET (the child still targets the
@@ -4149,14 +4556,15 @@ _report_task_elapsed() {
 # with literal quotes and rendering as "unparseable until".
 _report_front_field() { _run_md_field "$1" "$2"; }
 
-# The seven in-flight/terminal phases (run-state.md "Task lifecycle phases"),
-# bucketed for the report's summary line.
+# The two pre-claim and seven in-flight/terminal phases (run-state.md "Task
+# lifecycle phases"), bucketed for the report's summary line.
 _report_bucket() {
   case "$1" in
     '' | pending) printf 'pending' ;;
     claimed | implementing | pr-open | in-review | iterating) printf 'in-flight' ;;
     handed-off) printf 'handed-off' ;;
     parked) printf 'parked' ;;
+    skipped) printf 'skipped' ;;
     *) printf 'unknown' ;;
   esac
 }
@@ -4273,7 +4681,7 @@ status_report() {
   # --- the phase table: the ONE shared RUN.md table parser -------------------
   _restack_read_run_md "$run_md"
   local base_branch="$_RS_BASE_BRANCH" n="${#_RS_TASK[@]}" i
-  local counts_pending=0 counts_inflight=0 counts_handed=0 counts_parked=0
+  local counts_pending=0 counts_inflight=0 counts_handed=0 counts_parked=0 counts_skipped=0
   local -a phase_lines=() cur_map=()
   for ((i = 0; i < n; i++)); do
     local task="${_RS_TASK[$i]}" phase="${_RS_PHASE[$i]}" branch="${_RS_BRANCH[$i]}" \
@@ -4285,6 +4693,7 @@ status_report() {
       in-flight) counts_inflight=$((counts_inflight + 1)) ;;
       handed-off) counts_handed=$((counts_handed + 1)) ;;
       parked) counts_parked=$((counts_parked + 1)) ;;
+      skipped) counts_skipped=$((counts_skipped + 1)) ;;
     esac
     phase_lines+=("| $task | ${phase:-pending} | ${branch:--} | ${pr:--} |")
     cur_map+=("$task: ${phase:-pending}")
@@ -4541,8 +4950,8 @@ status_report() {
     printf 'Run: %s   Report interval: every %s\n\n' "$label" "$(_fmt_duration "$interval")"
     printf '## Delta since last report\n\n'
     printf '%s\n' "${delta_lines[@]}"
-    printf '\n## Phase table (pending=%s in-flight=%s handed-off=%s parked=%s)\n\n' \
-      "$counts_pending" "$counts_inflight" "$counts_handed" "$counts_parked"
+    printf '\n## Phase table (pending=%s in-flight=%s handed-off=%s parked=%s skipped=%s)\n\n' \
+      "$counts_pending" "$counts_inflight" "$counts_handed" "$counts_parked" "$counts_skipped"
     printf '| task | phase | branch | pr |\n| ---- | ----- | ------ | -- |\n'
     if [ "${#phase_lines[@]}" -gt 0 ]; then printf '%s\n' "${phase_lines[@]}"; else printf '| (no tasks materialized yet) | | | |\n'; fi
     printf '\n## In-flight (elapsed vs per-task ceiling)\n\n'
@@ -4608,7 +5017,7 @@ status_report() {
       fi
       ;;
   esac
-  echo "spawn-orchestrator: status-report: tasks=$n pending=$counts_pending in-flight=$counts_inflight handed-off=$counts_handed parked=$counts_parked delta=${delta_lines[0]#- } reality=$reality_flag ($out)"
+  echo "spawn-orchestrator: status-report: tasks=$n pending=$counts_pending in-flight=$counts_inflight handed-off=$counts_handed parked=$counts_parked skipped=$counts_skipped delta=${delta_lines[0]#- } reality=$reality_flag ($out)"
 }
 
 # One bounded report emission, invoked by the generated wrapper's IN-WAKE
@@ -5159,10 +5568,23 @@ _front_field() {
 
 # The stale-orchestrator check (launch-runtime.md "Orphan / stale detection"):
 # given RUN.md's recorded `orchestrator_pid` / `orchestrator_started_at`, print
-# exactly one of live | dead | mismatch | none. LIVE only if the PID is alive
-# AND its process start-time matches the recorded one — the start-time is what
-# tells a live orchestrator apart from a RECYCLED pid (`mismatch`, i.e. the
-# recorded process is gone). `none` = nothing recorded, so liveness is
+# exactly one of live | dead | mismatch | unknown | none. LIVE only if the PID
+# is alive AND its process start-time matches the recorded one — the start-time
+# is what tells a live orchestrator apart from a RECYCLED pid (`mismatch`, i.e.
+# the recorded process is gone). `unknown` = the PID IS alive (`kill -0`
+# succeeded) but its start time could not be read at all — `ps` missing,
+# restricted, or stripped out of a sandboxed/hardened host. That is NOT a
+# `mismatch`: nothing has been read that CONTRADICTS the recorded start time,
+# the probe just couldn't see it, so folding this into `mismatch` would let an
+# unreadable-but-live process read back as a confirmed recycle and get its
+# worktree pruned out from under it. A recorded start time that is ABSENT gets
+# the same verdict for the same reason — a half-recorded identity (pid without
+# start time, e.g. a truncated or hand-edited RUN.md) contradicts nothing
+# either, so there is no comparison to fail. Note both tests live INSIDE the
+# `kill -0` branch deliberately: once the pid is not alive, `dead` is provably
+# right whatever was recorded, and hoisting them would turn every genuine
+# orphan into `unknown` and leak its worktree forever — trading this data-loss
+# bug for a cleanup one. `none` = nothing recorded, so liveness is
 # UNDETERMINED, not "dead". ONE implementation, shared by `status` and doctor's
 # invariant 5 — a second, divergent liveness check is exactly how the two would
 # drift apart on the one question a destructive prune depends on.
@@ -5175,7 +5597,9 @@ _pid_state() {
   if kill -0 "$pid" 2>/dev/null; then
     local actual
     actual="$(ps -o lstart= -p "$pid" 2>/dev/null)"
-    if [ -n "$actual" ] && [ "$(_norm_ws "$actual")" = "$(_norm_ws "$started")" ]; then
+    if [ -z "$actual" ] || [ -z "$started" ]; then
+      printf 'unknown'
+    elif [ "$(_norm_ws "$actual")" = "$(_norm_ws "$started")" ]; then
       printf 'live'
     else
       printf 'mismatch'
@@ -5749,7 +6173,7 @@ doctor() {
     n_repaired=$((n_repaired + 1))
     repaired_notes+=("I1: discarded stale .auto-pilot/ dirt on $i1_parked_on, HEAD restored")
     report_bullets+=("- **I1 repaired** — the run worktree's HEAD was parked off \`$branch\` with stale \`.auto-pilot/\` content; tracked changes there were discarded (untracked run logs were left in place — never \`git clean\`ed) and HEAD was restored (see QUESTIONS.md for the deviation record).")
-  elif printf '%s' "$i1_out" | grep -q 'HEAD DEVIATION restored'; then
+  elif grep -q 'HEAD DEVIATION restored' <<<"$i1_out"; then
     n_repaired=$((n_repaired + 1))
     repaired_notes+=("I1: HEAD restored")
     report_bullets+=("- **I1 repaired** — the run worktree's HEAD was parked off \`$branch\`; restored (see QUESTIONS.md for the deviation record).")
@@ -5985,8 +6409,9 @@ doctor() {
   # gates on (resume.md "Stale-orchestrator guard"; launch-runtime.md "Orphan /
   # stale detection"): RUN.md's `orchestrator_pid` + `orchestrator_started_at`
   # via _pid_state, not a second liveness check of doctor's own. `live` skips,
-  # and so does an UNDETERMINED read (`none` — no pid recorded, or `ps`
-  # unreadable): same D2 posture as I3/I6, an undetermined signal never
+  # and so does an UNDETERMINED read — `none` (no pid recorded) or `unknown`
+  # (the pid IS alive but its start time couldn't be read, e.g. `ps` missing
+  # or restricted): same D2 posture as I3/I6, an undetermined signal never
   # green-lights a destructive action. A recycled pid (`mismatch`) means the
   # recorded process is gone, which IS provably dead.
   local run_root workers_root
@@ -6148,7 +6573,10 @@ doctor() {
     local task="${_RS_TASK[$i]}" phase="${_RS_PHASE[$i]}" base="${_RS_BASE[$i]}" bsha="${_RS_BASE_SHA[$i]}"
     [ "$base" != "$base_branch" ] || continue # independent task — nothing frozen
     _restack_empty "$bsha" && continue        # no frozen base yet — nothing to compare
-    [ "$phase" != "handed-off" ] || continue  # terminal success — already delivered
+    case "$phase" in
+      handed-off) continue ;; # terminal success — already delivered
+      skipped) continue ;;    # claim refused — holds nothing this run acquired
+    esac
 
     local pidx=-1 j
     for ((j = 0; j < n_rows; j++)); do
@@ -6274,7 +6702,7 @@ check_profile() {
   local errout status
   errout="$(sandbox-exec -f "$f" /usr/bin/true 2>&1)"
   status=$?
-  if [ "$status" -eq 0 ] || printf '%s' "$errout" | grep -q 'execvp('; then
+  if [ "$status" -eq 0 ] || grep -q 'execvp(' <<<"$errout"; then
     echo "spawn-orchestrator: profile OK $f"
     return 0
   fi
@@ -6304,6 +6732,7 @@ case "$sub" in
   classify-exit) classify_exit "$@" ;;
   supervisor-check) supervisor_check "$@" ;;
   supervisor-gate) supervisor_gate "$@" ;;
+  reserve-gate) reserve_gate "$@" ;;
   supervisor-scan) supervisor_scan "$@" ;;
   alarm) alarm "$@" ;;
   alarm-request) alarm_request "$@" ;;

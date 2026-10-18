@@ -1,0 +1,2 @@
+echo clean
+if printf '%s' "$b" | grep -qF 'y'; then echo hit; fi

@@ -1,0 +1,855 @@
+#!/usr/bin/env python3
+"""PreToolUse guard: refuse a write into a worktree this session never entered.
+
+Detecting the problem is not enough: an agent told its edits land outside the
+tree it stands in keeps making them. This is the half that refuses.
+
+WHAT GOES WRONG WHEN NOTHING REFUSES. An agent that edits, commits and pushes
+into a worktree it never entered diverges from the human's shell, editor,
+prompt and build, with no shared signal between them. Their build builds the
+tree they are standing in and verifies nothing, their editor shows stale
+content, and a "done" report names files they cannot see. ``git -C`` working
+*correctly* is what makes it quiet: nothing fails. The rule it breaks is
+"stand in the tree you write", in ``agent-guidance``'s ``portable.md``.
+
+There is a second cost. With many concurrent sessions, where a session stands
+is how a terminal sidebar or tab title tells them apart. A session that reaches
+into a worktree keeps advertising the checkout it launched from while the work
+happens elsewhere, so reaching in defeats that coordination signal, not just
+the verification.
+
+WHY THE ``Bash`` MATCHER IS THE LOAD-BEARING ONE. Auto mode instructs the model
+to prefer Bash for file changes, so a ghost edit typically goes through a
+``python3 - <<'PY'`` heredoc and never touches an ``Edit``/``Write`` hook. Registering only on ``Edit|Write|NotebookEdit`` would miss the exact
+failure this exists for. Both are registered; Bash is the one that fires.
+
+TWO DECISIONS, ONE HOOK.
+
+  1. A write into a *different* linked worktree of the session's own repo is
+     DENIED, with ``EnterWorktree`` named in the refusal: by ``name`` when
+     ``worktree-name-for.sh`` gives the worktree one, else by ``path``.
+  2. The first write of a session standing in a MAIN checkout on its default
+     branch emits a non-blocking warning: write-work belongs in a worktree.
+     Non-blocking so a deliberate one-line fix still goes through.
+
+The second is delivered as ``hookSpecificOutput.additionalContext``, not on
+stderr. Claude Code sends stderr from a hook that exits
+0 to the debug log only — never the transcript, and the model never sees it —
+so an exit-0 stderr warning would have been invisible to the one reader who can
+act on it. ``permissionDecision: "allow"`` is deliberately NOT set: that would
+short-circuit the permission system for the very calls this is watching, which
+is a far larger change than the warning is worth.
+
+READS ARE NOT DENIED, WRITES ARE. Per-command path flags (``rg <pattern>
+<path>``, ``git -C <path> log``) are the recommended way to READ another tree
+without moving the session; only writes must stand in the tree. A guard that denied reads too would contradict it and false-deny
+a taught idiom — and a guard that false-denies gets disabled, which costs the
+denials that matter. So a foreign path has to carry *write evidence* before it
+is refused. The evidence is enumerated in ``_write_targets`` and is a denylist:
+unknown shapes fail open. Prose covers what the parser misses; the hook covers
+what prose does not stop.
+
+Bypass one Bash call with ``env WORKFLOW_SKILLS_ALLOW_FOREIGN_WRITE=1 <command>``:
+an assignment in command position anywhere in the call exempts all of it.
+The ``env`` form rather than a bare ``VAR=1`` prefix, because some setups run a
+guard that denies an assignment-prefixed git so it can still match a
+permission rule.
+
+Reads the hook payload as JSON on stdin; emits a PreToolUse decision on stdout.
+Anything not matched produces no output and falls through to the normal flow.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+
+# A hook runs as a standalone script, not as part of a package, so the shared
+# parser is found by this file's own directory rather than by an install path.
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+
+from bash_command import (  # noqa: E402  (needs the sys.path entry above)
+    REDIRECT,
+    SEGMENT_SPLIT,
+    expand,
+    git_calls,
+    head_index,
+    head_word,
+    segments,
+    tokenize,
+)
+
+BYPASS = "WORKFLOW_SKILLS_ALLOW_FOREIGN_WRITE"
+
+
+# git subcommands that change a working tree, an index, or a branch — the ones
+# whose damage is the divergence this guard exists for. A denylist rather than
+# a read-only allowlist: git has a long tail of read plumbing (`cat-file`,
+# `for-each-ref`, `merge-base`, `name-rev`, …) and an allowlist would refuse
+# every one it had not been taught, which is a false denial on a read.
+#
+# `fetch` is deliberately absent. It writes remote-tracking refs into the
+# object store that every worktree of the repo shares, so running it from a
+# foreign worktree changes nothing the session's own tree would not have seen
+# anyway. `pull` is present: it moves the foreign working tree.
+_MUTATING_GIT = {
+    "add",
+    "am",
+    "apply",
+    "bisect",
+    "checkout",
+    "cherry-pick",
+    "clean",
+    "commit",
+    "commit-tree",
+    "filter-branch",
+    "gc",
+    "init",
+    "merge",
+    "mv",
+    "prune",
+    "pull",
+    "push",
+    "rebase",
+    "repack",
+    "replace",
+    "reset",
+    "restore",
+    "revert",
+    "rm",
+    "sparse-checkout",
+    "switch",
+    "update-index",
+    "update-ref",
+    "write-tree",
+}
+
+# Subcommands that read or write depending on their arguments. Each maps to the
+# first positional that makes it a read; `_git_writes` handles the rest. Left
+# out of `_MUTATING_GIT` above so that the common read forms — `git worktree
+# list`, `git stash list`, `git config --get` — are not refused.
+_DUAL_READ_POSITIONALS = {
+    "worktree": {"list"},
+    "stash": {"list", "show"},
+    "remote": {"show", "get-url"},
+    "submodule": {"status", "summary"},
+    "notes": {"list", "show"},
+    "reflog": {"show"},
+}
+
+# `git config`'s read forms are named by a flag, not a positional: the value
+# arguments of `config --get user.name` and `config user.name dan` are shaped
+# identically, so only the flag separates them.
+_CONFIG_READ_FLAGS = {
+    "--get",
+    "--get-all",
+    "--get-regexp",
+    "--get-urlmatch",
+    "--list",
+    "-l",
+}
+# Their value is not a key, so `config --file .gitmodules <key>` stays a read.
+_CONFIG_FLAGS_WITH_VALUE = {"-f", "--file", "--blob", "--type", "--default"}
+_CONFIG_WRITE_FLAGS = {
+    "--unset",
+    "--unset-all",
+    "--add",
+    "--replace-all",
+    "--rename-section",
+    "--remove-section",
+    "-e",
+    "--edit",
+}
+
+# `git branch` / `git tag` mutate when one of these is present, and otherwise
+# when a bare positional names a ref to create.
+_REF_EDIT_FLAGS = {
+    "-d",
+    "-D",
+    "-m",
+    "-M",
+    "-c",
+    "-C",
+    "-f",
+    "--delete",
+    "--move",
+    "--copy",
+    "--force",
+    "--edit-description",
+    "--set-upstream-to",
+    "--unset-upstream",
+}
+# Flags of `branch`/`tag` that consume the token after them, so that token is a
+# value and not the new ref's name. Without this `git branch --contains HEAD`
+# reads as creating a branch called HEAD.
+_REF_FLAGS_WITH_VALUE = {
+    "--contains",
+    "--no-contains",
+    "--merged",
+    "--no-merged",
+    "--points-at",
+    "--format",
+    "--sort",
+    "--color",
+    "-u",
+    "--set-upstream-to",
+}
+
+# Commands whose job is to change a file. A foreign path among their arguments
+# is write evidence on its own.
+_WRITERS = {
+    "tee",
+    "cp",
+    "mv",
+    "rm",
+    "rmdir",
+    "mkdir",
+    "touch",
+    "install",
+    "ln",
+    "truncate",
+    "dd",
+    "chmod",
+    "chown",
+    "shred",
+    "unlink",
+    "patch",
+    "rsync",
+    "split",
+    "tar",
+    "unzip",
+}
+
+# Interpreters. Code fed to one inline is opaque to this guard — the usual ghost
+# edit is a foreign path inside a `python3 - <<'PY'` heredoc — so a foreign path
+# anywhere in such a command is treated as a write. This is the guard's one
+# deliberately fail-CLOSED rule, and the bypass exists for it.
+#
+# An interpreter running a script FILE is narrower. The script's location
+# still counts (a script commonly writes relative to itself), but the
+# arguments after it are data, exactly as they are for `./script.py <path>` or
+# any other program: a foreign one carries no write evidence, so it is not
+# refused. `python3 tool.py --out <foreign>` therefore goes through; telling
+# that from `--snapshot <foreign>` would need the script's code.
+_INTERPRETERS = {"python", "python3", "node", "ruby", "perl", "php", "osascript", "uv"}
+
+# The flag that makes each interpreter run code given on its command line. Per
+# interpreter, because the letters collide: `python3 -E` ignores the
+# environment and `perl -c` only syntax-checks. `uv` has none; only a heredoc
+# feeds it code.
+_INLINE_FLAGS = {
+    "python": {"-c"},
+    "python3": {"-c"},
+    "node": {"-e", "--eval", "-p", "--print"},
+    "ruby": {"-e"},
+    "perl": {"-e", "-E"},
+    "php": {"-r"},
+    "osascript": {"-e"},
+}
+
+
+def _inline_code(head: str, args: list[str]) -> bool:
+    """Whether an interpreter's arguments carry code on the command line.
+
+    Beyond the exact flags, a short-option cluster counts when its LAST letter
+    is an inline flag (`node -pe`, `python3 -Bc`, `perl -lne`), since the code
+    follows it, and so does an attached long form (`node --eval=<code>`).
+    """
+    flags = _INLINE_FLAGS.get(head, set())
+    letters = {f[1] for f in flags if len(f) == 2}
+    for arg in args:
+        if arg in flags or arg.split("=", 1)[0] in flags:
+            return True
+        if re.fullmatch(r"-[A-Za-z]+", arg) and arg[-1] in letters:
+            return True
+    return False
+
+
+# Options known to take no value, so the token after one is still the program.
+# Any other option ahead of the program may take a value (`-W ignore`, `uv run
+# --with pkg`) and would be mistaken for it, so that call is not narrowed.
+_PYTHON_BARE = {"-I", "-u", "-B", "-E", "-s", "-S", "-O", "-OO", "-q", "-b", "-bb"}
+_BARE_FLAGS = {"python": _PYTHON_BARE, "python3": _PYTHON_BARE}
+
+
+def _program(head: str, args: list[str]) -> tuple[str | None, bool]:
+    """The program an interpreter call runs, and whether that is certain.
+
+    ``args`` are every token after the interpreter. The program is the first
+    operand, `-` included, and everything after it is the script's own
+    arguments. `uv run [<interpreter>] <script>` names it after a subcommand.
+    ``(None, True)`` is a call that names no program and so reads its code
+    from stdin. ``(None, False)`` is one whose program cannot be picked out:
+    another `uv` subcommand, or an option not known to be value-less ahead of
+    the program.
+    """
+    if head == "uv":
+        if args[:1] != ["run"]:
+            return None, False
+        args = args[1:]
+        if args[:1] and os.path.basename(args[0]) in _INTERPRETERS:
+            head, args = os.path.basename(args[0]), args[1:]
+    bare = _BARE_FLAGS.get(head, set())
+    for arg in args:
+        if arg == "-" or not arg.startswith("-"):
+            return arg, True
+        if arg not in bare:
+            return None, False
+    return None, True
+
+
+def _program_operands(head: str, args: list[str]) -> list[str]:
+    """The operands of an interpreter call graded as reaching in: its program,
+    or every operand, as before this narrowing, when that is uncertain."""
+    program, certain = _program(head, args)
+    if not certain:
+        return [a for a in args if not a.startswith("-")]
+    return [program] if program else []
+
+
+# A stdin redirect from a file. `<<`/`<<<` are heredocs, `<&` duplicates an fd,
+# and `<(` is process substitution.
+_STDIN_FILE = re.compile(
+    r"""
+    (?<! [<0-9&] )
+    < (?! [<&(] )
+    [ \t]*
+    ( "[^"]*" | '[^']*' | (?: \\. | [^\s|;&()`{}<>] )+ )
+    """,
+    re.VERBOSE,
+)
+
+# A program name, or a `<` source, that is stdin itself rather than a file.
+_STDIN_PATH = re.compile(r"-|/dev/stdin|/dev/fd/0|/proc/[^/]+/fd/0")
+
+
+def _is_stdin(path: str) -> bool:
+    """Whether `path` names stdin, however it is spelled (`//dev/./stdin`)."""
+    if path == "-":
+        return True
+    # normpath keeps a leading `//` on POSIX, so collapse it as well.
+    return bool(_STDIN_PATH.fullmatch(re.sub(r"^/+", "/", os.path.normpath(path))))
+
+
+def _code_in_command(cmd: str, cwd: str) -> bool:
+    """Whether an interpreter here runs code that is spelled out in this command.
+
+    Two routes put it there. A heredoc or here-string on an interpreter's own
+    command, whatever program it names. Or one anywhere in the command, when
+    some interpreter may be reading its code from stdin: it names no certain
+    program (or names `-` or a stdin device), and has no `<` file redirect.
+    Which command a heredoc feeds is not worked out — pipes, `2>&1` and line
+    continuations all move it — so `python3 -I - < script` beside a `cat
+    <<EOF` note goes through, and `cat <<PY | python3 -` does not. And a file
+    this command writes, by redirect or `tee`, that an interpreter then runs or
+    reads on stdin (`cat > s.py <<'PY' … PY` then `python3 s.py`).
+    """
+    heredoc = "<<" in cmd
+    cmd = cmd.replace("\\\n", " ")  # join line continuations, as bash does
+    files = [m.group(1).strip("\"'") for m in _WRITE_REDIRECT.finditer(cmd)]
+    for forms in segments(cmd):
+        for tokens in forms:
+            if head_word(tokens) == "tee":
+                files += [t for t in tokens[head_index(tokens) + 1 :] if t[:1] != "-"]
+    written = {os.path.normpath(p) for f in files if (p := expand(f, cwd))}
+    # Split with the redirects still in place, so each interpreter's own `<`
+    # is in its piece. A piece cut short by `2>&1` only loses a trailing fd.
+    for piece in SEGMENT_SPLIT.split(cmd):
+        stdin = [m.group(1).strip("\"'") for m in _STDIN_FILE.finditer(piece)]
+        stdin = [s for s in stdin if not _is_stdin(s)]
+        for tokens in tokenize(REDIRECT.sub(" ", piece)):
+            head = head_word(tokens)
+            if head not in _INTERPRETERS:
+                continue
+            program, certain = _program(head, tokens[head_index(tokens) + 1 :])
+            on_stdin = not certain or not program or _is_stdin(program)
+            # A heredoc on the interpreter's own command is refused whatever it
+            # runs: a `<` file does not shield it (bash applies fd 0's redirects
+            # left to right, and the `<` match is blind to quotes and comments),
+            # and a named script's stdin is not treated as data (#998).
+            if "<<" in piece or (heredoc and on_stdin and not stdin):
+                return True
+            sources = stdin + ([] if on_stdin else [program])
+            for path in sources:
+                resolved = expand(path, cwd)
+                if resolved and os.path.normpath(resolved) in written:
+                    return True
+    return False
+
+
+# In-place editors: the flag is what makes them writers. `sed <foreign>` reads.
+_INPLACE = {"sed", "perl", "awk", "gawk", "ruby"}
+
+# A redirect that writes. `<`, `<<` and `<<<` read, and an fd duplication
+# (`2>&1`, `>&-`) names no file at all, so the negative lookahead is what keeps
+# `cmd 2>&1` from reading as a write to a file called `1`.
+_WRITE_REDIRECT = re.compile(
+    r"""
+    (?: & | [0-9]+ )?
+    (?: >> | >\| | > )
+    (?! & )
+    [ \t]*
+    ( "[^"]*" | '[^']*' | (?: \\. | [^\s|;&()`{}<>] )+ )
+    """,
+    re.VERBOSE,
+)
+
+PATH_KEYS = ("file_path", "notebook_path")
+
+
+def _git(cwd: str, *args: str) -> str | None:
+    try:
+        out = subprocess.run(
+            ["git", *args], cwd=cwd, capture_output=True, text=True, timeout=5
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return out.stdout.strip() if out.returncode == 0 else None
+
+
+def _real(path: str) -> str:
+    """Physically resolve a path, so two spellings of one directory compare equal.
+
+    macOS puts the usual scratch roots behind a ``/tmp`` -> ``/private/tmp``
+    symlink, and ``git worktree list`` and ``git rev-parse --show-toplevel`` do
+    not always agree on which form they print. Comparing the raw strings
+    reports the session's OWN worktree as foreign — a false denial on every
+    command in the session, which is the fastest possible way to get this hook
+    switched off.
+    """
+    return os.path.realpath(path)
+
+
+def _worktrees(cwd: str) -> list[str] | None:
+    """Physical roots of every usable worktree of this repo, or None.
+
+    ``--porcelain -z`` rather than the line-oriented form: with ``-z`` each
+    record is NUL-terminated, so a worktree path containing a tab *or* a
+    newline is read back intact. The shell implementation of this check could
+    only detect the tab and had to refuse to answer on it, because a tab split
+    its intermediate records and fabricated a branch name that could collide
+    with a real ref. Python reading NUL-delimited records has neither problem.
+
+    A ``prunable`` worktree — one whose directory has been deleted but whose
+    record git still lists — is dropped. Treating it as real would let this
+    guard deny a command and name a path that no longer exists, so the fix it
+    suggests could not be followed. That is the worst answer it can give.
+    """
+    out = _git(cwd, "worktree", "list", "--porcelain", "-z")
+    if out is None:
+        return None
+    roots: list[str] = []
+    path: str | None = None
+    prunable = False
+    for record in out.split("\0"):
+        if record.startswith("worktree "):
+            if path is not None and not prunable:
+                roots.append(_real(path))
+            path, prunable = record[len("worktree ") :], False
+        elif record.startswith("prunable"):
+            prunable = True
+    if path is not None and not prunable:
+        roots.append(_real(path))
+    return roots
+
+
+def _inside(path: str, root: str) -> bool:
+    return path == root or path.startswith(root + os.sep)
+
+
+def _owning_foreign(path: str, own: str, foreign: list[str]) -> str | None:
+    """The foreign worktree holding ``path``, or None.
+
+    The deepest root containing the path owns it, own root included. Worktrees
+    do nest: Claude Code's default puts them under the main checkout's
+    ``.claude/worktrees/``, so a session in the main checkout writing there
+    is inside its own root and a foreign one at once, and the deeper one is
+    where the write lands.
+    """
+    best = None
+    for root in [own, *foreign]:
+        if _inside(path, root) and (best is None or len(root) > len(best)):
+            best = root
+    return None if best == own else best
+
+
+def _positionals(args: list[str], flags_with_value: set[str]) -> list[str]:
+    out, i = [], 0
+    while i < len(args):
+        if args[i] in flags_with_value:
+            i += 2
+            continue
+        if not args[i].startswith("-"):
+            out.append(args[i])
+        i += 1
+    return out
+
+
+def _git_writes(sub: str, args: list[str]) -> bool:
+    """Whether this git subcommand changes anything, given its arguments."""
+    if sub in _MUTATING_GIT:
+        return True
+    if sub in _DUAL_READ_POSITIONALS:
+        first = next((a for a in args if not a.startswith("-")), None)
+        if first is None:
+            # A bare `git stash` (or `stash -u`) is `stash push`. `git remote`
+            # and `git reflog` with no positional default to a listing, and
+            # `git worktree` and `git submodule` print usage.
+            return sub == "stash"
+        return first not in _DUAL_READ_POSITIONALS[sub]
+    if sub == "config":
+        if any(a in _CONFIG_READ_FLAGS for a in args):
+            return False
+        # `config user.name` and `config get user.name` read; a second
+        # positional or a write flag writes.
+        if any(a in _CONFIG_WRITE_FLAGS for a in args):
+            return True
+        positionals = _positionals(args, _CONFIG_FLAGS_WITH_VALUE)
+        if positionals[:1] in (["get"], ["list"]):
+            return False
+        return len(positionals) != 1
+    if sub in {"branch", "tag"}:
+        if any(a in _REF_EDIT_FLAGS for a in args):
+            return True
+        return bool(_positionals(args, _REF_FLAGS_WITH_VALUE))
+    return False
+
+
+def _bypassed(cmd: str) -> bool:
+    """Whether the bypass is set as a real assignment anywhere in this Bash call.
+
+    Scoped to the assignment rather than a substring test over the command
+    text, which is the point: a substring test is disarmed by anything that
+    merely NAMES the variable — in this repo that includes grepping the docs
+    that document it.
+    """
+    for forms in segments(cmd):
+        for tokens in forms:
+            head = head_index(tokens)
+            if f"{BYPASS}=1" in tokens[:head]:
+                return True
+    return False
+
+
+# The two grades of evidence `_write_targets` yields.
+#
+# DEFINITE is a path something in the command is unambiguously writing: a
+# mutating git call's directory, a write redirect's target, a file argument of
+# `cp`/`rm`/`tee`/`sed -i`. REACH is a path the command only *reaches into* —
+# the target of a `cd`, or anything named near an interpreter whose code this
+# guard cannot read.
+#
+# Both deny a foreign worktree, because a reach into one is the failure. Only
+# DEFINITE arms the main-checkout warning, so `python3 scripts/foo.py` in the
+# main checkout — a read as far as anything here can tell — does not spend the
+# session's one warning on itself.
+DEFINITE = "definite"
+REACH = "reach"
+
+
+def _write_targets(cmd: str, cwd: str):
+    """Yield ``(resolved path, grade)`` per path this command writes or reaches.
+
+    The evidence, in the order it is looked for:
+
+      - ``cd <path>`` as any segment's command (REACH). A `cd` that leaves the
+        session's working directory does not even persist to the next Bash
+        call, so this shape exists only to reach in — which is what makes a
+        bare directory count here with no writer beside it.
+      - ``git -C <path> <mutating subcommand>``, and a mutating git call with
+        no ``-C``, which lands in the session's cwd (DEFINITE).
+      - a write redirect's target (DEFINITE).
+      - a path argument of a writer command or an in-place editor (DEFINITE),
+        or the script an interpreter runs (REACH). The script's own arguments
+        are data, as they are for any other program, and are not evidence.
+      - every path mentioned anywhere in a command that feeds an interpreter
+        code it spells out — an inline-code flag, a heredoc beside an
+        interpreter reading stdin, or a file the command writes and then runs
+        (REACH). The code is opaque there, and that is the shape a ghost edit
+        usually takes.
+
+    Relative paths resolve against the payload's cwd rather than against a `cd`
+    tracked through the command. Tracking it would only matter for a relative
+    path resolved after a `cd` into a directory that is not itself foreign, and
+    a `cd` into one that IS foreign is already denied.
+    """
+    # A heredoc is asked of the raw command rather than this loop's segments:
+    # the operator is stripped along with the rest of the redirect before the
+    # split, and a heredoc BODY is its own segment anyway, since the splitter
+    # cuts on newlines.
+    inline_interpreter = _code_in_command(cmd, cwd)
+    for forms in segments(cmd):
+        for tokens in forms:
+            head_at = head_index(tokens)
+            head = head_word(tokens)
+            operands = [t for t in tokens[head_at + 1 :] if not t.startswith("-")]
+            if head in _INTERPRETERS and _inline_code(head, tokens[head_at + 1 :]):
+                inline_interpreter = True
+            # Only a `cd` in command position: `rg cd <path>` is a read.
+            if head == "cd" and operands:
+                resolved = expand(operands[0], cwd)
+                if resolved:
+                    yield _real(resolved), REACH
+            for dir_override, sub, args in git_calls(tokens):
+                if not _git_writes(sub, args):
+                    continue
+                target = expand(dir_override, cwd) if dir_override else cwd
+                if target:
+                    yield _real(target), DEFINITE
+            grade = None
+            if head in _WRITERS or (
+                head in _INPLACE
+                and any(t.startswith(("-i", "--in-place")) for t in tokens)
+            ):
+                grade = DEFINITE
+            elif head in _INTERPRETERS:
+                grade = REACH
+                operands = _program_operands(head, tokens[head_at + 1 :])
+            if grade:
+                for token in operands:
+                    resolved = expand(token, cwd)
+                    if resolved:
+                        yield _real(resolved), grade
+    for match in _WRITE_REDIRECT.finditer(cmd):
+        target = match.group(1).strip("\"'")
+        resolved = expand(target, cwd)
+        if resolved:
+            yield _real(resolved), DEFINITE
+    if inline_interpreter:
+        # The paths are inside the code, so there is nothing to tokenize. Every
+        # path-looking run of text in the command — absolute, or relative with
+        # a leading `./` or `../` — is offered instead, and the caller decides
+        # which of them lands in a foreign worktree.
+        for match in re.finditer(r"(?:\.\.?/|\$HOME|~|/)[^\s\"'`,;:)\]}]*", cmd):
+            resolved = expand(match.group(0), cwd)
+            if resolved:
+                yield _real(resolved), REACH
+
+
+RESOLVER = os.path.join(
+    os.path.dirname(os.path.realpath(__file__)), "worktree-name-for.sh"
+)
+
+# The resolver only ever prints a name scripts/lib/worktree-name.sh accepts.
+# This only keeps an unexpected stdout (a stray line, a stub) out of the reason.
+_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def _name_for(holder: str, cwd: str) -> str | None:
+    """The ``EnterWorktree`` ``name`` that hands back ``holder``, if any.
+
+    ``worktree-name-for.sh`` owns the answer. A missing, failing, crashing or
+    slow resolver yields None: the refusal still stands, and only the route it
+    offers falls back to the ``path`` wording.
+    """
+    try:
+        proc = subprocess.run(
+            [RESOLVER, holder], cwd=cwd, capture_output=True, text=True, timeout=10
+        )
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        # UnicodeError: text=True decodes strictly, and an escape from here
+        # reaches main()'s fail-open handler, which would drop the denial.
+        return None
+    name = proc.stdout.strip()
+    if proc.returncode != 0 or not _NAME_RE.match(name):
+        return None
+    return name
+
+
+def _route(holder: str, name: str | None) -> str:
+    # The ExitWorktree step is conditional in the prose, as in
+    # guard-enter-by-path.py: outside a worktree it is a no-op that still
+    # reports is_error (#1001), and no hook input says which case applies.
+    if name:
+        return (
+            f"  - Enter it instead: `EnterWorktree` with `name: {name}` hands it back "
+            "with no approval prompt. If this session is already in a worktree, call "
+            "`ExitWorktree` with `action: keep` first; otherwise skip that step, because "
+            "outside a worktree it is a no-op that reports an error. "
+            f"Then call `EnterWorktree` with `name: {name}`.\n"
+        )
+    return (
+        f"  - Enter it instead: `EnterWorktree` with `path: {holder}`, or re-run from "
+        "inside it. Entering by `path` raises an approval prompt that no allow rule "
+        "lifts, so an unattended or Remote Control session cannot answer it.\n"
+    )
+
+
+def _reason(target: str, holder: str, name: str | None) -> str:
+    return (
+        f"{holder} is a worktree this session has not entered, and this command writes "
+        f"into it ({target}).\n\n"
+        f"{_route(holder, name)}"
+        "  - Which `EnterWorktree` call reaches which worktree, and why: the "
+        "`worktree-entry` skill.\n"
+        "  - Do not reach in with `git -C <path>`, `cd <path> && …`, or an absolute path. "
+        "That succeeds quietly, so the user's shell, editor, prompt and build stay "
+        "pointed at this tree while the work lands in that one — their verification "
+        "verifies nothing and their editor shows stale content.\n"
+        "  - It also costs any sidebar or tab title its signal: this session keeps advertising "
+        "the checkout it launched from while the work happens elsewhere.\n\n"
+        'The rule is "stand in the tree you write" (agent-guidance, portable.md). '
+        f"To write into it from here anyway (exempts this whole Bash call): env {BYPASS}=1 <command>."
+    )
+
+
+WARN = (
+    "This is the MAIN checkout and it is on the default branch, and this is the "
+    "session's first write to it. Write-work belongs in its own worktree: "
+    "create the worktree first with EnterWorktree, and do the editing there. "
+    "Not blocking — a deliberate one-line fix is fine, and this fires once per session."
+)
+
+
+def _warned_already(session: str | None) -> bool:
+    """Whether this session has had the warning, stamping it if not.
+
+    Keyed by session id, and hashed because the id arrives as untrusted hook
+    stdin and is interpolated into a path. A session with no id is treated as
+    already warned rather than warned on every call.
+    """
+    if not session:
+        return True
+    state_dir = os.path.join(
+        os.environ.get("TMPDIR", "/tmp"), "claude-foreign-worktree"
+    )
+    try:
+        os.makedirs(state_dir, mode=0o700, exist_ok=True)
+        os.chmod(state_dir, 0o700)
+        stamp = os.path.join(state_dir, hashlib.sha256(session.encode()).hexdigest())
+        # One atomic create, so parallel calls cannot both see no stamp.
+        os.close(os.open(stamp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
+        return False
+    except FileExistsError:
+        return True
+    except OSError:
+        return True  # cannot remember: stay quiet rather than warn every call
+
+
+def _emit(payload: dict) -> None:
+    print(json.dumps(payload))
+
+
+def _deny(target: str, holder: str, cwd: str) -> None:
+    _emit(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": _reason(
+                    target, holder, _name_for(holder, cwd)
+                ),
+            }
+        }
+    )
+
+
+def _warn() -> None:
+    # No permissionDecision: this must not touch the permission flow. See the
+    # module docstring for why the warning is not written to stderr.
+    _emit(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "additionalContext": WARN,
+            },
+            "systemMessage": WARN,
+        }
+    )
+
+
+def main() -> None:
+    try:
+        data = json.load(sys.stdin)
+    except Exception:
+        return  # malformed payload: don't interfere with normal flow
+
+    try:
+        tool = data.get("tool_name")
+        tool_input = data.get("tool_input", {}) or {}
+        cwd = data.get("cwd") or os.getcwd()
+
+        if tool == "Bash":
+            cmd = tool_input.get("command", "")
+            if not cmd or _bypassed(cmd):
+                return
+            targets = list(_write_targets(cmd, cwd))
+        elif tool in {"Edit", "Write", "NotebookEdit"}:
+            raw = next(
+                (
+                    tool_input[k]
+                    for k in PATH_KEYS
+                    if isinstance(tool_input.get(k), str) and tool_input[k]
+                ),
+                None,
+            )
+            if raw is None:
+                return
+            resolved = expand(raw, cwd)
+            if not resolved:
+                return
+            targets = [(_real(resolved), DEFINITE)]
+        else:
+            return
+
+        if not targets:
+            return
+
+        own_top = _git(cwd, "rev-parse", "--show-toplevel")
+        if not own_top:
+            return  # not in a repo: nothing here is a worktree question
+        own_top = _real(own_top)
+
+        roots = _worktrees(cwd)
+        if roots is None:
+            return  # cannot enumerate: fail open rather than guess
+        foreign = [r for r in roots if r != own_top]
+
+        for target, _grade in targets:
+            holder = _owning_foreign(target, own_top, foreign)
+            if holder:
+                _deny(target, holder, cwd)
+                return
+
+        # No foreign write. The remaining question is whether write-work is
+        # happening in a main checkout that should be left alone.
+        if not any(g == DEFINITE and _inside(t, own_top) for t, g in targets):
+            return
+        git_dir = _git(cwd, "rev-parse", "--path-format=absolute", "--git-dir")
+        common = _git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir")
+        if not git_dir or git_dir != common:
+            return  # a linked worktree: this session is already isolated
+        head = _git(cwd, "branch", "--show-current")
+        if not head or head != _default_branch(cwd):
+            return
+        if not _warned_already(data.get("session_id")):
+            _warn()
+    except Exception:
+        return  # a guard that breaks the session is worse than what it prevents
+
+
+def _default_branch(cwd: str) -> str | None:
+    """The repo's default branch, by the strongest evidence available.
+
+    ``origin/HEAD`` is what the remote says, so it is asked first. A repo with
+    no remote — every fixture, and plenty of local-only repos — falls back to
+    a ``hooks.pinnedBranch`` pin where one is set, then to whichever of ``main``/``master`` exists.
+    """
+    ref = _git(cwd, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+    if ref and "/" in ref:
+        return ref.split("/", 1)[1]
+    pinned = _git(cwd, "config", "--get", "hooks.pinnedBranch")
+    if pinned:
+        return pinned
+    for name in ("main", "master"):
+        if _git(cwd, "rev-parse", "--verify", "--quiet", f"refs/heads/{name}"):
+            return name
+    return None
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,3 @@
+scripts/spawn-orchestrator.sh:5020 - issue (blocking): The status report logging line uses `$counts_parked` instead of `$counts_skipped` for the skipped count. The log will always report the wrong number for skipped tasks. Fix: Change `$counts_parked` to `$counts_skipped` in the echo statement.
+
+REVIEW_COMPLETE: FINDINGS

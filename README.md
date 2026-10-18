@@ -13,76 +13,209 @@ A Claude Code plugin bundling Daniel's general engineering workflow skills: coll
 
 ## What's in the box
 
-13 skills, 18 commands, and 1 subagent, organized into seven workflows:
+19 skills, 22 commands, and 2 subagents, organized into eight workflows. Each
+entry links to its own doc — that's where the flags, edge cases, and handler
+support live.
 
 ### PR review
 
-| Skill         | Trigger                                                               | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| ------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **co-review** | `/co-review [PR# \| --local \| --remote \| --post] [--base <branch>]` | Produce your own review of a PR, optionally pull in other local agents (codex, agy, devin, copilot, …) as extra reviewers, reconcile everything against existing GitHub bot/human comments via an independent subagent, auto-fix high-confidence items, surface judgment calls back to you, and — when reviewing your own PR — commit and push the fixes. `--local` reviews local changes (committed + uncommitted) with no PR; `--remote` skips local agents for a plain PR review; `--post` reviews someone else's PR and, after you vet the findings, posts them back as a batched GitHub review instead of editing local files. |
+| Skill                                            | Trigger                                                               | What it does                                                                                                                                                                                                                               |
+| ------------------------------------------------ | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [**co-review**](skills/co-review/SKILL.md)       | `/co-review [PR# \| --local \| --remote \| --post] [--base <branch>]` | Review a PR yourself, pull in other local agents (codex, agy, devin, copilot, crush, grok) as extra reviewers, reconcile everything against existing GitHub comments, auto-fix the high-confidence items, and surface the judgment calls.  |
+| [**local-review**](skills/local-review/SKILL.md) | "let me look over these changes", "open the diff so I can comment"    | Open a GitHub-style split-diff UI on localhost so _you_ read an agent's changes and leave inline line comments; the feedback is written to a file the agent acts on. Local-only — nothing touches GitHub unless you flag a comment for it. |
 
-**Approve the reviewer commands once.** co-review assembles the rubric, your extra requests, and the diff into a fixed input file and hands it to each local reviewer — on **stdin** with a fixed pointer argument (codex, agy, copilot), or via **`--prompt-file`** (devin) — so the command never changes and you approve each reviewer once with an exact-match, read-only rule (no broad wildcard). Merge them into the `permissions.allow` array in `~/.claude/settings.json` (or the repo's `.claude/settings.json`) — don't paste over an existing file. The co-review skill's **Permissions** section has the exact JSON to copy.
+**Run local-review by hand** (no agent needed): the server is a plain script —
+alias it once and review any patch:
+
+```bash
+# ~/.zshrc — a function, not an alias: the cache keeps one directory per
+# installed plugin version, so pick the newest deterministically instead of
+# letting a glob expand to several paths.
+local-review() {
+  python3 "$(ls -d "$HOME"/.claude/plugins/cache/workflow-skills/workflow-skills/*/scripts/local-review/server.py | sort -V | tail -1)" "$@"
+}
+
+cd my-worktree
+local-review --git main       # committed diff of my-branch vs main
+local-review --git uncommitted  # live diff of uncommitted worktree edits
+```
+
+Open the printed `Review UI:` URL. `--git uncommitted` re-reads the worktree
+live, so further edits show up via the Refresh button; `--git <ref>` and
+`--git <A>...<B>` diff commit-to-commit, so Refresh only picks up new content
+when the refs themselves move (a new commit, a rebase), not a worktree edit.
+For a patch file instead, pass `--diff-file PATCH --title "<label>"` (a
+static snapshot; `--title` names the change in the header, otherwise the
+patch path is shown).
+
+**Approve the reviewer commands once.** co-review hands each local reviewer a
+fixed input file on stdin (or via `--prompt-file` for devin), so the command
+string never changes and you can approve each reviewer with an exact-match,
+read-only rule instead of a broad wildcard. The skill's **Permissions** section
+has the exact JSON — merge it into `permissions.allow` in
+`~/.claude/settings.json` or the repo's `.claude/settings.json`.
 
 ### Planning
 
-| Skill              | Trigger                                                   | What it does                                                                                                                                                                                                                                                                                   |
-| ------------------ | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **plan-with-docs** | `/plan-with-docs`, or after approving a plan in plan mode | Write a multi-step implementation plan as markdown files under `dev_docs/tasks/<name>_plan/` (one file per PR-sized task, in the canonical task format) instead of printing it inline, then refine the plan through clarifying questions. Default for plans >3 tasks or spanning multiple PRs. |
+| Skill                                                | Trigger                                                                                            | What it does                                                                                                                                     |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [**plan-with-docs**](skills/plan-with-docs/SKILL.md) | `/plan-with-docs`, or after approving a plan in plan mode                                          | Write a multi-step plan as one markdown file per PR-sized task under `dev_docs/tasks/<name>_plan/`, then refine it through clarifying questions. |
+| [**research-spike**](skills/research-spike/SKILL.md) | filing/answering a question, registering an obligation, promoting a decision, checking convergence | Run a research spike through an **obligation ledger**, so a converging question count can't hide a climbing count of deferred work.              |
 
 ### Task loop
 
-Capture follow-up work with full context during development, then process it automatically. The `task` skill auto-triggers when you mention deferred work; the commands handle capture, listing, processing, and destination configuration.
-For the `linear` handler, merged PRs are reconciled explicitly via `/complete-task`, `/sweep-for-complete`, and `/reconcile-tasks` rather than a native auto-close integration; the sweep and reconciler are safe to schedule via `/loop` or `/schedule`.
+Capture follow-up work with full context during development, then process it
+automatically. The [`task`](skills/task/SKILL.md) skill auto-triggers on
+deferred-work language and carries the file format, capture workflow, and
+handler abstraction; the commands below do the work.
 
-| Command / Skill           | Trigger                                                                                                                  | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **`/add-task`**           | `/add-task [description]`                                                                                                | Capture follow-up work and deliver it via the configured handler. Defaults to the `repo-pr` handler: dispatches a remote agent to commit the task as a markdown file on a branch from main and open a PR, with zero local impact.                                                                                                                                                                                                                                                                                                                            |
-| **`/do-tasks`**           | `/do-tasks [slug \| --all \| -n N] [--remote\|--local]`                                                                  | The single execute verb. Resolves the handler and turns dependency-ready tasks into PRs. For `repo-pr`: default = highest-ranked task; `--all` / `-n N` batch dispatch (each to its own cloud VM) bounded by `wip_limit`; `--local` runs in-session. For `linear`: claims and executes one issue in the current session (single/foreground, pre-claim `wip_limit` gate). For `gh-issue`: the same single/foreground claim+execute over the `gh` CLI. For `jira`: the same single/foreground claim+execute over the Atlassian MCP (needs `ready_status` set). |
-| **`/list-tasks`**         | `/list-tasks [status]`                                                                                                   | Show a table of all tasks in `dev_docs/tasks/` with status, priority, size, dependency blockers, tags, and expiry. Filter by status (`unclaimed`, `claimed`, `blocked`, `expired`, `all`).                                                                                                                                                                                                                                                                                                                                                                   |
-| **`/push-plan`**          | `/push-plan <name> [--ready-only]`                                                                                       | Push a vetted local plan (`dev_docs/tasks/<name>_plan/`) to the configured tracker. `repo-pr` is a no-op (the files are the destination); `linear` creates one issue per task under a project, in dependency order, translating `is_blocked_by` to native blockers. Create-missing-only — records tracker ids back into the files, so re-runs don't duplicate. jira/gh-issue not supported yet.                                                                                                                                                              |
-| **`/reoptimize-tasks`**   | `/reoptimize-tasks [project \| initiative \| team] [name]`                                                               | Re-optimize an existing tracker backlog (the inverse of `/push-plan`). Reconciles dependencies hiding in description prose against native relations, surfaces hidden cross-project blockers, and detects cycles, stale links, priority inversions, and overlap — then applies the approved fixes (propose-then-apply, never auto-mutating). **v1 supports `linear` only**; `jira` and `gh-issue` re-optimize are planned follow-ups; under `repo-pr` there is no tracker graph, so re-optimize the plan files directly (or `/push-plan` first).              |
-| **`/task-config`**        | `/task-config [handler]`                                                                                                 | Configure where `/add-task` delivers (writes `dev_docs/tasks/.task-config.yml`). Handlers: `repo-pr` (default, markdown PR), `gh-issue` (GitHub Issue), `jira` (Jira work item via Atlassian MCP), `linear` (Linear issue via Linear MCP). Verifies prerequisites before writing the config.                                                                                                                                                                                                                                                                 |
-| **`/promote-tasks`**      | `/promote-tasks [dry-run \| apply]`                                                                                      | Score `new` tasks against the confidence check and promote them to `ready` or `needs_refinement`.                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| **`/archive-tasks`**      | `/archive-tasks [--older-than <N>d] [dry-run]`                                                                           | Retire terminal-state work past an age threshold, handler-dispatched. `repo-pr` moves stale `done` files to `dev_docs/tasks/_archive/`; `linear` keeps a workspace under its 250-active-issue cap via native auto-archive + a GraphQL `issueArchive` backstop; `gh-issue` labels long-closed issues (hygiene only); `jira` transitions terminal issues to a configured `archive_status` (else no-op). Refuses to mutate without a threshold (no surprise bulk archive).                                                                                      |
-| **`/complete-task`**      | `/complete-task <identifier> [--dry-run]`                                                                                | Explicitly transition one identified work item to its tracker's completed state. **linear-only (v1)** — a handler-dispatched primitive that trusts the caller and does no PR/merge verification of its own.                                                                                                                                                                                                                                                                                                                                                  |
-| **`/sweep-for-complete`** | `/sweep-for-complete [--apply] [--all]`                                                                                  | Safe, schedulable sweep that finds started-state issues whose linked PR merged and completes exactly those via the `/complete-task` primitive. **linear-only (v1)**; composes with `/loop` or `/schedule`.                                                                                                                                                                                                                                                                                                                                                   |
-| **`/reconcile-tasks`**    | `/reconcile-tasks [--apply] [--all]`                                                                                     | Bounded, schedulable reconciler that fixes issues sitting in the wrong state against a fixed rule table. **linear-only (v1)**; composes with `/loop` or `/schedule`.                                                                                                                                                                                                                                                                                                                                                                                         |
-| **`/doctor`**             | `/doctor [--fix]`                                                                                                        | Diagnose the task-loop setup — config validity, handler prerequisites, legacy dirs, schema drift, and hygiene — reporting `PASS`/`WARN`/`FAIL` per check. Read-only by default; `--fix` applies the safe mechanical repairs (run the migration, prune expired, fill defaulted fields) and leaves judgment calls as warnings.                                                                                                                                                                                                                                 |
-| **break-down-task**       | a task is too big for one PR, `/promote-tasks` flags `scope exceeds size 5`, or "split / slice / break down this task"   | Take an existing over-sized task, find natural shear points (vertical/horizontal slices, preparatory refactor, interface-then-impl), and on a HIGH-confidence split replace it with PR-sized component tasks chained by `is_blocked_by`. The resolution of the promote-tasks size gate; sibling of `plan-with-docs` (which slices a fresh idea).                                                                                                                                                                                                             |
-| **`task` skill**          | mentions of "task", "todo", "follow-up", "we should come back to this", or any of the `/add-task` / `/do-tasks` commands | Auto-trigger skill: provides the task file format, capture workflow, handler abstraction, and processing logic. Loaded in-context whenever Claude sees deferred-work language.                                                                                                                                                                                                                                                                                                                                                                               |
+Where tasks land is configured per repo — `repo-pr` (markdown PR, default),
+`gh-issue`, `jira`, or `linear`. **Handler support is jagged**, and
+[`commands/task-config.md`](commands/task-config.md) holds the authoritative
+capability matrix.
+
+| Command                                                       | Trigger                                                                   | What it does                                                                                                                     |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| [**`/add-task`**](commands/add-task.md)                       | `/add-task [description]`                                                 | Capture follow-up work and deliver it via the configured handler.                                                                |
+| [**`/do-tasks`**](commands/do-tasks.md)                       | `/do-tasks [slug \| --all \| -n N] [--remote\|--local]`                   | The single execute verb — turn dependency-ready tasks into PRs, one in-session or N dispatched, bounded by `wip_limit`.          |
+| [**`/list-tasks`**](commands/list-tasks.md)                   | `/list-tasks [status]`                                                    | Table of all tasks with status, priority, size, blockers, tags, and expiry.                                                      |
+| [**`/promote-tasks`**](commands/promote-tasks.md)             | `/promote-tasks [dry-run \| apply]`                                       | Score `new` tasks against the confidence check and promote them to `ready` or `needs_refinement`.                                |
+| [**`/push-plan`**](commands/push-plan.md)                     | `/push-plan <name> [--ready-only]`                                        | Push a vetted local plan to the tracker in dependency order, recording ids back so re-runs don't duplicate.                      |
+| [**`/reoptimize-tasks`**](commands/reoptimize-tasks.md)       | `/reoptimize-tasks [project \| initiative \| team] [name]`                | The inverse of `/push-plan` — reconcile prose dependencies against native relations and fix cycles, stale links, and overlap.    |
+| [**`/task-config`**](commands/task-config.md)                 | `/task-config [handler]`                                                  | Choose the handler and verify its prerequisites (writes `dev_docs/tasks/.task-config.yml`).                                      |
+| [**`/complete-task`**](commands/complete-task.md)             | `/complete-task <identifier> [--dry-run]`                                 | Transition one identified work item to its tracker's completed state. All four handlers.                                         |
+| [**`/archive-tasks`**](commands/archive-tasks.md)             | `/archive-tasks [--older-than <N>d] [--issues <refs>] [--all] [dry-run]`  | Retire terminal-state work past an age threshold. A sweep refuses to mutate without a threshold.                                 |
+| [**`/sweep-for-complete`**](commands/sweep-for-complete.md)   | `/sweep-for-complete [--apply] [--all] [--project <id\|name>]`            | Find started-state issues whose linked PR merged and complete exactly those. **linear-only (v1)**.                               |
+| [**`/reconcile-tasks`**](commands/reconcile-tasks.md)         | `/reconcile-tasks [--apply] [--all] [--project <id\|name>]`               | Fix issues sitting in the wrong state, against a fixed rule table. **linear** and **gh-issue**, each with its own table.         |
+| [**`/find-false-closures`**](commands/find-false-closures.md) | `/find-false-closures [--apply] [--project <uuid>] [--repo <owner/name>]` | Detect completed issues no merged PR owns (the bare-id over-close bug) and restore them. **linear-only**.                        |
+| [**`/sweep-for-archive`**](commands/sweep-for-archive.md)     | `/sweep-for-archive [--since 24h] [--apply] [...]`                        | Close-out sweep: verify the window's closures, complete what merged, archive exactly what was proved delivered. **linear-only**. |
+| [**`/doctor`**](commands/doctor.md)                           | `/doctor [--fix]`                                                         | Diagnose the setup — config, prerequisites, legacy dirs, schema drift, allow-rules, worktree config — as `PASS`/`WARN`/`FAIL`.   |
+| [**break-down-task**](skills/break-down-task/SKILL.md)        | a task is too big for one PR, or "split / slice / break down this task"   | Find the natural shear points in an over-sized task and replace it with PR-sized components chained by `is_blocked_by`.          |
+
+`/sweep-for-complete`, `/reconcile-tasks`, `/find-false-closures`, and
+`/sweep-for-archive` are dry-run-by-default and safe to schedule via `/loop` or
+`/schedule`.
 
 ### Coder orchestration
 
-| Skill                  | Trigger                                                                                                                                       | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **orchestrate-coders** | `/orchestrate-coders <task> [--coder <backend>[:<model>]]... [-n N] [--plan <name>]`, or "farm this out to codex / have opus implement these" | Turn the current session into an orchestrator that doesn't write feature code itself: it decomposes the task into PR-sized packets, dispatches each to a coder backend — a native `opus` subagent, or an external coder CLI (`codex`, `agy`, `devin`, custom) driven in an isolated git worktree — verifies every diff, integrates the branches, and reports per-packet outcomes. The backend and its model are selectable per run and rememberable via `dev_docs/orchestrate-coders/.coders.yml`.                                                                                                                                                                       |
-| **select-coder**       | `/select-coder <task> [--plan <name>] [--refresh] [-n N]`, or "which model should implement this / pick the best coder for these packets"     | Recommend which coder agent and model should execute a task: a one-time pre-flight probes which backends and models are actually available (cached in `.coders.yml`), the task is profiled (via `assess-task`) and its profile mapped against a capability matrix (correctness, speed, cost, context, creativity, autonomy, verification behavior, plus secret-exposure and containment gates that can disqualify a backend outright — with a refresh protocol so the data doesn't go stale), and the result is up to N ranked `<backend>:<model>` specs with rationale — directly usable as orchestrate-coders `--coder` arguments or per-packet round-robin overrides. |
-| **assess-task**        | `/assess-task <task> [--plan <name>]`, or "how hard / creative / mechanical is this task / profile this work"                                 | Profile what a coding task demands, independent of who executes it: score it along stable dimensions (complexity, creativity, scope, autonomy, speed/cost sensitivity, verification criticality) and return a compact `task_profile` block plus a routing `label`. Pure assessment — it never picks a model, sizes, or dispatches. `select-coder` consumes it for routing; `break-down-task` and `promote-tasks` reference it as a sizing/confidence signal.                                                                                                                                                                                                             |
+| Skill                                                                   | Trigger                                                                           | What it does                                                                                                                                                                                |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [**orchestrate-coders**](skills/orchestrate-coders/SKILL.md)            | `/orchestrate-coders <task> [--coder <backend>[:<model>]]... [-n N]`              | Turn the session into an orchestrator that writes no feature code: decompose into PR-sized packets, dispatch each to a coder backend in an isolated worktree, verify every diff, integrate. |
+| [**select-coder**](skills/select-coder/SKILL.md)                        | `/select-coder <task> [--refresh] [-n N]`, or "which model should implement this" | Probe which backends are actually available, profile the task, and return N ranked `<backend>:<model>` specs with rationale.                                                                |
+| [**assess-task**](skills/assess-task/SKILL.md)                          | `/assess-task <task>`, or "how hard / mechanical is this task"                    | Profile what a task demands — complexity, creativity, scope, autonomy, cost sensitivity, verification criticality. Never picks a model.                                                     |
+| [**`/refresh-coder-comparison`**](commands/refresh-coder-comparison.md) | `/refresh-coder-comparison [backend \| model]`, or a stale matrix cache date      | Re-research the capability matrix — benchmarks, pricing, model rosters, vendor terms — and write it back into `select-coder/matrix.md`.                                                     |
 
 ### Autonomous execution
 
-| Skill            | Trigger                                                                                                                | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **auto-pilot**   | `/auto-pilot <linear-project \| plan-dir>` — advance a workstream independently, no person in the loop _(in progress)_ | Advance a whole task graph unattended: an isolated worktree, a thin orchestrator walking the graph, and `/deliver-task` per task (claim → implement → PR → co-review → hand-off) with durable, crash-resumable state. v1 is being built — see [the design decisions](dev_docs/auto-pilot.md); this release ships the skill home and the [run-state reference](skills/auto-pilot/references/run-state.md).                                                                                                                                                                                     |
-| **deliver-task** | `/deliver-task <slug \| id> [--base <branch>] [--questions <path>]`                                                    | Deliver ONE task through its full per-task lifecycle: claim it via the handler's own protocol, implement it via a `select-coder`-routed worker in an isolated worktree, verify (check + exercise the feature), open a PR (ready if you have write access to the repo, draft otherwise), run `/co-review --non-interactive`, iterate on findings (bounded at 2 rounds), and hand off at `needs_review` — **never** `done` (completion stays merge-verified via `/sweep-for-complete`). The depth verb (one task, all the way) to `/do-tasks`'s breadth; the per-task unit `/auto-pilot` calls. |
+| Skill                                            | Trigger                                                             | What it does                                                                                                                                                                   |
+| ------------------------------------------------ | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [**deliver-task**](skills/deliver-task/SKILL.md) | `/deliver-task <slug \| id> [--base <branch>] [--questions <path>]` | One task, all the way: claim → implement via a routed worker in an isolated worktree → verify → PR → non-interactive co-review → hand off at `needs_review`, never `done`.     |
+| [**auto-pilot**](skills/auto-pilot/SKILL.md)     | `/auto-pilot <linear-project \| plan-dir>` _(in progress)_          | Advance a whole task graph unattended — a thin orchestrator walking the graph via `/deliver-task`, with crash-resumable state. See [the design notes](dev_docs/auto-pilot.md). |
 
 ### Auditable analysis
 
-| Skill                    | Trigger                                                               | What it does                                                                                                                                                                                                                                                                                                         |
-| ------------------------ | --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **analysis-pipeline**    | `/analysis-pipeline`, or auto when building report-producing analyses | Structure quantitative work as model → template → fill pipelines. Enforces input provenance, separation of narrative and computation, and reproducible output. Includes a working `example/` to copy from.                                                                                                           |
-| **review-facts**         | `/review-facts`                                                       | Independent fact-check of a completed analysis. Spawns the bundled `fact-reviewer` subagent (fresh context, read-only tools) to verify links resolve, cited values match sources, output is reproducible, narrative numbers trace to the model, units/formulas are correct, and the recommendation matches the data. |
-| **analysis-conventions** | Auto when writing notebooks or analysis scripts                       | Coding conventions for analysis work: when to use plain scripts vs marimo, `uv run` for execution, scratchpad patterns, notebook structure. Not user-invocable — loads in context.                                                                                                                                   |
+| Skill                                                            | Trigger                                                               | What it does                                                                                                                                           |
+| ---------------------------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [**analysis-pipeline**](skills/analysis-pipeline/SKILL.md)       | `/analysis-pipeline`, or auto when building report-producing analyses | Structure quantitative work as model → template → fill pipelines, with input provenance and reproducible output. Ships a working `example/`.           |
+| [**review-facts**](skills/review-facts/SKILL.md)                 | `/review-facts`                                                       | Spawn the `fact-reviewer` subagent to verify links, cited values, reproducibility, number-trace, descriptors, units, formulas, and the recommendation. |
+| [**analysis-conventions**](skills/analysis-conventions/SKILL.md) | auto when writing notebooks or analysis scripts                       | Conventions for analysis code: marimo vs plain scripts, `uv run`, scratchpad patterns, notebook structure. Not user-invocable.                         |
 
 ### Understanding the work
 
-| Skill     | Trigger                                                                                                                                | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| --------- | -------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **tutor** | `/tutor [--pr <N> \| --diff [<ref>] \| <path>]`, or "walk me through what you did / quiz me on this / make sure I actually understand" | Teach you the work until you can defend it, rather than summarizing it at you. Builds a staged checklist (the problem and why it existed → the solution, its design decisions and edge cases → the blast radius), then works it one item at a time: elicits your understanding **first**, diagnoses the gap, closes it with code or a debugger, and verifies with a counterfactual quiz via `AskUserQuestion`. An item is only checked off when you've demonstrated it unprompted — and the session doesn't end until they all are. |
+| Skill                                                                  | Trigger                                                               | What it does                                                                                                                                                         |
+| ---------------------------------------------------------------------- | --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [**tutor**](skills/tutor/SKILL.md)                                     | `/tutor [--pr <N> \| --diff [<ref>] \| <path>]`, or "quiz me on this" | Teach you the work until you can defend it: elicit first, close the gap, verify with a counterfactual quiz. An item is checked off only once you've demonstrated it. |
+| [**research-spike-tutorial**](skills/research-spike-tutorial/SKILL.md) | "walk me through how the research-spike obligation ledger works"      | A hands-on tutorial against a disposable tree under a temp dir — hit the "destination must already exist" wall for real, then watch the divergence.                  |
 
-### Bundled subagent
+### Worktree lifecycle
 
-- **fact-reviewer** — Read-only auditor used by `/review-facts`. Runs in a fresh context with `Read`, `Glob`, `Grep`, `Bash`, and `WebFetch`. Reports findings; never edits the analysis.
+The plugin registers seven hooks. Three of them create and tear down an
+isolated worktree without anything being typed: `WorktreeCreate` puts it where
+[`scripts/worktree-config.sh`](scripts/worktree-config.sh) says worktrees live
+(not inside the repo, which aborts in a repo that versions its own agent
+config), `WorktreeRemove` tears down only what the exiting session itself
+created, and a `PostToolUse` reminder on `ExitWorktree` says teardown ends
+there. Teardown covers the paths the harness dispatches: an explicit
+`ExitWorktree` and the interactive exit dialog, though an `ExitWorktree`
+remove of a hook-supplied worktree needs `discard_changes: true` —
+[the teardown reference](skills/worktree-teardown/SKILL.md) says what to check
+first, and a `PreToolUse` guard on `ExitWorktree`
+([`scripts/exit-worktree-guard.sh`](scripts/exit-worktree-guard.sh)) denies the
+flag unless the tree is clean and its branch has landed. An unattended (`claude -p`)
+exit fires `SessionEnd` and nothing else, and subagent worktrees are never
+handed to the hook, so both still need a manual run of the same scripts —
+they are plain scripts you can run by hand either way:
+`scripts/worktree-remove.sh <path>` and `scripts/branch-remove.sh <branch>`.
+
+The fourth, a `PreToolUse` guard
+([`scripts/guard-foreign-worktree.py`](scripts/guard-foreign-worktree.py)),
+refuses a write into a worktree of the same repo that the session never
+entered — `git -C <path> commit`, `cd <path> && …`, a redirect, or a heredoc
+naming the path — and points at `EnterWorktree` instead. Reads are allowed.
+It also warns once when write-work starts in a main checkout on its default
+branch. Bypass one Bash call with
+`env WORKFLOW_SKILLS_ALLOW_FOREIGN_WRITE=1 <command>`.
+
+The fifth, also on `PreToolUse`
+([`scripts/guard-pinned-branch.py`](scripts/guard-pinned-branch.py)), applies
+only to a repo that opts in with `git config --local hooks.pinnedBranch main`:
+it refuses a `git checkout`/`git switch` (or a `gh pr checkout`) that would move that repo's main
+checkout off the pinned branch, so branch work goes to a worktree. The refusal
+names the worktree an `EnterWorktree` call would create, at the root and branch
+prefix `scripts/worktree-config.sh` resolves, and points at the
+`worktree-entry` skill for every other target, and at the
+[`pinned-checkout`](skills/pinned-checkout/SKILL.md) skill for why. Each call is
+judged where it actually runs — a `cd <worktree> && git checkout -b x` is
+allowed — and linked worktrees are never pinned. Bypass one call with
+`env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git checkout <branch>`; the assignment
+has to sit immediately before that call's `git` (or `gh`) word. The guard reads command
+text, so it judges plain shapes only —
+`[cd <dir> &&] [env VAR=1] git [global options] checkout|switch …` and
+`[cd <dir> &&] [env VAR=1] gh [-R <repo>] pr checkout|co …` (judged at its
+`--worktree <path>` when it names one) — and lets
+executors (`bash -c`, `eval`), subshells, wrappers with options, git aliases
+and scripts through by design. A `post-checkout` hook, where one is installed,
+is the backstop for those, and a state check is planned.
+
+To opt a repo in, run
+[`scripts/pin-checkout.sh <branch>`](scripts/pin-checkout.sh) from it: it sets
+`hooks.pinnedBranch` and, when `core.hooksPath` is unset, installs that
+`post-checkout` hook in `.git/hooks`. It never overwrites an existing hook, and
+with `core.hooksPath` set it installs nothing and says where the hook belongs.
+Run it outside the Claude Code sandbox, which denies writes to `.git/config`
+and `.git/hooks`.
+
+The sixth, on `PreToolUse` for `EnterWorktree`
+([`scripts/guard-enter-by-path.py`](scripts/guard-enter-by-path.py)), refuses a
+`path` call when [`scripts/worktree-name-for.sh`](scripts/worktree-name-for.sh)
+says `EnterWorktree` with `name: <n>` would hand the same worktree back. The
+path form raises an approval prompt nothing can lift, which stops an unattended
+or Remote Control session; the refusal names the prompt-free route instead
+(`ExitWorktree` `keep` first only when already in a worktree, then `name`).
+With no name, or on any error, it stays silent and the prompt appears as
+before.
+
+| Skill                                                      | Trigger                                                                                                    | What it does                                                                                                                                                                                                                                            |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [**worktree-teardown**](skills/worktree-teardown/SKILL.md) | `/worktree-teardown <path> \| --branch <branch>`, or auto when a removal fails, refuses, or half-completes | Run the teardown scripts, granted by the command so a typed teardown needs no allow rule, and the mechanics behind them: the submodule force gates, the PR-evidence branch delete, and the half-deleted and locked recovery cases.                      |
+| [**worktree-entry**](skills/worktree-entry/SKILL.md)       | auto when entering, re-entering, or writing into a worktree                                                | Which `EnterWorktree` call reaches a worktree or branch with no prompt, when `ExitWorktree` (`keep`) comes first, the remote-only and unprefixed branch routes, when `path` is right, and what re-entering a shared worktree costs. Not user-invocable. |
+| [**pinned-checkout**](skills/pinned-checkout/SKILL.md)     | auto on a "This checkout is pinned to" refusal, or a checkout undone by the `post-checkout` hook           | How a repo opts in and out of the branch pin, why the guard runs before `git` and no git hook can, the `reference-transaction` trap, which layer covers what the guard lets through, and the one-call override. Not user-invocable.                     |
+
+### Bundled subagents
+
+- [**fact-reviewer**](agents/fact-reviewer.md) — read-only auditor used by
+  `/review-facts`. Fresh context, `Read`/`Glob`/`Grep`/`Bash`/`WebFetch`.
+  Reports findings; never edits the analysis.
+- [**co-review-reconciler**](agents/co-review-reconciler.md) — judges review
+  findings for `/co-review`. `Read`/`Glob`/`Grep`/`Bash`, no `Edit`/`Write`:
+  it returns a verdict, never the fix it just graded.
+
+### Also included
+
+- [**Overnight auto-resume (`car`)**](dev_docs/claude-auto-resume.md) — an
+  external launcher you run instead of `claude` that survives the 5-hour usage
+  cap: it detects a cap-kill, sleeps until reset, and resumes the same
+  conversation.
 
 ## Why auditable analysis matters
 
@@ -120,9 +253,10 @@ Third-party marketplaces have auto-update disabled by default. Enable auto-updat
 
 ## Development
 
-Run the full quality gate locally with `just check` (formatting, manifest
-validation, and repo-native structural checks). See [`CONTRIBUTING.md`](CONTRIBUTING.md)
-for the dev loop, the "adding a skill" checklist, and the opt-in behavioral evals.
+Run the full quality gate locally with `just check`. Start at
+[`AGENTS.md`](AGENTS.md) for the map of the repo and the conventions that are
+load-bearing, then [`CONTRIBUTING.md`](CONTRIBUTING.md) for the dev loop and the
+"adding a skill" checklist.
 
 ## License
 

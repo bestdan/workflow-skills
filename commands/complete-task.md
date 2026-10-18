@@ -1,6 +1,6 @@
 ---
 description: Explicitly transition one identified work item to its tracker's completed state — a handler-dispatched, manually-invoked primitive that trusts the caller and does no PR/merge verification of its own
-allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Glob, Grep, Read, AskUserQuestion, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__save_comment, mcp__claude_ai_Linear__list_teams, mcp__linear__get_issue, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__linear__save_comment, mcp__linear__list_teams
+allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(find *), Glob, Grep, Read, Edit, AskUserQuestion, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__save_comment, mcp__claude_ai_Linear__list_teams, mcp__linear__get_issue, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__linear__save_comment, mcp__linear__list_teams, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__getJiraIssue, mcp__claude_ai_Atlassian__getTransitionsForJiraIssue, mcp__claude_ai_Atlassian__transitionJiraIssue, mcp__claude_ai_Atlassian__addCommentToJiraIssue, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__getJiraIssue, mcp__atlassian__getTransitionsForJiraIssue, mcp__atlassian__transitionJiraIssue, mcp__atlassian__addCommentToJiraIssue
 argument-hint: "<identifier> [--dry-run]"
 ---
 
@@ -9,7 +9,7 @@ argument-hint: "<identifier> [--dry-run]"
 `/do-tasks`' tracker path never moves an issue to a `completed`-type state —
 merge is meant to be the completion signal. But relying on that signal alone
 breaks once a tracker's native auto-close integration is off (for example,
-Linear's GitHub integration disabled or unreachable): the PR merges, the issue
+Linear's GitHub integration inert or unreachable): the PR merges, the issue
 never moves, and the tracker silently drifts out of sync with reality.
 `/complete-task` is the explicit, mechanical replacement for that missing
 auto-close: given one identifier, it transitions that single issue to its
@@ -38,47 +38,64 @@ drift.
 ## Arguments
 
 - **`<identifier>`** (required) — the tracker's issue identifier (e.g. `PRE-123`
-  for Linear). No default; the command trusts exactly the id it is given.
+  for Linear, `142` or `#142` for gh-issue). No default; the command trusts
+  exactly the id it is given.
 - **`--dry-run`** — print the planned transition and stop. Change nothing.
 
 ## 1. Resolve the handler
 
-Read `dev_docs/tasks/.task-config.yml`:
+Resolve the handler from the **merged view** — the committed config overlaid with the optional local override (see `commands/task-config.md` → "Resolving the handler"):
 
 ```bash
-cat "$(git rev-parse --show-toplevel)/dev_docs/tasks/.task-config.yml" 2>/dev/null
+ROOT="$(git rev-parse --show-toplevel)"
+cat "$ROOT/dev_docs/tasks/.task-config.yml" 2>/dev/null       # committed config
+cat "$ROOT/dev_docs/tasks/.task-config.local.yml" 2>/dev/null # optional gitignored override
 ```
+
+Overlay the local override on the committed config — mappings merge recursively, local leaf values win — then resolve `handler:` from the merged view.
 
 - `handler: linear` → read and follow **`commands/handlers/linear-complete.md`**
   (resolves the team's `completed`-type state, checks idempotence, confirms
   before mutating, applies the transition via `save_issue`, optionally posts a
   comment).
-- File absent, or `handler: repo-pr` → **UNSUPPORTED.** Print: "unsupported for
-  handler repo-pr — repo-pr has no separate completion step to drive. Its done
-  signal **is** the merged PR (and/or the task file's `status: done`
-  frontmatter, set by hand or by whatever closed the loop). There is nothing
-  for `/complete-task` to transition." Do not silently no-op without this line.
-- `handler: gh-issue` → **UNSUPPORTED.** Print: "unsupported for handler
-  gh-issue — GitHub already closes the issue natively on merge via
-  `Closes #<n>` in the PR body. `/complete-task` has nothing to add; if that
-  auto-close didn't fire, close the issue directly with `gh issue close <n>`."
-- `handler: jira` → **UNSUPPORTED.** Print: "unsupported for handler jira —
-  Jira's completion path is its GitHub integration or **smart commits**
+- `handler: gh-issue` → read and follow **`commands/handlers/gh-issue-complete.md`**
+  (resolves the issue via `gh issue view`, checks idempotence — including the
+  `NOT_PLANNED` closed-reason distinction — confirms before mutating, applies
+  the transition via `gh issue close --reason completed`, optionally posts a
+  comment). GitHub still closes issues natively on merge via `Closes #<n>` in
+  the PR body; this handler is the explicit escape hatch for when that
+  auto-close didn't fire.
+- File absent, or `handler: repo-pr` → read and follow
+  **`commands/handlers/repo-pr-complete.md`** (resolves the task file by slug,
+  checks idempotence via `status: done` or a missing file, confirms before
+  mutating, flips the frontmatter via `Edit`, optionally appends a completion
+  note under `## Consumer Notes`). A merged PR (and the claim protocol's
+  file-delete on review) is still the **primary** done signal for `repo-pr` —
+  this handler only covers the residual case of a task file left behind in a
+  non-terminal status whose work landed some other way.
+- `handler: jira` → read and follow **`commands/handlers/jira-complete.md`**
+  (resolves a `Done`-category transition via the Atlassian MCP, checks
+  idempotence by status category, confirms before mutating, applies the
+  transition via `transitionJiraIssue`, optionally posts a comment). Jira's
+  completion path is normally its GitHub integration or **smart commits**
   (`<issue-key> #done` / `#comment` in a commit/PR) transitioning the issue
-  natively on merge. `/complete-task` has nothing to add here; configure the
-  integration or smart commits if that transition isn't firing."
+  natively on merge; this handler is the explicit replacement for when that
+  integration is off, unconfigured, or didn't fire.
 - Any other (unknown) value → **stop** with: "Unknown task handler `<value>` in
   dev_docs/tasks/.task-config.yml. Run /task-config to fix it."
 
 If the relative path doesn't resolve, find the handler file with **Glob**
-(`**/commands/handlers/linear-complete.md`) and Read the result. Pass the
+(`**/commands/handlers/linear-complete.md`,
+`**/commands/handlers/gh-issue-complete.md`,
+`**/commands/handlers/repo-pr-complete.md`, or
+`**/commands/handlers/jira-complete.md`) and Read the result. Pass the
 identifier and the `--dry-run` flag through.
 
 ## 2. Report
 
 The handler file owns its report format, but every outcome fits this skeleton:
 
-- **Unsupported handler** — the one-line pointer above, nothing mutated.
+- **Unknown handler** — the stop message above, nothing mutated.
 - **Already complete** — the identifier and its current terminal state; no
   write made.
 - **dry-run** — the planned `<current state> → <completed state>` transition,

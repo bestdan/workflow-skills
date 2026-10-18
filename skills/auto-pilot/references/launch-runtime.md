@@ -63,7 +63,10 @@ launchd-tracked PID was `claude` itself, never a wrapper shell. That leaves
 no way for the supervisor to see the exit: `exec` replaces the process, so
 nothing runs after `claude` dies. The script instead runs the jailed `claude`
 in the foreground, captures its exit code, and calls
-`scripts/spawn-orchestrator.sh supervisor-check` before exiting itself — the
+`spawn-orchestrator.sh supervisor-check` (bare on purpose — `write-launch`
+bakes its own absolute path into the generated wrapper, and `$CLAUDE_PLUGIN_ROOT`
+does not exist under launchd; [`../SKILL.md`](../SKILL.md) "Script paths",
+context 3) before exiting itself — the
 launchd-tracked PID is now this wrapper, not `claude`, which is the
 deliberate trade against being able to classify the exit at all.
 
@@ -128,7 +131,7 @@ strand a run that can no longer wake. See [`run-budget.md`](run-budget.md)
 **Why.**
 
 - **It must outlive the launch session.** The human runs launch interactively,
-  then closes the laptop and goes to bed. An in-session Agent is a child of the
+  then the launching session ends; the run must outlive it. An in-session Agent is a child of the
   Claude Code harness process and dies when the session ends; only an
   OS-detached process survives. This requirement alone decides it.
 - **The one advantage of an in-session agent is unused.** A background Agent
@@ -149,7 +152,7 @@ strand a run that can no longer wake. See [`run-budget.md`](run-budget.md)
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Logs / observability**     | `claude -p --output-format stream-json` redirected to `.auto-pilot/orchestrator.log`. The real report channel stays the committed `RUN.md` / `QUESTIONS.md` / `REPORT.md`; the log is forensic, not primary. Live status (run-level status, per-task phases, the last log event, PID liveness, `--until`, the **last heartbeat** aged against the per-task ceiling, the declared **exit reason**, and **whether a relaunch is expected**) is read in one shot by `spawn-orchestrator.sh status --label <label> [--dir <run-dir>] [--task-ceiling <s>]` — read-only, never mutates. Completion is a **single mechanism**: `spawn-orchestrator.sh teardown --label <label> --done-sentinel <dir>/.auto-pilot/orchestrator.done [--reason <r>]` writes that sentinel file first, THEN boots the launchd job out, so a watcher never observes "job gone, no done-marker." `status` reports the run stopped purely from that same sentinel's presence — a `KeepAlive`/`PathState` supervisor variant (above) would gate on this identical file, never a second, independently-written one. All three **terminal** exit reasons (`done`, `systemic`, `deadline`) drop that one sentinel, and it carries `reason: <r>` so the single file does not flatten a finished run and a halted one back into the same state ([`run-state.md`](run-state.md) "Exit contract"). A project **`Stop` hook is not compatible with the detached, jailed run** (it can misfire — e.g. `stop-hook-error` — every turn under a non-interactive, sandboxed `claude -p`, cluttering the forensic log). The intended mitigation: launch with a `--settings` JSON that carries an explicit, empty `"hooks"` block, so the ephemeral run settings the detached process starts from define no project `Stop` hook to fire. This is documented intent, not a verified mechanism — **Claude Code's settings merge semantics for `--settings` vs. project-level hook config are not confirmed here**; if project hooks are additively merged rather than replaced, an empty `"hooks"` block in `--settings` may not suppress them, and the honest fallback is that the `stop-hook-error` line is a known-benign log artifact of this run mode, not a real failure signal. |
 | **`--until <time>` bound**   | Defense in depth: a hard outer `timeout`/watchdog kill computed from `--until` at launch, **plus** the prompt-level "stop yourself at T" instruction the run loop honors.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| **Non-interactive auth**     | The detached process reuses the launching user's stored credentials (`~/.claude`). A launch-time smoke test (`claude -p 'ok' --max-turns 1`) verifies **before** detaching — but it must run **through the exact sandbox wrapper, env, and mounts** the orchestrator will use, or it can pass outside the jail while `~/.claude`/DNS/network fail inside it. A dead credential then fails loudly at launch, not silently at 3am (pre-flight step 2).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| **Non-interactive auth**     | The detached process reuses the launching user's stored credentials (`~/.claude`). A launch-time smoke test (`claude -p 'ok' --max-turns 1`) verifies **before** detaching — but it must run **through the exact sandbox wrapper, env, and mounts** the orchestrator will use, or it can pass outside the jail while `~/.claude`/DNS/network fail inside it. A dead credential then fails loudly at launch, not silently once no human can answer (pre-flight step 2).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | **Orphan / stale detection** | The launch step records the orchestrator **PID + process start-time + `--until` deadline** on the run-state branch, so `--resume` or a fresh launch can detect and kill a stale orchestrator before starting a new one. The **start-time** (e.g. `ps -p <pid> -o lstart=`) is recorded with the PID so a **recycled PID** — the OS reassigning a dead orchestrator's number to an unrelated process — can't be mistaken for a live run.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | **Laptop sleep**             | Detaching survives session exit, **not** machine sleep — and `caffeinate -is` does **not** by itself keep a MacBook awake after **lid close**: clamshell sleep still wins unless clamshell conditions are met (external power + display/keyboard) or the lid stays open. So pre-flight treats "cannot guarantee the machine stays awake for an unattended run" as a **launch blocker** (or the user keeps the lid open / uses a tested clamshell setup), rather than a soft mitigation.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
@@ -295,7 +298,7 @@ signal, not a silent allow.
 
 Every credential must be reachable **non-interactively** from inside the jail;
 anything that would prompt (a biometric `op signin`, a browser OAuth) is a
-**launch blocker** (pre-flight step 2), because it can't be satisfied at 3am.
+**launch blocker** (pre-flight step 2), because it can't be satisfied when no human can answer.
 
 | Credential              | Non-interactive path                                                                                                                    |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
@@ -332,6 +335,61 @@ that is verified working **inside the sandbox** (not just outside it), **or** an
 explicit grant of the specific Keychain/helper access that tool needs — recorded
 in the profile, never left implicit. A tool that can only authenticate via an
 interactive Keychain/helper prompt is a launch blocker.
+
+**The rule is broader than credentials: ANY interactive consent gate is a launch
+blocker** — TCC folder access (Documents/Desktop/Downloads, iCloud Drive,
+removable and network volumes), Full Disk Access, Keychain, biometric, browser
+OAuth. The generalization is not hypothetical; the live failure was TCC folder
+consent, and the narrower Keychain-only wording is what let it through. The rule
+is broader than what the pre-flight mechanically checks — see "What is enforced,
+and what is not" below.
+
+**Detaching is what creates the gate.** macOS attributes a TCC grant to a
+**responsible process**. Run from a terminal, folder-access grants belong to
+Terminal/iTerm, which the user authorized long ago, so nothing prompts. The
+orchestrator is spawned by **launchd**, which makes the orchestrator's own
+binary the responsible process: a different TCC identity holding none of those
+grants. Every protected resource it touches raises a fresh consent dialog — on a
+locked screen, addressed to nobody. The property that makes auto-pilot valuable
+(it detaches and outlives your session) is the same property that invalidates
+the permissions you already granted.
+
+**And if the dialog names the claude binary, it won't say "Claude."** `claude` is
+a symlink to `~/.local/share/claude/versions/<version>`, a bare Mach-O rather
+than an `.app` bundle. It is properly signed, but with no bundle there is no
+display name, so macOS falls back to the filename — a dialog from something
+called **"2.1.207"**, indistinguishable from malware, whose likely response
+(deny, or ignore) is the one that breaks the run. Treat this as the hypothesis
+it is: the dialog has not been observed, and under the attribution model below
+it would more likely name `/bin/bash`. Either way the user cannot answer it,
+which is what makes the gate a launch blocker rather than a prompt.
+
+So part of the rule is **enforced, not merely written down**:
+`"${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh"` re-runs the entry path under the
+real attribution — a transient launchd job whose program is `/bin/bash`, as the
+production job's is, stdin on `/dev/null`, no controlling TTY, running through
+the rendered profile — and blocks on a denial. A probe that passes from an
+interactive terminal proves nothing: the terminal's grants are exactly what the
+detached job will not have.
+
+**What is enforced, and what is not.** The probe covers **filesystem** consent —
+TCC folder access and Full Disk Access — against the run's own paths: the run
+worktree (passed as `--run-root`) and its `--git-common-dir`, which a linked
+worktree still writes to on every git operation. Keychain, biometric and browser
+OAuth stay covered only by step 2's credential probes, which run under the
+**terminal's** attribution, not launchd's. That gap is real; naming it is the
+point of this paragraph.
+
+**The grant target is not established, and the pre-flight says so.** launchd
+makes a job's own program the responsible process and children inherit it, which
+for both the probe and the real run is `/bin/bash` — but macOS may re-attribute
+on exec of a non-platform binary, and deciding that needs a desktop session to
+answer the dialog. So the blocker names both candidates, leads with the remedy
+that needs no grant, and tells the user to re-run the pre-flight after granting:
+the probe is the check. The best outcome is needing no grant at all, which is
+what `CONSENT_PROTECTED` records. **`none` means none of the run's known paths
+sit in a configured protected location** — the run root is probed regardless, and
+Full Disk Access can still block a path the inventory does not enumerate.
 
 ### 4. Worker-CLI composition
 
@@ -370,7 +428,7 @@ with its own sandbox on can't even start. Inside the jail, invoke codex with its
 **own sandbox disabled**: the outer jail already confines it and is strictly
 stronger (write-confinement + egress-allowlist + exec-wall), so codex's inner
 sandbox is redundant, not additive. This is a one-line policy so it isn't
-re-derived at 3am — set it wherever coders are invoked (`SKILL.md` verify/route
+re-derived mid-run — set it wherever coders are invoked (`SKILL.md` verify/route
 step, `commands/deliver-task.md`).
 
 ### 5. Verify broker — running the run's verify OUTSIDE the jail
@@ -382,7 +440,7 @@ Operation not permitted`, exit 126) **regardless of the diff** — they fail
 identically on pristine `main`. And a `sandbox-exec`-confined process's **children
 inherit the profile**, so the jailed orchestrator **cannot** simply spawn an
 un-jailed verifier. So verify runs in a **separate, un-jailed launchd job** — the
-**verify broker** (`scripts/spawn-orchestrator.sh write-verify-broker` installs it;
+**verify broker** (`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" write-verify-broker` installs it;
 `verify-request` / `verify-broker` / `verify-await` are the handshake):
 
 1. The jailed orchestrator drops a **request sentinel** (`verify-request`) into a
@@ -445,13 +503,21 @@ actually reach a human. That is also the only place it _could_ work anyway: a
 rate-limited or auth-dead orchestrator cannot make a model call to alert anyone
 (the same reasoning that put `classify-exit` / `supervisor-check` in shell).
 
-| Side                       | Subcommand                                                                         | What it can do                                                                                                                                                                                                                                                                            |
-| -------------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Supervisor** (un-jailed) | `spawn-orchestrator.sh alarm --dir <run> --condition <id> --reason <text>`         | Everything: `osascript -e 'display notification ...'` (falling back to `terminal-notifier`), the `.auto-pilot/ALARM` sentinel, and a one-line reason + **required action** prepended to the **very top** of `REPORT.md`. `supervisor-check` calls it on every alarm condition it detects. |
-| **Orchestrator** (jailed)  | `spawn-orchestrator.sh alarm-request --dir <run> --condition <id> --reason <text>` | Only **records** the condition (a file under `.auto-pilot/alarm-requests/`); it cannot notify, per the exec deny above. The supervisor **drains and delivers** it on its next wake. This is the seam for in-agent detectors (the invariant doctor).                                       |
+| Side                       | Subcommand                                                                                                         | What it can do                                                                                                                                                                                                                                                                            |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Supervisor** (un-jailed) | `spawn-orchestrator.sh alarm --dir <run> --condition <id> --reason <text>`                                         | Everything: `osascript -e 'display notification ...'` (falling back to `terminal-notifier`), the `.auto-pilot/ALARM` sentinel, and a one-line reason + **required action** prepended to the **very top** of `REPORT.md`. `supervisor-check` calls it on every alarm condition it detects. |
+| **Orchestrator** (jailed)  | `"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" alarm-request --dir <run> --condition <id> --reason <text>` | Only **records** the condition (a file under `.auto-pilot/alarm-requests/`); it cannot notify, per the exec deny above. The supervisor **drains and delivers** it on its next wake. This is the seam for in-agent detectors (the invariant doctor).                                       |
+
+The two rows take **opposite** path forms for the **same script**, and that is
+correct: the supervisor side is invoked from the generated launchd wrapper (bare,
+standing for the absolute path baked in at generation — no `$CLAUDE_PLUGIN_ROOT`
+under launchd), the orchestrator side by the agent (pinned). See
+[`../SKILL.md`](../SKILL.md) "Script paths".
 
 **The wake's shape: bookkeeping, then the gate, then the agent.** The generated
-wrapper runs, in order:
+wrapper runs, in order — paths shown bare, but the generated script carries the
+absolute path `write-launch` baked in ([`../SKILL.md`](../SKILL.md) "Script
+paths", context 3):
 
 ```sh
 spawn-orchestrator.sh supervisor-scan  --dir … --label …   # EVERY wake — the alarm scan

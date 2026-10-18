@@ -1,0 +1,207 @@
+{
+  "arm": "crush",
+  "run_date": "2026-09-24",
+  "cards": {
+    "issue-277": {
+      "raw": "```yaml\ntask_profile:\n  complexity: hard\n  creativity: medium\n  scope: pr-sized\n  autonomy: long-horizon\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: architecture\n  confidence: low\n  runner_up: verification-sensitive\n  notes: Cross-handler atomic claim using git ref CAS or comment election; must verify same-account race elimination.\n```\n",
+      "latency_s": 15.907063407823443
+    },
+    "issue-348": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: medium\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: Skill contract fix in SKILL.md and agent definition to constrain the reconciler to read-only tools, plus an optional git-status sanity check.\n```\n",
+      "latency_s": 6.349734199931845
+    },
+    "issue-381": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: medium\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: Security-surface refactor moving GitHub writes from server to agent; spans server, skill, docs, and test updates.\n```\n",
+      "latency_s": 9.662862559081987
+    },
+    "issue-382": {
+      "raw": "```yaml\ntask_profile:\n  complexity: hard\n  creativity: high\n  scope: multi-file\n  autonomy: long-horizon\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: frontend-creative\n  confidence: low\n  runner_up: architecture\n  notes: Preview rendering feature spans vendoring, lexer anchoring, payload changes, UI control, and sanitization; block-to-line mapping is safety-critical.\n```\n",
+      "latency_s": 13.277773220092058
+    },
+    "issue-385": {
+      "raw": "```yaml\ntask_profile:\n  complexity: hard\n  creativity: medium\n  scope: multi-file\n  autonomy: long-horizon\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: architecture\n  confidence: high\n  runner_up: null\n  notes: Security-sensitive structural refactor replacing innerHTML-based highlighting with token/DOM construction across diff and preview views; requires highlight.js integration changes, test assertions for inert attacker input, and threat-model doc update.\n```\n",
+      "latency_s": 12.087781843962148
+    },
+    "issue-386": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: verification-sensitive\n  confidence: high\n  runner_up: null\n  notes: Security-sensitive auth flow change from URL token to HttpOnly cookie; acceptance criteria are test-driven and existing Origin/Sec-Fetch-Site checks must hold.\n```\n",
+      "latency_s": 16.869214216945693
+    },
+    "issue-390": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: verification-sensitive\n  confidence: high\n  runner_up: null\n  notes: Three shell scripts need identical fail-closed guard and trap reordering; acceptance hinges on `just check` and correct failure behavior.\n```\n",
+      "latency_s": 9.796282012015581
+    },
+    "issue-406": {
+      "raw": "```yaml\ntask_profile:\n  complexity: mechanical\n  creativity: low\n  scope: single-file\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: mechanical-bulk\n  confidence: high\n  runner_up: null\n  notes: Single-file documentation correction to four matrix parentheticals in skills/task/SKILL.md; only rewording and a just check.\n```\n",
+      "latency_s": 13.046431346097961
+    },
+    "issue-429": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: medium\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: UI + API + docs/test change to add a reply-capable per-round summary thread.\n```\n",
+      "latency_s": 12.281028254888952
+    },
+    "issue-430": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: medium\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: Localized confirmation string fix; touches submit confirmation logic, tests, and possibly docs.\n```\n",
+      "latency_s": 6.855793720111251
+    },
+    "issue-445": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: medium\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: Bug fix in Preview link handling with a small design choice for rendering rejected/relative links.\n```\n",
+      "latency_s": 7.354634957155213
+    },
+    "issue-446": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: medium\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: Documentation/convention update to two markdown files with provided prose; requires judgment on placement and integration but is bounded and small in scope.\n```\n",
+      "latency_s": 11.16335524385795
+    },
+    "issue-465": {
+      "raw": "```yaml\ntask_profile:\n  complexity: hard\n  creativity: medium\n  scope: multi-file\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: architecture\n  confidence: high\n  runner_up: null\n  notes: Extract bash pagination loop into Python asset; multi-file refactor with strict failure-mode contract and mutation-tested cursor propagation.\n```\n",
+      "latency_s": 9.412518739001825
+    },
+    "issue-477": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: medium\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: Design discussion to add a verification-step prompt to the co-review workflow; implementation deferred.\n```\n",
+      "latency_s": 4.970702377147973
+    },
+    "issue-486": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: single-file\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: Small skill-doc contract fix; choose between a one-line prose qualification or adding a reviewer checklist item.\n```\n",
+      "latency_s": 11.032456338172778
+    },
+    "issue-491": {
+      "raw": "```yaml\ntask_profile:\n  complexity: mechanical\n  creativity: low\n  scope: multi-file\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: high\n  verification_criticality: high\n  label: mechanical-bulk\n  confidence: high\n  runner_up: null\n  notes: ~50 grep -q pipelines to replace across shell scripts, including runtime orchestrator logic; fix shape is dictated but needs careful verification.\n```\n",
+      "latency_s": 11.65970055013895
+    },
+    "issue-496": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: SSH env detection and skill docs change with strict non-SSH behavior preservation.\n```\n",
+      "latency_s": 13.084751965012401
+    },
+    "issue-502": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: verification-sensitive\n  confidence: high\n  runner_up: null\n  notes: Clear repo prep task dominated by verification-heavy acceptance criteria.\n```\n",
+      "latency_s": 10.719802516046911
+    },
+    "issue-504": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: Mirror an existing --all override into a related command; small, deterministic doc and handler change.\n```\n",
+      "latency_s": 5.840196073055267
+    },
+    "issue-511": {
+      "raw": "```yaml\ntask_profile:\n  complexity: hard\n  creativity: low\n  scope: multi-file\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: architecture\n  confidence: low\n  runner_up: verification-sensitive\n  notes: Complex crosswalk encoder spanning import script, existing state helper, and label validator; heavy test coverage required.\n```\n",
+      "latency_s": 12.414159207139164
+    },
+    "issue-512": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: medium\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: verification-sensitive\n  confidence: high\n  runner_up: null\n  notes: Multi-phase idempotent GitHub importer with detailed test assertions; correctness hinges on the tests and mapping-file integrity.\n```\n",
+      "latency_s": 13.689159214030951
+    },
+    "issue-513": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: PR-sized feature adding a new CLI mode, joining plan and mapping data, with clear test and acceptance requirements.\n```\n",
+      "latency_s": 5.578504726989195
+    },
+    "issue-514": {
+      "raw": "```yaml\ntask_profile:\n  complexity: hard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: verification-sensitive\n  confidence: high\n  runner_up: null\n  notes: A verifier script plus tests; correctness hinges on exact set-based edge checks and independent label cardinality validation.\n```\n",
+      "latency_s": 11.62645640806295
+    },
+    "issue-515": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: medium\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: verification-sensitive\n  confidence: high\n  runner_up: null\n  notes: Single new Linear successor script with GraphQL mutations, idempotency per-write, and explicit test/acceptance requirements; verification dominates.\n```\n",
+      "latency_s": 7.777504662051797
+    },
+    "issue-524": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: Well-specified refactor of five Jira handlers into a shared stdlib helper plus tests; bounded scope with clear acceptance criteria.\n```\n",
+      "latency_s": 13.691048445180058
+    },
+    "issue-525": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: Small utility + tests + skill step update; clear input/output contract, no architecture or design taste demands.\n```\n",
+      "latency_s": 7.295180505840108
+    },
+    "issue-526": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: verification-sensitive\n  confidence: high\n  runner_up: null\n  notes: Mechanical script/test addition with explicit acceptance checks and a documentation rewrite.\n```\n",
+      "latency_s": 9.297308108070865
+    },
+    "issue-527": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: verification-sensitive\n  confidence: high\n  runner_up: null\n  notes: Implement graph analysis helper with tests; verification by test cases is central to acceptance.\n```\n",
+      "latency_s": 8.758378081023693
+    },
+    "issue-528": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: verification-sensitive\n  confidence: low\n  runner_up: standard-pr\n  notes: Add a --sort/--edges feature to an existing CLI helper, extend its tests, and rewrite a doc dimension; heavy emphasis on code-enforced acceptance via just check and tie-break tests.\n```\n",
+      "latency_s": 10.741732977097854
+    },
+    "issue-529": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: medium\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: Well-specified feature add with a new script, tests, and doc updates; clear acceptance criteria but the work product is the tool, not the checks themselves.\n```\n",
+      "latency_s": 8.572743542958051
+    },
+    "issue-530": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: Standard PR adding a shell subcommand with well-specified business logic, pinned test cases, and doc updates; verification is emphasized.\n```\n",
+      "latency_s": 13.623949280008674
+    },
+    "issue-531": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: verification-sensitive\n  confidence: high\n  runner_up: null\n  notes: Three-file change; the deliverable is the tests and the missing-number error check.\n```\n",
+      "latency_s": 6.851636548992246
+    },
+    "issue-532": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: verification-sensitive\n  confidence: high\n  runner_up: null\n  notes: Script + git fixture tests + docs update; verification dominates because the acceptance criteria make the check and clean-tree guarantee the deliverable.\n```\n",
+      "latency_s": 6.710814155871049
+    },
+    "issue-533": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: verification-sensitive\n  confidence: high\n  runner_up: null\n  notes: Refactor plus new CLI entry point, with acceptance criteria explicitly gated on existing and new tests.\n```\n",
+      "latency_s": 6.838903224794194
+    },
+    "issue-534": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: medium\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: verification-sensitive\n  confidence: low\n  runner_up: standard-pr\n  notes: Cross-handler body-reference parser refactor with explicit code-enforced tests and acceptance checks.\n```\n",
+      "latency_s": 14.744663706049323
+    },
+    "issue-535": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: verification-sensitive\n  confidence: high\n  runner_up: null\n  notes: Refactor to share a race-critical primitive, add tests, and update docs; acceptance criteria explicitly pin the 422 case and check suite.\n```\n",
+      "latency_s": 6.982414219062775
+    },
+    "issue-536": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: \"Straightforward shell feature with dictated output format and acceptance tests; doc deduplication is mechanical.\"\n```\n",
+      "latency_s": 10.436703687999398
+    },
+    "issue-537": {
+      "raw": "```yaml\ntask_profile:\n  complexity: hard\n  creativity: medium\n  scope: multi-file\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: architecture\n  confidence: high\n  runner_up: null\n  notes: Cross-cutting unification of three tracker list handlers around a shared classifier, precedence table, and tracker-specific field maps with tests.\n```\n",
+      "latency_s": 14.456075546098873
+    },
+    "issue-538": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: Straightforward documentation update mirroring an existing section, adding PR links, and cleaning up a plan folder.\n```\n",
+      "latency_s": 16.131171787856147
+    },
+    "issue-586": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: high\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: frontend-creative\n  confidence: high\n  runner_up: null\n  notes: Output-template design for co-review; driven by presentation ergonomics and fixed-section ordering.\n```\n",
+      "latency_s": 6.671394198900089
+    },
+    "issue-595": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: medium\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: verification-sensitive\n  confidence: low\n  runner_up: standard-pr\n  notes: Clear regex/docs/release work; the standout risk is silent non-interactive failures, making honest verification the deliverable.\n```\n",
+      "latency_s": 10.038876465056092
+    },
+    "issue-607": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: standard-pr\n  confidence: low\n  runner_up: verification-sensitive\n  notes: Normal PR-sized bug fix in a plugin script plus docs and a missing regression test; the test gap is the main routing tension.\n```\n",
+      "latency_s": 11.991143753984943
+    },
+    "issue-608": {
+      "raw": "```yaml\ntask_profile:\n  complexity: mechanical\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: verification-sensitive\n  confidence: high\n  runner_up: null\n  notes: Mechanical doc/code repair plus test/backfill; success hinges on checks and real issue cleanup.\n```\n",
+      "latency_s": 6.463429752038792
+    },
+    "issue-613": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: Extend an existing workflow to strip rungs on PR merge using closingIssuesReferences; small, focused backend change with clear acceptance criteria.\n```\n",
+      "latency_s": 11.281682921107858
+    },
+    "issue-742": {
+      "raw": "```yaml\ntask_profile:\n  complexity: hard\n  creativity: medium\n  scope: multi-file\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: architecture\n  confidence: high\n  runner_up: null\n  notes: Cross-cutting refactor to unify priority/estimate backfill across four tracker handlers via one shared spec and thin per-handler adapters.\n```\n",
+      "latency_s": 10.63583830697462
+    },
+    "issue-746": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: medium\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: low\n  label: standard-pr\n  confidence: high\n  runner_up: null\n  notes: Cross-handler consistency fix deciding a lifecycle placement and aligning docs/code across a few handler files.\n```\n",
+      "latency_s": 10.435227004112676
+    },
+    "issue-750": {
+      "raw": "```yaml\ntask_profile:\n  complexity: hard\n  creativity: medium\n  scope: multi-file\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: architecture\n  confidence: high\n  runner_up: null\n  notes: Cross-handler backfill path with strict no-transition/hold rules, encoding inversion risk, and a required test pair.\n```\n",
+      "latency_s": 13.177326627075672
+    },
+    "issue-766": {
+      "raw": "```yaml\ntask_profile:\n  complexity: hard\n  creativity: medium\n  scope: multi-file\n  autonomy: long-horizon\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: architecture\n  confidence: low\n  runner_up: verification-sensitive\n  notes: Security-sensitive preflight probe spanning preflight.sh, sandbox wrapper, tests, and environment fingerprint; hard macOS TCC/launchd behavior with strong verification demands.\n```\n",
+      "latency_s": 11.1158968990203
+    },
+    "issue-786": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: low\n  scope: single-file\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: verification-sensitive\n  confidence: high\n  runner_up: null\n  notes: \"Small compatibility bug in a shell script; the hard part is verifying the fix on the correct git version where the failure reproduces.\"\n```\n",
+      "latency_s": 10.287785145221278
+    },
+    "issue-791": {
+      "raw": "```yaml\ntask_profile:\n  complexity: standard\n  creativity: medium\n  scope: pr-sized\n  autonomy: bounded\n  speed_sensitivity: low\n  cost_sensitivity: low\n  verification_criticality: high\n  label: standard-pr\n  confidence: low\n  runner_up: verification-sensitive\n  notes: Standard skill feature work; explicit check requirement and recommendation wording create some ambiguity with verification-sensitive.\n```\n",
+      "latency_s": 18.886447806842625
+    }
+  },
+  "failed": {}
+}

@@ -1,8 +1,14 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+user-invocable: false
+---
+
 # jira handler — /do-tasks execute flow
 
 Invoked from `/do-tasks` (section 5, "jira path") when `handler: jira` is configured. This file holds the full jira claim/execute flow, run in the current session over the Atlassian MCP: **find candidates** (read-only), **pre-flight in-flight check** (read-only), **judge feasibility** (read-only), **claim the issue** (mutating, before work starts), **branch + execute**, **PR**, and **move to review on PR open** (mutating, after the PR is opened). A separate **bail** phase runs when work proves infeasible mid-execution. It mirrors the tracker flow in `commands/handlers/linear-claim.md`, over the Atlassian MCP instead of the Linear MCP — the same way `gh-issue-claim.md` mirrors it over the `gh` CLI.
 
-**Shared reference:** the Atlassian MCP preflight is `commands/handlers/jira.md` step 1; the `ready_status` config key (the jira analogue of the Linear `Todo`/`unstarted` ready lane) is defined in `commands/handlers/jira-config.md`; `commands/handlers/linear-claim.md` is the structural template.
+**Shared reference:** the Atlassian MCP preflight is `commands/handlers/jira.md` step 1; the `ready_status` config key (the jira analogue of the Linear `Todo`/`unstarted` ready lane) is defined in `commands/handlers/jira-config.md`; the claim lock this file acquires is defined once in `commands/handlers/claim-lock.md`; `commands/handlers/linear-claim.md` is the structural template.
 
 > **MCP namespace.** `<atlassian-mcp>__` is `mcp__claude_ai_Atlassian__` or `mcp__atlassian__` depending on the install (see `jira-config.md`) — substitute the prefix loaded in your session. Tool names after the prefix (`getAccessibleAtlassianResources`, `searchJiraIssuesUsingJql`, `getJiraIssue`, `editJiraIssue`, `atlassianUserInfo`, `getTransitionsForJiraIssue`, `transitionJiraIssue`, `addCommentToJiraIssue`) are identical across installs.
 
@@ -18,6 +24,7 @@ Read `dev_docs/tasks/.task-config.yml`. The jira claim flow reads:
 - `jira.project` — project key.
 - `jira.ready_status` — **required here.** The status the ready lane lives in (the jira analogue of Linear's `Todo`). `/do-tasks` pulls candidates from this status. If it is unset/empty, **stop** with: "jira `/do-tasks` needs `jira.ready_status` set in dev_docs/tasks/.task-config.yml (the status promoted issues land in). Set it, or run `/task-config jira`." Do not guess a status name.
 - `jira.base_branch` — optional; the branch `/do-tasks` branches from (default: the repo's default branch).
+- `jira.blocked_statuses` — optional; status names that mean "blocked" on this board. The pre-claim WIP gate excludes them from its in-flight count, so a parked issue doesn't consume a slot. Defined in `commands/handlers/jira-config.md` → "Blocked statuses".
 
 ## Modes: atomic vs. claim/execute split
 
@@ -29,9 +36,10 @@ normal run — passing both is an error: stop and ask which was meant.
 - **default** (neither flag) — run every phase below: pre-claim WIP gate → find
   candidates → pre-flight → judge → claim → branch + execute → PR → move to review.
 - **`--claim-only`** — run through "Claim the issue" (pre-claim WIP gate, find
-  candidates, pre-flight, judge, then self-assign and transition to an In-Progress
-  status), then **stop**: no branch, no execution, no PR. The assigned, In-Progress
-  issue is the reservation marker — do **not** transition it to In Review.
+  candidates, pre-flight, judge, then acquire the `task/<KEY>` claim lock, self-assign,
+  and transition to an In-Progress status), then **stop**: no execution, no PR. The
+  created `task/<KEY>` lock ref plus the assigned, In-Progress issue is the reservation
+  marker — do **not** transition it to In Review.
   `--claim-only` is the one execute-family action safe to batch, so `/do-tasks --all`
   / `-n N --claim-only` may reserve several issues at once, each bounded by the WIP
   gate.
@@ -43,19 +51,18 @@ normal run — passing both is an error: stop and ask which was meant.
   executing an unclaimed issue reopens the race the claim step closes. When the guard
   passes, **check out the existing `task/<KEY>` branch** rather than branching fresh
   from base — Jira publishes no branch, so the handler's deterministic `task/<KEY>` is
-  the claim branch:
+  the claim branch (and, since the claim pushes it, the claim lock itself):
 
   ```bash
   git fetch origin && git switch "task/<KEY>"
   ```
 
-  If that branch exists neither locally nor on the remote (the issue was reserved via
-  `--claim-only`, which creates no branch), create it now —
-  `git switch -c "task/<KEY>" "origin/<base>"` (`<base>` is `jira.base_branch` if set,
-  else the repo's default branch — resolved as in "Branch + execute" below). Then run
-  "Branch + execute" (skipping
-  branch creation), "PR", and "Move to review" — without re-claiming. `--no-claim` is
-  always single (`--all` / `-n N` do not apply).
+  If that branch exists neither locally nor on the remote — the claim ran on the
+  degraded comment-election path, which creates no ref (see `claim-lock.md`) — create it
+  now: `git switch -c "task/<KEY>" "origin/<base>"` (`<base>` is `jira.base_branch` if
+  set, else the repo's default branch — resolved as in "Branch + execute" below). Then
+  run "Branch + execute" (skipping branch creation), "PR", and "Move to review" —
+  without re-claiming. `--no-claim` is always single (`--all` / `-n N` do not apply).
 
 ## Pre-claim WIP gate
 
@@ -63,10 +70,17 @@ Mirrors the Linear pre-claim gate. It runs **before** judging feasibility or
 claiming, on every claiming run — single mode included; only `--no-claim`, which
 claims nothing, skips it.
 
+> **When the count is at the limit, who decides.** The count below always runs. What
+> happens when it meets the limit depends on the action: a **batch** declines or is
+> bounded as specified here, always; a **single** claim in an attended session offers
+> the user a one-keystroke override first. See `commands/handlers/attendedness.md` —
+> that file owns the rule, including why the override is a prompt rather than a
+> printed question. Do not restate it here.
+
 1. Resolve `wip_limit` from the top-level `wip_limit` key in
    `dev_docs/tasks/.task-config.yml` (default `3` — the same key the repo-pr, linear,
    and gh-issue handlers use).
-2. Count current in-flight work = issues in the configured project whose status sits in
+2. Count current in-flight work = issues **assigned to this caller** whose status sits in
    the In Progress / In Review category. A single JQL count covers both: Jira's
    `indeterminate` category (display name `In Progress`) spans every In-Progress _and_
    In-Review-type status, so `statusCategory = "In Progress"` catches the lot (the
@@ -76,10 +90,26 @@ claims nothing, skips it.
    ```
    <atlassian-mcp>__searchJiraIssuesUsingJql
      cloudId: <jira.site>
-     jql: project = "<project>" AND statusCategory = "In Progress" ORDER BY updated ASC
+     jql: project = "<project>" AND assignee = currentUser() AND statusCategory = "In Progress" AND Flagged IS EMPTY [AND status NOT IN ("<blocked-status>", …)] ORDER BY updated ASC
      fields: ["status"]
      maxResults: 100
    ```
+
+   **`assignee = currentUser()` is required.** The gate bounds **this operator's**
+   concurrent work, not the project's. A shared team board carries other people's
+   in-progress issues by the dozen — an unscoped count on such a board exceeds any
+   plausible `wip_limit` permanently, so the gate never opens and `/do-tasks` can never
+   claim. Scoping to the caller is what makes the limit mean something a caller can act on.
+
+   **Parked work is not in flight.** `Flagged IS EMPTY` drops issues carrying Jira's
+   native Impediment flag; the `status NOT IN (…)` clause is added **only when**
+   `jira.blocked_statuses` is non-empty and drops the board's blocked-type statuses. Both
+   clauses are the same ones `jira-promote.md` step 3 applies, for the same reason — spell
+   them identically. A blocked status can sit in the `indeterminate` category, where it is
+   indistinguishable from real work to the category filter, and the same status name sits
+   in a different category on another board, so it cannot be hard-coded (see
+   `jira-config.md` → "Blocked statuses"). An issue parked at `On Hold/Blocked` consumes no
+   review capacity and must not consume a WIP slot.
 
    Count the returned issues — the length of `issues[]` (or `issues.nodes[]` on installs
    that nest it). The enhanced-search response carries **no** `total` field, so don't rely
@@ -89,9 +119,12 @@ claims nothing, skips it.
    status; do **not** add open PRs separately, that double-counts. (This mirrors the
    linear gate, which counts both `In Progress` and `In Review`, and the gh-issue gate,
    which counts both `auto-claimed` and `needs-review`.)
-3. If that count is **≥ `wip_limit`**, decline: report
+3. If that count is **≥ `wip_limit`**, apply the at-limit procedure in
+   `commands/handlers/attendedness.md`. **When it resolves to decline** — a batch, a hard
+   negative, or the user chose Stop — report
    `WIP limit <wip_limit> reached (<count> in flight) — no issue claimed` and stop. Do
-   not claim another issue.
+   not claim another issue. When it resolves to override, proceed with the claim and say
+   so in the run report. This step owns the **message**; that file owns the **decision**.
 
 For `--claim-only --all` / `-n N`, the gate bounds the batch instead of declining
 outright: reserve at most `max(0, wip_limit - <count>)` issues (0 slack → reserve
@@ -113,13 +146,13 @@ nothing and report the WIP-limit decline).
 
 Take the ranked candidates **one at a time**: for each candidate in ranked order, run **Pre-flight: is work already in flight?** and then, if it passes, **Judge feasibility** — on a pre-flight trip or a feasibility reject, advance to the next candidate and start it at pre-flight. Each entry needs `key`, `fields.summary`, `fields.description`, `fields.priority`, `fields.labels`, and the issue's `webUrl` (or build `https://<jira.site>/browse/<key>`). If no candidate remains, report that and stop.
 
-If the `/do-tasks` argument was a specific issue key (e.g. `PLAT-142`), skip the query and call `<atlassian-mcp>__getJiraIssue` (`cloudId`, `issueIdOrKey: <KEY>`, the same `fields` plus `"Flagged"`) for that one issue. Apply the step-3 filter and the `assignee IS EMPTY` / `status = <ready_status>` / `Flagged IS EMPTY` gates to it; if it fails any gate, return the failure reason rather than the issue (a flagged issue reports as blocked). Do not auto-override the gates from a direct key — `/do-tasks` surfaces the reason and stops.
+If the `/do-tasks` argument was a specific issue key (e.g. `PLAT-142`), skip the query and call `<atlassian-mcp>__getJiraIssue` (`cloudId`, `issueIdOrKey: <KEY>`, the same `fields` plus `"Flagged"`) for that one issue. Apply the step-3 filter and the `assignee IS EMPTY` / `status = <ready_status>` / `Flagged IS EMPTY` gates to it; if it fails any gate, return the failure reason rather than the issue (a flagged issue reports as blocked) — with one exception. A status outside `<ready_status>`, or a `human-approval-requested` label present, is the hold a human placed on the issue, and the person naming it is who the hold is for: apply the held-issue override in `commands/handlers/attendedness.md` (that file owns the prompt and the hard negatives; on decline, surface the reason and stop as before). On **Claim anyway** proceed with the issue and keep `human-approval-requested` on it through the claim — the override claims the issue, it does not release it to the loop. `assignee IS EMPTY`, `Flagged IS EMPTY` and `blocked` still refuse a direct key — `/do-tasks` surfaces the reason and stops.
 
 ## Pre-flight: is work already in flight?
 
 Runs on the candidate **before "Judge feasibility" and "Claim the issue"**, on every claiming path (single, direct `<KEY>`, and `--claim-only`). The same cheap, high-value guard as `linear-claim.md`'s pre-flight, keyed on the handler's deterministic `task/<KEY>` branch (Jira publishes no branch of its own): catch a sibling session that is already building this issue before spending the full issue-description read and feasibility judgment. If **any** check trips, **do not judge, do not claim, and do not build** — skip and report.
 
-1. **Open PR by key.** The execute path titles PRs `[<KEY>] <summary>`, so an open PR carrying the key is an in-flight build:
+1. **Open PR by key.** The execute path titles PRs `<type>(scope): <description> [<KEY>]`, so an open PR carrying the key is an in-flight build:
 
    ```bash
    gh pr list --state open --search "[<KEY>] in:title" --json number,url,title
@@ -127,13 +160,19 @@ Runs on the candidate **before "Judge feasibility" and "Claim the issue"**, on e
 
    GitHub search tokenizes on punctuation, so `[PROJ-45]` searches the tokens `PROJ` and `45` and can over-match. Before skipping, confirm a returned PR's `title` actually contains the literal `[<KEY>]` token — only then **skip** with `Skipped <KEY>: open PR already exists (<url>)`. (The `task/<KEY>` branch check in step 2 is exact and needs no post-filter.)
 
-2. **Remote branch (no PR yet).** A pushed `task/<KEY>` with no PR signals another session mid-build:
+2. **Remote branch (no PR yet).** An existing `task/<KEY>` with no PR signals another session mid-build:
 
    ```bash
    git ls-remote --heads origin "task/<KEY>"
    ```
 
    A non-empty result → `Skipped <KEY>: remote branch task/<KEY> already exists`.
+
+   Since "Claim the issue" pushes `task/<KEY>` **at claim time**, this check now also
+   catches a session that claimed the issue and is still building it — it is the cheap
+   read in front of the same ref the claim locks on, so a trip here saves the full
+   description read and feasibility judgment. It is a probe, not the lock: the lock is
+   the push (see `commands/handlers/claim-lock.md`).
 
 In single/direct mode an in-flight result **stops**; in ranked mode it moves to the next candidate and re-runs pre-flight on it.
 
@@ -152,22 +191,45 @@ If feasible: continue with this candidate (proceed to "Claim the issue"). If not
 
 **Do not claim it.** If every candidate is rejected, summarize the reasons and stop — do not lower the bar. Print the chosen issue's key, summary, and a one-sentence rationale, then proceed.
 
-Keeping the order as pre-flight → judge → claim is acceptable here because the claim is a cheap read-then-write guard executed immediately after the judge, unlike Linear's slow token-comment election that forces the judge inside the claim.
+Keeping the order as pre-flight → judge → claim is acceptable here because the claim below is atomic: two sessions may both judge the same issue, but only one can acquire the lock, and the loser detects the loss from the acquire result and advances to the next candidate instead of building a duplicate. (Linear's slow token-comment election is what forces its judge _inside_ the claim.)
 
 ## Claim the issue
 
-Jira has no transactional claim, so use a **claim-then-verify** guard (read-then-write, then re-read — the analogue of `linear-claim.md`'s concurrency guard and `gh-issue-claim.md`'s assignee guard): self-assign and move the issue to an In-Progress status, then re-read to confirm no one raced in.
+The claim locks on an **atomic primitive** — pushing the `task/<KEY>` ref, a server-side compare-and-swap — because Jira exposes no compare-and-swap on issue fields and a same-account racer reads back the identical `assignee`. Mechanics, the branch-pinned fallback, and the release rule live in **`commands/handlers/claim-lock.md`**; read it and follow it here rather than re-deriving them. The self-assign and In-Progress transition below stay on as the **human-visible** claim marker — they no longer decide the race.
 
 1. **Resolve your account id.** Call `<atlassian-mcp>__atlassianUserInfo` (no args) and capture the current user's `account_id`. (`@me` has no JQL/edit equivalent in Jira — assignment is by account id.)
 
-2. **Re-read** the chosen issue — `<atlassian-mcp>__getJiraIssue` (`cloudId`, `issueIdOrKey: <KEY>`, `fields: ["assignee", "status"]`). If it now has an assignee, or its status is no longer `ready_status`, **another session beat you** — return `race`, fall back to the next candidate.
+2. **Re-read** the chosen issue — `<atlassian-mcp>__getJiraIssue` (`cloudId`, `issueIdOrKey: <KEY>`, `fields: ["assignee", "status"]`). If it now has an assignee, or its status differs from the one you read in "Find candidates" (`ready_status` on the ranked path; the held status the direct-key override admitted), **another session beat you** — return `race`, fall back to the next candidate. An overridden issue keeps its held status here; step 5 resolves the start transition from that status and stops with its existing message if none exists. This is a cheap early-out, not the lock; note the wall-clock time of this read as `T_unclaimed` (the fallback election in `claim-lock.md` needs it).
 
-3. **Assign yourself.** Call `<atlassian-mcp>__editJiraIssue` with:
+3. **Acquire the lock** — `claim-lock.md` → "Primitive: create-only ref creation via the GitHub API", with `<base>` = `jira.base_branch` if set, else the repo's default branch, and `<repo>` from `gh repo view --json nameWithOwner --jq .nameWithOwner`:
+
+   ```bash
+   git fetch origin
+   base_sha=$(git rev-parse "origin/<base>")
+   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-claim.py" acquire-ref \
+     --repo "<repo>" --branch "task/<KEY>" --base-sha "$base_sha"
+   ```
+
+   If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
+   `**/handlers/assets/gh-issue-claim.py`.
+
+   Branch on the exit code (`claim-lock.md` → "Acquire" has the full table): **exit `3`**
+   (HTTP 422, `Reference already exists`) → **you lost**: leave the issue's assignee and
+   status untouched, return `race`, and fall back to the next candidate. **Exit `4`**
+   (any other 422, 403/404, protected-ref ruleset, branch-pinned environment) → degrade to
+   `claim-lock.md`'s comment-token election (using `T_unclaimed` from step 2) and report
+   the degrade reason. Only **exit `0`** proceeds to step 4 — check the branch out first
+   (`git fetch origin "task/<KEY>" && git switch -c "task/<KEY>" FETCH_HEAD`). Do **not**
+   substitute `git push origin task/<KEY>` for this call: both racers branch from the same
+   base sha, so the loser's push reports `Everything up-to-date` and exits 0 (measured —
+   see the warning in `claim-lock.md`).
+
+4. **Assign yourself.** Call `<atlassian-mcp>__editJiraIssue` with:
    - `cloudId`: `<jira.site>`
    - `issueIdOrKey`: `<KEY>`
    - `fields`: `{ "assignee": { "accountId": "<account_id>" } }`
 
-4. **Transition to In Progress.** `transitionJiraIssue` takes a transition **id**, not a status name, so resolve it per issue:
+5. **Transition to In Progress.** `transitionJiraIssue` takes a transition **id**, not a status name. Fetch the candidate's transitions, write the response to a file, and let the helper resolve the start-work one:
 
    ```
    <atlassian-mcp>__getTransitionsForJiraIssue
@@ -175,7 +237,13 @@ Jira has no transactional claim, so use a **claim-then-verify** guard (read-then
      issueIdOrKey: <KEY>
    ```
 
-   From the returned `transitions[]`, consider only entries whose target status is in the `indeterminate` (In Progress) category (`to.statusCategory.key == "indeterminate"`), then resolve the start-work status: if exactly one such transition exists, use it; if several exist, prefer one whose `to.name` is `In Progress` (case-insensitive), and if none is named `In Progress`, drop any whose `to.name` signals a non-start in-flight state (matches `hold`, `block`, `review`, `validation`, or `wait`) and use the single remaining candidate. Real workflows often name their start state `In Execution`, `Doing`, etc. — not literally `In Progress` — so don't assume the name. Capture its `id` and transition:
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-resolve-transition.py" \
+     --category indeterminate --exclude 'hold|block|review|validation|wait' --prefer 'in progress' \
+     < <transitions-response.json>
+   ```
+
+   If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/jira-resolve-transition.py`. Real workflows often name their start state `In Execution`, `Doing`, etc. — not literally `In Progress` — which is why the helper prefers that name rather than assuming it. On success it prints `<id>\t<to.name>` — capture the id and transition:
 
    ```
    <atlassian-mcp>__transitionJiraIssue
@@ -184,17 +252,17 @@ Jira has no transactional claim, so use a **claim-then-verify** guard (read-then
      transition: { id: "<transition-id>" }
    ```
 
-   If this leaves **no** candidate, or **more than one** after the filter, **do not guess** — surface the available transition names so the user can disambiguate (or fix the workflow / set a claim-target status in config), unassign yourself, and stop. Guessing among several `indeterminate` transitions risks parking a fresh claim in `On Hold/Blocked` or a review status — validated against a real workflow whose In-Progress category spans `In Execution`, `Validation`, and `On Hold/Blocked` with none named `In Progress`.
+   On `AMBIGUOUS`/`NONE` (exit 2), **do not guess** — surface the printed candidate names so the user can disambiguate (or fix the workflow / set a claim-target status in config), release the lock (`claim-lock.md` → "Release the lock"), unassign yourself, and stop. Guessing among several `indeterminate` transitions risks parking a fresh claim in `On Hold/Blocked` or a review status — validated against a real workflow whose In-Progress category spans `In Execution`, `Validation`, and `On Hold/Blocked` with none named `In Progress`.
 
-5. **Confirm.** Re-read the issue's `assignee` (`getJiraIssue`, `fields: ["assignee"]`). The claim holds **iff** `assignee.accountId` equals your `account_id` from step 1. If a different `accountId` appears, a concurrent claimer raced in **and won** — leave the issue untouched (do **not** clear the assignee or revert the status; both now belong to the winner, and stomping them would disrupt their active claim), return `race`, and fall back to the next candidate.
+6. **Confirm the marker landed** (not the race — the push in step 3 already decided that). Re-read the issue's `assignee` (`getJiraIssue`, `fields: ["assignee"]`). If a **different** `accountId` appears, a same-second sibling wrote the marker even though you hold the lock: leave the assignee alone (stomping it would disrupt a human's deliberate reassignment), and report `<KEY>: claim lock held, but assignee is <other> — the board marker disagrees with the lock`. Do **not** return `race` on this signal alone — you hold `task/<KEY>` and no one else can push it, so the atomic winner is you.
 
-6. **Comment** the branch name via `addCommentToJiraIssue` (`commentBody: "Claimed by /do-tasks. Working on branch \`task/<KEY>\`; PR link will follow."`).
+7. **Comment** the branch name. On the degraded election path, the token comment the election already posted carries this line — do not post it twice. Otherwise call `addCommentToJiraIssue` with `commentBody: "Claimed by /do-tasks. Working on branch \`task/<KEY>\`; PR link will follow."`
 
-Return the issue key and url so `/do-tasks` can branch and execute.
+Return the issue key and url so `/do-tasks` can execute (the work branch is already checked out).
 
 ## Branch + execute
 
-1. **Branch** — `task/<KEY>` (Jira has no native branch primitive, so the handler publishes this deterministic name). Branch from `<base>` — `jira.base_branch` if set, otherwise the repo's default branch (resolve it, e.g. `git symbolic-ref --short refs/remotes/origin/HEAD` → strip the `origin/` prefix; do **not** assume `main`):
+1. **Branch** — already done. "Claim the issue" step 3 created `task/<KEY>` from `<base>` (`jira.base_branch` if set, otherwise the repo's default branch — resolve it, e.g. `git symbolic-ref --short refs/remotes/origin/HEAD` → strip the `origin/` prefix; do **not** assume `main`) and pushed it as the claim lock, so this session is already on it. Confirm with `git branch --show-current` and do **not** re-create it. Only on the degraded comment-election path (no ref was pushed) create it now:
 
    ```bash
    git fetch origin && git switch -c "task/<KEY>" "origin/<base>"
@@ -205,12 +273,14 @@ Return the issue key and url so `/do-tasks` can branch and execute.
 ## PR
 
 ```bash
-gh pr create --title "[<KEY>] <summary>" --body "<KEY>: <jira issue URL>
+gh pr create --title "<type>(scope): <description> [<KEY>]" --body "<KEY>: <jira issue URL>
 
 <summary of the change>"
 ```
 
-The `[<KEY>]` title prefix and the `<KEY>` / issue URL in the body are the links Jira's GitHub integration (and smart commits) match on to associate and close the issue on merge — the jira analogue of `Closes #<n>` (gh-issue) and `Closes <identifier>` (Linear). Then post the PR URL back to the issue:
+The title grammar is the `agent-guidance` plugin's `portable.md` (`Git:` bullet), not this file.
+
+The `[<KEY>]` in the title and the `<KEY>` / issue URL in the body are the links Jira's GitHub integration (and smart commits) match on to associate and close the issue on merge — the jira analogue of `Closes #<n>` (gh-issue) and `Closes <identifier>` (Linear). Atlassian documents the requirement as _including_ the key in the PR title, and names capitalization as the only constraint on its form, with no positional one ([Reference work items in your development spaces](https://support.atlassian.com/jira-software-cloud/docs/reference-issues-in-your-development-work/), read 2026-09-13); the page's own examples happen to lead with the key. The end position is therefore documented-compatible rather than separately exercised: if a merge stops closing its issue, check position first. Then post the PR URL back to the issue:
 
 ```
 <atlassian-mcp>__addCommentToJiraIssue
@@ -240,9 +310,15 @@ The PR-URL comment posted right after `gh pr create` is the user-facing signal t
 
 ```bash
 git stash push -u
+git switch - && git push origin --delete "task/<KEY>"   # release the claim lock
 ```
 
-Then, over the Atlassian MCP:
+Release the lock **first** (`claim-lock.md` → "Release the lock") so the issue never
+returns to `ready_status` while a stale `task/<KEY>` still blocks the next session's
+acquire. On the degraded election path there is no ref to delete — **retract** this
+session's token comment instead by rewriting its body without the token
+(`addCommentToJiraIssue` with `commentId`); the Atlassian MCP has no delete-comment tool,
+so deletion is not available here. Then, over the Atlassian MCP:
 
 1. **Unassign** — `editJiraIssue` (`cloudId`, `issueIdOrKey: <KEY>`, `fields: { "assignee": null }`).
 2. **Transition back** to `ready_status` (resolve its transition id via `getTransitionsForJiraIssue`, matching `to.name == <ready_status>`) so the issue returns to the lane it came from. If a `human-approval-requested` label is configured on the board, re-read the issue's current labels (`getJiraIssue`, `fields: ["labels"]`), append `human-approval-requested` to that list, and write the combined list back via `editJiraIssue` (`fields: { "labels": [<existing…>, "human-approval-requested"] }`) so a human knows to look — `editJiraIssue` **replaces** the whole label set, so omitting the existing labels would drop them. Otherwise the comment below carries that signal.

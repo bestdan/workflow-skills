@@ -1,9 +1,17 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+user-invocable: false
+---
+
 # linear handler — /archive-tasks flow
 
 Invoked from `/archive-tasks` when `handler: linear` is configured. Retires
-terminal-state Linear issues (`completed`/`canceled` state types) older than the
+terminal-state Linear issues (`completed`/`canceled`/`duplicate` state types) older than the
 resolved threshold so the workspace stays under Linear's **free-plan cap of 250
-_active_ issues** — archived issues are unlimited and excluded from the cap.
+non-archived issues of any state** — archived issues are unlimited and excluded,
+and completing or cancelling frees nothing. `linear-common.md` →
+`active_issue_quota` owns that figure and records that it is dated, not fixed.
 
 **Shared reference:** see `commands/handlers/linear-common.md` for connection
 details, the config schema, the preflight pattern, and the kanban → state-type
@@ -19,15 +27,22 @@ mapping this file reuses.
 > whole thing — query **and** mutate — in GraphQL with one key. This is the one
 > handler whose retire op is not MCP-native.
 
-> **Gotcha (learned in practice): the agent usually can't read the key from its
-> own shell.** With 1Password **desktop-app integration**, only your authorized
-> terminal apps can unlock `op`. The agent's tool-spawned subshell is not one of
-> them, so `op read` / `op item get` there usually returns `account is not
-> signed in` even while you are signed in interactively — **but not always**: an
-> authorized environment or a `OP_SERVICE_ACCOUNT_TOKEN` in the shell can make it
-> succeed. **Test once** with a non-revealing probe (`op read "<ref>" >/dev/null
-> 2>&1`); if it resolves (exit 0), use it. If it returns `account is not signed
-> in`, fall back to one of these two paths:
+> **Gotcha: `account is not signed in` means no session, not a forbidden shell.**
+> `op read` needs an authorized 1Password session, and that message says one has
+> not been established — it is **not** a statement that the agent's tool-spawned
+> subshell is disallowed. Once `op signin` has run in **your own** terminal (with
+> desktop-app integration that raises the biometric prompt), `op` keeps the
+> session in a per-user cache daemon and `op read` works from the agent's subshell
+> too. Sessions lapse after roughly 30 minutes of inactivity. **Test once** with the
+> non-revealing probe, which honors a configured non-default resolver and never
+> prints the key:
+>
+> ```sh
+> python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/_secret_resolve.py" --probe LINEAR_API_KEY
+> ```
+>
+> Exit 0 → use it. Category `no-session` → run `op signin` in your terminal and
+> probe again — or fall back to one of these two paths:
 >
 > - **Interactive:** run the archive step in _your_ terminal via the session's
 >   `!` prefix (e.g. `! python3 …`), where `op` is authorized. The agent prepares
@@ -81,140 +96,144 @@ native window, or needs to drain a workspace that has already hit the cap.
    `linear-config.md` → "Archive key"). The agent already parses that merged
    config, so it reads the value directly (no YAML-scraping one-liner); a
    cron/Action sets `$LINEAR_API_KEY_REF` — or `$LINEAR_API_KEY` outright — in the
-   job env.
+   job env. `$LINEAR_API_KEY_RESOLVER` rides alongside it when the operator has
+   configured a non-default resolver; it comes from `linear.api_key_resolver` in
+   the **gitignored local config only** (`dev_docs/auth_key_access.md` →
+   "Provenance"), never from the committed file.
+
+   The script resolves the key itself — prefer letting it, rather than resolving
+   in the shell, so the redaction and the 120s bound apply. Where you do need the
+   value in a shell (the standalone cron path below), use the configured resolver:
 
    ```bash
-   LINEAR_API_KEY="$(op read "$LINEAR_API_KEY_REF")"   # e.g. op://Private/Linear API/credential
-   # or, by item UUID + field:
-   # LINEAR_API_KEY="$(op item get <uuid> --fields label=<field> --reveal)"
+   LINEAR_API_KEY="$(op read "$LINEAR_API_KEY_REF")"   # default resolver; e.g. op://Private/Linear API/credential
+   # with an approval-based resolver configured instead:
+   # LINEAR_API_KEY="$(opx "$LINEAR_API_KEY_REF")"
    ```
 
-   Per the gotcha above, run this in an `op`-authorized shell (your terminal via
-   `!`, or a headless shell with `OP_SERVICE_ACCOUNT_TOKEN`) — not the agent's own
-   subshell. If `linear.api_key_ref` is unset, **stop** with: "Linear archiving
+   Per the gotcha above, the default resolver needs an authorized `op` session —
+   establish one with `op signin` in your own terminal (it then works from the
+   agent's subshell too), or run headless with `OP_SERVICE_ACCOUNT_TOKEN`. If `linear.api_key_ref` is unset, **stop** with: "Linear archiving
    needs a personal API key. Add `linear.api_key_ref` (a 1Password `op://`
    reference) to the gitignored `dev_docs/tasks/.task-config.local.yml` — see
    `commands/handlers/linear-config.md` → 'Archive key'." Do not prompt for a
    pasted key and do not write one to the repo.
 
-### Find candidates
+### Run the script
 
-**Canonical: one GraphQL query (validated).** Filter on the **state type** (not
-display name — names are team-configurable) and the terminal timestamp directly,
-so no separate `list_workflow_states` call is needed. This is the same query the
-standalone script uses, and it ran cleanly against a real workspace:
+The retire step **is** `linear-archive.py` — do not re-derive its queries by
+hand. See "Run it without an agent — the shipped script" below for the full
+invocation and flag reference; this subsection is only the mapping from the
+resolved config onto those flags.
 
-```graphql
-query($cursor: String, $cutoff: DateTimeOrDuration!, $team: String!, $type: String!) {
-  issues(first: 100, after: $cursor, filter: {
-    team: { name: { eq: $team } },          # UUID-configured team? use id: { eq: $team } instead
-    state: { type: { eq: $type } },         # "completed" (Done) — repeat for "canceled"
-    # project: { id: { eq: $projectId } },  # per §3: loop once per configured project (omit for whole-team) — also declare $projectId: String in the signature above
-    completedAt: { lt: $cutoff }            # use canceledAt for the canceled pass
-  }) {
-    nodes { id identifier title completedAt }
-    pageInfo { hasNextPage endCursor }
-  }
-}
-```
+- Resolved age threshold (Preflight above, plus `--older-than` on
+  `/archive-tasks` if given) → `--older-than <N>`.
+- Call `commands/handlers/linear-common.md` → "Resolve configured projects" for
+  the project list. Whole-team scope (the synthetic `id: null` entry) → omit
+  `--project`. One or more configured projects → pass `--project <id>` once per
+  entry with a non-null `id`.
+- Refs passed to `/archive-tasks --issues` → `--issues <refs>` (identifiers
+  and/or UUIDs, comma-separated and/or repeated).
+- `linear.team` → `--team`.
 
-3. **Scope** the same way the rest of the Linear handler scopes — always bind the
-   team. `linear.team` may be a **name or a UUID id**: filter on
-   `team: { id: { eq: $team } }` when the value is UUID-shaped, else
-   `team: { name: { eq: $team } }` — otherwise a UUID-configured team matches
-   nothing and the archive silently no-ops. (The shipped script auto-detects this;
-   the agent path can resolve the id via the common preflight instead.) For the
-   **project** scope, call the **"Resolve configured projects"** step in
-   `commands/handlers/linear-common.md` (do **not** read the scalar
-   `default_project`). It returns a list of `{ id, name, wip_limit, max_estimate }`:
-   - **Whole-team scope** — the list is the single synthetic entry with `id: null`
-     (projects absent/empty): omit the `project` filter and sweep the whole team,
-     unchanged from today.
-   - **One or more configured projects** — each entry has a non-null `id`: **loop
-     the query once per `project.id`**, adding `project: { id: { eq: $projectId } }`
-     to the filter **and** declaring `$projectId: String` in the query signature
-     (the base example above omits it, so enabling the filter without also adding
-     the variable fails GraphQL validation). **Union** the candidates across all
-     projects (dedupe by issue `id`). This sweeps **every** configured project, not
-     just one.
+Run once without `--apply` first (the script's default) and show the candidate
+list. If the caller asked for a dry run, stop there. Otherwise re-run with
+`--apply`.
 
-   (`--project X` narrowing — restricting the sweep to a single named project — is
-   deferred; don't build it here.)
-4. **Paginate.** Linear caps a page (default 50; ask for `first: 100`). Loop on
-   `pageInfo.hasNextPage`, passing `endCursor` as the next `after`, until
-   exhausted — a single page silently undercounts a backlog at the cap. The
-   `issues` query **excludes archived issues by default**, so re-running is
-   idempotent: already-archived items simply don't come back. (No `archivedAt`
-   filter needed.)
-5. **Cutoff & the canceled pass.** `$cutoff` is `now − N days` as an ISO-8601
-   string (`DateTimeOrDuration`). Run the query once per terminal type **× per
-   configured project** (§3's loop): `completed` filtered on `completedAt`, and —
-   only if the user wants canceled work swept too — `canceled` filtered on
-   `canceledAt`. An issue missing the relevant timestamp is skipped (never archive
-   on an unknown date). Collect each match's UUID `id` and `identifier` into the
-   unioned candidate set (dedupe by `id`).
+Report what the script prints: candidate count, archived count, any failed ids
+with their error, and "nothing archived (dry-run)" for a dry run.
 
-> **In-session alternative (no key for the query).** If you are already in an
-> agent session with the Linear MCP, you _can_ do the read half over the MCP:
-> resolve `completed`/`canceled` state ids with `<linear-mcp>__list_workflow_states`,
-> then call `<linear-mcp>__list_issues` (`teamId`, optional `projectId`,
-> `includeArchived: false`, those state ids) and filter by age client-side. But
-> the mutation still needs the key in a non-agent shell, so for anything but a
-> tiny manual run, prefer the single-key GraphQL path above end-to-end.
-
-### Archive (mutation)
-
-6. **Always print the candidate list first** (identifier + terminal date). If
-   `dry-run`, stop here and report "nothing archived (dry-run)".
-7. Otherwise call the GraphQL `issueArchive` mutation **once per id** — there is
-   **no bulk archive mutation, so loop**. Use `trash: false` (archive, not trash):
-
-   ```bash
-   curl -sS https://api.linear.app/graphql \
-     -H "Authorization: $LINEAR_API_KEY" \
-     -H "Content-Type: application/json" \
-     -d '{"query":"mutation($id:String!){issueArchive(id:$id,trash:false){success}}","variables":{"id":"<ISSUE_ID>"}}'
-   ```
-
-   Check each response's `data.issueArchive.success`. On a `false` or an error
-   payload for an id, record it and continue the loop — one failure must not abort
-   the rest. (The personal API key authenticates as the user; `issueArchive` uses
-   the issue **UUID** `id`, not the `identifier` like `PRE-12`.)
-
-### Report
-
-8. Report: the candidate count, how many archived successfully, any ids that
-   failed (with the error), and a one-line "now under the 250 cap" note if you can
-   compute the remaining active count cheaply (otherwise omit — do not add tool
-   calls just for the count). In dry-run, report the candidates and that nothing
-   was changed.
+> Every terminal state is swept unconditionally — `duplicate` is its own state
+> type, not a flavour of `canceled`, and a state left out never gets archived.
+> If you are already in an agent session with the Linear MCP, you can do the
+> **read** half over the MCP instead (`list_workflow_states` +
+> `list_issues`), but the mutation still needs the key in a non-agent shell —
+> for anything but a tiny manual run, prefer the script end-to-end.
 
 ## Run it without an agent — the shipped script
 
 Because the backstop needs only the API key, it runs as a standalone job with no
 agent session — the cleanest way to dodge the `op`-in-agent-shell gotcha
-entirely, and the form to schedule on a cron / GitHub Action. The whole flow
-above (paginated query → candidate list → per-id `issueArchive` loop) is packaged
-as a runnable script:
+entirely, and the form to schedule on a cron / GitHub Action. The retire flow
+(paginated query → candidate list → per-id `issueArchive` loop, or the
+`--issues` lookup) is packaged as a runnable script:
 
 **`commands/handlers/assets/linear-archive.py`** (Glob `**/handlers/assets/linear-archive.py` if the relative path doesn't resolve).
 
 It **defaults to a dry run** and only mutates with `--apply` — preserve that. It
-reads the key from `$LINEAR_API_KEY`, else `op read "$LINEAR_API_KEY_REF"`. This
-is the exact script validated against a real workspace (archived 75 issues, 0
-failures).
+reads the key from `$LINEAR_API_KEY`, else resolves `$LINEAR_API_KEY_REF` with the
+program named by `$LINEAR_API_KEY_RESOLVER` (`op` by default — see
+`dev_docs/auth_key_access.md`). Because this command has **no MCP floor**, an
+unresolvable key is **fatal**: the script exits non-zero with a reason category
+and the archive does not run. This is the exact script validated against a real
+workspace (archived 75 issues, 0 failures).
+
+> **Plain-key fallback.** If the 1Password desktop-app integration doesn't
+> expose an account to the CLI (`op account list` comes back empty even when
+> signed in — a snag seen in practice), skip `op` entirely: open the item in
+> the 1Password **GUI**, copy the field value, and export it directly —
+> `export LINEAR_API_KEY="$(pbpaste)"` or a literal paste into the shell. This is a
+> first-class supported path, not just an aside; both `op item get <uuid>` and
+> `op read` require a working CLI integration that may not be present.
 
 ```bash
 # Dry run (lists candidates, changes nothing):
-python3 commands/handlers/assets/linear-archive.py --team PreThink --older-than 10
+python3 commands/handlers/assets/linear-archive.py --team Platform --older-than 10
 
 # Archive them:
-python3 commands/handlers/assets/linear-archive.py --team PreThink --older-than 10 --apply
+python3 commands/handlers/assets/linear-archive.py --team Platform --older-than 10 --apply
 
-# Scope to a project and also sweep Canceled:
-python3 commands/handlers/assets/linear-archive.py --team PreThink --older-than 30 \
-  --project <uuid> --include-canceled --apply
+# Scope to a project (all terminal states are swept either way):
+python3 commands/handlers/assets/linear-archive.py --team Platform --older-than 30 \
+  --project <uuid> --apply
+
+# Scope to several configured projects — repeat --project once per id
+# (linear-common.md → "Resolve configured projects" list); the sweep loops per project and unions
+# the results, deduped by issue id. Omitting --project entirely still sweeps
+# the whole team.
+python3 commands/handlers/assets/linear-archive.py --team Platform --older-than 30 \
+  --project <uuid-1> --project <uuid-2> --apply
+
+# Archive named issues regardless of age (identifiers and/or UUIDs):
+python3 commands/handlers/assets/linear-archive.py --team Platform \
+  --issues PRE-12,PRE-13 --apply
 ```
+
+The script's scope can now match the agent-driven flow's ("Run the script"), but only when
+the caller passes every configured project's `id` as its own `--project` —
+with 1+ projects configured under `linear.projects`, that is what a cron/Action
+entry must do to sweep the same scope the agent flow does. Omitting `--project`
+does **not** pick this up automatically: the script still reads no config, so
+with no flags at all it sweeps the **whole team**, exactly as it always has,
+even when `linear.projects` is configured. The whole-team default is unchanged
+either way — it is the caller's job to resolve the configured project list and
+pass one `--project <uuid>` per entry when narrower archiving is wanted.
+
+### `--issues` — archive specific issues, no age threshold
+
+The age threshold guards the **bulk sweep**: without a cutoff there is no bounded
+candidate list, so a bare run could archive a whole workspace. That reasoning does
+not apply once the caller has **named** the issues, and the guard was blocking a
+real case — issues closed minutes ago are un-archivable until the cutoff passes,
+even when you want exactly those three gone now.
+
+`--issues <refs>` is that mode. Refs are issue identifiers (`PRE-12`,
+case-insensitive) or issue UUIDs, comma-separated and/or the flag repeated. It
+ignores `--older-than` and `--project` (both are sweep-scoping knobs) and says so
+on stdout rather than silently, and it is still dry-run until `--apply`. Refs are
+capped at **250 per run** — the lookup fetches one page, so an overflowing list
+would come back as "not found" and go unarchived, which reads exactly like a
+clean run; it is rejected outright instead. Split the list, or use `--older-than`
+if you are archiving that many.
+
+What it does **not** relax is the terminal-state rule: a named issue that is not
+`completed`/`canceled`/`duplicate` is **reported and skipped**, never archived —
+archiving open work would hide it. Nor does it relax the **team** scope: an
+identifier is confined server-side by the team-scoped `number` filter, and a raw
+UUID — a global key whose query cannot bind the team — is checked against the
+returned `team` client-side. Either way a ref outside `--team` is reported as not
+found rather than archived, so another team's `OTH-12` never matches this team's
+issue 12.
 
 `--team`/`--older-than` also read `$LINEAR_TEAM`/`$ARCHIVE_AFTER`, so a cron entry
 can set those plus `$LINEAR_API_KEY` (or `$OP_SERVICE_ACCOUNT_TOKEN` +
