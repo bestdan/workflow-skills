@@ -14,9 +14,11 @@ impression has never been measured.
 
 This design turns **reconciliation into a measurement instrument**: every
 co-review run already grades every finding, so record the grades and aggregate
-them per reviewer. The output is evidence for two decisions we currently make on
-vibes — **which reviewers to keep running**, and **how to fix a reviewer's
-prompt**.
+them per reviewer, alongside how long each reviewer took. The output is evidence
+for two decisions we currently make on vibes — **which reviewers to keep
+running**, and **how to fix a reviewer's prompt**. A reviewer earns its place by
+being right, by catching what others miss, and by not holding up every run while
+it does either, so the evidence covers speed as well as correctness.
 
 ## The key insight: the grader is already (mostly) blind
 
@@ -164,15 +166,26 @@ Append-only, two record types.
   "co_review_version": "1.4.2",
   "reconciler_model": "claude-opus-4-8",
   "reviewers": [
-    { "name": "claude", "disposition": "ran", "model": "claude-opus-4-8" },
+    {
+      "name": "claude",
+      "disposition": "ran",
+      "model": "claude-opus-4-8",
+      "duration_s": 94.2
+    },
     {
       "name": "devin",
       "disposition": "ran",
       "model": "swe-1.6",
-      "command": "devin --sandbox --permission-mode auto --prompt-file ..."
+      "command": "devin --sandbox --permission-mode auto --prompt-file ...",
+      "duration_s": 211.7
     },
-    { "name": "agy", "disposition": "skipped", "reason": "auth probe failed" },
-    { "name": "codex", "disposition": "timed-out" }
+    {
+      "name": "agy",
+      "disposition": "skipped",
+      "reason": "auth probe failed",
+      "duration_s": null
+    },
+    { "name": "codex", "disposition": "timed-out", "duration_s": 600.0 }
   ]
 }
 ```
@@ -180,6 +193,28 @@ Append-only, two record types.
 Without this record, a reviewer that ran ten times and found nothing is
 indistinguishable from one that never ran — and "finds nothing" is itself a
 quality signal worth seeing.
+
+**Speed.** `duration_s` is the wall-clock seconds from dispatching a reviewer to
+having its result, `null` for a reviewer that was never dispatched. Reviewers
+run in parallel, so the slowest one sets how long the whole review waits; a
+reviewer that is correct but takes four times as long as the rest costs every
+run that wait. Three rules keep the number honest:
+
+- **Measured, never estimated.** The dispatch records a timestamp before and
+  after each reviewer and subtracts. A duration the model guessed from the
+  transcript would be fabricated data in a ledger whose only value is that it
+  isn't.
+- **A timeout is censored, not slow.** A `timed-out` reviewer's `duration_s` is
+  how long it was waited on, which is the timeout bound, not how long it would
+  have taken. The stats keep those runs out of the duration percentiles and
+  count them separately.
+- **Failures cost time too.** A reviewer that runs and returns nothing usable
+  (`disposition: failed`, e.g. answering NO INPUT) records its duration like any
+  other. Its time was spent whether or not it produced a finding.
+
+Duration is a measurement, not a grade, so recording it does not touch the
+blinding. Reading it is still a ledger read, and the firewall still forbids it
+in the review path.
 
 **Provenance, because names drift.** "devin" is not one thing over time: its
 model gets bumped in `.co-review.yml`, its command string changes, the
@@ -299,6 +334,9 @@ Per reviewer:
 | `high`        | Findings that survived as `high`                                    |
 | `unique-high` | `high` rows: sole automated source **and** not `human_corroborated` |
 | `finds/run`   | Volume — catches the reviewer that is quiet, not correct            |
+| `p50 s`       | Median `duration_s` over runs where the reviewer `ran`              |
+| `p90 s`       | 90th-percentile `duration_s` over the same runs                     |
+| `fail %`      | (`timed-out` + `failed`) ÷ runs where the reviewer was dispatched   |
 
 **The baseline comparison is paired, not marginal.** Reviewers don't skip at
 random — auth failures cluster in time, timeouts correlate with big diffs — so
@@ -321,6 +359,14 @@ always **relative to the reviewers that ran that day** — the run record makes
 that cohort explicit, so the stats can't silently credit a reviewer for being
 alone in an empty room.
 
+The speed columns are read against the quality ones, not on their own. `p90 s`
+is the column that matters for the run as a whole, because the slowest reviewer
+sets the wait. A reviewer that is slow, has a high `fail %`, and rarely adds a
+`unique-high` is the clearest drop case the table can show; one that is slow but
+the sole catcher of real bugs may be worth its wait. Durations depend on diff
+size, so `diff_lines` on the run record is there to stratify by when a
+reviewer's times look erratic.
+
 Flags: `--since <date>`, `--repo <name>` (did a reviewer regress after a model
 bump? is it fine on Python and hopeless on shell?).
 
@@ -330,6 +376,11 @@ bump? is it fine on Python and hopeless on shell?).
   would exonerate it — a trapdoor. And with per-reviewer N in the dozens, any
   threshold fires on noise. Eviction stays a human edit to `.co-review.yml`, made
   against a real sample.
+- **No automatic reviewer selection, yet.** Choosing per run which reviewers to
+  dispatch, from what the ledger shows, is a follow-up (#1040). It has to keep
+  scores out of every agent's context and keep an exploration floor so a
+  skipped reviewer can still be re-measured, and it can't be designed honestly
+  before there is data to select on.
 - **No mid-run nudge.** Considered and rejected: it would require the review path
   to read the ledger, which is the one thing the firewall forbids.
 - **No failure-mode taxonomy** (`hallucinated-api`, `misread-diff`, …). This is
@@ -352,8 +403,12 @@ bump? is it fine on Python and hopeless on shell?).
 4. `/co-review-stats` reports every reviewer plus the `claude` baseline, with
    the headline comparison **paired on common runs** and all arithmetic done in
    the script.
-5. After ~30 runs, the table can answer: _is devin actually wrong more often
-   than Claude on the same diffs, and does it catch anything nobody else does?_
+5. Every dispatched reviewer's `duration_s` is measured by the dispatch, not
+   estimated, and the stats report its `p50 s`, `p90 s` and `fail %` with
+   timed-out runs kept out of the percentiles.
+6. After ~30 runs, the table can answer: _is devin actually wrong more often
+   than Claude on the same diffs, does it catch anything nobody else does, and
+   how long does every run wait for it?_
 
 ## Open question, resolved by data
 
