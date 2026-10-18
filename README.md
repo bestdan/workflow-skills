@@ -130,7 +130,7 @@ capability matrix.
 
 ### Worktree lifecycle
 
-The plugin registers seven hooks. Three of them create and tear down an
+The plugin registers eight hooks. Three of them create and tear down an
 isolated worktree without anything being typed: `WorktreeCreate` puts it where
 [`scripts/worktree-config.sh`](scripts/worktree-config.sh) says worktrees live
 (not inside the repo, which aborts in a repo that versions its own agent
@@ -195,6 +195,12 @@ or Remote Control session; the refusal names the prompt-free route instead
 (`ExitWorktree` `keep` first only when already in a worktree, then `name`).
 With no name, or on any error, it stays silent and the prompt appears as
 before.
+
+The eighth, on `SessionEnd`, is not about worktrees. It pushes this machine's
+new co-review ledger rows to the shared repo
+([`scripts/co-review-ledger-sync.py`](scripts/co-review-ledger-sync.py)
+`--push --detach`), in the background so the session's exit does not wait on
+the network. With `CO_REVIEW_LEDGER_REMOTE` unset it does nothing.
 
 | Skill                                                      | Trigger                                                                                                    | What it does                                                                                                                                                                                                                                            |
 | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

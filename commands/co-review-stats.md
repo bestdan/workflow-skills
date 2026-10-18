@@ -15,8 +15,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/co-review-ledger-sync.py" --pull
 
 It prints only `ledger sync: …` receipt lines and always exits 0. Show them
 above the table; a `❌` line, or `ledger sync: off`, still goes on to the stats.
-This and a hand-run `--push` are the only flushes for now: nothing runs one at
-session end yet. The design is
+The plugin's `SessionEnd` hook also pushes this machine's new runs when a
+session ends, so the pull here mostly fetches the other machines'. The design is
 [`dev_docs/designs/2026-10-18-co-review-ledger-sync.md`](../dev_docs/designs/2026-10-18-co-review-ledger-sync.md).
 
 Then run the stats, passing through only `--since` and `--repo` from the

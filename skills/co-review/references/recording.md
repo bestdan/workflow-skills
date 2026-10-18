@@ -253,7 +253,8 @@ Read its outcome:
 
 Copying rows to other machines is a separate flush, never part of the review:
 [`scripts/co-review-ledger-sync.py`](../../../scripts/co-review-ledger-sync.py),
-run by hand and by `/co-review-stats`. Don't run it from a review.
+run at session end by the plugin's `SessionEnd` hook, by `/co-review-stats`,
+and by hand. Don't run it from a review.
 
 When aggregate reviewer scores were already in this session's context before
 the run started, add `scores were in context, discount this run` to the ledger
