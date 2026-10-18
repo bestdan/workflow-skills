@@ -63,8 +63,22 @@ def validate_run(run) -> dict:
         raise InputError("run: expected an object")
     if not isinstance(run.get("run_id"), str) or not run["run_id"]:
         raise InputError("run: run_id is required")
-    if not isinstance(run.get("reviewers", []), list):
+    reviewers = run.get("reviewers", [])
+    if not isinstance(reviewers, list):
         raise InputError("run: reviewers must be a list")
+    for i, reviewer in enumerate(reviewers):
+        if not isinstance(reviewer, dict):
+            raise InputError(f"run: reviewers[{i}] must be an object")
+        # Wall-clock seconds from dispatch to result; null when never dispatched.
+        duration = reviewer.get("duration_s")
+        if duration is not None and (
+            isinstance(duration, bool)
+            or not isinstance(duration, (int, float))
+            or duration < 0
+        ):
+            raise InputError(
+                f"run: reviewers[{i}].duration_s must be a non-negative number or null"
+            )
     return run
 
 

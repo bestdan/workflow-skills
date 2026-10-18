@@ -22,8 +22,8 @@ teardown() { teardown_test; }
 load test_helper
 
 write_run() {
-  printf '{"run_id": "%s", "pr": 7, "reviewers": [{"name": "devin"}, {"name": "bot:copilot-pull-request-reviewer"}]}\n' \
-    "$1" >"$TEST_TMPDIR/run-$1.json"
+  printf '{"run_id": "%s", "pr": 7, "reviewers": [{"name": "devin", "duration_s": %s}, {"name": "bot:copilot-pull-request-reviewer", "duration_s": null}]}\n' \
+    "$1" "${2:-42.5}" >"$TEST_TMPDIR/run-$1.json"
 }
 
 record() {
@@ -53,6 +53,23 @@ ledger_py() { python3 -c "import json,sys; recs=[json.loads(l) for l in open('$L
   record
   run ledger_py 'print(recs[1]["human_corroborated"], recs[2]["human_corroborated"], [r.get("file") for r in recs])'
   assert_output "True False [None, 'a.py', 'b.py']"
+}
+
+@test "each reviewer's duration_s is recorded on the run record" {
+  record
+  run ledger_py 'print([r["duration_s"] for r in recs[0]["reviewers"]])'
+  assert_output "[42.5, None]"
+}
+
+@test "a negative or non-numeric duration_s exits non-zero and writes nothing" {
+  write_run run-neg -1
+  record run-neg
+  assert_failure
+  assert_output --partial "duration_s must be a non-negative number or null"
+  write_run run-str '"slow"'
+  record run-str
+  assert_failure
+  assert_file_not_exists "$LEDGER"
 }
 
 @test "a repeated run_id appends nothing and says so" {
