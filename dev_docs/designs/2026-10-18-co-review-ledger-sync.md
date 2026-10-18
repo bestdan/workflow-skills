@@ -74,19 +74,29 @@ The flush never repairs a clone. Every row in the shared file came from a
 local ledger, so a clone can always be rebuilt from the remote plus this
 machine's ledger, and rebuilding is simpler and safer than any repair:
 
-- **No rebase, ever.** A rebase can stop on a conflict and leave state that
-  makes every later `git pull` fail, and after a history rewrite on the remote
-  (the remedy for a leaked field) it can replay the leaked commit and push it
-  again. The flush only ever fast-forwards or starts over.
-- **Start over on any doubt.** Under the lock, before doing anything else, the
-  flush deletes the clone and clones afresh when any of these holds: the
-  directory is not a valid repo (a clone killed partway), a rebase or merge is
-  in progress, or the upstream is not an ancestor of the local branch (the
-  remote was rewritten). A dirty working tree or an unpushed commit is not a
-  reason: step 7 resets both away. Deleting is safe because unpushed rows are rebuilt from
-  the local ledger on the next step.
+- **No rebase or merge, ever.** A rebase can stop on a conflict and leave state
+  that makes every later `git pull` fail, and after a history rewrite on the
+  remote (the remedy for a leaked field) it can replay the leaked commit and
+  push it again. The flush moves its branch only with `git reset --hard` onto
+  the fetched upstream, or starts over.
+- **Start over when the clone is broken.** Under the lock, before anything
+  else, the flush deletes the clone and clones afresh when the directory is not
+  a valid repo (a clone killed partway) or a rebase or merge is in progress.
+  A dirty working tree is reset (`git reset --hard`, no network). Unpushed
+  commits are left for step 7 to reset away.
+- **Start over when the remote was rewritten.** After every fetch (step 8 and
+  `--pull`), if the fetched upstream is not an ancestor of the local branch,
+  the flush deletes the clone. The check needs a fetch, so the no-network path
+  cannot see a rewrite; the next fetch does, and the rewrite changes no keys,
+  so a stale watermark meanwhile does no harm.
 - **Clone atomically.** A clone goes to `shared.tmp/` and is renamed to
   `shared/` only once it succeeds, so a killed clone never looks like a clone.
+
+Deleting is always safe, because unpushed rows are rebuilt from the local
+ledger. The same property means **rows cannot be deleted from the shared repo
+while a local ledger still holds them**: the next flush pushes them back. That
+is by design. To remove rows everywhere, remove them from the local ledger
+first.
 
 ### The flush — `scripts/co-review-ledger-sync.py`
 
@@ -94,26 +104,39 @@ Stdlib Python, PEP 723, the same tier as the writer. It has two modes, because
 the two callers need different things: session end wants to send this
 machine's rows cheaply, and `/co-review-stats` wants every machine's rows.
 
+**The empty remote.** A fresh remote has no branch, so a clone of it has no
+upstream and no `HEAD`, and every git command that names `@{u}` fails. The
+flush probes `git rev-parse --verify -q '@{u}'` once. When it fails, the
+watermark is empty, steps 7 and 8 skip their reset, and the push is
+`git push -u origin HEAD:main`, which creates the branch. The branch is pinned
+to `main` throughout.
+
 `--push` (session end, and by hand):
 
 1. If `CO_REVIEW_LEDGER_REMOTE` is unset, print `ledger sync: off` and exit 0.
 2. Take an exclusive `flock` on `~/.claude/co-review/shared.lock`, so two
-   sessions on one machine never flush at once.
-3. Make sure a clean clone exists, per "The clone is disposable". This is the
+   flushes on one machine never run at once. Try without blocking and retry
+   for at most 30 seconds; on timeout, print
+   `ledger sync: ❌ another flush is running` and exit 0. A background flush
+   at session end can hold the lock through a slow push, and
+   `/co-review-stats` must not wait on it without bound.
+3. Make sure a usable clone exists, per "The clone is disposable". This is the
    only step that may need the network when nothing is new, and only when the
-   clone was missing or unusable.
+   clone was missing or broken.
 4. Read the **pushed** copy of this machine's file,
-   `git show @{u}:ledgers/<host>.jsonl` (empty when the remote has no such file
-   or no branch yet), and collect its `(host, run_id)` keys. That committed,
-   pushed file is the watermark. Reading the pushed copy rather than the
-   working tree means rows that were appended or committed but never pushed
-   are selected again, so a kill at any step loses nothing.
+   `git show @{u}:ledgers/<host>.jsonl`, and collect its `(host, run_id)` keys.
+   That pushed file is the watermark. A `does not exist in` error means the
+   remote has no file for this host yet, so the watermark is empty; with no
+   upstream at all, it is empty too (above). Any other error deletes the clone
+   and ends the flush. Reading the pushed copy rather than the working tree
+   means rows that were appended or committed but never pushed are selected
+   again, so a kill at any step loses nothing.
 5. Read the local ledger under a **shared `flock` on `findings.jsonl`**, the
    same file the writer locks exclusively, so the flush never sees a write in
-   progress. Select every run block (a run record and the findings after it)
-   whose key is not in the watermark. A block whose last line is unterminated
-   or unparseable is skipped whole, not trimmed, so a partial run is never
-   copied and then counted as flushed.
+   progress. A missing ledger is an empty one. Select every run block (a run
+   record and the findings after it) whose key is not in the watermark. A
+   block whose last line is unterminated or unparseable is skipped whole, not
+   trimmed, so a partial run is never copied and then counted as flushed.
 6. If nothing was selected, print `ledger sync: up to date` and exit 0. **This
    path makes no network call.** Rows left in an unpushed commit by an earlier
    flush are not in the watermark, so they are selected again here rather than
@@ -121,24 +144,34 @@ machine's rows cheaply, and `/co-review-stats` wants every machine's rows.
 7. Otherwise reset the branch to its upstream (`git reset --hard @{u}`, which
    drops any unpushed commit whose rows step 5 just reselected), append the
    selected blocks redacted (below), commit (`ledger: <host> +<n> runs`) and
-   push. When the remote branch does not exist yet, push with
-   `-u origin HEAD:main`.
-8. If the push is rejected because another machine pushed first, fetch,
-   fast-forward (another machine never touches this file, so the
-   fast-forward always applies), redo steps 4 to 7 once against the new
-   upstream, and push again. Anything else, including a fast-forward that
-   fails, deletes the clone; the next flush starts over.
-9. Print one receipt line and exit 0: `ledger sync: pushed <n> runs` or
-   `ledger sync: ❌ <reason>`. Never ledger contents. The flush never exits
-   non-zero, so neither the hook nor the command can fail because of it.
+   push.
+8. If the push is rejected because the remote moved, fetch, apply the rewrite
+   check, and redo steps 4 to 7 once. The reset in step 7 is what moves the
+   branch onto the other machine's commit; the local commit is discarded and
+   its rows re-appended from the fresh watermark. This works whether the other
+   machine wrote a different file or, with a shared hostname, the same one. A
+   second rejection, or any other failure, deletes the clone; the next flush
+   starts over.
+9. Print one receipt line and exit 0: `ledger sync: pushed <n> runs`, or
+   `ledger sync: ❌ <reason>` where `<reason>` is a fixed word or phrase
+   (`unreachable`, `clone failed`, `push rejected twice`, `another flush is
+   running`), never git's own message, which can carry the remote URL. Never
+   ledger contents. The flush never exits non-zero, so neither the hook nor
+   the command can fail because of it.
 
-`--pull` (before `/co-review-stats`): run `--push`, then fetch and
-fast-forward so every machine's file is current, and print a second receipt
-line naming how many host files the clone holds. This always makes one network
+`--pull` (before `/co-review-stats`): run `--push`, then fetch, apply the
+rewrite check, and `git reset --hard @{u}` so every machine's file is current.
+A reset, not a fast-forward: a fast-forward refuses a dirty tree and a
+rewritten upstream, and a reset handles both. Print a second receipt line
+naming how many host files the clone holds. This always makes one network
 call, which is the price of a fresh table.
 
 Failure leaves the local ledger untouched, always: the flush only reads it,
-under a shared lock.
+under a shared lock. A shared reader cannot hold up the writer for long: one
+flush runs at a time, it holds the lock only while reading the file, and the
+kernel releases it if the flush dies. The lock order is one-way (the flush
+takes `shared.lock` then `findings.jsonl`, the writer only `findings.jsonl`),
+so the two cannot deadlock.
 
 ### Redaction: an allowlist, not a denylist
 
@@ -178,8 +211,10 @@ question below), and `host` names the file and the run.
 its default becomes the local ledger followed by
 `~/.claude/co-review/shared/ledgers/`. The local file comes first, so this
 machine's full rows win over its own redacted copies, which the existing
-`(host, run_id)` rule then drops. The empty-ledger message names every path it
-looked at.
+`(host, run_id)` rule then drops. A missing `shared/ledgers/` is not an error:
+it is absent on a fresh machine, and a failed `--pull` may have just deleted
+the clone, so the stats then read the local file alone, as with sync off. The
+empty-ledger message names every path it looked at.
 
 The existing rule needs no change, because each file keeps the one-block
 layout: the flush appends whole blocks, in local order, and every shared file
@@ -208,10 +243,15 @@ and only a `timeout` in the user's own settings (up to 60 s) or
 `CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS` extends it. A clone or push often
 takes longer. The design survives the kill (steps 3, 4 and 8 make any partial
 state harmless), but a killed flush pushes nothing. So the hook does not run
-the flush itself: it starts the flush as a detached background process and
-exits at once. On a local machine the flush then finishes after the session
-has gone. In a cloud container, teardown may kill it first; see "Not decided
-here".
+the flush itself: it starts the flush detached and exits at once. Detached
+means a new session (`setsid`, or a double fork) with stdin, stdout and stderr
+all redirected away from the hook, to `/dev/null` or a log file; Claude Code
+refuses a hook whose background child keeps its output open. The flush then
+finishes after the session has gone, **if** the harness does not kill the
+hook's whole process group or session when it cancels the hook. Its docs do
+not say, so this is unverified, and the Tests section carries a manual check.
+Claude Code's documented alternative, an `async: true` hook, is in "Not
+decided here". In a cloud container, teardown may kill the flush first.
 
 The hook always exits 0. Its output goes to the debug log, not to any model's
 context: Claude Code keeps `SessionEnd` output out of the conversation, shows
@@ -250,7 +290,9 @@ is unset, it reports sync as off, which is not a warning.
 
 ## Tests
 
-Bats, against a local bare repo as the remote (`file://`), with
+Bats, against a local bare repo as the remote (`file://`, created with
+`git init --bare -b main`, since a bare repo whose `HEAD` names a branch that
+does not exist clones with no `HEAD` at all), with
 `GIT_CONFIG_GLOBAL=/dev/null`:
 
 - Redaction: a run with every field set, plus an unknown field on a finding,
@@ -267,10 +309,21 @@ Bats, against a local bare repo as the remote (`file://`), with
   holds each run once.
 - A writer appending during a flush: the flush copies either the whole block
   or none of it.
-- A push rejected because another host pushed: fetched, fast-forwarded,
-  retried, and the other host's file is untouched.
-- An empty remote: the first `--push` creates `main`.
-- The receipt is the only output, and the exit code is 0 on every failure.
+- A push rejected because another host pushed: fetched, reset, retried, the
+  push succeeds, **the clone survives**, and the other host's file is
+  untouched. The same with two machines sharing a hostname: both runs end up
+  in the file.
+- An empty remote: the first `--push` runs steps 3 to 7 with no upstream and
+  creates `main`; a remote that has `main` but no file for this host gives an
+  empty watermark.
+- `--pull` on a dirty clone and on a clone whose remote was rewritten: both end
+  on the fetched upstream, the rewritten one by recloning.
+- A flush that cannot get `shared.lock` within its bound prints
+  `another flush is running` and exits 0.
+- The receipt is the only output, the exit code is 0 on every failure, and the
+  `❌` reason is one of the fixed words, never git's message.
+- Manual, on a real Claude Code session: the `SessionEnd` hook returns within
+  1.5 s, and the shared repo has the session's rows after it exits.
 - Unset remote: `ledger sync: off`, exit 0, no clone made.
 - Stats over two hosts' files plus the local ledger: run counts are the sum of
   distinct runs, and this machine's runs count once.
@@ -285,10 +338,14 @@ These need the owner:
    are to copy a salted hash, which keeps `--repo` working only for a caller
    who knows the salt, or to drop it and lose `--repo` on the merged data.
    Proposed: copy it as-is, since the repo is private to its owner.
-3. **The `SessionEnd` hook.** Proposed: the detached background flush above.
-   The alternatives are to ask the owner to raise the budget in their own
-   settings (60 s at most), or to flush only by hand and before
-   `/co-review-stats`, which loses cloud sessions' rows.
+3. **The `SessionEnd` hook.** Proposed: the detached background flush above,
+   pending the manual check. The alternatives:
+   - an `async: true` hook, which Claude Code documents as running in the
+     background with no timeout enforced. That is the documented form of the
+     same idea, but whether `SessionEnd` accepts it is unverified;
+   - asking the owner to raise the budget in their own settings (60 s at most);
+   - flushing only by hand and before `/co-review-stats`, which loses cloud
+     sessions' rows.
 4. **Cloud sessions.** Three things are unverified, and all three must hold
    for a cloud session's rows to survive: the plugin is installed there, so
    the hook exists; `CO_REVIEW_LEDGER_REMOTE` reaches it, since the local
