@@ -138,6 +138,17 @@ paired_fixture() {
   assert_output --partial 'Skipped across the whole ledger: 1 run(s) with unknown schema, 0 unparseable line(s).'
 }
 
+@test "a valid run does not inherit an earlier unknown-schema run's findings" {
+  rec_run h r1 $TS org/a 2 "[$(rev claude ran 1)]"
+  rec_finding h r1 '["claude"]' wrong
+  rec_finding h r1 '["claude"]' wrong
+  rec_run h r1 $TS org/a 1 "[$(rev claude ran 1)]"
+  rec_finding h r1 '["claude"]' high
+  stats
+  assert_success
+  assert_line --regexp '^claude +1 +1 +0\.0 '
+}
+
 @test "a repeated run counts once, and so do the findings that follow it" {
   rec_run h r1 $TS org/a 1 "[$(rev claude ran 1)]"
   rec_finding h r1 '["claude"]' wrong

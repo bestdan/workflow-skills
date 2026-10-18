@@ -88,6 +88,8 @@ def load(path: Path, since: Optional[str], repo: Optional[str]):
     # A repeated (host, run_id) — two ledgers concatenated — keeps its first run
     # record. The writer appends a run and its findings as one block, so the
     # findings that follow a repeat are the repeat's, and are dropped with it.
+    # An unknown-schema run's findings are dropped the same way, so a later
+    # valid run with its key does not inherit them.
     seen: Set[Key] = set()
     dropping: Optional[Key] = None
     with path.open(encoding="utf-8") as fh:
@@ -106,6 +108,7 @@ def load(path: Path, since: Optional[str], repo: Optional[str]):
                 dropping = key if key in seen else None
                 if rec.get("schema") != SCHEMA:
                     skipped_schema += 1
+                    dropping = key
                     continue
                 if dropping:
                     continue
