@@ -143,7 +143,7 @@ ledger_py() { python3 -c "import json,sys; recs=[json.loads(l) for l in open('$L
 
 @test "input fields cannot override the ledger's own type, run_id or schema" {
   printf '{"run_id": "run-o", "type": "finding", "schema": 99, "reviewers": []}\n' >"$TEST_TMPDIR/run-run-o.json"
-  printf '[{"sources": ["Reviewer A"], "verdict": "high", "type": "run", "run_id": "forged"}]' \
+  printf '[{"sources": ["Reviewer A"], "verdict": "high", "type": "run", "run_id": "forged", "schema": 99}]' \
     >"$TEST_TMPDIR/forged.json"
   record run-o "$TEST_TMPDIR/forged.json"
   assert_success
@@ -183,6 +183,10 @@ print(len(recs), len(set(runs)), all(len(set(b)) == 1 for b in blocks))'
   record run-1 "$TEST_TMPDIR/unmapped.json"
   assert_failure
   assert_output --partial "'Reviewer Z' is not in the mapping"
+  printf '[{"sources": [["Reviewer A"]], "verdict": "high"}]' >"$TEST_TMPDIR/nested.json"
+  record run-1 "$TEST_TMPDIR/nested.json"
+  assert_failure
+  assert_output "co-review-record: findings[0]: source ['Reviewer A'] is not in the mapping"
   printf '[{"sources": [], "verdict": "high"}]' >"$TEST_TMPDIR/nosources.json"
   record run-1 "$TEST_TMPDIR/nosources.json"
   assert_failure

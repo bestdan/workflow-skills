@@ -107,7 +107,7 @@ def join_findings(findings, mapping: dict, run_id: str, host: str) -> list[dict]
             raise InputError(f"findings[{i}]: sources must be a non-empty list")
         agents, human = [], False
         for label in sources:
-            if label not in mapping:
+            if not isinstance(label, str) or label not in mapping:
                 raise InputError(
                     f"findings[{i}]: source {label!r} is not in the mapping"
                 )
@@ -120,7 +120,7 @@ def join_findings(findings, mapping: dict, run_id: str, host: str) -> list[dict]
             continue
         records.append(
             {
-                **{k: v for k, v in finding.items() if k != "sources"},
+                **{k: v for k, v in finding.items() if k not in ("sources", "schema")},
                 "type": "finding",
                 "run_id": run_id,
                 "host": host,
