@@ -209,7 +209,8 @@ def ensure_clone(clone: Path, tmp: Path, remote: str) -> None:
     if not usable(clone, remote):
         fresh_clone(clone, tmp, remote)
         return
-    # A dirty tree is reset with no network; unpushed commits wait for step 7.
+    # A dirty tree is reset with no network; unpushed commits are left for
+    # attempt(), whose reset onto @{u} drops them once their rows are reselected.
     if rev(clone, "HEAD"):
         must(clone, "reset", "-q", "--hard")
     must(clone, "clean", "-q", "-fdx")
@@ -318,7 +319,10 @@ def watermark(clone: Path, path: str) -> str:
 
 
 def attempt(clone: Path, path: str, blocks) -> Tuple[int, str]:
-    """Steps 4-7 once. Returns (runs pushed, push outcome)."""
+    """Select the unpushed runs, reset onto @{u}, append, commit, push once.
+
+    Returns (runs pushed, push outcome).
+    """
     pushed = watermark(clone, path)
     have = keys_of(pushed)
     selected: List[List[dict]] = []
@@ -365,7 +369,7 @@ def push(base: Path, ledger: Path, remote: str, host: str) -> str:
         blocks = read_blocks(ledger)
         n, outcome = attempt(clone, path, blocks)
         if outcome == "rejected":
-            # The reset in step 7 moves the branch onto the other machine's
+            # attempt()'s reset onto @{u} moves the branch onto the other machine's
             # commit; this machine's rows are re-appended from the new watermark.
             fetch(clone, tmp, remote)
             n, outcome = attempt(clone, path, blocks)
