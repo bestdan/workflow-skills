@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import fcntl
 import json
+import socket
 import sys
 from pathlib import Path
 
@@ -63,6 +64,11 @@ def validate_run(run) -> dict:
         raise InputError("run: expected an object")
     if not isinstance(run.get("run_id"), str) or not run["run_id"]:
         raise InputError("run: run_id is required")
+    # Ledgers from several machines merge on (host, run_id), so every run
+    # names the machine it was recorded on.
+    run.setdefault("host", socket.gethostname())
+    if not isinstance(run["host"], str) or not run["host"]:
+        raise InputError("run: host must be a non-empty string")
     reviewers = run.get("reviewers", [])
     if not isinstance(reviewers, list):
         raise InputError("run: reviewers must be a list")

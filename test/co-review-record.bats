@@ -61,6 +61,24 @@ ledger_py() { python3 -c "import json,sys; recs=[json.loads(l) for l in open('$L
   assert_output "[42.5, None]"
 }
 
+@test "the run record names its host: the machine's by default, the caller's if given" {
+  record
+  run ledger_py 'import socket; print(recs[0]["host"] == socket.gethostname())'
+  assert_output "True"
+  printf '{"run_id": "run-h", "host": "laptop-2", "reviewers": []}\n' >"$TEST_TMPDIR/run-run-h.json"
+  record run-h
+  run ledger_py 'print([r["host"] for r in recs if r["type"] == "run"][-1])'
+  assert_output "laptop-2"
+}
+
+@test "an empty host exits non-zero and writes nothing" {
+  printf '{"run_id": "run-e", "host": "", "reviewers": []}\n' >"$TEST_TMPDIR/run-run-e.json"
+  record run-e
+  assert_failure
+  assert_output --partial "host must be a non-empty string"
+  assert_file_not_exists "$LEDGER"
+}
+
 @test "a negative or non-numeric duration_s exits non-zero and writes nothing" {
   write_run run-neg -1
   record run-neg
