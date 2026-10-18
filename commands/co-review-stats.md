@@ -1,5 +1,5 @@
 ---
-description: Print the per-reviewer quality table from the /co-review findings ledger, verbatim. The human-run end of the review feedback loop; no agent reads the ledger otherwise.
+description: Use when the user asks how useful, accurate or fast each co-review reviewer has been — e.g. "is agy worth running", "which reviewers are wrong most", "show reviewer stats", or /co-review-stats. Prints the per-reviewer quality table from the co-review findings ledger, verbatim. Never invoke it from inside a review, or to inform one; it is the human end of the feedback loop.
 allowed-tools: Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/co-review-stats.py":*)
 argument-hint: "[--since YYYY-MM-DD] [--repo <owner/name>]"
 ---
