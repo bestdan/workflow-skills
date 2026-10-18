@@ -265,3 +265,52 @@ write_task_config() { # rel body...
   assert_failure 1
   assert_output --partial "unknown argument"
 }
+
+# -------------------------------------------------------------- 6. explain
+
+# `explain` is what `/doctor` reports from, so each tier has to name itself.
+# A tab separates the value from its source.
+TAB=$'\t'
+
+@test "explain names the env var as the source of an env-overridden value" {
+  resolve WORKFLOW_SKILLS_WORKTREE_ROOT=/from/env WORKFLOW_SKILLS_BRANCH_PREFIX=fromenv \
+    bash "$RESOLVER" explain
+  assert_success
+  assert_line "root=/from/env${TAB}env WORKFLOW_SKILLS_WORKTREE_ROOT"
+  assert_line "branch_prefix=fromenv/${TAB}env WORKFLOW_SKILLS_BRANCH_PREFIX"
+}
+
+@test "explain names the repo config file as the source of a configured value" {
+  write_config "root: /from/config" "branch_prefix: fromconfig"
+  resolve bash "$RESOLVER" explain
+  assert_success
+  assert_line "root=/from/config${TAB}repo config $CONFIG_REL"
+  assert_line "branch_prefix=fromconfig/${TAB}repo config $CONFIG_REL"
+}
+
+@test "explain names the task config when the prefix comes from there" {
+  write_task_config "dev_docs/tasks/.task-config.yml" \
+    "handler: gh-issue" "gh-issue:" "  branch_prefix: fromtasks/"
+  resolve bash "$RESOLVER" explain
+  assert_success
+  assert_line "branch_prefix=fromtasks/${TAB}repo config dev_docs/tasks/.task-config.yml"
+}
+
+@test "explain marks both values as defaults when nothing configures them" {
+  resolve XDG_STATE_HOME="$H/state" bash "$RESOLVER" explain
+  assert_success
+  assert_line "root=$H/state/worktrees${TAB}default (XDG_STATE_HOME)"
+  assert_line "branch_prefix=test/${TAB}default (git user.email)"
+}
+
+@test "explain marks the impersonal fallback prefix as such" {
+  resolve GIT_CONFIG_GLOBAL=/dev/null bash "$RESOLVER" explain
+  assert_success
+  assert_line "root=$H/.local/state/worktrees${TAB}default (~/.local/state)"
+  assert_line "branch_prefix=worktree/${TAB}default (fallback)"
+}
+
+@test "explain still fails on an invalid value rather than reporting it" {
+  resolve WORKFLOW_SKILLS_WORKTREE_ROOT=not/absolute bash "$RESOLVER" explain
+  assert_failure 1
+}

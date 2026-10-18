@@ -26,7 +26,8 @@ failure this exists for. Both are registered; Bash is the one that fires.
 TWO DECISIONS, ONE HOOK.
 
   1. A write into a *different* linked worktree of the session's own repo is
-     DENIED, with ``EnterWorktree`` named in the refusal.
+     DENIED, with ``EnterWorktree`` named in the refusal: by ``name`` when
+     ``worktree-name-for.sh`` gives the worktree one, else by ``path``.
   2. The first write of a session standing in a MAIN checkout on its default
      branch emits a non-blocking warning: write-work belongs in a worktree.
      Non-blocking so a deliberate one-line fix still goes through.
@@ -64,90 +65,25 @@ import hashlib
 import json
 import os
 import re
-import shlex
 import subprocess
 import sys
 
-BYPASS = "WORKFLOW_SKILLS_ALLOW_FOREIGN_WRITE"
+# A hook runs as a standalone script, not as part of a package, so the shared
+# parser is found by this file's own directory rather than by an install path.
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 
-# --- command parsing ---------------------------------------------------------
-# A copy of the parser in bestdan/dotfiles' agents/guard_dangerous_git.py and
-# agents/guard_pinned_branch.py, which is hardened against redirects, wrappers,
-# executors, quoting and segment splitting. A plugin hook cannot import from a
-# machine's dotfiles, so the pieces this guard uses live here.
-
-# Anything that ends a command and starts a new one. Deliberately quote-blind:
-# `echo "$(…; git commit)"` really does run git, and every attempt to make a
-# regex track quoting failed open.
-_SEGMENT_SPLIT = re.compile(r"[|;&\n()`{}]+")
-
-# A whole redirect — operator and target — dropped BEFORE the split, because
-# three redirect operators are spelled with a character the splitter treats as
-# a separator (`2>&1`, `>&2` on `&`; `>| file` on `|`). The target is one shell
-# word, quoted or escaped whitespace included; an fd duplication takes none.
-_REDIRECT = re.compile(
-    r"""
-    (?: & | [0-9]+ )?
-    (?: <<< | << | >> | >\| | < | > )
-    (?:
-        & [0-9]* -?
-      | [ \t]* (?: "[^"]*" | '[^']*' | (?: \\. | [^\s|;&()`{}<>] )* )
-    )
-    """,
-    re.VERBOSE,
+from bash_command import (  # noqa: E402  (needs the sys.path entry above)
+    REDIRECT,
+    SEGMENT_SPLIT,
+    expand,
+    git_calls,
+    head_index,
+    head_word,
+    segments,
+    tokenize,
 )
 
-# Wrappers that run the command after them, and take options of their own —
-# so a wrapped segment is scanned at every position rather than at its head.
-_WRAPPERS = {"rtk", "sudo", "command", "env", "nohup", "time", "exec", "builtin"}
-# Shell keywords that can open a segment; they take no options.
-_KEYWORDS = {"if", "elif", "then", "else", "do", "while", "until", "!"}
-_PREFIX = _WRAPPERS | _KEYWORDS
-# Head words that run their arguments, so git can sit anywhere after them.
-_EXECUTORS = {"bash", "sh", "zsh", "dash", "ksh", "eval", "xargs", "ssh"}
-# git's own options that take a separate value token.
-_GIT_OPTS_WITH_VALUE = {
-    "-C",
-    "-c",
-    "--git-dir",
-    "--work-tree",
-    "--namespace",
-    "--exec-path",
-    "--config-env",
-}
-
-
-def _tokenize(segment: str) -> list[list[str]]:
-    """Tokenize a segment both ways, because neither alone is enough.
-
-    Stripping quote characters and splitting on whitespace tears a quoted
-    argument containing a space; ``shlex`` gets that right but folds
-    ``$'…'`` into one token. Both forms are returned and either may match.
-    """
-    forms = [re.sub(r"\$?[\"']", "", segment).split()]
-    try:
-        forms.append(shlex.split(segment))
-    except ValueError:
-        pass  # segment splitting can cut a quote in half
-    return forms
-
-
-def _expand(path: str, cwd: str | None) -> str | None:
-    """Resolve a path token the way the shell would, or None if we cannot.
-
-    No shell expansion has happened by the time a hook sees the command, so
-    ``$HOME/src/...`` and ``~/src/...`` arrive literally and are expanded here.
-    Any OTHER variable makes the path unknowable, where declining beats
-    guessing.
-    """
-    if path.startswith("$HOME/") or path == "$HOME":
-        path = os.path.expanduser("~") + path[len("$HOME") :]
-    if "$" in path:
-        return None
-    path = os.path.expanduser(path)
-    if os.path.isabs(path):
-        return path
-    return os.path.join(cwd, path) if cwd else None
+BYPASS = "WORKFLOW_SKILLS_ALLOW_FOREIGN_WRITE"
 
 
 # git subcommands that change a working tree, an index, or a branch — the ones
@@ -288,10 +224,17 @@ _WRITERS = {
     "unzip",
 }
 
-# Interpreters. Their arguments are code, not paths this guard can classify —
-# the usual ghost edit is a foreign path inside a `python3 - <<'PY'` heredoc — so a
-# foreign path anywhere near one is treated as a write. This is the guard's one
+# Interpreters. Code fed to one inline is opaque to this guard — the usual ghost
+# edit is a foreign path inside a `python3 - <<'PY'` heredoc — so a foreign path
+# anywhere in such a command is treated as a write. This is the guard's one
 # deliberately fail-CLOSED rule, and the bypass exists for it.
+#
+# An interpreter running a script FILE is narrower. The script's location
+# still counts (a script commonly writes relative to itself), but the
+# arguments after it are data, exactly as they are for `./script.py <path>` or
+# any other program: a foreign one carries no write evidence, so it is not
+# refused. `python3 tool.py --out <foreign>` therefore goes through; telling
+# that from `--snapshot <foreign>` would need the script's code.
 _INTERPRETERS = {"python", "python3", "node", "ruby", "perl", "php", "osascript", "uv"}
 
 # The flag that makes each interpreter run code given on its command line. Per
@@ -323,6 +266,118 @@ def _inline_code(head: str, args: list[str]) -> bool:
             return True
         if re.fullmatch(r"-[A-Za-z]+", arg) and arg[-1] in letters:
             return True
+    return False
+
+
+# Options known to take no value, so the token after one is still the program.
+# Any other option ahead of the program may take a value (`-W ignore`, `uv run
+# --with pkg`) and would be mistaken for it, so that call is not narrowed.
+_PYTHON_BARE = {"-I", "-u", "-B", "-E", "-s", "-S", "-O", "-OO", "-q", "-b", "-bb"}
+_BARE_FLAGS = {"python": _PYTHON_BARE, "python3": _PYTHON_BARE}
+
+
+def _program(head: str, args: list[str]) -> tuple[str | None, bool]:
+    """The program an interpreter call runs, and whether that is certain.
+
+    ``args`` are every token after the interpreter. The program is the first
+    operand, `-` included, and everything after it is the script's own
+    arguments. `uv run [<interpreter>] <script>` names it after a subcommand.
+    ``(None, True)`` is a call that names no program and so reads its code
+    from stdin. ``(None, False)`` is one whose program cannot be picked out:
+    another `uv` subcommand, or an option not known to be value-less ahead of
+    the program.
+    """
+    if head == "uv":
+        if args[:1] != ["run"]:
+            return None, False
+        args = args[1:]
+        if args[:1] and os.path.basename(args[0]) in _INTERPRETERS:
+            head, args = os.path.basename(args[0]), args[1:]
+    bare = _BARE_FLAGS.get(head, set())
+    for arg in args:
+        if arg == "-" or not arg.startswith("-"):
+            return arg, True
+        if arg not in bare:
+            return None, False
+    return None, True
+
+
+def _program_operands(head: str, args: list[str]) -> list[str]:
+    """The operands of an interpreter call graded as reaching in: its program,
+    or every operand, as before this narrowing, when that is uncertain."""
+    program, certain = _program(head, args)
+    if not certain:
+        return [a for a in args if not a.startswith("-")]
+    return [program] if program else []
+
+
+# A stdin redirect from a file. `<<`/`<<<` are heredocs, `<&` duplicates an fd,
+# and `<(` is process substitution.
+_STDIN_FILE = re.compile(
+    r"""
+    (?<! [<0-9&] )
+    < (?! [<&(] )
+    [ \t]*
+    ( "[^"]*" | '[^']*' | (?: \\. | [^\s|;&()`{}<>] )+ )
+    """,
+    re.VERBOSE,
+)
+
+# A program name, or a `<` source, that is stdin itself rather than a file.
+_STDIN_PATH = re.compile(r"-|/dev/stdin|/dev/fd/0|/proc/[^/]+/fd/0")
+
+
+def _is_stdin(path: str) -> bool:
+    """Whether `path` names stdin, however it is spelled (`//dev/./stdin`)."""
+    if path == "-":
+        return True
+    # normpath keeps a leading `//` on POSIX, so collapse it as well.
+    return bool(_STDIN_PATH.fullmatch(re.sub(r"^/+", "/", os.path.normpath(path))))
+
+
+def _code_in_command(cmd: str, cwd: str) -> bool:
+    """Whether an interpreter here runs code that is spelled out in this command.
+
+    Two routes put it there. A heredoc or here-string on an interpreter's own
+    command, whatever program it names. Or one anywhere in the command, when
+    some interpreter may be reading its code from stdin: it names no certain
+    program (or names `-` or a stdin device), and has no `<` file redirect.
+    Which command a heredoc feeds is not worked out — pipes, `2>&1` and line
+    continuations all move it — so `python3 -I - < script` beside a `cat
+    <<EOF` note goes through, and `cat <<PY | python3 -` does not. And a file
+    this command writes, by redirect or `tee`, that an interpreter then runs or
+    reads on stdin (`cat > s.py <<'PY' … PY` then `python3 s.py`).
+    """
+    heredoc = "<<" in cmd
+    cmd = cmd.replace("\\\n", " ")  # join line continuations, as bash does
+    files = [m.group(1).strip("\"'") for m in _WRITE_REDIRECT.finditer(cmd)]
+    for forms in segments(cmd):
+        for tokens in forms:
+            if head_word(tokens) == "tee":
+                files += [t for t in tokens[head_index(tokens) + 1 :] if t[:1] != "-"]
+    written = {os.path.normpath(p) for f in files if (p := expand(f, cwd))}
+    # Split with the redirects still in place, so each interpreter's own `<`
+    # is in its piece. A piece cut short by `2>&1` only loses a trailing fd.
+    for piece in SEGMENT_SPLIT.split(cmd):
+        stdin = [m.group(1).strip("\"'") for m in _STDIN_FILE.finditer(piece)]
+        stdin = [s for s in stdin if not _is_stdin(s)]
+        for tokens in tokenize(REDIRECT.sub(" ", piece)):
+            head = head_word(tokens)
+            if head not in _INTERPRETERS:
+                continue
+            program, certain = _program(head, tokens[head_index(tokens) + 1 :])
+            on_stdin = not certain or not program or _is_stdin(program)
+            # A heredoc on the interpreter's own command is refused whatever it
+            # runs: a `<` file does not shield it (bash applies fd 0's redirects
+            # left to right, and the `<` match is blind to quotes and comments),
+            # and a named script's stdin is not treated as data (#998).
+            if "<<" in piece or (heredoc and on_stdin and not stdin):
+                return True
+            sources = stdin + ([] if on_stdin else [program])
+            for path in sources:
+                resolved = expand(path, cwd)
+                if resolved and os.path.normpath(resolved) in written:
+                    return True
     return False
 
 
@@ -464,21 +519,6 @@ def _git_writes(sub: str, args: list[str]) -> bool:
     return False
 
 
-def _segments(cmd: str):
-    """Yield the token forms of each command segment.
-
-    Redirects are stripped BEFORE the split, because three redirect operators
-    are spelled with a
-    character the splitter treats as a separator (`2>&1` and `>&2` on `&`,
-    `>| file` on `|`), so splitting first leaves a bare fd number as the
-    segment's head word and the command behind it is never reached. Redirect
-    *targets* are therefore recovered from the whole command instead of from a
-    segment, in `_write_targets`.
-    """
-    for segment in _SEGMENT_SPLIT.split(_REDIRECT.sub(" ", cmd)):
-        yield _tokenize(segment)
-
-
 def _bypassed(cmd: str) -> bool:
     """Whether the bypass is set as a real assignment anywhere in this Bash call.
 
@@ -487,89 +527,12 @@ def _bypassed(cmd: str) -> bool:
     merely NAMES the variable — in this repo that includes grepping the docs
     that document it.
     """
-    for forms in _segments(cmd):
+    for forms in segments(cmd):
         for tokens in forms:
-            head = _head_index(tokens)
+            head = head_index(tokens)
             if f"{BYPASS}=1" in tokens[:head]:
                 return True
     return False
-
-
-def _git_calls(tokens: list[str]):
-    """Yield ``(dir_override, subcommand, args)`` per git call in one segment.
-
-    Head-word anchoring and the wrapper/executor scan are the dotfiles
-    parser's; what is kept here — and what that parser normalizes away — is
-    ``-C``, which decides WHICH repo
-    a command targets and is therefore the whole question.
-
-    A work tree named by ``--work-tree`` or a ``GIT_WORK_TREE=`` prefix is
-    where a mutating subcommand actually writes, so it wins over ``-C``. A
-    relative one resolves against the ``-C`` directory, as git does.
-    """
-    head = 0
-    wrapped = False
-    while head < len(tokens) and (
-        tokens[head] in _PREFIX or re.match(r"^[A-Za-z_][\w]*=", tokens[head])
-    ):
-        wrapped = wrapped or tokens[head] in _WRAPPERS
-        head += 1
-    if head >= len(tokens):
-        return
-    scan_all = wrapped or tokens[head] in _EXECUTORS
-    for start in range(head, len(tokens)) if scan_all else [head]:
-        word = tokens[start]
-        if word != "git" and not word.endswith("/git"):
-            continue
-        i = start + 1
-        dir_override = None
-        work_tree = None
-        for token in tokens[:start]:
-            if token.startswith("GIT_WORK_TREE="):
-                work_tree = token[len("GIT_WORK_TREE=") :]
-        while i < len(tokens) and tokens[i].startswith("-"):
-            if tokens[i].startswith("--work-tree="):
-                work_tree = tokens[i][len("--work-tree=") :]
-            elif tokens[i] in _GIT_OPTS_WITH_VALUE:
-                if i + 1 < len(tokens):
-                    if tokens[i] == "-C":
-                        dir_override = tokens[i + 1]
-                    elif tokens[i] == "--work-tree":
-                        work_tree = tokens[i + 1]
-                i += 1
-            i += 1
-        if work_tree:
-            if dir_override and not os.path.isabs(os.path.expanduser(work_tree)):
-                work_tree = os.path.join(dir_override, work_tree)
-            dir_override = work_tree
-        if i < len(tokens):
-            yield dir_override, tokens[i], tokens[i + 1 :]
-
-
-def _head_index(tokens: list[str]) -> int:
-    """Index of a segment's command word, past any wrapper, keyword or assignment.
-
-    A wrapper's own options (`sudo -n`) are skipped too. One that takes a
-    value (`sudo -u root`) still leaves the value as the head, which fails open.
-    """
-    i = 0
-    wrapped = False
-    while i < len(tokens) and (
-        tokens[i] in _PREFIX
-        or re.match(r"^[A-Za-z_][\w]*=", tokens[i])
-        or (wrapped and tokens[i].startswith("-"))
-    ):
-        wrapped = wrapped or tokens[i] in _WRAPPERS
-        i += 1
-    return i
-
-
-def _head_word(tokens: list[str]) -> str | None:
-    """The command word of a segment, past any wrapper, keyword or assignment."""
-    i = _head_index(tokens)
-    if i >= len(tokens):
-        return None
-    return os.path.basename(tokens[i])
 
 
 # The two grades of evidence `_write_targets` yields.
@@ -601,39 +564,40 @@ def _write_targets(cmd: str, cwd: str):
         no ``-C``, which lands in the session's cwd (DEFINITE).
       - a write redirect's target (DEFINITE).
       - a path argument of a writer command or an in-place editor (DEFINITE),
-        or of an interpreter (REACH).
+        or the script an interpreter runs (REACH). The script's own arguments
+        are data, as they are for any other program, and are not evidence.
       - every path mentioned anywhere in a command that feeds an interpreter
-        inline, via its inline-code flag or a heredoc (REACH). The code is
-        opaque there, and that is the shape a ghost edit usually takes.
+        code it spells out — an inline-code flag, a heredoc beside an
+        interpreter reading stdin, or a file the command writes and then runs
+        (REACH). The code is opaque there, and that is the shape a ghost edit
+        usually takes.
 
     Relative paths resolve against the payload's cwd rather than against a `cd`
     tracked through the command. Tracking it would only matter for a relative
     path resolved after a `cd` into a directory that is not itself foreign, and
     a `cd` into one that IS foreign is already denied.
     """
-    inline_interpreter = False
-    for forms in _segments(cmd):
+    # A heredoc is asked of the raw command rather than this loop's segments:
+    # the operator is stripped along with the rest of the redirect before the
+    # split, and a heredoc BODY is its own segment anyway, since the splitter
+    # cuts on newlines.
+    inline_interpreter = _code_in_command(cmd, cwd)
+    for forms in segments(cmd):
         for tokens in forms:
-            head_at = _head_index(tokens)
-            head = _head_word(tokens)
+            head_at = head_index(tokens)
+            head = head_word(tokens)
             operands = [t for t in tokens[head_at + 1 :] if not t.startswith("-")]
-            # `<<` is asked of the whole command rather than this segment: the
-            # heredoc operator is stripped along with the rest of the redirect
-            # before the split, and a heredoc BODY is its own segment anyway,
-            # since the splitter cuts on newlines.
-            if head in _INTERPRETERS and (
-                _inline_code(head, tokens[head_at + 1 :]) or "<<" in cmd
-            ):
+            if head in _INTERPRETERS and _inline_code(head, tokens[head_at + 1 :]):
                 inline_interpreter = True
             # Only a `cd` in command position: `rg cd <path>` is a read.
             if head == "cd" and operands:
-                resolved = _expand(operands[0], cwd)
+                resolved = expand(operands[0], cwd)
                 if resolved:
                     yield _real(resolved), REACH
-            for dir_override, sub, args in _git_calls(tokens):
+            for dir_override, sub, args in git_calls(tokens):
                 if not _git_writes(sub, args):
                     continue
-                target = _expand(dir_override, cwd) if dir_override else cwd
+                target = expand(dir_override, cwd) if dir_override else cwd
                 if target:
                     yield _real(target), DEFINITE
             grade = None
@@ -644,14 +608,15 @@ def _write_targets(cmd: str, cwd: str):
                 grade = DEFINITE
             elif head in _INTERPRETERS:
                 grade = REACH
+                operands = _program_operands(head, tokens[head_at + 1 :])
             if grade:
                 for token in operands:
-                    resolved = _expand(token, cwd)
+                    resolved = expand(token, cwd)
                     if resolved:
                         yield _real(resolved), grade
     for match in _WRITE_REDIRECT.finditer(cmd):
         target = match.group(1).strip("\"'")
-        resolved = _expand(target, cwd)
+        resolved = expand(target, cwd)
         if resolved:
             yield _real(resolved), DEFINITE
     if inline_interpreter:
@@ -660,16 +625,67 @@ def _write_targets(cmd: str, cwd: str):
         # a leading `./` or `../` — is offered instead, and the caller decides
         # which of them lands in a foreign worktree.
         for match in re.finditer(r"(?:\.\.?/|\$HOME|~|/)[^\s\"'`,;:)\]}]*", cmd):
-            resolved = _expand(match.group(0), cwd)
+            resolved = expand(match.group(0), cwd)
             if resolved:
                 yield _real(resolved), REACH
 
 
-def _reason(target: str, holder: str) -> str:
+RESOLVER = os.path.join(
+    os.path.dirname(os.path.realpath(__file__)), "worktree-name-for.sh"
+)
+
+# The resolver only ever prints a name scripts/lib/worktree-name.sh accepts.
+# This only keeps an unexpected stdout (a stray line, a stub) out of the reason.
+_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def _name_for(holder: str, cwd: str) -> str | None:
+    """The ``EnterWorktree`` ``name`` that hands back ``holder``, if any.
+
+    ``worktree-name-for.sh`` owns the answer. A missing, failing, crashing or
+    slow resolver yields None: the refusal still stands, and only the route it
+    offers falls back to the ``path`` wording.
+    """
+    try:
+        proc = subprocess.run(
+            [RESOLVER, holder], cwd=cwd, capture_output=True, text=True, timeout=10
+        )
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        # UnicodeError: text=True decodes strictly, and an escape from here
+        # reaches main()'s fail-open handler, which would drop the denial.
+        return None
+    name = proc.stdout.strip()
+    if proc.returncode != 0 or not _NAME_RE.match(name):
+        return None
+    return name
+
+
+def _route(holder: str, name: str | None) -> str:
+    # The ExitWorktree step is conditional in the prose, as in
+    # guard-enter-by-path.py: outside a worktree it is a no-op that still
+    # reports is_error (#1001), and no hook input says which case applies.
+    if name:
+        return (
+            f"  - Enter it instead: `EnterWorktree` with `name: {name}` hands it back "
+            "with no approval prompt. If this session is already in a worktree, call "
+            "`ExitWorktree` with `action: keep` first; otherwise skip that step, because "
+            "outside a worktree it is a no-op that reports an error. "
+            f"Then call `EnterWorktree` with `name: {name}`.\n"
+        )
+    return (
+        f"  - Enter it instead: `EnterWorktree` with `path: {holder}`, or re-run from "
+        "inside it. Entering by `path` raises an approval prompt that no allow rule "
+        "lifts, so an unattended or Remote Control session cannot answer it.\n"
+    )
+
+
+def _reason(target: str, holder: str, name: str | None) -> str:
     return (
         f"{holder} is a worktree this session has not entered, and this command writes "
         f"into it ({target}).\n\n"
-        f"  - Enter it instead: EnterWorktree with path {holder}, or re-run from inside it.\n"
+        f"{_route(holder, name)}"
+        "  - Which `EnterWorktree` call reaches which worktree, and why: the "
+        "`worktree-entry` skill.\n"
         "  - Do not reach in with `git -C <path>`, `cd <path> && …`, or an absolute path. "
         "That succeeds quietly, so the user's shell, editor, prompt and build stay "
         "pointed at this tree while the work lands in that one — their verification "
@@ -718,13 +734,15 @@ def _emit(payload: dict) -> None:
     print(json.dumps(payload))
 
 
-def _deny(target: str, holder: str) -> None:
+def _deny(target: str, holder: str, cwd: str) -> None:
     _emit(
         {
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "deny",
-                "permissionDecisionReason": _reason(target, holder),
+                "permissionDecisionReason": _reason(
+                    target, holder, _name_for(holder, cwd)
+                ),
             }
         }
     )
@@ -771,7 +789,7 @@ def main() -> None:
             )
             if raw is None:
                 return
-            resolved = _expand(raw, cwd)
+            resolved = expand(raw, cwd)
             if not resolved:
                 return
             targets = [(_real(resolved), DEFINITE)]
@@ -794,7 +812,7 @@ def main() -> None:
         for target, _grade in targets:
             holder = _owning_foreign(target, own_top, foreign)
             if holder:
-                _deny(target, holder)
+                _deny(target, holder, cwd)
                 return
 
         # No foreign write. The remaining question is whether write-work is

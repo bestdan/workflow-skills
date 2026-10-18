@@ -1,0 +1,2 @@
+# A bare $(mktemp) ignores TMPDIR on macOS.
+echo ok  # never write "$(mktemp)" here

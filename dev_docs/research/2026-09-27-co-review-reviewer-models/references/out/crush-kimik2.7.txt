@@ -1,0 +1,13 @@
+scripts/spawn-orchestrator.sh:5020  
+issue (blocking): status-report log line reports the skipped count from `$counts_parked` instead of `$counts_skipped`.  
+suggested fix: change `skipped=$counts_parked` to `skipped=$counts_skipped`.
+
+scripts/spawn-orchestrator.sh:6578  
+question (unverified): `skipped) break ;;` in `doctor` stops checking all later tasks. If later tasks are independent or on unrelated chains, their divergence will be missed.  
+suggested fix: use `continue` (and guard descendants) if only the current task should be skipped, or document the ordering invariant that makes `break` safe.
+
+skills/auto-pilot/references/run-state.md:348-349  
+question (unverified): the Outcomes section says a skipped line names each pending task it blocks, but no code in this diff generates that list.  
+suggested fix: verify the report writer already emits it, or add the blocked-dependents listing.
+
+REVIEW_COMPLETE: FINDINGS

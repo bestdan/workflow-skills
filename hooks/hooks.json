@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/worktree-create-hook.sh"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/worktree-create-hook.sh\""
           }
         ]
       }
@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/worktree-remove-hook.sh",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/worktree-remove-hook.sh\"",
             "timeout": 120
           }
         ]
@@ -27,7 +27,20 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/guard-foreign-worktree.py"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/guard-foreign-worktree.py\""
+          },
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/guard-pinned-branch.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "EnterWorktree",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/guard-enter-by-path.py\""
           }
         ]
       },
@@ -36,7 +49,17 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/guard-foreign-worktree.py"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/guard-foreign-worktree.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "ExitWorktree",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/exit-worktree-guard.sh\"",
+            "timeout": 60
           }
         ]
       }
@@ -47,7 +70,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/worktree-teardown-reminder.py"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/worktree-teardown-reminder.py\""
           }
         ]
       }

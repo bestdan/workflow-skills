@@ -19,13 +19,19 @@
 # the harness re-stats the path afterwards and logs "WorktreeRemove hook did
 # not remove worktree, kept at: <path>" to the debug log. That log is the only
 # place it appears — verified end-to-end, ExitWorktree still answered "Exited
-# and removed worktree at <path>" for a worktree this hook had just kept. So a
-# refusal here is safe but invisible, which is why every refusal below prints
-# its reason.
+# and removed worktree at <path>" for a worktree this hook had just kept. That
+# was Claude Code 2.1.260; 2.1.300 answers "could not remove it — kept at
+# <path>" for a non-zero exit, but an exit-0 keep still reads as removed. So a
+# refusal here is safe but easy to miss, which is why every refusal below
+# prints its reason.
 #
-# The harness checks the worktree is clean BEFORE dispatching, so a dirty tree
-# never reaches this script. worktree-remove.sh's own dirty refusal stays as a
-# backstop rather than as the primary gate.
+# ExitWorktree's remove cannot check a hook-supplied worktree before
+# dispatching: a hook-based session records no start commit, so it refuses with
+# "Could not verify worktree state" until the caller passes
+# discard_changes: true, which skips the check. On both paths
+# worktree-remove.sh's own dirty refusal is the gate: the interactive exit
+# dialog counts uncommitted files and warns before the user picks remove, but
+# does not block it. See skills/worktree-teardown/SKILL.md.
 #
 # Hooks run unsandboxed — `gh` is authenticated and api.github.com is
 # reachable from here — so worktree-remove.sh's merged-PR branch gate and its

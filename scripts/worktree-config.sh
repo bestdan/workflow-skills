@@ -5,6 +5,7 @@
 #   scripts/worktree-config.sh root     # absolute worktree root, exit 0
 #   scripts/worktree-config.sh prefix   # branch prefix, exactly one trailing /
 #   scripts/worktree-config.sh          # both, as `key=value` lines (diagnostic)
+#   scripts/worktree-config.sh explain  # both, each followed by a tab and its source
 #
 # Every other script and hook in the lifecycle reads these from here rather than
 # hardcoding them, because both values are one person's convention rather than a
@@ -54,6 +55,18 @@ PREFIX_FALLBACK="worktree"
 die() {
   printf 'worktree-config: %s\n' "$1" >&2
   exit 1
+}
+
+# Print a resolved value. Under `explain`, append a tab and the tier it came
+# from, so the report and the resolution are the same code path and cannot
+# disagree about where a value was read.
+EXPLAIN=0
+emit() { # value source
+  if [ "$EXPLAIN" = 1 ]; then
+    printf '%s\t%s\n' "$1" "$2"
+  else
+    printf '%s\n' "$1"
+  fi
 }
 
 # Expand a leading `~/` (or a bare `~`) against $HOME. Config files are written
@@ -131,12 +144,12 @@ resolve_root() {
   local value
   if [ -n "${WORKFLOW_SKILLS_WORKTREE_ROOT:-}" ]; then
     validate_root "WORKFLOW_SKILLS_WORKTREE_ROOT" "$WORKFLOW_SKILLS_WORKTREE_ROOT"
-    expand_tilde "$WORKFLOW_SKILLS_WORKTREE_ROOT"
+    emit "$(expand_tilde "$WORKFLOW_SKILLS_WORKTREE_ROOT")" "env WORKFLOW_SKILLS_WORKTREE_ROOT"
     return 0
   fi
   if value=$(config_get "$CONFIG_REL" root); then
     validate_root "$CONFIG_REL: root" "$value"
-    expand_tilde "$value"
+    emit "$(expand_tilde "$value")" "repo config $CONFIG_REL"
     return 0
   fi
   # No `~/src/worktrees`: that layout is one person's, and a fresh install has
@@ -152,8 +165,8 @@ resolve_root() {
   # succeeds against whatever directory the hook happened to run in, registers
   # the worktree there, and every later lookup by the documented path misses it.
   case "${XDG_STATE_HOME:-}" in
-    /*) printf '%s\n' "$XDG_STATE_HOME/worktrees" ;;
-    *) printf '%s\n' "$HOME/.local/state/worktrees" ;;
+    /*) emit "$XDG_STATE_HOME/worktrees" "default (XDG_STATE_HOME)" ;;
+    *) emit "$HOME/.local/state/worktrees" "default (~/.local/state)" ;;
   esac
 }
 
@@ -188,15 +201,15 @@ slugify() { # value
 }
 
 resolve_prefix() {
-  local value slug file
+  local value slug file src
   if [ -n "${WORKFLOW_SKILLS_BRANCH_PREFIX:-}" ]; then
     validate_prefix "WORKFLOW_SKILLS_BRANCH_PREFIX" "$WORKFLOW_SKILLS_BRANCH_PREFIX"
-    normalise_prefix "$WORKFLOW_SKILLS_BRANCH_PREFIX"
+    emit "$(normalise_prefix "$WORKFLOW_SKILLS_BRANCH_PREFIX")" "env WORKFLOW_SKILLS_BRANCH_PREFIX"
     return 0
   fi
   if value=$(config_get "$CONFIG_REL" branch_prefix); then
     validate_prefix "$CONFIG_REL: branch_prefix" "$value"
-    normalise_prefix "$value"
+    emit "$(normalise_prefix "$value")" "repo config $CONFIG_REL"
     return 0
   fi
   # The task handler's config, local override first — the same order
@@ -204,7 +217,7 @@ resolve_prefix() {
   for file in "$TASK_CONFIG_LOCAL_REL" "$TASK_CONFIG_REL"; do
     if value=$(config_get "$file" branch_prefix); then
       validate_prefix "$file: branch_prefix" "$value"
-      normalise_prefix "$value"
+      emit "$(normalise_prefix "$value")" "repo config $file"
       return 0
     fi
   done
@@ -213,11 +226,17 @@ resolve_prefix() {
   # often slugifies into something nobody would type.
   value=$(git config --get user.email 2>/dev/null)
   slug=$(slugify "${value%%@*}")
+  src="default (git user.email)"
   if [ -z "$slug" ]; then
     value=$(git config --get user.name 2>/dev/null)
     slug=$(slugify "$value")
+    src="default (git user.name)"
   fi
-  normalise_prefix "${slug:-$PREFIX_FALLBACK}"
+  if [ -z "$slug" ]; then
+    slug="$PREFIX_FALLBACK"
+    src="default (fallback)"
+  fi
+  emit "$(normalise_prefix "$slug")" "$src"
 }
 
 # ------------------------------------------------------------------ dispatch
@@ -234,5 +253,14 @@ case "${1-}" in
     printf 'root=%s\n' "$root"
     printf 'branch_prefix=%s\n' "$prefix"
     ;;
-  *) die "unknown argument: $1 (expected 'root', 'prefix', or none)" ;;
+  explain)
+    # Same resolution, with the tier each value came from. `/doctor` reads this
+    # to report a value a fresh clone resolved by default rather than by intent.
+    EXPLAIN=1
+    root=$(resolve_root) || exit 1
+    prefix=$(resolve_prefix) || exit 1
+    printf 'root=%s\n' "$root"
+    printf 'branch_prefix=%s\n' "$prefix"
+    ;;
+  *) die "unknown argument: $1 (expected 'root', 'prefix', 'explain', or none)" ;;
 esac

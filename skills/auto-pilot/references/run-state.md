@@ -14,7 +14,7 @@ Three stores exist; only one is authoritative for a given fact.
 - **Git is authoritative for code and PR existence** (the pushed branch and the
   open PR are the ground truth that a task's work happened).
 - **The run files are a cache + report** — a fast local read of the graph and a
-  human-facing morning summary. They are always allowed to be _behind_ the
+  human-facing live summary. They are always allowed to be _behind_ the
   tracker and git, never ahead (see **Write order**).
 
 ## The three files (+ one non-durable rendering)
@@ -26,7 +26,7 @@ the **run-state branch** (below) — never to a task branch. Paths:
 | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `.auto-pilot/RUN.md`       | The task graph + each task's current lifecycle **phase** and the run's verify tooling. The machine-readable state the run loop and `--resume` read. |
 | `.auto-pilot/QUESTIONS.md` | The decision log — one indexed entry per reversible call the run made without a human.                                                              |
-| `.auto-pilot/REPORT.md`    | The rolling human-facing report the user wakes to.                                                                                                  |
+| `.auto-pilot/REPORT.md`    | The rolling, live human-facing report, read mid-run as well as at the end.                                                                          |
 
 `.auto-pilot/STATUS.md` is a **fourth, non-durable** artifact (task 20,
 finding #28): the periodic status report, overwritten every interval by
@@ -160,10 +160,11 @@ usage_deltas: [] # rolling Claude-orchestrator consumption intervals: [{percent:
   these optional fields and use the documented defaults, preserving their
   existing state bytes. Resume reads recorded fields; it does not re-resolve
   current command-line defaults.
-- `phase` is one of the seven in-flight/terminal values below, or the pre-claim
-  `pending` marker (see "Task lifecycle phases"); of those, only the seven
-  in-flight/terminal values are what `--resume` reconciles (a `pending` task has
-  no in-flight transaction to reconcile).
+- `phase` is one of the seven in-flight/terminal values below, or one of the
+  two pre-claim values `pending` and `skipped` (see "Task lifecycle phases"); of
+  those, only the seven in-flight/terminal values are what `--resume` reconciles
+  (a pre-claim task has no in-flight transaction to reconcile). A `skipped`
+  row's `notes` cell carries the refusal reason.
 
 ### Exit contract — why the orchestrator stopped
 
@@ -189,7 +190,7 @@ branch).
 | ------------ | ------------------------------------------------- | ------------------------------ |
 | `continuing` | work remains, context exhausted                   | **relaunch**                   |
 | `paused`     | rate window / `paused_until` set                  | **relaunch** past the reset    |
-| `done`       | no ready tasks remain                             | **tear down**                  |
+| `done`       | no ready tasks remain (incl. all left `skipped`)  | **tear down**                  |
 | `systemic`   | circuit breaker / fatal auth / failed invariant   | **tear down + alarm**          |
 | `deadline`   | pre-dispatch guard stopped with tasks still ready | **tear down**; `--resume` only |
 
@@ -341,18 +342,20 @@ A deferred co-review finding that was also filed as a tracked follow-up (see
 
 ### `REPORT.md`
 
-The report, rewritten after every unit of work. Sections:
+The report, rewritten after every unit of work. Sections, in this order — what
+a human must judge comes last, because the end is what a reader is left on. The
+supervisor's alarm line is the one exception: it is the run's verdict, so it
+goes at the very top (`run-budget.md`, "The alarm").
 
 1. **Outcomes** — per task: `handed-off` / `parked` / `skipped` + one line why.
-2. **Decisions** — the highlights from `QUESTIONS.md` worth a human's eye.
-3. **Evidence** — links to the check output, screenshots, and exercised-feature
+   A `skipped` line gives the refusal reason from its `notes` cell, and names
+   each task left `pending` because it is blocked by that one.
+2. **Evidence** — links to the check output, screenshots, and exercised-feature
    artifacts each PR carries.
-4. **How-to-evaluate queue** — for each human-judgment checkpoint: exactly how
-   to evaluate it and what a "no" would invalidate.
-5. **Review classes per PR** — which reviewer classes ran / timed-out / skipped
+3. **Review classes per PR** — which reviewer classes ran / timed-out / skipped
    for each PR (the summary `/co-review --non-interactive` emits).
-6. **Spend** — usage against the rate window and any per-task bounds hit.
-7. **Follow-ups** — the index of every co-review finding filed as a tracked
+4. **Spend** — usage against the rate window and any per-task bounds hit.
+5. **Follow-ups** — the index of every co-review finding filed as a tracked
    task this run: task id, source PR, and the one-line finding. A finding is
    auto-filed via `/add-task` (tagged `auto-pilot`) when it is deferred **and**
    either **cross-cutting** (its faithful fix would touch a file outside the
@@ -368,6 +371,10 @@ The report, rewritten after every unit of work. Sections:
    before they enter work, so a hallucinated finding is caught before it costs
    anything. If `/add-task` itself fails, the run does not fail — the finding
    is recorded here as a plain bullet (task id `none`) instead.
+6. **For you** — everything a human must judge, numbered, highest impact
+   first: the `QUESTIONS.md` decisions worth a human's eye, and each
+   human-judgment checkpoint with exactly how to evaluate it and what a "no"
+   would invalidate.
 
 ## Run-state branch
 
@@ -405,7 +412,7 @@ uncommitted task-branch edits can block the checkout back, wedging recovery.
 restores that branch and appends a `QUESTIONS.md` entry recording the
 deviation (format above) — a run that finds itself on the wrong branch has
 already violated its recovery contract and must not silently continue. That
-entry reaches `REPORT.md`'s **Decisions** section through the normal rolling
+entry reaches `REPORT.md`'s **For you** section through the normal rolling
 rewrite; no separate `REPORT.md` format exists for it. It fails closed when the
 run worktree is **dirty** at the deviation (restoring would silently carry or
 lose the uncommitted task-branch edits) or when git itself refuses the restore —
@@ -417,17 +424,48 @@ otherwise-recoverable run.
 `phase` spans all materialized tasks, but only the seven **in-flight/terminal**
 values below — from the moment a task is claimed to its terminal state —
 participate in crash reconciliation. A task materialized into the graph but not
-yet claimed carries the pre-claim marker `pending` instead; it is not one of
-those seven and is never a target of the crash-reconciliation table (there is
-nothing mid-transaction to reconcile before a claim exists). Which `pending`
-tasks are **eligible to claim next** — graph readiness — is not encoded in a
-`pending` task's own `phase`; it is computed from the graph edges and the
-blockers' phases by the adapter's `list_ready`/`dependency_graph` verbs
+yet claimed carries one of two pre-claim values instead: `pending`, or
+`skipped` once its claim has been refused. Neither is one of those seven, and
+neither is ever a target of the crash-reconciliation table (there is nothing
+mid-transaction to reconcile before a claim exists). Which `pending` tasks are
+**eligible to claim next** — graph readiness — is not encoded in a `pending`
+task's own `phase`; it is computed from the graph edges and the blockers' phases
+by the adapter's `list_ready`/`dependency_graph` verbs
 ([`adapters.md`](adapters.md)).
 
-| Phase     | Meaning                                                                     | Tracker                                                      | Git / remote | Worker worktree |
-| --------- | --------------------------------------------------------------------------- | ------------------------------------------------------------ | ------------ | --------------- |
-| `pending` | Materialized into the graph, not yet claimed; readiness computed separately | new / materialized (plan `new`\|`ready`; linear `unstarted`) | no branch    | none            |
+| Phase     | Meaning                                                                                 | Tracker                                                      | Git / remote            | Worker worktree |
+| --------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------ | ----------------------- | --------------- |
+| `pending` | Materialized into the graph, not yet claimed; readiness computed separately             | new / materialized (plan `new`\|`ready`; linear `unstarted`) | no branch               | none            |
+| `skipped` | **Terminal (not claimed):** `/deliver-task` refused the claim; the reason is in `notes` | untouched by this run                                        | no branch from this run | none            |
+
+**`skipped` is how a refused claim leaves the queue.** When `/deliver-task`
+returns a claim refusal (its step 2: lost race, already in flight under another
+session, open blockers, a held or oversized issue), the loop writes `skipped`
+and the handler's reason into the row. Without it the row stays `pending`,
+readiness selects it again on the next iteration, and the run ends only at its
+budget or deadline (#912). Only a `pending` task is a readiness candidate, so a
+`skipped` task is never selected again in the same run — not by the loop, and
+not by a `--resume` of it. A human who wants it retried sets the cell back to
+`pending`.
+
+It is not `parked`, though both are terminal without success. A `parked` task
+was claimed: its tracker reads started, and a branch or PR may exist. A
+`skipped` task holds nothing this run acquired, so the doctor, resume and the
+crash-reconciliation table have nothing of it to repair. The one downstream
+effect is on its dependents: their blocker never reaches `handed-off`, so they
+stay `pending` and never become ready. `REPORT.md` lists them under the skipped
+task (below).
+
+**Decision: a blocker that reopened mid-run skips the task rather than parking
+it for a later retry.** The blocker in question is outside the run's graph —
+the in-graph ones are what readiness already waits on — so nothing in the run
+signals when it clears. A "retry later" state is then a poll: readiness
+reselects the task every iteration until the blocker happens to clear, which is
+the loop this phase exists to end. Rejected alternative: a re-checkable
+`waiting` phase — it needs a poll interval and a cap to terminate, and still
+spends a `/deliver-task` pre-flight per poll. The reason in `notes` names the
+open blockers, so a human who clears one can set its phase back to `pending`
+and `--resume` the run.
 
 Seven in-flight/terminal phases follow, once a task is claimed. Each names
 exactly what exists on the tracker, in git, and on disk while a task sits in

@@ -1,3 +1,9 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+user-invocable: false
+---
+
 # gh-issue handler — /task-config setup
 
 Configures the `gh-issue` handler, which creates GitHub Issues via `gh issue create` at `/add-task` time. This file owns the prerequisite check (`gh auth status`) and the optional-fields prompt; the actual create flow lives in `gh-issue.md`.

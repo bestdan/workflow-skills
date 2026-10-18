@@ -4,7 +4,7 @@ apply the canonical gates and rank to a set of issues the caller already
 fetched via `<linear-mcp>__list_issues`, instead of hand-walking them in
 prose. Sibling of `linear-ready.py` (the GraphQL fast path); both import the
 same `gate()`/`rank_key()` from `_linear_rank.py` — see that module's header
-for the six-gate table and the rank rule.
+for the gate table and the rank rule.
 
 Read-only. Never mutates anything, never calls the network — the caller
 already did the MCP read; this script only decides over the result.
@@ -18,6 +18,15 @@ each with at least:
   updatedAt   str   — ISO-8601, used for the tie-break
   labels      list[str]  — label names
   assigneeId  str or null (omit when unassigned)
+  blockedBy   optional list of {"id": "PRE-9", "statusType": "completed"} —
+              the issue's native blockers, each with its own state type. The
+              caller builds it at pre-flight from `get_issue` with
+              `includeRelations: true` plus one `get_issue` per blocker, since
+              relations carry no state. Omit it on the ranked pass, where
+              `list_issues` returns no relations; the blocker gate then does
+              not run. An entry with no `statusType` holds the issue. The one
+              ranked pass that does supply it is `/auto-pilot`'s `list_ready`,
+              together with `--stack-in-set`.
 
 Every other key on an issue object is passed through unchanged onto the
 matching output candidate, so the caller can feed `list_issues`' own fields
@@ -50,7 +59,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _linear_rank import gate, rank_key  # noqa: E402
+from _linear_rank import gate, rank_key, stack_in_set  # noqa: E402
 
 
 def _value(field):
@@ -70,9 +79,14 @@ def _to_gate_shape(issue, viewer_id):
     if assignee_id and viewer_id is not None:
         assignee = {"id": assignee_id, "isMe": assignee_id == viewer_id}
     return {
+        "identifier": issue.get("id"),
         "estimate": _value(issue.get("estimate")),
         "labels": {"nodes": [{"name": name} for name in issue.get("labels") or []]},
         "assignee": assignee,
+        "blockedBy": [
+            {"identifier": b.get("id"), "stateType": b.get("statusType")}
+            for b in issue.get("blockedBy") or []
+        ],
     }
 
 
@@ -92,19 +106,30 @@ def main():
         help="The current Linear user's id, for the assignee gate. Omit to "
         "skip that gate.",
     )
+    ap.add_argument(
+        "--stack-in-set",
+        action="store_true",
+        help="Count a blocker that is itself a surviving candidate as met. "
+        "For /auto-pilot's list_ready, which stacks a dependent on its "
+        "in-run parent; see _linear_rank.py.",
+    )
     args = ap.parse_args()
 
     issues = json.load(sys.stdin)
 
-    candidates, dropped = [], {}
+    pairs = []
     for issue in issues:
-        identifier = issue.get("id")
         project = issue.get("project")
         max_estimate = args.max_estimate
         if isinstance(project, dict) and project.get("max_estimate") is not None:
             max_estimate = project["max_estimate"]
-        gate_issue = _to_gate_shape(issue, args.viewer_id)
-        reason = gate(gate_issue, max_estimate)
+        pairs.append((_to_gate_shape(issue, args.viewer_id), max_estimate))
+    satisfied = stack_in_set(pairs) if args.stack_in_set else frozenset()
+
+    candidates, dropped = [], {}
+    for issue, (gate_issue, max_estimate) in zip(issues, pairs):
+        identifier = issue.get("id")
+        reason = gate(gate_issue, max_estimate, satisfied)
         if reason:
             dropped[identifier] = reason
             continue

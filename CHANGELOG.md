@@ -4,6 +4,220 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.88.0] - 2026-10-16
+
+### Features
+
+- deny discard_changes unless the tree is clean and landed [#980] (#994) (bda85de)
+
+## [2.87.1] - 2026-10-16
+
+### Fixes
+
+- feed copilot its input as the whole prompt [#1032] (#1033) (8ca07be)
+
+## [2.87.0] - 2026-10-16
+
+### Features
+
+- serve on the tailnet over Tailscale SSH [N/A] (#1016) (63ec3bb)
+
+## [2.86.0] - 2026-10-15
+
+### Features
+
+- add the reference skill and point the refusal at it [#933] (#1031) (4066498)
+
+## [2.85.0] - 2026-10-15
+
+### Features
+
+- refuse gh pr checkout in a pinned checkout [#968] (#1029) (0d9b1b2)
+
+## [2.84.1] - 2026-10-15
+
+### Fixes
+
+- gate discard_changes on hook-created worktrees [#980] (#993) (5349e7f)
+
+## [2.84.0] - 2026-10-15
+
+### Features
+
+- name the configured worktree in the refusal [#932] (#1027) (142126a)
+
+## [2.83.1] - 2026-10-15
+
+### Fixes
+
+- name the EnterWorktree name route in the refusal [#997] (#1026) (864bdb5)
+
+## [2.83.0] - 2026-10-15
+
+### Features
+
+- add the worktree-entry reference skill [#996] (#1018) (54c4e5d)
+
+## [2.82.0] - 2026-10-15
+
+### Features
+
+- refuse EnterWorktree path when a name route exists [#989] (#1021) (7d8b3b9)
+
+### Fixes
+
+- stop refusing interpreter reads [#998] (#1008) (21335b5)
+
+## [2.81.0] - 2026-10-15
+
+### Features
+
+- add opt-in pin-checkout script with post-checkout backstop [#969] (#1007) (2f27821)
+
+## [2.80.0] - 2026-10-15
+
+### Features
+
+- add worktree-name-for.sh resolver [#995] (#1006) (9cd4017)
+
+## [2.79.2] - 2026-10-15
+
+### Fixes
+
+- report only an existing ref as a lost race [#982] (#983) (a9dbc4e)
+
+## [2.79.1] - 2026-10-14
+
+### Fixes
+
+- reconciler lists a finding's premises, incl. reachability [#990] (#991) (aa1b2c8)
+
+## [2.79.0] - 2026-10-07
+
+### Features
+
+- post APPROVE or REQUEST_CHANGES, never COMMENT (#984) (85a5179)
+
+## [2.78.0] - 2026-10-05
+
+### Features
+
+- report the resolved worktree root and branch prefix [#955] (#978) (aeade0d)
+
+## [2.77.0] - 2026-10-05
+
+### Features
+
+- report dead teardown allow-rules from Check 7 [#954] (#977) (d9989c9)
+
+## [2.76.0] - 2026-10-05
+
+### Features
+
+- add a command that grants the teardown scripts [#953] (#971) (d250df8)
+
+## [2.75.2] - 2026-10-05
+
+### Fixes
+
+- name every shape the kept-branch tip can take [N/A] (#972) (2b2a124)
+
+## [2.75.1] - 2026-10-04
+
+### Fixes
+
+- restore strict plugin validation [N/A] (#964) (d9fe71e)
+
+## [2.75.0] - 2026-10-04
+
+### Features
+
+- register the pinned-branch guard with cd tracking [#931] (#951) (e108342)
+
+## [2.74.3] - 2026-10-04
+
+### Fixes
+
+- pass plugin validation under Claude Code 2.1.289 [N/A] (#966) (1521e62)
+
+## [2.74.2] - 2026-10-03
+
+### Fixes
+
+- group the status block so failures sit above the tally (#950) (2a51e92)
+
+## [2.74.1] - 2026-10-03
+
+### Fixes
+
+- end hand-off reports on what needs the reader [N/A] (#949) (92f0904)
+
+## [2.74.0] - 2026-10-03
+
+### Features
+
+- add pinned-branch guard's checkout decision, unregistered [#930] (#946) (1fa4268)
+
+## [2.73.1] - 2026-10-03
+
+### Fixes
+
+- unblock the sandboxed gate and correct stale agent docs [N/A] (#947) (9601164)
+
+## [2.73.0] - 2026-09-29
+
+### Features
+
+- fixed status symbols and line shapes in the output template [N/A] (#927) (b2b8139)
+
+## [2.72.1] - 2026-09-29
+
+### Fixes
+
+- check the shared allow-rules in the drift pre-flight [#475] (#918) (7ff5962)
+
+## [2.72.0] - 2026-09-29
+
+### Features
+
+- add pr-review-comments.sh for pending comments [#923] (#925) (aa69d04)
+
+## [2.71.2] - 2026-09-29
+
+### Fixes
+
+- describe an unattended run, not a nocturnal one [#767] (#922) (5248d2c)
+
+## [2.71.1] - 2026-09-27
+
+### Fixes
+
+- grant the plugin's scripts from the skill [#848] (#917) (b606ba1)
+
+## [2.71.0] - 2026-09-27
+
+### Features
+
+- pin stronger reviewer models [N/A] (#920) (fad91ae)
+
+## [2.70.7] - 2026-09-27
+
+### Fixes
+
+- wait for Copilot only when requested for the head [N/A] (#914) (d967d2d)
+
+## [2.70.6] - 2026-09-27
+
+### Fixes
+
+- record a refused claim as skipped [#912] (#913) (9e1e5ea)
+
+## [2.70.5] - 2026-09-27
+
+### Fixes
+
+- hold claim candidates on open native blockers [#909] (#910) (0ccd127)
+
 ## [2.70.4] - 2026-09-26
 
 ### Fixes

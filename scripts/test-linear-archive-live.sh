@@ -269,16 +269,16 @@ if [ -z "$P1" ] || [ -z "$P2" ]; then
   MULTI_OK=0
 fi
 
-TEAM_OUT="$(mktemp)"
-TEAM_ERR="$(mktemp)"
-ONE_OUT="$(mktemp)"
-ONE_ERR="$(mktemp)"
-DUPE_OUT="$(mktemp)"
-DUPE_ERR="$(mktemp)"
-MULTI_OUT="$(mktemp)"
-MULTI_ERR="$(mktemp)"
-BAD_OUT="$(mktemp)"
-BAD_ERR="$(mktemp)"
+TEAM_OUT="$(mktemp "${TMPDIR:-/tmp}/test-linear-archive-live.XXXXXX")"
+TEAM_ERR="$(mktemp "${TMPDIR:-/tmp}/test-linear-archive-live.XXXXXX")"
+ONE_OUT="$(mktemp "${TMPDIR:-/tmp}/test-linear-archive-live.XXXXXX")"
+ONE_ERR="$(mktemp "${TMPDIR:-/tmp}/test-linear-archive-live.XXXXXX")"
+DUPE_OUT="$(mktemp "${TMPDIR:-/tmp}/test-linear-archive-live.XXXXXX")"
+DUPE_ERR="$(mktemp "${TMPDIR:-/tmp}/test-linear-archive-live.XXXXXX")"
+MULTI_OUT="$(mktemp "${TMPDIR:-/tmp}/test-linear-archive-live.XXXXXX")"
+MULTI_ERR="$(mktemp "${TMPDIR:-/tmp}/test-linear-archive-live.XXXXXX")"
+BAD_OUT="$(mktemp "${TMPDIR:-/tmp}/test-linear-archive-live.XXXXXX")"
+BAD_ERR="$(mktemp "${TMPDIR:-/tmp}/test-linear-archive-live.XXXXXX")"
 trap 'rm -f "$TEAM_OUT" "$TEAM_ERR" "$ONE_OUT" "$ONE_ERR" "$DUPE_OUT" "$DUPE_ERR" "$MULTI_OUT" "$MULTI_ERR" "$BAD_OUT" "$BAD_ERR"' EXIT
 
 # --older-than 1 keeps the candidate set wide. --apply is NEVER passed anywhere

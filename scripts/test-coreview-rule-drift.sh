@@ -19,6 +19,14 @@
 #   - a missing plugin root exits 2, distinct from the exit 1 that means drift
 #   - the script is runnable AS DOCUMENTED, with CLAUDE_PLUGIN_ROOT unset, and
 #     both documented call sites still pass --plugin-root (issue #607)
+#   - the shared rules are checked for coverage up to a whole shell token, one
+#     diff source suffices, and a leftover plugin-cache prefix rule is DEAD
+#     (issue #475)
+#   - every plugin script co-review runs has an allowed-tools grant in its
+#     SKILL.md, since no settings rule can approve one (issue #848)
+#   - under --teardown, a teardown rule pinned to a stale plugin version is
+#     DEAD, one naming the installed path is live, and no rule is not drift
+#     (issue #954)
 #
 # Run directly: bash scripts/test-coreview-rule-drift.sh
 set -uo pipefail
@@ -31,11 +39,10 @@ command -v jq >/dev/null 2>&1 || {
   exit 2
 }
 
-# Bare `mktemp -d` (no template) ignores $TMPDIR on macOS, so the first arm
-# isn't a real $TMPDIR attempt; try $TMPDIR explicitly before falling back to
+# A bare `mktemp -d` ignores $TMPDIR on macOS (see scripts/lint-mktemp.sh), so
+# use a $TMPDIR template, falling back to
 # repo-local.
-BASE="$(mktemp -d 2>/dev/null \
-  || mktemp -d "${TMPDIR:-/tmp}/coreview-drift-test.XXXXXX" 2>/dev/null \
+BASE="$(mktemp -d "${TMPDIR:-/tmp}/coreview-drift-test.XXXXXX" 2>/dev/null \
   || mktemp -d "$ROOT/.coreview-drift-test.XXXXXX")"
 # Fail closed: an empty BASE would make the `cd` below a no-op (bash `cd ""`
 # exits 0), leaving BASE pointing at the repo root for the EXIT trap to delete.
@@ -387,6 +394,269 @@ for doc in "$ROOT/skills/co-review/SKILL.md" "$ROOT/commands/doctor.md"; do
     fail "$(basename "$doc"): $flagged of $calls invocation(s) pass --plugin-root"
   fi
 done
+
+# --- 10. shared rules --------------------------------------------------------
+# The shared rules live in references/permissions.md. They are prefix rules
+# over a class of commands, so they are checked by asking whether a settings
+# rule approves the command, matching up to a whole shell token as the
+# permission matcher does. The fixture copies the real shared-rules file, so
+# these cases check the shipped templates.
+
+SPLUGIN="$BASE/splugin"
+make_plugin "$SPLUGIN"
+mkdir -p "$SPLUGIN/skills/co-review/references"
+cp "$ROOT/skills/co-review/references/permissions.md" \
+  "$SPLUGIN/skills/co-review/references/permissions.md"
+
+SHARED_OK=(
+  "Bash(cat:*)" "Bash(gh pr diff:*)" "Bash(gh pr view:*)" "Bash(git diff:*)"
+  "Bash(git ls-remote:*)" "Bash(git status:*)"
+)
+
+run_shared() {
+  OUT="$("$SCRIPT" --plugin-root "$SPLUGIN" --settings "$1" --json 2>&1)"
+  RC=$?
+}
+shared_count() { printf '%s' "$OUT" | jq ".shared.$1 | length"; }
+
+make_settings "$BASE/shared-ok.json" "${SHARED_OK[@]}"
+run_shared "$BASE/shared-ok.json"
+if [ "$RC" -eq 0 ] && [ "$(printf '%s' "$OUT" | jq -r '.shared.templates')" = "6" ] \
+  && [ "$(shared_count missing)" = "0" ] && [ "$(shared_count dead)" = "0" ]; then
+  pass "the shipped shared rules cover every shared template"
+else
+  fail "shipped shared rules did not cover their templates (rc=$RC): $OUT"
+fi
+
+# A missing shared rule is drift once co-review is set up at all.
+make_settings "$BASE/shared-missing.json" "${SHARED_OK[@]:0:5}"
+run_shared "$BASE/shared-missing.json"
+if [ "$RC" -eq 1 ] && [ "$(printf '%s' "$OUT" | jq -r '.shared.missing[0]')" = "Bash(git status:*)" ]; then
+  pass "a missing shared rule is reported MISSING and is drift"
+else
+  fail "a missing shared rule was not reported (rc=$RC): $OUT"
+fi
+
+# One diff source suffices: permissions.md says to add only the one you use.
+make_settings "$BASE/shared-onediff.json" \
+  "Bash(cat:*)" "Bash(gh pr view:*)" "Bash(git diff:*)" \
+  "Bash(git ls-remote:*)" "Bash(git status:*)"
+run_shared "$BASE/shared-onediff.json"
+if [ "$RC" -eq 0 ] && [ "$(shared_count missing)" = "0" ]; then
+  pass "git diff alone satisfies the diff-source pair"
+else
+  fail "a single diff source reported missing (rc=$RC): $OUT"
+fi
+
+# With neither diff source covered, the text report names the pair once as
+# alternatives, so the operator is not told to add both.
+make_settings "$BASE/shared-nodiff.json" \
+  "Bash(cat:*)" "Bash(gh pr view:*)" "Bash(git ls-remote:*)" "Bash(git status:*)"
+TEXT="$("$SCRIPT" --plugin-root "$SPLUGIN" --settings "$BASE/shared-nodiff.json" 2>&1)"
+if [ "$(grep -c '^  MISSING ' <<<"$TEXT")" = "1" ] \
+  && grep -q 'one suffices' <<<"$TEXT" \
+  && grep -q '^shared: 4/5 required rules covered' <<<"$TEXT"; then
+  pass "an uncovered diff-source pair is reported once, as alternatives"
+else
+  fail "the diff-source pair was not reported as alternatives: $TEXT"
+fi
+
+# A broader rule approves the command too, so it is coverage. One ending
+# mid-token approves nothing.
+make_settings "$BASE/shared-broad.json" "Bash(agy models)" \
+  "Bash(cat:*)" "Bash(gh:*)" "Bash(git *)"
+run_shared "$BASE/shared-broad.json"
+# The agy probe rule keeps this a configured machine; agy's own missing rule
+# makes the exit code 1, so assert on the shared result directly.
+if [ "$(printf '%s' "$OUT" | jq -r .shared.configured)" = "true" ] \
+  && [ "$(shared_count missing)" = "0" ]; then
+  pass "broader Bash(gh:*) and Bash(git *) rules cover the shared templates"
+else
+  fail "a broader rule was not counted as coverage (rc=$RC): $OUT"
+fi
+make_settings "$BASE/shared-midtoken.json" "${SHARED_OK[@]:0:5}" "Bash(git stat:*)"
+run_shared "$BASE/shared-midtoken.json"
+if [ "$RC" -eq 1 ] && [ "$(shared_count missing)" = "1" ]; then
+  pass "a rule ending mid-token (Bash(git stat:*)) is not coverage"
+else
+  fail "a mid-token rule was counted as coverage (rc=$RC): $OUT"
+fi
+
+# The plugin-cache prefix rules permissions.md used to prescribe end inside the
+# script's path token, so they never fired. Every spelling is DEAD, so the
+# operator deletes it. Another plugin-path rule, such as a worktree teardown
+# grant, belongs to no co-review template and is left alone.
+make_settings "$BASE/shared-cache.json" "${SHARED_OK[@]}" \
+  "Bash(/c/workflow-skills/workflow-skills/:*)" \
+  "Bash(python3 /c/workflow-skills/workflow-skills/:*)" \
+  "Bash(python3 \"/c/workflow-skills/workflow-skills/:*)" \
+  "Bash(/c/workflow-skills/workflow-skills/*/scripts/worktree-remove.sh *)"
+run_shared "$BASE/shared-cache.json"
+if [ "$RC" -eq 1 ] && [ "$(shared_count dead)" = "3" ]; then
+  pass "every plugin-cache prefix rule is DEAD; a teardown rule is not"
+else
+  fail "plugin-cache rules misclassified (rc=$RC, dead=$(shared_count dead)): $OUT"
+fi
+
+# No sign of co-review at all is "not configured", as for a reviewer.
+make_settings "$BASE/shared-none.json" "Bash(ls:*)"
+run_shared "$BASE/shared-none.json"
+if [ "$RC" -eq 0 ] && [ "$(printf '%s' "$OUT" | jq -r .shared.configured)" = "false" ]; then
+  pass "no shared or reviewer rule at all is not configured, and not drift"
+else
+  fail "unconfigured shared rules reported as drift (rc=$RC): $OUT"
+fi
+
+# A generic rule is common on machines that never ran co-review, so on its own
+# it is no sign of setup.
+make_settings "$BASE/shared-generic.json" "Bash(cat:*)" "Bash(git:*)"
+run_shared "$BASE/shared-generic.json"
+if [ "$RC" -eq 0 ] && [ "$(printf '%s' "$OUT" | jq -r .shared.configured)" = "false" ]; then
+  pass "generic Bash(cat:*) and Bash(git:*) alone are not configured, and not drift"
+else
+  fail "generic rules alone reported as drift (rc=$RC): $OUT"
+fi
+
+# An exact rule approves only the bare command, and co-review always passes
+# arguments (`git status --porcelain`), so it covers no shared template. The
+# reviewer probe rule marks co-review as set up, making the gap drift.
+make_settings "$BASE/shared-exact.json" "Bash(agy models)" \
+  "Bash(cat)" "Bash(gh pr diff)" "Bash(gh pr view)" "Bash(git diff)" \
+  "Bash(git ls-remote)" "Bash(git status)"
+run_shared "$BASE/shared-exact.json"
+if [ "$RC" -eq 1 ] && [ "$(shared_count missing)" = "6" ]; then
+  pass "exact rules cover no shared template"
+else
+  fail "exact rules were counted as coverage (rc=$RC): $OUT"
+fi
+
+# A configured reviewer with no shared rule at all is set up, so every shared
+# template is missing and that is drift.
+make_settings "$BASE/shared-revonly.json" "Bash(agy models)"
+run_shared "$BASE/shared-revonly.json"
+if [ "$RC" -eq 1 ] && [ "$(printf '%s' "$OUT" | jq -r .shared.configured)" = "true" ] \
+  && [ "$(shared_count missing)" = "6" ]; then
+  pass "a configured reviewer with no shared rule reports every shared template"
+else
+  fail "a reviewer-only setup did not report the shared rules (rc=$RC): $OUT"
+fi
+
+# --- 11. every plugin script co-review runs is granted by the skill ---------
+# No settings rule can approve a plugin script: the quoted path is one shell
+# token carrying the version, and the matcher only compares whole tokens. So
+# each invocation must have an `allowed-tools` entry in SKILL.md whose prefix
+# is exactly the invocation's program and path. A script added without one is
+# denied silently under `--non-interactive`.
+#
+# Every reference to a plugin script is extracted with whatever single word
+# precedes it, quoted or not. An unquoted path or a `bash …` prefix is a form no
+# grant can match, so it surfaces as "no grant" rather than slipping past. The
+# `.sh|.py` anchor keeps prose placeholders like `scripts/<name>` out. Known
+# limit: prose putting a bare word right before a quoted path fails loudly;
+# backtick the path to fix it.
+
+SKILL_MD="$ROOT/skills/co-review/SKILL.md"
+invocations=$(grep -ohE \
+  '([A-Za-z0-9_./-]+ )?"?\$\{CLAUDE_PLUGIN_ROOT\}/scripts/[A-Za-z0-9_.-]+\.(sh|py)"?' \
+  "$SKILL_MD" "$ROOT"/skills/co-review/reviewers/*.md \
+  "$ROOT"/skills/co-review/references/*.md | sort -u)
+ungranted=0
+while IFS= read -r inv; do
+  [ -n "$inv" ] || continue
+  if ! grep -qxF "  - Bash($inv:*)" "$SKILL_MD"; then
+    fail "no allowed-tools grant in SKILL.md (unquoted, other interpreter, or missing) for: $inv"
+    ungranted=$((ungranted + 1))
+  fi
+done <<EOF
+$invocations
+EOF
+count=$(printf '%s\n' "$invocations" | grep -c .)
+if [ "$ungranted" -eq 0 ] && [ "$count" -gt 0 ]; then
+  pass "all $count plugin-script invocations have an allowed-tools grant"
+fi
+
+# --- 12. --teardown: live, stale-version, and absent teardown rules ---------
+# A teardown rule names the full installed path, version directory included, so
+# it dies at the next plugin update. The check reports a rule pinned to another
+# version as DEAD, naming the installed one (issue #954).
+TD_CACHE="$BASE/cache/workflow-skills/workflow-skills"
+TD_PLUGIN="$TD_CACHE/2.0.0"
+mkdir -p "$TD_PLUGIN/scripts"
+touch "$TD_PLUGIN/scripts/worktree-remove.sh" "$TD_PLUGIN/scripts/branch-remove.sh"
+
+run_teardown() {
+  OUT="$("$SCRIPT" --plugin-root "$TD_PLUGIN" --settings "$1" --teardown --json 2>&1)"
+  RC=$?
+}
+# td <script> <field> — how many entries that teardown script has in that field.
+td() {
+  printf '%s' "$OUT" | jq --arg s "$1" --arg f "$2" \
+    '[.teardown.scripts[] | select(.script == $s)][0][$f] | if . == null then 0 elif type == "string" then 1 else length end'
+}
+
+make_settings "$BASE/td-live.json" \
+  "Bash(\"$TD_PLUGIN/scripts/worktree-remove.sh\":*)" \
+  "Bash(\"$TD_PLUGIN/scripts/branch-remove.sh\":*)"
+run_teardown "$BASE/td-live.json"
+if [ "$RC" -eq 0 ] && [ "$(td worktree-remove.sh live)" = "1" ] \
+  && [ "$(td branch-remove.sh live)" = "1" ] && [ "$(td worktree-remove.sh missing)" = "0" ]; then
+  pass "teardown: rules naming the installed path are live, no drift"
+else
+  fail "teardown: live rules were not recognised (rc=$RC): $OUT"
+fi
+
+make_settings "$BASE/td-stale.json" \
+  "Bash(\"$TD_CACHE/1.9.0/scripts/worktree-remove.sh\":*)" \
+  "Bash(\"$TD_PLUGIN/scripts/branch-remove.sh\":*)"
+run_teardown "$BASE/td-stale.json"
+if [ "$RC" -eq 1 ] && [ "$(td worktree-remove.sh dead)" = "1" ] \
+  && [ "$(td worktree-remove.sh missing)" = "1" ] && [ "$(td branch-remove.sh dead)" = "0" ] \
+  && [ "$(printf '%s' "$OUT" | jq -r '.teardown.scripts[0].dead[0].version')" = "1.9.0" ]; then
+  pass "teardown: a rule pinned to a stale version is DEAD and its script MISSING"
+else
+  fail "teardown: a stale-version rule was not reported dead (rc=$RC): $OUT"
+fi
+
+# The human report names the installed version beside the dead rule, which is
+# what the issue's user-run check reads.
+report=$("$SCRIPT" --plugin-root "$TD_PLUGIN" --settings "$BASE/td-stale.json" --teardown 2>&1)
+if grep -qF "pinned to 1.9.0; installed is 2.0.0" <<<"$report"; then
+  pass "teardown: the report names the installed version beside a dead rule"
+else
+  fail "teardown: the report did not name the installed version: $report"
+fi
+
+# A `*` in the version segment was never measured to fire, so it is not
+# coverage — but it is not dead either.
+make_settings "$BASE/td-wild.json" \
+  "Bash(/Users/*/.claude/plugins/cache/workflow-skills/workflow-skills/*/scripts/worktree-remove.sh *)"
+run_teardown "$BASE/td-wild.json"
+if [ "$RC" -eq 1 ] && [ "$(td worktree-remove.sh unverified)" = "1" ] \
+  && [ "$(td worktree-remove.sh dead)" = "0" ] && [ "$(td worktree-remove.sh missing)" = "1" ]; then
+  pass "teardown: a wildcard-version rule is UNVERIFIED, not coverage"
+else
+  fail "teardown: a wildcard-version rule was misclassified (rc=$RC): $OUT"
+fi
+
+make_settings "$BASE/td-none.json" "Bash(git status:*)"
+run_teardown "$BASE/td-none.json"
+if [ "$RC" -eq 0 ] && [ "$(printf '%s' "$OUT" | jq -r .teardown.configured)" = "false" ] \
+  && [ "$(td worktree-remove.sh missing)" = "1" ] && [ "$(td branch-remove.sh missing)" = "1" ]; then
+  pass "teardown: no rule is 'not configured' and names both rules to add, not drift"
+else
+  fail "teardown: the no-rule case was reported as drift or named nothing (rc=$RC): $OUT"
+fi
+
+# A checkout's copy of a teardown script is not the installed plugin's, so a
+# rule naming it is never attributed — neither coverage nor dead.
+make_settings "$BASE/td-checkout.json" \
+  "Bash(\"$HOME/src/workflow-skills/scripts/worktree-remove.sh\":*)"
+run_teardown "$BASE/td-checkout.json"
+if [ "$RC" -eq 0 ] && [ "$(printf '%s' "$OUT" | jq -r .teardown.configured)" = "false" ]; then
+  pass "teardown: a rule naming a checkout's script is not attributed"
+else
+  fail "teardown: a checkout-path rule was attributed (rc=$RC): $OUT"
+fi
 
 echo
 if [ "$fails" -eq 0 ]; then

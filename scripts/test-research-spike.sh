@@ -17,11 +17,10 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="$ROOT/scripts/research-spike.py"
 
-# Bare `mktemp -d` (no template) ignores $TMPDIR on macOS, so the first arm
-# isn't a real $TMPDIR attempt; try $TMPDIR explicitly before falling back to
+# A bare `mktemp -d` ignores $TMPDIR on macOS (see scripts/lint-mktemp.sh), so
+# use a $TMPDIR template, falling back to
 # repo-local, where a sandboxed git init can't copy its hook templates.
-BASE="$(mktemp -d 2>/dev/null \
-  || mktemp -d "${TMPDIR:-/tmp}/research-spike-test.XXXXXX" 2>/dev/null \
+BASE="$(mktemp -d "${TMPDIR:-/tmp}/research-spike-test.XXXXXX" 2>/dev/null \
   || mktemp -d "$ROOT/.research-spike-test.XXXXXX")"
 # Fail closed: an empty BASE would make the `cd` below a no-op (bash `cd ""`
 # exits 0), leaving BASE pointing at the repo root for the EXIT trap to delete.

@@ -1,0 +1,494 @@
+#!/usr/bin/env bats
+# scripts/guard-pinned-branch.py — the PreToolUse guard that denies a branch
+# switch aimed at the main worktree of a repo carrying hooks.pinnedBranch.
+#
+# This cannot work on command text alone: the verdict depends on the repo the
+# command targets, which the guard learns by asking git. So every case runs
+# against real throwaway repos, and the payload's `cwd` field is what points
+# the guard at them. Branches carry DIFFERENT file contents, so a switch is
+# a real change to the tree rather than a no-op.
+
+setup() {
+  setup_test
+  # Pin git's config for the guard and every fixture call: a developer's
+  # global config must not leak a pin or an alias into either.
+  export GIT_CONFIG_GLOBAL=/dev/null
+  HOOK="$REPO_ROOT/scripts/guard-pinned-branch.py"
+  tmp="$TEST_TMPDIR"
+  pinned="$(new_repo pinned main)"
+  plain="$(new_repo plain)"
+}
+teardown() { teardown_test; }
+load test_helper
+
+# new_repo <name> [pinned-branch] — main commits file.txt "main"; `other`
+# commits file.txt "other". A branch name opts the repo in to the pin.
+new_repo() {
+  local dir="$tmp/$1"
+  git init -q -b main "$dir"
+  git -C "$dir" config user.name test
+  git -C "$dir" config user.email test@example.com
+  echo main >"$dir/file.txt"
+  git -C "$dir" add file.txt
+  git -C "$dir" commit -q -m init
+  git -C "$dir" checkout -q -b other
+  echo other >"$dir/file.txt"
+  git -C "$dir" commit -q -am other
+  git -C "$dir" checkout -q main
+  if [ -n "${2:-}" ]; then git -C "$dir" config hooks.pinnedBranch "$2"; fi
+  printf %s "$dir"
+}
+
+# run_hook <cwd> <command> — prints the guard's stdout.
+run_hook() {
+  python3 -c '
+import json, sys
+print(json.dumps({"tool_name": "Bash", "cwd": sys.argv[1],
+                  "tool_input": {"command": sys.argv[2]}}))
+' "$1" "$2" | python3 "$HOOK"
+}
+
+denied() {
+  local out
+  out="$(run_hook "$1" "$2")"
+  if [ -z "$out" ]; then
+    echo "want denied, got allowed: $2" >&2
+    return 1
+  fi
+}
+
+allowed() {
+  local out
+  out="$(run_hook "$1" "$2")"
+  if [ -n "$out" ]; then
+    echo "want allowed, got: $out ($2)" >&2
+    return 1
+  fi
+}
+
+@test "a branch switch in a pinned main worktree is denied" {
+  denied "$pinned" 'git checkout -b x'
+  denied "$pinned" 'git checkout -b bestdan/feature'
+  denied "$pinned" 'git switch -c bestdan/feature'
+  denied "$pinned" 'git switch other'
+  denied "$pinned" 'git checkout other'
+  denied "$pinned" 'git switch -c feature'
+  denied "$pinned" 'git checkout --quiet other'
+  denied "$pinned" 'git checkout -'
+  denied "$pinned" 'git fetch && git checkout other'
+  denied "$pinned" 'bash -c "git checkout other"'
+  # An explicit detach still leaves the pin.
+  denied "$pinned" 'git switch -d other'
+}
+
+# git takes a short option's value attached, so `-bfeature` is `-b feature`.
+@test "a new-branch flag with its name attached is denied" {
+  denied "$pinned" 'git checkout -bfeature'
+  denied "$pinned" 'git checkout -Bfeature'
+  denied "$pinned" 'git switch -cfeature'
+  denied "$pinned" 'git switch -Cfeature'
+  allowed "$pinned" 'git checkout -bmain'
+}
+
+@test "-C pointing at the pinned repo is denied, absolute or relative to the payload cwd" {
+  denied "$plain" "git -C $pinned checkout other"
+  denied "$tmp" "git -C pinned checkout other"
+  denied "$tmp" "git -C ./pinned checkout other"
+}
+
+# A detach leaves HEAD at a commit but off the pinned branch, so even a detach
+# at the pin is a move, and a bare `--detach` (no target) detaches in place.
+@test "a detach in a pinned main worktree is denied, even at the pin" {
+  denied "$pinned" 'git switch --detach main'
+  denied "$pinned" 'git checkout --detach main'
+  denied "$pinned" 'git switch -d main'
+  denied "$pinned" 'git switch --detach'
+  denied "$pinned" 'git checkout --detach'
+  allowed "$pinned" 'git checkout --detach -- file.txt'
+  git -C "$pinned" worktree add -q "$tmp/wt-detach" -b wt-detach
+  allowed "$tmp/wt-detach" 'git checkout --detach'
+  allowed "$tmp/wt-detach" 'git switch --detach main'
+}
+
+# git accepts short flags clustered, so `-qd` detaches as `-q -d` would.
+@test "a clustered detach flag is a detach" {
+  denied "$pinned" 'git switch -qd main'
+  denied "$pinned" 'git switch -qd'
+  # A letter that takes a value ends the cluster: `-cd` creates branch `d`.
+  run python3 -c '
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("g", sys.argv[1])
+g = importlib.util.module_from_spec(spec); spec.loader.exec_module(g)
+print(g._detaches("switch", ["-qd", "main"]), g._detaches("switch", ["-cd"]),
+      g._detaches("checkout", ["-bd"]), g._detaches("switch", ["--", "-qd"]))
+' "$HOOK"
+  assert_success
+  assert_output "True False False False"
+}
+
+@test "returning to the pin is allowed" {
+  git -C "$pinned" checkout -q other
+  allowed "$pinned" 'git checkout main'
+  allowed "$pinned" 'git checkout refs/heads/main'
+}
+
+@test "commands that move no HEAD are allowed" {
+  allowed "$pinned" 'git checkout -- file.txt'
+  allowed "$pinned" 'git checkout .'
+  allowed "$pinned" 'git status'
+  allowed "$pinned" 'git worktree add /tmp/wt -b x main'
+}
+
+# A bare `git checkout <path>` with no `--` is a file restore; an existing path
+# wins the ambiguity, as it does in git.
+@test "a bare existing path is a file restore, not a switch" {
+  : >"$pinned/README.md"
+  allowed "$pinned" 'git checkout README.md'
+  allowed "$pinned" 'git checkout does-not-exist'
+}
+
+# A word that is both a branch and a path switches, in git, for checkout and
+# switch alike; a path only matters when the word is not a ref, and only to
+# checkout, which then refuses as ambiguous against a remote-only branch.
+@test "a branch sharing its name with a path is still a switch" {
+  mkdir "$pinned/docs" "$pinned/docs2"
+  git -C "$pinned" branch docs
+  git -C "$pinned" update-ref refs/remotes/origin/docs2 "$(git -C "$pinned" rev-parse main)"
+  denied "$pinned" 'git checkout docs'
+  denied "$pinned" 'git switch docs'
+  denied "$pinned" 'git switch docs2'
+  allowed "$pinned" 'git checkout docs2'
+}
+
+# A bare target only switches when it is the LAST positional.
+@test "a tree-ish followed by paths, or patch mode, restores rather than switches" {
+  allowed "$pinned" 'git checkout other -- file.txt'
+  allowed "$pinned" 'git checkout other file.txt'
+  allowed "$pinned" 'git checkout -p other'
+  denied "$pinned" 'git checkout other'
+}
+
+# git's DWIM: no local `pushed-elsewhere` but one `<remote>/pushed-elsewhere`
+# creates the local branch and switches to it, resolving no local ref.
+@test "a remote-only branch via DWIM is denied" {
+  git -C "$pinned" update-ref refs/remotes/origin/pushed-elsewhere "$(git -C "$pinned" rev-parse main)"
+  denied "$pinned" 'git checkout pushed-elsewhere'
+}
+
+# `-t`/`--track` take an optional `=` value, never a separate token.
+@test "-t and --track name no value token" {
+  git -C "$pinned" update-ref refs/remotes/origin/pushed-elsewhere "$(git -C "$pinned" rev-parse main)"
+  denied "$pinned" 'git checkout -t origin/pushed-elsewhere'
+  denied "$pinned" 'git checkout --track origin/pushed-elsewhere'
+  denied "$pinned" 'git switch -t origin/pushed-elsewhere'
+}
+
+@test "prose that merely names a checkout does not fire" {
+  allowed "$pinned" "rg 'git checkout other' AGENTS.md"
+}
+
+@test "a repo with no pin is untouched" {
+  allowed "$plain" 'git checkout other'
+}
+
+@test "a linked worktree of a pinned repo is not pinned" {
+  git -C "$pinned" worktree add -q "$tmp/wt" -b wt-branch
+  allowed "$tmp/wt" 'git switch other'
+  allowed "$tmp/wt" 'git checkout -b y'
+  allowed "$plain" "git -C $tmp/wt checkout other"
+}
+
+@test "the denial opens with the pin and carries the PreToolUse decision shape" {
+  run run_hook "$pinned" 'git checkout -b x'
+  assert_success
+  run python3 -c '
+import json, sys
+h = json.load(sys.stdin)["hookSpecificOutput"]
+print(h["hookEventName"], h["permissionDecision"])
+print(h["permissionDecisionReason"])
+' <<<"$output"
+  assert_success
+  assert_line --index 0 "PreToolUse deny"
+  assert_line --index 1 "This checkout is pinned to 'main' — refusing to switch it to 'x'."
+  assert_line --index 2 --partial "worktree"
+  assert_line --index 3 --partial "EnterWorktree"
+  assert_line --index 4 --partial "worktree-entry"
+  assert_line --index 5 "To move this checkout anyway, re-run the same command with \`env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1\` immediately before the \`git\` word."
+  assert_line --index 6 "To unpin it for good: git config --unset hooks.pinnedBranch"
+  assert_line --index 7 "Why this checkout is pinned, and which layer covers what: load the \`workflow-skills:pinned-checkout\` skill."
+}
+
+# The pointer names a skill that ships, so following it cannot dead-end (#933).
+@test "the refusal names the pinned-checkout skill, and that skill exists" {
+  run reason "$pinned" 'git checkout other'
+  assert_success
+  assert_output --partial "workflow-skills:pinned-checkout"
+  [ -f "$REPO_ROOT/skills/pinned-checkout/SKILL.md" ]
+  run reason "$pinned" 'gh pr checkout 7'
+  assert_success
+  assert_output --partial "workflow-skills:pinned-checkout"
+}
+
+# reason <cwd> <command> — prints only the refusal text.
+reason() {
+  run_hook "$1" "$2" | python3 -c '
+import json, sys
+print(json.load(sys.stdin)["hookSpecificOutput"]["permissionDecisionReason"])
+'
+}
+
+# The one worktree suggestion is the create hook's layout, read from
+# worktree-config.sh, never a prefix or root baked into the guard.
+@test "the refusal names the configured worktree root and branch prefix" {
+  WORKFLOW_SKILLS_BRANCH_PREFIX=acme/ WORKFLOW_SKILLS_WORKTREE_ROOT="$tmp/roots" \
+    run reason "$pinned" 'git checkout -b x'
+  assert_success
+  assert_output --partial "\`EnterWorktree\` with a \`name\`: it creates $tmp/roots/pinned/<name> on the branch acme/<name>."
+  assert_output --partial "workflow-skills:worktree-entry"
+  refute_output --partial "bestdan/"
+}
+
+# A resolver failure must not turn into an allow, nor into a guessed path.
+@test "a failing worktree-config.sh still denies, and names no path" {
+  WORKFLOW_SKILLS_WORKTREE_ROOT=relative/root run reason "$pinned" 'git checkout -b x'
+  assert_success
+  assert_line --index 0 "This checkout is pinned to 'main' — refusing to switch it to 'x'."
+  assert_output --partial "EnterWorktree"
+  assert_output --partial "worktree-config.sh failed"
+  refute_output --partial "<name>"
+  refute_output --partial "relative/root"
+  refute_output --partial "$tmp"
+}
+
+# No per-target routes: only the echoed target differs between refusals.
+@test "the refusal is the same text for a new branch, an existing branch, a tag and --detach" {
+  git -C "$pinned" tag v1 other
+  local want got c
+  want="$(reason "$pinned" 'git checkout -b x' | sed "s/'x'/'T'/")"
+  [ -n "$want" ]
+  for c in "git checkout other|other" "git checkout v1|v1" "git switch --detach other|other" "git switch -c x|x"; do
+    got="$(reason "$pinned" "${c%%|*}" | sed "s/'${c##*|}'/'T'/")"
+    [ "$got" = "$want" ] || {
+      echo "differs for ${c%%|*}: $got" >&2
+      return 1
+    }
+  done
+}
+
+# --- gh pr checkout (#968) --------------------------------------------------
+# gh moves HEAD in the checkout it runs in exactly as git checkout does. These
+# never reach the network: the guard denies or allows before gh would run.
+
+@test "gh pr checkout in a pinned main checkout is denied" {
+  denied "$pinned" 'gh pr checkout 1'
+  denied "$pinned" 'gh pr co 1'
+  denied "$pinned" 'gh pr checkout 1 --detach'
+  denied "$pinned" 'gh pr checkout -b main 1'
+  denied "$pinned" 'gh pr checkout https://github.com/o/r/pull/1'
+  denied "$pinned" 'gh pr checkout'
+  denied "$pinned" 'rtk gh pr checkout 1'
+  denied "$plain" "cd $pinned && gh pr checkout 1"
+}
+
+@test "gh pr checkout in a worktree, an unpinned repo, or with the bypass is allowed" {
+  git -C "$pinned" worktree add -q "$tmp/wt" -b wt-branch
+  allowed "$tmp/wt" 'gh pr checkout 1'
+  allowed "$pinned" "cd $tmp/wt && gh pr checkout 1"
+  allowed "$plain" 'gh pr checkout 1'
+  allowed "$pinned" 'env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 gh pr checkout 1'
+  allowed "$pinned" 'WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 gh pr checkout 1'
+  denied "$pinned" 'env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 gh pr view 1; gh pr checkout 1'
+}
+
+@test "gh's -R/--repo before pr does not hide the checkout" {
+  denied "$pinned" 'gh -R o/r pr checkout 1'
+  denied "$pinned" 'gh --repo o/r pr checkout 1'
+  denied "$pinned" 'gh --repo=o/r pr checkout 1'
+  denied "$pinned" 'gh -Ro/r pr checkout 1'
+  denied "$pinned" 'gh -R o/r pr co 1'
+  denied "$pinned" 'gh --repo o/r pr co 1'
+  allowed "$plain" 'gh -R o/r pr checkout 1'
+  allowed "$pinned" 'gh -R o/r pr view 1'
+  allowed "$pinned" 'env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 gh -R o/r pr checkout 1'
+}
+
+# gh 2.98.0 switches an EXISTING checkout named by --worktree, the main one
+# included, so the destination is what gets judged.
+@test "gh pr checkout --worktree is judged at the destination" {
+  git -C "$pinned" worktree add -q "$tmp/wt" -b wt-branch
+  denied "$tmp/wt" "gh pr checkout 1 --detach --worktree $pinned"
+  denied "$tmp/wt" "gh pr checkout 1 --worktree=$pinned"
+  denied "$tmp/wt" "gh -R o/r pr co --worktree $pinned 1"
+  denied "$tmp/wt" "gh pr checkout 1 --worktree ../pinned"
+  denied "$plain" "gh pr checkout 1 --worktree $pinned"
+  allowed "$pinned" "gh pr checkout 1 --worktree $tmp/wt"
+  allowed "$pinned" "gh pr checkout 1 --worktree $plain"
+}
+
+@test "gh pr checkout into a worktree, and other gh pr calls, are allowed" {
+  allowed "$pinned" "gh pr checkout 1 --worktree $tmp/wt-pr"
+  allowed "$pinned" "gh pr checkout --worktree=$tmp/wt-pr 1"
+  allowed "$pinned" 'gh pr checkout 1 --worktree ../new-wt'
+  allowed "$pinned" 'gh pr checkout --help'
+  allowed "$pinned" 'gh pr checkout -h'
+  denied "$pinned" 'gh pr checkout 1 -b -h'
+  allowed "$pinned" 'gh pr view 1'
+  allowed "$pinned" 'gh pr list --search checkout'
+  allowed "$pinned" "rg 'gh pr checkout 1' README.md"
+}
+
+@test "a refused gh pr checkout reads as a refused git checkout" {
+  local git_reason gh_reason
+  git_reason="$(reason "$pinned" 'git checkout -b x' | sed "s/'x'/'T'/")"
+  gh_reason="$(reason "$pinned" 'gh pr checkout 7' | sed "s/'PR 7'/'T'/" | sed 's/`gh` word/`git` word/')"
+  [ -n "$git_reason" ]
+  [ "$gh_reason" = "$git_reason" ] || {
+    echo "differs: $gh_reason" >&2
+    return 1
+  }
+  run reason "$pinned" 'gh pr checkout 7'
+  assert_line --index 0 "This checkout is pinned to 'main' — refusing to switch it to 'PR 7'."
+  assert_output --partial "\`env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1\` immediately before the \`gh\` word."
+}
+
+@test "the scope line names gh pr checkout in the docstring, README and design" {
+  local f
+  for f in scripts/guard-pinned-branch.py README.md dev_docs/designs/2026-10-04-pinned-checkout-guard-v2.md; do
+    run grep -cF -- '[cd <dir> &&] [env VAR=1] gh [-R <repo>] pr' "$REPO_ROOT/$f"
+    assert_success
+  done
+}
+
+# An absolute -C fixes where git runs even when the shell's own directory is
+# unknown or missing, so the call is still refused. A crash here would exit
+# nonzero and let the checkout through.
+@test "an absolute -C after an unknown cd is still refused" {
+  local c
+  for c in "cd - ; git -C $pinned checkout other" "cd /missing; git -C $pinned checkout other" "cd \$X && git -C $pinned checkout other"; do
+    run run_hook "$tmp" "$c"
+    assert_success
+    assert_output --partial '"permissionDecision": "deny"'
+  done
+}
+
+# hooks.json runs the guard by its path, so the exec bit and the shebang are
+# what make it run at all. Every other case pipes into python3 and would pass
+# without either.
+@test "the guard runs by its path, as hooks.json invokes it" {
+  [ -x "$HOOK" ]
+  run bash -c 'python3 -c "
+import json, sys
+print(json.dumps({\"tool_name\": \"Bash\", \"cwd\": sys.argv[1],
+                  \"tool_input\": {\"command\": \"git checkout other\"}}))
+" "$1" | "$2"' _ "$pinned" "$HOOK"
+  assert_success
+  assert_output --partial '"permissionDecision": "deny"'
+}
+
+@test "hooks.json registers the guard on the Bash PreToolUse matcher" {
+  run python3 -c '
+import json, sys
+h = json.load(open(sys.argv[1]))["hooks"]["PreToolUse"]
+bash = [m for m in h if m["matcher"] == "Bash"][0]
+print("\n".join(x["command"] for x in bash["hooks"]))
+' "$REPO_ROOT/hooks/hooks.json"
+  assert_success
+  assert_line '"${CLAUDE_PLUGIN_ROOT}/scripts/guard-pinned-branch.py"'
+}
+
+@test "--orphan with its name attached is a new branch" {
+  denied "$pinned" 'git checkout --orphan=x'
+  denied "$pinned" 'git switch --orphan=x'
+  denied "$pinned" 'git checkout --orphan x'
+  allowed "$pinned" 'git checkout --orphan='
+}
+
+# --- cd tracking -----------------------------------------------------------
+#
+# Each git call is judged against the directory it actually runs in, so a cd
+# earlier in the command moves it.
+
+@test "a cd into the pinned repo is judged there" {
+  denied "$plain" "cd $pinned && git checkout other"
+  denied "$plain" "cd $pinned; git checkout other"
+  denied "$tmp" 'cd pinned && git checkout other'
+}
+
+# The workflow the pin pushes people toward: from a session rooted at the
+# pinned main checkout, cd into a linked worktree and branch there.
+@test "a cd into a linked worktree is judged against the worktree" {
+  git -C "$pinned" worktree add -q "$tmp/wt" -b wt-branch
+  allowed "$pinned" "cd $tmp/wt && git checkout -b x"
+  allowed "$pinned" "cd $tmp/wt; git switch other"
+  allowed "$tmp" 'cd wt && git checkout other'
+  # ...and a cd back out is judged against the pinned checkout again.
+  denied "$tmp/wt" "cd $pinned && git checkout other"
+}
+
+# An unresolvable cd must make the guard decline rather than fall back to the
+# directory the shell has just left: that fallback is a confident wrong verdict.
+@test "an unresolvable cd declines to judge" {
+  allowed "$pinned" 'cd - && git checkout other'
+  allowed "$pinned" 'cd $SOMEVAR && git checkout other'
+  allowed "$pinned" 'cd "$SOMEVAR/x"; git checkout other'
+}
+
+@test "a bare cd goes to HOME" {
+  HOME="$pinned" denied "$plain" 'cd && git checkout other'
+  HOME="$plain" allowed "$pinned" 'cd && git checkout other'
+}
+
+# $HOME and ~ arrive at a hook unexpanded, and agents are told to spell
+# worktree paths with $HOME, so both must resolve, after cd and after -C.
+@test "\$HOME and ~ resolve after cd and after -C" {
+  git -C "$pinned" worktree add -q "$tmp/wt" -b wt-branch
+  HOME="$tmp" denied "$plain" 'cd $HOME/pinned && git checkout other'
+  HOME="$tmp" denied "$plain" 'cd ~/pinned && git checkout other'
+  HOME="$tmp" denied "$plain" 'git -C $HOME/pinned checkout other'
+  HOME="$tmp" denied "$plain" 'git -C ~/pinned checkout other'
+  HOME="$tmp" allowed "$pinned" 'cd $HOME/wt && git checkout other'
+  HOME="$tmp" allowed "$pinned" 'cd ~/wt && git checkout other'
+  HOME="$tmp" allowed "$pinned" 'git -C $HOME/wt checkout other'
+  HOME="$tmp" allowed "$pinned" 'git -C ~/wt checkout other'
+}
+
+# A relative -C is relative to the shell's cwd, which a cd has moved.
+@test "a relative -C resolves against the tracked cwd" {
+  allowed "$tmp" 'cd pinned && git -C ../plain checkout other'
+  denied "$tmp" 'cd plain && git -C ../pinned checkout other'
+}
+
+@test "-C at the main checkout from inside a worktree is denied" {
+  git -C "$pinned" worktree add -q "$tmp/wt" -b wt-branch
+  denied "$tmp/wt" "git -C $pinned checkout -b x"
+}
+
+# --- the bypass, and its scope ----------------------------------------------
+
+@test "the bypass assignment on the git call allows it" {
+  allowed "$pinned" 'env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git checkout other'
+  allowed "$pinned" 'WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git checkout other'
+  allowed "$plain" "cd $pinned && env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git checkout other"
+}
+
+# The bypass is an assignment on the invocation, never a word in the command:
+# anything that merely names the variable, such as grepping the docs that
+# document it, must not disarm the guard, and the assignment disarms only the
+# call it prefixes.
+@test "the bypass covers its own invocation only" {
+  denied "$pinned" 'env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git status; git checkout other'
+  denied "$pinned" 'rg WORKFLOW_SKILLS_ALLOW_HEAD_MOVE; git checkout other'
+  denied "$pinned" 'echo WORKFLOW_SKILLS_ALLOW_HEAD_MOVE && git checkout other'
+}
+
+@test "an allowed command produces no output" {
+  run run_hook "$pinned" 'git checkout main'
+  assert_success
+  assert_output ""
+}
+
+@test "a malformed payload fails open" {
+  run bash -c 'printf "not json" | python3 "$1"' _ "$HOOK"
+  assert_success
+  assert_output ""
+}

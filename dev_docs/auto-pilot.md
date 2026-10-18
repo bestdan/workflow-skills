@@ -46,7 +46,7 @@ things deliberately _not_ built.
   approval in between. This keeps an unattended run from ever declaring victory
   on unreviewed code.
 - **Stacked-PR freeze rule.** Once a task hands off, its PR is frozen: late
-  findings are logged for the morning report, never applied mid-run. This is what
+  findings are logged for the run report, never applied mid-run. This is what
   lets a chained child branch from a guaranteed-stable parent tip — the run loop
   compares the parent's live tip against the child's recorded frozen-tip SHA and
   parks the child if they've diverged.
@@ -66,5 +66,5 @@ things deliberately _not_ built.
 
 Merging or tracker-completing anything unattended; `--budget` dollar/token caps
 (rate-window discipline + per-task bounds only); jira/gh-issue adapters (linear +
-plan only); reopening a frozen PR in-run; multi-night continuation beyond
+plan only); reopening a frozen PR in-run; continuation across multiple `--until` windows beyond
 `--resume`.

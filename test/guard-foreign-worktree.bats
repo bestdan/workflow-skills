@@ -113,6 +113,70 @@ bash_case() { expect "$1" Bash "$2" command "$3"; }
   bash_case deny "$repo" "ruby -e 'File.write(\"$wt/file.txt\", \"x\")'"
 }
 
+# The two reads #987 reported as refused, from a session in a sibling worktree
+# reading the main checkout. A script's arguments are data, as they are for
+# any other program; and a heredoc that feeds no interpreter (here, one that
+# prints a note) does not make the command's paths count as written.
+@test "an interpreter that only reads a foreign path gets no decision" {
+  local snap="$repo/data/barclay/2026-10.csv"
+  bash_case allow "$wt" "python3 scripts/refresh_balances.py --snapshot $snap"
+  bash_case allow "$wt" "uv run python scripts/refresh_balances.py --snapshot $snap"
+  bash_case allow "$wt" "python3 -I - < $repo/script.py"
+  bash_case allow "$wt" "python3 -I - < ../repo/script.py"
+  bash_case allow "$wt" "$(printf 'python3 -I - < script.py && cat <<EOF\nread %s\nEOF\n' "$snap")"
+}
+
+# The narrowing must not open the routes code reaches an interpreter by: the
+# script's own location still counts, and code spelled out in the command —
+# piped from a heredoc, or written to a file and then run — is still opaque.
+@test "code an interpreter runs from this command, or a foreign script, is still denied" {
+  bash_case deny "$wt" "python3 $repo/script.py"
+  bash_case deny "$wt" "uv run $repo/script.py"
+  bash_case deny "$repo" "$(printf 'cat <<PY | python3 -\nopen("%s/file.txt", "w")\nPY\n' "$wt")"
+  bash_case deny "$repo" "$(printf 'cat > s.py <<%s\nopen("%s/file.txt", "w")\nPY\npython3 -I - < s.py\n' "'PY'" "$wt")"
+  bash_case deny "$repo" "$(printf 'cat > s.py <<%s\nopen("%s/file.txt", "w")\nPY\npython3 s.py\n' "'PY'" "$wt")"
+  bash_case deny "$repo" "$(printf 'tee s.py >/dev/null <<%s\nopen("%s/file.txt", "w")\nPY\npython3 s.py\n' "'PY'" "$wt")"
+  bash_case deny "$repo" "$(printf 'python3 - \\\n  <<%s\nopen("%s/file.txt", "w")\nPY\n' "'PY'" "$wt")"
+  bash_case deny "$repo" "$(printf 'cat <<%s |\nopen("%s/file.txt", "w")\nPY\npython3 -\n' "'PY'" "$wt")"
+  bash_case deny "$repo" "$(printf 'cat <<%s 2>&1 | python3 -\nopen("%s/file.txt", "w")\nPY\n' "'PY'" "$wt")"
+  bash_case deny "$repo" "cat <<< 'open(\"$wt/file.txt\", \"w\")' | python3 -"
+  bash_case deny "$repo" "$(printf 'cat > "s p.py" <<%s\nopen("%s/file.txt", "w")\nPY\npython3 "s p.py"\n' "'PY'" "$wt")"
+}
+
+# An option that may take a value must not be mistaken for the program and so
+# hide the real one; such a call is not narrowed at all.
+@test "an option ahead of the script does not release a foreign script" {
+  bash_case deny "$wt" "python3 -W ignore $repo/script.py"
+  bash_case deny "$wt" "uv run --with pkg $repo/script.py"
+  bash_case deny "$repo" "$(printf 'cat > s.py <<%s\nopen("%s/file.txt", "w")\nPY\npython3 -W ignore s.py\n' "'PY'" "$wt")"
+}
+
+# Stdin reaches an interpreter by more spellings than `-`: a device path as the
+# program, a `<` from one, and a heredoc that follows a file redirect (the last
+# redirect of fd 0 wins). A `<` the regex finds in a quoted argument or a
+# comment is no redirect at all.
+@test "a heredoc reaching an interpreter's stdin past a file redirect is denied" {
+  local code="open(\"$wt/file.txt\", \"w\")"
+  bash_case deny "$repo" "$(printf 'python3 /dev/stdin <<%s\n%s\nPY\n' "'PY'" "$code")"
+  bash_case deny "$repo" "$(printf 'node /dev/fd/0 <<%s\n%s\nPY\n' "'PY'" "$code")"
+  bash_case deny "$repo" "$(printf 'python3 /proc/$$/fd/0 <<%s\n%s\nPY\n' "'PY'" "$code")"
+  bash_case deny "$repo" "$(printf 'python3 //dev/./stdin <<%s\n%s\nPY\n' "'PY'" "$code")"
+  bash_case deny "$repo" "$(printf 'cat <<%s | python3 - < /dev/stdin\n%s\nPY\n' "'PY'" "$code")"
+  bash_case deny "$repo" "$(printf 'python3 - < x.py <<%s\n%s\nPY\n' "'PY'" "$code")"
+  bash_case deny "$repo" "python3 - < x.py <<< '$code'"
+  bash_case deny "$repo" "$(printf 'python3 - "<x" <<%s\n%s\nPY\n' "'PY'" "$code")"
+  bash_case deny "$repo" "$(printf 'python3 - <<%s # <x\n%s\nPY\n' "'PY'" "$code")"
+}
+
+# A named script's own heredoc is not let through as data, unlike its
+# arguments: the owner chose to keep main's refusal here (#998, round 3).
+@test "a heredoc or here-string on a named script's own command is denied" {
+  local code="open(\"$wt/file.txt\", \"w\")"
+  bash_case deny "$repo" "$(printf 'python3 x.py <<%s\n%s\nPY\n' "'PY'" "$code")"
+  bash_case deny "$repo" "$(printf 'python3 tool.py <<EOF\n%s/x\nEOF\n' "$wt")"
+  bash_case deny "$repo" "python3 tool.py <<< '$wt/x'"
+}
+
 # The code follows the cluster's last letter, and a long flag may carry it
 # attached.
 @test "inline code behind a combined or attached flag is denied" {
@@ -251,6 +315,83 @@ bash_case() { expect "$1" Bash "$2" command "$3"; }
   expect allow Write "$off_default" file_path "$off_default/new.txt"
 }
 
+# reason <hook> <cwd> <command> — the deny reason that hook gives a Bash call.
+reason() {
+  python3 -c '
+import json, sys
+print(json.dumps({"tool_name": "Bash", "cwd": sys.argv[1], "session_id": "r",
+                  "tool_input": {"command": sys.argv[2]}}))
+' "$2" "$3" \
+    | TMPDIR="$stamps/r" python3 "$1" 2>/dev/null \
+    | python3 -c '
+import json, sys
+h = json.load(sys.stdin)["hookSpecificOutput"]
+assert h["permissionDecision"] == "deny"
+print(h["permissionDecisionReason"])
+'
+}
+
+# hook_layout_worktree <n> — a worktree where the WorktreeCreate hook puts it.
+hook_layout_worktree() {
+  export WORKFLOW_SKILLS_WORKTREE_ROOT="$tmp/worktrees"
+  export WORKFLOW_SKILLS_BRANCH_PREFIX="tester/"
+  git -C "$repo" worktree add -q -b "tester/$1" "$tmp/worktrees/repo/$1"
+}
+
+@test "a write into a hook-layout worktree names the EnterWorktree name route" {
+  local text
+  hook_layout_worktree feat-a
+  text=$(reason "$HOOK" "$wt" "echo x > $tmp/worktrees/repo/feat-a/file.txt")
+  [[ "$text" == *'`EnterWorktree` with `name: feat-a`'* ]]
+  [[ "$text" == *'If this session is already in a worktree, call `ExitWorktree` with `action: keep` first'* ]]
+  [[ "$text" == *'`worktree-entry` skill'* ]]
+  [[ "$text" != *'with `path:'* ]]
+}
+
+@test "a write into a worktree with no name keeps the path route and its warning" {
+  local text
+  text=$(reason "$HOOK" "$repo" "echo x > $wt/file.txt")
+  [[ "$text" == *"\`EnterWorktree\` with \`path: $(cd "$wt" && pwd -P)\`"* ]]
+  [[ "$text" == *'an unattended or Remote Control session cannot answer it'* ]]
+  [[ "$text" == *'`worktree-entry` skill'* ]]
+  [[ "$text" != *'`name:'* ]]
+}
+
+# stub_hook <resolver body> — a copy of the hook, and the parser it imports,
+# beside a stub resolver; prints the copy's path.
+stub_hook() {
+  local dir="$tmp/stub"
+  mkdir -p "$dir"
+  cp "$HOOK" "$REPO_ROOT/scripts/bash_command.py" "$dir/"
+  if [ -n "$1" ]; then
+    printf '#!/usr/bin/env bash\n%s\n' "$1" >"$dir/worktree-name-for.sh"
+    chmod +x "$dir/worktree-name-for.sh"
+  fi
+  printf %s "$dir/guard-foreign-worktree.py"
+}
+
+@test "control: a stub resolver's name reaches the reason" {
+  # Without this, the fallback cases below would pass on a hook that never
+  # ran the sibling resolver at all.
+  local text
+  text=$(reason "$(stub_hook 'echo feat-s')" "$repo" "echo x > $wt/file.txt")
+  [[ "$text" == *'`name: feat-s`'* ]]
+}
+
+@test "a missing, failing or garbled resolver still denies, with the path route" {
+  local body text
+  for body in '' 'echo feat-a; exit 2' 'kill -SEGV $$' 'printf "feat a\nmore\n"' \
+    "printf '\\377'" "printf '\\377' >&2; echo feat-a"; do
+    rm -rf "$tmp/stub"
+    text=$(reason "$(stub_hook "$body")" "$repo" "echo x > $wt/file.txt")
+    [[ "$text" == *'`EnterWorktree` with `path: '* ]] || {
+      echo "resolver body: $body" >&2
+      return 1
+    }
+    [[ "$text" != *'`name:'* ]]
+  done
+}
+
 @test "a malformed payload fails open" {
   run bash -c 'printf "not json" | python3 "$1"' _ "$HOOK"
   assert_success
@@ -262,8 +403,8 @@ bash_case() { expect "$1" Bash "$2" command "$3"; }
 import json, sys
 h = json.load(open(sys.argv[1]))["hooks"]["PreToolUse"]
 print(sorted(g["matcher"] for g in h
-             if any(e["command"].endswith("guard-foreign-worktree.py") for e in g["hooks"])))
-' "$REPO_ROOT/hooks/hooks.json"
+             if any(e["command"] == sys.argv[2] for e in g["hooks"])))
+' "$REPO_ROOT/hooks/hooks.json" '"${CLAUDE_PLUGIN_ROOT}/scripts/guard-foreign-worktree.py"'
   assert_success
   assert_output "['Bash', 'Edit|Write|NotebookEdit']"
 }

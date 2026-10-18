@@ -6,6 +6,9 @@ Usage:
   python3 server.py --diff-file some.patch [--port 8765] [--out PATH]
   python3 server.py --git uncommitted|<ref>|<A>...<B> [--port 8765] [--out PATH]
 
+Launched over SSH that arrived via Tailscale, it also listens on the tailnet
+address (opt out with --no-tailnet).
+
 On Submit the page POSTs all comments to /submit; the server writes them to
 --out (JSON) and prints them to stdout. Watch that file to collect the review.
 """
@@ -13,6 +16,7 @@ import argparse
 import errno
 import hashlib
 import http.cookies
+import ipaddress
 import json
 import os
 import re
@@ -2426,6 +2430,7 @@ class Handler(BaseHTTPRequestHandler):
     vendor_dir = ""
     token = ""  # random path segment every route is mounted under
     port = 0  # bound port, needed to validate Origin on POSTs
+    tailnet_hosts: "tuple[str, ...]" = ()  # host names the tailnet listener answers on, for _origin_ok
     # source the diff was generated from, so the server can recompute it on demand
     pr = None
     repo = None
@@ -2534,6 +2539,7 @@ class Handler(BaseHTTPRequestHandler):
             f"http://localhost:{Handler.port}",
             f"http://review.localhost:{Handler.port}",
         }
+        allowed.update(f"http://{h}:{Handler.port}" for h in Handler.tailnet_hosts)
         return origin in allowed
 
     def do_GET(self):
@@ -3021,6 +3027,12 @@ def bind_server(port):
         return ThreadingHTTPServer(("127.0.0.1", 0), Handler), True
 
 
+def tunnel_cmd(port):
+    """The ssh -L command that forwards the bound port, same port on both ends:
+    _origin_ok() allows only origins on Handler.port."""
+    return f"ssh -L {port}:127.0.0.1:{port} {socket.gethostname()}"
+
+
 def ssh_hint(port):
     """Lines to print between the URL and the readiness line when the server
     was launched over SSH. They go before LOCAL_REVIEW_URL= so a consumer that
@@ -3035,12 +3047,92 @@ def ssh_hint(port):
     host = socket.gethostname()
     return [
         f"SSH: this server is on {host}'s loopback; from your own machine run:",
-        f"SSH:   ssh -L {port}:127.0.0.1:{port} {host}",
+        f"SSH:   {tunnel_cmd(port)}",
         f"SSH: then open the URL above. Keep the local port {port} — a tunnel on another "
         "local port renders the page but the Origin check rejects every submit.",
         f"SSH: to skip this next time, add `LocalForward {port} 127.0.0.1:{port}` under "
         f"`Host {host}` in your own ~/.ssh/config; every session then carries the tunnel.",
     ]
+
+
+# Tailscale's address ranges: IPv4 CGNAT space and its fixed ULA prefix.
+TAILNET_NETS = (ipaddress.ip_network("100.64.0.0/10"), ipaddress.ip_network("fd7a:115c:a1e0::/48"))
+
+
+def tailnet_ip():
+    """The SSH session's server address when it falls in Tailscale's ranges,
+    else None. SSH_CONNECTION is "client cport server sport"; the server
+    field is the address the reviewer already routes to. A range match is
+    only a candidate: 100.64.0.0/10 is shared CGNAT space, so tailnet_self()
+    confirms Tailscale owns it before anything binds."""
+    parts = os.environ.get("SSH_CONNECTION", "").split()
+    if len(parts) != 4:
+        return None
+    try:
+        ip = ipaddress.ip_address(parts[2])
+    except ValueError:
+        return None
+    return str(ip) if any(ip in net for net in TAILNET_NETS) else None
+
+
+def tailnet_self(ip):
+    """Host names the reviewer can type for this machine — the MagicDNS name,
+    its short form, then the bare IP — or None unless `tailscale status`
+    answers and lists ip among this host's own Tailscale addresses. A CGNAT
+    address on some other network must not get a listener."""
+    try:
+        st = json.loads(subprocess.run(
+            ["tailscale", "status", "--self", "--json"],
+            capture_output=True, text=True, timeout=3, check=True,
+        ).stdout)
+        own = {ipaddress.ip_address(a) for a in st["Self"]["TailscaleIPs"]}
+        dns = (st["Self"].get("DNSName") or "").rstrip(".")
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError, AttributeError):
+        return None
+    if ipaddress.ip_address(ip) not in own:
+        return None
+    names = [dns, dns.split(".")[0]] if dns else []
+    names.append(f"[{ip}]" if ":" in ip else ip)
+    return names
+
+
+class _V6Server(ThreadingHTTPServer):
+    address_family = socket.AF_INET6
+
+
+def bind_tailnet(ip, port):
+    """A second listener on the tailnet address, same port and Handler as the
+    loopback one. Binds that one address, never 0.0.0.0, so the LAN still
+    cannot reach the page. The page is plain HTTP; on the tailnet hop
+    WireGuard encrypts it and the tailnet's ACLs decide who can route to it.
+    None when the bind fails, which leaves the SSH tunnel hint as the way in."""
+    cls = _V6Server if ":" in ip else ThreadingHTTPServer
+    try:
+        return cls((ip, port), Handler)
+    except OSError as e:
+        print(f"tailnet: could not bind {ip}:{port} ({e}); use the SSH tunnel", file=sys.stderr)
+        return None
+
+
+def startup_lines(port, token, nfiles, out_path, ts_ip=None, ts_hosts=()):
+    """The stdout lines main() prints at startup. ts_ip and ts_hosts are set
+    only when the tailnet listener bound; then the Review UI URL uses the
+    MagicDNS name, and the TAILNET: lines replace the SSH: tunnel hint.
+    LOCAL_REVIEW_URL= is always last: it is the readiness line."""
+    url = f"http://review.localhost:{port}/{token}/"
+    if ts_ip:
+        lines = [
+            f"Review UI: http://{ts_hosts[0]}:{port}/{token}/   ({nfiles} files)  out={out_path}",
+            f"TAILNET: also listening on {ts_hosts[-1]}:{port}; the Review UI URL opens from any "
+            "device on your tailnet, no tunnel needed.",
+        ]
+        if len(ts_hosts) > 1:  # with no MagicDNS name, the Review UI URL is already the IP
+            lines.append(f"TAILNET: if the name does not resolve, open http://{ts_hosts[-1]}:{port}/{token}/")
+        lines.append(f"TAILNET: if it does not load (a tailnet ACL may not allow port {port}), tunnel "
+                     f"instead: {tunnel_cmd(port)} (same local port {port}), then open {url}")
+    else:
+        lines = [f"Review UI: {url}   ({nfiles} files)  out={out_path}", *ssh_hint(port)]
+    return lines + [f"LOCAL_REVIEW_URL=http://127.0.0.1:{port}/{token}/"]
 
 
 def main():
@@ -3053,6 +3145,8 @@ def main():
     ap.add_argument("--out", default=None)
     ap.add_argument("--title", help="human title for the header (else the --diff-file path is shown)")
     ap.add_argument("--once", action="store_true", help="shut down after a successful /submit")
+    ap.add_argument("--no-tailnet", action="store_true",
+                    help="stay loopback-only even when SSH arrived over Tailscale")
     args = ap.parse_args()
 
     if sum(bool(x) for x in (args.pr, args.diff_file, args.git)) != 1:
@@ -3116,12 +3210,18 @@ def main():
     Handler.port = port
     if fell_back:
         print(f"port 8765 busy; using {port}", file=sys.stderr)
-    machine_url = f"http://127.0.0.1:{port}/{Handler.token}/"
-    vanity_url = f"http://review.localhost:{port}/{Handler.token}/"
-    print(f"Review UI: {vanity_url}   ({len(files)} files)  out={Handler.out_path}", flush=True)
-    for line in ssh_hint(port):
+    ts_ip = None if args.no_tailnet else tailnet_ip()
+    ts_hosts = tailnet_self(ts_ip) if ts_ip else None
+    if ts_ip and not ts_hosts:
+        print(f"tailnet: {ts_ip} is not this host's Tailscale address (or tailscale did not "
+              "answer); use the SSH tunnel", file=sys.stderr)
+    ts_srv = bind_tailnet(ts_ip, port) if ts_ip and ts_hosts else None
+    if ts_srv and ts_hosts:
+        Handler.tailnet_hosts = tuple(ts_hosts)
+        threading.Thread(target=ts_srv.serve_forever, daemon=True).start()
+    for line in startup_lines(port, Handler.token, len(files), Handler.out_path,
+                              ts_ip if ts_srv else None, Handler.tailnet_hosts):
         print(line, flush=True)
-    print(f"LOCAL_REVIEW_URL={machine_url}", flush=True)
     srv.serve_forever()
 
 

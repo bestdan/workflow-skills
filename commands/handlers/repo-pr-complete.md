@@ -1,3 +1,9 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+user-invocable: false
+---
+
 # repo-pr handler — /complete-task flow
 
 Invoked from `/complete-task <slug> [--dry-run]` when `handler: repo-pr` is

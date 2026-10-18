@@ -140,13 +140,21 @@ git fetch origin <base>:<base>          # default <base> = main
 "${CLAUDE_PLUGIN_ROOT}/scripts/preflight-freshness.sh" --ref <base>
 ```
 
+Git refuses to fetch into a branch that any worktree has checked out
+(`refusing to fetch into branch 'refs/heads/main' checked out at <path>`). When
+`<path>` is this checkout (`git rev-parse --show-toplevel`), update it with
+`git pull --ff-only origin <base>` instead, then run the same freshness check.
+When `<path>` is another worktree, a pull here would move this checkout's branch,
+not `<base>`: stop and report that `<base>` is checked out at `<path>` and must be
+updated there.
+
 On `stale`, stop and surface it (the work branch would start behind); on
 `unknown`, warn and proceed.
 
 **Then re-resolve the handler config from the fetched base — every value the claim
-uses is read _after_ this fetch, never before it.** `dev_docs/tasks/.task-config.yml`
-is tracked, so the base that just moved can carry a different config, and step 2 is
-the first consumer of its handler-specific keys.
+uses is read _after_ this fetch, never before it.** Where
+`dev_docs/tasks/.task-config.yml` is tracked, the base that just moved can carry a
+different config, and step 2 is the first consumer of its handler-specific keys.
 
 **It refreshes the chosen handler's _keys_, not the handler.** `handler:` itself is
 not re-resolved mid-delivery: an explicit `--handler` stays authoritative per
@@ -239,7 +247,14 @@ already fetched it, so the branch starts from its current tip. Everything else i
 the claim section is unchanged.
 
 If the claim reports the task already claimed / in flight / blocked, **stop** and
-report it — never double-claim.
+report it — never double-claim. Report it as a **claim refusal**, as
+`claim refused: <the handler's reason>`: that line is what `/auto-pilot` keys
+off to record the task `skipped` rather than leave it `pending` for reselection
+(`skills/auto-pilot/references/run-state.md` "Task lifecycle phases"). A refusal
+holds no claim, so there is nothing to bail. A WIP-limit decline
+(`WIP limit <n> reached …`) is **not** a claim refusal — step 2 never runs a
+handler's pre-claim WIP gate, and the cap is not about this task — so never
+report one as `claim refused:`.
 
 ## 3. Do (implement + verify)
 
@@ -348,6 +363,13 @@ line goes into the hand-off summary (step 7). If `/co-review` can't run **at all
 verified; note `co-review unavailable` and proceed to hand-off (review is
 advisory).
 
+This plugin grants co-review's own scripts when this delivery was started as the
+`/deliver-task` command, and `bypassPermissions` skips the check. Reached through
+the Skill tool in `default` mode, with no user allow rule or sandbox auto-allow
+covering them, each one is denied silently under `claude -p` (measured) and is
+expected to prompt interactively (not measured). Why, and the measurement:
+[`../co-review/references/permissions.md`](../co-review/references/permissions.md#plugin-scripts).
+
 ## 6. Iterate (bounded)
 
 Each iteration is a full round: apply co-review's **high-confidence** fixes,
@@ -411,10 +433,22 @@ remaining findings and proceed — don't loop.
   **hard rule** (the execute path never moves an issue to a completed/canceled
   state). This is the skill's terminal success state.
 - **Hand-off summary** (structured — for a human, or the `/auto-pilot` morning
-  report): task id, PR URL, reviewer classes that ran, outstanding findings (the
-  deferred judgment calls), any verification tests left unrun, co-review's
-  **Next round** recommendation from the last round (its verdict and reason,
-  verbatim — the human decides whether to run it), and evidence paths.
+  report). It ends on what the human must act on, because the end is what a
+  terminal leaves on screen. In order:
+  1. **Verdict line** — task id, PR URL, the tracker state set (if any), and how many
+     items wait in the closing section (or "nothing needs you").
+  2. **What changed** — a few lines, by behavior, not by file.
+  3. **Review and evidence** — reviewer classes that ran, what the rounds
+     applied, evidence paths.
+  4. **Process notes** — deviations from the normal flow, worktree left in
+     place. Omit when empty.
+  5. **For you**, always last, numbered, highest impact first: outstanding
+     findings (the deferred judgment calls), verification tests left unrun,
+     an acceptance criterion not met, and co-review's **Next round**
+     recommendation from the last round (its verdict and reason, verbatim — the
+     human decides whether to run it). Each item carries its options and what
+     each costs, so the human can answer without scrolling up. Omit the section
+     when it is empty.
 - **Freeze rule:** once a task hands off, its PR is **frozen for the rest of a
   run** — late-arriving findings (e.g. a bot review that lands after co-review's
   timeout) are **logged, never applied**. This keeps a stacked child's base

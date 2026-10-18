@@ -1,3 +1,9 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+user-invocable: false
+---
+
 # Linear handler — /sweep-for-complete flow
 
 Invoked from `/sweep-for-complete [--apply] [--all] [--project <id|name>]`
@@ -506,7 +512,14 @@ Print:
   `scope: whole team (--all)`, or `scope: project <name> only (--project)`.
 - **Counts** — `k completed, m open (left), u unresolved (left), s no-PR
   skipped, c closed-unmerged (left)`.
-- **Out-of-scope warning** (default scope only, when 1+ projects are
+- **Per-issue lines** — identifier, the PR resolved (if any) and its merge
+  state, and the outcome (`completed`, `left: open PR`, `left: unresolved`,
+  `left: closed unmerged`, `skipped: no PR found`, or `already complete` for
+  an idempotent no-op).
+- On dry-run, the same table with no outcome column, plus "nothing changed
+  (dry-run)."
+- **Out-of-scope warning**, always the last line, because it is the one
+  line that asks the reader to act (default scope only, when 1+ projects are
   configured; omit entirely for `--all`, for `--project`, and for the
   no-projects-configured case, since each of those already covers the whole
   team) — from the bucket built by step 2's MCP floor step 4 (at zero extra
@@ -522,9 +535,3 @@ Print:
   name — print this instead: `⚠ out-of-scope coverage incomplete (query
   truncated) — started-type issues outside configured scope may exist. Use
   --all or --project <name> to check.`
-- **Per-issue lines** — identifier, the PR resolved (if any) and its merge
-  state, and the outcome (`completed`, `left: open PR`, `left: unresolved`,
-  `left: closed unmerged`, `skipped: no PR found`, or `already complete` for
-  an idempotent no-op).
-- On dry-run, the same table with no outcome column, plus "nothing changed
-  (dry-run)."

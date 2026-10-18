@@ -137,6 +137,25 @@ Only an explicit `--out` with no `--once` keeps the server alive.
   bad `--git` spec, and a non-repo cwd are all normalized to a one-line
   `error:` (via `sh()`'s `RuntimeError`); other failures (an unreadable
   `--diff-file`, an occupied explicit `--port`) surface as a traceback.
+- **Tailnet listener:** when `$SSH_CONNECTION`'s server address is in
+  Tailscale's ranges (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`) **and**
+  `tailscale status --self --json` lists it in `Self.TailscaleIPs`
+  (`tailnet_self()`), `bind_tailnet()` adds a second listener on exactly that
+  address and the bound port, and `Review UI:` switches to the MagicDNS name.
+  The ownership check matters because `100.64.0.0/10` is shared CGNAT space:
+  a range match alone could open the page on a carrier or corporate network.
+  A missing or silent CLI fails closed, to the tunnel. The host names join
+  `_origin_ok()`'s allowlist on the same port. It binds one address rather
+  than `0.0.0.0` so the LAN still cannot reach the page. The page is plain
+  HTTP; on the tailnet hop WireGuard encrypts it and the tailnet's ACLs
+  decide which devices can route to it. Anyone the tailnet lets reach this
+  host can try the URL, and the 40-bit token is then the only gate, so a
+  tailnet shared with other people warrants `--no-tailnet`. Two further
+  `TAILNET:` lines carry fallbacks: a bare-IP URL, and a same-port tunnel for
+  a tailnet ACL that admits SSH but not the review port. A refused ownership
+  check or a failed bind logs a `tailnet:` line to stderr and falls back to
+  the `SSH:` tunnel hint. `startup_lines()` builds the stdout lines so both
+  shapes are tested in-process.
 - **`--once`:** the server exits after a successful submit. When passed with
   `--out`, it selects one-shot mode (see Modes above); the skill no longer launches with it by
   default — an explicit `--out` with no `--once` is what the skill passes,

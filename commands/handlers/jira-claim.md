@@ -1,3 +1,9 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+user-invocable: false
+---
+
 # jira handler — /do-tasks execute flow
 
 Invoked from `/do-tasks` (section 5, "jira path") when `handler: jira` is configured. This file holds the full jira claim/execute flow, run in the current session over the Atlassian MCP: **find candidates** (read-only), **pre-flight in-flight check** (read-only), **judge feasibility** (read-only), **claim the issue** (mutating, before work starts), **branch + execute**, **PR**, and **move to review on PR open** (mutating, after the PR is opened). A separate **bail** phase runs when work proves infeasible mid-execution. It mirrors the tracker flow in `commands/handlers/linear-claim.md`, over the Atlassian MCP instead of the Linear MCP — the same way `gh-issue-claim.md` mirrors it over the `gh` CLI.
@@ -210,7 +216,7 @@ The claim locks on an **atomic primitive** — pushing the `task/<KEY>` ref, a s
    Branch on the exit code (`claim-lock.md` → "Acquire" has the full table): **exit `3`**
    (HTTP 422, `Reference already exists`) → **you lost**: leave the issue's assignee and
    status untouched, return `race`, and fall back to the next candidate. **Exit `4`**
-   (403/404, protected-ref ruleset, branch-pinned environment) → degrade to
+   (any other 422, 403/404, protected-ref ruleset, branch-pinned environment) → degrade to
    `claim-lock.md`'s comment-token election (using `T_unclaimed` from step 2) and report
    the degrade reason. Only **exit `0`** proceeds to step 4 — check the branch out first
    (`git fetch origin "task/<KEY>" && git switch -c "task/<KEY>" FETCH_HEAD`). Do **not**

@@ -148,6 +148,7 @@ USEOF
       printf '| task_over     | implementing | branch_over   | main         | -   | -    | |\n'
       printf '| task_handed   | handed-off   | branch_handed | main         | -   | #201 | |\n'
       printf '| task_parked   | parked       | branch_parked | main         | -   | -    | |\n'
+      printf '| task_skipped  | skipped      | -             | main         | -   | -    | claim refused: in flight |\n'
       printf '| task_child    | pr-open      | branch_child  | branch_parent| -   | #202 | |\n'
       printf '| task_claimed  | %s | branch_claimed | main       | -   | -    | |\n' "$1"
       printf '| task_fresh    | implementing | branch_fresh  | main         | -   | -    | |\n'
@@ -169,6 +170,8 @@ USEOF
     --repo "$SR_REPO" --gh "$SR_GH" --usage-bin "$SR_USAGE" --task-ceiling 120 2>&1)"
   srAmd="$(cat "$SR_RUN/.auto-pilot/STATUS.md" 2>/dev/null)"
   have "status-report: renders the phase table" '| task_impl | implementing' "$srAmd"
+  have "status-report: counts a refused claim as skipped, not pending or unknown" \
+    'pending=1 in-flight=5 handed-off=1 parked=1 skipped=1' "$srAmd"
   have "status-report: in-flight elapsed is reported" 'task_impl (implementing): elapsed' "$srAmd"
   have "status-report: OVER-ceiling task is flagged" 'task_over (implementing): elapsed' "$srAmd"
   have "status-report: OVER-ceiling task says OVER" 'OVER the per-task ceiling' "$srAmd"

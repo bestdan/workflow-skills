@@ -1,3 +1,9 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+user-invocable: false
+---
+
 # linear handler — /archive-tasks flow
 
 Invoked from `/archive-tasks` when `handler: linear` is configured. Retires

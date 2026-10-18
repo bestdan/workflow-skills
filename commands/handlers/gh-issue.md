@@ -1,3 +1,9 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+user-invocable: false
+---
+
 # Handler: gh-issue
 
 Creates a GitHub Issue via the `gh` CLI. Runs in the **foreground in the current session** — one API call, no git plumbing, no remote/subagent/local cascade.

@@ -1,3 +1,9 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+user-invocable: false
+---
+
 # gh-issue handler — /reoptimize-tasks flow
 
 Invoked from `/reoptimize-tasks` when `handler: gh-issue` is configured. Audits

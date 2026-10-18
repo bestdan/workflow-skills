@@ -1,3 +1,9 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+user-invocable: false
+---
+
 # Linear handler — /complete-task flow
 
 Invoked from `/complete-task <identifier>` when `handler: linear` is configured.

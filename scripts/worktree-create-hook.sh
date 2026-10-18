@@ -42,6 +42,8 @@
 set -euo pipefail
 
 script_dir=$(cd -- "$(dirname -- "$0")" && pwd -P)
+# shellcheck source=lib/worktree-name.sh
+. "$script_dir/lib/worktree-name.sh"
 
 # The payload, in one pass. Fields the harness may omit come back empty rather
 # than as the string "None", and malformed JSON fails here — under `set -e`
@@ -60,9 +62,9 @@ cwd=$(sed -n 2p <<<"$payload")
 session=$(sed -n 3p <<<"$payload")
 [[ -n "$cwd" ]] || cwd=$PWD
 
-# The name is model-supplied and lands in a path and a branch name. One path
-# segment, nothing git would reject, nothing that climbs out of the parent.
-if [[ -z "$name" || ! "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ || "$name" == *..* ]]; then
+# The name is model-supplied and lands in a path and a branch name; the rule
+# lives in lib/worktree-name.sh so the scripts that predict this hook share it.
+if ! worktree_name_valid "$name"; then
   printf 'worktree-create: refusing worktree name %q\n' "$name" >&2
   exit 1
 fi

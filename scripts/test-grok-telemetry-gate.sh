@@ -36,8 +36,7 @@ assert_eq() {
   fi
 }
 
-tmp="$(mktemp -d 2>/dev/null \
-  || mktemp -d "${TMPDIR:-/tmp}/test-grok-telemetry-gate.XXXXXX" 2>/dev/null \
+tmp="$(mktemp -d "${TMPDIR:-/tmp}/test-grok-telemetry-gate.XXXXXX" 2>/dev/null \
   || mktemp -d "$ROOT/.test-grok-telemetry-gate.XXXXXX")"
 # Fail closed: an empty tmp would make every fixture path absolute-from-root,
 # and the EXIT trap's `rm -rf ""` would silently do nothing while the suite

@@ -9,8 +9,8 @@ summary of the seven steps that points here.
 The sequence is **supply-and-demand**: steps 2–3 probe what the configured
 environment can _supply_ (auth, resolved config), and the **scout** in step 6
 checks what the _plan_ will _demand_ (which coder each task routes to) against
-that supply — the join is where a run that would otherwise pass green but die
-at 3am gets caught tonight.
+that supply — the join is where a run that would otherwise pass green but fail
+with no human attached gets caught at launch.
 
 ## Step 1 — Worktree + run-state branch (BLOCKS LAUNCH)
 
@@ -109,7 +109,7 @@ exist until Step 6 materializes it.
 ## Step 3 — Resolve config into non-interactive choices (BLOCKS LAUNCH)
 
 Collapse every config decision the unattended run could hit into a fixed choice,
-so nothing prompts at 3am:
+so nothing prompts when no human can answer:
 
 - **Co-review reviewer set** — resolve `/co-review`'s reviewer set from
   `.co-review.yml` into the concrete list that will run under `--non-interactive`

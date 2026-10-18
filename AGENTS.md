@@ -82,7 +82,9 @@ whether it belongs one level down instead. The answer is usually yes.
 - **Run `just check` before pushing.** It is exactly what CI runs
   (`scripts/check.sh`), it runs everything concurrently, and it reports every
   failure rather than stopping at the first. Don't discover formatting drift in
-  CI — `just fmt` fixes it.
+  CI — `just fmt` fixes it. It needs network (`uvx` reaches pypi on every run),
+  so under Claude Code's Bash sandbox run it unsandboxed from the first call: a
+  sandboxed run fails in unrelated suites and costs a full rerun to diagnose.
 - **Never commit to `main`.** It's protected, and every qualifying merge
   auto-bumps the version. Branch (`bestdan/...` for this repo's owner),
   PR, squash-merge.

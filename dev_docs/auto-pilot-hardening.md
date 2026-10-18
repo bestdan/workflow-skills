@@ -159,7 +159,7 @@ the protocol, is the design.
 ## The spawn contract
 
 `scripts/spawn-orchestrator.sh` exists so no agent hand-authors a
-`bypassPermissions` jail at 3am. Every subcommand is **fail-closed**: paths must
+`bypassPermissions` jail with no human attached. Every subcommand is **fail-closed**: paths must
 be absolute and exist, and nothing partial is ever written.
 
 | Subcommand            | Contract                                                                                                                                                      |
@@ -190,7 +190,7 @@ Four of those details are load-bearing and were each a fatal bug:
   `write-launch --path`.
 - **The ordering inside `launch` is the safety property (#8).** Smoke-test auth
   _through the wrapper_ before detaching: a dead credential must fail loudly now,
-  not silently at 3am. `launch` was originally unusable precisely because the
+  not silently once no human can answer. `launch` was originally unusable precisely because the
   above two bugs forced hand-editing the script _between_ write-launch and
   detach; folding the fixes into `write-launch` is what makes the atomic
   subcommand usable again.

@@ -13,7 +13,7 @@ A Claude Code plugin bundling Daniel's general engineering workflow skills: coll
 
 ## What's in the box
 
-17 skills, 21 commands, and 2 subagents, organized into eight workflows. Each
+19 skills, 22 commands, and 2 subagents, organized into eight workflows. Each
 entry links to its own doc — that's where the flags, edge cases, and handler
 support live.
 
@@ -89,7 +89,7 @@ capability matrix.
 | [**`/reconcile-tasks`**](commands/reconcile-tasks.md)         | `/reconcile-tasks [--apply] [--all] [--project <id\|name>]`               | Fix issues sitting in the wrong state, against a fixed rule table. **linear** and **gh-issue**, each with its own table.         |
 | [**`/find-false-closures`**](commands/find-false-closures.md) | `/find-false-closures [--apply] [--project <uuid>] [--repo <owner/name>]` | Detect completed issues no merged PR owns (the bare-id over-close bug) and restore them. **linear-only**.                        |
 | [**`/sweep-for-archive`**](commands/sweep-for-archive.md)     | `/sweep-for-archive [--since 24h] [--apply] [...]`                        | Close-out sweep: verify the window's closures, complete what merged, archive exactly what was proved delivered. **linear-only**. |
-| [**`/doctor`**](commands/doctor.md)                           | `/doctor [--fix]`                                                         | Diagnose the setup — config, prerequisites, legacy dirs, schema drift, co-review allow-rules — as `PASS`/`WARN`/`FAIL`.          |
+| [**`/doctor`**](commands/doctor.md)                           | `/doctor [--fix]`                                                         | Diagnose the setup — config, prerequisites, legacy dirs, schema drift, allow-rules, worktree config — as `PASS`/`WARN`/`FAIL`.   |
 | [**break-down-task**](skills/break-down-task/SKILL.md)        | a task is too big for one PR, or "split / slice / break down this task"   | Find the natural shear points in an over-sized task and replace it with PR-sized components chained by `is_blocked_by`.          |
 
 `/sweep-for-complete`, `/reconcile-tasks`, `/find-false-closures`, and
@@ -129,14 +129,19 @@ capability matrix.
 
 ### Worktree lifecycle
 
-The plugin registers four hooks. Three of them create and tear down an
+The plugin registers seven hooks. Three of them create and tear down an
 isolated worktree without anything being typed: `WorktreeCreate` puts it where
 [`scripts/worktree-config.sh`](scripts/worktree-config.sh) says worktrees live
 (not inside the repo, which aborts in a repo that versions its own agent
 config), `WorktreeRemove` tears down only what the exiting session itself
 created, and a `PostToolUse` reminder on `ExitWorktree` says teardown ends
 there. Teardown covers the paths the harness dispatches: an explicit
-`ExitWorktree` and the interactive exit dialog. An unattended (`claude -p`)
+`ExitWorktree` and the interactive exit dialog, though an `ExitWorktree`
+remove of a hook-supplied worktree needs `discard_changes: true` —
+[the teardown reference](skills/worktree-teardown/SKILL.md) says what to check
+first, and a `PreToolUse` guard on `ExitWorktree`
+([`scripts/exit-worktree-guard.sh`](scripts/exit-worktree-guard.sh)) denies the
+flag unless the tree is clean and its branch has landed. An unattended (`claude -p`)
 exit fires `SessionEnd` and nothing else, and subagent worktrees are never
 handed to the hook, so both still need a manual run of the same scripts —
 they are plain scripts you can run by hand either way:
@@ -151,9 +156,50 @@ It also warns once when write-work starts in a main checkout on its default
 branch. Bypass one Bash call with
 `env WORKFLOW_SKILLS_ALLOW_FOREIGN_WRITE=1 <command>`.
 
-| Skill                                                      | Trigger                                                | What it does                                                                                                                                                             |
-| ---------------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [**worktree-teardown**](skills/worktree-teardown/SKILL.md) | auto, when a removal fails, refuses, or half-completes | The mechanics behind the teardown scripts: the submodule force gates, the PR-evidence branch delete, and the half-deleted and locked recovery cases. Not user-invocable. |
+The fifth, also on `PreToolUse`
+([`scripts/guard-pinned-branch.py`](scripts/guard-pinned-branch.py)), applies
+only to a repo that opts in with `git config --local hooks.pinnedBranch main`:
+it refuses a `git checkout`/`git switch` (or a `gh pr checkout`) that would move that repo's main
+checkout off the pinned branch, so branch work goes to a worktree. The refusal
+names the worktree an `EnterWorktree` call would create, at the root and branch
+prefix `scripts/worktree-config.sh` resolves, and points at the
+`worktree-entry` skill for every other target, and at the
+[`pinned-checkout`](skills/pinned-checkout/SKILL.md) skill for why. Each call is
+judged where it actually runs — a `cd <worktree> && git checkout -b x` is
+allowed — and linked worktrees are never pinned. Bypass one call with
+`env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1 git checkout <branch>`; the assignment
+has to sit immediately before that call's `git` (or `gh`) word. The guard reads command
+text, so it judges plain shapes only —
+`[cd <dir> &&] [env VAR=1] git [global options] checkout|switch …` and
+`[cd <dir> &&] [env VAR=1] gh [-R <repo>] pr checkout|co …` (judged at its
+`--worktree <path>` when it names one) — and lets
+executors (`bash -c`, `eval`), subshells, wrappers with options, git aliases
+and scripts through by design. A `post-checkout` hook, where one is installed,
+is the backstop for those, and a state check is planned.
+
+To opt a repo in, run
+[`scripts/pin-checkout.sh <branch>`](scripts/pin-checkout.sh) from it: it sets
+`hooks.pinnedBranch` and, when `core.hooksPath` is unset, installs that
+`post-checkout` hook in `.git/hooks`. It never overwrites an existing hook, and
+with `core.hooksPath` set it installs nothing and says where the hook belongs.
+Run it outside the Claude Code sandbox, which denies writes to `.git/config`
+and `.git/hooks`.
+
+The sixth, on `PreToolUse` for `EnterWorktree`
+([`scripts/guard-enter-by-path.py`](scripts/guard-enter-by-path.py)), refuses a
+`path` call when [`scripts/worktree-name-for.sh`](scripts/worktree-name-for.sh)
+says `EnterWorktree` with `name: <n>` would hand the same worktree back. The
+path form raises an approval prompt nothing can lift, which stops an unattended
+or Remote Control session; the refusal names the prompt-free route instead
+(`ExitWorktree` `keep` first only when already in a worktree, then `name`).
+With no name, or on any error, it stays silent and the prompt appears as
+before.
+
+| Skill                                                      | Trigger                                                                                                    | What it does                                                                                                                                                                                                                                            |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [**worktree-teardown**](skills/worktree-teardown/SKILL.md) | `/worktree-teardown <path> \| --branch <branch>`, or auto when a removal fails, refuses, or half-completes | Run the teardown scripts, granted by the command so a typed teardown needs no allow rule, and the mechanics behind them: the submodule force gates, the PR-evidence branch delete, and the half-deleted and locked recovery cases.                      |
+| [**worktree-entry**](skills/worktree-entry/SKILL.md)       | auto when entering, re-entering, or writing into a worktree                                                | Which `EnterWorktree` call reaches a worktree or branch with no prompt, when `ExitWorktree` (`keep`) comes first, the remote-only and unprefixed branch routes, when `path` is right, and what re-entering a shared worktree costs. Not user-invocable. |
+| [**pinned-checkout**](skills/pinned-checkout/SKILL.md)     | auto on a "This checkout is pinned to" refusal, or a checkout undone by the `post-checkout` hook           | How a repo opts in and out of the branch pin, why the guard runs before `git` and no git hook can, the `reference-transaction` trap, which layer covers what the guard lets through, and the one-call override. Not user-invocable.                     |
 
 ### Bundled subagents
 

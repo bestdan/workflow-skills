@@ -96,6 +96,8 @@ command -v git >/dev/null 2>&1 || die "git is required but not found in PATH"
 git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
 
 script_dir=$(cd -- "$(dirname -- "$0")" && pwd -P)
+# shellcheck source=lib/worktree-name.sh
+. "$script_dir/lib/worktree-name.sh"
 root=$(git rev-parse --show-toplevel) || die "could not resolve the working tree root"
 
 realpath_of() (cd "$1" 2>/dev/null && pwd -P)
@@ -111,10 +113,6 @@ wt_root=$(cd -- "$root" && "$script_dir/worktree-config.sh" root) || {
 }
 common=$(git -C "$root" rev-parse --path-format=absolute --git-common-dir)
 repo=$(basename "$(dirname "$common")")
-
-is_valid_name() { # value
-  [ -n "$1" ] && [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] && [[ "$1" != *..* ]]
-}
 
 prefixed_remainder() { # ref
   case "$1" in
@@ -152,16 +150,20 @@ if [ -n "$holder" ]; then
     exit 0
   fi
 
-  remainder=$(prefixed_remainder "$ref")
-  expected_real=""
-  if is_valid_name "$remainder"; then
-    expected_real=$(realpath_of "$wt_root/$repo/$remainder")
-  fi
-
-  if [ -n "$expected_real" ] && [ "$expected_real" = "$holder_real" ]; then
-    echo "ROUTE: enter-name name=$remainder ref=$ref"
-    exit 0
-  fi
+  # Whether the hook hands this worktree back by name is
+  # worktree-name-for.sh's call, shared with every other caller that asks.
+  name=$(cd -- "$root" && "$script_dir/worktree-name-for.sh" "$holder")
+  case $? in
+    0)
+      echo "ROUTE: enter-name name=$name ref=$ref"
+      exit 0
+      ;;
+    1) ;;
+    *)
+      echo "ROUTE: none reason=config-failed"
+      exit 1
+      ;;
+  esac
 
   echo "ROUTE: enter-path path=\"$holder_real\" ref=$ref"
   exit 0
@@ -176,7 +178,7 @@ if ! git show-ref -q --verify "refs/heads/$ref"; then
 fi
 
 remainder=$(prefixed_remainder "$ref")
-if is_valid_name "$remainder"; then
+if worktree_name_valid "$remainder"; then
   echo "ROUTE: enter-name name=$remainder ref=$ref"
   exit 0
 fi

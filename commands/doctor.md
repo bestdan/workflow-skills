@@ -1,18 +1,18 @@
 ---
-description: Diagnose and optionally fix the plugin setup — config validity, handler prerequisites, legacy dirs, schema drift, hygiene, and co-review allow-rule drift
-allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(find *), Bash(grep *), Bash(uv *), Bash(python3 *), Bash(mkdir *), Bash(rmdir *), Glob, Grep, Read, Edit, Write, AskUserQuestion, mcp__claude_ai_Linear__list_teams, mcp__linear__list_teams, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__atlassian__getAccessibleAtlassianResources
+description: Diagnose and optionally fix the plugin setup — config validity, handler prerequisites, legacy dirs, schema drift, hygiene, co-review and teardown allow-rule drift, and the worktree root and branch prefix
+allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(find *), Bash(grep *), Bash(uv *), Bash(python3 *), Bash(mkdir *), Bash(rmdir *), Bash("${CLAUDE_PLUGIN_ROOT}/scripts/worktree-config.sh":*), Glob, Grep, Read, Edit, Write, AskUserQuestion, mcp__claude_ai_Linear__list_teams, mcp__linear__list_teams, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__atlassian__getAccessibleAtlassianResources
 argument-hint: "[--fix]"
 ---
 
 # Doctor
 
 One explicit "diagnose and fix my setup" entry point. It runs a set of checks
-against `dev_docs/tasks/` and the configured handler — plus one over co-review's
-allow-rules, Check 7 — prints a `PASS` / `WARN` / `FAIL` line per check with a
+against `dev_docs/tasks/` and the configured handler — plus one over co-review's and the teardown scripts'
+allow-rules, Check 7, and one over the worktree root and branch prefix, Check 8 — prints a `PASS` / `WARN` / `FAIL` line per check with a
 remediation hint, and changes **nothing** unless invoked with `--fix`.
 
-Most of what it checks is the task loop. Check 7 is not, and that is deliberate:
-it covers a failure that is **silent by construction**, so the only way anyone
+Most of what it checks is the task loop. Checks 7 and 8 are not, and that is deliberate:
+each covers a failure that is **silent by construction**, so the only way anyone
 learns of it is by asking, and this is the one place people already come to ask.
 A check nobody runs does not fix a problem nobody notices. Read that as the bar
 for widening the scope again, not as an invitation — a diagnosable failure that
@@ -356,7 +356,7 @@ auto-archive, store an API key). Report against the resolved handler:
 handler-specific prerequisite (Linear key / Jira status) is satisfied or
 not-applicable.
 
-**Check 7 — co-review allow-rules.** Whether the exact-match Bash rules that
+**Check 7 — co-review and teardown allow-rules.** Whether the exact-match Bash rules that
 approve each co-review reviewer still match the command the **installed** plugin
 dispatches. This is the one check here that is not about the task loop, and it
 earns its place on the failure mode rather than the subject: a rule that stops
@@ -409,14 +409,46 @@ in `~/.claude/settings.json` plus the repo's `.claude/settings.json` /
 - **not configured** — a reviewer with no rules at all. Reported, but **not**
   drift: an operator who doesn't use a reviewer shouldn't be nagged about it.
 
-Exit `0` → `PASS`. Exit `1` (a configured reviewer has a dead or missing rule)
+It checks the **shared** rules in `skills/co-review/references/permissions.md`
+too, reported under `shared:`. Those are prefix rules, so it asks whether a
+settings rule approves the command, matching up to a whole shell token as the
+permission matcher does: `Bash(git:*)` covers `Bash(git diff:*)`, and
+`Bash(git stat:*)` covers nothing. Only a prefix rule, ending `:*` or a
+space and `*`, counts; an exact rule is reported MISSING. Only one of `gh pr diff` and `git diff` is
+required. Any `…/workflow-skills/workflow-skills/:*` plugin-cache rule is
+**DEAD** on every machine: it ends inside the script's path, so it never fired.
+How the scripts are approved instead, and where that grant stops, is in
+`permissions.md`.
+
+Exit `0` → `PASS`. Exit `1` (a configured reviewer, or the shared rules, has a dead or missing rule)
 → `WARN`, quoting the script's own lines. Exit `2` → `WARN`: the
 check could not run. It prints the reason on **stderr**, so capture that
 (`2>&1`) and quote it rather than reporting a bare failure — it is usually an
 unresolvable plugin root.
 
-**Always `WARN`, never `FAIL`, and never touched by `--fix`.** Three independent
-reasons, each sufficient:
+**Then run it again for the teardown scripts.** A model that runs
+`worktree-remove.sh` or `branch-remove.sh` itself, rather than through a typed
+`/worktree-teardown`, is approved only by a settings rule naming the script's full
+installed path. That path carries the version directory, so the rule dies at the
+next `claude plugin update`, and the denial is just as silent:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/coreview-rule-drift.py" \
+  --plugin-root "${CLAUDE_PLUGIN_ROOT}" --teardown
+```
+
+It reads the same settings files and classifies each rule naming a plugin-cache
+copy of either script. **LIVE** names the installed path. **DEAD** names a
+different version directory, and the line names the installed version beside it.
+**UNVERIFIED** names neither, typically a `*` in the version segment: no
+measurement shows that shape fires, so it is reported but not counted as coverage.
+**MISSING** is a script with no live rule, printed as the rule to add. No teardown
+rule at all is _not configured_, which is not drift: the hooks and a typed
+`/worktree-teardown` need no rule. The exit codes are the same as above, and the
+result is reported as its own line, `teardown allow-rules`.
+
+**Always `WARN`, never `FAIL`, and never touched by `--fix`.** This applies to both
+runs, for three independent reasons, each sufficient:
 
 1. The repair needs literal absolute paths only the operator knows — `<NEUTRAL>`
    in particular is deliberately never documented as a fixed value (see
@@ -434,9 +466,47 @@ reasons, each sufficient:
 Every `FAIL` in this command must be repairable under `--fix`; this one isn't, so
 it is a `WARN`. Print the corrected rules and let the human place them.
 
+**Check 8 — worktree root and branch prefix.** Where this repo's worktrees will be
+created and what their branches will be called, and **where each value came
+from**. A fresh clone gets both wrong without anything saying so: unset, the root
+resolves to an XDG state directory and the prefix to the git identity, which
+neither matches a repo whose branches follow some other convention.
+
+Read both from the resolver the worktree hooks use, so the report and the
+resolution cannot disagree:
+
+```bash
+"${CLAUDE_PLUGIN_ROOT}/scripts/worktree-config.sh" explain
+```
+
+It prints `root=<value>` and `branch_prefix=<value>`, each followed by a tab and
+its source: `env <VAR>`, `repo config <path>` (the worktree config, or the task
+config's `branch_prefix`), or `default (<what it was derived from>)`.
+
+- Both from an env var or a repo config → `PASS`, naming the two values.
+- Either from a `default (…)` → `WARN`, naming the value and its source. To pin
+  it, set `root:` and `branch_prefix:` as flat `key: value` lines in the repo's
+  worktree config file, the path `scripts/worktree-config.sh` names as
+  `CONFIG_REL`, or export `WORKFLOW_SKILLS_WORKTREE_ROOT` /
+  `WORKFLOW_SKILLS_BRANCH_PREFIX`. A default is not wrong as such, so this stays a
+  `WARN` for a human to confirm.
+- A nonzero exit → `WARN`, quoting its stderr: an env var or config value is set
+  but invalid, and the hooks will refuse it too.
+
+**Never written by `--fix`.** Which root and prefix a repo wants is a convention
+only its owner knows, so there is no mechanical value to write. And this check
+never writes a permission rule either: a settings rule can match a plugin script
+only by its full installed path, which carries the version and stops matching at
+the next release (#816). This command's own `allowed-tools` grant covers the
+resolver call.
+
 ### 3. Report (and fix under `--fix`)
 
-**Report-only (default).** Print the status block and stop — no writes:
+**Report-only (default).** Print the status block and stop — no writes. Group
+the lines by status, not by check number: every `PASS` first, then `FAIL` (what
+`--fix` repairs), then `WARN` (what needs a human), each with its remediation
+hint, and the tally line last. A failing early check then still lands next to
+the tally, where the reader is left.
 
 ```
 /doctor — repo-pr handler
@@ -448,12 +518,15 @@ it is a `WARN`. Print the corrected rules and let the human place them.
   WARN  Hygiene — 2 expired tasks; 1 orphan task/ branch
   WARN  Archive — `archive_after` unset; /archive-tasks is dry-run-only
   WARN  co-review allow-rules — agy: 1 dead, 2 missing; devin: 2 dead, 3 missing
+  WARN  teardown allow-rules — worktree-remove.sh: 1 dead (pinned to 2.70.4; installed is 2.76.0)
+  WARN  Worktree config — branch_prefix=jane/ from default (git user.email)
 
-2 fail, 3 warn, 2 pass. Re-run with `/doctor --fix` to apply the mechanical fixes.
+2 fail, 5 warn, 2 pass. Re-run with `/doctor --fix` to apply the mechanical fixes.
 ```
 
 **`--fix`.** Apply only the **safe, mechanical** repairs, then re-print the block
-with each fixed check marked `FIXED`:
+with each fixed check marked `FIXED` and grouped with the `PASS` lines, so the
+`WARN` lines left for the human still come last:
 
 - **Legacy dirs** → run the **Legacy migration** procedure from `skills/task/SKILL.md`
   (the same one the implicit preflight uses). Because `--fix` is the explicit

@@ -133,10 +133,10 @@ if [ -z "$TEAM" ]; then
   exit 0
 fi
 
-HAPPY_OUT="$(mktemp)"
-HAPPY_ERR="$(mktemp)"
-BAD_OUT="$(mktemp)"
-BAD_ERR="$(mktemp)"
+HAPPY_OUT="$(mktemp "${TMPDIR:-/tmp}/test-linear-ready-live.XXXXXX")"
+HAPPY_ERR="$(mktemp "${TMPDIR:-/tmp}/test-linear-ready-live.XXXXXX")"
+BAD_OUT="$(mktemp "${TMPDIR:-/tmp}/test-linear-ready-live.XXXXXX")"
+BAD_ERR="$(mktemp "${TMPDIR:-/tmp}/test-linear-ready-live.XXXXXX")"
 trap 'rm -f "$HAPPY_OUT" "$HAPPY_ERR" "$BAD_OUT" "$BAD_ERR"' EXIT
 
 # Happy path: the real inherited key.
@@ -214,7 +214,7 @@ if d is not None:
     bn = [c.get("identifier") for c in cands if not c.get("branchName")]
     ok("every candidate carries branchName") if not bn else bad("every candidate carries branchName", str(bn[:5]))
 
-    pat = re.compile(r"^(no estimate set|already auto-claimed|human-approval-requested|blocked|estimate \d+(?:\.\d+)? >= \d+(?:\.\d+)?|assigned to .+)$")
+    pat = re.compile(r"^(no estimate set|already auto-claimed|human-approval-requested|blocked|estimate \d+(?:\.\d+)? >= \d+(?:\.\d+)?|assigned to .+|waiting on .+)$")
     dropped = d.get("dropped", [])
     if not isinstance(dropped, list):
         bad("dropped is a list", "got %s" % type(dropped).__name__); dropped = []

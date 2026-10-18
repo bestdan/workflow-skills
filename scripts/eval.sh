@@ -110,7 +110,7 @@ while IFS=$'\t' read -r skill prompt_file max_turns; do
   slug="${skill//|/-or-}"
   mt="${max_turns:-$MAX_TURNS_DEFAULT}"
   prompt="$(cat "evals/$prompt_file")"
-  log="$(mktemp)"
+  log="$(mktemp "${TMPDIR:-/tmp}/eval.XXXXXX")"
   echo "→ ${skill}  (prompt: ${prompt_file}, max-turns: ${mt})"
   started=$SECONDS
   ${TIMEOUT:+"$TIMEOUT" "$CAP"} claude -p "$prompt" \

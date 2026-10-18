@@ -119,7 +119,7 @@ console string is not.
 
 **Caveats, stated rather than hidden:**
 
-- **Strands headroom on light nights.** The proxy fallback will sometimes
+- **Strands headroom in light windows.** The proxy fallback will sometimes
   pause a run that had capacity left. This is the deliberate safe direction
   — pausing early wastes idle time; pausing late risks the wall.
 - **The direct query is account-wide, closing the proxy's blind spot.** The
@@ -449,7 +449,10 @@ operative, not pedantic: a park is a **deliberate, successful** outcome (the
 task is blocked on a human decision), so a parked task must never be counted
 as a failure and re-dispatched. Reading a park as a failure would re-dispatch
 the very task that is waiting on an answer, burn the retry bound on it, and
-then park it a second time — defeating the park and the bound together.
+then park it a second time — defeating the park and the bound together. A
+**claim refusal** is neither a failure nor a park: the loop records it as the
+pre-claim terminal `skipped` ([`run-state.md`](run-state.md) "Task lifecycle
+phases") and does not re-dispatch it.
 
 A failed delivery gets **one** re-dispatch; a second failure parks the task,
 and the run loop continues to the next ready task rather than aborting — a
@@ -491,8 +494,8 @@ wrong, and counting them would halt a perfectly good run.
 **Why.** The per-task bounds above cap one runaway task each, but nothing
 caps _systemic_ failure — a broken `main`, a dead network, expired `gh`
 auth — where every task the loop tries parks for the same underlying
-reason. Left unchecked, the run would cheerfully burn the whole night
-parking task after task, each eating up to 45 minutes of window, and wake
-the human to a graveyard of parked tasks with no single signal pointing at
+reason. Left unchecked, the run would cheerfully burn the whole window
+parking task after task, each eating up to 45 minutes of window, and leave
+the human a graveyard of parked tasks with no single signal pointing at
 the real cause. Halting after a small consecutive-failure streak is cheap
 to implement and turns that graveyard into one legible alarm.

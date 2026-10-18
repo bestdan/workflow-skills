@@ -456,17 +456,9 @@ With positive WIP slack, run `commands/handlers/linear-claim.md` end to end:
    project in this run — treat it like an in-flight result: in ranked mode skip to the
    next candidate (whose project may have slack), on a direct pick stop. (The global
    ceiling, when set, is checked once up front and declines the whole run before the
-   loop.) **Also verify dependency-readiness here** — the shared "Find candidates"
-   gates do **not** check native blockers, so this is where single mode enforces it,
-   using the **same rule as the Tracker-batch subroutine (step 3)**: read `get_issue`
-   with `includeRelations: true` on the candidate and confirm every `blockedBy` issue
-   is in a `completed`-type state (`Done`) or no longer exists — a `canceled` blocker
-   does **not** satisfy it (matching `linear-reoptimize.md` Dimension 1). If any blocker
-   is unresolved the candidate is **not** dependency-ready: in ranked mode skip it
-   (`waiting on <identifier>`, move to the next candidate); on a direct `<identifier>`
-   pick **stop** and report the unresolved blocker rather than claiming an issue whose
-   dependencies aren't met. This keeps bare `/do-tasks` and `/do-tasks --all` from ever
-   disagreeing on whether an issue is ready.
+   loop.) Dependency-readiness is part of this pre-flight too — `linear-claim.md`
+   "Pre-flight" step 6, which applies the shared blocker gate. A candidate waiting on
+   an open blocker is skipped in ranked mode and stops a direct `<identifier>` pick.
 3. **Claim** — `linear-claim.md` "Claim the issue": the **token-comment lock** —
    read-before-write guard, then post a token-bearing claim comment **first** (the
    lock), then set the `started`-type state + `auto-claimed` label (creating it if
@@ -597,12 +589,10 @@ capability is actually visible — inside the remote session** — via two concr
 3. **Select dependency-ready candidates lazily, in ranked order, respecting each
    scope's slack.** Walk the ranked list and check dependency-readiness **on demand**,
    one candidate at a time: **dependency-ready** for a tracker means every native
-   blocking relationship is resolved — for Linear, read `get_issue` with
-   `includeRelations: true` and confirm each `blockedBy` issue is in a
-   `completed`-type state (`Done`) or no longer exists. A **`canceled`** blocker does
-   **not** satisfy the dependency (it blocks until a human removes the link — matching
-   `linear-reoptimize.md` Dimension 1, where a canceled `blockedBy` blocks forever and
-   only `Done` satisfies). Keep ready issues; skip the rest, recording each as
+   blocking relationship is resolved. For Linear that is the shared blocker gate —
+   `linear-claim.md` "Pre-flight" step 6, which owns the rule (only a `completed`
+   blocker satisfies it; a `canceled` one still blocks) and says which candidates
+   step 1 already cleared. Keep ready issues; skip the rest, recording each as
    `waiting on <identifier>`. As you accept a ready issue, **decrement its scope's
    slack and the global slack**, and **skip** a ready issue whose own scope is already
    full even if the global ceiling still has room. **Stop** once every chosen scope is

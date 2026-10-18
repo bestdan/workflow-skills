@@ -130,10 +130,10 @@ if [ -z "$TEAM" ]; then
   exit 0
 fi
 
-HAPPY_OUT="$(mktemp)"
-HAPPY_ERR="$(mktemp)"
-BAD_OUT="$(mktemp)"
-BAD_ERR="$(mktemp)"
+HAPPY_OUT="$(mktemp "${TMPDIR:-/tmp}/test-linear-scan-live.XXXXXX")"
+HAPPY_ERR="$(mktemp "${TMPDIR:-/tmp}/test-linear-scan-live.XXXXXX")"
+BAD_OUT="$(mktemp "${TMPDIR:-/tmp}/test-linear-scan-live.XXXXXX")"
+BAD_ERR="$(mktemp "${TMPDIR:-/tmp}/test-linear-scan-live.XXXXXX")"
 trap 'rm -f "$HAPPY_OUT" "$HAPPY_ERR" "$BAD_OUT" "$BAD_ERR"' EXIT
 
 # Happy path: the real inherited key.

@@ -1,11 +1,11 @@
 ---
 name: auto-pilot
-description: Unattended autonomous mode — "pick up this Project and grind on it overnight." Runs a task graph (a Linear project or a plan-with-docs directory) task-by-task in an isolated worktree, taking each through /deliver-task (claim → implement → PR → co-review → hand-off) with durable, crash-resumable state and no human in the loop. Use when the user wants a body of work advanced autonomously and unattended. NOTE - v1 is under construction; this entry establishes the skill home and the run-state reference. Launch, run, and resume are implemented.
+description: Unattended autonomous mode — "pick up this Project and advance it with no human attached." Runs a task graph (a Linear project or a plan-with-docs directory) task-by-task in an isolated worktree, taking each through /deliver-task (claim → implement → PR → co-review → hand-off) with durable, crash-resumable state and no human in the loop. Use when the user wants a body of work advanced autonomously and unattended. NOTE - v1 is under construction; this entry establishes the skill home and the run-state reference. Launch, run, and resume are implemented.
 ---
 
 # auto-pilot — unattended autonomous runs
 
-"Claude, pick up this Project and grind on it overnight."
+"Claude, pick up this Project and advance it unattended."
 
 Auto-pilot advances a whole task graph without a human in the loop: an isolated
 worktree, a thin orchestrator that walks the graph, and `/deliver-task` per task
@@ -13,6 +13,26 @@ worktree, a thin orchestrator that walks the graph, and `/deliver-task` per task
 battle-tested skills and handler protocols rather than duplicating them.
 
 Design: [`../../dev_docs/auto-pilot.md`](../../dev_docs/auto-pilot.md).
+
+**Unattended is about attention, not the hour.** The property every guarantee
+below serves is that no human is attached to the orchestrator process — true
+at 3 in the morning and equally at 10 while its launcher is in a meeting. A run
+meets a human in one of three modes, and the guarantees are sized for the
+hardest one it may be in:
+
+- **Attended** — a human is at the launching session. Prompts are fine; only
+  launch runs this way.
+- **Partially attended** — a human dips in every so often. This is the common
+  case: the run needs a live status surface (`spawn-orchestrator.sh status`,
+  the heartbeat, the rolling `REPORT.md`) and an alarm, and it must never
+  _block_ on a human.
+- **Unattended** — nobody looks until the run ends. It needs both of the
+  above, plus the fail-closed launch pre-flight and self-halt on the
+  unrecoverable (`references/run-budget.md`).
+
+Detachment outliving the launching session is a fact about process lifetime.
+The one physical constraint is power: the machine must stay awake
+(`references/launch-runtime.md` "Laptop sleep").
 
 > **Status:** v1 is being built. This SKILL.md establishes the skill home, the
 > references below, the interactive **launch** phase, the unattended **run**
@@ -109,10 +129,10 @@ only axis that explains it.
 
 Invoked by `/auto-pilot <linear-project | plan-dir> [--until <time>]
 [--reserve <pct>] [--profile less-claude] [--resume]`
-(`commands/auto-pilot.md`). Launch runs **interactively, tonight, while the human
-can still fix failures** — so it is **fail-closed**: any hard pre-flight failure
+(`commands/auto-pilot.md`). Launch runs **interactively, while a human is attached
+and can still fix failures** — so it is **fail-closed**: any hard pre-flight failure
 **BLOCKS LAUNCH** with a specific, fixable message rather than deferring the
-problem to 3am. It ends by spawning the detached, unattended orchestrator and
+problem to a point where no human can answer. It ends by spawning the detached, unattended orchestrator and
 telling the user the run is underway. The unattended **run** loop is what the
 spawned orchestrator executes; **`--resume`** reconciles a crashed or paused
 run's state and then falls into that same loop (see "Resume phase" below).
@@ -153,8 +173,8 @@ The pre-flight is an **ordered, fail-closed** sequence, steps 1–7 below. It is
 **supply-and-demand**: steps 2–3 probe what the configured environment can
 _supply_ (auth, resolved config), and the **scout** in step 6 checks what the
 _plan_ will _demand_ (which coder each task routes to) against that supply — the
-join is where a run that would otherwise pass green but die at 3am gets caught
-tonight.
+join is where a run that would otherwise pass green but fail with no human
+attached gets caught at launch.
 
 The full mechanics of each step are in
 [`references/launch-preflight.md`](references/launch-preflight.md); in brief:
@@ -170,7 +190,7 @@ The full mechanics of each step are in
 3. **Resolve config into non-interactive choices** (BLOCKS LAUNCH) — reviewer
    set + `min_task_budget`, `select-coder` per task, the less-claude profile
    fields, and the custom-commands posture; anything left unresolved would
-   prompt at 3am, so it blocks.
+   prompt when no human can answer, so it blocks.
 4. **Gitignore sanity check** — record ignored output paths for `git add -f`;
    warn-only, never blocks.
 5. **Record verify tooling + exercise path** — pin `verify_command` /
@@ -277,9 +297,11 @@ boundaries. The loop does not attempt to intercept those opaque substeps.
 
 **Readiness + ordering.** Walk the `RUN.md` task graph
 ([`references/run-state.md`](references/run-state.md) "`RUN.md`"). A task is
-**ready** when every task it is blocked by is at phase `handed-off` — never
-tracker done-state (per that reference's phase table, `handed-off` is the
-success terminal the run keys off, not `needs_review`'s eventual completion).
+**ready** when its own phase is `pending` and every task it is blocked by is
+at phase `handed-off` — never tracker done-state (per that reference's phase
+table, `handed-off` is the success terminal the run keys off, not
+`needs_review`'s eventual completion). A `skipped` task is never selected
+again.
 Pick the next ready task in dependency order. Each task's `base` column
 encodes whether it is independent (`main`) or chained (the parent task's
 branch) — that distinction drives the stacked-PR handling below.
@@ -320,11 +342,11 @@ index: [`references/run-state.md`](references/run-state.md) "`REPORT.md`".
 **Human checkpoints produce artifacts, then proceed.** When a task needs
 genuine human judgment, the run still does not block: `/deliver-task` ensures
 the PR carries a working end-to-end state plus a how-to-evaluate note, the
-orchestrator records the same entry in `REPORT.md`'s _How-to-evaluate queue_,
+orchestrator records the same entry in `REPORT.md`'s _For you_ section,
 and the loop moves on.
 
 **Rolling `REPORT.md` update.** After every task's state update above, rewrite
-`REPORT.md` from the current `RUN.md` + `QUESTIONS.md` state — the seven
+`REPORT.md` from the current `RUN.md` + `QUESTIONS.md` state — the six
 sections in [`references/run-state.md`](references/run-state.md)'s "`REPORT.md`"
 order. Commit it on the run-state branch as part of that state update's commit,
 under the write order's last step. Its _Spend_ section stays a one-line
@@ -350,6 +372,12 @@ stacked-PR repair)".
 the run-state branch — the **write order**'s last step
 ([`references/run-state.md`](references/run-state.md) "Write order");
 `/deliver-task` already performed that order's push + tracker-write steps.
+When `/deliver-task` returned a **claim refusal** (its step 2) instead, write
+phase `skipped` with the refusal reason in `notes`; it holds no claim, so there
+is nothing to push or write to the tracker first. A refusal is not a failed
+delivery and never takes the per-task retry bound. Why `skipped` and not
+`parked`, and why a reopened blocker skips rather than waits:
+[`references/run-state.md`](references/run-state.md) "Task lifecycle phases".
 Then apply the budget checks in
 [`references/run-budget.md`](references/run-budget.md): a hard-stop, a
 near-cap pause, or a circuit-breaker halt writes state and exits per that
@@ -363,7 +391,8 @@ ready for a later `--resume` — the `status`/`paused_until` contract and what
 that does to the relaunch supervisor:
 [`references/run-state.md`](references/run-state.md) "`RUN.md`" and
 [`references/launch-runtime.md`](references/launch-runtime.md) "Relaunchable,
-not one-shot".
+not one-shot". A run whose every remaining task was refused ends because no
+ready task remains: `skipped` tasks and their dependents are never ready.
 
 In every case the orchestrator writes and commits the final `REPORT.md`, then
 declares its exit reason and exits cleanly, emitting a one-line summary to

@@ -1,3 +1,9 @@
+---
+description: Handler procedure read by its dispatching command; not run directly.
+disable-model-invocation: true
+user-invocable: false
+---
+
 # repo-pr handler — /archive-tasks flow
 
 Invoked from `/archive-tasks` when `handler: repo-pr` is configured (the default

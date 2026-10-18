@@ -100,7 +100,7 @@ gh-issue:
   repo: owner/name
   labels: [follow-up]
   assignees: []
-  # branch_prefix: bestdan/   # optional — prepended verbatim to the /do-tasks claim branch, which is `<branch_prefix>task-<issue number>`; empty by default, giving `task-142`
+  # branch_prefix: bestdan/   # optional — prepended to the /do-tasks claim branch, which is `<branch_prefix>task-<issue number>`; must end in `/` (the claim parser reads the segment after the last `/`), empty by default, giving `task-142`
 # archive_after: 30          # optional, top-level — default /archive-tasks age threshold (days)
 ```
 

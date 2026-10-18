@@ -1,0 +1,6 @@
+log="$(mktemp "${TMPDIR:-/tmp}/eval.XXXXXX")"
+dir="$(mktemp -d "${TMPDIR:-/tmp}/check.XXXXXX")"
+f=$(mktemp "$TMPDIR/x.XXXXXX")
+my-mktemp-helper
+echo mktemp_result
+f=$(mktemp "$TMPDIR/x.XXXXXX" 2>/dev/null)
