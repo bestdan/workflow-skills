@@ -466,7 +466,15 @@ def detach(base: Path) -> bool:
     otherwise wait on. The receipt lands in LAST_PUSH_LOG, overwritten each time.
     """
     sys.stdout.flush()
-    if os.fork():
+    try:
+        pid = os.fork()
+        if pid:
+            # The first child only calls setsid and forks again, so this wait is
+            # brief; returning before it would leave a window in which the flush
+            # is still in the hook's process group.
+            os.waitpid(pid, 0)
+            return False
+    except OSError:
         return False
     try:
         os.setsid()
