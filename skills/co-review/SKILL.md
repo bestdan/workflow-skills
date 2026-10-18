@@ -126,7 +126,9 @@ install-versus-checkout property intact: the value is still the **installed**
 plugin either way.
 
 It is read-only and costs milliseconds. Exit `1` means at least one configured
-reviewer, or the shared rules, has a dead or missing rule; **do not skip any reviewer on
+reviewer, or the shared rules, has a missing rule. Dead rules alone exit `0` with
+`stale: true`: they can deny nothing, so put one line in the run summary
+suggesting `/doctor` to prune them, and nothing beside a reviewer. **Do not skip any reviewer on
 this signal** — the check is a heuristic over settings files it may not have all
 of, so let the dispatch decide. Instead, note a reviewer's finding beside that
 reviewer and a shared-rule finding once on the reviewer line, so a reviewer

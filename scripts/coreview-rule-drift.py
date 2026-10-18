@@ -41,6 +41,8 @@ Usage:
   --json         emit the findings as JSON instead of a report.
 
 Exit codes: 0 no drift, 1 drift found, 2 could not run (bad plugin root, etc).
+Dead rules alone are not drift outside --teardown: they exit 0 with `stale`
+set in the JSON (see `has_drift`).
 """
 
 import argparse
@@ -552,20 +554,31 @@ def report_teardown(t, settings_read, settings_searched):
 
 def has_drift(findings, shared=None):
     """Drift is a CONFIGURED reviewer, or configured shared rules, with a
-    missing or dead rule.
+    missing rule: a shipped template that no rule approves, so its dispatch is
+    denied.
 
-    Off-machine rules are deliberately excluded: on a settings file shared
-    across hosts they are the other hosts' correct rules, so counting them
-    would report drift on every machine forever. A template they fail to cover
-    is already reported as `missing`, which fires on exactly the hosts where it
-    is true.
+    Dead rules are reported but not counted, for the same reason off-machine
+    rules are not. A dead rule matches no shipped template, so it can never
+    deny anything; the template it once covered either has a live rule or is
+    reported as `missing` itself. Counting it would exit 1 forever on any
+    machine with settings history, and a warning that never clears is one the
+    operator learns to skip — so the next real `missing` would go unread. Dead
+    rules surface through `has_stale` as a non-blocking prompt to prune.
+
+    Off-machine rules are excluded too: on a settings file shared across hosts
+    they are the other hosts' correct rules, so counting them would report
+    drift on every machine forever. A template they fail to cover is already
+    reported as `missing`, which fires on exactly the hosts where it is true.
     """
-    shared_drift = bool(
-        shared and shared["configured"] and (shared["missing"] or shared["dead"])
-    )
-    return shared_drift or any(
-        f["configured"] and (f["missing"] or f["dead"]) for f in findings
-    )
+    shared_drift = bool(shared and shared["configured"] and shared["missing"])
+    return shared_drift or any(f["configured"] and f["missing"] for f in findings)
+
+
+def has_stale(findings, shared=None):
+    """True when a configured reviewer, or configured shared rules, carry a
+    dead rule. Advisory only: it never changes the exit code."""
+    shared_stale = bool(shared and shared["configured"] and shared["dead"])
+    return shared_stale or any(f["configured"] and f["dead"] for f in findings)
 
 
 def report(findings, shared, plugin_root, settings_read, settings_searched):
@@ -652,16 +665,28 @@ def report(findings, shared, plugin_root, settings_read, settings_searched):
             "appearing in the run summary. To repair: copy each MISSING template\n"
             "verbatim, substituting any placeholders with the same fixed absolute\n"
             "paths your invocation uses — spelled `$HOME/...` wherever the path is\n"
-            "under your home directory, the form the reviewer files require — and\n"
-            "delete each DEAD rule.\n"
-            "\n"
-            "Make that edit wherever the settings file above is MANAGED, which is not\n"
-            "always the file itself — a generated or dotfiles-synced settings.json\n"
-            "loses an in-place edit at the next sync, and the drift comes back with no\n"
-            "sign of why. Nothing here writes settings for you."
+            "under your home directory, the form the reviewer files require.\n"
         )
     else:
         print("No drift.")
+
+    if has_stale(findings, shared):
+        if not has_drift(findings, shared):
+            print()
+        print(
+            "DEAD rules are reported, not counted as drift: each matches no shipped\n"
+            "template, so it can never deny a dispatch. They are settings sediment\n"
+            "— a retired model pin, an old flag order. Delete them when convenient;\n"
+            "nothing is broken in the meantime.\n"
+        )
+
+    if has_drift(findings, shared) or has_stale(findings, shared):
+        print(
+            "Make any edit wherever the settings file above is MANAGED, which is not\n"
+            "always the file itself — a generated or dotfiles-synced settings.json\n"
+            "loses an in-place edit at the next sync, and the finding comes back with\n"
+            "no sign of why. Nothing here writes settings for you."
+        )
 
 
 def main():
@@ -725,6 +750,7 @@ def main():
                     "plugin_root": str(args.plugin_root),
                     "settings": settings_read,
                     "drift": drift,
+                    "stale": has_stale(findings, shared),
                     "shared": shared,
                     "reviewers": findings,
                 },

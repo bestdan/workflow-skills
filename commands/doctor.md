@@ -393,7 +393,11 @@ in `~/.claude/settings.json` plus the repo's `.claude/settings.json` /
 `settings.local.json`, and classifies every rule:
 
 - **DEAD** — an existing rule matching no shipped template (a reordered flag, a
-  dropped one, a stale pinned model). It will never fire again.
+  dropped one, a stale pinned model). It will never fire again, so it can never
+  deny a dispatch either: it is **reported and never counted as drift**. The
+  template it once covered has a live rule, or it is MISSING on its own. Counting
+  it would `WARN` on every run on any machine with settings history, and the next
+  real MISSING would land in a line the operator has learned to skip.
 - **OFF-MACHINE** — a rule matching a template's _shape_ but substituting a path
   this machine has no route to (missing two or more trailing levels; one is fine,
   the dispatch's own `cat >` creates it). `<NEUTRAL>` is exempt from this
@@ -420,8 +424,11 @@ required. Any `…/workflow-skills/workflow-skills/:*` plugin-cache rule is
 How the scripts are approved instead, and where that grant stops, is in
 `permissions.md`.
 
-Exit `0` → `PASS`. Exit `1` (a configured reviewer, or the shared rules, has a dead or missing rule)
-→ `WARN`, quoting the script's own lines. Exit `2` → `WARN`: the
+Exit `0` → `PASS`. When the report also lists DEAD rules, keep the `PASS` and
+append a non-blocking prompt to prune them, counted per reviewer
+(`PASS  co-review allow-rules — 29 stale rules (agy 10, devin 11, …); prune when
+convenient`). Exit `1` (a configured reviewer, or the shared rules, has a missing
+rule) → `WARN`, quoting the script's own lines. Exit `2` → `WARN`: the
 check could not run. It prints the reason on **stderr**, so capture that
 (`2>&1`) and quote it rather than reporting a bare failure — it is usually an
 unresolvable plugin root.
@@ -444,8 +451,11 @@ different version directory, and the line names the installed version beside it.
 measurement shows that shape fires, so it is reported but not counted as coverage.
 **MISSING** is a script with no live rule, printed as the rule to add. No teardown
 rule at all is _not configured_, which is not drift: the hooks and a typed
-`/worktree-teardown` need no rule. The exit codes are the same as above, and the
-result is reported as its own line, `teardown allow-rules`.
+`/worktree-teardown` need no rule. The exit codes are the same as above with one
+difference: here a DEAD rule still counts as drift. A teardown rule goes dead at
+every `claude plugin update`, so a dead one usually means the installed script
+has lost its rule, and the line beside it says so as MISSING. The result is reported as its
+own line, `teardown allow-rules`.
 
 **Always `WARN`, never `FAIL`, and never touched by `--fix`.** This applies to both
 runs, for three independent reasons, each sufficient:
@@ -517,7 +527,7 @@ the tally, where the reader is left.
   FAIL  Schema drift — 1 file missing `expires` (defaultable)
   WARN  Hygiene — 2 expired tasks; 1 orphan task/ branch
   WARN  Archive — `archive_after` unset; /archive-tasks is dry-run-only
-  WARN  co-review allow-rules — agy: 1 dead, 2 missing; devin: 2 dead, 3 missing
+  WARN  co-review allow-rules — agy: 2 missing; devin: 3 missing (3 stale rules; prune when convenient)
   WARN  teardown allow-rules — worktree-remove.sh: 1 dead (pinned to 2.70.4; installed is 2.76.0)
   WARN  Worktree config — branch_prefix=jane/ from default (git user.email)
 
