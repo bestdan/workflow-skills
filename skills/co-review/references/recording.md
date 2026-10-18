@@ -31,15 +31,19 @@ line between them exactly as its file under [`../reviewers/`](../reviewers/)
 gives it:
 
 ```bash
-date +%s > "<INPUT>.time"; <the reviewer's line, byte-for-byte>; date +%s >> "<INPUT>.time"
+date +%s > "<INPUT>.<run_id>.time"; <the reviewer's line, byte-for-byte>; date +%s >> "<INPUT>.<run_id>.time"
 ```
 
-- `<INPUT>.time` sits beside that reviewer's own `<INPUT>`, so it is per-agent
-  like the input, and its directory already exists. **`grok` is the one
-  exception to the position:** its `<INPUT>` lives inside `<NEUTRAL>`, which its
-  leading `mkdir -p "<NEUTRAL>"` creates, so its start stamp goes right after
-  that segment: `mkdir -p "<NEUTRAL>" && date +%s > "<INPUT>.time" && <the rest
-  of its chain>; date +%s >> "<INPUT>.time"`.
+- `<run_id>` is the run's id from [The three input files](#the-three-input-files).
+  Mint it **before the first dispatch**, not at step 8, and reuse it there. The
+  stamp file must be per-run, not only per-agent — see
+  [Why the stamp file carries the run id](#why-the-stamp-file-carries-the-run-id).
+- `<INPUT>.<run_id>.time` sits beside that reviewer's own `<INPUT>`, so its
+  directory already exists. **`grok` is the one exception to the position:** its
+  `<INPUT>` lives inside `<NEUTRAL>`, which its leading `mkdir -p "<NEUTRAL>"`
+  creates, so its start stamp goes right after that segment:
+  `mkdir -p "<NEUTRAL>" && date +%s > "<INPUT>.<run_id>.time" && <the rest of
+  its chain>; date +%s >> "<INPUT>.<run_id>.time"`.
 - The end stamp is joined with `;`, so it lands whether the dispatch succeeded,
   failed, or was skipped by an `&&` gate. A backgrounded dispatch stamps itself
   when the reviewer exits, however late you notice.
@@ -53,13 +57,14 @@ date +%s > "<INPUT>.time"; <the reviewer's line, byte-for-byte>; date +%s >> "<I
 - The trailing stamp makes the call's exit status the stamp's, not the
   reviewer's. Judge the reviewer from its output and its `REVIEW_COMPLETE` line,
   as SKILL.md step 5 and each reviewer file already require.
-- Read `<INPUT>.time` (`cat "<INPUT>.time"`). `duration_s` is the last line
-  minus the first. A killed reviewer can leave a third line (below), and the
-  last one is still the moment the wait ended.
+- Read `<INPUT>.<run_id>.time` (`cat "<INPUT>.<run_id>.time"`) once the
+  dispatch has finished. `duration_s` is the last line minus the first. A
+  killed reviewer can leave a third line (below), and the last one is still the
+  moment the wait ended.
 
 **A timed-out reviewer** (the `--non-interactive` 15-minute bound) never
 reaches its end stamp. When you stop waiting and kill it, append the stamp
-yourself, `date +%s >> "<INPUT>.time"`, so its duration is how long it was
+yourself, `date +%s >> "<INPUT>.<run_id>.time"`, so its duration is how long it was
 waited on — a lower bound on how long it would have taken. Killing only the
 reviewer process lets the dispatch's own end stamp run too; the extra line is
 harmless, since the duration reads first to last.
@@ -77,6 +82,37 @@ transcript; subtract.
 - a stamp file with fewer than two lines, or a stamp call that was denied.
   Record `null` and add `duration unmeasured` to that reviewer on the reviewer
   line.
+
+### Why the stamp file carries the run id
+
+`<INPUT>` is a fixed path under `$HOME`, so it is the same file for **every**
+co-review run on the machine, in any repo and any session. A stamp file named
+only for the agent is shared the same way: a second run's start stamp truncates
+it and its end stamp appends to it, while the first run is still waiting. The
+first run then sees two lines that are not its own. If it waits on the line
+count, or reads the file as "the dispatch has returned", it reads its output
+file while its reviewer is still writing, and it records a live reviewer as
+`failed`.
+
+That happened to PR #1050's run on 2026-10-18 ([#1051](https://github.com/bestdan/workflow-skills/issues/1051)).
+A `bestdan/dotfiles` session reviewing PR #902 dispatched its own codex while
+#1050's codex was running. #1050's session read `1792332438` and `1792332447`
+as its stamps, neither of which its dispatch wrote, and recorded codex as
+failed after 9 s. Its real end stamp, `1792332471`, matched the second the
+output file stopped changing, and that file held a complete review ending
+`REVIEW_COMPLETE: FINDINGS`. A solo re-run of the same dispatch showed codex
+and the shell behaving correctly: the call returned when codex exited, and the
+output did not change afterwards.
+
+Two rules follow, and the second holds whatever the file is named:
+
+- Name the stamp file for the run (`<INPUT>.<run_id>.time`), so no other run
+  can write to it.
+- Judge a reviewer only after **its own** dispatch has finished: the Bash call
+  returned, or for a backgrounded dispatch, its background task completed.
+  Never infer that from a file another process can write. Output that is still
+  missing its `REVIEW_COMPLETE` line while the dispatch is running is a
+  reviewer still at work, not a failed one.
 
 ## The three input files
 
