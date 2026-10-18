@@ -427,7 +427,9 @@ incidental convenience.
   **not** discharge the local obligation. The ledger reports declared debt
   as last hand-updated. The receipt cards are what would make a later
   `sweep` verb possible — walk the receipts, check tracker state, propose
-  discharges — but that verb is deliberately not in v1.
+  discharges — but that verb is deliberately not in v1. Unlike bridged
+  work, in-repo work is checked: an open obligation whose `destination:` file declares
+  `status: done` or `status: abandoned` in its frontmatter fails `validate`.
 - **The divergence signal is a snapshot.** The ledgers store no history, so
   "questions converging while obligations climb" is read by a human across
   commits — `git log` on the ledger lines — not computed or trended by the

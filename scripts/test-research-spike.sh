@@ -1146,6 +1146,105 @@ assert_contains "the missing-destination error says why the field exists" "$out_
 assert_contains "the missing-destination error names the accrual it prevents" "$out_l9" \
   "accrues invisibly"
 
+# A destination flipped to a terminal status in place still resolves, so the
+# existence rule above passes it — this is the rule that catches the open
+# obligation left behind (#634).
+DIR_L9A="$BASE/dest-done"
+obligation_fixture "$DIR_L9A" "dev_docs/tasks/real_task.md"
+write_file "$DIR_L9A/dev_docs/tasks/real_task.md" '---
+title: Write the keychain invariant
+status: done
+---
+
+# a task card whose work shipped'
+out_l9a="$(python3 "$SCRIPT" --root "$DIR_L9A" validate 2>&1)"
+exit_l9a=$?
+assert_exit "an open obligation whose destination is done exits 1" "$exit_l9a" 1
+assert_contains "the error names the destination and its status" "$out_l9a" \
+  "destination 'dev_docs/tasks/real_task.md' is marked 'status: done' but this obligation is still open"
+assert_contains "the error names both remedies" "$out_l9a" \
+  "set 'status: discharged' with 'discharged_by:'; if part of it is still owed, re-point 'destination:'"
+
+# An epic's `abandoned` is terminal too: the work was dropped, not done, and
+# the obligation is just as stranded.
+DIR_L9B="$BASE/dest-abandoned"
+obligation_fixture "$DIR_L9B" "dev_docs/tasks/real_task.md"
+write_file "$DIR_L9B/dev_docs/tasks/real_task.md" '---
+type: epic
+title: Keychain hardening
+status: "abandoned"   # dropped with the shared-host option
+---'
+out_l9b="$(python3 "$SCRIPT" --root "$DIR_L9B" validate 2>&1)"
+exit_l9b=$?
+assert_exit "an open obligation whose destination is abandoned exits 1" "$exit_l9b" 1
+assert_contains "a quoted, commented status is read as its value" "$out_l9b" \
+  "is marked 'status: abandoned'"
+
+# Discharged is the resolution, so the same destination is fine once the
+# obligation says so.
+DIR_L9C="$BASE/dest-done-discharged"
+obligation_fixture "$DIR_L9C" "dev_docs/tasks/real_task.md"
+write_file "$DIR_L9C/dev_docs/tasks/real_task.md" '---
+status: done
+---'
+write_file "$DIR_L9C/dev_docs/research/alpha/tracks/account/questions.md" '# account
+
+```obligation
+id: keychain-invariant
+owes: the keychain invariant, spelled out
+destination: dev_docs/tasks/real_task.md
+status: discharged
+discharged_by: PR #30
+```'
+seed_fresh_ledger "$DIR_L9C"
+out_l9c="$(python3 "$SCRIPT" --root "$DIR_L9C" validate 2>&1)"
+exit_l9c=$?
+assert_exit "a discharged obligation pointing at a done destination passes" "$exit_l9c" 0
+assert_not_contains "a discharged obligation is never reported as stranded" "$out_l9c" \
+  "is still open"
+
+# Only a terminal frontmatter status participates. A live status, `done` in
+# the body, and a frontmatter block that never closes are all left alone —
+# the last because validate must not report a contradiction it could not read.
+DIR_L9D="$BASE/dest-not-terminal"
+obligation_fixture "$DIR_L9D" "dev_docs/tasks/real_task.md"
+write_file "$DIR_L9D/dev_docs/tasks/real_task.md" '---
+status: in_progress
+---
+
+status: done'
+out_l9d="$(python3 "$SCRIPT" --root "$DIR_L9D" validate 2>&1)"
+exit_l9d=$?
+assert_exit "a destination in progress, with 'status: done' only in its body, passes" \
+  "$exit_l9d" 0
+assert_not_contains "a body 'status: done' is never read as the frontmatter's" "$out_l9d" \
+  "is still open"
+
+DIR_L9E="$BASE/dest-unclosed-frontmatter"
+obligation_fixture "$DIR_L9E" "dev_docs/tasks/real_task.md"
+write_file "$DIR_L9E/dev_docs/tasks/real_task.md" '---
+status: done
+
+# the closing delimiter was never written'
+out_l9e="$(python3 "$SCRIPT" --root "$DIR_L9E" validate 2>&1)"
+exit_l9e=$?
+assert_exit "an unclosed frontmatter block fails open" "$exit_l9e" 0
+assert_not_contains "an unclosed block reports no contradiction it could not read" \
+  "$out_l9e" "is still open"
+
+# An undecodable destination fails open too. Contrast fixture (g4): an
+# undecodable file *inside* the research tree is an error, because the tree is
+# what validate parses; a destination is only addressed, so a file it cannot
+# read gives it nothing to report.
+DIR_L9F="$BASE/dest-undecodable"
+obligation_fixture "$DIR_L9F" "dev_docs/tasks/real_task.md"
+printf -- '---\nstatus: done\n---\n\xff\n' >"$DIR_L9F/dev_docs/tasks/real_task.md"
+out_l9f="$(python3 "$SCRIPT" --root "$DIR_L9F" validate 2>&1)"
+exit_l9f=$?
+assert_exit "an undecodable destination fails open" "$exit_l9f" 0
+assert_not_contains "an undecodable destination reports no contradiction" \
+  "$out_l9f" "is still open"
+
 # --- Fixture (l2): ids are kebab-case and unique once qualified ----------
 # Across two files, because two files each internally consistent is exactly how
 # the reference implementation ended up with an ambiguous reference.
