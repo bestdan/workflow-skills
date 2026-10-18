@@ -154,8 +154,10 @@ make_settings "$BASE/reordered.json" \
   "Bash(agy --sandbox --add-dir \"$REAL_DIR\" --model \"M1\" -p \"read $REAL_DIR/in.agy\")" \
   "Bash(agy models)"
 run_drift "$BASE/reordered.json"
-if [ "$RC" -eq 1 ] && [ "$(count agy dead)" = "1" ] && [ "$(count agy missing)" = "1" ]; then
-  pass "a reordered flag is dead, and its template is missing"
+if [ "$RC" -eq 1 ] && [ "$(count agy dead)" = "1" ] && [ "$(count agy missing)" = "1" ] \
+  && [ "$(printf '%s' "$OUT" | jq -r .drift)" = "true" ] \
+  && [ "$(printf '%s' "$OUT" | jq -r .stale)" = "true" ]; then
+  pass "a reordered flag is dead, and its template is missing (drift and stale both set)"
 else
   fail "reordered flag misclassified (rc=$RC, dead=$(count agy dead), missing=$(count agy missing))"
 fi

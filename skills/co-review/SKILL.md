@@ -126,13 +126,12 @@ install-versus-checkout property intact: the value is still the **installed**
 plugin either way.
 
 It is read-only and costs milliseconds. Exit `1` means at least one configured
-reviewer, or the shared rules, has a missing rule. Dead rules alone exit `0` with
-`stale: true`: they can deny nothing, so put one line in the run summary
-suggesting `/doctor` to prune them, and nothing beside a reviewer. **Do not skip any reviewer on
+reviewer, or the shared rules, has a missing rule; **do not skip any reviewer on
 this signal** — the check is a heuristic over settings files it may not have all
 of, so let the dispatch decide. Instead, note a reviewer's finding beside that
 reviewer and a shared-rule finding once on the reviewer line, so a reviewer
-that then produces nothing is explained rather than silently absent. Exit `2` means the check itself could not run
+that then produces nothing is explained rather than silently absent. Dead rules alone exit `0` with `stale: true`: they deny
+nothing, so note once in the run summary that they can be deleted when convenient (`/doctor` lists them). Exit `2` means the check itself could not run
 (usually an unresolvable `${CLAUDE_PLUGIN_ROOT}`); note it and carry on — this is
 advisory, never fatal. `/doctor`'s Check 7 runs the same script and owns the full
 classification and repair guidance; see `commands/doctor.md`.
