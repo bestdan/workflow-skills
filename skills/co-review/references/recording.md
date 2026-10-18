@@ -38,15 +38,14 @@ date +%s > "<INPUT>.<run_id>.time"; <the reviewer's line, byte-for-byte>; date +
   Mint it **before the first dispatch**, not at step 8, and reuse it there. The
   stamp file must be per-run, not only per-agent — see
   [Why the stamp file carries the run id](#why-the-stamp-file-carries-the-run-id).
-  Where `<INPUT>` already ends in the run id (`codex`, `copilot`, `crush`, per
-  SKILL.md's Built-in invocations), name the stamp file `<INPUT>.time` instead,
-  so the id appears once.
 - `<INPUT>.<run_id>.time` sits beside that reviewer's own `<INPUT>`, so its
   directory already exists. **`grok` is the one exception to the position:** its
   `<INPUT>` lives inside `<NEUTRAL>`, which its leading `mkdir -p "<NEUTRAL>"`
-  creates, so its start stamp goes right after that segment:
-  `mkdir -p "<NEUTRAL>" && date +%s > "<INPUT>.<run_id>.time" && <the rest of
-  its chain>; date +%s >> "<INPUT>.<run_id>.time"`.
+  creates, so its start stamp goes right after that segment and ahead of the
+  input lock, which keeps lock-wait time inside the measured interval as for
+  every other reviewer: `mkdir -p "<NEUTRAL>" && date +%s >
+  "<INPUT>.<run_id>.time" && <the rest of its chain, from the lock>; date +%s >>
+  "<INPUT>.<run_id>.time"`.
 - The end stamp is joined with `;`, so it lands whether the dispatch succeeded,
   failed, or was skipped by an `&&` gate. A backgrounded dispatch stamps itself
   when the reviewer exits, however late you notice.
@@ -89,10 +88,12 @@ transcript; subtract.
 ### Why the stamp file carries the run id
 
 A path named only for the agent is the same file for **every** co-review run
-on the machine, in any repo and any session. That is why `<INPUT>` now carries
-the run id or is held under a lock (SKILL.md's Built-in invocations, #1071), and
-a stamp file named only for the agent would be shared the same way: a second run's start stamp truncates
-it and its end stamp appends to it, while the first run is still waiting. The
+on the machine, in any repo and any session. That is why `<INPUT>` carries the
+run id or is held under a lock (SKILL.md's Built-in invocations,
+[#1071](https://github.com/bestdan/workflow-skills/issues/1071)). A stamp file
+named only for the agent would be shared the same way: a second run's start
+stamp truncates it and its end stamp appends to it, while the first run is
+still waiting. The
 first run then sees two lines that are not its own. If it waits on the line
 count, or reads the file as "the dispatch has returned", it reads its output
 file while its reviewer is still writing, and it records a live reviewer as

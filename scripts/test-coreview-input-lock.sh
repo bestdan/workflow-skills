@@ -45,31 +45,57 @@ if [ -z "$tmp" ] || [ ! -d "$tmp" ]; then
   exit 2
 fi
 trap 'rm -rf "$tmp"' EXIT
-D="$tmp/locks"
 
-# try <wait-seconds> — exit status of one acquire attempt from its own shell.
-# The trailing `&& :` is load-bearing: bash execs a lone final command, which
-# would make the lock's parent this test script and hold it until the suite
-# ends. A real dispatch line always has the reviewer after the lock.
+# Each case gets its own lock directory: the lock file keeps its `shell_pid=…`
+# line after release, so a shared one would make held() true from case 2 on.
+case_n=0
+new_dir() {
+  case_n=$((case_n + 1))
+  D="$tmp/case$case_n"
+}
+
+# hold <tail> [lock flags…] — start a dispatch line that takes the lock and then
+# runs <tail>, and return once the lock is actually held. The script writes the
+# lock file only after flock succeeds, so a non-empty file is the signal; this
+# replaces fixed sleeps, which raced python's startup on a loaded machine.
+hold() {
+  local tail=$1
+  shift
+  bash -c "python3 '$SCRIPT' agy --dir '$D' $* && $tail" &
+  holder=$!
+  local i=0
+  while [ ! -s "$D/co-review-input.agy.lock" ] && [ "$i" -lt 50 ]; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+}
+
+# try <wait-seconds> [agent] — exit status of one acquire attempt from its own
+# shell. The trailing `&& :` is load-bearing: bash execs a lone final command,
+# which would make the lock's parent this test script and hold it until the
+# suite ends. A real dispatch line always has the reviewer after the lock.
 try() {
-  bash -c "python3 '$SCRIPT' agy --dir '$D' --wait $1 && :"
+  bash -c "python3 '$SCRIPT' ${2:-agy} --dir '$D' --wait $1 && :"
 }
 
 echo "coreview-input-lock: contention"
 
-# A holder that keeps its line running for 2 s.
-bash -c "python3 '$SCRIPT' agy --dir '$D' && sleep 2" &
-holder=$!
-sleep 0.7
-
-try 0.3
+new_dir
+hold "sleep 3"
+err="$(try 0.3 2>&1)"
 assert_eq "a second run is refused while the first line runs" 3 "$?"
+case "$err" in
+  *"in use by another co-review run"*) ok "the refusal says the input is in use" ;;
+  *) bad "the refusal does not say the input is in use: '$err'" ;;
+esac
 
 start=$(date +%s)
 try 10
 rc=$?
 waited=$(($(date +%s) - start))
 assert_eq "a second run that waits gets the lock once the first line ends" 0 "$rc"
+# The holder still had more than 2 s of its 3 s line to run, so even with
+# whole-second `date` this cannot read 0 unless the lock was not held.
 if [ "$waited" -ge 1 ]; then
   ok "the waiting run actually waited (${waited}s)"
 else
@@ -79,40 +105,37 @@ wait "$holder"
 
 echo "coreview-input-lock: release"
 
-bash -c "python3 '$SCRIPT' agy --dir '$D' && sleep 30" &
-holder=$!
-sleep 0.7
+new_dir
+hold "sleep 30"
 kill "$holder"
 wait "$holder" 2>/dev/null
-sleep 0.6
-try 0.3
+try 3
 assert_eq "killing the holding line frees the lock" 0 "$?"
 
-bash -c "python3 '$SCRIPT' agy --dir '$D' --max-hold 0.5 && sleep 3" &
-holder=$!
-sleep 1.2
-try 0.3
+new_dir
+hold "sleep 5" --max-hold 0.5
+try 3
 assert_eq "--max-hold frees the lock while the line still runs" 0 "$?"
-wait "$holder"
+kill "$holder" 2>/dev/null
+wait "$holder" 2>/dev/null
 
-bash -c "python3 '$SCRIPT' agy --dir '$D' && sleep 2" &
-holder=$!
-sleep 0.7
-bash -c "python3 '$SCRIPT' devin --dir '$D' --wait 0 && :"
+new_dir
+hold "sleep 2"
+try 0 devin
 assert_eq "different reviewers do not share a lock" 0 "$?"
 wait "$holder"
 
 echo "coreview-input-lock: refusal gates the chain"
 
-bash -c "python3 '$SCRIPT' agy --dir '$D' && sleep 2" &
-holder=$!
-sleep 0.7
+new_dir
+hold "sleep 2"
 out="$(bash -c "python3 '$SCRIPT' agy --dir '$D' --wait 0 2>/dev/null && echo dispatched")"
 assert_eq "a refused lock stops the && chain before dispatch" "" "$out"
 wait "$holder"
 
 echo "coreview-input-lock: usage"
 
+new_dir
 python3 "$SCRIPT" 'agy;rm' --dir "$D" 2>/dev/null
 assert_eq "an agent name outside [a-z0-9-] is a usage error" 2 "$?"
 

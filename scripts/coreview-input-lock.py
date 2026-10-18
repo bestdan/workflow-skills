@@ -9,7 +9,8 @@ once truncate and append to one file, and a reviewer can review the other run's
 diff, or a mix of both (#1071). This script serializes those dispatches, one
 reviewer at a time, without changing the reviewer's command string.
 
-It goes at the head of the reviewer's `&&` chain, in the same shell call:
+It goes ahead of the input assembly in the reviewer's `&&` chain, in the same
+shell call:
 
   python3 ".../coreview-input-lock.py" agy && cat ... > "<INPUT>" && ... && agy ...
 
@@ -32,7 +33,9 @@ Usage:
   scripts/coreview-input-lock.py <agent> [--wait S] [--max-hold S] [--dir DIR]
 
   <agent>      reviewer name: lowercase letters, digits and '-'
-  --wait       seconds to wait for another run to finish (default 900)
+  --wait       seconds to wait for another run to finish (default 600, under
+               co-review's 15-minute reviewer bound so a busy lock is reported
+               as a skip rather than a timeout)
   --max-hold   seconds after which the lock is released regardless (default 1200)
   --dir        lock directory (default $HOME/.claude/co-review-input)
 
@@ -78,7 +81,7 @@ def hold(fd: int, shell_pid: int, max_hold: float) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("agent")
-    parser.add_argument("--wait", type=float, default=900.0)
+    parser.add_argument("--wait", type=float, default=600.0)
     parser.add_argument("--max-hold", type=float, default=1200.0)
     parser.add_argument(
         "--dir",
