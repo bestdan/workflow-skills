@@ -135,6 +135,13 @@ CARD_KINDS = ("stub", "receipt")
 # deletion is not evidence at all.
 PLAN_DIR_SUFFIX = "_plan"
 
+# Frontmatter `status:` values that mean a destination's work is over — the
+# task loop's `done`, and an epic's `done` / `abandoned` (skills/task/SKILL.md).
+# Named rather than guessed: the check below is only as reliable as this
+# vocabulary, and this repo owns it. A destination with no frontmatter, or none
+# of these, never participates.
+DESTINATION_TERMINAL_STATUSES = ("done", "abandoned")
+
 # Keys each record kind accepts. Unknown keys are an error, not ignored — a
 # `desination:` typo must not silently drop the constraint. Only membership is
 # checked here; which keys are *required*, and what their values may be, is
@@ -1118,10 +1125,38 @@ def plan_directory(raw: str, resolved: Path, tree: Tree) -> str | None:
     return next((p for p in parts if p.endswith(PLAN_DIR_SUFFIX)), None)
 
 
+def frontmatter_status(path: Path) -> str | None:
+    """The top-level `status:` of a file's YAML frontmatter, or None.
+
+    Deliberately minimal — a leading `---` line, then unindented `key: value`
+    lines up to the closing `---` — because it reads one key and this script
+    otherwise parses no frontmatter at all. It fails **open**: an unreadable
+    file, no frontmatter, or a block that never closes all return None. A
+    destination whose frontmatter cannot be read is a different defect from an
+    undischarged obligation, and `validate` must not report a contradiction it
+    could not see.
+    """
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError):
+        return None
+    if not lines or lines[0].strip() != "---":
+        return None
+    status = None
+    for line in lines[1:]:
+        if line.strip() == "---":
+            return status
+        if line.startswith("status:"):
+            value = line[len("status:") :].split(" #", 1)[0].strip()
+            status = value.strip("'\"") or None
+    return None
+
+
 def check_destination(rec: Record, tree: Tree, report: Report) -> None:
-    """The destination rules: the shared containment ones, plus the two this
-    field owns — no cross-project destinations (error), and a plan directory
-    (warning).
+    """The destination rules: the shared containment ones, plus the three this
+    field owns — no cross-project destinations (error), an open obligation
+    whose destination's own frontmatter says the work is over (error), and a
+    plan directory (warning).
     """
     rel = rec.rel
     line = field_line(rec, "destination")
@@ -1162,6 +1197,30 @@ def check_destination(rec: Record, tree: Tree, report: Report) -> None:
             "handoff.",
         )
         return
+
+    # The terminal path the existence check cannot see. A task file that is
+    # deleted or archived when its work lands already fails above; one flipped
+    # to `status: done` in place still resolves, so the obligation stays open
+    # with nothing to say the work it waited on has shipped — or been dropped.
+    # An error, not a warning: it is decidable from two files, and the fix
+    # edits this track's own record (see `validate_ledger_freshness` for the
+    # one thing that earns a warning here, which is a file the track cannot
+    # touch).
+    dest_status = frontmatter_status(resolved)
+    if (
+        declared(rec, "status") == "open"
+        and dest_status in DESTINATION_TERMINAL_STATUSES
+    ):
+        report.error(
+            rel,
+            line,
+            f"destination '{raw}' is marked 'status: {dest_status}' but this "
+            "obligation is still open — the work it pointed at has finished "
+            "or been dropped, and the ledger still counts it as owed. If that "
+            "work discharged it, set 'status: discharged' with "
+            "'discharged_by:'; if part of it is still owed, re-point "
+            "'destination:' at the card that owes it now.",
+        )
 
     plan_dir = plan_directory(raw, resolved, tree)
     if plan_dir is not None:
