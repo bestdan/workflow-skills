@@ -242,6 +242,7 @@ reviewer names.
 {
   "type": "finding",
   "run_id": "2026-07-14T15-02-11Z-a3f9",
+  "host": "lindev",
   "file": "...",
   "line": 42,
   "issue": "...",
@@ -279,9 +280,11 @@ catches the failure mode where every reviewer looks terrible because the
 **Privacy.** Rows contain issue text and file paths from private repos. The
 ledger itself is local-only, under `~/.claude/`, and never committed.
 
-**Several machines, one table.** Each machine keeps its own ledger, and the run
-record's `host` (the recording script fills in the hostname) makes every run
-identifiable across machines by `(host, run_id)`. Combining ledgers is then
+**Several machines, one table.** Each machine keeps its own ledger, and the
+`host` on every run and finding record (the recording script fills in the
+hostname) makes every run identifiable across machines by `(host, run_id)`.
+Findings carry `host` too, so a merged ledger can still tie each finding to its
+run when two machines happen to produce the same `run_id`. Combining ledgers is then
 concatenation plus dropping repeated pairs. Moving rows off a machine is a
 separate flush (#1041), never part of the review: it sends a **redacted** copy,
 without `issue`, `rationale`, `recommended_fix` or `file`, to a private repo
@@ -292,31 +295,50 @@ rows unless it flushes before it ends.
 
 ### 3. The write — `scripts/co-review-record.py`
 
-A new step **immediately after the reconciler returns** (before fixes are
-applied, so a failure later in the run can't lose the record — the grades exist
-the moment reconciliation completes). The main agent writes three temp files
-and calls:
+The script exists (#711, PR #907) with tests in `test/co-review-record.bats`;
+nothing calls it yet. Wiring it into co-review is #709.
+
+The call is a new step **immediately after the reconciler returns** (before
+fixes are applied, so a failure later in the run can't lose the record — the
+grades exist the moment reconciliation completes). The main agent writes three
+temp files and calls:
 
 ```bash
 uv run scripts/co-review-record.py \
   --run <meta.json> --findings <recon.json> --mapping <map.json>
 ```
 
-- `--mapping` is the label→reviewer dict (`{"Reviewer A": "devin", ...}`). The
-  main agent necessarily holds this — it dispatched the reviewers. Identities
-  were never the risk; **aggregate scores** are, and the main agent never sees
-  one.
+- `--mapping` maps each neutral label to an identity:
+  `{"Reviewer A": {"name": "devin", "kind": "agent"}, "Reviewer D": {"kind": "human"}}`.
+  The main agent necessarily holds this — it dispatched the reviewers.
+  Identities were never the risk; **aggregate scores** are, and the main agent
+  never sees one.
 - The script performs the unblinding join, appends both record types, and prints
   exactly one line: `RECORDED: 14 findings, 4 reviewers`. It never echoes ledger
-  contents.
+  contents. `--ledger <path>` overrides the default location, for tests.
+- **The script owns the ledger's structural fields.** `type`, `run_id`, `host`
+  and `schema` are set by the script and win over any same-named key in the
+  input, so model-written JSON can't turn a finding into a run or move it to
+  another run.
+- **Invalid input writes nothing and exits 1:** an unknown verdict, a source
+  label that is not a string or not in the mapping, an empty `sources` list, a
+  `duration_s` that is negative, non-numeric, `NaN` or infinite, an empty
+  `host`, or malformed JSON.
 - **Consistency model.** Auto-pilot can run co-reviews concurrently, and
   "never fatal" invites retries — so the append must not be naive. The script:
-  takes an exclusive `flock` on the ledger; **dedups on `run_id`** (if the id
-  already appears, exit `RECORDED: duplicate, skipped` — retries are
+  takes an exclusive `flock` on the ledger; **dedups on `(host, run_id)`** (if
+  the pair already appears, exit `RECORDED: duplicate, skipped` — retries are
   idempotent); writes the run record and all its findings as **one batch under
   the one lock** (no interleaving, no run-without-findings torn state); releases
   the lock. All-or-nothing per run, plain JSONL, no database — proportionate to
   a ledger that will hold hundreds of rows.
+- **A failed write leaves no trace.** A partial run on disk would read as
+  recorded and block every retry, so the batch goes out as unbuffered bytes and
+  a write that fails partway (a full disk) is truncated back before the script
+  exits 1. If an earlier crash left the last line unterminated, the script ends
+  it before appending, so the new run stays parseable. It does not `fsync`: only
+  a whole-machine crash in the moments after a write could tear a run, and for a
+  local, non-fatal log that is not worth the cost.
 - Failure to record is **never fatal** — a warning in the run summary, matching
   co-review's existing posture on reviewer failures. Telemetry must not be able
   to break a review.
@@ -406,7 +428,7 @@ bump? is it fine on Python and hopeless on shell?).
 
 1. A co-review run appends one `run` record and one `finding` record per
    reconciled finding, in every mode; the write is locked, batched, and
-   idempotent on `run_id`; and a recording failure never breaks a run.
+   idempotent on `(host, run_id)`; and a recording failure never breaks a run.
 2. The reconciler sees **only neutral labels** — including for GitHub bots and
    human commenters. No identifiable source name reaches the grader.
 3. No agent in the review path reads `findings.jsonl`. Enforced by there being
