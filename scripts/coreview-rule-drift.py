@@ -83,7 +83,7 @@ PLACEHOLDER_VALUE = r'((?:/|\$HOME/)[^"]+?)'
 # driving one of these is not attributable to the reviewer, so it is never
 # reported dead — but the template still has to be covered, or the reviewer's
 # dispatch is denied at that segment.
-GENERIC_BINARIES = {"cat", "cd", "gh", "git", "mkdir"}
+GENERIC_BINARIES = {"cat", "cd", "date", "gh", "git", "mkdir"}
 
 # A rule line inside a ```json fence in a reviewer file: a JSON string holding a
 # Bash() rule, optionally followed by the array comma.

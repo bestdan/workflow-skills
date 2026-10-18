@@ -409,8 +409,8 @@ cp "$ROOT/skills/co-review/references/permissions.md" \
   "$SPLUGIN/skills/co-review/references/permissions.md"
 
 SHARED_OK=(
-  "Bash(cat:*)" "Bash(gh pr diff:*)" "Bash(gh pr view:*)" "Bash(git diff:*)"
-  "Bash(git ls-remote:*)" "Bash(git status:*)"
+  "Bash(cat:*)" "Bash(date:*)" "Bash(gh pr diff:*)" "Bash(gh pr view:*)"
+  "Bash(git diff:*)" "Bash(git ls-remote:*)" "Bash(git status:*)"
 )
 
 run_shared() {
@@ -421,7 +421,7 @@ shared_count() { printf '%s' "$OUT" | jq ".shared.$1 | length"; }
 
 make_settings "$BASE/shared-ok.json" "${SHARED_OK[@]}"
 run_shared "$BASE/shared-ok.json"
-if [ "$RC" -eq 0 ] && [ "$(printf '%s' "$OUT" | jq -r '.shared.templates')" = "6" ] \
+if [ "$RC" -eq 0 ] && [ "$(printf '%s' "$OUT" | jq -r '.shared.templates')" = "7" ] \
   && [ "$(shared_count missing)" = "0" ] && [ "$(shared_count dead)" = "0" ]; then
   pass "the shipped shared rules cover every shared template"
 else
@@ -429,7 +429,7 @@ else
 fi
 
 # A missing shared rule is drift once co-review is set up at all.
-make_settings "$BASE/shared-missing.json" "${SHARED_OK[@]:0:5}"
+make_settings "$BASE/shared-missing.json" "${SHARED_OK[@]:0:6}"
 run_shared "$BASE/shared-missing.json"
 if [ "$RC" -eq 1 ] && [ "$(printf '%s' "$OUT" | jq -r '.shared.missing[0]')" = "Bash(git status:*)" ]; then
   pass "a missing shared rule is reported MISSING and is drift"
@@ -439,7 +439,7 @@ fi
 
 # One diff source suffices: permissions.md says to add only the one you use.
 make_settings "$BASE/shared-onediff.json" \
-  "Bash(cat:*)" "Bash(gh pr view:*)" "Bash(git diff:*)" \
+  "Bash(cat:*)" "Bash(date:*)" "Bash(gh pr view:*)" "Bash(git diff:*)" \
   "Bash(git ls-remote:*)" "Bash(git status:*)"
 run_shared "$BASE/shared-onediff.json"
 if [ "$RC" -eq 0 ] && [ "$(shared_count missing)" = "0" ]; then
@@ -451,11 +451,12 @@ fi
 # With neither diff source covered, the text report names the pair once as
 # alternatives, so the operator is not told to add both.
 make_settings "$BASE/shared-nodiff.json" \
-  "Bash(cat:*)" "Bash(gh pr view:*)" "Bash(git ls-remote:*)" "Bash(git status:*)"
+  "Bash(cat:*)" "Bash(date:*)" "Bash(gh pr view:*)" "Bash(git ls-remote:*)" \
+  "Bash(git status:*)"
 TEXT="$("$SCRIPT" --plugin-root "$SPLUGIN" --settings "$BASE/shared-nodiff.json" 2>&1)"
 if [ "$(grep -c '^  MISSING ' <<<"$TEXT")" = "1" ] \
   && grep -q 'one suffices' <<<"$TEXT" \
-  && grep -q '^shared: 4/5 required rules covered' <<<"$TEXT"; then
+  && grep -q '^shared: 5/6 required rules covered' <<<"$TEXT"; then
   pass "an uncovered diff-source pair is reported once, as alternatives"
 else
   fail "the diff-source pair was not reported as alternatives: $TEXT"
@@ -464,7 +465,7 @@ fi
 # A broader rule approves the command too, so it is coverage. One ending
 # mid-token approves nothing.
 make_settings "$BASE/shared-broad.json" "Bash(agy models)" \
-  "Bash(cat:*)" "Bash(gh:*)" "Bash(git *)"
+  "Bash(cat:*)" "Bash(date:*)" "Bash(gh:*)" "Bash(git *)"
 run_shared "$BASE/shared-broad.json"
 # The agy probe rule keeps this a configured machine; agy's own missing rule
 # makes the exit code 1, so assert on the shared result directly.
@@ -474,7 +475,7 @@ if [ "$(printf '%s' "$OUT" | jq -r .shared.configured)" = "true" ] \
 else
   fail "a broader rule was not counted as coverage (rc=$RC): $OUT"
 fi
-make_settings "$BASE/shared-midtoken.json" "${SHARED_OK[@]:0:5}" "Bash(git stat:*)"
+make_settings "$BASE/shared-midtoken.json" "${SHARED_OK[@]:0:6}" "Bash(git stat:*)"
 run_shared "$BASE/shared-midtoken.json"
 if [ "$RC" -eq 1 ] && [ "$(shared_count missing)" = "1" ]; then
   pass "a rule ending mid-token (Bash(git stat:*)) is not coverage"
@@ -521,10 +522,10 @@ fi
 # arguments (`git status --porcelain`), so it covers no shared template. The
 # reviewer probe rule marks co-review as set up, making the gap drift.
 make_settings "$BASE/shared-exact.json" "Bash(agy models)" \
-  "Bash(cat)" "Bash(gh pr diff)" "Bash(gh pr view)" "Bash(git diff)" \
+  "Bash(cat)" "Bash(date)" "Bash(gh pr diff)" "Bash(gh pr view)" "Bash(git diff)" \
   "Bash(git ls-remote)" "Bash(git status)"
 run_shared "$BASE/shared-exact.json"
-if [ "$RC" -eq 1 ] && [ "$(shared_count missing)" = "6" ]; then
+if [ "$RC" -eq 1 ] && [ "$(shared_count missing)" = "7" ]; then
   pass "exact rules cover no shared template"
 else
   fail "exact rules were counted as coverage (rc=$RC): $OUT"
@@ -535,7 +536,7 @@ fi
 make_settings "$BASE/shared-revonly.json" "Bash(agy models)"
 run_shared "$BASE/shared-revonly.json"
 if [ "$RC" -eq 1 ] && [ "$(printf '%s' "$OUT" | jq -r .shared.configured)" = "true" ] \
-  && [ "$(shared_count missing)" = "6" ]; then
+  && [ "$(shared_count missing)" = "7" ]; then
   pass "a configured reviewer with no shared rule reports every shared template"
 else
   fail "a reviewer-only setup did not report the shared rules (rc=$RC): $OUT"

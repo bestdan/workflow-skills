@@ -57,7 +57,7 @@ a gap in which premises were checked, not in how carefully.
 
 ## What this costs when skipped
 
-The reconciler's confidence tier drives auto-fix: a **high** rating applies the
+The reconciler's verdict drives auto-fix: a **high** rating applies the
 change without asking. So an unchecked `recommended_fix` is not a bad
 suggestion sitting in a list — it is an edit, made automatically, on the
 strength of a reviewer's prose.
