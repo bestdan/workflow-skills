@@ -67,7 +67,7 @@ Six subcommands, `research-spike.py`, stdlib-only:
 | `validate [<project>] [--track <name>] [--strict]` | The gate. Whole tree, one project, or one track. `--strict` fails a stale `LEDGER.md` instead of warning — the organizer's tier.                                      |
 | `ledger [<project>] [--track <name>]`              | Print the derived ledgers. Writes nothing.                                                                                                                            |
 | `write-ledger [<project>] [--track <name>]`        | Rewrite the stored ledgers in place. Explicit act, never auto-repair.                                                                                                 |
-| `status [<project>]`                               | The convergence report: what still blocks each decision, per track and total.                                                                                         |
+| `status [<project>]`                               | The convergence report: what still blocks each decision, per track and total. A `— rests on N open obligations` suffix is reported, never gating.                     |
 | `suggest`                                          | Advisory lexical scan for unregistered deferral prose. Always exits 0 — a false positive against English prose has nowhere legal to go, so this can never fail a run. |
 
 **Two different paths are involved here, and they must not be conflated.**

@@ -2155,6 +2155,8 @@ def resolve_taint(
 
     result: dict[tuple[str, str], TaintedObligations] = {}
     for target, records in taint.items():
+        if not records:
+            continue
         stubs = receipts = 0
         for rec in records:
             card = _destination_card(rec, tree, cards_by_path)
@@ -2649,8 +2651,10 @@ def decision_statuses(
     """Every decision in one project, in tree order, with its derived status.
 
     `taint` is omitted by every stored-ledger caller (`project_ledger_body`)
-    and supplied only by the interactive `status` report — see
-    `resolve_taint`'s docstring for why the stored ledger must not carry it.
+    and supplied only by the interactive `status` report. The stored ledger
+    must not carry it: `validate`'s freshness gate compares `LEDGER.md` to its
+    derivation, so a taint suffix there would make every existing tree stale
+    until someone ran `write-ledger`.
     """
     statuses: list[DecisionStatus] = []
     seen: set[str] = set()

@@ -3111,7 +3111,7 @@ assert_contains "the 'total' track's row and the aggregate row carry their own n
   total:    Q 2 answered / 0 open / 0 retired    O 0 discharged / 0 open / 2 declared none
   total:    Q 3 answered / 0 open / 0 retired    O 0 discharged / 0 open / 3 declared none"
 
-# --- Fixture (s20-s25): transitive obligation taint, '#print axioms' (#632) -
+# --- Fixture (s20-s28): transitive obligation taint, '#print axioms' (#632) -
 # A decision can print DECIDED (or READY, or BLOCKED) while resting on work
 # that is still open and has nowhere to go — the edge is section co-location
 # with a question's `blocks:`, not the scarce, hand-declared `blocking:`. See
@@ -3347,6 +3347,65 @@ assert_contains "the stored ledger's decision bullet carries no taint suffix" \
   "$out_s26_ledger" "- **account-provisioning** — DECIDED"
 assert_not_contains "the stored ledger never mentions taint at all" \
   "$out_s26_ledger" "rests on"
+
+# A discharged obligation is history, not open work, so it taints nothing —
+# even co-located under a question that gates the decision.
+DIR_S27="$BASE/status-taint-discharged"
+status_fixture "$DIR_S27" '```decision
+id: account-provisioning
+state: decided
+decided_in: dev_docs/adr/0007-stop-semantics.md
+```' '### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: answered
+answer: yes, an isolated domain
+blocks: account-provisioning
+```
+
+```obligation
+id: keychain-invariant
+owes: the keychain invariant
+destination: dev_docs/research/alpha/tracks/account/obligations/keychain.md
+status: discharged
+discharged_by: PR #412
+```'
+out_s27="$(python3 "$SCRIPT" --root "$DIR_S27" status alpha 2>&1)"
+exit_s27=$?
+assert_exit "a discharged co-located obligation still exits 0" "$exit_s27" 0
+assert_contains "the decision is still reported" "$out_s27" \
+  "account-provisioning  DECIDED decided in dev_docs/adr/0007-stop-semantics.md"
+assert_not_contains "a discharged obligation taints nothing" "$out_s27" "rests on"
+
+# A retired question still taints: retiring it frees the decision, but an open
+# obligation filed under it is still owed work, and nothing discharges it with
+# the question. Both facts belong on the same line.
+DIR_S28="$BASE/status-taint-retired-question"
+status_fixture "$DIR_S28" '```decision
+id: account-provisioning
+state: pending
+```' '### Q1. Does the account need an isolated uid domain?
+
+```question
+id: uid-domain-isolation
+status: retired
+retired_because: the option that needed it was dropped
+blocks: account-provisioning
+```
+
+```obligation
+id: keychain-invariant
+owes: the keychain invariant
+destination: dev_docs/research/alpha/tracks/account/obligations/keychain.md
+status: open
+```'
+out_s28="$(python3 "$SCRIPT" --root "$DIR_S28" status alpha 2>&1)"
+exit_s28=$?
+assert_exit "a retired question with open work still exits 0" "$exit_s28" 0
+assert_contains "a retired question's open obligation still taints its decision" \
+  "$out_s28" \
+  "account-provisioning  READY awaiting decision (unblocked by retirement: alpha/account/uid-domain-isolation) — rests on 1 open obligation (1 stub)"
 
 # --- Fixture (j): --help lists all six subcommands -----------------------
 out_j="$(python3 "$SCRIPT" --help 2>&1)"
