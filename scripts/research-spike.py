@@ -1203,9 +1203,8 @@ def check_destination(rec: Record, tree: Tree, report: Report) -> None:
     # to `status: done` in place still resolves, so the obligation stays open
     # with nothing to say the work it waited on has shipped — or been dropped.
     # An error, not a warning: it is decidable from two files, and the fix
-    # edits this track's own record (see `validate_ledger_freshness` for the
-    # one thing that earns a warning here, which is a file the track cannot
-    # touch).
+    # edits this track's own record — unlike a stale `LEDGER.md`, which only
+    # warns outside `--strict` because a track PR cannot touch it.
     dest_status = frontmatter_status(resolved)
     if (
         declared(rec, "status") == "open"

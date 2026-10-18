@@ -1232,6 +1232,19 @@ assert_exit "an unclosed frontmatter block fails open" "$exit_l9e" 0
 assert_not_contains "an unclosed block reports no contradiction it could not read" \
   "$out_l9e" "is still open"
 
+# An undecodable destination fails open too. Contrast fixture (g4): an
+# undecodable file *inside* the research tree is an error, because the tree is
+# what validate parses; a destination is only addressed, so a file it cannot
+# read gives it nothing to report.
+DIR_L9F="$BASE/dest-undecodable"
+obligation_fixture "$DIR_L9F" "dev_docs/tasks/real_task.md"
+printf -- '---\nstatus: done\n---\n\xff\n' >"$DIR_L9F/dev_docs/tasks/real_task.md"
+out_l9f="$(python3 "$SCRIPT" --root "$DIR_L9F" validate 2>&1)"
+exit_l9f=$?
+assert_exit "an undecodable destination fails open" "$exit_l9f" 0
+assert_not_contains "an undecodable destination reports no contradiction" \
+  "$out_l9f" "is still open"
+
 # --- Fixture (l2): ids are kebab-case and unique once qualified ----------
 # Across two files, because two files each internally consistent is exactly how
 # the reference implementation ended up with an ambiguous reference.
