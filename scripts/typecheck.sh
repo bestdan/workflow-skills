@@ -69,7 +69,7 @@ STRICT_FILES=(scripts/research-spike.py)
 # (legal 3.9 SYNTAX, TypeError at 3.9 RUNTIME) and `X | Y` annotations without
 # `from __future__ import annotations`. Raise this number only by deciding to
 # drop support, never to make a diagnostic go away.
-# Membership is decided by WHO EXECUTES THE FILE, not by where it sits. Eleven of
+# Membership is decided by WHO EXECUTES THE FILE, not by where it sits. Thirteen of
 # these live under scripts/ and are still consumer code: server.py is launched
 # as bare `python3` by skills/local-review/SKILL.md and README.md,
 # coreview-rule-drift.py is invoked through ${CLAUDE_PLUGIN_ROOT} by
@@ -77,7 +77,8 @@ STRICT_FILES=(scripts/research-spike.py)
 # invoked the same way by skills/co-review/SKILL.md step 12,
 # grok-telemetry-gate.py the same way by skills/co-review/reviewers/grok.md,
 # co-review-record.py is the reviewer-ledger write /co-review will invoke the
-# same way once #709 wires it in,
+# same way once #709 wires it in, coreview-input-lock.py the same way by
+# skills/co-review/SKILL.md and its agy/devin/grok reviewer files,
 # co-review-ledger-sync.py the same way by commands/co-review-stats.md and
 # commands/doctor.md,
 # and worktree-teardown-reminder.py, guard-foreign-worktree.py,
@@ -92,6 +93,7 @@ CONSUMER_FILES=(
   scripts/diff-anchor-check.py
   scripts/grok-telemetry-gate.py
   scripts/co-review-record.py
+  scripts/coreview-input-lock.py
   scripts/co-review-stats.py
   scripts/co-review-ledger-sync.py
   scripts/worktree-teardown-reminder.py

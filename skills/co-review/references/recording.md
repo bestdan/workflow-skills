@@ -38,6 +38,9 @@ date +%s > "<INPUT>.<run_id>.time"; <the reviewer's line, byte-for-byte>; date +
   Mint it **before the first dispatch**, not at step 8, and reuse it there. The
   stamp file must be per-run, not only per-agent — see
   [Why the stamp file carries the run id](#why-the-stamp-file-carries-the-run-id).
+  Where `<INPUT>` already ends in the run id (`codex`, `copilot`, `crush`, per
+  SKILL.md's Built-in invocations), name the stamp file `<INPUT>.time` instead,
+  so the id appears once.
 - `<INPUT>.<run_id>.time` sits beside that reviewer's own `<INPUT>`, so its
   directory already exists. **`grok` is the one exception to the position:** its
   `<INPUT>` lives inside `<NEUTRAL>`, which its leading `mkdir -p "<NEUTRAL>"`
@@ -85,9 +88,10 @@ transcript; subtract.
 
 ### Why the stamp file carries the run id
 
-`<INPUT>` is a fixed path under `$HOME`, so it is the same file for **every**
-co-review run on the machine, in any repo and any session. A stamp file named
-only for the agent is shared the same way: a second run's start stamp truncates
+A path named only for the agent is the same file for **every** co-review run
+on the machine, in any repo and any session. That is why `<INPUT>` now carries
+the run id or is held under a lock (SKILL.md's Built-in invocations, #1071), and
+a stamp file named only for the agent would be shared the same way: a second run's start stamp truncates
 it and its end stamp appends to it, while the first run is still waiting. The
 first run then sees two lines that are not its own. If it waits on the line
 count, or reads the file as "the dispatch has returned", it reads its output
