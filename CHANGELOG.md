@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.97.1] - 2026-10-19
+
+### Fixes
+
+- keep concurrent runs out of each other's review input [#1071] (#1074) (b7bfc7d)
+
 ## [2.97.0] - 2026-10-18
 
 ### Features
