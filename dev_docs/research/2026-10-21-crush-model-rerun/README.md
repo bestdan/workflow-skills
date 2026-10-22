@@ -1,7 +1,7 @@
 ---
 created: 2026-10-21
 question: "Is there a model on Hyper that reviews as well as crush's `kimi-k3` pin, faster and without its failures on large diffs?"
-feeds: "https://github.com/bestdan/workflow-skills/pull/TBD"
+feeds: "https://github.com/bestdan/workflow-skills/pull/1079"
 ---
 
 # crush's model pin, re-run across Hyper's open-weight models (2026-10-21)
