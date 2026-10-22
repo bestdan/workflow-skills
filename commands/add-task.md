@@ -67,7 +67,7 @@ From conversation context and diff, draft:
 - `title`: from user description or `$ARGUMENTS`, specific enough to read on a board (see the `title` row of **Field reference** in `skills/task/SKILL.md`)
 - `related_files`: files from current diff or conversation that are relevant
 - `tags`: infer from context (e.g., `cleanup`, `tests`, `docs`)
-- **Context** section: why this work was noticed, written to **Body sections** in `skills/task/SKILL.md`
+- **Context** section: why this exists and what you saw (see **Body sections** in `skills/task/SKILL.md`)
 - **Task** section: concrete steps to complete it
 - **Acceptance Criteria**: definition of done
 
