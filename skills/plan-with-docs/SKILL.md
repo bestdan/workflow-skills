@@ -76,7 +76,7 @@ Use phases only when there are clear groupings (e.g. "backend → frontend → m
 
 5. **Write each `<name>_task_N.md`** in the **canonical task format** (see `skills/task/SKILL.md` for the full field reference) — a single-PR-sized task:
    - **Frontmatter:** `title`, `priority`, `size` (Fibonacci `1`/`2`/`3`/`5` — see **Task size**; if a task estimates `> 5`, split it), `status: new`, `created`, `source_branch` (the current branch), `related_files` (the files the task touches, `path:line` where useful), `is_blocked_by` (the slug of the earlier task this one depends on — the slug is the prerequisite's filename stem, e.g. `<name>_task_1`; this is how the plan's ordering is encoded), `parent: <name>` (the plan's epic slug, so the task rolls up under the overview — `<name>` is the plan name, the overview stem with `_plan` stripped), `expires`, `tags`.
-   - **`## Context`:** the bare minimum a developer needs to start — relevant files, prior decisions, gotchas. Written for someone who has never seen this code.
+   - **`## Context`:** what a developer who has never seen this code needs to start, written per **Body sections** in `skills/task/SKILL.md`.
    - **`## Task`:** concrete edits / new files / commands. Concrete enough that someone (or another agent) can pick it up cold.
    - **`## Acceptance Criteria`:** how we know it's done (≥ 1 bullet, required for promotion). Where useful, split into:
      - **Code-enforced:** automated tests to add or update, lint/type-check commands, CI checks expected to pass. Name the test files and the assertion in plain English.
