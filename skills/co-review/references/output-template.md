@@ -17,7 +17,7 @@ Symbols: ✅ pass / ran / done · 🟡 pass with suggestions · ⛔ blocking · 
 
 - ➖ <label> [(<decoration>)]: <subject> — <wrong | not-applicable | out-of-scope>: <reason>
 
-**Decided (consulted) (<N>)**
+**Decided without asking (<N>)**
 
 - <<✅ fix | ➖ skip> <label>: <subject> — <consultant <N>%: "<crux>" | low-stakes> | ➖ none>
 
