@@ -7,9 +7,11 @@ feeds: "https://github.com/bestdan/workflow-skills/pull/1079"
 # crush's model pin, re-run across Hyper's open-weight models (2026-10-21)
 
 **`hyper/deepseek-v4.1-flash-1017` matches `kimi-k3` on review quality, and it
-was the fastest model on both fixtures.** On the planted-bug fixture every model
+was faster than Kimi K3 on both fixtures and the fastest model on the
+planted-bug one.** On the planted-bug fixture every model
 tried caught both bugs, and DeepSeek finished in 13s against Kimi K3's 73s. On
-a large real PR no model failed, and DeepSeek finished in 140s against 228s. Its
+a large real PR every model completed (none repeated `kimi-k3`'s empty-output
+failure), and DeepSeek finished in 140s against 228s. Its
 Hyper price is about a tenth of Kimi K3's. This is two fixtures with one run
 per model, so treat the re-pin as a trial and read it back from the ledger.
 
