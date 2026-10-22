@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.98.0] - 2026-10-22
+
+### Features
+
+- pin crush to DeepSeek V4.1 Flash on Hyper [N/A] (#1079) (07c1705)
+
 ## [2.97.2] - 2026-10-19
 
 ### Fixes
