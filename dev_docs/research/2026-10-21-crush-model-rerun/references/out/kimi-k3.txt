@@ -1,9 +1,0 @@
-- `scripts/spawn-orchestrator.sh:5020` — issue (blocking): the terminal summary line prints `skipped=$counts_parked`, so the one-line report always echoes the parked count as the skipped count and never reports `counts_skipped`. The STATUS.md header two blocks up uses the right variable, so the two outputs contradict each other. Fix: change to `skipped=$counts_skipped`.
-
-- `scripts/spawn-orchestrator.sh:6576` — issue (blocking): `skipped) break` exits the entire task loop, not just the current row, so every row after a skipped row is never divergence-checked and can never be parked. The handed-off arm uses `continue`; the skipped arm's own comment ("holds nothing this run acquired") describes skip-this-row semantics, which is `continue`. The new test can't catch this because `t_skip` is the last row in the fixture. Fix: use `continue`, and add a fixture row after `t_skip` that should be parked to lock the behavior in.
-
-- `skills/deliver-task/SKILL.md:245` — question (non-blocking): the rationale for "never report a WIP-limit decline as `claim refused:`" is that "step 2 never runs a handler's pre-claim WIP gate". If that gate never runs in step 2, a WIP-limit decline can never arise there, so the prohibition reads as guarding an impossible case; if a WIP decline *can* surface from the claim handler itself, the stated reason is wrong. Fix: either drop the rationale or state the real path by which a WIP decline reaches step 2.
-
-- `scripts/test-spawn-orchestrator-status-report.sh:173` — note (non-blocking, UNVERIFIED): the new assertion expects `pending=1`, but no `pending` row is visible among the RUN.md lines in this diff; presumably one exists above the hunk. If not, the test fails. Verify a pending task row exists in the fixture outside the shown context.
-
-REVIEW_COMPLETE: FINDINGS
