@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.100.0] - 2026-10-22
+
+### Features
+
+- tighten card title and Context writing rules [N/A] (#1082) (9a29c12)
+
 ## [2.99.0] - 2026-10-22
 
 ### Features
