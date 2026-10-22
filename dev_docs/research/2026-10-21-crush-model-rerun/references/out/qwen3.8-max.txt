@@ -1,0 +1,13 @@
+- `scripts/spawn-orchestrator.sh:5020`
+  - **issue (blocking):** the one-line summary echoes `skipped=$counts_parked` instead of `skipped=$counts_skipped` — a copy-paste error from the adjacent `parked=` field. The skipped count in the log line will always mirror the parked count.
+  - Suggested fix: change `skipped=$counts_parked` to `skipped=$counts_skipped`.
+
+- `scripts/spawn-orchestrator.sh:6576`
+  - **issue (blocking):** `skipped) break ;;` exits the entire task loop, skipping the frozen-base divergence check for every subsequent task. The parallel `handed-off` arm uses `continue`, and the stated rationale ("holds nothing this run acquired") is the same — skip this row, keep checking the rest. If a skipped task appears before a task whose base has diverged, that divergence is silently missed.
+  - Suggested fix: change `break` to `continue`.
+
+- `scripts/test-spawn-orchestrator-status-report.sh:173`
+  - **note (non-blocking):** the assertion `'pending=1 in-flight=5 handed-off=1 parked=1 skipped=1'` checks `srAmd` (the rendered STATUS.md), which uses the `printf` at line 4953 and is correct. The buggy one-line `echo` at line 5020 is not covered by any assertion, so finding 1 would not be caught by this test.
+  - Suggested fix: add an assertion on the echo line (or its stderr capture) that includes `skipped=1`.
+
+REVIEW_COMPLETE: FINDINGS

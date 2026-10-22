@@ -1,0 +1,13 @@
+**Findings**
+
+- `scripts/spawn-orchestrator.sh:5020` — **issue (blocking):** the one-line summary now emits `skipped=$counts_parked`, so a skipped task is reported under the parked count while `parked=` already has it. The STATUS.md table above it uses `$counts_skipped` correctly, so only this line is wrong and the new test (which asserts on STATUS.md) cannot catch it. Fix: `... parked=$counts_parked skipped=$counts_skipped delta=...`.
+
+- `scripts/spawn-orchestrator.sh:6578` — **issue (blocking):** `skipped) break ;;` leaves the whole `for ((i = 0; i < n; i++))` task loop, not just this row. Every chained row after a `skipped` row is then never examined for base divergence and never parked, silently disabling the doctor for the rest of RUN.md. The sibling `handed-off` arm uses `continue`, and the same reasoning applies here: a refused claim "holds nothing this run acquired", so only this row is skipped. Fix: `skipped) continue ;;`.
+
+- `scripts/test-spawn-orchestrator-doctor.sh:902` — **suggestion (non-blocking):** `t_skip` is printed last, after `t_child`, so the fixture passes whether the new arm is `break` or `continue` — the two are indistinguishable at the end of the loop. It therefore locks in neither the intended behavior nor the defect above. Fix: place `t_skip` before `t_child` (or add a second chained row after it) so the test fails if the loop exits early.
+
+- `scripts/test-spawn-orchestrator-status-report.sh:173` — **suggestion (non-blocking):** the new assertion reads only `STATUS.md`, which is built from `$counts_skipped`; the emitted `spawn-orchestrator: status-report: ...` line is not asserted anywhere, which is why the `skipped=$counts_parked` regression goes undetected. Fix: assert the summary string too, e.g. `skipped=1 delta=`.
+
+- `skills/deliver-task/SKILL.md:242` — **question (non-blocking) [UNVERIFIED]:** the prose makes `/auto-pilot` key off the literal `claim refused:` line to write phase `skipped`, but nothing in this diff parses that line or writes `skipped` (the changed hunks only bucket and report it). If the write path lives in code not shown here, ignore this; if it does not exist yet, the documented behavior has no implementation. Fix: confirm the `claim refused:` → `skipped` write path is present and covered by a test, or add it in this change.
+
+REVIEW_COMPLETE: FINDINGS
