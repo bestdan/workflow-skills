@@ -241,7 +241,7 @@ Why this exists. What you saw. Written for someone who has never seen this code.
 
 | Field                      | Required | Description                                                                                                                                                                                                                                |
 | -------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `title`                    | yes      | Imperative description, < 80 chars                                                                                                                                                                                                         |
+| `title`                    | yes      | Imperative, < 80 chars, naming the specific thing (the job, constant, or file) with real counts, so it reads on a board with no body: `Drop unused retry_limit from 3 sync jobs`, not `Clean up sync config`                               |
 | `priority`                 | yes      | `low` / `medium` / `high` / `urgent`                                                                                                                                                                                                       |
 | `assignee`                 | no       | Human or agent accountable for the task. Mirrors gh-issue/Linear assignee for handler parity                                                                                                                                               |
 | `size`                     | yes      | Fibonacci story points: `1` / `2` / `3` / `5`. Larger ⇒ split into sub-tasks. See **Task size**                                                                                                                                            |
@@ -261,7 +261,14 @@ Why this exists. What you saw. Written for someone who has never seen this code.
 
 ### Body sections
 
-- **Context** (required) — Why this exists. What you saw.
+- **Context** (required) — Why this exists and what you saw, as durable facts the executor would otherwise rediscover. On a tracker handler (`gh-issue`, `jira`, `linear`), open with one or two plain-language sentences a teammate with no context can triage from: what is wrong and its user impact, stated even when there is none. Then, as they apply:
+  - the error string, with the file:line that raises it
+  - traps: a method, scope, or query that looks right but leaves the problem in place
+  - corrections to stale docs or runbooks, naming the current value
+  - explicit negatives ("no migration needed") that close off dead ends
+  - where missing information lives: a table, dashboard, or runbook section
+
+  Anchor each claim to a file:line, URL, query, or named artifact, and mark inference as inference ("appears to", "not confirmed"). Leave out what goes stale before the card is picked up (row counts, "as of" snapshots), scope history, the story of how it was found, and lists of related tickets.
 - **Task** (required) — Concrete steps. Specific enough for an agent to execute.
 - **Acceptance Criteria** (required, ≥ 1 bullet) — Definition of done. Missing or empty section blocks promotion to `ready`.
 - **Open Questions** / **TBD** (optional) — Presence of either with non-empty content blocks promotion to `ready`.
