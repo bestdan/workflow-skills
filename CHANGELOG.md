@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.99.0] - 2026-10-22
+
+### Features
+
+- settle medium items through consult before asking [N/A] (#1080) (84c13f1)
+
 ## [2.98.0] - 2026-10-22
 
 ### Features
