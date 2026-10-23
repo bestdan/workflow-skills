@@ -23,6 +23,7 @@ if sys.version_info < (3, 11):
 
 import argparse  # noqa: E402
 import json  # noqa: E402
+import secrets  # noqa: E402
 from datetime import datetime, timezone  # noqa: E402
 from pathlib import Path  # noqa: E402
 
@@ -32,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import config  # noqa: E402
 import db  # noqa: E402
+import ingest  # noqa: E402
 import server  # noqa: E402
 import sync  # noqa: E402
 
@@ -70,7 +72,31 @@ def build_parser() -> argparse.ArgumentParser:
         "--config",
         help="config path (default: $TASK_DASHBOARD_CONFIG or ~/.config/task-dashboard)",
     )
+    token_p = sub.add_parser("ingest-token", help="fleet view: per-machine tokens")
+    token_sub = token_p.add_subparsers(dest="token_command", required=True)
+    add_p = token_sub.add_parser(
+        "add", help="generate a machine's ingest token and print it once"
+    )
+    add_p.add_argument("host", help="the machine's short host name, as it snapshots")
     return parser
+
+
+def cmd_ingest_token_add(args: argparse.Namespace) -> int:
+    """Print a new token and its config digest; writes nothing."""
+    if not config.HOST_RE.fullmatch(args.host):
+        print(
+            f"task-dashboard: {args.host!r} is not a plain host name", file=sys.stderr
+        )
+        return 2
+    token = secrets.token_urlsafe(32)
+    print(f"Ingest token for {args.host}. It is shown once and stored nowhere.")
+    print(f"\n1. On {args.host}, put it in the collector's config:\n\n  {token}")
+    print(
+        "\n2. On the aggregator, add this under [ingest.machines] in"
+        f" {config.config_path()} and restart the server:"
+        f'\n\n  {args.host} = "{ingest.digest(token)}"'
+    )
+    return 0
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
@@ -125,6 +151,8 @@ def main(argv: "list[str] | None" = None) -> int:
         return cmd_sync(args)
     if args.command == "serve":
         return cmd_serve(args)
+    if args.command == "ingest-token":
+        return cmd_ingest_token_add(args)
     parser.print_help()
     return 2
 

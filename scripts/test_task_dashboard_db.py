@@ -256,9 +256,10 @@ class DbTests(TmpCase):
         db._stored_version = stale_unlocked_reads
         self.addCleanup(setattr, db, "_stored_version", real)
         db.migrate(b)
-        self.assertEqual(
-            reads, [1, 1, db.SCHEMA_VERSION]
-        )  # the third is under the lock
+        # The third read is under the lock. Each later migration's unlocked
+        # check then reads the real, current version and skips.
+        self.assertEqual(reads[:3], [1, 1, db.SCHEMA_VERSION])
+        self.assertTrue(all(r == db.SCHEMA_VERSION for r in reads[3:]), reads)
         self.assertFalse(b.in_transaction)
         ver = b.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
         self.assertEqual(int(ver[0]), db.SCHEMA_VERSION)
