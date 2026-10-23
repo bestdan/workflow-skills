@@ -47,9 +47,10 @@ class HookCase(unittest.TestCase):
         cfg.parent.mkdir(parents=True, exist_ok=True)
         cfg.write_text(body)
 
-    def run_hook(self, payload):
+    def run_hook(self, payload, **extra_env):
         env = {k: v for k, v in os.environ.items() if k != hook.CONFIG_ENV}
         env["HOME"] = str(self.home)
+        env.update(extra_env)
         proc = subprocess.run(
             [sys.executable, str(HOOK)],
             input=json.dumps(payload),
@@ -94,6 +95,26 @@ class NoOptInTests(HookCase):
                 proc = self.run_hook(self.payload("Stop"))
                 self.assertEqual(proc.returncode, 0)
                 self.assertFalse((self.home / ".local").exists())
+
+    def test_config_override_replaces_default_path(self):
+        # The override names a missing file, so an opt-in at the default path
+        # must not count.
+        self.opt_in()
+        missing = self.home / "elsewhere" / "absent.toml"
+        proc = self.run_hook(self.payload("Stop"), **{hook.CONFIG_ENV: str(missing)})
+        self.assertEqual(proc.returncode, 0)
+        self.assertFalse((self.home / ".local").exists())
+
+
+class ConfigOverrideTests(HookCase):
+    def test_override_outside_home_opts_in(self):
+        outside = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, outside, True)
+        cfg = outside / "config.toml"
+        cfg.write_text("[collector]\nenabled = true\n")
+        proc = self.run_hook(self.payload("Stop"), **{hook.CONFIG_ENV: str(cfg)})
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(len(self.lines()), 1)
 
 
 class OptInTests(HookCase):
@@ -207,6 +228,18 @@ class UnitTests(unittest.TestCase):
         self.assertEqual(hook.git_branch(str(wt / "sub")), "bestdan/wt")
         (gitdir / "HEAD").write_text("0123456789abcdef0123456789abcdef01234567\n")
         self.assertIsNone(hook.git_branch(str(wt)))
+
+    def test_branch_relative_gitdir(self):
+        # A submodule's .git file names its git dir relative to itself.
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        gitdir = tmp / "super" / ".git" / "modules" / "sub"
+        gitdir.mkdir(parents=True)
+        (gitdir / "HEAD").write_text("ref: refs/heads/bestdan/sub\n")
+        sub = tmp / "super" / "sub"
+        (sub / "deep").mkdir(parents=True)
+        (sub / ".git").write_text("gitdir: ../.git/modules/sub\n")
+        self.assertEqual(hook.git_branch(str(sub / "deep")), "bestdan/sub")
 
     def test_build_line_ts_format(self):
         now = datetime(2026, 10, 23, 14, 5, 9, 123456, tzinfo=timezone.utc)
