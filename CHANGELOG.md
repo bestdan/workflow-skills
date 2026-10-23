@@ -4,6 +4,13 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.104.0] - 2026-10-23
+
+### Features
+
+- add machine snapshot builder [#1102] (#1116) (b5c0322)
+- add the sync engine and a fake acli [#1089] (#1117) (ef6c421)
+
 ## [2.103.0] - 2026-10-23
 
 ### Features
