@@ -17,13 +17,16 @@ ORDER OF CHECKS, each refusing with no write: the token (401), then the declared
 body size (411 missing, 413 over MAX_BODY), all before the body is read, so an
 unauthenticated caller cannot make the server read anything. Then JSON (400),
 `schema` (400 unless 1), the full schema-1 shape (`snapshot.validate`, 400),
-the token's machine against the body's `host` (403), and staleness (409, a
-snapshot not newer than the last one ingested from that host).
+the token's machine against the body's `host` (403), a `taken_at` more than
+five minutes ahead of the server's clock (400), and staleness (409, a snapshot
+not newer than the last one ingested from that host). A database error is 503,
+with the cause logged to stderr and never sent.
 """
 
 import hashlib
 import hmac
 import json
+import sqlite3
 import sys
 from datetime import datetime
 from email.message import Message
@@ -115,13 +118,21 @@ class Ingest:
         if doc["host"] != machine:
             why = f"token for {machine} sent a snapshot for {doc['host']!r}"
             return 403, {"error": "token is not for this host"}, why
-        conn = db.connect(self.db_path)
+        # A locked or unmigratable DB is the server's problem, not the
+        # caller's: 503 so the collector retries, with the cause logged here
+        # rather than sent.
+        try:
+            conn = db.connect(self.db_path)
+        except sqlite3.Error as exc:
+            return 503, {"error": "database unavailable"}, f"{machine}: {exc}"
         try:
             written = snapshot_adapter.ingest(conn, doc, self.now())
         except snapshot_adapter.StaleSnapshot as exc:
             return 409, {"error": str(exc)}, None
         except ValueError as exc:
             return 400, {"error": f"bad taken_at: {exc}"}, None
+        except sqlite3.Error as exc:
+            return 503, {"error": "database unavailable"}, f"{machine}: {exc}"
         finally:
             conn.close()
         print(f"task-dashboard: ingested {machine} {doc['taken_at']}", file=sys.stderr)

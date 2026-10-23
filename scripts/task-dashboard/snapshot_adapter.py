@@ -16,14 +16,17 @@ one transaction, so a snapshot lands whole or not at all:
 A snapshot no newer than the last one ingested from its host is refused with
 ``StaleSnapshot`` and nothing is written. That is what makes a resend harmless:
 replacing the rows with older state would lose newer worktrees, and the deltas
-would be appended twice.
+would be appended twice. A snapshot taken more than ``MAX_CLOCK_AHEAD`` after
+the server's clock is refused too (ValueError): stored, it would make every
+later, correctly-clocked snapshot from that host look stale.
 """
 
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
+MAX_CLOCK_AHEAD = timedelta(minutes=5)
 HOOK_FIELDS = ("event", "session_id", "cwd", "branch", "notification")
 
 # kind, key, summary, created, raw_json
@@ -87,6 +90,12 @@ def ingest(
     host = doc["host"]
     source = source_for(host)
     taken = parse_taken_at(doc["taken_at"])
+    if taken > now + MAX_CLOCK_AHEAD:
+        raise ValueError(
+            f"taken_at {doc['taken_at']} is more than"
+            f" {int(MAX_CLOCK_AHEAD.total_seconds() // 60)} minutes ahead of"
+            f" server time {_ts(now)}"
+        )
     received = _ts(now)
     rows = item_rows(doc)
     counts = {

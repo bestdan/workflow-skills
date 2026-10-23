@@ -20,6 +20,7 @@ import threading
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 PKG = ROOT / "scripts" / "task-dashboard"
@@ -230,6 +231,30 @@ class RefusalTest(IngestCase):
         self.assertEqual(status, 400)
         self.assert_nothing_written()
 
+    def test_taken_at_far_ahead_of_server_time_is_400(self):
+        # NOW is 12:00Z; the tolerance is five minutes.
+        status, body = self.post(make_doc(taken_at="2026-10-23T12:06:00.000Z"))
+        self.assertEqual(status, 400)
+        self.assertIn("ahead of server time", body)
+        self.assert_nothing_written()
+        status, _ = self.post(make_doc(taken_at="2026-10-23T12:04:00.000Z"))
+        self.assertEqual(status, 200)
+
+    def test_database_errors_are_503_and_never_leak(self):
+        # db.connect cannot open a directory as a database.
+        self.httpd.app.ingest.db_path = Path(self.tmp.name)
+        status, body = self.post()
+        self.assertEqual(status, 503)
+        self.assertEqual(json.loads(body), {"error": "database unavailable"})
+        self.httpd.app.ingest.db_path = self.db_path
+        # A lock held past the busy timeout, raised inside the write.
+        locked = sqlite3.OperationalError("database is locked")
+        with mock.patch.object(snapshot_adapter, "ingest", side_effect=locked):
+            status, body = self.post()
+        self.assertEqual(status, 503)
+        self.assertEqual(json.loads(body), {"error": "database unavailable"})
+        self.assert_nothing_written()
+
     def test_foreign_host_header_is_403_even_with_a_valid_token(self):
         status, _ = self.post(host=f"evil.example:{self.port}")
         self.assertEqual(status, 403)
@@ -390,6 +415,15 @@ class ConfigTest(unittest.TestCase):
             with self.assertRaises(config.ConfigError) as ctx:
                 config.load(p)
             self.assertIn("ingest must be a table", str(ctx.exception))
+
+    def test_two_machines_sharing_a_digest_is_a_config_error(self):
+        d = ingest.digest("one-token-for-both")
+        with self.assertRaises(config.ConfigError) as ctx:
+            self.load(f'[ingest.machines]\nlindev = "{d}"\nmacbook = "{d}"\n')
+        self.assertIn("same token digest as ingest.machines.lindev", str(ctx.exception))
+        other = ingest.digest("another-token")
+        cfg = self.load(f'[ingest.machines]\nlindev = "{d}"\nmacbook = "{other}"\n')
+        self.assertEqual(sorted(cfg["ingest"]["machines"]), ["lindev", "macbook"])
 
 
 class TokenCliTest(unittest.TestCase):

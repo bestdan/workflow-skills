@@ -126,6 +126,9 @@ def load(path: "str | os.PathLike[str] | None" = None) -> dict[str, Any]:
     machines = cfg["ingest"]["machines"]
     if not isinstance(machines, dict):
         raise ConfigError("ingest.machines must be a table of host = token digest")
+    # One token per machine: the server maps a token to the machine it belongs
+    # to, so a shared digest would let only one of them ever ingest.
+    seen: dict[str, str] = {}
     for host, digest in machines.items():
         if not HOST_RE.fullmatch(host):
             raise ConfigError(f"ingest.machines: {host!r} is not a plain host name")
@@ -134,6 +137,12 @@ def load(path: "str | os.PathLike[str] | None" = None) -> dict[str, Any]:
                 f'ingest.machines.{host} must be the "sha256:<hex>" value'
                 " that `dashboard.py ingest-token add` prints"
             )
+        if digest in seen:
+            raise ConfigError(
+                f"ingest.machines.{host} has the same token digest as"
+                f" ingest.machines.{seen[digest]}; give each machine its own token"
+            )
+        seen[digest] = host
     return cfg
 
 
