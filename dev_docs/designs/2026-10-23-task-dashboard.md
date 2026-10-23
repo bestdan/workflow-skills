@@ -50,8 +50,11 @@ plist to manage. The DB runs in WAL mode, so page reads see the last committed
 snapshot while a sync is writing.
 
 - **Code:** `scripts/task-dashboard/`, stdlib-only Python like
-  `scripts/local-review/server.py`. No framework and no `pip install`, so
-  `launchd` can run it with the system `python3` or `uv run`.
+  `scripts/local-review/server.py`. No framework and no `pip install`. It
+  requires **Python 3.11+**, and runs under
+  `uv run --no-project --python ">=3.11"`, so it doesn't depend on whichever
+  `python3` macOS ships. Since 3.11 includes `tomllib`, the config file is
+  TOML.
 - **State:** `~/.local/state/task-dashboard/dashboard.db`, outside every
   checkout and plugin directory, so a plugin update never wipes the overlay.
 - **Skill:** `/task-dashboard` with subcommands `install` (write and load the
@@ -280,41 +283,45 @@ button that reads the same DB. It is not part of v1.
 
 ## Config
 
-The daemon reads only `~/.config/task-dashboard/config.yml`. The dashboard is
-per-user, not per-repo, and a `launchd` agent has no repo working directory to
-resolve a repo-relative path from. When `/task-dashboard install` runs inside a
-repo, it may seed the overlapping `jira` keys (`site`, `blocked_statuses`) from
-that repo's `dev_docs/tasks/.task-config.yml`. After that, the two files are
-independent.
+The daemon reads only `~/.config/task-dashboard/config.toml`, using `tomllib`.
+The dashboard is per-user, not per-repo, and a `launchd` agent has no repo
+working directory to resolve a repo-relative path from. When
+`/task-dashboard install` runs inside a repo, the skill may seed the
+overlapping `jira` keys (`site`, `blocked_statuses`) from that repo's
+`dev_docs/tasks/.task-config.yml`. Claude reads that YAML file and writes the
+TOML, so the daemon only ever reads TOML and never writes it. After that, the
+two files are independent.
 
-```yaml
-jira:
-  site: mycompany.atlassian.net
-  projects: [PLAT, OPS]
-  board_ids: [123] # sprint scope: these boards' active sprints
-  blocked_statuses: [Blocked, On Hold]
-  fields: # per site; acli can't list them
-    sprint: customfield_10303
-    flagged: customfield_10007
-github:
-  enabled: true
-  orgs: [mycompany]
-sync:
-  interval_minutes: 5
-  reconcile_minutes: 60
-  done_window_days: 14
-  view_concurrency: 8
-server:
-  port: 8765
-score:
-  weights: {
-    priority: 3,
-    deadline: 2,
-    unblocks: 2,
-    stuck: 1,
-    review: 2,
-    blocked: -10,
-  }
+```toml
+[jira]
+site = "mycompany.atlassian.net"
+board_ids = [123] # sprint scope: these boards' active sprints
+blocked_statuses = ["Blocked", "On Hold"]
+
+[jira.fields] # per site; acli can't list them
+sprint = "customfield_10303"
+flagged = "customfield_10007"
+
+[github]
+enabled = true
+orgs = ["mycompany"]
+
+[sync]
+interval_minutes = 5
+reconcile_minutes = 60
+done_window_days = 14
+view_concurrency = 8
+
+[server]
+port = 8765
+
+[score.weights]
+priority = 3
+deadline = 2
+unblocks = 2
+stuck = 1
+review = 2
+blocked = -10
 ```
 
 ## The launchd plist and the versioned plugin path
