@@ -297,6 +297,7 @@ two files are independent.
 site = "mycompany.atlassian.net"
 board_ids = [123] # sprint scope: these boards' active sprints
 blocked_statuses = ["Blocked", "On Hold"]
+acli_path = "acli" # point at the fake acli to run without Jira
 
 [jira.fields] # per site; acli can't list them
 sprint = "customfield_10303"
@@ -314,6 +315,7 @@ view_concurrency = 8
 
 [server]
 port = 8765
+extra_allowed_hosts = [] # e.g. a tailnet name; empty on the laptop
 
 [score.weights]
 priority = 3

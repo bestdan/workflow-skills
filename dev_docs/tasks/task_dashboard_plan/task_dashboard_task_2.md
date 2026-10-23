@@ -13,7 +13,8 @@ parent: task_dashboard
 tags: [task-dashboard, jira, acli]
 ---
 
-Part of [[task_dashboard_plan]].
+Part of [[task_dashboard_plan]]. **Runs on: the Mac mini** (no Jira access
+needed).
 
 ## Context
 
@@ -56,18 +57,27 @@ fixes the constraints. **Read it before starting.** In summary:
   - `parse_issue(raw, field_ids) -> dict`. Normalize into the `issues` columns
     from task 1, plus `links` rows (type name, direction, other key, other
     key's status category) and the active sprint.
-  - **Error classification.** Map an auth failure (stderr naming
-    unauthorized, login or token; find the real text, see below) to an
-    `AuthError`, and everything else to `AcliError`.
-- **Capture fixtures on the work laptop and redact them.** You need: one
-  `search` page, `view` output for an issue with links, parent, sprint
-  history and Flagged set, and one with nulls, plus one `list-sprints`. Also
-  capture the real stderr of a logged-out `acli` call (`acli jira auth logout`,
-  run, then log back in) so the auth classifier matches real text. Replace
-  summaries, names, emails, account ids, site URLs and the org with
-  placeholders. Keep keys, shapes and field ids. Store them under
-  `scripts/task-dashboard/fixtures/`.
-- Add `scripts/test_task_dashboard_acli.py` and its `.sh` wrapper.
+  - **Error classification.** Map an auth failure to an `AuthError`, and
+    everything else to `AcliError`. Keep the auth patterns in one named
+    constant. The real logged-out stderr hasn't been captured yet, so start
+    with a permissive guess (unauthorized, unauthenticated, login, token,
+    401). [[task_dashboard_task_10]] replaces it with the real text.
+- **Build on the Mac mini, without `acli`.** Hand-write **synthetic
+  fixtures** from the shapes in the spike record, under
+  `scripts/task-dashboard/fixtures/acli/`. You need:
+  - one `search` page
+  - a `view` of an issue with links (inward and outward), a parent, a
+    three-sprint history with one `active`, and Flagged set
+  - a `view` with every nullable field null
+  - one `list-sprints`
+  - a transient `failed to fetch work item details` stderr
+
+  Add a `README.md` there that says they are synthetic.
+  [[task_dashboard_task_10]] adds redacted real captures beside them on the
+  laptop.
+- Add `scripts/test_task_dashboard_acli.py` and its `.sh` wrapper. Write the
+  tests to run over every fixture in the folder, so the real captures are
+  picked up when they land.
 
 ## Acceptance Criteria
 
@@ -82,14 +92,14 @@ fixes the constraints. **Read it before starting.** In summary:
 - `view_issues` with a fake that fails 2 of 20 keys once returns all 20; with a
   fake that always fails one key, it returns 19 plus that key in the failure
   list.
-- The logged-out stderr fixture classifies as `AuthError`, and a transient
-  fetch error does not.
+- A transient fetch error does not classify as `AuthError`, and a synthetic
+  "unauthorized" stderr does.
 - The fixtures contain no site domain, org name, email or account id (a test
-  greps for `@` and `atlassian.net`).
+  greps for `@` and `atlassian.net`). This guard is what keeps the real
+  captures safe later.
 - `just check` passes.
 
 **User-run**
 
-- On the work laptop, a scratch call of
-  `search_keys('assignee = currentUser()')` and then `view_issues` on its first
-  10 keys returns 10 parsed issues with sane sprint, flagged and link values.
+- None on the Mac mini. The live check against real Jira is in
+  [[task_dashboard_task_10]].

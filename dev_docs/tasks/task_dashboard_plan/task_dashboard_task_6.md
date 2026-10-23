@@ -16,7 +16,8 @@ parent: task_dashboard
 tags: [task-dashboard, prioritization, views]
 ---
 
-Part of [[task_dashboard_plan]].
+Part of [[task_dashboard_plan]]. **Runs on: the Mac mini.** Tuning the
+weights against real work happens in [[task_dashboard_task_11]].
 
 ## Context
 
@@ -83,8 +84,10 @@ if rows exist, but doesn't need any UI to write them.
 
 **User-run**
 
-- On the work laptop, Now's top five match your own sense of what's next
-  closely enough that the term breakdown explains any surprise. Tune the
-  weights in config if not, and note the final weights in the PR.
-- Waiting on me lists at least the PRs that GitHub's own review-requested list
-  shows for the work org.
+- On the Mac mini, against the fake `acli` and the personal GitHub account,
+  check each view through the `ts-share.sh` link:
+  - each view renders
+  - every card's score terms are visible
+  - Waiting on me lists your review-requested `bestdan/*` PRs, if any
+- Checking the ranking against your real priorities, and tuning the weights,
+  is in [[task_dashboard_task_11]].

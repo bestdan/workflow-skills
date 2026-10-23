@@ -17,7 +17,8 @@ parent: task_dashboard
 tags: [task-dashboard, sync]
 ---
 
-Part of [[task_dashboard_plan]].
+Part of [[task_dashboard_plan]]. **Runs on: the Mac mini**, against a fake
+`acli`.
 
 ## Context
 
@@ -66,6 +67,16 @@ incremental cursor, the reconcile that both adds and drops, and **Failure**
   sync`, so a sync can be run by hand before the server exists.
 - Add `scripts/test_task_dashboard_sync.py` and its `.sh` wrapper, driving
   fake adapters.
+- **Add a fake `acli` for end-to-end runs without Jira:**
+  `scripts/task-dashboard/dev/fake-acli`, an executable stdlib Python script.
+  - It answers `workitem search` (including `--paginate`), `workitem view`
+    and `board list-sprints` from the fixtures in
+    `scripts/task-dashboard/fixtures/acli/`.
+  - It honours `FAKE_ACLI_MODE=auth_fail|flaky` for the failure paths.
+  - Add a `jira.acli_path` config key (default `acli`) so the dashboard can be
+    pointed at it.
+
+  Tasks 5–8 use it for their checks on the Mac mini.
 
 ## Acceptance Criteria
 
@@ -85,6 +96,8 @@ incremental cursor, the reconcile that both adds and drops, and **Failure**
 
 **User-run**
 
-- On the work laptop, `dashboard.py sync --mode full` completes in about two
-  minutes or less against the real union. A second `--mode incremental` run
-  right after takes seconds and views a handful of keys at most.
+- On the Mac mini, with `jira.acli_path` pointing at the fake `acli`:
+  - `dashboard.py sync --mode full` fills `issues`, `links` and `prs` (PRs
+    from the personal account).
+  - `FAKE_ACLI_MODE=auth_fail` records an `auth_failed` run.
+- Timing against the real union is checked in [[task_dashboard_task_11]].

@@ -13,7 +13,8 @@ parent: task_dashboard
 tags: [task-dashboard, github]
 ---
 
-Part of [[task_dashboard_plan]].
+Part of [[task_dashboard_plan]]. **Runs on: the Mac mini**, live against the
+personal GitHub account.
 
 ## Context
 
@@ -39,9 +40,13 @@ Constraints the spike measured:
 
 - Add `scripts/task-dashboard/github_gh.py` with the same runner seam as task
   2 (subprocess, pipes, timeout, fakeable):
-  - `my_prs(orgs)` runs the query `is:pr is:open author:@me org:<org>` (one
-    `org:` qualifier per configured org, or one search per org).
-  - `review_requested(orgs)` runs the same with `review-requested:@me`.
+  - `my_prs(owners)` runs the query `is:pr is:open author:@me <owner qualifier>`,
+    one search per owner. Config `github.orgs` supplies the owners.
+    - Build the qualifier per owner, and check on this machine which form
+      GitHub accepts for an org versus a user account (`org:` or `user:`).
+    - The live check below runs against the personal account `bestdan`, so
+      the adapter must accept a user as an owner as well as an org.
+  - `review_requested(owners)` runs the same with `review-requested:@me`.
   - `ci_state(url)` reduces `statusCheckRollup` to one of
     `success | failure | pending | none`. It must handle both `CheckRun`
     (`status`, `conclusion`) and `StatusContext` (`state`) entries.
@@ -49,9 +54,17 @@ Constraints the spike measured:
     `[A-Za-z][A-Za-z0-9]+-\d+` case-insensitively in title and branch,
     upper-cases each match, and keeps a match only if its project prefix is in
     `allowed_projects`.
-- Capture redacted fixtures on the laptop: one GraphQL page and two rollups
-  (one `CheckRun`-only, one mixed). Replace org and repo names, titles and
-  logins. Store them under `scripts/task-dashboard/fixtures/`.
+- **Capture fixtures on the Mac mini, from the personal account's own PRs.**
+  These are public `bestdan/*` repos, so there is no work data in them. You
+  need:
+  - one GraphQL search page, trimmed to a few nodes
+  - two `statusCheckRollup` responses: one `CheckRun`-only, one mixing
+    `CheckRun` and `StatusContext`, if such a PR exists
+
+    If no mixed one exists, hand-write it from the spike record's shape and
+    note it in `scripts/task-dashboard/fixtures/gh/README.md`.
+
+  Store them under `scripts/task-dashboard/fixtures/gh/`.
 - Add `scripts/test_task_dashboard_gh.py` and its `.sh` wrapper.
 
 ## Acceptance Criteria
@@ -71,6 +84,7 @@ Constraints the spike measured:
 
 **User-run**
 
-- On the work laptop, `my_prs([<work org>])` returns about the same count as
-  `gh search prs --author @me --state open --owner <work org>`. Every returned
-  PR has a `headRefName`.
+- On the Mac mini, run `my_prs(["bestdan"])`. It should return about the
+  same count as `gh search prs --author @me --state open --owner bestdan`, and
+  every returned PR should have a `headRefName`. The same check against the
+  work org is part of [[task_dashboard_task_11]].

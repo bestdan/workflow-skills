@@ -14,7 +14,7 @@ parent: task_dashboard
 tags: [task-dashboard, overlay]
 ---
 
-Part of [[task_dashboard_plan]].
+Part of [[task_dashboard_plan]]. **Runs on: the Mac mini.**
 
 ## Context
 
@@ -57,6 +57,6 @@ per-install token.
 
 **User-run**
 
-- On the work laptop: pin an issue, add a note, snooze another until tomorrow,
-  then restart the server. All three persist. `dashboard.py export` prints
-  them.
+- On the Mac mini, against the fake `acli`: pin an issue, add a note, snooze
+  another until tomorrow, then restart the server. All three persist, and
+  `dashboard.py export` prints them.

@@ -9,12 +9,12 @@ related_files:
   - dev_docs/designs/2026-10-23-task-dashboard.md
   - dev_docs/research/2026-10-23-task-dashboard-acli-spike.md
   - dev_docs/tasks/task_dashboard_plan/
-is_blocked_by: task_dashboard_task_8
+is_blocked_by: task_dashboard_task_11
 parent: task_dashboard
 tags: [task-dashboard, docs, cleanup]
 ---
 
-Part of [[task_dashboard_plan]].
+Part of [[task_dashboard_plan]]. **Runs on: the Mac mini.**
 
 ## Context
 

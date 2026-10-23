@@ -18,7 +18,8 @@ parent: task_dashboard
 tags: [task-dashboard, launchd, skill]
 ---
 
-Part of [[task_dashboard_plan]].
+Part of [[task_dashboard_plan]]. **Runs on: the Mac mini**, against the fake
+`acli`. The real-login check is in [[task_dashboard_task_11]].
 
 ## Context
 
@@ -91,10 +92,15 @@ See `.github/PULL_REQUEST_TEMPLATE.md`.
 
 **User-run**
 
-- On the work laptop:
-  - Run `/task-dashboard install`, then log out and back in. The dashboard
-    answers at `http://127.0.0.1:8765/`, and the header shows a sync newer
-    than five minutes.
-  - Update the plugin to a new version. The dashboard still starts after
+- On the Mac mini, only if `launchctl print gui/$(id -u)` succeeds. A GUI
+  login session must exist; over SSH alone there is no gui domain, so skip to
+  [[task_dashboard_task_11]].
+  - Run `/task-dashboard install` with the fake `acli` configured. The agent
+    loads, the dashboard answers on `127.0.0.1:8765`, and a sync runs.
+  - Simulate a plugin update by changing `installPath` in a copy of
+    `installed_plugins.json` that the launcher is pointed at. The dashboard
+    starts from the new path after
     `launchctl kickstart -k gui/$(id -u)/com.bestdan.task-dashboard`.
-  - `/doctor` reports the dashboard healthy.
+  - `/doctor` reports it healthy.
+  - Then run `/task-dashboard uninstall`, and confirm the agent, plist and
+    launcher are gone while the DB and config remain.

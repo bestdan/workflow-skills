@@ -15,7 +15,8 @@ parent: task_dashboard
 tags: [task-dashboard, server, security]
 ---
 
-Part of [[task_dashboard_plan]].
+Part of [[task_dashboard_plan]]. **Runs on: the Mac mini**, against the fake
+`acli` from [[task_dashboard_task_4]].
 
 ## Context
 
@@ -56,6 +57,13 @@ shape and render order.
   - **Request guard:** check `Host` on every request (403 otherwise). On
     `POST`, also check `Origin` and the token. Generate the token once and
     store it in `meta`.
+    - Add a `server.extra_allowed_hosts` config list, empty by default. Each
+      entry is a `host[:port]` that the `Host` and `Origin` checks also
+      accept.
+    - This is what lets the Mac mini be tested through `ts-share.sh` now, and
+      it is what the later tailnet port needs. Find out which `Host` header
+      Tailscale Serve actually forwards before relying on it. Leave the
+      laptop's config empty.
   - **Sync thread:**
     - interval loop on `Event.wait(timeout)`
     - single-flight lock
@@ -95,7 +103,13 @@ shape and render order.
 
 **User-run**
 
-- On the work laptop, run
-  `uv run --no-project --python ">=3.11" scripts/task-dashboard/dashboard.py serve`, then
-  open `http://127.0.0.1:8765/`. The Board shows the current sprint. Clicking
-  **Sync now** shows _Syncing…_, then reloads with a fresh "last synced" time.
+- On the Mac mini, with the fake `acli` configured, run
+  `uv run --no-project --python ">=3.11" scripts/task-dashboard/dashboard.py serve`.
+  Publish it with `ts-share.sh 8765` (with the tailnet host in
+  `extra_allowed_hosts`) and open the link on the phone.
+  - The Board shows the fixture sprint.
+  - **Sync now** shows _Syncing…_, then a fresh "last synced" time.
+  - With `FAKE_ACLI_MODE=auth_fail`, the header shows the `acli jira auth
+    login` message.
+  - Run `ts-share.sh off 8765` afterwards.
+- The same check against real Jira is in [[task_dashboard_task_11]].

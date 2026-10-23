@@ -16,7 +16,7 @@ parent: task_dashboard
 tags: [task-dashboard, scaffolding]
 ---
 
-Part of [[task_dashboard_plan]].
+Part of [[task_dashboard_plan]]. **Runs on: the Mac mini.**
 
 ## Context
 
