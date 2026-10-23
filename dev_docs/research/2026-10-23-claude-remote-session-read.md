@@ -12,7 +12,7 @@ the first "Verify before building" item in
 left out because this repo is public. Counts, timings and field names are as
 measured.
 
-## Verdict: readable without status (partly verified)
+## Verdict: readable without status (verified)
 
 A daemon has one route it can legitimately use: it starts `claude -p` itself and
 sends the `list_cloud_sessions` control request on stdin. That request returns
@@ -21,7 +21,8 @@ repository and branch.
 
 It does **not** return `status_bucket`, `post_turn_summary.status_category` or
 `needs_action`. It returns one page of at most 200 sessions, with a `truncated`
-flag and no cursor, so it **cannot page back 30 days**.
+flag and no cursor, so it **cannot page back 30 days**. On the owner's account
+that page reached back about 20 days.
 
 The full-status data exists on the same service. Every route to it uses Claude
 Code's own OAuth token against an undocumented endpoint. The issue rules that
@@ -31,10 +32,13 @@ What was and wasn't verified:
 
 - **Verified:** the control request exists, it is answered without a model turn,
   and it refuses any process started inside a Claude Code session.
-- **Inferred from the shipped CLI code:** the fields it returns on success. I
-  could not observe a successful read, because this probe ran inside a Claude
-  Code session and the guard refused it. I did not spoof the guard. The owner
-  can confirm with the command under "Owner check" below.
+- **Verified by the owner's run:** the fields it returns on success, the
+  200-session ceiling, and `truncated`. The probe itself ran inside a Claude
+  Code session, where the guard refused it. I did not spoof the guard. The owner
+  ran the command under "Owner check" from their own terminal, and the result is
+  recorded there.
+- **Still not observed:** a `running`, `requires_action`, `pending` or `failed`
+  status. The owner's read returned only `idle` and `archived`.
 
 **For #1100:** take the "readable" branch, but in reduced form. Build a polling
 adapter for the session **inventory**: id, title, `environment_kind`, branch,
@@ -44,7 +48,7 @@ cloud-only sessions visible. The **Needs you** categories (`need_input`,
 session-state hook, so cloud-only sessions get presence and `requires_action`,
 not a post-turn category. The adapter's "incremental since last run" and "page
 back 30 days" requirements can't be met on this route: each read is a full
-newest-first snapshot of at most 200 sessions.
+snapshot of at most 200 sessions, and it is not ordered by `updated_at`.
 
 ## What was tried
 
@@ -76,7 +80,10 @@ any other connection." Two more details from the same code:
   `GET /v1/code/sessions?limit=200`, with `/v1/sessions` plus
   `anthropic-beta: ccr-byoc-2025-07-29` on the older API. The response maps to
   `sessions[]: {id, title, updated_at, status, environment_kind, repository, branch}`
-  and `truncated`.
+  and `truncated`. The owner's run confirmed exactly these keys. `repository` is
+  an object `{owner, name}`. Both `repository` and `branch` are left out when
+  the session has none: `repository` appeared on 151 of 200 sessions and
+  `branch` on 46.
   - `status` takes the service's `session_status`: `running`, `idle`,
     `requires_action`, `archived`, `pending` or `failed`.
   - `environment_kind` is `bridge` (Remote Control), `anthropic_cloud`, `byoc`
@@ -90,10 +97,17 @@ ran 3.2–5.1 s wall, almost all of it CLI startup. A successful read adds one H
 round trip of unmeasured length. The code's timeouts are 15 s per request and
 25 s overall.
 
-**30 days:** not reachable. The saved MCP page (route 6) held 50 sessions created
-over about two days (2026-10-21 to 10-23) and reported `has_more: true`. At that
-rate 200 sessions cover about eight days, not 30. This rate is inferred from one
-page.
+**30 days:** not reachable. The owner's read returned 200 sessions with
+`truncated: true`. The oldest `updated_at` on the page was 2026-10-03, so it
+covered about 20 days, not 30. That supersedes this record's first estimate of
+about eight days, which was extrapolated from the 50-session MCP page under
+route 6 and was wrong.
+
+The page is not sorted by `updated_at`: 46 of its 199 adjacent pairs are out of
+order. Creation time, newest first, fits the data better, but the response
+carries no `created_at`, so that ordering is inferred, not measured. Because of
+this, a session created long ago and updated today can fall off the page while
+newer idle sessions stay on it.
 
 ### Route 6: the full-status data, and why it's off-limits
 
@@ -154,12 +168,14 @@ repo or in the dashboard's config.
   Whether it still works for a LaunchAgent, with no desktop session on the mini,
   is untested. A `not_signed_in` or `sign_in_expired` reply means someone has to
   run `claude auth login`.
-- **The 200-session ceiling.** At about 25 sessions a day, a read covers about
-  eight days. Older sessions drop off the snapshot, so the reconcile pass must
+- **The 200-session ceiling.** The owner's read covered about 20 days. Archived
+  sessions count toward the 200: they were 132 of them, and only 68 sessions
+  were `idle`. Older sessions drop off the snapshot, so the reconcile pass must
   not read absence as archival.
 - **It's a coarse status.** `requires_action` is the only "needs you" signal.
   Reading it as "waiting on a permission prompt" is inferred from the enum, not
-  observed.
+  observed. The owner's read held no `requires_action` and no `running` session
+  at all, so neither value has been seen on the wire.
 
 ## Owner check
 
@@ -178,3 +194,21 @@ From inside a session, this exact pipeline printed the `started_by_session`
 refusal, so closing stdin early does not cut off the reply. A `"status":"ok"`
 line confirms route 5. Its `sessions[]` keys confirm or correct the field list
 above.
+
+### Result, 2026-10-23
+
+The owner ran it from their own terminal on the Mac mini, with Claude Code
+2.1.309. It returned `"status":"ok"`:
+
+| Measure            | Value                                                                |
+| ------------------ | -------------------------------------------------------------------- |
+| Sessions           | 200, `truncated: true`                                               |
+| Keys               | `id`, `title`, `updated_at`, `status`, `environment_kind` on all 200 |
+| Optional keys      | `repository` (`{owner, name}`) on 151, `branch` on 46                |
+| `status`           | `archived` 132, `idle` 68                                            |
+| `environment_kind` | `bridge` 194, `anthropic_cloud` 6                                    |
+| `updated_at` span  | 2026-10-03 to 2026-10-23                                             |
+| Order              | Not by `updated_at`: 46 of 199 adjacent pairs out of order           |
+
+The wall time was not measured. Before this run, an in-session repeat of the
+refused read finished in 1.5 s wall.
