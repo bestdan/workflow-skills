@@ -89,6 +89,9 @@ class NoOptInTests(HookCase):
             '[collector]\nenabled = "true"\n',
             "[other]\nenabled = true\n[collector]\n",
             "# [collector]\n# enabled = true\n",
+            "collector.enabled = true\n",
+            "collector = {enabled = true}\n",
+            '[collector]\n"enabled" = true\n',
         ):
             with self.subTest(body=body):
                 self.opt_in(body)
@@ -111,7 +114,6 @@ class NoOptInTests(HookCase):
             env=env,
         )
         assert proc.stdin and proc.stdout and proc.stderr
-        time.sleep(0.3)  # let a non-draining hook exit before the write
         proc.stdin.write(data)
         proc.stdin.close()
         proc.wait(timeout=10)

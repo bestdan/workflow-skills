@@ -22,8 +22,8 @@ table (``collector = {enabled = true}``) and a quoted key all read as off.
 Anything else — no file, no table, ``false``, a value that is not exactly
 ``true``, an unreadable file — is "not opted in": exit 0 having written
 nothing. The file-existence test comes first, so a machine that never opted in
-pays one ``stat`` and no parse. It still reads the payload to EOF before it
-exits, so the harness never writes a large prompt into a closed pipe.
+pays one ``stat`` and no parse. It still reads up to 64 MiB of the payload
+before it exits, so the harness never writes a prompt into a closed pipe.
 
 NEVER FAILS THE TURN. Every error is swallowed and the exit code is always 0.
 The hook runs on every prompt, so it imports only the standard library, spawns

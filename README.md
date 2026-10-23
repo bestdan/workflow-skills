@@ -209,8 +209,8 @@ unless the machine opts in** with `[collector] enabled = true` in
 `~/.config/task-dashboard/config.toml`: a literal `[collector]` table header
 followed by an `enabled = true` line. A dotted key
 (`collector.enabled = true`) or an inline table
-(`collector = {enabled = true}`) reads as off. Otherwise it reads the payload
-to the end, exits, and writes nothing. Opted in, it appends one line of event metadata per event — time,
+(`collector = {enabled = true}`) reads as off. Otherwise it reads up to 64 MiB
+of the payload, exits, and writes nothing. Opted in, it appends one line of event metadata per event — time,
 event, session id, cwd, branch, and for a notification whether it was a
 permission prompt — to `~/.local/state/fleet/sessions/<session_id>.jsonl`. It
 never records prompt text, and it never fails a turn.
