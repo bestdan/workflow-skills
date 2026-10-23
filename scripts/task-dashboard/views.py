@@ -13,7 +13,7 @@ issue at all; the page says so.
 The overlay (pins, order, snoozes) is read here and written elsewhere. Now
 puts pinned items first, by `order.position` then pin time, and hides an item
 whose snooze `until` is still in the future. A date-only `until` ends at
-midnight UTC at the start of that date.
+local midnight at the start of that date (`score.local_day_start`).
 """
 
 import html
@@ -271,7 +271,12 @@ def stale(m: Mirror) -> list[tuple[dict, str]]:
 
 
 def epics(m: Mirror) -> list[dict[str, Any]]:
-    """Per parent: total, done and blocked (open and blocked) child counts."""
+    """Per parent: total, done and blocked (open and blocked) child counts.
+
+    Every mirrored child counts, including one mirrored only because it is
+    linked to an in-scope issue. The mirror never fetches a whole epic, so the
+    totals are of the children it holds, not of the epic's full child set.
+    """
     groups: dict[str, dict[str, Any]] = {}
     for issue in m.issues.values():
         parent = issue.get("parent_key")

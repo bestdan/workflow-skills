@@ -48,15 +48,24 @@ TERMS = ("priority", "deadline", "unblocks", "stuck", "review", "blocked")
 Term = tuple[str, float, str]
 
 
+def local_day_start(d: date) -> datetime:
+    """Midnight at the start of `d` in the machine's local timezone, as an
+    aware datetime.
+
+    This is the one place a date-only value (a Jira due date, a date-only
+    snooze `until`) is turned into an instant. Jira dates and snoozes are the
+    user's calendar days, so "until tomorrow" means local midnight, not UTC.
+    """
+    return datetime(d.year, d.month, d.day).astimezone()
+
+
 def parse_ts(value: "str | None") -> "datetime | None":
-    """A mirror timestamp (`...Z`, UTC) or a bare date (midnight UTC)."""
+    """A mirror timestamp (`...Z`, UTC) or a bare date (local midnight)."""
     if not value:
         return None
     try:
         if len(value) == 10:
-            return datetime.combine(
-                date.fromisoformat(value), datetime.min.time(), timezone.utc
-            )
+            return local_day_start(date.fromisoformat(value))
         dt = datetime.fromisoformat(value)
     except ValueError:
         return None
@@ -72,7 +81,12 @@ def _is_blocks(link: dict[str, Any]) -> bool:
 
 
 def unresolved_blockers(links: list[dict[str, Any]]) -> list[str]:
-    """Keys of the issues blocking this one (inward `Blocks`) that are not done."""
+    """Keys of the issues blocking this one (inward `Blocks`) that are not done.
+
+    A blocker whose status category is unknown (not mirrored, and none inlined
+    in the link) counts as not done, so the issue reads as blocked: an unknown
+    blocker stays visible rather than being silently dropped.
+    """
     return [
         link["linked_key"]
         for link in links
@@ -111,7 +125,8 @@ def is_blocked(
 
     `label` (the `blocked` label /list-tasks uses), `flagged` (Jira's Flagged
     field), `status` (a status named in `jira.blocked_statuses`, case aside)
-    and `link` (an inward `Blocks` link whose issue is not done).
+    and `link` (an inward `Blocks` link whose issue is not done, or whose
+    status is unknown; see `unresolved_blockers`).
     """
     signals = []
     if any(label.lower() == "blocked" for label in labels_of(issue)):
@@ -138,7 +153,10 @@ def _days_to_deadline(
         except ValueError:
             d = None
         if d is not None:
-            return float((d - now.date()).days), f"due {d.isoformat()}"
+            # Rounded up, this is the count of local calendar days to `d`: 0 on
+            # the day itself, 1 for tomorrow, whatever the time of day.
+            days = (local_day_start(d) - now).total_seconds() / 86400
+            return float(math.ceil(days)), f"due {d.isoformat()}"
     end = parse_ts(issue.get("sprint_end"))
     if end is not None:
         days = (end - now).total_seconds() / 86400
@@ -191,6 +209,7 @@ def score(
     ready = [
         p for p in ctx.get("prs", [])
         if p.get("role") == "author"
+        and not p.get("is_draft")
         and (p.get("review_decision") == "APPROVED" or p.get("ci_state") == "success")
     ]  # fmt: skip
     if ready:

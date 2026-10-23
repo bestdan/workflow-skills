@@ -10,13 +10,21 @@ scripts/test-task-dashboard-score.sh.
 import http.client
 import json
 import math
+import os
 import re
 import sys
 import tempfile
 import threading
+import time
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+
+# Date-only values compare in the machine's local timezone, so pin one: every
+# expectation below is written for New York (UTC-4 on these dates), and the
+# suite must not depend on the host's zone.
+os.environ["TZ"] = "America/New_York"
+time.tzset()
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "task-dashboard"))
@@ -147,6 +155,37 @@ class ScoreTest(unittest.TestCase):
         theirs = [{"role": "reviewer", "review_decision": "APPROVED", "number": 2}]
         self.assertGreater(self.total(issue(), prs=mine), self.total(issue()))
         self.assertEqual(self.total(issue(), prs=theirs), self.total(issue()))
+
+    def test_a_green_draft_adds_nothing(self):
+        draft = [{"role": "author", "ci_state": "success", "is_draft": 1, "number": 5}]
+        self.assertEqual(self.total(issue(), prs=draft), self.total(issue()))
+
+
+# 22:00 on 2026-10-23 in New York, already 2026-10-24 in UTC.
+LATE = datetime(2026, 10, 24, 2, 0, tzinfo=timezone.utc)
+
+
+class LocalDateTest(unittest.TestCase):
+    def test_local_day_start_is_local_midnight(self):
+        start = score.local_day_start(date(2026, 10, 24))
+        self.assertEqual(start, datetime(2026, 10, 24, 4, 0, tzinfo=timezone.utc))
+        self.assertEqual(score.parse_ts("2026-10-24"), start)
+
+    def test_due_today_is_today_in_the_evening(self):
+        # The UTC date is already the 24th; locally the 23rd is still today.
+        _, terms = score.score(issue(due_date="2026-10-23"), ctx(now=LATE), WEIGHTS)
+        deadline = {n: (v, w) for n, v, w in terms}["deadline"]
+        self.assertEqual(deadline, (2, "due 2026-10-23, in 0d"))
+
+    def test_due_tomorrow_is_one_day_out_at_any_hour(self):
+        for now in (LATE, datetime(2026, 10, 23, 4, 30, tzinfo=timezone.utc)):
+            _, terms = score.score(issue(due_date="2026-10-24"), ctx(now=now), WEIGHTS)
+            self.assertIn("in 1d", {n: w for n, _, w in terms}["deadline"], now)
+
+    def test_a_snooze_until_tomorrow_holds_through_the_local_evening(self):
+        self.assertTrue(views._in_future("2026-10-24", LATE))
+        after = datetime(2026, 10, 24, 4, 1, tzinfo=timezone.utc)
+        self.assertFalse(views._in_future("2026-10-24", after))
 
 
 class IsBlockedTest(unittest.TestCase):
