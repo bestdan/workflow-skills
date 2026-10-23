@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.105.0] - 2026-10-23
+
+### Features
+
+- add the HTTP server, Sync now and Board view [#1090] (#1121) (6501893)
+
 ## [2.104.0] - 2026-10-23
 
 ### Features
