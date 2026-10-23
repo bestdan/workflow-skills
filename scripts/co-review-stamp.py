@@ -11,12 +11,13 @@ followed by one human-readable line. The fleet view's review-queue gauge
 co-reviewed only when the sha equals the PR's current head, so the format is a
 contract: change it only together with that parser.
 
-One stamp per PR, owned by the authenticated account. A run that finds its
-own earlier stamp edits it in place; a run that finds none posts one. Stamps
-the same account left more than once (two runs racing past the read) are
-collapsed to the oldest, which is edited, and the rest deleted, so the PR never
-carries two heads that disagree. A marker in another account's comment is left
-alone: it is not this account's to edit.
+One stamp per PR per account, owned by the authenticated account. A run that
+finds its own earlier stamp edits it in place; a run that finds none posts
+one. Stamps the same account left more than once (two runs racing past the
+read) are collapsed to the oldest, which is edited, and the rest deleted. A
+duplicate that cannot be deleted is reported as a warning and retried on the
+next run. A marker in another account's comment is left alone: it is not this
+account's to edit.
 
 Usage:
   python3 scripts/co-review-stamp.py --repo <owner/name> --pr <n> \

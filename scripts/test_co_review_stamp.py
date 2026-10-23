@@ -122,6 +122,10 @@ class StampTests(unittest.TestCase):
         body = fake.stamps()[0]["body"]
         self.assertEqual(stamped_head(body), HEAD_A)
         self.assertTrue(body.startswith(f"<!-- co-review-stamp v1 head={HEAD_A} -->\n"))
+        # The fake answers any GET, so pin the listing call itself: without
+        # --paginate, gh returns one page and a stamp past it would be missed.
+        listing = [a for a in fake.calls if f"repos/{REPO}/issues/{PR}/comments" in a]
+        self.assertTrue(any("--paginate" in a for a in listing), fake.calls)
 
     def test_second_run_updates_in_place(self):
         fake = self.use(FakeGh())
