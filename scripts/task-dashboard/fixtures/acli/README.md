@@ -27,6 +27,10 @@ Three shapes are guesses the spike did not record:
 The parser also accepts an object wrapping the array, under `issues`,
 `sprints` or `values`.
 
+`../../dev/fake-acli` answers from these same files, so a sync can run end to
+end with no Jira: point `jira.acli_path` at it. Its header lists what it
+answers and its `FAKE_ACLI_MODE` failure paths.
+
 #1087 adds redacted real captures beside these. The test fails on any file in
 this folder containing an at-sign or the Atlassian cloud domain, so strip
 emails, account ids, `self` URLs and the site name before committing one.
