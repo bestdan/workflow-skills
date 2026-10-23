@@ -225,6 +225,48 @@ class DbTests(TmpCase):
         self.assertNotIn("ok_one", names)
         other.close()
 
+    def test_concurrent_migrate_rechecks_version_under_the_lock(self):
+        # Two connections open a v1 DB at once. Both read version 1 before
+        # either takes the write lock; A migrates first, then B must see v2
+        # under the lock and skip, not re-run v2 against the new schema.
+        path = self.tmp / "d.db"
+        original = db.MIGRATIONS
+        db.MIGRATIONS = original[:1]
+        try:
+            db.connect(path).close()
+        finally:
+            db.MIGRATIONS = original
+        a = sqlite3.connect(path)
+        b = sqlite3.connect(path)
+        self.addCleanup(a.close)
+        self.addCleanup(b.close)
+        real = db._stored_version
+        seen: list[int] = []
+
+        def stale_first_read(conn):
+            if conn is b and not seen:
+                seen.append(1)
+                return 1  # B's unlocked read happened before A committed
+            return real(conn)
+
+        db.migrate(a)
+        db._stored_version = stale_first_read
+        self.addCleanup(setattr, db, "_stored_version", real)
+        db.migrate(b)
+        self.assertEqual(seen, [1])
+        self.assertFalse(b.in_transaction)
+        ver = b.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+        self.assertEqual(int(ver[0]), db.SCHEMA_VERSION)
+        self.assertIn("source", {r[1] for r in b.execute("PRAGMA table_info(issues)")})
+
+    def test_statements_splits_a_script(self):
+        stmts = db._statements(
+            "CREATE TABLE a (x);\n-- note; here\nCREATE TABLE b (y);\n"
+        )
+        self.assertEqual(len(stmts), 2)
+        with self.assertRaises(ValueError):
+            db._statements("CREATE TABLE a (x)")
+
     def test_env_var_db_path(self):
         target = self.tmp / "sub" / "env.db"
         self.set_env(db.ENV_VAR, str(target))

@@ -236,25 +236,51 @@ def _stored_version(conn: sqlite3.Connection) -> int:
     return int(row[0]) if row else 0
 
 
+def _statements(script: str) -> list[str]:
+    """`script` split into single statements, for `execute` one at a time."""
+    out, buf = [], ""
+    for line in script.splitlines(keepends=True):
+        buf += line
+        if sqlite3.complete_statement(buf):
+            out.append(buf)
+            buf = ""
+    if buf.strip():
+        raise ValueError(f"incomplete SQL statement in migration: {buf.strip()!r}")
+    return out
+
+
 def migrate(conn: sqlite3.Connection) -> None:
-    """Apply every migration above the stored version, each in one transaction."""
-    stored = _stored_version(conn)
+    """Apply every migration above the stored version, each in one transaction.
+
+    Each step takes the write lock first (BEGIN IMMEDIATE) and re-reads the
+    stored version under it. Two connections opening an old DB at once would
+    otherwise both decide to migrate, and the second would re-run a step the
+    first had already applied: re-running v1 resets the stored version to 1 on
+    a v2 schema, which every later open then fails to migrate.
+    """
     for version, script in sorted(MIGRATIONS):
-        if version <= stored:
+        if version <= _stored_version(conn):
             continue
-        # executescript runs in autocommit, so the BEGIN/COMMIT lives inside the
-        # script to keep the DDL and the version bump atomic. A failing statement
-        # leaves that transaction open, holding the write lock until the
-        # connection is collected, so roll it back before re-raising.
+        # The statements run one by one rather than through executescript,
+        # which commits any open transaction first and so cannot run under the
+        # lock taken here. A failing statement leaves the transaction open,
+        # holding the write lock, so roll it back before re-raising.
+        conn.execute("BEGIN IMMEDIATE")
         try:
-            conn.executescript(
-                "BEGIN;\n"
-                + script
-                + "\nCREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);"
-                + f"\nINSERT INTO meta (key, value) VALUES ('schema_version', '{int(version)}')"
-                + " ON CONFLICT(key) DO UPDATE SET value = excluded.value;"
-                + "\nCOMMIT;"
+            if _stored_version(conn) >= version:
+                conn.rollback()
+                continue
+            for stmt in _statements(script):
+                conn.execute(stmt)
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)"
             )
+            conn.execute(
+                "INSERT INTO meta (key, value) VALUES ('schema_version', ?)"
+                " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (str(int(version)),),
+            )
+            conn.commit()
         except BaseException:
             if conn.in_transaction:
                 conn.rollback()

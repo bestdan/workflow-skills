@@ -518,6 +518,22 @@ def run(
     except Exception as exc:  # recorded, not raised: the next run retries
         outcome = "failed"
         error = "".join(traceback.format_exception_only(type(exc), exc)).strip()
+    except BaseException as exc:
+        # Ctrl-C or SystemExit: record the run as failed so its row does not
+        # read as still running (NULL outcome), then let the interrupt through.
+        if db.in_transaction:
+            db.rollback()
+        reason = type(exc).__name__
+        _finish_run(
+            db,
+            run_id,
+            "failed",
+            clock(),
+            counts,
+            failed_keys,
+            f"interrupted ({reason})",
+        )
+        raise
     if db.in_transaction:
         db.rollback()
     _finish_run(db, run_id, outcome, clock(), counts, failed_keys, error)
