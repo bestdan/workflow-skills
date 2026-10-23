@@ -241,19 +241,24 @@ class DbTests(TmpCase):
         self.addCleanup(a.close)
         self.addCleanup(b.close)
         real = db._stored_version
-        seen: list[int] = []
+        reads: list[int] = []
 
-        def stale_first_read(conn):
-            if conn is b and not seen:
-                seen.append(1)
-                return 1  # B's unlocked read happened before A committed
-            return real(conn)
+        def stale_unlocked_reads(conn):
+            # B's two unlocked reads (the v1 and v2 checks) happened before A
+            # committed; only the read under the lock sees A's v2.
+            if conn is not b:
+                return real(conn)
+            value = 1 if len(reads) < 2 else real(conn)
+            reads.append(value)
+            return value
 
         db.migrate(a)
-        db._stored_version = stale_first_read
+        db._stored_version = stale_unlocked_reads
         self.addCleanup(setattr, db, "_stored_version", real)
         db.migrate(b)
-        self.assertEqual(seen, [1])
+        self.assertEqual(
+            reads, [1, 1, db.SCHEMA_VERSION]
+        )  # the third is under the lock
         self.assertFalse(b.in_transaction)
         ver = b.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
         self.assertEqual(int(ver[0]), db.SCHEMA_VERSION)
