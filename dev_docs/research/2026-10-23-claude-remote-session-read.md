@@ -12,7 +12,7 @@ the first "Verify before building" item in
 left out because this repo is public. Counts, timings and field names are as
 measured.
 
-## Verdict: readable without status (verified, including from a LaunchAgent)
+## Verdict: readable without status (verified, including from a LaunchAgent with a user logged in)
 
 A daemon has one route it can legitimately use: it starts `claude -p` itself and
 sends the `list_cloud_sessions` control request on stdin. That request returns
@@ -22,7 +22,7 @@ repository and branch.
 It does **not** return `status_bucket`, `post_turn_summary.status_category` or
 `needs_action`. It returns one page of at most 200 sessions, with a `truncated`
 flag and no cursor, so it **cannot page back 30 days**. On the owner's account
-that page reached back about 20 days.
+that page's `updated_at` values reached back about 20 days.
 
 The full-status data exists on the same service. Every route to it uses Claude
 Code's own OAuth token against an undocumented endpoint. The issue rules that
@@ -33,9 +33,10 @@ What was and wasn't verified:
 - **Verified:** the control request exists, it is answered without a model turn,
   and it refuses any process started inside a Claude Code session.
 - **Verified by the owner's run:** the fields it returns on success, and one
-  page of 200 sessions returned with `truncated: true`. The "at most 200" limit
-  comes from the CLI's `limit=200` request, not from the run. The probe itself ran inside a Claude
-  Code session, where the guard refused it. I did not spoof the guard. The owner
+  page of exactly 200 sessions returned with `truncated: true`. That 200 is the
+  limit the CLI requests, so the ceiling is a request parameter, not a measured
+  service maximum. The probe itself ran inside a Claude Code session, where the
+  guard refused it. I did not spoof the guard. The owner
   ran the command under "Owner check" from their own terminal, and the result is
   recorded there.
 - **Verified from a LaunchAgent:** the same read, made from a `launchd` job in
@@ -99,15 +100,20 @@ any other connection." Two more details from the same code:
 **Call count and time for one full read:** one `claude` process start and one
 request. The refused read answered 2.1–3.7 s after launch, and the whole process
 ran 3.2–5.1 s wall, almost all of it CLI startup. A later in-session repeat of
-the refused read ran 1.5 s wall. A successful read adds one HTTP
-round trip of unmeasured length. The code's timeouts are 15 s per request and
+the refused read ran 1.5 s wall. A successful read from a LaunchAgent ran 2 s
+wall for the whole pipeline (see the LaunchAgent result). The HTTP round trip
+alone was not separated out. The code's timeouts are 15 s per request and
 25 s overall.
 
-**30 days:** not reachable. The owner's read returned 200 sessions with
-`truncated: true`. The oldest `updated_at` on the page was 2026-10-03, so it
-covered about 20 days, not 30. That supersedes this record's first estimate of
-about eight days, which was extrapolated from the 50-session MCP page under
-route 6 and was wrong.
+**30 days:** not reachable. The owner's terminal read returned 200 sessions
+with `truncated: true`, and the page's `updated_at` values spanned 2026-10-03 to
+2026-10-23, so nothing on it was last updated more than about 20 days ago.
+Because the page is truncated and takes no cursor, older sessions cannot be
+read. Sessions inside that span may also be missing if the service selects the
+page by creation time (below). This replaces the eight-day estimate in this
+record's first version (#1115). That estimate was a creation rate extrapolated
+from route 6's 50-session page, which measures something different from the
+`updated_at` span of the CLI's 200-session page.
 
 The page is not sorted by `updated_at`: 46 of its 199 adjacent pairs are out of
 order. The order may be newest-created first, but the response carries no
@@ -175,13 +181,17 @@ repo or in the dashboard's config.
   show-keychain-info` on the login keychain failed with "User interaction is not
   allowed", and the read still returned `ok`. That suggests the CLI's sign-in
   doesn't depend on reading the login keychain interactively, but it is
-  inferred: the job did not record where the CLI read its token from. A user was
+  inferred: the job did not record where the CLI read its token from.
+  `~/.claude/.credentials.json` also exists on this host (see route 6), so the
+  CLI may have read its token from that file rather than the keychain. This was
+  not checked. A user was
   logged in at the console during that run, so a mini with nobody logged in is
   still untested. A `not_signed_in` or `sign_in_expired` reply means someone has to
   run `claude auth login`.
-- **The 200-session ceiling.** The owner's read covered about 20 days. Archived
-  sessions count toward the 200: they were 132 of them, and only 68 sessions
-  were `idle`. Older sessions drop off the snapshot, so the reconcile pass must
+- **The 200-session ceiling.** The terminal read's `updated_at` values spanned
+  about 20 days. Archived sessions count toward the 200: 132 of that read's
+  sessions were archived and only 68 were `idle` (134 and 64 in the LaunchAgent
+  read later that day). Older sessions drop off the snapshot, so the reconcile pass must
   not read absence as archival.
 - **It's a coarse status.** `requires_action` is the only "needs you" signal.
   Reading it as "waiting on a permission prompt" is inferred from the enum, not
@@ -227,9 +237,19 @@ The wall time was not measured.
 ### Result from a LaunchAgent, 2026-10-23
 
 The owner ran a script that bootstraps a one-shot job into `user/<uid>`, the
-`launchd` background domain, with `LimitLoadToSessionType` set to `Background`.
-The job ran the same pipeline, with only `PATH` passed in, and the script
-removed the job afterwards. The job saw:
+`launchd` background domain. The job ran the same pipeline, with the plist
+setting only `PATH`, and the script removed the job afterwards. The script was a
+one-off and is not kept in the repo. Its job amounts to a plist with these keys:
+
+- `Label`: any reverse-DNS name
+- `ProgramArguments`: `/bin/bash` and a script holding the Owner check pipeline,
+  writing its output to a file
+- `EnvironmentVariables`: `PATH` only, so `claude` resolves
+- `LimitLoadToSessionType`: `Background`
+- `RunAtLoad`: true
+
+It was started with `launchctl bootstrap user/<uid> <plist>` and removed with
+`launchctl bootout user/<uid>/<label>`. The job saw:
 
 | Measure                     | Value                                                          |
 | --------------------------- | -------------------------------------------------------------- |
@@ -242,4 +262,4 @@ removed the job afterwards. The job saw:
 | Wall time                   | 2 s for the whole pipeline, with nothing on stderr             |
 
 So a LaunchAgent gets past the `started_by_session` guard without any help, as
-the guard's code says, and reads with the CLI's existing sign-in.
+the `CLAUDE_CODE_CHILD_SESSION` check predicts, and reads with the CLI's existing sign-in.
