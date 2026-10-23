@@ -480,6 +480,30 @@ class BoardTest(ServerCase):
         expected.remove("blocked")
         self.assertEqual(order, expected)
 
+    def add_issue(self, key, category, sprint_id):
+        conn = self.conn()
+        conn.execute(
+            "INSERT INTO issues (source, kind, key, summary, status_category,"
+            " labels, sprint_id, sprint_state) VALUES ('jira', 'ticket', ?, 'x',"
+            " ?, '[]', ?, 'active')",
+            (key, category, sprint_id),
+        )
+        conn.commit()
+        conn.close()
+
+    def test_another_boards_active_sprint_is_left_out(self):
+        self.add_issue("XYZ-1", "indeterminate", 6)  # sprint 6 is not configured
+        self.assertNotIn("XYZ-1", self.request("GET", "/")[1])
+
+    def test_unclassified_rows_get_their_own_last_lane(self):
+        self.add_issue("ABC-50", "undefined", 5)
+        page = self.request("GET", "/")[1]
+        self.assertEqual(self.sections(page)[-1], "unmatched")
+        lane = re.search(r'data-section="unmatched">(.*?)</section>', page, re.S)
+        assert lane is not None
+        self.assertIn("Unclassified (1)", lane.group(1))
+        self.assertIn(">ABC-50</a>", lane.group(1))
+
     def test_summary_is_escaped(self):
         conn = self.conn()
         conn.execute(

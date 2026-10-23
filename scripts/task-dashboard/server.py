@@ -153,11 +153,15 @@ class Syncer:
             return self._snapshot()
 
     def wait_idle(self, timeout: float) -> bool:
-        """True once nothing is running, queued or pending (for tests and CLI)."""
-        deadline = self._clock() + timeout
+        """True once nothing is running, queued or pending (for tests and CLI).
+
+        The timeout is real time, not the injected clock: a frozen test clock
+        would otherwise never let it expire.
+        """
+        deadline = time.monotonic() + timeout
         with self._state:
             while self._busy():
-                left = deadline - self._clock()
+                left = deadline - time.monotonic()
                 if left <= 0:
                     return False
                 self._changed.wait(left)
@@ -309,7 +313,11 @@ def board_rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     cur = conn.execute(
         "SELECT key, summary, status_name, status_category, assignee, priority,"
         " labels, created, sprint_name FROM jira_issues"
-        " WHERE sprint_state = 'active' ORDER BY key"
+        # The sprint field keeps the active sprint of any board, so an issue of
+        # mine in another team's sprint is active too; `sprints` holds only the
+        # configured boards' active sprints.
+        " WHERE sprint_state = 'active' AND sprint_id IN (SELECT id FROM sprints)"
+        " ORDER BY key"
     )
     rows = []
     for key, summary, status, category, assignee, priority, labels, created, sp in cur:
@@ -401,9 +409,10 @@ JS = """
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: 'mode=' + mode + '&token=' + encodeURIComponent(token)
     }).then(function (r) {
-      if (r.status !== 202) { btn.textContent = 'Sync refused (' + r.status + ')'; return; }
+      if (r.status !== 202) { btn.textContent = 'Sync refused (' + r.status + ')';
+        btn.disabled = false; return; }
       poll();
-    });
+    }).catch(function () { btn.textContent = 'Sync failed'; btn.disabled = false; });
   });
   if (document.body.dataset.busy === '1') { btn.disabled = true; poll(); }
 })();
