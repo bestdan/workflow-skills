@@ -12,7 +12,7 @@ the first "Verify before building" item in
 left out because this repo is public. Counts, timings and field names are as
 measured.
 
-## Verdict: readable without status (partly verified)
+## Verdict: readable without status (verified, including from a LaunchAgent with a user logged in)
 
 A daemon has one route it can legitimately use: it starts `claude -p` itself and
 sends the `list_cloud_sessions` control request on stdin. That request returns
@@ -21,7 +21,8 @@ repository and branch.
 
 It does **not** return `status_bucket`, `post_turn_summary.status_category` or
 `needs_action`. It returns one page of at most 200 sessions, with a `truncated`
-flag and no cursor, so it **cannot page back 30 days**.
+flag and no cursor, so it **cannot page back 30 days**. On the owner's account
+that page's `updated_at` values reached back about 20 days.
 
 The full-status data exists on the same service. Every route to it uses Claude
 Code's own OAuth token against an undocumented endpoint. The issue rules that
@@ -31,10 +32,19 @@ What was and wasn't verified:
 
 - **Verified:** the control request exists, it is answered without a model turn,
   and it refuses any process started inside a Claude Code session.
-- **Inferred from the shipped CLI code:** the fields it returns on success. I
-  could not observe a successful read, because this probe ran inside a Claude
-  Code session and the guard refused it. I did not spoof the guard. The owner
-  can confirm with the command under "Owner check" below.
+- **Verified by the owner's run:** the fields it returns on success, and one
+  page of exactly 200 sessions returned with `truncated: true`. That 200 is the
+  limit the CLI requests, so the ceiling is a request parameter, not a measured
+  service maximum. The probe itself ran inside a Claude Code session, where the
+  guard refused it. I did not spoof the guard. The owner
+  ran the command under "Owner check" from their own terminal, and the result is
+  recorded there.
+- **Verified from a LaunchAgent:** the same read, made from a `launchd` job in
+  the background domain, returned `status: ok`. A user was logged in at the
+  mini's console at the time, so a read with no desktop session at all is still
+  untested.
+- **Still not observed:** a `pending` or `failed` status. `running` and
+  `requires_action` appeared once each, in the LaunchAgent read.
 
 **For #1100:** take the "readable" branch, but in reduced form. Build a polling
 adapter for the session **inventory**: id, title, `environment_kind`, branch,
@@ -44,18 +54,18 @@ cloud-only sessions visible. The **Needs you** categories (`need_input`,
 session-state hook, so cloud-only sessions get presence and `requires_action`,
 not a post-turn category. The adapter's "incremental since last run" and "page
 back 30 days" requirements can't be met on this route: each read is a full
-newest-first snapshot of at most 200 sessions.
+snapshot of at most 200 sessions, and it is not ordered by `updated_at`.
 
 ## What was tried
 
-| # | Route                                                                                 | Result                                                                                                                                                                                                          | How known                                            |
-| - | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| 1 | Docs at code.claude.com                                                               | No public API or CLI command lists a user's cloud sessions. Cloud and other-machine sessions are listed only to a session connected to Remote Control, through `ListAgents`                                     | Read `llms.txt` and the cross-session messaging page |
-| 2 | `claude --help`, `claude remote-control --help`                                       | No `claude remote …` list subcommand. `remote-control` only starts a session                                                                                                                                    | Ran                                                  |
-| 3 | `claude agents --json` (and `--all`)                                                  | Works without a TTY in under 1 s. **Local sessions only**: 19 `interactive` + 1 `background`, fields `pid, cwd, kind, sessionId, name, status` (`idle`/`busy`), `state`. No cloud sessions, no post-turn fields | Ran                                                  |
-| 4 | The `claude-code-remote` MCP in a headless `claude -p`                                | **Not attached.** The init event listed 17 MCP servers and 205 tools, and the only remote-related tool was `RemoteTrigger`                                                                                      | Ran                                                  |
-| 5 | SDK control request `list_cloud_sessions` over `claude -p --input-format stream-json` | Answered in 2.1–3.7 s, with no model turn: `{"status":"unavailable","reason":"started_by_session"}`, and the same for `user_initiated: true`                                                                    | Ran                                                  |
-| 6 | Hosted MCP `/v2/ccr-sessions/-/meta/mcp`, or REST `GET /v1/code/sessions`             | Carries the full record, `status_bucket` and `post_turn_summary` included, and pages. Auth is Claude Code's OAuth token. **Not called**                                                                         | CLI code, plus a saved MCP result                    |
+| # | Route                                                                                 | Result                                                                                                                                                                                                                    | How known                                            |
+| - | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| 1 | Docs at code.claude.com                                                               | No public API or CLI command lists a user's cloud sessions. Cloud and other-machine sessions are listed only to a session connected to Remote Control, through `ListAgents`                                               | Read `llms.txt` and the cross-session messaging page |
+| 2 | `claude --help`, `claude remote-control --help`                                       | No `claude remote …` list subcommand. `remote-control` only starts a session                                                                                                                                              | Ran                                                  |
+| 3 | `claude agents --json` (and `--all`)                                                  | Works without a TTY in under 1 s. **Local sessions only**: 19 `interactive` + 1 `background`, fields `pid, cwd, kind, sessionId, name, status` (`idle`/`busy`), `state`. No cloud sessions, no post-turn fields           | Ran                                                  |
+| 4 | The `claude-code-remote` MCP in a headless `claude -p`                                | **Not attached.** The init event listed 17 MCP servers and 205 tools, and the only remote-related tool was `RemoteTrigger`                                                                                                | Ran                                                  |
+| 5 | SDK control request `list_cloud_sessions` over `claude -p --input-format stream-json` | Answered in 2.1–3.7 s, with no model turn: `{"status":"unavailable","reason":"started_by_session"}`, and the same for `user_initiated: true`. Outside a session, the owner's read returned `status: ok` (see Owner check) | Ran                                                  |
+| 6 | Hosted MCP `/v2/ccr-sessions/-/meta/mcp`, or REST `GET /v1/code/sessions`             | Carries the full record, `status_bucket` and `post_turn_summary` included, and pages. Auth is Claude Code's OAuth token. **Not called**                                                                                   | CLI code, plus a saved MCP result                    |
 
 ### Route 5 in detail: the usable one
 
@@ -76,7 +86,10 @@ any other connection." Two more details from the same code:
   `GET /v1/code/sessions?limit=200`, with `/v1/sessions` plus
   `anthropic-beta: ccr-byoc-2025-07-29` on the older API. The response maps to
   `sessions[]: {id, title, updated_at, status, environment_kind, repository, branch}`
-  and `truncated`.
+  and `truncated`. The owner's run confirmed this key set, and no other keys
+  appeared. `repository` is an object `{owner, name}`. `repository` and `branch`
+  appear only when the session has them: `repository` was on 151 of 200
+  sessions and `branch` on 46.
   - `status` takes the service's `session_status`: `running`, `idle`,
     `requires_action`, `archived`, `pending` or `failed`.
   - `environment_kind` is `bridge` (Remote Control), `anthropic_cloud`, `byoc`
@@ -86,14 +99,27 @@ any other connection." Two more details from the same code:
 
 **Call count and time for one full read:** one `claude` process start and one
 request. The refused read answered 2.1–3.7 s after launch, and the whole process
-ran 3.2–5.1 s wall, almost all of it CLI startup. A successful read adds one HTTP
-round trip of unmeasured length. The code's timeouts are 15 s per request and
+ran 3.2–5.1 s wall, almost all of it CLI startup. A later in-session repeat of
+the refused read ran 1.5 s wall. A successful read from a LaunchAgent ran 2 s
+wall for the whole pipeline (see the LaunchAgent result). The HTTP round trip
+alone was not separated out. The code's timeouts are 15 s per request and
 25 s overall.
 
-**30 days:** not reachable. The saved MCP page (route 6) held 50 sessions created
-over about two days (2026-10-21 to 10-23) and reported `has_more: true`. At that
-rate 200 sessions cover about eight days, not 30. This rate is inferred from one
-page.
+**30 days:** not reachable. The owner's terminal read returned 200 sessions
+with `truncated: true`, and the page's `updated_at` values spanned 2026-10-03 to
+2026-10-23, so nothing on it was last updated more than about 20 days ago.
+Because the page is truncated and takes no cursor, older sessions cannot be
+read. Sessions inside that span may also be missing if the service selects the
+page by creation time (below). This replaces the eight-day estimate in this
+record's first version (#1115). That estimate was a creation rate extrapolated
+from route 6's 50-session page, which measures something different from the
+`updated_at` span of the CLI's 200-session page.
+
+The page is not sorted by `updated_at`: 46 of its 199 adjacent pairs are out of
+order. The order may be newest-created first, but the response carries no
+`created_at`, so that is a guess. If the service picks the page by creation
+time, a session created long ago and updated today could fall off the page while
+newer idle sessions stay on it. This has not been observed.
 
 ### Route 6: the full-status data, and why it's off-limits
 
@@ -151,15 +177,27 @@ repo or in the dashboard's config.
 - **The sign-in and the keychain.** Over SSH, `claude mcp list` reported that the
   stored credentials of four plugin MCP servers couldn't be read because "your
   Mac's keychain is locked". Claude Code's own sign-in worked in the same shell.
-  Whether it still works for a LaunchAgent, with no desktop session on the mini,
-  is untested. A `not_signed_in` or `sign_in_expired` reply means someone has to
+  It also worked from a LaunchAgent. Inside that job, `security
+  show-keychain-info` on the login keychain failed with "User interaction is not
+  allowed", and the read still returned `ok`. That suggests the CLI's sign-in
+  doesn't depend on reading the login keychain interactively, but it is
+  inferred: the job did not record where the CLI read its token from.
+  `~/.claude/.credentials.json` also exists on this host (see route 6), so the
+  CLI may have read its token from that file rather than the keychain. This was
+  not checked. A user was
+  logged in at the console during that run, so a mini with nobody logged in is
+  still untested. A `not_signed_in` or `sign_in_expired` reply means someone has to
   run `claude auth login`.
-- **The 200-session ceiling.** At about 25 sessions a day, a read covers about
-  eight days. Older sessions drop off the snapshot, so the reconcile pass must
+- **The 200-session ceiling.** The terminal read's `updated_at` values spanned
+  about 20 days. Archived sessions count toward the 200: 132 of that read's
+  sessions were archived and only 68 were `idle` (134 and 64 in the LaunchAgent
+  read later that day). Older sessions drop off the snapshot, so the reconcile pass must
   not read absence as archival.
 - **It's a coarse status.** `requires_action` is the only "needs you" signal.
   Reading it as "waiting on a permission prompt" is inferred from the enum, not
-  observed.
+  observed. The LaunchAgent read held one `requires_action` and one `running`
+  session, so both values do arrive on the wire. Which state a
+  `requires_action` session was in was not checked.
 
 ## Owner check
 
@@ -178,3 +216,50 @@ From inside a session, this exact pipeline printed the `started_by_session`
 refusal, so closing stdin early does not cut off the reply. A `"status":"ok"`
 line confirms route 5. Its `sessions[]` keys confirm or correct the field list
 above.
+
+### Result, 2026-10-23
+
+The owner ran it from their own terminal, outside any Claude Code session. It
+returned `"status":"ok"`:
+
+| Measure            | Value                                                                |
+| ------------------ | -------------------------------------------------------------------- |
+| Sessions           | 200, `truncated: true`                                               |
+| Keys               | `id`, `title`, `updated_at`, `status`, `environment_kind` on all 200 |
+| Optional keys      | `repository` (`{owner, name}`) on 151, `branch` on 46                |
+| `status`           | `archived` 132, `idle` 68                                            |
+| `environment_kind` | `bridge` 194, `anthropic_cloud` 6                                    |
+| `updated_at` span  | 2026-10-03 to 2026-10-23                                             |
+| Order              | Not by `updated_at`: 46 of 199 adjacent pairs out of order           |
+
+The wall time was not measured.
+
+### Result from a LaunchAgent, 2026-10-23
+
+The owner ran a script that bootstraps a one-shot job into `user/<uid>`, the
+`launchd` background domain. The job ran the same pipeline, with the plist
+setting only `PATH`, and the script removed the job afterwards. The script was a
+one-off and is not kept in the repo. Its job amounts to a plist with these keys:
+
+- `Label`: any reverse-DNS name
+- `ProgramArguments`: `/bin/bash` and a script holding the Owner check pipeline,
+  writing its output to a file
+- `EnvironmentVariables`: `PATH` only, so `claude` resolves
+- `LimitLoadToSessionType`: `Background`
+- `RunAtLoad`: true
+
+It was started with `launchctl bootstrap user/<uid> <plist>` and removed with
+`launchctl bootout user/<uid>/<label>`. The job saw:
+
+| Measure                     | Value                                                          |
+| --------------------------- | -------------------------------------------------------------- |
+| `CLAUDE_CODE_CHILD_SESSION` | unset                                                          |
+| `SSH_CONNECTION`            | unset                                                          |
+| Console user                | the owner, logged in                                           |
+| Login keychain              | `show-keychain-info` failed: "User interaction is not allowed" |
+| Reply                       | `status: ok`, 200 sessions, `truncated: true`                  |
+| `status`                    | `archived` 134, `idle` 64, `requires_action` 1, `running` 1    |
+| Wall time                   | 2 s for the whole pipeline, with nothing on stderr             |
+
+So a LaunchAgent gets past the `started_by_session` guard without any help, as
+the `CLAUDE_CODE_CHILD_SESSION` check predicts, and reads with the CLI's existing sign-in.
