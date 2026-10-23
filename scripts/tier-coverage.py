@@ -10,7 +10,7 @@ a hand-maintained list and nothing compared it to reality.
 ## Why this is an exhaustive partition, not an allowlist
 
 A check with a suppression list drifts into an excuse. This one instead requires
-the four tier arrays plus EXCLUDED_FROM_TYPECHECK to *partition* the tracked .py
+the five tier arrays plus EXCLUDED_FROM_TYPECHECK to *partition* the tracked .py
 files: every file lands in exactly one, or the gate fails naming it. Excluding a
 file is then a visible declaration in typecheck.sh with a comment beside it,
 rather than an absence nobody can see. There is no heuristic here and nothing to
@@ -35,6 +35,7 @@ ARRAYS = (
     "STRICT_FILES",
     "CONSUMER_FILES",
     "DEV_FILES",
+    "UV_RUNTIME_FILES",
     "TEST_FILES",
     "EXCLUDED_FROM_TYPECHECK",
 )
