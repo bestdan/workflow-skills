@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.107.0] - 2026-10-23
+
+### Features
+
+- add GitHub issues, designs and review queue [#1101] (#1118) (38f0d0e)
+
 ## [2.106.0] - 2026-10-23
 
 ### Features
