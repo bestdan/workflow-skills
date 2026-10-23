@@ -150,6 +150,28 @@ class ScoreTest(unittest.TestCase):
         self.assertEqual(values(fresh)["stuck"], 0)
         self.assertGreater(values(old)["stuck"], 0)
 
+    def values(self, i):
+        c = ctx(stuck_days=CFG["score"]["stuck_days"])
+        return {n: v for n, v, _ in score.score(i, c, WEIGHTS)[1]}
+
+    def test_deadline_pressure_is_capped_when_long_overdue(self):
+        late = issue(due_date=(NOW - timedelta(days=30)).date().isoformat())
+        cap = WEIGHTS["deadline"] * score.DEADLINE_CAP
+        self.assertEqual(self.values(late)["deadline"], cap)
+
+    def test_stuck_is_capped_far_past_the_threshold(self):
+        stale = issue(status_category_changed=ts(NOW - timedelta(days=60)))
+        cap = WEIGHTS["stuck"] * score.STUCK_CAP
+        self.assertEqual(self.values(stale)["stuck"], cap)
+
+    def test_a_new_issue_is_stuck_only_past_fourteen_days(self):
+        def new(days):
+            changed = ts(NOW - timedelta(days=days))
+            return issue(status_category="new", status_category_changed=changed)
+
+        self.assertEqual(self.values(new(13))["stuck"], 0)
+        self.assertGreater(self.values(new(20))["stuck"], 0)
+
     def test_green_pr_of_mine_counts_and_a_reviewers_does_not(self):
         mine = [{"role": "author", "ci_state": "success", "number": 1}]
         theirs = [{"role": "reviewer", "review_decision": "APPROVED", "number": 2}]
