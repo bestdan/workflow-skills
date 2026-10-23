@@ -17,7 +17,7 @@ A snapshot no newer than the last one ingested from its host is refused with
 ``StaleSnapshot`` and nothing is written. That is what makes a resend harmless:
 replacing the rows with older state would lose newer worktrees, and the deltas
 would be appended twice. A snapshot taken more than ``MAX_CLOCK_AHEAD`` after
-the server's clock is refused too (ValueError): stored, it would make every
+the server's clock is refused too (BadTakenAt): stored, it would make every
 later, correctly-clocked snapshot from that host look stale.
 """
 
@@ -37,6 +37,10 @@ class StaleSnapshot(ValueError):
     """The host already has a snapshot taken at or after this one."""
 
 
+class BadTakenAt(ValueError):
+    """``taken_at`` is not ISO 8601 with a zone, or is ahead of the server."""
+
+
 def source_for(host: str) -> str:
     return f"machine:{host}"
 
@@ -46,10 +50,13 @@ def _ts(dt: datetime) -> str:
 
 
 def parse_taken_at(value: str) -> datetime:
-    """``taken_at`` as an aware datetime; ValueError unless ISO 8601 with a zone."""
-    dt = datetime.fromisoformat(value)
+    """``taken_at`` as an aware datetime; BadTakenAt unless ISO 8601 with a zone."""
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise BadTakenAt(f"taken_at is not ISO 8601: {value!r}") from exc
     if dt.utcoffset() is None:
-        raise ValueError(f"taken_at has no timezone: {value!r}")
+        raise BadTakenAt(f"taken_at has no timezone: {value!r}")
     return dt
 
 
@@ -85,13 +92,14 @@ def ingest(
     """Write a validated snapshot; returns what was written.
 
     ``doc`` must already pass ``snapshot.validate()``. Raises StaleSnapshot, or
-    ValueError for an unparseable ``taken_at``, with nothing written.
+    BadTakenAt for an unparseable or future ``taken_at``, with nothing written.
+    Any other ValueError (a string SQLite cannot encode, say) also rolls back.
     """
     host = doc["host"]
     source = source_for(host)
     taken = parse_taken_at(doc["taken_at"])
     if taken > now + MAX_CLOCK_AHEAD:
-        raise ValueError(
+        raise BadTakenAt(
             f"taken_at {doc['taken_at']} is more than"
             f" {int(MAX_CLOCK_AHEAD.total_seconds() // 60)} minutes ahead of"
             f" server time {_ts(now)}"

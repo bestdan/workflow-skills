@@ -129,8 +129,13 @@ class Ingest:
             written = snapshot_adapter.ingest(conn, doc, self.now())
         except snapshot_adapter.StaleSnapshot as exc:
             return 409, {"error": str(exc)}, None
-        except ValueError as exc:
+        except snapshot_adapter.BadTakenAt as exc:
             return 400, {"error": f"bad taken_at: {exc}"}, None
+        except ValueError as exc:
+            # Valid JSON that SQLite still refuses, e.g. a lone surrogate
+            # (UnicodeEncodeError). Resending it fails the same way, so 400.
+            why = f"{machine}: snapshot could not be stored: {exc!r}"
+            return 400, {"error": "snapshot could not be stored"}, why
         except sqlite3.Error as exc:
             return 503, {"error": "database unavailable"}, f"{machine}: {exc}"
         finally:

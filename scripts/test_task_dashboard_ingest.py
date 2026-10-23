@@ -240,6 +240,16 @@ class RefusalTest(IngestCase):
         status, _ = self.post(make_doc(taken_at="2026-10-23T12:04:00.000Z"))
         self.assertEqual(status, 200)
 
+    def test_unstorable_string_is_400_not_a_taken_at_error(self):
+        # A lone surrogate is valid JSON and passes validate(), but SQLite
+        # cannot encode it (UnicodeEncodeError, a ValueError).
+        doc = make_doc()
+        doc["worktrees"][0]["branch"] = "bestdan/\ud800"
+        status, body = self.post(doc)
+        self.assertEqual(status, 400)
+        self.assertEqual(json.loads(body), {"error": "snapshot could not be stored"})
+        self.assert_nothing_written()
+
     def test_database_errors_are_503_and_never_leak(self):
         # db.connect cannot open a directory as a database.
         self.httpd.app.ingest.db_path = Path(self.tmp.name)
