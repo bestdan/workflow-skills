@@ -11,8 +11,10 @@ never wait on a network call, so the dashboard is fast. It never writes to Jira
 or GitHub. Changes still go through `/add-task`, `/complete-task` and the claim
 flows.
 
-Status: design only. Nothing below is built. The **Verify before building**
-section lists the claims about `acli` that are inferred and not yet tested.
+Status: design only. Nothing below is built. The `acli` claims it depends on
+were tested on the work laptop on 2026-10-23; the results are in
+[`../research/2026-10-23-task-dashboard-acli-spike.md`](../research/2026-10-23-task-dashboard-acli-spike.md),
+and **Spike results** below summarizes what they changed.
 
 ## Decisions taken
 
@@ -77,6 +79,15 @@ than by copying the DB.
 
 ### Jira through `acli`
 
+**Every fetch has two steps.** `acli jira workitem search` returns only a
+fixed list of fields, and that list includes no dates, links, parent or custom
+fields. So a run first runs `search --paginate` to find the keys, then runs
+`acli jira workitem view <KEY> --json` once per key to get the fields. `view`
+takes one key per call, at about 0.9s each, so the views run 8 at a time. Any
+that fail are retried serially: about 1% fail transiently at that concurrency.
+The parser reads only `key` and `fields` from each response, and `view` output
+goes to a pipe, never `/dev/null`, where acli exits 1.
+
 One JQL query per scope. Results are unioned by key:
 
 | Scope            | JQL                                                                    |
@@ -86,11 +97,12 @@ One JQL query per scope. Results are unioned by key:
 | Reported/watched | `(reporter = currentUser() OR watcher = currentUser())`                |
 | Linked           | `key in (<blocker/blocked keys from the issues above>)`, a second pass |
 
-The sprint ids come from each configured board's active sprints, looked up at
-the start of each run. `sprint in openSprints()` would return every team's open
-sprints in a shared project, not just mine. If `acli` can't list a board's
-sprints (see **Verify before building**), drop `board_ids` and accept a
-project-wide sprint scope.
+The sprint ids come from each configured board's active sprints. They are
+looked up at the start of each run with `acli jira board list-sprints --id
+<board> --state active --json`, which also returns each sprint's `endDate`.
+`sprint in openSprints()` would return every team's open sprints in a shared
+project, not just mine. A board id is easiest to find in the `boardId` inside
+the sprint field of an issue already in the sprint.
 
 Each scope is wrapped in parentheses, and `AND (statusCategory != Done OR
 resolved >= -14d)` is appended outside them. That way recently finished work
@@ -98,30 +110,42 @@ still shows and old work doesn't pile up. The parentheses matter: JQL binds
 `AND` tighter than `OR`, so without them an appended clause filters only the
 last `OR` branch. The same applies to the incremental clause below.
 
-**Incremental.** After the first full pull, each run appends
-`AND updated >= "-<N>m"`, where N is the number of minutes since the last
-successful sync _started_, plus 5. The overlap covers index lag, and upserts
-make the duplicates harmless. The relative form is deliberate: Jira reads an
-absolute date in JQL in the Jira user's profile timezone. A cursor formatted in
-UTC or in the laptop's timezone can be off by hours, and a 5-minute overlap
-cannot cover that.
+**Incremental.** After the first full pull, each run searches the union with
+`AND updated >= "-<N>m"` appended, then views only the keys that come back. N
+is the number of minutes since the last successful sync _started_, plus 5. The
+overlap covers index lag, and upserts make the duplicates harmless. A run with
+a handful of changes takes a few seconds, so a 5-minute interval is cheap.
+
+The relative form is the only workable cursor, for two reasons. Jira reads an
+absolute date in JQL in the profile timezone, not UTC: the spike measured a
+4-hour gap. And `search` can't return `updated`, so the sync can't take a
+high-water mark from its own results.
 
 **Reconcile.** An incremental query cannot see an issue that _left_ scope, for
 example one reassigned away. It also misses an issue that _entered_ scope
-without its `updated` changing. Adding me as a watcher, for example, doesn't
-bump `updated`. On a slower interval (hourly), run each scope's query for
-**keys only**. Fetch in full every key that is missing from the mirror, then
-drop the mirror rows that no scope returned.
+without its `updated` changing; adding me as a watcher doesn't bump `updated`,
+for example. Hourly, run each scope's query for **keys only**: about 10s for
+the 529-issue union the spike measured. Then view every key missing from the
+mirror, and drop the mirror rows no scope returned. A full refresh, viewing
+every key, takes about 100s. It runs only on first install and on demand.
 
-**Fields.** Summary, status and `statusCategory`, assignee, reporter,
-priority, due date, sprint (name and end date), parent/epic, labels, the
-`Flagged` field, `issuelinks[]`, `created`, `updated`, and the timestamp of the
-last status change. That last one gives time-in-status, and it has to come from
-the changelog's last status transition. `statuscategorychangedate` is not a
-substitute: it records the last change of _category_. In Progress and In
-Review are both `indeterminate`, so it can't measure time in the current
-status, which the Stuck term and the Stale view need. How cheaply the changelog
-can be read is an open item below.
+**Fields.** Each `view` requests: summary, status (with its
+`statusCategory`), assignee, reporter, priority, due date, parent, labels,
+`issuelinks`, `created`, `updated`, `resolutiondate`,
+`statuscategorychangedate`, and the sprint and Flagged custom fields.
+
+- **Custom field ids are configured per site.** acli has no field-listing
+  command, and `view` returns empty `names`, so ids can't be found at runtime.
+- **The sprint field lists every sprint the issue has ever been in.** The sync
+  keeps the element whose `state` is `active`.
+- **Each link carries the linked issue's key and `statusCategory.key`
+  inline**, so the blocked-link signal needs no second fetch.
+- **Time in status is time in category.** acli can't read the changelog, so
+  the only status timestamp is `statuscategorychangedate`. It records the last
+  change of _category_, so a move from In Progress to In Review, both
+  `indeterminate`, doesn't reset it. v1 measures "stuck" at the category level.
+  Per-status time would need the REST changelog, and with it a separate API
+  token. That is a later option, not v1.
 
 **Failure.** Each run fetches everything first, then writes its mirror changes
 in a single SQLite transaction. A failed run therefore leaves the mirror as it
@@ -129,6 +153,12 @@ was. The run's `sync_runs` row is written separately, so the failure is still
 recorded. The UI header always shows how old the last successful sync is, and
 it turns red past three intervals. The dashboard never presents stale data as
 current.
+
+**Expired auth is its own state.** acli's OAuth credential sits in the login
+keychain and works unattended. The spike did not test whether its refresh
+token expires over days. When a run fails with an auth error, the header says
+so and names the fix: run `acli jira auth login` in a terminal. That keeps an
+expired login from looking like a generic sync failure.
 
 ### Manual sync
 
@@ -155,13 +185,24 @@ next interval.
 
 ### GitHub through `gh`
 
-- `gh search prs --author @me --state open`
-- `gh search prs --review-requested @me --state open`
-- For each PR: review decision, CI rollup, draft state, last update.
+The GitHub account is personal and reaches both personal repos and the work
+org. So every query is filtered to the configured `github.orgs`. Without that
+filter, the spike's `--author @me` returned 220 PRs, 141 of them personal.
 
-A PR is joined to a Jira issue by finding an issue key in the PR's branch name
-or title, with the regex `[A-Z][A-Z0-9]+-\d+`, restricted to configured
-project keys. Unmatched PRs are still shown in their own lane.
+- **My PRs:** one paginated GraphQL `search(type: ISSUE)` for
+  `is:pr is:open author:@me org:<org>`, returning `title headRefName isDraft
+  reviewDecision`. `gh search prs` can't be used, because it has no branch
+  name.
+- **Reviews requested of me:** the same search with `review-requested:@me`.
+- **CI state:** fetched per PR with `gh pr view --json statusCheckRollup`, not
+  in the search. Adding the rollup to a 100-node search made GitHub fail after
+  12s.
+
+A PR is joined to a Jira issue by an issue key in its title or branch name.
+Titles carry upper-case keys; branches usually carry lower-case ones. So the
+match is case-insensitive, `[A-Za-z][A-Za-z0-9]+-\d+`, and a candidate counts
+only if its project key is one already in the mirror. That allowlist keeps
+strings like `v2-1` from matching. Unmatched PRs still show in their own lane.
 
 ### Adapter seam
 
@@ -182,8 +223,10 @@ All of them read SQLite only.
 4. **Board.** The sprint as a kanban built with the shared
    `commands/handlers/assets/kanban-classify.py`, so its sections match
    `/list-tasks`.
-5. **Stale.** In progress, or in review, for longer than a threshold with no
-   update.
+5. **Stale.** In the `indeterminate` category (in progress, in review and
+   similar) for longer than a threshold, with no update. The card shows the
+   current status name, but the clock is time in the category; see
+   **Fields**.
 6. **Epics.** Rollup per parent: done/total and blocked count.
 
 **Blocked** is detected from four signals. The first is the `blocked` label,
@@ -200,14 +243,14 @@ The score is a deterministic sum of named terms. The weights live in config.
 There is no LLM in the loop, because the ranking has to be stable between
 refreshes and explainable on the card.
 
-| Term              | Signal                                                       |
-| ----------------- | ------------------------------------------------------------ |
-| Priority          | Jira priority mapped to urgent/high/medium/low               |
-| Deadline pressure | Days to due date, or to sprint end when there is no due date |
-| Unblocks others   | Count of open issues this one blocks (outward `Blocks`)      |
-| Stuck             | Time in current status beyond a per-status threshold         |
-| Review waiting    | A PR of mine is approved or green, so the next step is mine  |
-| Blocked           | Large negative term: blocked work sinks, but stays visible   |
+| Term              | Signal                                                          |
+| ----------------- | --------------------------------------------------------------- |
+| Priority          | Jira priority mapped to urgent/high/medium/low                  |
+| Deadline pressure | Days to due date, or to sprint end when there is no due date    |
+| Unblocks others   | Count of open issues this one blocks (outward `Blocks`)         |
+| Stuck             | Time in current status category beyond a per-category threshold |
+| Review waiting    | A PR of mine is approved or green, so the next step is mine     |
+| Blocked           | Large negative term: blocked work sinks, but stays visible      |
 
 The overlay comes on top: a pin forces an item to the top, a manual order
 overrides the score within the pinned set, and a snooze hides the item until a
@@ -250,12 +293,17 @@ jira:
   projects: [PLAT, OPS]
   board_ids: [123] # sprint scope: these boards' active sprints
   blocked_statuses: [Blocked, On Hold]
+  fields: # per site; acli can't list them
+    sprint: customfield_10303
+    flagged: customfield_10007
 github:
   enabled: true
+  orgs: [mycompany]
 sync:
   interval_minutes: 5
   reconcile_minutes: 60
   done_window_days: 14
+  view_concurrency: 8
 server:
   port: 8765
 score:
@@ -280,33 +328,38 @@ scripts are located. `/task-dashboard install` writes both the launcher and the
 plist. `/doctor` checks that the plist is loaded and that the last sync is
 recent.
 
-## Verify before building
+## Spike results
 
-These are inferred, not tested. `acli` is not installed on the machine where
-this was written.
+The spike ran on the work laptop on 2026-10-23, against acli 1.3.19 and
+gh 2.102.0. It tested two claims that could have killed the design, and both
+held:
 
-1. `acli jira workitem search --jql … --json` returns `issuelinks`, `Flagged`,
-   the sprint field, and parent. If the `--fields` flag can't request custom
-   fields, the plan B is one `acli jira workitem view <KEY> --json` per changed
-   key. That is fine for incremental runs and slow for the first one.
-2. Pagination: whether `--paginate` (or an equivalent) returns every page in
-   one call.
-3. Time-in-status: how cheaply the changelog's last status transition can be
-   read, per issue or in bulk. `statuscategorychangedate` gives only
-   time-in-category (see **Fields**).
-4. Auth under `launchd`: `acli jira auth login` stores a credential. It must be
-   readable by a non-interactive agent with no TTY. If it lives in a login
-   keychain that `launchd` agents can read, this works. If it needs a prompt,
-   the daemon can't sync unattended.
-5. `watcher = currentUser()` is valid JQL on the target site. Some sites
-   restrict watcher search.
-6. `acli` can list a board's active sprints. The sprint scope depends on it.
+- **Unattended auth works.** A throwaway gui-domain LaunchAgent ran a search
+  with exit 0. acli's OAuth credential lives in the login keychain, which is
+  unlocked once the user has logged in.
+- **Every needed field is reachable.** It just isn't reachable from `search`,
+  hence the two-step fetch under **Jira through `acli`**.
 
-Items 1 and 4 can kill the design, so they are the first spike: a script on the
-work laptop that runs the scope queries and dumps the JSON. For item 4, the
-same script must also run once from a throwaway `launchd` agent, because an
-interactive run has a TTY and a login session and so can't test unattended
-auth. The same run answers item 5.
+What the results changed in this design, each described in its own section:
+
+| Finding                                                 | Where it lands                                                    |
+| ------------------------------------------------------- | ----------------------------------------------------------------- |
+| `search` returns only a fixed field list                | Two-step fetch; full refresh is ~100s, so on demand only          |
+| acli can't read the changelog                           | Stuck and Stale measure time in category                          |
+| No field-listing command, and `names` comes back empty  | Custom field ids are configured per site                          |
+| The sprint field holds the issue's whole sprint history | Keep the element whose `state` is `active`                        |
+| Absolute JQL dates use the profile timezone             | Relative incremental cursor                                       |
+| `gh search prs` has no branch name                      | GraphQL search, filtered to `github.orgs`                         |
+| Branches carry lower-case Jira keys                     | Case-insensitive join, with an allowlist of mirrored project keys |
+| About 1% of `view` calls fail at 8-way concurrency      | Serial retry                                                      |
+
+Still untested:
+
+- **Whether the OAuth refresh token expires over days.** The expired-auth
+  header state covers this case if it happens.
+- **Plan C**, in case the `view` fan-out proves too slow or flaky: REST
+  `/rest/api/3/search/jql` returns any field in one paginated call. It needs a
+  separate API token.
 
 ## Out of scope for v1
 
