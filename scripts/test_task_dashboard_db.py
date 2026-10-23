@@ -161,6 +161,12 @@ class ConfigTests(TmpCase):
             config.load(p)
         self.assertIn(str(p), str(cm.exception))
 
+    def test_invalid_toml_names_path(self):
+        p = self.write_config("[jira\n")
+        with self.assertRaises(config.ConfigError) as cm:
+            config.load(p)
+        self.assertIn(str(p), str(cm.exception))
+
     def test_defaults_and_partial_weights(self):
         p = self.write_config(MINIMAL + "\n[score.weights]\npriority = 9\n")
         cfg = config.load(p)

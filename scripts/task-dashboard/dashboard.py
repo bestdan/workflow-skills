@@ -4,8 +4,10 @@ Run as `uv run --no-project --python ">=3.11" python scripts/task-dashboard/dash
 The program needs 3.11 (tomllib), but the `python3` macOS ships is 3.9, so the
 version guard comes before any import that could fail on it. That also means
 this file must stay *parseable* by 3.9: no match statements, no parenthesised
-context managers, no `X | Y` evaluated at module scope. Otherwise the guard
-could never run and the user would see a SyntaxError instead of the requirement.
+context managers, or 3.9 raises a SyntaxError before the guard can run. And
+nothing above the guard may use a 3.10+ runtime feature such as `X | Y` on
+types: 3.9 parses that fine but raises TypeError when it runs, again before the
+guard prints the requirement. Below the guard, 3.9 never gets that far.
 """
 
 import sys
