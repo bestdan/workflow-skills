@@ -222,21 +222,35 @@ def milestone_approved(description: "str | None") -> bool:
 
 
 class MilestoneCache:
-    """Milestone descriptions, fetched once per (repo, number) for one run."""
+    """Milestone descriptions, fetched once per (repo, number) for one run.
+
+    A non-auth failure is remembered too and raised again without calling
+    `gh`, so a 502 costs one call per milestone, not one per PR in it. An
+    AuthError is never cached.
+    """
 
     def __init__(self, runner: Runner, timeout: float) -> None:
         self.runner = runner
         self.timeout = timeout
         self.by_repo: dict[str, dict[int, str]] = {}
+        self.failed: dict[tuple[str, int], GhError] = {}
 
     def description(self, repo: str, number: int) -> str:
         cache = self.by_repo.setdefault(repo, {})
+        if (repo, number) in self.failed:
+            raise self.failed[(repo, number)]
         if number not in cache:
-            data = github_gh._call(
-                ["gh", "api", f"repos/{repo}/milestones/{int(number)}"],
-                self.runner,
-                self.timeout,
-            )
+            try:
+                data = github_gh._call(
+                    ["gh", "api", f"repos/{repo}/milestones/{int(number)}"],
+                    self.runner,
+                    self.timeout,
+                )
+            except github_gh.AuthError:
+                raise
+            except GhError as exc:
+                self.failed[(repo, number)] = exc
+                raise
             cache[number] = (data or {}).get("description") or ""
         return cache[number]
 
@@ -408,21 +422,25 @@ def proposed_designs(
     runner: Runner = run,
     timeout: float = DEFAULT_TIMEOUT,
     max_files: int = MAX_DESIGN_FILES,
-) -> "tuple[list[dict], list[str]]":
-    """Design docs at `status: proposed`, and the repos whose list was capped.
+) -> "tuple[list[dict], list[str], list[str]]":
+    """Proposed design docs, the repos whose list was capped, and the missing.
 
     Reads `dev_docs/designs/*.md` on each repo's default branch through the
-    contents API, at most `max_files` files per repo. A repo without the
-    directory contributes nothing. Age is the front matter's `created`, else
-    the date in a dated file name, else unknown.
+    contents API, at most `max_files` files per repo. A repo whose listing is
+    a 404 contributes nothing and is reported in `missing`: GitHub answers a
+    repo with no designs directory and a mistyped repo name the same way.
+    Age is the front matter's `created`, else the date in a dated file name,
+    else unknown.
     """
     rows: list[dict] = []
     truncated: list[str] = []
+    missing: list[str] = []
     for repo in repos:
         if not _REPO.match(repo):
             raise ValueError(f"not an owner/name repo: {repo!r}")
         listing = _contents(repo, DESIGNS_DIR, runner, timeout)
         if listing is None:
+            missing.append(repo)
             continue
         if not isinstance(listing, list):
             raise GhError(f"{repo}/{DESIGNS_DIR} is not a directory")
@@ -466,7 +484,7 @@ def proposed_designs(
                     or (dated.group(1) if dated else None),
                 }
             )
-    return rows, truncated
+    return rows, truncated, missing
 
 
 # --- sync --------------------------------------------------------------------
@@ -478,7 +496,7 @@ def fetch(
     """Every github row for the fleet view. Reads GitHub; writes nothing."""
     owners = list(config["github"]["orgs"])
     queue, failed = review_queue(owners, runner, timeout)
-    designs, truncated = proposed_designs(
+    designs, truncated, missing = proposed_designs(
         config["github"].get("design_repos", []), runner, timeout
     )
     rows = queue + issues_needing_human(owners, runner, timeout) + designs
@@ -486,6 +504,7 @@ def fetch(
         "rows": rows,
         "failed": failed,
         "truncated": truncated,
+        "missing": missing,
         "counts": queue_counts(rows),
     }
 

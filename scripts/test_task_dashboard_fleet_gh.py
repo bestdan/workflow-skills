@@ -348,10 +348,17 @@ class ReviewQueueTests(unittest.TestCase):
         self.assertIn("author { login }", query)
 
     def test_milestone_lookup_failure_is_a_miss_not_fatal(self):
-        rows, failed, _ = self.run_queue(None, milestone_error=(1, "", "HTTP 502"))
+        rows, failed, runner = self.run_queue(None, milestone_error=(1, "", "HTTP 502"))
         self.assertEqual(len(rows), 4)
         self.assertEqual(sorted(failed), sorted(r["url"] for r in rows))
         self.assertTrue(all(r["queue_misses"] == ["milestone"] for r in rows))
+        # Four PRs sit in two milestones; a failure is remembered, so each
+        # milestone is asked once rather than once per PR.
+        fetched = [c[2] for c in runner.calls if "/milestones/" in c[2]]
+        self.assertEqual(
+            sorted(fetched),
+            [f"repos/{REPO}/milestones/13", f"repos/{REPO}/milestones/14"],
+        )
 
     def test_comments_lookup_failure_is_a_miss_not_fatal(self):
         node = review_page()["data"]["search"]["nodes"][1]
@@ -475,8 +482,9 @@ def designs_router(listing=None, extra=()):
 
 class DesignTests(unittest.TestCase):
     def test_only_proposed(self):
-        rows, truncated = fleet.proposed_designs([REPO], designs_router())
+        rows, truncated, missing = fleet.proposed_designs([REPO], designs_router())
         self.assertEqual(truncated, [])
+        self.assertEqual(missing, [])
         self.assertEqual(len(rows), 1)
         row = rows[0]
         self.assertEqual(row["kind"], "design")
@@ -493,13 +501,24 @@ class DesignTests(unittest.TestCase):
         fleet.proposed_designs([REPO], runner)
         self.assertTrue(all("ref=" not in " ".join(c) for c in runner.calls))
 
-    def test_missing_directory_is_empty(self):
+    def test_missing_directory_is_reported(self):
         runner = Router([(lambda a: True, NOT_FOUND)])
-        self.assertEqual(fleet.proposed_designs(["bestdan/x"], runner), ([], []))
+        self.assertEqual(
+            fleet.proposed_designs(["bestdan/x"], runner), ([], [], ["bestdan/x"])
+        )
+
+    def test_missing_repo_does_not_hide_the_others(self):
+        runner = designs_router(extra=[(lambda a: "bestdan/typo/" in a[2], NOT_FOUND)])
+        rows, truncated, missing = fleet.proposed_designs(
+            ["bestdan/typo", REPO], runner
+        )
+        self.assertEqual(missing, ["bestdan/typo"])
+        self.assertEqual(truncated, [])
+        self.assertEqual(len(rows), 1)
 
     def test_cap_reads_newest_and_reports(self):
         runner = designs_router()
-        rows, truncated = fleet.proposed_designs([REPO], runner, max_files=2)
+        rows, truncated, _ = fleet.proposed_designs([REPO], runner, max_files=2)
         self.assertEqual(truncated, [REPO])
         read = [c[2] for c in runner.calls if c[2].endswith(".md")]
         self.assertEqual(len(read), 2)
@@ -555,6 +574,7 @@ class WriteTests(unittest.TestCase):
     def test_rows_land_as_github_by_kind(self):
         plan = fleet.fetch(self.config(), self.full_runner())
         self.assertEqual(plan["failed"], [])
+        self.assertEqual(plan["missing"], [])
         fleet.write(self.conn, plan["rows"], NOW)
         kinds = dict(
             self.conn.execute(
@@ -593,6 +613,16 @@ class WriteTests(unittest.TestCase):
         self.assertEqual(
             self.conn.execute("SELECT COUNT(*) FROM jira_issues").fetchone()[0], 1
         )
+
+    def test_fetch_reports_missing_design_repos(self):
+        config = {
+            "github": {"orgs": ["bestdan"], "design_repos": ["bestdan/typo", REPO]}
+        }
+        runner = self.full_runner()
+        runner.rules.insert(0, (lambda a: "bestdan/typo/" in a[2], NOT_FOUND))
+        plan = fleet.fetch(config, runner)
+        self.assertEqual(plan["missing"], ["bestdan/typo"])
+        self.assertEqual(sum(1 for r in plan["rows"] if r["kind"] == "design"), 1)
 
     def test_ci_failure_is_reported_not_fatal(self):
         plan = fleet.fetch(self.config(), self.full_runner(ci=(1, "", "HTTP 502")))
