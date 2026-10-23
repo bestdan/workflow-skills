@@ -87,7 +87,8 @@ STRICT_FILES=(scripts/research-spike.py)
 # same way once #709 wires it in, coreview-input-lock.py the same way by
 # skills/co-review/SKILL.md and its agy/devin/grok reviewer files,
 # co-review-ledger-sync.py the same way by commands/co-review-stats.md and
-# commands/doctor.md,
+# commands/doctor.md, co-review-stamp.py the same way by
+# skills/co-review/references/stamping.md,
 # and worktree-teardown-reminder.py, guard-foreign-worktree.py,
 # guard-pinned-branch.py and guard-enter-by-path.py are run by the harness
 # itself — hooks/hooks.json registers them on PostToolUse and PreToolUse, so
@@ -100,6 +101,7 @@ CONSUMER_FILES=(
   scripts/diff-anchor-check.py
   scripts/grok-telemetry-gate.py
   scripts/co-review-record.py
+  scripts/co-review-stamp.py
   scripts/coreview-input-lock.py
   scripts/co-review-stats.py
   scripts/co-review-ledger-sync.py

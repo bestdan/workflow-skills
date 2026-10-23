@@ -4,6 +4,7 @@ description: Use when the user wants a collaborative review of a PR — their ow
 allowed-tools:
   - Bash(date:*)
   - Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/co-review-record.py":*)
+  - Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/co-review-stamp.py":*)
   - Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/coreview-input-lock.py":*)
   - Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/coreview-rule-drift.py":*)
   - Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/diff-anchor-check.py":*)
@@ -408,7 +409,7 @@ label is the only signal of how hard each finding is meant to land.
 
    Worked examples of fixes that break the code they claim to repair are in [`references/judging-fixes.md`](references/judging-fixes.md).
 
-   **Record the grades the moment the reconciler returns** — after the tree-state comparison, before step 9 presents anything and before any fix is applied or review posted, in every mode including `--non-interactive` and `--post`. Write the run metadata (each reviewer's measured `duration_s` included), the reconciler's array as returned, and the label mapping to three files, then run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/co-review-record.py" --run <meta.json> --findings <recon.json> --mapping <map.json>`. **Never fatal:** a failure is a warning on section 1's reviewer line, and the review carries on. Paths, JSON shapes, and the outcome handling are in [`references/recording.md`](references/recording.md).
+   **Record the grades the moment the reconciler returns** — after the tree-state comparison, before step 9 presents anything and before any fix is applied or review posted, in every mode including `--non-interactive` and `--post`. Write the run metadata (each reviewer's measured `duration_s` included), the reconciler's array as returned, and the label mapping to three files, then run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/co-review-record.py" --run <meta.json> --findings <recon.json> --mapping <map.json>`. **Never fatal:** a failure is a warning on section 1's reviewer line, and the review carries on. Paths, JSON shapes, and the outcome handling are in [`references/recording.md`](references/recording.md). **Then, in the PR modes, stamp the PR** with the head this run reviewed — step 3's `headRefOid`, never a head co-review's own fixes pushed later — via `scripts/co-review-stamp.py`, which edits one comment in place. Not under `--local`. **Never fatal** either; the call and its reporting are in [`references/stamping.md`](references/stamping.md).
 
 9. **Reconcile and present** to the user. Label every finding per **Comment style** above — exactly one label each: the reconciled tier's label **replaces** any prefix a reviewer agent already wrote into the finding text, so a downgraded item can't keep a stale `(blocking)`. A **wrong**, **not-applicable** or **out-of-scope** verdict puts a finding on the **Skipped** list, each with its verdict and the reconciler's reason, so the user can pull any of them back in.
 
@@ -435,7 +436,7 @@ label is the only signal of how hard each finding is meant to land.
    - **`--non-interactive`, default disposition:** there is no one to answer, so **section 3 becomes the deferred log** — every medium finding recorded as a deferred judgment call and every verification item recorded as a deferred entry, so the `/deliver-task` caller can carry them into the PR body and the hand-off.
    - **`--post --non-interactive`:** the `--post` shape wins — **section 3 stays the post-candidate list**, because step 10 skips the vetting gate and step 11 posts that high+medium set. The verification list stays in section 2, user-facing only, and is still never posted.
 
-   Under `--non-interactive` in either disposition, section 1's reviewer line is the run's machine-readable outcome: report each **reviewer class** (local agents, CLI reviewers, remote bots) as ✅ ran / ❌ failed / ⏱️ timed out / ➖ skipped — reason, whether the review conventions were attached to `<INPUT>` (and if not, why — see **Review conventions**), and whether the run was recorded (step 8), so the caller can see the coverage gaps.
+   Under `--non-interactive` in either disposition, section 1's reviewer line is the run's machine-readable outcome: report each **reviewer class** (local agents, CLI reviewers, remote bots) as ✅ ran / ❌ failed / ⏱️ timed out / ➖ skipped — reason, whether the review conventions were attached to `<INPUT>` (and if not, why — see **Review conventions**), and whether the run was recorded and the PR stamped (step 8), so the caller can see the coverage gaps.
 
 The remaining steps depend on disposition.
 
