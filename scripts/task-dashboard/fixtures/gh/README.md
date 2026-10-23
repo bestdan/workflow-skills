@@ -29,7 +29,7 @@ from the public `bestdan/workflow-skills` only:
 - `fleet_design_proposed.json` and `fleet_design_accepted.json` are real
   contents API responses for one design at `status: proposed` and one at
   `status: accepted`. Each `content` was re-encoded to keep only the front
-  matter and title, since nothing past the front matter is parsed.
+  matter and title, since only the front matter and the first `#` heading are parsed.
 - `fleet_milestone_13.json` and `fleet_milestone_14.json` are real
   `repos/bestdan/workflow-skills/milestones/<n>` responses, the milestones
   those PRs' issues sit in. Neither description has an `approved: yes` line;
