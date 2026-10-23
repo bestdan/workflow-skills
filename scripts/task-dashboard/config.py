@@ -23,7 +23,9 @@ ENV_VAR = "TASK_DASHBOARD_CONFIG"
 DEFAULT_PATH = Path("~/.config/task-dashboard/config.toml")
 
 DEFAULTS: dict[str, Any] = {
-    "jira": {"blocked_statuses": [], "acli_path": "acli"},
+    # `me` is my Jira display name, which the mirror stores people by. Empty
+    # means "not set": the views then treat every in-scope issue as mine.
+    "jira": {"blocked_statuses": [], "acli_path": "acli", "me": ""},
     # design_repos: `owner/name` repos whose dev_docs/designs/ the fleet view
     # reads for `status: proposed` (github_fleet.py). Empty reads none.
     "github": {"enabled": True, "orgs": [], "design_repos": []},
@@ -45,7 +47,12 @@ DEFAULTS: dict[str, Any] = {
             "stuck": 1,
             "review": 2,
             "blocked": -10,
-        }
+        },
+        # Days in a status category before the Stuck term starts counting.
+        # Stale uses the `indeterminate` one. v1 measures time in category, not
+        # in status: acli cannot read the changelog (Fields, under Sync, in
+        # dev_docs/designs/2026-10-23-task-dashboard.md).
+        "stuck_days": {"new": 14, "indeterminate": 5},
     },
 }
 

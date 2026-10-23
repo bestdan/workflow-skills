@@ -298,6 +298,7 @@ site = "mycompany.atlassian.net"
 board_ids = [123] # sprint scope: these boards' active sprints
 blocked_statuses = ["Blocked", "On Hold"]
 acli_path = "acli" # point at the fake acli to run without Jira
+me = "Jane Doe" # my Jira display name; empty = every in-scope issue is mine
 
 [jira.fields] # per site; acli can't list them
 sprint = "customfield_10303"
@@ -306,6 +307,7 @@ flagged = "customfield_10007"
 [github]
 enabled = true
 orgs = ["mycompany"]
+design_repos = [] # owner/name repos whose proposed designs the fleet view reads
 
 [sync]
 interval_minutes = 5
@@ -324,6 +326,10 @@ unblocks = 2
 stuck = 1
 review = 2
 blocked = -10
+
+[score.stuck_days] # days in a status category before Stuck counts; Stale uses indeterminate
+new = 14
+indeterminate = 5
 ```
 
 ## The launchd plist and the versioned plugin path
