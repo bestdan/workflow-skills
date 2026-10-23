@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.108.0] - 2026-10-23
+
+### Features
+
+- add the ingest endpoint and snapshot adapter [#1103] (#1128) (7a80a0e)
+
 ## [2.107.1] - 2026-10-23
 
 ### Fixes
