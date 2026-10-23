@@ -322,8 +322,8 @@ def parse_issue(raw: dict[str, Any], field_ids: dict[str, str]) -> dict[str, Any
     """One `view` response as `{"issue": <issues row>, "links": [<links rows>]}`.
 
     `field_ids` is the per-site `jira.fields` config (`sprint`, `flagged`). The
-    issue row carries every `issues` column except `synced_at`, which the sync
-    stamps. People are stored by display name, never account id or email.
+    issue row carries every `issues` column except `source`, `kind`, `scope`
+    and `synced_at`, which the sync stamps. People are stored by display name, never account id or email.
     """
     key = raw.get("key")
     if not isinstance(key, str) or not key:

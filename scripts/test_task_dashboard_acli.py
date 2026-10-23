@@ -224,7 +224,10 @@ class ParseTests(unittest.TestCase):
         link_cols = {r[1] for r in conn.execute("PRAGMA table_info(links)")}
         conn.close()
         out = acli.parse_issue(load("view-links-sprints-flagged.json"), FIELD_IDS)
-        self.assertEqual(set(out["issue"]), cols - {"synced_at"})
+        # The sync stamps these itself: the row's source/kind, which scope
+        # found it, and when (sync.py).
+        stamped = {"source", "kind", "scope", "synced_at"}
+        self.assertEqual(set(out["issue"]), cols - stamped)
         self.assertEqual(set(out["links"][0]), link_cols)
 
     def test_no_active_sprint(self):

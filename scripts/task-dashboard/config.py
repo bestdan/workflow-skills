@@ -94,6 +94,20 @@ def load(path: "str | os.PathLike[str] | None" = None) -> dict[str, Any]:
     cfg = deep_merge(DEFAULTS, user)
     for dotted in REQUIRED_KEYS:
         _lookup(cfg, dotted)
-    if not isinstance(cfg["jira"]["board_ids"], list):
-        raise ConfigError("jira.board_ids must be a list of board ids")
+    for dotted in ("jira.site", "jira.fields.sprint", "jira.fields.flagged"):
+        _non_empty_str(cfg, dotted)
+    _non_empty_str(cfg, "jira.acli_path")
+    # An empty list is valid and means "no sprint scope": the assigned and
+    # reported/watched scopes still work for someone who is on no board.
+    ids = cfg["jira"]["board_ids"]
+    if not isinstance(ids, list) or not all(
+        isinstance(i, int) and not isinstance(i, bool) for i in ids
+    ):
+        raise ConfigError("jira.board_ids must be a list of integer board ids")
     return cfg
+
+
+def _non_empty_str(cfg: dict[str, Any], dotted: str) -> None:
+    value = _lookup(cfg, dotted)
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(f"config key {dotted} must be a non-empty string")

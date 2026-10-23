@@ -87,7 +87,9 @@ class DbTests(TmpCase):
         path = self.tmp / "d.db"
         conn = db.connect(path)
         before = self.tables(conn)
-        conn.execute("INSERT INTO notes (item_key, body) VALUES ('ABC-1', 'keep me')")
+        conn.execute(
+            "INSERT INTO notes (source, item_key, body) VALUES ('jira', 'ABC-1', 'keep me')"
+        )
         conn.commit()
         conn.close()
         conn = db.connect(path)
@@ -104,7 +106,8 @@ class DbTests(TmpCase):
     def test_order_table_is_usable(self):
         conn = db.connect(self.tmp / "d.db")
         conn.execute(
-            'INSERT INTO "order" (item_key, position) VALUES (?, ?)', ("ABC-1", 1.5)
+            'INSERT INTO "order" (source, item_key, position) VALUES (?, ?, ?)',
+            ("jira", "ABC-1", 1.5),
         )
         row = conn.execute(
             'SELECT position FROM "order" WHERE item_key = ?', ("ABC-1",)
@@ -139,6 +142,88 @@ class DbTests(TmpCase):
         self.assertEqual(int(ver), original[-1][0] + 1)
         conn.close()
         db.connect(path).close()  # second open must not re-run the ALTER
+
+    def test_v2_items_are_keyed_by_source_and_key(self):
+        conn = db.connect(self.tmp / "d.db")
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(issues)")}
+        self.assertLessEqual({"source", "kind", "key", "scope"}, cols)
+        for source, kind in (("jira", "ticket"), ("claude-remote", "session")):
+            conn.execute(
+                "INSERT INTO issues (source, kind, key) VALUES (?, ?, 'X-1')",
+                (source, kind),
+            )
+        with self.assertRaises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO issues (source, kind, key) VALUES ('jira', 'ticket', 'X-1')"
+            )
+        self.assertEqual(
+            conn.execute("SELECT kind FROM jira_issues").fetchall(), [("ticket",)]
+        )
+        for table in ("pins", '"order"', "snoozes", "notes"):
+            conn.execute(
+                f"INSERT INTO {table} (source, item_key) VALUES ('jira', 'X-1')"
+            )
+            conn.execute(
+                f"INSERT INTO {table} (source, item_key) VALUES ('claude-remote', 'X-1')"
+            )
+        conn.close()
+
+    def test_v1_rows_migrate_to_v2(self):
+        path = self.tmp / "d.db"
+        original = db.MIGRATIONS
+        db.MIGRATIONS = original[:1]
+        try:
+            conn = db.connect(path)
+        finally:
+            db.MIGRATIONS = original
+        conn.execute("INSERT INTO issues (key, summary) VALUES ('ABC-1', 'old')")
+        conn.execute("INSERT INTO notes (item_key, body) VALUES ('ABC-1', 'n1')")
+        conn.execute(
+            "INSERT INTO pins (item_key, pinned_at) VALUES ('https://github.com/a/b/pull/1', 't')"
+        )
+        conn.execute("INSERT INTO \"order\" (item_key, position) VALUES ('ABC-1', 2.5)")
+        conn.commit()
+        conn.close()
+        conn = db.connect(path)
+        self.assertEqual(
+            conn.execute(
+                "SELECT source, kind, key, summary, scope FROM issues"
+            ).fetchall(),
+            [("jira", "ticket", "ABC-1", "old", "search")],
+        )
+        self.assertEqual(
+            conn.execute("SELECT source, item_key, body FROM notes").fetchall(),
+            [("jira", "ABC-1", "n1")],
+        )
+        self.assertEqual(
+            conn.execute("SELECT source, pinned_at FROM pins").fetchall(),
+            [("github", "t")],
+        )
+        self.assertEqual(
+            conn.execute('SELECT source, position FROM "order"').fetchall(),
+            [("jira", 2.5)],
+        )
+        self.assertIn(
+            "outcome", {r[1] for r in conn.execute("PRAGMA table_info(sync_runs)")}
+        )
+        conn.close()
+
+    def test_failed_migration_releases_the_write_lock(self):
+        path = self.tmp / "d.db"
+        db.connect(path).close()
+        original = db.MIGRATIONS
+        db.MIGRATIONS = original + [
+            (original[-1][0] + 1, "CREATE TABLE ok_one (x);\nNOT VALID SQL;")
+        ]
+        self.addCleanup(setattr, db, "MIGRATIONS", original)
+        with self.assertRaises(sqlite3.Error):
+            db.connect(path)
+        other = sqlite3.connect(path, timeout=0.1)
+        other.execute("INSERT INTO pins (source, item_key) VALUES ('jira', 'Z-1')")
+        other.commit()
+        names = {r[0] for r in other.execute("SELECT name FROM sqlite_master")}
+        self.assertNotIn("ok_one", names)
+        other.close()
 
     def test_env_var_db_path(self):
         target = self.tmp / "sub" / "env.db"

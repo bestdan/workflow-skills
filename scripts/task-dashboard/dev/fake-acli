@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+"""A stand-in for `acli`, answering from scripts/task-dashboard/fixtures/acli/.
+
+Point the dashboard at it with `jira.acli_path` to run a sync end to end with
+no Jira. It answers the three calls the dashboard makes:
+
+- `jira workitem search --jql <JQL> [--paginate] --json ...`: a `key in (...)`
+  query returns exactly those keys; any other query returns search-page.json.
+- `jira workitem view <KEY> ... --json`: the view-*.json fixture carrying that
+  key, else a synthesized issue built on view-all-null.json, so the linked
+  pass's keys resolve too.
+- `jira board list-sprints --id <N> --state active --json`:
+  list-sprints-active.json.
+
+FAKE_ACLI_MODE selects a failure path:
+
+- `auth_fail`: every call prints stderr-auth-*.txt and exits 1.
+- `flaky`: each key's first `view` prints stderr-transient-*.txt and exits 1;
+  its retry succeeds. Attempts are remembered in FAKE_ACLI_STATE (default: a
+  directory under the temp dir named for the calling process).
+
+FAKE_ACLI_FIXTURES overrides the fixture directory. Stdlib only, so it runs
+under any python3.
+"""
+
+import json
+import os
+import re
+import sys
+import tempfile
+from pathlib import Path
+
+FIXTURES = Path(
+    os.environ.get("FAKE_ACLI_FIXTURES")
+    or Path(__file__).resolve().parents[1] / "fixtures" / "acli"
+)
+
+
+def first(pattern):
+    matches = sorted(FIXTURES.glob(pattern))
+    if not matches:
+        sys.exit(f"fake-acli: no fixture matching {pattern} in {FIXTURES}")
+    return matches[0]
+
+
+def fail(pattern):
+    sys.stderr.write(first(pattern).read_text())
+    return 1
+
+
+def flag(args, name):
+    if name in args:
+        i = args.index(name)
+        if i + 1 < len(args):
+            return args[i + 1]
+    return None
+
+
+def search(args):
+    jql = flag(args, "--jql") or ""
+    m = re.search(r"key in \(([^)]*)\)", jql)
+    if m:
+        keys = [k.strip() for k in m.group(1).split(",") if k.strip()]
+        print(json.dumps([{"key": k, "fields": {}} for k in keys]))
+    else:
+        sys.stdout.write(first("search-*.json").read_text())
+    return 0
+
+
+def view_fixture(key):
+    for path in sorted(FIXTURES.glob("view-*.json")):
+        data = json.loads(path.read_text())
+        if data.get("key") == key:
+            return data
+    data = json.loads(first("view-all-null.json").read_text())
+    data["key"] = key
+    data["fields"]["summary"] = f"Fake issue {key}"
+    data["fields"]["status"] = {
+        "name": "To Do",
+        "statusCategory": {"key": "new", "name": "To Do"},
+    }
+    return data
+
+
+def first_attempt(key):
+    state = Path(
+        os.environ.get("FAKE_ACLI_STATE")
+        or Path(tempfile.gettempdir()) / f"fake-acli-{os.getppid()}"
+    )
+    state.mkdir(parents=True, exist_ok=True)
+    try:
+        os.close(os.open(state / key, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+    except FileExistsError:
+        return False
+    return True
+
+
+def view(args, mode):
+    if len(args) < 4:
+        sys.stderr.write("fake-acli: view needs a key\n")
+        return 2
+    key = args[3]
+    if mode == "flaky" and first_attempt(key):
+        return fail("stderr-transient-*")
+    print(json.dumps(view_fixture(key)))
+    return 0
+
+
+def main(argv):
+    mode = os.environ.get("FAKE_ACLI_MODE", "")
+    if mode == "auth_fail":
+        return fail("stderr-auth-*")
+    head = argv[:3]
+    if head == ["jira", "workitem", "search"]:
+        return search(argv)
+    if head == ["jira", "workitem", "view"]:
+        return view(argv, mode)
+    if head == ["jira", "board", "list-sprints"]:
+        sys.stdout.write(first("list-sprints-*.json").read_text())
+        return 0
+    sys.stderr.write(f"fake-acli: unsupported command: {' '.join(argv)}\n")
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
