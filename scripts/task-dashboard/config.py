@@ -23,7 +23,9 @@ DEFAULT_PATH = Path("~/.config/task-dashboard/config.toml")
 
 DEFAULTS: dict[str, Any] = {
     "jira": {"blocked_statuses": [], "acli_path": "acli"},
-    "github": {"enabled": True, "orgs": []},
+    # design_repos: `owner/name` repos whose dev_docs/designs/ the fleet view
+    # reads for `status: proposed` (github_fleet.py). Empty reads none.
+    "github": {"enabled": True, "orgs": [], "design_repos": []},
     "sync": {
         "interval_minutes": 5,
         "reconcile_minutes": 60,

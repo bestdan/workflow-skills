@@ -1,0 +1,68 @@
+{
+  "data": {
+    "search": {
+      "pageInfo": {
+        "hasNextPage": false,
+        "endCursor": "Y3Vyc29yOjQ="
+      },
+      "nodes": [
+        {
+          "url": "https://github.com/bestdan/workflow-skills/pull/1117",
+          "number": 1117,
+          "title": "feat(task-dashboard): add the sync engine and a fake acli [#1089]",
+          "body": "Closes #1089\n\n## What & why\n\nAdds the task-dashboard sync engine (`scripts/task-dashboard/sync.py`), a `dashboard.py sync [--mode …]` subcommand, and `dev/fake-acli` so a sync runs end to end without Jira. A run fetches everything first, then writes every mirror change in one SQLite transaction. `sync_runs` is written outside it, so a failure is recorded and the mirror is left unchanged.\n",
+          "headRefName": "bestdan/task-1089",
+          "isDraft": false,
+          "reviewDecision": null,
+          "createdAt": "2026-10-23T20:04:07Z",
+          "updatedAt": "2026-10-23T20:52:56Z",
+          "repository": {
+            "nameWithOwner": "bestdan/workflow-skills"
+          }
+        },
+        {
+          "url": "https://github.com/bestdan/workflow-skills/pull/1116",
+          "number": 1116,
+          "title": "feat(fleet): add machine snapshot builder [#1102]",
+          "body": "Closes #1102\n\n## What & why\n\nThe fleet view needs the state that exists only on a machine. `scripts/task-dashboard/snapshot.py` prints one `schema: 1` JSON document of it: worktrees for every repo under `$HOME/src`, handoff front matter, tmux sessions, and cursor-tracked deltas of the session-state hook logs (#1099) and `~/.claude/history.jsonl`. Shipping it to the mini is task 6, not this PR.\n",
+          "headRefName": "bestdan/task-1102",
+          "isDraft": false,
+          "reviewDecision": null,
+          "createdAt": "2026-10-23T19:53:32Z",
+          "updatedAt": "2026-10-23T20:53:00Z",
+          "repository": {
+            "nameWithOwner": "bestdan/workflow-skills"
+          }
+        },
+        {
+          "url": "https://github.com/bestdan/workflow-skills/pull/1115",
+          "number": 1115,
+          "title": "docs(research): record whether a daemon can read the Remote session list [#1098]",
+          "body": "Closes #1098\n\n## What & why\n\nThe fleet view's **Needs you** queue assumed a background daemon could read the\nClaude Code Remote session list, `status_category` and `needs_action` included.\nThis research record tests that. Its verdict decides the shape of #1100.\n",
+          "headRefName": "bestdan/task-1098",
+          "isDraft": false,
+          "reviewDecision": null,
+          "createdAt": "2026-10-23T18:44:42Z",
+          "updatedAt": "2026-10-23T19:42:10Z",
+          "repository": {
+            "nameWithOwner": "bestdan/workflow-skills"
+          }
+        },
+        {
+          "url": "https://github.com/bestdan/workflow-skills/pull/1114",
+          "number": 1114,
+          "title": "feat(task-dashboard): add gh adapter for PR search and CI state [#1088]",
+          "body": "Closes #1088\n\n## What & why\n\nAdds the dashboard's GitHub source adapter, `scripts/task-dashboard/github_gh.py`. It finds my open PRs and the PRs requesting my review through a paginated GraphQL search, run once per configured owner because `gh search prs` returns no branch name. It reduces each PR's `statusCheckRollup` to `success | failure | pending | none`, and pulls allowlisted Jira keys out of a PR's title or branch. Every `gh` call goes through one fakeable `run(argv, timeout)` seam. Its signature matches the one #1086 specifies for `acli`, but this PR shares no code with that adapter.\n",
+          "headRefName": "bestdan/task-1088",
+          "isDraft": false,
+          "reviewDecision": null,
+          "createdAt": "2026-10-23T18:41:28Z",
+          "updatedAt": "2026-10-23T19:41:16Z",
+          "repository": {
+            "nameWithOwner": "bestdan/workflow-skills"
+          }
+        }
+      ]
+    }
+  }
+}

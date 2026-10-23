@@ -11,3 +11,21 @@ in public `bestdan/*` repos only. No work data.
 
 The search fixture's other 147 nodes were dropped rather than kept because most
 of them are in private repos.
+
+The `fleet_*` files feed `github_fleet.py`. They were captured on 2026-10-23
+from the public `bestdan/workflow-skills` only:
+
+- `fleet_issues_search.json` is real: the GraphQL `search` for open
+  `auto:human-review-needed` issues (`first:3`), with `hasNextPage` set to
+  `false`.
+- `fleet_review_search.json` is real: four PR nodes from the search
+  `is:pr repo:bestdan/workflow-skills` with their `body`, each
+  body cut after its first `## What & why` paragraph, and `hasNextPage` set
+  to `false`. None carries a `## Decision brief`, so the tests add one to a
+  copied node.
+- `fleet_designs_list.json` is real: the contents API listing of
+  `dev_docs/designs`, cut to three entries.
+- `fleet_design_proposed.json` and `fleet_design_accepted.json` are real
+  contents API responses for one design at `status: proposed` and one at
+  `status: accepted`. Each `content` was re-encoded to keep only the front
+  matter and title, since nothing past the front matter is parsed.
