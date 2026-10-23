@@ -47,8 +47,6 @@ TERMS = ("priority", "deadline", "unblocks", "stuck", "review", "blocked")
 
 Term = tuple[str, float, str]
 
-_TS = "%Y-%m-%dT%H:%M:%SZ"
-
 
 def parse_ts(value: "str | None") -> "datetime | None":
     """A mirror timestamp (`...Z`, UTC) or a bare date (midnight UTC)."""

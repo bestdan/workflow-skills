@@ -244,15 +244,17 @@ def seed_views(conn):
         links,
     )
     prs = [
-        ("https://github.com/o/r/pull/1", 1, "ABC-1 fix", "author", "APPROVED", "success", "ABC-1"),
-        ("https://github.com/o/r/pull/2", 2, "ABC-2 wip", "author", "REVIEW_REQUIRED", "pending", "ABC-2"),
-        ("https://github.com/o/r/pull/3", 3, "their change", "reviewer", None, "success", None),
-        ("https://github.com/o/r/pull/4", 4, "no review rule", "author", None, "success", None),
+        ("https://github.com/o/r/pull/1", 1, "ABC-1 fix", 0, "author", "APPROVED", "success", "ABC-1"),
+        ("https://github.com/o/r/pull/2", 2, "ABC-2 wip", 0, "author", "REVIEW_REQUIRED", "pending", "ABC-2"),
+        ("https://github.com/o/r/pull/3", 3, "their change", 0, "reviewer", None, "success", None),
+        ("https://github.com/o/r/pull/4", 4, "no review rule", 0, "author", None, "success", None),
+        # A draft is waiting on nobody, even where a review is required.
+        ("https://github.com/o/r/pull/5", 5, "draft", 1, "author", "REVIEW_REQUIRED", "success", None),
     ]  # fmt: skip
     conn.executemany(
         "INSERT INTO prs (url, repo, number, title, is_draft, role, review_decision,"
-        " ci_state, issue_key) VALUES (?, 'o/r', ?, ?, 0, ?, ?, ?, ?)",
-        [(u, n, t, role, rd, ci, k) for u, n, t, role, rd, ci, k in prs],
+        " ci_state, issue_key) VALUES (?, 'o/r', ?, ?, ?, ?, ?, ?, ?)",
+        prs,
     )
     conn.execute(
         "INSERT INTO pins (source, item_key, pinned_at) VALUES ('jira', 'ABC-2', ?)",
