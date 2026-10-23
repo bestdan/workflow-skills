@@ -4,6 +4,8 @@ title: task-dashboard — local read-only Jira + GitHub dashboard
 status: active
 owner: bestdan
 created: 2026-10-23
+tracker_id: 13
+tracker_url: https://github.com/bestdan/workflow-skills/milestone/13
 ---
 
 # task-dashboard plan
