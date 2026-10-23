@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.109.0] - 2026-10-23
+
+### Features
+
+- add score and Now, Waiting, Stale, Epics views [#1091] (#1127) (32513c4)
+
 ## [2.108.0] - 2026-10-23
 
 ### Features
