@@ -89,6 +89,8 @@ def load(path: "str | os.PathLike[str] | None" = None) -> dict[str, Any]:
             user = tomllib.load(fh)
     except FileNotFoundError:
         raise ConfigError(f"config file not found: {p}") from None
+    except OSError as exc:  # a directory, unreadable, ...: after the clause above
+        raise ConfigError(f"cannot read {p}: {exc}") from None
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError(f"invalid TOML in {p}: {exc}") from None
     cfg = deep_merge(DEFAULTS, user)
