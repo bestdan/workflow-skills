@@ -1,0 +1,57 @@
+{
+  "data": {
+    "search": {
+      "issueCount": 151,
+      "pageInfo": {
+        "hasNextPage": true,
+        "endCursor": "Y3Vyc29yOjUw"
+      },
+      "nodes": [
+        {
+          "url": "https://github.com/bestdan/workflow-skills/pull/1077",
+          "title": "docs(designs): design the fast-mode advisor for hand-run stacks [N/A]",
+          "headRefName": "bestdan/fast-mode-advisor",
+          "isDraft": true,
+          "reviewDecision": null,
+          "updatedAt": "2026-10-21T13:20:13Z",
+          "repository": {
+            "nameWithOwner": "bestdan/workflow-skills"
+          }
+        },
+        {
+          "url": "https://github.com/bestdan/papercuts-plugin/pull/39",
+          "title": "feat(triage): render the run manifest as a one-line summary [#22]",
+          "headRefName": "bestdan/task-22",
+          "isDraft": false,
+          "reviewDecision": null,
+          "updatedAt": "2026-10-04T19:14:39Z",
+          "repository": {
+            "nameWithOwner": "bestdan/papercuts-plugin"
+          }
+        },
+        {
+          "url": "https://github.com/bestdan/workflow-skills/pull/928",
+          "title": "docs(decisions): treat decision models as one interface over backends [N/A]",
+          "headRefName": "claude/amazing-gates-8xrjzr",
+          "isDraft": false,
+          "reviewDecision": null,
+          "updatedAt": "2026-10-02T00:31:30Z",
+          "repository": {
+            "nameWithOwner": "bestdan/workflow-skills"
+          }
+        },
+        {
+          "url": "https://github.com/bestdan/tsu/pull/188",
+          "title": "fix: harden upgrade and hook checks",
+          "headRefName": "codex-upgrade-upstream-hook-fixes",
+          "isDraft": false,
+          "reviewDecision": null,
+          "updatedAt": "2026-03-28T15:28:13Z",
+          "repository": {
+            "nameWithOwner": "bestdan/tsu"
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-21T13:20:17Z",
+      "conclusion": "SKIPPED",
+      "detailsUrl": "https://github.com/bestdan/workflow-skills/actions/runs/39607109524/job/119246127230",
+      "name": "Sync issue status to PR state",
+      "startedAt": "2026-10-21T13:20:27Z",
+      "status": "COMPLETED",
+      "workflowName": "gh-issue PR status sync"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-21T13:20:54Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/bestdan/workflow-skills/actions/runs/39607109480/job/119246045751",
+      "name": "Deterministic gate",
+      "startedAt": "2026-10-21T13:20:20Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-21T13:20:23Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/bestdan/workflow-skills/actions/runs/39607109480/job/119246045371",
+      "name": "Classify changed files",
+      "startedAt": "2026-10-21T13:20:19Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-21T13:20:23Z",
+      "conclusion": "SKIPPED",
+      "detailsUrl": "https://github.com/bestdan/workflow-skills/actions/runs/39607109480/job/119246097412",
+      "name": "Host-sensitive suites (macOS)",
+      "startedAt": "2026-10-21T13:20:23Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    }
+  ]
+}
