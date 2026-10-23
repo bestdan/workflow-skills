@@ -107,6 +107,7 @@ CONSUMER_FILES=(
   scripts/guard-foreign-worktree.py
   scripts/guard-pinned-branch.py
   scripts/guard-enter-by-path.py
+  scripts/session-state-hook.py
   scripts/bash_command.py
 )
 CONSUMER_PYTHON=3.9

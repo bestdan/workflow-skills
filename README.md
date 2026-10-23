@@ -130,7 +130,7 @@ capability matrix.
 
 ### Worktree lifecycle
 
-The plugin registers eight hooks. Three of them create and tear down an
+The plugin registers nine hooks. Three of them create and tear down an
 isolated worktree without anything being typed: `WorktreeCreate` puts it where
 [`scripts/worktree-config.sh`](scripts/worktree-config.sh) says worktrees live
 (not inside the repo, which aborts in a repo that versions its own agent
@@ -201,6 +201,16 @@ new co-review ledger rows to the shared repo
 ([`scripts/co-review-ledger-sync.py`](scripts/co-review-ledger-sync.py)
 `--push --detach`), in the background so the session's exit does not wait on
 the network. With `CO_REVIEW_LEDGER_REMOTE` unset it does nothing.
+
+The ninth, on `UserPromptSubmit`, `Stop` and `Notification`, is the fleet
+view's session-state hook
+([`scripts/session-state-hook.py`](scripts/session-state-hook.py)). It is **off
+unless the machine opts in** with `[collector] enabled = true` in
+`~/.config/task-dashboard/config.toml`; otherwise it exits at once and writes
+nothing. Opted in, it appends one line of event metadata per event — time,
+event, session id, cwd, branch, and for a notification whether it was a
+permission prompt — to `~/.local/state/fleet/sessions/<session_id>.jsonl`. It
+never records prompt text, and it never fails a turn.
 
 | Skill                                                      | Trigger                                                                                                    | What it does                                                                                                                                                                                                                                            |
 | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
