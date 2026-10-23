@@ -22,7 +22,8 @@
 #             rather than left to whatever interpreter uvx resolved.
 #   uv-runtime  scripts/task-dashboard/*.py — runtime code run on the user's
 #             machine through `uv run --no-project --python ">=3.11"`, so the
-#             floor is the 3.11 uv resolves, not the 3.9 macOS ships. Distinct
+#             floor is 3.11, not the 3.9 macOS ships; uv may run a newer
+#             interpreter, and the tier checks against the floor. Distinct
 #             from `dev`, which only contributors and CI run. A tier of its own
 #             was chosen over widening `dev`: the executor differs, and a later
 #             change to either floor should not have to untangle the two.
@@ -128,7 +129,7 @@ DEV_PYTHON=3.11
 
 # Runtime code that ships to users but runs under uv's >=3.11, not bare python3.
 # See the uv-runtime entry in the header. Pinned to the floor the run command
-# asks for, so diagnostics match what the user's interpreter will do.
+# accepts, so code that passes is valid on the oldest interpreter a user can get.
 UV_RUNTIME_FILES=(scripts/task-dashboard/*.py)
 UV_RUNTIME_PYTHON=3.11
 

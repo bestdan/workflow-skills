@@ -106,6 +106,11 @@ class DbTests(TmpCase):
         conn.execute(
             'INSERT INTO "order" (item_key, position) VALUES (?, ?)', ("ABC-1", 1.5)
         )
+        row = conn.execute(
+            'SELECT position FROM "order" WHERE item_key = ?', ("ABC-1",)
+        ).fetchone()
+        self.assertEqual(row[0], 1.5)
+        conn.close()
 
     def test_issues_columns(self):
         conn = db.connect(self.tmp / "d.db")
@@ -189,6 +194,8 @@ class ConfigTests(TmpCase):
 
 class DashboardTests(unittest.TestCase):
     def test_parses_under_python_39(self):
+        # Syntax only: 3.9 parses `X | Y`, so this cannot catch a runtime-only
+        # 3.10+ feature placed above the guard.
         src = (PKG / "dashboard.py").read_text()
         ast.parse(src, feature_version=(3, 9))
         self.assertLess(src.index("sys.version_info < (3, 11)"), src.index("import db"))
