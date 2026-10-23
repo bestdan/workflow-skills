@@ -11,3 +11,29 @@ in public `bestdan/*` repos only. No work data.
 
 The search fixture's other 147 nodes were dropped rather than kept because most
 of them are in private repos.
+
+The `fleet_*` files feed `github_fleet.py`. They were captured on 2026-10-23
+from the public `bestdan/workflow-skills` only:
+
+- `fleet_issues_search.json` is real: the GraphQL `search` for open
+  `auto:human-review-needed` issues (`first:3`), with `hasNextPage` set to
+  `false`.
+- `fleet_review_search.json` is real: PRs #1114-#1117 from the search
+  `is:pr repo:bestdan/workflow-skills`, with `headRefOid`,
+  `closingIssuesReferences` and `body`, each
+  body cut after its first `## What & why` paragraph, and `hasNextPage` set
+  to `false`. None carries a `## Decision brief`, so the tests add one to a
+  copied node.
+- `fleet_designs_list.json` is real: the contents API listing of
+  `dev_docs/designs`, cut to three entries.
+- `fleet_design_proposed.json` and `fleet_design_accepted.json` are real
+  contents API responses for one design at `status: proposed` and one at
+  `status: accepted`. Each `content` was re-encoded to keep only the front
+  matter and title, since only the front matter and the first `#` heading are parsed.
+- `fleet_milestone_13.json` and `fleet_milestone_14.json` are real
+  `repos/bestdan/workflow-skills/milestones/<n>` responses, the milestones
+  those PRs' issues sit in. Neither description has an `approved: yes` line;
+  the tests append one to a copy.
+- `fleet_comments.json` is real: the comments query for PR #1118, which had
+  none, with the `viewer` login it ran as. Co-review writes no stamp yet, so the tests add stamped comments to a
+  copy.

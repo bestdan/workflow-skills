@@ -1,0 +1,50 @@
+[
+  {
+    "name": "2026-08-01-research-spike-skill.md",
+    "path": "dev_docs/designs/2026-08-01-research-spike-skill.md",
+    "sha": "f660909ee2e03532469a7d981d28a22e0bb3fdf0",
+    "size": 36811,
+    "url": "https://api.github.com/repos/bestdan/workflow-skills/contents/dev_docs/designs/2026-08-01-research-spike-skill.md?ref=main",
+    "html_url": "https://github.com/bestdan/workflow-skills/blob/main/dev_docs/designs/2026-08-01-research-spike-skill.md",
+    "git_url": "https://api.github.com/repos/bestdan/workflow-skills/git/blobs/f660909ee2e03532469a7d981d28a22e0bb3fdf0",
+    "download_url": "https://raw.githubusercontent.com/bestdan/workflow-skills/main/dev_docs/designs/2026-08-01-research-spike-skill.md",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/bestdan/workflow-skills/contents/dev_docs/designs/2026-08-01-research-spike-skill.md?ref=main",
+      "git": "https://api.github.com/repos/bestdan/workflow-skills/git/blobs/f660909ee2e03532469a7d981d28a22e0bb3fdf0",
+      "html": "https://github.com/bestdan/workflow-skills/blob/main/dev_docs/designs/2026-08-01-research-spike-skill.md"
+    }
+  },
+  {
+    "name": "2026-10-14-reenter-worktrees-by-name.md",
+    "path": "dev_docs/designs/2026-10-14-reenter-worktrees-by-name.md",
+    "sha": "a3d791058de45c37b9a35557da63765fd6ff9176",
+    "size": 14814,
+    "url": "https://api.github.com/repos/bestdan/workflow-skills/contents/dev_docs/designs/2026-10-14-reenter-worktrees-by-name.md?ref=main",
+    "html_url": "https://github.com/bestdan/workflow-skills/blob/main/dev_docs/designs/2026-10-14-reenter-worktrees-by-name.md",
+    "git_url": "https://api.github.com/repos/bestdan/workflow-skills/git/blobs/a3d791058de45c37b9a35557da63765fd6ff9176",
+    "download_url": "https://raw.githubusercontent.com/bestdan/workflow-skills/main/dev_docs/designs/2026-10-14-reenter-worktrees-by-name.md",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/bestdan/workflow-skills/contents/dev_docs/designs/2026-10-14-reenter-worktrees-by-name.md?ref=main",
+      "git": "https://api.github.com/repos/bestdan/workflow-skills/git/blobs/a3d791058de45c37b9a35557da63765fd6ff9176",
+      "html": "https://github.com/bestdan/workflow-skills/blob/main/dev_docs/designs/2026-10-14-reenter-worktrees-by-name.md"
+    }
+  },
+  {
+    "name": "2026-10-18-co-review-ledger-sync.md",
+    "path": "dev_docs/designs/2026-10-18-co-review-ledger-sync.md",
+    "sha": "189e3fbdc2b7551c97157519684db35b644d3b67",
+    "size": 20958,
+    "url": "https://api.github.com/repos/bestdan/workflow-skills/contents/dev_docs/designs/2026-10-18-co-review-ledger-sync.md?ref=main",
+    "html_url": "https://github.com/bestdan/workflow-skills/blob/main/dev_docs/designs/2026-10-18-co-review-ledger-sync.md",
+    "git_url": "https://api.github.com/repos/bestdan/workflow-skills/git/blobs/189e3fbdc2b7551c97157519684db35b644d3b67",
+    "download_url": "https://raw.githubusercontent.com/bestdan/workflow-skills/main/dev_docs/designs/2026-10-18-co-review-ledger-sync.md",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/bestdan/workflow-skills/contents/dev_docs/designs/2026-10-18-co-review-ledger-sync.md?ref=main",
+      "git": "https://api.github.com/repos/bestdan/workflow-skills/git/blobs/189e3fbdc2b7551c97157519684db35b644d3b67",
+      "html": "https://github.com/bestdan/workflow-skills/blob/main/dev_docs/designs/2026-10-18-co-review-ledger-sync.md"
+    }
+  }
+]

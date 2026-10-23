@@ -94,9 +94,17 @@ def owner_qualifier(owner: str) -> str:
 
 
 def search_prs(
-    query: str, runner: Runner = run, timeout: float = DEFAULT_TIMEOUT
+    query: str,
+    runner: Runner = run,
+    timeout: float = DEFAULT_TIMEOUT,
+    graphql: str = SEARCH_QUERY,
 ) -> list[dict]:
-    """Every PullRequest node for a search, following endCursor to the end."""
+    """Every node with a `url` for a search, following endCursor to the end.
+
+    `graphql` swaps the node selection; it must keep the `search(...)` shape,
+    `pageInfo`, and `url`. The fleet view passes one selecting issues, or PRs
+    with their body.
+    """
     nodes: list[dict] = []
     after: str | None = None
     while True:
@@ -105,7 +113,7 @@ def search_prs(
             "api",
             "graphql",
             "-f",
-            f"query={SEARCH_QUERY}",
+            f"query={graphql}",
             "-f",
             f"q={query}",
         ]
@@ -117,7 +125,8 @@ def search_prs(
             page_info = search["pageInfo"]
         except (KeyError, TypeError):
             raise GhError(f"unexpected GraphQL response for {query!r}") from None
-        # A non-PR node (impossible with is:pr, but the union allows it) is {}.
+        # A node of a type the selection skips (an issue in an is:pr search is
+        # impossible, but the union allows it) comes back as {}.
         nodes.extend(n for n in search["nodes"] if n and n.get("url"))
         if not page_info["hasNextPage"]:
             return nodes

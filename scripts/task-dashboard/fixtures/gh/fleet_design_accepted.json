@@ -1,0 +1,18 @@
+{
+  "name": "2026-10-18-co-review-ledger-sync.md",
+  "path": "dev_docs/designs/2026-10-18-co-review-ledger-sync.md",
+  "sha": "189e3fbdc2b7551c97157519684db35b644d3b67",
+  "size": 150,
+  "url": "https://api.github.com/repos/bestdan/workflow-skills/contents/dev_docs/designs/2026-10-18-co-review-ledger-sync.md?ref=main",
+  "html_url": "https://github.com/bestdan/workflow-skills/blob/main/dev_docs/designs/2026-10-18-co-review-ledger-sync.md",
+  "git_url": "https://api.github.com/repos/bestdan/workflow-skills/git/blobs/189e3fbdc2b7551c97157519684db35b644d3b67",
+  "download_url": "https://raw.githubusercontent.com/bestdan/workflow-skills/main/dev_docs/designs/2026-10-18-co-review-ledger-sync.md",
+  "type": "file",
+  "content": "LS0tCmNyZWF0ZWQ6IDIwMjYtMTAtMTgKc3RhdHVzOiBhY2NlcHRlZAp0cmFj\na3M6IGh0dHBzOi8vZ2l0aHViLmNvbS9iZXN0ZGFuL3dvcmtmbG93LXNraWxs\ncy9pc3N1ZXMvMTA0MQotLS0KCiMgU3luYyBjby1yZXZpZXcgbGVkZ2VycyBh\nY3Jvc3MgbWFjaGluZXMK\n",
+  "encoding": "base64",
+  "_links": {
+    "self": "https://api.github.com/repos/bestdan/workflow-skills/contents/dev_docs/designs/2026-10-18-co-review-ledger-sync.md?ref=main",
+    "git": "https://api.github.com/repos/bestdan/workflow-skills/git/blobs/189e3fbdc2b7551c97157519684db35b644d3b67",
+    "html": "https://github.com/bestdan/workflow-skills/blob/main/dev_docs/designs/2026-10-18-co-review-ledger-sync.md"
+  }
+}

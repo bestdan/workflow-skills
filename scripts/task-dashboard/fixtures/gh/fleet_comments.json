@@ -1,0 +1,14 @@
+{
+  "data": {
+    "viewer": {
+      "login": "bestdan"
+    },
+    "repository": {
+      "pullRequest": {
+        "comments": {
+          "nodes": []
+        }
+      }
+    }
+  }
+}
