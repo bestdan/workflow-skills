@@ -144,10 +144,15 @@ def milestone(number, approved=False):
     return data
 
 
-def stamp(sha, at="2026-10-23T20:00:00Z"):
+# The viewer login in fleet_comments.json, the account the capture ran as.
+VIEWER = "bestdan"
+
+
+def stamp(sha, at="2026-10-23T20:00:00Z", author=VIEWER):
     return {
         "body": f"co-review done\n<!-- co-review-stamp v1 head={sha} -->\n",
         "createdAt": at,
+        "author": {"login": author},
     }
 
 
@@ -157,19 +162,26 @@ def comments_page(nodes):
     return page
 
 
-def queue_rules(ci=GREEN, approved=(), comments=None):
+def queue_rules(
+    ci=GREEN, approved=(), comments=None, milestone_error=None, comments_error=None
+):
     """Router rules for everything review_queue calls after its searches.
 
     `approved` names the milestone numbers whose description says
-    `approved: yes`; `comments` maps a PR number to its comment nodes.
+    `approved: yes`; `comments` maps a PR number to its comment nodes. A
+    `*_error` response replaces every milestone or comments reply.
     """
     comments = comments or {}
 
     def milestone_response(argv):
+        if milestone_error:
+            return milestone_error
         number = int(argv[2].rsplit("/", 1)[1])
         return ok(milestone(number, number in approved))
 
     def comments_response(argv):
+        if comments_error:
+            return comments_error
         return ok(comments_page(comments.get(int(arg(argv, "number")), [])))
 
     return [
@@ -294,16 +306,69 @@ class ReviewQueueTests(unittest.TestCase):
 
     def test_stamp_parse(self):
         sha = "ABCDEF0123" * 4
-        self.assertEqual(fleet.stamp_head([stamp(sha)]), sha.lower())
+        me = {"login": VIEWER}
+        self.assertEqual(fleet.stamp_head([stamp(sha)], VIEWER), sha.lower())
         self.assertIsNone(
-            fleet.stamp_head([{"body": "<!-- co-review-stamp v1 head=abc -->"}])
+            fleet.stamp_head(
+                [{"body": "<!-- co-review-stamp v1 head=abc -->", "author": me}],
+                VIEWER,
+            )
         )
         self.assertIsNone(
             fleet.stamp_head(
-                [{"body": "<!-- co-review-stamp v2 head=" + "a" * 40 + " -->"}]
+                [
+                    {
+                        "body": "<!-- co-review-stamp v2 head=" + "a" * 40 + " -->",
+                        "author": me,
+                    }
+                ],
+                VIEWER,
             )
         )
-        self.assertIsNone(fleet.stamp_head([]))
+        self.assertIsNone(fleet.stamp_head([], VIEWER))
+
+    def test_stamp_from_another_author_is_ignored(self):
+        sha = "b" * 40
+        self.assertIsNone(fleet.stamp_head([stamp(sha, author="mallory")], VIEWER))
+        self.assertIsNone(fleet.stamp_head([{"body": stamp(sha)["body"]}], VIEWER))
+        # A newer forged stamp does not supersede the viewer's own.
+        mine = stamp(sha, "2026-10-01T00:00:00Z")
+        forged = stamp("c" * 40, "2026-10-02T00:00:00Z", author="mallory")
+        self.assertEqual(fleet.stamp_head([forged, mine], VIEWER), sha)
+
+    def test_forged_stamp_does_not_queue(self):
+        node = review_page()["data"]["search"]["nodes"][1]
+        forged = stamp(node["headRefOid"], author="mallory")
+        rows, _, runner = self.run_queue(
+            [node], approved={14}, comments={node["number"]: [forged]}
+        )
+        self.assertEqual(rows[0]["queue_misses"], ["co_review"])
+        query = next(arg(c, "query") for c in runner.calls if arg(c, "owner"))
+        self.assertIn("viewer { login }", query)
+        self.assertIn("author { login }", query)
+
+    def test_milestone_lookup_failure_is_a_miss_not_fatal(self):
+        rows, failed, _ = self.run_queue(None, milestone_error=(1, "", "HTTP 502"))
+        self.assertEqual(len(rows), 4)
+        self.assertEqual(sorted(failed), sorted(r["url"] for r in rows))
+        self.assertTrue(all(r["queue_misses"] == ["milestone"] for r in rows))
+
+    def test_comments_lookup_failure_is_a_miss_not_fatal(self):
+        node = review_page()["data"]["search"]["nodes"][1]
+        rows, failed, _ = self.run_queue(
+            [node], approved={14}, comments_error=(1, "", "HTTP 502")
+        )
+        self.assertEqual(failed, [node["url"]])
+        self.assertEqual(rows[0]["queue_misses"], ["co_review"])
+        self.assertFalse(rows[0]["stamped"])
+
+    def test_lookup_auth_failure_still_raises(self):
+        auth = (1, "", "HTTP 401: Bad credentials")
+        with self.assertRaises(fleet.github_gh.AuthError):
+            self.run_queue(None, milestone_error=auth)
+        node = review_page()["data"]["search"]["nodes"][1]
+        with self.assertRaises(fleet.github_gh.AuthError):
+            self.run_queue([node], approved={14}, comments_error=auth)
 
     def test_milestone_approved_line(self):
         self.assertTrue(fleet.milestone_approved("Goal: x\n  APPROVED: yes \r\n"))

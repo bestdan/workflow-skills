@@ -35,5 +35,5 @@ from the public `bestdan/workflow-skills` only:
   those PRs' issues sit in. Neither description has an `approved: yes` line;
   the tests append one to a copy.
 - `fleet_comments.json` is real: the comments query for PR #1118, which had
-  none. Co-review writes no stamp yet, so the tests add stamped comments to a
+  none, with the `viewer` login it ran as. Co-review writes no stamp yet, so the tests add stamped comments to a
   copy.

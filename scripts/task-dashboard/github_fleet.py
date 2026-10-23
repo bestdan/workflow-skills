@@ -20,10 +20,12 @@ four rules hold:
    lag cannot let one through.
 2. CI is `success`, by github_gh's rollup reduction. Pending, failed, no
    checks, and a failed lookup all miss.
-3. Co-reviewed at its current head: a PR comment carries
+3. Co-reviewed at its current head: a PR comment written by the viewer (the
+   account `gh` is logged in as) carries
    `<!-- co-review-stamp v1 head=<40-hex sha> -->` and the sha equals the PR's
-   `headRefOid`. With several stamps the newest comment's wins, so a stamp for
-   an older head is superseded rather than counted.
+   `headRefOid`. Stamps in anyone else's comments are ignored, so another
+   commenter cannot forge one. With several stamps the newest comment's wins,
+   so a stamp for an older head is superseded rather than counted.
 4. Milestone approved: an issue the PR closes (`closingIssuesReferences`) is in
    a milestone whose description has a line reading `approved: yes` (case
    ignored, line trimmed). Descriptions are cached per repo for one run.
@@ -98,9 +100,10 @@ query($q: String!, $after: String) {
 
 COMMENTS_QUERY = """
 query($owner: String!, $name: String!, $number: Int!) {
+  viewer { login }
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
-      comments(last: 100) { nodes { body createdAt } }
+      comments(last: 100) { nodes { body createdAt author { login } } }
     }
   }
 }
@@ -195,13 +198,17 @@ def in_review_queue(node: dict) -> bool:
     return not node.get("isDraft") and node.get("reviewDecision") != "APPROVED"
 
 
-def stamp_head(comments: Iterable[dict]) -> "str | None":
-    """The head sha of the newest co-review stamp in `comments`, lower-cased.
+def stamp_head(comments: Iterable[dict], author: str) -> "str | None":
+    """The head sha of the newest co-review stamp `author` wrote, lower-cased.
 
-    Comments are ordered by `createdAt`; within one body the last marker wins.
+    A comment by anyone else is ignored, so a stamp cannot be forged by
+    another commenter. Comments are ordered by `createdAt`; within one body
+    the last marker wins.
     """
     head = None
     for comment in sorted(comments, key=lambda c: c.get("createdAt") or ""):
+        if ((comment.get("author") or {}).get("login") or "") != author:
+            continue
         found = _STAMP.findall(comment.get("body") or "")
         if found:
             head = found[-1].lower()
@@ -248,8 +255,11 @@ def _closes_approved(node: dict, milestones: MilestoneCache) -> bool:
 
 def pr_comments(
     repo: str, number: int, runner: Runner = run, timeout: float = DEFAULT_TIMEOUT
-) -> list[dict]:
-    """A PR's newest 100 conversation comments, `body` and `createdAt`."""
+) -> "tuple[str, list[dict]]":
+    """The viewer's login and a PR's newest 100 conversation comments.
+
+    Each comment carries `body`, `createdAt` and `author.login`.
+    """
     owner, name = repo.split("/", 1)
     data = github_gh._call(
         [
@@ -263,7 +273,9 @@ def pr_comments(
         timeout,
     )  # fmt: skip
     try:
-        return data["data"]["repository"]["pullRequest"]["comments"]["nodes"]
+        viewer = data["data"]["viewer"]["login"]
+        nodes = data["data"]["repository"]["pullRequest"]["comments"]["nodes"]
+        return viewer, nodes
     except (KeyError, TypeError):
         raise GhError(f"unexpected comments response for {repo}#{number}") from None
 
@@ -273,8 +285,10 @@ def review_queue(
 ) -> "tuple[list[dict], list[str]]":
     """Every awaiting PR (rule 1), each marked `in_queue` by rules 2-4.
 
-    Also returns the URLs whose CI lookup failed. Such a PR keeps a None
-    `ci_state` and misses rule 2; one flaky `pr view` does not fail the run.
+    Also returns the URLs where a CI, milestone or comments lookup failed.
+    A failed lookup counts as a miss of its rule (a None `ci_state`, a
+    `milestone` miss, a `co_review` miss), so one flaky call does not fail
+    the run. An AuthError still raises.
     """
     nodes: dict[str, tuple[dict, str]] = {}
     for owner in owners:
@@ -298,14 +312,28 @@ def review_queue(
         misses = []
         if ci != "success":
             misses.append("ci")
-        approved = _closes_approved(node, milestones)
+        try:
+            approved = _closes_approved(node, milestones)
+        except github_gh.AuthError:
+            raise
+        except GhError:
+            approved = False
+            if url not in failed:
+                failed.append(url)
         if not approved:
             misses.append("milestone")
         stamped = None
         if not misses:
-            head = stamp_head(pr_comments(repo, node["number"], runner, timeout))
-            current = (node.get("headRefOid") or "").lower()
-            stamped = head is not None and head == current
+            try:
+                viewer, comments = pr_comments(repo, node["number"], runner, timeout)
+                head = stamp_head(comments, viewer)
+                current = (node.get("headRefOid") or "").lower()
+                stamped = head is not None and head == current
+            except github_gh.AuthError:
+                raise
+            except GhError:
+                stamped = False
+                failed.append(url)
             if not stamped:
                 misses.append("co_review")
         rows.append(
@@ -521,7 +549,7 @@ def main(argv: list[str]) -> int:
         mark = "queue" if row["in_queue"] else "miss " + ",".join(row["queue_misses"])
         print(f"  {row['url']}  [{mark}]")
     for url in failed:
-        print(f"  CI lookup failed: {url}")
+        print(f"  lookup failed: {url}")
     return 0
 
 
