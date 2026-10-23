@@ -4,6 +4,13 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.102.0] - 2026-10-23
+
+### Features
+
+- add gh adapter for PR search, CI state and Jira-key join [#1088] (#1114) (7bbad6d)
+- add acli adapter for search, view and parsing [#1086] (#1113) (202a06e)
+
 ## [2.101.0] - 2026-10-23
 
 ### Features
