@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.103.0] - 2026-10-23
+
+### Features
+
+- add opt-in session-state hook [#1099] (#1112) (634659c)
+
 ## [2.102.0] - 2026-10-23
 
 ### Features
