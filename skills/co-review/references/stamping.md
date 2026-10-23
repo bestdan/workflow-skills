@@ -67,6 +67,10 @@ oldest and deletes the rest. It never touches another account's comment.
 
 - **Exit 0** prints `STAMPED: <created|updated|unchanged> <url>`. Put
   `stamp ✅ <created|updated|unchanged>` on section 1's reviewer line.
+- **Exit 0 with a `co-review-stamp: warning:` line on stderr** means the kept
+  stamp was written but a duplicate could not be deleted. The PR names the
+  right head, and the next run retries the delete. Put `stamp ⚠️ <outcome> —
+  <the warning>` on the reviewer line and carry on.
 - **Any other exit** is a warning, never a stop. Put `stamp ❌ not written —
   <the script's error line>` on the reviewer line and carry on. Don't retry
   in a loop. A missing stamp costs the gauge one PR until the next run, and a

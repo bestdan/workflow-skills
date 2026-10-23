@@ -23,8 +23,11 @@ Usage:
     --head <40-hex sha> --summary "<one line>"
 
 On success prints exactly one line, `STAMPED: <created|updated|unchanged>
-<comment url>`, and exits 0. Any failure prints one `co-review-stamp: <reason>`
-line on stderr and exits 1; a usage error exits 2. /co-review treats every
+<comment url>`, and exits 0. When the kept stamp was written but a duplicate
+could not be deleted, that is still exit 0, with one
+`co-review-stamp: warning: <reason>` line on stderr: the PR names the right
+head, and a later run retries the delete. Any other failure prints one
+`co-review-stamp: <reason>` line on stderr and exits 1; a usage error exits 2. /co-review treats every
 non-zero exit as a warning on its run summary, never as a failed run.
 """
 
@@ -131,23 +134,31 @@ def stamp(repo, pr, head, summary):
     stamps = own_stamps(repo, pr, viewer_login())
     if not stamps:
         url = write("POST", f"repos/{repo}/issues/{pr}/comments", body)
-        return "created", url
+        return "created", url, ""
     keep, extras = stamps[0], stamps[1:]
     if keep.get("body") == body:
         outcome, url = "unchanged", keep.get("url", "")
     else:
         path = f"repos/{repo}/issues/comments/{keep['id']}"
         outcome, url = "updated", write("PATCH", path, body) or keep.get("url", "")
+    failed = []
     for extra in extras:
-        gh(
-            [
-                "api",
-                "--method",
-                "DELETE",
-                f"repos/{repo}/issues/comments/{extra['id']}",
-            ]
-        )
-    return outcome, url
+        try:
+            gh(
+                [
+                    "api",
+                    "--method",
+                    "DELETE",
+                    f"repos/{repo}/issues/comments/{extra['id']}",
+                ]
+            )
+        except StampError as exc:
+            failed.append((extra["id"], str(exc)))
+    warning = ""
+    if failed:
+        ids = ", ".join(str(cid) for cid, _ in failed)
+        warning = f"could not delete duplicate stamp(s) {ids}: {failed[0][1]}"
+    return outcome, url, warning
 
 
 def parse_args(argv):
@@ -169,11 +180,13 @@ def parse_args(argv):
 def main(argv=None):
     args = parse_args(argv)
     try:
-        outcome, url = stamp(args.repo, args.pr, args.head, args.summary)
+        outcome, url, warning = stamp(args.repo, args.pr, args.head, args.summary)
     except StampError as exc:
         print(f"co-review-stamp: {exc}", file=sys.stderr)
         return 1
     print(f"STAMPED: {outcome} {url}".rstrip())
+    if warning:
+        print(f"co-review-stamp: warning: {warning}", file=sys.stderr)
     return 0
 
 

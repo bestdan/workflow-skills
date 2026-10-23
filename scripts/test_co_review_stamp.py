@@ -40,11 +40,14 @@ def stamped_head(body):
 class FakeGh:
     """An in-memory PR comment thread behind the `gh api` calls the script makes."""
 
-    def __init__(self, login="me", comments=(), fail_on=None):
+    def __init__(self, login="me", comments=(), fail_on=None, fail_path=None):
         self.login = login
         self.comments = [dict(c) for c in comments]
         self.next_id = 1000
         self.fail_on = fail_on  # a method ("GET", "POST", ...) that should fail
+        # When set, fail_on applies only to calls naming this path fragment, so a
+        # test can fail the comment listing while `gh api user` still succeeds.
+        self.fail_path = fail_path
         self.calls = []
 
     def _url(self, cid):
@@ -53,7 +56,8 @@ class FakeGh:
     def run_gh(self, args, stdin=None):
         self.calls.append(args)
         method = args[args.index("--method") + 1] if "--method" in args else "GET"
-        if method == self.fail_on:
+        on_path = self.fail_path is None or any(self.fail_path in a for a in args)
+        if method == self.fail_on and on_path:
             return 1, "", "HTTP 403: Resource not accessible by integration"
         if args[:2] == ["api", "user"]:
             return 0, self.login + "\n", ""
@@ -184,6 +188,49 @@ class StampTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertTrue(err.startswith("co-review-stamp: "), err)
         self.assertEqual(fake.writes(), [])
+
+    def test_a_failed_comment_listing_writes_nothing(self):
+        fake = self.use(FakeGh(fail_on="GET", fail_path="/comments"))
+        code, out, err = self.run_main()
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "")
+        self.assertTrue(err.startswith("co-review-stamp: "), err)
+        self.assertIn("403", err)
+        # Login resolution ran and succeeded; the listing is what failed.
+        self.assertIn(["api", "user", "--jq", ".login"], fake.calls)
+        self.assertEqual(fake.writes(), [])
+
+    def test_a_failed_patch_exits_nonzero_and_leaves_the_stamp(self):
+        old = stamp_mod.stamp_body(HEAD_A, "x")
+        fake = self.use(
+            FakeGh(comments=[{"id": 5, "login": "me", "body": old}], fail_on="PATCH")
+        )
+        code, out, err = self.run_main(head=HEAD_B)
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "")
+        self.assertEqual(len(err.strip().splitlines()), 1)
+        self.assertTrue(err.startswith("co-review-stamp: "), err)
+        self.assertEqual(fake.stamps()[0]["body"], old)
+
+    def test_a_failed_duplicate_delete_is_a_warning_not_a_failure(self):
+        old = stamp_mod.stamp_body(HEAD_A, "x")
+        fake = self.use(
+            FakeGh(
+                comments=[
+                    {"id": 5, "login": "me", "body": old},
+                    {"id": 9, "login": "me", "body": old},
+                ],
+                fail_on="DELETE",
+            )
+        )
+        code, out, err = self.run_main(head=HEAD_B)
+        self.assertEqual(code, 0)
+        self.assertTrue(out.startswith("STAMPED: updated "), out)
+        self.assertEqual(len(err.strip().splitlines()), 1)
+        self.assertTrue(err.startswith("co-review-stamp: warning: "), err)
+        self.assertIn("9", err)
+        kept = [c for c in fake.stamps() if c["id"] == 5][0]
+        self.assertEqual(stamped_head(kept["body"]), HEAD_B)
 
     def test_missing_gh_is_a_failure_not_a_crash(self):
         orig = stamp_mod.run_gh
