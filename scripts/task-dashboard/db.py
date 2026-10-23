@@ -216,6 +216,15 @@ ALTER TABLE sync_runs ADD COLUMN failed_keys TEXT;
 """ + "".join(_overlay_v2(t, c) for t, c in _OVERLAY_V2.items())
 
 # Ordered, ascending, append-only: never edit a shipped entry.
+#
+# migrate() runs a script one statement at a time through _statements, which
+# cuts it at line ends. So a script must follow three rules that executescript
+# did not impose:
+# - every statement ends in `;`;
+# - no two statements share a line (both land in one chunk, and execute
+#   raises "You can only execute one statement at a time");
+# - nothing follows the last statement's `;`, not even a comment.
+# A missing final `;` or a trailing comment makes _statements raise ValueError.
 MIGRATIONS: list[tuple[int, str]] = [(1, _V1), (2, _V2)]
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 
