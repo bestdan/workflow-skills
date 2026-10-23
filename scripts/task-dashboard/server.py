@@ -45,7 +45,9 @@ from urllib.parse import parse_qs, urlsplit
 
 import db
 import ingest
+import score
 import sync
+import views
 
 BIND = "127.0.0.1"
 TOKEN_KEY = "server_token"
@@ -72,21 +74,8 @@ SECTION_TITLES = {
     "done": "Done",
 }
 
-# Jira priority names onto kanban-classify's jira domain. Both the current
-# scheme (Highest..Lowest) and the older one (Blocker..Trivial) are mapped; an
-# unknown name maps to None, which the classifier sorts last.
-JIRA_PRIORITY = {
-    "highest": "urgent",
-    "blocker": "urgent",
-    "critical": "urgent",
-    "high": "high",
-    "medium": "medium",
-    "major": "medium",
-    "low": "low",
-    "lowest": "low",
-    "minor": "low",
-    "trivial": "low",
-}
+# Jira priority names onto kanban-classify's jira domain; score.py owns it.
+JIRA_PRIORITY = score.JIRA_PRIORITY
 
 
 # --- sync thread -------------------------------------------------------------
@@ -506,7 +495,7 @@ def render_page(title: str, header: str, body: str, token: str, busy: bool) -> s
         "<!doctype html><html lang=en><head><meta charset=utf-8>"
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
         f'<meta name="dashboard-token" content="{_e(token)}">'
-        f"<title>{_e(title)}</title><style>{CSS}</style></head>"
+        f"<title>{_e(title)}</title><style>{CSS}{views.CSS}</style></head>"
         f'<body data-busy="{1 if busy else 0}">{header}<main>{body}</main>'
         f"<script>{JS}</script></body></html>"
     )
@@ -552,6 +541,18 @@ class App:
             conn.close()
         return {**self.syncer.state(), **health}
 
+    def view_page(self, path: str) -> str:
+        """One of the views.ROUTES pages: Now, Waiting on me, and the rest."""
+        conn = self.read()
+        try:
+            health = sync_health(conn, self.interval_s, self.now())
+            body = views.render(path, conn, self.cfg, self.now())
+        finally:
+            conn.close()
+        busy = bool(self.syncer.state()["busy"])
+        title = f"{views.ROUTES[path][0]} · Task dashboard"
+        return render_page(title, render_header(health, busy), body, self.token, busy)
+
     def board_page(self) -> str:
         conn = self.read()
         try:
@@ -564,7 +565,11 @@ class App:
             conn.close()
         busy = bool(self.syncer.state()["busy"])
         title = "Board" + (f": {', '.join(sprints)}" if sprints else "")
-        body = f"<h2>{_e(title)}</h2>" + render_board(board, self.cfg["jira"]["site"])
+        body = (
+            views.nav("/board")
+            + f"<h2>{_e(title)}</h2>"
+            + render_board(board, self.cfg["jira"]["site"])
+        )
         return render_page(
             "Task dashboard", render_header(health, busy), body, self.token, busy
         )
@@ -636,6 +641,8 @@ class Handler(BaseHTTPRequestHandler):
         app = self.server.app
         if path in ("/", "/board"):
             self._send(200, app.board_page().encode(), "text/html; charset=utf-8")
+        elif path in views.ROUTES:
+            self._send(200, app.view_page(path).encode(), "text/html; charset=utf-8")
         elif path == "/status":
             self._json(200, app.status())
         else:
