@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.105.1] - 2026-10-23
+
+### Fixes
+
+- drain stdin when not opted in, and test the session-state hook's config paths (#1124) (a7658b7)
+
 ## [2.105.0] - 2026-10-23
 
 ### Features
