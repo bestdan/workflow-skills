@@ -18,8 +18,9 @@ from the public `bestdan/workflow-skills` only:
 - `fleet_issues_search.json` is real: the GraphQL `search` for open
   `auto:human-review-needed` issues (`first:3`), with `hasNextPage` set to
   `false`.
-- `fleet_review_search.json` is real: four PR nodes from the search
-  `is:pr repo:bestdan/workflow-skills` with their `body`, each
+- `fleet_review_search.json` is real: PRs #1114-#1117 from the search
+  `is:pr repo:bestdan/workflow-skills`, with `headRefOid`,
+  `closingIssuesReferences` and `body`, each
   body cut after its first `## What & why` paragraph, and `hasNextPage` set
   to `false`. None carries a `## Decision brief`, so the tests add one to a
   copied node.
@@ -29,3 +30,10 @@ from the public `bestdan/workflow-skills` only:
   contents API responses for one design at `status: proposed` and one at
   `status: accepted`. Each `content` was re-encoded to keep only the front
   matter and title, since nothing past the front matter is parsed.
+- `fleet_milestone_13.json` and `fleet_milestone_14.json` are real
+  `repos/bestdan/workflow-skills/milestones/<n>` responses, the milestones
+  those PRs' issues sit in. Neither description has an `approved: yes` line;
+  the tests append one to a copy.
+- `fleet_comments.json` is real: the comments query for PR #1118, which had
+  none. Co-review writes no stamp yet, so the tests add stamped comments to a
+  copy.

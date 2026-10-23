@@ -128,8 +128,59 @@ class DecisionBriefTests(unittest.TestCase):
         self.assertIsNone(fleet.decision_brief("Decision brief: x\n"))
 
 
+GREEN = ok(
+    {
+        "statusCheckRollup": [
+            {"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "SUCCESS"}
+        ]
+    }
+)
+
+
+def milestone(number, approved=False):
+    data = fixture(f"fleet_milestone_{number}.json")
+    if approved:
+        data["description"] += "\n\n  Approved: YES  \n"
+    return data
+
+
+def stamp(sha, at="2026-10-23T20:00:00Z"):
+    return {
+        "body": f"co-review done\n<!-- co-review-stamp v1 head={sha} -->\n",
+        "createdAt": at,
+    }
+
+
+def comments_page(nodes):
+    page = fixture("fleet_comments.json")
+    page["data"]["repository"]["pullRequest"]["comments"]["nodes"] = nodes
+    return page
+
+
+def queue_rules(ci=GREEN, approved=(), comments=None):
+    """Router rules for everything review_queue calls after its searches.
+
+    `approved` names the milestone numbers whose description says
+    `approved: yes`; `comments` maps a PR number to its comment nodes.
+    """
+    comments = comments or {}
+
+    def milestone_response(argv):
+        number = int(argv[2].rsplit("/", 1)[1])
+        return ok(milestone(number, number in approved))
+
+    def comments_response(argv):
+        return ok(comments_page(comments.get(int(arg(argv, "number")), [])))
+
+    return [
+        (lambda a: a[:3] == ["gh", "pr", "view"], ci),
+        (lambda a: "/milestones/" in a[2], milestone_response),
+        (lambda a: arg(a, "owner") is not None, comments_response),
+    ]
+
+
 class ReviewQueueTests(unittest.TestCase):
-    def run_queue(self, author_nodes, reviewer_nodes=()):
+    def run_queue(self, author_nodes, reviewer_nodes=(), **rules):
         runner = Router(
             [
                 (lambda a: "author:@me" in search_q(a), ok(review_page(author_nodes))),
@@ -138,11 +189,16 @@ class ReviewQueueTests(unittest.TestCase):
                     ok(review_page(list(reviewer_nodes))),
                 ),
             ]
+            + queue_rules(**rules)
         )
-        return fleet.review_queue(["bestdan"], runner), runner
+        rows, failed = fleet.review_queue(["bestdan"], runner)
+        return rows, failed, runner
 
-    def test_searches_ask_github_for_the_queue(self):
-        _, runner = self.run_queue([])
+    def queued(self, rows):
+        return sorted(r["number"] for r in rows if r["in_queue"])
+
+    def test_searches_ask_github_for_the_awaiting_set(self):
+        _, _, runner = self.run_queue([])
         self.assertEqual(
             [search_q(c) for c in runner.calls],
             [
@@ -150,20 +206,128 @@ class ReviewQueueTests(unittest.TestCase):
                 "is:pr is:open draft:false -review:approved review-requested:@me org:bestdan",
             ],
         )
-        self.assertIn("body", arg(runner.calls[0], "query"))
+        query = arg(runner.calls[0], "query")
+        for field in ("body", "headRefOid", "closingIssuesReferences"):
+            self.assertIn(field, query)
 
-    def test_fixture_rows(self):
-        rows, _ = self.run_queue(None)
-        self.assertEqual(len(rows), 4)
+    def test_fixture_rows_all_awaiting_none_queued(self):
+        # The real milestones carry no `approved: yes`, and the real PRs no
+        # stamp, so the live count is 0 until co-review writes stamps.
+        rows, failed, runner = self.run_queue(None)
+        self.assertEqual(failed, [])
+        self.assertEqual(fleet.queue_counts(rows), {"queue": 0, "awaiting": 4})
         row = next(r for r in rows if r["number"] == 1114)
         self.assertEqual(row["kind"], "pr")
         self.assertEqual(row["key"], f"https://github.com/{REPO}/pull/1114")
-        self.assertEqual(row["repo"], REPO)
         self.assertEqual(row["role"], "author")
+        self.assertEqual(row["queue_misses"], ["milestone"])
+        self.assertIsNone(row["stamped"])
         self.assertIsNone(row["brief"])
+        # Rule 3 is not asked for a PR that already missed another rule.
+        self.assertFalse(any(arg(c, "owner") for c in runner.calls))
+
+    def test_all_four_rules_queue_a_pr(self):
+        nodes = review_page()["data"]["search"]["nodes"]
+        heads = {n["number"]: n["headRefOid"] for n in nodes}
+        rows, _, _ = self.run_queue(
+            None,
+            approved={14},
+            comments={1115: [stamp(heads[1115])], 1116: [stamp("0" * 40)]},
+        )
+        self.assertEqual(self.queued(rows), [1115])
+        by = {r["number"]: r for r in rows}
+        self.assertEqual(by[1116]["queue_misses"], ["co_review"])
+        self.assertFalse(by[1116]["stamped"])
+        self.assertEqual(by[1117]["queue_misses"], ["milestone"])
+        self.assertEqual(fleet.queue_counts(rows), {"queue": 1, "awaiting": 4})
+
+    def test_ci_must_be_success(self):
+        node = review_page()["data"]["search"]["nodes"][1]
+        ok_stamp = {node["number"]: [stamp(node["headRefOid"])]}
+        for ci in (
+            ok({"statusCheckRollup": []}),
+            ok(
+                {
+                    "statusCheckRollup": [
+                        {"__typename": "CheckRun", "status": "IN_PROGRESS"}
+                    ]
+                }
+            ),
+            ok(
+                {
+                    "statusCheckRollup": [
+                        {
+                            "__typename": "CheckRun",
+                            "status": "COMPLETED",
+                            "conclusion": "FAILURE",
+                        }
+                    ]
+                }
+            ),
+            (1, "", "HTTP 502"),
+        ):
+            rows, _, _ = self.run_queue([node], ci=ci, approved={14}, comments=ok_stamp)
+            self.assertEqual(rows[0]["queue_misses"], ["ci"], ci)
+        rows, _, _ = self.run_queue([node], approved={14}, comments=ok_stamp)
+        self.assertTrue(rows[0]["in_queue"])
+
+    def test_newest_stamp_wins(self):
+        node = review_page()["data"]["search"]["nodes"][1]
+        head = node["headRefOid"]
+        old = stamp(head, "2026-10-01T00:00:00Z")
+        new = stamp("a" * 40, "2026-10-02T00:00:00Z")
+        rows, _, _ = self.run_queue(
+            [node], approved={14}, comments={node["number"]: [new, old]}
+        )
+        self.assertEqual(rows[0]["queue_misses"], ["co_review"])
+        rows, _, _ = self.run_queue(
+            [node],
+            approved={14},
+            comments={
+                node["number"]: [
+                    {"body": "lgtm", "createdAt": "2026-10-03T00:00:00Z"},
+                    old,
+                ]
+            },
+        )
+        self.assertTrue(rows[0]["in_queue"])
+
+    def test_stamp_parse(self):
+        sha = "ABCDEF0123" * 4
+        self.assertEqual(fleet.stamp_head([stamp(sha)]), sha.lower())
+        self.assertIsNone(
+            fleet.stamp_head([{"body": "<!-- co-review-stamp v1 head=abc -->"}])
+        )
+        self.assertIsNone(
+            fleet.stamp_head(
+                [{"body": "<!-- co-review-stamp v2 head=" + "a" * 40 + " -->"}]
+            )
+        )
+        self.assertIsNone(fleet.stamp_head([]))
+
+    def test_milestone_approved_line(self):
+        self.assertTrue(fleet.milestone_approved("Goal: x\n  APPROVED: yes \r\n"))
+        self.assertTrue(fleet.milestone_approved("approved:yes"))
+        self.assertFalse(fleet.milestone_approved("approved: yes, once tests land"))
+        self.assertFalse(fleet.milestone_approved("not approved: yes"))
+        self.assertFalse(fleet.milestone_approved("approved: no"))
+        self.assertFalse(fleet.milestone_approved(None))
+
+    def test_milestone_fetched_once_per_repo_run(self):
+        rows, _, runner = self.run_queue(None)
+        fetched = [c[2] for c in runner.calls if "/milestones/" in c[2]]
+        self.assertEqual(
+            sorted(fetched),
+            [f"repos/{REPO}/milestones/13", f"repos/{REPO}/milestones/14"],
+        )
+
+    def test_no_closing_issue_misses_milestone(self):
+        node = pr_node(url="u/pull/5", number=5, closingIssuesReferences={"nodes": []})
+        rows, _, _ = self.run_queue([node], approved={13, 14})
+        self.assertEqual(rows[0]["queue_misses"], ["milestone"])
 
     def test_draft_excluded(self):
-        rows, _ = self.run_queue(
+        rows, _, _ = self.run_queue(
             [
                 pr_node(url="u/pull/1", number=1, isDraft=True),
                 pr_node(url="u/pull/2", number=2),
@@ -172,7 +336,7 @@ class ReviewQueueTests(unittest.TestCase):
         self.assertEqual([r["number"] for r in rows], [2])
 
     def test_approved_excluded(self):
-        rows, _ = self.run_queue(
+        rows, _, _ = self.run_queue(
             [
                 pr_node(url="u/pull/1", number=1, reviewDecision="APPROVED"),
                 pr_node(url="u/pull/2", number=2, reviewDecision="CHANGES_REQUESTED"),
@@ -183,13 +347,13 @@ class ReviewQueueTests(unittest.TestCase):
 
     def test_author_and_reviewer_deduplicate(self):
         node = pr_node(url="u/pull/9", number=9)
-        rows, _ = self.run_queue([node], [node, pr_node(url="u/pull/8", number=8)])
+        rows, _, _ = self.run_queue([node], [node, pr_node(url="u/pull/8", number=8)])
         self.assertEqual(
             [(r["number"], r["role"]) for r in rows], [(9, "author"), (8, "reviewer")]
         )
 
     def test_brief_carried(self):
-        rows, _ = self.run_queue(
+        rows, _, _ = self.run_queue(
             [pr_node(url="u/pull/1", number=1, body="## Decision brief\na\nb\nc\nd\n")]
         )
         self.assertEqual(rows[0]["brief"], "a\nb\nc")
@@ -312,8 +476,8 @@ class WriteTests(unittest.TestCase):
     def full_runner(self, ci=None):
         ci = ci or ok({"statusCheckRollup": []})
         return designs_router(
-            extra=[
-                (lambda a: a[:3] == ["gh", "pr", "view"], ci),
+            extra=queue_rules(ci=ci)
+            + [
                 (lambda a: "author:@me" in search_q(a), ok(review_page())),
                 (lambda a: "review-requested:@me" in search_q(a), ok(review_page([]))),
                 (
@@ -339,6 +503,13 @@ class WriteTests(unittest.TestCase):
             ).fetchone()[0]
         )
         self.assertEqual(raw["ci_state"], "none")
+        self.assertEqual(plan["counts"], {"queue": 0, "awaiting": 4})
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT DISTINCT status_name FROM issues WHERE kind = 'pr'"
+            ).fetchall(),
+            [("awaiting",)],
+        )
 
     def test_jira_rows_untouched_and_github_replaced(self):
         self.conn.execute(

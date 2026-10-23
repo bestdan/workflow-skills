@@ -10,15 +10,32 @@ Rows land in the v2 generic `issues` table as `source = 'github'`, with
 touches `source = 'jira'` rows, and `write()` here only `source = 'github'`
 ones, so the two never overwrite each other.
 
-THE REVIEW QUEUE is the open, non-draft PRs in the configured owners that are
-not approved and wait on the owner: ones I authored (agents open PRs as the
-owner's account) or ones requesting my review. The search asks GitHub for
-exactly that (`draft:false -review:approved`), so its count can be checked
-against GitHub's own PR search, and the same two filters run again on the
-returned nodes so an index lag cannot let a draft or an approved PR through.
+THE REVIEW QUEUE, which the cap-of-5 gauge reads, holds a PR only when all
+four rules hold:
+
+1. Open, not a draft and not approved, and waiting on the owner: authored by
+   me (agents open PRs as the owner's account) or requesting my review. The
+   search asks GitHub for exactly that (`draft:false -review:approved`), and
+   the draft and approved filters run again on the returned nodes so an index
+   lag cannot let one through.
+2. CI is `success`, by github_gh's rollup reduction. Pending, failed, no
+   checks, and a failed lookup all miss.
+3. Co-reviewed at its current head: a PR comment carries
+   `<!-- co-review-stamp v1 head=<40-hex sha> -->` and the sha equals the PR's
+   `headRefOid`. With several stamps the newest comment's wins, so a stamp for
+   an older head is superseded rather than counted.
+4. Milestone approved: an issue the PR closes (`closingIssuesReferences`) is in
+   a milestone whose description has a line reading `approved: yes` (case
+   ignored, line trimmed). Descriptions are cached per repo for one run.
+
+The PRs passing rule 1 alone are AWAITING. Every one is still a `kind = pr`
+row, with `status_name` set to `queue` or `awaiting`, `queue_misses` naming
+the rules it failed, and `queue_counts()` giving both totals. Rules 2 and 4
+are checked for every awaiting PR. Rule 3 costs one call per PR, so it runs
+only for those that passed the others (`stamped` is None when skipped).
 
 Run `python github_fleet.py review-queue <owner>...` (under uv, Python 3.11+)
-to print the queue's length and the searches that produced it.
+to print both counts and the searches behind the awaiting set.
 """
 
 import base64
@@ -67,10 +84,23 @@ query($q: String!, $after: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       ... on PullRequest {
-        url number title body headRefName isDraft reviewDecision
+        url number title body headRefName headRefOid isDraft reviewDecision
         createdAt updatedAt
         repository { nameWithOwner }
+        closingIssuesReferences(first: 10) {
+          nodes { number repository { nameWithOwner } milestone { number } }
+        }
       }
+    }
+  }
+}
+"""
+
+COMMENTS_QUERY = """
+query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      comments(last: 100) { nodes { body createdAt } }
     }
   }
 }
@@ -81,7 +111,7 @@ REVIEW_ROLES = (("author:@me", "author"), ("review-requested:@me", "reviewer"))
 
 
 def review_searches(owner: str) -> list[str]:
-    """The GitHub searches whose union is one owner's review queue."""
+    """The GitHub searches whose union is one owner's awaiting set (rule 1)."""
     scope = github_gh.owner_qualifier(owner)
     return [
         f"is:pr is:open draft:false -review:approved {who} {scope}"
@@ -156,40 +186,157 @@ def issues_needing_human(
 
 # --- review queue ------------------------------------------------------------
 
+_STAMP = re.compile(r"<!--\s*co-review-stamp v1 head=([0-9a-fA-F]{40})\s*-->")
+_APPROVED = re.compile(r"^approved:\s*yes$", re.IGNORECASE)
+
 
 def in_review_queue(node: dict) -> bool:
-    """Not a draft and not approved: the client-side half of the queue filter."""
+    """Not a draft and not approved: the client-side half of rule 1."""
     return not node.get("isDraft") and node.get("reviewDecision") != "APPROVED"
+
+
+def stamp_head(comments: Iterable[dict]) -> "str | None":
+    """The head sha of the newest co-review stamp in `comments`, lower-cased.
+
+    Comments are ordered by `createdAt`; within one body the last marker wins.
+    """
+    head = None
+    for comment in sorted(comments, key=lambda c: c.get("createdAt") or ""):
+        found = _STAMP.findall(comment.get("body") or "")
+        if found:
+            head = found[-1].lower()
+    return head
+
+
+def milestone_approved(description: "str | None") -> bool:
+    """True when a line of the description, trimmed, is `approved: yes`."""
+    lines = (description or "").replace("\r\n", "\n").split("\n")
+    return any(_APPROVED.match(line.strip()) for line in lines)
+
+
+class MilestoneCache:
+    """Milestone descriptions, fetched once per (repo, number) for one run."""
+
+    def __init__(self, runner: Runner, timeout: float) -> None:
+        self.runner = runner
+        self.timeout = timeout
+        self.by_repo: dict[str, dict[int, str]] = {}
+
+    def description(self, repo: str, number: int) -> str:
+        cache = self.by_repo.setdefault(repo, {})
+        if number not in cache:
+            data = github_gh._call(
+                ["gh", "api", f"repos/{repo}/milestones/{int(number)}"],
+                self.runner,
+                self.timeout,
+            )
+            cache[number] = (data or {}).get("description") or ""
+        return cache[number]
+
+
+def _closes_approved(node: dict, milestones: MilestoneCache) -> bool:
+    refs = (node.get("closingIssuesReferences") or {}).get("nodes") or []
+    for issue in refs:
+        milestone = (issue or {}).get("milestone")
+        if not milestone:
+            continue
+        repo = issue["repository"]["nameWithOwner"]
+        if milestone_approved(milestones.description(repo, milestone["number"])):
+            return True
+    return False
+
+
+def pr_comments(
+    repo: str, number: int, runner: Runner = run, timeout: float = DEFAULT_TIMEOUT
+) -> list[dict]:
+    """A PR's newest 100 conversation comments, `body` and `createdAt`."""
+    owner, name = repo.split("/", 1)
+    data = github_gh._call(
+        [
+            "gh", "api", "graphql",
+            "-f", f"query={COMMENTS_QUERY}",
+            "-f", f"owner={owner}",
+            "-f", f"name={name}",
+            "-F", f"number={int(number)}",
+        ],
+        runner,
+        timeout,
+    )  # fmt: skip
+    try:
+        return data["data"]["repository"]["pullRequest"]["comments"]["nodes"]
+    except (KeyError, TypeError):
+        raise GhError(f"unexpected comments response for {repo}#{number}") from None
 
 
 def review_queue(
     owners: Iterable[str], runner: Runner = run, timeout: float = DEFAULT_TIMEOUT
-) -> list[dict]:
-    """The open PRs waiting on the owner, deduplicated by URL.
+) -> "tuple[list[dict], list[str]]":
+    """Every awaiting PR (rule 1), each marked `in_queue` by rules 2-4.
 
-    `ci_state` is not filled here; `fetch()` adds it, one `gh pr view` per PR.
+    Also returns the URLs whose CI lookup failed. Such a PR keeps a None
+    `ci_state` and misses rule 2; one flaky `pr view` does not fail the run.
     """
-    rows: dict[str, dict] = {}
+    nodes: dict[str, tuple[dict, str]] = {}
     for owner in owners:
         for (_, role), query in zip(REVIEW_ROLES, review_searches(owner)):
             for node in github_gh.search_prs(query, runner, timeout, REVIEW_QUERY):
-                if not in_review_queue(node) or node["url"] in rows:
-                    continue
-                rows[node["url"]] = {
-                    "kind": "pr",
-                    "key": node["url"],
-                    "url": node["url"],
-                    "repo": node["repository"]["nameWithOwner"],
-                    "number": node["number"],
-                    "title": node["title"],
-                    "head_ref": node.get("headRefName"),
-                    "review_decision": node.get("reviewDecision"),
-                    "role": role,
-                    "brief": decision_brief(node.get("body")),
-                    "created": node.get("createdAt"),
-                    "updated": node.get("updatedAt"),
-                }
-    return list(rows.values())
+                if in_review_queue(node):
+                    nodes.setdefault(node["url"], (node, role))
+    milestones = MilestoneCache(runner, timeout)
+    rows: list[dict] = []
+    failed: list[str] = []
+    for url, (node, role) in nodes.items():
+        repo = node["repository"]["nameWithOwner"]
+        ci: "str | None"
+        try:
+            ci = github_gh.ci_state(url, runner, timeout)
+        except github_gh.AuthError:
+            raise
+        except GhError:
+            ci = None
+            failed.append(url)
+        misses = []
+        if ci != "success":
+            misses.append("ci")
+        approved = _closes_approved(node, milestones)
+        if not approved:
+            misses.append("milestone")
+        stamped = None
+        if not misses:
+            head = stamp_head(pr_comments(repo, node["number"], runner, timeout))
+            current = (node.get("headRefOid") or "").lower()
+            stamped = head is not None and head == current
+            if not stamped:
+                misses.append("co_review")
+        rows.append(
+            {
+                "kind": "pr",
+                "key": url,
+                "url": url,
+                "repo": repo,
+                "number": node["number"],
+                "title": node["title"],
+                "head_ref": node.get("headRefName"),
+                "head_oid": node.get("headRefOid"),
+                "review_decision": node.get("reviewDecision"),
+                "role": role,
+                "brief": decision_brief(node.get("body")),
+                "ci_state": ci,
+                "milestone_approved": approved,
+                "stamped": stamped,
+                "in_queue": not misses,
+                "queue_misses": misses,
+                "created": node.get("createdAt"),
+                "updated": node.get("updatedAt"),
+            }
+        )
+    return rows, failed
+
+
+def queue_counts(rows: Iterable[dict]) -> dict[str, int]:
+    """`queue` (the gauge: all four rules) and `awaiting` (rule 1 only)."""
+    prs = [r for r in rows if r["kind"] == "pr"]
+    return {"queue": sum(1 for r in prs if r["in_queue"]), "awaiting": len(prs)}
 
 
 # --- design docs -------------------------------------------------------------
@@ -300,38 +447,34 @@ def proposed_designs(
 def fetch(
     config: dict[str, Any], runner: Runner = run, timeout: float = DEFAULT_TIMEOUT
 ) -> dict[str, Any]:
-    """Every github row for the fleet view. Reads GitHub; writes nothing.
-
-    A PR whose CI lookup fails keeps a None `ci_state` and is listed in
-    `failed`, as in sync.py: one flaky `pr view` does not fail the run.
-    """
+    """Every github row for the fleet view. Reads GitHub; writes nothing."""
     owners = list(config["github"]["orgs"])
-    queue = review_queue(owners, runner, timeout)
-    failed: list[str] = []
-    for row in queue:
-        try:
-            row["ci_state"] = github_gh.ci_state(row["url"], runner, timeout)
-        except github_gh.AuthError:
-            raise
-        except GhError:
-            row["ci_state"] = None
-            failed.append(row["url"])
+    queue, failed = review_queue(owners, runner, timeout)
     designs, truncated = proposed_designs(
         config["github"].get("design_repos", []), runner, timeout
     )
     rows = queue + issues_needing_human(owners, runner, timeout) + designs
-    return {"rows": rows, "failed": failed, "truncated": truncated}
+    return {
+        "rows": rows,
+        "failed": failed,
+        "truncated": truncated,
+        "counts": queue_counts(rows),
+    }
 
 
-_STATUS = {"pr": "review_decision", "design": "status"}
+def _status(row: dict) -> "str | None":
+    if row["kind"] == "pr":
+        return "queue" if row["in_queue"] else "awaiting"
+    return row.get("status")
 
 
 def write(conn: sqlite3.Connection, rows: list[dict], now: datetime) -> None:
     """Replace every `source = 'github'` row with `rows`, in one transaction.
 
     The fields with a generic column go there (`summary` the title, `labels`
-    as JSON, `status_name` the review decision or design status); the whole
-    row is kept in `raw_json`, which is where the URL, CI state and brief live.
+    as JSON, `status_name` a PR's `queue` or `awaiting` or a design's status);
+    the whole row is kept in `raw_json`, where the URL, CI state, brief and
+    queue rule results live.
     """
     stamp = now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     conn.execute("BEGIN IMMEDIATE")
@@ -347,7 +490,7 @@ def write(conn: sqlite3.Connection, rows: list[dict], now: datetime) -> None:
                     row["kind"],
                     row["key"],
                     row["title"],
-                    row.get(_STATUS.get(row["kind"], ""), None),
+                    _status(row),
                     json.dumps(row["labels"]) if "labels" in row else None,
                     row.get("created"),
                     row.get("updated"),
@@ -367,13 +510,18 @@ def main(argv: list[str]) -> int:
     if len(argv) < 2 or argv[0] != "review-queue":
         print("usage: github_fleet.py review-queue <owner>...", file=sys.stderr)
         return 2
-    rows = review_queue(argv[1:])
-    print(f"{len(rows)} PRs in the review queue; GitHub's own count is the union of:")
+    rows, failed = review_queue(argv[1:])
+    counts = queue_counts(rows)
+    print(f"review queue: {counts['queue']}; awaiting: {counts['awaiting']}")
+    print("awaiting is GitHub's own count for the union of:")
     for owner in argv[1:]:
         for query in review_searches(owner):
             print(f"  {query}")
     for row in rows:
-        print(f"  {row['url']}  {row['title']}")
+        mark = "queue" if row["in_queue"] else "miss " + ",".join(row["queue_misses"])
+        print(f"  {row['url']}  [{mark}]")
+    for url in failed:
+        print(f"  CI lookup failed: {url}")
     return 0
 
 
