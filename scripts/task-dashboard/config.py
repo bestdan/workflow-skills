@@ -121,6 +121,8 @@ def load(path: "str | os.PathLike[str] | None" = None) -> dict[str, Any]:
     port = cfg["server"]["port"]
     if not isinstance(port, int) or isinstance(port, bool) or not 0 < port < 65536:
         raise ConfigError("server.port must be an integer port (1-65535)")
+    if not isinstance(cfg["ingest"], dict):
+        raise ConfigError("ingest must be a table")
     machines = cfg["ingest"]["machines"]
     if not isinstance(machines, dict):
         raise ConfigError("ingest.machines must be a table of host = token digest")

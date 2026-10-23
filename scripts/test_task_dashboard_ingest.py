@@ -384,6 +384,12 @@ class ConfigTest(unittest.TestCase):
         ):
             with self.assertRaises(config.ConfigError, msg=bad):
                 self.load(f"[ingest.machines]\n{bad}\n")
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "config.toml"
+            p.write_text("ingest = 3\n" + self.BASE)  # root key, before any table
+            with self.assertRaises(config.ConfigError) as ctx:
+                config.load(p)
+            self.assertIn("ingest must be a table", str(ctx.exception))
 
 
 class TokenCliTest(unittest.TestCase):
