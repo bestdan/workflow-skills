@@ -1,0 +1,13 @@
+{
+  "sprints": [
+    {
+      "id": 503,
+      "name": "DEMO Sprint 42",
+      "state": "active",
+      "originBoardId": 77,
+      "goal": "Ship the queue",
+      "startDate": "2026-10-12T13:00:00.000Z",
+      "endDate": "2026-10-26T13:00:00.000Z"
+    }
+  ]
+}
