@@ -1,0 +1,31 @@
+{
+  "key": "DEMO-102",
+  "id": "10102",
+  "changelog": null,
+  "editmeta": null,
+  "expand": null,
+  "names": {},
+  "operations": null,
+  "properties": null,
+  "renderedFields": null,
+  "schema": {},
+  "transitions": null,
+  "versionedRepresentations": null,
+  "fields": {
+    "summary": null,
+    "status": null,
+    "assignee": null,
+    "reporter": null,
+    "priority": null,
+    "duedate": null,
+    "parent": null,
+    "labels": null,
+    "issuelinks": null,
+    "created": null,
+    "updated": null,
+    "resolutiondate": null,
+    "statuscategorychangedate": null,
+    "customfield_10303": null,
+    "customfield_10007": null
+  }
+}

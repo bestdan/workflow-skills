@@ -1,0 +1,120 @@
+{
+  "key": "DEMO-101",
+  "id": "10101",
+  "changelog": null,
+  "editmeta": null,
+  "expand": null,
+  "names": {},
+  "operations": null,
+  "properties": null,
+  "renderedFields": null,
+  "schema": {},
+  "transitions": null,
+  "versionedRepresentations": null,
+  "fields": {
+    "summary": "Wire the export job to the new queue",
+    "status": {
+      "id": "3",
+      "name": "In Review",
+      "statusCategory": { "id": 4, "key": "indeterminate", "name": "In Progress", "colorName": "yellow" }
+    },
+    "assignee": { "displayName": "Pat Example", "active": true, "timeZone": "America/New_York" },
+    "reporter": { "displayName": "Sam Sample", "active": true, "timeZone": "America/New_York" },
+    "priority": { "id": "2", "name": "High" },
+    "duedate": "2026-11-06",
+    "parent": {
+      "id": "10050",
+      "key": "DEMO-50",
+      "fields": {
+        "summary": "Queue migration",
+        "status": {
+          "name": "In Progress",
+          "statusCategory": { "id": 4, "key": "indeterminate", "name": "In Progress" }
+        },
+        "priority": { "id": "3", "name": "Medium" },
+        "issuetype": { "id": "10000", "name": "Epic", "subtask": false, "hierarchyLevel": 1 }
+      }
+    },
+    "labels": ["backend", "queue"],
+    "issuelinks": [
+      {
+        "id": "30001",
+        "type": { "id": "10000", "name": "Blocks", "inward": "is blocked by", "outward": "blocks" },
+        "inwardIssue": {
+          "id": "10090",
+          "key": "DEMO-90",
+          "fields": {
+            "summary": "Provision the queue",
+            "status": { "name": "To Do", "statusCategory": { "id": 2, "key": "new", "name": "To Do" } },
+            "priority": { "id": "2", "name": "High" },
+            "issuetype": { "id": "10001", "name": "Task", "subtask": false, "hierarchyLevel": 0 }
+          }
+        }
+      },
+      {
+        "id": "30002",
+        "type": { "id": "10000", "name": "Blocks", "inward": "is blocked by", "outward": "blocks" },
+        "outwardIssue": {
+          "id": "10120",
+          "key": "DEMO-120",
+          "fields": {
+            "summary": "Retire the old export cron",
+            "status": { "name": "Backlog", "statusCategory": { "id": 2, "key": "new", "name": "To Do" } },
+            "priority": { "id": "3", "name": "Medium" },
+            "issuetype": { "id": "10001", "name": "Task", "subtask": false, "hierarchyLevel": 0 }
+          }
+        }
+      },
+      {
+        "id": "30003",
+        "type": { "id": "10003", "name": "Relates", "inward": "relates to", "outward": "relates to" },
+        "outwardIssue": {
+          "id": "20007",
+          "key": "OTHR-7",
+          "fields": {
+            "summary": "Queue dashboards",
+            "status": { "name": "Done", "statusCategory": { "id": 3, "key": "done", "name": "Done" } },
+            "priority": { "id": "4", "name": "Low" },
+            "issuetype": { "id": "10001", "name": "Task", "subtask": false, "hierarchyLevel": 0 }
+          }
+        }
+      }
+    ],
+    "created": "2026-09-14T10:02:11.000-0400",
+    "updated": "2026-10-22T16:54:43.512-0400",
+    "resolutiondate": null,
+    "statuscategorychangedate": "2026-10-19T09:30:00.000-0400",
+    "customfield_10303": [
+      {
+        "id": 501,
+        "name": "DEMO Sprint 40",
+        "state": "closed",
+        "boardId": 77,
+        "goal": "",
+        "startDate": "2026-09-14T13:00:00.000Z",
+        "endDate": "2026-09-28T13:00:00.000Z",
+        "completeDate": "2026-09-28T14:00:00.000Z"
+      },
+      {
+        "id": 502,
+        "name": "DEMO Sprint 41",
+        "state": "closed",
+        "boardId": 77,
+        "goal": "",
+        "startDate": "2026-09-28T13:00:00.000Z",
+        "endDate": "2026-10-12T13:00:00.000Z",
+        "completeDate": "2026-10-12T14:00:00.000Z"
+      },
+      {
+        "id": 503,
+        "name": "DEMO Sprint 42",
+        "state": "active",
+        "boardId": 77,
+        "goal": "Ship the queue",
+        "startDate": "2026-10-12T13:00:00.000Z",
+        "endDate": "2026-10-26T13:00:00.000Z"
+      }
+    ],
+    "customfield_10007": [{ "value": "Impediment", "id": "10019" }]
+  }
+}
