@@ -182,6 +182,22 @@ class LocalDateTest(unittest.TestCase):
             _, terms = score.score(issue(due_date="2026-10-24"), ctx(now=now), WEIGHTS)
             self.assertIn("in 1d", {n: w for n, _, w in terms}["deadline"], now)
 
+    def test_due_dates_count_calendar_days_across_dst(self):
+        # 00:30 on 2026-11-01, the 25-hour day DST ends; and 23:30 on
+        # 2027-03-13, the evening before the 23-hour day it starts.
+        cases = (
+            (datetime(2026, 11, 1, 4, 30, tzinfo=timezone.utc), "2026-11-02", "in 1d"),
+            (datetime(2027, 3, 14, 4, 30, tzinfo=timezone.utc), "2027-03-15", "in 2d"),
+        )
+        for now, due, want in cases:
+            _, terms = score.score(issue(due_date=due), ctx(now=now), WEIGHTS)
+            self.assertIn(want, {n: w for n, _, w in terms}["deadline"], due)
+
+    def test_sprint_end_names_the_local_day(self):
+        i = issue(sprint_end="2026-10-24T02:00:00Z")  # 22:00 on the 23rd locally
+        _, terms = score.score(i, ctx(now=NOW), WEIGHTS)
+        self.assertIn("sprint ends 2026-10-23", {n: w for n, _, w in terms}["deadline"])
+
     def test_a_snooze_until_tomorrow_holds_through_the_local_evening(self):
         self.assertTrue(views._in_future("2026-10-24", LATE))
         after = datetime(2026, 10, 24, 4, 1, tzinfo=timezone.utc)
@@ -198,6 +214,11 @@ class IsBlockedTest(unittest.TestCase):
         }
         for signal, (i, links) in cases.items():
             self.assertEqual(score.is_blocked(i, links, CFG), (True, [signal]), signal)
+
+    def test_a_blocker_of_unknown_status_blocks(self):
+        self.assertEqual(
+            score.is_blocked(issue(), [link("inward", None)], CFG), (True, ["link"])
+        )
 
     def test_unblocked_issue(self):
         self.assertEqual(score.is_blocked(issue(), [], CFG), (False, []))

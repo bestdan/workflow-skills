@@ -153,14 +153,14 @@ def _days_to_deadline(
         except ValueError:
             d = None
         if d is not None:
-            # Rounded up, this is the count of local calendar days to `d`: 0 on
-            # the day itself, 1 for tomorrow, whatever the time of day.
-            days = (local_day_start(d) - now).total_seconds() / 86400
-            return float(math.ceil(days)), f"due {d.isoformat()}"
+            # Calendar days, not elapsed hours over 24: a DST day is 23 or 25
+            # hours long, and tomorrow is still one day away on it.
+            days = float((d - now.astimezone().date()).days)
+            return days, f"due {d.isoformat()}"
     end = parse_ts(issue.get("sprint_end"))
     if end is not None:
         days = (end - now).total_seconds() / 86400
-        return days, f"sprint ends {end.date().isoformat()}"
+        return days, f"sprint ends {end.astimezone().date().isoformat()}"
     return None
 
 
