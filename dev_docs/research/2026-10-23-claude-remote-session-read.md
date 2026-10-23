@@ -12,7 +12,7 @@ the first "Verify before building" item in
 left out because this repo is public. Counts, timings and field names are as
 measured.
 
-## Verdict: readable without status (verified from a terminal; untested from a LaunchAgent)
+## Verdict: readable without status (verified, including from a LaunchAgent)
 
 A daemon has one route it can legitimately use: it starts `claude -p` itself and
 sends the `list_cloud_sessions` control request on stdin. That request returns
@@ -38,8 +38,12 @@ What was and wasn't verified:
   Code session, where the guard refused it. I did not spoof the guard. The owner
   ran the command under "Owner check" from their own terminal, and the result is
   recorded there.
-- **Still not observed:** a `running`, `requires_action`, `pending` or `failed`
-  status. The owner's read returned only `idle` and `archived`.
+- **Verified from a LaunchAgent:** the same read, made from a `launchd` job in
+  the background domain, returned `status: ok`. A user was logged in at the
+  mini's console at the time, so a read with no desktop session at all is still
+  untested.
+- **Still not observed:** a `pending` or `failed` status. `running` and
+  `requires_action` appeared once each, in the LaunchAgent read.
 
 **For #1100:** take the "readable" branch, but in reduced form. Build a polling
 adapter for the session **inventory**: id, title, `environment_kind`, branch,
@@ -167,8 +171,13 @@ repo or in the dashboard's config.
 - **The sign-in and the keychain.** Over SSH, `claude mcp list` reported that the
   stored credentials of four plugin MCP servers couldn't be read because "your
   Mac's keychain is locked". Claude Code's own sign-in worked in the same shell.
-  Whether it still works for a LaunchAgent, with no desktop session on the mini,
-  is untested. A `not_signed_in` or `sign_in_expired` reply means someone has to
+  It also worked from a LaunchAgent. Inside that job, `security
+  show-keychain-info` on the login keychain failed with "User interaction is not
+  allowed", and the read still returned `ok`. That suggests the CLI's sign-in
+  doesn't depend on reading the login keychain interactively, but it is
+  inferred: the job did not record where the CLI read its token from. A user was
+  logged in at the console during that run, so a mini with nobody logged in is
+  still untested. A `not_signed_in` or `sign_in_expired` reply means someone has to
   run `claude auth login`.
 - **The 200-session ceiling.** The owner's read covered about 20 days. Archived
   sessions count toward the 200: they were 132 of them, and only 68 sessions
@@ -176,8 +185,9 @@ repo or in the dashboard's config.
   not read absence as archival.
 - **It's a coarse status.** `requires_action` is the only "needs you" signal.
   Reading it as "waiting on a permission prompt" is inferred from the enum, not
-  observed. The owner's read held no `requires_action` and no `running` session
-  at all, so neither value has been seen on the wire.
+  observed. The LaunchAgent read held one `requires_action` and one `running`
+  session, so both values do arrive on the wire. Which state a
+  `requires_action` session was in was not checked.
 
 ## Owner check
 
@@ -213,3 +223,23 @@ returned `"status":"ok"`:
 | Order              | Not by `updated_at`: 46 of 199 adjacent pairs out of order           |
 
 The wall time was not measured.
+
+### Result from a LaunchAgent, 2026-10-23
+
+The owner ran a script that bootstraps a one-shot job into `user/<uid>`, the
+`launchd` background domain, with `LimitLoadToSessionType` set to `Background`.
+The job ran the same pipeline, with only `PATH` passed in, and the script
+removed the job afterwards. The job saw:
+
+| Measure                     | Value                                                          |
+| --------------------------- | -------------------------------------------------------------- |
+| `CLAUDE_CODE_CHILD_SESSION` | unset                                                          |
+| `SSH_CONNECTION`            | unset                                                          |
+| Console user                | the owner, logged in                                           |
+| Login keychain              | `show-keychain-info` failed: "User interaction is not allowed" |
+| Reply                       | `status: ok`, 200 sessions, `truncated: true`                  |
+| `status`                    | `archived` 134, `idle` 64, `requires_action` 1, `running` 1    |
+| Wall time                   | 2 s for the whole pipeline, with nothing on stderr             |
+
+So a LaunchAgent gets past the `started_by_session` guard without any help, as
+the guard's code says, and reads with the CLI's existing sign-in.
