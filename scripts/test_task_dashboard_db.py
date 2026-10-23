@@ -225,6 +225,53 @@ class DbTests(TmpCase):
         self.assertNotIn("ok_one", names)
         other.close()
 
+    def test_concurrent_migrate_rechecks_version_under_the_lock(self):
+        # Two connections open a v1 DB at once. Both read version 1 before
+        # either takes the write lock; A migrates first, then B must see v2
+        # under the lock and skip, not re-run v2 against the new schema.
+        path = self.tmp / "d.db"
+        original = db.MIGRATIONS
+        db.MIGRATIONS = original[:1]
+        try:
+            db.connect(path).close()
+        finally:
+            db.MIGRATIONS = original
+        a = sqlite3.connect(path)
+        b = sqlite3.connect(path)
+        self.addCleanup(a.close)
+        self.addCleanup(b.close)
+        real = db._stored_version
+        reads: list[int] = []
+
+        def stale_unlocked_reads(conn):
+            # B's two unlocked reads (the v1 and v2 checks) happened before A
+            # committed; only the read under the lock sees A's v2.
+            if conn is not b:
+                return real(conn)
+            value = 1 if len(reads) < 2 else real(conn)
+            reads.append(value)
+            return value
+
+        db.migrate(a)
+        db._stored_version = stale_unlocked_reads
+        self.addCleanup(setattr, db, "_stored_version", real)
+        db.migrate(b)
+        self.assertEqual(
+            reads, [1, 1, db.SCHEMA_VERSION]
+        )  # the third is under the lock
+        self.assertFalse(b.in_transaction)
+        ver = b.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+        self.assertEqual(int(ver[0]), db.SCHEMA_VERSION)
+        self.assertIn("source", {r[1] for r in b.execute("PRAGMA table_info(issues)")})
+
+    def test_statements_splits_a_script(self):
+        stmts = db._statements(
+            "CREATE TABLE a (x);\n-- note; here\nCREATE TABLE b (y);\n"
+        )
+        self.assertEqual(len(stmts), 2)
+        with self.assertRaises(ValueError):
+            db._statements("CREATE TABLE a (x)")
+
     def test_env_var_db_path(self):
         target = self.tmp / "sub" / "env.db"
         self.set_env(db.ENV_VAR, str(target))

@@ -135,6 +135,7 @@ class FakeGh:
         self.authored = list(authored)
         self.ci = ci
         self.error = None
+        self.ci_fail = set()
 
     def __call__(self, argv, timeout):
         if self.error:
@@ -152,6 +153,8 @@ class FakeGh:
             }
             return 0, json.dumps(page), ""
         if argv[:3] == ["gh", "pr", "view"]:
+            if any(a in self.ci_fail for a in argv):
+                return 1, "", "HTTP 502: bad gateway"
             rollup = [
                 {"__typename": "CheckRun", "status": "COMPLETED", "conclusion": self.ci}
             ]
@@ -295,6 +298,25 @@ class CursorTests(SyncCase):
         self.assertEqual(json.loads(row["failed_keys"]), ["DEMO-2"])
         acli = FakeAcli([])
         self.run_sync("incremental", acli, now=NOW + timedelta(minutes=10))
+        self.assertEqual(acli.viewed(), ["DEMO-2"])
+
+    def test_incremental_retries_a_new_key_that_failed_last_time(self):
+        self.run_sync("full", FakeAcli(["DEMO-1"]))
+        flaky = FakeAcli(["DEMO-1", "DEMO-9"])
+        flaky.fail_view = {"DEMO-9"}
+        row = self.run_sync("incremental", flaky, now=NOW + timedelta(minutes=5))
+        self.assertEqual(json.loads(row["failed_keys"]), ["DEMO-9"])
+        self.assertEqual(self.keys(), ["DEMO-1"])
+        acli = FakeAcli([])
+        self.run_sync("incremental", acli, now=NOW + timedelta(minutes=10))
+        self.assertEqual(acli.viewed(), ["DEMO-9"])
+        self.assertEqual(self.keys(), ["DEMO-1", "DEMO-9"])
+
+    def test_incremental_does_not_view_failed_pr_urls(self):
+        url = "https://github.com/acme/app/pull/7"
+        self.seed_run("full", NOW - timedelta(minutes=5), failed=["DEMO-2", url])
+        acli = FakeAcli([])
+        self.run_sync("incremental", acli)
         self.assertEqual(acli.viewed(), ["DEMO-2"])
 
 
@@ -457,6 +479,25 @@ class FailureTests(SyncCase):
         self.assertEqual(acli.viewed().count("B-1"), 2)
         self.assertEqual(self.keys(), ["A-1"])
 
+    def test_interrupted_run_is_recorded_and_reraised(self):
+        before = self.populate()
+        acli = FakeAcli(["A-1", "C-1"])
+
+        def interrupt(argv, timeout):
+            if argv[2:4] == ["workitem", "view"]:
+                raise KeyboardInterrupt
+            return acli(argv, timeout)
+
+        with self.assertRaises(KeyboardInterrupt):
+            self.run_sync("full", interrupt, now=NOW + timedelta(hours=1))
+        row = self.conn.execute(
+            "SELECT outcome, ok, error, finished_at FROM sync_runs ORDER BY id DESC"
+        ).fetchone()
+        self.assertEqual(row[:3], ("failed", 0, "interrupted (KeyboardInterrupt)"))
+        self.assertIsNotNone(row[3])
+        self.assertEqual(self.checksum("issues"), before[0])
+        self.assertFalse(self.conn.in_transaction)
+
     def test_write_failure_rolls_back(self):
         before = self.populate()
         saved = sync._UPSERT_ISSUE
@@ -495,6 +536,21 @@ class GithubTests(SyncCase):
         ci = {r[0] for r in self.conn.execute("SELECT ci_state FROM prs")}
         self.assertEqual(ci, {"success"})
         self.assertEqual(json.loads(row["counts"])["prs"], 3)
+
+    def test_ci_lookup_failure_is_logged_not_fatal(self):
+        gh = FakeGh(authored=[pr_node(1, "feat [DEMO-1]", "a"), pr_node(2, "b", "b")])
+        bad = "https://github.com/acme/app/pull/2"
+        gh.ci_fail = {bad}
+        row = self.run_sync(
+            "full", FakeAcli(["DEMO-1"]), gh=gh, cfg=make_config(enabled=True)
+        )
+        self.assertEqual(row["outcome"], "ok")
+        ci = dict(self.conn.execute("SELECT url, ci_state FROM prs").fetchall())
+        self.assertEqual(
+            ci, {"https://github.com/acme/app/pull/1": "success", bad: None}
+        )
+        self.assertEqual(json.loads(row["failed_keys"]), [bad])
+        self.assertEqual(json.loads(row["counts"])["ci_failed"], 1)
 
     def test_disabled_github_leaves_prs_alone(self):
         self.conn.execute(
@@ -620,6 +676,14 @@ class FakeAcliTests(unittest.TestCase):
             self.query("SELECT kind, outcome FROM sync_runs ORDER BY id"),
             [("full", "ok"), ("incremental", "ok")],
         )
+
+    def test_failed_run_exits_1(self):
+        missing = self.tmp / "no-such-acli"
+        self.cfg.write_text(self.cfg.read_text().replace(str(FAKE_ACLI), str(missing)))
+        r = self.sync("full")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("acli not found", r.stderr)
+        self.assertEqual(self.query("SELECT outcome FROM sync_runs"), [("failed",)])
 
     def test_bad_config_exits_2(self):
         self.cfg.write_text(
