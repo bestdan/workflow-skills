@@ -319,6 +319,16 @@ class ViewsTest(unittest.TestCase):
         self.assertIn("ABC-5", issues[0][1])
         self.assertEqual([p["number"] for p in prs], [3])
 
+    def test_blocking_my_own_issue_is_not_waiting_on_me(self):
+        self.conn.executemany(
+            "INSERT INTO links (issue_key, linked_key, link_type, direction,"
+            " linked_status_category) VALUES (?, ?, 'Blocks', ?, 'new')",
+            [("ABC-2", "ABC-9", "outward"), ("ABC-9", "ABC-2", "inward")],
+        )
+        self.conn.commit()
+        issues, _ = views.waiting_on_me(self.mirror())
+        self.assertEqual([i["key"] for i, _ in issues], ["ABC-4"])
+
     def test_waiting_on_uses_the_mirrored_blocker_status(self):
         issues, prs = views.waiting_on(self.mirror())
         self.assertEqual([i["key"] for i, _ in issues], ["ABC-1"])
@@ -330,6 +340,18 @@ class ViewsTest(unittest.TestCase):
         found = views.stale(self.mirror())
         self.assertEqual([i["key"] for i, _ in found], ["ABC-7"])
         self.assertIn("In Review", found[0][1])
+
+    def test_a_recent_update_keeps_an_old_category_off_stale(self):
+        self.conn.execute(
+            "INSERT INTO issues (source, kind, key, status_name, status_category,"
+            " status_category_changed, updated, assignee, labels, scope) VALUES"
+            " ('jira', 'ticket', 'ABC-20', 'In Progress', 'indeterminate', ?, ?, ?,"
+            " '[]', 'search')",
+            (ts(NOW - timedelta(days=20)), ts(NOW - timedelta(days=1)), ME),
+        )
+        self.conn.commit()
+        keys = [i["key"] for i, _ in views.stale(self.mirror())]
+        self.assertEqual(keys, ["ABC-7"])
 
     def test_epics_rollup(self):
         # ABC-5 is blocked by its inward link from ABC-4, which is open.

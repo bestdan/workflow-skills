@@ -50,7 +50,8 @@ DEFAULTS: dict[str, Any] = {
         },
         # Days in a status category before the Stuck term starts counting.
         # Stale uses the `indeterminate` one. v1 measures time in category, not
-        # in status: acli cannot read the changelog (the design's Fields).
+        # in status: acli cannot read the changelog (Fields, under Sync, in
+        # dev_docs/designs/2026-10-23-task-dashboard.md).
         "stuck_days": {"new": 14, "indeterminate": 5},
     },
 }

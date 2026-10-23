@@ -36,7 +36,7 @@ JIRA_PRIORITY = {
 PRIORITY_LEVEL = {"urgent": 4, "high": 3, "medium": 2, "low": 1}
 
 # Deadline pressure rises linearly from 0 at DEADLINE_HORIZON_DAYS out to 1 on
-# the day, and keeps rising while overdue, capped at 2 (two horizons late).
+# the day, and keeps rising while overdue, capped at 2 (one horizon overdue).
 DEADLINE_HORIZON_DAYS = 14.0
 DEADLINE_CAP = 2.0
 
