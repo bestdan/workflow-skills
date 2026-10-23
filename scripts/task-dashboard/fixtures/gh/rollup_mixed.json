@@ -1,0 +1,31 @@
+{
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-21T13:20:54Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/bestdan/example/actions/runs/1/job/1",
+      "name": "test",
+      "startedAt": "2026-10-21T13:20:20Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-21T13:20:23Z",
+      "conclusion": "SKIPPED",
+      "detailsUrl": "https://github.com/bestdan/example/actions/runs/1/job/2",
+      "name": "deploy-preview",
+      "startedAt": "2026-10-21T13:20:23Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "StatusContext",
+      "context": "coverage/coveralls",
+      "startedAt": "2026-10-21T13:21:02Z",
+      "state": "SUCCESS",
+      "targetUrl": "https://coveralls.io/builds/1"
+    }
+  ]
+}
