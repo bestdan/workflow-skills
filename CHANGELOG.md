@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.101.0] - 2026-10-23
+
+### Features
+
+- add package skeleton, config and SQLite schema [#1085] (#1097) (177f473)
+
 ## [2.100.0] - 2026-10-22
 
 ### Features
