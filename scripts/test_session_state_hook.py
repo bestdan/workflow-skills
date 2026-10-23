@@ -96,6 +96,32 @@ class NoOptInTests(HookCase):
                 self.assertEqual(proc.returncode, 0)
                 self.assertFalse((self.home / ".local").exists())
 
+    def test_large_payload_is_drained(self):
+        # Larger than any pipe buffer: if the hook exited without reading,
+        # writing the rest would raise BrokenPipeError here.
+        payload = self.payload("UserPromptSubmit", prompt="x" * (2 * 1024 * 1024))
+        data = json.dumps(payload).encode()
+        env = {k: v for k, v in os.environ.items() if k != hook.CONFIG_ENV}
+        env["HOME"] = str(self.home)
+        proc = subprocess.Popen(
+            [sys.executable, str(HOOK)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+        )
+        assert proc.stdin and proc.stdout and proc.stderr
+        time.sleep(0.3)  # let a non-draining hook exit before the write
+        proc.stdin.write(data)
+        proc.stdin.close()
+        proc.wait(timeout=10)
+        out, err = proc.stdout.read(), proc.stderr.read()
+        proc.stdout.close()
+        proc.stderr.close()
+        self.assertEqual(proc.returncode, 0)
+        self.assertEqual(out + err, b"")
+        self.assertFalse((self.home / ".local").exists())
+
     def test_config_override_replaces_default_path(self):
         # The override names a missing file, so an opt-in at the default path
         # must not count.

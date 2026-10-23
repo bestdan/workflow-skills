@@ -14,10 +14,16 @@ same override the dashboard reads) has::
     [collector]
     enabled = true
 
+Only that form opts in: a literal ``[collector]`` table header, then an
+``enabled = true`` line before the next header. The file is line-scanned, not
+parsed as TOML, so a dotted key (``collector.enabled = true``), an inline
+table (``collector = {enabled = true}``) and a quoted key all read as off.
+
 Anything else — no file, no table, ``false``, a value that is not exactly
 ``true``, an unreadable file — is "not opted in": exit 0 having written
 nothing. The file-existence test comes first, so a machine that never opted in
-pays one ``stat`` and no parse.
+pays one ``stat`` and no parse. It still reads the payload to EOF before it
+exits, so the harness never writes a large prompt into a closed pipe.
 
 NEVER FAILS THE TURN. Every error is swallowed and the exit code is always 0.
 The hook runs on every prompt, so it imports only the standard library, spawns
@@ -61,6 +67,9 @@ DEFAULT_CONFIG = "~/.config/task-dashboard/config.toml"
 STATE_DIR = "~/.local/state/fleet/sessions"
 EVENTS = ("UserPromptSubmit", "Stop", "Notification")
 FORMAT_VERSION = 1
+# The most a not-opted-in run reads before giving up; past it the harness is
+# writing something no prompt payload resembles.
+DRAIN_LIMIT = 64 * 1024 * 1024
 
 
 def _config_path():
@@ -187,13 +196,37 @@ def append(session_id, line):
         os.close(fd)
 
 
-def main():
+def opted_in():
     config = _config_path()
     if not os.path.isfile(config):
-        return
+        return False
     with open(config, encoding="utf-8") as fh:
-        if not collector_enabled(fh.read()):
+        return collector_enabled(fh.read())
+
+
+def drain_stdin(limit=DRAIN_LIMIT):
+    """Read stdin to EOF, or ``limit`` bytes, and discard it. Never raises."""
+    try:
+        stream = sys.stdin.buffer
+        if stream.isatty():
             return
+        while limit > 0:
+            chunk = stream.read(min(65536, limit))
+            if not chunk:
+                return
+            limit -= len(chunk)
+    except (AttributeError, OSError, ValueError):
+        pass
+
+
+def main():
+    try:
+        enabled = opted_in()
+    except (OSError, UnicodeError, ValueError):
+        enabled = False
+    if not enabled:
+        drain_stdin()
+        return
 
     import json
     from datetime import datetime, timezone

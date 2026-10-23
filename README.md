@@ -206,8 +206,11 @@ The ninth, on `UserPromptSubmit`, `Stop` and `Notification`, is the fleet
 view's session-state hook
 ([`scripts/session-state-hook.py`](scripts/session-state-hook.py)). It is **off
 unless the machine opts in** with `[collector] enabled = true` in
-`~/.config/task-dashboard/config.toml`; otherwise it exits at once and writes
-nothing. Opted in, it appends one line of event metadata per event — time,
+`~/.config/task-dashboard/config.toml`: a literal `[collector]` table header
+followed by an `enabled = true` line. A dotted key
+(`collector.enabled = true`) or an inline table
+(`collector = {enabled = true}`) reads as off. Otherwise it reads the payload
+to the end, exits, and writes nothing. Opted in, it appends one line of event metadata per event — time,
 event, session id, cwd, branch, and for a notification whether it was a
 permission prompt — to `~/.local/state/fleet/sessions/<session_id>.jsonl`. It
 never records prompt text, and it never fails a turn.
