@@ -22,8 +22,11 @@ if sys.version_info < (3, 11):
     sys.exit(1)
 
 import argparse  # noqa: E402
+import contextlib  # noqa: E402
 import json  # noqa: E402
+import os  # noqa: E402
 import secrets  # noqa: E402
+import sqlite3  # noqa: E402
 from datetime import datetime, timezone  # noqa: E402
 from pathlib import Path  # noqa: E402
 
@@ -34,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import config  # noqa: E402
 import db  # noqa: E402
 import ingest  # noqa: E402
+import overlay  # noqa: E402
 import server  # noqa: E402
 import sync  # noqa: E402
 
@@ -78,6 +82,20 @@ def build_parser() -> argparse.ArgumentParser:
         "add", help="generate a machine's ingest token and print it once"
     )
     add_p.add_argument("host", help="the machine's short host name, as it snapshots")
+    export_p = sub.add_parser(
+        "export", help="write the overlay (pins, order, snoozes, notes) as JSON"
+    )
+    export_p.add_argument("path", nargs="?", help="output file (default: stdout)")
+    export_p.add_argument(
+        "--db", help="DB path (default: $TASK_DASHBOARD_DB or the state dir)"
+    )
+    import_p = sub.add_parser(
+        "import", help="replace the overlay with an export file's contents"
+    )
+    import_p.add_argument("path", help="a file written by `export`")
+    import_p.add_argument(
+        "--db", help="DB path (default: $TASK_DASHBOARD_DB or the state dir)"
+    )
     return parser
 
 
@@ -96,6 +114,63 @@ def cmd_ingest_token_add(args: argparse.Namespace) -> int:
         f" {config.config_path()} and restart the server:"
         f'\n\n  {args.host} = "{ingest.digest(token)}"'
     )
+    return 0
+
+
+def cmd_export(args: argparse.Namespace) -> int:
+    """Exit 0 on success, 1 on an OS or SQLite error (an earlier file is kept)."""
+    try:
+        conn = db.connect(args.db)
+        try:
+            text = overlay.dumps(overlay.export(conn))
+        finally:
+            conn.close()
+    except (sqlite3.Error, OSError) as exc:
+        print(f"task-dashboard: export failed: {exc}", file=sys.stderr)
+        return 1
+    if not args.path:
+        sys.stdout.write(text)
+        return 0
+    # Write beside the target and rename, so a failed write never truncates an
+    # earlier backup of the one table set that cannot be rebuilt.
+    dest = Path(args.path)
+    tmp = dest.with_name(f".{dest.name}.tmp")
+    try:
+        tmp.write_text(text)
+        os.replace(tmp, dest)
+    except OSError as exc:
+        with contextlib.suppress(OSError):  # best effort: the path may be bad too
+            tmp.unlink(missing_ok=True)
+        print(f"task-dashboard: cannot write {dest}: {exc}", file=sys.stderr)
+        return 1
+    print(f"exported overlay to {dest}", file=sys.stderr)
+    return 0
+
+
+def cmd_import(args: argparse.Namespace) -> int:
+    """Exit 0 on success, 1 when the file is refused (the overlay is unchanged)."""
+    try:
+        doc = json.loads(Path(args.path).read_text())
+    except (OSError, ValueError) as exc:
+        print(f"task-dashboard: cannot read {args.path}: {exc}", file=sys.stderr)
+        return 1
+    try:
+        conn = db.connect(args.db)
+    except (sqlite3.Error, OSError) as exc:
+        print(
+            f"task-dashboard: import failed, overlay unchanged: {exc}", file=sys.stderr
+        )
+        return 1
+    try:
+        counts = overlay.import_(conn, doc)
+    except (overlay.OverlayError, sqlite3.Error) as exc:
+        print(
+            f"task-dashboard: import refused, overlay unchanged: {exc}", file=sys.stderr
+        )
+        return 1
+    finally:
+        conn.close()
+    print("imported overlay: " + ", ".join(f"{t} {n}" for t, n in counts.items()))
     return 0
 
 
@@ -153,6 +228,10 @@ def main(argv: "list[str] | None" = None) -> int:
         return cmd_serve(args)
     if args.command == "ingest-token":
         return cmd_ingest_token_add(args)
+    if args.command == "export":
+        return cmd_export(args)
+    if args.command == "import":
+        return cmd_import(args)
     parser.print_help()
     return 2
 

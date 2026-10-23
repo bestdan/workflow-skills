@@ -45,6 +45,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import db
 import ingest
+import overlay
 import score
 import sync
 import views
@@ -454,7 +455,14 @@ def render_header(health: dict[str, Any], busy: bool) -> str:
     )
 
 
-def _card(row: dict[str, Any], site: str) -> str:
+def _card(
+    row: dict[str, Any],
+    site: str,
+    ov: "overlay.Overlay | None" = None,
+    now: "datetime | None" = None,
+    *,
+    reorder: bool = False,
+) -> str:
     key = _e(str(row["id"]))
     href = _e(f"https://{site}/browse/{row['id']}")
     meta = " · ".join(
@@ -462,25 +470,49 @@ def _card(row: dict[str, Any], site: str) -> str:
         for v in (row.get("status_name"), row.get("assignee"), row.get("priority_name"))
         if v
     )
+    attrs, controls = 'class="card"', ""
+    if ov is not None and now is not None:
+        item = ("jira", str(row["id"]))
+        attrs = overlay.card_attrs(item, ov, now)
+        controls = overlay.card_controls(item, ov, now, reorder=reorder)
     return (
-        f'<div class="card"><a href="{href}">{key}</a> {_e(row.get("summary") or "")}'
-        f'<div class="meta">{meta}</div></div>'
+        f'<div {attrs}><a href="{href}">{key}</a> {_e(row.get("summary") or "")}'
+        f'<div class="meta">{meta}</div>{controls}</div>'
     )
 
 
-def render_board(board: dict[str, Any], site: str) -> str:
+def render_board(
+    board: dict[str, Any],
+    site: str,
+    ov: "overlay.Overlay | None" = None,
+    now: "datetime | None" = None,
+) -> str:
     parts = []
+    if ov is not None and now is not None:
+        # Pinned cards are repeated above the lanes, in their manual order; the
+        # lanes themselves stay exactly what /list-tasks would show.
+        rows = [r for lane in board["sections"].values() for r in lane]
+        pinned = sorted(
+            (r for r in rows + board["unmatched"] if ov.is_pinned(("jira", r["id"]))),
+            key=lambda r: ov.pin_rank(("jira", r["id"])),
+        )
+        if pinned:
+            cards = "".join(_card(r, site, ov, now, reorder=True) for r in pinned)
+            parts.append(
+                '<section class="lane" data-section="pinned" data-pinned="1">'
+                f"<h2>Pinned ({len(pinned)})</h2>{cards}</section>"
+            )
     for name in kanban().SECTION_ORDER:
         rows = board["sections"][name]
         if not rows:
             continue
-        cards = "".join(_card(r, site) for r in rows)
+        cards = "".join(_card(r, site, ov, now) for r in rows)
         parts.append(
             f'<section class="lane" data-section="{name}">'
             f"<h2>{SECTION_TITLES.get(name, name)} ({len(rows)})</h2>{cards}</section>"
         )
     if board["unmatched"]:
-        cards = "".join(_card(r, site) for r in board["unmatched"])
+        cards = "".join(_card(r, site, ov, now) for r in board["unmatched"])
         parts.append(
             '<section class="lane" data-section="unmatched">'
             f"<h2>Unclassified ({len(board['unmatched'])})</h2>{cards}</section>"
@@ -495,9 +527,9 @@ def render_page(title: str, header: str, body: str, token: str, busy: bool) -> s
         "<!doctype html><html lang=en><head><meta charset=utf-8>"
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
         f'<meta name="dashboard-token" content="{_e(token)}">'
-        f"<title>{_e(title)}</title><style>{CSS}{views.CSS}</style></head>"
+        f"<title>{_e(title)}</title><style>{CSS}{views.CSS}{overlay.CSS}</style></head>"
         f'<body data-busy="{1 if busy else 0}">{header}<main>{body}</main>'
-        f"<script>{JS}</script></body></html>"
+        f"<script>{JS}{overlay.JS}</script></body></html>"
     )
 
 
@@ -553,11 +585,19 @@ class App:
         title = f"{views.ROUTES[path][0]} · Task dashboard"
         return render_page(title, render_header(health, busy), body, self.token, busy)
 
+    def overlay_write(self, action: str, form: dict[str, list[str]]) -> None:
+        conn = self.read()
+        try:
+            overlay.apply(conn, action, form, self.now())
+        finally:
+            conn.close()
+
     def board_page(self) -> str:
         conn = self.read()
         try:
             health = sync_health(conn, self.interval_s, self.now())
             board = classify_board(board_rows(conn))
+            ov = overlay.load(conn)
             sprints = [
                 r[0] for r in conn.execute("SELECT name FROM sprints ORDER BY id")
             ]
@@ -568,7 +608,7 @@ class App:
         body = (
             views.nav("/board")
             + f"<h2>{_e(title)}</h2>"
-            + render_board(board, self.cfg["jira"]["site"])
+            + render_board(board, self.cfg["jira"]["site"], ov, self.now())
         )
         return render_page(
             "Task dashboard", render_header(health, busy), body, self.token, busy
@@ -659,7 +699,9 @@ class Handler(BaseHTTPRequestHandler):
                 sys.stderr.write(f"task-dashboard: {code} POST /ingest: {why}\n")
             self._json(code, body)
             return
-        if urlsplit(self.path).path != "/sync":
+        path = urlsplit(self.path).path
+        action = path[len("/overlay/") :] if path.startswith("/overlay/") else None
+        if path != "/sync" and action not in overlay.ACTIONS:
             self._text(404, "not found\n")
             return
         if not self._origin_ok():
@@ -668,7 +710,7 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
             length = -1
-        if length < 0 or length > MAX_BODY:
+        if length < 0 or length > (MAX_BODY if action is None else overlay.MAX_BODY):
             self._text(400, "bad body\n")
             return
         form = parse_qs(self.rfile.read(length).decode("utf-8", "replace"))
@@ -676,6 +718,20 @@ class Handler(BaseHTTPRequestHandler):
         app = self.server.app
         if not hmac.compare_digest(token.encode(), app.token.encode()):
             self._refuse("missing or wrong token")
+            return
+        if action is not None:
+            try:
+                app.overlay_write(action, form)
+            except overlay.OverlayError as exc:
+                self._text(400, f"{exc}\n")
+                return
+            except sqlite3.Error as exc:
+                # Usually a lock a sync held past the connect timeout. Log the
+                # detail here; the client gets a retryable status, no traceback.
+                sys.stderr.write(f"task-dashboard: overlay {action} failed: {exc}\n")
+                self._json(503, {"ok": False, "error": "database busy, try again"})
+                return
+            self._json(200, {"ok": True})
             return
         mode = (form.get("mode") or ["incremental"])[0]
         if mode not in SYNC_MODES:
