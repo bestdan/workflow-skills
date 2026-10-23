@@ -58,8 +58,9 @@ SKILL.md's `allowed-tools` grants the call. It writes to GitHub, so run it
 unsandboxed.
 
 The script reads the PR's comments, edits this account's existing stamp in
-place, and posts one only when there is none. A rerun on an unchanged head
-writes nothing. If this account has left more than one stamp, it keeps the
+place, and posts one only when there is none. A rerun with the same head and
+the same summary writes nothing; a changed summary on the same head edits the
+comment in place. If this account has left more than one stamp, it keeps the
 oldest and deletes the rest. It never touches another account's comment.
 
 ## Reading the outcome
