@@ -80,9 +80,9 @@ Order:
 
 ## Decisions
 
-- **The plan is committed.** A `.gitignore` negation tracks this folder, so the
-  work laptop gets it with the branch. Task 9 removes both the folder and the
-  negation.
+- **The plan lives in GitHub issues** under this milestone, so the Mac mini and
+  the laptop coordinate through the same board, with `/list-tasks` and
+  `/do-tasks` on either machine.
 - **Python 3.11+ via `uv`, with a TOML config.** This was chosen over the
   3.9/JSON floor of macOS's bundled `python3`, at the cost of needing `uv`
   on the build machine.
