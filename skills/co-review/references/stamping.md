@@ -1,8 +1,8 @@
 # Stamping the PR
 
-The procedure behind SKILL.md step 8's stamp sentence. The ledger is local and
-write-only, so nothing outside this session can read it. The stamp is the one
-record of a co-review that lives on GitHub. It is a single PR comment whose
+The procedure behind SKILL.md step 8's stamp sentence. The ledger never reaches
+the PR, so a reader on GitHub cannot learn from it that the PR was reviewed.
+The stamp is the one record of a co-review on the PR itself. It is a single PR comment whose
 body opens with a fixed marker:
 
 ```
