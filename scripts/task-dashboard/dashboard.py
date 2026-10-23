@@ -80,7 +80,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
     except config.ConfigError as exc:
         print(f"task-dashboard: {exc}", file=sys.stderr)
         return 2
-    port = args.port if args.port is not None else int(cfg["server"]["port"])
+    port = args.port if args.port is not None else cfg["server"]["port"]
     server.serve(cfg, db.db_path(args.db), port)
     return 0
 

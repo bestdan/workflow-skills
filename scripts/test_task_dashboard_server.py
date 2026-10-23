@@ -515,6 +515,15 @@ class BoardTest(ServerCase):
         self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", page)
         self.assertEqual(page.count("<script>"), 1)  # only the page's own
 
+    def test_responses_carry_nosniff(self):
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        for path in ("/", "/status", "/nope"):
+            c.request("GET", path)
+            resp = c.getresponse()
+            resp.read()
+            self.assertEqual(resp.getheader("X-Content-Type-Options"), "nosniff", path)
+        c.close()
+
     def test_unknown_path_is_404(self):
         self.assertEqual(self.request("GET", "/nope")[0], 404)
         self.assertEqual(self.request("POST", "/x")[0], 404)
@@ -526,6 +535,21 @@ class ConfigTest(unittest.TestCase):
             with self.assertRaises(config.ConfigError) as ctx:
                 config.load(d)  # a directory, not a file
             self.assertIn("cannot read", str(ctx.exception))
+
+    def test_server_port_must_be_an_integer_port(self):
+        base = (
+            '[jira]\nsite = "x"\nboard_ids = []\n'
+            '[jira.fields]\nsprint = "s"\nflagged = "f"\n'
+        )
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "config.toml"
+            for bad in ('"8765"', "true", "0", "70000", "87.5"):
+                p.write_text(base + f"[server]\nport = {bad}\n")
+                with self.assertRaises(config.ConfigError, msg=bad) as ctx:
+                    config.load(p)
+                self.assertIn("server.port", str(ctx.exception))
+            p.write_text(base + "[server]\nport = 9000\n")
+            self.assertEqual(config.load(p)["server"]["port"], 9000)
 
     def test_missing_config_keeps_its_message(self):
         with tempfile.TemporaryDirectory() as d:
