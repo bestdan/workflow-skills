@@ -32,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import config  # noqa: E402
 import db  # noqa: E402
+import server  # noqa: E402
 import sync  # noqa: E402
 
 
@@ -58,7 +59,30 @@ def build_parser() -> argparse.ArgumentParser:
         "--config",
         help="config path (default: $TASK_DASHBOARD_CONFIG or ~/.config/task-dashboard)",
     )
+    serve_p = sub.add_parser(
+        "serve", help="serve the dashboard on 127.0.0.1 and sync on an interval"
+    )
+    serve_p.add_argument("--port", type=int, help="port (default: server.port)")
+    serve_p.add_argument(
+        "--db", help="DB path (default: $TASK_DASHBOARD_DB or the state dir)"
+    )
+    serve_p.add_argument(
+        "--config",
+        help="config path (default: $TASK_DASHBOARD_CONFIG or ~/.config/task-dashboard)",
+    )
     return parser
+
+
+def cmd_serve(args: argparse.Namespace) -> int:
+    """Run until interrupted; exit 2 on a config error."""
+    try:
+        cfg = config.load(args.config)
+    except config.ConfigError as exc:
+        print(f"task-dashboard: {exc}", file=sys.stderr)
+        return 2
+    port = args.port if args.port is not None else cfg["server"]["port"]
+    server.serve(cfg, db.db_path(args.db), port)
+    return 0
 
 
 def cmd_sync(args: argparse.Namespace) -> int:
@@ -95,6 +119,8 @@ def main(argv: "list[str] | None" = None) -> int:
         return 0
     if args.command == "sync":
         return cmd_sync(args)
+    if args.command == "serve":
+        return cmd_serve(args)
     parser.print_help()
     return 2
 

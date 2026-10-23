@@ -89,6 +89,8 @@ def load(path: "str | os.PathLike[str] | None" = None) -> dict[str, Any]:
             user = tomllib.load(fh)
     except FileNotFoundError:
         raise ConfigError(f"config file not found: {p}") from None
+    except OSError as exc:  # a directory, unreadable, ...: after the clause above
+        raise ConfigError(f"cannot read {p}: {exc}") from None
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError(f"invalid TOML in {p}: {exc}") from None
     cfg = deep_merge(DEFAULTS, user)
@@ -104,6 +106,9 @@ def load(path: "str | os.PathLike[str] | None" = None) -> dict[str, Any]:
         isinstance(i, int) and not isinstance(i, bool) for i in ids
     ):
         raise ConfigError("jira.board_ids must be a list of integer board ids")
+    port = cfg["server"]["port"]
+    if not isinstance(port, int) or isinstance(port, bool) or not 0 < port < 65536:
+        raise ConfigError("server.port must be an integer port (1-65535)")
     return cfg
 
 
