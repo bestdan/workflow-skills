@@ -10,7 +10,7 @@
 # a type checker whose diagnostics move between releases turns a green gate
 # red on a day nobody touched the code.
 #
-# FOUR TIERS, split by WHO RUNS THE FILE — a file's tier follows the interpreter
+# FIVE TIERS, split by WHO RUNS THE FILE — a file's tier follows the interpreter
 # it must survive, not the directory it sits in. Two files under scripts/ are
 # consumer code; see the comments on the arrays below.
 #
@@ -20,6 +20,12 @@
 #             --python-version 3.9; that pin is the point.
 #   dev       Only this repo's contributors and CI run these. Pinned to 3.11
 #             rather than left to whatever interpreter uvx resolved.
+#   uv-runtime  scripts/task-dashboard/*.py — runtime code run on the user's
+#             machine through `uv run --no-project --python ">=3.11"`, so the
+#             floor is the 3.11 uv resolves, not the 3.9 macOS ships. Distinct
+#             from `dev`, which only contributors and CI run. A tier of its own
+#             was chosen over widening `dev`: the executor differs, and a later
+#             change to either floor should not have to untangle the two.
 #   tests     scripts/test_*.py, with --disable-error-code=attr-defined and
 #             nothing else disabled — they stub seams on importlib-loaded
 #             modules, which mypy sees only as ModuleType.
@@ -29,7 +35,7 @@
 # BODY at all — which is how the tier covering every consumer-executed file came
 # to be checking nothing.
 #
-# All four tiers always run and the exit code is their OR, so one failing never
+# All five tiers always run and the exit code is their OR, so one failing never
 # hides another's findings. scripts/tier-coverage.py holds the arrays below to a
 # partition of every .py file, EXCLUDED_FROM_TYPECHECK included.
 #
@@ -120,6 +126,12 @@ DEV_FILES=(
 )
 DEV_PYTHON=3.11
 
+# Runtime code that ships to users but runs under uv's >=3.11, not bare python3.
+# See the uv-runtime entry in the header. Pinned to the floor the run command
+# asks for, so diagnostics match what the user's interpreter will do.
+UV_RUNTIME_FILES=(scripts/task-dashboard/*.py)
+UV_RUNTIME_PYTHON=3.11
+
 # Globbed rather than listed: a new scripts/test_*.py is covered the day it
 # lands. Being absent from a hand-maintained list is precisely why none of these
 # files was checked at all until recently.
@@ -166,6 +178,13 @@ uvx --with "$STUBS" "mypy@${MYPY_VERSION}" --check-untyped-defs \
 echo "→ mypy --check-untyped-defs (py${DEV_PYTHON}): ${DEV_FILES[*]}"
 uvx --with "$STUBS" "mypy@${MYPY_VERSION}" --check-untyped-defs \
   --python-version "$DEV_PYTHON" "${DEV_FILES[@]}" || rc=1
+
+# MYPYPATH: dashboard.py imports its siblings (`import db`) through a runtime
+# sys.path insert, because the hyphenated directory is not a package. mypy
+# cannot see that, so it is given the directory as a search root instead.
+echo "→ mypy --check-untyped-defs (py${UV_RUNTIME_PYTHON}, uv-runtime): ${UV_RUNTIME_FILES[*]}"
+MYPYPATH=scripts/task-dashboard uvx --with "$STUBS" "mypy@${MYPY_VERSION}" --check-untyped-defs \
+  --python-version "$UV_RUNTIME_PYTHON" "${UV_RUNTIME_FILES[@]}" || rc=1
 
 # attr-defined is disabled here and nowhere else. These files stub seams on
 # modules loaded through importlib (`rollups.run_gh = fake`), which mypy sees

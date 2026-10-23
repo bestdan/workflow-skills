@@ -38,6 +38,10 @@ latent defects.
 4. **No runtime validation dependency.** Shape checking is `_shape.expect()`,
    stdlib.
 
+_Addendum 2026-10-23: a fifth tier, `uv-runtime` (3.11, `scripts/task-dashboard/`),
+now covers code run on users' machines under `uv run --python ">=3.11"`. It is
+not `dev` (contributors only) and not consumer (3.9). See `scripts/typecheck.sh`._
+
 ## Why the split is by executor, not by directory
 
 The assets run as bare `python3` on **other people's machines**. Which Python
