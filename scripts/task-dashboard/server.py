@@ -15,6 +15,9 @@ dev_docs/designs/2026-10-23-task-dashboard.md:
 - Every POST also needs an `Origin` naming the same allowed host, and the
   per-install token from `meta`, which the page embeds. The token holds only
   because the Host check stops another origin from reading the page.
+- `POST /ingest` (fleet view) exists only when `[ingest.machines]` is set. It
+  passes the same Host check, then a per-machine bearer token instead of the
+  Origin and page token; ingest.py has the rest.
 
 `extra_allowed_hosts` entries match the `Host` header exactly (case aside), port
 included. Tailscale Serve on port P proxies to 127.0.0.1:P; a refused `Host` is
@@ -41,6 +44,7 @@ from typing import Any, Callable
 from urllib.parse import parse_qs, urlsplit
 
 import db
+import ingest
 import sync
 
 BIND = "127.0.0.1"
@@ -529,6 +533,8 @@ class App:
         self.now = now
         self.port = 0
         self.interval_s = float(cfg["sync"]["interval_minutes"]) * 60
+        machines = cfg.get("ingest", {}).get("machines", {})
+        self.ingest = ingest.Ingest(machines, db_path, lambda: self.now())
 
     def allowed_hosts(self) -> set[str]:
         hosts = {f"127.0.0.1:{self.port}", f"localhost:{self.port}"}
@@ -637,6 +643,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         if not self._host_ok():
+            return
+        if urlsplit(self.path).path == "/ingest" and self.server.app.ingest.enabled:
+            # A collector, not a browser: its own token check replaces the
+            # Origin and page-token checks below. The Host check above stands.
+            code, body, why = self.server.app.ingest.handle(self.headers, self.rfile)
+            if why:
+                sys.stderr.write(f"task-dashboard: {code} POST /ingest: {why}\n")
+            self._json(code, body)
             return
         if urlsplit(self.path).path != "/sync":
             self._text(404, "not found\n")

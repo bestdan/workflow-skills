@@ -14,6 +14,7 @@ frames into a sync.
 
 import copy
 import os
+import re
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,9 @@ DEFAULTS: dict[str, Any] = {
         "view_concurrency": 8,
     },
     "server": {"port": 8765, "extra_allowed_hosts": []},
+    # Host name -> "sha256:<hex>" of that machine's ingest token. Empty means
+    # the server has no /ingest route at all (the work-laptop instance).
+    "ingest": {"machines": {}},
     "score": {
         "weights": {
             "priority": 3,
@@ -51,6 +55,12 @@ REQUIRED_KEYS = (
     "jira.fields.sprint",
     "jira.fields.flagged",
 )
+
+
+# A snapshot's `host` is the machine's short host name, and it ends up in a row
+# source (`machine:<host>`), so it is held to a plain label.
+HOST_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,62}")
+DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}")
 
 
 class ConfigError(ValueError):
@@ -111,6 +121,17 @@ def load(path: "str | os.PathLike[str] | None" = None) -> dict[str, Any]:
     port = cfg["server"]["port"]
     if not isinstance(port, int) or isinstance(port, bool) or not 0 < port < 65536:
         raise ConfigError("server.port must be an integer port (1-65535)")
+    machines = cfg["ingest"]["machines"]
+    if not isinstance(machines, dict):
+        raise ConfigError("ingest.machines must be a table of host = token digest")
+    for host, digest in machines.items():
+        if not HOST_RE.fullmatch(host):
+            raise ConfigError(f"ingest.machines: {host!r} is not a plain host name")
+        if not isinstance(digest, str) or not DIGEST_RE.fullmatch(digest):
+            raise ConfigError(
+                f'ingest.machines.{host} must be the "sha256:<hex>" value'
+                " that `dashboard.py ingest-token add` prints"
+            )
     return cfg
 
 

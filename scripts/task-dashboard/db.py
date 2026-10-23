@@ -21,7 +21,16 @@ from pathlib import Path
 ENV_VAR = "TASK_DASHBOARD_DB"
 DEFAULT_PATH = Path("~/.local/state/task-dashboard/dashboard.db")
 
-MIRROR_TABLES = ("issues", "links", "sprints", "prs", "sync_runs")
+MIRROR_TABLES = (
+    "issues",
+    "links",
+    "sprints",
+    "prs",
+    "sync_runs",
+    "machines",
+    "session_events",
+    "history_entries",
+)
 OVERLAY_TABLES = ("pins", "order", "snoozes", "notes")
 
 _V1 = """
@@ -215,6 +224,47 @@ ALTER TABLE sync_runs ADD COLUMN counts TEXT;
 ALTER TABLE sync_runs ADD COLUMN failed_keys TEXT;
 """ + "".join(_overlay_v2(t, c) for t, c in _OVERLAY_V2.items())
 
+# Version 3: the fleet view's ingest (snapshot_adapter.py). A machine's
+# worktrees, handoffs and tmux sessions go into `issues` under
+# `source = 'machine:<host>'`, so they need no table of their own. What does:
+#
+# - `machines`: one row per host, with the `taken_at` of the last snapshot
+#   ingested from it (the header's per-machine age) and when it arrived.
+# - `session_events` and `history_entries`: the snapshot's two deltas, appended
+#   rather than replaced, since each snapshot carries only what is new.
+_V3 = """
+CREATE TABLE machines (
+    host TEXT PRIMARY KEY,
+    last_snapshot_at TEXT NOT NULL,
+    received_at TEXT NOT NULL,
+    counts TEXT
+);
+
+CREATE TABLE session_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    host TEXT NOT NULL,
+    ts TEXT NOT NULL,
+    event TEXT,
+    session_id TEXT,
+    cwd TEXT,
+    branch TEXT,
+    notification TEXT,
+    received_at TEXT NOT NULL
+);
+CREATE INDEX session_events_host_ts ON session_events (host, ts);
+
+CREATE TABLE history_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    host TEXT NOT NULL,
+    ts TEXT NOT NULL,
+    session_id TEXT,
+    project TEXT,
+    approval_shaped INTEGER NOT NULL,
+    received_at TEXT NOT NULL
+);
+CREATE INDEX history_entries_host_ts ON history_entries (host, ts);
+"""
+
 # Ordered, ascending, append-only: never edit a shipped entry.
 #
 # migrate() runs a script one statement at a time through _statements, which
@@ -225,7 +275,7 @@ ALTER TABLE sync_runs ADD COLUMN failed_keys TEXT;
 #   raises "You can only execute one statement at a time");
 # - nothing follows the last statement's `;`, not even a comment.
 # A missing final `;` or a trailing comment makes _statements raise ValueError.
-MIGRATIONS: list[tuple[int, str]] = [(1, _V1), (2, _V2)]
+MIGRATIONS: list[tuple[int, str]] = [(1, _V1), (2, _V2), (3, _V3)]
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 
 
