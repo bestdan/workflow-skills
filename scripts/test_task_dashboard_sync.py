@@ -297,6 +297,25 @@ class CursorTests(SyncCase):
         self.run_sync("incremental", acli, now=NOW + timedelta(minutes=10))
         self.assertEqual(acli.viewed(), ["DEMO-2"])
 
+    def test_incremental_retries_a_new_key_that_failed_last_time(self):
+        self.run_sync("full", FakeAcli(["DEMO-1"]))
+        flaky = FakeAcli(["DEMO-1", "DEMO-9"])
+        flaky.fail_view = {"DEMO-9"}
+        row = self.run_sync("incremental", flaky, now=NOW + timedelta(minutes=5))
+        self.assertEqual(json.loads(row["failed_keys"]), ["DEMO-9"])
+        self.assertEqual(self.keys(), ["DEMO-1"])
+        acli = FakeAcli([])
+        self.run_sync("incremental", acli, now=NOW + timedelta(minutes=10))
+        self.assertEqual(acli.viewed(), ["DEMO-9"])
+        self.assertEqual(self.keys(), ["DEMO-1", "DEMO-9"])
+
+    def test_incremental_does_not_view_failed_pr_urls(self):
+        url = "https://github.com/acme/app/pull/7"
+        self.seed_run("full", NOW - timedelta(minutes=5), failed=["DEMO-2", url])
+        acli = FakeAcli([])
+        self.run_sync("incremental", acli)
+        self.assertEqual(acli.viewed(), ["DEMO-2"])
+
 
 class ReconcileTests(SyncCase):
     def test_adds_new_drops_old_keeps_overlay(self):

@@ -78,8 +78,12 @@ def cmd_sync(args: argparse.Namespace) -> int:
         f"({row['started_at']} -> {row['finished_at']}) {row['counts'] or '{}'}"
     )
     failed = json.loads(row["failed_keys"] or "[]")
-    if failed:
-        print(f"failed twice, logged: {', '.join(failed)}", file=sys.stderr)
+    views = [k for k in failed if not sync._is_pr_url(k)]
+    ci = [k for k in failed if sync._is_pr_url(k)]
+    if views:
+        print(f"view failed twice, logged: {', '.join(views)}", file=sys.stderr)
+    if ci:
+        print(f"CI lookup failed, logged: {', '.join(ci)}", file=sys.stderr)
     if row["error"]:
         print(row["error"], file=sys.stderr)
     return {"ok": 0, "auth_failed": 3}.get(row["outcome"], 1)

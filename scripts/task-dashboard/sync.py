@@ -238,6 +238,11 @@ def _search_union(jira: JiraSource, queries: list[str]) -> list[str]:
     return list(keys)
 
 
+def _is_pr_url(key: str) -> bool:
+    """`sync_runs.failed_keys` holds Jira keys and the PR URLs whose CI failed."""
+    return key.startswith("https://")
+
+
 def _key_queries(keys: "list[str]", clause: "str | None") -> list[str]:
     out = []
     for i in range(0, len(keys), KEY_CHUNK):
@@ -300,9 +305,14 @@ def fetch(
         assert prev is not None, "incremental needs a prior cursor run"
         cursor = cursor_clause(cursor_minutes(_parse_ts(prev[0]), now))
         union = _search_union(jira, [with_clause(s, cursor) for s in scopes])
-        # Keys whose view failed last time were not refreshed; retry them now.
-        retry = json.loads(prev[1] or "[]")
-        _view(jira, union + [k for k in retry if k in mirror_keys], fetched, failed)
+        # Keys whose view failed last time were not refreshed; retry them now,
+        # including ones new to the mirror: the cursor has moved past them, so
+        # nothing else would bring them back before a reconcile. A retried key
+        # this run places in no scope is written with a NULL scope, which the
+        # next reconcile sets. The list also holds PR URLs whose CI lookup
+        # failed; those are not Jira keys.
+        retry = [k for k in json.loads(prev[1] or "[]") if not _is_pr_url(k)]
+        _view(jira, union + retry, fetched, failed)
         # The in-scope set is this run's hits plus what earlier runs found in
         # scope; incremental cannot see an issue leave scope (reconcile does).
         earlier = [k for k, sc in mirror_scope.items() if sc == "search"]
