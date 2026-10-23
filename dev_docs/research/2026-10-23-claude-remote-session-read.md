@@ -12,7 +12,7 @@ the first "Verify before building" item in
 left out because this repo is public. Counts, timings and field names are as
 measured.
 
-## Verdict: readable without status (verified)
+## Verdict: readable without status (verified from a terminal; untested from a LaunchAgent)
 
 A daemon has one route it can legitimately use: it starts `claude -p` itself and
 sends the `list_cloud_sessions` control request on stdin. That request returns
@@ -32,8 +32,9 @@ What was and wasn't verified:
 
 - **Verified:** the control request exists, it is answered without a model turn,
   and it refuses any process started inside a Claude Code session.
-- **Verified by the owner's run:** the fields it returns on success, the
-  200-session ceiling, and `truncated`. The probe itself ran inside a Claude
+- **Verified by the owner's run:** the fields it returns on success, and one
+  page of 200 sessions returned with `truncated: true`. The "at most 200" limit
+  comes from the CLI's `limit=200` request, not from the run. The probe itself ran inside a Claude
   Code session, where the guard refused it. I did not spoof the guard. The owner
   ran the command under "Owner check" from their own terminal, and the result is
   recorded there.
@@ -52,14 +53,14 @@ snapshot of at most 200 sessions, and it is not ordered by `updated_at`.
 
 ## What was tried
 
-| # | Route                                                                                 | Result                                                                                                                                                                                                          | How known                                            |
-| - | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| 1 | Docs at code.claude.com                                                               | No public API or CLI command lists a user's cloud sessions. Cloud and other-machine sessions are listed only to a session connected to Remote Control, through `ListAgents`                                     | Read `llms.txt` and the cross-session messaging page |
-| 2 | `claude --help`, `claude remote-control --help`                                       | No `claude remote …` list subcommand. `remote-control` only starts a session                                                                                                                                    | Ran                                                  |
-| 3 | `claude agents --json` (and `--all`)                                                  | Works without a TTY in under 1 s. **Local sessions only**: 19 `interactive` + 1 `background`, fields `pid, cwd, kind, sessionId, name, status` (`idle`/`busy`), `state`. No cloud sessions, no post-turn fields | Ran                                                  |
-| 4 | The `claude-code-remote` MCP in a headless `claude -p`                                | **Not attached.** The init event listed 17 MCP servers and 205 tools, and the only remote-related tool was `RemoteTrigger`                                                                                      | Ran                                                  |
-| 5 | SDK control request `list_cloud_sessions` over `claude -p --input-format stream-json` | Answered in 2.1–3.7 s, with no model turn: `{"status":"unavailable","reason":"started_by_session"}`, and the same for `user_initiated: true`                                                                    | Ran                                                  |
-| 6 | Hosted MCP `/v2/ccr-sessions/-/meta/mcp`, or REST `GET /v1/code/sessions`             | Carries the full record, `status_bucket` and `post_turn_summary` included, and pages. Auth is Claude Code's OAuth token. **Not called**                                                                         | CLI code, plus a saved MCP result                    |
+| # | Route                                                                                 | Result                                                                                                                                                                                                                    | How known                                            |
+| - | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| 1 | Docs at code.claude.com                                                               | No public API or CLI command lists a user's cloud sessions. Cloud and other-machine sessions are listed only to a session connected to Remote Control, through `ListAgents`                                               | Read `llms.txt` and the cross-session messaging page |
+| 2 | `claude --help`, `claude remote-control --help`                                       | No `claude remote …` list subcommand. `remote-control` only starts a session                                                                                                                                              | Ran                                                  |
+| 3 | `claude agents --json` (and `--all`)                                                  | Works without a TTY in under 1 s. **Local sessions only**: 19 `interactive` + 1 `background`, fields `pid, cwd, kind, sessionId, name, status` (`idle`/`busy`), `state`. No cloud sessions, no post-turn fields           | Ran                                                  |
+| 4 | The `claude-code-remote` MCP in a headless `claude -p`                                | **Not attached.** The init event listed 17 MCP servers and 205 tools, and the only remote-related tool was `RemoteTrigger`                                                                                                | Ran                                                  |
+| 5 | SDK control request `list_cloud_sessions` over `claude -p --input-format stream-json` | Answered in 2.1–3.7 s, with no model turn: `{"status":"unavailable","reason":"started_by_session"}`, and the same for `user_initiated: true`. Outside a session, the owner's read returned `status: ok` (see Owner check) | Ran                                                  |
+| 6 | Hosted MCP `/v2/ccr-sessions/-/meta/mcp`, or REST `GET /v1/code/sessions`             | Carries the full record, `status_bucket` and `post_turn_summary` included, and pages. Auth is Claude Code's OAuth token. **Not called**                                                                                   | CLI code, plus a saved MCP result                    |
 
 ### Route 5 in detail: the usable one
 
@@ -80,10 +81,10 @@ any other connection." Two more details from the same code:
   `GET /v1/code/sessions?limit=200`, with `/v1/sessions` plus
   `anthropic-beta: ccr-byoc-2025-07-29` on the older API. The response maps to
   `sessions[]: {id, title, updated_at, status, environment_kind, repository, branch}`
-  and `truncated`. The owner's run confirmed exactly these keys. `repository` is
-  an object `{owner, name}`. Both `repository` and `branch` are left out when
-  the session has none: `repository` appeared on 151 of 200 sessions and
-  `branch` on 46.
+  and `truncated`. The owner's run confirmed this key set, and no other keys
+  appeared. `repository` is an object `{owner, name}`. `repository` and `branch`
+  appear only when the session has them: `repository` was on 151 of 200
+  sessions and `branch` on 46.
   - `status` takes the service's `session_status`: `running`, `idle`,
     `requires_action`, `archived`, `pending` or `failed`.
   - `environment_kind` is `bridge` (Remote Control), `anthropic_cloud`, `byoc`
@@ -93,7 +94,8 @@ any other connection." Two more details from the same code:
 
 **Call count and time for one full read:** one `claude` process start and one
 request. The refused read answered 2.1–3.7 s after launch, and the whole process
-ran 3.2–5.1 s wall, almost all of it CLI startup. A successful read adds one HTTP
+ran 3.2–5.1 s wall, almost all of it CLI startup. A later in-session repeat of
+the refused read ran 1.5 s wall. A successful read adds one HTTP
 round trip of unmeasured length. The code's timeouts are 15 s per request and
 25 s overall.
 
@@ -104,10 +106,10 @@ about eight days, which was extrapolated from the 50-session MCP page under
 route 6 and was wrong.
 
 The page is not sorted by `updated_at`: 46 of its 199 adjacent pairs are out of
-order. Creation time, newest first, fits the data better, but the response
-carries no `created_at`, so that ordering is inferred, not measured. Because of
-this, a session created long ago and updated today can fall off the page while
-newer idle sessions stay on it.
+order. The order may be newest-created first, but the response carries no
+`created_at`, so that is a guess. If the service picks the page by creation
+time, a session created long ago and updated today could fall off the page while
+newer idle sessions stay on it. This has not been observed.
 
 ### Route 6: the full-status data, and why it's off-limits
 
@@ -197,8 +199,8 @@ above.
 
 ### Result, 2026-10-23
 
-The owner ran it from their own terminal on the Mac mini, with Claude Code
-2.1.309. It returned `"status":"ok"`:
+The owner ran it from their own terminal, outside any Claude Code session. It
+returned `"status":"ok"`:
 
 | Measure            | Value                                                                |
 | ------------------ | -------------------------------------------------------------------- |
@@ -210,5 +212,4 @@ The owner ran it from their own terminal on the Mac mini, with Claude Code
 | `updated_at` span  | 2026-10-03 to 2026-10-23                                             |
 | Order              | Not by `updated_at`: 46 of 199 adjacent pairs out of order           |
 
-The wall time was not measured. Before this run, an in-session repeat of the
-refused read finished in 1.5 s wall.
+The wall time was not measured.
