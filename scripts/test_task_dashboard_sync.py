@@ -598,6 +598,31 @@ class GithubTests(SyncCase):
         )
         self.assertEqual(row["outcome"], "auth_failed")
 
+    def test_ci_auth_error_cancels_the_remaining_lookups(self):
+        # `pool.map`'s result generator cancels the queued futures once one
+        # raises; collecting results any other way runs all 40 lookups.
+        # The good lookups are slow and the bad one is instant, so at most
+        # the first batch, the failing one, and the batch it freed have started.
+        gh = FakeGh(authored=[pr_node(n, f"pr {n}", f"b{n}") for n in range(1, 41)])
+        bad = "https://github.com/acme/app/pull/4"
+        started = []
+        lock = threading.Lock()
+
+        def runner(argv, timeout):
+            if argv[:3] == ["gh", "pr", "view"]:
+                with lock:
+                    started.append(argv)
+                if bad in argv:
+                    return 1, "", "HTTP 401: Bad credentials"
+                time.sleep(0.1)
+            return gh(argv, timeout)
+
+        cfg = make_config(enabled=True)
+        cfg["sync"]["view_concurrency"] = 3
+        row = self.run_sync("full", FakeAcli(["DEMO-1"]), gh=runner, cfg=cfg)
+        self.assertEqual(row["outcome"], "auth_failed")
+        self.assertLessEqual(len(started), 2 * 3 + 1)
+
     def test_disabled_github_leaves_prs_alone(self):
         self.conn.execute(
             "INSERT INTO prs (url, title) VALUES ('https://x/pull/1', 't')"
