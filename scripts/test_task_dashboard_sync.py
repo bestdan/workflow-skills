@@ -663,9 +663,12 @@ class FleetGh:
 class FleetTests(SyncCase):
     def run_all(self, cfg, gh, acli=None):
         acli = acli or FakeAcli(["DEMO-1"])
+        # `github.enabled` is on, so the Jira run's PR step needs a fake too;
+        # left to default it calls the real gh, which CI has not logged in.
         return sync.run_all(
             "full", cfg, self.conn, NOW,
-            jira=sync.JiraSource(cfg, runner=acli), fleet_runner=gh,
+            jira=sync.JiraSource(cfg, runner=acli),
+            github=sync.GithubSource(cfg, runner=FakeGh()), fleet_runner=gh,
             clock=lambda: NOW,
         )  # fmt: skip
 
@@ -765,6 +768,7 @@ class FleetTests(SyncCase):
         sync.run_all(
             "full", cfg, self.conn, NOW,
             jira=sync.JiraSource(cfg, runner=FakeAcli(["DEMO-1"])),
+            github=sync.GithubSource(cfg, runner=FakeGh()),
             fleet_runner=FleetGh(), clock=lambda: next(ticks),
         )  # fmt: skip
         runs = self.conn.execute("SELECT kind, started_at FROM sync_runs").fetchall()
