@@ -16,6 +16,11 @@ the cursor it ends at, and the next snapshot's deltas start there, not at the
 saved cursor, so two spooled snapshots never carry the same hook or history
 lines. A full spool (``[collector] spool_max`` files) drops its oldest
 snapshot. That snapshot's deltas are lost: the next one starts after them.
+A new snapshot that fails validation is not spooled, the waiting ones are
+still sent, and the run exits 1.
+
+``[collector] enabled = false`` turns the collector off as well as the
+session-state hook: ``collect`` builds and sends nothing and exits 0.
 
 WHAT EACH ANSWER DOES:
 
@@ -177,7 +182,12 @@ def collect(
     poster: Poster = post,
     log: Callable[[str], None] = _stderr,
 ) -> int:
-    """0 when the spool is empty at the end, 1 when something waits on a retry."""
+    """0 when the spool is empty at the end, 1 when something waits on a retry
+    or the new snapshot failed validation. 0, with nothing built or sent, when
+    ``[collector] enabled`` is false."""
+    if not cfg["enabled"]:
+        log("[collector] enabled is false; nothing built or pushed")
+        return 0
     state = home / ".local/state/fleet"
     spool = state / "spool"
     with _locked(state / "collect.lock") as held:
@@ -197,7 +207,11 @@ def collect(
         )
         problems = snapshot.validate(doc)
         if problems:
-            log("snapshot does not match schema 1: " + "; ".join(problems[:5]))
+            # Not spooled, but it must not block the snapshots already waiting:
+            # they were valid when written and carry their own cursors.
+            log("snapshot does not match schema 1, not spooled: "
+                + "; ".join(problems[:5]))  # fmt: skip
+            flush(cfg, spool, state, poster, log)
             return 1
         write_entry(spool, doc, cursor)
         trim(spool, cfg["spool_max"], log)

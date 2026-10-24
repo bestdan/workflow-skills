@@ -27,6 +27,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest import mock
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -237,6 +238,34 @@ class TestPush(Home):
         self.assertEqual(len(self.spool()), 1)
         self.assertTrue(any("no answer" in m for m in self.log_lines))
 
+    def test_disabled_builds_and_pushes_nothing(self):
+        self.ingest.script = [503]
+        self.assertEqual(self.run_once(), 1)  # leaves one snapshot spooled
+        self.ingest.calls.clear()
+
+        def runner(argv, timeout):
+            raise AssertionError(f"a disabled collector ran {argv}")
+
+        rc = collector.collect(self.cfg(enabled=False), home=self.home, now=NOW,
+                               runner=runner, log=self.log_lines.append)  # fmt: skip
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.ingest.calls, [])
+        self.assertEqual(len(self.spool()), 1)
+        self.assertTrue(any("enabled is false" in m for m in self.log_lines))
+
+    def test_an_invalid_snapshot_does_not_block_the_spool(self):
+        self.hook(("Stop", "2026-10-23T10:00:00.000Z"))
+        self.ingest.script = [503]
+        self.assertEqual(self.run_once(), 1)
+        waiting = self.ingest.docs[0]
+        with mock.patch.object(snapshot, "validate", return_value=["host: bad"]):
+            rc = self.run_once(at=NOW + timedelta(minutes=5))
+        self.assertEqual(rc, 1)
+        self.assertEqual(self.ingest.docs[1:], [waiting])  # sent; the bad one not
+        self.assertEqual(self.spool(), [])
+        self.assertIn("s1.jsonl", self.cursor()["sessions"])
+        self.assertTrue(any("not spooled" in m for m in self.log_lines))
+
     def test_the_token_never_reaches_argv_logs_or_the_spool(self):
         calls = []
 
@@ -358,9 +387,10 @@ class TestUnits(unittest.TestCase):
 
 
 class FakeScheduler:
-    def __init__(self, linger="yes"):
+    def __init__(self, linger="yes", bootstrap_failures=0):
         self.calls = []
         self.linger = linger
+        self.bootstrap_failures = bootstrap_failures
 
     def __call__(self, argv, timeout):
         self.calls.append(argv)
@@ -368,6 +398,9 @@ class FakeScheduler:
             return 0, self.linger + "\n", ""
         if argv[:2] == ["launchctl", "bootout"]:
             return 3, "", "Boot-out failed: 3: No such process"
+        if argv[:2] == ["launchctl", "bootstrap"] and self.bootstrap_failures:
+            self.bootstrap_failures -= 1
+            return 5, "", "Bootstrap failed: 5: Input/output error"
         return 0, "", ""
 
 
@@ -468,14 +501,63 @@ class TestInstall(unittest.TestCase):
                                    path_env=FAKE_PATH, uid=1, user="t")  # fmt: skip
 
     def test_an_off_hook_is_noted(self):
+        # A quoted key: tomllib reads it as enabled, the hook's line scan not.
         path = self.home / "off.toml"
-        path.write_text(f'[collector]\ningest_url = "http://m/i"\ntoken = "{TOKEN}"\n')
+        path.write_text(f'[collector]\n"enabled" = true\ningest_url = "http://m/i"\n'
+                        f'token = "{TOKEN}"\n')  # fmt: skip
         os.chmod(path, 0o600)
         cfg = config.load_collector(path)
         p = collector_install.plan(cfg, home=self.home, platform="linux",
                                    uv="/u/uv", path_env=FAKE_PATH, uid=1, user="t")  # fmt: skip
         self.assertTrue(any("hook is off" in n for n in p.notes))
         self.assertFalse(any("hook is off" in n for n in self.plan("linux").notes))
+
+    def bootstraps(self, runner):
+        return [c for c in runner.calls if c[:2] == ["launchctl", "bootstrap"]]
+
+    def test_a_failed_bootstrap_is_retried(self):
+        runner = FakeScheduler(bootstrap_failures=2)
+        sleeps: list[float] = []
+        rc = collector_install.execute(self.plan("darwin"), runner=runner,
+                                       log=self.out.append, sleep=sleeps.append)  # fmt: skip
+        self.assertEqual(rc, 0, self.out)
+        self.assertEqual(len(self.bootstraps(runner)), 3)
+        self.assertEqual(sleeps, [1.0, 1.0])
+
+    def test_bootstrap_gives_up_after_three_retries(self):
+        runner = FakeScheduler(bootstrap_failures=99)
+        sleeps: list[float] = []
+        rc = collector_install.execute(self.plan("darwin"), runner=runner,
+                                       log=self.out.append, sleep=sleeps.append)  # fmt: skip
+        self.assertEqual(rc, 1)
+        self.assertEqual(len(self.bootstraps(runner)), 4)
+        self.assertEqual(sleeps, [1.0, 1.0, 1.0])
+        self.assertTrue(any(m.startswith("FAILED (5)") for m in self.out))
+
+    def test_only_bootstrap_is_retried(self):
+        def runner(argv, timeout):
+            return (1, "", "boom") if argv[0] == "systemctl" else (0, "yes", "")
+
+        sleeps: list[float] = []
+        collector_install.execute(self.plan("linux"), runner=runner,
+                                  log=self.out.append, sleep=sleeps.append)  # fmt: skip
+        self.assertEqual(sleeps, [])
+
+    def test_a_disabled_collector_is_not_installed(self):
+        path = self.home / "disabled.toml"
+        path.write_text(f'[collector]\nenabled = false\ningest_url = "http://m/i"\n'
+                        f'token = "{TOKEN}"\n')  # fmt: skip
+        os.chmod(path, 0o600)
+        cfg = config.load_collector(path)
+        with self.assertRaisesRegex(collector_install.InstallError, "enabled is false"):
+            collector_install.plan(cfg, home=self.home, platform="darwin", uv="/u/uv",
+                                   path_env=FAKE_PATH, uid=1, user="t")  # fmt: skip
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = dashboard.main(["install", "--collector-only", "--config", str(path)])
+        self.assertEqual(rc, 2)
+        self.assertIn("enabled is false", err.getvalue())
+        self.assertEqual(set(self.written()), {"config.toml", "disabled.toml"})
 
     def test_install_without_collector_only_is_refused(self):
         err = io.StringIO()

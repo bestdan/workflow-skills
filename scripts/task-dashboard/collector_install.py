@@ -28,6 +28,8 @@ import plistlib
 import shlex
 import shutil
 import sys
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -37,6 +39,8 @@ from github_gh import Runner, run
 LABEL = "com.bestdan.task-dashboard.collector"
 UNIT = "task-dashboard-collector"
 INTERVAL_SECONDS = 300
+BOOTSTRAP_RETRIES = 3
+BOOTSTRAP_PAUSE = 1.0
 LAUNCHER_TEMPLATE = Path(__file__).resolve().parent / "task-dashboard-launch.sh"
 HOOK = Path(__file__).resolve().parents[1] / "session-state-hook.py"
 UV_PLACEHOLDER = "'@UV@'"
@@ -176,6 +180,11 @@ def plan(
     user: str,
 ) -> Plan:
     """What install writes and runs on ``platform``; raises InstallError."""
+    if not cfg["enabled"]:
+        raise InstallError(
+            f"[collector] enabled is false in {cfg['config_path']}; set it to"
+            " true to schedule the collector"
+        )
     if not uv:
         raise InstallError("uv is not on PATH; install it, then rerun install")
     if not os.path.isabs(uv):
@@ -235,8 +244,20 @@ def _linger_note(user: str, out: str) -> str | None:
     )
 
 
-def execute(p: Plan, *, runner: Runner = run, log: Any = print) -> int:
-    """Write the files, run the commands; 0 on success, 1 if a command failed."""
+def execute(
+    p: Plan,
+    *,
+    runner: Runner = run,
+    log: Any = print,
+    sleep: Callable[[float], None] = time.sleep,
+) -> int:
+    """Write the files, run the commands; 0 on success, 1 if a command failed.
+
+    A failed ``launchctl bootstrap`` is retried up to BOOTSTRAP_RETRIES times,
+    BOOTSTRAP_PAUSE seconds apart:
+    straight after a ``bootout`` of a loaded agent, launchd can still be
+    tearing it down, and bootstrap then fails with "5: Input/output error".
+    """
     for path, text, mode in p.files:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_name(path.name + ".tmp")
@@ -245,7 +266,14 @@ def execute(p: Plan, *, runner: Runner = run, log: Any = print) -> int:
         os.replace(tmp, path)
         log(f"wrote {path}")
     for argv in p.commands:
-        rc, out, err = runner(argv, 600.0)
+        bootstrap = argv[:2] == ["launchctl", "bootstrap"]
+        tries = 1 + (BOOTSTRAP_RETRIES if bootstrap else 0)
+        for attempt in range(1, tries + 1):
+            rc, out, err = runner(argv, 600.0)
+            if rc == 0 or attempt == tries:
+                break
+            log(f"retrying ({attempt}/{tries - 1}) after: {err.strip() or rc}")
+            sleep(BOOTSTRAP_PAUSE)
         shown = " ".join(shlex.quote(a) for a in argv)
         if argv[:2] == ["launchctl", "bootout"]:
             continue  # not loaded yet is the normal first-install answer
