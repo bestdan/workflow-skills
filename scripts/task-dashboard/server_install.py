@@ -633,16 +633,19 @@ def read_token(db_file: Path) -> str:
 def _finished_after(db_file: Path, run_id: int, *, fleet: bool) -> "tuple | None":
     """The newest finished Jira run (or, with `fleet`, GitHub fleet run) after `run_id`.
 
-    One sync request records a Jira run and, when `github.fleet` is on, a
-    fleet run after it, so "the newest row" alone would report the fleet's.
+    One sync request records a Jira run and, after it, a run for each fleet
+    step that is on (GitHub, sessions, the cloud session list), so "the newest
+    row" alone would report a fleet step's. A Jira run is one whose kind is a
+    Jira mode.
     """
-    op = "=" if fleet else "IS NOT"
+    kinds = (sync.FLEET_KIND,) if fleet else sync.MODES
     return _read(
         db_file,
         "SELECT id, kind, outcome, error, finished_at FROM sync_runs"
-        f" WHERE finished_at IS NOT NULL AND id > ? AND kind {op} ?"
+        f" WHERE finished_at IS NOT NULL AND id > ?"
+        f" AND kind IN ({', '.join('?' * len(kinds))})"
         " ORDER BY id DESC LIMIT 1",
-        (run_id, sync.FLEET_KIND),
+        (run_id, *kinds),
     )
 
 

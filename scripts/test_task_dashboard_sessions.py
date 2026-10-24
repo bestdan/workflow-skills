@@ -470,6 +470,10 @@ class SyncStepTests(DbCase):
             ],
         )
         self.conn.commit()
+        import server_install  # type: ignore[import-not-found]
+
+        jira = server_install._finished_after(self.tmp / "d.db", 0, fleet=False)
+        self.assertEqual((jira[1], jira[2]), ("full", "failed"))
         health = server.sync_health(self.conn, 300, NOW)
         self.assertEqual(health["last_ok_at"], "2026-10-23T10:00:05Z")
         self.assertEqual(health["last_run"]["kind"], "full")
