@@ -163,7 +163,7 @@ def load(path: "str | os.PathLike[str] | None" = None) -> dict[str, Any]:
             )
         seen[digest] = host
     # The value's shape only: the figure ids live in health.py, which this
-    # module does not import, and its validate_targets() names an unknown one.
+    # module does not import, and its unknown_targets() names an unknown one.
     targets = cfg["health"]["targets"]
     if not isinstance(targets, dict):
         raise ConfigError("health.targets must be a table")

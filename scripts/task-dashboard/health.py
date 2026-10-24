@@ -247,8 +247,11 @@ def hook_figures(
 
 def hook_days(conn: sqlite3.Connection, end: datetime) -> "float | None":
     """Days from the first hook event to ``end``; None with no hook data."""
-    first = [t for t, _ in _rows(conn, _EVENTS, _EPOCH, end)[:1]]
-    return round((end - first[0]).total_seconds() / 86400, 1) if first else None
+    row = conn.execute(
+        "SELECT MIN(ts) FROM session_events WHERE ts < ?", (_iso(end),)
+    ).fetchone()
+    first = score.parse_ts(row[0])
+    return None if first is None else round((end - first).total_seconds() / 86400, 1)
 
 
 def current_figures(
