@@ -322,6 +322,17 @@ def _json_line(raw: bytes) -> dict[str, Any] | None:
     return obj if isinstance(obj, dict) else None
 
 
+def _asked_ok(ev: dict[str, Any]) -> bool:
+    """``asked`` appears only on v2 Stop lines, as a bool or null."""
+    if "asked" not in ev:
+        return True
+    return (
+        ev.get("v") == 2
+        and ev.get("event") == "Stop"
+        and isinstance(ev["asked"], (bool, type(None)))
+    )
+
+
 def _known_format(v: Any) -> bool:
     """A hook line's ``v`` is one this reads (``True`` is not ``1``)."""
     return type(v) is int and v in HOOK_FORMAT_VERSIONS
@@ -521,7 +532,7 @@ def validate(doc: Any) -> list[str]:
                 ok
                 and _known_format(ev.get("v"))
                 and isinstance(ev.get("ts"), str)
-                and isinstance(ev.get("asked"), (bool, type(None)))
+                and _asked_ok(ev)
             )
             _check(ok, f"sessions[{idx}]: malformed", problems)
     return problems

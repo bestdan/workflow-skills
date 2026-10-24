@@ -379,11 +379,24 @@ class TestCursor(Fixture):
     def test_validate_checks_v_and_asked(self):
         doc, _ = self.build()
         base = {"v": 2, "ts": "2026-10-23T10:05:00.000Z", "event": "Stop"}
-        for bad in ({"asked": "yes"}, {"asked": 1}, {"v": True}, {"v": 3}):
+        for bad in (
+            {"asked": "yes"},
+            {"asked": 1},
+            {"v": True},
+            {"v": 3},
+            {"v": 1, "asked": True},
+            {"event": "Notification", "asked": False},
+            {"event": "UserPromptSubmit", "asked": None},
+        ):
             with self.subTest(bad=bad):
                 doc["sessions"] = [{**base, **bad}]
                 self.assertEqual(snap.validate(doc), ["sessions[0]: malformed"])
-        doc["sessions"] = [{**base, "asked": False}]
+        doc["sessions"] = [
+            {**base, "asked": False},
+            {**base, "asked": None},
+            {**base, "v": 1},
+            {**base, "event": "Notification"},
+        ]
         self.assertEqual(snap.validate(doc), [])
 
 

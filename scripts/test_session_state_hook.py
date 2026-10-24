@@ -312,6 +312,16 @@ class AskedTests(HookCase):
             ("finished", [_rec("assistant", _text("Pushed. CI is green."))], False),
             ("tool call last", [_rec("assistant", [{"type": "tool_use"}])], False),
             (
+                "text then a tool call",
+                [_rec("assistant", [*_text("Shall I?"), {"type": "tool_use"}])],
+                False,
+            ),
+            (
+                "tool call then text",
+                [_rec("assistant", [{"type": "tool_use"}, *_text("Shall I?")])],
+                True,
+            ),
+            (
                 "sidechain skipped",
                 [
                     _rec("assistant", _text("Which one?")),

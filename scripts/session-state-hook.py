@@ -177,15 +177,23 @@ def ends_with_question(text):
     return text.rstrip(_TRAILING).endswith("?")
 
 
-def _last_text(content):
-    """The last text block of a message's content, or None when it has none."""
+def _content_asked(content):
+    """``asked`` from one assistant message's content, or None when it has
+    neither text nor a tool call (thinking only). The last text or tool-call
+    block decides: a tool call after the text means the turn went on."""
     if isinstance(content, str):
-        return content
+        return ends_with_question(content)
     if not isinstance(content, list):
         return None
-    texts = [b.get("text") for b in content if isinstance(b, dict)]
-    texts = [t for t in texts if isinstance(t, str)]
-    return texts[-1] if texts else None
+    for block in reversed(content):
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") == "tool_use":
+            return False
+        text = block.get("text")
+        if isinstance(text, str):
+            return ends_with_question(text)
+    return None
 
 
 def tail_asked(path, limit=TAIL_BYTES):
@@ -223,13 +231,9 @@ def tail_asked(path, limit=TAIL_BYTES):
             continue
         message = rec.get("message")
         content = message.get("content") if isinstance(message, dict) else None
-        text = _last_text(content)
-        if text is not None:
-            return ends_with_question(text)
-        if isinstance(content, list) and any(
-            isinstance(b, dict) and b.get("type") == "tool_use" for b in content
-        ):
-            return False
+        asked = _content_asked(content)
+        if asked is not None:
+            return asked
     return None
 
 
