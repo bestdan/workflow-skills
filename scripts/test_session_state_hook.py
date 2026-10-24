@@ -295,6 +295,18 @@ class AskedTests(HookCase):
         self.assertIs(rec["asked"], True)
         self.assertNotIn("SECRET", (self.state / f"{SESSION}.jsonl").read_text())
 
+    def test_tail_that_starts_on_a_record_boundary_keeps_it(self):
+        # The deciding record begins exactly TAIL_BYTES from the end, so the
+        # window's first line is whole and must not be dropped as partial.
+        asked = _rec("assistant", _text("Merge it?"))
+        pad = json.dumps({"type": "system", "pad": ""}) + "\n"
+        fill = hook.TAIL_BYTES - len(asked) - len(pad)
+        trailing = json.dumps({"type": "system", "pad": "y" * fill}) + "\n"
+        self.write(_rec("user", "earlier"), asked, trailing)
+        self.assertEqual(len(asked) + len(trailing), hook.TAIL_BYTES)
+        rec = self.stop_record(transcript_path=str(self.transcript))
+        self.assertIs(rec["asked"], True)
+
     def test_tail_decisions(self):
         cases: tuple[tuple[str, list[str], "bool | None"], ...] = (
             ("finished", [_rec("assistant", _text("Pushed. CI is green."))], False),

@@ -210,6 +210,8 @@ def load(conn: sqlite3.Connection, cfg: "dict[str, Any] | None" = None) -> Fleet
             s.asked = False
         elif event == "Stop":
             s.asked = asked == 1
+        elif event == "Notification" and note == "permission_prompt":
+            s.asked = False
     for host, sid, n in conn.execute(
         "SELECT host, session_id, COUNT(*) FROM history_entries"
         " WHERE session_id IS NOT NULL GROUP BY host, session_id"

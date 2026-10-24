@@ -9,6 +9,7 @@ touched: the server runs with a fake sync function. Needs Python 3.11: run via
 scripts/test-task-dashboard-needs.sh.
 """
 
+import copy
 import re
 import sys
 import tempfile
@@ -234,6 +235,28 @@ class AskedTests(NeedsCase):
         self.assertIn("asked (heuristic)", card.group(0))
         # A question is a decision, never batched with the plain approvals.
         self.assertNotIn("s-turn", keys(section(page, "approvals")))
+
+    def test_a_permission_prompt_after_an_asked_stop_is_an_approval(self):
+        # A Stop hook can continue the turn, so a permission prompt can follow
+        # an asked Stop with no prompt between: the prompt is what blocks it.
+        snap = copy.deepcopy(SNAPSHOT)
+        lines: list = snap["sessions"]  # type: ignore[assignment]
+        lines += [
+            ev("s-ask-perm", "2026-10-24T05:00:00.000Z", "UserPromptSubmit"),
+            ev("s-ask-perm", "2026-10-24T06:00:00.000Z", "Stop", asked=True),
+            ev(
+                "s-ask-perm",
+                "2026-10-24T06:05:00.000Z",
+                "Notification",
+                notification="permission_prompt",
+            ),
+        ]
+        snapshot_adapter.ingest(self.conn, with_branch(snap), NOW)
+        sessions.write(self.conn, sessions.derive(self.conn, NOW), NOW)
+        approvals = section(self.page(), "approvals")
+        card = re.search(r'data-key="s-ask-perm".*?</summary>', approvals, re.S)
+        assert card is not None
+        self.assertIn("permission prompt", card.group(0))
 
 
 class OrderTests(NeedsCase):

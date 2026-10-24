@@ -202,8 +202,10 @@ def tail_asked(path, limit=TAIL_BYTES):
         fh.seek(0, os.SEEK_END)
         size = fh.tell()
         start = max(0, size - limit)
-        fh.seek(start)
-        data = fh.read(limit)
+        # One byte early, so a window that starts on a record boundary keeps
+        # that record: the byte before it is the newline dropped below.
+        fh.seek(max(0, start - 1))
+        data = fh.read(limit + 1 if start else limit)
     if start:
         # The seek landed mid-record: drop the partial first line.
         data = data[data.find(b"\n") + 1 :] if b"\n" in data else b""

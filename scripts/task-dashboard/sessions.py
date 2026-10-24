@@ -25,9 +25,9 @@ rest is in `raw_json`:
                       | null (working)
     needs_action      true only for need_input
     asked             the last Stop since the last prompt has `asked = 1`: its
-                      turn ended in a question, by the hook's "?" heuristic. A
-                      Notification after it (idle_prompt) does not clear it; a
-                      prompt does. NULL (hook format 1, or untellable) and 0
+                      turn ended in a question, by the hook's "?" heuristic. An
+                      idle_prompt after it does not clear it; a permission
+                      prompt or a prompt does. NULL (hook format 1, or untellable) and 0
                       are both false here, so such a turn end is turn_ended.
     waiting_since     the first Stop or Notification after the last prompt
     has_prompt        whether any UserPromptSubmit was recorded
@@ -104,6 +104,8 @@ def fold(session_id: str, events: list[tuple]) -> dict[str, Any]:
             if event == "Notification" and notification == "permission_prompt":
                 permission_prompts += 1
                 need_input = True
+                # What blocks the session now is the prompt, not the question.
+                asked = False
         else:
             continue
         last_event = event
