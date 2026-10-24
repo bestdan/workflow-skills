@@ -65,6 +65,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--db", help="DB path (default: $TASK_DASHBOARD_DB or the state dir)"
     )
     sync_p.add_argument(
+        "--fleet-warns",
+        action="store_true",
+        help="exit on the Jira run alone; a failed github.fleet step only warns",
+    )
+    sync_p.add_argument(
         "--config",
         help="config path (default: $TASK_DASHBOARD_CONFIG or ~/.config/task-dashboard)",
     )
@@ -283,7 +288,9 @@ def cmd_sync(args: argparse.Namespace) -> int:
     """Exit 0 on ok, 1 on failed, 3 on auth_failed, 2 on a config error.
 
     With `github.fleet` on, the GitHub fleet step runs after the Jira sync as
-    its own sync_runs row, and a failure of either run makes the exit nonzero.
+    its own sync_runs row, and a failure of either run makes the exit nonzero
+    — unless --fleet-warns, which install's warm-up sync passes: then only the
+    Jira run decides the exit, and a failed fleet step prints a warning.
     """
     try:
         cfg = config.load(args.config)
@@ -301,6 +308,14 @@ def cmd_sync(args: argparse.Namespace) -> int:
     for row in fleet:
         # Printed whatever the Jira outcome; the Jira run's code wins a tie.
         fleet_code = _report_sync(row, "PR lookup failed")
+        if args.fleet_warns:
+            if fleet_code:
+                print(
+                    f"WARNING: the github.fleet step ended {row['outcome']};"
+                    " not counted (--fleet-warns)",
+                    file=sys.stderr,
+                )
+            continue
         code = code or fleet_code
     return code
 

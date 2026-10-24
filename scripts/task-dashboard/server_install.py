@@ -112,6 +112,15 @@ def resolve_tools(
     )
 
 
+def versioned_mise_path(path: str) -> bool:
+    """True for `…/mise/installs/<tool>/<version>/…`, which a mise upgrade deletes."""
+    parts = Path(path).parts
+    if "installs" not in parts:
+        return False
+    i = len(parts) - 1 - parts[::-1].index("installs")
+    return i >= 1 and parts[i - 1] == "mise" and len(parts) > i + 2
+
+
 def search_path(tools: Tools) -> str:
     """The agent's PATH: each tool's directory, then the system base."""
     dirs = [str(Path(t).parent) for t in (tools.uv, tools.acli, tools.gh) if t]
@@ -211,7 +220,9 @@ def plan(
     p.steps.append(Step([*fg, "init-db"], why="launcher resolves the plugin; warms uv"))
     p.steps.append(
         Step(
-            [*fg, "sync", "--mode", "full"],
+            # --fleet-warns: the warm-up is judged on the Jira run alone; a
+            # failed github.fleet step prints a warning and does not undo.
+            [*fg, "sync", "--mode", "full", "--fleet-warns"],
             timeout=FULL_SYNC_TIMEOUT,
             why="first full sync",
         )
@@ -223,6 +234,13 @@ def plan(
             loads=True,
         )
     )
+    acli_cfg = str(cfg["jira"]["acli_path"])
+    if os.path.isabs(acli_cfg) and versioned_mise_path(acli_cfg):
+        p.notes.append(
+            f"WARNING: jira.acli_path is {acli_cfg}, inside a versioned mise install"
+            ' that the next mise upgrade removes; set jira.acli_path = "acli" so'
+            " the agent finds acli through PATH (the mise shim)"
+        )
     port = cfg["server"]["port"]
     p.notes.append(f"dashboard: {url(port)} (localhost: opens only on this machine)")
     p.notes.append(
@@ -448,6 +466,11 @@ def _launchctl_field(out: str, name: str) -> str:
     return ""
 
 
+def _ro_uri(db_file: Path) -> str:
+    """A read-only SQLite URI; as_uri() escapes the ?, # and % a URI would misread."""
+    return Path(db_file).absolute().as_uri() + "?mode=ro"
+
+
 def read_health(
     db_file: Path, interval_s: float, now: datetime
 ) -> "tuple[dict[str, Any] | None, str]":
@@ -455,7 +478,7 @@ def read_health(
     if not db_file.exists():
         return None, f"no DB at {db_file}"
     try:
-        conn = sqlite3.connect(f"file:{db_file}?mode=ro", uri=True)
+        conn = sqlite3.connect(_ro_uri(db_file), uri=True)
         try:
             return server.sync_health(conn, interval_s, now), ""
         finally:
@@ -591,7 +614,7 @@ def _read(db_file: Path, sql: str, args: tuple = ()) -> "tuple | None":
     if not db_file.exists():
         return None
     try:
-        conn = sqlite3.connect(f"file:{db_file}?mode=ro", uri=True)
+        conn = sqlite3.connect(_ro_uri(db_file), uri=True)
         try:
             row: "tuple | None" = conn.execute(sql, args).fetchone()
             return row

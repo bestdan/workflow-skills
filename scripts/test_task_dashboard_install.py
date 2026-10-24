@@ -261,7 +261,7 @@ class PlanTest(Home):
         argvs = [s.argv for s in p.steps]
         self.assertEqual(argvs[0][:2], ["/usr/bin/env", "-i"])
         self.assertEqual(argvs[0][-2:], [str(si.launcher_path(self.home)), "init-db"])
-        self.assertEqual(argvs[1][-3:], ["sync", "--mode", "full"])
+        self.assertEqual(argvs[1][-4:], ["sync", "--mode", "full", "--fleet-warns"])
         self.assertEqual(
             argvs[2],
             ["launchctl", "bootstrap", "gui/501", str(si.plist_path(self.home))],
@@ -284,6 +284,27 @@ class PlanTest(Home):
         self.assertIn(
             "launchctl bootout gui/501/com.bestdan.task-dashboard", si.describe(p)
         )
+
+    def test_a_versioned_mise_acli_path_warns(self):
+        versioned = "/Users/me/.local/share/mise/installs/acli/1.3.19/bin/acli"
+        self.cfg["jira"]["acli_path"] = versioned
+        p = si.plan(self.cfg, home=self.home, tools=self.tools, uid=501)
+        warning = [n for n in p.notes if n.startswith("WARNING: jira.acli_path")]
+        self.assertEqual(len(warning), 1, p.notes)
+        self.assertIn(versioned, warning[0])
+        self.assertIn('jira.acli_path = "acli"', warning[0])
+
+    def test_a_plain_or_shim_acli_path_does_not_warn(self):
+        for path in (
+            "acli",
+            "/opt/homebrew/bin/acli",
+            "/Users/me/.local/share/mise/shims/acli",
+            str(PKG / "dev" / "fake-acli"),
+        ):
+            with self.subTest(path=path):
+                self.cfg["jira"]["acli_path"] = path
+                p = si.plan(self.cfg, home=self.home, tools=self.tools, uid=501)
+                self.assertFalse(any("jira.acli_path" in n for n in p.notes))
 
     def test_a_relative_uv_is_refused(self):
         self.tools.uv = "uv"
@@ -656,6 +677,22 @@ class StatusTest(Home):
         self.assertIn("no DB at", si.doctor_line(st))
         st = self.status(FakeRunner([("print", 0, LOADED, "")]), cfg=None)
         self.assertIn("config unreadable: config file not found", si.doctor_line(st))
+
+    def test_a_db_path_with_uri_characters_is_read(self):
+        odd = self.home / "a?b#c%20d" / "dashboard.db"
+        conn = db.connect(odd)
+        try:
+            server_harness.add_run(conn, "ok", NOW - timedelta(minutes=2))
+            conn.execute(
+                "INSERT INTO meta (key, value) VALUES (?, 'tok')", (server.TOKEN_KEY,)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        self.db_file = odd
+        st = self.status(FakeRunner([("print", 0, LOADED, "")]))
+        self.assertTrue(st.healthy(), st.problems)
+        self.assertEqual(si.read_token(odd), "tok")
 
     def test_status_never_creates_the_db(self):
         self.status(FakeRunner([("print", 0, LOADED, "")]))
