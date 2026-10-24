@@ -1,6 +1,8 @@
-"""The overlay: the user's pins, pinned order, snoozes and notes.
+"""The overlay: the user's pins, pinned order, snoozes, notes, kind tags,
+focus and last visit.
 
-Every row is keyed by (source, item_key), the same pair as `issues`. The sync
+Every row is keyed by (source, item_key), the same pair as `issues`, except
+`last_visit`, which is one timestamp for the whole overlay. The sync
 never writes these tables, and nothing here reads `issues`: a row for an item
 that has left the mirror is kept as is, and the views simply have no card to
 show it on. It is the only state on the machine that cannot be rebuilt from
@@ -26,7 +28,10 @@ import db
 import score
 
 EXPORT_FORMAT = "task-dashboard-overlay"
-EXPORT_VERSION = 1
+# 2 added kind_tags, focus and last_visit. A version 1 file still imports, with
+# those empty, so a backup taken before the upgrade can be restored.
+EXPORT_VERSION = 2
+IMPORT_VERSIONS = (1, 2)
 MAX_KEY = 512
 MAX_BODY = 256 * 1024  # a POST body; room for a long note, percent-encoded
 MAX_NOTE = 20_000
@@ -38,12 +43,18 @@ COLUMNS: dict[str, tuple[str, ...]] = {
     "order": ("position",),
     "snoozes": ("until",),
     "notes": ("body", "updated_at"),
+    "kind_tags": ("tag", "tagged_at"),
+    "focus": ("set_at",),
 }
 assert tuple(COLUMNS) == db.OVERLAY_TABLES
+V1_TABLES = ("pins", "order", "snoozes", "notes")
 
-ACTIONS = ("pin", "unpin", "order", "snooze", "note")
+KIND_TAGS = ("side-quest", "substantial")
+
+ACTIONS = ("pin", "unpin", "order", "snooze", "note", "tag", "focus", "unfocus")
 
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+_STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 
 Item = tuple[str, str]
@@ -146,20 +157,116 @@ def snooze(conn: sqlite3.Connection, item: Item, until: str) -> None:
         )
 
 
+SUBSTANTIAL_NEEDS_NOTE = (
+    "an item tagged substantial must name the figure it moves in its note"
+)
+
+
+def _write_note(
+    conn: sqlite3.Connection, item: Item, text: str, now: "datetime | None"
+) -> None:
+    """The note write itself, inside the caller's transaction."""
+    if len(text) > MAX_NOTE:
+        raise OverlayError(f"note is longer than {MAX_NOTE} characters")
+    if not text.strip():
+        conn.execute("DELETE FROM notes WHERE source = ? AND item_key = ?", item)
+        return
+    conn.execute(
+        "INSERT OR REPLACE INTO notes (source, item_key, body, updated_at)"
+        " VALUES (?, ?, ?, ?)",
+        (*item, text, _now(now)),
+    )
+
+
 def note(
     conn: sqlite3.Connection, item: Item, text: str, now: "datetime | None" = None
 ) -> None:
-    """Set the item's note; blank text deletes it."""
-    if len(text) > MAX_NOTE:
-        raise OverlayError(f"note is longer than {MAX_NOTE} characters")
+    """Set the item's note; blank text deletes it.
+
+    A substantial item's note cannot be blanked: untag it first.
+    """
     with conn:
+        conn.execute("BEGIN IMMEDIATE")
         if not text.strip():
-            conn.execute("DELETE FROM notes WHERE source = ? AND item_key = ?", item)
+            row = conn.execute(
+                "SELECT tag FROM kind_tags WHERE source = ? AND item_key = ?", item
+            ).fetchone()
+            if row and row[0] == "substantial":
+                raise OverlayError(SUBSTANTIAL_NEEDS_NOTE + "; untag it first")
+        _write_note(conn, item, text, now)
+
+
+def tag(
+    conn: sqlite3.Connection,
+    item: Item,
+    kind: str,
+    text: str = "",
+    now: "datetime | None" = None,
+) -> None:
+    """Tag an item `side-quest` or `substantial`; an empty tag clears it.
+
+    `substantial` needs a note naming the figure the item moves. Non-blank
+    `text` is saved as that note in the same transaction; otherwise the item
+    must already have one. Re-tagging with the same tag keeps `tagged_at`.
+    """
+    if kind and kind not in KIND_TAGS:
+        raise OverlayError(f"tag must be one of {', '.join(KIND_TAGS)}, got {kind!r}")
+    with conn:
+        conn.execute("BEGIN IMMEDIATE")
+        if not kind:
+            conn.execute(
+                "DELETE FROM kind_tags WHERE source = ? AND item_key = ?", item
+            )
             return
+        if text.strip():
+            _write_note(conn, item, text, now)
+        if kind == "substantial":
+            row = conn.execute(
+                "SELECT body FROM notes WHERE source = ? AND item_key = ?", item
+            ).fetchone()
+            if not row or not (row[0] or "").strip():
+                raise OverlayError(SUBSTANTIAL_NEEDS_NOTE)
         conn.execute(
-            "INSERT OR REPLACE INTO notes (source, item_key, body, updated_at)"
-            " VALUES (?, ?, ?, ?)",
-            (*item, text, _now(now)),
+            "INSERT INTO kind_tags (source, item_key, tag, tagged_at)"
+            " VALUES (?, ?, ?, ?) ON CONFLICT (source, item_key) DO UPDATE"
+            " SET tag = excluded.tag, tagged_at = excluded.tagged_at"
+            " WHERE tag != excluded.tag",
+            (*item, kind, _now(now)),
+        )
+
+
+def set_focus(
+    conn: sqlite3.Connection, item: Item, now: "datetime | None" = None
+) -> None:
+    """Make `item` the one focus item, clearing any other."""
+    with conn:
+        conn.execute("BEGIN IMMEDIATE")
+        if conn.execute(
+            "SELECT 1 FROM focus WHERE source = ? AND item_key = ?", item
+        ).fetchone():
+            return
+        conn.execute("DELETE FROM focus")
+        conn.execute(
+            "INSERT INTO focus (source, item_key, set_at) VALUES (?, ?, ?)",
+            (*item, _now(now)),
+        )
+
+
+def clear_focus(conn: sqlite3.Connection, item: Item) -> None:
+    """Clear the focus if it is `item`.
+
+    Naming the item means a page loaded before another focus was set cannot
+    clear that newer one.
+    """
+    with conn:
+        conn.execute("DELETE FROM focus WHERE source = ? AND item_key = ?", item)
+
+
+def set_last_visit(conn: sqlite3.Connection, now: "datetime | None" = None) -> None:
+    """Record now as the last visit; Since you were away (#1106) calls it."""
+    with conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO last_visit (id, at) VALUES (1, ?)", (_now(now),)
         )
 
 
@@ -172,7 +279,8 @@ def apply(
     """One overlay POST, from its parsed form. Raises OverlayError on bad input.
 
     Fields: `source` (default `jira`) and `key`; `order` repeats `key`, one per
-    pinned item in the new order; `snooze` takes `until`, `note` takes `text`.
+    pinned item in the new order; `snooze` takes `until`, `note` takes `text`,
+    `tag` takes `tag` (empty clears) and an optional `text` for the note.
     """
     if action not in ACTIONS:
         raise OverlayError(f"unknown overlay action: {action!r}")
@@ -190,6 +298,13 @@ def apply(
         unpin(conn, item)
     elif action == "snooze":
         snooze(conn, item, (form.get("until") or [""])[0].strip())
+    elif action == "tag":
+        kind = (form.get("tag") or [""])[0].strip()
+        tag(conn, item, kind, (form.get("text") or [""])[0], now)
+    elif action == "focus":
+        set_focus(conn, item, now)
+    elif action == "unfocus":
+        clear_focus(conn, item)
     else:
         note(conn, item, (form.get("text") or [""])[0], now)
 
@@ -199,12 +314,15 @@ def apply(
 
 @dataclass
 class Overlay:
-    """All four tables, keyed by (source, item_key)."""
+    """Every overlay table, keyed by (source, item_key), plus the last visit."""
 
     pinned_at: "dict[Item, str | None]" = field(default_factory=dict)
     position: "dict[Item, float | None]" = field(default_factory=dict)
     snoozed_until: "dict[Item, str]" = field(default_factory=dict)
     notes: "dict[Item, str]" = field(default_factory=dict)
+    kind_tags: "dict[Item, str]" = field(default_factory=dict)
+    focus: "Item | None" = None
+    last_visit: "str | None" = None
 
     def is_pinned(self, item: Item) -> bool:
         return item in self.pinned_at
@@ -238,6 +356,12 @@ def load(conn: sqlite3.Connection) -> Overlay:
     for s, k, body in conn.execute("SELECT source, item_key, body FROM notes"):
         if body:
             ov.notes[(s, k)] = body
+    for s, k, kind in conn.execute("SELECT source, item_key, tag FROM kind_tags"):
+        ov.kind_tags[(s, k)] = kind
+    row = conn.execute("SELECT source, item_key FROM focus").fetchone()
+    ov.focus = (row[0], row[1]) if row else None
+    row = conn.execute("SELECT at FROM last_visit WHERE id = 1").fetchone()
+    ov.last_visit = row[0] if row else None
     return ov
 
 
@@ -245,8 +369,9 @@ def load(conn: sqlite3.Connection) -> Overlay:
 
 
 def export(conn: sqlite3.Connection, now: "datetime | None" = None) -> dict[str, Any]:
-    """The four tables as a versioned, JSON-ready document, rows sorted by key."""
+    """The overlay as a versioned, JSON-ready document, rows sorted by key."""
     tables: dict[str, list[dict[str, Any]]] = {}
+    last_visit: "str | None" = None
     # One read transaction, so every table comes from the same snapshot: a pin
     # committed between two SELECTs would otherwise give a file import refuses.
     conn.execute("BEGIN")
@@ -257,12 +382,15 @@ def export(conn: sqlite3.Connection, now: "datetime | None" = None) -> dict[str,
                 f'SELECT {", ".join(names)} FROM "{table}" ORDER BY source, item_key'
             )
             tables[table] = [dict(zip(names, row)) for row in cur]
+        row = conn.execute("SELECT at FROM last_visit WHERE id = 1").fetchone()
+        last_visit = row[0] if row else None
     finally:
         conn.rollback()
     return {
         "format": EXPORT_FORMAT,
         "version": EXPORT_VERSION,
         "exported_at": _now(now),
+        "last_visit": last_visit,
         "tables": tables,
     }
 
@@ -287,27 +415,59 @@ def _check_value(table: str, col: str, value: Any, where: str) -> None:
         raise OverlayError(f"{where}: {col} has the wrong type")
     if table == "snoozes" and value is not None:
         _iso_date(value)
+    if col == "tag" and value not in KIND_TAGS:
+        raise OverlayError(f"{where}: tag must be one of {', '.join(KIND_TAGS)}")
     # The write path's limit too, or an imported note could never be re-saved.
     if col == "body" and isinstance(value, str) and len(value) > MAX_NOTE:
         raise OverlayError(f"{where}: note is longer than {MAX_NOTE} characters")
 
 
-def validate(doc: Any) -> "dict[str, list[tuple[Any, ...]]]":
-    """Check a whole import document; return each table's rows as tuples."""
+def _check_last_visit(value: Any) -> "str | None":
+    if value is None:
+        return None
+    if not isinstance(value, str) or not _STAMP.fullmatch(value):
+        raise OverlayError("last_visit must be null or YYYY-MM-DDTHH:MM:SSZ")
+    try:
+        datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        raise OverlayError(f"last_visit is not a real time: {value!r}") from None
+    return value
+
+
+def validate(
+    doc: Any,
+) -> "tuple[dict[str, list[tuple[Any, ...]]], str | None]":
+    """Check a whole import document; return each table's rows as tuples, and
+    the last visit.
+
+    A version 1 file has only the first four tables and no `last_visit`; the
+    tables added in version 2 come back empty.
+    """
     if not isinstance(doc, dict):
         raise OverlayError("import file is not a JSON object")
     if doc.get("format") != EXPORT_FORMAT:
         raise OverlayError(f"import file is not a {EXPORT_FORMAT} export")
-    if doc.get("version") != EXPORT_VERSION:
+    version = doc.get("version")
+    if type(version) is not int or version not in IMPORT_VERSIONS:
         raise OverlayError(
-            f"import file version {doc.get('version')!r} is not {EXPORT_VERSION}"
+            f"import file version {version!r} is not one of"
+            f" {', '.join(map(str, IMPORT_VERSIONS))}"
         )
+    expected = V1_TABLES if version == 1 else tuple(COLUMNS)
     tables = doc.get("tables")
-    if not isinstance(tables, dict) or set(tables) != set(COLUMNS):
-        raise OverlayError(f"tables must be exactly: {', '.join(COLUMNS)}")
+    if not isinstance(tables, dict) or set(tables) != set(expected):
+        raise OverlayError(f"tables must be exactly: {', '.join(expected)}")
+    if version == 1:
+        if "last_visit" in doc:
+            raise OverlayError("a version 1 file has no last_visit")
+        last_visit = None
+    else:
+        if "last_visit" not in doc:
+            raise OverlayError("last_visit is missing (null when never visited)")
+        last_visit = _check_last_visit(doc["last_visit"])
     out: dict[str, list[tuple[Any, ...]]] = {}
     for table, cols in COLUMNS.items():
-        rows = tables[table]
+        rows = tables.get(table, [])
         if not isinstance(rows, list):
             raise OverlayError(f"{table} is not a list")
         names = ("source", "item_key", *cols)
@@ -334,16 +494,28 @@ def validate(doc: Any) -> "dict[str, list[tuple[Any, ...]]]":
     unplaced = sorted(f"{s}:{k}" for s, k in pinned - positioned)
     if unplaced:
         raise OverlayError(f"pins without a position: {', '.join(unplaced)}")
-    return out
+    if len(out["focus"]) > 1:
+        raise OverlayError("focus holds at most one item")
+    noted = {(r[0], r[1]) for r in out["notes"] if (r[2] or "").strip()}
+    bare = sorted(
+        f"{r[0]}:{r[1]}"
+        for r in out["kind_tags"]
+        if r[2] == "substantial" and (r[0], r[1]) not in noted
+    )
+    if bare:
+        raise OverlayError(f"{SUBSTANTIAL_NEEDS_NOTE}: {', '.join(bare)}")
+    return out, last_visit
 
 
 def import_(conn: sqlite3.Connection, doc: Any) -> dict[str, int]:
     """Replace the overlay with a validated document, in one transaction."""
-    rows = validate(doc)
+    rows, last_visit = validate(doc)
     with conn:
         conn.execute("BEGIN IMMEDIATE")
-        for table in COLUMNS:
+        for table in (*COLUMNS, *db.OVERLAY_SINGLETONS):
             conn.execute(f'DELETE FROM "{table}"')
+        if last_visit is not None:
+            conn.execute("INSERT INTO last_visit (id, at) VALUES (1, ?)", (last_visit,))
         for table, cols in COLUMNS.items():
             names = ("source", "item_key", *cols)
             marks = ", ".join("?" * len(names))
@@ -365,7 +537,7 @@ _e = html.escape
 CSS = """
 .card .ov { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:4px;
   font-size:12px; }
-.card .ov button, .card .ov input { font:inherit; padding:1px 6px; border-radius:4px;
+.card .ov button, .card .ov input, .card .ov select { font:inherit; padding:1px 6px; border-radius:4px;
   border:1px solid var(--line); background:var(--bg); color:var(--fg); }
 .card .ov details { width:100%; }
 .card .ov textarea { width:100%; min-height:4em; font:inherit; color:var(--fg);
@@ -399,7 +571,9 @@ JS = """
     var b = ev.target.closest('[data-ov]');
     if (!b) return;
     var act = b.dataset.ov, it = item(b);
-    if (act === 'pin' || act === 'unpin') { post(act, it); }
+    if (act === 'pin' || act === 'unpin' || act === 'focus' || act === 'unfocus') {
+      post(act, it);
+    }
     else if (act === 'note') {
       post('note', it.concat([['text', b.closest('details').querySelector('textarea').value]]));
     } else if (act === 'up' || act === 'down') {
@@ -415,6 +589,16 @@ JS = """
   document.addEventListener('change', function (ev) {
     var d = ev.target.closest('input[data-ov=snooze]');
     if (d) post('snooze', item(d).concat([['until', d.value]]));
+    var s = ev.target.closest('select[data-ov=tag]');
+    if (!s) return;
+    var fields = item(s).concat([['tag', s.value]]);
+    // A substantial item must name the figure it moves; ask when it has no note.
+    if (s.value === 'substantial' && !s.closest('.card').querySelector('.note')) {
+      var fig = prompt('Substantial: which figure does this move?');
+      if (!fig || !fig.trim()) { s.value = s.dataset.was; return; }
+      fields.push(['text', fig]);
+    }
+    post('tag', fields);
   });
 })();
 """
@@ -427,12 +611,24 @@ def card_attrs(item: Item, ov: Overlay, now: datetime) -> str:
 
 
 def card_controls(item: Item, ov: Overlay, now: datetime, *, reorder: bool) -> str:
-    """The pin toggle, snooze picker, note editor and (pinned lane) up/down."""
+    """The pin and focus toggles, tag and snooze pickers, note editor, and
+    (pinned lane) up/down."""
     pinned = ov.is_pinned(item)
+    focused = ov.focus == item
     parts = [
         f'<button type="button" data-ov="{"unpin" if pinned else "pin"}">'
-        f"{'Unpin' if pinned else 'Pin'}</button>"
+        f"{'Unpin' if pinned else 'Pin'}</button>",
+        f'<button type="button" data-ov="{"unfocus" if focused else "focus"}">'
+        f"{'Unfocus' if focused else 'Focus'}</button>",
     ]
+    current = ov.kind_tags.get(item, "")
+    options = "".join(
+        f'<option value="{v}"{" selected" if v == current else ""}>{label}</option>'
+        for v, label in (("", "no tag"), *((t, t) for t in KIND_TAGS))
+    )
+    parts.append(
+        f'<select data-ov="tag" data-was="{_e(current)}" title="Kind">{options}</select>'
+    )
     if reorder:
         parts.append(
             '<button type="button" data-ov="up" title="Move up">↑</button>'

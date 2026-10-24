@@ -44,6 +44,7 @@ from typing import Any, Callable
 from urllib.parse import parse_qs, urlsplit
 
 import db
+import gauges
 import ingest
 import overlay
 import score
@@ -443,13 +444,14 @@ def _alert(last_run: "dict[str, Any] | None") -> str:
     return f'<div class="alert" role="alert">Last sync failed: {_e(first)}</div>'
 
 
-def render_header(health: dict[str, Any], busy: bool) -> str:
+def render_header(health: dict[str, Any], busy: bool, gauge_html: str = "") -> str:
     cls = ' class="stale"' if health["stale"] else ""
     title = _e(health["last_ok_at"] or "no successful sync recorded")
     label = "Syncing…" if busy else "Sync now"
     return (
         f"<header{cls}><h1>Task dashboard</h1>"
         f'<span class="age" title="{title}">{_age_text(health["age_seconds"])}</span>'
+        f"{gauge_html}"
         f'<button id="sync" title="Shift-click for a full reconcile">{label}</button>'
         f"{_alert(health['last_run'])}</header>"
     )
@@ -527,7 +529,8 @@ def render_page(title: str, header: str, body: str, token: str, busy: bool) -> s
         "<!doctype html><html lang=en><head><meta charset=utf-8>"
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
         f'<meta name="dashboard-token" content="{_e(token)}">'
-        f"<title>{_e(title)}</title><style>{CSS}{views.CSS}{overlay.CSS}</style></head>"
+        f"<title>{_e(title)}</title>"
+        f"<style>{CSS}{views.CSS}{overlay.CSS}{gauges.CSS}</style></head>"
         f'<body data-busy="{1 if busy else 0}">{header}<main>{body}</main>'
         f"<script>{JS}{overlay.JS}</script></body></html>"
     )
@@ -579,11 +582,13 @@ class App:
         try:
             health = sync_health(conn, self.interval_s, self.now())
             body = views.render(path, conn, self.cfg, self.now())
+            gauge_html = gauges.render(gauges.read(conn), self.cfg)
         finally:
             conn.close()
         busy = bool(self.syncer.state()["busy"])
         title = f"{views.ROUTES[path][0]} · Task dashboard"
-        return render_page(title, render_header(health, busy), body, self.token, busy)
+        header = render_header(health, busy, gauge_html)
+        return render_page(title, header, body, self.token, busy)
 
     def overlay_write(self, action: str, form: dict[str, list[str]]) -> None:
         conn = self.read()
@@ -598,6 +603,7 @@ class App:
             health = sync_health(conn, self.interval_s, self.now())
             board = classify_board(board_rows(conn))
             ov = overlay.load(conn)
+            gauge_html = gauges.render(gauges.read(conn, ov), self.cfg)
             sprints = [
                 r[0] for r in conn.execute("SELECT name FROM sprints ORDER BY id")
             ]
@@ -611,7 +617,11 @@ class App:
             + render_board(board, self.cfg["jira"]["site"], ov, self.now())
         )
         return render_page(
-            "Task dashboard", render_header(health, busy), body, self.token, busy
+            "Task dashboard",
+            render_header(health, busy, gauge_html),
+            body,
+            self.token,
+            busy,
         )
 
 

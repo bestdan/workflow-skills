@@ -2,8 +2,9 @@
 
 Two kinds of table share one file and must stay apart. MIRROR tables are the
 sync's: any row may be overwritten or deleted on the next run. OVERLAY tables
-(pins, order, snoozes, notes) are the user's, keyed by (source, item key), and
-a sync never touches them; they are the only state here that cannot be rebuilt.
+(pins, order, snoozes, notes, kind tags, focus, last visit) are the user's,
+keyed by (source, item key) apart from the one-row last visit, and a sync never
+touches them; they are the only state here that cannot be rebuilt.
 
 The DB lives under ~/.local/state, outside every checkout and plugin directory,
 so a plugin update never wipes the overlay. WAL mode lets the HTTP thread read a
@@ -31,7 +32,10 @@ MIRROR_TABLES = (
     "session_events",
     "history_entries",
 )
-OVERLAY_TABLES = ("pins", "order", "snoozes", "notes")
+# Keyed by (source, item_key). `last_visit` is overlay state too, but one row
+# with no item key, so it is named apart.
+OVERLAY_TABLES = ("pins", "order", "snoozes", "notes", "kind_tags", "focus")
+OVERLAY_SINGLETONS = ("last_visit",)
 
 _V1 = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -265,6 +269,39 @@ CREATE TABLE history_entries (
 CREATE INDEX history_entries_host_ts ON history_entries (host, ts);
 """
 
+# Version 4: the fleet view's overlay additions (design, "Overlay additions").
+#
+# - `kind_tags`: an item's `side-quest` or `substantial` tag. A substantial item
+#   must name the figure it moves in its note; overlay.py enforces that, since
+#   the note lives in another table.
+# - `focus`: the one deep-work item. The constant-expression unique index makes
+#   a second row a constraint error, so "at most one" holds even against a
+#   writer that skips overlay.set_focus.
+# - `last_visit`: one timestamp for the whole overlay, not one per item, so a
+#   single row (id 1) rather than a (source, item_key) key.
+_V4 = """
+CREATE TABLE kind_tags (
+    source TEXT NOT NULL,
+    item_key TEXT NOT NULL,
+    tag TEXT NOT NULL CHECK (tag IN ('side-quest', 'substantial')),
+    tagged_at TEXT,
+    PRIMARY KEY (source, item_key)
+);
+
+CREATE TABLE focus (
+    source TEXT NOT NULL,
+    item_key TEXT NOT NULL,
+    set_at TEXT,
+    PRIMARY KEY (source, item_key)
+);
+CREATE UNIQUE INDEX focus_one ON focus ((0));
+
+CREATE TABLE last_visit (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    at TEXT NOT NULL
+);
+"""
+
 # Ordered, ascending, append-only: never edit a shipped entry.
 #
 # migrate() runs a script one statement at a time through _statements, which
@@ -275,7 +312,7 @@ CREATE INDEX history_entries_host_ts ON history_entries (host, ts);
 #   raises "You can only execute one statement at a time");
 # - nothing follows the last statement's `;`, not even a comment.
 # A missing final `;` or a trailing comment makes _statements raise ValueError.
-MIGRATIONS: list[tuple[int, str]] = [(1, _V1), (2, _V2), (3, _V3)]
+MIGRATIONS: list[tuple[int, str]] = [(1, _V1), (2, _V2), (3, _V3), (4, _V4)]
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 
 
