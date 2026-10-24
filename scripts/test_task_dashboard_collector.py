@@ -607,11 +607,18 @@ class TestInstall(unittest.TestCase):
         self.assertIn("enabled is false", err.getvalue())
         self.assertEqual(set(self.written()), {"config.toml", "disabled.toml"})
 
-    def test_install_without_collector_only_is_refused(self):
+    def test_install_without_collector_only_is_the_server_install(self):
+        # Plain `install` is the server's LaunchAgent (server_install.py), not a
+        # refusal: with no server config it stops on that config before writing.
         err = io.StringIO()
-        with contextlib.redirect_stderr(err):
-            self.assertEqual(dashboard.main(["install"]), 2)
-        self.assertIn("#1093", err.getvalue())
+        missing = str(self.home / "no-such-config.toml")
+        with (
+            mock.patch.object(sys, "platform", "darwin"),
+            contextlib.redirect_stderr(err),
+        ):
+            self.assertEqual(dashboard.main(["install", "--config", missing]), 2)
+        self.assertIn("config file not found", err.getvalue())
+        self.assertNotIn("#1093", err.getvalue())
 
 
 class TestLauncher(unittest.TestCase):

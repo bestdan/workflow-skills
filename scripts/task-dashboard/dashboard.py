@@ -41,6 +41,7 @@ import db  # noqa: E402
 import ingest  # noqa: E402
 import overlay  # noqa: E402
 import server  # noqa: E402
+import server_install  # noqa: E402
 import sync  # noqa: E402
 
 
@@ -107,12 +108,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="config path (default: $TASK_DASHBOARD_CONFIG or ~/.config/task-dashboard)",
     )
     install_p = sub.add_parser(
-        "install", help="schedule this machine's dashboard process (launchd/systemd)"
+        "install",
+        help="macOS: install the dashboard server as a LaunchAgent (full sync, then"
+        " load it); --collector-only schedules only the fleet collector",
     )
     install_p.add_argument(
         "--collector-only",
         action="store_true",
-        help="schedule only the fleet collector, for a machine that runs no server",
+        help="schedule only the fleet collector (launchd or systemd), for a machine"
+        " that runs no server",
     )
     install_p.add_argument(
         "--dry-run",
@@ -120,10 +124,52 @@ def build_parser() -> argparse.ArgumentParser:
         help="print the files and commands; write and run nothing",
     )
     install_p.add_argument(
+        "--plugins-json",
+        help="installed_plugins.json the launcher reads (default: Claude Code's)",
+    )
+    _paths(install_p)
+    uninstall_p = sub.add_parser(
+        "uninstall",
+        help="boot the server agent out, remove plist and launcher (unless another"
+        " agent runs it); keep data",
+    )
+    _paths(uninstall_p)
+    status_p = sub.add_parser(
+        "status", help="is the agent loaded, how old is the last sync, the URL"
+    )
+    _paths(status_p)
+    shape = status_p.add_mutually_exclusive_group()
+    shape.add_argument("--json", action="store_true", help="print JSON")
+    shape.add_argument(
+        "--doctor",
+        action="store_true",
+        help="one PASS/WARN line for /doctor; prints nothing when not installed",
+    )
+    now_p = sub.add_parser(
+        "sync-now", help="ask the running server for a sync and wait for it"
+    )
+    _paths(now_p)
+    now_p.add_argument(
+        "--reconcile", action="store_true", help="a reconcile, not an incremental"
+    )
+    now_p.add_argument(
+        "--wait", type=float, default=300.0, help="seconds to wait (default 300)"
+    )
+    url_p = sub.add_parser(
+        "url", aliases=["open"], help="print the dashboard URL (alias: open)"
+    )
+    url_p.add_argument("--config", help="config path")
+    return parser
+
+
+def _paths(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--db", help="DB path (default: $TASK_DASHBOARD_DB or the state dir)"
+    )
+    p.add_argument(
         "--config",
         help="config path (default: $TASK_DASHBOARD_CONFIG or ~/.config/task-dashboard)",
     )
-    return parser
 
 
 def cmd_ingest_token_add(args: argparse.Namespace) -> int:
@@ -211,15 +257,8 @@ def cmd_collect(args: argparse.Namespace) -> int:
     return collector.collect(cfg, home=Path.home(), now=datetime.now(timezone.utc))
 
 
-def cmd_install(args: argparse.Namespace) -> int:
-    """Exit 0 installed, 1 a command failed, 2 refused before writing anything."""
-    if not args.collector_only:
-        print(
-            "task-dashboard: only `install --collector-only` exists so far;"
-            " the server install is tracked in bestdan/workflow-skills#1093",
-            file=sys.stderr,
-        )
-        return 2
+def cmd_install_collector(args: argparse.Namespace) -> int:
+    """`install --collector-only`: exit 0 installed, 1 failed, 2 refused."""
     try:
         cfg = config.load_collector(args.config)
     except config.ConfigError as exc:
@@ -284,6 +323,141 @@ def _report_sync(row: dict, pr_failed: str = "CI lookup failed") -> int:
     return {"ok": 0, "auth_failed": 3}.get(row["outcome"], 1)
 
 
+def _overrides(args: argparse.Namespace) -> dict[str, str]:
+    """TASK_DASHBOARD_* paths for the agent: flag, then env, then the installed plist.
+
+    The plist is last so a reinstall without the flags keeps what the first
+    install was given, and so every other command reads the agent's own paths.
+    """
+    baked = server_install.installed_paths(Path.home())
+    out = {}
+    for var, flag in (
+        (config.ENV_VAR, getattr(args, "config", None)),
+        (db.ENV_VAR, getattr(args, "db", None)),
+        ("TASK_DASHBOARD_PLUGINS_JSON", getattr(args, "plugins_json", None)),
+    ):
+        value = flag or os.environ.get(var)
+        if value:
+            out[var] = str(Path(value).expanduser().resolve())
+        elif var in baked:
+            out[var] = baked[var]
+    return out
+
+
+def _agent_paths(args: argparse.Namespace) -> "tuple[str | None, str | None]":
+    """(config, DB) as the installed agent sees them, for the post-install commands."""
+    paths = _overrides(args)
+    return paths.get(config.ENV_VAR), paths.get(db.ENV_VAR)
+
+
+def _not_macos(verb: str) -> bool:
+    if sys.platform == "darwin":
+        return False
+    print(
+        f"task-dashboard: {verb} manages a macOS LaunchAgent; elsewhere run"
+        " `dashboard.py serve` under your own supervisor",
+        file=sys.stderr,
+    )
+    return True
+
+
+def cmd_install(args: argparse.Namespace) -> int:
+    """Exit 0 installed, 1 a command failed, 2 refused before writing anything.
+
+    Plain `install` sets up the server's LaunchAgent; `--collector-only` hands
+    over to the collector's install, which also covers systemd.
+    """
+    if args.collector_only:
+        return cmd_install_collector(args)
+    if _not_macos("install"):
+        return 2
+    try:
+        # The same config the plist will name: flag, env, then a prior install's.
+        cfg = config.load(_agent_paths(args)[0])
+        p = server_install.plan(
+            cfg,
+            home=Path.home(),
+            tools=server_install.resolve_tools(cfg),
+            uid=os.getuid(),
+            overrides=_overrides(args),
+        )
+    except (config.ConfigError, server_install.InstallError) as exc:
+        print(f"task-dashboard install: {exc}", file=sys.stderr)
+        return 2
+    if args.dry_run:
+        print(server_install.describe(p))
+        return 0
+    return server_install.execute(p)
+
+
+def cmd_uninstall(args: argparse.Namespace) -> int:
+    """Exit 0 removed, 1 the agent could not be booted out, 2 not macOS."""
+    if _not_macos("uninstall"):
+        return 2
+    cfg_path, db_arg = _agent_paths(args)
+    return server_install.uninstall(
+        home=Path.home(),
+        uid=os.getuid(),
+        db_file=db.db_path(db_arg),
+        config_file=config.config_path(cfg_path),
+    )
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    """Exit 0 healthy, 1 a problem, 3 not installed (no plist)."""
+    cfg, error = None, ""
+    cfg_path, db_arg = _agent_paths(args)
+    try:
+        cfg = config.load(cfg_path)
+    except config.ConfigError as exc:
+        error = str(exc)
+    st = server_install.status(
+        home=Path.home(),
+        uid=os.getuid(),
+        cfg=cfg,
+        config_error=error,
+        db_file=db.db_path(db_arg),
+        now=datetime.now(timezone.utc),
+    )
+    if args.json:
+        print(json.dumps(st.as_dict(), indent=2))
+    elif args.doctor:
+        if st.installed:
+            print(server_install.doctor_line(st))
+    else:
+        print(server_install.render_status(st))
+    if not st.installed:
+        return 3
+    return 0 if st.healthy() else 1
+
+
+def cmd_sync_now(args: argparse.Namespace) -> int:
+    """Exit 0 ok, 1 failed or unreachable, 2 config error, 3 still running."""
+    cfg_path, db_arg = _agent_paths(args)
+    try:
+        cfg = config.load(cfg_path)
+    except config.ConfigError as exc:
+        print(f"task-dashboard: {exc}", file=sys.stderr)
+        return 2
+    return server_install.sync_now(
+        port=cfg["server"]["port"],
+        db_file=db.db_path(db_arg),
+        mode="reconcile" if args.reconcile else "incremental",
+        wait_s=args.wait,
+    )
+
+
+def cmd_url(args: argparse.Namespace) -> int:
+    cfg_path, _ = _agent_paths(args)
+    try:
+        cfg = config.load(cfg_path)
+    except config.ConfigError as exc:
+        print(f"task-dashboard: {exc}", file=sys.stderr)
+        return 2
+    print(server_install.url(cfg["server"]["port"]))
+    return 0
+
+
 def main(argv: "list[str] | None" = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -306,6 +480,14 @@ def main(argv: "list[str] | None" = None) -> int:
         return cmd_collect(args)
     if args.command == "install":
         return cmd_install(args)
+    if args.command == "uninstall":
+        return cmd_uninstall(args)
+    if args.command == "status":
+        return cmd_status(args)
+    if args.command == "sync-now":
+        return cmd_sync_now(args)
+    if args.command in ("url", "open"):
+        return cmd_url(args)
     parser.print_help()
     return 2
 

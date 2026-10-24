@@ -13,7 +13,7 @@ A Claude Code plugin bundling Daniel's general engineering workflow skills: coll
 
 ## What's in the box
 
-19 skills, 23 commands, and 2 subagents, organized into eight workflows. Each
+20 skills, 23 commands, and 2 subagents, organized into eight workflows. Each
 entry links to its own doc — that's where the flags, edge cases, and handler
 support live.
 
@@ -232,6 +232,12 @@ never records prompt text, and it never fails a turn.
 
 ### Also included
 
+- [**task-dashboard**](skills/task-dashboard/SKILL.md) — `/task-dashboard
+  install | status | sync-now | open | export | import | uninstall`. A
+  localhost-only dashboard that mirrors your Jira work (through `acli`) and
+  GitHub PRs (through `gh`) into SQLite and ranks it, run on macOS as a login
+  LaunchAgent. Read-only toward Jira and GitHub; `/doctor` reports whether the
+  agent is loaded and syncing.
 - [**Overnight auto-resume (`car`)**](dev_docs/claude-auto-resume.md) — an
   external launcher you run instead of `claude` that survives the 5-hour usage
   cap: it detects a cap-kill, sleeps until reset, and resumes the same

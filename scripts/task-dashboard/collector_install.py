@@ -37,21 +37,22 @@ from pathlib import Path
 from typing import Any
 
 from github_gh import Runner, run
+from launcher import (
+    BASE_PATH,
+    InstallError,
+    launcher_path,
+    log_dir,
+    render_launcher,
+    stable_tool,
+)
 
 LABEL = "com.bestdan.task-dashboard.collector"
 UNIT = "task-dashboard-collector"
 INTERVAL_SECONDS = 300
 BOOTSTRAP_RETRIES = 3
 BOOTSTRAP_PAUSE = 1.0
-LAUNCHER_TEMPLATE = Path(__file__).resolve().parent / "task-dashboard-launch.sh"
 HOOK = Path(__file__).resolve().parents[1] / "session-state-hook.py"
-UV_PLACEHOLDER = "'@UV@'"
-BASE_PATH = ("/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin")
 PATH_TOOLS = ("git", "tmux", "gh", "uv")
-
-
-class InstallError(RuntimeError):
-    """Something install needs is missing; the message says what."""
 
 
 @dataclass
@@ -61,37 +62,6 @@ class Plan:
     files: list[tuple[Path, str, int]] = field(default_factory=list)
     commands: list[list[str]] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
-
-
-def launcher_path(home: Path) -> Path:
-    return home / ".local/bin/task-dashboard-launch"
-
-
-def log_dir(home: Path) -> Path:
-    return home / ".local/state/task-dashboard"
-
-
-def render_launcher(uv: str) -> str:
-    text = LAUNCHER_TEMPLATE.read_text()
-    if text.count(UV_PLACEHOLDER) != 1:
-        raise InstallError(f"{LAUNCHER_TEMPLATE} lost its {UV_PLACEHOLDER} line")
-    return text.replace(UV_PLACEHOLDER, shlex.quote(uv), 1)
-
-
-def stable_tool(found: str) -> str:
-    """``found``, or its mise shim when ``found`` is a versioned mise install.
-
-    An activated mise puts ``…/mise/installs/<tool>/<version>/…`` on PATH, and
-    that directory goes away on the next upgrade: the same breakage the stable
-    launcher exists to avoid. The shim beside ``installs/`` survives it.
-    """
-    parts = Path(found).parts
-    if "installs" in parts:
-        i = len(parts) - 1 - parts[::-1].index("installs")
-        shim = Path(*parts[:i], "shims", Path(found).name)
-        if shim.exists():
-            return str(shim)
-    return found
 
 
 def search_path(which: Any = shutil.which) -> str:

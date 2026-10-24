@@ -1,5 +1,5 @@
 ---
-description: Diagnose and optionally fix the plugin setup — config validity, handler prerequisites, legacy dirs, schema drift, hygiene, co-review and teardown allow-rule drift, the worktree root and branch prefix, and co-review ledger sync
+description: Diagnose and optionally fix the plugin setup — config validity, handler prerequisites, legacy dirs, schema drift, hygiene, co-review and teardown allow-rule drift, the worktree root and branch prefix, co-review ledger sync, and the task-dashboard agent
 allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(find *), Bash(grep *), Bash(uv *), Bash(python3 *), Bash(mkdir *), Bash(rmdir *), Bash("${CLAUDE_PLUGIN_ROOT}/scripts/worktree-config.sh":*), Glob, Grep, Read, Edit, Write, AskUserQuestion, mcp__claude_ai_Linear__list_teams, mcp__linear__list_teams, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__atlassian__getAccessibleAtlassianResources
 argument-hint: "[--fix]"
 ---
@@ -8,10 +8,10 @@ argument-hint: "[--fix]"
 
 One explicit "diagnose and fix my setup" entry point. It runs a set of checks
 against `dev_docs/tasks/` and the configured handler — plus one over co-review's and the teardown scripts'
-allow-rules, Check 7, one over the worktree root and branch prefix, Check 8, and one over co-review ledger sync, Check 9 — prints a `PASS` / `WARN` / `FAIL` line per check with a
+allow-rules, Check 7, one over the worktree root and branch prefix, Check 8, one over co-review ledger sync, Check 9, and one over the task-dashboard agent, Check 10 — prints a `PASS` / `WARN` / `FAIL` line per check with a
 remediation hint, and changes **nothing** unless invoked with `--fix`.
 
-Most of what it checks is the task loop. Checks 7, 8 and 9 are not, and that is deliberate:
+Most of what it checks is the task loop. Checks 7 to 10 are not, and that is deliberate:
 each covers a failure that is **silent by construction**, so the only way anyone
 learns of it is by asking, and this is the one place people already come to ask.
 A check nobody runs does not fix a problem nobody notices. Read that as the bar
@@ -526,6 +526,23 @@ the remote is unreachable, the remote refused this machine's credentials or has
 no such repository (a mistyped URL, an SSH key the host does not accept, or no
 HTTPS credential helper), or the clone at `~/.claude/co-review/shared/` is not
 a usable repo (the next flush reclones it). **Never touched by `--fix`.**
+
+**Check 10 — task-dashboard agent.** Only on a machine where
+`$HOME/Library/LaunchAgents/com.bestdan.task-dashboard.plist` exists; without
+it, skip this check silently and print no line. When it exists, run
+unsandboxed (it calls `launchctl print`):
+
+```bash
+uv run --no-project --python ">=3.11" "${CLAUDE_PLUGIN_ROOT}/scripts/task-dashboard/dashboard.py" status --doctor
+```
+
+It prints one line, already in this report's shape; quote it as is. Exit `0`
+is a `PASS`: the agent is loaded and the last successful sync is newer than
+three sync intervals. Exit `1` is a `WARN` naming each problem, and its fix where one is known — not
+loaded, a stale sync (with the last run's error, which names the login command,
+`acli jira auth login` or `gh auth login`, when it was an auth failure), or a launchd state, config or DB it could not read. Exit `3` (no plist)
+prints nothing, so it is skipped too. **Never touched by `--fix`**: reloading an
+agent or logging in to Jira is the user's call, and `/task-dashboard` owns both.
 
 ### 3. Report (and fix under `--fix`)
 
