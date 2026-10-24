@@ -230,10 +230,11 @@ def make_sync_fn(cfg: dict[str, Any], db_path: Path) -> Callable[[str], None]:
     def run(mode: str) -> None:
         conn = db.connect(db_path)
         try:
-            row = sync.run(mode, cfg, conn, datetime.now(timezone.utc))
+            rows = sync.run_all(mode, cfg, conn, datetime.now(timezone.utc))
         finally:
             conn.close()
-        print(f"sync {row['kind']}: {row['outcome']}", file=sys.stderr)
+        for row in rows:
+            print(f"sync {row['kind']}: {row['outcome']}", file=sys.stderr)
 
     return run
 
@@ -266,14 +267,26 @@ def _parse_ts(value: "str | None") -> "datetime | None":
 def sync_health(
     conn: sqlite3.Connection, interval_s: float, now: datetime
 ) -> dict[str, Any]:
-    """Last successful sync, its age, staleness, and the latest finished run."""
+    """Last successful sync, its age, staleness, and the latest finished run.
+
+    All of it is the Jira sync's: a GitHub fleet run (sync.FLEET_KIND) must not
+    make a failing Jira sync look fresh. The latest finished fleet run is
+    reported beside it as `fleet_run`.
+    """
     ok = conn.execute(
-        "SELECT finished_at FROM sync_runs WHERE outcome = 'ok'"
-        " ORDER BY finished_at DESC, id DESC LIMIT 1"
+        "SELECT finished_at FROM sync_runs WHERE outcome = 'ok' AND kind IS NOT ?"
+        " ORDER BY finished_at DESC, id DESC LIMIT 1",
+        (sync.FLEET_KIND,),
     ).fetchone()
     last = conn.execute(
         "SELECT kind, outcome, error, finished_at FROM sync_runs"
-        " WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT 1"
+        " WHERE finished_at IS NOT NULL AND kind IS NOT ? ORDER BY id DESC LIMIT 1",
+        (sync.FLEET_KIND,),
+    ).fetchone()
+    fleet = conn.execute(
+        "SELECT kind, outcome, error, finished_at FROM sync_runs"
+        " WHERE finished_at IS NOT NULL AND kind = ? ORDER BY id DESC LIMIT 1",
+        (sync.FLEET_KIND,),
     ).fetchone()
     ok_at = _parse_ts(ok[0]) if ok else None
     age = (now - ok_at).total_seconds() if ok_at else None
@@ -281,15 +294,15 @@ def sync_health(
         "last_ok_at": ok[0] if ok else None,
         "age_seconds": None if age is None else max(0, int(age)),
         "stale": age is None or age > STALE_INTERVALS * interval_s,
-        "last_run": None
-        if last is None
-        else {
-            "kind": last[0],
-            "outcome": last[1],
-            "error": last[2],
-            "finished_at": last[3],
-        },
+        "last_run": _run_dict(last),
+        "fleet_run": _run_dict(fleet),
     }
+
+
+def _run_dict(row: "tuple | None") -> "dict[str, Any] | None":
+    if row is None:
+        return None
+    return {"kind": row[0], "outcome": row[1], "error": row[2], "finished_at": row[3]}
 
 
 @lru_cache(maxsize=1)
@@ -426,7 +439,7 @@ def _age_text(seconds: "int | None") -> str:
     return f"synced {round(seconds / 86400)}d ago"
 
 
-def _alert(last_run: "dict[str, Any] | None") -> str:
+def _alert(last_run: "dict[str, Any] | None", what: str = "Last sync") -> str:
     """The header's failure line for the latest finished run, if it failed."""
     if not last_run or last_run["outcome"] in (None, "ok"):
         return ""
@@ -441,7 +454,7 @@ def _alert(last_run: "dict[str, Any] | None") -> str:
             )
         return f'<div class="alert" role="alert">{text}</div>'
     first = error.strip().splitlines()[0] if error.strip() else "unknown error"
-    return f'<div class="alert" role="alert">Last sync failed: {_e(first)}</div>'
+    return f'<div class="alert" role="alert">{what} failed: {_e(first)}</div>'
 
 
 def render_header(health: dict[str, Any], busy: bool, gauge_html: str = "") -> str:
@@ -453,7 +466,8 @@ def render_header(health: dict[str, Any], busy: bool, gauge_html: str = "") -> s
         f'<span class="age" title="{title}">{_age_text(health["age_seconds"])}</span>'
         f"{gauge_html}"
         f'<button id="sync" title="Shift-click for a full reconcile">{label}</button>'
-        f"{_alert(health['last_run'])}</header>"
+        f"{_alert(health['last_run'])}"
+        f"{_alert(health.get('fleet_run'), 'GitHub fleet sync')}</header>"
     )
 
 
@@ -557,6 +571,7 @@ class App:
         self.now = now
         self.port = 0
         self.interval_s = float(cfg["sync"]["interval_minutes"]) * 60
+        self.fleet = sync.fleet_enabled(cfg)
         machines = cfg.get("ingest", {}).get("machines", {})
         self.ingest = ingest.Ingest(machines, db_path, lambda: self.now())
 
@@ -568,21 +583,33 @@ class App:
     def read(self) -> sqlite3.Connection:
         return sqlite3.connect(self.db_path)
 
+    def health(self, conn: sqlite3.Connection) -> dict[str, Any]:
+        """sync_health, without a fleet run once `github.fleet` is off.
+
+        A failed fleet run would otherwise keep its header alert after the
+        step that could clear it was switched off.
+        """
+        health = sync_health(conn, self.interval_s, self.now())
+        if not self.fleet:
+            health["fleet_run"] = None
+        return health
+
     def status(self) -> dict[str, Any]:
         conn = self.read()
         try:
-            health = sync_health(conn, self.interval_s, self.now())
+            health = self.health(conn)
+            queue = gauges.review_queue(conn, self.fleet)
         finally:
             conn.close()
-        return {**self.syncer.state(), **health}
+        return {**self.syncer.state(), **health, "review_queue": queue}
 
     def view_page(self, path: str) -> str:
         """One of the views.ROUTES pages: Now, Waiting on me, and the rest."""
         conn = self.read()
         try:
-            health = sync_health(conn, self.interval_s, self.now())
+            health = self.health(conn)
             body = views.render(path, conn, self.cfg, self.now())
-            gauge_html = gauges.render(gauges.read(conn), self.cfg)
+            gauge_html = gauges.render(gauges.read(conn, fleet=self.fleet), self.cfg)
         finally:
             conn.close()
         busy = bool(self.syncer.state()["busy"])
@@ -600,10 +627,12 @@ class App:
     def board_page(self) -> str:
         conn = self.read()
         try:
-            health = sync_health(conn, self.interval_s, self.now())
+            health = self.health(conn)
             board = classify_board(board_rows(conn))
             ov = overlay.load(conn)
-            gauge_html = gauges.render(gauges.read(conn, ov), self.cfg)
+            gauge_html = gauges.render(
+                gauges.read(conn, ov, fleet=self.fleet), self.cfg
+            )
             sprints = [
                 r[0] for r in conn.execute("SELECT name FROM sprints ORDER BY id")
             ]

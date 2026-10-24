@@ -111,6 +111,20 @@ the machine opts in**: it exits at once unless
 plugin is public and installed by people who never asked to have their
 sessions logged. On an opted-in machine it needs no further setup.
 
+**The GitHub row is a sync step of its own, behind `github.fleet`.** With
+`github.fleet = true` (default `false`; `github.enabled = false` also turns it
+off), every scheduled sync and every `dashboard.py sync` runs
+`github_fleet.fetch()` and `write()` after the Jira sync, whatever that sync's
+outcome. The step records its own `sync_runs` row, kind `github_fleet`, so its
+failure never touches the Jira rows or the Jira run's outcome, and staleness is
+judged on Jira runs alone. A failed fleet run gets its own header alert (the
+`gh auth login` hint on an auth error) and shows as `/status.fleet_run`.
+`/status.review_queue` and the header's review-queue gauge read the same
+counts: "—" / null before the first successful fleet run or while the gate is
+off, and 0 after a successful run that found nothing. `dashboard.py sync`
+prints both runs and exits nonzero if either failed; the Jira run's exit code
+wins when both did.
+
 ## Views
 
 1. **Needs you** — the home page.

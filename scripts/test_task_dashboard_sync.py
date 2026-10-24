@@ -7,8 +7,10 @@ own. The end-to-end cases run dashboard.py against dev/fake-acli. Everything
 lives under tempdirs. Needs Python 3.11: run via scripts/test-task-dashboard-sync.sh.
 """
 
+import contextlib
 import copy
 import hashlib
+import io
 import json
 import os
 import re
@@ -19,6 +21,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 PKG = ROOT / "scripts" / "task-dashboard"
@@ -31,6 +34,7 @@ sys.path.insert(0, str(PKG))
 # mypy checks this file without scripts/task-dashboard on its path; the
 # modules themselves are type-checked in their own group (scripts/typecheck.sh).
 import config  # type: ignore[import-not-found]  # noqa: E402
+import dashboard  # type: ignore[import-not-found]  # noqa: E402
 import db  # type: ignore[import-not-found]  # noqa: E402
 import jira_acli  # type: ignore[import-not-found]  # noqa: E402
 import sync  # type: ignore[import-not-found]  # noqa: E402
@@ -561,6 +565,219 @@ class GithubTests(SyncCase):
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM prs").fetchone()[0], 1)
 
 
+HEAD = "a" * 40
+
+
+def fleet_pr(number, milestone=None):
+    """A review-search node; with `milestone`, it closes an issue in that one."""
+    refs = []
+    if milestone is not None:
+        refs.append(
+            {
+                "number": 900 + number,
+                "repository": {"nameWithOwner": "acme/app"},
+                "milestone": {"number": milestone},
+            }
+        )
+    return {
+        "url": f"https://github.com/acme/app/pull/{number}",
+        "number": number,
+        "title": f"feat: fleet {number}",
+        "body": "",
+        "headRefName": f"bestdan/f-{number}",
+        "headRefOid": HEAD,
+        "isDraft": False,
+        "reviewDecision": None,
+        "createdAt": "2026-10-20T10:00:00Z",
+        "updatedAt": "2026-10-22T10:00:00Z",
+        "repository": {"nameWithOwner": "acme/app"},
+        "closingIssuesReferences": {"nodes": refs},
+    }
+
+
+class FleetGh:
+    """A runner answering github_fleet's gh calls; records every argv.
+
+    PR 1 passes all four review-queue rules (green CI, an approved milestone,
+    the viewer's stamp at its head); PR 2 closes no issue, so it only awaits.
+    `error` answers every call with that stderr.
+    """
+
+    def __init__(self):
+        self.calls = []
+        self.error = None
+        self.ci_fail = set()
+
+    def __call__(self, argv, timeout):
+        self.calls.append(argv)
+        if self.error:
+            return 1, "", self.error
+        q = next((a[2:] for a in argv if a.startswith("q=")), None)
+        if q is not None:
+            if "author:@me" in q:
+                nodes = [fleet_pr(1, milestone=7), fleet_pr(2)]
+            elif "is:issue" in q:
+                nodes = [
+                    {
+                        "url": "https://github.com/acme/app/issues/5",
+                        "number": 5,
+                        "title": "needs a human",
+                        "repository": {"nameWithOwner": "acme/app"},
+                        "labels": {"nodes": [{"name": "auto:human-review-needed"}]},
+                    }
+                ]
+            else:
+                nodes = []
+            page = {"pageInfo": {"hasNextPage": False, "endCursor": None}}
+            return 0, json.dumps({"data": {"search": {**page, "nodes": nodes}}}), ""
+        if argv[:3] == ["gh", "pr", "view"]:
+            if any(a in self.ci_fail for a in argv):
+                return 1, "", "HTTP 502: bad gateway"
+            rollup = [
+                {
+                    "__typename": "CheckRun",
+                    "status": "COMPLETED",
+                    "conclusion": "SUCCESS",
+                }
+            ]
+            return 0, json.dumps({"statusCheckRollup": rollup}), ""
+        if len(argv) > 2 and "/milestones/" in argv[2]:
+            return 0, json.dumps({"description": "approved: yes"}), ""
+        if any(a.startswith("owner=") for a in argv):
+            stamp = f"<!-- co-review-stamp v1 head={HEAD} -->"
+            comments = [
+                {
+                    "body": stamp,
+                    "createdAt": "2026-10-23T00:00:00Z",
+                    "author": {"login": "me"},
+                }
+            ]
+            data = {
+                "viewer": {"login": "me"},
+                "repository": {"pullRequest": {"comments": {"nodes": comments}}},
+            }
+            return 0, json.dumps({"data": data}), ""
+        raise AssertionError(f"unexpected gh call: {argv}")
+
+
+class FleetTests(SyncCase):
+    def run_all(self, cfg, gh, acli=None):
+        acli = acli or FakeAcli(["DEMO-1"])
+        # `github.enabled` is on, so the Jira run's PR step needs a fake too;
+        # left to default it calls the real gh, which CI has not logged in.
+        return sync.run_all(
+            "full", cfg, self.conn, NOW,
+            jira=sync.JiraSource(cfg, runner=acli),
+            github=sync.GithubSource(cfg, runner=FakeGh()), fleet_runner=gh,
+            clock=lambda: NOW,
+        )  # fmt: skip
+
+    def github_rows(self):
+        return dict(
+            self.conn.execute(
+                "SELECT key, status_name FROM issues WHERE source = 'github'"
+            ).fetchall()
+        )
+
+    def test_gate(self):
+        self.assertFalse(sync.fleet_enabled(make_config()))
+        self.assertFalse(sync.fleet_enabled(make_config(enabled=False, fleet=True)))
+        self.assertFalse(sync.fleet_enabled(make_config(enabled=True)))
+        self.assertTrue(sync.fleet_enabled(make_config(enabled=True, fleet=True)))
+
+    def test_gate_off_makes_no_fleet_calls(self):
+        gh = FleetGh()
+        # `enabled` on with `fleet` at its default: the work-laptop shape.
+        cfg = make_config(enabled=True)
+        jira = sync.JiraSource(cfg, runner=FakeAcli(["DEMO-1"]))
+        rows = sync.run_all(
+            "full", cfg, self.conn, NOW, jira=jira, github=sync.GithubSource(cfg, FakeGh()),
+            fleet_runner=gh, clock=lambda: NOW,
+        )  # fmt: skip
+        self.assertEqual(gh.calls, [])
+        self.assertEqual([r["kind"] for r in rows], ["full"])
+        self.assertEqual(self.github_rows(), {})
+
+    def test_gate_on_writes_github_rows_and_records_a_run(self):
+        rows = self.run_all(make_config(enabled=True, fleet=True), FleetGh())
+        self.assertEqual(
+            [(r["kind"], r["outcome"]) for r in rows],
+            [("full", "ok"), ("github_fleet", "ok")],
+        )
+        self.assertEqual(
+            self.github_rows(),
+            {
+                "https://github.com/acme/app/pull/1": "queue",
+                "https://github.com/acme/app/pull/2": "awaiting",
+                "https://github.com/acme/app/issues/5": None,
+            },
+        )
+        counts = json.loads(rows[1]["counts"])
+        self.assertEqual(
+            (counts["queue"], counts["awaiting"], counts["rows"]), (1, 2, 3)
+        )
+        self.assertEqual(self.keys(), ["DEMO-1"])
+
+    def test_failure_leaves_jira_rows_and_outcome(self):
+        gh = FleetGh()
+        gh.error = "HTTP 502: bad gateway"
+        rows = self.run_all(make_config(enabled=True, fleet=True), gh)
+        self.assertEqual([r["outcome"] for r in rows], ["ok", "failed"])
+        self.assertIn("502", rows[1]["error"])
+        self.assertEqual(self.keys(), ["DEMO-1"])
+
+    def test_failure_keeps_the_last_good_github_rows(self):
+        cfg = make_config(enabled=True, fleet=True)
+        self.run_all(cfg, FleetGh())
+        before = self.github_rows()
+        gh = FleetGh()
+        gh.error = "HTTP 502: bad gateway"
+        self.run_all(cfg, gh)
+        self.assertEqual(self.github_rows(), before)
+
+    def test_auth_failure_carries_the_gh_hint(self):
+        gh = FleetGh()
+        gh.error = "To get started with GitHub CLI, please run:  gh auth login"
+        rows = self.run_all(make_config(enabled=True, fleet=True), gh)
+        self.assertEqual([r["outcome"] for r in rows], ["ok", "auth_failed"])
+        self.assertIn("gh auth login", rows[1]["error"])
+        self.assertEqual(self.keys(), ["DEMO-1"])
+
+    def test_lookup_failure_is_listed_not_fatal(self):
+        gh = FleetGh()
+        bad = "https://github.com/acme/app/pull/1"
+        gh.ci_fail = {bad}
+        rows = self.run_all(make_config(enabled=True, fleet=True), gh)
+        self.assertEqual(rows[1]["outcome"], "ok")
+        self.assertEqual(json.loads(rows[1]["failed_keys"]), [bad])
+        self.assertEqual(self.github_rows()[bad], "awaiting")
+
+    def test_jira_failure_still_runs_the_fleet_step(self):
+        acli = FakeAcli(["DEMO-1"])
+        acli.auth = True
+        rows = self.run_all(make_config(enabled=True, fleet=True), FleetGh(), acli)
+        self.assertEqual([r["outcome"] for r in rows], ["auth_failed", "ok"])
+        self.assertEqual(len(self.github_rows()), 3)
+
+    def test_fleet_run_is_not_a_jira_cursor(self):
+        # The fleet run starts after the Jira run, as it does in production, so
+        # a cursor query that ignored kind would pick the fleet row.
+        later = NOW + timedelta(minutes=1)
+        ticks = iter([NOW, later, later])  # Jira finish, fleet start, fleet finish
+        cfg = make_config(enabled=True, fleet=True)
+        sync.run_all(
+            "full", cfg, self.conn, NOW,
+            jira=sync.JiraSource(cfg, runner=FakeAcli(["DEMO-1"])),
+            github=sync.GithubSource(cfg, runner=FakeGh()),
+            fleet_runner=FleetGh(), clock=lambda: next(ticks),
+        )  # fmt: skip
+        runs = self.conn.execute("SELECT kind, started_at FROM sync_runs").fetchall()
+        self.assertEqual(
+            runs, [("full", sync._ts(NOW)), ("github_fleet", sync._ts(later))]
+        )
+        self.assertEqual(sync.last_cursor_run(self.conn)[0], sync._ts(NOW))
+
+
 class GenericItemTests(SyncCase):
     def test_session_row_beside_jira_rows_is_ignored(self):
         self.run_sync("full", FakeAcli(["DEMO-1"]))
@@ -694,6 +911,75 @@ class FakeAcliTests(unittest.TestCase):
         self.assertIn("jira.site", r.stderr)
 
 
+def run_row(kind, outcome, error=None, failed=()):
+    return {
+        "kind": kind,
+        "outcome": outcome,
+        "started_at": "2026-10-23T12:00:00Z",
+        "finished_at": "2026-10-23T12:00:01Z",
+        "counts": "{}",
+        "failed_keys": json.dumps(list(failed)),
+        "error": error,
+    }
+
+
+class CmdSyncTests(unittest.TestCase):
+    """dashboard.py sync's report and exit code over run_all's rows."""
+
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        tmp = Path(self._td.name)
+        self.cfg = tmp / "config.toml"
+        self.cfg.write_text(
+            '[jira]\nsite = "example.invalid"\nboard_ids = [77]\n'
+            '[jira.fields]\nsprint = "c1"\nflagged = "c2"\n'
+            "[github]\nenabled = true\nfleet = true\n"
+        )
+        self.db = tmp / "d.db"
+
+    def cmd_sync(self, rows):
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(sync, "run_all", return_value=rows):
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = dashboard.main(
+                    ["sync", "--db", str(self.db), "--config", str(self.cfg)]
+                )
+        return code, out.getvalue(), err.getvalue()
+
+    def test_both_rows_print_when_both_runs_fail(self):
+        url = "https://github.com/acme/app/pull/1"
+        code, out, err = self.cmd_sync(
+            [
+                run_row("incremental", "failed", "AcliError: boom"),
+                run_row(
+                    "github_fleet",
+                    "auth_failed",
+                    "gh: 401 (fix: run `gh auth login`)",
+                    [url],
+                ),
+            ]
+        )
+        self.assertEqual(code, 1)  # the Jira run's code wins
+        self.assertIn("sync incremental: failed", out)
+        self.assertIn("sync github_fleet: auth_failed", out)
+        self.assertIn("AcliError: boom", err)
+        self.assertIn("gh auth login", err)
+        self.assertIn(f"PR lookup failed, logged: {url}", err)
+
+    def test_fleet_failure_alone_sets_the_exit_code(self):
+        code, out, _ = self.cmd_sync(
+            [run_row("incremental", "ok"), run_row("github_fleet", "auth_failed", "x")]
+        )
+        self.assertEqual(code, 3)
+        self.assertIn("sync github_fleet: auth_failed", out)
+
+    def test_jira_row_alone(self):
+        code, out, _ = self.cmd_sync([run_row("incremental", "ok")])
+        self.assertEqual(code, 0)
+        self.assertNotIn("github_fleet", out)
+
+
 class ConfigTests(unittest.TestCase):
     def load(self, user):
         with tempfile.TemporaryDirectory() as td:
@@ -715,6 +1001,14 @@ class ConfigTests(unittest.TestCase):
         u = self.base()
         u["jira"]["board_ids"] = []
         self.assertEqual(self.load(u)["jira"]["board_ids"], [])
+
+    def test_github_fleet_defaults_off_and_must_be_a_bool(self):
+        self.assertIs(self.load(self.base())["github"]["fleet"], False)
+        u = self.base()
+        u["github"] = {"fleet": "yes"}
+        with self.assertRaises(config.ConfigError) as cm:
+            self.load(u)
+        self.assertIn("github.fleet", str(cm.exception))
 
     def test_empty_site_is_an_error(self):
         u = self.base()

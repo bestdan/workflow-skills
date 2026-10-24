@@ -10,8 +10,10 @@ own cap). Neither is enforced; the gauges only show them.
   (a merged PR, a removed worktree) is kept, as every overlay row is, but no
   longer counts.
 - **Review queue** is github_fleet's `queue` count over the mirrored
-  `source = 'github'` PR rows. Until that source has written any row it reads
-  as unknown and shows "—", never 0.
+  `source = 'github'` PR rows, read by `review_queue()`, which `/status` uses
+  too so the two always agree. Before the fleet sync step's first successful
+  run, or while `github.fleet` is off, it is unknown and shows "—"; after one,
+  a run that found nothing reads 0.
 - **Focus** is the overlay's one focus item, linked when its key gives a URL.
 """
 
@@ -41,12 +43,41 @@ header .gauge a { color:var(--accent); text-decoration:none; }
 @dataclass
 class Gauges:
     side_quests: int
-    review_queue: "int | None"  # None until the GitHub fleet source has rows
+    review_queue: "int | None"  # None: fleet off, or never synced successfully
     focus: "overlay.Item | None"
     focus_summary: "str | None"
 
 
-def read(conn: sqlite3.Connection, ov: "overlay.Overlay | None" = None) -> Gauges:
+def review_queue(conn: sqlite3.Connection, fleet: bool) -> "dict[str, int] | None":
+    """github_fleet's `queue` and `awaiting` counts, or None when unknown.
+
+    Unknown means `fleet` (sync.fleet_enabled) is off, so leftover rows are not
+    reported as current, or no fleet sync run has succeeded yet.
+    """
+    if not fleet:
+        return None
+    if (
+        conn.execute(
+            "SELECT 1 FROM sync_runs WHERE kind = ? AND outcome = 'ok' LIMIT 1",
+            (github_fleet.RUN_KIND,),
+        ).fetchone()
+        is None
+    ):
+        return None
+    rows = [
+        json.loads(r[0])
+        for r in conn.execute(
+            "SELECT raw_json FROM issues WHERE source = ? AND kind = 'pr'"
+            " AND raw_json IS NOT NULL",
+            (github_fleet.SOURCE,),
+        )
+    ]
+    return github_fleet.queue_counts(rows)
+
+
+def read(
+    conn: sqlite3.Connection, ov: "overlay.Overlay | None" = None, *, fleet: bool
+) -> Gauges:
     ov = ov if ov is not None else overlay.load(conn)
     tagged = [item for item, t in ov.kind_tags.items() if t == "side-quest"]
     side_quests = 0
@@ -57,26 +88,15 @@ def read(conn: sqlite3.Connection, ov: "overlay.Overlay | None" = None) -> Gauge
         ).fetchone()
         if row is not None and not score.is_done(row[0]):
             side_quests += 1
-    review_queue = None
-    if conn.execute(
-        "SELECT 1 FROM issues WHERE source = ? LIMIT 1", (github_fleet.SOURCE,)
-    ).fetchone():
-        rows = [
-            json.loads(r[0])
-            for r in conn.execute(
-                "SELECT raw_json FROM issues WHERE source = ? AND kind = 'pr'"
-                " AND raw_json IS NOT NULL",
-                (github_fleet.SOURCE,),
-            )
-        ]
-        review_queue = github_fleet.queue_counts(rows)["queue"]
+    counts = review_queue(conn, fleet)
     summary = None
     if ov.focus is not None:
         row = conn.execute(
             "SELECT summary FROM issues WHERE source = ? AND key = ?", ov.focus
         ).fetchone()
         summary = row[0] if row else None
-    return Gauges(side_quests, review_queue, ov.focus, summary)
+    queue = None if counts is None else counts["queue"]
+    return Gauges(side_quests, queue, ov.focus, summary)
 
 
 def _href(item: "overlay.Item", cfg: dict[str, Any]) -> "str | None":

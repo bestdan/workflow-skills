@@ -308,6 +308,7 @@ flagged = "customfield_10007"
 enabled = true
 orgs = ["mycompany"]
 design_repos = [] # owner/name repos whose proposed designs the fleet view reads
+fleet = false # true: every sync also runs the fleet view's GitHub fetch
 
 [sync]
 interval_minutes = 5

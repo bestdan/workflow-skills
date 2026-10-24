@@ -22,6 +22,12 @@ Only rows with `source = 'jira'` are the Jira sync's. Rows from any other
 source (the fleet view's sessions, worktrees, ...) are never read, updated or
 dropped here.
 
+The fleet view's GitHub rows (github_fleet.py, `source = 'github'`) are a
+separate step, `run_fleet()`, which the scheduled sync and `dashboard.py sync`
+run after this one when `github.fleet` is on. It records its own `sync_runs`
+row (kind `github_fleet`), so its failure never reaches the Jira rows or the
+Jira run's outcome.
+
 The spec is the Sync section of dev_docs/designs/2026-10-23-task-dashboard.md.
 """
 
@@ -32,6 +38,7 @@ import traceback
 from datetime import datetime, timezone
 from typing import Any, Callable
 
+import github_fleet
 import github_gh
 import jira_acli
 
@@ -537,6 +544,99 @@ def run(
     if db.in_transaction:
         db.rollback()
     _finish_run(db, run_id, outcome, clock(), counts, failed_keys, error)
+    return _run_row(db, run_id)
+
+
+def _run_row(db: sqlite3.Connection, run_id: int) -> dict[str, Any]:
     cur = db.execute("SELECT * FROM sync_runs WHERE id = ?", (run_id,))
     names = [d[0] for d in cur.description]
     return dict(zip(names, cur.fetchone()))
+
+
+# --- the fleet view's GitHub step --------------------------------------------
+
+FLEET_KIND = github_fleet.RUN_KIND
+
+
+def fleet_enabled(config: dict[str, Any]) -> bool:
+    """`github.fleet` is on and GitHub is not switched off as a whole."""
+    gh = config["github"]
+    return bool(gh["enabled"] and gh["fleet"])
+
+
+def run_fleet(
+    config: dict[str, Any],
+    db: sqlite3.Connection,
+    now: datetime,
+    *,
+    runner: github_gh.Runner = github_gh.run,
+    clock: "Callable[[], datetime] | None" = None,
+) -> dict[str, Any]:
+    """Fetch and write the fleet view's GitHub rows; return its `sync_runs` row.
+
+    Failures are treated as the Jira sync's GitHub step treats them: an
+    AuthError is `auth_failed` with the `gh auth login` hint, a CI, milestone
+    or comments lookup that failed for one PR is listed in `failed_keys`, and
+    anything else is `failed`. No Exception is raised (an interrupt is recorded
+    as a failed run, then re-raised), and none reaches the Jira rows:
+    `github_fleet.write` replaces only `source = 'github'` rows, in its own
+    transaction, so a failed run leaves the last good GitHub rows in place. The
+    caller checks `fleet_enabled()` first.
+    """
+    clock = clock or (lambda: datetime.now(timezone.utc))
+    run_id = _start_run(db, FLEET_KIND, now)
+    counts: dict[str, int] = {}
+    failed_keys: list[str] = []
+    outcome, error = "ok", None
+    try:
+        plan = github_fleet.fetch(config, runner)
+        failed_keys = list(plan["failed"])
+        counts = {
+            **plan["counts"],
+            "rows": len(plan["rows"]),
+            "lookup_failed": len(plan["failed"]),
+            "designs_missing": len(plan["missing"]),
+            "designs_truncated": len(plan["truncated"]),
+        }
+        github_fleet.write(db, plan["rows"], now)
+    except github_gh.AuthError as exc:
+        outcome, error = "auth_failed", f"{exc} (fix: run `gh auth login`)"
+    except Exception as exc:  # recorded, not raised: the next run retries
+        outcome = "failed"
+        error = "".join(traceback.format_exception_only(type(exc), exc)).strip()
+    except BaseException as exc:
+        if db.in_transaction:
+            db.rollback()
+        reason = type(exc).__name__
+        _finish_run(
+            db, run_id, "failed", clock(), counts, failed_keys,
+            f"interrupted ({reason})",
+        )  # fmt: skip
+        raise
+    if db.in_transaction:
+        db.rollback()
+    _finish_run(db, run_id, outcome, clock(), counts, failed_keys, error)
+    return _run_row(db, run_id)
+
+
+def run_all(
+    mode: str,
+    config: dict[str, Any],
+    db: sqlite3.Connection,
+    now: datetime,
+    *,
+    jira: "JiraSource | None" = None,
+    github: "GithubSource | None" = None,
+    fleet_runner: github_gh.Runner = github_gh.run,
+    clock: "Callable[[], datetime] | None" = None,
+) -> list[dict[str, Any]]:
+    """One scheduled sync: `run()`, then `run_fleet()` when it is enabled.
+
+    Returns the `sync_runs` row of each run made. The fleet step runs whatever
+    the Jira run's outcome, since the two write disjoint rows.
+    """
+    clock = clock or (lambda: datetime.now(timezone.utc))
+    rows = [run(mode, config, db, now, jira=jira, github=github, clock=clock)]
+    if fleet_enabled(config):
+        rows.append(run_fleet(config, db, clock(), runner=fleet_runner, clock=clock))
+    return rows

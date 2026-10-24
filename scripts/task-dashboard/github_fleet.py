@@ -55,6 +55,11 @@ from github_gh import DEFAULT_TIMEOUT, GhError, Runner, run
 
 SOURCE = "github"
 
+# The `sync_runs.kind` of the sync step that runs fetch() and write()
+# (sync.run_fleet). gauges.review_queue reads it to tell "never synced" from
+# "synced, nothing waiting".
+RUN_KIND = "github_fleet"
+
 # The label /promote-tasks writes when automation must not take an issue; see
 # commands/handlers/assets/labels.yml (`auto: [eligible, human-review-needed]`).
 HUMAN_LABEL = "auto:human-review-needed"

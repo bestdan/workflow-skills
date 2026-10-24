@@ -241,7 +241,11 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 
 def cmd_sync(args: argparse.Namespace) -> int:
-    """Exit 0 on ok, 1 on failed, 3 on auth_failed, 2 on a config error."""
+    """Exit 0 on ok, 1 on failed, 3 on auth_failed, 2 on a config error.
+
+    With `github.fleet` on, the GitHub fleet step runs after the Jira sync as
+    its own sync_runs row, and a failure of either run makes the exit nonzero.
+    """
     try:
         cfg = config.load(args.config)
     except config.ConfigError as exc:
@@ -249,9 +253,21 @@ def cmd_sync(args: argparse.Namespace) -> int:
         return 2
     conn = db.connect(args.db)
     try:
-        row = sync.run(args.mode, cfg, conn, datetime.now(timezone.utc))
+        jira_row, *fleet = sync.run_all(
+            args.mode, cfg, conn, datetime.now(timezone.utc)
+        )
     finally:
         conn.close()
+    code = _report_sync(jira_row)
+    for row in fleet:
+        # Printed whatever the Jira outcome; the Jira run's code wins a tie.
+        fleet_code = _report_sync(row, "PR lookup failed")
+        code = code or fleet_code
+    return code
+
+
+def _report_sync(row: dict, pr_failed: str = "CI lookup failed") -> int:
+    """Print one sync_runs row; exit 0 on ok, 1 on failed, 3 on auth_failed."""
     print(
         f"sync {row['kind']}: {row['outcome']} "
         f"({row['started_at']} -> {row['finished_at']}) {row['counts'] or '{}'}"
@@ -262,7 +278,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
     if views:
         print(f"view failed twice, logged: {', '.join(views)}", file=sys.stderr)
     if ci:
-        print(f"CI lookup failed, logged: {', '.join(ci)}", file=sys.stderr)
+        print(f"{pr_failed}, logged: {', '.join(ci)}", file=sys.stderr)
     if row["error"]:
         print(row["error"], file=sys.stderr)
     return {"ok": 0, "auth_failed": 3}.get(row["outcome"], 1)
