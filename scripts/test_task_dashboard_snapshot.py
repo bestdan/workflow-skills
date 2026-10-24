@@ -352,10 +352,52 @@ class TestCursor(Fixture):
             fh.write(
                 hook_line("sess-1", "Stop", "2026-10-23T10:03:00.000Z", prompt=SECRET)
             )
-            fh.write(json.dumps({"v": 2, "ts": "x"}) + "\nnot json\n")
+            fh.write(json.dumps({"v": 3, "ts": "x"}) + "\nnot json\n")
+            fh.write(json.dumps({"v": True, "ts": "y"}) + "\n")
         doc, _ = self.build()
         self.assertEqual(len(doc["sessions"]), 4)
         self.assertNotIn("prompt", doc["sessions"][3])
+
+    def test_v1_and_v2_hook_lines_are_both_read(self):
+        log = self.state / "sessions" / "sess-2.jsonl"
+        with log.open("a") as fh:
+            fh.write(hook_line("sess-2", "Stop", "2026-10-23T10:04:00.000Z"))
+            fh.write(
+                hook_line("sess-2", "Stop", "2026-10-23T10:05:00.000Z", v=2, asked=True)
+            )
+            fh.write(
+                hook_line("sess-2", "Stop", "2026-10-23T10:06:00.000Z", v=2, asked=None)
+            )
+        doc, _ = self.build()
+        mine = [e for e in doc["sessions"] if e["session_id"] == "sess-2"]
+        self.assertEqual([e["v"] for e in mine], [1, 2, 2])
+        self.assertNotIn("asked", mine[0])
+        self.assertIs(mine[1]["asked"], True)
+        self.assertIsNone(mine[2]["asked"])
+        self.assertEqual(snap.validate(doc), [])
+
+    def test_validate_checks_v_and_asked(self):
+        doc, _ = self.build()
+        base = {"v": 2, "ts": "2026-10-23T10:05:00.000Z", "event": "Stop"}
+        for bad in (
+            {"asked": "yes"},
+            {"asked": 1},
+            {"v": True},
+            {"v": 3},
+            {"v": 1, "asked": True},
+            {"event": "Notification", "asked": False},
+            {"event": "UserPromptSubmit", "asked": None},
+        ):
+            with self.subTest(bad=bad):
+                doc["sessions"] = [{**base, **bad}]
+                self.assertEqual(snap.validate(doc), ["sessions[0]: malformed"])
+        doc["sessions"] = [
+            {**base, "asked": False},
+            {**base, "asked": None},
+            {**base, "v": 1},
+            {**base, "event": "Notification"},
+        ]
+        self.assertEqual(snap.validate(doc), [])
 
 
 class TestApprovalShaped(unittest.TestCase):

@@ -337,6 +337,13 @@ CREATE TABLE view_includes (
 );
 """
 
+# Version 7: `asked` on `session_events`, from the session-state hook's format
+# 2 (a Stop whose last assistant text ended in "?"): 1, 0, or NULL when the hook
+# could not tell or the line is format 1. sessions.py reads it.
+_V7 = """
+ALTER TABLE session_events ADD COLUMN asked INTEGER;
+"""
+
 # Ordered, ascending, append-only: never edit a shipped entry.
 #
 # migrate() runs a script one statement at a time through _statements, which
@@ -354,6 +361,7 @@ MIGRATIONS: list[tuple[int, str]] = [
     (4, _V4),
     (5, _V5),
     (6, _V6),
+    (7, _V7),
 ]
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 

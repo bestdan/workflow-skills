@@ -212,8 +212,11 @@ followed by an `enabled = true` line. A dotted key
 (`collector = {enabled = true}`) reads as off. Otherwise it reads up to 64 MiB
 of the payload, exits, and writes nothing. Opted in, it appends one line of event metadata per event — time,
 event, session id, cwd, branch, and for a notification whether it was a
-permission prompt — to `~/.local/state/fleet/sessions/<session_id>.jsonl`. It
-never records prompt text, and it never fails a turn. The fleet collector
+permission prompt, and for a turn end whether its last reply ended in a
+question — to `~/.local/state/fleet/sessions/<session_id>.jsonl`. To tell, it
+reads the harness's `last_assistant_message`, or else the last 64 KiB of the
+session transcript, in memory. It never records prompt or reply text, and it
+never fails a turn. The fleet collector
 deletes a session's file once the server has accepted all of it and it is older
 than `[collector] retention_days` (default 30).
 

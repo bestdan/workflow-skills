@@ -34,7 +34,8 @@ and the collector drops that snapshot, deltas included.
                read.
     tmux       ``name``, ``created``, ``attached``; empty when no server runs.
     sessions   session-state hook lines (``scripts/session-state-hook.py``,
-               format v1) appended since the last snapshot.
+               format v1 or v2) appended since the last snapshot, each with
+               its own ``v``. Only v2 ``Stop`` lines carry ``asked``.
     history    ``~/.claude/history.jsonl`` prompts since the last snapshot,
                reduced to ``ts``, ``session_id``, ``project`` and
                ``approval_shaped``.
@@ -77,13 +78,17 @@ from github_gh import Runner, run  # noqa: E402
 SCHEMA_VERSION = 2
 ACCEPTED_SCHEMAS = (1, 2)
 SCAN_STEPS = ("worktree_list",)
-HOOK_FORMAT_VERSION = 1
+# The hook formats read; a line of any other ``v`` is skipped. v2 added
+# ``asked`` on Stop lines, so a machine whose hook is older still ships v1.
+HOOK_FORMAT_VERSIONS = (1, 2)
 GIT_TIMEOUT = 20.0
 LANDED_TIMEOUT = 60.0
 BRANCH_REMOVE = Path(__file__).resolve().parents[1] / "branch-remove.sh"
 CURSOR_NAME = "snapshot-cursor.json"
 HANDOFF_KEYS = ("aim", "branch", "pr", "expires", "created")
-HOOK_KEYS = ("v", "ts", "event", "session_id", "cwd", "branch", "notification")
+HOOK_KEYS = (
+    "v", "ts", "event", "session_id", "cwd", "branch", "notification", "asked",
+)  # fmt: skip
 LANDED_STATES = ("landed", "not_landed", "unknown")
 
 Classifier = Callable[[str], bool]
@@ -317,6 +322,22 @@ def _json_line(raw: bytes) -> dict[str, Any] | None:
     return obj if isinstance(obj, dict) else None
 
 
+def _asked_ok(ev: dict[str, Any]) -> bool:
+    """``asked`` appears only on v2 Stop lines, as a bool or null."""
+    if "asked" not in ev:
+        return True
+    return (
+        ev.get("v") == 2
+        and ev.get("event") == "Stop"
+        and isinstance(ev["asked"], (bool, type(None)))
+    )
+
+
+def _known_format(v: Any) -> bool:
+    """A hook line's ``v`` is one this reads (``True`` is not ``1``)."""
+    return type(v) is int and v in HOOK_FORMAT_VERSIONS
+
+
 def hook_tails(
     sessions_dir: Path, cursor: dict[str, Any]
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -331,7 +352,7 @@ def hook_tails(
             continue
         for raw in lines:
             obj = _json_line(raw)
-            if obj is None or obj.get("v") != HOOK_FORMAT_VERSION:
+            if obj is None or not _known_format(obj.get("v")):
                 continue
             events.append({k: obj[k] for k in HOOK_KEYS if k in obj})
     events.sort(key=lambda e: str(e.get("ts", "")))
@@ -509,8 +530,9 @@ def validate(doc: Any) -> list[str]:
             ok = isinstance(ev, dict) and set(ev) <= set(HOOK_KEYS)
             ok = (
                 ok
-                and ev.get("v") == HOOK_FORMAT_VERSION
+                and _known_format(ev.get("v"))
                 and isinstance(ev.get("ts"), str)
+                and _asked_ok(ev)
             )
             _check(ok, f"sessions[{idx}]: malformed", problems)
     return problems

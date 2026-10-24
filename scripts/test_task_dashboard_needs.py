@@ -9,6 +9,7 @@ touched: the server runs with a fake sync function. Needs Python 3.11: run via
 scripts/test-task-dashboard-needs.sh.
 """
 
+import copy
 import re
 import sys
 import tempfile
@@ -26,6 +27,7 @@ import config  # type: ignore[import-not-found]  # noqa: E402
 import db  # type: ignore[import-not-found]  # noqa: E402
 import gauges  # type: ignore[import-not-found]  # noqa: E402
 import github_fleet  # type: ignore[import-not-found]  # noqa: E402
+import include  # type: ignore[import-not-found]  # noqa: E402
 import needs  # type: ignore[import-not-found]  # noqa: E402
 import overlay  # type: ignore[import-not-found]  # noqa: E402
 import sessions  # type: ignore[import-not-found]  # noqa: E402
@@ -87,10 +89,16 @@ GITHUB_ROWS = [
 ]
 
 
-def ev(sid, ts, event, cwd="/h/src/dotfiles", notification=None):
+_V1 = object()
+
+
+def ev(sid, ts, event, cwd="/h/src/dotfiles", notification=None, asked=_V1):
+    """A hook line: format 1 unless `asked` is given, which makes it format 2."""
     line = {"v": 1, "ts": ts, "event": event, "session_id": sid, "cwd": cwd}
     if notification:
         line["notification"] = notification
+    if asked is not _V1:
+        line.update(v=2, asked=asked)
     return line
 
 
@@ -102,9 +110,28 @@ SNAPSHOT = {
     "handoffs": [],
     "tmux": [],
     "sessions": [
-        # Turn ended 6h ago: a real decision, in the main list.
+        # Asked a question 6h ago: a real decision, in the main list. The
+        # idle_prompt the harness raises a minute later does not clear it.
         ev("s-turn", "2026-10-24T05:00:00.000Z", "UserPromptSubmit"),
-        ev("s-turn", "2026-10-24T06:00:00.000Z", "Stop"),
+        ev("s-turn", "2026-10-24T06:00:00.000Z", "Stop", asked=True),
+        ev("s-turn", "2026-10-24T06:01:00.000Z", "Notification", None, "idle_prompt"),
+        # Finished without a question, or the hook could not tell, or a
+        # format-1 hook wrote the Stop: none of them waits on me.
+        ev("s-done", "2026-10-24T05:00:00.000Z", "UserPromptSubmit"),
+        ev("s-done", "2026-10-24T06:00:00.000Z", "Stop", asked=False),
+        ev("s-null", "2026-10-24T05:00:00.000Z", "UserPromptSubmit"),
+        ev("s-null", "2026-10-24T06:00:00.000Z", "Stop", asked=None),
+        ev("s-v1", "2026-10-24T05:00:00.000Z", "UserPromptSubmit"),
+        ev("s-v1", "2026-10-24T06:00:00.000Z", "Stop"),
+        # Asked, then answered: working again.
+        ev("s-answered", "2026-10-24T05:00:00.000Z", "UserPromptSubmit"),
+        ev("s-answered", "2026-10-24T06:00:00.000Z", "Stop", asked=True),
+        ev("s-answered", "2026-10-24T07:00:00.000Z", "UserPromptSubmit"),
+        # Asked, answered, then finished: the later Stop decides.
+        ev("s-later", "2026-10-24T05:00:00.000Z", "UserPromptSubmit"),
+        ev("s-later", "2026-10-24T06:00:00.000Z", "Stop", asked=True),
+        ev("s-later", "2026-10-24T07:00:00.000Z", "UserPromptSubmit"),
+        ev("s-later", "2026-10-24T08:00:00.000Z", "Stop", asked=False),
         # A permission prompt 1h ago: a plain approval.
         ev("s-perm", "2026-10-24T10:00:00.000Z", "UserPromptSubmit"),
         ev(
@@ -127,7 +154,7 @@ SNAPSHOT = {
             "UserPromptSubmit",
             f"{WT}/task-1101",
         ),
-        ev("s-pr", "2026-10-24T10:00:00.000Z", "Stop", f"{WT}/task-1101"),
+        ev("s-pr", "2026-10-24T10:00:00.000Z", "Stop", f"{WT}/task-1101", asked=True),
     ],
     "history": [],
 }
@@ -194,6 +221,55 @@ class NeedsCase(unittest.TestCase):
 
     def page(self, cfg=None):
         return needs.render(self.conn, cfg or fleet_cfg(), NOW)
+
+
+class AskedTests(NeedsCase):
+    def test_only_a_turn_that_asked_is_listed_and_labelled(self):
+        seed(self.conn)
+        page = self.page()
+        main = section(page, "needs")
+        self.assertIn("s-turn", keys(main))
+        for sid in ("s-done", "s-null", "s-v1", "s-answered", "s-later"):
+            self.assertNotIn(f'data-key="{sid}"', page, sid)
+        card = re.search(r'data-key="s-turn".*?</summary>', main, re.S)
+        assert card is not None
+        self.assertIn("asked (heuristic)", card.group(0))
+        # A question is a decision, never batched with the plain approvals.
+        self.assertNotIn("s-turn", keys(section(page, "approvals")))
+
+    def test_the_include_filter_and_ignore_reach_an_asked_session(self):
+        seed(self.conn)
+        no_sessions = include.Include("needs", frozenset({"tasks", "prs"}), "url")
+        page = needs.render(self.conn, fleet_cfg(), NOW, no_sessions)
+        self.assertNotIn('data-key="s-turn"', page)
+        everything = include.Include("needs", include.ALL, "url")
+        page = needs.render(self.conn, fleet_cfg(), NOW, everything)
+        self.assertIn("s-turn", keys(section(page, "needs")))
+        overlay.ignore(self.conn, ("claude-hook", "s-turn"), NOW)
+        page = needs.render(self.conn, fleet_cfg(), NOW, everything)
+        self.assertNotIn('data-key="s-turn"', page)
+
+    def test_a_permission_prompt_after_an_asked_stop_is_an_approval(self):
+        # A Stop hook can continue the turn, so a permission prompt can follow
+        # an asked Stop with no prompt between: the prompt is what blocks it.
+        snap = copy.deepcopy(SNAPSHOT)
+        lines: list = snap["sessions"]  # type: ignore[assignment]
+        lines += [
+            ev("s-ask-perm", "2026-10-24T05:00:00.000Z", "UserPromptSubmit"),
+            ev("s-ask-perm", "2026-10-24T06:00:00.000Z", "Stop", asked=True),
+            ev(
+                "s-ask-perm",
+                "2026-10-24T06:05:00.000Z",
+                "Notification",
+                notification="permission_prompt",
+            ),
+        ]
+        snapshot_adapter.ingest(self.conn, with_branch(snap), NOW)
+        sessions.write(self.conn, sessions.derive(self.conn, NOW), NOW)
+        approvals = section(self.page(), "approvals")
+        card = re.search(r'data-key="s-ask-perm".*?</summary>', approvals, re.S)
+        assert card is not None
+        self.assertIn("permission prompt", card.group(0))
 
 
 class OrderTests(NeedsCase):

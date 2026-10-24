@@ -7,11 +7,13 @@ deltas snapshot_adapter.py writes, and the overlay.
 
 SINCE YOU WERE AWAY (`/away`) lists what changed after the overlay's
 `last_visit`: my PRs merged or closed, sessions whose last turn ended, and what
-newly waits on me (a session's notification, an awaiting PR, an issue needing a
-human, a newly proposed design). Loading the page records nothing. Only its
-"Mark as read" button does, through overlay's `visit` action with the page's
-render time, so a phone preview does not swallow the digest and an item that
-arrives while the page is open is still new next time. With no visit recorded,
+newly waits on me (a session's notification or a turn that ended in a question,
+labelled "asked (heuristic)", an awaiting PR, an issue needing a human, a newly
+proposed design). A turn that asked is never listed as finished. Loading the
+page records nothing. Only its "Mark as read" button does, through overlay's
+`visit` action with the page's render time, so a phone preview does not
+swallow the digest and an item that arrives while the page is open is still
+new next time. With no visit recorded,
 the page covers github_fleet's closed-PR window. When the overlay's focus item
 is a design, the items in that design's repo come first, in a section of their
 own: the weekend design block opens there.
@@ -100,6 +102,8 @@ class Session:
     cwd: "str | None" = None
     branch: "str | None" = None
     prompts: int = 0
+    # The last Stop since the last prompt ended in a question (sessions.py).
+    asked: bool = False
 
     @property
     def repo(self) -> "str | None":
@@ -186,8 +190,8 @@ def load(conn: sqlite3.Connection, cfg: "dict[str, Any] | None" = None) -> Fleet
         row = {**_raw(raw), "host": source.split(":", 1)[1], "synced_at": synced}
         (f.worktrees if kind == "worktree" else f.handoffs).append(row)
     sessions: dict[tuple[str, str], Session] = {}
-    for host, sid, ts, event, cwd, branch, note in conn.execute(
-        "SELECT host, session_id, ts, event, cwd, branch, notification"
+    for host, sid, ts, event, cwd, branch, note, asked in conn.execute(
+        "SELECT host, session_id, ts, event, cwd, branch, notification, asked"
         " FROM session_events WHERE session_id IS NOT NULL ORDER BY ts, id"
     ):
         at = score.parse_ts(ts)
@@ -204,6 +208,11 @@ def load(conn: sqlite3.Connection, cfg: "dict[str, Any] | None" = None) -> Fleet
         s.branch = branch or s.branch
         if event == "UserPromptSubmit":
             s.prompts += 1
+            s.asked = False
+        elif event == "Stop":
+            s.asked = asked == 1
+        elif event == "Notification" and note == "permission_prompt":
+            s.asked = False
     for host, sid, n in conn.execute(
         "SELECT host, session_id, COUNT(*) FROM history_entries"
         " WHERE session_id IS NOT NULL GROUP BY host, session_id"
@@ -308,7 +317,15 @@ def away_items(f: Fleet, since: datetime, now: datetime) -> list[AwayItem]:
     for s in f.sessions:
         if s.last <= since or s.last_event not in ("Stop", "Notification"):
             continue
-        if s.last_event == "Stop":
+        if s.asked:
+            # A turn that ended in a question did not finish: it waits on me.
+            card = _card(
+                _e(f"session {s.session_id}"),
+                f"{_session_where(s)} · asked (heuristic) {_e(ago(s.last, now))}",
+                key=s.session_id,
+            )
+            out.append(AwayItem("waiting", s.last, s.repo, card, "session"))
+        elif s.last_event == "Stop":
             card = _card(
                 _e(f"session {s.session_id}"),
                 f"{_session_where(s)} · turn ended {_e(ago(s.last, now))}",

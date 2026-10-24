@@ -8,10 +8,15 @@ itself.
 WHAT IT COLLECTS, each keyed by its overlay item `(source, key)`:
 
 - **Sessions waiting on me.** A session-state hook row (sessions.py,
-  `source = 'claude-hook'`) whose last event is a turn end or a notification
-  with no prompt since (`status_bucket = 'waiting'`), active within
-  fleet_views.SESSION_IDLE_DAYS. A session quiet for longer is Stale's, and an
-  empty spawn (never prompted) is Stale's too. And, with `claude_remote`
+  `source = 'claude-hook'`) at `need_input` with no prompt since: a harness
+  permission prompt, or a turn that ended in a question (`asked`, labelled
+  "asked (heuristic)": the hook's test is a trailing "?"). Active within
+  fleet_views.SESSION_IDLE_DAYS. A turn that ended without a question is not
+  listed, nor is one the hook could not judge (`asked` null, or a format-1
+  hook): that is finished work, Since you were away's. A session quiet for
+  longer is Stale's, and an empty spawn (never prompted) is Stale's too. A
+  pending `AskUserQuestion` never reaches `Stop`, and the harness documents
+  no notification for it, so it is not seen here. And, with `claude_remote`
   enabled, a cloud session row (claude_remote.py) at `need_input` /
   `needs_action`. The wait starts at the hook row's `waiting_since`; a cloud
   row has none, so its `updated` stands in.
@@ -34,10 +39,9 @@ a hook row) is a plain approval, and so is one whose brief ends in any short
 yes/no-shaped ask (approval_brief). Those go into one collapsed
 Approvals group, out of the main list. No session source carries a post-turn
 summary yet (`brief` is null on both), so today only permission prompts land
-there. A brief-carrying source, or the `asked` flag proposed in
-dev_docs/designs/2026-10-24-workdesk-borrowings.md, slots in at
-approval_brief() and at _session(): `asked` would also let a turn that ended
-without a question leave the main list.
+there, and an `asked` session stays in the main list: without the question's
+text there is no telling a yes/no from a decision. A brief-carrying source
+slots in at approval_brief().
 
 FOCUS. While the overlay has a focus item, only that item's own needs show:
 the item itself, and what is tied to it (related()). The rest are counted as
@@ -148,10 +152,12 @@ def _session(row: dict[str, Any], now: datetime) -> "Need | None":
     """A hook session row waiting on me, or None."""
     if row.get("status_bucket") != "waiting" or row.get("empty_spawn"):
         return None
+    if row.get("status_category") != "need_input":
+        return None
     last = score.parse_ts(row.get("updated"))
     if last is None or now - last > timedelta(days=fleet_views.SESSION_IDLE_DAYS):
         return None
-    need_input = row.get("status_category") == "need_input"
+    asked = bool(row.get("asked"))
     brief = row.get("brief")
     repo = fleet_views.repo_of_path(row.get("cwd"))
     where = [f"on {row.get('host') or 'an unknown host'}"]
@@ -166,10 +172,10 @@ def _session(row: dict[str, Any], now: datetime) -> "Need | None":
         title=row.get("title") or f"session {row.get('session_id')}",
         since=score.parse_ts(row.get("waiting_since")) or last,
         url=CODE_URL,
-        state="permission prompt" if need_input else "turn ended",
+        state="asked (heuristic)" if asked else "permission prompt",
         where=" · ".join(where),
         brief=brief,
-        approval=need_input or approval_brief(brief),
+        approval=not asked or approval_brief(brief),
         repo=repo,
         branch=row.get("branch"),
         hint="answer it in the session",

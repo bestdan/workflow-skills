@@ -137,10 +137,16 @@ def handoff(name, expires, created="2026-10-01"):
     }
 
 
-def ev(sid, ts, event, cwd="/h/src/dotfiles", notification=None):
+_V1 = object()
+
+
+def ev(sid, ts, event, cwd="/h/src/dotfiles", notification=None, asked=_V1):
+    """A hook line: format 1 unless `asked` is given, which makes it format 2."""
     line = {"v": 1, "ts": ts, "event": event, "session_id": sid, "cwd": cwd}
     if notification:
         line["notification"] = notification
+    if asked is not _V1:
+        line.update(v=2, asked=asked)
     return line
 
 
@@ -180,7 +186,19 @@ SNAPSHOT = {
     "tmux": [],
     "sessions": [
         ev("s-done", "2026-10-23T08:00:00.000Z", "UserPromptSubmit"),
-        ev("s-done", "2026-10-23T09:00:00.000Z", "Stop"),
+        ev("s-done", "2026-10-23T09:00:00.000Z", "Stop", asked=False),
+        ev("s-asked", "2026-10-23T08:00:00.000Z", "UserPromptSubmit"),
+        ev("s-asked", "2026-10-23T09:10:00.000Z", "Stop", asked=True),
+        ev("s-asked", "2026-10-23T09:11:00.000Z", "Notification", None, "idle_prompt"),
+        ev("s-askperm", "2026-10-23T08:00:00.000Z", "UserPromptSubmit"),
+        ev("s-askperm", "2026-10-23T09:12:00.000Z", "Stop", asked=True),
+        ev(
+            "s-askperm",
+            "2026-10-23T09:13:00.000Z",
+            "Notification",
+            None,
+            "permission_prompt",
+        ),
         ev("s-wait", "2026-10-23T07:00:00.000Z", "UserPromptSubmit"),
         ev("s-wait", "2026-10-23T08:00:00.000Z", "Notification", None, "idle_prompt"),
         ev("s-before", "2026-10-21T08:00:00.000Z", "UserPromptSubmit"),
@@ -261,11 +279,31 @@ class AwayTests(FleetCase):
         self.assertEqual(keys(section(page, "finished")), ["s-done"])
         waiting = keys(section(page, "waiting"))
         self.assertIn("s-wait", waiting)
+        self.assertIn("s-asked", waiting)
+        self.assertIn("asked (heuristic)", section(page, "waiting"))
+        # A permission prompt after the question is what blocks it now.
+        self.assertIn("s-askperm", waiting)
+        card = re.search(
+            r'data-key="s-askperm".*?</div>', section(page, "waiting"), re.S
+        )
+        assert card is not None
+        self.assertNotIn("asked (heuristic)", card.group(0))
+        self.assertIn("permission_prompt", card.group(0))
         self.assertIn(pr_url(1140), waiting)
         self.assertIn(f"https://github.com/{REPO}/issues/950", waiting)
         self.assertIn(DESIGN_URL, waiting)
         self.assertNotIn(pr_url(900), waiting)
         self.assertNotIn(OTHER_DESIGN, waiting)
+
+    def test_the_include_filter_reaches_an_asked_session(self):
+        seed(self.conn)
+        cfg = fleet_cfg()
+        off = include.Include("away", frozenset({"tasks", "prs", "other"}), "url")
+        page = fleet_views.render_away(self.conn, cfg, NOW, off)
+        self.assertNotIn('data-key="s-asked"', page)
+        on = include.Include("away", include.ALL, "url")
+        page = fleet_views.render_away(self.conn, cfg, NOW, on)
+        self.assertIn("s-asked", keys(section(page, "waiting")))
 
     def test_rendering_does_not_move_the_visit(self):
         seed(self.conn)
