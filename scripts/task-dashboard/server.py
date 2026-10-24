@@ -46,6 +46,7 @@ from urllib.parse import parse_qs, urlsplit
 import db
 import fleet_views
 import gauges
+import health
 import ingest
 import overlay
 import score
@@ -618,6 +619,23 @@ class App:
         header = render_header(health, busy, gauge_html)
         return render_page(title, header, body, self.token, busy)
 
+    def health_page(self, days: int) -> str:
+        """The Health panel (health.py) over the last `days` days."""
+        busy = bool(self.syncer.state()["busy"])
+        conn = self.read()
+        try:
+            header = render_header(
+                self.health(conn),
+                busy,
+                gauges.render(gauges.read(conn, fleet=self.fleet), self.cfg),
+            )
+            body = views.nav("/health") + health.page(
+                conn, self.cfg, self.now(), days, fleet=self.fleet
+            )
+        finally:
+            conn.close()
+        return render_page("Health · Task dashboard", header, body, self.token, busy)
+
     def overlay_write(self, action: str, form: dict[str, list[str]]) -> None:
         conn = self.read()
         try:
@@ -723,6 +741,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, app.board_page().encode(), "text/html; charset=utf-8")
         elif path in views.ROUTES:
             self._send(200, app.view_page(path).encode(), "text/html; charset=utf-8")
+        elif path == "/health":
+            days = health.parse_days(parse_qs(urlsplit(self.path).query))
+            self._send(200, app.health_page(days).encode(), "text/html; charset=utf-8")
         elif path == "/status":
             self._json(200, app.status())
         else:
