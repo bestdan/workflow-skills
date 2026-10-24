@@ -392,7 +392,7 @@ class WriteTest(IngestCase):
 
 
 class ScanErrorTest(IngestCase):
-    """A repo whose scan failed keeps its rows; the rest are replaced (#1156)."""
+    """A repo whose scan failed keeps its rows; the rest are replaced."""
 
     def worktrees(self):
         return {

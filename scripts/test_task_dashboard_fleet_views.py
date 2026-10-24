@@ -322,6 +322,14 @@ class StaleTests(FleetCase):
         page = fleet_views.render_stale(self.conn, fleet_cfg(), NOW)
         return items, section(page, "close"), section(page, "check")
 
+    def test_an_ignored_worktree_leaves_stale(self):
+        _, close, _ = self.stale()
+        self.assertIn(f"worktree {WT}/task-1135", close)
+        overlay.ignore(self.conn, ("machine:mini", f"worktree:{WT}/task-1135"), NOW)
+        page = fleet_views.render_stale(self.conn, fleet_cfg(), NOW)
+        self.assertNotIn(f"worktree {WT}/task-1135", page)
+        self.assertIn(f"worktree {WT}/task-1100", page)
+
     def test_an_ignored_pr_or_session_leaves_stale(self):
         _, _, check = self.stale()
         self.assertIn(pr_url(900), check)
@@ -409,7 +417,7 @@ def failed_scan(host="mini", taken_at="2026-10-23T20:30:00.000Z"):
 
 
 class KeptRowTests(FleetCase):
-    """Rows kept from a failed scan are never evidence (#1156)."""
+    """Rows kept from a failed scan are never evidence."""
 
     def stale(self):
         seed(self.conn)
