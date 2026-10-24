@@ -1,0 +1,7 @@
+[Unit]
+Description=task-dashboard collector: push this machine's snapshot to the fleet view
+
+[Service]
+Type=oneshot
+Environment=PATH=/opt/fake/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+ExecStart=/home/tester/.local/bin/task-dashboard-launch collect --config /home/tester/.config/task-dashboard/config.toml

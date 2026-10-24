@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.bestdan.task-dashboard.collector</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Users/tester/.local/bin/task-dashboard-launch</string>
+		<string>collect</string>
+		<string>--config</string>
+		<string>/Users/tester/.config/task-dashboard/config.toml</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StartInterval</key>
+	<integer>300</integer>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>HOME</key>
+		<string>/Users/tester</string>
+		<key>PATH</key>
+		<string>/opt/fake/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+	</dict>
+	<key>StandardOutPath</key>
+	<string>/Users/tester/.local/state/task-dashboard/collector.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/tester/.local/state/task-dashboard/collector.log</string>
+</dict>
+</plist>

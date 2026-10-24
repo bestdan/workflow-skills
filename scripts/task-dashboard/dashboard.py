@@ -34,6 +34,8 @@ from pathlib import Path  # noqa: E402
 # on sys.path and import the siblings as top-level modules.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import collector  # noqa: E402
+import collector_install  # noqa: E402
 import config  # noqa: E402
 import db  # noqa: E402
 import ingest  # noqa: E402
@@ -95,6 +97,31 @@ def build_parser() -> argparse.ArgumentParser:
     import_p.add_argument("path", help="a file written by `export`")
     import_p.add_argument(
         "--db", help="DB path (default: $TASK_DASHBOARD_DB or the state dir)"
+    )
+    collect_p = sub.add_parser(
+        "collect",
+        help="fleet view: snapshot this machine and push it to [collector] ingest_url",
+    )
+    collect_p.add_argument(
+        "--config",
+        help="config path (default: $TASK_DASHBOARD_CONFIG or ~/.config/task-dashboard)",
+    )
+    install_p = sub.add_parser(
+        "install", help="schedule this machine's dashboard process (launchd/systemd)"
+    )
+    install_p.add_argument(
+        "--collector-only",
+        action="store_true",
+        help="schedule only the fleet collector, for a machine that runs no server",
+    )
+    install_p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print the files and commands; write and run nothing",
+    )
+    install_p.add_argument(
+        "--config",
+        help="config path (default: $TASK_DASHBOARD_CONFIG or ~/.config/task-dashboard)",
     )
     return parser
 
@@ -174,6 +201,33 @@ def cmd_import(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_collect(args: argparse.Namespace) -> int:
+    """Exit 0 when everything was pushed, 1 when some waits, 2 on a config error."""
+    try:
+        cfg = config.load_collector(args.config)
+    except config.ConfigError as exc:
+        print(f"task-dashboard: {exc}", file=sys.stderr)
+        return 2
+    return collector.collect(cfg, home=Path.home(), now=datetime.now(timezone.utc))
+
+
+def cmd_install(args: argparse.Namespace) -> int:
+    """Exit 0 installed, 1 a command failed, 2 refused before writing anything."""
+    if not args.collector_only:
+        print(
+            "task-dashboard: only `install --collector-only` exists so far;"
+            " the server install is tracked in bestdan/workflow-skills#1093",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        cfg = config.load_collector(args.config)
+    except config.ConfigError as exc:
+        print(f"task-dashboard: {exc}", file=sys.stderr)
+        return 2
+    return collector_install.install(cfg, dry_run=args.dry_run)
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     """Run until interrupted; exit 2 on a config error."""
     try:
@@ -232,6 +286,10 @@ def main(argv: "list[str] | None" = None) -> int:
         return cmd_export(args)
     if args.command == "import":
         return cmd_import(args)
+    if args.command == "collect":
+        return cmd_collect(args)
+    if args.command == "install":
+        return cmd_install(args)
     parser.print_help()
     return 2
 

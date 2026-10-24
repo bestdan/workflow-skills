@@ -1,0 +1,11 @@
+[Unit]
+Description=Run task-dashboard-collector.service every 5 minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Unit=task-dashboard-collector.service
+
+[Install]
+WantedBy=timers.target

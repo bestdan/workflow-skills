@@ -16,6 +16,7 @@ import copy
 import os
 import re
 import tomllib
+import urllib.parse
 from pathlib import Path
 from typing import Any
 
@@ -151,6 +152,86 @@ def load(path: "str | os.PathLike[str] | None" = None) -> dict[str, Any]:
             )
         seen[digest] = host
     return cfg
+
+
+# The collector's table. A collector-only machine (lindev) has no Jira at all,
+# so load_collector() reads this table alone and never asks for jira.*.
+COLLECTOR_DEFAULTS: dict[str, Any] = {
+    "enabled": False,
+    "ingest_url": "",
+    "token": "",
+    "host": "",
+    "spool_max": 50,
+}
+INGEST_URL_RE = re.compile(r"https?://[^/\s]+/\S*")
+
+
+def load_collector(path: "str | os.PathLike[str] | None" = None) -> dict[str, Any]:
+    """The validated `[collector]` table, plus `config_path`.
+
+    The table holds this machine's ingest token, which is the reason for the
+    mode check: a config that group or others can read is refused rather than
+    used, with the chmod that fixes it. The token is read from this file only,
+    so it never sits in a process's argv or in a unit file.
+    """
+    p = config_path(path)
+    try:
+        st = p.stat()
+        with open(p, "rb") as fh:
+            user = tomllib.load(fh)
+    except FileNotFoundError:
+        raise ConfigError(f"config file not found: {p}") from None
+    except OSError as exc:
+        raise ConfigError(f"cannot read {p}: {exc}") from None
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(f"invalid TOML in {p}: {exc}") from None
+    table = user.get("collector")
+    if not isinstance(table, dict):
+        raise ConfigError(f"{p} has no [collector] table")
+    if st.st_mode & 0o077:
+        raise ConfigError(
+            f"{p} holds the collector's ingest token but is mode"
+            f" {st.st_mode & 0o777:o}; run: chmod 600 {p}"
+        )
+    cfg = deep_merge(COLLECTOR_DEFAULTS, table)
+    if not isinstance(cfg["enabled"], bool):
+        raise ConfigError("collector.enabled must be true or false")
+    # A disabled collector sends nothing, so it needs no URL or token:
+    # `enabled = false` alone is a valid way to switch a machine off.
+    url = cfg["ingest_url"]
+    if cfg["enabled"] and (not isinstance(url, str) or not _valid_url(url)):
+        raise ConfigError(
+            "collector.ingest_url must be an http(s) URL with the ingest path,"
+            " e.g. http://127.0.0.1:8765/ingest"
+        )
+    token = cfg["token"]
+    if cfg["enabled"] and (
+        not isinstance(token, str) or not token or token != token.strip()
+    ):
+        raise ConfigError(
+            "collector.token must be the token `dashboard.py ingest-token add"
+            " <host>` printed for this machine"
+        )
+    host = cfg["host"]
+    if not isinstance(host, str) or (host and not HOST_RE.fullmatch(host)):
+        raise ConfigError("collector.host must be a plain host name, or unset")
+    n = cfg["spool_max"]
+    if not isinstance(n, int) or isinstance(n, bool) or n < 1:
+        raise ConfigError("collector.spool_max must be a positive integer")
+    cfg["config_path"] = p
+    return cfg
+
+
+def _valid_url(url: str) -> bool:
+    """An http(s) URL with a host, a path and a port urllib can parse."""
+    if not INGEST_URL_RE.fullmatch(url):
+        return False
+    try:
+        parts = urllib.parse.urlsplit(url)
+        parts.port  # noqa: B018 - raises ValueError on a bad port
+    except ValueError:
+        return False
+    return parts.scheme in ("http", "https") and bool(parts.hostname)
 
 
 def _non_empty_str(cfg: dict[str, Any], dotted: str) -> None:
