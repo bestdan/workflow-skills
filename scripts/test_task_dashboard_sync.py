@@ -614,7 +614,9 @@ class FleetGh:
             return 1, "", self.error
         q = next((a[2:] for a in argv if a.startswith("q=")), None)
         if q is not None:
-            if "author:@me" in q:
+            if "is:closed" in q:
+                nodes = []
+            elif "author:@me" in q:
                 nodes = [fleet_pr(1, milestone=7), fleet_pr(2)]
             elif "is:issue" in q:
                 nodes = [

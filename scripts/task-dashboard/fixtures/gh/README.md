@@ -37,3 +37,7 @@ from the public `bestdan/workflow-skills` only:
 - `fleet_comments.json` is real: the comments query for PR #1118, which had
   none, with the `viewer` login it ran as. Co-review writes no stamp yet, so the tests add stamped comments to a
   copy.
+- `fleet_closed_search.json` is real: the closed-PR search
+  `is:pr is:closed author:@me closed:>=2026-10-20 repo:bestdan/workflow-skills`
+  (`first:3`), with `hasNextPage` set to `false`. All three merged, so the
+  tests clear `mergedAt` on a copy for a PR closed without merging.

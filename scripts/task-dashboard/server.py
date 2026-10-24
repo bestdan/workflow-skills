@@ -44,6 +44,7 @@ from typing import Any, Callable
 from urllib.parse import parse_qs, urlsplit
 
 import db
+import fleet_views
 import gauges
 import ingest
 import overlay
@@ -544,7 +545,7 @@ def render_page(title: str, header: str, body: str, token: str, busy: bool) -> s
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
         f'<meta name="dashboard-token" content="{_e(token)}">'
         f"<title>{_e(title)}</title>"
-        f"<style>{CSS}{views.CSS}{overlay.CSS}{gauges.CSS}</style></head>"
+        f"<style>{CSS}{views.CSS}{fleet_views.CSS}{overlay.CSS}{gauges.CSS}</style></head>"
         f'<body data-busy="{1 if busy else 0}">{header}<main>{body}</main>'
         f"<script>{JS}{overlay.JS}</script></body></html>"
     )
@@ -641,7 +642,7 @@ class App:
         busy = bool(self.syncer.state()["busy"])
         title = "Board" + (f": {', '.join(sprints)}" if sprints else "")
         body = (
-            views.nav("/board")
+            views.nav("/board", self.cfg)
             + f"<h2>{_e(title)}</h2>"
             + render_board(board, self.cfg["jira"]["site"], ov, self.now())
         )

@@ -238,6 +238,25 @@ class FleetWriteTests(OverlayCase):
         self.assertEqual(overlay.load(self.conn).last_visit, "2026-10-23T14:00:00Z")
         self.assertEqual(len(dump(self.conn)["last_visit"]), 1)
 
+    def test_last_visit_never_moves_back(self):
+        overlay.set_last_visit(self.conn, NOW)
+        overlay.set_last_visit(self.conn, NOW - timedelta(hours=2))
+        self.assertEqual(overlay.load(self.conn).last_visit, "2026-10-23T12:00:00Z")
+
+    def test_visit_records_the_render_time_capped_at_now(self):
+        overlay.apply(self.conn, "visit", {"at": ["2026-10-23T11:30:00Z"]}, NOW)
+        self.assertEqual(overlay.load(self.conn).last_visit, "2026-10-23T11:30:00Z")
+        overlay.apply(self.conn, "visit", {"at": ["2026-10-24T00:00:00Z"]}, NOW)
+        self.assertEqual(overlay.load(self.conn).last_visit, "2026-10-23T12:00:00Z")
+
+    def test_visit_without_at_is_now_and_a_bad_at_is_refused(self):
+        overlay.apply(self.conn, "visit", {}, NOW - timedelta(hours=1))
+        self.assertEqual(overlay.load(self.conn).last_visit, "2026-10-23T11:00:00Z")
+        for bad in ("yesterday", "2026-02-30T00:00:00Z", "2026-10-23"):
+            with self.assertRaises(overlay.OverlayError, msg=bad):
+                overlay.apply(self.conn, "visit", {"at": [bad]}, NOW)
+        self.assertEqual(overlay.load(self.conn).last_visit, "2026-10-23T11:00:00Z")
+
     def test_apply_routes_the_new_actions(self):
         overlay.apply(self.conn, "tag", {"key": ["A-1"], "tag": ["side-quest"]}, NOW)
         overlay.apply(
@@ -617,6 +636,7 @@ class RouteTests(server_harness.ServerCase):
         "tag": [("key", "ABC-1"), ("tag", "side-quest")],
         "focus": [("key", "ABC-1")],
         "unfocus": [("key", "ABC-1")],
+        "visit": [("at", "2026-10-23T11:00:00Z")],
     }
 
     def test_routes_cover_every_action(self):

@@ -21,12 +21,14 @@ import sqlite3
 from datetime import datetime
 from typing import Any
 
+import fleet_views
 import score
 
 _e = html.escape
 
 TABS = (
     ("/now", "Now"),
+    ("/away", "Since you were away"),
     ("/waiting-on-me", "Waiting on me"),
     ("/waiting-on", "I'm waiting on"),
     ("/board", "Board"),
@@ -65,10 +67,13 @@ PR_COLUMNS = (
 )
 
 
-def nav(active: str) -> str:
+def nav(active: str, cfg: "dict[str, Any] | None" = None) -> str:
+    """The tab bar; a fleet-only tab is left out of an instance with no fleet."""
+    hidden = set() if cfg is None or fleet_views.enabled(cfg) else fleet_views.ONLY
     links = "".join(
         f'<a href="{href}"{" aria-current=page" if href == active else ""}>{_e(name)}</a>'
         for href, name in TABS
+        if href not in hidden
     )
     return f"<nav>{links}</nav>"
 
@@ -84,6 +89,7 @@ class Mirror:
     ) -> None:
         self.cfg = cfg
         self.now = now
+        self.conn = conn
         self.me = str(cfg["jira"].get("me") or "").strip()
         conn.row_factory = sqlite3.Row
         self.issues: dict[str, dict[str, Any]] = {
@@ -437,8 +443,16 @@ def render_waiting_on(m: Mirror) -> str:
 
 
 def render_stale(m: Mirror) -> str:
+    """Jira's stale lane, then, on a fleet instance, the fleet's (fleet_views)."""
     cards = [issue_card(m, i, why) for i, why in stale(m)]
-    return _lane("stale", "Stale", cards, "Nothing in progress has gone quiet.")
+    jira = _lane("stale", "Stale", cards, "Nothing in progress has gone quiet.")
+    if not fleet_views.enabled(m.cfg):
+        return jira
+    return (jira if m.issues else "") + fleet_views.render_stale(m.conn, m.cfg, m.now)
+
+
+def render_away(m: Mirror) -> str:
+    return fleet_views.render_away(m.conn, m.cfg, m.now)
 
 
 def render_epics(m: Mirror) -> str:
@@ -460,6 +474,7 @@ ROUTES = {
     "/waiting-on-me": ("Waiting on me", render_waiting_on_me),
     "/waiting-on": ("I'm waiting on", render_waiting_on),
     "/stale": ("Stale", render_stale),
+    "/away": ("Since you were away", render_away),
     "/epics": ("Epics", render_epics),
 }
 
@@ -469,4 +484,4 @@ def render(
 ) -> str:
     """The body of the view at `path` (a key of ROUTES), tab bar included."""
     _, fn = ROUTES[path]
-    return nav(path) + fn(Mirror(conn, cfg, now))
+    return nav(path, cfg) + fn(Mirror(conn, cfg, now))

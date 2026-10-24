@@ -6,7 +6,9 @@ it on the same `gh` runner seam, and reuses that module's search pagination,
 error mapping and CI reduction rather than copying them.
 
 Rows land in the v2 generic `issues` table as `source = 'github'`, with
-`kind = pr | issue | design`, keyed by the item's URL. The Jira sync only
+`kind = pr | issue | design | closed_pr`, keyed by the item's URL. A
+`closed_pr` is one of my PRs closed in the last CLOSED_WINDOW_DAYS days, kept
+apart from `pr` so nothing that counts open PRs sees it. The Jira sync only
 touches `source = 'jira'` rows, and `write()` here only `source = 'github'`
 ones, so the two never overwrite each other.
 
@@ -47,7 +49,7 @@ import re
 import sqlite3
 import sys
 from collections.abc import Iterable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import github_gh
@@ -102,6 +104,24 @@ query($q: String!, $after: String) {
   }
 }
 """
+
+CLOSED_QUERY = """
+query($q: String!, $after: String) {
+  search(query: $q, type: ISSUE, first: 50, after: $after) {
+    pageInfo { hasNextPage endCursor }
+    nodes {
+      ... on PullRequest {
+        url number title state headRefName createdAt closedAt mergedAt
+        repository { nameWithOwner }
+      }
+    }
+  }
+}
+"""
+
+# How far back the closed-PR search reaches. Since you were away lists what
+# closed after the last visit; a visit older than this sees only the window.
+CLOSED_WINDOW_DAYS = 14
 
 COMMENTS_QUERY = """
 query($owner: String!, $name: String!, $number: Int!) {
@@ -187,6 +207,53 @@ def issues_needing_human(
                     "labels": labels,
                     "created": node.get("createdAt"),
                     "updated": node.get("updatedAt"),
+                },
+            )
+    return list(rows.values())
+
+
+# --- recently closed PRs -----------------------------------------------------
+
+
+def recently_closed(
+    owners: Iterable[str],
+    now: datetime,
+    runner: Runner = run,
+    timeout: float = DEFAULT_TIMEOUT,
+    days: int = CLOSED_WINDOW_DAYS,
+) -> list[dict]:
+    """My PRs closed (merged or not) in the last `days` days, one search per owner.
+
+    These are `kind = closed_pr` rows, not `pr`, so the review queue and every
+    count of open PRs never sees them. Since you were away reads `closed_at`
+    against the last visit; Stale matches `head_ref` to a landed worktree.
+    """
+    since = (now - timedelta(days=days)).astimezone(timezone.utc).date().isoformat()
+    rows: dict[str, dict] = {}
+    for owner in owners:
+        query = (
+            f"is:pr is:closed author:@me closed:>={since}"
+            f" {github_gh.owner_qualifier(owner)}"
+        )
+        for node in github_gh.search_prs(query, runner, timeout, CLOSED_QUERY):
+            if not node.get("closedAt"):
+                continue
+            rows.setdefault(
+                node["url"],
+                {
+                    "kind": "closed_pr",
+                    "key": node["url"],
+                    "url": node["url"],
+                    "repo": node["repository"]["nameWithOwner"],
+                    "number": node["number"],
+                    "title": node["title"],
+                    "head_ref": node.get("headRefName"),
+                    "merged": bool(node.get("mergedAt")),
+                    "status": "merged" if node.get("mergedAt") else "closed",
+                    "closed_at": node.get("closedAt"),
+                    "merged_at": node.get("mergedAt"),
+                    "created": node.get("createdAt"),
+                    "updated": node.get("closedAt"),
                 },
             )
     return list(rows.values())
@@ -496,15 +563,25 @@ def proposed_designs(
 
 
 def fetch(
-    config: dict[str, Any], runner: Runner = run, timeout: float = DEFAULT_TIMEOUT
+    config: dict[str, Any],
+    runner: Runner = run,
+    timeout: float = DEFAULT_TIMEOUT,
+    now: "datetime | None" = None,
 ) -> dict[str, Any]:
     """Every github row for the fleet view. Reads GitHub; writes nothing."""
+    now = now or datetime.now(timezone.utc)
     owners = list(config["github"]["orgs"])
     queue, failed = review_queue(owners, runner, timeout)
     designs, truncated, missing = proposed_designs(
         config["github"].get("design_repos", []), runner, timeout
     )
-    rows = queue + issues_needing_human(owners, runner, timeout) + designs
+    open_urls = {r["url"] for r in queue}
+    closed = [
+        r
+        for r in recently_closed(owners, now, runner, timeout)
+        if r["url"] not in open_urls  # an index lag; the open row wins
+    ]
+    rows = queue + issues_needing_human(owners, runner, timeout) + designs + closed
     return {
         "rows": rows,
         "failed": failed,

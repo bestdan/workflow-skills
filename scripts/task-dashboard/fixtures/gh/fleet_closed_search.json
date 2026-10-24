@@ -1,0 +1,51 @@
+{
+  "data": {
+    "search": {
+      "pageInfo": {
+        "hasNextPage": false,
+        "endCursor": null
+      },
+      "nodes": [
+        {
+          "url": "https://github.com/bestdan/workflow-skills/pull/1135",
+          "number": 1135,
+          "title": "feat(task-dashboard): run the GitHub fleet fetch in the scheduled sync [#1133]",
+          "state": "MERGED",
+          "headRefName": "bestdan/task-1133",
+          "createdAt": "2026-10-24T00:59:03Z",
+          "closedAt": "2026-10-24T02:31:10Z",
+          "mergedAt": "2026-10-24T02:31:09Z",
+          "repository": {
+            "nameWithOwner": "bestdan/workflow-skills"
+          }
+        },
+        {
+          "url": "https://github.com/bestdan/workflow-skills/pull/1134",
+          "number": 1134,
+          "title": "fix(task-dashboard): parse real acli output and add pseudonymised captures [#1087]",
+          "state": "MERGED",
+          "headRefName": "bestdan/task-1087",
+          "createdAt": "2026-10-24T00:40:55Z",
+          "closedAt": "2026-10-24T01:09:36Z",
+          "mergedAt": "2026-10-24T01:09:35Z",
+          "repository": {
+            "nameWithOwner": "bestdan/workflow-skills"
+          }
+        },
+        {
+          "url": "https://github.com/bestdan/workflow-skills/pull/1131",
+          "number": 1131,
+          "title": "feat(task-dashboard): add kind tags, focus pin and header gauges [#1105]",
+          "state": "MERGED",
+          "headRefName": "bestdan/task-1105",
+          "createdAt": "2026-10-24T00:26:39Z",
+          "closedAt": "2026-10-24T01:01:03Z",
+          "mergedAt": "2026-10-24T01:01:03Z",
+          "repository": {
+            "nameWithOwner": "bestdan/workflow-skills"
+          }
+        }
+      ]
+    }
+  }
+}
