@@ -159,6 +159,12 @@ SNAPSHOT = {
         ),
         worktree("task-1200", "bestdan/task-1200", "not_landed", "no merged PR"),
         worktree(
+            "fresh",
+            "bestdan/fresh",
+            "landed",
+            "branch bestdan/fresh landed — its tip is already on origin/main",
+        ),
+        worktree(
             "main", "main", "landed", "on origin/main", path="/h/src/workflow-skills"
         ),
     ],
@@ -168,6 +174,7 @@ SNAPSHOT = {
         handoff("vague", "when the spike lands", created="2026-09-01"),
         handoff("future", "2026-12-01"),
         handoff("fresh", "when #4242 merges", created="2026-10-22"),
+        handoff("compound", "when #1135 and #4242 merge"),
     ],
     "tmux": [],
     "sessions": [
@@ -188,6 +195,8 @@ SNAPSHOT = {
         ),
         ev("s-landed", "2026-10-15T09:00:00.000Z", "Stop", f"{WT}/task-1135/sub"),
         ev("s-ancient", "2026-08-01T09:00:00.000Z", "Stop"),
+        ev("s-fresh", "2026-10-14T08:00:00.000Z", "UserPromptSubmit", f"{WT}/fresh"),
+        ev("s-fresh", "2026-10-14T09:00:00.000Z", "Stop", f"{WT}/fresh"),
     ],
     "history": [],
 }
@@ -331,6 +340,21 @@ class StaleTests(FleetCase):
         self.assertIn("uncommitted changes", card)
         self.assertNotIn("/h/src/workflow-skills<", close + check)
         self.assertNotIn("task-1200", close + check)
+
+    def test_a_landed_worktree_with_no_merged_pr_is_a_check(self):
+        _, close, check = self.stale()
+        self.assertNotIn(f"worktree {WT}/fresh", close)
+        card = self.card(check, f"worktree {WT}/fresh")
+        self.assertIn("no merged PR found for its branch", card)
+        self.assertIn("its tip is already on origin/main", card)
+        # A session in it is not closed on the worktree's say-so either.
+        self.assertNotIn("session s-fresh", close)
+        self.assertIn("no evidence", self.card(check, "session s-fresh"))
+
+    def test_a_compound_merge_condition_is_a_check(self):
+        _, close, check = self.stale()
+        self.assertNotIn("aim compound", close)
+        self.assertIn("cannot be checked", self.card(check, "aim compound"))
 
     def test_handoffs_close_on_a_passed_date_or_a_merged_pr(self):
         _, close, check = self.stale()

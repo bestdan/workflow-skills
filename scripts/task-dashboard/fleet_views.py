@@ -21,12 +21,13 @@ evidence, never by age. Each row names its evidence and the action that
 resolves it, and goes in one of two lanes:
 
 - **Close** has evidence: a worktree whose branch landed (`branch-remove.sh
-  --check`, with the merged PR when one is mirrored), a handoff past its
-  `expires` (a date, or "when #N merges" with #N merged), a session that never
-  had a prompt (an empty spawn), or an idle session in a landed worktree.
-- **Check** has none: an idle session, a landed worktree with uncommitted or
-  unpushed work, a handoff whose expiry cannot be evaluated, or a PR or issue
-  open past the threshold.
+  --check`) and whose merged PR is mirrored, a handoff past its `expires` (a
+  date, or "when #N merges" naming one #N, with #N merged), a session that
+  never had a prompt (an empty spawn), or an idle session in such a worktree.
+- **Check** has none: an idle session, a landed worktree with no mirrored
+  merged PR or with uncommitted or unpushed work, a handoff whose expiry
+  cannot be evaluated (a compound condition included), or a PR or issue open
+  past the threshold.
 
 Age orders each lane, oldest first, and is shown only as context.
 """
@@ -410,7 +411,11 @@ class StaleItem:
     html: str
 
 
-_WHEN_MERGES = re.compile(r"#(\d+)\b.*\bmerge", re.IGNORECASE)
+# "when #N merges" is a merge condition only when it names exactly one #N. A
+# compound one ("when #148 and #150 merge") is not met by its first PR alone,
+# and evaluating the rest is beyond a regex, so it goes under Check.
+_REF = re.compile(r"#(\d+)\b")
+_MERGE = re.compile(r"\bmerge", re.IGNORECASE)
 
 
 def _expiry(
@@ -418,9 +423,10 @@ def _expiry(
 ) -> "tuple[bool | None, str]":
     """(expired?, evidence). None when `expires` cannot be evaluated here.
 
-    A date expires at the end of that local day. "when #N merges" expires once
-    PR #N of the handoff's repo is mirrored as merged; until then it is not
-    known to have expired, since the closed-PR window may simply not reach it.
+    A date expires at the end of that local day. "when #N merges", naming
+    exactly one #N, expires once PR #N of the handoff's repo is mirrored as
+    merged; until then it is not known to have expired, since the closed-PR
+    window may simply not reach it. Any other value cannot be evaluated.
     """
     if not value:
         return None, "no expires"
@@ -433,13 +439,14 @@ def _expiry(
         if now >= end:
             return True, f"expires {value}: passed {ago(end, now)}"
         return False, ""
-    m = _WHEN_MERGES.search(value)
-    if m:
-        pr = f.merged_pr(repo, int(m.group(1)))
+    refs = set(_REF.findall(value))
+    if len(refs) == 1 and _MERGE.search(value):
+        (n,) = refs
+        pr = f.merged_pr(repo, int(n))
         if pr is not None:
             at = score.parse_ts(pr.get("merged_at") or pr.get("closed_at"))
-            return True, f"expires `{value}`: PR #{m.group(1)} merged {ago(at, now)}"
-        return None, f"expires `{value}`: PR #{m.group(1)} not seen merged"
+            return True, f"expires `{value}`: PR #{n} merged {ago(at, now)}"
+        return None, f"expires `{value}`: PR #{n} not seen merged"
     return None, f"expires `{value}` cannot be checked here"
 
 
@@ -506,7 +513,16 @@ def stale_items(f: Fleet, now: datetime) -> list[StaleItem]:
         if active is not None:
             risks.append(f"session {active.session_id} used it {ago(active.last, now)}")
         cmd = f"<code>worktree-remove.sh {_e(wt['path'])}</code>"
-        if risks:
+        if landed[key].pr is None:
+            # The gate also calls a branch landed when its tip is on
+            # origin/<default>, which a fresh worktree with no commits is.
+            # Without a merged PR for the branch that is not evidence enough.
+            why = f"no merged PR found for its branch; the gate says: {_e(evidence)}"
+            if risks:
+                why += f"; it has {_e(', '.join(risks))}"
+            act = f"check it has nothing left to do; then {cmd}"
+            out.append(StaleItem("check", at, _card(head, meta, why, act)))
+        elif risks:
             why = f"{_e(evidence)}, but it has {_e(', '.join(risks))}"
             act = f"look before removing; then {cmd}"
             out.append(StaleItem("check", at, _card(head, meta, why, act)))
@@ -544,6 +560,7 @@ def stale_items(f: Fleet, now: datetime) -> list[StaleItem]:
                 ev
                 for (host, path), ev in landed.items()
                 if host == s.host
+                and ev.pr is not None
                 and ((s.cwd or "") + "/").startswith(path.rstrip("/") + "/")
             ),
             None,
