@@ -30,6 +30,13 @@ resolves it, and goes in one of two lanes:
   past the threshold.
 
 Age orders each lane, oldest first, and is shown only as context.
+
+A worktree row kept from a failed scan (snapshot_adapter.py, `kept`) is never
+evidence: its landed verdict is as old as the snapshot that last saw it. It
+goes under Check, naming the failure and how old the row is.
+
+MACHINES (`machines_line`) is the header's "lindev 4m · MacBook 2d": each
+host's snapshot age, with a host past MACHINE_STALE_MINUTES marked `stale`.
 """
 
 import html
@@ -54,6 +61,9 @@ ONLY = {"/needs", "/away"}
 SESSION_IDLE_DAYS = 3  # a session with no event for this long is idle
 SESSION_FORGET_DAYS = 30  # and one quiet for this long has left the list
 OPEN_ITEM_DAYS = 14  # a PR, issue or handoff older than this goes under Check
+# The collector runs every 5 minutes (collector_install.INTERVAL_SECONDS), so a
+# host this far behind has missed several runs: asleep, offline, or failing.
+MACHINE_STALE_MINUTES = 30
 
 _e = html.escape
 
@@ -65,6 +75,8 @@ CSS = """
   margin-bottom:12px; color:var(--muted); }
 .fleet .visit button { font:inherit; padding:4px 12px; border-radius:6px;
   border:1px solid var(--line); background:var(--card); color:var(--fg); }
+header .machines { color:var(--muted); }
+header .machines .stale { color:var(--bad); font-weight:600; }
 """
 
 
@@ -486,6 +498,7 @@ class Landed:
     pr: "dict[str, Any] | None"
     reason: str
     at: "datetime | None"
+    kept: bool = False  # from a failed scan: not evidence
 
     def evidence(self, now: datetime) -> str:
         if self.pr is not None:
@@ -507,22 +520,73 @@ def _landed_worktrees(f: Fleet) -> "dict[tuple[str, str], Landed]":
             continue
         pr = f.merged_head(wt.get("repo") or "", branch)
         at = score.parse_ts(pr.get("merged_at") or pr.get("closed_at")) if pr else None
-        out[(wt["host"], wt["path"])] = Landed(pr, str(verdict.get("reason") or ""), at)
+        reason = str(verdict.get("reason") or "")
+        out[(wt["host"], wt["path"])] = Landed(pr, reason, at, bool(wt.get("kept")))
     return out
+
+
+def kept_note(wt: dict[str, Any], now: datetime) -> str:
+    """Why a kept row is not current: the failed scan, and when it was seen."""
+    kept = wt.get("kept") or {}
+    failed = score.parse_ts(kept.get("taken_at"))
+    seen = score.parse_ts(wt.get("synced_at"))
+    return (
+        f"kept from a failed scan ({kept.get('step')} failed {ago(failed, now)});"
+        f" last listed {ago(seen, now)}"
+    )
+
+
+def _short_age(then: "datetime | None", now: datetime) -> str:
+    if then is None:
+        return "?"
+    s = max((now - then).total_seconds(), 0)
+    if s < 90:
+        return f"{round(s)}s"
+    if s < 90 * 60:
+        return f"{round(s / 60)}m"
+    if s < 36 * 3600:
+        return f"{round(s / 3600)}h"
+    return f"{round(s / 86400)}d"
+
+
+def machines_line(conn: sqlite3.Connection, now: datetime) -> str:
+    """Each host's snapshot age, "lindev 4m · MacBook 2d"; empty with none.
+
+    A host whose last snapshot is older than MACHINE_STALE_MINUTES gets the
+    `stale` class, and a host whose last snapshot had a failed repo scan says
+    how many, since its kept rows are older than its age suggests.
+    """
+    parts = []
+    stale_after = timedelta(minutes=MACHINE_STALE_MINUTES)
+    for host, taken, counts in conn.execute(
+        "SELECT host, last_snapshot_at, counts FROM machines ORDER BY host"
+    ):
+        at = score.parse_ts(taken)
+        failed = _raw(counts).get("scan_errors") or 0
+        text = f"{host} {_short_age(at, now)}"
+        if failed:
+            text += f" ({failed} repo scan{'s' if failed > 1 else ''} failed)"
+        cls = ' class="stale"' if at is None or now - at > stale_after else ""
+        parts.append(f'<span{cls} title="{_e(taken)}">{_e(text)}</span>')
+    if not parts:
+        return ""
+    return '<span class="machines">' + " · ".join(parts) + "</span>"
 
 
 def stale_items(
     f: Fleet, now: datetime, ignored: "set[overlay.Item] | None" = None
 ) -> list[StaleItem]:
     """The Stale lanes' items. `ignored` (the overlay's) drops the sessions,
-    PRs and issues the user ignored on Needs, under the same overlay keys."""
+    PRs and issues the user ignored on Needs, under the same overlay keys, and
+    a worktree ignored under its mirror key, kept from a failed scan or not."""
     ignored = ignored or set()
     out: list[StaleItem] = []
     landed = _landed_worktrees(f)
 
     for wt in f.worktrees:
         key = (wt["host"], wt["path"])
-        if key not in landed:
+        item = (f"machine:{wt['host']}", f"worktree:{wt['path']}")
+        if key not in landed or item in ignored:
             continue
         evidence, at = landed[key].evidence(now), landed[key].at
         head = _e(f"worktree {wt['path']}")
@@ -536,7 +600,13 @@ def stale_items(
         if active is not None:
             risks.append(f"session {active.session_id} used it {ago(active.last, now)}")
         cmd = f"<code>worktree-remove.sh {_e(wt['path'])}</code>"
-        if landed[key].pr is None:
+        if landed[key].kept:
+            why = f"{_e(kept_note(wt, now))}; when last seen: {_e(evidence)}"
+            if risks:
+                why += f", and it had {_e(', '.join(risks))}"
+            act = f"wait for a scan that lists it, or check the host; then {cmd}"
+            out.append(StaleItem("check", at, _card(head, meta, why, act), "worktree"))
+        elif landed[key].pr is None:
             # The gate also calls a branch landed when its tip is on
             # origin/<default>, which a fresh worktree with no commits is.
             # Without a merged PR for the branch that is not evidence enough.
@@ -588,6 +658,7 @@ def stale_items(
                 for (host, path), ev in landed.items()
                 if host == s.host
                 and ev.pr is not None
+                and not ev.kept
                 and ((s.cwd or "") + "/").startswith(path.rstrip("/") + "/")
             ),
             None,

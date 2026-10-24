@@ -16,7 +16,7 @@ the matching machine must be the `host` the snapshot names.
 ORDER OF CHECKS, each refusing with no write: the token (401), then the declared
 body size (411 missing, 413 over MAX_BODY), all before the body is read, so an
 unauthenticated caller cannot make the server read anything. Then JSON (400),
-`schema` (400 unless 1), the full schema-1 shape (`snapshot.validate`, 400),
+`schema` (400 unless 1 or 2), that schema's full shape (`snapshot.validate`, 400),
 the token's machine against the body's `host` (403), a `taken_at` more than
 five minutes ahead of the server's clock (400), and staleness (409, a snapshot
 not newer than the last one ingested from that host). A database error is 503,
@@ -108,12 +108,12 @@ class Ingest:
             doc = json.loads(rfile.read(length))
         except ValueError:
             return 400, {"error": "body is not JSON"}, None
-        if not isinstance(doc, dict) or doc.get("schema") != snapshot.SCHEMA_VERSION:
-            got = doc.get("schema") if isinstance(doc, dict) else None
+        got = doc.get("schema") if isinstance(doc, dict) else None
+        if isinstance(got, bool) or got not in snapshot.ACCEPTED_SCHEMAS:
             return 400, {"error": f"unsupported schema {got!r}"}, None
         problems = snapshot.validate(doc)
         if problems:
-            return 400, {"error": "snapshot does not match schema 1",
+            return 400, {"error": f"snapshot does not match schema {doc['schema']}",
                          "problems": problems[:20]}, None  # fmt: skip
         if doc["host"] != machine:
             why = f"token for {machine} sent a snapshot for {doc['host']!r}"

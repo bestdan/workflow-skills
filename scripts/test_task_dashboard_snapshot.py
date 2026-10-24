@@ -151,7 +151,8 @@ class TestDocument(Fixture):
     def test_validates_against_schema(self):
         doc, _ = self.build()
         self.assertEqual(snap.validate(doc), [])
-        self.assertEqual(doc["schema"], 1)
+        self.assertEqual(doc["schema"], 2)
+        self.assertEqual(doc["scan_errors"], [])
         self.assertEqual(doc["host"], "testhost")
         self.assertEqual(doc["taken_at"], "2026-10-23T12:00:00.000Z")
 
@@ -221,6 +222,28 @@ class TestWorktrees(Fixture):
 
     def test_detached_head_skips_the_gate(self):
         self.assertEqual(snap.landed(FakeRunner(), "/r", None)["state"], "unknown")
+
+    def test_failed_worktree_list_is_a_scan_error_not_an_absence(self):
+        second = self.src / "second"
+        second.mkdir()
+        git(second, "init", "-q", "-b", "main")
+        failing = str(self.repo)
+
+        class Failing(FakeRunner):
+            def __call__(self, argv, timeout):
+                if argv[:3] == ["git", "-C", failing] and "worktree" in argv:
+                    self.calls.append(argv)
+                    return 124, "fatal: planted output\n", "timed out"
+                return super().__call__(argv, timeout)
+
+        doc, _ = self.build(Failing())
+        self.assertEqual(snap.validate(doc), [])
+        self.assertEqual(
+            doc["scan_errors"], [{"repo": "fakerepo", "step": "worktree_list"}]
+        )
+        self.assertEqual({w["repo"] for w in doc["worktrees"]}, {"second"})
+        for value in snap.iter_values(doc):
+            self.assertNotIn("planted", str(value))
 
     def test_missing_path_has_null_state(self):
         shutil.rmtree(self.wt_a)

@@ -4,7 +4,7 @@ the `[ingest]` config and `dashboard.py ingest-token add`.
 
 The real server runs in-process on an ephemeral 127.0.0.1 port over a temp DB,
 with a no-op sync. Every snapshot is synthetic and is checked against
-snapshot.validate() before it is sent, so a fixture cannot drift from schema 1.
+snapshot.validate() before it is sent, so a fixture cannot drift from its schema.
 Needs Python 3.11: run via scripts/test-task-dashboard-ingest.sh.
 """
 
@@ -56,15 +56,22 @@ def make_config(machines):
     return cfg
 
 
-def make_doc(host="lindev", taken_at="2026-10-23T11:00:00.000Z", branches=("a", "b")):
+def make_doc(
+    host="lindev",
+    taken_at="2026-10-23T11:00:00.000Z",
+    branches=("a", "b"),
+    repo="demo",
+    scan_errors=None,
+):
+    """A schema 1 snapshot; schema 2 when `scan_errors` is given (a list)."""
     doc = {
-        "schema": 1,
+        "schema": 1 if scan_errors is None else 2,
         "host": host,
         "taken_at": taken_at,
         "worktrees": [
             {
-                "repo": "demo",
-                "path": f"/home/u/src/worktrees/demo/{b}",
+                "repo": repo,
+                "path": f"/home/u/src/worktrees/{repo}/{b}",
                 "branch": f"bestdan/{b}",
                 "head": "0" * 40,
                 "dirty": False,
@@ -105,8 +112,19 @@ def make_doc(host="lindev", taken_at="2026-10-23T11:00:00.000Z", branches=("a", 
             }
         ],
     }
+    if scan_errors is not None:
+        doc["scan_errors"] = [{"repo": r, "step": "worktree_list"} for r in scan_errors]
     assert snapshot.validate(doc) == [], snapshot.validate(doc)
     return doc
+
+
+def merged(*docs):
+    """One snapshot whose worktrees are every doc's, the first doc's otherwise."""
+    out = json.loads(json.dumps(docs[0]))
+    for d in docs[1:]:
+        out["worktrees"] += d["worktrees"]
+    assert snapshot.validate(out) == [], snapshot.validate(out)
+    return out
 
 
 class IngestCase(unittest.TestCase):
@@ -208,7 +226,7 @@ class RefusalTest(IngestCase):
         self.assert_nothing_written()
 
     def test_unknown_schema_is_400(self):
-        for schema in (2, "1", None):
+        for schema in (3, "1", "2", True, None):
             doc = make_doc()
             doc["schema"] = schema
             status, body = self.post(doc)
@@ -371,6 +389,115 @@ class WriteTest(IngestCase):
         self.assertEqual(
             self.q("SELECT count(*) FROM issues WHERE key LIKE 'worktree:%/z'"), [(0,)]
         )
+
+
+class ScanErrorTest(IngestCase):
+    """A repo whose scan failed keeps its rows; the rest are replaced."""
+
+    def worktrees(self):
+        return {
+            key: (json.loads(raw), synced)
+            for key, raw, synced in self.q(
+                "SELECT key, raw_json, synced_at FROM issues"
+                " WHERE source = 'machine:lindev' AND kind = 'worktree'"
+            )
+        }
+
+    def test_failed_repo_keeps_its_rows_and_others_are_replaced(self):
+        first = merged(make_doc(), make_doc(repo="other", branches=("x",)))
+        self.assertEqual(self.post(first)[0], 200)
+        later = make_doc(
+            taken_at="2026-10-23T11:30:00.000Z",
+            repo="other",
+            branches=("y",),
+            scan_errors=["demo"],
+        )
+        status, body = self.post(later)
+        self.assertEqual(status, 200, body)
+        self.assertEqual(json.loads(body)["kept_worktrees"], 2)
+        self.assertEqual(json.loads(body)["scan_errors"], 1)
+        rows = self.worktrees()
+        self.assertEqual(
+            sorted(rows),
+            [
+                "worktree:/home/u/src/worktrees/demo/a",
+                "worktree:/home/u/src/worktrees/demo/b",
+                "worktree:/home/u/src/worktrees/other/y",
+            ],
+        )
+        kept, synced = rows["worktree:/home/u/src/worktrees/demo/a"]
+        self.assertEqual(
+            kept["kept"],
+            {"step": "worktree_list", "taken_at": "2026-10-23T11:30:00.000Z"},
+        )
+        # Still dated by the snapshot that last listed it, never the new one.
+        self.assertEqual(synced, "2026-10-23T11:00:00.000Z")
+        fresh, synced = rows["worktree:/home/u/src/worktrees/other/y"]
+        self.assertNotIn("kept", fresh)
+        self.assertEqual(synced, "2026-10-23T11:30:00.000Z")
+        counts = json.loads(self.q("SELECT counts FROM machines")[0][0])
+        self.assertEqual((counts["scan_errors"], counts["kept_worktrees"]), (1, 2))
+        # Handoffs and tmux are not per-repo scans: replaced as before.
+        self.assertEqual(
+            self.q(
+                "SELECT count(*) FROM issues WHERE source = 'machine:lindev'"
+                " AND kind IN ('handoff', 'tmux')"
+            ),
+            [(2,)],
+        )
+
+    def test_a_later_good_scan_replaces_kept_rows(self):
+        self.assertEqual(self.post(make_doc())[0], 200)
+        failed = make_doc(
+            taken_at="2026-10-23T11:20:00.000Z", branches=(), scan_errors=["demo"]
+        )
+        self.assertEqual(self.post(failed)[0], 200)
+        good = make_doc(
+            taken_at="2026-10-23T11:40:00.000Z", branches=("c",), scan_errors=[]
+        )
+        self.assertEqual(self.post(good)[0], 200)
+        rows = self.worktrees()
+        self.assertEqual(list(rows), ["worktree:/home/u/src/worktrees/demo/c"])
+        self.assertNotIn("kept", rows["worktree:/home/u/src/worktrees/demo/c"][0])
+
+    def test_a_failure_in_one_host_leaves_another_hosts_rows(self):
+        self.assertEqual(self.post(make_doc(host="macbook"), token="macbook")[0], 200)
+        failed = make_doc(branches=(), scan_errors=["demo"])
+        self.assertEqual(self.post(failed)[0], 200)
+        self.assertEqual(self.worktrees(), {})
+        raws = self.q(
+            "SELECT raw_json FROM issues WHERE source = 'machine:macbook'"
+            " AND kind = 'worktree'"
+        )
+        self.assertEqual(len(raws), 2)
+        self.assertTrue(all("kept" not in json.loads(r[0]) for r in raws))
+
+    def test_schema_1_still_replaces_every_row(self):
+        self.assertEqual(self.post(make_doc())[0], 200)
+        later = make_doc(taken_at="2026-10-23T11:30:00.000Z", branches=())
+        self.assertEqual(later["schema"], 1)
+        self.assertEqual(self.post(later)[0], 200)
+        self.assertEqual(self.worktrees(), {})
+
+
+class SchemaTest(unittest.TestCase):
+    def test_scan_errors_belong_to_schema_2_only(self):
+        one = make_doc()
+        self.assertEqual(snapshot.validate(one), [])
+        two = make_doc(scan_errors=["demo"])
+        self.assertEqual(snapshot.validate(two), [])
+        bad = dict(two, schema=1)
+        self.assertIn("scan_errors: unexpected", snapshot.validate(bad))
+        missing = dict(one, schema=2)
+        self.assertIn("scan_errors: missing", snapshot.validate(missing))
+
+    def test_scan_errors_are_closed(self):
+        doc = make_doc(scan_errors=["demo"])
+        doc["scan_errors"][0]["output"] = "fatal: planted"
+        self.assertIn("scan_errors[0].output: unexpected key", snapshot.validate(doc))
+        doc = make_doc(scan_errors=["demo"])
+        doc["scan_errors"][0]["step"] = "status"
+        self.assertIn("scan_errors[0].step: unknown", snapshot.validate(doc))
 
 
 class AdapterTest(unittest.TestCase):
