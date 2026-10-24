@@ -4,7 +4,7 @@
 Point `claude_remote.claude_path` at it to run the fleet view's optional
 cloud-session step with no Claude Code. It answers only the read that
 claude_remote.py makes: `-p --input-format stream-json --output-format
-stream-json --verbose`, with an `initialize` and a `list_cloud_sessions`
+stream-json --verbose --no-session-persistence`, with an `initialize` and a `list_cloud_sessions`
 control request on stdin. It prints a fixture from
 scripts/task-dashboard/fixtures/claude/, with the list reply's `request_id`
 set to the one it was sent.
@@ -30,7 +30,7 @@ import sys
 from pathlib import Path
 
 ARGV = ["-p", "--input-format", "stream-json", "--output-format", "stream-json",
-        "--verbose"]  # fmt: skip
+        "--verbose", "--no-session-persistence"]  # fmt: skip
 FILES = {
     "ok": "list-ok.jsonl",
     "started_by_session": "list-started-by-session.jsonl",

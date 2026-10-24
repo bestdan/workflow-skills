@@ -82,7 +82,7 @@ mini ────┘   (per machine)   (POST, token)    + GitHub / Claude Remote
 
 | Source                      | Read by                                  | Gives                                                                                                                                                                       |
 | --------------------------- | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Claude Code Remote sessions | aggregator, adapter                      | optional, off by default: cloud and Remote Control sessions with title, environment, repo, branch, `updated_at` and a coarse `status`, and no post-turn fields (see below). |
+| Claude Code Remote sessions | aggregator, adapter                      | optional, off by default: cloud-hosted sessions (not Remote Control), with title, repo, branch, `updated_at` and a coarse `status`; it has no post-turn fields (see below). |
 | GitHub, configured owners   | aggregator, adapter (task 3's `gh` code) | open PRs (age, draft, review decision, CI), issues at `auto:human-review-needed`, designs at `status: proposed`                                                             |
 | Session-state hook          | collector                                | local sessions the Remote list misses, with exact turn-end and prompt times and permission prompts                                                                          |
 | Worktrees                   | collector                                | per repo: branch, dirty or unpushed state, and the landed-PR evidence `branch-remove.sh` already computes                                                                   |
@@ -131,8 +131,9 @@ stand-ins for those three from `status` alone. So, as decided on #1100:
   since the last run" or page back 30 days. A session the page reports
   `archived` is dropped; one missing from the page is kept, since it may have
   fallen off a truncated page, and ages out after 30 days unseen.
-- The two sources key a session differently, and nothing joins them, so a
-  Remote Control session on an opted-in machine can show under both.
+- The two sources key a session differently, and nothing joins them, so the
+  list keeps only `anthropic_cloud` sessions. A Remote Control session is the
+  hook's to report, and is invisible on a machine without the plugin.
 
 **The GitHub row is a sync step of its own, behind `github.fleet`.** With
 `github.fleet = true` (default `false`; `github.enabled = false` also turns it

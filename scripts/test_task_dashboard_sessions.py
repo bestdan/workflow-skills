@@ -197,6 +197,7 @@ class ListSessionsTests(unittest.TestCase):
         self.assertEqual(len(got), 6)
         argv, stdin, timeout = runner.calls[0]
         self.assertEqual(argv, ["claude", *claude_remote.ARGV])
+        self.assertIn("--no-session-persistence", argv)
         self.assertEqual(timeout, 9)
         subtypes = [
             json.loads(line)["request"]["subtype"] for line in stdin.splitlines()
@@ -272,7 +273,7 @@ class ToRowTests(unittest.TestCase):
             (r["status_bucket"], r["status_category"], r["needs_action"]),
             ("waiting", "need_input", True),
         )
-        self.assertEqual(r["machine"], "remote-control")
+        self.assertEqual(r["machine"], "cloud")
         self.assertEqual(r["repository"], "example/repo-a")
         self.assertEqual(r["branch"], "feature/one")
 
@@ -319,13 +320,22 @@ class ReconcileTests(DbCase):
         rows = self.rows(claude_remote.SOURCE)
         self.assertNotIn("session_01FIXTURE0000000000000004", rows)
         self.assertEqual(dropped["dropped_archived"], 1)
-        self.assertEqual(len(rows), 5)
+        self.assertEqual(len(rows), 3)
 
     def test_archived_session_never_seen_is_not_inserted(self):
         self.write_page()
         self.assertNotIn(
             "session_01FIXTURE0000000000000004", self.rows(claude_remote.SOURCE)
         )
+
+    def test_remote_control_sessions_are_not_written(self):
+        self.write_page()
+        rows = self.rows(claude_remote.SOURCE)
+        self.assertEqual(sorted(k[-1] for k in rows), ["1", "2", "6"])
+        for _, _, raw in rows.values():
+            self.assertEqual(raw["environment_kind"], "anthropic_cloud")
+        for bridge in ("3", "5"):
+            self.assertNotIn(f"session_01FIXTURE000000000000000{bridge}", rows)
 
     def test_absence_from_the_page_is_not_archival(self):
         self.put("session_offpage", "2026-10-20T00:00:00Z")
@@ -407,8 +417,10 @@ class SyncStepTests(DbCase):
         )  # fmt: skip
         self.assertEqual((row["kind"], row["outcome"]), ("claude_remote", "ok"))
         counts = json.loads(row["counts"])
-        self.assertEqual((counts["page"], counts["truncated"]), (6, 1))
-        self.assertEqual(len(self.rows(claude_remote.SOURCE)), 5)
+        self.assertEqual(
+            (counts["page"], counts["kept"], counts["truncated"]), (6, 4, 1)
+        )
+        self.assertEqual(len(self.rows(claude_remote.SOURCE)), 3)
 
     def test_refused_read_fails_the_run_and_keeps_the_last_rows(self):
         cfg = make_config(remote=True)
@@ -425,7 +437,7 @@ class SyncStepTests(DbCase):
         )  # fmt: skip
         self.assertEqual(row["outcome"], "failed")
         self.assertIn("started_by_session", row["error"])
-        self.assertEqual(len(self.rows(claude_remote.SOURCE)), 5)
+        self.assertEqual(len(self.rows(claude_remote.SOURCE)), 3)
 
     def test_auth_failure_carries_the_login_hint(self):
         row = sync.run_claude_remote(
@@ -535,7 +547,7 @@ class EndToEndTests(unittest.TestCase):
                 "SELECT source, COUNT(*) FROM issues WHERE kind = 'session'"
                 " GROUP BY source ORDER BY source"
             ),
-            [("claude-hook", 1), ("claude-remote", 5)],
+            [("claude-hook", 1), ("claude-remote", 3)],
         )
         self.assertEqual(
             self.query("SELECT status_category FROM issues WHERE key = 'hook-1'"),

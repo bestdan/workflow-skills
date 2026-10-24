@@ -2,13 +2,16 @@
 
 OFF BY DEFAULT. It runs only with `[claude_remote] enabled = true`. Session
 state comes from the session-state hook (sessions.py); this source adds the
-sessions the hook cannot see, cloud-only ones above all, with a coarse status.
+cloud-hosted sessions the hook cannot see, with a coarse status. It keeps only
+`environment_kind = anthropic_cloud` (KEPT_ENVIRONMENTS): a Remote Control
+session is the hook's to report, on any machine that has opted in.
 The route depends on a request Claude Code marks `@internal`: it can change or
 disappear in any CLI release, and using it is a deliberate choice.
 
 THE ROUTE, from dev_docs/research/2026-10-23-claude-remote-session-read.md
 (route 5): start `claude -p --input-format stream-json --output-format
-stream-json --verbose`, write an `initialize` control request and then
+stream-json --verbose` (plus `--no-session-persistence`, which the research
+run did not use), write an `initialize` control request and then
 `list_cloud_sessions` on its stdin, and read the `control_response` whose
 `request_id` is the second one's. The CLI reads with its own sign-in, so this
 module holds no credential. The child inherits this process's environment
@@ -22,7 +25,7 @@ flag and no cursor, covering about 20 days on the owner's account, and not
 ordered by `updated_at`. So every read is a full snapshot: there is no
 "updated since the last run" and no paging back further.
 
-RECONCILE. Each run upserts the page's sessions and drops the ones the page
+RECONCILE. Each run upserts the page's kept sessions and drops the ones the page
 reports `archived`. A session missing from the page is NOT archived: it may
 have fallen off a truncated page. Its row stays, with `synced_at` left at the
 last run that saw it, and is dropped only once no run has seen it for
@@ -60,10 +63,16 @@ RUN_KIND = "claude_remote"
 RETAIN_DAYS = 30
 DEFAULT_TIMEOUT = 45.0  # the CLI's own bound is 25 s, plus its startup
 
+# --no-session-persistence keeps each read from leaving a session file behind;
+# a sync runs one read every few minutes.
 ARGV = (
     "-p", "--input-format", "stream-json", "--output-format", "stream-json",
-    "--verbose",
+    "--verbose", "--no-session-persistence",
 )  # fmt: skip
+# Only cloud-hosted sessions are kept. Remote Control (`bridge`) sessions run
+# on a machine whose session-state hook already gives a fuller row, and the two
+# sources' ids cannot be joined, so keeping both would show one session twice.
+KEPT_ENVIRONMENTS = ("anthropic_cloud",)
 LIST_ID = "list"
 REQUESTS = (
     {"type": "control_request", "request_id": "init",
@@ -207,13 +216,15 @@ def fetch(config: dict[str, Any], runner: Runner = run) -> dict[str, Any]:
     sessions, truncated = list_sessions(
         cr["claude_path"], runner, float(cr["timeout_seconds"])
     )
-    rows = [r for r in (to_row(s) for s in sessions) if r is not None]
+    page = [r for r in (to_row(s) for s in sessions) if r is not None]
+    rows = [r for r in page if r["environment_kind"] in KEPT_ENVIRONMENTS]
     statuses = Counter(r["status"] or "unknown" for r in rows)
     return {
         "rows": rows,
         "truncated": truncated,
         "counts": {
-            "page": len(rows),
+            "page": len(page),
+            "kept": len(rows),
             "truncated": int(truncated),
             "archived": statuses.get("archived", 0),
             "requires_action": statuses.get("requires_action", 0),
