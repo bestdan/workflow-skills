@@ -10,7 +10,7 @@ Four suggestions for the task dashboard
 view ([`2026-10-23-fleet-view.md`](2026-10-23-fleet-view.md)), taken from
 [adbutler007/workdesk](https://github.com/adbutler007/workdesk) at commit
 `f33e7d3`. Two of them change what the fleet view can know about a session; the
-other two are small fixes for reporting a missing item as if it were gone. They
+other two are small fixes that stop stale or missing data from looking current. They
 are ranked by value for the cost, and each is meant to be planned separately.
 
 workdesk is a single-user, always-on localhost board over one person's Claude
@@ -115,12 +115,16 @@ an `idle_prompt` notification.
 **Where it lands.**
 
 - `scripts/session-state-hook.py`: on `Stop` only, read the last ~64 KiB of
-  the transcript and write one boolean, `asked`. The harness passes the path as
+  the transcript, discard the bytes before the first newline (the seek lands
+  mid-record), and write one field, `asked`: `true`, `false`, or `null` when
+  the tail cannot be parsed. Add a fixture whose tail starts mid-record. The
+  harness passes the path as
   `transcript_path`; that is documented for hook input, but this hook has not
   tested it. No text is written, which keeps the hook's "records no prompt
   text" rule. This is hook format `v: 2`, and the collector's `HOOK_KEYS` must
   accept it.
-- Needs you's query: a `Stop` with `asked = true`, and no prompt after it.
+- Needs you's query: a `Stop` with `asked = true`, and no prompt after it. A
+  `null` is not listed.
 - If suggestion 1 lands first, a fresh registry status of `waiting` may answer
   part of this without touching the hook. Check what `waiting` means before
   building both.
@@ -152,10 +156,13 @@ tailnet link has died. That breaks the dashboard design's rule that the
 dashboard "never presents stale data as current".
 
 **Where it lands.** The `JS` block in `scripts/task-dashboard/server.py`. Poll
-the existing `/status` every 30–60 s. Update the age text from `age_seconds`,
-apply the `stale` class from `stale`, and show a "dashboard not responding"
-alert when polls fail past a limit. `/status` already returns all of this, so
-no server change is needed.
+the existing `/status` every 30–60 s, each request with an `AbortController`
+timeout so a hung server counts as a failure rather than a pending request.
+Record the browser's own time of the last successful poll. Advance the age
+text locally, as `age_seconds` plus the time since that success, apply the
+`stale` class from `stale`, and show a "dashboard not responding" alert once
+the last success is older than a threshold. `/status` already returns
+`age_seconds` and `stale`, so no server change is needed.
 
 **Risks.** Few. The poll should back off while the tab is hidden
 (`document.visibilityState`), so a phone does not wake to poll.
@@ -171,7 +178,8 @@ a pass failed. Its Health panel shows discovery freshness.
 **Why it helps us (verified).** In `snapshot.py`, `worktrees()` skips a repo
 whose `git worktree list` exits nonzero (`continue`). `snapshot_adapter.ingest`
 then deletes and rewrites all of that host's rows. So a transient git failure,
-such as a lock held during a fetch, removes that repo's worktrees from the
+such as `git worktree list` running past snapshot.py's 20 s `GIT_TIMEOUT`
+(the runner returns rc 124), removes that repo's worktrees from the
 mirror until the next snapshot. Stale's "worktrees whose PR landed" loses them,
 and a missing row reads as "cleaned up". Separately, `machines.last_snapshot_at`
 is stored but not rendered anywhere. A laptop asleep for two days looks the
@@ -179,8 +187,9 @@ same as one with nothing open.
 
 **Where it lands.**
 
-- `snapshot.py`: a `scan_errors` list (repo and step, no output text), in the
-  same `schema: 2` bump as suggestion 1.
+- `snapshot.py`: a `scan_errors` list (repo and step, no output text). It
+  needs a `schema: 2` bump of its own; whichever of suggestions 1 and 4 lands
+  second adds its section to the bump the first one made.
 - `snapshot_adapter.py`: keep the previous rows for a repo named in
   `scan_errors` instead of deleting them.
 - The fleet header or the Health panel: one "lindev 4m · MacBook 2d" line
