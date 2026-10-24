@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.114.0] - 2026-10-24
+
+### Features
+
+- add the LaunchAgent install and skill [#1093] (#1132) (4cf2262)
+
 ## [2.113.0] - 2026-10-24
 
 ### Features
