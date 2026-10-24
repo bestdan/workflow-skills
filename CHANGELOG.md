@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.115.0] - 2026-10-24
+
+### Features
+
+- add Since you were away and fleet Stale [#1106] (#1141) (51086b3)
+
 ## [2.114.0] - 2026-10-24
 
 ### Features
