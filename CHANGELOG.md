@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.111.1] - 2026-10-24
+
+### Fixes
+
+- parse real acli output and add pseudonymised captures [#1087] (#1134) (a7a5149)
+
 ## [2.111.0] - 2026-10-24
 
 ### Features
