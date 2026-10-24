@@ -281,6 +281,7 @@ class ApprovalTests(NeedsCase):
             "Which of the three designs do you prefer?",
             "Open the PR?\nBut first: what should the retry budget be?",
             "Done.",
+            "Answered the yes/no form.",
         ):
             self.assertFalse(needs.approval_brief(not_one), not_one)
 
@@ -318,6 +319,15 @@ class FocusTests(NeedsCase):
         overlay.set_focus(self.conn, ("github", issue_url(950)), NOW)
         page = self.page()
         self.assertEqual(keys(section(page, "needs")), [issue_url(950)])
+        # A PR titled [#950], and one on its claim branch task-950.
+        titled = {**pr(1301, "2026-10-24T01:00:00Z", head="bestdan/other"),
+                  "title": "fix: x [#950]"}  # fmt: skip
+        branch = pr(1302, "2026-10-24T02:00:00Z", head="bestdan/task-950")
+        github_fleet.write(self.conn, GITHUB_ROWS + [titled, branch], NOW)
+        self.assertEqual(
+            keys(section(self.page(), "needs")),
+            [issue_url(950), pr_url(1301), pr_url(1302)],
+        )
         overlay.set_focus(self.conn, ("claude-hook", "s-pr"), NOW)
         self.assertEqual(keys(section(self.page(), "needs")), [pr_url(1201), "s-pr"])
 

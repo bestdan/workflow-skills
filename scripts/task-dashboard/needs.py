@@ -97,7 +97,7 @@ class Need:
 # "Shall I merge it?", "(y/n)". A question offering a choice ("A or B?") is a
 # decision, not an approval. This is not snapshot.approval_shaped, which
 # classifies the owner's reply ("y", "go ahead"), not the agent's question.
-_YN = re.compile(r"\(?\[?\b(y/n|yes/no)\b\]?\)?", re.IGNORECASE)
+_YN = re.compile(r"\(?\[?\b(y/n|yes/no)\b\]?\)?\s*\??\s*$", re.IGNORECASE)
 _ROUTINE = re.compile(
     r"^(?:ok(?:ay)?,?\s+)?(?:shall i|should i|ok(?:ay)? to|want me to|do you want me"
     r" to|may i|can i|ready to|go ahead|proceed|commit|push|open (?:the|a) pr|merge"
@@ -374,7 +374,11 @@ def _body(n: Need, now: datetime, ov: overlay.Overlay) -> str:
     opens = (
         f"open {what.get(n.kind, 'it')}" if n.url != CODE_URL else "open claude.ai/code"
     )
-    link = f'<a href="{_e(n.url)}">{opens}</a>' if n.url else ""
+    link = (
+        f'<a href="{_e(n.url)}">{opens}</a>'
+        if n.url and n.url.startswith("https://")
+        else ""
+    )
     act = " · ".join(x for x in (link, n.hint) if x)
     act = f'<div class="act">→ {act}</div>' if act else ""
     return brief + act + overlay.card_controls(n.item, ov, now, reorder=False)
