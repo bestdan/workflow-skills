@@ -27,6 +27,7 @@ import config  # type: ignore[import-not-found]  # noqa: E402
 import db  # type: ignore[import-not-found]  # noqa: E402
 import gauges  # type: ignore[import-not-found]  # noqa: E402
 import github_fleet  # type: ignore[import-not-found]  # noqa: E402
+import include  # type: ignore[import-not-found]  # noqa: E402
 import needs  # type: ignore[import-not-found]  # noqa: E402
 import overlay  # type: ignore[import-not-found]  # noqa: E402
 import sessions  # type: ignore[import-not-found]  # noqa: E402
@@ -235,6 +236,18 @@ class AskedTests(NeedsCase):
         self.assertIn("asked (heuristic)", card.group(0))
         # A question is a decision, never batched with the plain approvals.
         self.assertNotIn("s-turn", keys(section(page, "approvals")))
+
+    def test_the_include_filter_and_ignore_reach_an_asked_session(self):
+        seed(self.conn)
+        no_sessions = include.Include("needs", frozenset({"tasks", "prs"}), "url")
+        page = needs.render(self.conn, fleet_cfg(), NOW, no_sessions)
+        self.assertNotIn('data-key="s-turn"', page)
+        everything = include.Include("needs", include.ALL, "url")
+        page = needs.render(self.conn, fleet_cfg(), NOW, everything)
+        self.assertIn("s-turn", keys(section(page, "needs")))
+        overlay.ignore(self.conn, ("claude-hook", "s-turn"), NOW)
+        page = needs.render(self.conn, fleet_cfg(), NOW, everything)
+        self.assertNotIn('data-key="s-turn"', page)
 
     def test_a_permission_prompt_after_an_asked_stop_is_an_approval(self):
         # A Stop hook can continue the turn, so a permission prompt can follow

@@ -368,7 +368,8 @@ class FleetViewTests(unittest.TestCase):
         self.assertNotIn("s-done", prs)
         self.assertNotIn(issue, prs)
         self.assertEqual(
-            sorted(fleet_fx.keys(self.away("sessions"))), sorted(["s-done", "s-wait"])
+            sorted(fleet_fx.keys(self.away("sessions"))),
+            sorted(["s-asked", "s-askperm", "s-done", "s-wait"]),
         )
         self.assertEqual(fleet_fx.keys(self.away("tasks")), [issue])
         self.assertEqual(fleet_fx.keys(self.away("other")), [fleet_fx.DESIGN_URL])

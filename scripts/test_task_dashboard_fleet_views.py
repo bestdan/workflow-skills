@@ -295,6 +295,16 @@ class AwayTests(FleetCase):
         self.assertNotIn(pr_url(900), waiting)
         self.assertNotIn(OTHER_DESIGN, waiting)
 
+    def test_the_include_filter_reaches_an_asked_session(self):
+        seed(self.conn)
+        cfg = fleet_cfg()
+        off = include.Include("away", frozenset({"tasks", "prs", "other"}), "url")
+        page = fleet_views.render_away(self.conn, cfg, NOW, off)
+        self.assertNotIn('data-key="s-asked"', page)
+        on = include.Include("away", include.ALL, "url")
+        page = fleet_views.render_away(self.conn, cfg, NOW, on)
+        self.assertIn("s-asked", keys(section(page, "waiting")))
+
     def test_rendering_does_not_move_the_visit(self):
         seed(self.conn)
         before = overlay.load(self.conn).last_visit

@@ -9,10 +9,11 @@ SINCE YOU WERE AWAY (`/away`) lists what changed after the overlay's
 `last_visit`: my PRs merged or closed, sessions whose last turn ended, and what
 newly waits on me (a session's notification or a turn that ended in a question,
 labelled "asked (heuristic)", an awaiting PR, an issue needing a human, a newly
-proposed design). A turn that asked is never listed as finished. Loading the page records nothing. Only its
-"Mark as read" button does, through overlay's `visit` action with the page's
-render time, so a phone preview does not swallow the digest and an item that
-arrives while the page is open is still new next time. With no visit recorded,
+proposed design). A turn that asked is never listed as finished. Loading the
+page records nothing. Only its "Mark as read" button does, through overlay's
+`visit` action with the page's render time, so a phone preview does not
+swallow the digest and an item that arrives while the page is open is still
+new next time. With no visit recorded,
 the page covers github_fleet's closed-PR window. When the overlay's focus item
 is a design, the items in that design's repo come first, in a section of their
 own: the weekend design block opens there.
@@ -323,7 +324,7 @@ def away_items(f: Fleet, since: datetime, now: datetime) -> list[AwayItem]:
                 f"{_session_where(s)} · asked (heuristic) {_e(ago(s.last, now))}",
                 key=s.session_id,
             )
-            out.append(AwayItem("waiting", s.last, s.repo, card))
+            out.append(AwayItem("waiting", s.last, s.repo, card, "session"))
         elif s.last_event == "Stop":
             card = _card(
                 _e(f"session {s.session_id}"),
