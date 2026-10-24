@@ -589,7 +589,7 @@ def run_fleet(
     failed_keys: list[str] = []
     outcome, error = "ok", None
     try:
-        plan = github_fleet.fetch(config, runner)
+        plan = github_fleet.fetch(config, runner, now=now)
         failed_keys = list(plan["failed"])
         counts = {
             **plan["counts"],

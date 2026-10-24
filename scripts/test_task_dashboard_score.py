@@ -33,6 +33,7 @@ sys.path.insert(0, str(ROOT / "scripts" / "task-dashboard"))
 # modules themselves are type-checked in their own group (scripts/typecheck.sh).
 import config  # type: ignore[import-not-found]  # noqa: E402
 import db  # type: ignore[import-not-found]  # noqa: E402
+import fleet_views  # type: ignore[import-not-found]  # noqa: E402
 import score  # type: ignore[import-not-found]  # noqa: E402
 import server  # type: ignore[import-not-found]  # noqa: E402
 import views  # type: ignore[import-not-found]  # noqa: E402
@@ -480,12 +481,19 @@ class RoutesTest(unittest.TestCase):
         return out
 
     def test_every_view_renders_with_tabs_and_terms(self):
+        # A Jira instance: the fleet-only tabs are hidden, and their pages are
+        # covered by test_task_dashboard_fleet_views.py.
         for path in views.ROUTES:
+            if path in fleet_views.ONLY:
+                continue
             status, page = self.get(path)
             self.assertEqual(status, 200, path)
             self.assertIn(f'href="{path}" aria-current=page', page, path)
             for href, _ in views.TABS:
-                self.assertIn(f'href="{href}"', page, path)
+                if href in fleet_views.ONLY:
+                    self.assertNotIn(f'href="{href}"', page, path)
+                else:
+                    self.assertIn(f'href="{href}"', page, path)
             cards = re.findall(r'<div class="card" data-key="([^"]+)"', page)
             if path != "/epics":
                 self.assertTrue(cards, path)

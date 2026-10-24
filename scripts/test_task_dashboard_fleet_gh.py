@@ -545,6 +545,60 @@ class DesignTests(unittest.TestCase):
             fleet.proposed_designs(["../etc"], Router([]))
 
 
+class ClosedTests(unittest.TestCase):
+    def closed_page(self, unmerge=()):
+        page = fixture("fleet_closed_search.json")
+        for node in page["data"]["search"]["nodes"]:
+            if node["number"] in unmerge:
+                node["mergedAt"] = None
+                node["state"] = "CLOSED"
+        return page
+
+    def test_search_is_my_closed_prs_in_the_window(self):
+        runner = Router([(lambda a: True, ok(self.closed_page()))])
+        fleet.recently_closed(["bestdan", "acme"], NOW, runner)
+        self.assertEqual(
+            [search_q(a) for a in runner.calls],
+            [
+                f"is:pr is:closed author:@me closed:>=2026-10-09 org:{o}"
+                for o in ("bestdan", "acme")
+            ],
+        )
+
+    def test_rows_carry_merged_and_close_time(self):
+        runner = Router([(lambda a: True, ok(self.closed_page(unmerge={1134})))])
+        rows = {r["number"]: r for r in fleet.recently_closed(["bestdan"], NOW, runner)}
+        self.assertEqual(set(rows), {1131, 1134, 1135})
+        self.assertEqual(rows[1135]["kind"], "closed_pr")
+        self.assertTrue(rows[1135]["merged"])
+        self.assertEqual(rows[1135]["head_ref"], "bestdan/task-1133")
+        self.assertEqual(rows[1135]["closed_at"], "2026-10-24T02:31:10Z")
+        self.assertEqual(rows[1135]["status"], "merged")
+        self.assertFalse(rows[1134]["merged"])
+        self.assertEqual(rows[1134]["status"], "closed")
+
+    def test_an_open_pr_wins_over_a_closed_row_for_the_same_url(self):
+        page = self.closed_page()
+        page["data"]["search"]["nodes"][0]["url"] = review_page()["data"]["search"][
+            "nodes"
+        ][0]["url"]
+        runner = WriteTests().full_runner()
+        runner.rules.insert(0, (lambda a: "is:closed" in search_q(a), ok(page)))
+        plan = fleet.fetch(
+            {"github": {"orgs": ["bestdan"], "design_repos": []}}, runner, now=NOW
+        )
+        urls = [r["url"] for r in plan["rows"]]
+        self.assertEqual(len(urls), len(set(urls)))
+        self.assertEqual(sum(1 for r in plan["rows"] if r["kind"] == "closed_pr"), 2)
+
+    def test_closed_rows_do_not_count_as_open(self):
+        rows = [
+            {"kind": "closed_pr", "key": "u", "title": "t", "in_queue": True},
+            {"kind": "pr", "key": "v", "title": "t", "in_queue": False},
+        ]
+        self.assertEqual(fleet.queue_counts(rows), {"queue": 0, "awaiting": 1})
+
+
 class WriteTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -562,6 +616,10 @@ class WriteTests(unittest.TestCase):
         return designs_router(
             extra=queue_rules(ci=ci)
             + [
+                (
+                    lambda a: "is:closed" in search_q(a),
+                    ok(fixture("fleet_closed_search.json")),
+                ),
                 (lambda a: "author:@me" in search_q(a), ok(review_page())),
                 (lambda a: "review-requested:@me" in search_q(a), ok(review_page([]))),
                 (
@@ -581,7 +639,7 @@ class WriteTests(unittest.TestCase):
                 "SELECT kind, COUNT(*) FROM issues WHERE source = 'github' GROUP BY kind"
             ).fetchall()
         )
-        self.assertEqual(kinds, {"pr": 4, "issue": 3, "design": 1})
+        self.assertEqual(kinds, {"pr": 4, "issue": 3, "design": 1, "closed_pr": 3})
         raw = json.loads(
             self.conn.execute(
                 "SELECT raw_json FROM issues WHERE kind = 'pr' LIMIT 1"

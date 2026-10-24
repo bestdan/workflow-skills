@@ -51,7 +51,9 @@ V1_TABLES = ("pins", "order", "snoozes", "notes")
 
 KIND_TAGS = ("side-quest", "substantial")
 
-ACTIONS = ("pin", "unpin", "order", "snooze", "note", "tag", "focus", "unfocus")
+ACTIONS = (
+    "pin", "unpin", "order", "snooze", "note", "tag", "focus", "unfocus", "visit",
+)  # fmt: skip
 
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
@@ -264,11 +266,32 @@ def clear_focus(conn: sqlite3.Connection, item: Item) -> None:
 
 
 def set_last_visit(conn: sqlite3.Connection, now: "datetime | None" = None) -> None:
-    """Record now as the last visit; the Since you were away view calls it."""
+    """Record `now` as the last visit, unless a later one is already recorded.
+
+    Since you were away's "Mark as read" calls it, through the `visit` action,
+    with the time the page was rendered. A tab left open on an older render
+    therefore cannot move the visit back and re-show what was already read.
+    """
     with conn:
         conn.execute(
-            "INSERT OR REPLACE INTO last_visit (id, at) VALUES (1, ?)", (_now(now),)
+            "INSERT INTO last_visit (id, at) VALUES (1, ?) ON CONFLICT (id)"
+            " DO UPDATE SET at = excluded.at WHERE excluded.at > at",
+            (_now(now),),
         )
+
+
+def _visit_at(value: str, now: "datetime | None") -> datetime:
+    """The `visit` action's `at`: a page's render time, never past `now`."""
+    now = now or datetime.now(timezone.utc)
+    if not value:
+        return now
+    if not _STAMP.fullmatch(value):
+        raise OverlayError(f"at must be YYYY-MM-DDTHH:MM:SSZ, got {value!r}")
+    try:
+        at = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        raise OverlayError(f"at is not a real time: {value!r}") from None
+    return min(at.replace(tzinfo=timezone.utc), now)
 
 
 def apply(
@@ -282,9 +305,14 @@ def apply(
     Fields: `source` (default `jira`) and `key`; `order` repeats `key`, one per
     pinned item in the new order; `snooze` takes `until`, `note` takes `text`,
     `tag` takes `tag` (empty clears) and an optional `text` for the note.
+    `visit` takes no key, only `at`: the render time of the page whose
+    "Mark as read" was pressed (absent means now).
     """
     if action not in ACTIONS:
         raise OverlayError(f"unknown overlay action: {action!r}")
+    if action == "visit":
+        set_last_visit(conn, _visit_at((form.get("at") or [""])[0].strip(), now))
+        return
     source = _ident((form.get("source") or ["jira"])[0], "source")
     keys = [_ident(k, "key") for k in form.get("key") or []]
     if action == "order":
@@ -575,6 +603,7 @@ JS = """
     if (act === 'pin' || act === 'unpin' || act === 'focus' || act === 'unfocus') {
       post(act, it);
     }
+    else if (act === 'visit') { post('visit', [['at', b.dataset.at]]); }
     else if (act === 'note') {
       post('note', it.concat([['text', b.closest('details').querySelector('textarea').value]]));
     } else if (act === 'up' || act === 'down') {
