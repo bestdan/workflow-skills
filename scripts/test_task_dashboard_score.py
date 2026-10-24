@@ -471,6 +471,14 @@ class ViewsTest(unittest.TestCase):
         self.assertIn('<div class="epic">◆ Checkout &lt;rewrite&gt;</div>', one)
         self.assertNotIn('class="epic"', self.card(page, "ABC-2"))
 
+    def test_an_untitled_card_shows_its_ref_once(self):
+        html = views.card_title("https://x.invalid/browse/E-9", None, "E-9")
+        self.assertEqual(html.count("E-9</"), 1)
+        self.assertNotIn('class="ref"', html)
+        self.assertIn(
+            '<span class="ref">(E-9)</span>', views.card_title("u", "t", "E-9")
+        )
+
     def test_status_icon_by_category_and_blocked(self):
         page = views.render("/now", self.conn, CFG, NOW)
         # ABC-1 is blocked by ABC-8, which is open.

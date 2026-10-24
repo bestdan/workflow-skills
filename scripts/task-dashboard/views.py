@@ -409,12 +409,15 @@ def status_icon(
 
 
 def card_title(href: str, title: "str | None", ref: str) -> str:
-    """The title as the link, with the key or PR number as a muted suffix."""
-    return (
+    """The title as the link, with the key or PR number as a muted suffix.
+
+    With no title the ref is the link text, so the suffix is left off.
+    """
+    link = (
         f'<a class="title" href="{_e(href)}" target="_blank" rel="noopener">'
         f"{_e(title or ref)}</a>"
-        f' <span class="ref">({_e(ref)})</span>'
     )
+    return link + f' <span class="ref">({_e(ref)})</span>' if title else link
 
 
 def epic_name(issue: dict[str, Any]) -> "str | None":

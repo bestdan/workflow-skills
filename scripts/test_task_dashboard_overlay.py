@@ -822,6 +822,16 @@ class RouteTests(server_harness.ServerCase):
         self.assertIn("snoozed until 2999-01-01", page)
         self.assertIn('class="card snoozed" data-source="jira" data-key="ABC-6"', page)
 
+    def test_unsnooze_clears_through_the_route(self):
+        # Unsnooze posts an empty `until`, which parse_qs drops from the form.
+        self.assertEqual(
+            self.post("snooze", [("key", "ABC-6"), ("until", "2999-01-01")])[0], 200
+        )
+        self.assertEqual(self.post("snooze", [("key", "ABC-6"), ("until", "")])[0], 200)
+        page = self.request("GET", "/board")[1]
+        self.assertNotIn("snoozed until 2999-01-01", page)
+        self.assertEqual(self.overlay_rows()["snoozes"], [])
+
     def test_bad_input_is_400_and_writes_nothing(self):
         for action, fields in (
             ("snooze", [("key", "ABC-1"), ("until", "tomorrow")]),

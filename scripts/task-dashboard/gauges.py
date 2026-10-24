@@ -10,10 +10,11 @@ own cap). Neither is enforced; the gauges only show them.
   (a merged PR, a removed worktree) is kept, as every overlay row is, but no
   longer counts, and neither does an ignored one (overlay.hidden).
 - **Review queue** is github_fleet's `queue` count over the mirrored
-  `source = 'github'` PR rows that are not ignored, read by `review_queue()`,
-  which `/status` and Needs you use too so all three agree. Before the fleet sync step's first successful
-  run, or while `github.fleet` is off, it is unknown and shows "—"; after one,
-  a run that found nothing reads 0.
+  `source = 'github'` PR rows that are not ignored. `review_queue()` counts
+  `review_queue_rows()`, which Needs you lists, and `/status` reads
+  `review_queue()`, so the gauge, `/status` and Needs you agree. Before the
+  fleet sync step's first successful run, or while `github.fleet` is off, it
+  is unknown and shows "—"; after one, a run that found nothing reads 0.
 - **Focus** is the overlay's one focus item, linked when its key gives a URL.
   A focus that is ignored, or under an ignored item, is not shown
   (overlay.load).
