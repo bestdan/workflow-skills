@@ -41,6 +41,7 @@ import json
 import math
 import sqlite3
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -161,28 +162,36 @@ class GithubSource:
         self, config: dict[str, Any], runner: github_gh.Runner = github_gh.run
     ) -> None:
         self.orgs = list(config["github"]["orgs"])
+        self.concurrency = int(config["sync"]["view_concurrency"])
         self.runner = runner
+
+    def _ci(self, url: str) -> "str | None":
+        try:
+            return github_gh.ci_state(url, self.runner)
+        except github_gh.AuthError:
+            raise
+        except github_gh.GhError:
+            return None
 
     def prs(self, allowed_projects: "set[str]") -> "tuple[list[dict], list[str]]":
         """Rows for my PRs and reviews requested of me, and URLs whose CI failed.
 
-        A PR whose CI lookup fails keeps a NULL `ci_state` and is reported, not
-        fatal: one flaky `pr view` should not fail the whole run. An AuthError
-        still raises.
+        CI is one `pr view` per PR, so the lookups fan out over a thread pool;
+        serially they dominated sync time. A PR whose CI lookup fails keeps a
+        NULL `ci_state` and is reported, not fatal: one flaky `pr view` should
+        not fail the whole run. An AuthError still raises.
         """
         rows: dict[str, dict] = {}
         for row in github_gh.my_prs(self.orgs, self.runner):
             rows.setdefault(row["url"], row)
         for row in github_gh.review_requested(self.orgs, self.runner):
             rows.setdefault(row["url"], row)
+        with ThreadPoolExecutor(max_workers=max(1, self.concurrency)) as pool:
+            states = list(pool.map(self._ci, rows))
         failed: list[str] = []
-        for url, row in rows.items():
-            try:
-                row["ci_state"] = github_gh.ci_state(url, self.runner)
-            except github_gh.AuthError:
-                raise
-            except github_gh.GhError:
-                row["ci_state"] = None
+        for (url, row), state in zip(rows.items(), states):
+            row["ci_state"] = state
+            if state is None:
                 failed.append(url)
             text = f"{row['title']} {row.get('head_ref') or ''}"
             keys = github_gh.jira_keys(text, allowed_projects)

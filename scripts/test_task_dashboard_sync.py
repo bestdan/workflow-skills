@@ -18,6 +18,8 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -140,8 +142,26 @@ class FakeGh:
         self.ci = ci
         self.error = None
         self.ci_fail = set()
+        self.ci_auth_fail = False
+        self.ci_delay = 0.0
+        self.in_flight = 0
+        self.max_in_flight = 0
+        self.lock = threading.Lock()
 
     def __call__(self, argv, timeout):
+        if argv[:3] == ["gh", "pr", "view"]:
+            with self.lock:
+                self.in_flight += 1
+                self.max_in_flight = max(self.max_in_flight, self.in_flight)
+            try:
+                time.sleep(self.ci_delay)
+                return self._answer(argv)
+            finally:
+                with self.lock:
+                    self.in_flight -= 1
+        return self._answer(argv)
+
+    def _answer(self, argv):
         if self.error:
             return 1, "", self.error
         if argv[:3] == ["gh", "api", "graphql"]:
@@ -157,6 +177,8 @@ class FakeGh:
             }
             return 0, json.dumps(page), ""
         if argv[:3] == ["gh", "pr", "view"]:
+            if self.ci_auth_fail:
+                return 1, "", "HTTP 401: Bad credentials"
             if any(a in self.ci_fail for a in argv):
                 return 1, "", "HTTP 502: bad gateway"
             rollup = [
@@ -555,6 +577,26 @@ class GithubTests(SyncCase):
         )
         self.assertEqual(json.loads(row["failed_keys"]), [bad])
         self.assertEqual(json.loads(row["counts"])["ci_failed"], 1)
+
+    def test_ci_lookups_run_concurrently(self):
+        gh = FakeGh(authored=[pr_node(n, f"pr {n}", f"b{n}") for n in range(1, 9)])
+        gh.ci_delay = 0.05
+        cfg = make_config(enabled=True)
+        cfg["sync"]["view_concurrency"] = 3
+        row = self.run_sync("full", FakeAcli(["DEMO-1"]), gh=gh, cfg=cfg)
+        self.assertEqual(row["outcome"], "ok")
+        self.assertGreater(gh.max_in_flight, 1)
+        self.assertLessEqual(gh.max_in_flight, 3)
+        ci = {r[0] for r in self.conn.execute("SELECT ci_state FROM prs")}
+        self.assertEqual(ci, {"success"})
+
+    def test_ci_auth_error_fails_the_run(self):
+        gh = FakeGh(authored=[pr_node(1, "a", "a"), pr_node(2, "b", "b")])
+        gh.ci_auth_fail = True
+        row = self.run_sync(
+            "full", FakeAcli(["DEMO-1"]), gh=gh, cfg=make_config(enabled=True)
+        )
+        self.assertEqual(row["outcome"], "auth_failed")
 
     def test_disabled_github_leaves_prs_alone(self):
         self.conn.execute(
