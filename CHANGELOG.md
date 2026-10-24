@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.113.0] - 2026-10-24
+
+### Features
+
+- run the GitHub fleet fetch in the scheduled sync [#1133] (#1135) (76c58fc)
+
 ## [2.112.0] - 2026-10-24
 
 ### Features
