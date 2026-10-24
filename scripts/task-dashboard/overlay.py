@@ -21,17 +21,18 @@ import math
 import re
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import db
 import score
 
 EXPORT_FORMAT = "task-dashboard-overlay"
-# 2 added kind_tags, focus and last_visit. A version 1 file still imports, with
-# those empty, so a backup taken before the upgrade can be restored.
-EXPORT_VERSION = 2
-IMPORT_VERSIONS = (1, 2)
+# 2 added kind_tags, focus and last_visit; 3 added ignores. An older file still
+# imports, with the later tables empty, so a backup taken before an upgrade can
+# be restored.
+EXPORT_VERSION = 3
+IMPORT_VERSIONS = (1, 2, 3)
 MAX_KEY = 512
 MAX_BODY = 256 * 1024  # a POST body; room for a long note, percent-encoded
 MAX_NOTE = 20_000
@@ -45,14 +46,19 @@ COLUMNS: dict[str, tuple[str, ...]] = {
     "notes": ("body", "updated_at"),
     "kind_tags": ("tag", "tagged_at"),
     "focus": ("set_at",),
+    "ignores": ("ignored_at",),
 }
 assert tuple(COLUMNS) == db.OVERLAY_TABLES
 V1_TABLES = ("pins", "order", "snoozes", "notes")
+V2_TABLES = (*V1_TABLES, "kind_tags", "focus")
 
 KIND_TAGS = ("side-quest", "substantial")
+# The Snooze button hides a card for this many days; Unsnooze clears it.
+SNOOZE_DAYS = 7
 
 ACTIONS = (
     "pin", "unpin", "order", "snooze", "note", "tag", "focus", "unfocus", "visit",
+    "ignore", "unignore",
 )  # fmt: skip
 
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
@@ -265,6 +271,21 @@ def clear_focus(conn: sqlite3.Connection, item: Item) -> None:
         conn.execute("DELETE FROM focus WHERE source = ? AND item_key = ?", item)
 
 
+def ignore(conn: sqlite3.Connection, item: Item, now: "datetime | None" = None) -> None:
+    """Mark an item as not mine; ignoring an epic hides its children too."""
+    with conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO ignores (source, item_key, ignored_at)"
+            " VALUES (?, ?, ?)",
+            (*item, _now(now)),
+        )
+
+
+def unignore(conn: sqlite3.Connection, item: Item) -> None:
+    with conn:
+        conn.execute("DELETE FROM ignores WHERE source = ? AND item_key = ?", item)
+
+
 def set_last_visit(conn: sqlite3.Connection, now: "datetime | None" = None) -> None:
     """Record `now` as the last visit, unless a later one is already recorded.
 
@@ -334,6 +355,10 @@ def apply(
         set_focus(conn, item, now)
     elif action == "unfocus":
         clear_focus(conn, item)
+    elif action == "ignore":
+        ignore(conn, item, now)
+    elif action == "unignore":
+        unignore(conn, item)
     else:
         note(conn, item, (form.get("text") or [""])[0], now)
 
@@ -352,6 +377,7 @@ class Overlay:
     kind_tags: "dict[Item, str]" = field(default_factory=dict)
     focus: "Item | None" = None
     last_visit: "str | None" = None
+    ignored: "set[Item]" = field(default_factory=set)
 
     def is_pinned(self, item: Item) -> bool:
         return item in self.pinned_at
@@ -389,6 +415,9 @@ def load(conn: sqlite3.Connection) -> Overlay:
         ov.kind_tags[(s, k)] = kind
     row = conn.execute("SELECT source, item_key FROM focus").fetchone()
     ov.focus = (row[0], row[1]) if row else None
+    ov.ignored = {
+        (s, k) for s, k in conn.execute("SELECT source, item_key FROM ignores")
+    }
     row = conn.execute("SELECT at FROM last_visit WHERE id = 1").fetchone()
     ov.last_visit = row[0] if row else None
     return ov
@@ -482,7 +511,7 @@ def validate(
             f"import file version {version!r} is not one of"
             f" {', '.join(map(str, IMPORT_VERSIONS))}"
         )
-    expected = V1_TABLES if version == 1 else tuple(COLUMNS)
+    expected = {1: V1_TABLES, 2: V2_TABLES}.get(version, tuple(COLUMNS))
     tables = doc.get("tables")
     if not isinstance(tables, dict) or set(tables) != set(expected):
         raise OverlayError(f"tables must be exactly: {', '.join(expected)}")
@@ -600,10 +629,14 @@ JS = """
     var b = ev.target.closest('[data-ov]');
     if (!b) return;
     var act = b.dataset.ov, it = item(b);
-    if (act === 'pin' || act === 'unpin' || act === 'focus' || act === 'unfocus') {
+    if (act === 'pin' || act === 'unpin' || act === 'focus' || act === 'unfocus'
+        || act === 'ignore' || act === 'unignore') {
       post(act, it);
     }
     else if (act === 'visit') { post('visit', [['at', b.dataset.at]]); }
+    else if (act === 'snooze') {
+      post('snooze', it.concat([['until', b.dataset.until]]));
+    }
     else if (act === 'note') {
       post('note', it.concat([['text', b.closest('details').querySelector('textarea').value]]));
     } else if (act === 'up' || act === 'down') {
@@ -617,8 +650,6 @@ JS = """
     }
   });
   document.addEventListener('change', function (ev) {
-    var d = ev.target.closest('input[data-ov=snooze]');
-    if (d) post('snooze', item(d).concat([['until', d.value]]));
     var s = ev.target.closest('select[data-ov=tag]');
     if (!s) return;
     var fields = item(s).concat([['tag', s.value]]);
@@ -640,17 +671,25 @@ def card_attrs(item: Item, ov: Overlay, now: datetime) -> str:
     return f'class="{cls}" data-source="{_e(item[0])}" data-key="{_e(item[1])}"'
 
 
-def card_controls(item: Item, ov: Overlay, now: datetime, *, reorder: bool) -> str:
-    """The pin and focus toggles, tag and snooze pickers, note editor, and
-    (pinned lane) up/down."""
+def card_controls(
+    item: Item, ov: Overlay, now: datetime, *, reorder: bool, pin: bool = True
+) -> str:
+    """The pin and focus toggles, tag picker, snooze button, note editor, and
+    (pinned lane) up/down. `pin=False` drops Pin where nothing ranks by it."""
     pinned = ov.is_pinned(item)
     focused = ov.focus == item
-    parts = [
-        f'<button type="button" data-ov="{"unpin" if pinned else "pin"}">'
-        f"{'Unpin' if pinned else 'Pin'}</button>",
-        f'<button type="button" data-ov="{"unfocus" if focused else "focus"}">'
-        f"{'Unfocus' if focused else 'Focus'}</button>",
-    ]
+    parts = []
+    if pin:
+        parts.append(
+            f'<button type="button" data-ov="{"unpin" if pinned else "pin"}"'
+            ' title="Keep it at the top of Now, the Board and Epics">'
+            f"{'Unpin' if pinned else 'Pin'}</button>"
+        )
+    parts.append(
+        f'<button type="button" data-ov="{"unfocus" if focused else "focus"}"'
+        ' title="Your one deep-work item, shown in the header">'
+        f"{'Unfocus' if focused else 'Focus'}</button>"
+    )
     current = ov.kind_tags.get(item, "")
     options = "".join(
         f'<option value="{v}"{" selected" if v == current else ""}>{label}</option>'
@@ -664,14 +703,20 @@ def card_controls(item: Item, ov: Overlay, now: datetime, *, reorder: bool) -> s
             '<button type="button" data-ov="up" title="Move up">↑</button>'
             '<button type="button" data-ov="down" title="Move down">↓</button>'
         )
-    until = ov.snoozed_until.get(item, "")
-    label = (
-        f'<span class="badge">snoozed until {_e(until)}</span>'
-        if ov.is_snoozed(item, now)
-        else "snooze"
-    )
+    if ov.is_snoozed(item, now):
+        until = ov.snoozed_until.get(item, "")
+        parts.append(
+            f'<span class="badge">snoozed until {_e(until)}</span>'
+            '<button type="button" data-ov="snooze" data-until="">Unsnooze</button>'
+        )
+    else:
+        back = (now.astimezone() + timedelta(days=SNOOZE_DAYS)).date().isoformat()
+        parts.append(
+            f'<button type="button" data-ov="snooze" data-until="{back}"'
+            f' title="Hide until {back}">Snooze {SNOOZE_DAYS}d</button>'
+        )
     parts.append(
-        f'<label>{label} <input type="date" data-ov="snooze" value="{_e(until)}"></label>'
+        '<button type="button" data-ov="ignore" title="Not mine: hide it">Ignore</button>'
     )
     body = ov.notes.get(item, "")
     parts.append(

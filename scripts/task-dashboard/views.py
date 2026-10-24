@@ -17,12 +17,14 @@ local midnight at the start of that date (`score.local_day_start`).
 """
 
 import html
+import json
 import sqlite3
 from datetime import datetime
 from typing import Any
 
 import fleet_views
 import needs
+import overlay
 import score
 
 _e = html.escape
@@ -55,6 +57,26 @@ nav a[aria-current=page] { color:var(--fg); font-weight:600; background:var(--ca
 .card .why { color:var(--muted); font-size:12px; }
 .pin { font-size:12px; color:var(--accent); font-weight:600; }
 .note { color:var(--muted); font-size:12px; }
+.card .ref { color:var(--muted); font-size:12px; font-weight:400; }
+.card .epic { color:var(--muted); font-size:12px; }
+.icon { display:inline-block; width:1.1em; text-align:center; margin-right:4px;
+  color:var(--muted); position:relative; cursor:help; }
+.icon:hover::after { content:attr(data-tip); position:absolute; left:0; top:1.5em;
+  z-index:10; white-space:nowrap; padding:2px 8px; border-radius:4px;
+  font-size:12px; font-weight:400; background:var(--fg); color:var(--bg); }
+.icon.s-indeterminate { color:var(--accent); }
+.icon.s-done { color:#1a7f37; }
+.icon.blocked { color:var(--bad); }
+#filter { width:240px; max-width:100%; padding:4px 10px;
+  font:inherit; color:var(--fg); background:var(--card);
+  border:1px solid var(--line); border-radius:6px; }
+.lane.filtered-empty .card, .lane.filtered-empty .empty { display:none; }
+.card { position:relative; }
+.others { margin-top:16px; }
+.others summary { color:var(--muted); cursor:pointer; }
+.ignored { margin-top:16px; color:var(--muted); }
+.ignored ul { list-style:none; padding:0; }
+.ignored li button { font:inherit; font-size:12px; margin-left:6px; }
 """
 
 PR_COLUMNS = (
@@ -94,6 +116,7 @@ class Mirror:
         self.now = now
         self.conn = conn
         self.me = str(cfg["jira"].get("me") or "").strip()
+        self.ov = overlay.load(conn)
         conn.row_factory = sqlite3.Row
         self.issues: dict[str, dict[str, Any]] = {
             r["key"]: dict(r)
@@ -111,12 +134,24 @@ class Mirror:
             " ORDER BY l.issue_key, l.linked_key"
         ):
             self.links.setdefault(r["issue_key"], []).append(dict(r))
-        self.prs = [
+        self.ignored_prs = {
+            r[0]
+            for r in conn.execute(
+                "SELECT item_key FROM ignores WHERE source = 'github'"
+            )
+        }
+        prs = [
             dict(r)
             for r in conn.execute(
                 f"SELECT {', '.join(PR_COLUMNS)} FROM prs ORDER BY repo, number"
             )
         ]
+        self.prs = [p for p in prs if p["url"] not in self.ignored_prs]
+        self.pr_refs = {
+            p["url"]: f"{p['title']} ({p['repo'] or ''}#{p['number']})"
+            for p in prs
+            if p["url"] in self.ignored_prs
+        }
         self.prs_by_issue: dict[str, list[dict[str, Any]]] = {}
         for p in self.prs:
             if p["issue_key"]:
@@ -135,6 +170,10 @@ class Mirror:
                 "SELECT item_key, until FROM snoozes WHERE source = 'jira'"
             )
             if _in_future(r[1], now)
+        }
+        self.ignored = {
+            r[0]
+            for r in conn.execute("SELECT item_key FROM ignores WHERE source = 'jira'")
         }
         conn.row_factory = None
         weights = cfg["score"]["weights"]
@@ -161,11 +200,17 @@ class Mirror:
     def is_mine_name(self, assignee: "str | None") -> bool:
         return bool(self.me) and (assignee or "").casefold() == self.me.casefold()
 
+    def is_ignored(self, issue: dict[str, Any]) -> bool:
+        """Ignored itself, or a child of an ignored epic."""
+        return issue["key"] in self.ignored or issue.get("parent_key") in self.ignored
+
     def open_mine(self) -> list[dict[str, Any]]:
         return [
             i
             for i in self.issues.values()
-            if self.is_mine(i) and not score.is_done(i["status_category"])
+            if self.is_mine(i)
+            and not score.is_done(i["status_category"])
+            and not self.is_ignored(i)
         ]
 
 
@@ -183,7 +228,9 @@ def now_items(m: Mirror) -> list[dict[str, Any]]:
     keys |= {
         k
         for k in m.pins
-        if k in m.issues and not score.is_done(m.issues[k]["status_category"])
+        if k in m.issues
+        and not score.is_done(m.issues[k]["status_category"])
+        and not m.is_ignored(m.issues[k])
     }
     keys -= m.snoozed
     pinned = sorted(
@@ -256,7 +303,7 @@ def stale(m: Mirror) -> list[tuple[dict, str]]:
         return []
     out = []
     for issue in m.issues.values():
-        if issue.get("scope") != "search":
+        if issue.get("scope") != "search" or m.is_ignored(issue):
             continue
         if (issue["status_category"] or "").lower() != "indeterminate":
             continue
@@ -280,20 +327,35 @@ def stale(m: Mirror) -> list[tuple[dict, str]]:
 
 
 def epics(m: Mirror) -> list[dict[str, Any]]:
-    """Per parent: total, done and blocked (open and blocked) child counts.
+    """Per parent: child counts and how the user relates to the epic.
 
     Every mirrored child counts, including one mirrored only because it is
     linked to an in-scope issue. The mirror never fetches a whole epic, so the
     totals are of the children it holds, not of the epic's full child set.
+
+    `role` is `mine` (the epic is assigned to the user), `involved` (the user
+    reported it, or is assigned to or reported one of its children), `pinned`,
+    or `other`. An epic counts as an epic only once a child of it is mirrored:
+    the mirror does not record issue types.
     """
     groups: dict[str, dict[str, Any]] = {}
     for issue in m.issues.values():
         parent = issue.get("parent_key")
-        if not parent:
+        if not parent or m.is_ignored(issue):
             continue
         g = groups.setdefault(
-            parent, {"key": parent, "total": 0, "done": 0, "blocked": 0}
+            parent,
+            {
+                "key": parent,
+                "total": 0,
+                "done": 0,
+                "blocked": 0,
+                "child_says": None,
+                "touched": False,
+            },
         )
+        g["child_says"] = g["child_says"] or epic_name(issue)
+        g["touched"] = g["touched"] or _touches(m, issue)
         g["total"] += 1
         if score.is_done(issue["status_category"]):
             g["done"] += 1
@@ -301,11 +363,81 @@ def epics(m: Mirror) -> list[dict[str, Any]]:
             g["blocked"] += 1
     for g in groups.values():
         parent = m.issues.get(g["key"])
-        g["summary"] = parent["summary"] if parent else None
+        child_says = g.pop("child_says")
+        g["summary"] = (parent["summary"] if parent else None) or child_says
+        touched = g.pop("touched")
+        if parent and m.is_mine_name(parent.get("assignee")):
+            g["role"] = "mine"
+        elif touched or (parent and m.is_mine_name(parent.get("reporter"))):
+            g["role"] = "involved"
+        elif g["key"] in m.pins:
+            g["role"] = "pinned"
+        else:
+            g["role"] = "other"
     return sorted(groups.values(), key=lambda g: g["key"])
 
 
+def _touches(m: Mirror, issue: dict[str, Any]) -> bool:
+    """Assigned to or reported by the user; with no `jira.me`, in search scope."""
+    if not m.me:
+        return issue.get("scope") == "search"
+    return m.is_mine_name(issue.get("assignee")) or m.is_mine_name(
+        issue.get("reporter")
+    )
+
+
 # --- rendering ---------------------------------------------------------------
+
+
+# Icons go by status category, not status name: a site has a dozen names but
+# only these three categories. The hover text carries the exact name.
+STATUS_ICONS = {
+    "new": ("○", "To do"),
+    "indeterminate": ("◐", "In progress"),
+    "done": ("●", "Done"),
+}
+BLOCKED_ICON = ("⊘", "Blocked")
+
+
+def status_icon(
+    category: "str | None", name: "str | None", blocked: bool = False
+) -> str:
+    icon, label = (
+        BLOCKED_ICON
+        if blocked
+        else STATUS_ICONS.get((category or "").lower(), ("·", "Unknown status"))
+    )
+    title = f"{label}: {name}" if name else label
+    cls = "icon blocked" if blocked else f"icon s-{_e((category or 'unknown').lower())}"
+    return f'<span class="{cls}" role="img" aria-label="{_e(title)}" data-tip="{_e(title)}">{icon}</span>'
+
+
+def card_title(href: str, title: "str | None", ref: str) -> str:
+    """The title as the link, with the key or PR number as a muted suffix."""
+    return (
+        f'<a class="title" href="{_e(href)}" target="_blank" rel="noopener">'
+        f"{_e(title or ref)}</a>"
+        f' <span class="ref">({_e(ref)})</span>'
+    )
+
+
+def epic_name(issue: dict[str, Any]) -> "str | None":
+    """The parent's summary, which every `view` response carries.
+
+    Read from raw_json, not the mirror: the mirror holds the parent issue
+    itself for only some children.
+    """
+    try:
+        raw = json.loads(issue.get("raw_json") or "{}")
+    except ValueError:
+        return None
+    parent = (raw.get("fields") or {}).get("parent") or {}
+    name = (parent.get("fields") or {}).get("summary")
+    return name if isinstance(name, str) and name else None
+
+
+def epic_line(name: "str | None") -> str:
+    return f'<div class="epic">◆ {_e(name)}</div>' if name else ""
 
 
 def _who(link: dict[str, Any]) -> str:
@@ -345,15 +477,13 @@ def _pr_line(p: dict[str, Any]) -> str:
     if p["ci_state"]:
         bits.append(f"CI {p['ci_state']}")
     meta = f" · {_e(' · '.join(bits))}" if bits else ""
-    return (
-        f'<a href="{_e(p["url"])}">{_e(p["repo"] or "")}#{_e(str(p["number"]))}</a>'
-        f" {_e(p['title'] or '')}{meta}"
-    )
+    ref = f"{p['repo'] or ''}#{p['number']}"
+    return card_title(p["url"], p["title"], ref) + meta
 
 
 def issue_card(m: Mirror, issue: dict[str, Any], why: str = "") -> str:
     key = issue["key"]
-    href = _e(f"https://{m.cfg['jira']['site']}/browse/{key}")
+    href = f"https://{m.cfg['jira']['site']}/browse/{key}"
     meta = " · ".join(
         _e(str(v))
         for v in (
@@ -372,25 +502,37 @@ def issue_card(m: Mirror, issue: dict[str, Any], why: str = "") -> str:
         else ""
     )
     total, terms = m.scores[key]
+    icon = status_icon(
+        issue.get("status_category"),
+        issue.get("status_name"),
+        bool(m.blocked[key][0]) or bool(issue.get("flagged")),
+    )
+    item = ("jira", key)
     return (
-        f'<div class="card" data-key="{_e(key)}">{pin}<a href="{href}">{_e(key)}</a>'
-        f' {_e(issue.get("summary") or "")}<div class="meta">{meta}</div>'
-        f"{why_html}{_terms(total, terms)}{prs_html}</div>"
+        f"<div {overlay.card_attrs(item, m.ov, m.now)}>{pin}{icon}"
+        f"{card_title(href, issue.get('summary'), key)}"
+        f'{epic_line(epic_name(issue))}<div class="meta">{meta}</div>'
+        f"{why_html}{_terms(total, terms)}{prs_html}"
+        f"{overlay.card_controls(item, m.ov, m.now, reorder=False)}</div>"
     )
 
 
-def pr_card(p: dict[str, Any], why: str = "") -> str:
+def pr_card(m: Mirror, p: dict[str, Any], why: str = "") -> str:
     why_html = f'<div class="why">{_e(why)}</div>' if why else ""
     joined = f'<div class="meta">{_e(p["issue_key"])}</div>' if p["issue_key"] else ""
-    return f'<div class="card" data-pr="{_e(p["url"])}">{_pr_line(p)}{joined}{why_html}</div>'
-
-
-def _lane(name: str, title: str, cards: list[str], empty: str) -> str:
-    body = "".join(cards) if cards else f'<p class="empty">{_e(empty)}</p>'
+    item = ("github", p["url"])
     return (
-        f'<section class="lane" data-section="{name}">'
-        f"<h2>{_e(title)} ({len(cards)})</h2>{body}</section>"
+        f"<div {overlay.card_attrs(item, m.ov, m.now)}>"
+        f"{_pr_line(p)}{joined}{why_html}"
+        f"{overlay.card_controls(item, m.ov, m.now, reorder=False, pin=False)}</div>"
     )
+
+
+def _lane(name: str, title: "str | None", cards: list[str], empty: str) -> str:
+    """A lane of cards; `title` is None where the tab already names it."""
+    body = "".join(cards) if cards else f'<p class="empty">{_e(empty)}</p>'
+    head = f"<h2>{_e(title)} ({len(cards)})</h2>" if title else ""
+    return f'<section class="lane" data-section="{name}">{head}{body}</section>'
 
 
 def _me_note(m: Mirror) -> str:
@@ -404,7 +546,7 @@ def _me_note(m: Mirror) -> str:
 
 def render_now(m: Mirror) -> str:
     cards = [issue_card(m, i) for i in now_items(m)]
-    return _me_note(m) + _lane("now", "Now", cards, "Nothing open.")
+    return _me_note(m) + _lane("now", None, cards, "Nothing open.")
 
 
 def render_waiting_on_me(m: Mirror) -> str:
@@ -413,14 +555,14 @@ def render_waiting_on_me(m: Mirror) -> str:
         _me_note(m)
         + _lane(
             "issues",
-            "My issues blocking others",
+            "Issues",
             [issue_card(m, i, why) for i, why in issues],
             "None of your open issues blocks anyone.",
         )
         + _lane(
             "reviews",
-            "Reviews requested of me",
-            [pr_card(p) for p in prs],
+            "Pull requests",
+            [pr_card(m, p) for p in prs],
             "No reviews requested.",
         )
     )
@@ -432,14 +574,14 @@ def render_waiting_on(m: Mirror) -> str:
         _me_note(m)
         + _lane(
             "issues",
-            "My blocked issues",
+            "Issues",
             [issue_card(m, i, why) for i, why in issues],
             "None of your open issues has an unresolved blocker.",
         )
         + _lane(
             "prs",
-            "My PRs waiting on review or CI",
-            [pr_card(p, why) for p, why in prs],
+            "Pull requests",
+            [pr_card(m, p, why) for p, why in prs],
             "No PR of yours is waiting.",
         )
     )
@@ -448,7 +590,7 @@ def render_waiting_on(m: Mirror) -> str:
 def render_stale(m: Mirror) -> str:
     """Jira's stale lane, then, on a fleet instance, the fleet's (fleet_views)."""
     cards = [issue_card(m, i, why) for i, why in stale(m)]
-    jira = _lane("stale", "Stale", cards, "Nothing in progress has gone quiet.")
+    jira = _lane("stale", None, cards, "Nothing in progress has gone quiet.")
     if not fleet_views.enabled(m.cfg):
         return jira
     return (jira if m.issues else "") + fleet_views.render_stale(m.conn, m.cfg, m.now)
@@ -462,18 +604,49 @@ def render_needs(m: Mirror) -> str:
     return needs.render(m.conn, m.cfg, m.now)
 
 
+EPIC_LANES = (
+    ("mine", "Mine", "No epic is assigned to you."),
+    ("involved", "Involved", "You have no issue under anyone else's epic."),
+    ("pinned", "Pinned", "No other epic is pinned."),
+)
+
+
+def _epic_card(m: Mirror, g: dict[str, Any]) -> str:
+    href = f"https://{m.cfg['jira']['site']}/browse/{g['key']}"
+    blocked = f" · {g['blocked']} blocked" if g["blocked"] else ""
+    pinned = g["key"] in m.pins
+    return (
+        f'<div class="card" data-source="jira" data-key="{_e(g["key"])}">'
+        f'{card_title(href, g["summary"], g["key"])}<div class="meta">'
+        f"{g['done']}/{g['total']} done{blocked}</div>"
+        f'<div class="ov"><button type="button" data-ov="{"unpin" if pinned else "pin"}"'
+        ' title="Keep it on Epics">'
+        f"{'Unpin' if pinned else 'Pin'}</button>"
+        '<button type="button" data-ov="ignore"'
+        ' title="Hide this epic and its children">Ignore epic</button></div></div>'
+    )
+
+
 def render_epics(m: Mirror) -> str:
-    rows = []
-    for g in epics(m):
-        href = _e(f"https://{m.cfg['jira']['site']}/browse/{g['key']}")
-        summary = f" {_e(g['summary'])}" if g["summary"] else ""
-        blocked = f" · {g['blocked']} blocked" if g["blocked"] else ""
-        rows.append(
-            f'<div class="card" data-key="{_e(g["key"])}"><a href="{href}">'
-            f'{_e(g["key"])}</a>{summary}<div class="meta">'
-            f"{g['done']}/{g['total']} done{blocked}</div></div>"
+    groups = epics(m)
+    out = "".join(
+        _lane(
+            role,
+            title,
+            [_epic_card(m, g) for g in groups if g["role"] == role],
+            empty,
         )
-    return _lane("epics", "Epics", rows, "No issue in the mirror has a parent.")
+        for role, title, empty in EPIC_LANES
+    )
+    others = [_epic_card(m, g) for g in groups if g["role"] == "other"]
+    if others:
+        out += (
+            f'<details class="lane others" data-section="other">'
+            f"<summary>Other epics ({len(others)}): you have no issue in them."
+            " Pin one to keep it above.</summary>"
+            f"{''.join(others)}</details>"
+        )
+    return out
 
 
 ROUTES = {
@@ -492,4 +665,41 @@ def render(
 ) -> str:
     """The body of the view at `path` (a key of ROUTES), tab bar included."""
     _, fn = ROUTES[path]
-    return nav(path, cfg) + fn(Mirror(conn, cfg, now))
+    m = Mirror(conn, cfg, now)
+    return nav(path, cfg) + fn(m) + render_ignored(m)
+
+
+def render_ignored(m: Mirror) -> str:
+    """A closed list of ignored items, each with Unignore; empty when none."""
+    if not m.ignored and not m.ignored_prs:
+        return ""
+    rows = []
+    for key in sorted(m.ignored):
+        issue = m.issues.get(key)
+        name = issue["summary"] if issue else None
+        if name is None:
+            name = next(
+                (epic_name(i) for i in m.issues.values() if i.get("parent_key") == key),
+                None,
+            )
+        children = sum(1 for i in m.issues.values() if i.get("parent_key") == key)
+        hides = (
+            f" · hides {children} child issue{'s' if children != 1 else ''}"
+            if children
+            else ""
+        )
+        rows.append(
+            f'<li class="card" data-source="jira" data-key="{_e(key)}">'
+            f'{_e(name or key)} <span class="ref">({_e(key)})</span>{hides}'
+            ' <button type="button" data-ov="unignore">Unignore</button></li>'
+        )
+    for url in sorted(m.ignored_prs):
+        rows.append(
+            f'<li class="card" data-source="github" data-key="{_e(url)}">'
+            f"{_e(m.pr_refs.get(url, url))}"
+            ' <button type="button" data-ov="unignore">Unignore</button></li>'
+        )
+    return (
+        f'<details class="ignored"><summary>Ignored ({len(rows)})</summary>'
+        f"<ul>{''.join(rows)}</ul></details>"
+    )

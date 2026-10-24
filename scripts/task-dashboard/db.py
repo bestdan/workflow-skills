@@ -34,7 +34,15 @@ MIRROR_TABLES = (
 )
 # Keyed by (source, item_key). `last_visit` is overlay state too, but one row
 # with no item key, so it is named apart.
-OVERLAY_TABLES = ("pins", "order", "snoozes", "notes", "kind_tags", "focus")
+OVERLAY_TABLES = (
+    "pins",
+    "order",
+    "snoozes",
+    "notes",
+    "kind_tags",
+    "focus",
+    "ignores",
+)
 OVERLAY_SINGLETONS = ("last_visit",)
 
 _V1 = """
@@ -302,6 +310,18 @@ CREATE TABLE last_visit (
 );
 """
 
+# Version 5: `ignores`, items the user has said are not theirs. Ignoring an epic
+# hides its children too; views.py applies that, since parentage lives in
+# `issues`.
+_V5 = """
+CREATE TABLE ignores (
+    source TEXT NOT NULL,
+    item_key TEXT NOT NULL,
+    ignored_at TEXT,
+    PRIMARY KEY (source, item_key)
+);
+"""
+
 # Ordered, ascending, append-only: never edit a shipped entry.
 #
 # migrate() runs a script one statement at a time through _statements, which
@@ -312,7 +332,13 @@ CREATE TABLE last_visit (
 #   raises "You can only execute one statement at a time");
 # - nothing follows the last statement's `;`, not even a comment.
 # A missing final `;` or a trailing comment makes _statements raise ValueError.
-MIGRATIONS: list[tuple[int, str]] = [(1, _V1), (2, _V2), (3, _V3), (4, _V4)]
+MIGRATIONS: list[tuple[int, str]] = [
+    (1, _V1),
+    (2, _V2),
+    (3, _V3),
+    (4, _V4),
+    (5, _V5),
+]
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 
 

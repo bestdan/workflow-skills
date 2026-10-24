@@ -443,6 +443,138 @@ class ViewsTest(unittest.TestCase):
             (g["key"], g["total"], g["done"], g["blocked"]), ("EPIC-1", 3, 1, 1)
         )
 
+    def set_parent_summary(self, key, summary):
+        raw = {"key": key, "fields": {"parent": {"key": "EPIC-1",
+               "fields": {"summary": summary}}}}  # fmt: skip
+        self.conn.execute(
+            "UPDATE issues SET raw_json = ? WHERE key = ?", (json.dumps(raw), key)
+        )
+        self.conn.commit()
+
+    def card(self, page, key):
+        (text,) = [
+            c for c in page.split('<div class="card"') if f'data-key="{key}"' in c
+        ]
+        return text
+
+    def test_card_leads_with_the_title_and_shows_the_epic(self):
+        self.set_parent_summary("ABC-1", "Checkout <rewrite>")
+        page = views.render("/now", self.conn, CFG, NOW)
+        one = self.card(page, "ABC-1")
+        self.assertRegex(
+            one, r'<a class="title" href="[^"]*/browse/ABC-1" target="_blank" '
+            r'rel="noopener">summary ABC-1</a> '
+            r'<span class="ref">\(ABC-1\)</span>',
+        )  # fmt: skip
+        self.assertIn('<div class="epic">◆ Checkout &lt;rewrite&gt;</div>', one)
+        self.assertNotIn('class="epic"', self.card(page, "ABC-2"))
+
+    def test_status_icon_by_category_and_blocked(self):
+        page = views.render("/now", self.conn, CFG, NOW)
+        # ABC-1 is blocked by ABC-8, which is open.
+        self.assertIn('aria-label="Blocked: ', self.card(page, "ABC-1"))
+        self.assertIn('class="icon s-', self.card(page, "ABC-2"))
+        self.assertEqual(
+            views.status_icon("done", "Shipped"),
+            '<span class="icon s-done" role="img" aria-label="Done: Shipped"'
+            ' data-tip="Done: Shipped">●</span>',
+        )
+        self.assertIn('aria-label="Unknown status"', views.status_icon(None, None))
+
+    def test_ignoring_an_issue_or_its_epic_hides_it(self):
+        before = [i["key"] for i in views.now_items(self.mirror())]
+        self.assertIn("ABC-1", before)
+        self.assertIn("ABC-4", before)  # a child of EPIC-1
+        self.conn.executemany(
+            "INSERT INTO ignores (source, item_key) VALUES ('jira', ?)",
+            [("ABC-1",), ("EPIC-1",)],
+        )
+        self.conn.commit()
+        m = self.mirror()
+        after = [i["key"] for i in views.now_items(m)]
+        self.assertNotIn("ABC-1", after)
+        self.assertNotIn("ABC-4", after)
+        self.assertEqual(views.epics(m), [])
+        self.assertEqual([i["key"] for i, _ in views.waiting_on(m)[0]], [])
+        footer = views.render_ignored(m)
+        self.assertIn("Ignored (2)", footer)
+        self.assertIn("hides 3 child issues", footer)
+        self.assertEqual(footer.count('data-ov="unignore"'), 2)
+
+    def test_ignoring_a_pr_hides_it_from_every_lane(self):
+        url = "https://github.com/o/r/pull/2"
+        page = views.render("/waiting-on", self.conn, CFG, NOW)
+        self.assertIn(f'data-source="github" data-key="{url}"', page)
+        self.conn.execute(
+            "INSERT INTO ignores (source, item_key) VALUES ('github', ?)", (url,)
+        )
+        self.conn.commit()
+        m = self.mirror()
+        self.assertNotIn(url, [p["url"] for p, _ in views.waiting_on(m)[1]])
+        self.assertNotIn(url, [p["url"] for p in m.prs_by_issue.get("ABC-2", [])])
+        footer = views.render_ignored(m)
+        self.assertIn("Ignored (1)", footer)
+        self.assertIn("ABC-2 wip (o/r#2)", footer)
+        self.assertIn('data-ov="unignore"', footer)
+
+    def add_issue(self, key, assignee, parent, reporter=None, scope="search"):
+        self.conn.execute(
+            "INSERT INTO issues (source, kind, key, summary, status_category,"
+            " assignee, reporter, parent_key, labels, scope)"
+            " VALUES ('jira', 'ticket', ?, ?, 'new', ?, ?, ?, '[]', ?)",
+            (key, f"summary {key}", assignee, reporter, parent, scope),
+        )
+        self.conn.commit()
+
+    def test_epics_split_by_how_the_user_relates_to_them(self):
+        # The seeded epic has a child assigned to the user: involved.
+        self.add_issue("EPIC-2", ME, None)  # the epic itself is mine
+        self.add_issue("ABC-20", THEM, "EPIC-2")
+        self.add_issue("ABC-21", THEM, "EPIC-3", reporter=ME)  # reported a child
+        self.add_issue("ABC-22", THEM, "EPIC-4", scope="linked")  # linked only
+        self.add_issue("ABC-23", THEM, "EPIC-5", scope="linked")
+        self.conn.execute(
+            "INSERT INTO pins (source, item_key) VALUES ('jira', 'EPIC-5')"
+        )
+        self.conn.commit()
+        roles = {g["key"]: g["role"] for g in views.epics(self.mirror())}
+        self.assertEqual(
+            roles,
+            {"EPIC-1": "involved", "EPIC-2": "mine", "EPIC-3": "involved",
+             "EPIC-4": "other", "EPIC-5": "pinned"},
+        )  # fmt: skip
+        page = views.render("/epics", self.conn, CFG, NOW)
+        others = page.split('data-section="other"')[1]
+        self.assertIn("Other epics (1)", others)
+        self.assertIn('data-key="EPIC-4"', others)
+        self.assertNotIn('data-key="EPIC-4"', page.split('data-section="other"')[0])
+
+    def test_view_cards_carry_the_board_controls(self):
+        page = views.render("/waiting-on", self.conn, CFG, NOW)
+        issue = self.card(page, "ABC-1")
+        for act in ("pin", "focus", "snooze", "ignore", "note"):
+            self.assertIn(f'data-ov="{act}"', issue, act)
+        pr = page.split('data-key="https://github.com/o/r/pull/2"')[1]
+        pr = pr.split('<div class="card"')[0]
+        self.assertIn('data-ov="snooze"', pr)
+        self.assertNotIn('data-ov="pin"', pr)
+
+    def test_single_lane_views_have_no_heading(self):
+        for path in ("/now", "/stale"):
+            page = views.render(path, self.conn, CFG, NOW)
+            self.assertNotIn("<h2>", page, path)
+        page = views.render("/waiting-on", self.conn, CFG, NOW)
+        self.assertIn("<h2>Issues (", page)
+        self.assertIn("<h2>Pull requests (", page)
+
+    def test_no_ignored_footer_when_nothing_is_ignored(self):
+        self.assertEqual(views.render_ignored(self.mirror()), "")
+
+    def test_epic_name_falls_back_to_a_childs_copy(self):
+        self.set_parent_summary("ABC-4", "Named by the child")
+        (g,) = views.epics(self.mirror())
+        self.assertEqual(g["summary"], "Named by the child")
+
     def test_unset_me_falls_back_to_scope(self):
         cfg = config.deep_merge(CFG, {"jira": {"me": ""}})
         keys = [i["key"] for i in views.now_items(self.mirror(cfg))]
@@ -494,7 +626,9 @@ class RoutesTest(unittest.TestCase):
                     self.assertNotIn(f'href="{href}"', page, path)
                 else:
                     self.assertIn(f'href="{href}"', page, path)
-            cards = re.findall(r'<div class="card" data-key="([^"]+)"', page)
+            cards = re.findall(
+                r'<div class="card" data-source="jira" data-key="([^"]+)"', page
+            )
             if path != "/epics":
                 self.assertTrue(cards, path)
                 self.assertEqual(page.count('class="terms"'), len(cards), path)
@@ -515,6 +649,21 @@ class RoutesTest(unittest.TestCase):
             for v in re.findall(r"</?li[^>]*>[a-z]+ <b>([^<]+)</b>", text)
         ]
         self.assertTrue(math.isclose(total, sum(values)))
+
+    def test_every_page_has_the_filter_box_beside_sync_now(self):
+        for path in (
+            "/now",
+            "/waiting-on-me",
+            "/waiting-on",
+            "/stale",
+            "/epics",
+            "/board",
+        ):
+            with self.subTest(path):
+                page = self.get(path)[1]
+                self.assertEqual(page.count('id="filter"'), 1)
+                header = page[page.index("<header") : page.index("</header>")]
+                self.assertLess(header.index('id="filter"'), header.index('id="sync"'))
 
     def test_board_carries_the_tab_bar(self):
         page = self.get("/board")[1]

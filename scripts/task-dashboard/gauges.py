@@ -139,6 +139,10 @@ def render(g: Gauges, cfg: dict[str, Any]) -> str:
         else:
             text = _e(key + (f" {g.focus_summary}" if g.focus_summary else ""))
         href = _href(g.focus, cfg)
-        inner = f'<a href="{_e(href)}">{text}</a>' if href else text
+        inner = (
+            f'<a href="{_e(href)}" target="_blank" rel="noopener">{text}</a>'
+            if href
+            else text
+        )
         parts.append(f'<span class="gauge" data-gauge="focus">Focus: {inner}</span>')
     return "".join(parts)
