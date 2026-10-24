@@ -75,7 +75,9 @@ CSS = """
 @dataclass
 class Need:
     item: overlay.Item  # (source, key): the overlay identity
-    kind: str  # session | pr | issue | drain
+    # A collected need: session | pr | issue | drain. focus_need() instead
+    # carries the focus row's mirror kind (design, ticket, ...; "" once gone).
+    kind: str
     title: str
     since: "datetime | None"  # when the wait began; orders the list
     url: "str | None"

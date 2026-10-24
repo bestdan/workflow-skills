@@ -321,6 +321,21 @@ class FocusTests(NeedsCase):
         overlay.set_focus(self.conn, ("claude-hook", "s-pr"), NOW)
         self.assertEqual(keys(section(self.page(), "needs")), [pr_url(1201), "s-pr"])
 
+    def test_a_design_focus_takes_everything_in_its_repo(self):
+        seed(self.conn)
+        url = f"https://github.com/{REPO}/blob/main/dev_docs/designs/x.md"
+        design = {"kind": "design", "key": url, "url": url, "repo": REPO,
+                  "title": "x design", "status": "proposed"}  # fmt: skip
+        github_fleet.write(self.conn, GITHUB_ROWS + [design], NOW)
+        overlay.set_focus(self.conn, ("github", url), NOW)
+        page = self.page()
+        self.assertEqual(
+            keys(section(page, "needs")),
+            [pr_url(1201), issue_url(950), pr_url(1202), "s-pr"],
+        )
+        # s-turn and the s-perm approval ran in dotfiles.
+        self.assertIn('data-focus-held="2"', page)
+
     def test_a_focus_outside_the_mirror_holds_everything(self):
         seed(self.conn)
         overlay.set_focus(self.conn, ("jira", "ABC-1"), NOW)
