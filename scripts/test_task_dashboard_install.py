@@ -38,6 +38,7 @@ import db  # type: ignore[import-not-found]  # noqa: E402
 import server  # type: ignore[import-not-found]  # noqa: E402
 import dashboard  # type: ignore[import-not-found]  # noqa: E402
 import server_install as si  # type: ignore[import-not-found]  # noqa: E402
+import sync  # type: ignore[import-not-found]  # noqa: E402
 import test_task_dashboard_server as server_harness  # noqa: E402
 
 NOW = datetime(2026, 10, 23, 12, 0, 0, tzinfo=timezone.utc)
@@ -758,6 +759,27 @@ class SyncNowTest(unittest.TestCase):
         self.assertEqual(rc, 0, logs)
         self.assertEqual(self.modes, ["incremental"])
         self.assertIn("sync incremental: ok", "\n".join(logs))
+
+    def test_a_fleet_run_after_the_jira_run_does_not_hide_it(self):
+        def jira_then_fleet(mode):
+            self.modes.append(mode)
+            conn = sqlite3.connect(self.db_file)
+            try:
+                now = datetime.now(timezone.utc)
+                server_harness.add_run(conn, "ok", now, kind=mode)
+                server_harness.add_run(
+                    conn, "auth_failed", now, error="fix: run `gh auth login`",
+                    kind=sync.FLEET_KIND,
+                )  # fmt: skip
+            finally:
+                conn.close()
+
+        self.syncer._sync_fn = jira_then_fleet
+        rc, log = self.sync_now()
+        self.assertEqual(rc, 0, log)
+        self.assertIn("sync incremental: ok", log)
+        self.assertIn(f"sync {sync.FLEET_KIND}: auth_failed", log)
+        self.assertIn("gh auth login", log)
 
     def test_a_run_outlasting_the_wait_exits_3(self):
         self.release.clear()

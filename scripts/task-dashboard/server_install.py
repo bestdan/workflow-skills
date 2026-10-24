@@ -46,6 +46,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import server
+import sync
 from github_gh import Runner, run
 from launcher import (
     BASE_PATH,
@@ -216,7 +217,11 @@ def plan(
         )
     )
     p.steps.append(
-        Step(["launchctl", "bootstrap", domain, str(plist_path(home))], why="load", loads=True)
+        Step(
+            ["launchctl", "bootstrap", domain, str(plist_path(home))],
+            why="load",
+            loads=True,
+        )
     )
     port = cfg["server"]["port"]
     p.notes.append(f"dashboard: {url(port)} (localhost: opens only on this machine)")
@@ -602,12 +607,19 @@ def read_token(db_file: Path) -> str:
     return str(row[0]) if row else ""
 
 
-def _finished_after(db_file: Path, run_id: int) -> "tuple | None":
+def _finished_after(db_file: Path, run_id: int, *, fleet: bool) -> "tuple | None":
+    """The newest finished Jira run (or, with `fleet`, GitHub fleet run) after `run_id`.
+
+    One sync request records a Jira run and, when `github.fleet` is on, a
+    fleet run after it, so "the newest row" alone would report the fleet's.
+    """
+    op = "=" if fleet else "IS NOT"
     return _read(
         db_file,
         "SELECT id, kind, outcome, error, finished_at FROM sync_runs"
-        " WHERE finished_at IS NOT NULL AND id > ? ORDER BY id DESC LIMIT 1",
-        (run_id,),
+        f" WHERE finished_at IS NOT NULL AND id > ? AND kind {op} ?"
+        " ORDER BY id DESC LIMIT 1",
+        (run_id, sync.FLEET_KIND),
     )
 
 
@@ -671,7 +683,7 @@ def sync_now(
             log(f"still running after {wait_s:g}s; it carries on in the server")
             return 3
         sleep(2.0)
-    row = _finished_after(db_file, before_id)
+    row = _finished_after(db_file, before_id, fleet=False)
     if row is None:
         log("the server went idle without recording a run; see its log")
         return 1
@@ -679,4 +691,11 @@ def sync_now(
     log(f"sync {kind}: {outcome} at {finished}")
     if error:
         log(str(error))
+    # The fleet step is reported, but the exit code is the Jira sync's, as the
+    # header's staleness is.
+    fleet = _finished_after(db_file, before_id, fleet=True)
+    if fleet is not None:
+        log(f"sync {fleet[1]}: {fleet[2]} at {fleet[4]}")
+        if fleet[3]:
+            log(str(fleet[3]))
     return 0 if outcome == "ok" else 1
