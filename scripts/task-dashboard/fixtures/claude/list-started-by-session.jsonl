@@ -1,0 +1,3 @@
+{"type":"system","subtype":"init","session_id":"00000000-0000-4000-8000-000000000000","cwd":"/home/placeholder","tools":[],"mcp_servers":[]}
+{"type":"control_response","response":{"subtype":"success","request_id":"init","response":{"commands":[],"models":[]}}}
+{"type":"control_response","response":{"subtype":"success","request_id":"list","response":{"status":"unavailable","reason":"started_by_session","message":"Placeholder sentence."}}}

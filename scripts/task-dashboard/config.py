@@ -47,6 +47,10 @@ DEFAULTS: dict[str, Any] = {
     # view's Health panel (health.py holds the figure ids, and the default for
     # any id left out).
     "health": {"targets": {}},
+    # The cloud session list (claude_remote.py), an optional inventory source
+    # for the fleet view that runs `claude -p` once per sync. Off by default:
+    # it relies on a request Claude Code marks internal.
+    "claude_remote": {"enabled": False, "claude_path": "claude", "timeout_seconds": 45},
     "score": {
         "weights": {
             "priority": 3,
@@ -140,6 +144,13 @@ def load(path: "str | os.PathLike[str] | None" = None) -> dict[str, Any]:
     port = cfg["server"]["port"]
     if not isinstance(port, int) or isinstance(port, bool) or not 0 < port < 65536:
         raise ConfigError("server.port must be an integer port (1-65535)")
+    cr = cfg["claude_remote"]
+    if not isinstance(cr, dict) or not isinstance(cr.get("enabled"), bool):
+        raise ConfigError("claude_remote.enabled must be true or false")
+    _non_empty_str(cfg, "claude_remote.claude_path")
+    t = cr["timeout_seconds"]
+    if not isinstance(t, (int, float)) or isinstance(t, bool) or t <= 0:
+        raise ConfigError("claude_remote.timeout_seconds must be a positive number")
     if not isinstance(cfg["ingest"], dict):
         raise ConfigError("ingest must be a table")
     machines = cfg["ingest"]["machines"]

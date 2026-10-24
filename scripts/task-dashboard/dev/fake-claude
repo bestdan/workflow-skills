@@ -1,0 +1,73 @@
+#!/usr/bin/env python3
+"""A stand-in for `claude`, answering the cloud session list from fixtures.
+
+Point `claude_remote.claude_path` at it to run the fleet view's optional
+cloud-session step with no Claude Code. It answers only the read that
+claude_remote.py makes: `-p --input-format stream-json --output-format
+stream-json --verbose --no-session-persistence`, with an `initialize` and a `list_cloud_sessions`
+control request on stdin. It prints a fixture from
+scripts/task-dashboard/fixtures/claude/, with the list reply's `request_id`
+set to the one it was sent.
+
+FAKE_CLAUDE_MODE picks the reply:
+
+- `ok` (default): list-ok.jsonl, a synthetic page with placeholder titles.
+- `started_by_session`, `not_signed_in`: the matching refusal fixture.
+- `garbage`: prints text that is not stream-json and exits 1.
+
+It does NOT reproduce the real CLI's `started_by_session` guard: it answers
+whatever CLAUDE_CODE_CHILD_SESSION says, so the tests can run inside a Claude
+Code session without touching that variable. When FAKE_CLAUDE_ENV_OUT names a
+file, it writes there whether the variable was set, so a test can check the
+caller passed its environment through unchanged.
+
+FAKE_CLAUDE_FIXTURES overrides the fixture directory. Stdlib only.
+"""
+
+import json
+import os
+import sys
+from pathlib import Path
+
+ARGV = ["-p", "--input-format", "stream-json", "--output-format", "stream-json",
+        "--verbose", "--no-session-persistence"]  # fmt: skip
+FILES = {
+    "ok": "list-ok.jsonl",
+    "started_by_session": "list-started-by-session.jsonl",
+    "not_signed_in": "list-not-signed-in.jsonl",
+}
+
+
+def main(argv):
+    env_out = os.environ.get("FAKE_CLAUDE_ENV_OUT")
+    if env_out:
+        seen = "set" if "CLAUDE_CODE_CHILD_SESSION" in os.environ else "unset"
+        Path(env_out).write_text(seen + "\n")
+    if argv != ARGV:
+        print(f"fake-claude: unexpected arguments {argv}", file=sys.stderr)
+        return 2
+    list_id = None
+    for line in sys.stdin:
+        msg = json.loads(line)
+        if msg.get("request", {}).get("subtype") == "list_cloud_sessions":
+            list_id = msg["request_id"]
+    if list_id is None:
+        print("fake-claude: no list_cloud_sessions request on stdin", file=sys.stderr)
+        return 2
+    mode = os.environ.get("FAKE_CLAUDE_MODE", "ok")
+    if mode == "garbage":
+        print("this is not stream-json")
+        return 1
+    here = Path(__file__).resolve().parent
+    fixtures = Path(os.environ.get("FAKE_CLAUDE_FIXTURES") or here.parent / "fixtures" / "claude")
+    for line in (fixtures / FILES[mode]).read_text().splitlines():
+        msg = json.loads(line)
+        response = msg.get("response")
+        if isinstance(response, dict) and response.get("request_id") == "list":
+            response["request_id"] = list_id
+        print(json.dumps(msg))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
