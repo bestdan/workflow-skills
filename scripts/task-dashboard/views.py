@@ -32,6 +32,7 @@ TABS = (
     ("/board", "Board"),
     ("/stale", "Stale"),
     ("/epics", "Epics"),
+    ("/health", "Health"),
 )
 
 CSS = """

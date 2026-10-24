@@ -27,7 +27,7 @@ import json  # noqa: E402
 import os  # noqa: E402
 import secrets  # noqa: E402
 import sqlite3  # noqa: E402
-from datetime import datetime, timezone  # noqa: E402
+from datetime import date, datetime, timezone  # noqa: E402
 from pathlib import Path  # noqa: E402
 
 # The directory name has a hyphen, so it is not importable as a package; put it
@@ -38,6 +38,7 @@ import collector  # noqa: E402
 import collector_install  # noqa: E402
 import config  # noqa: E402
 import db  # noqa: E402
+import health  # noqa: E402
 import ingest  # noqa: E402
 import overlay  # noqa: E402
 import server  # noqa: E402
@@ -109,6 +110,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="fleet view: snapshot this machine and push it to [collector] ingest_url",
     )
     collect_p.add_argument(
+        "--config",
+        help="config path (default: $TASK_DASHBOARD_CONFIG or ~/.config/task-dashboard)",
+    )
+    health_p = sub.add_parser(
+        "health",
+        help="fleet view: the Health panel's figures for a dated window",
+    )
+    health_p.add_argument(
+        "--since", required=True, type=date.fromisoformat, help="first day, YYYY-MM-DD"
+    )
+    health_p.add_argument(
+        "--until",
+        type=date.fromisoformat,
+        help="last day, included, YYYY-MM-DD (default: today); days are local time",
+    )
+    health_p.add_argument(
+        "--json", action="store_true", help="print the figures as JSON"
+    )
+    health_p.add_argument(
+        "--db", help="DB path (default: $TASK_DASHBOARD_DB or the state dir)"
+    )
+    health_p.add_argument(
         "--config",
         help="config path (default: $TASK_DASHBOARD_CONFIG or ~/.config/task-dashboard)",
     )
@@ -270,6 +293,38 @@ def cmd_install_collector(args: argparse.Namespace) -> int:
         print(f"task-dashboard: {exc}", file=sys.stderr)
         return 2
     return collector_install.install(cfg, dry_run=args.dry_run)
+
+
+def cmd_health(args: argparse.Namespace) -> int:
+    """Exit 0, or 2 on a config error or a window that ends before it starts."""
+    until = args.until or date.today()
+    if until < args.since:
+        print("task-dashboard: --until is before --since", file=sys.stderr)
+        return 2
+    try:
+        cfg = config.load(args.config)
+    except config.ConfigError as exc:
+        print(f"task-dashboard: {exc}", file=sys.stderr)
+        return 2
+    start, end = health.date_window(args.since, until)
+    conn = db.connect(args.db)
+    try:
+        result = health.compute(
+            conn,
+            cfg["health"]["targets"],
+            start,
+            end,
+            fleet=sync.fleet_enabled(cfg),
+        )
+    finally:
+        conn.close()
+    for fid in result["unknown_targets"]:
+        print(f"task-dashboard: health.targets.{fid} names no figure", file=sys.stderr)
+    if args.json:
+        print(json.dumps(result, indent=2))
+    else:
+        sys.stdout.write(health.text_table(result))
+    return 0
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
@@ -515,6 +570,8 @@ def main(argv: "list[str] | None" = None) -> int:
         return cmd_sync_now(args)
     if args.command in ("url", "open"):
         return cmd_url(args)
+    if args.command == "health":
+        return cmd_health(args)
     parser.print_help()
     return 2
 

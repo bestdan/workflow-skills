@@ -43,6 +43,10 @@ DEFAULTS: dict[str, Any] = {
     # Host name -> "sha256:<hex>" of that machine's ingest token. Empty means
     # the server has no /ingest route at all (the work-laptop instance).
     "ingest": {"machines": {}},
+    # Figure id -> "observed" or a comparison such as "<= 5", for the fleet
+    # view's Health panel (health.py holds the figure ids, and the default for
+    # any id left out).
+    "health": {"targets": {}},
     "score": {
         "weights": {
             "priority": 3,
@@ -72,6 +76,8 @@ REQUIRED_KEYS = (
 # source (`machine:<host>`), so it is held to a plain label.
 HOST_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,62}")
 DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}")
+# A Health panel target other than "observed": a comparison and a number.
+HEALTH_TARGET_RE = re.compile(r"\s*(<=|>=|<|>)\s*(-?\d+(?:\.\d+)?)\s*")
 
 
 class ConfigError(ValueError):
@@ -156,6 +162,18 @@ def load(path: "str | os.PathLike[str] | None" = None) -> dict[str, Any]:
                 f" ingest.machines.{seen[digest]}; give each machine its own token"
             )
         seen[digest] = host
+    # The value's shape only: the figure ids live in health.py, which this
+    # module does not import, and its validate_targets() names an unknown one.
+    targets = cfg["health"]["targets"]
+    if not isinstance(targets, dict):
+        raise ConfigError("health.targets must be a table")
+    for fid, target in targets.items():
+        if target != "observed" and not (
+            isinstance(target, str) and HEALTH_TARGET_RE.fullmatch(target)
+        ):
+            raise ConfigError(
+                f'health.targets.{fid} must be "observed" or a comparison like "<= 5"'
+            )
     return cfg
 
 
