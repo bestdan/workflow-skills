@@ -11,7 +11,9 @@ view ([`2026-10-23-fleet-view.md`](2026-10-23-fleet-view.md)), taken from
 [adbutler007/workdesk](https://github.com/adbutler007/workdesk) at commit
 `f33e7d3`. Two of them change what the fleet view can know about a session; the
 other two are small fixes that stop stale or missing data from looking current. They
-are ranked by value for the cost, and each is meant to be planned separately.
+are ranked by value first. Within a value tier, a suggestion that another one
+leans on comes first, whatever its size: suggestion 2 needs suggestion 1's
+registry status for one case. Each is meant to be planned separately.
 
 workdesk is a single-user, always-on localhost board over one person's Claude
 and Codex sessions on one Mac. Like ours, it is a stdlib Python HTTP server
@@ -29,6 +31,8 @@ suggestion 1 depends on was also inspected. "Inferred" means the point rests on
 workdesk's `docs/DESIGN.md` or on reasoning, not on code.
 
 ## Ranking
+
+Size is the 1/2/3/5/8 estimate scale: 1 is the smallest change, 8 the largest.
 
 | # | Suggestion                                                  | Size | Value                                                  |
 | - | ----------------------------------------------------------- | ---- | ------------------------------------------------------ |
@@ -121,13 +125,25 @@ an `idle_prompt` notification.
   harness passes the path as
   `transcript_path`; that is documented for hook input, but this hook has not
   tested it. No text is written, which keeps the hook's "records no prompt
-  text" rule. This is hook format `v: 2`, and the collector's `HOOK_KEYS` must
-  accept it.
-- Needs you's query: a `Stop` with `asked = true`, and no prompt after it. A
-  `null` is not listed.
-- If suggestion 1 lands first, a fresh registry status of `waiting` may answer
-  part of this without touching the hook. Check what `waiting` means before
-  building both.
+  text" rule. This is hook format `v: 2`.
+- `scripts/task-dashboard/snapshot.py`: `HOOK_KEYS` gains `asked`, and
+  `hook_tails` must accept `v: 2` lines as well as `v: 1`. Today it drops any
+  line whose `v` is not `HOOK_FORMAT_VERSION`, so a v2 line would vanish
+  silently. `validate()` checks session events against `HOOK_KEYS`.
+- `scripts/task-dashboard/snapshot_adapter.py`: `HOOK_FIELDS` gains `asked`,
+  and the `session_events` table gains an `asked` column (in `db.py`'s schema)
+  for the adapter's insert to write.
+- `scripts/task-dashboard/fleet_views.py`: Needs you lists a `Stop` with
+  `asked = true` and no prompt after it; a `null` is not listed. Since you
+  were away (`away_items`) labels every `Stop` "finished", and should not
+  when `asked` is true.
+- **A pending `AskUserQuestion` never reaches `Stop`.** While the question
+  waits for an answer the turn has not ended, so a check that runs at `Stop`
+  cannot see it (inferred from hook semantics, not tested). That case needs
+  another signal: the registry's `waiting` status from suggestion 1, or a
+  `Notification` line, if the harness raises one for the question. Check what
+  `waiting` means, and whether such a notification fires, before building
+  either.
 
 **Risks.**
 
@@ -191,7 +207,11 @@ same as one with nothing open.
   needs a `schema: 2` bump of its own; whichever of suggestions 1 and 4 lands
   second adds its section to the bump the first one made.
 - `snapshot_adapter.py`: keep the previous rows for a repo named in
-  `scan_errors` instead of deleting them.
+  `scan_errors`. Rows carry no repo column; the repo sits only in
+  `raw_json`. So narrow `ingest`'s host-wide `DELETE FROM issues WHERE source = ?`
+  to skip worktree rows whose `json_extract(raw_json, '$.repo')` is in
+  `scan_errors`, and have `scan_errors` name a repo by the same basename that
+  `snapshot.py` writes to `worktrees[].repo`.
 - The fleet header or the Health panel: one "lindev 4m · MacBook 2d" line
   from `machines`.
 
@@ -208,11 +228,13 @@ the failure and the host's age, never as current.
   never leaves the machine. One part is worth keeping in mind if the fleet
   view's three-line brief is ever model-written: workdesk checks that any
   question a card quotes appears word for word in the agent's messages
-  (`docs/DESIGN.md`, "Decisions keep Adam's words"). That check is cheap and
+  (`docs/DESIGN.md`, "Decisions keep Adam's words"; Adam is the person workdesk is built
+  for). That check is cheap and
   stops an invented quote.
 - **Acting on sessions**: Close, Close idle, Fresh start, Resume, Go to window,
   and launch scripts (`start.py`, `terminal.py`, `procs.py`). Our fleet view is
-  read-only by principle 2, and the owner's sessions run under tmux, not in
+  read-only by principle 2 of the fleet design ("Read-only, as in the first
+  instance", in [`2026-10-23-fleet-view.md`](2026-10-23-fleet-view.md)), and the owner's sessions run under tmux, not in
   Terminal.app windows. workdesk's four-part identity check (pid, start time, tty, tty
   leader) exists to make a kill safe; we only need the pid and start time half,
   for liveness, which suggestion 1 covers.
