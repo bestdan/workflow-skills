@@ -600,7 +600,8 @@ class GithubTests(SyncCase):
 
     def test_ci_auth_error_cancels_the_remaining_lookups(self):
         # `pool.map`'s result generator cancels the queued futures once one
-        # raises; collecting results any other way runs all 40 lookups.
+        # raises; collecting per future (submit + .result(), as_completed)
+        # without cancelling runs all 40 lookups.
         # The good lookups are slow and the bad one is instant, so at most
         # the first batch, the failing one, and the batch it freed have started.
         gh = FakeGh(authored=[pr_node(n, f"pr {n}", f"b{n}") for n in range(1, 41)])
@@ -614,7 +615,7 @@ class GithubTests(SyncCase):
                     started.append(argv)
                 if bad in argv:
                     return 1, "", "HTTP 401: Bad credentials"
-                time.sleep(0.1)
+                time.sleep(0.5)
             return gh(argv, timeout)
 
         cfg = make_config(enabled=True)
