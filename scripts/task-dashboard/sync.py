@@ -577,7 +577,8 @@ def run_fleet(
     Failures are treated as the Jira sync's GitHub step treats them: an
     AuthError is `auth_failed` with the `gh auth login` hint, a CI, milestone
     or comments lookup that failed for one PR is listed in `failed_keys`, and
-    anything else is `failed`. None is raised, and none reaches the Jira rows:
+    anything else is `failed`. No Exception is raised (an interrupt is recorded
+    as a failed run, then re-raised), and none reaches the Jira rows:
     `github_fleet.write` replaces only `source = 'github'` rows, in its own
     transaction, so a failed run leaves the last good GitHub rows in place. The
     caller checks `fleet_enabled()` first.

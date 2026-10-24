@@ -757,10 +757,21 @@ class FleetTests(SyncCase):
         self.assertEqual(len(self.github_rows()), 3)
 
     def test_fleet_run_is_not_a_jira_cursor(self):
-        self.run_all(make_config(enabled=True, fleet=True), FleetGh())
+        # The fleet run starts after the Jira run, as it does in production, so
+        # a cursor query that ignored kind would pick the fleet row.
+        later = NOW + timedelta(minutes=1)
+        ticks = iter([NOW, later, later])  # Jira finish, fleet start, fleet finish
+        cfg = make_config(enabled=True, fleet=True)
+        sync.run_all(
+            "full", cfg, self.conn, NOW,
+            jira=sync.JiraSource(cfg, runner=FakeAcli(["DEMO-1"])),
+            fleet_runner=FleetGh(), clock=lambda: next(ticks),
+        )  # fmt: skip
+        runs = self.conn.execute("SELECT kind, started_at FROM sync_runs").fetchall()
+        self.assertEqual(
+            runs, [("full", sync._ts(NOW)), ("github_fleet", sync._ts(later))]
+        )
         self.assertEqual(sync.last_cursor_run(self.conn)[0], sync._ts(NOW))
-        kinds = [k for (k,) in self.conn.execute("SELECT kind FROM sync_runs")]
-        self.assertEqual(kinds, ["full", "github_fleet"])
 
 
 class GenericItemTests(SyncCase):
