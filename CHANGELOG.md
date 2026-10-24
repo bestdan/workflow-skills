@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.111.0] - 2026-10-24
+
+### Features
+
+- add kind tags, focus pin and header gauges [#1105] (#1131) (21ac778)
+
 ## [2.110.0] - 2026-10-24
 
 ### Features
