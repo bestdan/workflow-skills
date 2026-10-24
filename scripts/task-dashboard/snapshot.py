@@ -366,9 +366,16 @@ def build(
     now: datetime,
     runner: Runner = run,
     classify: Classifier = approval_shaped,
+    cursor: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """The snapshot document and the cursor to save once it has been shipped."""
-    cursor = load_cursor(state_dir / CURSOR_NAME)
+    """The snapshot document and the cursor to save once it has been shipped.
+
+    The deltas start at ``cursor``, else at the one saved in ``state_dir``. The
+    collector passes the cursor of its newest unsent snapshot, so a snapshot
+    waiting in its spool and the next one never carry the same lines.
+    """
+    if cursor is None:
+        cursor = load_cursor(state_dir / CURSOR_NAME)
     sessions, session_marks = hook_tails(state_dir / "sessions", cursor)
     prompts, history_mark = history_delta(history, cursor, classify)
     doc = {
