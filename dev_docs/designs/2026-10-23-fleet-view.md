@@ -116,8 +116,9 @@ inventory.** #1098 found that a background process can read the session list
 only through an `@internal` request (`list_cloud_sessions`, answered by
 `claude -p` for the program that started it). That request returns one page of
 at most 200 sessions with no cursor, about 20 days on the owner's account, not
-ordered by `updated_at`, and none of `status_bucket`, `status_category` or
-`needs_action`. So, as decided on #1100:
+ordered by `updated_at`, and none of the service's `status_bucket`,
+post-turn `status_category` or `needs_action`. The adapter derives coarse
+stand-ins for those three from `status` alone. So, as decided on #1100:
 
 - Every sync on an instance that ingests snapshots folds the hook events into
   one row per session (`sessions.py`, `source = 'claude-hook'`): waiting or
