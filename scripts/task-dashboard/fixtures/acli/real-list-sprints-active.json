@@ -1,0 +1,17 @@
+{
+  "isLast": true,
+  "maxResults": 50,
+  "sprints": [
+    {
+      "endDate": "2026-06-22T15:00:00.000Z",
+      "goal": "",
+      "id": 505,
+      "link": "https://jira.example.invalid/redacted",
+      "name": "Sprint 505",
+      "startDate": "2026-06-08T15:00:48.506Z",
+      "state": "active"
+    }
+  ],
+  "startAt": 0,
+  "total": 1
+}

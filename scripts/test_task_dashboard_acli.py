@@ -10,6 +10,7 @@ Needs Python 3.11: run via scripts/test-task-dashboard-acli.sh.
 
 import importlib.util
 import json
+import re
 import sys
 import threading
 import unittest
@@ -30,7 +31,9 @@ TRANSIENT = (FIXTURES / "stderr-transient-fetch.txt").read_text()
 
 
 def fixtures(prefix):
-    found = sorted(FIXTURES.glob(prefix + "*"))
+    found = sorted(
+        [*FIXTURES.glob(prefix + "*"), *FIXTURES.glob("real-" + prefix + "*")]
+    )
     assert found, f"no fixture matches {prefix}*"
     return found
 
@@ -114,7 +117,7 @@ class SearchTests(unittest.TestCase):
         self.assertEqual(argv[argv.index("--jql") + 1], "assignee = currentUser()")
         self.assertIn("--paginate", argv)
         self.assertIn("--json", argv)
-        self.assertEqual(argv[argv.index("--fields") + 1], "key")
+        self.assertEqual(argv[argv.index("--fields") + 1], "status")
 
     def test_wrapped_object_is_accepted(self):
         body = json.dumps({"issues": [{"key": "A-1"}, {"key": "A-1"}, {"key": "A-2"}]})
@@ -285,11 +288,35 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(err.argv, ["acli", "jira"])
 
     def test_auth_text_on_stdout(self):
-        self.assertIsInstance(acli.classify(1, "not logged in", "", []), acli.AuthError)
+        real = (FIXTURES / "real-stderr-auth-logged-out.txt").read_text()
+        self.assertIsInstance(acli.classify(1, real, "", []), acli.AuthError)
+
+    def test_fallback_wordings_are_auth(self):
+        for text in ("Error: unauthenticated", "Error: not logged in"):
+            with self.subTest(text):
+                self.assertIsInstance(acli.classify(1, "", text, []), acli.AuthError)
+                self.assertIsInstance(acli.classify(1, text, "", []), acli.AuthError)
+
+    def test_ordinary_stdout_is_not_auth(self):
+        # Words near the patterns, and the 401/token the patterns leave out.
+        stdout = json.dumps(
+            [{"key": "DEMO-1401", "fields": {"summary": "rotate the login token"}}]
+        )
+        err = acli.classify(1, stdout, "", ["acli"])
+        self.assertIs(type(err), acli.AcliError)
+
+
+# The only project keys a fixture may use. The real- captures are pseudonymised
+# onto DEMO, ALPHA and BETA, so a capture committed without that pass carries
+# some other prefix and fails here. An allowlist, not a list of the real keys:
+# any function of those keys committed here, a hash included, would give them
+# back. A new fixture's keys must use one of these.
+PSEUDONYM_PROJECTS = {"DEMO", "ALPHA", "BETA", "OTHR"}
+ISSUE_KEY = re.compile(r"\b([A-Z][A-Z0-9]*)-\d+\b")
 
 
 class FixtureHygieneTests(unittest.TestCase):
-    """Keeps real captures safe: no email, account id or site domain lands here."""
+    """Keeps real captures safe: no email, account id, site domain or real key."""
 
     def test_no_identifying_text(self):
         files = [p for p in FIXTURES.rglob("*") if p.is_file()]
@@ -300,6 +327,9 @@ class FixtureHygieneTests(unittest.TestCase):
                 self.assertNotIn("@", text)
                 self.assertNotIn("atlassian.net", text.lower())
                 self.assertNotIn("accountid", text.lower())
+                unlisted = set(ISSUE_KEY.findall(text)) - PSEUDONYM_PROJECTS
+                # The message names no prefix: an unlisted one may be real.
+                self.assertTrue(not unlisted, "issue key outside PSEUDONYM_PROJECTS")
                 self.assertNotIn("emailaddress", text.lower())
 
 

@@ -28,18 +28,19 @@ Runner = Callable[[list[str], float], Result]
 
 DEFAULT_TIMEOUT = 120.0
 
-# Lower-cased substrings that mark an auth failure in acli's output. A GUESS:
-# the real logged-out text has not been captured yet, so this is deliberately
-# permissive. #1087 replaces it with the text a logged-out acli actually prints.
-# It must never match the transient `failed to fetch work item details`, which
+# Lower-cased substrings that mark an auth failure in acli's output. A logged-out
+# acli 1.3.19 prints, on stderr:
+#   ✗ Error: unauthorized: use 'acli [product] auth login' to authenticate
+# `unauthenticated` and `not logged in` are uncaptured wordings kept as a
+# fallback. Bare `401` and `token` are left out on purpose: stdout is searched
+# too, and both turn up in ordinary output, as in the key of issue number 1401.
+# They must never match the transient `failed to fetch work item details`, which
 # the serial retry exists to absorb.
 AUTH_ERROR_PATTERNS = (
     "unauthorized",
+    "auth login",
     "unauthenticated",
     "not logged in",
-    "login",
-    "token",
-    "401",
 )
 
 # The fields every `view` requests, before the per-site custom fields.
@@ -101,8 +102,8 @@ def is_auth_error(text: str) -> bool:
 def classify(rc: int, stdout: str, stderr: str, argv: list[str]) -> AcliError:
     """The exception for a failed call: AuthError on an auth pattern, else AcliError.
 
-    stdout is searched too, because where acli prints its errors is not yet
-    measured.
+    acli 1.3.19 prints its errors on stderr. stdout is searched too, so a
+    version that moves them still reads as auth rather than as transient.
     """
     detail = (stderr.strip() or stdout.strip() or f"exit {rc}")[:500]
     message = f"acli exited {rc}: {detail}"
@@ -139,9 +140,13 @@ def search_keys(
     runner: Runner = run_acli,
     timeout: float = DEFAULT_TIMEOUT,
 ) -> list[str]:
-    """Every issue key the JQL matches, across all pages, in returned order."""
+    """Every issue key the JQL matches, across all pages, in returned order.
+
+    `--fields key` alone makes acli print one `null` per match, dropping every
+    key; any allowlisted field keeps them, so the cheapest one is requested.
+    """
     argv = [acli, "jira", "workitem", "search", "--jql", jql]
-    argv += ["--paginate", "--json", "--fields", "key"]
+    argv += ["--paginate", "--json", "--fields", "status"]
     keys: list[str] = []
     seen: set[str] = set()
     for item in _items(_call_json(argv, runner, timeout), "issues", "values"):
