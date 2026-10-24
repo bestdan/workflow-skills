@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.116.0] - 2026-10-24
+
+### Features
+
+- add the Health panel and health --json [#1107] (#1142) (1fa7fcc)
+
 ## [2.115.0] - 2026-10-24
 
 ### Features
