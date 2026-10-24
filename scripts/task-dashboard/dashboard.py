@@ -368,7 +368,11 @@ def cmd_install(args: argparse.Namespace) -> int:
     over to the collector's install, which also covers systemd.
     """
     if args.collector_only:
-        ignored = [f for f, v in (("--db", args.db), ("--plugins-json", args.plugins_json)) if v]
+        ignored = [
+            f
+            for f, v in (("--db", args.db), ("--plugins-json", args.plugins_json))
+            if v
+        ]
         if ignored:
             print(
                 f"task-dashboard install: {' and '.join(ignored)} apply only to the"
