@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.119.0] - 2026-10-24
+
+### Features
+
+- add the Needs you page [#1108] (#1151) (085ad86)
+
 ## [2.118.1] - 2026-10-24
 
 ### Fixes
