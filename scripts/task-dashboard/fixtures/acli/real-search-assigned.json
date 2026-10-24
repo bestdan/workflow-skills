@@ -1,0 +1,282 @@
+[
+  {
+    "changelog": null,
+    "editmeta": null,
+    "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+    "fields": {
+      "assignee": {
+        "accountType": "atlassian",
+        "active": true,
+        "displayName": "Person A",
+        "self": "https://jira.example.invalid/redacted",
+        "timeZone": "Etc/UTC"
+      },
+      "issuetype": {
+        "avatarId": 10903,
+        "description": "Redacted description",
+        "hierarchyLevel": 0,
+        "iconUrl": "https://jira.example.invalid/redacted",
+        "id": "1",
+        "name": "Bug",
+        "self": "https://jira.example.invalid/redacted",
+        "subtask": false
+      },
+      "priority": {
+        "iconUrl": "https://jira.example.invalid/redacted",
+        "id": "4",
+        "name": "P3-Minor",
+        "self": "https://jira.example.invalid/redacted"
+      },
+      "status": {
+        "description": "Redacted description",
+        "iconUrl": "https://jira.example.invalid/redacted",
+        "id": "10002",
+        "name": "Done",
+        "self": "https://jira.example.invalid/redacted",
+        "statusCategory": {
+          "colorName": "green",
+          "id": 3,
+          "key": "done",
+          "name": "Done",
+          "self": "https://jira.example.invalid/redacted"
+        }
+      },
+      "summary": "Redacted summary"
+    },
+    "fieldsToInclude": null,
+    "id": "100011",
+    "key": "ALPHA-104",
+    "names": null,
+    "operations": null,
+    "properties": null,
+    "renderedFields": null,
+    "schema": null,
+    "self": "https://jira.example.invalid/redacted",
+    "transitions": null,
+    "versionedRepresentations": null
+  },
+  {
+    "changelog": null,
+    "editmeta": null,
+    "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+    "fields": {
+      "assignee": {
+        "accountType": "atlassian",
+        "active": true,
+        "displayName": "Person A",
+        "self": "https://jira.example.invalid/redacted",
+        "timeZone": "Etc/UTC"
+      },
+      "issuetype": {
+        "avatarId": 10903,
+        "description": "Redacted description",
+        "hierarchyLevel": 0,
+        "iconUrl": "https://jira.example.invalid/redacted",
+        "id": "1",
+        "name": "Bug",
+        "self": "https://jira.example.invalid/redacted",
+        "subtask": false
+      },
+      "priority": {
+        "iconUrl": "https://jira.example.invalid/redacted",
+        "id": "4",
+        "name": "P3-Minor",
+        "self": "https://jira.example.invalid/redacted"
+      },
+      "status": {
+        "description": "Redacted description",
+        "iconUrl": "https://jira.example.invalid/redacted",
+        "id": "10002",
+        "name": "Done",
+        "self": "https://jira.example.invalid/redacted",
+        "statusCategory": {
+          "colorName": "green",
+          "id": 3,
+          "key": "done",
+          "name": "Done",
+          "self": "https://jira.example.invalid/redacted"
+        }
+      },
+      "summary": "Redacted summary"
+    },
+    "fieldsToInclude": null,
+    "id": "100009",
+    "key": "ALPHA-103",
+    "names": null,
+    "operations": null,
+    "properties": null,
+    "renderedFields": null,
+    "schema": null,
+    "self": "https://jira.example.invalid/redacted",
+    "transitions": null,
+    "versionedRepresentations": null
+  },
+  {
+    "changelog": null,
+    "editmeta": null,
+    "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+    "fields": {
+      "assignee": {
+        "accountType": "atlassian",
+        "active": true,
+        "displayName": "Person A",
+        "self": "https://jira.example.invalid/redacted",
+        "timeZone": "Etc/UTC"
+      },
+      "issuetype": {
+        "avatarId": 10903,
+        "description": "Redacted description",
+        "hierarchyLevel": 0,
+        "iconUrl": "https://jira.example.invalid/redacted",
+        "id": "1",
+        "name": "Bug",
+        "self": "https://jira.example.invalid/redacted",
+        "subtask": false
+      },
+      "priority": {
+        "iconUrl": "https://jira.example.invalid/redacted",
+        "id": "4",
+        "name": "P3-Minor",
+        "self": "https://jira.example.invalid/redacted"
+      },
+      "status": {
+        "description": "Redacted description",
+        "iconUrl": "https://jira.example.invalid/redacted",
+        "id": "10002",
+        "name": "Done",
+        "self": "https://jira.example.invalid/redacted",
+        "statusCategory": {
+          "colorName": "green",
+          "id": 3,
+          "key": "done",
+          "name": "Done",
+          "self": "https://jira.example.invalid/redacted"
+        }
+      },
+      "summary": "Redacted summary"
+    },
+    "fieldsToInclude": null,
+    "id": "100008",
+    "key": "ALPHA-102",
+    "names": null,
+    "operations": null,
+    "properties": null,
+    "renderedFields": null,
+    "schema": null,
+    "self": "https://jira.example.invalid/redacted",
+    "transitions": null,
+    "versionedRepresentations": null
+  },
+  {
+    "changelog": null,
+    "editmeta": null,
+    "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+    "fields": {
+      "assignee": {
+        "accountType": "atlassian",
+        "active": true,
+        "displayName": "Person A",
+        "self": "https://jira.example.invalid/redacted",
+        "timeZone": "Etc/UTC"
+      },
+      "issuetype": {
+        "avatarId": 10903,
+        "description": "Redacted description",
+        "hierarchyLevel": 0,
+        "iconUrl": "https://jira.example.invalid/redacted",
+        "id": "1",
+        "name": "Bug",
+        "self": "https://jira.example.invalid/redacted",
+        "subtask": false
+      },
+      "priority": {
+        "iconUrl": "https://jira.example.invalid/redacted",
+        "id": "4",
+        "name": "P3-Minor",
+        "self": "https://jira.example.invalid/redacted"
+      },
+      "status": {
+        "description": "Redacted description",
+        "iconUrl": "https://jira.example.invalid/redacted",
+        "id": "10273",
+        "name": "On Hold/Blocked",
+        "self": "https://jira.example.invalid/redacted",
+        "statusCategory": {
+          "colorName": "yellow",
+          "id": 4,
+          "key": "indeterminate",
+          "name": "In Progress",
+          "self": "https://jira.example.invalid/redacted"
+        }
+      },
+      "summary": "Redacted summary"
+    },
+    "fieldsToInclude": null,
+    "id": "100010",
+    "key": "DEMO-104",
+    "names": null,
+    "operations": null,
+    "properties": null,
+    "renderedFields": null,
+    "schema": null,
+    "self": "https://jira.example.invalid/redacted",
+    "transitions": null,
+    "versionedRepresentations": null
+  },
+  {
+    "changelog": null,
+    "editmeta": null,
+    "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+    "fields": {
+      "assignee": {
+        "accountType": "atlassian",
+        "active": true,
+        "displayName": "Person A",
+        "self": "https://jira.example.invalid/redacted",
+        "timeZone": "Etc/UTC"
+      },
+      "issuetype": {
+        "avatarId": 10920,
+        "description": "Redacted description",
+        "hierarchyLevel": 0,
+        "iconUrl": "https://jira.example.invalid/redacted",
+        "id": "9",
+        "name": "Spike",
+        "self": "https://jira.example.invalid/redacted",
+        "subtask": false
+      },
+      "priority": {
+        "iconUrl": "https://jira.example.invalid/redacted",
+        "id": "4",
+        "name": "P3-Minor",
+        "self": "https://jira.example.invalid/redacted"
+      },
+      "status": {
+        "description": "Redacted description",
+        "iconUrl": "https://jira.example.invalid/redacted",
+        "id": "10002",
+        "name": "Done",
+        "self": "https://jira.example.invalid/redacted",
+        "statusCategory": {
+          "colorName": "green",
+          "id": 3,
+          "key": "done",
+          "name": "Done",
+          "self": "https://jira.example.invalid/redacted"
+        }
+      },
+      "summary": "Redacted summary"
+    },
+    "fieldsToInclude": null,
+    "id": "100002",
+    "key": "DEMO-102",
+    "names": null,
+    "operations": null,
+    "properties": null,
+    "renderedFields": null,
+    "schema": null,
+    "self": "https://jira.example.invalid/redacted",
+    "transitions": null,
+    "versionedRepresentations": null
+  }
+]

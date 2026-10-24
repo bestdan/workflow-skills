@@ -12,7 +12,7 @@ the day it lands:
 | `stderr-transient-*`  | stderr of a failure the serial retry absorbs; must not read auth |
 | `stderr-auth-*`       | stderr of a logged-out acli; must classify as an auth error      |
 
-**Every file here today is synthetic.** They were written by hand on a machine
+**Every file without a `real-` prefix is synthetic.** They were written by hand on a machine
 with no `acli`, from the shapes recorded in
 `dev_docs/research/2026-10-23-task-dashboard-acli-spike.md`. Keys, names, ids
 and dates are invented. The custom field ids are the ones the spike found:
@@ -29,8 +29,46 @@ The parser also accepts an object wrapping the array, under `issues`,
 
 `../../dev/fake-acli` answers from these same files, so a sync can run end to
 end with no Jira: point `jira.acli_path` at it. Its header lists what it
-answers and its `FAKE_ACLI_MODE` failure paths.
+answers and its `FAKE_ACLI_MODE` failure paths. It reads the synthetic files
+only; its globs do not match the `real-` ones.
 
-#1087 adds redacted real captures beside these. The test fails on any file in
-this folder containing an at-sign or the Atlassian cloud domain, so strip
-emails, account ids, `self` URLs and the site name before committing one.
+## Real captures
+
+The `real-` files are redacted, pseudonymised output of acli 1.3.19 against
+the work site, captured for #1087. The test globs `real-<prefix>` beside each
+prefix above, so they get the same checks. They confirm two of the guesses:
+`search` prints a bare array, and `list-sprints` an object holding `sprints`.
+The real logged-out text replaced the guessed auth patterns in `jira_acli.py`.
+
+| File                              | What it shows                                                  |
+| --------------------------------- | -------------------------------------------------------------- |
+| `real-search-assigned.json`       | `search --limit 5 --json`, default fields                      |
+| `real-view-links-both-ways.json`  | Blocks links inward and outward, parent, one active sprint     |
+| `real-view-sprints-flagged.json`  | three-sprint history ending active, Flagged set, parent        |
+| `real-view-mostly-null.json`      | no assignee, sprint, links, labels, priority or due date       |
+| `real-view-assigned.json`         | an issue of mine, sprints all closed                           |
+| `real-list-sprints-active.json`   | `list-sprints --state active` for one board                    |
+| `real-stderr-auth-logged-out.txt` | stderr of `search` after `acli jira auth logout`; stdout empty |
+
+Kept: field ids, enum values (status, status category, priority, issue type,
+link type, Flagged's `Impediment`), timestamp formats and offsets, and
+structure.
+
+Pseudonymised, each with one mapping across every file so links, parents and
+sprints still resolve to each other: project keys (`DEMO`, `ALPHA`, `BETA`),
+issue numbers, issue and link ids, sprint ids and names (`Sprint <id>`), and
+board ids. Every date is shifted by one fixed number of days, with its time
+and offset unchanged.
+
+Replaced: summaries, descriptions, display names (`Person A`…), labels
+(`label-N`), sprint goals, time zones, and every URL
+(`https://jira.example.invalid/redacted`). Dropped: the account id and email
+address keys, whose names alone fail the hygiene test, and the avatar URL keys.
+
+One shape the captures exposed: `search --fields key` prints one `null` per
+match, so `search_keys` requests `status` instead.
+
+The test fails on any file in this folder containing an at-sign, the Atlassian
+cloud domain, or an issue key whose project is not in its `PSEUDONYM_PROJECTS`
+allowlist, so strip emails, account ids, `self` URLs and the site name, and
+pseudonymise keys, before committing one.

@@ -1,0 +1,209 @@
+{
+  "changelog": null,
+  "editmeta": null,
+  "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+  "fields": {
+    "assignee": {
+      "accountType": "atlassian",
+      "active": true,
+      "displayName": "Person B",
+      "self": "https://jira.example.invalid/redacted",
+      "timeZone": "Etc/UTC"
+    },
+    "created": "2026-06-12T12:11:26.425-0400",
+    "customfield_10007": null,
+    "customfield_10303": [
+      {
+        "boardId": 41,
+        "endDate": "2026-06-22T15:00:00.000Z",
+        "goal": "",
+        "id": 505,
+        "name": "Sprint 505",
+        "startDate": "2026-06-08T15:00:48.506Z",
+        "state": "active"
+      }
+    ],
+    "duedate": null,
+    "issuelinks": [
+      {
+        "id": "90002",
+        "inwardIssue": {
+          "fields": {
+            "issuetype": {
+              "avatarId": 10918,
+              "description": "Redacted description",
+              "hierarchyLevel": 0,
+              "iconUrl": "https://jira.example.invalid/redacted",
+              "id": "3",
+              "name": "Task",
+              "self": "https://jira.example.invalid/redacted",
+              "subtask": false
+            },
+            "priority": {
+              "iconUrl": "https://jira.example.invalid/redacted",
+              "id": "4",
+              "name": "P3-Minor",
+              "self": "https://jira.example.invalid/redacted"
+            },
+            "status": {
+              "description": "Redacted description",
+              "iconUrl": "https://jira.example.invalid/redacted",
+              "id": "3",
+              "name": "In progress",
+              "self": "https://jira.example.invalid/redacted",
+              "statusCategory": {
+                "colorName": "yellow",
+                "id": 4,
+                "key": "indeterminate",
+                "name": "In Progress",
+                "self": "https://jira.example.invalid/redacted"
+              }
+            },
+            "summary": "Redacted summary"
+          },
+          "id": "100013",
+          "key": "DEMO-106",
+          "self": "https://jira.example.invalid/redacted"
+        },
+        "self": "https://jira.example.invalid/redacted",
+        "type": {
+          "id": "10000",
+          "inward": "is blocked by",
+          "name": "Blocks",
+          "outward": "blocks",
+          "self": "https://jira.example.invalid/redacted"
+        }
+      },
+      {
+        "id": "90003",
+        "outwardIssue": {
+          "fields": {
+            "issuetype": {
+              "avatarId": 10918,
+              "description": "Redacted description",
+              "hierarchyLevel": 0,
+              "iconUrl": "https://jira.example.invalid/redacted",
+              "id": "3",
+              "name": "Task",
+              "self": "https://jira.example.invalid/redacted",
+              "subtask": false
+            },
+            "priority": {
+              "iconUrl": "https://jira.example.invalid/redacted",
+              "id": "4",
+              "name": "P3-Minor",
+              "self": "https://jira.example.invalid/redacted"
+            },
+            "status": {
+              "description": "Redacted description",
+              "iconUrl": "https://jira.example.invalid/redacted",
+              "id": "3",
+              "name": "In progress",
+              "self": "https://jira.example.invalid/redacted",
+              "statusCategory": {
+                "colorName": "yellow",
+                "id": 4,
+                "key": "indeterminate",
+                "name": "In Progress",
+                "self": "https://jira.example.invalid/redacted"
+              }
+            },
+            "summary": "Redacted summary"
+          },
+          "id": "100012",
+          "key": "DEMO-105",
+          "self": "https://jira.example.invalid/redacted"
+        },
+        "self": "https://jira.example.invalid/redacted",
+        "type": {
+          "id": "10000",
+          "inward": "is blocked by",
+          "name": "Blocks",
+          "outward": "blocks",
+          "self": "https://jira.example.invalid/redacted"
+        }
+      }
+    ],
+    "labels": [],
+    "parent": {
+      "fields": {
+        "issuetype": {
+          "avatarId": 10907,
+          "description": "Redacted description",
+          "hierarchyLevel": 1,
+          "iconUrl": "https://jira.example.invalid/redacted",
+          "id": "6",
+          "name": "Epic",
+          "self": "https://jira.example.invalid/redacted",
+          "subtask": false
+        },
+        "priority": {
+          "iconUrl": "https://jira.example.invalid/redacted",
+          "id": "4",
+          "name": "P3-Minor",
+          "self": "https://jira.example.invalid/redacted"
+        },
+        "status": {
+          "description": "Redacted description",
+          "iconUrl": "https://jira.example.invalid/redacted",
+          "id": "11823",
+          "name": "In Execution",
+          "self": "https://jira.example.invalid/redacted",
+          "statusCategory": {
+            "colorName": "yellow",
+            "id": 4,
+            "key": "indeterminate",
+            "name": "In Progress",
+            "self": "https://jira.example.invalid/redacted"
+          }
+        },
+        "summary": "Redacted summary"
+      },
+      "id": "100003",
+      "key": "DEMO-103",
+      "self": "https://jira.example.invalid/redacted"
+    },
+    "priority": {
+      "iconUrl": "https://jira.example.invalid/redacted",
+      "id": "4",
+      "name": "P3-Minor",
+      "self": "https://jira.example.invalid/redacted"
+    },
+    "reporter": {
+      "accountType": "atlassian",
+      "active": true,
+      "displayName": "Person B",
+      "self": "https://jira.example.invalid/redacted",
+      "timeZone": "Etc/UTC"
+    },
+    "resolutiondate": null,
+    "status": {
+      "description": "Redacted description",
+      "iconUrl": "https://jira.example.invalid/redacted",
+      "id": "3",
+      "name": "In progress",
+      "self": "https://jira.example.invalid/redacted",
+      "statusCategory": {
+        "colorName": "yellow",
+        "id": 4,
+        "key": "indeterminate",
+        "name": "In Progress",
+        "self": "https://jira.example.invalid/redacted"
+      }
+    },
+    "statuscategorychangedate": "2026-06-12T14:25:58.934-0400",
+    "summary": "Redacted summary",
+    "updated": "2026-06-12T14:25:58.934-0400"
+  },
+  "fieldsToInclude": null,
+  "id": "100014",
+  "key": "DEMO-107",
+  "names": null,
+  "operations": null,
+  "properties": null,
+  "renderedFields": null,
+  "schema": null,
+  "self": "https://jira.example.invalid/redacted",
+  "transitions": null,
+  "versionedRepresentations": null
+}
