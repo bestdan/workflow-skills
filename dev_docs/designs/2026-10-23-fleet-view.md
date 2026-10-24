@@ -82,7 +82,7 @@ mini ────┘   (per machine)   (POST, token)    + GitHub / Claude Remote
 
 | Source                      | Read by                                  | Gives                                                                                                                                                                       |
 | --------------------------- | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Claude Code Remote sessions | aggregator, adapter                      | every cloud and Remote Control session: title, machine, `status_bucket`, and its post-turn `status_category` (`need_input`, `review_ready`, `completed`) and `needs_action` |
+| Claude Code Remote sessions | aggregator, adapter                      | optional, off by default: cloud and Remote Control sessions with title, environment, repo, branch, `updated_at` and a coarse `status`, and no post-turn fields (see below). |
 | GitHub, configured owners   | aggregator, adapter (task 3's `gh` code) | open PRs (age, draft, review decision, CI), issues at `auto:human-review-needed`, designs at `status: proposed`                                                             |
 | Session-state hook          | collector                                | local sessions the Remote list misses, with exact turn-end and prompt times and permission prompts                                                                          |
 | Worktrees                   | collector                                | per repo: branch, dirty or unpushed state, and the landed-PR evidence `branch-remove.sh` already computes                                                                   |
@@ -110,6 +110,28 @@ the machine opts in**: it exits at once unless
 `~/.config/task-dashboard/config.toml` has `[collector] enabled = true`. The
 plugin is public and installed by people who never asked to have their
 sessions logged. On an opted-in machine it needs no further setup.
+
+**Session state comes from the hook; the Remote list is an optional
+inventory.** #1098 found that a background process can read the session list
+only through an `@internal` request (`list_cloud_sessions`, answered by
+`claude -p` for the program that started it). That request returns one page of
+at most 200 sessions with no cursor, about 20 days on the owner's account, not
+ordered by `updated_at`, and none of `status_bucket`, `status_category` or
+`needs_action`. So, as decided on #1100:
+
+- Every sync on an instance that ingests snapshots folds the hook events into
+  one row per session (`sessions.py`, `source = 'claude-hook'`): waiting or
+  working, `need_input` after a permission prompt, the empty-spawn flag, and
+  exact times. Sessions on a machine without the plugin are not in it.
+- With `claude_remote.enabled = true` (default `false`), each sync also reads
+  the list (`claude_remote.py`, `source = 'claude-remote'`). With it off,
+  **cloud-only sessions are invisible**. With it on they appear with the coarse
+  status only, and each read is a full snapshot: it cannot fetch "updated
+  since the last run" or page back 30 days. A session the page reports
+  `archived` is dropped; one missing from the page is kept, since it may have
+  fallen off a truncated page, and ages out after 30 days unseen.
+- The two sources key a session differently, and nothing joins them, so a
+  Remote Control session on an opted-in machine can show under both.
 
 **The GitHub row is a sync step of its own, behind `github.fleet`.** With
 `github.fleet = true` (default `false`; `github.enabled = false` also turns it

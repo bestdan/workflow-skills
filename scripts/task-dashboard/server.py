@@ -271,19 +271,20 @@ def sync_health(
 ) -> dict[str, Any]:
     """Last successful sync, its age, staleness, and the latest finished run.
 
-    All of it is the Jira sync's: a GitHub fleet run (sync.FLEET_KIND) must not
-    make a failing Jira sync look fresh. The latest finished fleet run is
-    reported beside it as `fleet_run`.
+    All of it is the Jira sync's: no fleet step's run (GitHub, sessions) may
+    make a failing Jira sync look fresh, so only the Jira modes count. The
+    latest finished GitHub fleet run is reported beside it as `fleet_run`.
     """
+    jira_kinds = f"kind IN ({', '.join('?' * len(sync.MODES))})"
     ok = conn.execute(
-        "SELECT finished_at FROM sync_runs WHERE outcome = 'ok' AND kind IS NOT ?"
+        f"SELECT finished_at FROM sync_runs WHERE outcome = 'ok' AND {jira_kinds}"
         " ORDER BY finished_at DESC, id DESC LIMIT 1",
-        (sync.FLEET_KIND,),
+        sync.MODES,
     ).fetchone()
     last = conn.execute(
         "SELECT kind, outcome, error, finished_at FROM sync_runs"
-        " WHERE finished_at IS NOT NULL AND kind IS NOT ? ORDER BY id DESC LIMIT 1",
-        (sync.FLEET_KIND,),
+        f" WHERE finished_at IS NOT NULL AND {jira_kinds} ORDER BY id DESC LIMIT 1",
+        sync.MODES,
     ).fetchone()
     fleet = conn.execute(
         "SELECT kind, outcome, error, finished_at FROM sync_runs"

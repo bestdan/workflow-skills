@@ -28,6 +28,12 @@ run after this one when `github.fleet` is on. It records its own `sync_runs`
 row (kind `github_fleet`), so its failure never reaches the Jira rows or the
 Jira run's outcome.
 
+The fleet view's session rows are two more steps of the same shape, each with
+its own `sync_runs` row: `run_sessions()` (kind `sessions`) folds the ingested
+session-state hook events into rows whenever the instance ingests snapshots,
+and `run_claude_remote()` (kind `claude_remote`) reads the optional cloud
+session list when `claude_remote.enabled` is on.
+
 The spec is the Sync section of dev_docs/designs/2026-10-23-task-dashboard.md.
 """
 
@@ -38,9 +44,11 @@ import traceback
 from datetime import datetime, timezone
 from typing import Any, Callable
 
+import claude_remote
 import github_fleet
 import github_gh
 import jira_acli
+import sessions
 
 MODES = ("incremental", "reconcile", "full")
 SOURCE = "jira"
@@ -619,6 +627,96 @@ def run_fleet(
     return _run_row(db, run_id)
 
 
+# --- the fleet view's session steps ------------------------------------------
+
+
+def _wall() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _run_step(
+    db: sqlite3.Connection,
+    kind: str,
+    now: datetime,
+    clock: Callable[[], datetime],
+    body: Callable[[], "tuple[dict[str, int], str | None]"],
+) -> dict[str, Any]:
+    """Record one step as a `sync_runs` row around `body`, as run_fleet does.
+
+    `body` returns (counts, None) on success, or (counts, error) for an auth
+    failure it classified itself; any other Exception is `failed`.
+    """
+    run_id = _start_run(db, kind, now)
+    counts: dict[str, int] = {}
+    outcome, error = "ok", None
+    try:
+        counts, auth_error = body()
+        if auth_error is not None:
+            outcome, error = "auth_failed", auth_error
+    except Exception as exc:  # recorded, not raised: the next run retries
+        outcome = "failed"
+        error = "".join(traceback.format_exception_only(type(exc), exc)).strip()
+    except BaseException as exc:
+        if db.in_transaction:
+            db.rollback()
+        _finish_run(
+            db, run_id, "failed", clock(), counts, [],
+            f"interrupted ({type(exc).__name__})",
+        )  # fmt: skip
+        raise
+    if db.in_transaction:
+        db.rollback()
+    _finish_run(db, run_id, outcome, clock(), counts, [], error)
+    return _run_row(db, run_id)
+
+
+def run_sessions(
+    db: sqlite3.Connection,
+    now: datetime,
+    *,
+    clock: "Callable[[], datetime] | None" = None,
+) -> dict[str, Any]:
+    """Rebuild the `claude-hook` session rows from `session_events`."""
+
+    def body() -> "tuple[dict[str, int], str | None]":
+        rows = sessions.derive(db, now)
+        sessions.write(db, rows, now)
+        return {
+            "sessions": len(rows),
+            "waiting": sum(1 for r in rows if r["status_bucket"] == "waiting"),
+            "need_input": sum(1 for r in rows if r["needs_action"]),
+            "empty_spawns": sum(1 for r in rows if r["empty_spawn"]),
+        }, None
+
+    return _run_step(db, sessions.RUN_KIND, now, clock or _wall, body)
+
+
+def run_claude_remote(
+    config: dict[str, Any],
+    db: sqlite3.Connection,
+    now: datetime,
+    *,
+    runner: claude_remote.Runner = claude_remote.run,
+    clock: "Callable[[], datetime] | None" = None,
+) -> dict[str, Any]:
+    """Read the cloud session list and reconcile the `claude-remote` rows.
+
+    An unavailable read (a refusal, a timeout, a reply it cannot parse) is a
+    failed run that leaves the last good rows in place; it never reads as "no
+    sessions". The caller checks `claude_remote.enabled` first.
+    """
+
+    def body() -> "tuple[dict[str, int], str | None]":
+        try:
+            plan = claude_remote.fetch(config, runner)
+        except claude_remote.AuthError as exc:
+            return {}, f"{exc} (fix: run `claude auth login`)"
+        dropped = claude_remote.write(db, plan["rows"], now)
+        return {**plan["counts"], **dropped}, None
+
+    return _run_step(db, claude_remote.RUN_KIND, now, clock or _wall, body)
+
+
 def run_all(
     mode: str,
     config: dict[str, Any],
@@ -628,15 +726,22 @@ def run_all(
     jira: "JiraSource | None" = None,
     github: "GithubSource | None" = None,
     fleet_runner: github_gh.Runner = github_gh.run,
+    claude_runner: claude_remote.Runner = claude_remote.run,
     clock: "Callable[[], datetime] | None" = None,
 ) -> list[dict[str, Any]]:
-    """One scheduled sync: `run()`, then `run_fleet()` when it is enabled.
+    """One scheduled sync: `run()`, then each fleet step that is enabled.
 
-    Returns the `sync_runs` row of each run made. The fleet step runs whatever
-    the Jira run's outcome, since the two write disjoint rows.
+    Returns the `sync_runs` row of each run made. The fleet steps run whatever
+    the Jira run's outcome, since every step writes disjoint rows.
     """
-    clock = clock or (lambda: datetime.now(timezone.utc))
+    clock = clock or _wall
     rows = [run(mode, config, db, now, jira=jira, github=github, clock=clock)]
     if fleet_enabled(config):
         rows.append(run_fleet(config, db, clock(), runner=fleet_runner, clock=clock))
+    if sessions.enabled(config):
+        rows.append(run_sessions(db, clock(), clock=clock))
+    if config["claude_remote"]["enabled"]:
+        rows.append(
+            run_claude_remote(config, db, clock(), runner=claude_runner, clock=clock)
+        )
     return rows
