@@ -260,8 +260,9 @@ def cmd_sync(args: argparse.Namespace) -> int:
         conn.close()
     code = _report_sync(jira_row)
     for row in fleet:
-        # Nonzero when either run failed; the Jira run's code wins a tie.
-        code = code or _report_sync(row, "PR lookup failed")
+        # Printed whatever the Jira outcome; the Jira run's code wins a tie.
+        fleet_code = _report_sync(row, "PR lookup failed")
+        code = code or fleet_code
     return code
 
 
