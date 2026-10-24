@@ -20,7 +20,8 @@ WHAT IT COLLECTS, each keyed by its overlay item `(source, key)`:
   and the gauge agree. The wait starts when the PR was opened: when it entered
   the queue is not recorded.
 - **Issues at `auto:human-review-needed`** (github_fleet's `issue` rows),
-  waiting since they were opened, for the same reason.
+  waiting since they were opened, for the same reason, and behind the same
+  gate as the PRs: none until a fleet sync run has succeeded.
 - **Drain items marked "needs you"**: drain_items(), an empty hook point
   until a drain tracking issue is configured.
 
@@ -39,7 +40,8 @@ without a question leave the main list.
 
 FOCUS. While the overlay has a focus item, only that item's own needs show:
 the item itself, and what is tied to it (related()). The rest are counted as
-held and never listed.
+held and never listed, snoozed or not; a snoozed need of the focus item is
+counted as snoozed.
 """
 
 import html
@@ -94,8 +96,8 @@ class Need:
 # --- approvals ---------------------------------------------------------------
 
 # A yes/no question about a routine step: "Open the PR?", "Commit and push?",
-# "Shall I merge it?", "(y/n)". A question offering a choice ("A or B?") is a
-# decision, not an approval. This is not snapshot.approval_shaped, which
+# "Shall I merge it?", "(y/n)". A question offering a choice ("A or B?") or an
+# open question ("how should I resolve it?") is a decision, not an approval. This is not snapshot.approval_shaped, which
 # classifies the owner's reply ("y", "go ahead"), not the agent's question.
 _YN = re.compile(r"\(?\[?\b(y/n|yes/no)\b\]?\)?\s*\??\s*$", re.IGNORECASE)
 _ROUTINE = re.compile(
@@ -105,6 +107,7 @@ _ROUTINE = re.compile(
     re.IGNORECASE,
 )
 _ROUTINE_WORDS = 15
+_OPEN = re.compile(r"\b(how|what|which|why|where|when|who|whom|whose)\b", re.IGNORECASE)
 
 
 def approval_brief(brief: "str | None") -> bool:
@@ -113,13 +116,13 @@ def approval_brief(brief: "str | None") -> bool:
     if not lines:
         return False
     last = lines[-1]
+    if _OPEN.search(last) or " or " in f" {last.lower()} ":
+        return False
     if _YN.search(last):
         return True
-    words = last.split()
     return (
         last.endswith("?")
-        and len(words) <= _ROUTINE_WORDS
-        and " or " not in f" {last.lower()} "
+        and len(last.split()) <= _ROUTINE_WORDS
         and _ROUTINE.match(last) is not None
     )
 
@@ -249,11 +252,13 @@ def collect(conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime) -> lis
             need = _remote(row)
             if need is not None:
                 out.append(need)
-    fleet = sync.fleet_enabled(cfg)
-    for row in gauges.review_queue_rows(conn, fleet) or []:
+    # Issue rows take the PR rows' gate: none before the first successful
+    # fleet run, so leftovers from an earlier run are never shown as current.
+    queue = gauges.review_queue_rows(conn, sync.fleet_enabled(cfg))
+    for row in queue or []:
         if row.get("in_queue"):
             out.append(_pr(row))
-    if fleet:
+    if queue is not None:
         out.extend(_issue(row) for row in _rows(conn, github_fleet.SOURCE, "issue"))
     out.extend(drain_items(conn, cfg))
     return out
@@ -412,15 +417,16 @@ def build(
     conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime, ov: overlay.Overlay
 ) -> Page:
     needs = collect(conn, cfg, now)
-    snoozed = [n for n in needs if ov.is_snoozed(n.item, now)]
-    needs = [n for n in needs if not ov.is_snoozed(n.item, now)]
     focus = None
     held = 0
+    # Focus first: an unrelated item is held whether or not it is snoozed.
     if ov.focus is not None:
         focus = focus_need(conn, ov.focus)
         mine = [n for n in needs if related(n, focus)]
         held = len(needs) - len(mine)
         needs = mine
+    snoozed = [n for n in needs if ov.is_snoozed(n.item, now)]
+    needs = [n for n in needs if not ov.is_snoozed(n.item, now)]
     ordered = order(needs, ov)
     return Page(
         main=[n for n in ordered if not n.approval],
@@ -452,11 +458,12 @@ def render(conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime) -> str:
     cards = []
     for i, n in enumerate(p.main):
         cards.append(expanded(n, now, ov) if i == 0 else collapsed(n, now, ov))
-    empty = (
-        "Nothing of the focus item needs you."
-        if p.focus is not None
-        else "Nothing needs you."
-    )
+    if p.approvals:
+        empty = "No decisions waiting; only the approvals below."
+    elif p.focus is not None:
+        empty = "Nothing of the focus item needs you."
+    else:
+        empty = "Nothing needs you."
     body = "".join(cards) if cards else f'<p class="empty">{_e(empty)}</p>'
     parts.append(
         f'<section class="lane" data-section="needs">'

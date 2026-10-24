@@ -263,7 +263,9 @@ class ApprovalTests(NeedsCase):
         sessions.write(self.conn, rows, NOW)
         page = self.page()
         self.assertIn('<details class="group" open>', section(page, "approvals"))
-        self.assertIn("Nothing needs you.", section(page, "needs"))
+        needs_lane = section(page, "needs")
+        self.assertNotIn("Nothing needs you.", needs_lane)
+        self.assertIn("only the approvals below", needs_lane)
 
     def test_an_approval_shaped_brief(self):
         for text in (
@@ -282,6 +284,9 @@ class ApprovalTests(NeedsCase):
             "Open the PR?\nBut first: what should the retry budget be?",
             "Done.",
             "Answered the yes/no form.",
+            "Merge conflicts in auth.py, how should I resolve?",
+            "Commit now, or what do you want first?",
+            "Which branch should I push (y/n)?",
         ):
             self.assertFalse(needs.approval_brief(not_one), not_one)
 
@@ -331,6 +336,20 @@ class FocusTests(NeedsCase):
         overlay.set_focus(self.conn, ("claude-hook", "s-pr"), NOW)
         self.assertEqual(keys(section(self.page(), "needs")), [pr_url(1201), "s-pr"])
 
+    def test_a_focus_holds_unrelated_snoozed_items(self):
+        seed(self.conn)
+        overlay.set_focus(self.conn, ("github", pr_url(1201)), NOW)
+        overlay.snooze(self.conn, ("github", pr_url(1202)), "2999-01-01")
+        page = self.page()
+        # PR 1202 is unrelated: held, not snoozed.
+        self.assertIn('data-focus-held="4"', page)
+        self.assertNotIn("data-snoozed", page)
+        overlay.snooze(self.conn, ("claude-hook", "s-pr"), "2999-01-01")
+        page = self.page()
+        self.assertEqual(keys(section(page, "needs")), [pr_url(1201)])
+        self.assertIn('data-snoozed="1"', page)
+        self.assertIn('data-focus-held="4"', page)
+
     def test_a_design_focus_takes_everything_in_its_repo(self):
         seed(self.conn)
         url = f"https://github.com/{REPO}/blob/main/dev_docs/designs/x.md"
@@ -365,11 +384,14 @@ class GateTests(NeedsCase):
         self.assertNotIn("https://github.com/", page)
         self.assertIn("s-turn", keys(page))
 
-    def test_no_successful_fleet_run_means_no_prs_but_issues_show(self):
+    def test_no_successful_fleet_run_means_no_prs_or_issues(self):
         seed(self.conn, fleet_ran=False)
         page = self.page()
         self.assertNotIn(pr_url(1201), keys(page))
-        self.assertIn(issue_url(950), keys(page))
+        self.assertNotIn(issue_url(950), keys(page))
+        self.assertIn("s-turn", keys(page))
+        server_harness.add_run(self.conn, "ok", NOW, kind=github_fleet.RUN_KIND)
+        self.assertIn(issue_url(950), keys(self.page()))
 
 
 class RouteTests(server_harness.ServerCase):
@@ -392,6 +414,9 @@ class RouteTests(server_harness.ServerCase):
         status, page = self.request("GET", "/board")
         self.assertEqual(status, 200)
         self.assertNotIn('data-section="needs"', page)
+        # The Board itself: its tab is current and its heading rendered.
+        self.assertIn("aria-current=page>Board", page)
+        self.assertIn("<h2>Board", page)
 
     def test_the_tab_is_on_a_fleet_instance_only(self):
         page = self.request("GET", "/now")[1]
