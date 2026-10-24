@@ -29,8 +29,8 @@ ORDER. Pinned items first, in the overlay's order (overlay.Overlay.pin_rank),
 then the longest wait first. A snoozed item is left out and counted.
 
 APPROVALS. A session waiting on a harness permission prompt (`need_input` on
-a hook row) is a plain approval, and so is one whose brief ends in a yes/no
-question about a routine step (approval_brief). Those go into one collapsed
+a hook row) is a plain approval, and so is one whose brief ends in any short
+yes/no-shaped ask (approval_brief). Those go into one collapsed
 Approvals group, out of the main list. No session source carries a post-turn
 summary yet (`brief` is null on both), so today only permission prompts land
 there. A brief-carrying source, or the `asked` flag proposed in
@@ -95,8 +95,9 @@ class Need:
 
 # --- approvals ---------------------------------------------------------------
 
-# A yes/no question about a routine step: "Open the PR?", "Commit and push?",
-# "Shall I merge it?", "(y/n)". A question offering a choice ("A or B?") or an
+# Any short yes/no-shaped ask: "Open the PR?", "Commit and push?",
+# "Should I refactor it first?", "(y/n)". Whether the step is routine is not
+# judged. A question offering a choice ("A or B?") or an
 # open question ("how should I resolve it?") is a decision, not an approval.
 # This is not snapshot.approval_shaped, which classifies the owner's reply
 # ("y", "go ahead"), not the agent's question.
@@ -112,7 +113,7 @@ _OPEN = re.compile(r"\b(how|what|which|why|where|when|who|whom|whose)\b", re.IGN
 
 
 def approval_brief(brief: "str | None") -> bool:
-    """True when a brief's last line is a plain yes/no approval question."""
+    """True when a brief's last line is a short yes/no-shaped ask."""
     lines = [ln.strip() for ln in (brief or "").splitlines() if ln.strip()]
     if not lines:
         return False
@@ -159,7 +160,7 @@ def _session(row: dict[str, Any], now: datetime) -> "Need | None":
         )
     return Need(
         item=(sessions.SOURCE, str(row.get("key") or row.get("session_id"))),
-        kind="session",
+        kind=sessions.KIND,
         title=row.get("title") or f"session {row.get('session_id')}",
         since=score.parse_ts(row.get("waiting_since")) or last,
         url=CODE_URL,
@@ -186,7 +187,7 @@ def _remote(row: dict[str, Any]) -> "Need | None":
         )
     return Need(
         item=(claude_remote.SOURCE, sid),
-        kind="session",
+        kind=claude_remote.KIND,
         title=row.get("title") or f"session {sid}",
         since=score.parse_ts(row.get("updated")),
         url=f"{CODE_URL}/{sid}" if sid.startswith("session_") else CODE_URL,
