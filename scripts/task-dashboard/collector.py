@@ -35,6 +35,7 @@ Redirects are refused, so the header cannot follow one to another host.
 """
 
 import fcntl
+import http.client
 import json
 import os
 import socket
@@ -84,7 +85,7 @@ def post(url: str, token: str, body: bytes) -> tuple["int | None", str]:
         with exc:
             detail = exc.read(512).decode("utf-8", "replace") if exc.fp else ""
         return exc.code, detail or str(exc.reason)
-    except (urllib.error.URLError, OSError) as exc:
+    except (urllib.error.URLError, OSError, http.client.HTTPException) as exc:
         reason = getattr(exc, "reason", exc)
         return None, f"no answer from {url}: {reason}"
 

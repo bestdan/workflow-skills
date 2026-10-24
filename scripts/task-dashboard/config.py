@@ -16,6 +16,7 @@ import copy
 import os
 import re
 import tomllib
+import urllib.parse
 from pathlib import Path
 from typing import Any
 
@@ -194,7 +195,7 @@ def load_collector(path: "str | os.PathLike[str] | None" = None) -> dict[str, An
         )
     cfg = deep_merge(COLLECTOR_DEFAULTS, table)
     url = cfg["ingest_url"]
-    if not isinstance(url, str) or not INGEST_URL_RE.fullmatch(url):
+    if not isinstance(url, str) or not _valid_url(url):
         raise ConfigError(
             "collector.ingest_url must be an http(s) URL with the ingest path,"
             " e.g. http://127.0.0.1:8765/ingest"
@@ -215,6 +216,18 @@ def load_collector(path: "str | os.PathLike[str] | None" = None) -> dict[str, An
         raise ConfigError("collector.enabled must be true or false")
     cfg["config_path"] = p
     return cfg
+
+
+def _valid_url(url: str) -> bool:
+    """An http(s) URL with a host, a path and a port urllib can parse."""
+    if not INGEST_URL_RE.fullmatch(url):
+        return False
+    try:
+        parts = urllib.parse.urlsplit(url)
+        parts.port  # noqa: B018 - raises ValueError on a bad port
+    except ValueError:
+        return False
+    return parts.scheme in ("http", "https") and bool(parts.hostname)
 
 
 def _non_empty_str(cfg: dict[str, Any], dotted: str) -> None:

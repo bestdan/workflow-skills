@@ -20,6 +20,7 @@ import json
 import os
 import plistlib
 import shutil
+import socket
 import stat
 import subprocess
 import sys
@@ -217,7 +218,24 @@ class TestPush(Home):
         self.assertEqual(self.run_once(), 1)
         self.assertEqual(len(self.spool()), 1)
         self.assertTrue(any("no answer" in m for m in self.log_lines))
-        self.ingest = FakeIngest()  # for the cleanup's close()
+
+    def test_a_malformed_response_is_kept(self):
+        sock = socket.socket()
+        sock.bind(("127.0.0.1", 0))
+        sock.listen(1)
+        self.addCleanup(sock.close)
+
+        def answer():
+            conn, _ = sock.accept()
+            with conn:
+                conn.recv(65536)
+                conn.sendall(b"NOT-HTTP garbage\r\n\r\n")
+
+        threading.Thread(target=answer, daemon=True).start()
+        url = f"http://127.0.0.1:{sock.getsockname()[1]}/ingest"
+        self.assertEqual(self.run_once(self.cfg(ingest_url=url)), 1)
+        self.assertEqual(len(self.spool()), 1)
+        self.assertTrue(any("no answer" in m for m in self.log_lines))
 
     def test_the_token_never_reaches_argv_logs_or_the_spool(self):
         calls = []
@@ -284,6 +302,8 @@ class TestConfig(unittest.TestCase):
             f'[collector]\ningest_url = "http://m/i"\ntoken = "{TOKEN}"\n'
             'host = "a.b"\n': "collector.host",
             "[server]\nport = 1\n": "no \\[collector\\]",
+            f'[collector]\ningest_url = "http://[::1/ingest"\ntoken = "{TOKEN}"\n': "ingest_url",
+            f'[collector]\ningest_url = "http://m:abc/ingest"\ntoken = "{TOKEN}"\n': "ingest_url",
         }
         for text, pattern in cases.items():
             with self.subTest(pattern=pattern):

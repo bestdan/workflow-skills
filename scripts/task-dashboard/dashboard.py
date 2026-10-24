@@ -216,7 +216,7 @@ def cmd_install(args: argparse.Namespace) -> int:
     if not args.collector_only:
         print(
             "task-dashboard: only `install --collector-only` exists so far;"
-            " the server install is #1093",
+            " the server install is tracked in bestdan/workflow-skills#1093",
             file=sys.stderr,
         )
         return 2
