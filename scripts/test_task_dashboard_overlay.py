@@ -658,7 +658,7 @@ class RouteTests(server_harness.ServerCase):
             self.post("tag", [("key", "GONE-9"), ("tag", "side-quest")])[0], 200
         )
         self.assertEqual(self.post("focus", [("key", "ABC-1")])[0], 200)
-        for path in ("/", "/now", "/stale"):
+        for path in ("/board", "/needs", "/now", "/stale"):
             page = self.request("GET", path)[1]
             self.assertEqual(self.gauge(page, "side-quests"), "Side quests 2/3", path)
             self.assertEqual(self.gauge(page, "review-queue"), "Review queue —/5", path)
@@ -667,11 +667,11 @@ class RouteTests(server_harness.ServerCase):
             )
             self.assertIn("https://example.invalid/browse/ABC-1", page)
         self.assertEqual(self.post("focus", [("key", "ABC-4")])[0], 200)
-        page = self.request("GET", "/")[1]
+        page = self.request("GET", "/board")[1]
         self.assertEqual(self.gauge(page, "focus"), "Focus: ABC-4 summary ABC-4")
         self.assertIn('data-ov="unfocus"', page)
         self.assertEqual(self.post("unfocus", [("key", "ABC-4")])[0], 200)
-        self.assertIsNone(self.gauge(self.request("GET", "/")[1], "focus"))
+        self.assertIsNone(self.gauge(self.request("GET", "/board")[1], "focus"))
 
     def test_a_done_side_quest_is_not_in_flight(self):
         conn = self.conn()
@@ -681,7 +681,7 @@ class RouteTests(server_harness.ServerCase):
         conn.close()
         for key in ("ABC-1", "ABC-4"):
             self.post("tag", [("key", key), ("tag", "side-quest")])
-        page = self.request("GET", "/")[1]
+        page = self.request("GET", "/board")[1]
         self.assertEqual(self.gauge(page, "side-quests"), "Side quests 1/3")
 
     def test_review_queue_reads_the_github_rows_once_the_fleet_step_ran(self):
@@ -762,7 +762,7 @@ class RouteTests(server_harness.ServerCase):
         self.assertEqual(
             self.post("snooze", [("key", "ABC-6"), ("until", "2999-01-01")])[0], 200
         )
-        page = self.request("GET", "/")[1]
+        page = self.request("GET", "/board")[1]
         pinned = re.search(r'data-section="pinned".*?</section>', page, re.S)
         assert pinned is not None
         self.assertEqual(
@@ -786,11 +786,11 @@ class RouteTests(server_harness.ServerCase):
         self.assertEqual(
             self.post("note", [("key", "ABC-2"), ("text", "for later")])[0], 200
         )
-        self.assertNotIn("for later", self.request("GET", "/")[1])
+        self.assertNotIn("for later", self.request("GET", "/board")[1])
         conn = self.conn()
         server_harness.seed(conn)
         conn.close()
-        self.assertIn("for later", self.request("GET", "/")[1])
+        self.assertIn("for later", self.request("GET", "/board")[1])
 
     def test_a_database_error_is_503_with_a_json_body(self):
         real = overlay.apply
@@ -830,10 +830,10 @@ class RouteTests(server_harness.ServerCase):
         badge = "snoozed until 2026-10-24"
         os.environ["TZ"] = "America/Los_Angeles"
         time.tzset()
-        self.assertIn(badge, self.request("GET", "/")[1])
+        self.assertIn(badge, self.request("GET", "/board")[1])
         os.environ["TZ"] = "Asia/Tokyo"
         time.tzset()
-        self.assertNotIn(badge, self.request("GET", "/")[1])
+        self.assertNotIn(badge, self.request("GET", "/board")[1])
 
     def test_a_long_note_fits_the_overlay_body_limit(self):
         text = "é" * overlay.MAX_NOTE

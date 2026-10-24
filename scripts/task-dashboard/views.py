@@ -1,4 +1,4 @@
-"""The Now, Waiting on me, I'm waiting on, Stale and Epics views.
+"""The Needs you, Now, Waiting on me, I'm waiting on, Stale and Epics views.
 
 Each view reads SQLite only: Jira rows through the `jira_issues` view, so a
 non-Jira row never reaches them, plus `links`, `prs` and the overlay tables.
@@ -22,11 +22,13 @@ from datetime import datetime
 from typing import Any
 
 import fleet_views
+import needs
 import score
 
 _e = html.escape
 
 TABS = (
+    ("/needs", "Needs you"),
     ("/now", "Now"),
     ("/away", "Since you were away"),
     ("/waiting-on-me", "Waiting on me"),
@@ -456,6 +458,10 @@ def render_away(m: Mirror) -> str:
     return fleet_views.render_away(m.conn, m.cfg, m.now)
 
 
+def render_needs(m: Mirror) -> str:
+    return needs.render(m.conn, m.cfg, m.now)
+
+
 def render_epics(m: Mirror) -> str:
     rows = []
     for g in epics(m):
@@ -471,6 +477,7 @@ def render_epics(m: Mirror) -> str:
 
 
 ROUTES = {
+    "/needs": ("Needs you", render_needs),
     "/now": ("Now", render_now),
     "/waiting-on-me": ("Waiting on me", render_waiting_on_me),
     "/waiting-on": ("I'm waiting on", render_waiting_on),

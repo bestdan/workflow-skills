@@ -48,11 +48,13 @@ class Gauges:
     focus_summary: "str | None"
 
 
-def review_queue(conn: sqlite3.Connection, fleet: bool) -> "dict[str, int] | None":
-    """github_fleet's `queue` and `awaiting` counts, or None when unknown.
+def review_queue_rows(conn: sqlite3.Connection, fleet: bool) -> "list[dict] | None":
+    """Every mirrored awaiting PR row, or None when unknown.
 
     Unknown means `fleet` (sync.fleet_enabled) is off, so leftover rows are not
-    reported as current, or no fleet sync run has succeeded yet.
+    reported as current, or no fleet sync run has succeeded yet. A row is in
+    the queue proper when its `in_queue` is true. review_queue() counts these
+    rows and Needs you (needs.py) lists them, so the two always agree.
     """
     if not fleet:
         return None
@@ -64,7 +66,7 @@ def review_queue(conn: sqlite3.Connection, fleet: bool) -> "dict[str, int] | Non
         is None
     ):
         return None
-    rows = [
+    return [
         json.loads(r[0])
         for r in conn.execute(
             "SELECT raw_json FROM issues WHERE source = ? AND kind = 'pr'"
@@ -72,7 +74,12 @@ def review_queue(conn: sqlite3.Connection, fleet: bool) -> "dict[str, int] | Non
             (github_fleet.SOURCE,),
         )
     ]
-    return github_fleet.queue_counts(rows)
+
+
+def review_queue(conn: sqlite3.Connection, fleet: bool) -> "dict[str, int] | None":
+    """github_fleet's `queue` and `awaiting` counts, or None when unknown."""
+    rows = review_queue_rows(conn, fleet)
+    return None if rows is None else github_fleet.queue_counts(rows)
 
 
 def read(
