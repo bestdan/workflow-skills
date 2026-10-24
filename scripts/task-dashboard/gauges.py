@@ -2,8 +2,8 @@
 
 From the fleet view design ("Views", item 5). The two caps limit different
 things and both stand: side quests in flight against 3 (the work-in-progress
-reset design), PRs waiting on the owner against 5 (#952). Neither is enforced;
-the gauges only show them.
+reset design), PRs waiting on the owner against 5 (the human-review queue's
+own cap). Neither is enforced; the gauges only show them.
 
 - **Side quests in flight** are overlay items tagged `side-quest` whose item
   is still in the mirror and not done. A tag on an item that left the mirror

@@ -153,7 +153,7 @@ class WriteTests(OverlayCase):
 
 
 class FleetWriteTests(OverlayCase):
-    """kind_tag, focus and last_visit (#1105)."""
+    """kind_tag, focus and last_visit."""
 
     def focus(self):
         return self.conn.execute("SELECT source, item_key FROM focus").fetchall()
@@ -683,6 +683,16 @@ class RouteTests(server_harness.ServerCase):
         conn.close()
         page = self.request("GET", "/now")[1]
         self.assertEqual(self.gauge(page, "review-queue"), "Review queue 0/5")
+
+    def test_a_side_quest_post_carrying_text_leaves_the_note_alone(self):
+        self.assertEqual(
+            self.post("note", [("key", "ABC-1"), ("text", "keep me")])[0], 200
+        )
+        fields = [("key", "ABC-1"), ("tag", "side-quest"), ("text", "clobber")]
+        self.assertEqual(self.post("tag", fields)[0], 200)
+        rows = self.overlay_rows()
+        self.assertEqual(rows["notes"][0][2], "keep me")
+        self.assertEqual(rows["kind_tags"][0][2], "side-quest")
 
     def test_tagging_substantial_without_a_note_is_400(self):
         status, body = self.post("tag", [("key", "ABC-1"), ("tag", "substantial")])

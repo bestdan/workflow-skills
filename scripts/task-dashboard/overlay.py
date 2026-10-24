@@ -207,7 +207,8 @@ def tag(
 
     `substantial` needs a note naming the figure the item moves. Non-blank
     `text` is saved as that note in the same transaction; otherwise the item
-    must already have one. Re-tagging with the same tag keeps `tagged_at`.
+    must already have one. `text` is ignored for any other tag, so it can
+    never overwrite a note. Re-tagging with the same tag keeps `tagged_at`.
     """
     if kind and kind not in KIND_TAGS:
         raise OverlayError(f"tag must be one of {', '.join(KIND_TAGS)}, got {kind!r}")
@@ -218,7 +219,7 @@ def tag(
                 "DELETE FROM kind_tags WHERE source = ? AND item_key = ?", item
             )
             return
-        if text.strip():
+        if kind == "substantial" and text.strip():
             _write_note(conn, item, text, now)
         if kind == "substantial":
             row = conn.execute(
@@ -263,7 +264,7 @@ def clear_focus(conn: sqlite3.Connection, item: Item) -> None:
 
 
 def set_last_visit(conn: sqlite3.Connection, now: "datetime | None" = None) -> None:
-    """Record now as the last visit; Since you were away (#1106) calls it."""
+    """Record now as the last visit; the Since you were away view calls it."""
     with conn:
         conn.execute(
             "INSERT OR REPLACE INTO last_visit (id, at) VALUES (1, ?)", (_now(now),)
