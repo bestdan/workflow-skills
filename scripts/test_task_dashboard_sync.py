@@ -938,12 +938,12 @@ class CmdSyncTests(unittest.TestCase):
         )
         self.db = tmp / "d.db"
 
-    def cmd_sync(self, rows):
+    def cmd_sync(self, rows, *extra):
         out, err = io.StringIO(), io.StringIO()
         with mock.patch.object(sync, "run_all", return_value=rows):
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
                 code = dashboard.main(
-                    ["sync", "--db", str(self.db), "--config", str(self.cfg)]
+                    ["sync", "--db", str(self.db), "--config", str(self.cfg), *extra]
                 )
         return code, out.getvalue(), err.getvalue()
 
@@ -973,6 +973,24 @@ class CmdSyncTests(unittest.TestCase):
         )
         self.assertEqual(code, 3)
         self.assertIn("sync github_fleet: auth_failed", out)
+
+    def test_fleet_warns_leaves_the_exit_code_to_jira(self):
+        # install's warm-up sync passes --fleet-warns: a failed fleet step is a
+        # warning there, not a reason to undo the install.
+        code, out, err = self.cmd_sync(
+            [run_row("full", "ok"), run_row("github_fleet", "auth_failed", "x")],
+            "--fleet-warns",
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("sync github_fleet: auth_failed", out)
+        self.assertIn("WARNING: the github.fleet step ended auth_failed", err)
+
+    def test_fleet_warns_still_fails_on_a_failed_jira_run(self):
+        code, _, _ = self.cmd_sync(
+            [run_row("full", "failed", "boom"), run_row("github_fleet", "ok")],
+            "--fleet-warns",
+        )
+        self.assertEqual(code, 1)
 
     def test_jira_row_alone(self):
         code, out, _ = self.cmd_sync([run_row("incremental", "ok")])
