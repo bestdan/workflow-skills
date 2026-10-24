@@ -177,9 +177,9 @@ class GithubSource:
         """Rows for my PRs and reviews requested of me, and URLs whose CI failed.
 
         CI is one `pr view` per PR, so the lookups fan out over a thread pool;
-        serially, 91 of them made every sync take about 80s. A PR whose CI
-        lookup fails keeps a NULL `ci_state` and is reported, not fatal: one
-        flaky `pr view` should not fail the whole run. An AuthError still raises.
+        serially they dominated sync time. A PR whose CI lookup fails keeps a
+        NULL `ci_state` and is reported, not fatal: one flaky `pr view` should
+        not fail the whole run. An AuthError still raises.
         """
         rows: dict[str, dict] = {}
         for row in github_gh.my_prs(self.orgs, self.runner):

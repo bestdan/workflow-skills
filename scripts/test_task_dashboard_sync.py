@@ -581,11 +581,12 @@ class GithubTests(SyncCase):
     def test_ci_lookups_run_concurrently(self):
         gh = FakeGh(authored=[pr_node(n, f"pr {n}", f"b{n}") for n in range(1, 9)])
         gh.ci_delay = 0.05
-        row = self.run_sync(
-            "full", FakeAcli(["DEMO-1"]), gh=gh, cfg=make_config(enabled=True)
-        )
+        cfg = make_config(enabled=True)
+        cfg["sync"]["view_concurrency"] = 3
+        row = self.run_sync("full", FakeAcli(["DEMO-1"]), gh=gh, cfg=cfg)
         self.assertEqual(row["outcome"], "ok")
         self.assertGreater(gh.max_in_flight, 1)
+        self.assertLessEqual(gh.max_in_flight, 3)
         ci = {r[0] for r in self.conn.execute("SELECT ci_state FROM prs")}
         self.assertEqual(ci, {"success"})
 
