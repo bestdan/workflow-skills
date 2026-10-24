@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.112.0] - 2026-10-24
+
+### Features
+
+- schedule the collector and push snapshots to ingest [#1104] (#1130) (6ea3d80)
+
 ## [2.111.1] - 2026-10-24
 
 ### Fixes
