@@ -14,6 +14,12 @@ The overlay (pins, order, snoozes) is read here and written elsewhere. Now
 puts pinned items first, by `order.position` then pin time, and hides an item
 whose snooze `until` is still in the future. A date-only `until` ends at
 local midnight at the start of that date (`score.local_day_start`).
+
+Each view takes an include filter (include.py) and draws its switches under
+the nav. A lane belongs to one group, every row here being a Jira `ticket` or
+a `prs` row, so a lane whose group is off says so rather than listing nothing.
+An issue card keeps its joined PR lines whatever the filter: they are part of
+the issue's card, not PR rows of their own.
 """
 
 import html
@@ -23,6 +29,7 @@ from datetime import datetime
 from typing import Any
 
 import fleet_views
+import include
 import needs
 import overlay
 import score
@@ -92,15 +99,25 @@ PR_COLUMNS = (
 )
 
 
-def nav(active: str, cfg: "dict[str, Any] | None" = None) -> str:
-    """The tab bar; a fleet-only tab is left out of an instance with no fleet."""
+def nav(
+    active: str,
+    cfg: "dict[str, Any] | None" = None,
+    inc: "include.Include | None" = None,
+    query: "dict[str, list[str]] | None" = None,
+) -> str:
+    """The tab bar; a fleet-only tab is left out of an instance with no fleet.
+
+    With `inc`, the view's include switches follow it (include.py); `query` is
+    the request's own, so a switch keeps its other parameters.
+    """
     hidden = set() if cfg is None or fleet_views.enabled(cfg) else fleet_views.ONLY
     links = "".join(
         f'<a href="{href}"{" aria-current=page" if href == active else ""}>{_e(name)}</a>'
         for href, name in TABS
         if href not in hidden
     )
-    return f"<nav>{links}</nav>"
+    bar = "" if inc is None else include.switches(inc, active, query or {})
+    return f"<nav>{links}</nav>{bar}"
 
 
 # --- data --------------------------------------------------------------------
@@ -527,8 +544,24 @@ def pr_card(m: Mirror, p: dict[str, Any], why: str = "") -> str:
     )
 
 
-def _lane(name: str, title: "str | None", cards: list[str], empty: str) -> str:
-    """A lane of cards; `title` is None where the tab already names it."""
+def _lane(
+    name: str,
+    title: "str | None",
+    cards: list[str],
+    empty: str,
+    group: "str | None" = None,
+    inc: "include.Include | None" = None,
+) -> str:
+    """A lane of cards; `title` is None where the tab already names it.
+
+    A lane whose `group` the include filter switched off says so instead.
+    """
+    if group is not None and inc is not None and not inc.has(group):
+        head = f"<h2>{_e(title)} (0)</h2>" if title else ""
+        return (
+            f'<section class="lane" data-section="{name}" data-filtered="{group}">'
+            f"{head}{include.off_note(group)}</section>"
+        )
     body = "".join(cards) if cards else f'<p class="empty">{_e(empty)}</p>'
     head = f"<h2>{_e(title)} ({len(cards)})</h2>" if title else ""
     return f'<section class="lane" data-section="{name}">{head}{body}</section>'
@@ -543,12 +576,17 @@ def _me_note(m: Mirror) -> str:
     )
 
 
-def render_now(m: Mirror) -> str:
+# Every Jira row these views list is a `ticket`; the PRs are the `prs` table's.
+TICKETS = include.group_of("ticket")
+PRS = include.group_of("pr")
+
+
+def render_now(m: Mirror, inc: include.Include) -> str:
     cards = [issue_card(m, i) for i in now_items(m)]
-    return _me_note(m) + _lane("now", None, cards, "Nothing open.")
+    return _me_note(m) + _lane("now", None, cards, "Nothing open.", TICKETS, inc)
 
 
-def render_waiting_on_me(m: Mirror) -> str:
+def render_waiting_on_me(m: Mirror, inc: include.Include) -> str:
     issues, prs = waiting_on_me(m)
     return (
         _me_note(m)
@@ -557,17 +595,21 @@ def render_waiting_on_me(m: Mirror) -> str:
             "Issues",
             [issue_card(m, i, why) for i, why in issues],
             "None of your open issues blocks anyone.",
+            TICKETS,
+            inc,
         )
         + _lane(
             "reviews",
             "Pull requests",
             [pr_card(m, p) for p in prs],
             "No reviews requested.",
+            PRS,
+            inc,
         )
     )
 
 
-def render_waiting_on(m: Mirror) -> str:
+def render_waiting_on(m: Mirror, inc: include.Include) -> str:
     issues, prs = waiting_on(m)
     return (
         _me_note(m)
@@ -576,31 +618,38 @@ def render_waiting_on(m: Mirror) -> str:
             "Issues",
             [issue_card(m, i, why) for i, why in issues],
             "None of your open issues has an unresolved blocker.",
+            TICKETS,
+            inc,
         )
         + _lane(
             "prs",
             "Pull requests",
             [pr_card(m, p, why) for p, why in prs],
             "No PR of yours is waiting.",
+            PRS,
+            inc,
         )
     )
 
 
-def render_stale(m: Mirror) -> str:
+def render_stale(m: Mirror, inc: include.Include) -> str:
     """Jira's stale lane, then, on a fleet instance, the fleet's (fleet_views)."""
     cards = [issue_card(m, i, why) for i, why in stale(m)]
-    jira = _lane("stale", None, cards, "Nothing in progress has gone quiet.")
+    jira = _lane(
+        "stale", None, cards, "Nothing in progress has gone quiet.", TICKETS, inc
+    )
     if not fleet_views.enabled(m.cfg):
         return jira
-    return (jira if m.issues else "") + fleet_views.render_stale(m.conn, m.cfg, m.now)
+    fleet = fleet_views.render_stale(m.conn, m.cfg, m.now, inc)
+    return (jira if m.issues else "") + fleet
 
 
-def render_away(m: Mirror) -> str:
-    return fleet_views.render_away(m.conn, m.cfg, m.now)
+def render_away(m: Mirror, inc: include.Include) -> str:
+    return fleet_views.render_away(m.conn, m.cfg, m.now, inc)
 
 
-def render_needs(m: Mirror) -> str:
-    return needs.render(m.conn, m.cfg, m.now)
+def render_needs(m: Mirror, inc: include.Include) -> str:
+    return needs.render(m.conn, m.cfg, m.now, inc)
 
 
 EPIC_LANES = (
@@ -633,7 +682,10 @@ def _epic_card(m: Mirror, g: dict[str, Any]) -> str:
     )
 
 
-def render_epics(m: Mirror) -> str:
+def render_epics(m: Mirror, inc: include.Include) -> str:
+    if not inc.has(TICKETS):
+        # Every epic and child is a ticket: one note, not one per lane.
+        return _lane("epics", None, [], "", TICKETS, inc)
     groups = epics(m)
     out = "".join(
         _lane(
@@ -641,6 +693,8 @@ def render_epics(m: Mirror) -> str:
             title,
             [_epic_card(m, g) for g in groups if g["role"] == role],
             empty,
+            TICKETS,
+            inc,
         )
         for role, title, empty in EPIC_LANES
     )
@@ -667,12 +721,22 @@ ROUTES = {
 
 
 def render(
-    path: str, conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime
+    path: str,
+    conn: sqlite3.Connection,
+    cfg: dict[str, Any],
+    now: datetime,
+    inc: "include.Include | None" = None,
+    query: "dict[str, list[str]] | None" = None,
 ) -> str:
-    """The body of the view at `path` (a key of ROUTES), tab bar included."""
+    """The body of the view at `path` (a key of ROUTES), tab bar included.
+
+    `inc` filters it (include.py); without one it shows everything and draws
+    no switches.
+    """
     _, fn = ROUTES[path]
+    shown = inc if inc is not None else include.everything(path.lstrip("/"))
     m = Mirror(conn, cfg, now)
-    return nav(path, cfg) + fn(m) + render_ignored(conn)
+    return nav(path, cfg, inc, query) + fn(m, shown) + render_ignored(conn)
 
 
 # Every Jira issue under `key`, at any depth. UNION, not UNION ALL, drops
