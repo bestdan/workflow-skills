@@ -678,7 +678,7 @@ class FleetTests(SyncCase):
 
     def test_gate(self):
         self.assertFalse(sync.fleet_enabled(make_config()))
-        self.assertFalse(sync.fleet_enabled(make_config(fleet=True)))  # enabled off
+        self.assertFalse(sync.fleet_enabled(make_config(enabled=False, fleet=True)))
         self.assertFalse(sync.fleet_enabled(make_config(enabled=True)))
         self.assertTrue(sync.fleet_enabled(make_config(enabled=True, fleet=True)))
 
