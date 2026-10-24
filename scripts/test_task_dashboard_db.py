@@ -363,5 +363,20 @@ class DashboardTests(unittest.TestCase):
             sqlite3.connect(target).close()
 
 
+class AskedColumnTests(unittest.TestCase):
+    def test_session_events_has_a_nullable_asked_column(self):
+        with tempfile.TemporaryDirectory() as td:
+            conn = db.connect(Path(td) / "d.db")
+            try:
+                cols = {
+                    r[1]: r for r in conn.execute("PRAGMA table_info(session_events)")
+                }
+                self.assertIn("asked", cols)
+                self.assertEqual(cols["asked"][2], "INTEGER")
+                self.assertEqual(cols["asked"][3], 0)  # nullable
+            finally:
+                conn.close()
+
+
 if __name__ == "__main__":
     unittest.main()

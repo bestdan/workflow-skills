@@ -339,6 +339,20 @@ class WriteTest(IngestCase):
             [("lindev", "s-1", 1)],
         )
 
+    def test_v1_and_v2_hook_lines_land_with_asked(self):
+        doc = make_doc()
+        base = {"event": "Stop", "session_id": "s-2", "cwd": "/home/u/src/demo"}
+        doc["sessions"] += [
+            {**base, "v": 2, "ts": "2026-10-23T10:31:00.000Z", "asked": True},
+            {**base, "v": 2, "ts": "2026-10-23T10:32:00.000Z", "asked": False},
+            {**base, "v": 2, "ts": "2026-10-23T10:33:00.000Z", "asked": None},
+        ]
+        self.assertEqual(self.post(doc)[0], 200)
+        self.assertEqual(
+            self.q("SELECT session_id, asked FROM session_events ORDER BY ts"),
+            [("s-1", None), ("s-2", 1), ("s-2", 0), ("s-2", None)],
+        )
+
     def test_second_snapshot_replaces_its_host_and_leaves_others(self):
         self.assertEqual(self.post(make_doc(host="macbook"), token="macbook")[0], 200)
         conn = db.connect(self.db_path)

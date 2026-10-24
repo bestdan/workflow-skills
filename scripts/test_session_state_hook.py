@@ -172,13 +172,17 @@ class OptInTests(HookCase):
             [r["event"] for r in records], ["UserPromptSubmit", "Stop", "Notification"]
         )
         for r in records:
-            self.assertEqual(r["v"], 1)
+            self.assertEqual(r["v"], 2)
             self.assertRegex(r["ts"], TS_RE)
             self.assertEqual(r["session_id"], SESSION)
             self.assertEqual(r["cwd"], str(self.repo))
             self.assertEqual(r["branch"], "feature/x")
         self.assertNotIn("notification", records[0])
         self.assertEqual(records[2]["notification"], "permission_prompt")
+        # The transcript path is a fixture that does not exist: unknown.
+        self.assertIsNone(records[1]["asked"])
+        self.assertNotIn("asked", records[0])
+        self.assertNotIn("asked", records[2])
 
         raw = (self.state / f"{SESSION}.jsonl").read_text()
         self.assertNotIn("SECRET", raw)
@@ -223,7 +227,123 @@ class OptInTests(HookCase):
         self.assertLess(elapsed, 1.0)
 
 
+def _rec(kind, content=None, **extra):
+    rec = {"type": kind, "isSidechain": False, **extra}
+    if content is not None:
+        rec["message"] = {"role": kind, "content": content}
+    return json.dumps(rec) + "\n"
+
+
+def _text(text):
+    return [{"type": "text", "text": text}]
+
+
+ASKED_TEXT = "SECRET REPLY TEXT. Shall I open the PR?"
+
+
+class AskedTests(HookCase):
+    """``asked`` on Stop, from the payload's last message or the transcript."""
+
+    def setUp(self):
+        super().setUp()
+        self.opt_in()
+        self.transcript = self.home / "transcript.jsonl"
+
+    def stop_record(self, **extra):
+        proc = self.run_hook(self.payload("Stop", **extra))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout + proc.stderr, "")
+        return json.loads(self.lines()[-1])
+
+    def write(self, *records):
+        self.transcript.write_text("".join(records))
+
+    def test_last_assistant_message_decides(self):
+        for text, want in (
+            (ASKED_TEXT, True),
+            ("Want me to merge it?**\n\n", True),
+            ("All done. The PR is open.", False),
+            ("", False),
+        ):
+            with self.subTest(text=text):
+                rec = self.stop_record(last_assistant_message=text)
+                self.assertIs(rec["asked"], want)
+        self.assertNotIn("SECRET", (self.state / f"{SESSION}.jsonl").read_text())
+
+    def test_the_field_wins_over_the_transcript(self):
+        # The hooks reference warns the transcript can lag the turn.
+        self.write(_rec("assistant", _text("An older question?")))
+        rec = self.stop_record(
+            transcript_path=str(self.transcript), last_assistant_message="Done."
+        )
+        self.assertIs(rec["asked"], False)
+
+    def test_tail_that_starts_mid_record(self):
+        # One huge record straddles the seek point, so the tail begins inside
+        # it; its second half is braces, which would not parse as a record.
+        big = _rec("user", [{"type": "tool_result", "content": "{" * hook.TAIL_BYTES}])
+        self.write(
+            _rec("user", "an earlier prompt"),
+            big,
+            _rec("assistant", [{"type": "thinking", "thinking": "hm"}]),
+            _rec("assistant", _text(ASKED_TEXT)),
+            _rec("system", subtype="stop_hook_summary"),
+            json.dumps({"type": "last-prompt", "lastPrompt": "x"}) + "\n",
+        )
+        self.assertGreater(self.transcript.stat().st_size, hook.TAIL_BYTES)
+        rec = self.stop_record(transcript_path=str(self.transcript))
+        self.assertIs(rec["asked"], True)
+        self.assertNotIn("SECRET", (self.state / f"{SESSION}.jsonl").read_text())
+
+    def test_tail_decisions(self):
+        cases: tuple[tuple[str, list[str], "bool | None"], ...] = (
+            ("finished", [_rec("assistant", _text("Pushed. CI is green."))], False),
+            ("tool call last", [_rec("assistant", [{"type": "tool_use"}])], False),
+            (
+                "sidechain skipped",
+                [
+                    _rec("assistant", _text("Which one?")),
+                    _rec("assistant", _text("Done."), isSidechain=True),
+                ],
+                True,
+            ),
+            ("lagging transcript", [_rec("user", "a prompt")], None),
+            ("no message", [_rec("system")], None),
+            ("unparseable", ["not json\n", "{also not\n"], None),
+            ("empty", [], None),
+        )
+        for name, records, want in cases:
+            with self.subTest(name):
+                self.write(*records)
+                rec = self.stop_record(transcript_path=str(self.transcript))
+                self.assertIs(rec["asked"], want)
+
+    def test_missing_or_bad_path_is_null(self):
+        for extra in (
+            {"transcript_path": str(self.home / "absent.jsonl")},
+            {"transcript_path": str(self.home)},
+            {"transcript_path": None},
+            {"transcript_path": 7},
+        ):
+            with self.subTest(extra=extra):
+                self.assertIsNone(self.stop_record(**extra)["asked"])
+
+
 class UnitTests(unittest.TestCase):
+    def test_ends_with_question(self):
+        for text, want in (
+            ("Ready?", True),
+            ("Ready? ", True),
+            ("**Merge it?**", True),
+            ("Pick one (`a` or `b`?)", True),
+            ('"Is that it?"', True),
+            ("Done.", False),
+            ("Why? Because.", False),
+            ("", False),
+        ):
+            with self.subTest(text=text):
+                self.assertIs(hook.ends_with_question(text), want)
+
     def test_notification_class_fallback(self):
         self.assertEqual(
             hook.notification_class(

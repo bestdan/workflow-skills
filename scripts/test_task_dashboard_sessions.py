@@ -81,12 +81,12 @@ class DbCase(unittest.TestCase):
         self.addCleanup(self.conn.close)
 
     def event(self, session, minutes_ago, event, notification=None, host="mini",
-              cwd="/w/repo-a", branch="feature/x"):  # fmt: skip
+              cwd="/w/repo-a", branch="feature/x", asked=None):  # fmt: skip
         self.conn.execute(
             "INSERT INTO session_events (host, ts, event, session_id, cwd, branch,"
-            " notification, received_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            " notification, asked, received_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (host, ts(minutes_ago), event, session, cwd, branch, notification,
-             "2026-10-23T21:00:00Z"),
+             asked, "2026-10-23T21:00:00Z"),
         )  # fmt: skip
         self.conn.commit()
 
@@ -136,6 +136,41 @@ class HookSessionTests(DbCase):
         self.assertFalse(raw["needs_action"])
         self.assertEqual(raw["permission_prompts"], 1)
         self.assertEqual(raw["waiting_since"], ts(25))
+
+    def test_a_turn_that_asked_is_need_input(self):
+        self.event("s1", 30, "UserPromptSubmit")
+        self.event("s1", 25, "Stop", asked=1)
+        self.event("s1", 24, "Notification", "idle_prompt")
+        status, category, raw = self.derive()["s1"]
+        self.assertEqual((status, category), ("waiting", "need_input"))
+        self.assertTrue(raw["needs_action"])
+        self.assertTrue(raw["asked"])
+        self.assertEqual(raw["permission_prompts"], 0)
+        self.assertEqual(raw["waiting_since"], ts(25))
+
+    def test_asked_false_or_unknown_is_a_plain_turn_end(self):
+        for asked in (0, None):
+            with self.subTest(asked=asked):
+                sid = f"s-{asked}"
+                self.event(sid, 30, "UserPromptSubmit")
+                self.event(sid, 25, "Stop", asked=asked)
+                status, category, raw = self.derive()[sid]
+                self.assertEqual((status, category), ("waiting", "turn_ended"))
+                self.assertFalse(raw["asked"])
+
+    def test_a_prompt_or_a_later_stop_clears_asked(self):
+        self.event("s1", 30, "UserPromptSubmit")
+        self.event("s1", 25, "Stop", asked=1)
+        self.event("s1", 20, "UserPromptSubmit")
+        self.event("s2", 30, "UserPromptSubmit")
+        self.event("s2", 25, "Stop", asked=1)
+        self.event("s2", 20, "UserPromptSubmit")
+        self.event("s2", 15, "Stop", asked=0)
+        rows = self.derive()
+        self.assertEqual(rows["s1"][:2], ("working", None))
+        self.assertFalse(rows["s1"][2]["asked"])
+        self.assertEqual(rows["s2"][:2], ("waiting", "turn_ended"))
+        self.assertFalse(rows["s2"][2]["asked"])
 
     def test_a_new_prompt_clears_the_wait(self):
         self.event("s1", 30, "UserPromptSubmit")

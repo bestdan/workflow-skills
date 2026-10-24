@@ -137,10 +137,16 @@ def handoff(name, expires, created="2026-10-01"):
     }
 
 
-def ev(sid, ts, event, cwd="/h/src/dotfiles", notification=None):
+_V1 = object()
+
+
+def ev(sid, ts, event, cwd="/h/src/dotfiles", notification=None, asked=_V1):
+    """A hook line: format 1 unless `asked` is given, which makes it format 2."""
     line = {"v": 1, "ts": ts, "event": event, "session_id": sid, "cwd": cwd}
     if notification:
         line["notification"] = notification
+    if asked is not _V1:
+        line.update(v=2, asked=asked)
     return line
 
 
@@ -180,7 +186,10 @@ SNAPSHOT = {
     "tmux": [],
     "sessions": [
         ev("s-done", "2026-10-23T08:00:00.000Z", "UserPromptSubmit"),
-        ev("s-done", "2026-10-23T09:00:00.000Z", "Stop"),
+        ev("s-done", "2026-10-23T09:00:00.000Z", "Stop", asked=False),
+        ev("s-asked", "2026-10-23T08:00:00.000Z", "UserPromptSubmit"),
+        ev("s-asked", "2026-10-23T09:10:00.000Z", "Stop", asked=True),
+        ev("s-asked", "2026-10-23T09:11:00.000Z", "Notification", None, "idle_prompt"),
         ev("s-wait", "2026-10-23T07:00:00.000Z", "UserPromptSubmit"),
         ev("s-wait", "2026-10-23T08:00:00.000Z", "Notification", None, "idle_prompt"),
         ev("s-before", "2026-10-21T08:00:00.000Z", "UserPromptSubmit"),
@@ -261,6 +270,8 @@ class AwayTests(FleetCase):
         self.assertEqual(keys(section(page, "finished")), ["s-done"])
         waiting = keys(section(page, "waiting"))
         self.assertIn("s-wait", waiting)
+        self.assertIn("s-asked", waiting)
+        self.assertIn("asked (heuristic)", section(page, "waiting"))
         self.assertIn(pr_url(1140), waiting)
         self.assertIn(f"https://github.com/{REPO}/issues/950", waiting)
         self.assertIn(DESIGN_URL, waiting)

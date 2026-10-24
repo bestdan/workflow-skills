@@ -28,18 +28,24 @@ before it exits, so the harness never writes a prompt into a closed pipe.
 NEVER FAILS THE TURN. Every error is swallowed and the exit code is always 0.
 The hook runs on every prompt, so it imports only the standard library, spawns
 no subprocess (the branch is read from ``.git/HEAD`` directly) and does one
-append. Measured on macOS, median of 21 runs, opted in: 15ms under python
-3.12 and 22ms under the system 3.9; the not-opted-in path is a few ms less.
+append. On ``Stop`` it also reads at most ``TAIL_BYTES`` of the transcript.
+Measured on macOS, median of 21 runs, an opted-in ``Stop`` that reads the
+tail of a 3 MB transcript: 16ms under python 3.12 and 23ms under the system
+3.9, against 15.5ms and 20.5ms for format 1, which read no transcript; with
+``last_assistant_message`` in the payload, no tail is read. The not-opted-in
+path is a few ms less.
 
-RECORDS NO PROMPT TEXT, EVER. ``UserPromptSubmit`` carries the prompt and
-``Notification`` carries a message; neither is written. Each line is built from
-an allowlist of fields below, never by copying the payload.
+RECORDS NO PROMPT TEXT, EVER. ``UserPromptSubmit`` carries the prompt,
+``Notification`` a message, and ``Stop`` the turn's last assistant text; none
+is written. Each line is built from an allowlist of fields below, never by
+copying the payload. ``asked`` is one boolean derived from that last text.
 
 LINE FORMAT — read by the collector, so change it only with a new ``v``.
 Appended to ``~/.local/state/fleet/sessions/<session_id>.jsonl``, one JSON
 object per line, keys:
 
-    v             1 — the format version.
+    v             2 — the format version. Version 1 had no ``asked``; the
+                  collector reads both.
     ts            UTC ISO 8601 with milliseconds and a ``Z`` suffix, taken when
                   the hook runs: "2026-10-23T14:05:09.123Z".
     event         "UserPromptSubmit" | "Stop" | "Notification".
@@ -53,6 +59,16 @@ object per line, keys:
                   permission prompt), "idle_prompt" (Claude is waiting for
                   input), or another identifier the harness sends as
                   ``notification_type``; "other" when it cannot be classified.
+    asked         Stop lines only: whether the turn's last assistant text,
+                  stripped of trailing markdown, ends in "?" — a heuristic, so
+                  a rhetorical question reads as asked. null when there is no
+                  text to judge: no ``last_assistant_message`` in the payload
+                  and no transcript tail to parse.
+
+A pending ``AskUserQuestion`` never reaches ``Stop`` (the turn has not ended),
+so ``asked`` cannot see it. The hooks reference documents no ``Notification``
+type for it either (code.claude.com/docs/en/hooks, Notification matchers), so
+this hook has no line for that case.
 
 An agent waiting on the owner runs from a ``Stop`` or ``Notification`` line to
 the next ``UserPromptSubmit``; the owner waiting on an agent runs from a
@@ -66,7 +82,11 @@ CONFIG_ENV = "TASK_DASHBOARD_CONFIG"
 DEFAULT_CONFIG = "~/.config/task-dashboard/config.toml"
 STATE_DIR = "~/.local/state/fleet/sessions"
 EVENTS = ("UserPromptSubmit", "Stop", "Notification")
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
+# How much of the transcript's end a Stop reads to find the last assistant text.
+TAIL_BYTES = 64 * 1024
+# Trailing characters that are markdown or quoting, not the sentence's end.
+_TRAILING = " \t\r\n*_`~>\"')]"
 # The most a not-opted-in run reads before giving up; past it the harness is
 # writing something no prompt payload resembles.
 DRAIN_LIMIT = 64 * 1024 * 1024
@@ -153,6 +173,80 @@ def notification_class(payload):
     return "other"
 
 
+def ends_with_question(text):
+    return text.rstrip(_TRAILING).endswith("?")
+
+
+def _last_text(content):
+    """The last text block of a message's content, or None when it has none."""
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return None
+    texts = [b.get("text") for b in content if isinstance(b, dict)]
+    texts = [t for t in texts if isinstance(t, str)]
+    return texts[-1] if texts else None
+
+
+def tail_asked(path, limit=TAIL_BYTES):
+    """``asked`` from the last ``limit`` bytes of a transcript, or None.
+
+    Walks the main conversation's records back from the end and decides at the
+    first message: an assistant text decides by its last sentence, an assistant
+    tool call means the turn did not end in a question, and a user record (the
+    transcript lags the turn) cannot decide, nor can a tail with no message.
+    """
+    import json
+
+    with open(path, "rb") as fh:
+        fh.seek(0, os.SEEK_END)
+        size = fh.tell()
+        start = max(0, size - limit)
+        fh.seek(start)
+        data = fh.read(limit)
+    if start:
+        # The seek landed mid-record: drop the partial first line.
+        data = data[data.find(b"\n") + 1 :] if b"\n" in data else b""
+    for raw in reversed(data.splitlines()):
+        try:
+            rec = json.loads(raw)
+        except ValueError:
+            continue
+        if not isinstance(rec, dict) or rec.get("isSidechain"):
+            continue
+        kind = rec.get("type")
+        if kind == "user":
+            return None
+        if kind != "assistant":
+            continue
+        message = rec.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        text = _last_text(content)
+        if text is not None:
+            return ends_with_question(text)
+        if isinstance(content, list) and any(
+            isinstance(b, dict) and b.get("type") == "tool_use" for b in content
+        ):
+            return False
+    return None
+
+
+def stop_asked(payload):
+    """``asked`` for a Stop: from ``last_assistant_message`` when the harness
+    sends it (the hooks reference says the transcript can lag the turn), else
+    from the transcript tail; None when neither can answer. Never raises."""
+    message = payload.get("last_assistant_message")
+    if isinstance(message, str):
+        return ends_with_question(message)
+    path = payload.get("transcript_path")
+    if not isinstance(path, str) or not path:
+        return None
+    try:
+        return tail_asked(path)
+    except (OSError, ValueError, RecursionError):
+        return None
+
+
 def build_line(payload, now):
     """The record for one hook payload, or None when it should not be written."""
     import json
@@ -180,6 +274,8 @@ def build_line(payload, now):
     }
     if event == "Notification":
         record["notification"] = notification_class(payload)
+    if event == "Stop":
+        record["asked"] = stop_asked(payload)
     return json.dumps(record, separators=(",", ":")) + "\n"
 
 

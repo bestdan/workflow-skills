@@ -17,7 +17,8 @@ one transaction, so a snapshot lands whole or not at all:
   a reader can show how old they are and never shows them as current. The
   next snapshot that scans the repo replaces them as usual.
 - ``sessions`` and ``history`` are deltas, appended to ``session_events`` and
-  ``history_entries``.
+  ``history_entries``. A hook line's ``asked`` (format 2 Stop lines) is stored
+  as 1 / 0, and NULL when it is null or absent.
 - ``machines.last_snapshot_at`` records the snapshot's own ``taken_at``.
 
 A snapshot no newer than the last one ingested from its host is refused with
@@ -34,7 +35,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 MAX_CLOCK_AHEAD = timedelta(minutes=5)
-HOOK_FIELDS = ("event", "session_id", "cwd", "branch", "notification")
+HOOK_FIELDS = ("event", "session_id", "cwd", "branch", "notification", "asked")
 
 # kind, key, summary, created, raw_json
 Row = tuple[str, str, "str | None", "str | None", str]
@@ -87,7 +88,9 @@ def item_rows(doc: dict[str, Any]) -> list[Row]:
     return rows
 
 
-def _str_or_json(value: Any) -> "str | None":
+def _str_or_json(value: Any) -> "str | int | None":
+    if isinstance(value, bool):
+        return int(value)
     if value is None or isinstance(value, str):
         return value
     return json.dumps(value, sort_keys=True)
@@ -164,7 +167,7 @@ def ingest(
         )
         conn.executemany(
             "INSERT INTO session_events (host, ts, event, session_id, cwd, branch,"
-            " notification, received_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            " notification, asked, received_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (
                     host,
