@@ -97,8 +97,9 @@ class Need:
 
 # A yes/no question about a routine step: "Open the PR?", "Commit and push?",
 # "Shall I merge it?", "(y/n)". A question offering a choice ("A or B?") or an
-# open question ("how should I resolve it?") is a decision, not an approval. This is not snapshot.approval_shaped, which
-# classifies the owner's reply ("y", "go ahead"), not the agent's question.
+# open question ("how should I resolve it?") is a decision, not an approval.
+# This is not snapshot.approval_shaped, which classifies the owner's reply
+# ("y", "go ahead"), not the agent's question.
 _YN = re.compile(r"\(?\[?\b(y/n|yes/no)\b\]?\)?\s*\??\s*$", re.IGNORECASE)
 _ROUTINE = re.compile(
     r"^(?:ok(?:ay)?,?\s+)?(?:shall i|should i|ok(?:ay)? to|want me to|do you want me"
