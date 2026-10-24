@@ -52,6 +52,7 @@ from typing import Any
 import config
 import gauges
 import github_fleet
+import include
 import score
 
 WINDOWS = (7, 14, 30)
@@ -86,6 +87,26 @@ FIGURES: tuple[tuple[str, str, str, str, str], ...] = (
     ("review_queue", "Human-review queue length", "GitHub", "PRs", "now"),
 )  # fmt: skip
 FIGURE_IDS = tuple(f[0] for f in FIGURES)
+
+# The mirror kind each figure is about, for the include filter (include.py
+# maps the kind onto its group). Side quests are tags on items of any kind,
+# so that row is always shown.
+FIGURE_KINDS: dict[str, "str | None"] = {
+    "approval_per_100": "session",
+    "switch_rate": "session",
+    "three_plus_active": "session",
+    "permission_per_100": "session",
+    "owner_wait_median": "session",
+    "owner_wait_p90": "session",
+    "agent_wait_median": "session",
+    "agent_wait_p90": "session",
+    "open_prs": "pr",
+    "issues_opened_closed": "issue",
+    "designs_proposed": "design",
+    "side_quests": None,
+    "review_queue": "pr",
+}
+assert set(FIGURE_KINDS) == set(FIGURE_IDS)
 
 # The caps the fleet view design names; every other target is the owner's to
 # copy in from the reset design's table, and is "observed" until then.
@@ -378,14 +399,25 @@ def _trend(value: "float | None") -> str:
     return ("+" if value > 0 else "−") + f"{abs(value):g}"
 
 
-def render(result: dict[str, Any], days: int) -> str:
+def render(
+    result: dict[str, Any], days: int, inc: "include.Include | None" = None
+) -> str:
+    """The panel; `inc` leaves out the figures about a group it switched off,
+    and the window links carry a filter the URL named, so it survives a
+    change of window (a remembered or configured one applies again anyway)."""
+    suffix = ""
+    if inc is not None and inc.origin == "url":
+        suffix = f"&amp;include={_e(','.join(include.canonical(inc.groups)))}"
     windows = "".join(
-        f'<a href="/health?days={d}"{" aria-current=page" if d == days else ""}>'
+        f'<a href="/health?days={d}{suffix}"{" aria-current=page" if d == days else ""}>'
         f"{d} days</a>"
         for d in WINDOWS
     )
     body = []
     for f in result["figures"]:
+        kind = FIGURE_KINDS[f["id"]]
+        if inc is not None and kind is not None and not inc.shows(kind):
+            continue
         cls = {True: "met", False: "miss", None: ""}[f["met"]]
         tag = ' <span class="baseline">baseline</span>' if f["baseline"] else ""
         note = f'<div class="why">{_e(f["note"])}</div>' if f["note"] else ""
@@ -434,10 +466,11 @@ def page(
     days: int,
     *,
     fleet: bool,
+    inc: "include.Include | None" = None,
 ) -> str:
     targets = cfg.get("health", {}).get("targets", {})
     result = compute(conn, targets, now - timedelta(days=days), now, fleet=fleet)
-    return render(result, days)
+    return render(result, days, inc)
 
 
 def text_table(result: dict[str, Any]) -> str:

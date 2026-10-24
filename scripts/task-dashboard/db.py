@@ -2,9 +2,10 @@
 
 Two kinds of table share one file and must stay apart. MIRROR tables are the
 sync's: any row may be overwritten or deleted on the next run. OVERLAY tables
-(pins, order, snoozes, notes, kind tags, focus, last visit) are the user's,
-keyed by (source, item key) apart from the one-row last visit, and a sync never
-touches them; they are the only state here that cannot be rebuilt.
+(pins, order, snoozes, notes, kind tags, focus, last visit, view filters) are
+the user's, keyed by (source, item key) apart from the one-row last visit and
+the per-view filters, and a sync never touches them; they are the only state
+here that cannot be rebuilt.
 
 The DB lives under ~/.local/state, outside every checkout and plugin directory,
 so a plugin update never wipes the overlay. WAL mode lets the HTTP thread read a
@@ -44,6 +45,8 @@ OVERLAY_TABLES = (
     "ignores",
 )
 OVERLAY_SINGLETONS = ("last_visit",)
+# Keyed by view name rather than by item: the remembered include filters.
+OVERLAY_VIEW_TABLES = ("view_includes",)
 
 _V1 = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -322,6 +325,18 @@ CREATE TABLE ignores (
 );
 """
 
+# Version 6: `view_includes`, each view's last include-filter choice
+# (include.py). Overlay state keyed by view name, one row per view. `groups` is
+# the chosen group names, comma-joined in include.GROUPS order; empty means
+# every switch was turned off, which is a choice too.
+_V6 = """
+CREATE TABLE view_includes (
+    view TEXT PRIMARY KEY,
+    groups TEXT NOT NULL,
+    set_at TEXT
+);
+"""
+
 # Ordered, ascending, append-only: never edit a shipped entry.
 #
 # migrate() runs a script one statement at a time through _statements, which
@@ -338,6 +353,7 @@ MIGRATIONS: list[tuple[int, str]] = [
     (3, _V3),
     (4, _V4),
     (5, _V5),
+    (6, _V6),
 ]
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 

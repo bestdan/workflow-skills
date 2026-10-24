@@ -42,6 +42,7 @@ from pathlib import PurePosixPath
 from typing import Any
 
 import github_fleet
+import include
 import overlay
 import score
 import sessions
@@ -271,6 +272,7 @@ class AwayItem:
     at: datetime
     repo: "str | None"  # bare repo name, for the design-focus section
     html: str
+    kind: str  # the row's mirror kind, for the include filter
 
 
 SECTIONS = (
@@ -290,7 +292,7 @@ def away_items(f: Fleet, since: datetime, now: datetime) -> list[AwayItem]:
         card = _card(
             _ref(pr), f"{what} {_e(ago(at, now))}", key=str(pr.get("url") or "")
         )
-        out.append(AwayItem("landed", at, _name(pr.get("repo")), card))
+        out.append(AwayItem("landed", at, _name(pr.get("repo")), card, "closed_pr"))
     for s in f.sessions:
         if s.last <= since or s.last_event not in ("Stop", "Notification"):
             continue
@@ -300,7 +302,7 @@ def away_items(f: Fleet, since: datetime, now: datetime) -> list[AwayItem]:
                 f"{_session_where(s)} · turn ended {_e(ago(s.last, now))}",
                 key=s.session_id,
             )
-            out.append(AwayItem("finished", s.last, s.repo, card))
+            out.append(AwayItem("finished", s.last, s.repo, card, "session"))
         else:
             kind = s.notification or "notification"
             card = _card(
@@ -308,7 +310,7 @@ def away_items(f: Fleet, since: datetime, now: datetime) -> list[AwayItem]:
                 f"{_session_where(s)} · {_e(kind)} {_e(ago(s.last, now))}",
                 key=s.session_id,
             )
-            out.append(AwayItem("waiting", s.last, s.repo, card))
+            out.append(AwayItem("waiting", s.last, s.repo, card, "session"))
     for kind, label in (("pr", "PR awaiting you"), ("issue", "issue needs a human")):
         for row in f.github.get(kind, []):
             at = score.parse_ts(row.get("created"))
@@ -319,7 +321,7 @@ def away_items(f: Fleet, since: datetime, now: datetime) -> list[AwayItem]:
                 f"{label} · opened {_e(ago(at, now))}",
                 key=str(row.get("url") or ""),
             )
-            out.append(AwayItem("waiting", at, _name(row.get("repo")), card))
+            out.append(AwayItem("waiting", at, _name(row.get("repo")), card, kind))
     since_day = since.astimezone().date()
     for d in f.github.get("design", []):
         created = d.get("created")
@@ -335,7 +337,7 @@ def away_items(f: Fleet, since: datetime, now: datetime) -> list[AwayItem]:
             key=str(d.get("url") or ""),
         )
         at = score.local_day_start(day)
-        out.append(AwayItem("waiting", at, _name(d.get("repo")), card))
+        out.append(AwayItem("waiting", at, _name(d.get("repo")), card, "design"))
     out.sort(key=lambda i: i.at, reverse=True)
     return out
 
@@ -352,7 +354,12 @@ def design_focus(conn: sqlite3.Connection, ov: overlay.Overlay) -> "dict | None"
     return _raw(row[1])
 
 
-def render_away(conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime) -> str:
+def render_away(
+    conn: sqlite3.Connection,
+    cfg: dict[str, Any],
+    now: datetime,
+    inc: "include.Include | None" = None,
+) -> str:
     ov = overlay.load(conn)
     f = load(conn, cfg)
     window = timedelta(days=github_fleet.CLOSED_WINDOW_DAYS)
@@ -381,16 +388,21 @@ def render_away(conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime) ->
             '<p class="note">github.fleet is off, so no PRs, issues or designs'
             " are shown here.</p>"
         )
-    items = away_items(f, since, now)
+    items = [i for i in away_items(f, since, now) if inc is None or inc.shows(i.kind)]
     focus = design_focus(conn, ov)
     if focus is not None:
         repo = _name(focus.get("repo"))
         mine = [i for i in items if i.repo == repo]
         items = [i for i in items if i.repo != repo]
-        head = _card(
-            _link(focus.get("url"), focus.get("title") or ""),
-            f"design focus · {_e(focus.get('repo') or '')}",
-        )
+        # The focused design is itself a `design` row, so it obeys the filter;
+        # the section and its repo's included items stay.
+        head = ""
+        if inc is None or inc.shows("design"):
+            head = _card(
+                _link(focus.get("url"), focus.get("title") or ""),
+                f"design focus · {_e(focus.get('repo') or '')}",
+                key=str(focus.get("url") or ""),
+            )
         parts.append(
             f'<section class="lane" data-section="focus" data-repo="{_e(repo or "")}">'
             f"<h2>Design focus: {_e(focus.get('repo') or '')} ({len(mine)})</h2>"
@@ -405,11 +417,16 @@ def render_away(conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime) ->
 # --- Stale, with evidence ----------------------------------------------------
 
 
+# The kinds a Stale row can be, for the include filter's "switched off" note.
+STALE_KINDS = ("worktree", "handoff", "session", "pr", "issue")
+
+
 @dataclass
 class StaleItem:
     lane: str  # close | check
     at: "datetime | None"  # orders the lane, oldest first; never a reason
     html: str
+    kind: str  # the row's mirror kind, for the include filter
 
 
 # "when #N merges" is a merge condition only when it names exactly one #N. A
@@ -527,13 +544,15 @@ def stale_items(
             if risks:
                 why += f"; it has {_e(', '.join(risks))}"
             act = f"check it has nothing left to do; then {cmd}"
-            out.append(StaleItem("check", at, _card(head, meta, why, act)))
+            out.append(StaleItem("check", at, _card(head, meta, why, act), "worktree"))
         elif risks:
             why = f"{_e(evidence)}, but it has {_e(', '.join(risks))}"
             act = f"look before removing; then {cmd}"
-            out.append(StaleItem("check", at, _card(head, meta, why, act)))
+            out.append(StaleItem("check", at, _card(head, meta, why, act), "worktree"))
         else:
-            out.append(StaleItem("close", at, _card(head, meta, _e(evidence), cmd)))
+            out.append(
+                StaleItem("close", at, _card(head, meta, _e(evidence), cmd), "worktree")
+            )
 
     for ho in f.handoffs:
         path = ho.get("path") or ""
@@ -544,7 +563,9 @@ def stale_items(
         meta = _e(f"on {ho['host']} · {path}")
         if expired:
             act = f"read it, then delete <code>{_e(path)}</code>"
-            out.append(StaleItem("close", at, _card(head, meta, _e(evidence), act)))
+            out.append(
+                StaleItem("close", at, _card(head, meta, _e(evidence), act), "handoff")
+            )
         elif (
             expired is None
             and at is not None
@@ -552,7 +573,7 @@ def stale_items(
         ):
             why = f"no evidence: {_e(evidence)}"
             act = "read it: still needed, or delete it"
-            out.append(StaleItem("check", at, _card(head, meta, why, act)))
+            out.append(StaleItem("check", at, _card(head, meta, why, act), "handoff"))
 
     idle = now - timedelta(days=SESSION_IDLE_DAYS)
     forget = now - timedelta(days=SESSION_FORGET_DAYS)
@@ -574,18 +595,25 @@ def stale_items(
         if s.prompts == 0:
             why = f"no prompt was ever sent (first event {ago(s.first, now)})"
             act = "close the session: an empty spawn"
-            out.append(StaleItem("close", s.last, _card(head, meta, _e(why), act)))
+            out.append(
+                StaleItem("close", s.last, _card(head, meta, _e(why), act), "session")
+            )
         elif in_landed is not None:
             why = "its worktree landed: " + in_landed.evidence(now)
             out.append(
                 StaleItem(
-                    "close", s.last, _card(head, meta, _e(why), "close the session")
+                    "close",
+                    s.last,
+                    _card(head, meta, _e(why), "close the session"),
+                    "session",
                 )
             )
         else:
             why = "no evidence: idle, with nothing that says its work is done"
             act = "resume it, or close it"
-            out.append(StaleItem("check", s.last, _card(head, meta, why, act)))
+            out.append(
+                StaleItem("check", s.last, _card(head, meta, why, act), "session")
+            )
 
     old = now - timedelta(days=OPEN_ITEM_DAYS)
     for kind, act in (
@@ -599,15 +627,35 @@ def stale_items(
                 continue
             meta = f"opened {_e(ago(at, now))}"
             why = "no evidence: nothing mirrored says it can close"
-            out.append(StaleItem("check", at, _card(_ref(row), meta, why, act)))
+            out.append(StaleItem("check", at, _card(_ref(row), meta, why, act), kind))
 
     epoch = datetime.min.replace(tzinfo=timezone.utc)
     out.sort(key=lambda i: (i.at is None, i.at or epoch))
     return out
 
 
-def render_stale(conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime) -> str:
+def render_stale(
+    conn: sqlite3.Connection,
+    cfg: dict[str, Any],
+    now: datetime,
+    inc: "include.Include | None" = None,
+) -> str:
+    groups = sorted(
+        {include.group_of(k) for k in STALE_KINDS}, key=include.GROUPS.index
+    )
+    if inc is not None and not any(inc.has(g) for g in groups):
+        # Every group these lanes hold is off: say so, as a Jira lane does.
+        note = include.off_note(*groups)
+        return (
+            '<div class="fleet">'
+            f'<section class="lane" data-section="close" data-filtered="all">'
+            f"<h2>Close: evidence found (0)</h2>{note}</section>"
+            f'<section class="lane" data-section="check" data-filtered="all">'
+            f"<h2>Check: no evidence, so not a reason to close (0)</h2>{note}"
+            "</section></div>"
+        )
     items = stale_items(load(conn, cfg), now, overlay.load(conn).ignored)
+    items = [i for i in items if inc is None or inc.shows(i.kind)]
     close = [i.html for i in items if i.lane == "close"]
     check = [i.html for i in items if i.lane == "check"]
     return (

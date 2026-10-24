@@ -18,6 +18,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PKG = ROOT / "scripts" / "task-dashboard"
+# config.py imports include.py, its sibling, by name.
+sys.path.insert(0, str(PKG))
 
 
 def _load(name):

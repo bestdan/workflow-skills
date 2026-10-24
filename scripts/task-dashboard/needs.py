@@ -56,6 +56,7 @@ import claude_remote
 import fleet_views
 import gauges
 import github_fleet
+import include
 import overlay
 import score
 import sessions
@@ -417,10 +418,18 @@ class Page:
 
 
 def build(
-    conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime, ov: overlay.Overlay
+    conn: sqlite3.Connection,
+    cfg: dict[str, Any],
+    now: datetime,
+    ov: overlay.Overlay,
+    inc: "include.Include | None" = None,
 ) -> Page:
     # An ignored item is gone from the page; the Ignored footer can undo it.
     needs = [n for n in collect(conn, cfg, now) if n.item not in ov.ignored]
+    # Then the include filter: a need it switches off is neither held,
+    # snoozed nor listed, so no count on the page reflects it.
+    if inc is not None:
+        needs = [n for n in needs if inc.shows(n.kind)]
     focus = None
     held = 0
     # Focus first: an unrelated item is held whether or not it is snoozed.
@@ -441,9 +450,14 @@ def build(
     )
 
 
-def render(conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime) -> str:
+def render(
+    conn: sqlite3.Connection,
+    cfg: dict[str, Any],
+    now: datetime,
+    inc: "include.Include | None" = None,
+) -> str:
     ov = overlay.load(conn)
-    p = build(conn, cfg, now, ov)
+    p = build(conn, cfg, now, ov, inc)
     parts = []
     if p.focus is not None:
         row = conn.execute(
@@ -466,6 +480,8 @@ def render(conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime) -> str:
         empty = "No decisions waiting; only the approvals below."
     elif p.focus is not None:
         empty = "Nothing of the focus item needs you."
+    elif inc is not None and not inc.everything:
+        empty = "Nothing included by the filter needs you."
     else:
         empty = "Nothing needs you."
     body = "".join(cards) if cards else f'<p class="empty">{_e(empty)}</p>'

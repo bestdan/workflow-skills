@@ -47,6 +47,7 @@ import db
 import fleet_views
 import gauges
 import health
+import include
 import ingest
 import needs
 import overlay
@@ -556,7 +557,13 @@ def render_board(
     site: str,
     ov: "overlay.Overlay | None" = None,
     now: "datetime | None" = None,
+    inc: "include.Include | None" = None,
 ) -> str:
+    if inc is not None and not inc.shows("ticket"):
+        return (
+            '<section class="lane" data-section="board" data-filtered="tasks">'
+            f"<h2>Issues (0)</h2>{include.off_note('tasks')}</section>"
+        )
     parts = []
     if ov is not None and now is not None:
         # Pinned cards are repeated above the lanes, in their manual order; the
@@ -604,9 +611,9 @@ def render_page(title: str, header: str, body: str, token: str, busy: bool) -> s
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
         f'<meta name="dashboard-token" content="{_e(token)}">'
         f"<title>{_e(title)}</title>"
-        f"<style>{CSS}{views.CSS}{fleet_views.CSS}{needs.CSS}{overlay.CSS}{gauges.CSS}</style></head>"
+        f"<style>{CSS}{views.CSS}{fleet_views.CSS}{needs.CSS}{overlay.CSS}{gauges.CSS}{include.CSS}</style></head>"
         f'<body data-busy="{1 if busy else 0}">{header}<main>{body}</main>'
-        f"<script>{JS}{overlay.JS}</script></body></html>"
+        f"<script>{JS}{overlay.JS}{include.JS}</script></body></html>"
     )
 
 
@@ -663,12 +670,26 @@ class App:
             conn.close()
         return {**self.syncer.state(), **health, "review_queue": queue}
 
-    def view_page(self, path: str) -> str:
+    def include_for(
+        self, conn: sqlite3.Connection, view: str, query: dict[str, list[str]]
+    ) -> include.Include:
+        """The view's include filter: URL, else remembered, else config.
+
+        Raises include.IncludeError on an unknown group in the URL.
+        """
+        remembered = overlay.view_includes(conn).get(view)
+        return include.resolve(view, query, remembered, self.cfg)
+
+    def view_page(self, path: str, query: "dict[str, list[str]] | None" = None) -> str:
         """One of the views.ROUTES pages: Now, Waiting on me, and the rest."""
+        query = query or {}
         conn = self.read()
         try:
+            inc = self.include_for(conn, path.lstrip("/"), query)
             health = self.health(conn)
-            body = views.render(path, conn, self.cfg, self.now())
+            body = views.render(path, conn, self.cfg, self.now(), inc, query)
+            # The gauges read the mirror, never the filtered view: identical
+            # numbers whatever `inc` is.
             gauge_html = gauges.render(gauges.read(conn, fleet=self.fleet), self.cfg)
         finally:
             conn.close()
@@ -677,18 +698,22 @@ class App:
         header = render_header(health, busy, gauge_html)
         return render_page(title, header, body, self.token, busy)
 
-    def health_page(self, days: int) -> str:
+    def health_page(
+        self, days: int, query: "dict[str, list[str]] | None" = None
+    ) -> str:
         """The Health panel (health.py) over the last `days` days."""
+        query = query or {}
         busy = bool(self.syncer.state()["busy"])
         conn = self.read()
         try:
+            inc = self.include_for(conn, "health", query)
             header = render_header(
                 self.health(conn),
                 busy,
                 gauges.render(gauges.read(conn, fleet=self.fleet), self.cfg),
             )
-            body = views.nav("/health") + health.page(
-                conn, self.cfg, self.now(), days, fleet=self.fleet
+            body = views.nav("/health", self.cfg, inc, query) + health.page(
+                conn, self.cfg, self.now(), days, fleet=self.fleet, inc=inc
             )
         finally:
             conn.close()
@@ -701,9 +726,11 @@ class App:
         finally:
             conn.close()
 
-    def board_page(self) -> str:
+    def board_page(self, query: "dict[str, list[str]] | None" = None) -> str:
+        query = query or {}
         conn = self.read()
         try:
+            inc = self.include_for(conn, "board", query)
             health = self.health(conn)
             ov = overlay.load(conn)
             ignored = {k for s, k in ov.ignored if s == "jira"}
@@ -736,9 +763,9 @@ class App:
         busy = bool(self.syncer.state()["busy"])
         title = "Board" + (f": {', '.join(sprints)}" if sprints else "")
         body = (
-            views.nav("/board", self.cfg)
+            views.nav("/board", self.cfg, inc, query)
             + f"<h2>{_e(title)}</h2>"
-            + render_board(board, self.cfg["jira"]["site"], ov, self.now())
+            + render_board(board, self.cfg["jira"]["site"], ov, self.now(), inc)
             + ignored_html
         )
         return render_page(
@@ -812,24 +839,30 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if not self._host_ok():
             return
-        path = urlsplit(self.path).path
+        split = urlsplit(self.path)
+        path = split.path
+        # Blank values kept: `include=` (every switch off) is a choice.
+        query = parse_qs(split.query, keep_blank_values=True)
         app = self.server.app
-        if path == "/" and fleet_views.enabled(app.cfg):
-            # A fleet instance's home page is Needs you; the Jira one's the Board.
-            self._send(
-                200, app.view_page("/needs").encode(), "text/html; charset=utf-8"
-            )
-        elif path in ("/", "/board"):
-            self._send(200, app.board_page().encode(), "text/html; charset=utf-8")
-        elif path in views.ROUTES:
-            self._send(200, app.view_page(path).encode(), "text/html; charset=utf-8")
-        elif path == "/health":
-            days = health.parse_days(parse_qs(urlsplit(self.path).query))
-            self._send(200, app.health_page(days).encode(), "text/html; charset=utf-8")
-        elif path == "/status":
-            self._json(200, app.status())
-        else:
-            self._text(404, "not found\n")
+        html_type = "text/html; charset=utf-8"
+        try:
+            if path == "/" and fleet_views.enabled(app.cfg):
+                # A fleet instance's home page is Needs you; the Jira one's the
+                # Board.
+                self._send(200, app.view_page("/needs", query).encode(), html_type)
+            elif path in ("/", "/board"):
+                self._send(200, app.board_page(query).encode(), html_type)
+            elif path in views.ROUTES:
+                self._send(200, app.view_page(path, query).encode(), html_type)
+            elif path == "/health":
+                days = health.parse_days(query)
+                self._send(200, app.health_page(days, query).encode(), html_type)
+            elif path == "/status":
+                self._json(200, app.status())
+            else:
+                self._text(404, "not found\n")
+        except include.IncludeError as exc:
+            self._text(400, f"{exc}\n")
 
     def do_POST(self) -> None:
         if not self._host_ok():

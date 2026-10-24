@@ -48,11 +48,16 @@ def dump(conn):
     }
     for t in db.OVERLAY_SINGLETONS:
         out[t] = conn.execute(f'SELECT * FROM "{t}"').fetchall()
+    for t in db.OVERLAY_VIEW_TABLES:
+        out[t] = conn.execute(f'SELECT * FROM "{t}" ORDER BY view').fetchall()
     return out
 
 
 def empty():
-    return {t: [] for t in db.OVERLAY_TABLES + db.OVERLAY_SINGLETONS}
+    return {
+        t: []
+        for t in db.OVERLAY_TABLES + db.OVERLAY_SINGLETONS + db.OVERLAY_VIEW_TABLES
+    }
 
 
 def populate(conn):
@@ -68,6 +73,8 @@ def populate(conn):
     overlay.set_focus(conn, ("jira", "ABC-1"), NOW)
     overlay.ignore(conn, ("jira", "NOTME-1"), NOW)
     overlay.set_last_visit(conn, NOW)
+    overlay.set_view_include(conn, "needs", frozenset({"sessions", "prs"}), NOW)
+    overlay.set_view_include(conn, "board", frozenset(), NOW)
 
 
 class OverlayCase(unittest.TestCase):
@@ -283,7 +290,7 @@ class FleetWriteTests(OverlayCase):
 class ExportImportTests(OverlayCase):
     def wipe(self):
         with self.conn:
-            for t in db.OVERLAY_TABLES + db.OVERLAY_SINGLETONS:
+            for t in empty():
                 self.conn.execute(f'DELETE FROM "{t}"')
 
     def test_round_trip_leaves_tables_identical(self):
@@ -291,8 +298,19 @@ class ExportImportTests(OverlayCase):
         before = dump(self.conn)
         doc = json.loads(overlay.dumps(overlay.export(self.conn, NOW)))
         self.assertFalse(self.conn.in_transaction)  # the read snapshot is closed
-        self.assertEqual((doc["format"], doc["version"]), ("task-dashboard-overlay", 3))
+        self.assertEqual((doc["format"], doc["version"]), ("task-dashboard-overlay", 4))
         self.assertEqual(doc["last_visit"], "2026-10-23T12:00:00Z")
+        self.assertEqual(
+            doc["view_includes"],
+            [
+                {"view": "board", "include": [], "set_at": "2026-10-23T12:00:00Z"},
+                {
+                    "view": "needs",
+                    "include": ["prs", "sessions"],
+                    "set_at": "2026-10-23T12:00:00Z",
+                },
+            ],
+        )
         self.wipe()
         self.assertEqual(dump(self.conn), empty())
         counts = overlay.import_(self.conn, doc)
@@ -307,7 +325,12 @@ class ExportImportTests(OverlayCase):
                 "kind_tags": 2,
                 "focus": 1,
                 "ignores": 1,
+                "view_includes": 2,
             },
+        )
+        self.assertEqual(
+            overlay.load(self.conn).view_includes,
+            {"needs": frozenset({"prs", "sessions"}), "board": frozenset()},
         )
         ov = overlay.load(self.conn)
         self.assertEqual(ov.focus, ("jira", "ABC-1"))
@@ -333,13 +356,15 @@ class ExportImportTests(OverlayCase):
         self.assertEqual(
             (after["kind_tags"], after["focus"], after["last_visit"]), ([], [], [])
         )
+        self.assertEqual(after["view_includes"], [])
         self.assertEqual((counts["kind_tags"], counts["focus"]), (0, 0))
 
     def test_a_version_2_file_still_imports_with_no_ignores(self):
         populate(self.conn)
         overlay.ignore(self.conn, ("jira", "GONE-1"), NOW)
         doc = overlay.export(self.conn)
-        v2 = dict(doc, version=2)
+        v2 = {k: v for k, v in doc.items() if k != "view_includes"}
+        v2["version"] = 2
         v2["tables"] = {t: doc["tables"][t] for t in overlay.V2_TABLES}
         overlay.import_(self.conn, v2)
         self.assertEqual(dump(self.conn)["ignores"], [])
@@ -364,6 +389,18 @@ class ExportImportTests(OverlayCase):
         overlay.unignore(self.conn, item)
         self.assertEqual(overlay.load(self.conn).focus, item)
 
+    def test_a_version_3_file_still_imports_with_no_view_filters(self):
+        populate(self.conn)
+        doc = overlay.export(self.conn)
+        v3 = {k: v for k, v in doc.items() if k != "view_includes"}
+        v3["version"] = 3
+        before = dump(self.conn)
+        overlay.import_(self.conn, v3)
+        after = dump(self.conn)
+        self.assertEqual(after["view_includes"], [])
+        self.assertEqual(after["pins"], before["pins"])
+        self.assertEqual(after["ignores"], before["ignores"])
+
     def test_import_replaces_rather_than_merges(self):
         populate(self.conn)
         doc = overlay.export(self.conn)
@@ -385,7 +422,20 @@ class ExportImportTests(OverlayCase):
         cases = {
             "not an object": [],
             "wrong format": bad(lambda d: d.update(format="other")),
-            "wrong version": bad(lambda d: d.update(version=4)),
+            "wrong version": bad(lambda d: d.update(version=5)),
+            "v3 with view_includes": bad(lambda d: d.update(version=3)),
+            "missing view_includes": bad(lambda d: d.pop("view_includes")),
+            "view_includes not a list": bad(lambda d: d.update(view_includes={})),
+            "unknown view": bad(lambda d: d["view_includes"][0].update(view="nope")),
+            "unknown group": bad(
+                lambda d: d["view_includes"][0].update(include=["bugs"])
+            ),
+            "group not text": bad(lambda d: d["view_includes"][0].update(include=[1])),
+            "duplicate view": bad(
+                lambda d: d["view_includes"].append(dict(d["view_includes"][0]))
+            ),
+            "view row extra field": bad(lambda d: d["view_includes"][0].update(x=1)),
+            "bad set_at": bad(lambda d: d["view_includes"][0].update(set_at="now")),
             "bool version": bad(lambda d: d.update(version=True)),
             "v1 with the v2 tables": bad(lambda d: d.update(version=1)),
             "v1 with a last_visit": bad(
@@ -686,6 +736,7 @@ class RouteTests(server_harness.ServerCase):
         "visit": [("at", "2026-10-23T11:00:00Z")],
         "ignore": [("key", "ABC-1")],
         "unignore": [("key", "ABC-1")],
+        "include": [("view", "needs"), ("include", "prs,sessions")],
     }
 
     def test_routes_cover_every_action(self):
@@ -789,6 +840,23 @@ class RouteTests(server_harness.ServerCase):
             status, _ = self.post(action, fields, host=f"evil.example:{self.port}")
             self.assertEqual(status, 403, action)
         self.assertEqual(self.overlay_rows(), empty())
+
+    def test_an_include_post_is_remembered_and_validated(self):
+        fields = [("view", "now"), ("include", "tasks,prs")]
+        self.assertEqual(self.post("include", fields)[0], 200)
+        rows = self.overlay_rows()["view_includes"]
+        self.assertEqual([r[:2] for r in rows], [("now", "tasks,prs")])
+        status, body = self.post("include", [("view", "now"), ("include", "bugs")])
+        self.assertEqual(status, 400)
+        self.assertIn("valid groups are tasks, prs, sessions, other", body)
+        status, body = self.post("include", [("view", "nope"), ("include", "prs")])
+        self.assertEqual(status, 400)
+        self.assertIn("view must be one of", body)
+        # Every switch off is a choice too: the empty set is stored.
+        self.assertEqual(
+            self.post("include", [("view", "now"), ("include", "")])[0], 200
+        )
+        self.assertEqual(self.overlay_rows()["view_includes"][0][:2], ("now", ""))
 
     def test_unknown_overlay_route_is_404(self):
         self.assertEqual(self.post("drop", [("key", "ABC-1")])[0], 404)

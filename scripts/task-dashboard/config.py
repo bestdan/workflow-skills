@@ -20,6 +20,8 @@ import urllib.parse
 from pathlib import Path
 from typing import Any
 
+import include
+
 ENV_VAR = "TASK_DASHBOARD_CONFIG"
 DEFAULT_PATH = Path("~/.config/task-dashboard/config.toml")
 
@@ -51,6 +53,9 @@ DEFAULTS: dict[str, Any] = {
     # for the fleet view that runs `claude -p` once per sync. Off by default:
     # it relies on a request Claude Code marks internal.
     "claude_remote": {"enabled": False, "claude_path": "claude", "timeout_seconds": 45},
+    # View name -> {"include": [group, ...]}: what a view shows when neither its
+    # URL nor a remembered switch choice says (include.py has the names).
+    "views": {},
     "score": {
         "weights": {
             "priority": 3,
@@ -185,6 +190,9 @@ def load(path: "str | os.PathLike[str] | None" = None) -> dict[str, Any]:
             raise ConfigError(
                 f'health.targets.{fid} must be "observed" or a comparison like "<= 5"'
             )
+    problem = include.validate_config(cfg["views"])
+    if problem is not None:
+        raise ConfigError(problem)
     return cfg
 
 

@@ -1,8 +1,9 @@
 """The overlay: the user's pins, pinned order, snoozes, notes, kind tags,
-focus and last visit.
+focus, last visit and each view's remembered include filter.
 
 Every row is keyed by (source, item_key), the same pair as `issues`, except
-`last_visit`, which is one timestamp for the whole overlay. The sync
+`last_visit`, which is one timestamp for the whole overlay, and
+`view_includes`, which is keyed by view name (include.py). The sync
 never writes these tables, and nothing here reads `issues`: a row for an item
 that has left the mirror is kept as is, and the views simply have no card to
 show it on. It is the only state on the machine that cannot be rebuilt from
@@ -26,14 +27,15 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import db
+import include
 import score
 
 EXPORT_FORMAT = "task-dashboard-overlay"
-# 2 added kind_tags, focus and last_visit; 3 added ignores. An older file still
-# imports, with the later tables empty, so a backup taken before an upgrade can
-# be restored.
-EXPORT_VERSION = 3
-IMPORT_VERSIONS = (1, 2, 3)
+# 2 added kind_tags, focus and last_visit; 3 added ignores; 4 added
+# view_includes. An older file still imports, with what it lacks empty, so a
+# backup taken before an upgrade can be restored.
+EXPORT_VERSION = 4
+IMPORT_VERSIONS = (1, 2, 3, 4)
 MAX_KEY = 512
 MAX_BODY = 256 * 1024  # a POST body; room for a long note, percent-encoded
 MAX_NOTE = 20_000
@@ -59,7 +61,7 @@ SNOOZE_DAYS = 7
 
 ACTIONS = (
     "pin", "unpin", "order", "snooze", "note", "tag", "focus", "unfocus", "visit",
-    "ignore", "unignore",
+    "ignore", "unignore", "include",
 )  # fmt: skip
 
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
@@ -350,6 +352,25 @@ def set_last_visit(conn: sqlite3.Connection, now: "datetime | None" = None) -> N
         )
 
 
+def set_view_include(
+    conn: sqlite3.Connection,
+    view: str,
+    groups: "frozenset[str]",
+    now: "datetime | None" = None,
+) -> None:
+    """Remember `groups` as the view's include choice (include.py)."""
+    if view not in include.VIEWS:
+        raise OverlayError(
+            f"view must be one of {', '.join(include.VIEWS)}, got {view!r}"
+        )
+    with conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO view_includes (view, groups, set_at)"
+            " VALUES (?, ?, ?)",
+            (view, ",".join(include.canonical(groups)), _now(now)),
+        )
+
+
 def _visit_at(value: str, now: "datetime | None") -> datetime:
     """The `visit` action's `at`: a page's render time, never past `now`."""
     now = now or datetime.now(timezone.utc)
@@ -376,10 +397,19 @@ def apply(
     pinned item in the new order; `snooze` takes `until`, `note` takes `text`,
     `tag` takes `tag` (empty clears) and an optional `text` for the note.
     `visit` takes no key, only `at`: the render time of the page whose
-    "Mark as read" was pressed (absent means now).
+    "Mark as read" was pressed (absent means now). `include` takes no key,
+    only `view` and `include`, the view's comma-joined groups (empty: none).
     """
     if action not in ACTIONS:
         raise OverlayError(f"unknown overlay action: {action!r}")
+    if action == "include":
+        try:
+            groups = include.parse(form.get("include") or [""])
+        except include.IncludeError as exc:
+            raise OverlayError(str(exc)) from None
+        view = (form.get("view") or [""])[0].strip()
+        set_view_include(conn, view, groups, now)
+        return
     if action == "visit":
         set_last_visit(conn, _visit_at((form.get("at") or [""])[0].strip(), now))
         return
@@ -427,6 +457,7 @@ class Overlay:
     focus: "Item | None" = None
     last_visit: "str | None" = None
     ignored: "set[Item]" = field(default_factory=set)
+    view_includes: "dict[str, frozenset[str]]" = field(default_factory=dict)
 
     def is_pinned(self, item: Item) -> bool:
         return item in self.pinned_at
@@ -474,7 +505,16 @@ def load(conn: sqlite3.Connection) -> Overlay:
         ov.focus = None
     row = conn.execute("SELECT at FROM last_visit WHERE id = 1").fetchone()
     ov.last_visit = row[0] if row else None
+    ov.view_includes = view_includes(conn)
     return ov
+
+
+def view_includes(conn: sqlite3.Connection) -> "dict[str, frozenset[str]]":
+    """Every remembered include choice, by view."""
+    return {
+        view: frozenset(g for g in str(groups).split(",") if g in include.GROUPS)
+        for view, groups in conn.execute("SELECT view, groups FROM view_includes")
+    }
 
 
 # --- export / import ---------------------------------------------------------
@@ -484,6 +524,7 @@ def export(conn: sqlite3.Connection, now: "datetime | None" = None) -> dict[str,
     """The overlay as a versioned, JSON-ready document, rows sorted by key."""
     tables: dict[str, list[dict[str, Any]]] = {}
     last_visit: "str | None" = None
+    views: list[dict[str, Any]] = []
     # One read transaction, so every table comes from the same snapshot: a pin
     # committed between two SELECTs would otherwise give a file import refuses.
     conn.execute("BEGIN")
@@ -496,6 +537,12 @@ def export(conn: sqlite3.Connection, now: "datetime | None" = None) -> dict[str,
             tables[table] = [dict(zip(names, row)) for row in cur]
         row = conn.execute("SELECT at FROM last_visit WHERE id = 1").fetchone()
         last_visit = row[0] if row else None
+        views = [
+            {"view": v, "include": [g for g in str(gs).split(",") if g], "set_at": at}
+            for v, gs, at in conn.execute(
+                "SELECT view, groups, set_at FROM view_includes ORDER BY view"
+            )
+        ]
     finally:
         conn.rollback()
     return {
@@ -503,6 +550,7 @@ def export(conn: sqlite3.Connection, now: "datetime | None" = None) -> dict[str,
         "version": EXPORT_VERSION,
         "exported_at": _now(now),
         "last_visit": last_visit,
+        "view_includes": views,
         "tables": tables,
     }
 
@@ -546,14 +594,45 @@ def _check_last_visit(value: Any) -> "str | None":
     return value
 
 
+def _check_view_includes(value: Any) -> list[tuple[Any, ...]]:
+    """A version 4 file's `view_includes`, as (view, groups, set_at) rows."""
+    if not isinstance(value, list):
+        raise OverlayError("view_includes must be a list")
+    out: list[tuple[Any, ...]] = []
+    seen: set[str] = set()
+    for i, row in enumerate(value):
+        where = f"view_includes[{i}]"
+        if not isinstance(row, dict) or set(row) != {"view", "include", "set_at"}:
+            raise OverlayError(f"{where} must have exactly: view, include, set_at")
+        view, groups, at = row["view"], row["include"], row["set_at"]
+        if view not in include.VIEWS:
+            raise OverlayError(
+                f"{where}: view must be one of {', '.join(include.VIEWS)}"
+            )
+        if view in seen:
+            raise OverlayError(f"{where}: duplicate view {view}")
+        seen.add(view)
+        if not isinstance(groups, list) or not all(isinstance(g, str) for g in groups):
+            raise OverlayError(f"{where}: include must be a list of group names")
+        try:
+            parsed = include.parse(groups)
+        except include.IncludeError as exc:
+            raise OverlayError(f"{where}: {exc}") from None
+        if at is not None and (not isinstance(at, str) or not _STAMP.fullmatch(at)):
+            raise OverlayError(f"{where}: set_at must be null or YYYY-MM-DDTHH:MM:SSZ")
+        out.append((view, ",".join(include.canonical(parsed)), at))
+    return out
+
+
 def validate(
     doc: Any,
 ) -> "tuple[dict[str, list[tuple[Any, ...]]], str | None]":
     """Check a whole import document; return each table's rows as tuples, and
-    the last visit.
+    the last visit. The `view_includes` entry holds the view filters' rows.
 
     A version 1 file has only the first four tables and no `last_visit`; the
-    tables added in version 2 come back empty.
+    tables added in version 2 (and `ignores`, added in 3) come back empty. A
+    version 1 to 3 file has no `view_includes`, which comes back empty.
     """
     if not isinstance(doc, dict):
         raise OverlayError("import file is not a JSON object")
@@ -577,6 +656,14 @@ def validate(
         if "last_visit" not in doc:
             raise OverlayError("last_visit is missing (null when never visited)")
         last_visit = _check_last_visit(doc["last_visit"])
+    if version < 4:
+        if "view_includes" in doc:
+            raise OverlayError(f"a version {version} file has no view_includes")
+        views: list[tuple[Any, ...]] = []
+    else:
+        if "view_includes" not in doc:
+            raise OverlayError("view_includes is missing (an empty list when none)")
+        views = _check_view_includes(doc["view_includes"])
     out: dict[str, list[tuple[Any, ...]]] = {}
     for table, cols in COLUMNS.items():
         rows = tables.get(table, [])
@@ -616,6 +703,7 @@ def validate(
     )
     if bare:
         raise OverlayError(f"{SUBSTANTIAL_NEEDS_NOTE}: {', '.join(bare)}")
+    out["view_includes"] = views
     return out, last_visit
 
 
@@ -624,8 +712,12 @@ def import_(conn: sqlite3.Connection, doc: Any) -> dict[str, int]:
     rows, last_visit = validate(doc)
     with conn:
         conn.execute("BEGIN IMMEDIATE")
-        for table in (*COLUMNS, *db.OVERLAY_SINGLETONS):
+        for table in (*COLUMNS, *db.OVERLAY_SINGLETONS, *db.OVERLAY_VIEW_TABLES):
             conn.execute(f'DELETE FROM "{table}"')
+        conn.executemany(
+            "INSERT INTO view_includes (view, groups, set_at) VALUES (?, ?, ?)",
+            rows["view_includes"],
+        )
         if last_visit is not None:
             conn.execute("INSERT INTO last_visit (id, at) VALUES (1, ?)", (last_visit,))
         for table, cols in COLUMNS.items():
