@@ -8,8 +8,9 @@ Jira, which is why `export` and `import` exist.
 
 Writes arrive as POSTs that server.py has already put through its Host, Origin
 and token checks; `apply()` is what it calls with the parsed form. Rendering
-helpers for the card controls live here too, so the views only have to call
-`card_controls()` and include `CSS` and `JS`.
+helpers for the card controls live here too, so a view only has to put
+`card_attrs()` on each card's root element, call `card_controls()` inside it,
+and include `CSS` and `JS`.
 """
 
 import html
@@ -246,12 +247,18 @@ def load(conn: sqlite3.Connection) -> Overlay:
 def export(conn: sqlite3.Connection, now: "datetime | None" = None) -> dict[str, Any]:
     """The four tables as a versioned, JSON-ready document, rows sorted by key."""
     tables: dict[str, list[dict[str, Any]]] = {}
-    for table, cols in COLUMNS.items():
-        names = ("source", "item_key", *cols)
-        cur = conn.execute(
-            f'SELECT {", ".join(names)} FROM "{table}" ORDER BY source, item_key'
-        )
-        tables[table] = [dict(zip(names, row)) for row in cur]
+    # One read transaction, so every table comes from the same snapshot: a pin
+    # committed between two SELECTs would otherwise give a file import refuses.
+    conn.execute("BEGIN")
+    try:
+        for table, cols in COLUMNS.items():
+            names = ("source", "item_key", *cols)
+            cur = conn.execute(
+                f'SELECT {", ".join(names)} FROM "{table}" ORDER BY source, item_key'
+            )
+            tables[table] = [dict(zip(names, row)) for row in cur]
+    finally:
+        conn.rollback()
     return {
         "format": EXPORT_FORMAT,
         "version": EXPORT_VERSION,
@@ -260,12 +267,19 @@ def export(conn: sqlite3.Connection, now: "datetime | None" = None) -> dict[str,
     }
 
 
+def _finite(value: "int | float") -> bool:
+    try:
+        return math.isfinite(value)
+    except OverflowError:  # an int too large for a float, or for SQLite
+        return False
+
+
 def _check_value(table: str, col: str, value: Any, where: str) -> None:
     if col == "position":
         ok = value is None or (
             isinstance(value, (int, float))
             and not isinstance(value, bool)
-            and math.isfinite(value)
+            and _finite(value)
         )
     else:
         ok = value is None or isinstance(value, str)

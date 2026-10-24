@@ -151,7 +151,7 @@ def cmd_import(args: argparse.Namespace) -> int:
     """Exit 0 on success, 1 when the file is refused (the overlay is unchanged)."""
     try:
         doc = json.loads(Path(args.path).read_text())
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, RecursionError) as exc:
         print(f"task-dashboard: cannot read {args.path}: {exc}", file=sys.stderr)
         return 1
     try:

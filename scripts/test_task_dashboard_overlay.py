@@ -150,6 +150,7 @@ class ExportImportTests(OverlayCase):
         populate(self.conn)
         before = dump(self.conn)
         doc = json.loads(overlay.dumps(overlay.export(self.conn, NOW)))
+        self.assertFalse(self.conn.in_transaction)  # the read snapshot is closed
         self.assertEqual((doc["format"], doc["version"]), ("task-dashboard-overlay", 1))
         self.wipe()
         self.assertEqual(dump(self.conn)["notes"], [])
@@ -194,6 +195,9 @@ class ExportImportTests(OverlayCase):
             ),
             "infinite position": bad(
                 lambda d: d["tables"]["order"][0].update(position=float("inf"))
+            ),
+            "position too big for a float": bad(
+                lambda d: d["tables"]["order"][0].update(position=10**400)
             ),
             "order row with no pin": bad(
                 lambda d: d["tables"]["order"].append(
@@ -260,6 +264,7 @@ class ExportImportTests(OverlayCase):
             json.dumps({"format": "task-dashboard-overlay"}),
             json.dumps(doc),  # writes the literal Infinity, which json.loads accepts
             json.dumps(unplaced),
+            "[" * 100_000,  # json.loads raises RecursionError, not ValueError
         ):
             path.write_text(text)
             res = self.cli("import", str(path))
