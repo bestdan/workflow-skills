@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.120.0] - 2026-10-24
+
+### Features
+
+- card and view usability pass [#1138] (#1158) (94989c2)
+
 ## [2.119.0] - 2026-10-24
 
 ### Features
