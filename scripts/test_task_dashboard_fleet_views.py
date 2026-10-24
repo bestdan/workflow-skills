@@ -190,6 +190,15 @@ SNAPSHOT = {
         ev("s-asked", "2026-10-23T08:00:00.000Z", "UserPromptSubmit"),
         ev("s-asked", "2026-10-23T09:10:00.000Z", "Stop", asked=True),
         ev("s-asked", "2026-10-23T09:11:00.000Z", "Notification", None, "idle_prompt"),
+        ev("s-askperm", "2026-10-23T08:00:00.000Z", "UserPromptSubmit"),
+        ev("s-askperm", "2026-10-23T09:12:00.000Z", "Stop", asked=True),
+        ev(
+            "s-askperm",
+            "2026-10-23T09:13:00.000Z",
+            "Notification",
+            None,
+            "permission_prompt",
+        ),
         ev("s-wait", "2026-10-23T07:00:00.000Z", "UserPromptSubmit"),
         ev("s-wait", "2026-10-23T08:00:00.000Z", "Notification", None, "idle_prompt"),
         ev("s-before", "2026-10-21T08:00:00.000Z", "UserPromptSubmit"),
@@ -272,6 +281,14 @@ class AwayTests(FleetCase):
         self.assertIn("s-wait", waiting)
         self.assertIn("s-asked", waiting)
         self.assertIn("asked (heuristic)", section(page, "waiting"))
+        # A permission prompt after the question is what blocks it now.
+        self.assertIn("s-askperm", waiting)
+        card = re.search(
+            r'data-key="s-askperm".*?</div>', section(page, "waiting"), re.S
+        )
+        assert card is not None
+        self.assertNotIn("asked (heuristic)", card.group(0))
+        self.assertIn("permission_prompt", card.group(0))
         self.assertIn(pr_url(1140), waiting)
         self.assertIn(f"https://github.com/{REPO}/issues/950", waiting)
         self.assertIn(DESIGN_URL, waiting)
