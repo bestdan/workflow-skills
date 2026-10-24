@@ -7,7 +7,9 @@ run the stable launcher (task-dashboard-launch.sh, rendered into
 directory, so a plugin update needs no reinstall.
 
 NO SECRET IN ANY FILE THIS WRITES. The unit runs ``task-dashboard-launch
-collect`` with no other argument; the token stays in the config file, which
+collect --config <path>``, naming the config install loaded (a path, not the
+token), so a non-default config reaches every scheduled run. The token stays
+in that file, which
 config.load_collector() requires to be mode 0600. Install refuses to run until
 that config loads, so a unit is never installed that could only fail.
 
@@ -103,11 +105,23 @@ def search_path(which: Any = shutil.which) -> str:
     return ":".join(dict.fromkeys(dirs))
 
 
-def render_plist(home: Path, path_env: str) -> str:
+def collect_argv(home: Path, config_path: Path) -> list[str]:
+    return [str(launcher_path(home)), "collect", "--config", str(config_path)]
+
+
+def _systemd_word(arg: str) -> str:
+    """One ExecStart word: ``%`` doubled, double-quoted when it needs it."""
+    arg = arg.replace("%", "%%")
+    if any(c.isspace() or c in "\"'\\;" for c in arg):
+        return '"' + arg.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    return arg
+
+
+def render_plist(home: Path, path_env: str, config_path: Path) -> str:
     logs = log_dir(home)
     doc = {
         "Label": LABEL,
-        "ProgramArguments": [str(launcher_path(home)), "collect"],
+        "ProgramArguments": collect_argv(home, config_path),
         "RunAtLoad": True,
         "StartInterval": INTERVAL_SECONDS,
         "ProcessType": "Background",
@@ -118,7 +132,8 @@ def render_plist(home: Path, path_env: str) -> str:
     return plistlib.dumps(doc, sort_keys=False).decode()
 
 
-def render_service(home: Path, path_env: str) -> str:
+def render_service(home: Path, path_env: str, config_path: Path) -> str:
+    exec_start = " ".join(map(_systemd_word, collect_argv(home, config_path)))
     return (
         "[Unit]\n"
         "Description=task-dashboard collector: push this machine's snapshot to"
@@ -127,7 +142,7 @@ def render_service(home: Path, path_env: str) -> str:
         "[Service]\n"
         "Type=oneshot\n"
         f"Environment=PATH={path_env}\n"
-        f"ExecStart={launcher_path(home)} collect\n"
+        f"ExecStart={exec_start}\n"
     )
 
 
@@ -189,13 +204,14 @@ def plan(
         raise InstallError("uv is not on PATH; install it, then rerun install")
     if not os.path.isabs(uv):
         raise InstallError(f"uv must be an absolute path, got {uv!r}")
+    config_file = Path(cfg["config_path"]).resolve()
     p = Plan()
     p.files.append((launcher_path(home), render_launcher(uv), 0o755))
     warm = [uv, "run", "--no-project", "--python", ">=3.11", "python", "-c", "pass"]
     p.commands.append(warm)
     if platform == "darwin":
         plist = plist_path(home)
-        p.files.append((plist, render_plist(home, path_env), 0o644))
+        p.files.append((plist, render_plist(home, path_env, config_file), 0o644))
         domain = f"gui/{uid}"
         p.commands.append(["launchctl", "bootout", f"{domain}/{LABEL}"])
         p.commands.append(["launchctl", "bootstrap", domain, str(plist)])
@@ -206,7 +222,11 @@ def plan(
     elif platform.startswith("linux"):
         units = unit_dir(home)
         p.files.append(
-            (units / f"{UNIT}.service", render_service(home, path_env), 0o644)
+            (
+                units / f"{UNIT}.service",
+                render_service(home, path_env, config_file),
+                0o644,
+            )
         )
         p.files.append((units / f"{UNIT}.timer", render_timer(), 0o644))
         p.commands.append(["systemctl", "--user", "daemon-reload"])

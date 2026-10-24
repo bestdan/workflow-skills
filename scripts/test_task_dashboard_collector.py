@@ -345,6 +345,10 @@ FAKE_HOME = {"darwin": Path("/Users/tester"), "linux": Path("/home/tester")}
 FAKE_PATH = "/opt/fake/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 
+def fake_config(home):
+    return home / ".config/task-dashboard/config.toml"
+
+
 class TestUnits(unittest.TestCase):
     def check_golden(self, name, text):
         golden = GOLDEN / name
@@ -354,23 +358,32 @@ class TestUnits(unittest.TestCase):
         self.assertEqual(text, golden.read_text(), f"{name} drifted from its golden")
 
     def test_plist_matches_golden(self):
-        text = collector_install.render_plist(FAKE_HOME["darwin"], FAKE_PATH)
+        home = FAKE_HOME["darwin"]
+        text = collector_install.render_plist(home, FAKE_PATH, fake_config(home))
         self.check_golden(f"{collector_install.LABEL}.plist", text)
         doc = plistlib.loads(text.encode())
         self.assertTrue(doc["RunAtLoad"])
         self.assertEqual(doc["StartInterval"], 300)
         self.assertEqual(
             doc["ProgramArguments"],
-            ["/Users/tester/.local/bin/task-dashboard-launch", "collect"],
-        )
+            ["/Users/tester/.local/bin/task-dashboard-launch", "collect",
+             "--config", "/Users/tester/.config/task-dashboard/config.toml"],
+        )  # fmt: skip
 
     def test_systemd_units_match_golden(self):
         unit = collector_install.UNIT
+        home = FAKE_HOME["linux"]
         self.check_golden(
             f"{unit}.service",
-            collector_install.render_service(FAKE_HOME["linux"], FAKE_PATH),
+            collector_install.render_service(home, FAKE_PATH, fake_config(home)),
         )
         self.check_golden(f"{unit}.timer", collector_install.render_timer())
+
+    def test_an_awkward_config_path_is_one_execstart_word(self):
+        text = collector_install.render_service(
+            FAKE_HOME["linux"], FAKE_PATH, Path('/home/t/my "cfg" 100%.toml')
+        )
+        self.assertIn(' --config "/home/t/my \\"cfg\\" 100%%.toml"\n', text)
 
     def test_mise_installs_resolve_to_their_shim(self):
         tmp = Path(tempfile.mkdtemp()).resolve()
@@ -436,6 +449,11 @@ class TestInstall(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(launcher.stat().st_mode), 0o755)
         self.assertIn("UV=/opt/fake/bin/uv\n", launcher.read_text())
         self.assertNotIn("@UV@", launcher.read_text())
+        # The config install loaded, not the default path, reaches the agent.
+        args = plistlib.loads(plist.read_bytes())["ProgramArguments"]
+        self.assertEqual(
+            args[1:], ["collect", "--config", str(self.home / "config.toml")]
+        )
         self.assertEqual(
             [c[:2] for c in runner.calls[1:]],
             [["launchctl", "bootout"], ["launchctl", "bootstrap"]],

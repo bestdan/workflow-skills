@@ -8,6 +8,8 @@
 	<array>
 		<string>/Users/tester/.local/bin/task-dashboard-launch</string>
 		<string>collect</string>
+		<string>--config</string>
+		<string>/Users/tester/.config/task-dashboard/config.toml</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
