@@ -409,6 +409,26 @@ class TestPrune(Home):
         self.assertEqual(self.spool(), [])
         self.assertFalse(old.exists())
 
+    def test_a_failed_cursor_save_after_pruning_keeps_the_push_result(self):
+        old = self.session("old", hook_line("old", "Stop", OLD))
+        real = snapshot.save_cursor
+        calls = []
+
+        def save(path, cursor):
+            calls.append(cursor)
+            if len(calls) > 1:  # the first is flush's, the second prune's
+                raise OSError(28, "No space left on device")
+            real(path, cursor)
+
+        with mock.patch.object(snapshot, "save_cursor", side_effect=save):
+            self.assertEqual(self.run_once(), 0)
+        self.assertEqual(len(calls), 2)
+        self.assertFalse(old.exists())
+        self.assertTrue(
+            any("could not drop 1 pruned mark" in m for m in self.log_lines),
+            self.log_lines,
+        )
+
     def test_a_pruned_name_is_dropped_from_the_cursor(self):
         old = self.session("s", hook_line("s", "UserPromptSubmit", OLD),
                            hook_line("s", "Stop", OLD))  # fmt: skip

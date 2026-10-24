@@ -359,7 +359,12 @@ def prune(
         # gives it the old inode number.
         for name in gone:
             marks.pop(name, None)
-        snapshot.save_cursor(cursor_path, cursor)
+        try:
+            snapshot.save_cursor(cursor_path, cursor)
+        except OSError as exc:
+            # The push already succeeded; the next accepted snapshot rebuilds
+            # the marks from the files that exist.
+            log(f"could not drop {len(gone)} pruned mark(s) from the cursor: {exc}")
     if skipped:
         log(f"skipped {skipped} malformed session-state line(s) while pruning")
     if gone:
