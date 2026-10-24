@@ -185,6 +185,7 @@ COLLECTOR_DEFAULTS: dict[str, Any] = {
     "token": "",
     "host": "",
     "spool_max": 50,
+    "retention_days": 30,
 }
 INGEST_URL_RE = re.compile(r"https?://[^/\s]+/\S*")
 
@@ -241,6 +242,9 @@ def load_collector(path: "str | os.PathLike[str] | None" = None) -> dict[str, An
     n = cfg["spool_max"]
     if not isinstance(n, int) or isinstance(n, bool) or n < 1:
         raise ConfigError("collector.spool_max must be a positive integer")
+    days = cfg["retention_days"]
+    if not isinstance(days, int) or isinstance(days, bool) or days < 1:
+        raise ConfigError("collector.retention_days must be a positive integer")
     cfg["config_path"] = p
     return cfg
 
