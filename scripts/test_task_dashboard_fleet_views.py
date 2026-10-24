@@ -284,10 +284,19 @@ class AwayTests(FleetCase):
         overlay.set_focus(self.conn, ("github", pr_url(1140)), NOW)
         self.assertNotIn('data-section="focus"', self.away())
 
-    def test_fleet_off_says_why_github_is_empty(self):
+    def test_fleet_off_hides_leftover_github_rows(self):
+        seed(self.conn)
         cfg = fleet_cfg()
         cfg["github"]["fleet"] = False
-        self.assertIn("github.fleet is off", self.away(cfg))
+        cfg["ingest"]["machines"] = {"mini": "sha256:" + "0" * 64}
+        page = self.away(cfg)
+        self.assertIn("github.fleet is off", page)
+        self.assertNotIn("https://github.com/", page)
+        self.assertEqual(keys(section(page, "finished")), ["s-done"])
+        stale = fleet_views.render_stale(self.conn, cfg, NOW)
+        self.assertNotIn(pr_url(900), stale)
+        self.assertNotIn("PR #1135 merged", stale)
+        self.assertIn(f"worktree {WT}/task-1135", stale)  # the gate's own reason
 
 
 class StaleTests(FleetCase):

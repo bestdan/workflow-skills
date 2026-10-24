@@ -149,12 +149,19 @@ def _raw(value: "str | None") -> dict[str, Any]:
     return obj if isinstance(obj, dict) else {}
 
 
-def load(conn: sqlite3.Connection) -> Fleet:
+def load(conn: sqlite3.Connection, cfg: "dict[str, Any] | None" = None) -> Fleet:
+    """The fleet rows. With `cfg` and `github.fleet` off, no github rows: the
+    ones left from an earlier run are not current (as gauges.review_queue)."""
     f = Fleet()
-    for kind, raw in conn.execute(
-        "SELECT kind, raw_json FROM issues WHERE source = ? ORDER BY key",
-        (github_fleet.SOURCE,),
-    ):
+    rows = (
+        conn.execute(
+            "SELECT kind, raw_json FROM issues WHERE source = ? ORDER BY key",
+            (github_fleet.SOURCE,),
+        )
+        if cfg is None or sync.fleet_enabled(cfg)
+        else []
+    )
+    for kind, raw in rows:
         f.github.setdefault(kind, []).append(_raw(raw))
     for source, kind, raw, synced in conn.execute(
         "SELECT source, kind, raw_json, synced_at FROM issues"
@@ -345,7 +352,7 @@ def design_focus(conn: sqlite3.Connection, ov: overlay.Overlay) -> "dict | None"
 
 def render_away(conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime) -> str:
     ov = overlay.load(conn)
-    f = load(conn)
+    f = load(conn, cfg)
     window = timedelta(days=github_fleet.CLOSED_WINDOW_DAYS)
     last = score.parse_ts(ov.last_visit)
     since = last or now - window
@@ -576,7 +583,7 @@ def stale_items(f: Fleet, now: datetime) -> list[StaleItem]:
 
 
 def render_stale(conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime) -> str:
-    items = stale_items(load(conn), now)
+    items = stale_items(load(conn, cfg), now)
     close = [i.html for i in items if i.lane == "close"]
     check = [i.html for i in items if i.lane == "check"]
     return (
