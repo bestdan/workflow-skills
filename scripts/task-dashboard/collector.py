@@ -22,6 +22,29 @@ still sent, and the run exits 1.
 ``[collector] enabled = false`` turns the collector off as well as the
 session-state hook: ``collect`` builds and sends nothing and exits 0.
 
+PRUNING. The session-state hook writes one file per session and nothing else
+deletes them, so a run whose push leaves the spool empty ends by deleting the
+session files that are both FULLY INGESTED and OLD. Fully ingested is read
+from the saved cursor, because only the saved cursor has been accepted by the
+server: its mark for the file must name the file's current inode at an offset
+equal to its size. Old means the newest line's ``ts`` and the file's mtime are
+both further back than ``[collector] retention_days`` (default 30). A line that
+is not a hook record with a parseable ``ts`` is skipped and counted, never
+fatal.
+
+The deleted files' marks are then removed from the saved cursor. A session
+resumed after its file was pruned gets a new file under the same name, and a
+filesystem that reuses inode numbers (ext4 does) can give it the old one; with
+the mark gone, the file is read from the start whatever its inode. Pruning
+waits for an empty spool because a spooled snapshot's cursor would carry the
+mark back: the next snapshot starts from it, and the server accepting it saves
+it.
+
+The age window is what keeps an active session's file: the hook appends on
+every prompt and turn end, so a live session's file is never that old. The one
+loss left is a hook that opened the file in the instant between the last check
+and the delete; its line goes to the deleted file.
+
 WHAT EACH ANSWER DOES:
 
     2xx                  accepted: delete, advance the cursor
@@ -211,11 +234,15 @@ def collect(
             # they were valid when written and carry their own cursors.
             log("snapshot does not match schema 1, not spooled: "
                 + "; ".join(problems[:5]))  # fmt: skip
-            flush(cfg, spool, state, poster, log)
+            if flush(cfg, spool, state, poster, log) == 0:
+                prune(state, cfg["retention_days"], now, log)
             return 1
         write_entry(spool, doc, cursor)
         trim(spool, cfg["spool_max"], log)
-        return flush(cfg, spool, state, poster, log)
+        rc = flush(cfg, spool, state, poster, log)
+        if rc == 0:
+            prune(state, cfg["retention_days"], now, log)
+        return rc
 
 
 def flush(
@@ -251,3 +278,97 @@ def flush(
         sent += 1
     print(f"task-dashboard collect: pushed {sent} snapshot(s) to {cfg['ingest_url']}")
     return 0
+
+
+# --- pruning session-state files ----------------------------------------------
+
+
+def newest_ts(path: Path) -> tuple["datetime | None", int]:
+    """The newest hook line's ``ts``, and how many lines were skipped as malformed.
+
+    A line counts when it is a JSON object with a ``ts`` that parses as an
+    ISO 8601 time; anything else (a torn write, a foreign line) is skipped.
+    """
+    newest: datetime | None = None
+    skipped = 0
+    for raw in path.read_bytes().splitlines():
+        if not raw.strip():
+            continue
+        try:
+            obj = json.loads(raw)
+            ts = datetime.fromisoformat(obj["ts"].replace("Z", "+00:00"))
+            if ts.tzinfo is None:
+                raise ValueError("naive ts")
+        except (ValueError, TypeError, KeyError, AttributeError):
+            skipped += 1
+            continue
+        if newest is None or ts > newest:
+            newest = ts
+    return newest, skipped
+
+
+def prune(
+    state: Path, retention_days: int, now: datetime, log: Callable[[str], None]
+) -> int:
+    """Delete the session files that are fully ingested and old; the count deleted.
+
+    Fully ingested: the saved (server-accepted) cursor's mark for the file is
+    its current inode at its current size. Old: its newest line and its mtime
+    are both older than ``retention_days``. The deleted files' marks are
+    removed from the saved cursor. Call it only with the spool empty; see
+    PRUNING in the module doc.
+    """
+    sessions = state / "sessions"
+    if not sessions.is_dir():
+        return 0
+    cursor_path = state / snapshot.CURSOR_NAME
+    cursor = snapshot.load_cursor(cursor_path)
+    marks = cursor.get("sessions")
+    marks = marks if isinstance(marks, dict) else {}
+    cutoff = now.timestamp() - retention_days * 86400
+    gone: list[str] = []
+    skipped = 0
+    for path in sorted(sessions.glob("*.jsonl")):
+        mark = marks.get(path.name)
+        try:
+            st = path.stat()
+            if not (
+                isinstance(mark, dict)
+                and mark.get("inode") == st.st_ino
+                and mark.get("offset") == st.st_size
+            ):
+                continue  # unread lines, or not yet accepted by the server
+            if st.st_mtime >= cutoff:
+                continue
+            newest, bad = newest_ts(path)
+            skipped += bad
+            if newest is not None and newest.timestamp() >= cutoff:
+                continue
+            # Re-check just before the delete: a hook that appended since the
+            # stat changed the size, and the file is kept.
+            again = path.stat()
+            if (again.st_ino, again.st_size) != (st.st_ino, st.st_size):
+                continue
+            path.unlink()
+        except OSError:
+            continue
+        gone.append(path.name)
+    if gone:
+        # Drop the deleted files' marks, so a file the hook later creates
+        # under the same name is read from the start even if the filesystem
+        # gives it the old inode number.
+        for name in gone:
+            marks.pop(name, None)
+        try:
+            snapshot.save_cursor(cursor_path, cursor)
+        except OSError as exc:
+            # The push already succeeded; the next accepted snapshot rebuilds
+            # the marks from the files that exist.
+            log(f"could not drop {len(gone)} pruned mark(s) from the cursor: {exc}")
+    if skipped:
+        log(f"skipped {skipped} malformed session-state line(s) while pruning")
+    if gone:
+        log(
+            f"pruned {len(gone)} session-state file(s) older than {retention_days} day(s)"
+        )
+    return len(gone)

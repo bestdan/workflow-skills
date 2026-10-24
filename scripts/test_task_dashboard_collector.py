@@ -298,6 +298,165 @@ class TestPush(Home):
             self.assertEqual(collector.verdict(status), want, status)
 
 
+OLD = "2026-09-01T10:00:00.000Z"  # 52 days before NOW
+RECENT = "2026-10-20T10:00:00.000Z"  # 3 days before NOW
+
+
+class TestPrune(Home):
+    def session(self, name, *lines, age_days=60):
+        """A session file of ``lines`` (raw strings), its mtime ``age_days`` old."""
+        path = self.state / "sessions" / f"{name}.jsonl"
+        path.write_text("".join(lines))
+        mtime = (NOW - timedelta(days=age_days)).timestamp()
+        os.utime(path, (mtime, mtime))
+        return path
+
+    def test_an_old_fully_ingested_file_is_deleted(self):
+        old = self.session("old", hook_line("old", "Stop", OLD))
+        self.assertEqual(self.run_once(), 0)
+        self.assertEqual(len(self.ingest.docs[0]["sessions"]), 1)  # ingested first
+        self.assertFalse(old.exists())
+        self.assertTrue(any("pruned 1 session-state file" in m for m in self.log_lines))
+        # The next run's cursor no longer names it, and nothing is resent.
+        self.assertEqual(self.run_once(at=NOW + timedelta(minutes=5)), 0)
+        self.assertEqual(self.ingest.docs[1]["sessions"], [])
+        self.assertNotIn("old.jsonl", self.cursor()["sessions"])
+
+    def test_an_old_file_the_server_has_not_accepted_is_kept(self):
+        # The spooled snapshot's cursor reaches EOF, but the saved one does not.
+        old = self.session("old", hook_line("old", "Stop", OLD))
+        self.ingest.script = [503]
+        self.assertEqual(self.run_once(), 1)
+        self.assertTrue(old.exists())
+        self.assertEqual(self.cursor(), {})
+        self.assertEqual(self.run_once(at=NOW + timedelta(minutes=5)), 0)
+        self.assertFalse(old.exists())  # accepted now, so it goes
+
+    def test_an_old_file_with_unread_lines_is_kept(self):
+        self.assertEqual(self.run_once(), 0)  # a saved cursor with no mark for it
+        unread = self.session("unread", hook_line("unread", "Stop", OLD))
+        collector.prune(self.state, 30, NOW, self.log_lines.append)
+        self.assertTrue(unread.exists())
+        # A line the hook is still writing (no newline) keeps the cursor short
+        # of the end, so the file is kept even once the rest is accepted.
+        torn = self.session("torn", hook_line("torn", "Stop", OLD), '{"v":1,"ts"',
+                            age_days=60)  # fmt: skip
+        self.assertEqual(self.run_once(at=NOW + timedelta(minutes=5)), 0)
+        self.assertTrue(torn.exists())
+        self.assertFalse(unread.exists())
+
+    def test_a_recent_file_is_kept(self):
+        recent_line = self.session("a", hook_line("a", "Stop", RECENT), age_days=60)
+        recent_mtime = self.session("b", hook_line("b", "Stop", OLD), age_days=3)
+        self.assertEqual(self.run_once(), 0)
+        self.assertTrue(recent_line.exists())
+        self.assertTrue(recent_mtime.exists())
+
+    def test_the_window_comes_from_retention_days(self):
+        path = self.session("a", hook_line("a", "Stop", RECENT), age_days=3)
+        self.assertEqual(self.run_once(self.cfg(retention_days=2)), 0)
+        self.assertFalse(path.exists())
+
+    def test_a_malformed_line_is_skipped_and_counted(self):
+        path = self.session(
+            "bad",
+            hook_line("bad", "UserPromptSubmit", OLD),
+            "not json at all\n",
+            '{"v":1,"ts":"yesterday"}\n',
+            hook_line("bad", "Stop", OLD),
+        )
+        self.assertEqual(collector.newest_ts(path)[1], 2)
+        self.assertEqual(self.run_once(), 0)
+        self.assertFalse(path.exists())
+        self.assertTrue(
+            any("skipped 2 malformed" in m for m in self.log_lines), self.log_lines
+        )
+
+    def accepted(self, path):
+        """Save a cursor that has accepted all of ``path``."""
+        st = path.stat()
+        cursor = {"v": 1, "sessions": {path.name: {"offset": st.st_size,
+                                                   "inode": st.st_ino}}}  # fmt: skip
+        snapshot.save_cursor(self.state / snapshot.CURSOR_NAME, cursor)
+
+    def test_a_disabled_collector_prunes_nothing(self):
+        old = self.session("old", hook_line("old", "Stop", OLD))
+        self.accepted(old)
+        self.assertEqual(self.run_once(self.cfg(enabled=False)), 0)
+        self.assertTrue(old.exists())
+        # Enabled, but the push leaves a snapshot spooled: still kept.
+        self.ingest.script = [503]
+        self.assertEqual(self.run_once(), 1)
+        self.assertTrue(old.exists())
+        # The spool empties on the next run, and it goes.
+        self.assertEqual(self.run_once(at=NOW + timedelta(minutes=5)), 0)
+        self.assertFalse(old.exists())
+
+    def test_an_invalid_snapshot_prunes_only_once_the_spool_is_empty(self):
+        old = self.session("old", hook_line("old", "Stop", OLD))
+        self.accepted(old)
+        bad = mock.patch.object(snapshot, "validate", return_value=["host: bad"])
+        with bad:
+            # A waiting snapshot that cannot be sent: the spool is not empty.
+            collector.write_entry(self.state / "spool",
+                                  {"taken_at": "2026-10-23T11:00:00.000Z"},
+                                  snapshot.load_cursor(self.state / snapshot.CURSOR_NAME))  # fmt: skip
+            self.ingest.script = [503]
+            self.assertEqual(self.run_once(), 1)
+            self.assertTrue(old.exists())
+            # The waiting one is accepted, the spool empties, and it goes.
+            self.assertEqual(self.run_once(at=NOW + timedelta(minutes=5)), 1)
+        self.assertEqual(self.spool(), [])
+        self.assertFalse(old.exists())
+
+    def test_a_failed_cursor_save_after_pruning_keeps_the_push_result(self):
+        old = self.session("old", hook_line("old", "Stop", OLD))
+        real = snapshot.save_cursor
+        calls = []
+
+        def save(path, cursor):
+            calls.append(cursor)
+            if len(calls) > 1:  # the first is flush's, the second prune's
+                raise OSError(28, "No space left on device")
+            real(path, cursor)
+
+        with mock.patch.object(snapshot, "save_cursor", side_effect=save):
+            self.assertEqual(self.run_once(), 0)
+        self.assertEqual(len(calls), 2)
+        self.assertFalse(old.exists())
+        self.assertTrue(
+            any("could not drop 1 pruned mark" in m for m in self.log_lines),
+            self.log_lines,
+        )
+
+    def test_a_pruned_name_is_dropped_from_the_cursor(self):
+        old = self.session("s", hook_line("s", "UserPromptSubmit", OLD),
+                           hook_line("s", "Stop", OLD))  # fmt: skip
+        # Keep the inode alive through a hard link, so the "new" file the
+        # resumed session writes reuses it, as ext4 can with a freed inode.
+        keep = self.home / "keep"
+        os.link(old, keep)
+        inode = old.stat().st_ino
+        self.assertEqual(self.run_once(), 0)
+        self.assertFalse(old.exists())
+        self.assertNotIn("s.jsonl", self.cursor()["sessions"])
+        # The resumed session's file: same name, same inode, more bytes than
+        # the old mark's offset.
+        lines = [hook_line("s", "UserPromptSubmit", RECENT),
+                 hook_line("s", "Notification", RECENT),
+                 hook_line("s", "Stop", RECENT)]  # fmt: skip
+        with keep.open("r+") as fh:
+            fh.truncate(0)
+            fh.write("".join(lines))
+        os.replace(keep, old)
+        self.assertEqual(old.stat().st_ino, inode)
+        self.assertEqual(self.run_once(at=NOW + timedelta(minutes=5)), 0)
+        self.assertEqual(
+            [e["event"] for e in self.ingest.docs[-1]["sessions"]],
+            ["UserPromptSubmit", "Notification", "Stop"],
+        )
+
+
 class TestConfig(unittest.TestCase):
     def setUp(self):
         self.dir = Path(tempfile.mkdtemp())
@@ -314,7 +473,17 @@ class TestConfig(unittest.TestCase):
         cfg = config.load_collector(self.path)
         self.assertEqual(cfg["token"], TOKEN)
         self.assertEqual(cfg["spool_max"], 50)
+        self.assertEqual(cfg["retention_days"], 30)
         self.assertEqual(cfg["config_path"], self.path)
+
+    def test_retention_days_is_validated_when_disabled(self):
+        self.write("[collector]\nenabled = false\nretention_days = 7\n")
+        self.assertEqual(config.load_collector(self.path)["retention_days"], 7)
+        for bad in ("0", "-1", "true", "1.5"):
+            with self.subTest(value=bad):
+                self.write(f"[collector]\nenabled = false\nretention_days = {bad}\n")
+                with self.assertRaisesRegex(config.ConfigError, "retention_days"):
+                    config.load_collector(self.path)
 
     def test_a_readable_config_is_refused(self):
         self.write(f'[collector]\ningest_url = "http://m/ingest"\ntoken = "{TOKEN}"\n',
@@ -328,6 +497,10 @@ class TestConfig(unittest.TestCase):
             f'[collector]\ningest_url = "m:8765"\ntoken = "{TOKEN}"\n': "ingest_url",
             f'[collector]\ningest_url = "http://m/i"\ntoken = "{TOKEN}"\n'
             "spool_max = 0\n": "spool_max",
+            f'[collector]\ningest_url = "http://m/i"\ntoken = "{TOKEN}"\n'
+            "retention_days = 0\n": "retention_days",
+            f'[collector]\ningest_url = "http://m/i"\ntoken = "{TOKEN}"\n'
+            'retention_days = "30"\n': "retention_days",
             f'[collector]\ningest_url = "http://m/i"\ntoken = "{TOKEN}"\n'
             'host = "a.b"\n': "collector.host",
             "[server]\nport = 1\n": "no \\[collector\\]",

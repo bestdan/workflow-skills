@@ -213,7 +213,9 @@ followed by an `enabled = true` line. A dotted key
 of the payload, exits, and writes nothing. Opted in, it appends one line of event metadata per event — time,
 event, session id, cwd, branch, and for a notification whether it was a
 permission prompt — to `~/.local/state/fleet/sessions/<session_id>.jsonl`. It
-never records prompt text, and it never fails a turn.
+never records prompt text, and it never fails a turn. The fleet collector
+deletes a session's file once the server has accepted all of it and it is older
+than `[collector] retention_days` (default 30).
 
 | Skill                                                      | Trigger                                                                                                    | What it does                                                                                                                                                                                                                                            |
 | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
