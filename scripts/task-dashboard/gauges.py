@@ -8,13 +8,16 @@ own cap). Neither is enforced; the gauges only show them.
 - **Side quests in flight** are overlay items tagged `side-quest` whose item
   is still in the mirror and not done. A tag on an item that left the mirror
   (a merged PR, a removed worktree) is kept, as every overlay row is, but no
-  longer counts.
+  longer counts, and neither does an ignored one (overlay.hidden).
 - **Review queue** is github_fleet's `queue` count over the mirrored
-  `source = 'github'` PR rows, read by `review_queue()`, which `/status` uses
-  too so the two always agree. Before the fleet sync step's first successful
-  run, or while `github.fleet` is off, it is unknown and shows "—"; after one,
-  a run that found nothing reads 0.
+  `source = 'github'` PR rows that are not ignored. `review_queue()` counts
+  `review_queue_rows()`, which Needs you lists, and `/status` reads
+  `review_queue()`, so the gauge, `/status` and Needs you agree. Before the
+  fleet sync step's first successful run, or while `github.fleet` is off, it
+  is unknown and shows "—"; after one, a run that found nothing reads 0.
 - **Focus** is the overlay's one focus item, linked when its key gives a URL.
+  A focus that is ignored, or under an ignored item, is not shown
+  (overlay.load).
 """
 
 import html
@@ -66,7 +69,14 @@ def review_queue_rows(conn: sqlite3.Connection, fleet: bool) -> "list[dict] | No
         is None
     ):
         return None
-    return [
+    # An ignored PR is out of the queue: Needs leaves it out, so the count does.
+    ignored = {
+        r[0]
+        for r in conn.execute(
+            "SELECT item_key FROM ignores WHERE source = ?", (github_fleet.SOURCE,)
+        )
+    }
+    rows = [
         json.loads(r[0])
         for r in conn.execute(
             "SELECT raw_json FROM issues WHERE source = ? AND kind = 'pr'"
@@ -74,6 +84,7 @@ def review_queue_rows(conn: sqlite3.Connection, fleet: bool) -> "list[dict] | No
             (github_fleet.SOURCE,),
         )
     ]
+    return [r for r in rows if str(r.get("key") or r.get("url")) not in ignored]
 
 
 def review_queue(conn: sqlite3.Connection, fleet: bool) -> "dict[str, int] | None":
@@ -89,6 +100,8 @@ def read(
     tagged = [item for item, t in ov.kind_tags.items() if t == "side-quest"]
     side_quests = 0
     for source, key in tagged:
+        if overlay.hidden(conn, ov.ignored, (source, key)):
+            continue
         row = conn.execute(
             "SELECT status_category FROM issues WHERE source = ? AND key = ?",
             (source, key),
@@ -139,6 +152,10 @@ def render(g: Gauges, cfg: dict[str, Any]) -> str:
         else:
             text = _e(key + (f" {g.focus_summary}" if g.focus_summary else ""))
         href = _href(g.focus, cfg)
-        inner = f'<a href="{_e(href)}">{text}</a>' if href else text
+        inner = (
+            f'<a href="{_e(href)}" target="_blank" rel="noopener">{text}</a>'
+            if href
+            else text
+        )
         parts.append(f'<span class="gauge" data-gauge="focus">Focus: {inner}</span>')
     return "".join(parts)

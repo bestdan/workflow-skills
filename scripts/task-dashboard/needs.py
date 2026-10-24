@@ -26,7 +26,8 @@ WHAT IT COLLECTS, each keyed by its overlay item `(source, key)`:
   until a drain tracking issue is configured.
 
 ORDER. Pinned items first, in the overlay's order (overlay.Overlay.pin_rank),
-then the longest wait first. A snoozed item is left out and counted.
+then the longest wait first. A snoozed item is left out and counted. An
+ignored item is left out entirely; the page's Ignored list can undo it.
 
 APPROVALS. A session waiting on a harness permission prompt (`need_input` on
 a hook row) is a plain approval, and so is one whose brief ends in any short
@@ -418,7 +419,8 @@ class Page:
 def build(
     conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime, ov: overlay.Overlay
 ) -> Page:
-    needs = collect(conn, cfg, now)
+    # An ignored item is gone from the page; the Ignored footer can undo it.
+    needs = [n for n in collect(conn, cfg, now) if n.item not in ov.ignored]
     focus = None
     held = 0
     # Focus first: an unrelated item is held whether or not it is snoozed.

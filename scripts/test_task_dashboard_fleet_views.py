@@ -321,6 +321,16 @@ class StaleTests(FleetCase):
         self.assertEqual(len(found), 1, text)
         return found[0]
 
+    def test_an_ignored_pr_or_session_leaves_stale(self):
+        _, _, check = self.stale()
+        self.assertIn(pr_url(900), check)
+        self.assertIn("session s-idle", check)
+        overlay.ignore(self.conn, ("github", pr_url(900)), NOW)
+        overlay.ignore(self.conn, ("claude-hook", "s-idle"), NOW)
+        page = fleet_views.render_stale(self.conn, fleet_cfg(), NOW)
+        self.assertNotIn(pr_url(900), page)
+        self.assertNotIn("session s-idle", page)
+
     def test_a_landed_pr_worktree_shows_its_evidence_and_action(self):
         _, close, _ = self.stale()
         card = self.card(close, f"worktree {WT}/task-1135")

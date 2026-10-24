@@ -320,19 +320,27 @@ def kanban() -> ModuleType:
     return mod
 
 
-def board_rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-    """Active-sprint Jira issues as kanban-classify `--tracker jira` rows."""
+def board_rows(conn: sqlite3.Connection, me: str = "") -> list[dict[str, Any]]:
+    """Active-sprint Jira issues as kanban-classify `--tracker jira` rows.
+
+    Every issue in a configured board's active sprint, plus, from any other
+    team's active sprint, only the issues `me` is assigned to or reported.
+    """
     cur = conn.execute(
         "SELECT key, summary, status_name, status_category, assignee, priority,"
-        " labels, created, sprint_name FROM jira_issues"
-        # The sprint field keeps the active sprint of any board, so an issue of
-        # mine in another team's sprint is active too; `sprints` holds only the
-        # configured boards' active sprints.
-        " WHERE sprint_state = 'active' AND sprint_id IN (SELECT id FROM sprints)"
-        " ORDER BY key"
+        " labels, created, sprint_name, flagged, raw_json, parent_key FROM jira_issues"
+        # The sprint field keeps the active sprint of any board; `sprints`
+        # holds only the configured boards' active sprints.
+        " WHERE sprint_state = 'active' AND (sprint_id IN (SELECT id FROM sprints)"
+        "  OR (? != '' AND (lower(assignee) = lower(?) OR lower(reporter) = lower(?))))"
+        " ORDER BY key",
+        (me, me, me),
     )
     rows = []
-    for key, summary, status, category, assignee, priority, labels, created, sp in cur:
+    for (
+        key, summary, status, category, assignee, priority, labels, created, sp,
+        flagged, raw_json, parent_key,
+    ) in cur:  # fmt: skip
         try:
             label_list = json.loads(labels or "[]")
         except ValueError:
@@ -349,6 +357,9 @@ def board_rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
                 "assignee": assignee,
                 "priority_name": priority,
                 "sprint_name": sp,
+                "flagged": bool(flagged),
+                "epic": views.epic_name({"raw_json": raw_json}),
+                "parent_key": parent_key,
             }
         )
     return rows
@@ -390,7 +401,8 @@ header .age { color:var(--muted); }
 header.stale .age { color:var(--bad); font-weight:600; }
 header .alert { width:100%; padding:6px 10px; border-radius:6px;
   background:var(--badbg); color:var(--bad); }
-header button { margin-left:auto; font:inherit; padding:4px 12px; border-radius:6px;
+header #filter { margin-left:auto; }
+header button { font:inherit; padding:4px 12px; border-radius:6px;
   border:1px solid var(--line); background:var(--card); color:var(--fg); cursor:pointer; }
 main { padding:12px 16px; }
 .lane { margin-bottom:16px; }
@@ -427,6 +439,40 @@ JS = """
     }).catch(function () { btn.textContent = 'Sync failed'; btn.disabled = false; });
   });
   if (document.body.dataset.busy === '1') { btn.disabled = true; poll(); }
+})();
+(function () {
+  var box = document.getElementById('filter');
+  if (!box) return;
+  function text(card) {
+    return Array.prototype.map.call(
+      card.querySelectorAll('.title, .ref, .epic, .meta'),
+      function (el) { return el.textContent; }).join(' ').toLowerCase();
+  }
+  document.querySelectorAll('.lane > h2').forEach(function (h) {
+    h.dataset.base = h.textContent.replace(/\\s*\\(\\d+\\)$/, '');
+  });
+  // Every card action reloads the page; keep the filter across that, per tab.
+  var saved = 'filter:' + location.pathname;
+  function apply() {
+    var q = box.value.trim().toLowerCase();
+    document.querySelectorAll('.lane').forEach(function (lane) {
+      var cards = lane.querySelectorAll('.card'), shown = 0;
+      cards.forEach(function (c) {
+        var hit = !q || text(c).indexOf(q) !== -1;
+        c.hidden = !hit;
+        if (hit) shown++;
+      });
+      var h = lane.querySelector('h2');
+      if (h && h.dataset.base) h.textContent = h.dataset.base + ' (' + shown + ')';
+      lane.classList.toggle('filtered-empty', !!q && shown === 0);
+    });
+  }
+  box.addEventListener('input', function () {
+    try { sessionStorage.setItem(saved, box.value); } catch (e) {}
+    apply();
+  });
+  try { box.value = sessionStorage.getItem(saved) || ''; } catch (e) {}
+  if (box.value) apply();
 })();
 """
 
@@ -468,7 +514,7 @@ def render_header(health: dict[str, Any], busy: bool, gauge_html: str = "") -> s
     return (
         f"<header{cls}><h1>Task dashboard</h1>"
         f'<span class="age" title="{title}">{_age_text(health["age_seconds"])}</span>'
-        f"{gauge_html}"
+        f"{gauge_html}{FILTER}"
         f'<button id="sync" title="Shift-click for a full reconcile">{label}</button>'
         f"{_alert(health['last_run'])}"
         f"{_alert(health.get('fleet_run'), 'GitHub fleet sync')}</header>"
@@ -483,8 +529,11 @@ def _card(
     *,
     reorder: bool = False,
 ) -> str:
-    key = _e(str(row["id"]))
-    href = _e(f"https://{site}/browse/{row['id']}")
+    key = str(row["id"])
+    href = f"https://{site}/browse/{key}"
+    icon = views.status_icon(
+        row.get("category"), row.get("status_name"), bool(row.get("flagged"))
+    )
     meta = " · ".join(
         _e(str(v))
         for v in (row.get("status_name"), row.get("assignee"), row.get("priority_name"))
@@ -496,7 +545,8 @@ def _card(
         attrs = overlay.card_attrs(item, ov, now)
         controls = overlay.card_controls(item, ov, now, reorder=reorder)
     return (
-        f'<div {attrs}><a href="{href}">{key}</a> {_e(row.get("summary") or "")}'
+        f"<div {attrs}>{icon}{views.card_title(href, row.get('summary'), key)}"
+        f"{views.epic_line(row.get('epic'))}"
         f'<div class="meta">{meta}</div>{controls}</div>'
     )
 
@@ -540,6 +590,12 @@ def render_board(
     if not parts:
         return '<p class="empty">No issues in an active sprint.</p>'
     return "".join(parts)
+
+
+FILTER = (
+    '<input id="filter" type="search" placeholder="Filter this page"'
+    ' aria-label="Filter cards" autocomplete="off">'
+)
 
 
 def render_page(title: str, header: str, body: str, token: str, busy: bool) -> str:
@@ -649,8 +705,26 @@ class App:
         conn = self.read()
         try:
             health = self.health(conn)
-            board = classify_board(board_rows(conn))
             ov = overlay.load(conn)
+            ignored = {k for s, k in ov.ignored if s == "jira"}
+            parents = dict(
+                conn.execute(
+                    "SELECT key, parent_key FROM jira_issues"
+                    " WHERE parent_key IS NOT NULL"
+                )
+            )
+            board = classify_board(
+                [
+                    r
+                    for r in board_rows(
+                        conn, str(self.cfg["jira"].get("me") or "").strip()
+                    )
+                    if not views.under_ignored(
+                        r["id"], r["parent_key"], parents.get, ignored
+                    )
+                ]
+            )
+            ignored_html = views.render_ignored(conn)
             gauge_html = gauges.render(
                 gauges.read(conn, ov, fleet=self.fleet), self.cfg
             )
@@ -665,6 +739,7 @@ class App:
             views.nav("/board", self.cfg)
             + f"<h2>{_e(title)}</h2>"
             + render_board(board, self.cfg["jira"]["site"], ov, self.now())
+            + ignored_html
         )
         return render_page(
             "Task dashboard",

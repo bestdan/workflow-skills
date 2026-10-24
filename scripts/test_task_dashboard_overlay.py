@@ -66,6 +66,7 @@ def populate(conn):
     overlay.tag(conn, ("jira", "ABC-2"), "side-quest", now=NOW)
     overlay.tag(conn, ("jira", "ABC-1"), "substantial", now=NOW)  # has a note
     overlay.set_focus(conn, ("jira", "ABC-1"), NOW)
+    overlay.ignore(conn, ("jira", "NOTME-1"), NOW)
     overlay.set_last_visit(conn, NOW)
 
 
@@ -290,7 +291,7 @@ class ExportImportTests(OverlayCase):
         before = dump(self.conn)
         doc = json.loads(overlay.dumps(overlay.export(self.conn, NOW)))
         self.assertFalse(self.conn.in_transaction)  # the read snapshot is closed
-        self.assertEqual((doc["format"], doc["version"]), ("task-dashboard-overlay", 2))
+        self.assertEqual((doc["format"], doc["version"]), ("task-dashboard-overlay", 3))
         self.assertEqual(doc["last_visit"], "2026-10-23T12:00:00Z")
         self.wipe()
         self.assertEqual(dump(self.conn), empty())
@@ -305,6 +306,7 @@ class ExportImportTests(OverlayCase):
                 "notes": 2,
                 "kind_tags": 2,
                 "focus": 1,
+                "ignores": 1,
             },
         )
         ov = overlay.load(self.conn)
@@ -333,6 +335,35 @@ class ExportImportTests(OverlayCase):
         )
         self.assertEqual((counts["kind_tags"], counts["focus"]), (0, 0))
 
+    def test_a_version_2_file_still_imports_with_no_ignores(self):
+        populate(self.conn)
+        overlay.ignore(self.conn, ("jira", "GONE-1"), NOW)
+        doc = overlay.export(self.conn)
+        v2 = dict(doc, version=2)
+        v2["tables"] = {t: doc["tables"][t] for t in overlay.V2_TABLES}
+        overlay.import_(self.conn, v2)
+        self.assertEqual(dump(self.conn)["ignores"], [])
+
+    def test_ignore_is_idempotent_and_unignore_clears_it(self):
+        item = ("jira", "ABC-1")
+        overlay.ignore(self.conn, item, NOW)
+        overlay.ignore(self.conn, item, NOW)
+        self.assertEqual(overlay.load(self.conn).ignored, {item})
+        overlay.unignore(self.conn, item)
+        self.assertEqual(overlay.load(self.conn).ignored, set())
+
+    def test_an_ignored_focus_is_hidden_and_comes_back_on_unignore(self):
+        item = ("jira", "ABC-1")
+        overlay.set_focus(self.conn, item, NOW)
+        overlay.ignore(self.conn, ("jira", "ABC-2"), NOW)
+        self.assertEqual(overlay.load(self.conn).focus, item)  # another item
+        overlay.ignore(self.conn, item, NOW)
+        self.assertIsNone(overlay.load(self.conn).focus)
+        kept = [row[:2] for row in dump(self.conn)["focus"]]
+        self.assertEqual(kept, [("jira", "ABC-1")])  # the row stays
+        overlay.unignore(self.conn, item)
+        self.assertEqual(overlay.load(self.conn).focus, item)
+
     def test_import_replaces_rather_than_merges(self):
         populate(self.conn)
         doc = overlay.export(self.conn)
@@ -354,7 +385,7 @@ class ExportImportTests(OverlayCase):
         cases = {
             "not an object": [],
             "wrong format": bad(lambda d: d.update(format="other")),
-            "wrong version": bad(lambda d: d.update(version=3)),
+            "wrong version": bad(lambda d: d.update(version=4)),
             "bool version": bad(lambda d: d.update(version=True)),
             "v1 with the v2 tables": bad(lambda d: d.update(version=1)),
             "v1 with a last_visit": bad(
@@ -594,6 +625,22 @@ class LocalDateTests(unittest.TestCase):
                 ov.is_snoozed(("jira", "A-1"), self.INSTANT), snoozed, zone
             )
 
+    def test_snooze_is_one_button_a_local_week_out(self):
+        self.in_zone("Asia/Tokyo")  # the instant is already the 24th there
+        html = overlay.card_controls(
+            ("jira", "A-1"), overlay.Overlay(), self.INSTANT, reorder=False
+        )
+        self.assertIn('data-ov="snooze" data-until="2026-10-31"', html)
+        self.assertIn("Snooze 7d", html)
+        self.assertNotIn('type="date"', html)
+
+    def test_a_snoozed_card_offers_unsnooze(self):
+        self.in_zone("UTC")
+        ov = overlay.Overlay(snoozed_until={("jira", "A-1"): "2026-10-24"})
+        html = overlay.card_controls(("jira", "A-1"), ov, self.INSTANT, reorder=False)
+        self.assertIn("snoozed until 2026-10-24", html)
+        self.assertIn('data-ov="snooze" data-until="">Unsnooze', html)
+
 
 class ReconcileTests(sync_harness.SyncCase):
     def test_note_survives_a_reconcile_that_drops_its_issue(self):
@@ -637,6 +684,8 @@ class RouteTests(server_harness.ServerCase):
         "focus": [("key", "ABC-1")],
         "unfocus": [("key", "ABC-1")],
         "visit": [("at", "2026-10-23T11:00:00Z")],
+        "ignore": [("key", "ABC-1")],
+        "unignore": [("key", "ABC-1")],
     }
 
     def test_routes_cover_every_action(self):
@@ -772,6 +821,16 @@ class RouteTests(server_harness.ServerCase):
         self.assertNotIn("<b>me</b>", page)
         self.assertIn("snoozed until 2999-01-01", page)
         self.assertIn('class="card snoozed" data-source="jira" data-key="ABC-6"', page)
+
+    def test_unsnooze_clears_through_the_route(self):
+        # Unsnooze posts an empty `until`, which parse_qs drops from the form.
+        self.assertEqual(
+            self.post("snooze", [("key", "ABC-6"), ("until", "2999-01-01")])[0], 200
+        )
+        self.assertEqual(self.post("snooze", [("key", "ABC-6"), ("until", "")])[0], 200)
+        page = self.request("GET", "/board")[1]
+        self.assertNotIn("snoozed until 2999-01-01", page)
+        self.assertEqual(self.overlay_rows()["snoozes"], [])
 
     def test_bad_input_is_400_and_writes_nothing(self):
         for action, fields in (

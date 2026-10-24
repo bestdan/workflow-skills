@@ -24,11 +24,13 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import claude_remote  # type: ignore[import-not-found]  # noqa: E402
 import config  # type: ignore[import-not-found]  # noqa: E402
 import db  # type: ignore[import-not-found]  # noqa: E402
+import gauges  # type: ignore[import-not-found]  # noqa: E402
 import github_fleet  # type: ignore[import-not-found]  # noqa: E402
 import needs  # type: ignore[import-not-found]  # noqa: E402
 import overlay  # type: ignore[import-not-found]  # noqa: E402
 import sessions  # type: ignore[import-not-found]  # noqa: E402
 import snapshot_adapter  # type: ignore[import-not-found]  # noqa: E402
+import views  # type: ignore[import-not-found]  # noqa: E402
 import test_task_dashboard_server as server_harness  # noqa: E402
 
 NOW = datetime(2026, 10, 24, 12, 0, tzinfo=timezone.utc)
@@ -247,6 +249,28 @@ class OrderTests(NeedsCase):
         page = self.page()
         self.assertNotIn(pr_url(1201), keys(page))
         self.assertIn('data-snoozed="1"', page)
+
+    def test_an_ignored_item_leaves_and_can_be_undone(self):
+        seed(self.conn)
+        item = ("claude-hook", "s-turn")
+        overlay.ignore(self.conn, item, NOW)
+        self.assertNotIn("s-turn", keys(self.page()))
+        footer = views.render_ignored(self.conn)
+        self.assertIn('data-source="claude-hook" data-key="s-turn"', footer)
+        self.assertIn('data-ov="unignore"', footer)
+        overlay.unignore(self.conn, item)
+        self.assertIn("s-turn", keys(self.page()))
+        self.assertEqual(views.render_ignored(self.conn), "")
+
+    def test_an_ignored_pr_leaves_the_page_and_the_queue_gauge(self):
+        seed(self.conn)
+        before = gauges.review_queue(self.conn, True)
+        assert before is not None
+        overlay.ignore(self.conn, ("github", pr_url(1201)), NOW)
+        self.assertNotIn(pr_url(1201), keys(self.page()))
+        after = gauges.review_queue(self.conn, True)
+        assert after is not None
+        self.assertEqual(after["queue"], before["queue"] - 1)
 
 
 class ApprovalTests(NeedsCase):

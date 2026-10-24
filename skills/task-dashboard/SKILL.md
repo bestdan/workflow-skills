@@ -123,8 +123,8 @@ LAN address.
 
 ## export, import
 
-The overlay (pins, order, snoozes, notes) is the one thing on this machine
-that cannot be rebuilt from Jira or GitHub.
+The overlay (pins, order, snoozes, notes, kind tags, focus and ignores) is
+the one thing on this machine that cannot be rebuilt from Jira or GitHub.
 
 - `DASH export <file>` writes it as JSON. With no file it prints to stdout.
 - `DASH import <file>` **replaces** the whole overlay with the file's

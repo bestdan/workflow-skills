@@ -565,7 +565,10 @@ class BoardTest(ServerCase):
         lanes = dict(
             re.findall(r'data-section="([a-z_]+)">(.*?)</section>', page, re.S)
         )
-        found = {s: re.findall(r">(ABC-\d+)</a>", body) for s, body in lanes.items()}
+        found = {
+            s: re.findall(r"class=\"ref\">\((ABC-\d+)\)<", body)
+            for s, body in lanes.items()
+        }
         self.assertEqual(found["new"], ["ABC-1"])
         self.assertEqual(found["needs_refinement"], ["ABC-2"])
         self.assertEqual(found["ready"], ["ABC-3"])
@@ -590,13 +593,15 @@ class BoardTest(ServerCase):
         expected.remove("blocked")
         self.assertEqual(order, expected)
 
-    def add_issue(self, key, category, sprint_id):
+    def add_issue(
+        self, key, category, sprint_id, assignee=None, reporter=None, parent=None
+    ):
         conn = self.conn()
         conn.execute(
             "INSERT INTO issues (source, kind, key, summary, status_category,"
-            " labels, sprint_id, sprint_state) VALUES ('jira', 'ticket', ?, 'x',"
-            " ?, '[]', ?, 'active')",
-            (key, category, sprint_id),
+            " labels, sprint_id, sprint_state, assignee, reporter, parent_key)"
+            " VALUES ('jira', 'ticket', ?, 'x', ?, '[]', ?, 'active', ?, ?, ?)",
+            (key, category, sprint_id, assignee, reporter, parent),
         )
         conn.commit()
         conn.close()
@@ -605,6 +610,43 @@ class BoardTest(ServerCase):
         self.add_issue("XYZ-1", "indeterminate", 6)  # sprint 6 is not configured
         self.assertNotIn("XYZ-1", self.request("GET", "/")[1])
 
+    def test_my_issue_in_another_boards_sprint_is_kept(self):
+        self.add_issue("XYZ-2", "indeterminate", 6, assignee="Pat Example")
+        self.add_issue("XYZ-3", "indeterminate", 6, reporter="pat example")
+        self.add_issue("XYZ-4", "indeterminate", 6, assignee="Someone Else")
+        conn = self.conn()
+        try:
+            keys = {r["id"] for r in server.board_rows(conn, "Pat Example")}
+            unset = {r["id"] for r in server.board_rows(conn, "")}
+        finally:
+            conn.close()
+        self.assertLessEqual({"XYZ-2", "XYZ-3"}, keys)
+        self.assertNotIn("XYZ-4", keys)
+        self.assertFalse({"XYZ-2", "XYZ-3"} & unset)
+
+    def test_ignored_issues_and_epic_children_leave_the_board(self):
+        self.add_issue("ABC-60", "indeterminate", 5, parent="EPIC-9")
+        self.add_issue("ABC-61", "indeterminate", 5)
+        self.add_issue("ABC-62", "indeterminate", 5, parent="EPIC-8")
+        self.add_issue("ABC-63", "indeterminate", 5, parent="ABC-60")  # a sub-task
+        conn = self.conn()
+        conn.executemany(
+            "INSERT INTO ignores (source, item_key) VALUES ('jira', ?)",
+            [("EPIC-9",), ("ABC-61",)],
+        )
+        conn.commit()
+        conn.close()
+        page = self.request("GET", "/")[1]
+        lanes = "".join(
+            re.findall(r'data-section="[a-z_]+">(.*?)</section>', page, re.S)
+        )
+        self.assertNotIn("(ABC-60)", lanes)  # a child of the ignored epic
+        self.assertNotIn("(ABC-61)", lanes)  # ignored itself
+        self.assertNotIn("(ABC-63)", lanes)  # under the ignored epic, two down
+        self.assertIn("(ABC-62)", lanes)
+        self.assertIn("Ignored (2)", page)
+        self.assertEqual(page.count('data-ov="unignore"'), 2)
+
     def test_unclassified_rows_get_their_own_last_lane(self):
         self.add_issue("ABC-50", "undefined", 5)
         page = self.request("GET", "/")[1]
@@ -612,7 +654,7 @@ class BoardTest(ServerCase):
         lane = re.search(r'data-section="unmatched">(.*?)</section>', page, re.S)
         assert lane is not None
         self.assertIn("Unclassified (1)", lane.group(1))
-        self.assertIn(">ABC-50</a>", lane.group(1))
+        self.assertIn("(ABC-50)</span>", lane.group(1))
 
     def test_summary_is_escaped(self):
         conn = self.conn()
