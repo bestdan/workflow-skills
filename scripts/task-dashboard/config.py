@@ -29,7 +29,10 @@ DEFAULTS: dict[str, Any] = {
     "jira": {"blocked_statuses": [], "acli_path": "acli", "me": ""},
     # design_repos: `owner/name` repos whose dev_docs/designs/ the fleet view
     # reads for `status: proposed` (github_fleet.py). Empty reads none.
-    "github": {"enabled": True, "orgs": [], "design_repos": []},
+    # fleet: run github_fleet's fetch (review queue, issues needing a human,
+    # proposed designs) in every sync. Off by default, so the work-laptop
+    # Jira instance never runs it; `enabled = false` turns it off too.
+    "github": {"enabled": True, "orgs": [], "design_repos": [], "fleet": False},
     "sync": {
         "interval_minutes": 5,
         "reconcile_minutes": 60,
@@ -126,6 +129,8 @@ def load(path: "str | os.PathLike[str] | None" = None) -> dict[str, Any]:
         isinstance(i, int) and not isinstance(i, bool) for i in ids
     ):
         raise ConfigError("jira.board_ids must be a list of integer board ids")
+    if not isinstance(cfg["github"]["fleet"], bool):
+        raise ConfigError("github.fleet must be true or false")
     port = cfg["server"]["port"]
     if not isinstance(port, int) or isinstance(port, bool) or not 0 < port < 65536:
         raise ConfigError("server.port must be an integer port (1-65535)")

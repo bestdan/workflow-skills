@@ -29,6 +29,7 @@ sys.path.insert(0, str(PKG))
 # modules themselves are type-checked in their own group (scripts/typecheck.sh).
 import config  # type: ignore[import-not-found]  # noqa: E402
 import db  # type: ignore[import-not-found]  # noqa: E402
+import github_fleet  # type: ignore[import-not-found]  # noqa: E402
 import server  # type: ignore[import-not-found]  # noqa: E402
 
 USER_CONFIG = {
@@ -431,6 +432,61 @@ class HeaderTest(ServerCase):
         self.assertFalse(state["stale"])
         self.assertEqual(state["last_run"]["outcome"], "ok")
         self.assertFalse(state["busy"])
+
+    def test_fleet_run_does_not_freshen_a_failing_jira_sync(self):
+        conn = self.conn()
+        add_run(conn, "failed", self.now() - timedelta(minutes=20), "AcliError: x")
+        add_run(conn, "ok", self.now(), kind="github_fleet")
+        conn.close()
+        state = json.loads(self.request("GET", "/status")[1])
+        self.assertTrue(state["stale"])
+        self.assertIsNone(state["last_ok_at"])
+        self.assertEqual(state["last_run"]["kind"], "incremental")
+        self.assertEqual(state["fleet_run"]["outcome"], "ok")
+        self.assertIn("Last sync failed: AcliError: x", self.header())
+
+    def test_fleet_auth_failure_names_gh_login_beside_the_jira_state(self):
+        conn = self.conn()
+        add_run(conn, "ok", self.now())
+        add_run(
+            conn, "auth_failed", self.now(), "gh: 401 (fix: run `gh auth login`)",
+            kind="github_fleet",
+        )  # fmt: skip
+        conn.close()
+        header = self.header()
+        self.assertIn("gh auth login", header)
+        self.assertNotIn('class="stale"', header)
+
+    def test_fleet_failure_is_labelled(self):
+        conn = self.conn()
+        add_run(conn, "ok", self.now())
+        add_run(conn, "failed", self.now(), "GhError: 502", kind="github_fleet")
+        conn.close()
+        self.assertIn("GitHub fleet sync failed: GhError: 502", self.header())
+
+    def test_status_review_queue_is_none_until_the_fleet_step_runs(self):
+        self.assertIsNone(json.loads(self.request("GET", "/status")[1])["review_queue"])
+        conn = self.conn()
+        add_run(conn, "ok", self.now(), kind="github_fleet")  # ran, found nothing
+        conn.close()
+        state = json.loads(self.request("GET", "/status")[1])
+        self.assertEqual(state["review_queue"], {"queue": 0, "awaiting": 0})
+
+    def test_status_review_queue_counts_the_github_pr_rows(self):
+        conn = self.conn()
+        rows = [
+            {
+                "kind": "pr",
+                "key": f"https://g/pull/{n}",
+                "title": "t",
+                "in_queue": n < 3,
+            }
+            for n in range(5)
+        ] + [{"kind": "issue", "key": "https://g/issues/9", "title": "i", "labels": []}]
+        github_fleet.write(conn, rows, self.now())
+        conn.close()
+        state = json.loads(self.request("GET", "/status")[1])
+        self.assertEqual(state["review_queue"], {"queue": 3, "awaiting": 5})
 
 
 class BoardTest(ServerCase):

@@ -45,6 +45,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import db
 import gauges
+import github_fleet
 import ingest
 import overlay
 import score
@@ -230,10 +231,11 @@ def make_sync_fn(cfg: dict[str, Any], db_path: Path) -> Callable[[str], None]:
     def run(mode: str) -> None:
         conn = db.connect(db_path)
         try:
-            row = sync.run(mode, cfg, conn, datetime.now(timezone.utc))
+            rows = sync.run_all(mode, cfg, conn, datetime.now(timezone.utc))
         finally:
             conn.close()
-        print(f"sync {row['kind']}: {row['outcome']}", file=sys.stderr)
+        for row in rows:
+            print(f"sync {row['kind']}: {row['outcome']}", file=sys.stderr)
 
     return run
 
@@ -266,14 +268,26 @@ def _parse_ts(value: "str | None") -> "datetime | None":
 def sync_health(
     conn: sqlite3.Connection, interval_s: float, now: datetime
 ) -> dict[str, Any]:
-    """Last successful sync, its age, staleness, and the latest finished run."""
+    """Last successful sync, its age, staleness, and the latest finished run.
+
+    All of it is the Jira sync's: a GitHub fleet run (sync.FLEET_KIND) must not
+    make a failing Jira sync look fresh. The latest finished fleet run is
+    reported beside it as `fleet_run`.
+    """
     ok = conn.execute(
-        "SELECT finished_at FROM sync_runs WHERE outcome = 'ok'"
-        " ORDER BY finished_at DESC, id DESC LIMIT 1"
+        "SELECT finished_at FROM sync_runs WHERE outcome = 'ok' AND kind IS NOT ?"
+        " ORDER BY finished_at DESC, id DESC LIMIT 1",
+        (sync.FLEET_KIND,),
     ).fetchone()
     last = conn.execute(
         "SELECT kind, outcome, error, finished_at FROM sync_runs"
-        " WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT 1"
+        " WHERE finished_at IS NOT NULL AND kind IS NOT ? ORDER BY id DESC LIMIT 1",
+        (sync.FLEET_KIND,),
+    ).fetchone()
+    fleet = conn.execute(
+        "SELECT kind, outcome, error, finished_at FROM sync_runs"
+        " WHERE finished_at IS NOT NULL AND kind = ? ORDER BY id DESC LIMIT 1",
+        (sync.FLEET_KIND,),
     ).fetchone()
     ok_at = _parse_ts(ok[0]) if ok else None
     age = (now - ok_at).total_seconds() if ok_at else None
@@ -281,15 +295,38 @@ def sync_health(
         "last_ok_at": ok[0] if ok else None,
         "age_seconds": None if age is None else max(0, int(age)),
         "stale": age is None or age > STALE_INTERVALS * interval_s,
-        "last_run": None
-        if last is None
-        else {
-            "kind": last[0],
-            "outcome": last[1],
-            "error": last[2],
-            "finished_at": last[3],
-        },
+        "last_run": _run_dict(last),
+        "fleet_run": _run_dict(fleet),
     }
+
+
+def _run_dict(row: "tuple | None") -> "dict[str, Any] | None":
+    if row is None:
+        return None
+    return {"kind": row[0], "outcome": row[1], "error": row[2], "finished_at": row[3]}
+
+
+def review_queue_counts(conn: sqlite3.Connection) -> "dict[str, int] | None":
+    """github_fleet's `queue` and `awaiting` over the mirrored PR rows.
+
+    None until the fleet step has run successfully or written a row, so a
+    disabled step reads "—" rather than a zero it never measured.
+    """
+    synced = conn.execute(
+        "SELECT 1 FROM sync_runs WHERE kind = ? AND outcome = 'ok'"
+        " UNION ALL SELECT 1 FROM issues WHERE source = ? LIMIT 1",
+        (sync.FLEET_KIND, github_fleet.SOURCE),
+    ).fetchone()
+    if synced is None:
+        return None
+    by_status = dict(
+        conn.execute(
+            "SELECT status_name, COUNT(*) FROM issues"
+            " WHERE source = ? AND kind = 'pr' GROUP BY status_name",
+            (github_fleet.SOURCE,),
+        ).fetchall()
+    )
+    return {"queue": by_status.get("queue", 0), "awaiting": sum(by_status.values())}
 
 
 @lru_cache(maxsize=1)
@@ -426,7 +463,7 @@ def _age_text(seconds: "int | None") -> str:
     return f"synced {round(seconds / 86400)}d ago"
 
 
-def _alert(last_run: "dict[str, Any] | None") -> str:
+def _alert(last_run: "dict[str, Any] | None", what: str = "Last sync") -> str:
     """The header's failure line for the latest finished run, if it failed."""
     if not last_run or last_run["outcome"] in (None, "ok"):
         return ""
@@ -441,7 +478,7 @@ def _alert(last_run: "dict[str, Any] | None") -> str:
             )
         return f'<div class="alert" role="alert">{text}</div>'
     first = error.strip().splitlines()[0] if error.strip() else "unknown error"
-    return f'<div class="alert" role="alert">Last sync failed: {_e(first)}</div>'
+    return f'<div class="alert" role="alert">{what} failed: {_e(first)}</div>'
 
 
 def render_header(health: dict[str, Any], busy: bool, gauge_html: str = "") -> str:
@@ -453,7 +490,8 @@ def render_header(health: dict[str, Any], busy: bool, gauge_html: str = "") -> s
         f'<span class="age" title="{title}">{_age_text(health["age_seconds"])}</span>'
         f"{gauge_html}"
         f'<button id="sync" title="Shift-click for a full reconcile">{label}</button>'
-        f"{_alert(health['last_run'])}</header>"
+        f"{_alert(health['last_run'])}"
+        f"{_alert(health.get('fleet_run'), 'GitHub fleet sync')}</header>"
     )
 
 
@@ -572,9 +610,10 @@ class App:
         conn = self.read()
         try:
             health = sync_health(conn, self.interval_s, self.now())
+            queue = review_queue_counts(conn)
         finally:
             conn.close()
-        return {**self.syncer.state(), **health}
+        return {**self.syncer.state(), **health, "review_queue": queue}
 
     def view_page(self, path: str) -> str:
         """One of the views.ROUTES pages: Now, Waiting on me, and the rest."""
