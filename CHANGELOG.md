@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.110.0] - 2026-10-24
+
+### Features
+
+- add overlay writes and export/import [#1092] (#1129) (4922d90)
+
 ## [2.109.0] - 2026-10-23
 
 ### Features
