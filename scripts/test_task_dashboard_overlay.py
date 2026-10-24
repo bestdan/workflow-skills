@@ -592,6 +592,8 @@ class ReconcileTests(sync_harness.SyncCase):
 
 
 class RouteTests(server_harness.ServerCase):
+    fleet = True  # the review-queue gauge reads "—" with github.fleet off
+
     def post(self, action, fields, **kw):
         origin = kw.pop("origin", f"http://127.0.0.1:{self.port}")
         body = [("token", kw.pop("token", self.token)), *fields]
@@ -662,8 +664,9 @@ class RouteTests(server_harness.ServerCase):
         page = self.request("GET", "/")[1]
         self.assertEqual(self.gauge(page, "side-quests"), "Side quests 1/3")
 
-    def test_review_queue_reads_the_github_rows_once_they_exist(self):
+    def test_review_queue_reads_the_github_rows_once_the_fleet_step_ran(self):
         conn = self.conn()
+        server_harness.add_run(conn, "ok", NOW, kind="github_fleet")
         rows = [
             {
                 "kind": "pr",

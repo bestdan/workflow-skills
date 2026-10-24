@@ -555,7 +555,7 @@ def _run_row(db: sqlite3.Connection, run_id: int) -> dict[str, Any]:
 
 # --- the fleet view's GitHub step --------------------------------------------
 
-FLEET_KIND = "github_fleet"
+FLEET_KIND = github_fleet.RUN_KIND
 
 
 def fleet_enabled(config: dict[str, Any]) -> bool:

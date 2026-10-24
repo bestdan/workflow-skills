@@ -118,11 +118,14 @@ def add_run(conn, outcome, finished, error=None, kind="incremental"):
 
 class ServerCase(unittest.TestCase):
     extra_hosts: list = []
+    fleet = False  # github.enabled and github.fleet both on when True
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.db_path = Path(self.tmp.name) / "dashboard.db"
         self.cfg = make_config(extra_allowed_hosts=list(self.extra_hosts))
+        if self.fleet:
+            self.cfg["github"].update(enabled=True, fleet=True)
         self.fake = FakeSync()
         self.httpd, self.syncer = server.build(
             self.cfg, self.db_path, 0, self.fake, run_at_start=False
@@ -363,7 +366,7 @@ class SyncerTest(unittest.TestCase):
         self.assertIn("RuntimeError: boom", err.getvalue())
 
 
-class HeaderTest(ServerCase):
+class HeaderCase(ServerCase):
     def now(self):
         return datetime.now(timezone.utc)
 
@@ -373,6 +376,8 @@ class HeaderTest(ServerCase):
         assert match is not None, "page has no header"
         return match.group(0)
 
+
+class HeaderTest(HeaderCase):
     def test_auth_failed_names_acli_login(self):
         conn = self.conn()
         add_run(conn, "ok", self.now() - timedelta(minutes=1))
@@ -433,6 +438,38 @@ class HeaderTest(ServerCase):
         self.assertEqual(state["last_run"]["outcome"], "ok")
         self.assertFalse(state["busy"])
 
+
+def fleet_rows(queued, awaiting_only):
+    """github_fleet rows: `queued` PRs in the queue, `awaiting_only` not, one issue."""
+    prs = [
+        {
+            "kind": "pr",
+            "key": f"https://g/pull/{n}",
+            "title": "t",
+            "in_queue": n < queued,
+        }
+        for n in range(queued + awaiting_only)
+    ]
+    return prs + [
+        {"kind": "issue", "key": "https://g/issues/9", "title": "i", "labels": []}
+    ]
+
+
+class FleetStatusTest(HeaderCase):
+    """/status, the header alert and the review-queue gauge with github.fleet on."""
+
+    fleet = True
+
+    def state(self):
+        return json.loads(self.request("GET", "/status")[1])
+
+    def gauge(self):
+        m = re.search(
+            r'data-gauge="review-queue"[^>]*>(.*?)</span>', self.header(), re.S
+        )
+        assert m is not None, "header has no review-queue gauge"
+        return re.sub(r"<[^>]+>", "", m.group(1))
+
     def test_fleet_run_does_not_freshen_a_failing_jira_sync(self):
         conn = self.conn()
         add_run(conn, "failed", self.now() - timedelta(minutes=20), "AcliError: x")
@@ -464,29 +501,46 @@ class HeaderTest(ServerCase):
         conn.close()
         self.assertIn("GitHub fleet sync failed: GhError: 502", self.header())
 
-    def test_status_review_queue_is_none_until_the_fleet_step_runs(self):
-        self.assertIsNone(json.loads(self.request("GET", "/status")[1])["review_queue"])
+    def test_status_and_gauge_agree_from_never_synced_to_counted(self):
+        # Before any successful fleet run: unknown in both, even with rows.
         conn = self.conn()
-        add_run(conn, "ok", self.now(), kind="github_fleet")  # ran, found nothing
+        github_fleet.write(conn, fleet_rows(1, 1), self.now())
+        add_run(conn, "failed", self.now(), "GhError: 502", kind="github_fleet")
         conn.close()
-        state = json.loads(self.request("GET", "/status")[1])
-        self.assertEqual(state["review_queue"], {"queue": 0, "awaiting": 0})
+        self.assertIsNone(self.state()["review_queue"])
+        self.assertEqual(self.gauge(), "Review queue —/5")
+        # A successful run that found nothing reads 0 in both.
+        conn = self.conn()
+        github_fleet.write(conn, [], self.now())
+        add_run(conn, "ok", self.now(), kind="github_fleet")
+        conn.close()
+        self.assertEqual(self.state()["review_queue"], {"queue": 0, "awaiting": 0})
+        self.assertEqual(self.gauge(), "Review queue 0/5")
+        # Then the rows' counts, again in both.
+        conn = self.conn()
+        github_fleet.write(conn, fleet_rows(6, 2), self.now())
+        conn.close()
+        self.assertEqual(self.state()["review_queue"], {"queue": 6, "awaiting": 8})
+        self.assertEqual(self.gauge(), "Review queue 6/5")
 
-    def test_status_review_queue_counts_the_github_pr_rows(self):
+
+class FleetOffStatusTest(HeaderCase):
+    """github.fleet off: leftover fleet rows and runs are not reported."""
+
+    def test_leftover_rows_and_failed_run_are_not_reported(self):
         conn = self.conn()
-        rows = [
-            {
-                "kind": "pr",
-                "key": f"https://g/pull/{n}",
-                "title": "t",
-                "in_queue": n < 3,
-            }
-            for n in range(5)
-        ] + [{"kind": "issue", "key": "https://g/issues/9", "title": "i", "labels": []}]
-        github_fleet.write(conn, rows, self.now())
+        add_run(conn, "ok", self.now() - timedelta(minutes=1), kind="github_fleet")
+        github_fleet.write(conn, fleet_rows(3, 2), self.now())
+        add_run(conn, "ok", self.now())
+        add_run(conn, "failed", self.now(), "GhError: 502", kind="github_fleet")
         conn.close()
         state = json.loads(self.request("GET", "/status")[1])
-        self.assertEqual(state["review_queue"], {"queue": 3, "awaiting": 5})
+        self.assertIsNone(state["review_queue"])
+        self.assertIsNone(state["fleet_run"])
+        self.assertEqual(state["last_run"]["outcome"], "ok")
+        header = self.header()
+        self.assertNotIn("GitHub fleet sync failed", header)
+        self.assertIn("Review queue <b>—/5</b>", header)
 
 
 class BoardTest(ServerCase):

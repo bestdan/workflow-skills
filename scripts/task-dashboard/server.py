@@ -45,7 +45,6 @@ from urllib.parse import parse_qs, urlsplit
 
 import db
 import gauges
-import github_fleet
 import ingest
 import overlay
 import score
@@ -304,29 +303,6 @@ def _run_dict(row: "tuple | None") -> "dict[str, Any] | None":
     if row is None:
         return None
     return {"kind": row[0], "outcome": row[1], "error": row[2], "finished_at": row[3]}
-
-
-def review_queue_counts(conn: sqlite3.Connection) -> "dict[str, int] | None":
-    """github_fleet's `queue` and `awaiting` over the mirrored PR rows.
-
-    None until the fleet step has run successfully or written a row, so a
-    disabled step reads "—" rather than a zero it never measured.
-    """
-    synced = conn.execute(
-        "SELECT 1 FROM sync_runs WHERE kind = ? AND outcome = 'ok'"
-        " UNION ALL SELECT 1 FROM issues WHERE source = ? LIMIT 1",
-        (sync.FLEET_KIND, github_fleet.SOURCE),
-    ).fetchone()
-    if synced is None:
-        return None
-    by_status = dict(
-        conn.execute(
-            "SELECT status_name, COUNT(*) FROM issues"
-            " WHERE source = ? AND kind = 'pr' GROUP BY status_name",
-            (github_fleet.SOURCE,),
-        ).fetchall()
-    )
-    return {"queue": by_status.get("queue", 0), "awaiting": sum(by_status.values())}
 
 
 @lru_cache(maxsize=1)
@@ -595,6 +571,7 @@ class App:
         self.now = now
         self.port = 0
         self.interval_s = float(cfg["sync"]["interval_minutes"]) * 60
+        self.fleet = sync.fleet_enabled(cfg)
         machines = cfg.get("ingest", {}).get("machines", {})
         self.ingest = ingest.Ingest(machines, db_path, lambda: self.now())
 
@@ -606,11 +583,22 @@ class App:
     def read(self) -> sqlite3.Connection:
         return sqlite3.connect(self.db_path)
 
+    def health(self, conn: sqlite3.Connection) -> dict[str, Any]:
+        """sync_health, without a fleet run once `github.fleet` is off.
+
+        A failed fleet run would otherwise keep its header alert after the
+        step that could clear it was switched off.
+        """
+        health = sync_health(conn, self.interval_s, self.now())
+        if not self.fleet:
+            health["fleet_run"] = None
+        return health
+
     def status(self) -> dict[str, Any]:
         conn = self.read()
         try:
-            health = sync_health(conn, self.interval_s, self.now())
-            queue = review_queue_counts(conn)
+            health = self.health(conn)
+            queue = gauges.review_queue(conn, self.fleet)
         finally:
             conn.close()
         return {**self.syncer.state(), **health, "review_queue": queue}
@@ -619,9 +607,9 @@ class App:
         """One of the views.ROUTES pages: Now, Waiting on me, and the rest."""
         conn = self.read()
         try:
-            health = sync_health(conn, self.interval_s, self.now())
+            health = self.health(conn)
             body = views.render(path, conn, self.cfg, self.now())
-            gauge_html = gauges.render(gauges.read(conn), self.cfg)
+            gauge_html = gauges.render(gauges.read(conn, fleet=self.fleet), self.cfg)
         finally:
             conn.close()
         busy = bool(self.syncer.state()["busy"])
@@ -639,10 +627,12 @@ class App:
     def board_page(self) -> str:
         conn = self.read()
         try:
-            health = sync_health(conn, self.interval_s, self.now())
+            health = self.health(conn)
             board = classify_board(board_rows(conn))
             ov = overlay.load(conn)
-            gauge_html = gauges.render(gauges.read(conn, ov), self.cfg)
+            gauge_html = gauges.render(
+                gauges.read(conn, ov, fleet=self.fleet), self.cfg
+            )
             sprints = [
                 r[0] for r in conn.execute("SELECT name FROM sprints ORDER BY id")
             ]

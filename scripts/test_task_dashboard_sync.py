@@ -7,8 +7,10 @@ own. The end-to-end cases run dashboard.py against dev/fake-acli. Everything
 lives under tempdirs. Needs Python 3.11: run via scripts/test-task-dashboard-sync.sh.
 """
 
+import contextlib
 import copy
 import hashlib
+import io
 import json
 import os
 import re
@@ -19,6 +21,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 PKG = ROOT / "scripts" / "task-dashboard"
@@ -31,6 +34,7 @@ sys.path.insert(0, str(PKG))
 # mypy checks this file without scripts/task-dashboard on its path; the
 # modules themselves are type-checked in their own group (scripts/typecheck.sh).
 import config  # type: ignore[import-not-found]  # noqa: E402
+import dashboard  # type: ignore[import-not-found]  # noqa: E402
 import db  # type: ignore[import-not-found]  # noqa: E402
 import jira_acli  # type: ignore[import-not-found]  # noqa: E402
 import sync  # type: ignore[import-not-found]  # noqa: E402
@@ -890,6 +894,75 @@ class FakeAcliTests(unittest.TestCase):
         r = self.sync("full")
         self.assertEqual(r.returncode, 2)
         self.assertIn("jira.site", r.stderr)
+
+
+def run_row(kind, outcome, error=None, failed=()):
+    return {
+        "kind": kind,
+        "outcome": outcome,
+        "started_at": "2026-10-23T12:00:00Z",
+        "finished_at": "2026-10-23T12:00:01Z",
+        "counts": "{}",
+        "failed_keys": json.dumps(list(failed)),
+        "error": error,
+    }
+
+
+class CmdSyncTests(unittest.TestCase):
+    """dashboard.py sync's report and exit code over run_all's rows."""
+
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        tmp = Path(self._td.name)
+        self.cfg = tmp / "config.toml"
+        self.cfg.write_text(
+            '[jira]\nsite = "example.invalid"\nboard_ids = [77]\n'
+            '[jira.fields]\nsprint = "c1"\nflagged = "c2"\n'
+            "[github]\nenabled = true\nfleet = true\n"
+        )
+        self.db = tmp / "d.db"
+
+    def cmd_sync(self, rows):
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(sync, "run_all", return_value=rows):
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = dashboard.main(
+                    ["sync", "--db", str(self.db), "--config", str(self.cfg)]
+                )
+        return code, out.getvalue(), err.getvalue()
+
+    def test_both_rows_print_when_both_runs_fail(self):
+        url = "https://github.com/acme/app/pull/1"
+        code, out, err = self.cmd_sync(
+            [
+                run_row("incremental", "failed", "AcliError: boom"),
+                run_row(
+                    "github_fleet",
+                    "auth_failed",
+                    "gh: 401 (fix: run `gh auth login`)",
+                    [url],
+                ),
+            ]
+        )
+        self.assertEqual(code, 1)  # the Jira run's code wins
+        self.assertIn("sync incremental: failed", out)
+        self.assertIn("sync github_fleet: auth_failed", out)
+        self.assertIn("AcliError: boom", err)
+        self.assertIn("gh auth login", err)
+        self.assertIn(f"PR lookup failed, logged: {url}", err)
+
+    def test_fleet_failure_alone_sets_the_exit_code(self):
+        code, out, _ = self.cmd_sync(
+            [run_row("incremental", "ok"), run_row("github_fleet", "auth_failed", "x")]
+        )
+        self.assertEqual(code, 3)
+        self.assertIn("sync github_fleet: auth_failed", out)
+
+    def test_jira_row_alone(self):
+        code, out, _ = self.cmd_sync([run_row("incremental", "ok")])
+        self.assertEqual(code, 0)
+        self.assertNotIn("github_fleet", out)
 
 
 class ConfigTests(unittest.TestCase):
