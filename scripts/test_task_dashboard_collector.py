@@ -336,9 +336,39 @@ class TestConfig(unittest.TestCase):
         }
         for text, pattern in cases.items():
             with self.subTest(pattern=pattern):
-                self.write(text)
+                # Enabled, since a disabled table needs no URL or token.
+                self.write(
+                    text.replace("[collector]\n", "[collector]\nenabled = true\n")
+                )
                 with self.assertRaisesRegex(config.ConfigError, pattern):
                     config.load_collector(self.path)
+
+    def test_enabled_must_be_a_bool(self):
+        self.write('[collector]\nenabled = "yes"\n')
+        with self.assertRaisesRegex(config.ConfigError, "true or false"):
+            config.load_collector(self.path)
+
+    def test_enabled_false_alone_is_a_valid_off_switch(self):
+        self.write("[collector]\nenabled = false\n")
+        cfg = config.load_collector(self.path)
+        self.assertFalse(cfg["enabled"])
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = dashboard.main(["collect", "--config", str(self.path)])
+        self.assertEqual(rc, 0, err.getvalue())
+        self.assertIn("enabled is false", err.getvalue())
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = dashboard.main(
+                ["install", "--collector-only", "--config", str(self.path)]
+            )
+        self.assertEqual(rc, 2)
+        self.assertIn("enabled is false", err.getvalue())
+
+    def test_the_mode_check_still_applies_when_disabled(self):
+        self.write("[collector]\nenabled = false\n", mode=0o644)
+        with self.assertRaisesRegex(config.ConfigError, "chmod 600"):
+            config.load_collector(self.path)
 
 
 FAKE_HOME = {"darwin": Path("/Users/tester"), "linux": Path("/home/tester")}

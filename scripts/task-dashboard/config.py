@@ -194,14 +194,20 @@ def load_collector(path: "str | os.PathLike[str] | None" = None) -> dict[str, An
             f" {st.st_mode & 0o777:o}; run: chmod 600 {p}"
         )
     cfg = deep_merge(COLLECTOR_DEFAULTS, table)
+    if not isinstance(cfg["enabled"], bool):
+        raise ConfigError("collector.enabled must be true or false")
+    # A disabled collector sends nothing, so it needs no URL or token:
+    # `enabled = false` alone is a valid way to switch a machine off.
     url = cfg["ingest_url"]
-    if not isinstance(url, str) or not _valid_url(url):
+    if cfg["enabled"] and (not isinstance(url, str) or not _valid_url(url)):
         raise ConfigError(
             "collector.ingest_url must be an http(s) URL with the ingest path,"
             " e.g. http://127.0.0.1:8765/ingest"
         )
     token = cfg["token"]
-    if not isinstance(token, str) or not token or token != token.strip():
+    if cfg["enabled"] and (
+        not isinstance(token, str) or not token or token != token.strip()
+    ):
         raise ConfigError(
             "collector.token must be the token `dashboard.py ingest-token add"
             " <host>` printed for this machine"
@@ -212,8 +218,6 @@ def load_collector(path: "str | os.PathLike[str] | None" = None) -> dict[str, An
     n = cfg["spool_max"]
     if not isinstance(n, int) or isinstance(n, bool) or n < 1:
         raise ConfigError("collector.spool_max must be a positive integer")
-    if not isinstance(cfg["enabled"], bool):
-        raise ConfigError("collector.enabled must be true or false")
     cfg["config_path"] = p
     return cfg
 
