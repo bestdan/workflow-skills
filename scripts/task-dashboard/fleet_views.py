@@ -44,6 +44,7 @@ from typing import Any
 import github_fleet
 import overlay
 import score
+import sessions
 import sync
 
 # Tabs that exist only on a fleet instance (views.nav hides them elsewhere).
@@ -493,7 +494,12 @@ def _landed_worktrees(f: Fleet) -> "dict[tuple[str, str], Landed]":
     return out
 
 
-def stale_items(f: Fleet, now: datetime) -> list[StaleItem]:
+def stale_items(
+    f: Fleet, now: datetime, ignored: "set[overlay.Item] | None" = None
+) -> list[StaleItem]:
+    """The Stale lanes' items. `ignored` (the overlay's) drops the sessions,
+    PRs and issues the user ignored on Needs, under the same overlay keys."""
+    ignored = ignored or set()
     out: list[StaleItem] = []
     landed = _landed_worktrees(f)
 
@@ -551,7 +557,7 @@ def stale_items(f: Fleet, now: datetime) -> list[StaleItem]:
     idle = now - timedelta(days=SESSION_IDLE_DAYS)
     forget = now - timedelta(days=SESSION_FORGET_DAYS)
     for s in f.sessions:
-        if not forget < s.last <= idle:
+        if not forget < s.last <= idle or (sessions.SOURCE, s.session_id) in ignored:
             continue
         head = _e(f"session {s.session_id}")
         meta = f"{_session_where(s)} · last event {_e(ago(s.last, now))}"
@@ -588,7 +594,8 @@ def stale_items(f: Fleet, now: datetime) -> list[StaleItem]:
     ):
         for row in f.github.get(kind, []):
             at = score.parse_ts(row.get("created"))
-            if at is None or at > old:
+            item = (github_fleet.SOURCE, str(row.get("key") or row.get("url")))
+            if at is None or at > old or item in ignored:
                 continue
             meta = f"opened {_e(ago(at, now))}"
             why = "no evidence: nothing mirrored says it can close"
@@ -600,7 +607,7 @@ def stale_items(f: Fleet, now: datetime) -> list[StaleItem]:
 
 
 def render_stale(conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime) -> str:
-    items = stale_items(load(conn, cfg), now)
+    items = stale_items(load(conn, cfg), now, overlay.load(conn).ignored)
     close = [i.html for i in items if i.lane == "close"]
     check = [i.html for i in items if i.lane == "check"]
     return (

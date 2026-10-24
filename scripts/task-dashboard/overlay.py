@@ -20,6 +20,7 @@ import json
 import math
 import re
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -272,10 +273,11 @@ def clear_focus(conn: sqlite3.Connection, item: Item) -> None:
 
 
 def ignore(conn: sqlite3.Connection, item: Item, now: "datetime | None" = None) -> None:
-    """Mark an item as not mine; ignoring an epic hides its children too.
+    """Mark an item as not mine; ignoring an epic hides everything under it.
 
-    An ignored item stops being the focus: a hidden item cannot be the one
-    thing the header points at. Unignore does not restore it.
+    The focus row is left alone. load() hides a focus that is ignored or under
+    an ignored item, so the header and Needs never point at a hidden item, and
+    Unignore brings the focus back.
     """
     with conn:
         conn.execute(
@@ -283,7 +285,49 @@ def ignore(conn: sqlite3.Connection, item: Item, now: "datetime | None" = None) 
             " VALUES (?, ?, ?)",
             (*item, _now(now)),
         )
-        conn.execute("DELETE FROM focus WHERE source = ? AND item_key = ?", item)
+
+
+def under_ignored(
+    key: str,
+    parent: "str | None",
+    parent_of: "Callable[[str], str | None]",
+    ignored: "set[str]",
+) -> bool:
+    """`key` is ignored, or so is an ancestor reachable through `parent_of`.
+
+    The walk stops at an ancestor the mirror does not hold, and at a key it
+    has already seen, so a parent cycle in the data cannot loop.
+    """
+    if key in ignored:
+        return True
+    seen = {key}
+    while parent and parent not in seen:
+        if parent in ignored:
+            return True
+        seen.add(parent)
+        parent = parent_of(parent)
+    return False
+
+
+def _jira_parent(conn: sqlite3.Connection, key: str) -> "str | None":
+    row = conn.execute(
+        "SELECT parent_key FROM issues WHERE source = 'jira' AND key = ?", (key,)
+    ).fetchone()
+    return row[0] if row else None
+
+
+def hidden(conn: sqlite3.Connection, ignored: "set[Item]", item: Item) -> bool:
+    """Ignored, or a Jira item under an ignored ancestor (an epic, a story)."""
+    if item in ignored:
+        return True
+    jira = {k for s, k in ignored if s == "jira"}
+    if item[0] != "jira" or not jira:
+        return False
+
+    def parent_of(key: str) -> "str | None":
+        return _jira_parent(conn, key)
+
+    return under_ignored(item[1], parent_of(item[1]), parent_of, jira)
 
 
 def unignore(conn: sqlite3.Connection, item: Item) -> None:
@@ -405,6 +449,7 @@ class Overlay:
 
 
 def load(conn: sqlite3.Connection) -> Overlay:
+    """Every overlay table, for rendering. `focus` is None while it is hidden."""
     ov = Overlay()
     for s, k, at in conn.execute("SELECT source, item_key, pinned_at FROM pins"):
         ov.pinned_at[(s, k)] = at
@@ -418,11 +463,15 @@ def load(conn: sqlite3.Connection) -> Overlay:
             ov.notes[(s, k)] = body
     for s, k, kind in conn.execute("SELECT source, item_key, tag FROM kind_tags"):
         ov.kind_tags[(s, k)] = kind
-    row = conn.execute("SELECT source, item_key FROM focus").fetchone()
-    ov.focus = (row[0], row[1]) if row else None
     ov.ignored = {
         (s, k) for s, k in conn.execute("SELECT source, item_key FROM ignores")
     }
+    row = conn.execute("SELECT source, item_key FROM focus").fetchone()
+    ov.focus = (row[0], row[1]) if row else None
+    # A hidden focus reads as no focus, so the header and Needs agree with the
+    # views; the row stays, and Unignore brings it back.
+    if ov.focus is not None and hidden(conn, ov.ignored, ov.focus):
+        ov.focus = None
     row = conn.execute("SELECT at FROM last_visit WHERE id = 1").fetchone()
     ov.last_visit = row[0] if row else None
     return ov

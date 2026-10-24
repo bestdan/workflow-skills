@@ -19,7 +19,6 @@ local midnight at the start of that date (`score.local_day_start`).
 import html
 import json
 import sqlite3
-from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
@@ -107,26 +106,7 @@ def nav(active: str, cfg: "dict[str, Any] | None" = None) -> str:
 # --- data --------------------------------------------------------------------
 
 
-def under_ignored(
-    key: str,
-    parent: "str | None",
-    parent_of: "Callable[[str], str | None]",
-    ignored: "set[str]",
-) -> bool:
-    """`key` is ignored, or so is an ancestor reachable through `parent_of`.
-
-    The walk stops at an ancestor the mirror does not hold, and at a key it
-    has already seen, so a parent cycle in the data cannot loop.
-    """
-    if key in ignored:
-        return True
-    seen = {key}
-    while parent and parent not in seen:
-        if parent in ignored:
-            return True
-        seen.add(parent)
-        parent = parent_of(parent)
-    return False
+under_ignored = overlay.under_ignored
 
 
 class Mirror:
@@ -157,12 +137,8 @@ class Mirror:
             " ORDER BY l.issue_key, l.linked_key"
         ):
             self.links.setdefault(r["issue_key"], []).append(dict(r))
-        self.ignored_prs = {
-            r[0]
-            for r in conn.execute(
-                "SELECT item_key FROM ignores WHERE source = 'github'"
-            )
-        }
+        self.ignored_prs = {k for s, k in self.ov.ignored if s == "github"}
+        self.ignored = {k for s, k in self.ov.ignored if s == "jira"}
         prs = [
             dict(r)
             for r in conn.execute(
@@ -188,10 +164,6 @@ class Mirror:
                 "SELECT item_key, until FROM snoozes WHERE source = 'jira'"
             )
             if _in_future(r[1], now)
-        }
-        self.ignored = {
-            r[0]
-            for r in conn.execute("SELECT item_key FROM ignores WHERE source = 'jira'")
         }
         conn.row_factory = None
         weights = cfg["score"]["weights"]
@@ -639,12 +611,18 @@ def _epic_card(m: Mirror, g: dict[str, Any]) -> str:
     href = f"https://{m.cfg['jira']['site']}/browse/{g['key']}"
     blocked = f" · {g['blocked']} blocked" if g["blocked"] else ""
     pinned = g["key"] in m.pins
+    # Now lists a pin only when the mirror holds its issue (now_items).
+    pin_tip = (
+        "Keep it on Epics; while it is open it also shows on Now"
+        if g["key"] in m.issues
+        else "Keep it on Epics"
+    )
     return (
         f'<div class="card" data-source="jira" data-key="{_e(g["key"])}">'
         f'{card_title(href, g["summary"], g["key"])}<div class="meta">'
         f"{g['done']}/{g['total']} done{blocked}</div>"
         f'<div class="ov"><button type="button" data-ov="{"unpin" if pinned else "pin"}"'
-        ' title="Keep it on Epics; while it is open it also shows on Now">'
+        f' title="{pin_tip}">'
         f"{'Unpin' if pinned else 'Pin'}</button>"
         '<button type="button" data-ov="ignore"'
         ' title="Hide this epic and everything under it">Ignore epic</button>'
@@ -695,14 +673,15 @@ def render(
 
 
 # Every Jira issue under `key`, at any depth. UNION, not UNION ALL, drops
-# repeats, so a parent cycle in the data ends the recursion.
+# repeats, so a parent cycle in the data ends the recursion; a cycle back to
+# `key` itself is not counted as something it hides.
 _DESCENDANTS = """
 WITH RECURSIVE d(key) AS (
-  SELECT key FROM issues WHERE source = 'jira' AND parent_key = ?
+  SELECT key FROM issues WHERE source = 'jira' AND parent_key = :key
   UNION
   SELECT i.key FROM issues i JOIN d ON i.parent_key = d.key WHERE i.source = 'jira'
 )
-SELECT count(*) FROM d
+SELECT count(*) FROM d WHERE key != :key
 """
 
 
@@ -749,7 +728,7 @@ def render_ignored(conn: sqlite3.Connection) -> str:
         ref = hides = ""
         if source == "jira":
             ref = f' <span class="ref">({_e(key)})</span>'
-            (n,) = conn.execute(_DESCENDANTS, (key,)).fetchone()
+            (n,) = conn.execute(_DESCENDANTS, {"key": key}).fetchone()
             if n:
                 hides = f" · hides {n} child issue{'s' if n != 1 else ''}"
         rows.append(

@@ -34,6 +34,8 @@ sys.path.insert(0, str(ROOT / "scripts" / "task-dashboard"))
 import config  # type: ignore[import-not-found]  # noqa: E402
 import db  # type: ignore[import-not-found]  # noqa: E402
 import fleet_views  # type: ignore[import-not-found]  # noqa: E402
+import gauges  # type: ignore[import-not-found]  # noqa: E402
+import overlay  # type: ignore[import-not-found]  # noqa: E402
 import score  # type: ignore[import-not-found]  # noqa: E402
 import server  # type: ignore[import-not-found]  # noqa: E402
 import views  # type: ignore[import-not-found]  # noqa: E402
@@ -512,6 +514,11 @@ class ViewsTest(unittest.TestCase):
         m = self.mirror()
         self.assertNotIn(url, [p["url"] for p, _ in views.waiting_on(m)[1]])
         self.assertNotIn(url, [p["url"] for p in m.prs_by_issue.get("ABC-2", [])])
+        for path in views.ROUTES:
+            with self.subTest(path):
+                page = views.render(path, self.conn, CFG, NOW)
+                lanes = page.split('<details class="ignored"')[0]
+                self.assertNotIn(url, lanes)
         footer = views.render_ignored(m.conn)
         self.assertIn("Ignored (1)", footer)
         self.assertIn("ABC-2 wip (o/r#2)", footer)
@@ -591,7 +598,8 @@ class ViewsTest(unittest.TestCase):
             "INSERT INTO ignores (source, item_key) VALUES ('jira', 'CYC-1')"
         )
         self.conn.commit()
-        self.assertIn("CYC-1", views.render_ignored(self.conn))
+        footer = views.render_ignored(self.conn)
+        self.assertIn("(CYC-1)</span> · hides 1 child issue <button", footer)
 
     def test_an_untitled_ignored_pr_is_named_by_its_url(self):
         url = "https://github.com/o/r/pull/2"
@@ -605,8 +613,28 @@ class ViewsTest(unittest.TestCase):
     def test_tooltips_say_what_snooze_and_an_epic_pin_do(self):
         page = views.render("/waiting-on", self.conn, CFG, NOW)
         self.assertIn("hidden from Now and Needs, dimmed elsewhere", page)
+        self.add_issue("EPIC-2", THEM, None)  # an epic the mirror holds
+        self.add_issue("ABC-20", ME, "EPIC-2")
+        self.add_issue("ABC-21", ME, "EPIC-9")  # its epic is not mirrored
         page = views.render("/epics", self.conn, CFG, NOW)
-        self.assertIn("Keep it on Epics; while it is open it also shows on Now", page)
+        long = "Keep it on Epics; while it is open it also shows on Now"
+        self.assertIn(long, self.card(page, "EPIC-2"))
+        unmirrored = self.card(page, "EPIC-9")
+        self.assertNotIn(long, unmirrored)
+        self.assertIn('title="Keep it on Epics"', unmirrored)
+
+    def test_a_focus_under_an_ignored_epic_is_hidden_until_unignored(self):
+        item = ("jira", "ABC-4")  # a child of the seeded epic
+        overlay.set_focus(self.conn, item, NOW)
+        overlay.tag(self.conn, item, "side-quest", now=NOW)
+        g = gauges.read(self.conn, fleet=False)
+        self.assertEqual((g.focus, g.side_quests), (item, 1))
+        overlay.ignore(self.conn, ("jira", "EPIC-1"), NOW)
+        g = gauges.read(self.conn, fleet=False)
+        self.assertEqual((g.focus, g.side_quests), (None, 0))
+        self.assertNotIn("Focus:", gauges.render(g, CFG))
+        overlay.unignore(self.conn, ("jira", "EPIC-1"))
+        self.assertEqual(gauges.read(self.conn, fleet=False).focus, item)
 
     def test_epic_name_falls_back_to_a_childs_copy(self):
         self.set_parent_summary("ABC-4", "Named by the child")
