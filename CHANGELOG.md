@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.121.0] - 2026-10-24
+
+### Features
+
+- add per-view include filters [#1154] (#1155) (6232a42)
+
 ## [2.120.0] - 2026-10-24
 
 ### Features
