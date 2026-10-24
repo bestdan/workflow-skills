@@ -661,6 +661,15 @@ class App:
             health["fleet_run"] = None
         return health
 
+    def header_extras(
+        self, conn: sqlite3.Connection, ov: "overlay.Overlay | None" = None
+    ) -> str:
+        """The header's gauges, then each machine's snapshot age (fleet only)."""
+        out = gauges.render(gauges.read(conn, ov, fleet=self.fleet), self.cfg)
+        if fleet_views.enabled(self.cfg):
+            out += fleet_views.machines_line(conn, self.now())
+        return out
+
     def status(self) -> dict[str, Any]:
         conn = self.read()
         try:
@@ -688,9 +697,9 @@ class App:
             inc = self.include_for(conn, path.lstrip("/"), query)
             health = self.health(conn)
             body = views.render(path, conn, self.cfg, self.now(), inc, query)
-            # The gauges read the mirror, never the filtered view: identical
-            # numbers whatever `inc` is.
-            gauge_html = gauges.render(gauges.read(conn, fleet=self.fleet), self.cfg)
+            # The header reads the mirror, never the filtered view: identical
+            # gauges and machine ages whatever `inc` is.
+            gauge_html = self.header_extras(conn)
         finally:
             conn.close()
         busy = bool(self.syncer.state()["busy"])
@@ -707,11 +716,7 @@ class App:
         conn = self.read()
         try:
             inc = self.include_for(conn, "health", query)
-            header = render_header(
-                self.health(conn),
-                busy,
-                gauges.render(gauges.read(conn, fleet=self.fleet), self.cfg),
-            )
+            header = render_header(self.health(conn), busy, self.header_extras(conn))
             body = views.nav("/health", self.cfg, inc, query) + health.page(
                 conn, self.cfg, self.now(), days, fleet=self.fleet, inc=inc
             )
@@ -752,9 +757,7 @@ class App:
                 ]
             )
             ignored_html = views.render_ignored(conn)
-            gauge_html = gauges.render(
-                gauges.read(conn, ov, fleet=self.fleet), self.cfg
-            )
+            gauge_html = self.header_extras(conn, ov)
             sprints = [
                 r[0] for r in conn.execute("SELECT name FROM sprints ORDER BY id")
             ]

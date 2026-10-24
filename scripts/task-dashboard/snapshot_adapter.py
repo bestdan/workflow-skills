@@ -1,4 +1,4 @@
-"""Write one machine snapshot (snapshot.py, ``schema: 1``) into the mirror.
+"""Write one machine snapshot (snapshot.py, ``schema: 1`` or ``2``) into the mirror.
 
 The fleet view's ingest endpoint (ingest.py) calls ``ingest()`` once it has
 authenticated the caller and validated the document. Everything is written in
@@ -9,6 +9,13 @@ one transaction, so a snapshot lands whole or not at all:
   ``tmux``. A snapshot is that host's full current state, so the host's rows
   are deleted and rewritten; other hosts' rows, and the Jira sync's
   (``source = 'jira'``), are never touched.
+- The one exception is a repo named in ``scan_errors`` (schema 2): its scan
+  failed, so the snapshot says nothing about its worktrees. Its previous
+  worktree rows are kept, matched by ``json_extract(raw_json, '$.repo')``, and
+  marked with ``kept`` = ``{step, taken_at}`` naming the failed scan. Their
+  ``synced_at`` stays the ``taken_at`` of the snapshot that last saw them, so
+  a reader can show how old they are and never shows them as current. The
+  next snapshot that scans the repo replaces them as usual.
 - ``sessions`` and ``history`` are deltas, appended to ``session_events`` and
   ``history_entries``.
 - ``machines.last_snapshot_at`` records the snapshot's own ``taken_at``.
@@ -112,7 +119,10 @@ def ingest(
         "tmux": len(doc["tmux"]),
         "sessions": len(doc["sessions"]),
         "history": len(doc["history"]),
+        "scan_errors": len(doc.get("scan_errors", [])),
     }
+    failed = sorted({err["repo"] for err in doc.get("scan_errors", [])})
+    failed_json = json.dumps(failed)
     # IMMEDIATE takes the write lock before the staleness read, so two posts
     # from one host cannot both pass it.
     conn.execute("BEGIN IMMEDIATE")
@@ -125,7 +135,27 @@ def ingest(
                 f"{host}: snapshot taken {doc['taken_at']} is not newer than"
                 f" the last one ingested ({prev[0]})"
             )
-        conn.execute("DELETE FROM issues WHERE source = ?", (source,))
+        conn.execute(
+            "DELETE FROM issues WHERE source = ? AND NOT (kind = 'worktree'"
+            " AND json_extract(raw_json, '$.repo') IN (SELECT value FROM json_each(?)))",
+            (source, failed_json),
+        )
+        counts["kept_worktrees"] = 0
+        if failed:
+            step = {err["repo"]: err["step"] for err in doc["scan_errors"]}
+            counts["kept_worktrees"] = conn.executemany(
+                "UPDATE issues SET raw_json = json_set(raw_json, '$.kept', json(?))"
+                " WHERE source = ? AND kind = 'worktree'"
+                " AND json_extract(raw_json, '$.repo') = ?",
+                [
+                    (
+                        json.dumps({"step": step[repo], "taken_at": doc["taken_at"]}),
+                        source,
+                        repo,
+                    )
+                    for repo in failed
+                ],
+            ).rowcount
         conn.executemany(
             "INSERT OR REPLACE INTO issues"
             " (source, kind, key, summary, created, raw_json, synced_at)"

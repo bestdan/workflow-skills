@@ -24,6 +24,7 @@ import config  # type: ignore[import-not-found]  # noqa: E402
 import db  # type: ignore[import-not-found]  # noqa: E402
 import fleet_views  # type: ignore[import-not-found]  # noqa: E402
 import github_fleet  # type: ignore[import-not-found]  # noqa: E402
+import include  # type: ignore[import-not-found]  # noqa: E402
 import overlay  # type: ignore[import-not-found]  # noqa: E402
 import snapshot_adapter  # type: ignore[import-not-found]  # noqa: E402
 import test_task_dashboard_server as server_harness  # noqa: E402
@@ -234,6 +235,12 @@ class FleetCase(unittest.TestCase):
         self.conn = db.connect(Path(self._td.name) / "d.db")
         self.addCleanup(self.conn.close)
 
+    def card(self, lane, text):
+        cards = re.findall(r'<div class="card">(.*?)</div></div>', lane, re.S)
+        found = [c for c in cards if text in c]
+        self.assertEqual(len(found), 1, text)
+        return found[0]
+
 
 class AwayTests(FleetCase):
     def away(self, cfg=None):
@@ -315,12 +322,6 @@ class StaleTests(FleetCase):
         page = fleet_views.render_stale(self.conn, fleet_cfg(), NOW)
         return items, section(page, "close"), section(page, "check")
 
-    def card(self, lane, text):
-        cards = re.findall(r'<div class="card">(.*?)</div></div>', lane, re.S)
-        found = [c for c in cards if text in c]
-        self.assertEqual(len(found), 1, text)
-        return found[0]
-
     def test_an_ignored_pr_or_session_leaves_stale(self):
         _, _, check = self.stale()
         self.assertIn(pr_url(900), check)
@@ -392,6 +393,81 @@ class StaleTests(FleetCase):
             self.assertEqual(ats, sorted(ats), lane)
 
 
+def failed_scan(host="mini", taken_at="2026-10-23T20:30:00.000Z"):
+    """A schema 2 snapshot from `host` whose workflow-skills scan failed."""
+    return {
+        "schema": 2,
+        "host": host,
+        "taken_at": taken_at,
+        "worktrees": [],
+        "scan_errors": [{"repo": "workflow-skills", "step": "worktree_list"}],
+        "handoffs": [],
+        "tmux": [],
+        "sessions": [],
+        "history": [],
+    }
+
+
+class KeptRowTests(FleetCase):
+    """Rows kept from a failed scan are never evidence (#1156)."""
+
+    def stale(self):
+        seed(self.conn)
+        snapshot_adapter.ingest(self.conn, failed_scan(), NOW)
+        page = fleet_views.render_stale(self.conn, fleet_cfg(), NOW)
+        return None, section(page, "close"), section(page, "check")
+
+    def test_a_kept_landed_worktree_is_a_check_naming_the_failure(self):
+        _, close, check = self.stale()
+        self.assertNotIn(f"worktree {WT}/task-1135", close)
+        card = self.card(check, f"worktree {WT}/task-1135")
+        self.assertIn("kept from a failed scan (worktree_list failed 30m ago)", card)
+        self.assertIn("last listed 60m ago", card)
+        self.assertIn("PR #1135 merged 18h ago", card)
+
+    def test_a_kept_worktree_respects_ignore_and_the_include_filter(self):
+        _, _, check = self.stale()
+        self.assertIn(f"worktree {WT}/task-1135", check)
+        page = fleet_views.render_stale(
+            self.conn, fleet_cfg(), NOW,
+            include.Include("stale", frozenset({"prs", "sessions"}), "url"),
+        )  # fmt: skip
+        self.assertNotIn(f"worktree {WT}/task-1135", page)
+        overlay.ignore(self.conn, ("machine:mini", f"worktree:{WT}/task-1135"), NOW)
+        page = fleet_views.render_stale(self.conn, fleet_cfg(), NOW)
+        self.assertNotIn(f"worktree {WT}/task-1135", page)
+        self.assertIn(f"worktree {WT}/task-1100", page)
+
+    def test_a_session_in_a_kept_worktree_is_not_closed_by_it(self):
+        _, close, check = self.stale()
+        self.assertNotIn("session s-landed", close)
+        self.assertIn("session s-landed", check)
+
+
+class MachinesLineTests(FleetCase):
+    def test_each_host_with_its_age_and_a_stale_one_marked(self):
+        seed(self.conn)  # mini at 20:00, 60 minutes before NOW
+        fresh = dict(failed_scan("lindev", "2026-10-23T20:56:00.000Z"))
+        fresh["scan_errors"] = []
+        snapshot_adapter.ingest(self.conn, fresh, NOW)
+        line = fleet_views.machines_line(self.conn, NOW)
+        self.assertEqual(re.sub(r"<[^>]+>", "", line), "lindev 4m · mini 60m")
+        self.assertIn('<span title="2026-10-23T20:56:00.000Z">lindev 4m</span>', line)
+        self.assertIn(
+            '<span class="stale" title="2026-10-23T20:00:00.000Z">mini 60m', line
+        )
+
+    def test_a_failed_scan_is_named_on_the_host(self):
+        seed(self.conn)
+        snapshot_adapter.ingest(self.conn, failed_scan(), NOW)
+        line = fleet_views.machines_line(self.conn, NOW)
+        self.assertIn("mini 30m (1 repo scan failed)", line)
+        self.assertNotIn('class="stale"', line)
+
+    def test_no_machines_renders_nothing(self):
+        self.assertEqual(fleet_views.machines_line(self.conn, NOW), "")
+
+
 class NavTests(unittest.TestCase):
     def test_away_tab_only_on_a_fleet_instance(self):
         jira = config.deep_merge(config.DEFAULTS, server_harness.USER_CONFIG)
@@ -443,6 +519,12 @@ class AwayRouteTests(server_harness.ServerCase):
         self.assertEqual(self.last_visit(), "2026-10-23T21:00:00Z")
         page = self.request("GET", "/away")[1]
         self.assertNotIn(pr_url(1135), section(page, "landed"))
+
+    def test_header_shows_each_machines_age(self):
+        page = self.request("GET", "/away")[1]
+        header = page.split("<header", 1)[1].split("</header>", 1)[0]
+        self.assertIn('<span class="machines">', header)
+        self.assertIn("mini 60m", header)
 
     def test_stale_shows_the_fleet_lanes_under_jira(self):
         page = self.request("GET", "/stale")[1]

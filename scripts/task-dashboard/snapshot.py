@@ -8,9 +8,11 @@ Run under uv (Python 3.11+), as the rest of the dashboard is::
 
     uv run --no-project --python '>=3.11' python scripts/task-dashboard/snapshot.py
 
-DOCUMENT — ``schema: 1``; ``validate()`` below is the executable form of it.
+DOCUMENT — ``schema: 2``; ``validate()`` below is the executable form of it.
+It also accepts ``schema: 1``, the same document without ``scan_errors``, so a
+collector that has not been updated yet still reaches ingest.
 
-    schema     1
+    schema     2
     host       this machine's short host name
     taken_at   UTC ISO 8601, ``Z`` suffix
     worktrees  one entry per ``git worktree list --porcelain`` record, for every
@@ -19,6 +21,11 @@ DOCUMENT — ``schema: 1``; ``validate()`` below is the executable form of it.
                ``unpushed`` (commits on no remote ref; both null when the path
                is gone), and ``landed`` — ``{state, reason}`` where state is
                ``landed`` | ``not_landed`` | ``unknown``.
+    scan_errors  (schema 2) one entry per repo whose worktrees could not be
+               listed: ``repo`` (the same basename as ``worktrees[].repo``)
+               and ``step`` (``worktree_list``), never the command's output.
+               Ingest keeps that repo's previous rows rather than reading the
+               failure as "no worktrees".
     handoffs   ``$HOME/src/worktrees/*/.handoffs/*.md``: ``path``, ``mtime``
                and the front-matter keys ``aim``, ``branch``, ``pr``,
                ``expires``, ``created`` (null when absent). The body is never
@@ -65,7 +72,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from github_gh import Runner, run  # noqa: E402
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+ACCEPTED_SCHEMAS = (1, 2)
+SCAN_STEPS = ("worktree_list",)
 HOOK_FORMAT_VERSION = 1
 GIT_TIMEOUT = 20.0
 LANDED_TIMEOUT = 60.0
@@ -184,15 +193,22 @@ def find_repos(src_root: Path) -> list[str]:
     return sorted(str(p) for p in src_root.iterdir() if (p / ".git").is_dir())
 
 
-def worktrees(runner: Runner, src_root: Path, workers: int = 8) -> list[dict[str, Any]]:
+def worktrees(
+    runner: Runner, src_root: Path, workers: int = 8
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    """Every repo's worktrees, plus a ``scan_errors`` entry for each repo whose
+    ``git worktree list`` failed (a timeout is rc 124). That repo contributes
+    no worktrees, and the entry is what tells ingest it is not an absence."""
     jobs: list[tuple[str, dict[str, Any]]] = []
+    errors: list[dict[str, str]] = []
     for repo in find_repos(src_root):
         rc, out = _git(runner, repo, "worktree", "list", "--porcelain")
         if rc != 0:
+            errors.append({"repo": os.path.basename(repo), "step": "worktree_list"})
             continue
         jobs.extend((repo, rec) for rec in parse_porcelain(out) if not rec.get("bare"))
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        return list(pool.map(lambda job: _probe(runner, *job), jobs))
+        return list(pool.map(lambda job: _probe(runner, *job), jobs)), errors
 
 
 # --- handoffs -----------------------------------------------------------------
@@ -378,11 +394,13 @@ def build(
         cursor = load_cursor(state_dir / CURSOR_NAME)
     sessions, session_marks = hook_tails(state_dir / "sessions", cursor)
     prompts, history_mark = history_delta(history, cursor, classify)
+    trees, scan_errors = worktrees(runner, src_root)
     doc = {
         "schema": SCHEMA_VERSION,
         "host": host,
         "taken_at": _iso(now),
-        "worktrees": worktrees(runner, src_root),
+        "worktrees": trees,
+        "scan_errors": scan_errors,
         "handoffs": handoffs(src_root / "worktrees"),
         "tmux": tmux_sessions(runner),
         "sessions": sessions,
@@ -419,7 +437,7 @@ def _fields(
 
 
 def validate(doc: Any) -> list[str]:
-    """Every way ``doc`` departs from schema 1; empty when it conforms.
+    """Every way ``doc`` departs from its schema (1 or 2); empty when it conforms.
 
     Keys are closed: an unexpected key is a violation, which is what keeps a
     new field (prompt text, say) from shipping without a schema bump.
@@ -437,9 +455,16 @@ def validate(doc: Any) -> list[str]:
         "sessions",
         "history",
     }
+    version = doc.get("schema")
+    if version == 2:
+        top.add("scan_errors")
     for key in set(doc) ^ top:
         problems.append(f"{key}: {'unexpected' if key in doc else 'missing'}")
-    _check(doc.get("schema") == SCHEMA_VERSION, "schema: not 1", problems)
+    _check(
+        version in ACCEPTED_SCHEMAS and not isinstance(version, bool),
+        "schema: not 1 or 2",
+        problems,
+    )
     _check(isinstance(doc.get("host"), str), "host: not a string", problems)
     _check(isinstance(doc.get("taken_at"), str), "taken_at: not a string", problems)
     s, n, b, d = (str,), (str, type(None)), (bool,), (dict,)
@@ -462,6 +487,12 @@ def validate(doc: Any) -> list[str]:
     _fields(doc.get("handoffs"), "handoffs",
             {"path": s, "mtime": s, **dict.fromkeys(HANDOFF_KEYS, n)}, problems)  # fmt: skip
     _fields(doc.get("tmux"), "tmux", {"name": s, "created": s, "attached": b}, problems)
+    if version == 2:
+        errors = doc.get("scan_errors")
+        _fields(errors, "scan_errors", {"repo": s, "step": s}, problems)
+        for idx, err in enumerate(errors if isinstance(errors, list) else []):
+            if isinstance(err, dict) and err.get("step") not in SCAN_STEPS:
+                problems.append(f"scan_errors[{idx}].step: unknown")
     _fields(
         doc.get("history"),
         "history",
@@ -517,7 +548,10 @@ def main(argv: list[str] | None = None) -> int:
     problems = validate(doc)
     if problems:
         print(
-            "snapshot does not match schema 1:", *problems, sep="\n  ", file=sys.stderr
+            f"snapshot does not match schema {SCHEMA_VERSION}:",
+            *problems,
+            sep="\n  ",
+            file=sys.stderr,
         )
         return 1
     json.dump(doc, sys.stdout, indent=2)

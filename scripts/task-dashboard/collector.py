@@ -232,7 +232,7 @@ def collect(
         if problems:
             # Not spooled, but it must not block the snapshots already waiting:
             # they were valid when written and carry their own cursors.
-            log("snapshot does not match schema 1, not spooled: "
+            log(f"snapshot does not match schema {snapshot.SCHEMA_VERSION}, not spooled: "
                 + "; ".join(problems[:5]))  # fmt: skip
             if flush(cfg, spool, state, poster, log) == 0:
                 prune(state, cfg["retention_days"], now, log)
