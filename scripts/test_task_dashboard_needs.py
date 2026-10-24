@@ -29,6 +29,7 @@ import needs  # type: ignore[import-not-found]  # noqa: E402
 import overlay  # type: ignore[import-not-found]  # noqa: E402
 import sessions  # type: ignore[import-not-found]  # noqa: E402
 import snapshot_adapter  # type: ignore[import-not-found]  # noqa: E402
+import views  # type: ignore[import-not-found]  # noqa: E402
 import test_task_dashboard_server as server_harness  # noqa: E402
 
 NOW = datetime(2026, 10, 24, 12, 0, tzinfo=timezone.utc)
@@ -247,6 +248,18 @@ class OrderTests(NeedsCase):
         page = self.page()
         self.assertNotIn(pr_url(1201), keys(page))
         self.assertIn('data-snoozed="1"', page)
+
+    def test_an_ignored_item_leaves_and_can_be_undone(self):
+        seed(self.conn)
+        item = ("claude-hook", "s-turn")
+        overlay.ignore(self.conn, item, NOW)
+        self.assertNotIn("s-turn", keys(self.page()))
+        footer = views.render_ignored(self.conn)
+        self.assertIn('data-source="claude-hook" data-key="s-turn"', footer)
+        self.assertIn('data-ov="unignore"', footer)
+        overlay.unignore(self.conn, item)
+        self.assertIn("s-turn", keys(self.page()))
+        self.assertEqual(views.render_ignored(self.conn), "")
 
 
 class ApprovalTests(NeedsCase):

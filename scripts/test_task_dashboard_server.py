@@ -628,6 +628,7 @@ class BoardTest(ServerCase):
         self.add_issue("ABC-60", "indeterminate", 5, parent="EPIC-9")
         self.add_issue("ABC-61", "indeterminate", 5)
         self.add_issue("ABC-62", "indeterminate", 5, parent="EPIC-8")
+        self.add_issue("ABC-63", "indeterminate", 5, parent="ABC-60")  # a sub-task
         conn = self.conn()
         conn.executemany(
             "INSERT INTO ignores (source, item_key) VALUES ('jira', ?)",
@@ -641,6 +642,7 @@ class BoardTest(ServerCase):
         )
         self.assertNotIn("(ABC-60)", lanes)  # a child of the ignored epic
         self.assertNotIn("(ABC-61)", lanes)  # ignored itself
+        self.assertNotIn("(ABC-63)", lanes)  # under the ignored epic, two down
         self.assertIn("(ABC-62)", lanes)
         self.assertIn("Ignored (2)", page)
         self.assertEqual(page.count('data-ov="unignore"'), 2)

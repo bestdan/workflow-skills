@@ -451,7 +451,9 @@ JS = """
   document.querySelectorAll('.lane > h2').forEach(function (h) {
     h.dataset.base = h.textContent.replace(/\\s*\\(\\d+\\)$/, '');
   });
-  box.addEventListener('input', function () {
+  // Every card action reloads the page; keep the filter across that, per tab.
+  var saved = 'filter:' + location.pathname;
+  function apply() {
     var q = box.value.trim().toLowerCase();
     document.querySelectorAll('.lane').forEach(function (lane) {
       var cards = lane.querySelectorAll('.card'), shown = 0;
@@ -464,7 +466,13 @@ JS = """
       if (h && h.dataset.base) h.textContent = h.dataset.base + ' (' + shown + ')';
       lane.classList.toggle('filtered-empty', !!q && shown === 0);
     });
+  }
+  box.addEventListener('input', function () {
+    try { sessionStorage.setItem(saved, box.value); } catch (e) {}
+    apply();
   });
+  try { box.value = sessionStorage.getItem(saved) || ''; } catch (e) {}
+  if (box.value) apply();
 })();
 """
 
@@ -699,18 +707,24 @@ class App:
             health = self.health(conn)
             ov = overlay.load(conn)
             ignored = {k for s, k in ov.ignored if s == "jira"}
+            parents = dict(
+                conn.execute(
+                    "SELECT key, parent_key FROM jira_issues"
+                    " WHERE parent_key IS NOT NULL"
+                )
+            )
             board = classify_board(
                 [
                     r
                     for r in board_rows(
                         conn, str(self.cfg["jira"].get("me") or "").strip()
                     )
-                    if r["id"] not in ignored and r["parent_key"] not in ignored
+                    if not views.under_ignored(
+                        r["id"], r["parent_key"], parents.get, ignored
+                    )
                 ]
             )
-            ignored_html = views.render_ignored(
-                views.Mirror(conn, self.cfg, self.now())
-            )
+            ignored_html = views.render_ignored(conn)
             gauge_html = gauges.render(
                 gauges.read(conn, ov, fleet=self.fleet), self.cfg
             )

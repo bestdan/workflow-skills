@@ -19,6 +19,7 @@ local midnight at the start of that date (`score.local_day_start`).
 import html
 import json
 import sqlite3
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
@@ -106,6 +107,28 @@ def nav(active: str, cfg: "dict[str, Any] | None" = None) -> str:
 # --- data --------------------------------------------------------------------
 
 
+def under_ignored(
+    key: str,
+    parent: "str | None",
+    parent_of: "Callable[[str], str | None]",
+    ignored: "set[str]",
+) -> bool:
+    """`key` is ignored, or so is an ancestor reachable through `parent_of`.
+
+    The walk stops at an ancestor the mirror does not hold, and at a key it
+    has already seen, so a parent cycle in the data cannot loop.
+    """
+    if key in ignored:
+        return True
+    seen = {key}
+    while parent and parent not in seen:
+        if parent in ignored:
+            return True
+        seen.add(parent)
+        parent = parent_of(parent)
+    return False
+
+
 class Mirror:
     """One read of everything the views need, plus the derived per-issue facts."""
 
@@ -147,11 +170,6 @@ class Mirror:
             )
         ]
         self.prs = [p for p in prs if p["url"] not in self.ignored_prs]
-        self.pr_refs = {
-            p["url"]: f"{p['title']} ({p['repo'] or ''}#{p['number']})"
-            for p in prs
-            if p["url"] in self.ignored_prs
-        }
         self.prs_by_issue: dict[str, list[dict[str, Any]]] = {}
         for p in self.prs:
             if p["issue_key"]:
@@ -201,8 +219,13 @@ class Mirror:
         return bool(self.me) and (assignee or "").casefold() == self.me.casefold()
 
     def is_ignored(self, issue: dict[str, Any]) -> bool:
-        """Ignored itself, or a child of an ignored epic."""
-        return issue["key"] in self.ignored or issue.get("parent_key") in self.ignored
+        """Ignored itself, or under an ignored ancestor (epic, story, ...)."""
+        return under_ignored(
+            issue["key"],
+            issue.get("parent_key"),
+            lambda k: (self.issues.get(k) or {}).get("parent_key"),
+            self.ignored,
+        )
 
     def open_mine(self) -> list[dict[str, Any]]:
         return [
@@ -621,10 +644,11 @@ def _epic_card(m: Mirror, g: dict[str, Any]) -> str:
         f'{card_title(href, g["summary"], g["key"])}<div class="meta">'
         f"{g['done']}/{g['total']} done{blocked}</div>"
         f'<div class="ov"><button type="button" data-ov="{"unpin" if pinned else "pin"}"'
-        ' title="Keep it on Epics">'
+        ' title="Keep it on Epics; while it is open it also shows on Now">'
         f"{'Unpin' if pinned else 'Pin'}</button>"
         '<button type="button" data-ov="ignore"'
-        ' title="Hide this epic and its children">Ignore epic</button></div></div>'
+        ' title="Hide this epic and everything under it">Ignore epic</button>'
+        "</div></div>"
     )
 
 
@@ -667,37 +691,70 @@ def render(
     """The body of the view at `path` (a key of ROUTES), tab bar included."""
     _, fn = ROUTES[path]
     m = Mirror(conn, cfg, now)
-    return nav(path, cfg) + fn(m) + render_ignored(m)
+    return nav(path, cfg) + fn(m) + render_ignored(conn)
 
 
-def render_ignored(m: Mirror) -> str:
-    """A closed list of ignored items, each with Unignore; empty when none."""
-    if not m.ignored and not m.ignored_prs:
+# Every Jira issue under `key`, at any depth. UNION, not UNION ALL, drops
+# repeats, so a parent cycle in the data ends the recursion.
+_DESCENDANTS = """
+WITH RECURSIVE d(key) AS (
+  SELECT key FROM issues WHERE source = 'jira' AND parent_key = ?
+  UNION
+  SELECT i.key FROM issues i JOIN d ON i.parent_key = d.key WHERE i.source = 'jira'
+)
+SELECT count(*) FROM d
+"""
+
+
+def _ignored_name(conn: sqlite3.Connection, source: str, key: str) -> "str | None":
+    """What to call an ignored item: its mirrored summary, else a fallback."""
+    row = conn.execute(
+        "SELECT summary FROM issues WHERE source = ? AND key = ?", (source, key)
+    ).fetchone()
+    if row and row[0]:
+        return row[0]
+    if source == "jira":
+        # An epic the mirror does not hold is named by its children's copy.
+        for (raw,) in conn.execute(
+            "SELECT raw_json FROM issues WHERE source = 'jira' AND parent_key = ?"
+            " ORDER BY key",
+            (key,),
+        ):
+            name = epic_name({"raw_json": raw})
+            if name:
+                return name
+        return None
+    row = conn.execute(
+        "SELECT title, repo, number FROM prs WHERE url = ?", (key,)
+    ).fetchone()
+    if row:
+        return f"{row[0] or key} ({row[1] or ''}#{row[2]})"
+    return None
+
+
+def render_ignored(conn: sqlite3.Connection) -> str:
+    """A closed list of every ignored item, of any source, each with Unignore.
+
+    Empty when nothing is ignored. It reads only the rows it names, so the
+    Board can show it without building a Mirror.
+    """
+    items = conn.execute(
+        "SELECT source, item_key FROM ignores ORDER BY source, item_key"
+    ).fetchall()
+    if not items:
         return ""
     rows = []
-    for key in sorted(m.ignored):
-        issue = m.issues.get(key)
-        name = issue["summary"] if issue else None
-        if name is None:
-            name = next(
-                (epic_name(i) for i in m.issues.values() if i.get("parent_key") == key),
-                None,
-            )
-        children = sum(1 for i in m.issues.values() if i.get("parent_key") == key)
-        hides = (
-            f" · hides {children} child issue{'s' if children != 1 else ''}"
-            if children
-            else ""
-        )
+    for source, key in items:
+        name = _ignored_name(conn, source, key)
+        ref = hides = ""
+        if source == "jira":
+            ref = f' <span class="ref">({_e(key)})</span>'
+            (n,) = conn.execute(_DESCENDANTS, (key,)).fetchone()
+            if n:
+                hides = f" · hides {n} child issue{'s' if n != 1 else ''}"
         rows.append(
-            f'<li class="card" data-source="jira" data-key="{_e(key)}">'
-            f'{_e(name or key)} <span class="ref">({_e(key)})</span>{hides}'
-            ' <button type="button" data-ov="unignore">Unignore</button></li>'
-        )
-    for url in sorted(m.ignored_prs):
-        rows.append(
-            f'<li class="card" data-source="github" data-key="{_e(url)}">'
-            f"{_e(m.pr_refs.get(url, url))}"
+            f'<li class="card" data-source="{_e(source)}" data-key="{_e(key)}">'
+            f"{_e(name or key)}{ref}{hides}"
             ' <button type="button" data-ov="unignore">Unignore</button></li>'
         )
     return (

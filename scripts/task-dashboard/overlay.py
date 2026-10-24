@@ -272,13 +272,18 @@ def clear_focus(conn: sqlite3.Connection, item: Item) -> None:
 
 
 def ignore(conn: sqlite3.Connection, item: Item, now: "datetime | None" = None) -> None:
-    """Mark an item as not mine; ignoring an epic hides its children too."""
+    """Mark an item as not mine; ignoring an epic hides its children too.
+
+    An ignored item stops being the focus: a hidden item cannot be the one
+    thing the header points at. Unignore does not restore it.
+    """
     with conn:
         conn.execute(
             "INSERT OR IGNORE INTO ignores (source, item_key, ignored_at)"
             " VALUES (?, ?, ?)",
             (*item, _now(now)),
         )
+        conn.execute("DELETE FROM focus WHERE source = ? AND item_key = ?", item)
 
 
 def unignore(conn: sqlite3.Connection, item: Item) -> None:
@@ -713,7 +718,8 @@ def card_controls(
         back = (now.astimezone() + timedelta(days=SNOOZE_DAYS)).date().isoformat()
         parts.append(
             f'<button type="button" data-ov="snooze" data-until="{back}"'
-            f' title="Hide until {back}">Snooze {SNOOZE_DAYS}d</button>'
+            f' title="Snooze until {back}: hidden from Now and Needs, dimmed'
+            f' elsewhere">Snooze {SNOOZE_DAYS}d</button>'
         )
     parts.append(
         '<button type="button" data-ov="ignore" title="Not mine: hide it">Ignore</button>'

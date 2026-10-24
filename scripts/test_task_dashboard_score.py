@@ -496,7 +496,7 @@ class ViewsTest(unittest.TestCase):
         self.assertNotIn("ABC-4", after)
         self.assertEqual(views.epics(m), [])
         self.assertEqual([i["key"] for i, _ in views.waiting_on(m)[0]], [])
-        footer = views.render_ignored(m)
+        footer = views.render_ignored(m.conn)
         self.assertIn("Ignored (2)", footer)
         self.assertIn("hides 3 child issues", footer)
         self.assertEqual(footer.count('data-ov="unignore"'), 2)
@@ -512,7 +512,7 @@ class ViewsTest(unittest.TestCase):
         m = self.mirror()
         self.assertNotIn(url, [p["url"] for p, _ in views.waiting_on(m)[1]])
         self.assertNotIn(url, [p["url"] for p in m.prs_by_issue.get("ABC-2", [])])
-        footer = views.render_ignored(m)
+        footer = views.render_ignored(m.conn)
         self.assertIn("Ignored (1)", footer)
         self.assertIn("ABC-2 wip (o/r#2)", footer)
         self.assertIn('data-ov="unignore"', footer)
@@ -568,7 +568,45 @@ class ViewsTest(unittest.TestCase):
         self.assertIn("<h2>Pull requests (", page)
 
     def test_no_ignored_footer_when_nothing_is_ignored(self):
-        self.assertEqual(views.render_ignored(self.mirror()), "")
+        self.assertEqual(views.render_ignored(self.conn), "")
+
+    def test_ignoring_an_epic_hides_its_grandchildren(self):
+        # A sub-task of a story that sits under the seeded epic.
+        self.add_issue("ABC-30", ME, "ABC-4")
+        self.assertIn("ABC-30", [i["key"] for i in views.now_items(self.mirror())])
+        self.conn.execute(
+            "INSERT INTO ignores (source, item_key) VALUES ('jira', 'EPIC-1')"
+        )
+        self.conn.commit()
+        self.assertNotIn("ABC-30", [i["key"] for i in views.now_items(self.mirror())])
+        self.assertIn("hides 4 child issues", views.render_ignored(self.conn))
+
+    def test_the_ancestry_walk_survives_a_parent_cycle(self):
+        parents = {"A-1": "A-2", "A-2": "A-1"}
+        self.assertFalse(views.under_ignored("A-1", "A-2", parents.get, {"Z-1"}))
+        self.assertTrue(views.under_ignored("A-1", "A-2", parents.get, {"A-2"}))
+        self.add_issue("CYC-1", ME, "CYC-2")
+        self.add_issue("CYC-2", ME, "CYC-1")
+        self.conn.execute(
+            "INSERT INTO ignores (source, item_key) VALUES ('jira', 'CYC-1')"
+        )
+        self.conn.commit()
+        self.assertIn("CYC-1", views.render_ignored(self.conn))
+
+    def test_an_untitled_ignored_pr_is_named_by_its_url(self):
+        url = "https://github.com/o/r/pull/2"
+        self.conn.execute("UPDATE prs SET title = NULL WHERE url = ?", (url,))
+        self.conn.execute(
+            "INSERT INTO ignores (source, item_key) VALUES ('github', ?)", (url,)
+        )
+        self.conn.commit()
+        self.assertIn(f"{url} (o/r#2)", views.render_ignored(self.conn))
+
+    def test_tooltips_say_what_snooze_and_an_epic_pin_do(self):
+        page = views.render("/waiting-on", self.conn, CFG, NOW)
+        self.assertIn("hidden from Now and Needs, dimmed elsewhere", page)
+        page = views.render("/epics", self.conn, CFG, NOW)
+        self.assertIn("Keep it on Epics; while it is open it also shows on Now", page)
 
     def test_epic_name_falls_back_to_a_childs_copy(self):
         self.set_parent_summary("ABC-4", "Named by the child")

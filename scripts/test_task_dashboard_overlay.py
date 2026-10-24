@@ -352,6 +352,16 @@ class ExportImportTests(OverlayCase):
         overlay.unignore(self.conn, item)
         self.assertEqual(overlay.load(self.conn).ignored, set())
 
+    def test_ignoring_the_focus_item_clears_focus(self):
+        item = ("jira", "ABC-1")
+        overlay.set_focus(self.conn, item, NOW)
+        overlay.ignore(self.conn, ("jira", "ABC-2"), NOW)
+        self.assertEqual(overlay.load(self.conn).focus, item)  # another item
+        overlay.ignore(self.conn, item, NOW)
+        self.assertIsNone(overlay.load(self.conn).focus)
+        overlay.unignore(self.conn, item)
+        self.assertIsNone(overlay.load(self.conn).focus)  # not restored
+
     def test_import_replaces_rather_than_merges(self):
         populate(self.conn)
         doc = overlay.export(self.conn)
