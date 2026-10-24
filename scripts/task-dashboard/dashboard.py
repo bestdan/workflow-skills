@@ -368,6 +368,14 @@ def cmd_install(args: argparse.Namespace) -> int:
     over to the collector's install, which also covers systemd.
     """
     if args.collector_only:
+        ignored = [f for f, v in (("--db", args.db), ("--plugins-json", args.plugins_json)) if v]
+        if ignored:
+            print(
+                f"task-dashboard install: {' and '.join(ignored)} apply only to the"
+                " server install, not --collector-only",
+                file=sys.stderr,
+            )
+            return 2
         return cmd_install_collector(args)
     if _not_macos("install"):
         return 2

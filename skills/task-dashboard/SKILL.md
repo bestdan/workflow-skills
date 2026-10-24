@@ -133,8 +133,10 @@ that cannot be rebuilt from Jira or GitHub.
 
 ## uninstall
 
-`DASH uninstall`, unsandboxed: boots the agent out, then removes the plist and
-the launcher. It keeps the launcher when another LaunchAgent still runs it
+`DASH uninstall`, unsandboxed, on macOS: boots the server's agent out, then
+removes its plist and the launcher. It removes only the server's LaunchAgent: a
+`--collector-only` install (its LaunchAgent, or its `systemd --user` timer) is
+left alone, and there is no collector uninstall yet. It keeps the launcher when another LaunchAgent still runs it
 (the fleet collector shares it), and it never touches the DB, the config or
 the logs. Say which paths it kept, as its output does. A user who wants
 everything gone runs `DASH export` first, then deletes those paths themselves.

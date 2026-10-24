@@ -192,13 +192,10 @@ class ResolveToolsTest(unittest.TestCase):
 
     def test_missing_uv_acli_or_gh_is_refused_by_name(self):
         fake = str(PKG / "dev" / "fake-acli")
-        with self.assertRaisesRegex(si.InstallError, "uv is not on PATH"):
-            env_uv = os.environ.pop("UV", None)
-            try:
+        with mock.patch.dict(os.environ):
+            os.environ.pop("UV", None)
+            with self.assertRaisesRegex(si.InstallError, "uv is not on PATH"):
                 si.resolve_tools(self.cfg(), {"acli": fake}.get)
-            finally:
-                if env_uv is not None:
-                    os.environ["UV"] = env_uv
         with self.assertRaisesRegex(si.InstallError, "jira.acli_path 'acli'"):
             si.resolve_tools(self.cfg(), {"uv": "/bin/sh"}.get)
         with self.assertRaisesRegex(si.InstallError, "gh is not on PATH"):
@@ -392,6 +389,41 @@ class ExecuteTest(Home):
         self.assertEqual(rc, 1)
         self.assertIn("install undone, and the previous install with it", log)
         self.assertFalse(si.plist_path(self.home).exists())
+
+    def raising_runner(self, needle, exc):
+        def runner(argv, timeout):
+            if needle in argv:
+                raise exc
+            return FakeRunner()(argv, timeout)
+
+        return runner
+
+    def test_an_interrupted_first_sync_undoes_and_reraises(self):
+        with self.assertRaises(KeyboardInterrupt):
+            self.run_plan(self.raising_runner("full", KeyboardInterrupt()))
+        self.assertFalse(si.plist_path(self.home).exists())
+        self.assertFalse(si.launcher_path(self.home).exists())
+
+    def test_a_failed_file_write_undoes_and_reraises(self):
+        real = si._write
+        calls = []
+
+        def write(path, text, mode):
+            calls.append(path)
+            if path == si.plist_path(self.home):
+                raise OSError("disk full")
+            real(path, text, mode)
+
+        with mock.patch.object(si, "_write", write), self.assertRaises(OSError):
+            self.run_plan(FakeRunner())
+        self.assertEqual(calls[0], si.launcher_path(self.home))
+        self.assertFalse(si.launcher_path(self.home).exists())
+
+    def test_an_interrupt_once_bootstrap_started_keeps_the_files(self):
+        with self.assertRaises(KeyboardInterrupt):
+            self.run_plan(self.raising_runner("bootstrap", KeyboardInterrupt()))
+        self.assertTrue(si.plist_path(self.home).exists())
+        self.assertTrue(si.launcher_path(self.home).exists())
 
     def test_bootout_waits_for_launchd_to_drop_the_service(self):
         prints = iter([(0, LOADED, ""), (113, "", "Could not find service")])
@@ -937,6 +969,17 @@ class InstalledPathsTest(unittest.TestCase):
             os.environ.pop("UV", None)
             rc = dashboard.main(["install"])
         return rc, "\n".join(err)
+
+    def test_collector_only_refuses_server_only_flags(self):
+        for flags in (["--db", "x.db"], ["--plugins-json", "p.json"]):
+            with self.subTest(flags=flags):
+                err: list[str] = []
+                with mock.patch(
+                    "builtins.print", lambda *a, **k: err.append(" ".join(map(str, a)))
+                ):
+                    rc = dashboard.main(["install", "--collector-only", *flags])
+                self.assertEqual(rc, 2)
+                self.assertIn(f"{flags[0]} apply only to the server install", err[0])
 
     def test_install_refuses_off_macos_with_exit_2(self):
         with mock.patch.object(sys, "platform", "linux"):

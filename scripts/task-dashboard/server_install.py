@@ -167,6 +167,9 @@ class Step:
     argv: list[str]
     timeout: float = COMMAND_TIMEOUT
     why: str = ""
+    # True for bootstrap: once it has started, launchd may hold the agent, so
+    # an exception from here on must not delete the plist from under it.
+    loads: bool = False
 
 
 @dataclass
@@ -213,7 +216,7 @@ def plan(
         )
     )
     p.steps.append(
-        Step(["launchctl", "bootstrap", domain, str(plist_path(home))], why="load")
+        Step(["launchctl", "bootstrap", domain, str(plist_path(home))], why="load", loads=True)
     )
     port = cfg["server"]["port"]
     p.notes.append(f"dashboard: {url(port)} (localhost: opens only on this machine)")
@@ -256,37 +259,53 @@ def execute(
     failure other than "not loaded" stops the install there: carrying on would
     rewrite the files of an agent that is still running. Once the files are
     written, any failed step (init-db, the first sync, bootstrap) removes the
-    plist, and the launcher unless another agent runs it. A plist left behind
-    would load at the next login, where KeepAlive restarts a failing agent.
+    plist, and the launcher unless another agent runs it; so does an exception
+    raised before bootstrap starts, which is then re-raised. A plist left
+    behind would load at the next login, where KeepAlive restarts a failing
+    agent.
     """
     ok, why = boot_out(p.uid, runner, sleep=sleep)
     if not ok:
         log(f"FAILED: {why}; nothing written")
         return 1
     reinstall = plist_path(p.home).exists()
-    for d in p.dirs:
-        d.mkdir(parents=True, exist_ok=True)
-    for path, text, mode in p.files:
-        _write(path, text, mode)
-        log(f"wrote {path}")
-    for step in p.steps:
-        rc, out, err = runner(step.argv, step.timeout)
-        shown = " ".join(shlex.quote(a) for a in step.argv[-4:])
-        if rc == 0:
-            log(f"ran …{shown}" + (f"\n{out.strip()}" if out.strip() else ""))
-            continue
-        detail = "\n".join(s for s in (out.strip(), err.strip()) if s)
-        log(f"FAILED ({rc}): {step.why}: …{shown}\n{detail}")
+
+    def undo(cause: str) -> None:
+        log(cause)
         remove_files(p.home, log)
         if reinstall:
             log(
                 "install undone, and the previous install with it: its agent was"
-                " booted out and its files replaced before the failed step"
+                " booted out and its files replaced before the failure"
             )
         else:
             log("install undone")
-        log("fix the cause above and run install again")
-        return 1
+
+    loading = False
+    try:
+        for d in p.dirs:
+            d.mkdir(parents=True, exist_ok=True)
+        for path, text, mode in p.files:
+            _write(path, text, mode)
+            log(f"wrote {path}")
+        for step in p.steps:
+            loading = loading or step.loads
+            rc, out, err = runner(step.argv, step.timeout)
+            shown = " ".join(shlex.quote(a) for a in step.argv[-4:])
+            if rc == 0:
+                log(f"ran …{shown}" + (f"\n{out.strip()}" if out.strip() else ""))
+                continue
+            detail = "\n".join(s for s in (out.strip(), err.strip()) if s)
+            undo(f"FAILED ({rc}): {step.why}: …{shown}\n{detail}")
+            log("fix the cause above and run install again")
+            return 1
+    except BaseException as exc:
+        # Ctrl-C in the long foreground sync, or an OSError writing a file:
+        # undo like a failed step, unless bootstrap has started, after which
+        # the agent may be loaded and its plist must stay.
+        if not loading:
+            undo(f"INTERRUPTED: {type(exc).__name__}: {exc}")
+        raise
     for note in p.notes:
         log(note)
     return 0

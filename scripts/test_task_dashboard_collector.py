@@ -614,6 +614,8 @@ class TestInstall(unittest.TestCase):
         missing = str(self.home / "no-such-config.toml")
         with (
             mock.patch.object(sys, "platform", "darwin"),
+            # Path.home() must not reach the real ~/Library/LaunchAgents plist.
+            mock.patch.dict(os.environ, {"HOME": str(self.home)}),
             contextlib.redirect_stderr(err),
         ):
             self.assertEqual(dashboard.main(["install", "--config", missing]), 2)
