@@ -372,18 +372,69 @@ class TestPrune(Home):
             any("skipped 2 malformed" in m for m in self.log_lines), self.log_lines
         )
 
+    def accepted(self, path):
+        """Save a cursor that has accepted all of ``path``."""
+        st = path.stat()
+        cursor = {"v": 1, "sessions": {path.name: {"offset": st.st_size,
+                                                   "inode": st.st_ino}}}  # fmt: skip
+        snapshot.save_cursor(self.state / snapshot.CURSOR_NAME, cursor)
+
     def test_a_disabled_collector_prunes_nothing(self):
         old = self.session("old", hook_line("old", "Stop", OLD))
-        st = old.stat()
-        cursor = {"v": 1, "sessions": {"old.jsonl": {"offset": st.st_size,
-                                                     "inode": st.st_ino}}}  # fmt: skip
-        snapshot.save_cursor(self.state / snapshot.CURSOR_NAME, cursor)
+        self.accepted(old)
         self.assertEqual(self.run_once(self.cfg(enabled=False)), 0)
         self.assertTrue(old.exists())
-        # The same file and cursor, enabled: it goes.
-        self.ingest.script = [503]  # the new snapshot is not accepted either way
+        # Enabled, but the push leaves a snapshot spooled: still kept.
+        self.ingest.script = [503]
         self.assertEqual(self.run_once(), 1)
+        self.assertTrue(old.exists())
+        # The spool empties on the next run, and it goes.
+        self.assertEqual(self.run_once(at=NOW + timedelta(minutes=5)), 0)
         self.assertFalse(old.exists())
+
+    def test_an_invalid_snapshot_prunes_only_once_the_spool_is_empty(self):
+        old = self.session("old", hook_line("old", "Stop", OLD))
+        self.accepted(old)
+        bad = mock.patch.object(snapshot, "validate", return_value=["host: bad"])
+        with bad:
+            # A waiting snapshot that cannot be sent: the spool is not empty.
+            collector.write_entry(self.state / "spool",
+                                  {"taken_at": "2026-10-23T11:00:00.000Z"},
+                                  snapshot.load_cursor(self.state / snapshot.CURSOR_NAME))  # fmt: skip
+            self.ingest.script = [503]
+            self.assertEqual(self.run_once(), 1)
+            self.assertTrue(old.exists())
+            # The waiting one is accepted, the spool empties, and it goes.
+            self.assertEqual(self.run_once(at=NOW + timedelta(minutes=5)), 1)
+        self.assertEqual(self.spool(), [])
+        self.assertFalse(old.exists())
+
+    def test_a_pruned_name_is_dropped_from_the_cursor(self):
+        old = self.session("s", hook_line("s", "UserPromptSubmit", OLD),
+                           hook_line("s", "Stop", OLD))  # fmt: skip
+        # Keep the inode alive through a hard link, so the "new" file the
+        # resumed session writes reuses it, as ext4 can with a freed inode.
+        keep = self.home / "keep"
+        os.link(old, keep)
+        inode = old.stat().st_ino
+        self.assertEqual(self.run_once(), 0)
+        self.assertFalse(old.exists())
+        self.assertNotIn("s.jsonl", self.cursor()["sessions"])
+        # The resumed session's file: same name, same inode, more bytes than
+        # the old mark's offset.
+        lines = [hook_line("s", "UserPromptSubmit", RECENT),
+                 hook_line("s", "Notification", RECENT),
+                 hook_line("s", "Stop", RECENT)]  # fmt: skip
+        with keep.open("r+") as fh:
+            fh.truncate(0)
+            fh.write("".join(lines))
+        os.replace(keep, old)
+        self.assertEqual(old.stat().st_ino, inode)
+        self.assertEqual(self.run_once(at=NOW + timedelta(minutes=5)), 0)
+        self.assertEqual(
+            [e["event"] for e in self.ingest.docs[-1]["sessions"]],
+            ["UserPromptSubmit", "Notification", "Stop"],
+        )
 
 
 class TestConfig(unittest.TestCase):

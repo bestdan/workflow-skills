@@ -23,20 +23,27 @@ still sent, and the run exits 1.
 session-state hook: ``collect`` builds and sends nothing and exits 0.
 
 PRUNING. The session-state hook writes one file per session and nothing else
-deletes them, so each run ends by deleting the session files that are both
-FULLY INGESTED and OLD. Fully ingested is read from the saved cursor, never a
-spooled one, because only the saved cursor has been accepted by the server: its
-mark for the file must name the file's current inode at an offset equal to its
-size. Old means the newest line's ``ts`` and the file's mtime are both further
-back than ``[collector] retention_days`` (default 30). A line that is not a
-hook record with a parseable ``ts`` is skipped and counted, never fatal.
+deletes them, so a run whose push leaves the spool empty ends by deleting the
+session files that are both FULLY INGESTED and OLD. Fully ingested is read
+from the saved cursor, because only the saved cursor has been accepted by the
+server: its mark for the file must name the file's current inode at an offset
+equal to its size. Old means the newest line's ``ts`` and the file's mtime are
+both further back than ``[collector] retention_days`` (default 30). A line that
+is not a hook record with a parseable ``ts`` is skipped and counted, never
+fatal.
+
+The deleted files' marks are then removed from the saved cursor. A session
+resumed after its file was pruned gets a new file under the same name, and a
+filesystem that reuses inode numbers (ext4 does) can give it the old one; with
+the mark gone, the file is read from the start whatever its inode. Pruning
+waits for an empty spool because a spooled snapshot's cursor would carry the
+mark back: the next snapshot starts from it, and the server accepting it saves
+it.
 
 The age window is what keeps an active session's file: the hook appends on
-every prompt and turn end, so a live session's file is never that old. A
-session resumed after its file was pruned gets a new file with a new inode,
-which the cursor reads from the start, so nothing is lost or sent twice. The
-one loss left is a hook that opened the file in the instant between the last
-check and the delete; its line goes to the deleted file.
+every prompt and turn end, so a live session's file is never that old. The one
+loss left is a hook that opened the file in the instant between the last check
+and the delete; its line goes to the deleted file.
 
 WHAT EACH ANSWER DOES:
 
@@ -227,13 +234,14 @@ def collect(
             # they were valid when written and carry their own cursors.
             log("snapshot does not match schema 1, not spooled: "
                 + "; ".join(problems[:5]))  # fmt: skip
-            flush(cfg, spool, state, poster, log)
-            prune(state, cfg["retention_days"], now, log)
+            if flush(cfg, spool, state, poster, log) == 0:
+                prune(state, cfg["retention_days"], now, log)
             return 1
         write_entry(spool, doc, cursor)
         trim(spool, cfg["spool_max"], log)
         rc = flush(cfg, spool, state, poster, log)
-        prune(state, cfg["retention_days"], now, log)
+        if rc == 0:
+            prune(state, cfg["retention_days"], now, log)
         return rc
 
 
@@ -306,15 +314,20 @@ def prune(
 
     Fully ingested: the saved (server-accepted) cursor's mark for the file is
     its current inode at its current size. Old: its newest line and its mtime
-    are both older than ``retention_days``. See PRUNING in the module doc.
+    are both older than ``retention_days``. The deleted files' marks are
+    removed from the saved cursor. Call it only with the spool empty; see
+    PRUNING in the module doc.
     """
     sessions = state / "sessions"
     if not sessions.is_dir():
         return 0
-    marks = snapshot.load_cursor(state / snapshot.CURSOR_NAME).get("sessions")
+    cursor_path = state / snapshot.CURSOR_NAME
+    cursor = snapshot.load_cursor(cursor_path)
+    marks = cursor.get("sessions")
     marks = marks if isinstance(marks, dict) else {}
     cutoff = now.timestamp() - retention_days * 86400
-    deleted = skipped = 0
+    gone: list[str] = []
+    skipped = 0
     for path in sorted(sessions.glob("*.jsonl")):
         mark = marks.get(path.name)
         try:
@@ -339,11 +352,18 @@ def prune(
             path.unlink()
         except OSError:
             continue
-        deleted += 1
+        gone.append(path.name)
+    if gone:
+        # Drop the deleted files' marks, so a file the hook later creates
+        # under the same name is read from the start even if the filesystem
+        # gives it the old inode number.
+        for name in gone:
+            marks.pop(name, None)
+        snapshot.save_cursor(cursor_path, cursor)
     if skipped:
         log(f"skipped {skipped} malformed session-state line(s) while pruning")
-    if deleted:
+    if gone:
         log(
-            f"pruned {deleted} session-state file(s) older than {retention_days} day(s)"
+            f"pruned {len(gone)} session-state file(s) older than {retention_days} day(s)"
         )
-    return deleted
+    return len(gone)
