@@ -10,7 +10,9 @@ Run under uv (Python 3.11+), as the rest of the dashboard is::
 
 DOCUMENT — ``schema: 2``; ``validate()`` below is the executable form of it.
 It also accepts ``schema: 1``, the same document without ``scan_errors``, so a
-collector that has not been updated yet still reaches ingest.
+collector that has not been updated yet still reaches ingest. Update the ingest
+server before any collector: an older server rejects ``schema: 2`` with a 400,
+and the collector drops that snapshot, deltas included.
 
     schema     2
     host       this machine's short host name
