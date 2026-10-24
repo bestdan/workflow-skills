@@ -20,8 +20,9 @@ rest is in `raw_json`:
     session_id, host, cwd, branch
     status_bucket     "working" (last event a prompt) | "waiting" (a turn end
                       or a notification since the last prompt)
-    status_category   "need_input" (a permission prompt since the last prompt)
-                      | "turn_ended" (any other wait) | null (working)
+    status_category   "need_input" (a permission prompt since the last prompt
+                      or turn end) | "turn_ended" (any other wait) | null
+                      (working)
     needs_action      true only for need_input
     waiting_since     the first Stop or Notification after the last prompt
     has_prompt        whether any UserPromptSubmit was recorded
@@ -91,6 +92,9 @@ def fold(session_id: str, events: list[tuple]) -> dict[str, Any]:
         elif event in ("Stop", "Notification"):
             if waiting_since is None:
                 waiting_since = ts
+            if event == "Stop":
+                # A turn cannot end while a permission prompt still blocks it.
+                need_input = False
             if event == "Notification" and notification == "permission_prompt":
                 permission_prompts += 1
                 need_input = True

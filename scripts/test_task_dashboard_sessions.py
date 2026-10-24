@@ -127,6 +127,16 @@ class HookSessionTests(DbCase):
         self.assertFalse(raw["needs_action"])
         self.assertEqual(raw["waiting_since"], ts(25))
 
+    def test_turn_end_after_a_permission_prompt_clears_need_input(self):
+        self.event("s1", 30, "UserPromptSubmit")
+        self.event("s1", 25, "Notification", "permission_prompt")
+        self.event("s1", 20, "Stop")
+        status, category, raw = self.derive()["s1"]
+        self.assertEqual((status, category), ("waiting", "turn_ended"))
+        self.assertFalse(raw["needs_action"])
+        self.assertEqual(raw["permission_prompts"], 1)
+        self.assertEqual(raw["waiting_since"], ts(25))
+
     def test_a_new_prompt_clears_the_wait(self):
         self.event("s1", 30, "UserPromptSubmit")
         self.event("s1", 25, "Notification", "permission_prompt")

@@ -3,8 +3,8 @@
 OFF BY DEFAULT. It runs only with `[claude_remote] enabled = true`. Session
 state comes from the session-state hook (sessions.py); this source adds the
 sessions the hook cannot see, cloud-only ones above all, with a coarse status.
-The route depends on a request Claude Code marks `@internal`, which the owner
-accepted on #1100.
+The route depends on a request Claude Code marks `@internal`: it can change or
+disappear in any CLI release, and using it is a deliberate choice.
 
 THE ROUTE, from dev_docs/research/2026-10-23-claude-remote-session-read.md
 (route 5): start `claude -p --input-format stream-json --output-format
