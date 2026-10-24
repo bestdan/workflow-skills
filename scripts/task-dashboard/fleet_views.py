@@ -47,7 +47,7 @@ import score
 import sync
 
 # Tabs that exist only on a fleet instance (views.nav hides them elsewhere).
-ONLY = {"/away"}
+ONLY = {"/needs", "/away"}
 
 SESSION_IDLE_DAYS = 3  # a session with no event for this long is idle
 SESSION_FORGET_DAYS = 30  # and one quiet for this long has left the list
