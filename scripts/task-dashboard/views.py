@@ -329,9 +329,10 @@ def stale(m: Mirror) -> list[tuple[dict, str]]:
 def epics(m: Mirror) -> list[dict[str, Any]]:
     """Per parent: child counts and how the user relates to the epic.
 
-    Every mirrored child counts, including one mirrored only because it is
-    linked to an in-scope issue. The mirror never fetches a whole epic, so the
-    totals are of the children it holds, not of the epic's full child set.
+    Every mirrored child that is not ignored counts, including one mirrored
+    only because it is linked to an in-scope issue. The mirror never fetches a
+    whole epic, so the totals are of the children it holds, not of the epic's
+    full child set.
 
     `role` is `mine` (the epic is assigned to the user), `involved` (the user
     reported it, or is assigned to or reported one of its children), `pinned`,

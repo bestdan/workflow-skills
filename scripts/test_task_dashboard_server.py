@@ -593,13 +593,15 @@ class BoardTest(ServerCase):
         expected.remove("blocked")
         self.assertEqual(order, expected)
 
-    def add_issue(self, key, category, sprint_id, assignee=None, reporter=None):
+    def add_issue(
+        self, key, category, sprint_id, assignee=None, reporter=None, parent=None
+    ):
         conn = self.conn()
         conn.execute(
             "INSERT INTO issues (source, kind, key, summary, status_category,"
-            " labels, sprint_id, sprint_state, assignee, reporter)"
-            " VALUES ('jira', 'ticket', ?, 'x', ?, '[]', ?, 'active', ?, ?)",
-            (key, category, sprint_id, assignee, reporter),
+            " labels, sprint_id, sprint_state, assignee, reporter, parent_key)"
+            " VALUES ('jira', 'ticket', ?, 'x', ?, '[]', ?, 'active', ?, ?, ?)",
+            (key, category, sprint_id, assignee, reporter, parent),
         )
         conn.commit()
         conn.close()
@@ -621,6 +623,27 @@ class BoardTest(ServerCase):
         self.assertLessEqual({"XYZ-2", "XYZ-3"}, keys)
         self.assertNotIn("XYZ-4", keys)
         self.assertFalse({"XYZ-2", "XYZ-3"} & unset)
+
+    def test_ignored_issues_and_epic_children_leave_the_board(self):
+        self.add_issue("ABC-60", "indeterminate", 5, parent="EPIC-9")
+        self.add_issue("ABC-61", "indeterminate", 5)
+        self.add_issue("ABC-62", "indeterminate", 5, parent="EPIC-8")
+        conn = self.conn()
+        conn.executemany(
+            "INSERT INTO ignores (source, item_key) VALUES ('jira', ?)",
+            [("EPIC-9",), ("ABC-61",)],
+        )
+        conn.commit()
+        conn.close()
+        page = self.request("GET", "/")[1]
+        lanes = "".join(
+            re.findall(r'data-section="[a-z_]+">(.*?)</section>', page, re.S)
+        )
+        self.assertNotIn("(ABC-60)", lanes)  # a child of the ignored epic
+        self.assertNotIn("(ABC-61)", lanes)  # ignored itself
+        self.assertIn("(ABC-62)", lanes)
+        self.assertIn("Ignored (2)", page)
+        self.assertEqual(page.count('data-ov="unignore"'), 2)
 
     def test_unclassified_rows_get_their_own_last_lane(self):
         self.add_issue("ABC-50", "undefined", 5)
