@@ -35,10 +35,10 @@ only; its globs do not match the `real-` ones.
 ## Real captures
 
 The `real-` files are redacted, pseudonymised output of acli 1.3.19 against
-the work site, captured for #1087. The test globs `real-<prefix>` beside each
-prefix above, so they get the same checks. They confirm two of the guesses:
-`search` prints a bare array, and `list-sprints` an object holding `sprints`.
-The real logged-out text replaced the guessed auth patterns in `jira_acli.py`.
+a work Jira site. The test globs `real-<prefix>` beside each prefix above, so
+they get the same checks. In them, `search` prints a bare array and
+`list-sprints` an object holding `sprints`, the shapes the synthetic files
+assume. `jira_acli.py`'s auth patterns match the logged-out stderr here.
 
 | File                              | What it shows                                                  |
 | --------------------------------- | -------------------------------------------------------------- |
@@ -46,7 +46,7 @@ The real logged-out text replaced the guessed auth patterns in `jira_acli.py`.
 | `real-view-links-both-ways.json`  | Blocks links inward and outward, parent, one active sprint     |
 | `real-view-sprints-flagged.json`  | three-sprint history ending active, Flagged set, parent        |
 | `real-view-mostly-null.json`      | no assignee, sprint, links, labels, priority or due date       |
-| `real-view-assigned.json`         | an issue of mine, sprints all closed                           |
+| `real-view-assigned.json`         | assigned issue, epic parent, two sprints, both closed          |
 | `real-list-sprints-active.json`   | `list-sprints --state active` for one board                    |
 | `real-stderr-auth-logged-out.txt` | stderr of `search` after `acli jira auth logout`; stdout empty |
 
@@ -65,8 +65,8 @@ Replaced: summaries, descriptions, display names (`Person A`…), labels
 (`https://jira.example.invalid/redacted`). Dropped: the account id and email
 address keys, whose names alone fail the hygiene test, and the avatar URL keys.
 
-One shape the captures exposed: `search --fields key` prints one `null` per
-match, so `search_keys` requests `status` instead.
+`search --fields key` prints one `null` per match, so `search_keys` requests
+`status` instead.
 
 The test fails on any file in this folder containing an at-sign, the Atlassian
 cloud domain, or an issue key whose project is not in its `PSEUDONYM_PROJECTS`

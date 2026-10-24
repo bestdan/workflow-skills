@@ -31,11 +31,16 @@ DEFAULT_TIMEOUT = 120.0
 # Lower-cased substrings that mark an auth failure in acli's output. A logged-out
 # acli 1.3.19 prints, on stderr:
 #   ✗ Error: unauthorized: use 'acli [product] auth login' to authenticate
+# `unauthenticated` and `not logged in` are uncaptured wordings kept as a
+# fallback. Bare `401` and `token` are left out on purpose: stdout is searched
+# too, and both turn up in ordinary output, as in the key of issue number 1401.
 # They must never match the transient `failed to fetch work item details`, which
 # the serial retry exists to absorb.
 AUTH_ERROR_PATTERNS = (
     "unauthorized",
     "auth login",
+    "unauthenticated",
+    "not logged in",
 )
 
 # The fields every `view` requests, before the per-site custom fields.

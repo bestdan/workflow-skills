@@ -291,6 +291,20 @@ class ClassifyTests(unittest.TestCase):
         real = (FIXTURES / "real-stderr-auth-logged-out.txt").read_text()
         self.assertIsInstance(acli.classify(1, real, "", []), acli.AuthError)
 
+    def test_fallback_wordings_are_auth(self):
+        for text in ("Error: unauthenticated", "Error: not logged in"):
+            with self.subTest(text):
+                self.assertIsInstance(acli.classify(1, "", text, []), acli.AuthError)
+                self.assertIsInstance(acli.classify(1, text, "", []), acli.AuthError)
+
+    def test_ordinary_stdout_is_not_auth(self):
+        # Words near the patterns, and the 401/token the patterns leave out.
+        stdout = json.dumps(
+            [{"key": "DEMO-1401", "fields": {"summary": "rotate the login token"}}]
+        )
+        err = acli.classify(1, stdout, "", ["acli"])
+        self.assertIs(type(err), acli.AcliError)
+
 
 # The only project keys a fixture may use. The real- captures are pseudonymised
 # onto DEMO, ALPHA and BETA, so a capture committed without that pass carries
