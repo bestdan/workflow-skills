@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.122.0] - 2026-10-24
+
+### Features
+
+- keep failed-scan rows, show host ages [#1156] (#1159) (dec931b)
+
 ## [2.121.0] - 2026-10-24
 
 ### Features
