@@ -9,7 +9,8 @@ Defaults live here rather than in the file so a sparse config is valid: a user
 who sets one score weight keeps the other five. Required keys are the ones with
 no sane default, the per-site Jira custom-field ids and the board ids, because
 acli cannot list them. Failing with the dotted key name beats a KeyError three
-frames into a sync.
+frames into a sync. `jira.enabled = false` waives all of them, for an instance
+with no Jira at all.
 """
 
 import copy
@@ -28,7 +29,9 @@ DEFAULT_PATH = Path("~/.config/task-dashboard/config.toml")
 DEFAULTS: dict[str, Any] = {
     # `me` is my Jira display name, which the mirror stores people by. Empty
     # means "not set": the views then treat every in-scope issue as mine.
-    "jira": {"blocked_statuses": [], "acli_path": "acli", "me": ""},
+    # enabled: false runs the instance with no Jira: no acli call, no required
+    # jira.* key, and no Jira-only tab.
+    "jira": {"enabled": True, "blocked_statuses": [], "acli_path": "acli", "me": ""},
     # design_repos: `owner/name` repos whose dev_docs/designs/ the fleet view
     # reads for `status: proposed` (github_fleet.py). Empty reads none.
     # fleet: run github_fleet's fetch (review queue, issues needing a human,
@@ -132,18 +135,18 @@ def load(path: "str | os.PathLike[str] | None" = None) -> dict[str, Any]:
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError(f"invalid TOML in {p}: {exc}") from None
     cfg = deep_merge(DEFAULTS, user)
-    for dotted in REQUIRED_KEYS:
-        _lookup(cfg, dotted)
-    for dotted in ("jira.site", "jira.fields.sprint", "jira.fields.flagged"):
-        _non_empty_str(cfg, dotted)
-    _non_empty_str(cfg, "jira.acli_path")
-    # An empty list is valid and means "no sprint scope": the assigned and
-    # reported/watched scopes still work for someone who is on no board.
-    ids = cfg["jira"]["board_ids"]
-    if not isinstance(ids, list) or not all(
-        isinstance(i, int) and not isinstance(i, bool) for i in ids
-    ):
-        raise ConfigError("jira.board_ids must be a list of integer board ids")
+    if not isinstance(cfg["jira"], dict):
+        raise ConfigError("jira must be a table")
+    if not isinstance(cfg["jira"]["enabled"], bool):
+        raise ConfigError("jira.enabled must be true or false")
+    if cfg["jira"]["enabled"]:
+        _validate_jira(cfg)
+    else:
+        # The sync never reads these with Jira off, but the Board page still
+        # indexes jira.site, so each holds an empty value.
+        cfg["jira"].setdefault("site", "")
+        cfg["jira"].setdefault("board_ids", [])
+        cfg["jira"].setdefault("fields", {})
     if not isinstance(cfg["github"]["fleet"], bool):
         raise ConfigError("github.fleet must be true or false")
     port = cfg["server"]["port"]
@@ -194,6 +197,21 @@ def load(path: "str | os.PathLike[str] | None" = None) -> dict[str, Any]:
     if problem is not None:
         raise ConfigError(problem)
     return cfg
+
+
+def _validate_jira(cfg: dict[str, Any]) -> None:
+    for dotted in REQUIRED_KEYS:
+        _lookup(cfg, dotted)
+    for dotted in ("jira.site", "jira.fields.sprint", "jira.fields.flagged"):
+        _non_empty_str(cfg, dotted)
+    _non_empty_str(cfg, "jira.acli_path")
+    # An empty list is valid and means "no sprint scope": the assigned and
+    # reported/watched scopes still work for someone who is on no board.
+    ids = cfg["jira"]["board_ids"]
+    if not isinstance(ids, list) or not all(
+        isinstance(i, int) and not isinstance(i, bool) for i in ids
+    ):
+        raise ConfigError("jira.board_ids must be a list of integer board ids")
 
 
 # The collector's table. A collector-only machine (lindev) has no Jira at all,

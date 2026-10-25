@@ -77,7 +77,7 @@ def url(port: int) -> str:
 
 @dataclass
 class Tools:
-    """Absolute paths install resolved; `gh` is empty when GitHub is off."""
+    """Absolute paths install resolved; `acli` or `gh` is empty when its side is off."""
 
     uv: str
     acli: str
@@ -87,17 +87,24 @@ class Tools:
 def resolve_tools(
     cfg: dict[str, Any], which: Callable[[str], "str | None"] = shutil.which
 ) -> Tools:
-    """uv, acli and gh as absolute paths; raises InstallError naming the gap."""
+    """uv, acli and gh as absolute paths; raises InstallError naming the gap.
+
+    acli is not looked up with `jira.enabled` false, nor gh with
+    `github.enabled` false.
+    """
     uv = which("uv") or os.environ.get("UV") or ""
     if not uv:
         raise InstallError("uv is not on PATH; install it, then rerun install")
-    acli_cfg = str(cfg["jira"]["acli_path"])
-    acli = acli_cfg if os.path.isabs(acli_cfg) else (which(acli_cfg) or "")
-    if not acli or not os.access(acli, os.X_OK):
-        raise InstallError(
-            f"jira.acli_path {acli_cfg!r} does not resolve to an executable;"
-            " install acli or point jira.acli_path at it (the fake acli works)"
-        )
+    acli = ""
+    if sync.jira_enabled(cfg):
+        acli_cfg = str(cfg["jira"]["acli_path"])
+        acli = acli_cfg if os.path.isabs(acli_cfg) else (which(acli_cfg) or "")
+        if not acli or not os.access(acli, os.X_OK):
+            raise InstallError(
+                f"jira.acli_path {acli_cfg!r} does not resolve to an executable;"
+                " install acli, point jira.acli_path at it, or set"
+                " jira.enabled = false"
+            )
     gh = ""
     if cfg["github"]["enabled"]:
         gh = which("gh") or ""
@@ -107,7 +114,7 @@ def resolve_tools(
             )
     return Tools(
         uv=stable_tool(os.path.abspath(uv)),
-        acli=stable_tool(os.path.abspath(acli)),
+        acli=stable_tool(os.path.abspath(acli)) if acli else "",
         gh=stable_tool(os.path.abspath(gh)) if gh else "",
     )
 
@@ -235,7 +242,11 @@ def plan(
         )
     )
     acli_cfg = str(cfg["jira"]["acli_path"])
-    if os.path.isabs(acli_cfg) and versioned_mise_path(acli_cfg):
+    if (
+        sync.jira_enabled(cfg)
+        and os.path.isabs(acli_cfg)
+        and versioned_mise_path(acli_cfg)
+    ):
         p.notes.append(
             f"WARNING: jira.acli_path is {acli_cfg}, inside a versioned mise install"
             ' that the next mise upgrade removes; set jira.acli_path = "acli" so'

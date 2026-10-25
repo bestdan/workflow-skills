@@ -155,6 +155,31 @@ class JiraSource:
         return jira_acli.parse_issue(raw, self.field_ids)
 
 
+class NoJiraSource:
+    """The Jira adapter for `jira.enabled = false`: every scope is empty.
+
+    It makes no acli call. The run still records its Jira-mode `sync_runs`
+    row, and only the GitHub step can make that row's outcome other than ok.
+    """
+
+    def active_sprints(self) -> list[dict[str, Any]]:
+        return []
+
+    def search(self, jql: str) -> list[str]:
+        return []
+
+    def view(self, keys: list[str]) -> jira_acli.ViewResult:
+        return jira_acli.ViewResult()
+
+    def parse(self, raw: dict[str, Any]) -> dict[str, Any]:
+        raise AssertionError("NoJiraSource views nothing, so it parses nothing")
+
+
+def jira_enabled(config: dict[str, Any]) -> bool:
+    """`jira.enabled`, which defaults to true."""
+    return bool(config["jira"].get("enabled", True))
+
+
 class GithubSource:
     """The GitHub adapter as the sync uses it: `prs` rows with CI and the join."""
 
@@ -254,7 +279,7 @@ def _finish_run(
 # --- fetch -------------------------------------------------------------------
 
 
-def _search_union(jira: JiraSource, queries: list[str]) -> list[str]:
+def _search_union(jira: "JiraSource | NoJiraSource", queries: list[str]) -> list[str]:
     keys: dict[str, None] = {}
     for jql in queries:
         for k in jira.search(jql):
@@ -275,7 +300,9 @@ def _key_queries(keys: "list[str]", clause: "str | None") -> list[str]:
     return out
 
 
-def _view(jira: JiraSource, keys: list[str], fetched: dict, failed: dict) -> None:
+def _view(
+    jira: "JiraSource | NoJiraSource", keys: list[str], fetched: dict, failed: dict
+) -> None:
     """View `keys` not yet fetched this run, parsing into `fetched`."""
     todo = [k for k in dict.fromkeys(keys) if k not in fetched]
     if not todo:
@@ -301,7 +328,7 @@ def fetch(
     config: dict[str, Any],
     conn: sqlite3.Connection,
     now: datetime,
-    jira: JiraSource,
+    jira: "JiraSource | NoJiraSource",
     github: "GithubSource | None",
 ) -> dict[str, Any]:
     """Everything the write phase needs. Reads the mirror; writes nothing."""
@@ -495,21 +522,23 @@ def run(
     db: sqlite3.Connection,
     now: datetime,
     *,
-    jira: "JiraSource | None" = None,
+    jira: "JiraSource | NoJiraSource | None" = None,
     github: "GithubSource | None" = None,
     clock: "Callable[[], datetime] | None" = None,
 ) -> dict[str, Any]:
     """Run one sync and return its `sync_runs` row as a dict.
 
     `jira` and `github` default to the real adapters; tests pass ones built on
-    fake runners. `github` is used only when `github.enabled` is true. `clock`
-    gives the finish time (default: wall clock).
+    fake runners. With `jira.enabled` false the default is NoJiraSource,
+    which makes no acli call. `github` is used only when `github.enabled` is
+    true. `clock` gives the finish time (default: wall clock).
     """
     if mode not in MODES:
         raise ValueError(f"unknown sync mode: {mode!r}")
     if mode == "incremental" and last_cursor_run(db) is None:
         mode = "full"
-    jira = jira or JiraSource(config)
+    if jira is None:
+        jira = JiraSource(config) if jira_enabled(config) else NoJiraSource()
     if config["github"]["enabled"]:
         github = github or GithubSource(config)
     else:
@@ -732,7 +761,7 @@ def run_all(
     db: sqlite3.Connection,
     now: datetime,
     *,
-    jira: "JiraSource | None" = None,
+    jira: "JiraSource | NoJiraSource | None" = None,
     github: "GithubSource | None" = None,
     fleet_runner: github_gh.Runner = github_gh.run,
     claude_runner: claude_remote.Runner = claude_remote.run,

@@ -295,6 +295,36 @@ class ConfigTests(TmpCase):
             config.load(p)
         self.assertIn("jira.fields.sprint", str(cm.exception))
 
+    def test_each_required_jira_key_is_named_when_enabled_is_unset(self):
+        for dotted, line in (
+            ("jira.site", 'site = "x.atlassian.net"\n'),
+            ("jira.board_ids", "board_ids = [1]\n"),
+            ("jira.fields.sprint", 'sprint = "customfield_1"\n'),
+            ("jira.fields.flagged", 'flagged = "customfield_2"\n'),
+        ):
+            p = self.write_config(MINIMAL.replace(line, ""))
+            with self.assertRaises(config.ConfigError, msg=dotted) as cm:
+                config.load(p)
+            self.assertIn(dotted, str(cm.exception))
+        self.assertIs(config.load(self.write_config(MINIMAL))["jira"]["enabled"], True)
+
+    def test_jira_disabled_needs_no_other_jira_key(self):
+        cfg = config.load(self.write_config("[jira]\nenabled = false\n"))
+        self.assertIs(cfg["jira"]["enabled"], False)
+        self.assertEqual(cfg["jira"]["site"], "")
+        self.assertEqual(cfg["jira"]["board_ids"], [])
+        # acli_path is not checked either: nothing will run it.
+        cfg = config.load(
+            self.write_config('[jira]\nenabled = false\nacli_path = ""\n')
+        )
+        self.assertIs(cfg["jira"]["enabled"], False)
+
+    def test_jira_enabled_must_be_a_bool(self):
+        p = self.write_config(MINIMAL.replace("[jira]\n", '[jira]\nenabled = "no"\n'))
+        with self.assertRaises(config.ConfigError) as cm:
+            config.load(p)
+        self.assertIn("jira.enabled", str(cm.exception))
+
     def test_missing_file_names_path(self):
         p = self.tmp / "nope.toml"
         with self.assertRaises(config.ConfigError) as cm:
