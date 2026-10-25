@@ -264,14 +264,13 @@ class AwayTests(FleetCase):
     def away(self, cfg=None):
         return fleet_views.render_away(self.conn, cfg or fleet_cfg(), NOW)
 
-    def test_lists_a_pr_merged_after_the_visit_and_omits_one_before(self):
+    def test_a_merged_or_closed_pr_is_never_listed(self):
         seed(self.conn)
-        landed = section(self.away(), "landed")
-        self.assertIn(pr_url(1135), keys(landed))
-        self.assertNotIn(pr_url(1100), keys(landed))
-        self.assertIn(pr_url(1101), keys(landed))
-        self.assertIn("closed without merging", landed)
-        self.assertLess(landed.index(pr_url(1101)), landed.index(pr_url(1135)))
+        page = self.away()
+        self.assertNotIn('data-section="landed"', page)
+        for n in (1135, 1101):  # merged and closed after the visit
+            self.assertNotIn(pr_url(n), page)
+        self.assertNotIn("closed without merging", page)
 
     def test_sessions_that_finished_and_what_newly_waits(self):
         seed(self.conn)
@@ -317,19 +316,22 @@ class AwayTests(FleetCase):
         seed(self.conn, last_visit=None)
         page = self.away()
         self.assertIn("No visit recorded yet", page)
-        self.assertIn(pr_url(1100), keys(section(page, "landed")))
+        self.assertIn(f"covers the last {github_fleet.CLOSED_WINDOW_DAYS} days", page)
+        # s-before finished a turn two days ago, inside the window.
+        self.assertIn("s-before", keys(section(page, "finished")))
+        self.assertNotIn(pr_url(1100), page)  # merged inside it, still not listed
 
     def test_a_design_focus_puts_its_repo_first(self):
         seed(self.conn)
         overlay.set_focus(self.conn, ("github", DESIGN_URL), NOW)
         page = self.away()
         self.assertLess(
-            page.index('data-section="focus"'), page.index('data-section="landed"')
+            page.index('data-section="focus"'), page.index('data-section="finished"')
         )
         focus = keys(section(page, "focus"))
-        self.assertIn(pr_url(1135), focus)
         self.assertIn(pr_url(1140), focus)
-        self.assertNotIn(pr_url(1135), keys(section(page, "landed")))
+        self.assertNotIn(pr_url(1140), keys(section(page, "waiting")))
+        self.assertNotIn(pr_url(1135), page)
         # s-done ran in dotfiles, outside the focus design's repo.
         self.assertEqual(keys(section(page, "finished")), ["s-done"])
 
@@ -546,7 +548,7 @@ class AwayRouteTests(server_harness.ServerCase):
         for _ in range(2):
             status, page = self.request("GET", "/away")
             self.assertEqual(status, 200)
-            self.assertIn(pr_url(1135), page)
+            self.assertIn(pr_url(1140), page)
             self.assertIn("aria-current=page>Since you were away", page)
         self.assertEqual(self.last_visit(), before)
 
@@ -564,7 +566,7 @@ class AwayRouteTests(server_harness.ServerCase):
         self.assertEqual(status, 200)
         self.assertEqual(self.last_visit(), "2026-10-23T21:00:00Z")
         page = self.request("GET", "/away")[1]
-        self.assertNotIn(pr_url(1135), section(page, "landed"))
+        self.assertNotIn(pr_url(1140), section(page, "waiting"))
 
     def test_header_shows_each_machines_age(self):
         page = self.request("GET", "/away")[1]

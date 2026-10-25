@@ -6,17 +6,18 @@ read SQLite only: the `source = 'github'` rows github_fleet.py writes, the
 deltas snapshot_adapter.py writes, and the overlay.
 
 SINCE YOU WERE AWAY (`/away`) lists what changed after the overlay's
-`last_visit`: my PRs merged or closed, sessions whose last turn ended, and what
-newly waits on me (a session's notification or a turn that ended in a question,
-labelled "asked (heuristic)", an awaiting PR, an issue needing a human, a newly
-proposed design). A turn that asked is never listed as finished. Loading the
-page records nothing. Only its "Mark as read" button does, through overlay's
-`visit` action with the page's render time, so a phone preview does not
-swallow the digest and an item that arrives while the page is open is still
-new next time. With no visit recorded,
-the page covers github_fleet's closed-PR window. When the overlay's focus item
-is a design, the items in that design's repo come first, in a section of their
-own: the weekend design block opens there.
+`last_visit`: sessions whose last turn ended, and what newly waits on me (a
+session's notification or a turn that ended in a question, labelled "asked
+(heuristic)", an awaiting PR, an issue needing a human, a newly proposed
+design). A turn that asked is never listed as finished. My merged or closed
+PRs are not listed: they would be noise here, and only Stale reads them, as
+evidence. Loading the page records nothing. Only its "Mark as read" button
+does, through overlay's `visit` action with the page's render time, so a phone
+preview does not swallow the digest and an item that arrives while the page is
+open is still new next time. With no visit recorded, the page covers the last
+github_fleet.CLOSED_WINDOW_DAYS days. When the overlay's focus item is a
+design, the items in that design's repo come first, in a section of their own:
+the weekend design block opens there.
 
 STALE (`/stale`, under Jira's own stale lane on a fleet instance) closes by
 evidence, never by age. Each row names its evidence and the action that
@@ -289,7 +290,7 @@ def _session_where(s: Session) -> str:
 
 @dataclass
 class AwayItem:
-    section: str  # landed | finished | waiting
+    section: str  # finished | waiting
     at: datetime
     repo: "str | None"  # bare repo name, for the design-focus section
     html: str
@@ -297,7 +298,6 @@ class AwayItem:
 
 
 SECTIONS = (
-    ("landed", "Landed", "No PR of yours merged or closed."),
     ("finished", "Sessions that finished", "No session finished a turn."),
     ("waiting", "Newly waiting on you", "Nothing new is waiting on you."),
 )
@@ -305,15 +305,6 @@ SECTIONS = (
 
 def away_items(f: Fleet, since: datetime, now: datetime) -> list[AwayItem]:
     out: list[AwayItem] = []
-    for pr in f.github.get("closed_pr", []):
-        at = score.parse_ts(pr.get("closed_at"))
-        if at is None or at <= since:
-            continue
-        what = "merged" if pr.get("merged") else "closed without merging"
-        card = _card(
-            _ref(pr), f"{what} {_e(ago(at, now))}", key=str(pr.get("url") or "")
-        )
-        out.append(AwayItem("landed", at, _name(pr.get("repo")), card, "closed_pr"))
     for s in f.sessions:
         if s.last <= since or s.last_event not in ("Stop", "Notification"):
             continue
@@ -401,11 +392,6 @@ def render_away(
         )
     else:
         note = f"Since your last visit, {ago(last, now)} ({ov.last_visit})."
-        if now - last > window:
-            note += (
-                f" Closed PRs are fetched for the last"
-                f" {github_fleet.CLOSED_WINDOW_DAYS} days only."
-            )
     parts = [
         '<div class="visit">'
         f'<span data-last-visit="{_e(ov.last_visit or "")}">{_e(note)}</span>'

@@ -360,11 +360,11 @@ class FleetViewTests(unittest.TestCase):
         every = fleet_fx.keys(
             fleet_views.render_away(self.conn, self.cfg, fleet_fx.NOW)
         )
-        for key in (fleet_fx.pr_url(1135), "s-done", issue, fleet_fx.DESIGN_URL):
+        for key in (fleet_fx.pr_url(1140), "s-done", issue, fleet_fx.DESIGN_URL):
             self.assertIn(key, every)
+        self.assertNotIn(fleet_fx.pr_url(1135), every)  # closed PRs are not listed
         prs = fleet_fx.keys(self.away("prs"))
-        self.assertIn(fleet_fx.pr_url(1135), prs)  # a closed PR is a PR
-        self.assertIn(fleet_fx.pr_url(1140), prs)
+        self.assertEqual(prs, [fleet_fx.pr_url(1140)])
         self.assertNotIn("s-done", prs)
         self.assertNotIn(issue, prs)
         self.assertEqual(
@@ -381,7 +381,7 @@ class FleetViewTests(unittest.TestCase):
             self.assertEqual(fleet_fx.DESIGN_URL in fleet_fx.keys(focus), shown, groups)
         # The section stays, with its repo's included items.
         focus = fleet_fx.section(self.away("prs"), "focus")
-        self.assertIn(fleet_fx.pr_url(1135), fleet_fx.keys(focus))
+        self.assertIn(fleet_fx.pr_url(1140), fleet_fx.keys(focus))
         unfiltered = fleet_views.render_away(self.conn, self.cfg, fleet_fx.NOW)
         self.assertIn(
             fleet_fx.DESIGN_URL, fleet_fx.keys(fleet_fx.section(unfiltered, "focus"))
