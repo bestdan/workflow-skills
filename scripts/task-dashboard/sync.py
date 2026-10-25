@@ -160,6 +160,8 @@ class NoJiraSource:
 
     It makes no acli call. The run still records its Jira-mode `sync_runs`
     row, and only the GitHub step can make that row's outcome other than ok.
+    Rows mirrored while Jira was on are dropped by the next reconcile or full
+    run, as intended; overlay rows are kept.
     """
 
     def active_sprints(self) -> list[dict[str, Any]]:

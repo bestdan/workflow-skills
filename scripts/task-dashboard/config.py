@@ -30,7 +30,7 @@ DEFAULTS: dict[str, Any] = {
     # `me` is my Jira display name, which the mirror stores people by. Empty
     # means "not set": the views then treat every in-scope issue as mine.
     # enabled: false runs the instance with no Jira: no acli call, no required
-    # jira.* key, and no Epics tab (nor Board or the Waiting tabs off a fleet
+    # jira.* key, and no Epics or Board tab (nor the Waiting tabs off a fleet
     # instance).
     "jira": {"enabled": True, "blocked_statuses": [], "acli_path": "acli", "me": ""},
     # design_repos: `owner/name` repos whose dev_docs/designs/ the fleet view
@@ -143,8 +143,8 @@ def load(path: "str | os.PathLike[str] | None" = None) -> dict[str, Any]:
     if cfg["jira"]["enabled"]:
         _validate_jira(cfg)
     else:
-        # The sync never reads these with Jira off, but the Board page still
-        # indexes jira.site, so each holds an empty value.
+        # The sync never reads these with Jira off, but the Board page, still
+        # reachable by URL, indexes jira.site, so each holds an empty value.
         cfg["jira"].setdefault("site", "")
         cfg["jira"].setdefault("board_ids", [])
         cfg["jira"].setdefault("fields", {})

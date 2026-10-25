@@ -711,11 +711,12 @@ class JiraDisabledTest(ServerCase):
             self.assertIn('href="/stale"', nav, path)
             self.assertNotIn("jira.me is not set", page, path)
 
-    def test_a_fleet_instance_drops_only_epics(self):
+    def test_a_fleet_instance_drops_epics_and_board(self):
         self.httpd.app.cfg["github"].update(enabled=True, fleet=True)
         nav = server.views.nav("/now", self.httpd.app.cfg)
-        self.assertNotIn('href="/epics"', nav)
-        for tab in self.JIRA_TABS[1:]:
+        for tab in self.JIRA_TABS[:2]:
+            self.assertNotIn(tab, nav)
+        for tab in self.JIRA_TABS[2:]:
             self.assertIn(tab, nav)
 
     def test_jira_enabled_keeps_every_tab_and_the_note(self):

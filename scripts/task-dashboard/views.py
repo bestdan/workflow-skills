@@ -51,8 +51,8 @@ TABS = (
 
 # Tabs left out with `jira.enabled` false: the first set on every instance, the
 # second only on an instance with no fleet.
-JIRA_ONLY = {"/epics"}
-JIRA_ONLY_OFF_FLEET = {"/board", "/waiting-on-me", "/waiting-on"}
+JIRA_ONLY = {"/epics", "/board"}
+JIRA_ONLY_OFF_FLEET = {"/waiting-on-me", "/waiting-on"}
 
 CSS = """
 nav { display:flex; flex-wrap:wrap; gap:4px; padding:8px 16px 0;
