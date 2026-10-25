@@ -30,7 +30,8 @@ DEFAULTS: dict[str, Any] = {
     # `me` is my Jira display name, which the mirror stores people by. Empty
     # means "not set": the views then treat every in-scope issue as mine.
     # enabled: false runs the instance with no Jira: no acli call, no required
-    # jira.* key, and no Jira-only tab.
+    # jira.* key, and no Epics tab (nor Board or the Waiting tabs off a fleet
+    # instance).
     "jira": {"enabled": True, "blocked_statuses": [], "acli_path": "acli", "me": ""},
     # design_repos: `owner/name` repos whose dev_docs/designs/ the fleet view
     # reads for `status: proposed` (github_fleet.py). Empty reads none.

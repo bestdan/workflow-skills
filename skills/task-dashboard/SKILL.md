@@ -51,7 +51,8 @@ flag again, and a reinstall keeps them too.
    later commands read back. Read that file if it exists. Its schema
    and every default are in the design's **Config** section; the required
    keys are `jira.site`, `jira.board_ids`, `jira.fields.sprint` and
-   `jira.fields.flagged`, unless `jira.enabled = false`. Never overwrite a key the file already sets.
+   `jira.fields.flagged`, unless `jira.enabled = false`. Never overwrite a
+   key the file already sets.
    - **Seed from the repo.** When the session is in a repo whose
      `dev_docs/tasks/.task-config.yml` (with any `.task-config.local.yml`
      overlaid) has a `jira:` block, read its `site` and `blocked_statuses` and
@@ -67,9 +68,11 @@ flag again, and a reinstall keeps them too.
      for someone who wants Jira only. `jira.me`, the user's Jira display name,
      is optional.
    - To run without Jira, set `jira.enabled = false` under `[jira]` and skip
-     the questions above. The four `jira.*` keys are then not required,
-     install does not look for acli, the sync makes no acli call, and the
-     Jira-only tabs leave the nav. To try the Jira views without a Jira login,
+     the Jira questions above (`board_ids` and the sprint and Flagged field
+     ids); still ask for `github.orgs`. The four `jira.*` keys are then not
+     required, install does not look for acli, and the sync makes no acli
+     call. Epics leaves the nav, and so do Board, Waiting on me and I'm
+     waiting on on an instance with no fleet. To try the Jira views without a Jira login,
      point `jira.acli_path` at the fake acli,
      `${CLAUDE_PLUGIN_ROOT}/scripts/task-dashboard/dev/fake-acli`, instead.
      That path is inside the versioned plugin directory and moves on a plugin
