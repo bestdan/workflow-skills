@@ -597,7 +597,7 @@ was `exit 0`, `terminal_reason: completed`. Neither tripped the circuit
 breaker, because the circuit breaker counts _delivery_ failures and neither of
 these was one. The run never asked "am I still a valid run?" — `doctor`
 (`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" doctor --dir <run worktree> --run-id <run_id>
-[--label <launchd label>] [--questions <path>] [--handler repo-pr|linear]
+[--label <launchd label>] [--questions <path>] [--handler repo-pr|linear|gh-issue]
 [--gh <path>] [--no-progress-limit N] [--context loop|resume]`) is that
 question, asked seven ways, run at the **top of every run-loop iteration**
 (`--context loop`, the default) and at the **top of `--resume`**
@@ -680,7 +680,14 @@ the request the doctor just filed.
    the same silent lie invariant 5 forbids for a failed `worktree remove`; a
    failed write is announced and left for the next pass, which re-reads the
    still-stale state. Skipped for a merged PR (labels no
-   longer matter). Other handlers stay behind `--handler` as future work.
+   longer matter). For `gh-issue` the signal is the **issue** on
+   `status:4_needs_review` with a non-draft PR whose `closingIssuesReferences`
+   include it (the issue number is the row's `task` cell). The repair readies a
+   draft PR **first** and writes the rung through `gh-issue-state.py` only once
+   that succeeded — a rung on a draft is the state the
+   [write order](#write-order) forbids. A PR that does not close its issue is
+   **reported only**: editing a PR body is not a safe doctor write. `linear` stays
+   behind `--handler` as future work.
 5. **No orphan worker worktrees from a dead dispatch** (G2). → **repair**, remove
    them — but only when removal is provably safe: the worktree is under
    `<run root>/workers/`; its `RUN.md` row is at a phase that is unambiguously

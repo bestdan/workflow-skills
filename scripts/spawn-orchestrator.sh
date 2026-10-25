@@ -38,7 +38,7 @@
 #       --exec-dir <dir> [--exec-dir <dir> ...] [--toolchain] \
 #       --out <file> [--template <file>]
 #   spawn-orchestrator.sh render-settings \
-#       --source <linear|plan> \
+#       --source <linear|plan|gh-issue> \
 #       [--coder <codex|devin|agy> ...] [--agy-host <host>] \
 #       [--mcp-host <host> ...] [--add-task-host <host> ...] [--npm] \
 #       --out <file>
@@ -299,7 +299,7 @@
 #
 #   spawn-orchestrator.sh doctor --dir <run worktree> --run-id <run_id> \
 #       [--label <launchd label>] [--questions <path>] \
-#       [--handler repo-pr|linear] [--gh <path>] [--no-progress-limit <n>] \
+#       [--handler repo-pr|linear|gh-issue] [--gh <path>] [--no-progress-limit <n>] \
 #       [--context loop|resume]
 #
 #   doctor  The run doctor (task 14, generalizing findings #22/#23): a cheap,
@@ -1145,8 +1145,8 @@ render_network_allowlist() {
     esac
   done
   case "$source" in
-    linear | plan) ;;
-    "") die "network allowlist requires --source <linear|plan>" ;;
+    linear | plan | gh-issue) ;;
+    "") die "network allowlist requires --source <linear|plan|gh-issue>" ;;
     *) die "unknown --source (fail-closed): $source" ;;
   esac
 
@@ -6313,7 +6313,7 @@ doctor() {
   done
   [ -n "$dir" ] && [ -n "$run_id" ] || die "doctor requires --dir and --run-id"
   case "$dir" in /*) ;; *) die "--dir must be absolute (fail-closed): $dir" ;; esac
-  case "$handler" in repo-pr | linear) ;; *) die "unknown --handler (fail-closed): $handler" ;; esac
+  case "$handler" in repo-pr | linear | gh-issue) ;; *) die "unknown --handler (fail-closed): $handler" ;; esac
   case "$context" in loop | resume) ;; *) die "unknown --context (fail-closed): $context" ;; esac
   case "$limit" in *[!0-9]* | "") die "--no-progress-limit must be a positive integer: $limit" ;; esac
   [ "$limit" -ge 1 ] || die "--no-progress-limit must be a positive integer"
@@ -6490,7 +6490,7 @@ doctor() {
   # "parked"/"repaired" wins over "ok" if ANY row needed it. A gh read that
   # could not be determined at all bumps i3_skipped instead — it is neither a
   # pass nor a violation, just unknown this pass (D2).
-  local i3_status="ok" i4_status="ok" i3_skipped=0
+  local i3_status="ok" i4_status="ok" i3_skipped=0 i4_skipped=0
   for ((i = 0; i < n_rows; i++)); do
     local task="${_RS_TASK[$i]}" phase="${_RS_PHASE[$i]}" pr="${_RS_PR[$i]}"
     case "$phase" in pr-open | in-review | iterating | handed-off) ;; *) continue ;; esac
@@ -6579,7 +6579,7 @@ doctor() {
     # Invariant 4: repo-pr's review signal is the PR itself — labeled
     # `task-loop` (not `task-claim`) and NOT a draft (deliver-task step 7: the
     # task file is deleted in the PR rather than flipped to needs_review, so
-    # the ready task-loop PR IS the review signal). Only repo-pr is wired;
+    # the ready task-loop PR IS the review signal). gh-issue is wired below;
     # a future `linear` handler's own signal is kept behind --handler.
     if [ "$phase" = "handed-off" ] && [ "$handler" = "repo-pr" ]; then
       # Each gh WRITE's exit code is checked, and `fixes` only grows on a write
@@ -6616,16 +6616,105 @@ doctor() {
           "yes — re-label/re-draft by hand if this was wrong"
       fi
     fi
+
+    # Invariant 4, gh-issue: the review signal is the ISSUE on
+    # `status:4_needs_review` with a ready (non-draft) PR that closes it. The
+    # run keeps the PR a draft until hand-off (adapters.md "gh-issue adapter"),
+    # so the repair readies the PR FIRST and writes the rung only once that
+    # succeeded — the same remote-before-tracker order set_needs_review uses; a
+    # rung on a draft PR is the state that order forbids. The rung goes through
+    # gh-issue-state.py, never a raw label edit (which silently creates unknown
+    # labels). A PR that does not close the issue is REPORTED only: editing a
+    # PR body is not a safe doctor write. The issue number is the task cell's.
+    if [ "$phase" = "handed-off" ] && [ "$handler" = "gh-issue" ]; then
+      local issue_num issue_labels issue_rc draft fixes="" closes closes_rc
+      issue_num="$(_pr_number "$task")"
+      if [ -z "$issue_num" ]; then
+        i4_skipped=1
+        skipped_notes+=("I4: $task (no issue number in the task cell)")
+        echo "spawn-orchestrator: doctor I4: $task — task cell names no issue number, skipping (undetermined)"
+        continue
+      fi
+      issue_labels="$("$gh_bin" issue view "$issue_num" --json labels --jq '[.labels[].name] | join(",")' 2>/dev/null)"
+      issue_rc=$?
+      closes="$("$gh_bin" pr view "$pr_num" --json closingIssuesReferences --jq '[.closingIssuesReferences[].number] | join(",")' 2>/dev/null)"
+      closes_rc=$?
+      if [ "$issue_rc" -ne 0 ] || [ "$closes_rc" -ne 0 ]; then
+        i4_skipped=1
+        skipped_notes+=("I4: $task (gh unreadable)")
+        echo "spawn-orchestrator: doctor I4: $task — gh unreadable for issue #$issue_num / PR #$pr_num, skipping (undetermined)"
+        continue
+      fi
+      case ",$closes," in
+        *",$issue_num,"*) ;;
+        *)
+          i4_skipped=1
+          skipped_notes+=("I4: $task (PR #$pr_num does not close #$issue_num)")
+          report_bullets+=("- **I4 reported — $task**: PR #$pr_num does not close issue #$issue_num (no \`Closes #$issue_num\` link) — merging it will not complete the issue. Not repaired: editing a PR body is not a safe doctor write.")
+          ;;
+      esac
+      draft="$(_doctor_pr_draft "$gh_bin" "$pr_num")"
+      if [ "$draft" = "true" ]; then
+        if "$gh_bin" pr ready "$pr_num" >/dev/null 2>&1; then
+          fixes="marked ready (was draft)"
+          draft=false
+        else
+          echo "spawn-orchestrator: doctor I4: $task — \`gh pr ready\` FAILED for PR #$pr_num (PR left as a draft, rung not written, not reported as a repair)"
+        fi
+      fi
+      case ",$issue_labels," in
+        *,status:4_needs_review,*) ;;
+        *)
+          if [ "$draft" = "true" ]; then
+            : # never write the rung while the PR is still a draft
+          else
+            # Carry the issue's other managed rungs; replace only `status:`.
+            local keep="" l rung_set shim
+            local -a issue_label_list=()
+            IFS=',' read -ra issue_label_list <<<"$issue_labels"
+            for l in ${issue_label_list[@]+"${issue_label_list[@]}"}; do
+              case "$l" in auto:* | prio:* | est:*) keep="$keep,$l" ;; esac
+            done
+            rung_set="status:4_needs_review$keep"
+            # gh-issue-state.py runs `gh` from PATH; a one-entry shim makes it
+            # the same binary every other doctor read used (mockable via --gh).
+            shim="$(mktemp -d "${TMPDIR:-/tmp}/doctor-gh.XXXXXX")" || die "mktemp failed"
+            ln -s "$gh_bin" "$shim/gh"
+            local repo
+            repo="$("$gh_bin" repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)"
+            if [ -n "$repo" ] && PATH="$shim:$PATH" python3 "$ROOT/commands/handlers/assets/gh-issue-state.py" \
+              --repo "$repo" --issue "$issue_num" --labels "$rung_set" --apply >/dev/null 2>&1; then
+              fixes="${fixes:+$fixes, }issue #$issue_num -> status:4_needs_review"
+            else
+              echo "spawn-orchestrator: doctor I4: $task — gh-issue-state.py FAILED for issue #$issue_num (rung left as-is, not reported as a repair)"
+            fi
+            rm -rf "$shim"
+          fi
+          ;;
+      esac
+      if [ -n "$fixes" ]; then
+        i4_status="repaired"
+        repaired_notes+=("I4: $task PR #$pr_num")
+        report_bullets+=("- **I4 repaired — $task** (PR #$pr_num): $fixes — a G6/G7 crash gap left the gh-issue review signal stale.")
+        _doctor_questions_entry "$questions" "$task — PR #$pr_num missing its gh-issue review signal" \
+          "apply the missing ready/rung write | leave it as-is" "applied ($fixes)" \
+          "adapters.md gh-issue set_needs_review: a ready PR plus the issue on status:4_needs_review IS the review signal; a G6/G7 crash can leave the PR a draft or the issue on status:3_started" \
+          "yes — re-draft the PR or move the rung back with gh-issue-state.py if this was wrong"
+      fi
+    fi
   done
   case "$i3_status" in
     ok) n_ok=$((n_ok + 1)) ;;
     parked) n_parked=$((n_parked + 1)) ;;
   esac
   [ "$i3_skipped" -eq 1 ] && n_skipped=$((n_skipped + 1))
+  # An undetermined or report-only I4 row (gh-issue) must never read as `ok`.
+  [ "$i4_skipped" -eq 1 ] && [ "$i4_status" = ok ] && i4_status="skipped"
   case "$i4_status" in
     ok) n_ok=$((n_ok + 1)) ;;
     repaired) n_repaired=$((n_repaired + 1)) ;;
   esac
+  [ "$i4_skipped" -eq 1 ] && n_skipped=$((n_skipped + 1))
 
   # --- Invariant 5: no orphan worker worktrees from a dead dispatch (G2) ----
   # Conservative: prune ONLY when EVERY condition holds (D4). `pending` is

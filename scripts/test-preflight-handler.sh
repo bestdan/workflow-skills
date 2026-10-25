@@ -229,6 +229,21 @@ else
     "PREFLIGHT HANDLER_SOURCE: $LINKED/dev_docs/tasks/.task-config.yml" "$out5"
 fi
 
+# --- Case 6: --source accepts gh-issue, and still fails closed on the unknown -
+src_run() { # src_run <source>
+  PATH="$FIXTURE_PATH" \
+    PREFLIGHT_LAUNCHCTL="$BASE/no-such-launchctl" \
+    PREFLIGHT_TCC_LOCATIONS="$BASE/elsewhere" \
+    bash "$SCRIPT" --source "$1" --base main --run-root "$RUN_NONE" 2>&1
+}
+out6="$(src_run gh-issue)"
+assert_not_contains "--source gh-issue: accepted" "unknown --source" "$out6"
+assert_contains "--source gh-issue: runs through to a verdict" "PREFLIGHT VERDICT:" "$out6"
+out7="$(src_run bogus)"
+rc7=$?
+assert_contains "--source bogus: still fails closed" "unknown --source (fail-closed): bogus" "$out7"
+[ "$rc7" -ne 0 ] && ok "--source bogus: exits non-zero" || bad "--source bogus: exits non-zero"
+
 echo
 echo "test-preflight-handler: $pass_count passed, $fail_count failed"
 exit "$fail"
