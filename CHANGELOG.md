@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.127.0] - 2026-10-25
+
+### Features
+
+- title-first fleet cards, and no repeated fallback on Needs you [#1168] (#1175) (690b1f1)
+
 ## [2.126.0] - 2026-10-25
 
 ### Features
