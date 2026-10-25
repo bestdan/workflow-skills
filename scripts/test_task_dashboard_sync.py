@@ -39,6 +39,7 @@ import config  # type: ignore[import-not-found]  # noqa: E402
 import dashboard  # type: ignore[import-not-found]  # noqa: E402
 import db  # type: ignore[import-not-found]  # noqa: E402
 import jira_acli  # type: ignore[import-not-found]  # noqa: E402
+import server  # type: ignore[import-not-found]  # noqa: E402
 import sync  # type: ignore[import-not-found]  # noqa: E402
 
 NOW = datetime(2026, 10, 23, 12, 0, 0, tzinfo=timezone.utc)
@@ -982,6 +983,70 @@ class FakeAcliTests(unittest.TestCase):
         r = self.sync("full")
         self.assertEqual(r.returncode, 2)
         self.assertIn("jira.site", r.stderr)
+
+
+class JiraDisabledTests(SyncCase):
+    """`jira.enabled = false`: no acli call, and a Jira run GitHub alone decides."""
+
+    def load(self, extra=""):
+        p = self.tmp / "config.toml"
+        p.write_text(
+            f'[jira]\nenabled = false\nacli_path = "{FAKE_ACLI}"\n'
+            '[github]\nenabled = false\norgs = ["acme"]\n' + extra
+        )
+        return config.load(p)
+
+    def test_run_all_records_an_ok_jira_run_without_a_jira_source(self):
+        cfg = self.load()
+        with mock.patch.object(
+            sync.JiraSource, "__init__", side_effect=AssertionError("JiraSource")
+        ):
+            rows = sync.run_all("incremental", cfg, self.conn, NOW, clock=lambda: NOW)
+        self.assertEqual([(r["kind"], r["outcome"]) for r in rows], [("full", "ok")])
+        self.assertEqual(json.loads(rows[0]["counts"])["searched"], 0)
+        self.assertEqual(self.keys(), [])
+        health = server.sync_health(self.conn, 300, NOW)
+        self.assertFalse(health["stale"])
+        self.assertEqual(health["last_run"]["outcome"], "ok")
+
+    def test_the_github_step_still_runs_and_decides_the_outcome(self):
+        cfg = self.load()
+        cfg["github"]["enabled"] = True
+        gh = FakeGh([pr_node(5, "Fix the thing", "fix-thing")])
+        row = sync.run(
+            "full", cfg, self.conn, NOW,
+            github=sync.GithubSource(cfg, runner=gh), clock=lambda: NOW,
+        )  # fmt: skip
+        self.assertEqual(row["outcome"], "ok")
+        self.assertEqual(
+            self.conn.execute("SELECT url, issue_key FROM prs").fetchall(),
+            [("https://github.com/acme/app/pull/5", None)],
+        )
+        gh.error = "HTTP 401: Bad credentials"
+        row = sync.run(
+            "full", cfg, self.conn, NOW,
+            github=sync.GithubSource(cfg, runner=gh), clock=lambda: NOW,
+        )  # fmt: skip
+        self.assertEqual(row["outcome"], "auth_failed")
+        self.assertIn("gh auth login", row["error"])
+
+    def test_dashboard_sync_never_runs_acli(self):
+        mark = self.tmp / "acli-ran"
+        acli = self.tmp / "acli"
+        acli.write_text(f'#!/bin/sh\necho "$@" >> "{mark}"\necho "[]"\n')
+        acli.chmod(0o755)
+        p = self.tmp / "config.toml"
+        p.write_text(
+            f'[jira]\nenabled = false\nacli_path = "{acli}"\n[github]\nenabled = false\n'
+        )
+        for mode in ("full", "incremental", "reconcile"):
+            r = subprocess.run(
+                [sys.executable, str(PKG / "dashboard.py"), "sync", "--mode", mode,
+                 "--db", str(self.tmp / "e2e.db"), "--config", str(p)],
+                capture_output=True, text=True, timeout=120,
+            )  # fmt: skip
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse(mark.exists(), mark.read_text() if mark.exists() else "")
 
 
 def run_row(kind, outcome, error=None, failed=()):

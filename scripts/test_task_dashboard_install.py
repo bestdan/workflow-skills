@@ -207,6 +207,20 @@ class ResolveToolsTest(unittest.TestCase):
         tools = si.resolve_tools(self.cfg(acli=fake, gh=False), {"uv": "/bin/sh"}.get)
         self.assertEqual(tools.gh, "")
 
+    def test_acli_is_not_looked_up_when_jira_is_off(self):
+        cfg = self.cfg(acli="no-such-acli", gh=False)
+        cfg["jira"]["enabled"] = False
+        looked: list[str] = []
+
+        def which(name):
+            looked.append(name)
+            return "/bin/sh" if name == "uv" else None
+
+        tools = si.resolve_tools(cfg, which)
+        self.assertEqual(tools.acli, "")
+        self.assertEqual(looked, ["uv"])
+        self.assertEqual(si.search_path(tools).split(":")[0], "/bin")
+
     def test_a_versioned_mise_install_becomes_its_shim(self):
         with tempfile.TemporaryDirectory() as d:
             mise = Path(d) / "mise"
@@ -1014,8 +1028,8 @@ class InstalledPathsTest(unittest.TestCase):
         self.assertEqual(st.url, "http://127.0.0.1:9004/")
         self.assertIn(f"no DB at {self.db_file}", si.doctor_line(st))
 
-    def install_cli(self, path_dirs):
-        """`dashboard.main(["install"])` with PATH limited to `path_dirs`."""
+    def install_cli(self, path_dirs, *argv):
+        """`dashboard.main(["install", *argv])` with PATH limited to `path_dirs`."""
         err: list[str] = []
         env = {"PATH": os.pathsep.join(str(d) for d in path_dirs)}
         with (
@@ -1026,8 +1040,23 @@ class InstalledPathsTest(unittest.TestCase):
             ),
         ):
             os.environ.pop("UV", None)
-            rc = dashboard.main(["install"])
+            rc = dashboard.main(["install", *argv])
         return rc, "\n".join(err)
+
+    def test_a_jira_disabled_config_installs_with_no_acli(self):
+        self.cfg_file.write_text(
+            "[jira]\nenabled = false\n[github]\nenabled = false\n"
+            "[server]\nport = 9004\n"
+        )
+        bindir = self.home / "uv-only"
+        bindir.mkdir()
+        (bindir / "uv").write_text("#!/bin/sh\n")
+        (bindir / "uv").chmod(0o755)
+        rc, out = self.install_cli([bindir], "--dry-run")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("http://127.0.0.1:9004/", out)
+        self.assertNotIn("acli", out)
+        self.assertFalse(si.launcher_path(self.home).exists())
 
     def test_collector_only_refuses_server_only_flags(self):
         for flags in (["--db", "x.db"], ["--plugins-json", "p.json"]):

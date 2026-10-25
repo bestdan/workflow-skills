@@ -33,6 +33,7 @@ import include
 import needs
 import overlay
 import score
+import sync
 
 _e = html.escape
 
@@ -47,6 +48,11 @@ TABS = (
     ("/epics", "Epics"),
     ("/health", "Health"),
 )
+
+# Tabs left out with `jira.enabled` false: the first set on every instance, the
+# second only on an instance with no fleet.
+JIRA_ONLY = {"/epics", "/board"}
+JIRA_ONLY_OFF_FLEET = {"/waiting-on-me", "/waiting-on"}
 
 CSS = """
 nav { display:flex; flex-wrap:wrap; gap:4px; padding:8px 16px 0;
@@ -105,12 +111,22 @@ def nav(
     inc: "include.Include | None" = None,
     query: "dict[str, list[str]] | None" = None,
 ) -> str:
-    """The tab bar; a fleet-only tab is left out of an instance with no fleet.
+    """The tab bar, less the tabs this instance has no data for.
 
-    With `inc`, the view's include switches follow it (include.py); `query` is
-    the request's own, so a switch keeps its other parameters.
+    A fleet-only tab is left out of an instance with no fleet, and a Jira-only
+    one out of an instance with `jira.enabled` false. With `inc`, the view's
+    include switches follow it (include.py); `query` is the request's own, so a
+    switch keeps its other parameters.
     """
-    hidden = set() if cfg is None or fleet_views.enabled(cfg) else fleet_views.ONLY
+    hidden: set[str] = set()
+    if cfg is not None:
+        fleet = fleet_views.enabled(cfg)
+        if not fleet:
+            hidden.update(fleet_views.ONLY)
+        if not sync.jira_enabled(cfg):
+            hidden.update(JIRA_ONLY)
+            if not fleet:
+                hidden.update(JIRA_ONLY_OFF_FLEET)
     links = "".join(
         f'<a href="{href}"{" aria-current=page" if href == active else ""}>{_e(name)}</a>'
         for href, name in TABS
@@ -568,7 +584,7 @@ def _lane(
 
 
 def _me_note(m: Mirror) -> str:
-    if m.me:
+    if m.me or not sync.jira_enabled(m.cfg):
         return ""
     return (
         '<p class="note">jira.me is not set, so every in-scope issue counts as'

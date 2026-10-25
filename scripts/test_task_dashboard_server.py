@@ -681,6 +681,52 @@ class BoardTest(ServerCase):
         self.assertEqual(self.request("POST", "/x")[0], 404)
 
 
+class JiraDisabledTest(ServerCase):
+    """`jira.enabled = false`: no Jira-only tab and no `jira.me` note."""
+
+    JIRA_TABS = ('href="/epics"', 'href="/board"', 'href="/waiting-on-me"',
+                 'href="/waiting-on"')  # fmt: skip
+
+    def setUp(self):
+        super().setUp()
+        p = Path(self.tmp.name) / "config.toml"
+        p.write_text("[jira]\nenabled = false\n[github]\nenabled = false\n")
+        self.httpd.app.cfg = config.load(p)
+
+    def pages(self):
+        paths = [*server.views.ROUTES, "/board", "/health"]
+        out = {}
+        for path in paths:
+            status, page = self.request("GET", path)
+            self.assertEqual(status, 200, path)
+            out[path] = page
+        return out
+
+    def test_no_jira_tab_and_no_me_note_on_any_page(self):
+        for path, page in self.pages().items():
+            nav = page[page.index("<nav>") : page.index("</nav>")]
+            for tab in self.JIRA_TABS:
+                self.assertNotIn(tab, nav, path)
+            self.assertIn('href="/now"', nav, path)
+            self.assertIn('href="/stale"', nav, path)
+            self.assertNotIn("jira.me is not set", page, path)
+
+    def test_a_fleet_instance_drops_epics_and_board(self):
+        self.httpd.app.cfg["github"].update(enabled=True, fleet=True)
+        nav = server.views.nav("/now", self.httpd.app.cfg)
+        for tab in self.JIRA_TABS[:2]:
+            self.assertNotIn(tab, nav)
+        for tab in self.JIRA_TABS[2:]:
+            self.assertIn(tab, nav)
+
+    def test_jira_enabled_keeps_every_tab_and_the_note(self):
+        nav = server.views.nav("/now", self.cfg)
+        for tab in self.JIRA_TABS:
+            self.assertIn(tab, nav)
+        self.httpd.app.cfg = self.cfg
+        self.assertIn("jira.me is not set", self.request("GET", "/now")[1])
+
+
 class ConfigTest(unittest.TestCase):
     def test_unreadable_config_is_a_config_error(self):
         with tempfile.TemporaryDirectory() as d:
