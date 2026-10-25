@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.124.0] - 2026-10-25
+
+### Features
+
+- drop the Landed section from Since you were away [#1165] (#1166) (3699792)
+
 ## [2.123.0] - 2026-10-24
 
 ### Features
