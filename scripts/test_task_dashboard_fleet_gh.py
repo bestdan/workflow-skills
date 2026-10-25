@@ -393,10 +393,69 @@ class ReviewQueueTests(unittest.TestCase):
             [f"repos/{REPO}/milestones/13", f"repos/{REPO}/milestones/14"],
         )
 
-    def test_no_closing_issue_misses_milestone(self):
-        node = pr_node(url="u/pull/5", number=5, closingIssuesReferences={"nodes": []})
-        rows, _, _ = self.run_queue([node], approved={13, 14})
+    def outside_milestones(self):
+        """Two PRs the milestone rule skips: no closing issue, and one whose
+        closing issue is in no milestone."""
+        bare = pr_node(url="u/pull/5", number=5, closingIssuesReferences={"nodes": []})
+        unfiled = pr_node(
+            url="u/pull/6",
+            number=6,
+            closingIssuesReferences={
+                "nodes": [
+                    {
+                        "number": 7,
+                        "repository": {"nameWithOwner": REPO},
+                        "milestone": None,
+                    }
+                ]
+            },
+        )
+        return [bare, unfiled]
+
+    def test_pr_outside_a_milestone_skips_the_rule(self):
+        nodes = self.outside_milestones()
+        stamps = {n["number"]: [stamp(n["headRefOid"])] for n in nodes}
+        rows, failed, runner = self.run_queue(nodes, comments=stamps)
+        self.assertEqual(failed, [])
+        self.assertEqual(self.queued(rows), [5, 6])
+        for row in rows:
+            self.assertIsNone(row["milestone_approved"])
+            self.assertTrue(row["stamped"])
+        self.assertFalse(any("/milestones/" in c[2] for c in runner.calls))
+
+    def test_skipped_rule_still_checks_the_stamp(self):
+        rows, _, runner = self.run_queue(self.outside_milestones())
+        self.assertEqual([r["queue_misses"] for r in rows], [["co_review"]] * 2)
+        self.assertEqual(sum(1 for c in runner.calls if arg(c, "owner")), 2)
+
+    def test_skipped_rule_still_needs_ci(self):
+        failing = (1, "", "HTTP 502")
+        rows, _, _ = self.run_queue(self.outside_milestones(), ci=failing)
+        self.assertEqual([r["queue_misses"] for r in rows], [["ci"]] * 2)
+        self.assertTrue(all(r["milestone_approved"] is None for r in rows))
+
+    def test_one_milestoned_issue_brings_the_rule_back(self):
+        nodes = review_page()["data"]["search"]["nodes"]
+        milestoned = next(
+            i
+            for n in nodes
+            for i in n["closingIssuesReferences"]["nodes"]
+            if i.get("milestone")
+        )
+        refs = self.outside_milestones()[1]["closingIssuesReferences"]["nodes"]
+        node = pr_node(
+            url="u/pull/7",
+            number=7,
+            closingIssuesReferences={"nodes": refs + [milestoned]},
+        )
+        good = {7: [stamp(node["headRefOid"])]}
+        rows, _, _ = self.run_queue([node], comments=good)
         self.assertEqual(rows[0]["queue_misses"], ["milestone"])
+        self.assertIs(rows[0]["milestone_approved"], False)
+        number = milestoned["milestone"]["number"]
+        rows, _, _ = self.run_queue([node], approved={number}, comments=good)
+        self.assertTrue(rows[0]["in_queue"])
+        self.assertIs(rows[0]["milestone_approved"], True)
 
     def test_draft_excluded(self):
         rows, _, _ = self.run_queue(
