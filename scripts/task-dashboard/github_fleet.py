@@ -382,7 +382,9 @@ def review_queue(
     """Every awaiting PR (rule 1), each marked `in_queue` by rules 2-4.
 
     Rule 4 is skipped, with `milestone_approved` None, for a PR that closes no
-    issue in a milestone. Also returns the URLs where a CI, milestone or comments lookup failed.
+    issue in a milestone.
+
+    Also returns the URLs where a CI, milestone or comments lookup failed.
     A failed lookup counts as a miss of its rule (a None `ci_state`, a
     `milestone` miss, a `co_review` miss), so one flaky call does not fail
     the run. An AuthError still raises.
