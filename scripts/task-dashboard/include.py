@@ -19,6 +19,21 @@ WHICH GROUPS A VIEW SHOWS is decided in this order, first match wins:
 3. config `[views.<view>] include = [...]`;
 4. every group, which is what a view showed before filters existed.
 
+WHAT A SWITCH CLICK ASKS FOR (switches() below). The row is an "All" switch
+and then one switch per group:
+
+- a plain click on a group shows only that group; clicking the group that is
+  already the only one shown goes back to every group;
+- a shift-click on a group adds it to the selection, or removes it, so several
+  groups can show at once (cmd/ctrl-click is left to open a new tab);
+- "All" shows every group, and reads as on when every group is included.
+
+Each switch's `href` and `data-include` are its plain-click target, so a page
+with no script still gets the solo behaviour; its `data-toggle` and
+`data-toggle-href` are the shift-click target, which the page's script picks
+when the shift key is held. Either way the click is remembered like any other
+choice, so only what a click asks for differs, not the precedence above.
+
 An unknown group name in the URL is an IncludeError, which the server turns
 into a 400 naming the valid groups; config.load turns one into a ConfigError.
 
@@ -188,15 +203,18 @@ CSS = """
   color:var(--muted); text-decoration:none; }
 .include a[aria-checked=true] { color:var(--fg); background:var(--card);
   border-color:var(--accent); font-weight:600; }
+.include .hint { margin-left:4px; }
 .lane[data-filtered] .empty { font-style:italic; }
 /* The header's text filter hides an empty lane's text; a switched-off lane
    keeps saying why it is empty. */
 .lane.filtered-empty .empty.switched-off { display:block; }
 """
 
-# A switch is a link to the toggled URL, so it works with no script at all.
-# With one, the click first remembers the choice through the overlay POST
-# (Host, Origin and token checked like every other write), then follows it.
+# A switch is a link to its plain-click URL, so it works with no script at all.
+# With one, a shift-click swaps in the switch's shift-click target, and either
+# click first remembers the choice through the overlay POST (Host, Origin and
+# token checked like every other write), then follows it. Which target each
+# click means is computed in switches(), so this only picks between the two.
 JS = """
 (function () {
   var row = document.querySelector('.include[data-view]');
@@ -205,11 +223,15 @@ JS = """
   row.addEventListener('click', function (ev) {
     var a = ev.target.closest('a[data-include]');
     if (!a) return;
+    if (ev.metaKey || ev.ctrlKey) return;
     ev.preventDefault();
+    var shift = ev.shiftKey && a.dataset.toggle !== undefined;
+    var value = shift ? a.dataset.toggle : a.dataset.include;
+    var url = shift ? a.dataset.toggleHref : a.href;
     var body = 'token=' + encodeURIComponent(token) + '&view=' +
       encodeURIComponent(row.dataset.view) + '&include=' +
-      encodeURIComponent(a.dataset.include);
-    function go() { location.href = a.href; }
+      encodeURIComponent(value);
+    function go() { location.href = url; }
     fetch('/overlay/include', { method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body
     }).then(function (r) {
@@ -228,22 +250,45 @@ def href(path: str, query: "dict[str, list[str]]", groups: Iterable[str]) -> str
     return f"{path}?{urlencode(pairs, safe=',')}"
 
 
+def solo(inc: Include, group: str) -> frozenset[str]:
+    """What a plain click on `group` shows: it alone, or every group when it
+    is already the only one shown."""
+    return ALL if inc.groups == {group} else frozenset({group})
+
+
+def toggle(inc: Include, group: str) -> frozenset[str]:
+    """What a shift-click on `group` shows: the selection with it flipped."""
+    return inc.groups - {group} if inc.has(group) else inc.groups | {group}
+
+
+HINT = "Click shows one group; shift-click adds or removes one."
+
+
 def switches(inc: Include, path: str, query: "dict[str, list[str]]") -> str:
-    """The row of on/off switches that goes under the nav."""
-    links = []
+    """The row of switches that goes under the nav: All, then each group."""
+
+    def value(groups: Iterable[str]) -> str:
+        return _e(",".join(canonical(groups)))
+
+    links = [
+        f'<a role="switch" aria-checked="{"true" if inc.everything else "false"}"'
+        f' data-all="" data-include="{value(ALL)}"'
+        f' href="{_e(href(path, query, ALL))}">All</a>'
+    ]
     for g in GROUPS:
-        on = inc.has(g)
-        toggled = inc.groups - {g} if on else inc.groups | {g}
-        value = ",".join(canonical(toggled))
+        plain, shift = solo(inc, g), toggle(inc, g)
         links.append(
-            f'<a role="switch" aria-checked="{"true" if on else "false"}"'
-            f' data-group="{g}" data-include="{_e(value)}"'
-            f' href="{_e(href(path, query, toggled))}">{_e(LABELS[g])}</a>'
+            f'<a role="switch" aria-checked="{"true" if inc.has(g) else "false"}"'
+            f' data-group="{g}" data-include="{value(plain)}"'
+            f' href="{_e(href(path, query, plain))}"'
+            f' data-toggle="{value(shift)}"'
+            f' data-toggle-href="{_e(href(path, query, shift))}">{_e(LABELS[g])}</a>'
         )
     return (
         f'<div class="include" data-view="{_e(inc.view)}"'
-        f' data-include="{_e(",".join(canonical(inc.groups)))}"'
-        f' data-origin="{_e(inc.origin)}">Include: {"".join(links)}</div>'
+        f' data-include="{value(inc.groups)}"'
+        f' data-origin="{_e(inc.origin)}">Include: {"".join(links)}'
+        f'<span class="hint">{_e(HINT)}</span></div>'
     )
 
 

@@ -148,6 +148,91 @@ class ConfigTests(unittest.TestCase):
             self.assertIn(message, str(cm.exception), text)
 
 
+def switch_attrs(row):
+    """Each switch's attributes, keyed by its group (`all` for the All switch)."""
+    out = {}
+    for attrs in re.findall(r'<a role="switch"([^>]*)>', row):
+        pairs = dict(re.findall(r'([\w-]+)="([^"]*)"', attrs))
+        out[pairs.get("data-group", "all" if "data-all" in pairs else "?")] = pairs
+    return out
+
+
+class SwitchTests(unittest.TestCase):
+    """What each switch's plain click and shift-click ask for."""
+
+    def row(self, *groups, query=None):
+        return switch_attrs(
+            include.switches(inc(*groups, view="now"), "/now", query or {})
+        )
+
+    def test_a_plain_click_with_everything_shown_shows_that_group_alone(self):
+        sw = self.row(*include.GROUPS)
+        self.assertEqual(sw["prs"]["data-include"], "prs")
+        self.assertEqual(sw["prs"]["href"], "/now?include=prs")
+        self.assertEqual(sw["tasks"]["data-include"], "tasks")
+
+    def test_clicking_the_only_group_shown_goes_back_to_every_group(self):
+        sw = self.row("prs")
+        self.assertEqual(sw["prs"]["data-include"], "tasks,prs,sessions,other")
+        self.assertEqual(sw["prs"]["href"], "/now?include=tasks,prs,sessions,other")
+        # Another group still goes solo.
+        self.assertEqual(sw["tasks"]["data-include"], "tasks")
+        # With two shown, clicking one of them goes solo, not back to all.
+        self.assertEqual(self.row("tasks", "prs")["prs"]["data-include"], "prs")
+        # With none shown, a click shows that group.
+        self.assertEqual(self.row()["sessions"]["data-include"], "sessions")
+
+    def test_all_shows_every_group_and_is_on_only_when_every_group_is(self):
+        for groups, on in (
+            ((), "false"),
+            (("prs",), "false"),
+            (include.GROUPS, "true"),
+        ):
+            sw = self.row(*groups)["all"]
+            self.assertEqual(sw["aria-checked"], on, groups)
+            self.assertEqual(sw["data-include"], "tasks,prs,sessions,other", groups)
+            self.assertEqual(sw["href"], "/now?include=tasks,prs,sessions,other")
+            # Nothing to add or remove: a shift-click on All is a plain click.
+            self.assertNotIn("data-toggle", sw)
+        # All comes first, ahead of the groups.
+        self.assertEqual(list(self.row("prs")), ["all", *include.GROUPS])
+
+    def test_a_shift_click_adds_or_removes_a_group(self):
+        sw = self.row("prs")
+        self.assertEqual(sw["tasks"]["data-toggle"], "tasks,prs")
+        self.assertEqual(sw["tasks"]["data-toggle-href"], "/now?include=tasks,prs")
+        self.assertEqual(sw["prs"]["data-toggle"], "")
+        sw = self.row("tasks", "prs")
+        self.assertEqual(sw["tasks"]["data-toggle"], "prs")
+        # On/off still says whether a group is included.
+        self.assertEqual(sw["tasks"]["aria-checked"], "true")
+        self.assertEqual(sw["sessions"]["aria-checked"], "false")
+
+    def test_other_parameters_ride_along_on_both_targets(self):
+        sw = self.row("prs", query={"days": ["14"], "include": ["prs"]})
+        self.assertEqual(sw["tasks"]["href"], "/now?days=14&amp;include=tasks")
+        self.assertEqual(
+            sw["tasks"]["data-toggle-href"], "/now?days=14&amp;include=tasks,prs"
+        )
+
+    def test_the_row_says_what_a_click_does(self):
+        row = include.switches(inc("prs", view="now"), "/now", {})
+        self.assertIn(include.HINT, row)
+        self.assertIn("shift-click", include.HINT)
+
+    def test_the_script_picks_the_shift_target_on_shift_click(self):
+        # The suite has no JavaScript runtime, so this pins the one branch the
+        # script makes; which set each target means is pinned above, in Python.
+        js = include.JS
+        self.assertIn("ev.shiftKey && a.dataset.toggle !== undefined", js)
+        self.assertIn("shift ? a.dataset.toggle : a.dataset.include", js)
+        self.assertIn("shift ? a.dataset.toggleHref : a.href", js)
+        self.assertIn("encodeURIComponent(value)", js)
+        self.assertIn("location.href = url", js)
+        # Cmd/ctrl-click is left to the browser, which opens a new tab.
+        self.assertIn("if (ev.metaKey || ev.ctrlKey) return;", js)
+
+
 def header(page):
     m = re.search(r"<header.*?</header>", page, re.S)
     assert m is not None
@@ -210,7 +295,10 @@ class FleetRouteTests(server_harness.ServerCase):
             row = switch_row(page)
             self.assertIn('data-include="prs"', row, path)
             self.assertIn('data-origin="url"', row, path)
-            self.assertIn('data-group="prs" data-include=""', row, path)
+            # PRs alone: clicking PRs again goes back to every group.
+            self.assertIn(
+                'data-group="prs" data-include="tasks,prs,sessions,other"', row, path
+            )
             self.assertLess(page.index("</nav>"), page.index('class="include"'), path)
             on = re.findall(r'aria-checked="true" data-group="(\w+)"', row)
             self.assertEqual(on, ["prs"], path)
@@ -301,6 +389,22 @@ class FleetRouteTests(server_harness.ServerCase):
         self.remember("now", "")
         self.assertIn('data-include=""', switch_row(self.get("/now")))
 
+    def test_a_click_is_remembered_as_what_it_asked_for(self):
+        # What the page's script posts on each click: the switch's data-include
+        # for a plain click, its data-toggle for a shift-click.
+        prs = switch_attrs(switch_row(self.get("/now")))["prs"]
+        self.assertEqual(prs["href"], "/now?include=prs")
+        self.remember("now", prs["data-include"])
+        row = switch_row(self.get("/now"))
+        self.assertIn('data-include="prs" data-origin="remembered"', row)
+        tasks = switch_attrs(row)["tasks"]
+        self.remember("now", tasks["data-toggle"])
+        row = switch_row(self.get("/now"))
+        self.assertIn('data-include="tasks,prs" data-origin="remembered"', row)
+        self.remember("now", switch_attrs(row)["all"]["data-include"])
+        sw = switch_attrs(switch_row(self.get("/now")))
+        self.assertEqual(sw["all"]["aria-checked"], "true")
+
     def test_a_config_default_applies_until_a_choice_is_remembered(self):
         self.httpd.app.cfg["views"] = {"now": {"include": ["prs"]}}
         page = self.get("/now")
@@ -332,8 +436,9 @@ class FleetRouteTests(server_harness.ServerCase):
         # The window links carry the URL's filter; the switches keep the window.
         self.assertIn('href="/health?days=7&amp;include=prs"', page)
         row = switch_row(page)
-        self.assertIn('href="/health?days=14&amp;include=tasks,prs"', row)
-        self.assertIn('href="/health?days=14&amp;include="', row)
+        self.assertIn(' href="/health?days=14&amp;include=tasks"', row)
+        self.assertIn('data-toggle-href="/health?days=14&amp;include=tasks,prs"', row)
+        self.assertIn('data-toggle-href="/health?days=14&amp;include="', row)
         everything = re.findall(r'data-figure="(\w+)"', self.get("/health"))
         self.assertEqual(len(everything), 13)
 
