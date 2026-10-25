@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.125.0] - 2026-10-25
+
+### Features
+
+- skip the milestone rule for PRs outside a milestone [#1167] (#1172) (5fc136b)
+
 ## [2.124.0] - 2026-10-25
 
 ### Features
