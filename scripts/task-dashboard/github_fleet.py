@@ -28,15 +28,20 @@ four rules hold:
    `headRefOid`. Stamps in anyone else's comments are ignored, so another
    commenter cannot forge one. With several stamps the newest comment's wins,
    so a stamp for an older head is superseded rather than counted.
-4. Milestone approved: an issue the PR closes (`closingIssuesReferences`) is in
-   a milestone whose description has a line reading `approved: yes` (case
-   ignored, line trimmed). Descriptions are cached per repo for one run.
+4. Milestone approved, when it can apply: if an issue the PR closes
+   (`closingIssuesReferences`) is in a milestone, one of those milestones must
+   have a description line reading `approved: yes` (case ignored, line
+   trimmed). A PR that closes no issue in a milestone skips this rule, since
+   most repos use none. Descriptions are cached per repo for one run, and a
+   failed lookup counts as a miss.
 
 The PRs passing rule 1 alone are AWAITING. Every one is still a `kind = pr`
 row, with `status_name` set to `queue` or `awaiting`, `queue_misses` naming
 the rules it failed, and `queue_counts()` giving both totals. Rules 2 and 4
-are checked for every awaiting PR. Rule 3 costs one call per PR, so it runs
-only for those that passed the others (`stamped` is None when skipped).
+are checked for every awaiting PR; `milestone_approved` is None when rule 4
+was skipped, so a skip is told apart from a pass. Rule 3 costs one call per
+PR, so it runs only for those that passed the others (`stamped` is None when
+skipped).
 
 Run `python github_fleet.py review-queue <owner>...` (under uv, Python 3.11+)
 to print both counts and the searches behind the awaiting set.
@@ -327,14 +332,19 @@ class MilestoneCache:
         return cache[number]
 
 
-def _closes_approved(node: dict, milestones: MilestoneCache) -> bool:
+def _closes_approved(node: dict, milestones: MilestoneCache) -> "bool | None":
+    """Rule 4: whether a milestone of an issue the PR closes is approved.
+
+    None when no closing issue is in a milestone, so the rule does not apply.
+    """
     refs = (node.get("closingIssuesReferences") or {}).get("nodes") or []
-    for issue in refs:
-        milestone = (issue or {}).get("milestone")
-        if not milestone:
-            continue
+    milestoned = [i for i in refs if (i or {}).get("milestone")]
+    if not milestoned:
+        return None
+    for issue in milestoned:
         repo = issue["repository"]["nameWithOwner"]
-        if milestone_approved(milestones.description(repo, milestone["number"])):
+        number = issue["milestone"]["number"]
+        if milestone_approved(milestones.description(repo, number)):
             return True
     return False
 
@@ -371,7 +381,8 @@ def review_queue(
 ) -> "tuple[list[dict], list[str]]":
     """Every awaiting PR (rule 1), each marked `in_queue` by rules 2-4.
 
-    Also returns the URLs where a CI, milestone or comments lookup failed.
+    Rule 4 is skipped, with `milestone_approved` None, for a PR that closes no
+    issue in a milestone. Also returns the URLs where a CI, milestone or comments lookup failed.
     A failed lookup counts as a miss of its rule (a None `ci_state`, a
     `milestone` miss, a `co_review` miss), so one flaky call does not fail
     the run. An AuthError still raises.
@@ -398,6 +409,7 @@ def review_queue(
         misses = []
         if ci != "success":
             misses.append("ci")
+        approved: "bool | None"
         try:
             approved = _closes_approved(node, milestones)
         except github_gh.AuthError:
@@ -406,7 +418,7 @@ def review_queue(
             approved = False
             if url not in failed:
                 failed.append(url)
-        if not approved:
+        if approved is False:
             misses.append("milestone")
         stamped = None
         if not misses:

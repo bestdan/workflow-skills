@@ -667,7 +667,8 @@ class FleetGh:
     """A runner answering github_fleet's gh calls; records every argv.
 
     PR 1 passes all four review-queue rules (green CI, an approved milestone,
-    the viewer's stamp at its head); PR 2 closes no issue, so it only awaits.
+    the viewer's stamp at its head); PR 2 closes an issue in milestone 8, which
+    is not approved, so it only awaits.
     `error` answers every call with that stderr.
     """
 
@@ -685,7 +686,7 @@ class FleetGh:
             if "is:closed" in q:
                 nodes = []
             elif "author:@me" in q:
-                nodes = [fleet_pr(1, milestone=7), fleet_pr(2)]
+                nodes = [fleet_pr(1, milestone=7), fleet_pr(2, milestone=8)]
             elif "is:issue" in q:
                 nodes = [
                     {
@@ -712,7 +713,9 @@ class FleetGh:
             ]
             return 0, json.dumps({"statusCheckRollup": rollup}), ""
         if len(argv) > 2 and "/milestones/" in argv[2]:
-            return 0, json.dumps({"description": "approved: yes"}), ""
+            approved = argv[2].endswith("/milestones/7")
+            body = "approved: yes" if approved else "approved: no"
+            return 0, json.dumps({"description": body}), ""
         if any(a.startswith("owner=") for a in argv):
             stamp = f"<!-- co-review-stamp v1 head={HEAD} -->"
             comments = [
