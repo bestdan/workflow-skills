@@ -503,7 +503,10 @@ class FleetViewTests(unittest.TestCase):
     def test_stale_keeps_only_the_included_groups(self):
         def heads(page):
             return set(
-                re.findall(r'<div class="card">(worktree|handoff|session) ', page)
+                re.findall(
+                    r'<div class="card"><span class="title">(worktree|handoff|session) ',
+                    page,
+                )
             )
 
         every = fleet_views.render_stale(self.conn, self.cfg, fleet_fx.NOW)

@@ -272,6 +272,20 @@ class AwayTests(FleetCase):
             self.assertNotIn(pr_url(n), page)
         self.assertNotIn("closed without merging", page)
 
+    def test_a_pr_or_issue_card_puts_its_title_first_and_its_ref_after(self):
+        seed(self.conn)
+        waiting = section(self.away(), "waiting")
+        self.assertIn(
+            f'<a class="title" href="{pr_url(1140)}">open 1140</a>'
+            f' <span class="ref">({REPO}#1140)</span>',
+            waiting,
+        )
+        self.assertIn(
+            '>needs a human</a> <span class="ref">(bestdan/workflow-skills#950)</span>',
+            waiting,
+        )
+        self.assertNotIn(f"{REPO}#1140</a>", waiting)
+
     def test_sessions_that_finished_and_what_newly_waits(self):
         seed(self.conn)
         page = self.away()
@@ -351,7 +365,7 @@ class AwayTests(FleetCase):
         self.assertEqual(keys(section(page, "finished")), ["s-done"])
         stale = fleet_views.render_stale(self.conn, cfg, NOW)
         self.assertNotIn(pr_url(900), stale)
-        self.assertNotIn("PR #1135 merged", stale)
+        self.assertNotIn("(#1135) merged", stale)
         self.assertIn(f"worktree {WT}/task-1135", stale)  # the gate's own reason
 
 
@@ -383,7 +397,7 @@ class StaleTests(FleetCase):
     def test_a_landed_pr_worktree_shows_its_evidence_and_action(self):
         _, close, _ = self.stale()
         card = self.card(close, f"worktree {WT}/task-1135")
-        self.assertIn("PR #1135 merged 18h ago", card)
+        self.assertIn("closed 1135 (#1135) merged 18h ago", card)
         self.assertIn(f"<code>worktree-remove.sh {WT}/task-1135</code>", card)
 
     def test_an_old_pr_with_no_evidence_is_under_check(self):
@@ -415,11 +429,19 @@ class StaleTests(FleetCase):
         self.assertNotIn("aim compound", close)
         self.assertIn("cannot be checked", self.card(check, "aim compound"))
 
+    def test_an_old_pr_puts_its_title_first_and_its_ref_after(self):
+        _, _, check = self.stale()
+        self.assertIn(
+            f'<a class="title" href="{pr_url(900)}">open 900</a>'
+            f' <span class="ref">({REPO}#900)</span>',
+            check,
+        )
+
     def test_handoffs_close_on_a_passed_date_or_a_merged_pr(self):
         _, close, check = self.stale()
         self.assertIn("expires 2026-10-20: passed", self.card(close, "aim dated"))
         self.assertIn(
-            "expires `when #1135 merges`: PR #1135 merged",
+            "expires `when #1135 merges`: closed 1135 (#1135) merged",
             self.card(close, "aim when-merged").replace("&#x27;", "'"),
         )
         self.assertIn("cannot be checked", self.card(check, "aim vague"))
@@ -439,6 +461,37 @@ class StaleTests(FleetCase):
         for lane in ("close", "check"):
             ats = [i.at for i in items if i.lane == lane and i.at is not None]
             self.assertEqual(ats, sorted(ats), lane)
+
+
+class TitleTests(FleetCase):
+    """The page's filter box searches a card's `.title`, `.ref` and `.meta`."""
+
+    def test_every_card_on_each_fleet_page_carries_a_title(self):
+        seed(self.conn)
+        pages = {
+            "away": fleet_views.render_away(self.conn, fleet_cfg(), NOW),
+            "stale": fleet_views.render_stale(self.conn, fleet_cfg(), NOW),
+        }
+        for name, page in pages.items():
+            lanes = re.findall(
+                r'<section class="lane"[^>]*>(.*?)</section>', page, re.S
+            )
+            cards = [c for lane in lanes for c in lane.split('<div class="card"')[1:]]
+            self.assertGreater(len(cards), 3, name)
+            for card in cards:
+                m = re.search(r'class="title"[^>]*>([^<]+)<', card)
+                assert m is not None, (name, card[:200])
+                self.assertTrue(m.group(1).strip(), (name, card[:200]))
+
+    def test_an_untitled_merged_pr_is_named_by_its_number(self):
+        at = datetime(2026, 10, 23, 3, 0, tzinfo=timezone.utc)
+        self.assertEqual(
+            fleet_views._pr_merged({"number": 7}, at, NOW), "PR #7 merged 18h ago"
+        )
+        self.assertEqual(
+            fleet_views._pr_merged({"number": 7, "title": "fix: x"}, at, NOW),
+            "fix: x (#7) merged 18h ago",
+        )
 
 
 def failed_scan(host="mini", taken_at="2026-10-23T20:30:00.000Z"):
@@ -471,7 +524,7 @@ class KeptRowTests(FleetCase):
         card = self.card(check, f"worktree {WT}/task-1135")
         self.assertIn("kept from a failed scan (worktree_list failed 30m ago)", card)
         self.assertIn("last listed 60m ago", card)
-        self.assertIn("PR #1135 merged 18h ago", card)
+        self.assertIn("closed 1135 (#1135) merged 18h ago", card)
 
     def test_a_kept_worktree_respects_ignore_and_the_include_filter(self):
         _, _, check = self.stale()
@@ -576,7 +629,7 @@ class AwayRouteTests(server_harness.ServerCase):
 
     def test_stale_shows_the_fleet_lanes_under_jira(self):
         page = self.request("GET", "/stale")[1]
-        self.assertIn("PR #1135 merged", section(page, "close"))
+        self.assertIn("closed 1135 (#1135) merged", section(page, "close"))
         self.assertIn(pr_url(900), section(page, "check"))
 
 

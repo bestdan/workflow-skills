@@ -97,6 +97,7 @@ class Need:
     branch: "str | None" = None
     number: "int | None" = None
     hint: str = ""  # where it is acted on, or the skill that resolves it
+    ref: "str | None" = None  # `repo#N`, shown muted after the title
 
 
 # --- approvals ---------------------------------------------------------------
@@ -217,7 +218,8 @@ def _pr(row: dict[str, Any]) -> Need:
     return Need(
         item=(github_fleet.SOURCE, str(row.get("key") or row.get("url"))),
         kind="pr",
-        title=f"{row.get('repo') or ''}#{row.get('number')} {row.get('title') or ''}",
+        title=row.get("title") or "",
+        ref=f"{row.get('repo') or ''}#{row.get('number')}",
         since=score.parse_ts(row.get("created")),
         url=row.get("url"),
         state=" · ".join(bits),
@@ -233,7 +235,8 @@ def _issue(row: dict[str, Any]) -> Need:
     return Need(
         item=(github_fleet.SOURCE, str(row.get("key") or row.get("url"))),
         kind="issue",
-        title=f"{row.get('repo') or ''}#{row.get('number')} {row.get('title') or ''}",
+        title=row.get("title") or "",
+        ref=f"{row.get('repo') or ''}#{row.get('number')}",
         since=score.parse_ts(row.get("created")),
         url=row.get("url"),
         state=github_fleet.HUMAN_LABEL,
@@ -353,10 +356,11 @@ def waited(since: "datetime | None", now: datetime) -> str:
     return f"waiting {round(s / 86400)}d"
 
 
-def _link(n: Need) -> str:
-    if n.url and n.url.startswith("https://"):
-        return f'<a href="{_e(n.url)}">{_e(n.title)}</a>'
-    return _e(n.title)
+def _title(n: Need, url: "str | None") -> str:
+    """The `.title`, linked to `url` when given, then the muted `.ref`."""
+    if n.ref is not None:
+        return fleet_views.title_ref(url, n.title, n.ref)
+    return fleet_views._link(url, n.title)
 
 
 def _meta(n: Need, now: datetime, ov: overlay.Overlay) -> str:
@@ -376,15 +380,12 @@ def _attrs(n: Need, cls: str) -> str:
 
 
 def _body(n: Need, now: datetime, ov: overlay.Overlay) -> str:
-    """The brief, or the fallback (title, age, state), then where to act."""
-    if n.brief:
-        brief = f'<div class="brief">{_e(n.brief)}</div>'
-    else:
-        opened = fleet_views.ago(n.since, now)
-        brief = (
-            f'<div class="brief" data-fallback="1">{_e(n.title)}\n'
-            f"since {_e(opened)} · {_e(n.state)}</div>"
-        )
+    """The brief when there is one, then where to act.
+
+    With no brief there is no brief block: the header already shows the
+    title, the wait and the state.
+    """
+    brief = f'<div class="brief">{_e(n.brief)}</div>' if n.brief else ""
     what = {"pr": "the PR", "issue": "the issue", "session": "the session"}
     opens = (
         f"open {what.get(n.kind, 'it')}" if n.url != CODE_URL else "open claude.ai/code"
@@ -401,14 +402,14 @@ def _body(n: Need, now: datetime, ov: overlay.Overlay) -> str:
 
 def expanded(n: Need, now: datetime, ov: overlay.Overlay) -> str:
     return (
-        f"<div {_attrs(n, ' first')}>{_link(n)}"
+        f"<div {_attrs(n, ' first')}>{_title(n, n.url)}"
         f'<div class="meta">{_meta(n, now, ov)}</div>{_body(n, now, ov)}</div>'
     )
 
 
 def collapsed(n: Need, now: datetime, ov: overlay.Overlay) -> str:
     return (
-        f"<details {_attrs(n, '')}><summary>{_e(n.title)}"
+        f"<details {_attrs(n, '')}><summary>{_title(n, None)}"
         f' <span class="meta">{_meta(n, now, ov)}</span></summary>'
         f"{_body(n, now, ov)}</details>"
     )

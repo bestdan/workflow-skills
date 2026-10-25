@@ -245,15 +245,34 @@ def ago(then: "datetime | None", now: datetime) -> str:
 
 
 def _link(url: "str | None", text: str) -> str:
+    """A card's title, as a `.title` the page's filter box searches."""
     if url and url.startswith("https://"):
-        return f'<a href="{_e(url)}">{_e(text)}</a>'
-    return _e(text)
+        return f'<a class="title" href="{_e(url)}">{_e(text)}</a>'
+    return f'<span class="title">{_e(text)}</span>'
+
+
+def ref_suffix(ref: str) -> str:
+    """The muted ` (ref)` that follows a card's title, as views.card_title's."""
+    return f' <span class="ref">({_e(ref)})</span>'
+
+
+def title_ref(url: "str | None", title: "str | None", ref: str) -> str:
+    """The title, linked, then the muted ref; the ref alone when untitled."""
+    return _link(url, title or ref) + (ref_suffix(ref) if title else "")
 
 
 def _ref(row: dict[str, Any]) -> str:
-    """`repo#N title`, linked: a PR or issue row."""
+    """`title (repo#N)`, the title linked: a PR or issue row."""
     label = f"{row.get('repo') or ''}#{row.get('number')}"
-    return f"{_link(row.get('url'), label)} {_e(row.get('title') or '')}"
+    return title_ref(row.get("url"), row.get("title"), label)
+
+
+def _pr_merged(pr: dict[str, Any], at: "datetime | None", now: datetime) -> str:
+    """`title (#N) merged <ago>`, or `PR #N merged <ago>` when untitled."""
+    n = pr.get("number")
+    title = pr.get("title")
+    head = f"{title} (#{n})" if title else f"PR #{n}"
+    return f"{head} merged {ago(at, now)}"
 
 
 def _card(head: str, meta: str = "", why: str = "", act: str = "", **data: str) -> str:
@@ -311,14 +330,14 @@ def away_items(f: Fleet, since: datetime, now: datetime) -> list[AwayItem]:
         if s.asked:
             # A turn that ended in a question did not finish: it waits on me.
             card = _card(
-                _e(f"session {s.session_id}"),
+                _link(None, f"session {s.session_id}"),
                 f"{_session_where(s)} · asked (heuristic) {_e(ago(s.last, now))}",
                 key=s.session_id,
             )
             out.append(AwayItem("waiting", s.last, s.repo, card, "session"))
         elif s.last_event == "Stop":
             card = _card(
-                _e(f"session {s.session_id}"),
+                _link(None, f"session {s.session_id}"),
                 f"{_session_where(s)} · turn ended {_e(ago(s.last, now))}",
                 key=s.session_id,
             )
@@ -326,7 +345,7 @@ def away_items(f: Fleet, since: datetime, now: datetime) -> list[AwayItem]:
         else:
             kind = s.notification or "notification"
             card = _card(
-                _e(f"session {s.session_id}"),
+                _link(None, f"session {s.session_id}"),
                 f"{_session_where(s)} · {_e(kind)} {_e(ago(s.last, now))}",
                 key=s.session_id,
             )
@@ -478,7 +497,7 @@ def _expiry(
         pr = f.merged_pr(repo, int(n))
         if pr is not None:
             at = score.parse_ts(pr.get("merged_at") or pr.get("closed_at"))
-            return True, f"expires `{value}`: PR #{n} merged {ago(at, now)}"
+            return True, f"expires `{value}`: {_pr_merged(pr, at, now)}"
         return None, f"expires `{value}`: PR #{n} not seen merged"
     return None, f"expires `{value}` cannot be checked here"
 
@@ -505,7 +524,7 @@ class Landed:
 
     def evidence(self, now: datetime) -> str:
         if self.pr is not None:
-            return f"PR #{self.pr.get('number')} merged {ago(self.at, now)}"
+            return _pr_merged(self.pr, self.at, now)
         return self.reason
 
 
@@ -592,7 +611,7 @@ def stale_items(
         if key not in landed or item in ignored:
             continue
         evidence, at = landed[key].evidence(now), landed[key].at
-        head = _e(f"worktree {wt['path']}")
+        head = _link(None, f"worktree {wt['path']}")
         meta = _e(f"on {wt['host']} · {wt.get('repo')}: {wt.get('branch')}")
         risks = []
         if wt.get("dirty"):
@@ -632,7 +651,7 @@ def stale_items(
         repo = PurePosixPath(path).parent.parent.name or None
         at = score.parse_ts(ho.get("created")) or score.parse_ts(ho.get("mtime"))
         expired, evidence = _expiry(ho.get("expires"), repo, f, now)
-        head = _e(f"handoff {ho.get('aim') or PurePosixPath(path).name}")
+        head = _link(None, f"handoff {ho.get('aim') or PurePosixPath(path).name}")
         meta = _e(f"on {ho['host']} · {path}")
         if expired:
             act = f"read it, then delete <code>{_e(path)}</code>"
@@ -653,7 +672,7 @@ def stale_items(
     for s in f.sessions:
         if not forget < s.last <= idle or (sessions.SOURCE, s.session_id) in ignored:
             continue
-        head = _e(f"session {s.session_id}")
+        head = _link(None, f"session {s.session_id}")
         meta = f"{_session_where(s)} · last event {_e(ago(s.last, now))}"
         in_landed = next(
             (

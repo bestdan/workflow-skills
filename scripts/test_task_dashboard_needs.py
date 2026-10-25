@@ -68,7 +68,7 @@ def pr(n, created, *, in_queue=True, brief=None, head=None, ci="success"):
 
 
 GITHUB_ROWS = [
-    # The longest wait, and no decision brief: the fallback.
+    # The longest wait, and no decision brief: no brief block.
     pr(1201, "2026-10-21T12:00:00Z"),
     pr(
         1202,
@@ -287,16 +287,43 @@ class OrderTests(NeedsCase):
         self.assertEqual(main.count("<details "), 4)
         self.assertIn("waiting 3d", main)
 
-    def test_a_pr_without_a_brief_falls_back_to_title_age_and_ci(self):
+    def test_a_pr_without_a_brief_shows_its_header_once_and_no_brief(self):
         seed(self.conn)
         main = section(self.page(), "needs")
         first = main[: main.index("<details ")]
-        m = re.search(r'<div class="brief" data-fallback="1">(.*?)</div>', first, re.S)
-        assert m is not None
-        self.assertIn("thing 1201", m.group(1))
-        self.assertIn("since 3d ago", m.group(1))
-        self.assertIn("CI success", m.group(1))
-        self.assertIn(f'href="{pr_url(1201)}"', first)
+        self.assertNotIn('class="brief"', first)
+        self.assertEqual(first.count("feat: thing 1201"), 1)
+        self.assertEqual(first.count("waiting 3d"), 1)
+        self.assertEqual(first.count("CI success"), 1)
+        # The act line and the controls stay.
+        self.assertIn(f'→ <a href="{pr_url(1201)}">open the PR</a>', first)
+        self.assertIn("data-ov=", first)
+
+    def test_a_card_puts_its_title_first_and_its_ref_after(self):
+        seed(self.conn)
+        main = section(self.page(), "needs")
+        self.assertIn(
+            f'<a class="title" href="{pr_url(1201)}">feat: thing 1201 [#1101]</a>'
+            f' <span class="ref">({REPO}#1201)</span>',
+            main,
+        )
+        self.assertIn(
+            '<summary><span class="title">needs a human</span>'
+            f' <span class="ref">({REPO}#950)</span>',
+            main,
+        )
+        self.assertNotIn(f"{REPO}#1201 feat", main)
+
+    def test_every_card_carries_a_title_the_filter_searches(self):
+        seed(self.conn)
+        page = self.page()
+        for lane in ("needs", "approvals"):
+            cards = re.split(r'<(?:div|details) class="card need', section(page, lane))
+            self.assertGreater(len(cards), 1, lane)
+            for card in cards[1:]:
+                m = re.search(r'class="title"[^>]*>([^<]+)<', card)
+                assert m is not None, card[:200]
+                self.assertTrue(m.group(1).strip(), card[:200])
 
     def test_a_brief_is_shown_when_there_is_one(self):
         seed(self.conn)
