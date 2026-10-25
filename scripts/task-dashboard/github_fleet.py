@@ -119,8 +119,9 @@ query($q: String!, $after: String) {
 }
 """
 
-# How far back the closed-PR search reaches. Since you were away lists what
-# closed after the last visit; a visit older than this sees only the window.
+# How far back the closed-PR search reaches, which bounds what Stale can find
+# merged. Since you were away also covers this many days when no visit is
+# recorded.
 CLOSED_WINDOW_DAYS = 14
 
 COMMENTS_QUERY = """
@@ -225,8 +226,9 @@ def recently_closed(
     """My PRs closed (merged or not) in the last `days` days, one search per owner.
 
     These are `kind = closed_pr` rows, not `pr`, so the review queue and every
-    count of open PRs never sees them. Since you were away reads `closed_at`
-    against the last visit; Stale matches `head_ref` to a landed worktree.
+    count of open PRs never sees them. Only Stale reads them: it matches
+    `head_ref` to a landed worktree, and a handoff's "when #N merges" to a
+    merged PR.
     """
     since = (now - timedelta(days=days)).astimezone(timezone.utc).date().isoformat()
     rows: dict[str, dict] = {}
