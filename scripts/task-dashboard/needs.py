@@ -13,7 +13,7 @@ WHAT IT COLLECTS, each keyed by its overlay item `(source, key)`:
   "asked (heuristic)": the hook's test is a trailing "?"). Active within
   fleet_views.SESSION_IDLE_DAYS. A turn that ended without a question is not
   listed, nor is one the hook could not judge (`asked` null, or a format-1
-  hook): that is finished work, Since you were away's. A session quiet for
+  hook): that is finished work, in the Finished group below. A session quiet for
   longer is Stale's, and an empty spawn (never prompted) is Stale's too. A
   pending `AskUserQuestion` never reaches `Stop`, and the harness documents
   no notification for it, so it is not seen here. And, with `claude_remote`
@@ -46,7 +46,27 @@ slots in at approval_brief().
 FOCUS. While the overlay has a focus item, only that item's own needs show:
 the item itself, and what is tied to it (related()). The rest are counted as
 held and never listed, snoozed or not; a snoozed need of the focus item is
-counted as snoozed.
+counted as snoozed. A focused design takes everything in its repo, so the
+design-focus section the Since you were away page had is not repeated here.
+
+NEW. A card whose wait began after the overlay's `last_visit` carries a `new`
+badge, expanded, collapsed and approval cards alike; the order is unchanged.
+With no visit recorded, nothing is new.
+
+FINISHED SINCE YOU LOOKED. A collapsed group at the bottom lists the sessions
+whose last turn ended after `last_visit` without asking
+(fleet_views.finished_sessions), one line each; with no visit recorded it
+covers the last github_fleet.CLOSED_WINDOW_DAYS days. A turn that asked is in
+the main list instead. The group is hidden when it is empty. The include
+filter, ignores, snoozes and the focus apply to it as to every other card;
+under a focus an unrelated finished session is left out, but not counted as
+held, since it is not a need.
+
+MARK AS READ, in that group, and "Mark all as read" under the Needs you
+heading, record a visit through overlay's `visit` action with the page's
+render time. Loading the page records nothing, so a phone preview does not
+swallow the digest, and an item that arrives while the page is open is still
+new next time. The page reloads after the action, which clears the badges.
 """
 
 import html
@@ -76,7 +96,14 @@ CSS = """
 .needs .need.first { border-width:2px; }
 .needs .brief { white-space:pre-line; margin:6px 0; }
 .needs .wait { color:var(--fg); font-weight:600; }
-.needs .approvals details.group > summary h2 { display:inline; }
+.needs .approvals details.group > summary h2,
+.needs .finished details.group > summary h2 { display:inline; }
+.needs .new { font-size:11px; font-weight:600; color:var(--accent);
+  border:1px solid var(--accent); border-radius:999px; padding:0 6px; }
+.needs .visit { display:flex; flex-wrap:wrap; gap:8px; align-items:center;
+  margin:4px 0 8px; color:var(--muted); font-size:12px; }
+.needs .visit button { font:inherit; padding:2px 10px; border-radius:6px;
+  border:1px solid var(--line); background:var(--card); color:var(--fg); }
 """
 
 
@@ -320,8 +347,8 @@ def focus_need(conn: sqlite3.Connection, item: overlay.Item) -> Need:
 def related(need: Need, focus: Need) -> bool:
     """Whether `need` is one of the focus item's own needs.
 
-    The item itself; anything in a focused design's repo (as Since you were
-    away's design block); a session on a focused PR's head branch, or a PR on
+    The item itself; anything in a focused design's repo; a session on a
+    focused PR's head branch, or a PR on
     a focused session's branch; for a focused issue, a PR titled `[#n]` or a
     session or PR on its `task-<n>` claim branch. All within one repo.
     """
@@ -363,12 +390,18 @@ def _title(n: Need, url: "str | None") -> str:
     return fleet_views._link(url, n.title)
 
 
+def is_new(n: Need, ov: overlay.Overlay) -> bool:
+    """Whether the wait began after the last visit; never with none recorded."""
+    last = score.parse_ts(ov.last_visit)
+    return last is not None and n.since is not None and n.since > last
+
+
 def _meta(n: Need, now: datetime, ov: overlay.Overlay) -> str:
+    new = '<span class="new">new</span> · ' if is_new(n, ov) else ""
     pin = '<span class="pin">pinned</span> · ' if ov.is_pinned(n.item) else ""
     bits = [_e(n.state)] + ([_e(n.where)] if n.where else [])
-    return f'{pin}<span class="wait">{_e(waited(n.since, now))}</span> · ' + " · ".join(
-        bits
-    )
+    wait = f'<span class="wait">{_e(waited(n.since, now))}</span>'
+    return f"{new}{pin}{wait} · " + " · ".join(bits)
 
 
 def _attrs(n: Need, cls: str) -> str:
@@ -415,6 +448,44 @@ def collapsed(n: Need, now: datetime, ov: overlay.Overlay) -> str:
     )
 
 
+def finished_row(n: Need, now: datetime, ov: overlay.Overlay) -> str:
+    """One line in the Finished group: title or branch, host, the turn's end."""
+    meta = f"{_e(n.where)} · turn ended {_e(fleet_views.ago(n.since, now))}"
+    controls = overlay.card_controls(n.item, ov, now, reorder=False, pin=False)
+    return (
+        f"<details {_attrs(n, ' done')}><summary>{_title(n, None)}"
+        f' <span class="meta">{meta}</span></summary>{controls}</details>'
+    )
+
+
+def finished(
+    conn: sqlite3.Connection, cfg: dict[str, Any], since: datetime
+) -> list[Need]:
+    """The sessions that finished a turn after `since`, as Needs."""
+    out = []
+    for s in fleet_views.finished_sessions(fleet_views.load(conn, cfg), since):
+        out.append(
+            Need(
+                item=(sessions.SOURCE, s.session_id),
+                kind=sessions.KIND,
+                title=sessions._label(s.cwd, s.branch) or f"session {s.session_id}",
+                since=s.last,
+                url=None,
+                state="turn ended",
+                where=f"on {s.host}",
+                repo=s.repo,
+                branch=s.branch,
+            )
+        )
+    return out
+
+
+def since_looked(ov: overlay.Overlay, now: datetime) -> datetime:
+    """Where the Finished group starts: the last visit, else the closed window."""
+    last = score.parse_ts(ov.last_visit)
+    return last or now - timedelta(days=github_fleet.CLOSED_WINDOW_DAYS)
+
+
 @dataclass
 class Page:
     main: list[Need]
@@ -422,6 +493,7 @@ class Page:
     held: int
     snoozed: int
     focus: "Need | None"
+    finished: list[Need]
 
 
 def build(
@@ -433,10 +505,13 @@ def build(
 ) -> Page:
     # An ignored item is gone from the page; the Ignored footer can undo it.
     needs = [n for n in collect(conn, cfg, now) if n.item not in ov.ignored]
+    done = finished(conn, cfg, since_looked(ov, now))
+    done = [n for n in done if n.item not in ov.ignored]
     # Then the include filter: a need it switches off is neither held,
     # snoozed nor listed, so no count on the page reflects it.
     if inc is not None:
         needs = [n for n in needs if inc.shows(n.kind)]
+        done = [n for n in done if inc.shows(n.kind)]
     focus = None
     held = 0
     # Focus first: an unrelated item is held whether or not it is snoozed.
@@ -445,8 +520,10 @@ def build(
         mine = [n for n in needs if related(n, focus)]
         held = len(needs) - len(mine)
         needs = mine
-    snoozed = [n for n in needs if ov.is_snoozed(n.item, now)]
+        done = [n for n in done if related(n, focus)]
+    snoozed = [n for n in needs + done if ov.is_snoozed(n.item, now)]
     needs = [n for n in needs if not ov.is_snoozed(n.item, now)]
+    done = [n for n in done if not ov.is_snoozed(n.item, now)]
     ordered = order(needs, ov)
     return Page(
         main=[n for n in ordered if not n.approval],
@@ -454,6 +531,7 @@ def build(
         held=held,
         snoozed=len(snoozed),
         focus=focus,
+        finished=done,
     )
 
 
@@ -492,9 +570,15 @@ def render(
     else:
         empty = "Nothing needs you."
     body = "".join(cards) if cards else f'<p class="empty">{_e(empty)}</p>'
+    # Beside the heading, not in it: the page's text filter rewrites the h2.
+    mark_all = (
+        '<div class="visit"><button type="button" data-ov="visit"'
+        f' data-at="{fleet_views._stamp(now)}" title="Clear the new badges">'
+        "Mark all as read</button></div>"
+    )
     parts.append(
         f'<section class="lane" data-section="needs">'
-        f"<h2>Needs you ({len(p.main)})</h2>{body}</section>"
+        f"<h2>Needs you ({len(p.main)})</h2>{mark_all}{body}</section>"
     )
     if p.approvals:
         rows = "".join(collapsed(n, now, ov) for n in p.approvals)
@@ -506,8 +590,32 @@ def render(
             '<p class="note">Plain approvals, batched: answer each in its'
             f" session.</p>{rows}</details></section>"
         )
+    if p.finished:
+        parts.append(finished_group(p.finished, now, ov))
     if p.snoozed:
         parts.append(
             f'<p class="note" data-snoozed="{p.snoozed}">{p.snoozed} snoozed.</p>'
         )
     return f'<div class="fleet needs">{"".join(parts)}</div>'
+
+
+def finished_group(done: list[Need], now: datetime, ov: overlay.Overlay) -> str:
+    """The closed "Finished since you looked (N)" group, with Mark as read."""
+    last = score.parse_ts(ov.last_visit)
+    if last is None:
+        note = (
+            "No visit recorded yet, so this covers the last"
+            f" {github_fleet.CLOSED_WINDOW_DAYS} days."
+        )
+    else:
+        note = f"Since your last visit, {fleet_views.ago(last, now)} ({ov.last_visit})."
+    rows = "".join(finished_row(n, now, ov) for n in done)
+    return (
+        '<section class="lane finished" data-section="finished">'
+        '<details class="group">'
+        f"<summary><h2>Finished since you looked ({len(done)})</h2></summary>"
+        f'<div class="visit"><span data-last-visit="{_e(ov.last_visit or "")}">'
+        f"{_e(note)}</span>"
+        f'<button type="button" data-ov="visit" data-at="{fleet_views._stamp(now)}">'
+        f"Mark as read</button></div>{rows}</details></section>"
+    )

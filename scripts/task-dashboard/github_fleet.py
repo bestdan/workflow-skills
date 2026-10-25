@@ -125,8 +125,8 @@ query($q: String!, $after: String) {
 """
 
 # How far back the closed-PR search reaches, which bounds what Stale can find
-# merged. Since you were away also covers this many days when no visit is
-# recorded.
+# merged. Needs you's Finished group also covers this many days when no visit
+# is recorded.
 CLOSED_WINDOW_DAYS = 14
 
 COMMENTS_QUERY = """

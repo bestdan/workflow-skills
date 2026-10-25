@@ -60,6 +60,9 @@ TOKEN_KEY = "server_token"
 STALE_INTERVALS = 3
 MAX_BODY = 4096
 SYNC_MODES = ("incremental", "reconcile")
+# Pages folded into another, kept as 302s to `/` so old bookmarks still land:
+# Since you were away is now Needs you's new badges and Finished group.
+RETIRED_ROUTES = ("/away",)
 
 # scripts/task-dashboard/server.py -> the plugin root, two directories up.
 KANBAN_PATH = (
@@ -809,6 +812,13 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _redirect(self, location: str) -> None:
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+
     def _text(self, code: int, text: str) -> None:
         self._send(code, text.encode(), "text/plain; charset=utf-8")
 
@@ -853,6 +863,8 @@ class Handler(BaseHTTPRequestHandler):
                 # A fleet instance's home page is Needs you; the Jira one's the
                 # Board.
                 self._send(200, app.view_page("/needs", query).encode(), html_type)
+            elif path in RETIRED_ROUTES:
+                self._redirect("/")
             elif path in ("/", "/board"):
                 self._send(200, app.board_page(query).encode(), html_type)
             elif path in views.ROUTES:

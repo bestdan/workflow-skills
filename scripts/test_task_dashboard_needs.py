@@ -207,8 +207,24 @@ def section(page, name):
 
 
 def keys(text):
+    """The keys of the needs listed; the Finished group's rows are not needs."""
     return re.findall(
-        r'class="card need[^"]*" data-source="[^"]*" data-key="([^"]*)"', text
+        r'class="card need(?! done)[^"]*" data-source="[^"]*" data-key="([^"]*)"',
+        text,
+    )
+
+
+def listed(page):
+    """The page without its Finished group."""
+    return re.sub(r'<section class="lane finished".*?</section>', "", page, flags=re.S)
+
+
+def finished_keys(page):
+    if 'data-section="finished"' not in page:
+        return []
+    return re.findall(
+        r'class="card need done" data-source="[^"]*" data-key="([^"]*)"',
+        section(page, "finished"),
     )
 
 
@@ -230,7 +246,7 @@ class AskedTests(NeedsCase):
         main = section(page, "needs")
         self.assertIn("s-turn", keys(main))
         for sid in ("s-done", "s-null", "s-v1", "s-answered", "s-later"):
-            self.assertNotIn(f'data-key="{sid}"', page, sid)
+            self.assertNotIn(f'data-key="{sid}"', listed(page), sid)
         card = re.search(r'data-key="s-turn".*?</summary>', main, re.S)
         assert card is not None
         self.assertIn("asked (heuristic)", card.group(0))
@@ -344,7 +360,7 @@ class OrderTests(NeedsCase):
         seed(self.conn)
         page = self.page()
         for absent in ("s-work", "s-old", "s-empty", pr_url(1203), "session_01ABC"):
-            self.assertNotIn(f'data-key="{absent}"', page)
+            self.assertNotIn(f'data-key="{absent}"', listed(page))
 
     def test_a_snoozed_item_is_hidden_and_counted(self):
         seed(self.conn)
@@ -499,6 +515,76 @@ class FocusTests(NeedsCase):
         self.assertEqual(keys(section(page, "needs")), [])
         self.assertIn("Nothing of the focus item needs you.", page)
         self.assertIn('data-focus-held="6"', page)
+
+
+VISIT = datetime(2026, 10, 23, 0, 0, tzinfo=timezone.utc)
+
+
+class NewTests(NeedsCase):
+    """A card whose wait began after the last visit is marked new."""
+
+    def new_keys(self, page):
+        return re.findall(
+            r'data-key="([^"]*)"[^>]*>(?:(?!</summary>|<div class="act">).)*'
+            r'<span class="new">new</span>',
+            page,
+            re.S,
+        )
+
+    def test_only_a_wait_since_the_last_visit_is_new(self):
+        seed(self.conn)
+        overlay.set_last_visit(self.conn, VISIT)
+        page = self.page()
+        # PR 1202, s-turn, s-pr and the s-perm approval arrived after it;
+        # PR 1201 and issue 950 before it.
+        self.assertEqual(
+            sorted(self.new_keys(page)),
+            sorted([pr_url(1202), "s-turn", "s-pr", "s-perm"]),
+        )
+        # The order is unchanged by the marker.
+        self.assertEqual(
+            keys(section(page, "needs")),
+            [pr_url(1201), issue_url(950), pr_url(1202), "s-turn", "s-pr"],
+        )
+
+    def test_the_expanded_first_card_can_be_new(self):
+        seed(self.conn)
+        overlay.set_last_visit(self.conn, datetime(2026, 10, 1, tzinfo=timezone.utc))
+        main = section(self.page(), "needs")
+        first = main[: main.index("<details ")]
+        self.assertIn('<span class="new">new</span>', first)
+
+    def test_with_no_visit_nothing_is_new(self):
+        seed(self.conn)
+        self.assertNotIn('class="new"', self.page())
+
+    def test_mark_all_as_read_sits_under_the_heading_at_render_time(self):
+        seed(self.conn)
+        main = section(self.page(), "needs")
+        # Not inside the h2: the page's text filter rewrites the heading.
+        self.assertIn(
+            '<h2>Needs you (5)</h2><div class="visit"><button type="button"'
+            ' data-ov="visit" data-at="2026-10-24T12:00:00Z"',
+            main,
+        )
+        self.assertIn("Mark all as read", main)
+
+    def test_finished_sessions_are_grouped_closed_at_the_bottom(self):
+        seed(self.conn)
+        overlay.set_last_visit(self.conn, VISIT)
+        page = self.page()
+        self.assertGreater(
+            page.index('data-section="finished"'),
+            page.index('data-section="approvals"'),
+        )
+        self.assertEqual(
+            sorted(finished_keys(page)), sorted(["s-done", "s-null", "s-v1", "s-later"])
+        )
+        # A turn that asked is in the main list, never here.
+        self.assertNotIn("s-turn", finished_keys(page))
+        self.assertIn("Finished since you looked (4)", page)
+        overlay.set_last_visit(self.conn, NOW)
+        self.assertNotIn('data-section="finished"', self.page())
 
 
 class GateTests(NeedsCase):

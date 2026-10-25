@@ -340,8 +340,8 @@ def unignore(conn: sqlite3.Connection, item: Item) -> None:
 def set_last_visit(conn: sqlite3.Connection, now: "datetime | None" = None) -> None:
     """Record `now` as the last visit, unless a later one is already recorded.
 
-    Since you were away's "Mark as read" calls it, through the `visit` action,
-    with the time the page was rendered. A tab left open on an older render
+    Needs you's "Mark as read" calls it, through the `visit` action, with the
+    time the page was rendered. A tab left open on an older render
     therefore cannot move the visit back and re-show what was already read.
     """
     with conn:
@@ -358,7 +358,11 @@ def set_view_include(
     groups: "frozenset[str]",
     now: "datetime | None" = None,
 ) -> None:
-    """Remember `groups` as the view's include choice (include.py)."""
+    """Remember `groups` as the view's include choice (include.py). A retired
+    view's choice is dropped, not refused: a page open from before it went
+    can still post one."""
+    if view in include.RETIRED:
+        return
     if view not in include.VIEWS:
         raise OverlayError(
             f"view must be one of {', '.join(include.VIEWS)}, got {view!r}"
@@ -510,10 +514,11 @@ def load(conn: sqlite3.Connection) -> Overlay:
 
 
 def view_includes(conn: sqlite3.Connection) -> "dict[str, frozenset[str]]":
-    """Every remembered include choice, by view."""
+    """Every remembered include choice, by view; a retired view's is left out."""
     return {
         view: frozenset(g for g in str(groups).split(",") if g in include.GROUPS)
         for view, groups in conn.execute("SELECT view, groups FROM view_includes")
+        if view not in include.RETIRED
     }
 
 
@@ -542,6 +547,7 @@ def export(conn: sqlite3.Connection, now: "datetime | None" = None) -> dict[str,
             for v, gs, at in conn.execute(
                 "SELECT view, groups, set_at FROM view_includes ORDER BY view"
             )
+            if v not in include.RETIRED
         ]
     finally:
         conn.rollback()
@@ -605,6 +611,8 @@ def _check_view_includes(value: Any) -> list[tuple[Any, ...]]:
         if not isinstance(row, dict) or set(row) != {"view", "include", "set_at"}:
             raise OverlayError(f"{where} must have exactly: view, include, set_at")
         view, groups, at = row["view"], row["include"], row["set_at"]
+        if view in include.RETIRED:
+            continue  # a backup from before the view went: dropped, not refused
         if view not in include.VIEWS:
             raise OverlayError(
                 f"{where}: view must be one of {', '.join(include.VIEWS)}"

@@ -40,7 +40,6 @@ _e = html.escape
 TABS = (
     ("/needs", "Needs you"),
     ("/now", "Now"),
-    ("/away", "Since you were away"),
     ("/waiting-on-me", "Waiting on me"),
     ("/waiting-on", "I'm waiting on"),
     ("/board", "Board"),
@@ -660,10 +659,6 @@ def render_stale(m: Mirror, inc: include.Include) -> str:
     return (jira if m.issues else "") + fleet
 
 
-def render_away(m: Mirror, inc: include.Include) -> str:
-    return fleet_views.render_away(m.conn, m.cfg, m.now, inc)
-
-
 def render_needs(m: Mirror, inc: include.Include) -> str:
     return needs.render(m.conn, m.cfg, m.now, inc)
 
@@ -731,7 +726,6 @@ ROUTES = {
     "/waiting-on-me": ("Waiting on me", render_waiting_on_me),
     "/waiting-on": ("I'm waiting on", render_waiting_on),
     "/stale": ("Stale", render_stale),
-    "/away": ("Since you were away", render_away),
     "/epics": ("Epics", render_epics),
 }
 
