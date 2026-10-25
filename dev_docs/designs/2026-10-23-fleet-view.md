@@ -203,7 +203,12 @@ wins when both did.
 5. **Gauges and focus**, shown in every page's header:
    - **Side quests:** in flight against the cap of 3. The overlay's
      `side-quest` tag marks them.
-   - **Review queue:** length against the cap of 5 from #952.
+   - **Review queue:** length against the cap of 5 from #952. A PR counts
+     when its CI is green and it is co-reviewed at its head. A PR that closes
+     an issue in a milestone also needs one of those milestones marked
+     `approved: yes`; a PR that closes none skips that rule, since most repos
+     use no milestones. The full rule set is `github_fleet.py`'s module
+     docstring.
    - **Focus pin:** marks one item as the deep work. While it is set, Needs you
      shows the focus item's own needs and counts the rest as "held". It never
      shows the held items one by one. That is the deep-work pattern: others may
