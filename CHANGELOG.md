@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.128.0] - 2026-10-25
+
+### Features
+
+- jira.enabled = false for an instance with no Jira [#1171] (#1176) (c269cac)
+
 ## [2.127.0] - 2026-10-25
 
 ### Features
