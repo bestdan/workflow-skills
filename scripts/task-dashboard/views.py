@@ -434,7 +434,7 @@ def card_title(href: str, title: "str | None", ref: str) -> str:
         f'<a class="title" href="{_e(href)}" target="_blank" rel="noopener">'
         f"{_e(title or ref)}</a>"
     )
-    return link + f' <span class="ref">({_e(ref)})</span>' if title else link
+    return link + fleet_views.ref_suffix(ref) if title else link
 
 
 def epic_name(issue: dict[str, Any]) -> "str | None":
