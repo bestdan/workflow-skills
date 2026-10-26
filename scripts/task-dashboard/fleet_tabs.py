@@ -4,24 +4,28 @@ They replace Waiting on me and I'm waiting on in a fleet instance's nav: those
 read Jira blocker links, which a fleet instance's GitHub work does not have.
 Both read SQLite only, and both are fleet-only (fleet_views.ONLY).
 
-PULL REQUESTS are every open PR in the configured owners that is mine or asks
-for my review: the `prs` mirror (github_gh.py, which holds drafts and approved
-PRs too), joined by URL to github_fleet's awaiting rows (`kind = pr`), which
-carry the review-queue verdict. Each PR goes in exactly one lane, the first
-that fits:
+PULL REQUESTS are every open PR in the configured owners that is mine, asks
+for my review, or was opened on the owners' repos by someone else: the `prs`
+mirror (github_gh.py, which holds my drafts and approved PRs too), joined by
+URL to github_fleet's awaiting rows (`kind = pr`), which carry the
+review-queue verdict and the `others` rows. Each PR goes in exactly one lane,
+the first that fits:
 
 1. **Ready for you**: in the review queue (`in_queue`), the set the header
    gauge counts.
-2. **Review requested of me**: someone else's PR. The lane is drawn only when
-   it has rows.
-3. **Drafts.**
-4. **CI failing**: CI is `failure`.
-5. **Waiting on you**: every other PR, naming what keeps it out of the queue,
+2. **Review requested of me**: someone else's PR that asks for my review.
+3. **From others on your repos**: someone else's PR, bot or human, with no
+   review request. Green-CI bot PRs come first, as the quickest merges; a bot
+   card carries a `bot` tag. Both this lane and the one above name the
+   author, and each is drawn only when it has rows.
+4. **Drafts.**
+5. **CI failing**: CI is `failure`.
+6. **Waiting on you**: every other PR, naming what keeps it out of the queue,
    from the awaiting row's `queue_misses`. An approved PR is never awaiting
    (github_fleet rule 1), so it says that instead.
 
-The page draws them in the order Ready, Waiting on you, CI failing, Drafts,
-Review requested of me.
+The page draws them in the order Ready, Waiting on you, From others, Review
+requested of me, CI failing, Drafts. Within a lane, oldest first.
 
 ISSUES are github_fleet's `issue` rows, every open issue of the owners (its
 MAX_OPEN_ISSUES cap is noted on the page when it bit), laned by the gh-issue
@@ -55,10 +59,13 @@ _e = html.escape
 PR_LANES = (
     ("ready", "Ready for you", "No PR is in the review queue."),
     ("waiting", "Waiting on you", "No PR is waiting out of the queue."),
+    ("others", "From others on your repos", ""),
+    ("review", "Review requested of me", ""),
     ("ci", "CI failing", "No PR has failing CI."),
     ("drafts", "Drafts", "No drafts."),
-    ("review", "Review requested of me", ""),
 )
+# Lanes drawn only when they have rows.
+OPTIONAL_LANES = {"others", "review"}
 
 MISSES = {
     "co_review": "no co-review stamp at its head",
@@ -177,6 +184,8 @@ def pr_lane(p: dict) -> "tuple[str, str]":
         return "ready", ""
     if p.get("role") == "reviewer":
         return "review", "review requested"
+    if p.get("role") == "others":
+        return "others", ""
     if p.get("is_draft"):
         return "drafts", ""
     if p.get("ci_state") == "failure":
@@ -194,13 +203,30 @@ def pr_lane(p: dict) -> "tuple[str, str]":
 
 def _pr_card(p: dict, why: str, ov: overlay.Overlay, now: datetime) -> str:
     ref = f"{p.get('repo') or ''}#{p.get('number')}"
-    bits = [f"CI {p.get('ci_state') or 'unknown'}", _age(p.get("created"), now)]
+    row = p.get("awaiting") or {}
+    bits = []
+    if p.get("role") != "author" and row.get("author"):
+        bits.append(f"by {row['author']}")
+    bits += [f"CI {p.get('ci_state') or 'unknown'}", _age(p.get("created"), now)]
     bits.append(p.get("repo") or "")
     if why:
         bits.append(why)
     meta = " · ".join(_e(b) for b in bits if b)
+    head = views.card_title(p["url"], p.get("title"), ref)
+    if row.get("author_is_bot"):
+        head += ' <span class="badge">bot</span>'
     item = (github_fleet.SOURCE, str(p["url"]))
-    return _card(item, ov, now, views.card_title(p["url"], p.get("title"), ref), meta)
+    return _card(item, ov, now, head, meta)
+
+
+def _lane_order(name: str, p: dict) -> tuple:
+    """Oldest first; in the others lane, green-CI bot PRs (the quickest
+    merges) before the rest."""
+    created = p.get("created") or ""
+    if name != "others":
+        return (created,)
+    bot = bool((p.get("awaiting") or {}).get("author_is_bot"))
+    return (not (bot and p.get("ci_state") == "success"), created)
 
 
 def render_prs(
@@ -224,8 +250,8 @@ def render_prs(
     group = include.group_of("pr")
     parts = [_gate_note(cfg, synced)]
     for name, title, empty in PR_LANES:
-        rows = sorted(lanes[name], key=lambda t: t[0].get("created") or "")
-        if name == "review" and not rows:
+        rows = sorted(lanes[name], key=lambda t: _lane_order(name, t[0]))
+        if name in OPTIONAL_LANES and not rows:
             continue
         cards = [_pr_card(p, why, ov, now) for p, why in rows]
         parts.append(views._lane(name, title, cards, empty, group, inc))

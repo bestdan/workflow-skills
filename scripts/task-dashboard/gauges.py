@@ -52,7 +52,8 @@ class Gauges:
 
 
 def review_queue_rows(conn: sqlite3.Connection, fleet: bool) -> "list[dict] | None":
-    """Every mirrored awaiting PR row, or None when unknown.
+    """Every mirrored awaiting PR row, PRs from others included, or None when
+    unknown.
 
     Unknown means `fleet` (sync.fleet_enabled) is off, so leftover rows are not
     reported as current, or no fleet sync run has succeeded yet. A row is in
@@ -88,7 +89,8 @@ def review_queue_rows(conn: sqlite3.Connection, fleet: bool) -> "list[dict] | No
 
 
 def review_queue(conn: sqlite3.Connection, fleet: bool) -> "dict[str, int] | None":
-    """github_fleet's `queue` and `awaiting` counts, or None when unknown."""
+    """github_fleet's `queue`, `awaiting` and `others` counts, or None when
+    unknown."""
     rows = review_queue_rows(conn, fleet)
     return None if rows is None else github_fleet.queue_counts(rows)
 

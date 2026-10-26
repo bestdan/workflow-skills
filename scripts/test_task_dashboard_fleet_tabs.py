@@ -26,6 +26,7 @@ import config  # type: ignore[import-not-found]  # noqa: E402
 import db  # type: ignore[import-not-found]  # noqa: E402
 import fleet_tabs  # type: ignore[import-not-found]  # noqa: E402
 import fleet_views  # type: ignore[import-not-found]  # noqa: E402
+import gauges  # type: ignore[import-not-found]  # noqa: E402
 import github_fleet  # type: ignore[import-not-found]  # noqa: E402
 import include  # type: ignore[import-not-found]  # noqa: E402
 import needs  # type: ignore[import-not-found]  # noqa: E402
@@ -45,8 +46,8 @@ def issue_url(n):
     return f"https://github.com/{REPO}/issues/{n}"
 
 
-def awaiting(n, *, misses=(), ci="success", role="author"):
-    return {
+def awaiting(n, *, misses=(), ci="success", role="author", author=None, bot=False):
+    row = {
         "kind": "pr",
         "key": pr_url(n),
         "url": pr_url(n),
@@ -55,11 +56,18 @@ def awaiting(n, *, misses=(), ci="success", role="author"):
         "title": f"awaiting {n}",
         "role": role,
         "ci_state": ci,
-        "in_queue": not misses,
+        "in_queue": not misses and role != "others",
         "queue_misses": list(misses),
         "review_decision": None,
         "created": f"2026-10-{n % 20 + 1:02d}T00:00:00Z",
     }
+    if author:
+        row.update(author=author, author_is_bot=bot)
+    return row
+
+
+def others(n, author, *, ci="success", bot=False):
+    return awaiting(n, ci=ci, role="others", author=author, bot=bot)
 
 
 def issue(n, *labels, title=None):
@@ -83,6 +91,10 @@ AWAITING = [
     awaiting(7, misses=["ci"], ci="none", role="reviewer"),
     awaiting(8, misses=["co_review"]),  # ignored
     awaiting(9, misses=["co_review"]),  # snoozed
+    # PRs others opened on my repos. Created oldest first: 20, 21, 22.
+    others(20, "azack", ci="failure"),  # a human's: From others, not CI failing
+    others(21, "dependabot[bot]", ci="pending", bot=True),
+    others(22, "github-actions", bot=True),  # a green bot PR leads the lane
 ]
 
 # The `prs` mirror: every open PR of mine, drafts and approved ones included.
@@ -151,12 +163,12 @@ def fleet_cfg():
     return cfg
 
 
-def section(page, name):
+def section(page, name, required=True):
     m = re.search(
         rf'<section class="lane" data-section="{name}"[^>]*>(.*?)</section>', page, re.S
     )
-    assert m, f"no section {name}"
-    return m.group(1)
+    assert m or not required, f"no section {name}"
+    return m.group(1) if m else ""
 
 
 def keys(text):
@@ -190,12 +202,20 @@ class PullRequestTests(Case):
         page = self.page()
         lanes = {name: keys(section(page, name)) for name, _, _ in fleet_tabs.PR_LANES}
         self.assertEqual(lanes["ready"], [pr_url(1)])
+        self.assertEqual(
+            [m for m in re.findall(r'data-section="([a-z-]+)"', page)],
+            ["ready", "waiting", "others", "review", "ci", "drafts"],
+        )
         self.assertEqual(sorted(lanes["waiting"]), [pr_url(n) for n in (2, 3, 6)])
         self.assertEqual(lanes["ci"], [pr_url(4)])
         self.assertEqual(lanes["drafts"], [pr_url(5)])
         self.assertEqual(lanes["review"], [pr_url(7)])
+        self.assertEqual(lanes["others"], [pr_url(22), pr_url(20), pr_url(21)])
         placed = [k for ks in lanes.values() for k in ks]
         self.assertEqual(len(placed), len(set(placed)))
+        # Every mirrored PR not ignored or snoozed is placed.
+        mirrored = {pr_url(n) for n, *_ in PRS} | {r["url"] for r in AWAITING}
+        self.assertEqual(set(placed), mirrored - {pr_url(8), pr_url(9)})
         # Ignored and snoozed PRs are out; the snooze is counted.
         self.assertNotIn(pr_url(8), page)
         self.assertNotIn(pr_url(9), placed)
@@ -220,13 +240,24 @@ class PullRequestTests(Case):
         self.assertIn("opened ", ready)
         self.assertIn(f"· {REPO}", ready)
 
-    def test_the_review_lane_appears_only_with_rows(self):
+    def test_the_review_and_others_lanes_appear_only_with_rows(self):
         seed(
             self.conn,
             prs=[p for p in PRS if p[4] == "author"],
             rows=[r for r in AWAITING if r["role"] == "author"],
         )
-        self.assertNotIn('data-section="review"', self.page())
+        page = self.page()
+        self.assertNotIn('data-section="review"', page)
+        self.assertNotIn('data-section="others"', page)
+
+    def test_a_pr_from_others_names_its_author_and_tags_a_bot(self):
+        seed(self.conn)
+        lane = section(self.page(), "others")
+        cards = dict(re.findall(r'data-key="([^"]+)"(.*?)class="ov"', lane, re.S))
+        self.assertIn("by azack", cards[pr_url(20)])
+        self.assertNotIn('class="badge">bot', cards[pr_url(20)])
+        self.assertIn("by github-actions", cards[pr_url(22)])
+        self.assertIn('<span class="badge">bot</span>', cards[pr_url(22)])
 
     def test_an_awaiting_row_without_a_prs_row_still_counts(self):
         seed(self.conn, prs=[])
@@ -299,6 +330,24 @@ class HumanSetTests(Case):
             if n.kind == "issue"
         )
         self.assertEqual(got, [issue_url(10), issue_url(16)])
+
+    def test_needs_you_lists_every_pr_from_others_beside_the_queue(self):
+        seed(self.conn)
+        prs = {
+            n.item[1]: n.state
+            for n in needs.collect(self.conn, self.cfg, NOW)
+            if n.kind == "pr"
+        }
+        self.assertEqual(set(prs), {pr_url(1), pr_url(20), pr_url(21), pr_url(22)})
+        self.assertTrue(prs[pr_url(20)].startswith("PR from azack · CI failure"))
+        self.assertTrue(prs[pr_url(22)].startswith("PR from github-actions · bot"))
+
+    def test_the_gauge_counts_the_review_queue_only(self):
+        seed(self.conn)
+        self.assertEqual(
+            gauges.review_queue(self.conn, True),
+            {"queue": 1, "awaiting": 7, "others": 3},
+        )
 
     def test_the_fleet_read_holds_only_the_human_review_issues(self):
         seed(self.conn)

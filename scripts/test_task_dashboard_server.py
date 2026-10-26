@@ -515,13 +515,17 @@ class FleetStatusTest(HeaderCase):
         github_fleet.write(conn, [], self.now())
         add_run(conn, "ok", self.now(), kind="github_fleet")
         conn.close()
-        self.assertEqual(self.state()["review_queue"], {"queue": 0, "awaiting": 0})
+        self.assertEqual(
+            self.state()["review_queue"], {"queue": 0, "awaiting": 0, "others": 0}
+        )
         self.assertEqual(self.gauge(), "Review queue 0/5")
         # Then the rows' counts, again in both.
         conn = self.conn()
         github_fleet.write(conn, fleet_rows(6, 2), self.now())
         conn.close()
-        self.assertEqual(self.state()["review_queue"], {"queue": 6, "awaiting": 8})
+        self.assertEqual(
+            self.state()["review_queue"], {"queue": 6, "awaiting": 8, "others": 0}
+        )
         self.assertEqual(self.gauge(), "Review queue 6/5")
 
 

@@ -111,6 +111,16 @@ def seed_fleet(conn):
         {"kind": "pr", "key": f"https://g/pull/{n}", "title": "t", "in_queue": n < 2}
         for n in range(3)
     ]
+    # A PR someone else opened: open and awaiting the owner, never queued.
+    rows.append(
+        {
+            "kind": "pr",
+            "key": "https://g/pull/9",
+            "title": "t",
+            "in_queue": False,
+            "role": "others",
+        }  # fmt: skip
+    )
     rows += [
         {"kind": "design", "key": "https://g/d1", "title": "d", "status": "proposed"},
         {"kind": "design", "key": "https://g/d2", "title": "d", "status": "accepted"},
@@ -201,7 +211,7 @@ class FigureTest(DbCase):
         for fid in ("open_prs", "review_queue", "designs_proposed"):
             self.assertIsNone(off[fid]["value"], fid)
         on = by_id(health.compute(self.conn, {}, START, END, fleet=True))
-        self.assertEqual(on["open_prs"]["value"], 3)
+        self.assertEqual(on["open_prs"]["value"], 4)
         self.assertEqual(on["review_queue"]["value"], 2)
         self.assertEqual(on["designs_proposed"]["value"], 1)
         self.assertEqual(on["side_quests"]["value"], 0)

@@ -39,20 +39,29 @@ four rules hold:
    (`closingIssuesReferences`) is in a milestone, one of those milestones must
    have a description line reading `approved: yes` (case ignored, line
    trimmed). A PR that closes no issue in a milestone skips this rule, since
-   most of the owner's repos use none. Descriptions are cached per repo for one run, and a
-   failed lookup counts as a miss.
+   most of the owner's repos use none. Descriptions are cached per repo for
+   one run, and a failed lookup counts as a miss.
 
 The PRs passing rule 1 alone are AWAITING. Every one is still a `kind = pr`
 row, with `status_name` set to `queue` or `awaiting`, `queue_misses` naming
-the rules it failed, and `queue_counts()` giving both totals. Rule 2 is
-checked for every awaiting PR, and rule 4 only when a closing issue is in a
-milestone; `milestone_approved` is None when rule 4 was skipped, so a skip is
-told apart from a pass. Rule 3 costs one call per
-PR, so it runs only for those that passed the others (`stamped` is None when
-skipped).
+the rules it failed, and `queue_counts()` giving the totals. Rule 2 is checked
+for every awaiting PR, and rule 4 only when a closing issue is in a milestone;
+`milestone_approved` is None when rule 4 was skipped, so a skip is told apart
+from a pass. Rule 3 costs one call per PR, so it runs only for those that
+passed the others (`stamped` is None when skipped).
+
+PRS FROM OTHERS are the open, non-draft PRs someone else opened on the owners'
+repos without requesting my review: a third search, `-author:@me`, role
+`others`, deduplicated by URL after the two above, so a review-requested PR
+keeps its `reviewer` role. Bot authors are included: a dependency or version
+bump waits on the owner too, and is the quickest merge. Every row records
+`author` and `author_is_bot` (is_bot()). Rules 2-4 are for the owner's agent
+PRs and are not applied: an `others` row has its CI state for display,
+`in_queue` false, no `queue_misses`, and `status_name` `others`. The gauge
+never counts one; `queue_counts()` gives them as `others`.
 
 Run `python github_fleet.py review-queue <owner>...` (under uv, Python 3.11+)
-to print both counts and the searches behind the awaiting set, and
+to print the counts and the searches behind them, and
 `python github_fleet.py issues <owner>...` to print how many open issues the
 widened fetch mirrors and which owners the cap cut short.
 """
@@ -114,6 +123,7 @@ query($q: String!, $after: String) {
       ... on PullRequest {
         url number title body headRefName headRefOid isDraft reviewDecision
         createdAt updatedAt
+        author { login __typename }
         repository { nameWithOwner }
         closingIssuesReferences(first: 10) {
           nodes { number repository { nameWithOwner } milestone { number } }
@@ -165,6 +175,27 @@ def review_searches(owner: str) -> list[str]:
         f"is:pr is:open draft:false -review:approved {who} {scope}"
         for who, _ in REVIEW_ROLES
     ]
+
+
+def others_search(owner: str) -> str:
+    """The search for PRs others opened on one owner's repos."""
+    return f"is:pr is:open draft:false -author:@me {github_gh.owner_qualifier(owner)}"
+
+
+# Bot accounts that open PRs here, named in case a node does not mark them.
+BOT_LOGINS = {"github-actions", "dependabot", "copilot-swe-agent"}
+
+
+def is_bot(author: "dict | None") -> bool:
+    """A bot author: a `Bot` node, an `app/` or `[bot]` login, or BOT_LOGINS."""
+    author = author or {}
+    login = str(author.get("login") or "")
+    return (
+        author.get("__typename") == "Bot"
+        or login.startswith("app/")
+        or login.endswith("[bot]")
+        or login in BOT_LOGINS
+    )
 
 
 # --- decision brief ----------------------------------------------------------
@@ -427,7 +458,8 @@ def pr_comments(
 def review_queue(
     owners: Iterable[str], runner: Runner = run, timeout: float = DEFAULT_TIMEOUT
 ) -> "tuple[list[dict], list[str]]":
-    """Every awaiting PR (rule 1), each marked `in_queue` by rules 2-4.
+    """Every awaiting PR (rule 1), each marked `in_queue` by rules 2-4, then
+    the PRs from others (role `others`), which those rules do not apply to.
 
     Rule 4 is skipped, with `milestone_approved` None, for a PR that closes no
     issue in a milestone.
@@ -437,12 +469,18 @@ def review_queue(
     `milestone` miss, a `co_review` miss), so one flaky call does not fail
     the run. An AuthError still raises.
     """
+    owners = list(owners)
     nodes: dict[str, tuple[dict, str]] = {}
     for owner in owners:
         for (_, role), query in zip(REVIEW_ROLES, review_searches(owner)):
             for node in github_gh.search_prs(query, runner, timeout, REVIEW_QUERY):
                 if in_review_queue(node):
                     nodes.setdefault(node["url"], (node, role))
+    for owner in owners:
+        query = others_search(owner)
+        for node in github_gh.search_prs(query, runner, timeout, REVIEW_QUERY):
+            if not node.get("isDraft"):
+                nodes.setdefault(node["url"], (node, "others"))
     milestones = MilestoneCache(runner, timeout)
     rows: list[dict] = []
     failed: list[str] = []
@@ -457,21 +495,22 @@ def review_queue(
             ci = None
             failed.append(url)
         misses = []
-        if ci != "success":
+        approved: "bool | None" = None
+        stamped = None
+        if role != "others" and ci != "success":
             misses.append("ci")
-        approved: "bool | None"
-        try:
-            approved = _closes_approved(node, milestones)
-        except github_gh.AuthError:
-            raise
-        except GhError:
-            approved = False
-            if url not in failed:
-                failed.append(url)
+        if role != "others":
+            try:
+                approved = _closes_approved(node, milestones)
+            except github_gh.AuthError:
+                raise
+            except GhError:
+                approved = False
+                if url not in failed:
+                    failed.append(url)
         if approved is False:
             misses.append("milestone")
-        stamped = None
-        if not misses:
+        if role != "others" and not misses:
             try:
                 viewer, comments = pr_comments(repo, node["number"], runner, timeout)
                 head = stamp_head(comments, viewer)
@@ -496,11 +535,13 @@ def review_queue(
                 "head_oid": node.get("headRefOid"),
                 "review_decision": node.get("reviewDecision"),
                 "role": role,
+                "author": (node.get("author") or {}).get("login"),
+                "author_is_bot": is_bot(node.get("author")),
                 "brief": decision_brief(node.get("body")),
                 "ci_state": ci,
                 "milestone_approved": approved,
                 "stamped": stamped,
-                "in_queue": not misses,
+                "in_queue": role != "others" and not misses,
                 "queue_misses": misses,
                 "created": node.get("createdAt"),
                 "updated": node.get("updatedAt"),
@@ -510,9 +551,15 @@ def review_queue(
 
 
 def queue_counts(rows: Iterable[dict]) -> dict[str, int]:
-    """`queue` (the gauge: all four rules) and `awaiting` (rule 1 only)."""
+    """`queue` (the gauge: all four rules), `awaiting` (rule 1 only) and
+    `others` (PRs from others)."""
     prs = [r for r in rows if r["kind"] == "pr"]
-    return {"queue": sum(1 for r in prs if r["in_queue"]), "awaiting": len(prs)}
+    others = sum(1 for r in prs if r.get("role") == "others")
+    return {
+        "queue": sum(1 for r in prs if r["in_queue"]),
+        "awaiting": len(prs) - others,
+        "others": others,
+    }
 
 
 # --- design docs -------------------------------------------------------------
@@ -657,6 +704,8 @@ def fetch(
 
 def _status(row: dict) -> "str | None":
     if row["kind"] == "pr":
+        if row.get("role") == "others":
+            return "others"
         return "queue" if row["in_queue"] else "awaiting"
     return row.get("status")
 
@@ -713,13 +762,25 @@ def main(argv: list[str]) -> int:
         return 0
     rows, failed = review_queue(argv[1:])
     counts = queue_counts(rows)
-    print(f"review queue: {counts['queue']}; awaiting: {counts['awaiting']}")
+    print(
+        f"review queue: {counts['queue']}; awaiting: {counts['awaiting']};"
+        f" from others: {counts['others']}"
+    )
     print("awaiting is GitHub's own count for the union of:")
     for owner in argv[1:]:
         for query in review_searches(owner):
             print(f"  {query}")
+    print("from others is, less the PRs already above:")
+    for owner in argv[1:]:
+        print(f"  {others_search(owner)}")
     for row in rows:
-        mark = "queue" if row["in_queue"] else "miss " + ",".join(row["queue_misses"])
+        if row["role"] == "others":
+            bot = " (bot)" if row.get("author_is_bot") else ""
+            mark = f"from {row.get('author')}{bot}"
+        elif row["in_queue"]:
+            mark = "queue"
+        else:
+            mark = "miss " + ",".join(row["queue_misses"])
         print(f"  {row['url']}  [{mark}]")
     for url in failed:
         print(f"  lookup failed: {url}")

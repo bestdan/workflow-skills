@@ -217,7 +217,9 @@ wins when both did.
    Waiting on me and I'm waiting on, which read Jira blocker links. Pull
    requests lanes every open PR of the owner's by the review queue: ready, or
    waiting with the rules it misses, CI failing, drafts, and reviews requested
-   of the owner. Issues lanes every open issue by the gh-issue status ladder.
+   of the owner. A lane of its own holds the PRs others opened on the owner's
+   repos, bots included, which Needs you lists too; the queue rules are for
+   agent PRs and do not apply to them. Issues lanes every open issue by the gh-issue status ladder.
    The lane rules are `fleet_tabs.py`'s module docstring.
 
 **The two caps limit different things and both stand.** The side-quest cap
