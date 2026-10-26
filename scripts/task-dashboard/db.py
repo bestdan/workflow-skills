@@ -2,7 +2,7 @@
 
 Two kinds of table share one file and must stay apart. MIRROR tables are the
 sync's: any row may be overwritten or deleted on the next run. OVERLAY tables
-(pins, order, snoozes, notes, kind tags, focus, last visit, view filters) are
+(pins, order, snoozes, notes, kind tags, ignores, last visit, view filters) are
 the user's, keyed by (source, item key) apart from the one-row last visit and
 the per-view filters, and a sync never touches them; they are the only state
 here that cannot be rebuilt.
@@ -41,7 +41,6 @@ OVERLAY_TABLES = (
     "snoozes",
     "notes",
     "kind_tags",
-    "focus",
     "ignores",
 )
 OVERLAY_SINGLETONS = ("last_visit",)
@@ -285,9 +284,7 @@ CREATE INDEX history_entries_host_ts ON history_entries (host, ts);
 # - `kind_tags`: an item's `side-quest` or `substantial` tag. A substantial item
 #   must name the figure it moves in its note; overlay.py enforces that, since
 #   the note lives in another table.
-# - `focus`: the one deep-work item. The constant-expression unique index makes
-#   a second row a constraint error, so "at most one" holds even against a
-#   writer that skips overlay.set_focus.
+# - `focus`: the one deep-work item, at most one row. Version 8 drops it.
 # - `last_visit`: one timestamp for the whole overlay, not one per item, so a
 #   single row (id 1) rather than a (source, item_key) key.
 _V4 = """
@@ -344,6 +341,14 @@ _V7 = """
 ALTER TABLE session_events ADD COLUMN asked INTEGER;
 """
 
+# Version 8: the focus feature is removed, so its table and index go. Dropping
+# the table drops the index with it; the index is named first so the step reads
+# as the undo of version 4.
+_V8 = """
+DROP INDEX IF EXISTS focus_one;
+DROP TABLE IF EXISTS focus;
+"""
+
 # Ordered, ascending, append-only: never edit a shipped entry.
 #
 # migrate() runs a script one statement at a time through _statements, which
@@ -362,6 +367,7 @@ MIGRATIONS: list[tuple[int, str]] = [
     (5, _V5),
     (6, _V6),
     (7, _V7),
+    (8, _V8),
 ]
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 

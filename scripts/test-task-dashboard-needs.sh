@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # test-task-dashboard-needs.sh — hermetic tests for the fleet view's Needs you
 # page (scripts/task-dashboard/needs.py): the longest wait first and expanded,
-# permission prompts batched under Approvals, a focus showing only its own
-# needs with a held count, a PR without a brief showing its header once with
-# no brief block, and every card's title first and searchable.
+# permission prompts batched under Approvals, a PR without a brief showing its
+# header once with no brief block, and every card's title first and searchable.
 #
 # Wraps scripts/test_task_dashboard_needs.py (stdlib unittest). The fixture DB
 # is written through the real writers, and the server runs in-process with a

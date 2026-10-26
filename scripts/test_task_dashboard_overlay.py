@@ -53,6 +53,24 @@ def dump(conn):
     return out
 
 
+# A pre-version-5 file's `focus` table: still accepted, and its rows dropped.
+FOCUS_ROWS = [{"source": "jira", "item_key": "ABC-1", "set_at": "2026-10-23T12:00:00Z"}]
+
+
+def legacy(doc, version):
+    """`doc` (a current export) as a version 2 to 4 file, focus row included."""
+    old = {
+        k: v
+        for k, v in copy.deepcopy(doc).items()
+        if version >= 4 or k != "view_includes"
+    }
+    old["version"] = version
+    tables = overlay.V2_TABLES if version == 2 else overlay.V3_TABLES
+    old["tables"] = {t: old["tables"].get(t, []) for t in tables}
+    old["tables"]["focus"] = copy.deepcopy(FOCUS_ROWS)
+    return old
+
+
 def empty():
     return {
         t: []
@@ -70,7 +88,6 @@ def populate(conn):
     overlay.note(conn, ("jira", "GONE-1"), "kept while absent", NOW)
     overlay.tag(conn, ("jira", "ABC-2"), "side-quest", now=NOW)
     overlay.tag(conn, ("jira", "ABC-1"), "substantial", now=NOW)  # has a note
-    overlay.set_focus(conn, ("jira", "ABC-1"), NOW)
     overlay.ignore(conn, ("jira", "NOTME-1"), NOW)
     overlay.set_last_visit(conn, NOW)
     overlay.set_view_include(conn, "needs", frozenset({"sessions", "prs"}), NOW)
@@ -161,10 +178,7 @@ class WriteTests(OverlayCase):
 
 
 class FleetWriteTests(OverlayCase):
-    """kind_tag, focus and last_visit."""
-
-    def focus(self):
-        return self.conn.execute("SELECT source, item_key FROM focus").fetchall()
+    """kind_tag and last_visit."""
 
     def tags(self):
         return dict(
@@ -173,30 +187,6 @@ class FleetWriteTests(OverlayCase):
                 "SELECT source, item_key, tag FROM kind_tags"
             )
         )
-
-    def test_setting_a_second_focus_clears_the_first(self):
-        overlay.set_focus(self.conn, ("jira", "A-1"), NOW)
-        overlay.set_focus(self.conn, ("github", "https://x/pull/1"), NOW)
-        self.assertEqual(self.focus(), [("github", "https://x/pull/1")])
-        overlay.set_focus(self.conn, ("github", "https://x/pull/1"), NOW)  # no-op
-        self.assertEqual(self.focus(), [("github", "https://x/pull/1")])
-        self.assertEqual(overlay.load(self.conn).focus, ("github", "https://x/pull/1"))
-
-    def test_the_schema_refuses_a_second_focus_row_too(self):
-        overlay.set_focus(self.conn, ("jira", "A-1"), NOW)
-        with self.assertRaises(sqlite3.IntegrityError):
-            with self.conn:
-                self.conn.execute(
-                    "INSERT INTO focus (source, item_key) VALUES ('jira', 'A-2')"
-                )
-        self.assertEqual(self.focus(), [("jira", "A-1")])
-
-    def test_unfocus_clears_only_the_named_item(self):
-        overlay.set_focus(self.conn, ("jira", "A-2"), NOW)
-        overlay.clear_focus(self.conn, ("jira", "A-1"))  # a stale page's unfocus
-        self.assertEqual(self.focus(), [("jira", "A-2")])
-        overlay.clear_focus(self.conn, ("jira", "A-2"))
-        self.assertEqual(self.focus(), [])
 
     def test_substantial_without_a_note_is_rejected(self):
         for text in ("", "   \n"):
@@ -273,14 +263,11 @@ class FleetWriteTests(OverlayCase):
             {"key": ["A-2"], "tag": ["substantial"], "text": ["figure"]},
             NOW,
         )
-        overlay.apply(self.conn, "focus", {"key": ["A-1"]}, NOW)
-        overlay.apply(self.conn, "focus", {"key": ["A-2"]}, NOW)
-        self.assertEqual(self.focus(), [("jira", "A-2")])
-        overlay.apply(self.conn, "unfocus", {"key": ["A-2"]}, NOW)
         overlay.apply(self.conn, "tag", {"key": ["A-1"], "tag": [""]}, NOW)
-        self.assertEqual(
-            (self.focus(), self.tags()), ([], {("jira", "A-2"): "substantial"})
-        )
+        self.assertEqual(self.tags(), {("jira", "A-2"): "substantial"})
+        for gone in ("focus", "unfocus"):
+            with self.assertRaises(overlay.OverlayError, msg=gone):
+                overlay.apply(self.conn, gone, {"key": ["A-1"]}, NOW)
         with self.assertRaises(overlay.OverlayError):
             overlay.apply(
                 self.conn, "tag", {"key": ["A-3"], "tag": ["substantial"]}, NOW
@@ -318,7 +305,8 @@ class ExportImportTests(OverlayCase):
         before = dump(self.conn)
         doc = json.loads(overlay.dumps(overlay.export(self.conn, NOW)))
         self.assertFalse(self.conn.in_transaction)  # the read snapshot is closed
-        self.assertEqual((doc["format"], doc["version"]), ("task-dashboard-overlay", 4))
+        self.assertEqual((doc["format"], doc["version"]), ("task-dashboard-overlay", 5))
+        self.assertNotIn("focus", doc["tables"])
         self.assertEqual(doc["last_visit"], "2026-10-23T12:00:00Z")
         self.assertEqual(
             doc["view_includes"],
@@ -343,7 +331,6 @@ class ExportImportTests(OverlayCase):
                 "snoozes": 1,
                 "notes": 2,
                 "kind_tags": 2,
-                "focus": 1,
                 "ignores": 1,
                 "view_includes": 2,
             },
@@ -353,7 +340,6 @@ class ExportImportTests(OverlayCase):
             {"needs": frozenset({"prs", "sessions"}), "board": frozenset()},
         )
         ov = overlay.load(self.conn)
-        self.assertEqual(ov.focus, ("jira", "ABC-1"))
         self.assertEqual(
             ov.kind_tags,
             {("jira", "ABC-1"): "substantial", ("jira", "ABC-2"): "side-quest"},
@@ -373,21 +359,21 @@ class ExportImportTests(OverlayCase):
         after = dump(self.conn)
         for t in overlay.V1_TABLES:
             self.assertEqual(after[t], before[t], t)
-        self.assertEqual(
-            (after["kind_tags"], after["focus"], after["last_visit"]), ([], [], [])
-        )
+        self.assertEqual((after["kind_tags"], after["last_visit"]), ([], []))
         self.assertEqual(after["view_includes"], [])
-        self.assertEqual((counts["kind_tags"], counts["focus"]), (0, 0))
+        self.assertEqual(counts["kind_tags"], 0)
+        self.assertNotIn("focus", counts)
 
     def test_a_version_2_file_still_imports_with_no_ignores(self):
         populate(self.conn)
         overlay.ignore(self.conn, ("jira", "GONE-1"), NOW)
         doc = overlay.export(self.conn)
-        v2 = {k: v for k, v in doc.items() if k != "view_includes"}
-        v2["version"] = 2
-        v2["tables"] = {t: doc["tables"][t] for t in overlay.V2_TABLES}
-        overlay.import_(self.conn, v2)
-        self.assertEqual(dump(self.conn)["ignores"], [])
+        before = dump(self.conn)
+        counts = overlay.import_(self.conn, legacy(doc, 2))
+        after = dump(self.conn)
+        self.assertEqual(after["ignores"], [])
+        self.assertEqual(after["kind_tags"], before["kind_tags"])
+        self.assertNotIn("focus", counts)
 
     def test_ignore_is_idempotent_and_unignore_clears_it(self):
         item = ("jira", "ABC-1")
@@ -397,29 +383,34 @@ class ExportImportTests(OverlayCase):
         overlay.unignore(self.conn, item)
         self.assertEqual(overlay.load(self.conn).ignored, set())
 
-    def test_an_ignored_focus_is_hidden_and_comes_back_on_unignore(self):
-        item = ("jira", "ABC-1")
-        overlay.set_focus(self.conn, item, NOW)
-        overlay.ignore(self.conn, ("jira", "ABC-2"), NOW)
-        self.assertEqual(overlay.load(self.conn).focus, item)  # another item
-        overlay.ignore(self.conn, item, NOW)
-        self.assertIsNone(overlay.load(self.conn).focus)
-        kept = [row[:2] for row in dump(self.conn)["focus"]]
-        self.assertEqual(kept, [("jira", "ABC-1")])  # the row stays
-        overlay.unignore(self.conn, item)
-        self.assertEqual(overlay.load(self.conn).focus, item)
-
     def test_a_version_3_file_still_imports_with_no_view_filters(self):
         populate(self.conn)
         doc = overlay.export(self.conn)
-        v3 = {k: v for k, v in doc.items() if k != "view_includes"}
-        v3["version"] = 3
         before = dump(self.conn)
-        overlay.import_(self.conn, v3)
+        overlay.import_(self.conn, legacy(doc, 3))
         after = dump(self.conn)
         self.assertEqual(after["view_includes"], [])
         self.assertEqual(after["pins"], before["pins"])
         self.assertEqual(after["ignores"], before["ignores"])
+
+    def test_a_version_4_files_focus_rows_are_accepted_and_dropped(self):
+        populate(self.conn)
+        doc = overlay.export(self.conn)
+        before = dump(self.conn)
+        self.wipe()
+        counts = overlay.import_(self.conn, legacy(doc, 4))
+        self.assertEqual(dump(self.conn), before)
+        self.assertNotIn("focus", counts)
+        # Even rows the old schema refused (two focus items) are not read.
+        two = legacy(doc, 4)
+        two["tables"]["focus"].append(dict(FOCUS_ROWS[0], item_key="ABC-2"))
+        overlay.import_(self.conn, two)
+        self.assertEqual(dump(self.conn), before)
+        # A version 4 file must still carry the table, as it always did.
+        no_focus = legacy(doc, 4)
+        del no_focus["tables"]["focus"]
+        with self.assertRaises(overlay.OverlayError):
+            overlay.import_(self.conn, no_focus)
 
     def test_import_replaces_rather_than_merges(self):
         populate(self.conn)
@@ -442,8 +433,11 @@ class ExportImportTests(OverlayCase):
         cases = {
             "not an object": [],
             "wrong format": bad(lambda d: d.update(format="other")),
-            "wrong version": bad(lambda d: d.update(version=5)),
-            "v3 with view_includes": bad(lambda d: d.update(version=3)),
+            "wrong version": bad(lambda d: d.update(version=6)),
+            "v3 with view_includes": bad(
+                lambda d: (d.update(version=3), d["tables"].update(focus=[]))
+            ),
+            "v5 with a focus table": bad(lambda d: d["tables"].update(focus=[])),
             "missing view_includes": bad(lambda d: d.pop("view_includes")),
             "view_includes not a list": bad(lambda d: d.update(view_includes={})),
             "unknown view": bad(lambda d: d["view_includes"][0].update(view="nope")),
@@ -462,7 +456,7 @@ class ExportImportTests(OverlayCase):
                 lambda d: (
                     d.update(version=1),
                     d["tables"].pop("kind_tags"),
-                    d["tables"].pop("focus"),
+                    d["tables"].pop("ignores"),
                 )
             ),
             "missing last_visit": bad(lambda d: d.pop("last_visit")),
@@ -473,11 +467,6 @@ class ExportImportTests(OverlayCase):
             "missing kind_tags": bad(lambda d: d["tables"].pop("kind_tags")),
             "bad tag": bad(lambda d: d["tables"]["kind_tags"][0].update(tag="epic")),
             "null tag": bad(lambda d: d["tables"]["kind_tags"][0].update(tag=None)),
-            "two focus rows": bad(
-                lambda d: d["tables"]["focus"].append(
-                    {"source": "jira", "item_key": "ABC-2", "set_at": None}
-                )
-            ),
             "substantial without a note": bad(
                 lambda d: d["tables"]["kind_tags"].append(
                     {
@@ -751,8 +740,6 @@ class RouteTests(server_harness.ServerCase):
         "snooze": [("key", "ABC-1"), ("until", "2026-10-24")],
         "note": [("key", "ABC-1"), ("text", "hi")],
         "tag": [("key", "ABC-1"), ("tag", "side-quest")],
-        "focus": [("key", "ABC-1")],
-        "unfocus": [("key", "ABC-1")],
         "visit": [("at", "2026-10-23T11:00:00Z")],
         "ignore": [("key", "ABC-1")],
         "unignore": [("key", "ABC-1")],
@@ -766,7 +753,7 @@ class RouteTests(server_harness.ServerCase):
         m = re.search(rf'data-gauge="{name}"[^>]*>(.*?)</span>', page, re.S)
         return m and re.sub(r"<[^>]+>", "", m.group(1))
 
-    def test_header_gauges_show_side_quests_and_focus_on_every_page(self):
+    def test_header_gauges_show_side_quests_on_every_page(self):
         conn = self.conn()
         server_harness.seed(conn)
         conn.close()
@@ -777,21 +764,16 @@ class RouteTests(server_harness.ServerCase):
         self.assertEqual(
             self.post("tag", [("key", "GONE-9"), ("tag", "side-quest")])[0], 200
         )
-        self.assertEqual(self.post("focus", [("key", "ABC-1")])[0], 200)
         for path in ("/board", "/needs", "/now", "/stale"):
             page = self.request("GET", path)[1]
             self.assertEqual(self.gauge(page, "side-quests"), "Side quests 2/3", path)
             self.assertEqual(self.gauge(page, "review-queue"), "Review queue —/5", path)
-            self.assertEqual(
-                self.gauge(page, "focus"), "Focus: ABC-1 summary ABC-1", path
-            )
-            self.assertIn("https://example.invalid/browse/ABC-1", page)
-        self.assertEqual(self.post("focus", [("key", "ABC-4")])[0], 200)
-        page = self.request("GET", "/board")[1]
-        self.assertEqual(self.gauge(page, "focus"), "Focus: ABC-4 summary ABC-4")
-        self.assertIn('data-ov="unfocus"', page)
-        self.assertEqual(self.post("unfocus", [("key", "ABC-4")])[0], 200)
-        self.assertIsNone(self.gauge(self.request("GET", "/board")[1], "focus"))
+            self.assertIsNone(self.gauge(page, "focus"), path)
+            self.assertNotIn('data-ov="focus"', page, path)
+
+    def test_the_removed_focus_actions_are_not_found(self):
+        for action in ("focus", "unfocus"):
+            self.assertEqual(self.post(action, [("key", "ABC-1")])[0], 404, action)
 
     def test_a_done_side_quest_is_not_in_flight(self):
         conn = self.conn()

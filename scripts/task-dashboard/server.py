@@ -668,7 +668,7 @@ class App:
         self, conn: sqlite3.Connection, ov: "overlay.Overlay | None" = None
     ) -> str:
         """The header's gauges, then each machine's snapshot age (fleet only)."""
-        out = gauges.render(gauges.read(conn, ov, fleet=self.fleet), self.cfg)
+        out = gauges.render(gauges.read(conn, ov, fleet=self.fleet))
         if fleet_views.enabled(self.cfg):
             out += fleet_views.machines_line(conn, self.now())
         return out

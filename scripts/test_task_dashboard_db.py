@@ -210,6 +210,37 @@ class DbTests(TmpCase):
         )
         conn.close()
 
+    def test_v7_focus_table_is_dropped_and_the_rest_kept(self):
+        path = self.tmp / "d.db"
+        original = db.MIGRATIONS
+        db.MIGRATIONS = [m for m in original if m[0] <= 7]
+        try:
+            conn = db.connect(path)
+        finally:
+            db.MIGRATIONS = original
+        conn.execute(
+            "INSERT INTO focus (source, item_key, set_at) VALUES ('jira', 'ABC-1', 't')"
+        )
+        conn.execute(
+            "INSERT INTO notes (source, item_key, body) VALUES ('jira', 'ABC-1', 'n1')"
+        )
+        conn.commit()
+        conn.close()
+        conn = db.connect(path)
+        names = {
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE name LIKE 'focus%'"
+            )
+        }
+        self.assertEqual(names, set())
+        self.assertEqual(conn.execute("SELECT body FROM notes").fetchall(), [("n1",)])
+        ver = conn.execute(
+            "SELECT value FROM meta WHERE key='schema_version'"
+        ).fetchone()[0]
+        self.assertEqual(int(ver), 8)
+        conn.close()
+
     def test_failed_migration_releases_the_write_lock(self):
         path = self.tmp / "d.db"
         db.connect(path).close()

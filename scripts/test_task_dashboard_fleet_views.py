@@ -324,12 +324,6 @@ class FinishedTests(FleetCase):
         overlay.ignore(self.conn, ("claude-hook", "s-done"), NOW)
         self.assertNotIn('data-key="s-done"', self.page())
 
-    def test_a_focus_leaves_out_an_unrelated_finished_session(self):
-        seed(self.conn)
-        overlay.set_focus(self.conn, ("github", DESIGN_URL), NOW)
-        # s-done ran in dotfiles, outside the focused design's repo.
-        self.assertNotIn('data-section="finished"', self.page())
-
     def test_fleet_off_still_lists_finished_sessions(self):
         seed(self.conn)
         cfg = fleet_cfg()

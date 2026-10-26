@@ -1,5 +1,5 @@
 """The overlay: the user's pins, pinned order, snoozes, notes, kind tags,
-focus, last visit and each view's remembered include filter.
+ignores, last visit and each view's remembered include filter.
 
 Every row is keyed by (source, item_key), the same pair as `issues`, except
 `last_visit`, which is one timestamp for the whole overlay, and
@@ -32,10 +32,11 @@ import score
 
 EXPORT_FORMAT = "task-dashboard-overlay"
 # 2 added kind_tags, focus and last_visit; 3 added ignores; 4 added
-# view_includes. An older file still imports, with what it lacks empty, so a
-# backup taken before an upgrade can be restored.
-EXPORT_VERSION = 4
-IMPORT_VERSIONS = (1, 2, 3, 4)
+# view_includes; 5 dropped focus, a feature since removed. An older file still
+# imports, with what it lacks empty and its focus rows dropped, so a backup
+# taken before an upgrade can be restored.
+EXPORT_VERSION = 5
+IMPORT_VERSIONS = (1, 2, 3, 4, 5)
 MAX_KEY = 512
 MAX_BODY = 256 * 1024  # a POST body; room for a long note, percent-encoded
 MAX_NOTE = 20_000
@@ -48,20 +49,21 @@ COLUMNS: dict[str, tuple[str, ...]] = {
     "snoozes": ("until",),
     "notes": ("body", "updated_at"),
     "kind_tags": ("tag", "tagged_at"),
-    "focus": ("set_at",),
     "ignores": ("ignored_at",),
 }
 assert tuple(COLUMNS) == db.OVERLAY_TABLES
 V1_TABLES = ("pins", "order", "snoozes", "notes")
+# Versions 2 to 4 also carry `focus`, whose rows are accepted and dropped.
 V2_TABLES = (*V1_TABLES, "kind_tags", "focus")
+V3_TABLES = (*V2_TABLES, "ignores")
 
 KIND_TAGS = ("side-quest", "substantial")
 # The Snooze button hides a card for this many days; Unsnooze clears it.
 SNOOZE_DAYS = 7
 
 ACTIONS = (
-    "pin", "unpin", "order", "snooze", "note", "tag", "focus", "unfocus", "visit",
-    "ignore", "unignore", "include",
+    "pin", "unpin", "order", "snooze", "note", "tag", "visit", "ignore",
+    "unignore", "include",
 )  # fmt: skip
 
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
@@ -247,40 +249,8 @@ def tag(
         )
 
 
-def set_focus(
-    conn: sqlite3.Connection, item: Item, now: "datetime | None" = None
-) -> None:
-    """Make `item` the one focus item, clearing any other."""
-    with conn:
-        conn.execute("BEGIN IMMEDIATE")
-        if conn.execute(
-            "SELECT 1 FROM focus WHERE source = ? AND item_key = ?", item
-        ).fetchone():
-            return
-        conn.execute("DELETE FROM focus")
-        conn.execute(
-            "INSERT INTO focus (source, item_key, set_at) VALUES (?, ?, ?)",
-            (*item, _now(now)),
-        )
-
-
-def clear_focus(conn: sqlite3.Connection, item: Item) -> None:
-    """Clear the focus if it is `item`.
-
-    Naming the item means a page loaded before another focus was set cannot
-    clear that newer one.
-    """
-    with conn:
-        conn.execute("DELETE FROM focus WHERE source = ? AND item_key = ?", item)
-
-
 def ignore(conn: sqlite3.Connection, item: Item, now: "datetime | None" = None) -> None:
-    """Mark an item as not mine; ignoring an epic hides everything under it.
-
-    The focus row is left alone. load() hides a focus that is ignored or under
-    an ignored item, so the header and Needs never point at a hidden item, and
-    Unignore brings the focus back.
-    """
+    """Mark an item as not mine; ignoring an epic hides everything under it."""
     with conn:
         conn.execute(
             "INSERT OR IGNORE INTO ignores (source, item_key, ignored_at)"
@@ -434,10 +404,6 @@ def apply(
     elif action == "tag":
         kind = (form.get("tag") or [""])[0].strip()
         tag(conn, item, kind, (form.get("text") or [""])[0], now)
-    elif action == "focus":
-        set_focus(conn, item, now)
-    elif action == "unfocus":
-        clear_focus(conn, item)
     elif action == "ignore":
         ignore(conn, item, now)
     elif action == "unignore":
@@ -458,7 +424,6 @@ class Overlay:
     snoozed_until: "dict[Item, str]" = field(default_factory=dict)
     notes: "dict[Item, str]" = field(default_factory=dict)
     kind_tags: "dict[Item, str]" = field(default_factory=dict)
-    focus: "Item | None" = None
     last_visit: "str | None" = None
     ignored: "set[Item]" = field(default_factory=set)
     view_includes: "dict[str, frozenset[str]]" = field(default_factory=dict)
@@ -484,7 +449,7 @@ class Overlay:
 
 
 def load(conn: sqlite3.Connection) -> Overlay:
-    """Every overlay table, for rendering. `focus` is None while it is hidden."""
+    """Every overlay table, for rendering."""
     ov = Overlay()
     for s, k, at in conn.execute("SELECT source, item_key, pinned_at FROM pins"):
         ov.pinned_at[(s, k)] = at
@@ -501,12 +466,6 @@ def load(conn: sqlite3.Connection) -> Overlay:
     ov.ignored = {
         (s, k) for s, k in conn.execute("SELECT source, item_key FROM ignores")
     }
-    row = conn.execute("SELECT source, item_key FROM focus").fetchone()
-    ov.focus = (row[0], row[1]) if row else None
-    # A hidden focus reads as no focus, so the header and Needs agree with the
-    # views; the row stays, and Unignore brings it back.
-    if ov.focus is not None and hidden(conn, ov.ignored, ov.focus):
-        ov.focus = None
     row = conn.execute("SELECT at FROM last_visit WHERE id = 1").fetchone()
     ov.last_visit = row[0] if row else None
     ov.view_includes = view_includes(conn)
@@ -640,7 +599,8 @@ def validate(
 
     A version 1 file has only the first four tables and no `last_visit`; the
     tables added in version 2 (and `ignores`, added in 3) come back empty. A
-    version 1 to 3 file has no `view_includes`, which comes back empty.
+    version 1 to 3 file has no `view_includes`, which comes back empty. A
+    version 2 to 4 file's `focus` rows are dropped unread.
     """
     if not isinstance(doc, dict):
         raise OverlayError("import file is not a JSON object")
@@ -652,7 +612,9 @@ def validate(
             f"import file version {version!r} is not one of"
             f" {', '.join(map(str, IMPORT_VERSIONS))}"
         )
-    expected = {1: V1_TABLES, 2: V2_TABLES}.get(version, tuple(COLUMNS))
+    expected = {1: V1_TABLES, 2: V2_TABLES, 3: V3_TABLES, 4: V3_TABLES}.get(
+        version, tuple(COLUMNS)
+    )
     tables = doc.get("tables")
     if not isinstance(tables, dict) or set(tables) != set(expected):
         raise OverlayError(f"tables must be exactly: {', '.join(expected)}")
@@ -701,8 +663,6 @@ def validate(
     unplaced = sorted(f"{s}:{k}" for s, k in pinned - positioned)
     if unplaced:
         raise OverlayError(f"pins without a position: {', '.join(unplaced)}")
-    if len(out["focus"]) > 1:
-        raise OverlayError("focus holds at most one item")
     noted = {(r[0], r[1]) for r in out["notes"] if (r[2] or "").strip()}
     bare = sorted(
         f"{r[0]}:{r[1]}"
@@ -783,8 +743,7 @@ JS = """
     var b = ev.target.closest('[data-ov]');
     if (!b) return;
     var act = b.dataset.ov, it = item(b);
-    if (act === 'pin' || act === 'unpin' || act === 'focus' || act === 'unfocus'
-        || act === 'ignore' || act === 'unignore') {
+    if (act === 'pin' || act === 'unpin' || act === 'ignore' || act === 'unignore') {
       post(act, it);
     }
     else if (act === 'visit') { post('visit', [['at', b.dataset.at]]); }
@@ -828,10 +787,9 @@ def card_attrs(item: Item, ov: Overlay, now: datetime) -> str:
 def card_controls(
     item: Item, ov: Overlay, now: datetime, *, reorder: bool, pin: bool = True
 ) -> str:
-    """The pin and focus toggles, tag picker, snooze button, note editor, and
+    """The pin toggle, tag picker, snooze button, note editor, and
     (pinned lane) up/down. `pin=False` drops Pin where nothing ranks by it."""
     pinned = ov.is_pinned(item)
-    focused = ov.focus == item
     parts = []
     if pin:
         parts.append(
@@ -839,11 +797,6 @@ def card_controls(
             ' title="Keep it at the top of Now, the Board and Epics">'
             f"{'Unpin' if pinned else 'Pin'}</button>"
         )
-    parts.append(
-        f'<button type="button" data-ov="{"unfocus" if focused else "focus"}"'
-        ' title="Your one deep-work item, shown in the header">'
-        f"{'Unfocus' if focused else 'Focus'}</button>"
-    )
     current = ov.kind_tags.get(item, "")
     options = "".join(
         f'<option value="{v}"{" selected" if v == current else ""}>{label}</option>'

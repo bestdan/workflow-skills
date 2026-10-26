@@ -567,8 +567,9 @@ class ViewsTest(unittest.TestCase):
     def test_view_cards_carry_the_board_controls(self):
         page = views.render("/waiting-on", self.conn, CFG, NOW)
         issue = self.card(page, "ABC-1")
-        for act in ("pin", "focus", "snooze", "ignore", "note"):
+        for act in ("pin", "snooze", "ignore", "note"):
             self.assertIn(f'data-ov="{act}"', issue, act)
+        self.assertNotIn('data-ov="focus"', page)
         pr = page.split('data-key="https://github.com/o/r/pull/2"')[1]
         pr = pr.split('<div class="card"')[0]
         self.assertIn('data-ov="snooze"', pr)
@@ -631,18 +632,18 @@ class ViewsTest(unittest.TestCase):
         self.assertNotIn(long, unmirrored)
         self.assertIn('title="Keep it on Epics"', unmirrored)
 
-    def test_a_focus_under_an_ignored_epic_is_hidden_until_unignored(self):
+    def test_a_side_quest_under_an_ignored_epic_stops_counting_until_unignored(
+        self,
+    ):
         item = ("jira", "ABC-4")  # a child of the seeded epic
-        overlay.set_focus(self.conn, item, NOW)
         overlay.tag(self.conn, item, "side-quest", now=NOW)
-        g = gauges.read(self.conn, fleet=False)
-        self.assertEqual((g.focus, g.side_quests), (item, 1))
+        self.assertEqual(gauges.read(self.conn, fleet=False).side_quests, 1)
         overlay.ignore(self.conn, ("jira", "EPIC-1"), NOW)
         g = gauges.read(self.conn, fleet=False)
-        self.assertEqual((g.focus, g.side_quests), (None, 0))
-        self.assertNotIn("Focus:", gauges.render(g, CFG))
+        self.assertEqual(g.side_quests, 0)
+        self.assertNotIn('data-gauge="focus"', gauges.render(g))
         overlay.unignore(self.conn, ("jira", "EPIC-1"))
-        self.assertEqual(gauges.read(self.conn, fleet=False).focus, item)
+        self.assertEqual(gauges.read(self.conn, fleet=False).side_quests, 1)
 
     def test_epic_name_falls_back_to_a_childs_copy(self):
         self.set_parent_summary("ABC-4", "Named by the child")

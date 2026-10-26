@@ -47,12 +47,6 @@ there, and an `asked` session stays in the main list: without the question's
 text there is no telling a yes/no from a decision. A brief-carrying source
 slots in at approval_brief().
 
-FOCUS. While the overlay has a focus item, only that item's own needs show:
-the item itself, and what is tied to it (related()). The rest are counted as
-held and never listed, snoozed or not; a snoozed need of the focus item is
-counted as snoozed. A focused design takes every need in its repo, in the
-main list rather than a section of its own.
-
 NEW. A card whose wait began after the overlay's `last_visit` carries a `new`
 badge, expanded, collapsed and approval cards alike; the order is unchanged.
 With no visit recorded, nothing is new.
@@ -62,9 +56,7 @@ whose last turn ended after `last_visit` without asking
 (fleet_views.finished_sessions), one line each; with no visit recorded it
 covers the last github_fleet.CLOSED_WINDOW_DAYS days. A turn that asked is in
 the main list instead. The group is hidden when it is empty. The include
-filter, ignores, snoozes and the focus apply to it as to every other card;
-under a focus an unrelated finished session is left out, but not counted as
-held, since it is not a need.
+filter, ignores and snoozes apply to it as to every other card.
 
 MARK AS READ, in that group, and "Mark all as read" under the Needs you
 heading, record a visit through overlay's `visit` action with the page's
@@ -114,9 +106,7 @@ CSS = """
 @dataclass
 class Need:
     item: overlay.Item  # (source, key): the overlay identity
-    # A collected need: session | pr | issue | drain. focus_need() instead
-    # carries the focus row's mirror kind (design, ticket, ...; "" once gone).
-    kind: str
+    kind: str  # session | pr | issue | drain
     title: str
     since: "datetime | None"  # when the wait began; orders the list
     url: "str | None"
@@ -330,57 +320,6 @@ def order(needs: list[Need], ov: overlay.Overlay) -> list[Need]:
     return pinned + rest
 
 
-# --- focus -------------------------------------------------------------------
-
-
-def _task_number(branch: "str | None") -> "int | None":
-    """`.../task-<n>` -> n, the gh-issue claim branch shape."""
-    last = (branch or "").rsplit("/", 1)[-1]
-    m = re.fullmatch(r"task-(\d+)", last)
-    return int(m.group(1)) if m else None
-
-
-def focus_need(conn: sqlite3.Connection, item: overlay.Item) -> Need:
-    """The focus item as a Need, for related(); bare when it left the mirror."""
-    row = conn.execute(
-        "SELECT kind, raw_json FROM issues WHERE source = ? AND key = ?", item
-    ).fetchone()
-    kind, raw = (row[0], fleet_views._raw(row[1])) if row else ("", {})
-    need = Need(item, kind, item[1], None, None, "", branch=raw.get("branch"))
-    if item[0] == sessions.SOURCE:
-        need.repo = fleet_views.repo_of_path(raw.get("cwd"))
-    elif item[0] == claude_remote.SOURCE:
-        need.repo = fleet_views._name(raw.get("repository"))
-    elif item[0] == github_fleet.SOURCE:
-        need.repo = fleet_views._name(raw.get("repo"))
-        need.branch = raw.get("head_ref")
-        need.number = raw.get("number")
-    return need
-
-
-def related(need: Need, focus: Need) -> bool:
-    """Whether `need` is one of the focus item's own needs.
-
-    The item itself; anything in a focused design's repo; a session on a
-    focused PR's head branch, or a PR on
-    a focused session's branch; for a focused issue, a PR titled `[#n]` or a
-    session or PR on its `task-<n>` claim branch. All within one repo.
-    """
-    if need.item == focus.item:
-        return True
-    if focus.repo is None or need.repo != focus.repo:
-        return False
-    if focus.kind == "design":
-        return True
-    if focus.kind in ("pr", "session") and focus.branch:
-        return need.kind != focus.kind and need.branch == focus.branch
-    if focus.kind == "issue" and focus.number is not None:
-        if need.kind == "pr" and f"[#{focus.number}]" in need.title:
-            return True
-        return _task_number(need.branch) == focus.number
-    return False
-
-
 # --- render ------------------------------------------------------------------
 
 
@@ -504,9 +443,7 @@ def since_looked(ov: overlay.Overlay, now: datetime) -> datetime:
 class Page:
     main: list[Need]
     approvals: list[Need]
-    held: int
     snoozed: int
-    focus: "Need | None"
     finished: list[Need]
 
 
@@ -521,20 +458,11 @@ def build(
     needs = [n for n in collect(conn, cfg, now) if n.item not in ov.ignored]
     done = finished(conn, cfg, since_looked(ov, now))
     done = [n for n in done if n.item not in ov.ignored]
-    # Then the include filter: a need it switches off is neither held,
-    # snoozed nor listed, so no count on the page reflects it.
+    # Then the include filter: a need it switches off is neither snoozed nor
+    # listed, so no count on the page reflects it.
     if inc is not None:
         needs = [n for n in needs if inc.shows(n.kind)]
         done = [n for n in done if inc.shows(n.kind)]
-    focus = None
-    held = 0
-    # Focus first: an unrelated item is held whether or not it is snoozed.
-    if ov.focus is not None:
-        focus = focus_need(conn, ov.focus)
-        mine = [n for n in needs if related(n, focus)]
-        held = len(needs) - len(mine)
-        needs = mine
-        done = [n for n in done if related(n, focus)]
     snoozed = [n for n in needs + done if ov.is_snoozed(n.item, now)]
     needs = [n for n in needs if not ov.is_snoozed(n.item, now)]
     done = [n for n in done if not ov.is_snoozed(n.item, now)]
@@ -542,9 +470,7 @@ def build(
     return Page(
         main=[n for n in ordered if not n.approval],
         approvals=[n for n in ordered if n.approval],
-        held=held,
         snoozed=len(snoozed),
-        focus=focus,
         finished=done,
     )
 
@@ -558,15 +484,6 @@ def render(
     ov = overlay.load(conn)
     p = build(conn, cfg, now, ov, inc)
     parts = []
-    if p.focus is not None:
-        row = conn.execute(
-            "SELECT summary FROM issues WHERE source = ? AND key = ?", p.focus.item
-        ).fetchone()
-        name = (row[0] if row and row[0] else None) or p.focus.item[1]
-        parts.append(
-            f'<p class="note" data-focus-held="{p.held}">Focus: {_e(name)}. Showing'
-            f" its needs only; {p.held} held.</p>"
-        )
     if not sync.fleet_enabled(cfg):
         parts.append(
             '<p class="note">github.fleet is off, so no PRs or issues are'
@@ -577,8 +494,6 @@ def render(
         cards.append(expanded(n, now, ov) if i == 0 else collapsed(n, now, ov))
     if p.approvals:
         empty = "No decisions waiting; only the approvals below."
-    elif p.focus is not None:
-        empty = "Nothing of the focus item needs you."
     elif inc is not None and not inc.everything:
         empty = "Nothing included by the filter needs you."
     else:
