@@ -10,6 +10,9 @@
 # 127.0.0.1 port over a temp DB, so no gh or network runs. It runs under uv
 # rather than bare python3 because the dashboard needs Python 3.11.
 #
+# The page-script tests run under jsdom and skip unless TASK_DASHBOARD_JSDOM
+# names a node_modules directory holding it (see the .py file's docstring).
+#
 # Run directly: bash scripts/test-task-dashboard-refresh.sh
 set -uo pipefail
 

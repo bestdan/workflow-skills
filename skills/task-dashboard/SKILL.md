@@ -33,7 +33,8 @@ needs the sandbox escape** because they reach Atlassian and GitHub hosts.
 the agent's launchd state; a sandbox refusal there is reported as "cannot read
 the agent's state", never as "not loaded". `sync-now` makes an HTTP request to
 the server on `127.0.0.1`, which the sandbox's network filter may refuse.
-`refresh` makes one `gh` call.
+`refresh` makes one `gh` call, or two for a PR with a team review request or
+more than 100 checks.
 `open`, `export`, `import`, `tune`, `view` and `overlay` touch only local files.
 
 `status`, `sync-now`, `open` and `uninstall` use the config and DB paths that
@@ -193,7 +194,11 @@ After acting on a PR or issue (merging, closing, labelling, pushing a fix), run
 `DASH refresh <owner/repo#N>`, unsandboxed, rather than `sync-now`: it re-reads
 that one item and rewrites its rows in seconds, with no server and no sync, and
 prints `updated`, `merged (removed)`, `closed (removed)`, `archived repo
-(removed)` or `not found (removed)`; `--json` adds the item as each view's `view --json` lists it.
+(removed)`, `not found (removed)` or `moved outside github.orgs (removed)`;
+`--json` adds the item as each view's `view --json` lists it. It exits 2,
+making no call, for a config error, a malformed ref or one outside
+`github.orgs`, and 1 when
+GitHub or the DB fails, with the mirror unchanged.
 
 `DASH overlay <action> --source S --key K` makes the write a card's button
 makes (`ignore`, `unignore`, `snooze --until YYYY-MM-DD`, `pin`, `unpin`,

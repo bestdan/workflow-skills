@@ -4,15 +4,24 @@ the server's POST /refresh, the card's button and script, and the CLI's
 `refresh` command.
 
 The fixture DB is fleet_tabs' seed, written through the real writers. Every
-gh call goes through a fake runner that answers the one GraphQL read with a
-canned item, so nothing reaches the network; the server runs in process with
-a fake sync function. Needs Python 3.11: run via
-scripts/test-task-dashboard-refresh.sh.
+gh call goes through a fake runner that answers the GraphQL read with a
+canned item (and the review search and `gh pr view` when asked), so nothing
+reaches the network; the server runs in process with a fake sync function.
+Needs Python 3.11: run via scripts/test-task-dashboard-refresh.sh.
+
+PageScriptTests runs the page's script under jsdom, through
+test_task_dashboard_refresh_dom.js. The repo vendors no npm packages, so they
+run only with TASK_DASHBOARD_JSDOM naming a node_modules that holds jsdom
+(and node on PATH, or TASK_DASHBOARD_NODE), and skip otherwise.
 """
 
 import contextlib
 import io
 import json
+import os
+import re
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -62,7 +71,11 @@ def pr_node(
     ci="SUCCESS",
     stamped=True,
     requested=(),
+    teams=(),
     title=None,
+    checks=None,
+    more_checks=False,
+    url=None,
 ):
     comments = (
         [
@@ -77,7 +90,7 @@ def pr_node(
     )
     return {
         "__typename": "PullRequest",
-        "url": pr_url(n),
+        "url": url or pr_url(n),
         "number": n,
         "title": title or f"pr {n}",
         "body": "",
@@ -96,11 +109,21 @@ def pr_node(
                 {"requestedReviewer": {"__typename": "User", "login": who}}
                 for who in requested
             ]
+            + [{"requestedReviewer": {"__typename": "Team"}} for _ in teams]
         },
         "closingIssuesReferences": {"nodes": []},
         "commits": {
             "nodes": [
-                {"commit": {"statusCheckRollup": {"contexts": {"nodes": [check(ci)]}}}}
+                {
+                    "commit": {
+                        "statusCheckRollup": {
+                            "contexts": {
+                                "pageInfo": {"hasNextPage": more_checks},
+                                "nodes": checks if checks is not None else [check(ci)],
+                            }
+                        }
+                    }
+                }
             ]
         },
         "comments": {"nodes": comments},
@@ -120,13 +143,13 @@ def issue_node(n, *labels, state="OPEN"):
     }
 
 
-def answer(node, *, archived=False):
+def answer(node, *, archived=False, name=REPO):
     return json.dumps(
         {
             "data": {
                 "viewer": {"login": VIEWER},
                 "repository": {
-                    "nameWithOwner": REPO,
+                    "nameWithOwner": name,
                     "isArchived": archived,
                     "issueOrPullRequest": node,
                 },
@@ -141,17 +164,28 @@ def arg(argv, name):
 
 
 class FakeGh:
-    """Answers the refresh's GraphQL read by item number; records each call."""
+    """Answers the refresh's GraphQL read by item number, a search by its query
+    (`searches`: query -> URLs) and `gh pr view` by URL (`rollups`: URL ->
+    statusCheckRollup list); records each call."""
 
-    def __init__(self, by_number=None, fail=None):
+    def __init__(self, by_number=None, fail=None, searches=None, rollups=None):
         self.by_number = dict(by_number or {})
         self.fail = fail
+        self.searches = dict(searches or {})
+        self.rollups = dict(rollups or {})
         self.calls = []
 
     def __call__(self, argv, timeout):
         self.calls.append(argv)
         if self.fail:
             return self.fail
+        if argv[1:3] == ["pr", "view"]:
+            return 0, json.dumps({"statusCheckRollup": self.rollups[argv[3]]}), ""
+        query = arg(argv, "q")
+        if query is not None:
+            nodes = [{"url": u} for u in self.searches.get(query, [])]
+            page = {"pageInfo": {"hasNextPage": False, "endCursor": None}}
+            return 0, json.dumps({"data": {"search": {**page, "nodes": nodes}}}), ""
         n = int(arg(argv, "number"))
         if n not in self.by_number:
             return (
@@ -349,6 +383,88 @@ class PullRequestTests(Case):
         self.assertEqual(self.prs_row(pr_url(7))[0], "reviewer")
         self.assertEqual(self.fleet_row(pr_url(7))[1]["role"], "reviewer")
 
+    def test_a_fresh_team_request_for_me_makes_it_reviewer(self):
+        # 20 is in the mirror as someone else's PR, not as asking for me.
+        self.assertEqual(self.fleet_row(pr_url(20))[1]["role"], "others")
+        query = f"is:pr is:open review-requested:@me repo:{REPO}"
+        node = pr_node(20, author="azack", teams=("core",), ci="FAILURE")
+        fake = FakeGh({20: answer(node)}, searches={query: [pr_url(3), pr_url(20)]})
+        self.refresh(pr_url(20), fake)
+        self.assertEqual([arg(c, "q") for c in fake.calls], [None, query])
+        self.assertEqual(self.prs_row(pr_url(20))[0], "reviewer")
+        self.assertEqual(self.fleet_row(pr_url(20))[1]["role"], "reviewer")
+        keys = lane_keys(agent_view.build(self.conn, self.cfg, "prs", NOW))
+        self.assertIn(pr_url(20), keys["review"])
+        self.assertNotIn(pr_url(20), keys.get("others", []))
+
+    def test_a_team_request_for_a_team_i_am_not_in_is_from_others(self):
+        # 7 is in the mirror as asking for my review; the search now says no.
+        query = f"is:pr is:open review-requested:@me repo:{REPO}"
+        node = pr_node(7, author="azack", teams=("core",))
+        fake = FakeGh({7: answer(node)}, searches={query: [pr_url(3)]})
+        self.refresh(pr_url(7), fake)
+        self.assertEqual(len(fake.calls), 2)
+        self.assertIsNone(self.prs_row(pr_url(7)))
+        self.assertEqual(self.fleet_row(pr_url(7))[1]["role"], "others")
+        keys = lane_keys(agent_view.build(self.conn, self.cfg, "prs", NOW))
+        self.assertIn(pr_url(7), keys["others"])
+
+    def test_no_team_request_runs_no_search(self):
+        fake = FakeGh({7: answer(pr_node(7, author="azack", requested=(VIEWER,)))})
+        self.refresh(pr_url(7), fake)
+        self.assertEqual(len(fake.calls), 1)
+
+    def test_more_than_100_checks_take_the_ci_state_the_sync_reads(self):
+        # The first 100 contexts pass; one past them fails.
+        rollup = [check("SUCCESS")] * 100 + [check("FAILURE")]
+        node = pr_node(4, checks=rollup[:100], more_checks=True)
+        fake = FakeGh({4: answer(node)}, rollups={pr_url(4): rollup})
+        self.refresh(pr_url(4), fake)
+        self.assertEqual(fake.calls[1][:4], ["gh", "pr", "view", pr_url(4)])
+        synced = github_gh.ci_state(pr_url(4), fake)
+        self.assertEqual(synced, "failure")
+        self.assertEqual(self.prs_row(pr_url(4))[2], synced)
+        self.assertEqual(self.fleet_row(pr_url(4))[1]["ci_state"], synced)
+        keys = lane_keys(agent_view.build(self.conn, self.cfg, "prs", NOW))
+        self.assertIn(pr_url(4), keys["ci"])
+
+    def test_100_checks_or_fewer_take_one_call(self):
+        node = pr_node(4, checks=[check("SUCCESS")] * 100)
+        fake = FakeGh({4: answer(node)})
+        self.refresh(pr_url(4), fake)
+        self.assertEqual(len(fake.calls), 1)
+        self.assertEqual(self.prs_row(pr_url(4))[2], "success")
+
+    def test_a_renamed_repo_leaves_no_row_under_the_old_url(self):
+        new = "bestdan/renamed"
+        new_url = f"https://github.com/{new}/pull/4"
+        self.assertIsNotNone(self.fleet_row(pr_url(4)))
+        self.assertIsNotNone(self.prs_row(pr_url(4)))
+        node = pr_node(4, url=new_url)
+        result = self.refresh(pr_url(4), FakeGh({4: answer(node, name=new)}))
+        self.assertEqual(
+            (result.outcome, result.repo, result.url), ("updated", new, new_url)
+        )
+        self.assertIsNone(self.fleet_row(pr_url(4)))
+        self.assertIsNone(self.prs_row(pr_url(4)))
+        self.assertEqual(self.prs_row(new_url), ("author", 0, "success"))
+        self.assertEqual(self.fleet_row(new_url)[1]["repo"], new)
+        for view in agent_view.available(self.cfg):
+            self.assertNotIn(pr_url(4), view_keys(self.conn, self.cfg, view), view)
+
+    def test_a_repo_transferred_outside_github_orgs_is_dropped(self):
+        new = "someone/elsewhere"
+        new_url = f"https://github.com/{new}/pull/4"
+        node = pr_node(4, url=new_url)
+        result = self.refresh(pr_url(4), FakeGh({4: answer(node, name=new)}))
+        self.assertEqual((result.outcome, result.removed), ("out_of_scope", True))
+        self.assertEqual(
+            result.line(), f"moved outside github.orgs (removed): {new}#4 (pr)"
+        )
+        for url in (pr_url(4), new_url):
+            self.assertIsNone(self.fleet_row(url))
+            self.assertIsNone(self.prs_row(url))
+
     def test_not_found_drops_the_rows(self):
         result = self.refresh(pr_url(4), FakeGh({}))
         self.assertEqual((result.outcome, result.kind), ("not_found", None))
@@ -466,6 +582,123 @@ class CardTests(Case):
         page = server.render_page("t", "", "", "x", False)
         self.assertIn(refresh.JS, page)
         self.assertIn(refresh.CSS, page)
+
+
+NODE = os.environ.get("TASK_DASHBOARD_NODE") or shutil.which("node") or ""
+# A node_modules directory holding jsdom; the repo vendors no npm packages.
+JSDOM = os.environ.get("TASK_DASHBOARD_JSDOM") or ""
+DOM_JS = ROOT / "scripts" / "test_task_dashboard_refresh_dom.js"
+
+
+@unittest.skipUnless(
+    NODE and JSDOM and Path(JSDOM, "jsdom").is_dir(),
+    "needs node and jsdom: set TASK_DASHBOARD_JSDOM to a node_modules holding it",
+)
+class PageScriptTests(Case):
+    """The page's Refresh script, run under jsdom over the real PRs page."""
+
+    def page(self):
+        """GET /prs as the server builds it, with no server bound."""
+        syncer = server.Syncer(server_harness.FakeSync(), 60, 60, run_at_start=False)
+        app = server.App(self.cfg, self.db_path, "tok", syncer)
+        app.now = lambda: NOW
+        return app.view_page("/prs")
+
+    def drive(self, **case):
+        path = Path(self.tmp.name) / "case.json"
+        path.write_text(json.dumps(case))
+        out = subprocess.run(
+            [NODE, str(DOM_JS), JSDOM, str(path)],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(out.returncode, 0, out.stderr)
+        state = json.loads(out.stdout)
+        self.assertEqual((state["errors"], state["failed"]), ([], None))
+        self.assertFalse(state["reloaded"])
+        self.assertEqual([c["method"] for c in state["calls"]], ["POST", "GET"])
+        return state
+
+    def go_green(self):
+        """PR 2 gets its co-review stamp: it moves from Waiting to Ready for you."""
+        before = self.page()
+        result = self.refresh(pr_url(2), FakeGh({2: answer(pr_node(2))}))
+        return before, self.page(), {"ok": True, **result.as_dict()}
+
+    def heading(self, page, lane):
+        m = re.search(rf'data-section="{lane}"[^>]*><h2>([^<]*)</h2>', page)
+        assert m, f"no lane {lane}"
+        return m.group(1)
+
+    def test_an_open_or_unsaved_note_in_a_sibling_card_survives(self):
+        before, after, result = self.go_green()
+        self.assertIn(pr_url(3), tabs_fx.keys(tabs_fx.section(before, "waiting")))
+        self.assertIn(pr_url(1), tabs_fx.keys(tabs_fx.section(before, "ready")))
+        state = self.drive(
+            before=before,
+            after=after,
+            result=result,
+            click=pr_url(2),
+            open=[pr_url(3)],  # its lane loses the clicked card
+            dirty=[pr_url(1)],  # its lane gains it
+        )
+        for key, opened in ((pr_url(3), True), (pr_url(1), False)):
+            edit = state["edits"][key]
+            self.assertTrue(edit["same_card"] and edit["kept"], (key, edit))
+            self.assertEqual(edit["open"], opened)
+        lanes = state["lanes"]
+        # Only the refreshed item moved, and both lanes say they may be stale.
+        self.assertNotIn(pr_url(2), lanes["waiting"]["keys"])
+        self.assertIn(pr_url(2), lanes["ready"]["keys"])
+        self.assertEqual(
+            lanes["ready"]["keys"], tabs_fx.keys(tabs_fx.section(after, "ready"))
+        )
+        self.assertTrue(lanes["waiting"]["stale"] and lanes["ready"]["stale"])
+        for lane in ("waiting", "ready"):
+            self.assertEqual(lanes[lane]["heading"], self.heading(after, lane))
+        self.assertIn("moved to", lanes["waiting"]["note"])
+
+    def test_with_no_editor_open_the_lanes_take_the_new_page(self):
+        before, after, result = self.go_green()
+        state = self.drive(before=before, after=after, result=result, click=pr_url(2))
+        for lane in ("waiting", "ready"):
+            got = state["lanes"][lane]
+            self.assertEqual(got["keys"], tabs_fx.keys(tabs_fx.section(after, lane)))
+            self.assertFalse(got["stale"])
+        self.assertIn("moved to", state["lanes"]["waiting"]["note"])
+
+    def test_an_editor_in_an_untouched_lane_does_not_stop_the_swap(self):
+        before, after, result = self.go_green()
+        state = self.drive(
+            before=before,
+            after=after,
+            result=result,
+            click=pr_url(2),
+            open=[pr_url(20)],
+        )
+        self.assertTrue(state["edits"][pr_url(20)]["kept"])
+        self.assertFalse(state["lanes"]["waiting"]["stale"])
+        self.assertFalse(state["lanes"]["ready"]["stale"])
+
+    def test_a_renamed_repo_s_card_is_followed_to_its_new_url(self):
+        new_url = "https://github.com/bestdan/renamed/pull/2"
+        before = self.page()
+        fake = FakeGh({2: answer(pr_node(2, url=new_url), name="bestdan/renamed")})
+        result = self.refresh(pr_url(2), fake)
+        after = self.page()
+        state = self.drive(
+            before=before,
+            after=after,
+            result={"ok": True, **result.as_dict()},
+            click=pr_url(2),
+            open=[pr_url(3)],
+        )
+        lanes = state["lanes"]
+        self.assertNotIn(pr_url(2), lanes["waiting"]["keys"])
+        self.assertIn(new_url, lanes["ready"]["keys"])
+        self.assertIn("moved to", lanes["waiting"]["note"])
+        self.assertTrue(state["edits"][pr_url(3)]["kept"])
 
 
 class ServerTests(server_harness.ServerCase):
