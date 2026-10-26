@@ -270,6 +270,36 @@ class HookSessionTests(DbCase):
         self.assertIsNone(other["bridge_session_id"])
         self.assertIsNone(other["live_status"])
 
+    def machine(self, host, counts):
+        self.conn.execute(
+            "INSERT OR REPLACE INTO machines (host, last_snapshot_at, received_at,"
+            " counts) VALUES (?, ?, ?, ?)",
+            (host, "2026-10-23T20:59:00Z", "2026-10-23T20:59:00Z",
+             None if counts is None else json.dumps(counts)),
+        )  # fmt: skip
+        self.conn.commit()
+
+    def test_a_session_missing_from_a_registry_host_has_ended(self):
+        self.event("s1", 30, "UserPromptSubmit")
+        self.event("s2", 30, "UserPromptSubmit")
+        self.registry("mini", "s1")
+        # No machines row for mini, or one from before the schema was
+        # recorded, or one from schema 2: nothing has ended.
+        for counts in (False, None, {"registry": 0}, {"schema": 2}, {"schema": "3"}):
+            if counts is not False:
+                self.machine("mini", counts)
+            rows = self.derive()
+            self.assertFalse(rows["s1"][2]["ended"], counts)
+            self.assertFalse(rows["s2"][2]["ended"], counts)
+        self.machine("mini", {"schema": 3, "registry": 1})
+        rows = self.derive()
+        self.assertFalse(rows["s1"][2]["ended"])
+        self.assertTrue(rows["s2"][2]["ended"])
+        # Another host's registry says nothing about mini's sessions.
+        self.machine("mini", {"schema": 2})
+        self.machine("lindev", {"schema": 3})
+        self.assertFalse(self.derive()["s2"][2]["ended"])
+
 
 class ListSessionsTests(unittest.TestCase):
     def test_ok_page(self):

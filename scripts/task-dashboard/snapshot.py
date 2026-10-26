@@ -42,6 +42,10 @@ collector drops that snapshot, deltas included.
                name one session when an old process's file lingers after a
                resume: the live one wins, then the newest ``updatedAt``. The
                socket path, the launch arguments and every other key stay here.
+               No directory is an empty registry. A directory that cannot be
+               listed sends the document as schema 2, without ``registry``:
+               ingest reads a hook session missing from a registry as ended,
+               and a failed scan must not end them all.
     sessions   session-state hook lines (``scripts/session-state-hook.py``,
                format v1 or v2) appended since the last snapshot, each with
                its own ``v``. Only v2 ``Stop`` lines carry ``asked``.
@@ -318,16 +322,26 @@ def _iso_ms(ms: float) -> str | None:
         return None
 
 
-def registry(registry_dir: Path, alive: Alive = pid_alive) -> list[dict[str, Any]]:
+def registry(
+    registry_dir: Path, alive: Alive = pid_alive
+) -> list[dict[str, Any]] | None:
     """One entry per live session in ``~/.claude/sessions/<pid>.json``.
 
     Each entry is built from an allowlist, so ``messagingSocketPath`` and the
     launch arguments never leave the file. An unreadable file, one without a
     ``sessionId`` or an integer ``pid``, and one whose process is gone are
     skipped. Of two live files for one session, the newest ``updatedAt`` wins.
+    No directory is an empty registry; one that cannot be listed is None, a
+    failed scan, since ``glob`` would report it as empty.
     """
     best: dict[str, tuple[float, dict[str, Any]]] = {}
-    paths = sorted(registry_dir.glob("*.json")) if registry_dir.is_dir() else []
+    if not registry_dir.is_dir():
+        return []
+    try:
+        os.listdir(registry_dir)
+    except OSError:
+        return None
+    paths = sorted(registry_dir.glob("*.json"))
     for path in paths:
         try:
             obj = json.loads(path.read_text())
@@ -504,24 +518,28 @@ def build(
     collector passes the cursor of its newest unsent snapshot, so a snapshot
     waiting in its spool and the next one never carry the same lines.
     ``registry_dir`` is Claude Code's ``sessions`` directory; None reads none.
+    A registry that cannot be read makes the document schema 2, without one.
     """
     if cursor is None:
         cursor = load_cursor(state_dir / CURSOR_NAME)
     sessions, session_marks = hook_tails(state_dir / "sessions", cursor)
     prompts, history_mark = history_delta(history, cursor, classify)
     trees, scan_errors = worktrees(runner, src_root)
+    live = registry(registry_dir, alive) if registry_dir else []
     doc = {
-        "schema": SCHEMA_VERSION,
+        "schema": SCHEMA_VERSION if live is not None else 2,
         "host": host,
         "taken_at": _iso(now),
         "worktrees": trees,
         "scan_errors": scan_errors,
         "handoffs": handoffs(src_root / "worktrees"),
         "tmux": tmux_sessions(runner),
-        "registry": registry(registry_dir, alive) if registry_dir else [],
+        "registry": live,
         "sessions": sessions,
         "history": prompts,
     }
+    if live is None:
+        del doc["registry"]
     new_cursor = {"v": 1, "sessions": session_marks, "history": history_mark}
     return doc, new_cursor
 

@@ -22,7 +22,10 @@ one transaction, so a snapshot lands whole or not at all:
 - ``sessions`` and ``history`` are deltas, appended to ``session_events`` and
   ``history_entries``. A hook line's ``asked`` (format 2 Stop lines) is stored
   as 1 / 0, and NULL when it is null or absent.
-- ``machines.last_snapshot_at`` records the snapshot's own ``taken_at``.
+- ``machines.last_snapshot_at`` records the snapshot's own ``taken_at``, and
+  ``machines.counts`` its ``schema`` beside the counts: sessions.py reads a
+  host whose latest snapshot is schema 3 or later as one that sent a registry,
+  so a hook session missing from it has ended.
 
 A snapshot no newer than the last one ingested from its host is refused with
 ``StaleSnapshot`` and nothing is written. That is what makes a resend harmless:
@@ -124,6 +127,7 @@ def ingest(
     received = _ts(now)
     rows = item_rows(doc)
     counts = {
+        "schema": doc["schema"],
         "worktrees": len(doc["worktrees"]),
         "handoffs": len(doc["handoffs"]),
         "tmux": len(doc["tmux"]),

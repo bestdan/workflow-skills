@@ -41,6 +41,14 @@ rest is in `raw_json`:
                       process is gone or the collector predates schema 3.
                       `bridge_session_id` is the Remote Control session, so
                       `https://claude.ai/code/<it>` opens this session.
+    ended             the host's latest snapshot carries a registry (schema 3
+                      or later, recorded in `machines.counts`) and this
+                      session is not in it: its process is gone, so it can
+                      only be resumed. False on a host whose latest snapshot
+                      has no registry (an older collector, or a registry scan
+                      that failed), where a missing entry proves nothing.
+                      Recomputed on every derive, so a session that shows up
+                      in the registry again is no longer ended.
 
 A permission prompt answered mid-turn fires no hook event, so the session
 reads as need_input until that turn's Stop. The hook has no archive signal, so
@@ -167,6 +175,24 @@ def registry(conn: sqlite3.Connection) -> dict[tuple[str, str], dict[str, Any]]:
     return out
 
 
+def registry_hosts(conn: sqlite3.Connection) -> set[str]:
+    """The hosts whose latest snapshot carried a registry (schema 3 or later).
+
+    snapshot_adapter records each snapshot's `schema` in `machines.counts`; a
+    row written before it did has none, and counts as no registry.
+    """
+    out: set[str] = set()
+    for host, counts in conn.execute("SELECT host, counts FROM machines"):
+        try:
+            got = json.loads(counts or "{}")
+        except ValueError:
+            continue
+        schema = got.get("schema") if isinstance(got, dict) else None
+        if type(schema) is int and schema >= 3:
+            out.add(host)
+    return out
+
+
 def with_registry(
     row: dict[str, Any], entry: "dict[str, Any] | None"
 ) -> dict[str, Any]:
@@ -196,11 +222,15 @@ def derive(conn: sqlite3.Connection, now: datetime) -> list[dict[str, Any]]:
         if session_id:
             by_session.setdefault(session_id, []).append(tuple(rest))
     live = registry(conn)
-    rows = [fold(sid, evs) for sid, evs in by_session.items()]
-    return [
-        with_registry(row, live.get((row["host"] or "", row["session_id"])))
-        for row in rows
-    ]
+    hosts = registry_hosts(conn)
+    rows = []
+    for sid, evs in by_session.items():
+        row = fold(sid, evs)
+        entry = live.get((row["host"] or "", sid))
+        with_registry(row, entry)
+        row["ended"] = entry is None and row["host"] in hosts
+        rows.append(row)
+    return rows
 
 
 def write(conn: sqlite3.Connection, rows: list[dict[str, Any]], now: datetime) -> None:

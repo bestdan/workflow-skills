@@ -452,6 +452,21 @@ class TestRegistry(unittest.TestCase):
         self.write("8.json", {"pid": 8, "sessionId": "s"})
         self.assertEqual(snap.registry(self.dir, alive=lambda pid: False), [])
 
+    def test_an_unlistable_directory_is_a_failed_scan_sent_as_schema_2(self):
+        self.write("8.json", {"pid": 8, "sessionId": "s"})
+        self.assertEqual(snap.registry(self.dir / "absent", lambda p: True), [])
+        self.dir.chmod(0o300)  # searchable, not listable
+        self.addCleanup(self.dir.chmod, 0o700)
+        self.assertIsNone(snap.registry(self.dir, alive=lambda pid: True))
+        doc, _ = snap.build(
+            src_root=self.dir / "src", state_dir=self.dir / "state",
+            history=self.dir / "history.jsonl", host="h", now=NOW,
+            runner=FakeRunner(), registry_dir=self.dir, alive=lambda pid: True,
+        )  # fmt: skip
+        self.assertEqual(doc["schema"], 2)
+        self.assertNotIn("registry", doc)
+        self.assertEqual(snap.validate(doc), [])
+
     def test_a_schema_3_document_needs_its_registry(self):
         doc = {"schema": 3, "host": "h", "taken_at": "t", "worktrees": [],
                "scan_errors": [], "handoffs": [], "tmux": [], "sessions": [],

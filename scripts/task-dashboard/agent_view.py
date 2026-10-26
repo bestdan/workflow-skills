@@ -313,7 +313,9 @@ def _needs(ctx: "Ctx") -> list[dict[str, Any]]:
     ctx.notes["snoozed"] = page.snoozed
     if ctx.show_all:
         every = needs.collect(ctx.conn, ctx.cfg, ctx.now)
-        done = needs.finished(ctx.conn, ctx.cfg, needs.since_looked(ov, ctx.now))
+        done = needs.finished(
+            ctx.conn, ctx.cfg, needs.since_looked(ov, ctx.now), ctx.now
+        )
         cands = [
             need_item(n, "approvals" if n.approval else "needs", ctx.now) for n in every
         ]

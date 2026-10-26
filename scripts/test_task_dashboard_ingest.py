@@ -531,6 +531,12 @@ class RegistryTest(IngestCase):
             self.assertEqual(
                 self.q("SELECT COUNT(*) FROM issues WHERE kind = 'registry'"), [(0,)]
             )
+            # The schema is recorded, so sessions.py can tell "no registry"
+            # from "an empty one".
+            self.assertEqual(
+                self.q("SELECT json_extract(counts, '$.schema') FROM machines"),
+                [(schema,)],
+            )
 
 
 class SchemaTest(unittest.TestCase):
