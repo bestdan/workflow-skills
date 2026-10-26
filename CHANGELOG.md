@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.133.1] - 2026-10-26
+
+### Fixes
+
+- leave archived repos out of every open-item search [#1189] (#1191) (60dbcf4)
+
 ## [2.133.0] - 2026-10-26
 
 ### Features
