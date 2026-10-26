@@ -8,8 +8,9 @@ one transaction, so a snapshot lands whole or not at all:
 - worktrees, handoffs, tmux sessions and live registry entries (schema 3)
   become ``issues`` rows under ``source = 'machine:<host>'`` with ``kind``
   ``worktree`` | ``handoff`` | ``tmux`` | ``registry``; sessions.py joins a
-  registry row to its session's row by host and session id. A snapshot is that host's full current state, so the host's rows
-  are deleted and rewritten; other hosts' rows, and the Jira sync's
+  registry row to its session's row by host and session id. A snapshot is
+  that host's full current state, so the host's rows are deleted and
+  rewritten; other hosts' rows, and the Jira sync's
   (``source = 'jira'``), are never touched.
 - The one exception is a repo named in ``scan_errors`` (schema 2): its scan
   failed, so the snapshot says nothing about its worktrees. Its previous
