@@ -325,7 +325,7 @@ class FleetRouteTests(server_harness.ServerCase):
     def test_header_gauges_are_identical_with_and_without_a_filter(self):
         for path in VIEW_PATHS:
             bare = header(self.get(path))
-            self.assertIn("Side quests <b>1/3</b>", bare, path)
+            self.assertIn('data-gauge="review-queue"', bare, path)
             for groups in ("prs", "sessions", "tasks", "other", ""):
                 filtered = header(self.get(f"{path}?include={groups}"))
                 self.assertEqual(filtered, bare, (path, groups))
@@ -443,7 +443,7 @@ class FleetRouteTests(server_harness.ServerCase):
     def test_health_leaves_out_the_figures_of_a_group_switched_off(self):
         page = self.get("/health?days=14&include=prs")
         figures = re.findall(r'data-figure="(\w+)"', page)
-        self.assertEqual(figures, ["open_prs", "side_quests", "review_queue"])
+        self.assertEqual(figures, ["open_prs", "review_queue"])
         # The window links carry the URL's filter; the switches keep the window.
         self.assertIn('href="/health?days=7&amp;include=prs"', page)
         row = switch_row(page)
@@ -451,7 +451,7 @@ class FleetRouteTests(server_harness.ServerCase):
         self.assertIn('data-toggle-href="/health?days=14&amp;include=tasks,prs"', row)
         self.assertIn('data-toggle-href="/health?days=14&amp;include="', row)
         everything = re.findall(r'data-figure="(\w+)"', self.get("/health"))
-        self.assertEqual(len(everything), 13)
+        self.assertEqual(len(everything), 12)
 
 
 class FleetViewTests(unittest.TestCase):

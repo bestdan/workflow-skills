@@ -32,7 +32,7 @@ the switch rate or the active-session share.
 CURRENT FIGURES have no window: open PRs awaiting the owner and the review
 queue (``gauges.review_queue``, the one reader both the header and /status
 use), designs at ``proposed`` (github_fleet's rows, unknown under the same
-rule), and side quests in flight (``gauges.read``). Issues opened : closed has
+rule). Issues opened : closed has
 no source yet, since github_fleet mirrors only issues needing a human, and
 shows as such.
 
@@ -83,14 +83,12 @@ FIGURES: tuple[tuple[str, str, str, str, str], ...] = (
     ("issues_opened_closed", "Issues opened : closed", "GitHub", "ratio", "now"),
     ("designs_proposed", "Designs at proposed", "GitHub (design front matter)",
      "designs", "now"),
-    ("side_quests", "Side quests in flight", "overlay tags", "items", "now"),
     ("review_queue", "Human-review queue length", "GitHub", "PRs", "now"),
 )  # fmt: skip
 FIGURE_IDS = tuple(f[0] for f in FIGURES)
 
 # The mirror kind each figure is about, for the include filter (include.py
-# maps the kind onto its group). Side quests are tags on items of any kind,
-# so that row is always shown.
+# maps the kind onto its group).
 FIGURE_KINDS: dict[str, "str | None"] = {
     "approval_per_100": "session",
     "switch_rate": "session",
@@ -103,7 +101,6 @@ FIGURE_KINDS: dict[str, "str | None"] = {
     "open_prs": "pr",
     "issues_opened_closed": "issue",
     "designs_proposed": "design",
-    "side_quests": None,
     "review_queue": "pr",
 }
 assert set(FIGURE_KINDS) == set(FIGURE_IDS)
@@ -111,7 +108,6 @@ assert set(FIGURE_KINDS) == set(FIGURE_IDS)
 # The caps the fleet view design names; every other target is the owner's to
 # copy in from the reset design's table, and is "observed" until then.
 DEFAULT_TARGETS: dict[str, str] = {fid: "observed" for fid in FIGURE_IDS}
-DEFAULT_TARGETS["side_quests"] = f"<= {gauges.SIDE_QUEST_CAP}"
 DEFAULT_TARGETS["review_queue"] = f"<= {gauges.REVIEW_QUEUE_CAP}"
 
 _OPS = {
@@ -291,7 +287,6 @@ def current_figures(
         "open_prs": None if counts is None else counts["awaiting"] + counts["others"],
         "issues_opened_closed": None,
         "designs_proposed": designs,
-        "side_quests": gauges.read(conn, fleet=fleet).side_quests,
         "review_queue": None if counts is None else counts["queue"],
     }
 

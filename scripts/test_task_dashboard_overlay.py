@@ -842,41 +842,28 @@ class RouteTests(server_harness.ServerCase):
         self.assertEqual(set(self.ROUTES), set(overlay.ACTIONS))
 
     def gauge(self, page, name):
-        m = re.search(rf'data-gauge="{name}"[^>]*>(.*?)</span>', page, re.S)
+        m = re.search(rf'data-gauge="{name}"[^>]*>(.*?)</span><input', page, re.S)
         return m and re.sub(r"<[^>]+>", "", m.group(1))
 
-    def test_header_gauges_show_side_quests_on_every_page(self):
+    def test_the_header_has_no_side_quest_gauge_even_with_a_tag(self):
         conn = self.conn()
         server_harness.seed(conn)
         conn.close()
-        for key in ("ABC-1", "ABC-4"):
-            fields = [("key", key), ("tag", "side-quest")]
-            self.assertEqual(self.post("tag", fields)[0], 200)
-        # A tag on an item not in the mirror is kept but not in flight.
-        self.assertEqual(
-            self.post("tag", [("key", "GONE-9"), ("tag", "side-quest")])[0], 200
-        )
+        # Tagging still works; it only no longer reaches the header.
+        fields = [("key", "ABC-1"), ("tag", "side-quest")]
+        self.assertEqual(self.post("tag", fields)[0], 200)
         for path in ("/board", "/needs", "/now", "/stale"):
             page = self.request("GET", path)[1]
-            self.assertEqual(self.gauge(page, "side-quests"), "Side quests 2/3", path)
-            self.assertEqual(self.gauge(page, "review-queue"), "Review queue —/5", path)
+            self.assertNotIn("side-quest", page.split("</header>", 1)[0], path)
+            self.assertEqual(
+                self.gauge(page, "review-queue"), "Review: — ready · — waiting", path
+            )
             self.assertIsNone(self.gauge(page, "focus"), path)
             self.assertNotIn('data-ov="focus"', page, path)
 
     def test_the_removed_focus_actions_are_not_found(self):
         for action in ("focus", "unfocus"):
             self.assertEqual(self.post(action, [("key", "ABC-1")])[0], 404, action)
-
-    def test_a_done_side_quest_is_not_in_flight(self):
-        conn = self.conn()
-        server_harness.seed(conn)
-        conn.execute("UPDATE issues SET status_category = 'done' WHERE key = 'ABC-1'")
-        conn.commit()
-        conn.close()
-        for key in ("ABC-1", "ABC-4"):
-            self.post("tag", [("key", key), ("tag", "side-quest")])
-        page = self.request("GET", "/board")[1]
-        self.assertEqual(self.gauge(page, "side-quests"), "Side quests 1/3")
 
     def test_review_queue_reads_the_github_rows_once_the_fleet_step_ran(self):
         conn = self.conn()
@@ -885,6 +872,7 @@ class RouteTests(server_harness.ServerCase):
             {
                 "kind": "pr",
                 "key": f"https://github.com/o/r/pull/{n}",
+                "url": f"https://github.com/o/r/pull/{n}",
                 "title": f"pr {n}",
                 "in_queue": n <= 6,
             }
@@ -893,13 +881,17 @@ class RouteTests(server_harness.ServerCase):
         github_fleet.write(conn, rows, NOW)
         conn.close()
         page = self.request("GET", "/now")[1]
-        self.assertEqual(self.gauge(page, "review-queue"), "Review queue 6/5")
+        self.assertEqual(
+            self.gauge(page, "review-queue"), "Review: 6 ready · 2 waiting"
+        )
         self.assertIn('class="gauge over" data-gauge="review-queue"', page)
         conn = self.conn()
         github_fleet.write(conn, rows[-1:], NOW)  # GitHub synced, no PR waiting
         conn.close()
         page = self.request("GET", "/now")[1]
-        self.assertEqual(self.gauge(page, "review-queue"), "Review queue 0/5")
+        self.assertEqual(
+            self.gauge(page, "review-queue"), "Review: 0 ready · 0 waiting"
+        )
 
     def test_a_side_quest_post_carrying_text_leaves_the_note_alone(self):
         self.assertEqual(

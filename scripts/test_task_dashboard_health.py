@@ -214,8 +214,7 @@ class FigureTest(DbCase):
         self.assertEqual(on["open_prs"]["value"], 4)
         self.assertEqual(on["review_queue"]["value"], 2)
         self.assertEqual(on["designs_proposed"]["value"], 1)
-        self.assertEqual(on["side_quests"]["value"], 0)
-        self.assertIs(on["side_quests"]["met"], True)  # "<= 3" by default
+        self.assertNotIn("side_quests", on)
         self.assertIsNone(on["issues_opened_closed"]["value"])
         self.assertIn("no source", on["issues_opened_closed"]["note"])
 

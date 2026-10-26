@@ -769,19 +769,27 @@ def run_all(
     fleet_runner: github_gh.Runner = github_gh.run,
     claude_runner: claude_remote.Runner = claude_remote.run,
     clock: "Callable[[], datetime] | None" = None,
+    on_step: "Callable[[str], None] | None" = None,
 ) -> list[dict[str, Any]]:
     """One scheduled sync: `run()`, then each fleet step that is enabled.
 
     Returns the `sync_runs` row of each run made. The fleet steps run whatever
-    the Jira run's outcome, since every step writes disjoint rows.
+    the Jira run's outcome, since every step writes disjoint rows. `on_step`,
+    when given, is called with each step's `sync_runs` kind as it starts (the
+    server's /status reports it).
     """
     clock = clock or _wall
+    step = on_step or (lambda _kind: None)
+    step(mode)
     rows = [run(mode, config, db, now, jira=jira, github=github, clock=clock)]
     if fleet_enabled(config):
+        step(FLEET_KIND)
         rows.append(run_fleet(config, db, clock(), runner=fleet_runner, clock=clock))
     if sessions.enabled(config):
+        step(sessions.RUN_KIND)
         rows.append(run_sessions(db, clock(), clock=clock))
     if config["claude_remote"]["enabled"]:
+        step(claude_remote.RUN_KIND)
         rows.append(
             run_claude_remote(config, db, clock(), runner=claude_runner, clock=clock)
         )
