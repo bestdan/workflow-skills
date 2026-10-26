@@ -16,10 +16,11 @@ Every field is plain text. An item's `action` is structured: `review` (what to
 do by hand, a command in backticks), `command` (argv), and `url`, or null when
 the page suggests none. A Needs you, Finished or Now item also carries
 `bridge_session_id`: a hook session's Remote Control id, null for an ended
-session and for anything else, and the action's `url` is that session's page. It carries `branch` too,
-and for a hook session `first_prompt` and `last_ask` (its transcript summary,
-needs.py) and `pr`, the open PR on its branch as {number, url, repo}; each is
-null when there is none.
+session and for anything else; when it is set, the action's `url` is that
+session's page. It carries `branch` too, and for a hook session
+`first_prompt` and `last_ask` (its transcript summary, needs.py) and `pr`,
+the open PR on its branch as {number, url, repo}; each is null when there is
+none.
 """
 
 import json
