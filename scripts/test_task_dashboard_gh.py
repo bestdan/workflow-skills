@@ -179,8 +179,10 @@ class SearchTests(unittest.TestCase):
         runner = FakeRunner([ok(second), ok(first), ok(second)])
         rows = gh.my_prs(["bestdan", "cli"], runner)
         queries = [arg(c, "q") for c in runner.calls]
-        self.assertEqual(queries[0], "is:pr is:open author:@me org:bestdan")
-        self.assertEqual(queries[1], "is:pr is:open author:@me org:cli")
+        self.assertEqual(
+            queries[0], "is:pr is:open archived:false author:@me org:bestdan"
+        )
+        self.assertEqual(queries[1], "is:pr is:open archived:false author:@me org:cli")
         # second page's nodes appear under both owners; rows dedupe by url.
         self.assertEqual(len(rows), 4)
         self.assertTrue(all(r["head_ref"] for r in rows))
@@ -202,7 +204,8 @@ class SearchTests(unittest.TestCase):
         runner = FakeRunner([ok(second)])
         rows = gh.review_requested(["bestdan"], runner)
         self.assertEqual(
-            arg(runner.calls[0], "q"), "is:pr is:open review-requested:@me org:bestdan"
+            arg(runner.calls[0], "q"),
+            "is:pr is:open archived:false review-requested:@me org:bestdan",
         )
         self.assertTrue(all(r["role"] == "reviewer" for r in rows))
 

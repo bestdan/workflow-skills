@@ -218,9 +218,9 @@ class ReviewQueueTests(unittest.TestCase):
         self.assertEqual(
             [search_q(c) for c in runner.calls],
             [
-                "is:pr is:open draft:false -review:approved author:@me org:bestdan",
-                "is:pr is:open draft:false -review:approved review-requested:@me org:bestdan",
-                "is:pr is:open draft:false -author:@me org:bestdan",
+                "is:pr is:open archived:false draft:false -review:approved author:@me org:bestdan",
+                "is:pr is:open archived:false draft:false -review:approved review-requested:@me org:bestdan",
+                "is:pr is:open archived:false draft:false -author:@me org:bestdan",
             ],
         )
         query = arg(runner.calls[0], "query")
@@ -562,7 +562,7 @@ class IssuesTests(unittest.TestCase):
         rows = fleet.issues_needing_human(["bestdan"], runner)
         self.assertEqual(
             search_q(runner.calls[0]),
-            'is:issue is:open label:"auto:human-review-needed" org:bestdan',
+            'is:issue is:open archived:false label:"auto:human-review-needed" org:bestdan',
         )
         self.assertEqual(len(rows), 3)
         self.assertTrue(all(r["kind"] == "issue" for r in rows))
@@ -636,7 +636,7 @@ class OpenIssuesTests(unittest.TestCase):
         self.assertEqual(len(wide), 2)
         self.assertEqual(
             search_q(wide[0]),
-            'is:issue is:open -label:"auto:human-review-needed" org:bestdan',
+            'is:issue is:open archived:false -label:"auto:human-review-needed" org:bestdan',
         )
 
     def test_a_cap_met_exactly_on_the_last_page_is_not_truncation(self):
@@ -871,6 +871,21 @@ class WriteTests(unittest.TestCase):
             ).fetchall(),
             [("awaiting",)],
         )
+
+    def test_open_item_searches_leave_out_archived_repos(self):
+        # GitHub leaves an archived repo's PRs and issues open. Stale reads
+        # merged PRs as evidence, so the closed search keeps archived repos.
+        runner = self.full_runner()
+        fleet.fetch(self.config(), runner, now=NOW)
+        searches = [search_q(a) for a in runner.calls if search_q(a)]
+        open_ = [q for q in searches if "is:open" in q]
+        closed = [q for q in searches if "is:closed" in q]
+        self.assertEqual(len(open_), 5)
+        self.assertEqual(len(closed), 1)
+        self.assertEqual(len(open_) + len(closed), len(searches))
+        for q in open_:
+            self.assertIn("archived:false", q.split())
+        self.assertNotIn("archived:false", closed[0])
 
     def test_jira_rows_untouched_and_github_replaced(self):
         self.conn.execute(

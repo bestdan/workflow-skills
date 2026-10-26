@@ -164,7 +164,9 @@ query($owner: String!, $name: String!, $number: Int!) {
 }
 """
 
-# What "waits on the owner" means; each is one search per owner.
+# What "waits on the owner" means; each is one search per owner. Every search
+# for open items carries `archived:false`: archiving a repo leaves its PRs and
+# issues open, so without it they would keep showing as work.
 REVIEW_ROLES = (("author:@me", "author"), ("review-requested:@me", "reviewer"))
 
 
@@ -172,14 +174,17 @@ def review_searches(owner: str) -> list[str]:
     """The GitHub searches whose union is one owner's awaiting set (rule 1)."""
     scope = github_gh.owner_qualifier(owner)
     return [
-        f"is:pr is:open draft:false -review:approved {who} {scope}"
+        f"is:pr is:open archived:false draft:false -review:approved {who} {scope}"
         for who, _ in REVIEW_ROLES
     ]
 
 
 def others_search(owner: str) -> str:
     """The search for PRs others opened on one owner's repos."""
-    return f"is:pr is:open draft:false -author:@me {github_gh.owner_qualifier(owner)}"
+    return (
+        "is:pr is:open archived:false draft:false -author:@me"
+        f" {github_gh.owner_qualifier(owner)}"
+    )
 
 
 # Bot accounts that open PRs here, named in case a node does not mark them.
@@ -262,7 +267,8 @@ def issues_needing_human(
     rows: dict[str, dict] = {}
     for owner in owners:
         query = (
-            f'is:issue is:open label:"{HUMAN_LABEL}" {github_gh.owner_qualifier(owner)}'
+            f'is:issue is:open archived:false label:"{HUMAN_LABEL}"'
+            f" {github_gh.owner_qualifier(owner)}"
         )
         for node in github_gh.search_prs(query, runner, timeout, ISSUE_QUERY):
             rows.setdefault(node["url"], _issue_row(node))
@@ -285,7 +291,7 @@ def open_issues(
     truncated: list[str] = []
     for owner in owners:
         query = (
-            f'is:issue is:open -label:"{HUMAN_LABEL}"'
+            f'is:issue is:open archived:false -label:"{HUMAN_LABEL}"'
             f" {github_gh.owner_qualifier(owner)}"
         )
         nodes, more = github_gh.search_nodes(
@@ -318,6 +324,8 @@ def recently_closed(
     since = (now - timedelta(days=days)).astimezone(timezone.utc).date().isoformat()
     rows: dict[str, dict] = {}
     for owner in owners:
+        # No `archived:false` here: a PR that merged before its repo was
+        # archived is still evidence that its worktree can go.
         query = (
             f"is:pr is:closed author:@me closed:>={since}"
             f" {github_gh.owner_qualifier(owner)}"

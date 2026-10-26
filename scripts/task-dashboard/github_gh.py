@@ -170,7 +170,8 @@ def _prs(
 ) -> list[dict]:
     rows: dict[str, dict] = {}
     for owner in owners:
-        query = f"is:pr is:open {qualifier} {owner_qualifier(owner)}"
+        # Archiving a repo leaves its PRs open; `archived:false` keeps them out.
+        query = f"is:pr is:open archived:false {qualifier} {owner_qualifier(owner)}"
         for node in search_prs(query, runner, timeout):
             rows.setdefault(node["url"], _row(node, role))
     return list(rows.values())

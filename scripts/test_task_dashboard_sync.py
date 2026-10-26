@@ -38,6 +38,9 @@ sys.path.insert(0, str(PKG))
 import config  # type: ignore[import-not-found]  # noqa: E402
 import dashboard  # type: ignore[import-not-found]  # noqa: E402
 import db  # type: ignore[import-not-found]  # noqa: E402
+import fleet_now  # type: ignore[import-not-found]  # noqa: E402
+import fleet_tabs  # type: ignore[import-not-found]  # noqa: E402
+import fleet_views  # type: ignore[import-not-found]  # noqa: E402
 import jira_acli  # type: ignore[import-not-found]  # noqa: E402
 import server  # type: ignore[import-not-found]  # noqa: E402
 import sync  # type: ignore[import-not-found]  # noqa: E402
@@ -670,13 +673,15 @@ class FleetGh:
     PR 1 passes all four review-queue rules (green CI, an approved milestone,
     the viewer's stamp at its head); PR 2 closes an issue in milestone 8, which
     is not approved, so it only awaits.
-    `error` answers every call with that stderr.
+    `error` answers every call with that stderr; `extra` nodes join PRs 1 and 2
+    in the author search.
     """
 
     def __init__(self):
         self.calls = []
         self.error = None
         self.ci_fail = set()
+        self.extra = []
 
     def __call__(self, argv, timeout):
         self.calls.append(argv)
@@ -688,6 +693,7 @@ class FleetGh:
                 nodes = []
             elif "author:@me" in q:
                 nodes = [fleet_pr(1, milestone=7), fleet_pr(2, milestone=8)]
+                nodes += self.extra
             elif "is:issue" in q:
                 nodes = [
                     {
@@ -850,6 +856,110 @@ class FleetTests(SyncCase):
             runs, [("full", sync._ts(NOW)), ("github_fleet", sync._ts(later))]
         )
         self.assertEqual(sync.last_cursor_run(self.conn)[0], sync._ts(NOW))
+
+
+class ArchivedRepo:
+    """A gh runner that treats `repo` as GitHub does once it is archived.
+
+    GitHub leaves an archived repo's PRs and issues open, so a search without
+    `archived:false` still returns them. With `archived` set, a search that
+    carries the qualifier has that repo's nodes dropped from its answer.
+    """
+
+    def __init__(self, inner, repo):
+        self.inner = inner
+        self.repo = repo
+        self.archived = False
+
+    def __call__(self, argv, timeout):
+        code, out, err = self.inner(argv, timeout)
+        q = next((a[2:] for a in argv if a.startswith("q=")), "")
+        if code or not self.archived or "archived:false" not in q:
+            return code, out, err
+        page = json.loads(out)
+        search = page["data"]["search"]
+        search["nodes"] = [
+            n for n in search["nodes"] if n["repository"]["nameWithOwner"] != self.repo
+        ]
+        return code, json.dumps(page), err
+
+
+class ArchivedRepoTests(SyncCase):
+    OLD = "acme/old"
+    URL = "https://github.com/acme/old/pull/50"
+    PLACES = ("prs table", "github rows", "Pull requests", "Stale", "Now")
+
+    def old_node(self, **extra):
+        return {
+            "url": self.URL,
+            "number": 50,
+            "title": "feat: in a repo about to be archived",
+            "headRefName": "bestdan/old-50",
+            "isDraft": False,
+            "reviewDecision": None,
+            # Older than Stale's open-item window, so it is a Check item.
+            "createdAt": "2026-09-01T10:00:00Z",
+            "updatedAt": "2026-09-02T10:00:00Z",
+            "repository": {"nameWithOwner": self.OLD},
+            **extra,
+        }
+
+    def sync(self, cfg, gh, fleet_gh):
+        rows = sync.run_all(
+            "full", cfg, self.conn, NOW,
+            jira=sync.JiraSource(cfg, runner=FakeAcli(["DEMO-1"])),
+            github=sync.GithubSource(cfg, runner=gh), fleet_runner=fleet_gh,
+            clock=lambda: NOW,
+        )  # fmt: skip
+        self.assertEqual([r["outcome"] for r in rows], ["ok", "ok"])
+
+    def seen(self, cfg):
+        """Where the archived repo's PR shows, by place."""
+        prs = {u for (u,) in self.conn.execute("SELECT url FROM prs")}
+        mirrored = {k for (k,) in self.conn.execute("SELECT key FROM issues")}
+        checks = [
+            i.html
+            for i in fleet_views.stale_items(fleet_views.load(self.conn, cfg), NOW)
+            if i.lane == "check"
+        ]
+        now = [r.need.item[1] for r in fleet_now.candidates(self.conn, cfg, NOW)]
+        found = (
+            self.URL in prs,
+            self.URL in mirrored,
+            self.URL in fleet_tabs.render_prs(self.conn, cfg, NOW),
+            any(self.URL in c for c in checks),
+            self.URL in now,
+        )
+        return dict(zip(self.PLACES, found))
+
+    def test_a_pr_left_open_in_an_archived_repo_drops_out_on_the_next_sync(self):
+        cfg = make_config(enabled=True, fleet=True)
+        fleet_inner = FleetGh()
+        fleet_inner.extra = [
+            self.old_node(
+                headRefOid=HEAD, body="", closingIssuesReferences={"nodes": []}
+            )
+        ]
+        gh = ArchivedRepo(
+            FakeGh([pr_node(5, "kept", "keep-5"), self.old_node()]), self.OLD
+        )
+        fleet_gh = ArchivedRepo(fleet_inner, self.OLD)
+
+        self.sync(cfg, gh, fleet_gh)
+        self.assertEqual(self.seen(cfg), dict.fromkeys(self.PLACES, True))
+
+        gh.archived = fleet_gh.archived = True
+        self.sync(cfg, gh, fleet_gh)
+        self.assertEqual(self.seen(cfg), dict.fromkeys(self.PLACES, False))
+        # Rows from repos that are still live stay.
+        self.assertIn(
+            "https://github.com/acme/app/pull/5",
+            {u for (u,) in self.conn.execute("SELECT url FROM prs")},
+        )
+        self.assertIn(
+            "https://github.com/acme/app/pull/1",
+            {k for (k,) in self.conn.execute("SELECT key FROM issues")},
+        )
 
 
 class GenericItemTests(SyncCase):
