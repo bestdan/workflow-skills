@@ -521,12 +521,26 @@ def _title(n: Need, url: "str | None") -> str:
     return fleet_views._link(url, n.title) + tag
 
 
+# The leading word of a cut ask, with the space after it: the cut fell
+# somewhere in that word, or just before it, which the text cannot tell apart.
+_PARTIAL_WORD = re.compile(r"\S*\s+(?=\S)")
+
+
+def ask_excerpt(ask: str) -> str:
+    """`ask` as a card quotes it. The collector keeps the last ASK_CHARS, so
+    one that long was cut: it starts at its next word, after a `…`. With no
+    space to cut at, it is kept whole."""
+    if len(ask) < snapshot.ASK_CHARS:
+        return ask
+    m = _PARTIAL_WORD.match(ask)
+    return "…" + (ask[m.end() :] if m else ask)
+
+
 def ask_html(n: Need) -> str:
-    """A session's last ask, quoted, or nothing. A cut one starts with `…`."""
+    """A session's last ask, quoted, or nothing (ask_excerpt)."""
     if not n.last_ask:
         return ""
-    cut = "…" if len(n.last_ask) >= snapshot.ASK_CHARS else ""
-    return f'<div class="ask">› {cut}{_e(n.last_ask)}</div>'
+    return f'<div class="ask">› {_e(ask_excerpt(n.last_ask))}</div>'
 
 
 def pr_link(n: Need) -> str:
@@ -614,18 +628,18 @@ def finished_row(n: Need, now: datetime, ov: overlay.Overlay) -> str:
     controls = overlay.card_controls(n.item, ov, now, reorder=False, pin=False)
     if n.state == ENDED:
         meta = f"{_e(n.where)} · last active {ago}"
-        resume = f" · {view_model.code(n.hint)}" if n.hint else ""
-        act = f'<div class="act">→ {ENDED}{resume}</div>'
+        resume = view_model.code(n.hint) if n.hint else ""
+        bits = [ENDED, pr_link(n), resume]
     else:
         meta = f"{_e(n.where)} · turn ended {ago}"
-        act = (
-            f'<div class="act">→ {view_model.link(n.url, open_label(n))}</div>'
-            if n.url
-            else ""
-        )
+        link = view_model.link(n.url, open_label(n)) if n.url else ""
+        bits = [link, pr_link(n)]
+    act = " · ".join(x for x in bits if x)
+    act = f'<div class="act">→ {act}</div>' if act else ""
     return (
         f"<details {_attrs(n, ' done')}><summary>{_title(n, None)}"
-        f' <span class="meta">{meta}</span></summary>{act}{controls}</details>'
+        f' <span class="meta">{meta}</span></summary>{ask_html(n)}{act}{controls}'
+        "</details>"
     )
 
 
@@ -635,9 +649,10 @@ def finished(
     """The sessions that finished a turn after `since`, then the ended ones
     (ended_need), as Needs, latest first."""
     out = []
+    prs = open_prs(conn, cfg)
     mirror = {str(r.get("key")): r for r in _rows(conn, sessions.SOURCE, sessions.KIND)}
     for row in mirror.values():
-        need = ended_need(row, since, now)
+        need = ended_need(row, since, now, prs)
         if need is not None:
             out.append(need)
     for s in fleet_views.finished_sessions(fleet_views.load(conn, cfg), since):
@@ -649,6 +664,7 @@ def finished(
             row.get("live_name")
             or sessions._label(s.cwd, s.branch)
             or f"session {s.session_id}",
+            prs,
         )
         bridge = extra.pop("bridge_session_id")
         out.append(
@@ -671,14 +687,21 @@ def finished(
     return out
 
 
-def ended_need(row: dict[str, Any], since: datetime, now: datetime) -> "Need | None":
+def ended_need(
+    row: dict[str, Any],
+    since: datetime,
+    now: datetime,
+    prs: "PrIndex | None" = None,
+) -> "Need | None":
     """An ended hook session (sessions.py `ended`) for the Finished lane, or
     None: one active after `since`, or one that would otherwise wait on me.
 
-    Its process is gone, so there is no Remote Control link: the action is
-    `claude --resume <id>`, run in its directory on its host. A session id
-    that is not plain letters, digits, `_` and `-` gets no command, since it
-    came from another machine and the command is meant to be pasted.
+    Its process is gone, so there is no Remote Control link, whatever id its
+    transcript names: the action is `claude --resume <id>`, run in its
+    directory on its host. A session id that is not plain letters, digits,
+    `_` and `-` gets no command, since it came from another machine and the
+    command is meant to be pasted. Its transcript summary is shown as a live
+    session's is (transcript_fields).
     """
     if not row.get("ended") or row.get("empty_spawn"):
         return None
@@ -693,10 +716,11 @@ def ended_need(row: dict[str, Any], since: datetime, now: datetime) -> "Need | N
     if resumable:
         where = f" in {cwd}" if cwd else ""
         hint = f"resume with `claude --resume {sid}`{where} on {host}"
+    extra = transcript_fields(row, row.get("title") or f"session {sid}", prs)
+    extra.pop("bridge_session_id")
     return Need(
         item=(sessions.SOURCE, sid),
         kind=sessions.KIND,
-        title=row.get("title") or f"session {sid}",
         since=last,
         url=None,
         state=ENDED,
@@ -707,6 +731,7 @@ def ended_need(row: dict[str, Any], since: datetime, now: datetime) -> "Need | N
         command=("claude", "--resume", sid) if resumable else None,
         host=row.get("host"),
         path=cwd,
+        **extra,
     )
 
 

@@ -337,6 +337,24 @@ class SessionLinkTests(Case):
         self.assertNotIn("s-turn", keys)
         self.assertIn("s-perm", keys)
 
+    def test_an_ended_session_carries_its_transcript_summary_and_pr(self):
+        needs_fx.post_transcripts(self.conn, [
+            needs_fx.summary("s-pr", "fix task 1101", needs_fx.ASK,
+                             bridge="session_01ENDED"),
+        ], registry=needs_fx.WITHOUT_PR)  # fmt: skip
+        doc = agent_view.build(self.conn, self.cfg, "needs", needs_fx.NOW)
+        lanes = {lane["id"]: lane for lane in doc["lanes"]}
+        [ended] = [i for i in lanes["finished"]["items"] if i["key"] == "s-pr"]
+        self.assertEqual(
+            (ended["evidence"], ended["title"], ended["first_prompt"],
+             ended["last_ask"], ended["pr"]),
+            ("ended", "fix task 1101", "fix task 1101", needs_fx.ASK,
+             {"number": 1201, "url": needs_fx.pr_url(1201), "repo": needs_fx.REPO}),
+        )  # fmt: skip
+        self.assertIsNone(ended["url"])
+        self.assertIsNone(ended["bridge_session_id"])
+        self.assertEqual(ended["action"]["command"], ["claude", "--resume", "s-pr"])
+
 
 class NowLimitTests(Case):
     def test_all_marks_what_the_list_length_cut_as_limit(self):
