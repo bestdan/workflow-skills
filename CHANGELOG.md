@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.139.1] - 2026-10-26
+
+### Fixes
+
+- list the Workstreams sync step in the freshness panel [#1206] (#1210) (89da288)
+
 ## [2.139.0] - 2026-10-26
 
 ### Features
