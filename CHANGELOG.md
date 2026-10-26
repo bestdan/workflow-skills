@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.132.0] - 2026-10-26
+
+### Features
+
+- show each page's lanes as tabs with counts [#1184] (#1185) (fe4e3f3)
+
 ## [2.131.0] - 2026-10-26
 
 ### Features
