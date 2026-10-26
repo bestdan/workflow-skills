@@ -16,7 +16,7 @@ the matching machine must be the `host` the snapshot names.
 ORDER OF CHECKS, each refusing with no write: the token (401), then the declared
 body size (411 missing, 413 over MAX_BODY), all before the body is read, so an
 unauthenticated caller cannot make the server read anything. Then JSON (400),
-`schema` (400 unless 1 to 4), that schema's full shape (`snapshot.validate`, 400),
+`schema` (400 unless 1 to 5), that schema's full shape (`snapshot.validate`, 400),
 the token's machine against the body's `host` (403), a `taken_at` more than
 five minutes ahead of the server's clock (400), and staleness (409, a snapshot
 not newer than the last one ingested from that host). A database error is 503,

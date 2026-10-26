@@ -332,6 +332,39 @@ class HookSessionTests(DbCase):
         self.assertTrue(rows["s3"][2]["ended"])
         self.assertFalse(rows["s4"][2]["ended"])
 
+    def test_a_transcript_summary_joins_its_session_by_host(self):
+        self.event("s1", 30, "UserPromptSubmit")
+        self.event("s2", 30, "UserPromptSubmit")
+        self.event("s3", 30, "UserPromptSubmit")
+        summary = {"session_id": "s1", "first_prompt": "fix the build",
+                   "last_ask": "Shall I push?", "branch": "bestdan/fix",
+                   "bridge_session_id": "cse_01X"}  # fmt: skip
+        for host, sid, entry in (
+            ("mini", "s1", summary),
+            ("lindev", "s2", dict(summary, session_id="s2")),  # another host's
+            ("mini", "s3", dict(summary, session_id="s3", branch=None)),
+        ):
+            self.conn.execute(
+                "INSERT INTO issues (source, kind, key, raw_json)"
+                " VALUES (?, 'transcript', ?, ?)",
+                (f"machine:{host}", f"transcript:{sid}", json.dumps(entry)),
+            )
+        self.conn.commit()
+        rows = self.derive()
+        s1, s2, s3 = (rows[s][2] for s in ("s1", "s2", "s3"))
+        self.assertEqual(
+            (s1["first_prompt"], s1["last_ask"], s1["branch"],
+             s1["transcript_bridge_session_id"]),
+            ("fix the build", "Shall I push?", "bestdan/fix", "cse_01X"),
+        )  # fmt: skip
+        # The registry's id is the only one in `bridge_session_id`.
+        self.assertIsNone(s1["bridge_session_id"])
+        for key in ("first_prompt", "last_ask", "transcript_bridge_session_id"):
+            self.assertIsNone(s2[key])
+        self.assertEqual(s2["branch"], "feature/x")
+        # A summary with no branch keeps the hook's.
+        self.assertEqual(s3["branch"], "feature/x")
+
 
 class ListSessionsTests(unittest.TestCase):
     def test_ok_page(self):

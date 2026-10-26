@@ -215,10 +215,14 @@ event, session id, cwd, branch, and for a notification whether it was a
 permission prompt, and for a turn end whether its last reply ended in a
 question — to `~/.local/state/fleet/sessions/<session_id>.jsonl`. To tell, it
 reads the harness's `last_assistant_message`, or else the last 64 KiB of the
-session transcript, in memory. It never records prompt or reply text, and it
+session transcript, in memory. The hook never records prompt or reply text, and it
 never fails a turn. The fleet collector
 deletes a session's file once the server has accepted all of it and it is older
-than `[collector] retention_days` (default 30).
+than `[collector] retention_days` (default 30). The collector does send some
+text: for each live or recently active session, the first 200 characters of its
+first prompt and the last 400 of its last reply, with its branch and Remote
+Control id, read from the transcript on that machine. It never sends tool
+calls, tool output or attachments.
 
 | Skill                                                      | Trigger                                                                                                    | What it does                                                                                                                                                                                                                                            |
 | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

@@ -295,6 +295,29 @@ class SessionLinkTests(Case):
             self.assertIsNone(perm["bridge_session_id"], view)
             self.assertEqual(perm["action"]["url"], "https://claude.ai/code", view)
 
+    def test_needs_and_now_carry_the_transcript_summary_and_the_pr(self):
+        needs_fx.post_transcripts(self.conn, [
+            needs_fx.summary("s-turn", "edit the notes", needs_fx.ASK, "bestdan/n"),
+        ])  # fmt: skip
+        for view in ("needs", "now"):
+            doc = agent_view.build(self.conn, self.cfg, view, needs_fx.NOW)
+            items = {i["key"]: i for lane in doc["lanes"] for i in lane["items"]}
+            turn = items["s-turn"]
+            self.assertEqual(
+                (turn["title"], turn["first_prompt"], turn["last_ask"],
+                 turn["branch"], turn["pr"]),
+                ("edit the notes", "edit the notes", needs_fx.ASK, "bestdan/n", None),
+                view,
+            )  # fmt: skip
+            pr_item = items["s-pr"]
+            self.assertIsNone(pr_item["first_prompt"], view)
+            self.assertEqual(pr_item["branch"], "bestdan/task-1101", view)
+            self.assertEqual(
+                pr_item["pr"],
+                {"number": 1201, "url": needs_fx.pr_url(1201), "repo": needs_fx.REPO},
+                view,
+            )
+
     def test_an_ended_session_is_finished_with_its_resume_and_left_out_of_now(self):
         needs_fx.post_registry(
             self.conn, "2026-10-24T11:59:40.000Z", needs_fx.WITHOUT_TURN

@@ -24,7 +24,15 @@ WHAT IT COLLECTS, each keyed by its overlay item `(source, key)`:
   process is live in its host's registry (sessions.py) links to its Remote
   Control session and shows the registry's status; "idle: your turn" replaces
   "asked (heuristic)" when that status is idle. Without a Remote Control id
-  the card links to the bare claude.ai/code and says so. A session that has
+  the card links to the bare claude.ai/code and says so. With a transcript
+  summary from its host (sessions.py `first_prompt`, `last_ask`), the card's
+  title is the first prompt, with the old title as a small tag, and the last
+  ask is quoted under it. An open PR in the mirror whose head is the
+  session's branch (the transcript's, else the hook's), in its repo, is
+  linked as "PR #N", summary or not. The transcript's own
+  Remote Control id stands in for a missing registry one only when it is a
+  `session_` id: the `cse_` form is not known to open. Without a summary the
+  card is as it was. A session that has
   ended (sessions.py `ended`: its host sent a registry without it) is not
   listed: nobody can answer it in place, so it is in Finished, below. And, with `claude_remote`
   enabled, a cloud session row (claude_remote.py) at `need_input` /
@@ -120,6 +128,9 @@ CSS = """
   margin:4px 0 8px; color:var(--muted); font-size:12px; }
 .needs .visit button { font:inherit; padding:2px 10px; border-radius:6px;
   border:1px solid var(--line); background:var(--card); color:var(--fg); }
+.fleet .ask { margin:4px 0; color:var(--fg); overflow-wrap:anywhere; }
+.fleet .stag { font-size:11px; color:var(--muted); border:1px solid var(--line);
+  border-radius:999px; padding:0 6px; }
 """
 
 
@@ -148,6 +159,14 @@ class Need:
     bridge_session_id: "str | None" = None
     # The command that resolves it, as argv: an ended session's resume.
     command: "tuple[str, ...] | None" = None
+    # A hook session's transcript summary (sessions.py): the first prompt and
+    # the end of the last assistant text; `tag` is the title the first prompt
+    # replaced (the registry name, else the cwd and branch).
+    first_prompt: "str | None" = None
+    last_ask: "str | None" = None
+    tag: "str | None" = None
+    # The open PR whose head is the session's branch: {number, url, repo}.
+    pr: "dict[str, Any] | None" = None
 
     @property
     def action(self) -> view_model.Action:
@@ -215,7 +234,74 @@ def _waiting(row: dict[str, Any], now: datetime) -> bool:
     )
 
 
-def _session(row: dict[str, Any], now: datetime) -> "Need | None":
+PrIndex = dict[tuple[str, str], dict[str, Any]]
+
+
+def open_prs(conn: sqlite3.Connection, cfg: dict[str, Any]) -> PrIndex:
+    """The mirror's open PRs by (bare repo name, head branch): the `prs`
+    table's and the review-queue rows'. Of two on one branch, the newest
+    number wins. Empty with `github.fleet` off, as the page shows no PRs then."""
+    if not sync.fleet_enabled(cfg):
+        return {}
+    found: list[dict[str, Any]] = [
+        {"url": url, "repo": repo, "number": number, "head_ref": head}
+        for url, repo, number, head in conn.execute(
+            "SELECT url, repo, number, head_ref FROM prs"
+        )
+    ]
+    found.extend(gauges.review_queue_rows(conn, True) or [])
+    out: PrIndex = {}
+    for pr in found:
+        name, head, number = (
+            fleet_views._name(pr.get("repo")),
+            pr.get("head_ref"),
+            pr.get("number"),
+        )
+        url = pr.get("url")
+        if not (name and head and type(number) is int and view_model.external(url)):
+            continue
+        key = (name, str(head))
+        if key not in out or number > out[key]["number"]:
+            out[key] = {"number": number, "url": url, "repo": pr.get("repo")}
+    return out
+
+
+def session_pr(
+    prs: "PrIndex | None", repo: "str | None", branch: "str | None"
+) -> "dict[str, Any] | None":
+    """The open PR whose head is `branch` in `repo`, or None."""
+    if not (prs and repo and branch):
+        return None
+    return prs.get((repo, branch))
+
+
+def transcript_fields(
+    row: dict[str, Any], title: str, prs: "PrIndex | None" = None
+) -> dict[str, Any]:
+    """A hook session's Need fields from its transcript summary (sessions.py):
+    the first prompt as the title, with `title` as its tag; the last ask; the
+    PR on its branch; and the Remote Control id, the registry's else the
+    transcript's, only when it is linkable. A row with no summary keeps
+    `title` and gets nothing else, so its card is unchanged."""
+    first = (
+        row.get("first_prompt") if isinstance(row.get("first_prompt"), str) else None
+    )
+    ask = row.get("last_ask") if isinstance(row.get("last_ask"), str) else None
+    repo = fleet_views.repo_of_path(row.get("cwd"))
+    return {
+        "title": first or title,
+        "tag": title if first else None,
+        "first_prompt": first,
+        "last_ask": ask,
+        "pr": session_pr(prs, repo, row.get("branch")),
+        "bridge_session_id": valid_bridge(row.get("bridge_session_id"))
+        or valid_bridge(row.get("transcript_bridge_session_id")),
+    }
+
+
+def _session(
+    row: dict[str, Any], now: datetime, prs: "PrIndex | None" = None
+) -> "Need | None":
     """A hook session row waiting on me, or None. An ended session cannot be
     answered in place, so it is the Finished lane's (ended_need)."""
     if row.get("ended") or not _waiting(row, now):
@@ -224,11 +310,13 @@ def _session(row: dict[str, Any], now: datetime) -> "Need | None":
     asked = bool(row.get("asked"))
     brief = row.get("brief")
     repo = fleet_views.repo_of_path(row.get("cwd"))
-    bridge = valid_bridge(row.get("bridge_session_id"))
+    extra = transcript_fields(
+        row, row.get("title") or f"session {row.get('session_id')}", prs
+    )
+    bridge = extra.pop("bridge_session_id")
     return Need(
         item=(sessions.SOURCE, str(row.get("key") or row.get("session_id"))),
         kind=sessions.KIND,
-        title=row.get("title") or f"session {row.get('session_id')}",
         since=score.parse_ts(row.get("waiting_since")) or last,
         url=session_url(bridge),
         state=session_state(asked, row.get("live_status")),
@@ -241,6 +329,7 @@ def _session(row: dict[str, Any], now: datetime) -> "Need | None":
         host=row.get("host"),
         path=row.get("cwd"),
         bridge_session_id=bridge,
+        **extra,
     )
 
 
@@ -369,8 +458,9 @@ def collect(conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime) -> lis
     """Everything waiting on me, unordered and unfiltered."""
     out: list[Need] = []
     if sessions.enabled(cfg):
+        prs = open_prs(conn, cfg)
         for row in _rows(conn, sessions.SOURCE, sessions.KIND):
-            need = _session(row, now)
+            need = _session(row, now, prs)
             if need is not None:
                 out.append(need)
     if cfg["claude_remote"]["enabled"]:
@@ -423,10 +513,27 @@ def waited(since: "datetime | None", now: datetime) -> str:
 
 
 def _title(n: Need, url: "str | None") -> str:
-    """The `.title`, linked to `url` when given, then the muted `.ref`."""
+    """The `.title`, linked to `url` when given, then the muted `.ref`, or a
+    session's tag (its old title, when its first prompt is the title)."""
     if n.ref is not None:
         return fleet_views.title_ref(url, n.title, n.ref)
-    return fleet_views._link(url, n.title)
+    tag = f' <span class="stag">{_e(n.tag)}</span>' if n.tag else ""
+    return fleet_views._link(url, n.title) + tag
+
+
+def ask_html(n: Need) -> str:
+    """A session's last ask, quoted, or nothing. A cut one starts with `…`."""
+    if not n.last_ask:
+        return ""
+    cut = "…" if len(n.last_ask) >= snapshot.ASK_CHARS else ""
+    return f'<div class="ask">› {cut}{_e(n.last_ask)}</div>'
+
+
+def pr_link(n: Need) -> str:
+    """`PR #N`, linked to the open PR on a session's branch, or nothing."""
+    if not n.pr:
+        return ""
+    return view_model.link(n.pr["url"], f"PR #{n.pr['number']}")
 
 
 def is_new(n: Need, ov: overlay.Overlay) -> bool:
@@ -463,9 +570,14 @@ def _body(n: Need, now: datetime, ov: overlay.Overlay) -> str:
         if n.url and n.url.startswith("https://")
         else ""
     )
-    act = " · ".join(x for x in (link, view_model.code(n.hint)) if x)
+    act = " · ".join(x for x in (link, pr_link(n), view_model.code(n.hint)) if x)
     act = f'<div class="act">→ {act}</div>' if act else ""
-    return brief + act + overlay.card_controls(n.item, ov, now, reorder=False)
+    return (
+        ask_html(n)
+        + brief
+        + act
+        + overlay.card_controls(n.item, ov, now, reorder=False)
+    )
 
 
 def open_label(n: Need, other: "str | None" = None) -> str:
@@ -532,14 +644,17 @@ def finished(
         row = mirror.get(s.session_id) or {}
         if row.get("ended"):
             continue
-        bridge = valid_bridge(row.get("bridge_session_id"))
+        extra = transcript_fields(
+            row,
+            row.get("live_name")
+            or sessions._label(s.cwd, s.branch)
+            or f"session {s.session_id}",
+        )
+        bridge = extra.pop("bridge_session_id")
         out.append(
             Need(
                 item=(sessions.SOURCE, s.session_id),
                 kind=sessions.KIND,
-                title=row.get("live_name")
-                or sessions._label(s.cwd, s.branch)
-                or f"session {s.session_id}",
                 since=s.last,
                 url=session_url(bridge) if bridge else None,
                 bridge_session_id=bridge,
@@ -549,6 +664,7 @@ def finished(
                 branch=s.branch,
                 host=s.host,
                 path=s.cwd,
+                **extra,
             )
         )
     out.sort(key=lambda n: (n.since is not None, n.since or now), reverse=True)

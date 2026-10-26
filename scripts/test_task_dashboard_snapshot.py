@@ -153,8 +153,9 @@ class TestDocument(Fixture):
         # A registry directory that does not exist is an empty registry.
         doc, _ = self.build(registry_dir=self.state / "no-sessions")
         self.assertEqual(snap.validate(doc), [])
-        self.assertEqual(doc["schema"], 4)
+        self.assertEqual(doc["schema"], 5)
         self.assertEqual(doc["registry"], [])
+        self.assertEqual(doc["transcripts"], [])  # no projects_dir
         self.assertEqual(doc["scan_errors"], [])
         # No registry directory at all reads none: schema 2, which ingest
         # never reads as every session ended.
@@ -520,6 +521,259 @@ class TestRegistry(unittest.TestCase):
         self.write("9.json", {"pid": 9, "sessionId": "s", "cwd": "/h/src/x"})
         [entry] = snap.registry(self.dir, alive=lambda pid: True)
         self.assertEqual(entry["cwd"], "/h/src/x")
+
+
+CWD = "/h/src/demo.repo"
+SID = "0a1b2c3d-1111-2222-3333-444455556666"
+
+
+def rec(kind, **fields):
+    return {"type": kind, "sessionId": SID, "cwd": CWD, **fields}
+
+
+def said(text, msg_id="m1", **fields):
+    """An assistant record holding one text block."""
+    return rec("assistant", message={"id": msg_id, "role": "assistant",
+               "content": [{"type": "text", "text": text}]}, **fields)  # fmt: skip
+
+
+def planted_transcript():
+    """An invented transcript with a secret in every place nothing may be
+    copied from, and what may be copied around it."""
+    return [
+        rec("bridge-session", bridgeSessionId="cse_01AbC"),
+        rec("system", content=f"system note {SECRET}", gitBranch="HEAD"),
+        rec(
+            "user", isMeta=True, message={"role": "user", "content": f"Caveat {SECRET}"}
+        ),
+        rec(
+            "user",
+            message={
+                "role": "user",
+                "content": f"<command-name>/model</command-name> {SECRET}",
+            },
+        ),  # fmt: skip
+        rec(
+            "user",
+            gitBranch="bestdan/old",
+            message={"role": "user", "content": "can   you see\nand edit the repo?"},
+        ),  # fmt: skip
+        rec(
+            "assistant",
+            message={
+                "id": "m0",
+                "role": "assistant",
+                "content": [
+                    {"type": "thinking", "thinking": f"thought {SECRET}"},
+                    {
+                        "type": "tool_use",
+                        "id": "t1",
+                        "name": "Bash",
+                        "input": {"command": f"echo {SECRET}"},
+                    },
+                ],
+            },
+        ),  # fmt: skip
+        rec(
+            "user",
+            message={
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "t1",
+                        "content": f"out {SECRET}",
+                    }
+                ],
+            },
+            toolUseResult={"stdout": SECRET},
+        ),  # fmt: skip
+        rec("attachment", attachment={"type": "file", "content": SECRET}),
+        rec("user", message={"role": "user", "content": f"a later prompt {SECRET}"}),
+        said(f"subagent says {SECRET}", "m9", isSidechain=True),
+        said("I can't find it here.", "m2", gitBranch="bestdan/demo"),
+        said(
+            "Should I clone it?\n\nAnd what change do you want?",
+            "m2",
+            gitBranch="bestdan/demo",
+        ),  # fmt: skip
+        said(f"api error {SECRET}", "m3", isApiErrorMessage=True),
+        rec("system", subtype="turn_duration", content=SECRET),
+    ]
+
+
+class TestTranscripts(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.projects = self.tmp / "projects"
+        self.state = self.tmp / "state"
+        (self.state / "sessions").mkdir(parents=True)
+        self.reg = self.tmp / "sessions"
+        self.reg.mkdir()
+
+    def write(self, records, sid=SID, slug=None, raw=b""):
+        d = self.projects / (slug or snap.project_slug(CWD))
+        d.mkdir(parents=True, exist_ok=True)
+        path = d / f"{sid}.jsonl"
+        path.write_bytes(
+            b"".join(json.dumps(r).encode() + b"\n" for r in records) + raw
+        )
+        return path
+
+    def live(self, sid=SID, **fields):
+        entry = {"pid": 7, "sessionId": sid, "cwd": CWD, **fields}
+        (self.reg / f"{len(list(self.reg.iterdir()))}.json").write_text(
+            json.dumps(entry)
+        )
+
+    def build(self):
+        doc, _ = snap.build(
+            src_root=self.tmp / "src", state_dir=self.state,
+            history=self.tmp / "history.jsonl", host="h", now=NOW,
+            runner=FakeRunner(), registry_dir=self.reg, alive=lambda pid: True,
+            projects_dir=self.projects,
+        )  # fmt: skip
+        self.assertEqual(snap.validate(doc), [])
+        return doc
+
+    def test_only_the_allowlisted_fields_are_sent(self):
+        self.write(planted_transcript())
+        self.live()
+        doc = self.build()
+        self.assertEqual(doc["schema"], 5)
+        self.assertEqual(doc["transcripts"], [{
+            "session_id": SID,
+            "first_prompt": "can you see and edit the repo?",
+            "last_ask": "I can't find it here. Should I clone it? And what change do you want?",
+            "branch": "bestdan/demo",
+            "bridge_session_id": "cse_01AbC",
+        }])  # fmt: skip
+        for value in snap.iter_values(doc):
+            self.assertNotIn(SECRET, str(value))
+        self.assertNotIn(SECRET, json.dumps(doc))
+
+    def test_the_slug_matches_the_harness(self):
+        self.assertEqual(snap.project_slug("/Users/d/src/workflow-skills"),
+                         "-Users-d-src-workflow-skills")  # fmt: skip
+        self.assertEqual(snap.project_slug("/h/src/a.b_c"), "-h-src-a-b-c")
+
+    def test_texts_are_capped_and_head_is_null(self):
+        long_prompt = "word " * 100
+        self.write([
+            rec("user", gitBranch="HEAD", message={"role": "user", "content": long_prompt}),
+            said("x" * 300 + " " + "y" * 300, "m1", gitBranch="HEAD"),
+        ])  # fmt: skip
+        self.live()
+        [t] = self.build()["transcripts"]
+        self.assertEqual(len(t["first_prompt"]), snap.PROMPT_CHARS)
+        self.assertTrue(t["first_prompt"].startswith("word word"))
+        self.assertEqual(t["last_ask"], "x" * 99 + " " + "y" * 300)
+        self.assertIsNone(t["branch"])
+
+    def test_the_last_message_is_the_ask_not_an_earlier_one(self):
+        self.write([
+            rec("user", message={"role": "user", "content": "go"}),
+            said("first answer", "m1"), said("more of it", "m1"),
+            rec("user", message={"role": "user", "content": "and then?"}),
+            said("second answer", "m2"),
+        ])  # fmt: skip
+        self.live()
+        [t] = self.build()["transcripts"]
+        self.assertEqual((t["first_prompt"], t["last_ask"]), ("go", "second answer"))
+
+    def test_only_the_head_and_the_tail_are_read(self):
+        middle = [
+            said(f"middle {SECRET} {i} " + "z" * 1000, f"x{i}") for i in range(600)
+        ]
+        self.write(
+            [rec("user", message={"role": "user", "content": "the first prompt"})]
+            + middle + [said("the end", "end")]
+        )  # fmt: skip
+        self.live()
+        [t] = self.build()["transcripts"]
+        self.assertEqual(
+            (t["first_prompt"], t["last_ask"]), ("the first prompt", "the end")
+        )
+        # A prompt past the head's window is not hunted for.
+        self.write(middle + [rec("user", message={"role": "user", "content": "late"})])
+        [t] = self.build()["transcripts"]
+        self.assertIsNone(t["first_prompt"])
+
+    def test_the_registry_bridge_wins_and_a_bad_one_is_dropped(self):
+        self.write([rec("bridge-session", bridgeSessionId="cse_01X"), said("hi")])
+        self.live(bridgeSessionId="session_01RC")
+        [t] = self.build()["transcripts"]
+        self.assertIsNone(t["bridge_session_id"])
+        for bad in ("cse_01/../x", "other_01", "cse_", 5):
+            with self.subTest(bad=bad):
+                self.write([rec("bridge-session", bridgeSessionId=bad), said("hi")],
+                           sid="s-2")  # fmt: skip
+                (self.reg / "0.json").write_text(
+                    json.dumps({"pid": 7, "sessionId": "s-2"})
+                )
+                [t] = self.build()["transcripts"]
+                self.assertIsNone(t["bridge_session_id"])
+
+    def test_missing_or_unreadable_sends_no_entry(self):
+        self.live()
+        self.assertEqual(self.build()["transcripts"], [])
+        path = self.write([said("hi")])
+        path.chmod(0)
+        self.addCleanup(path.chmod, 0o600)
+        if not os.access(path, os.R_OK):  # root reads anything
+            self.assertEqual(self.build()["transcripts"], [])
+        path.chmod(0o600)
+        path.unlink()
+        path.mkdir()  # a directory where the file should be
+        self.assertEqual(self.build()["transcripts"], [])
+
+    def test_a_shortened_slug_is_found_by_session_id(self):
+        self.write([said("hi")], slug="-h-src-demo-shortened-1a2b")
+        self.live()
+        [t] = self.build()["transcripts"]
+        self.assertEqual(t["last_ask"], "hi")
+
+    def test_recent_hook_sessions_are_read_too(self):
+        self.write([said("from the hook")], sid="hooked")
+        self.write([said("too old")], sid="old")
+        for sid, age in (("hooked", 3600), ("old", 4 * 86400)):
+            p = self.state / "sessions" / f"{sid}.jsonl"
+            p.write_text("{}\n")
+            t = NOW.timestamp() - age
+            os.utime(p, (t, t))
+        got = {t["session_id"]: t["last_ask"] for t in self.build()["transcripts"]}
+        self.assertEqual(got, {"hooked": "from the hook"})
+        # A session id that is not a plain file name is never looked up.
+        self.assertIsNone(snap.transcript_path(self.projects, "../x", None))
+        self.assertIsNone(snap.transcript_path(self.projects, "*", None))
+
+    def test_schema_5_validates_and_downgrades_to_4_then_3(self):
+        self.write(planted_transcript())
+        self.live()
+        doc = self.build()
+        entry = doc["transcripts"][0]
+        for key, value, problem in (
+            ("first_prompt", "x" * 201, "transcripts[0]: over a cap"),
+            ("last_ask", "x" * 401, "transcripts[0]: over a cap"),
+            ("bridge_session_id", "cse_01/x", "transcripts[0]: over a cap"),
+            ("tool_result", SECRET, "transcripts[0].tool_result: unexpected key"),
+        ):
+            with self.subTest(key=key):
+                bad = {**doc, "transcripts": [{**entry, key: value}]}
+                self.assertIn(problem, snap.validate(bad))
+        self.assertIn("transcripts: missing",
+                      snap.validate({k: v for k, v in doc.items() if k != "transcripts"}))  # fmt: skip
+        four = snap.downgrade(doc)
+        assert four is not None
+        self.assertEqual(four["schema"], 4)
+        self.assertNotIn("transcripts", four)
+        self.assertEqual(snap.validate(four), [])
+        self.assertIn("transcripts", doc)  # not mutated
+        three = snap.downgrade(four)
+        assert three is not None
+        self.assertEqual(snap.validate(three), [])
+        self.assertIsNone(snap.downgrade(three))
 
 
 class TestApprovalShaped(unittest.TestCase):

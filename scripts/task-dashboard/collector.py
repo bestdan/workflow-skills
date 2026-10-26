@@ -50,9 +50,10 @@ WHAT EACH ANSWER DOES:
     2xx                  accepted: delete, advance the cursor
     409 (stale)          the server already has this or newer; a resend of a
                          snapshot whose answer was lost lands here. Same as 2xx
-    400 "unsupported     a server older than this collector: a schema 4
-    schema"              snapshot is resent at once as schema 3
-                         (snapshot.downgrade), and that answer decides
+    400 "unsupported     a server older than this collector: the snapshot is
+    schema"              resent at once one schema lower
+                         (snapshot.downgrade), 5 as 4 and then 4 as 3, and
+                         the first other answer decides
     other 4xx but 401,   refused for good, and resending cannot change that:
     403, 408, 429        delete, advance the cursor, say why on stderr
     5xx, 3xx, 401, 403,  stop and keep it for the next run. 401, 403 and a
@@ -233,6 +234,7 @@ def collect(
             cursor=base,
             registry_dir=home / ".claude/sessions",
             alive=alive,
+            projects_dir=home / ".claude/projects",
         )
         problems = snapshot.validate(doc)
         if problems:
@@ -265,18 +267,21 @@ def flush(
             path.unlink(missing_ok=True)
             log(f"dropped an unreadable spool entry, {path.name}")
             continue
-        body = json.dumps(entry["doc"]).encode()
-        status, detail = poster(cfg["ingest_url"], cfg["token"], body)
-        older = snapshot.downgrade(entry["doc"])
-        if (
-            status == 400
-            and older is not None
-            and snapshot.UNSUPPORTED_SCHEMA in detail
-        ):
+        doc = entry["doc"]
+        status, detail = poster(
+            cfg["ingest_url"], cfg["token"], json.dumps(doc).encode()
+        )
+        while status == 400 and snapshot.UNSUPPORTED_SCHEMA in detail:
             # A server that predates this schema: send what it can read.
-            log(f"server refused schema {entry['doc']['schema']}; resending as 3")
+            older = snapshot.downgrade(doc)
+            if older is None:
+                break
+            log(
+                f"server refused schema {doc['schema']}; resending as {older['schema']}"
+            )
+            doc = older
             status, detail = poster(
-                cfg["ingest_url"], cfg["token"], json.dumps(older).encode()
+                cfg["ingest_url"], cfg["token"], json.dumps(doc).encode()
             )
         outcome = verdict(status)
         if outcome == "keep":
