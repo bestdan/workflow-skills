@@ -8,13 +8,14 @@ Run under uv (Python 3.11+), as the rest of the dashboard is::
 
     uv run --no-project --python '>=3.11' python scripts/task-dashboard/snapshot.py
 
-DOCUMENT — ``schema: 2``; ``validate()`` below is the executable form of it.
-It also accepts ``schema: 1``, the same document without ``scan_errors``, so a
-collector that has not been updated yet still reaches ingest. Update the ingest
-server before any collector: an older server rejects ``schema: 2`` with a 400,
-and the collector drops that snapshot, deltas included.
+DOCUMENT — ``schema: 3``; ``validate()`` below is the executable form of it.
+It also accepts ``schema: 2``, the same document without ``registry``, and
+``schema: 1``, without ``scan_errors`` either, so a collector that has not been
+updated yet still reaches ingest. Update the ingest server before any
+collector: an older server rejects a newer schema with a 400, and the
+collector drops that snapshot, deltas included.
 
-    schema     2
+    schema     3
     host       this machine's short host name
     taken_at   UTC ISO 8601, ``Z`` suffix
     worktrees  one entry per ``git worktree list --porcelain`` record, for every
@@ -33,6 +34,14 @@ and the collector drops that snapshot, deltas included.
                ``expires``, ``created`` (null when absent). The body is never
                read.
     tmux       ``name``, ``created``, ``attached``; empty when no server runs.
+    registry   (schema 3) Claude Code's live process registry,
+               ``~/.claude/sessions/<pid>.json``: one entry per session whose
+               process is alive — ``session_id``, ``bridge_session_id`` (the
+               Remote Control session), ``name``, ``status``, ``pid``,
+               ``updated_at`` and ``tmux`` (null when absent). Two files can
+               name one session when an old process's file lingers after a
+               resume: the live one wins, then the newest ``updatedAt``. The
+               socket path, the launch arguments and every other key stay here.
     sessions   session-state hook lines (``scripts/session-state-hook.py``,
                format v1 or v2) appended since the last snapshot, each with
                its own ``v``. Only v2 ``Stop`` lines carry ``asked``.
@@ -75,8 +84,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from github_gh import Runner, run  # noqa: E402
 
-SCHEMA_VERSION = 2
-ACCEPTED_SCHEMAS = (1, 2)
+SCHEMA_VERSION = 3
+ACCEPTED_SCHEMAS = (1, 2, 3)
 SCAN_STEPS = ("worktree_list",)
 # The hook formats read; a line of any other ``v`` is skipped. v2 added
 # ``asked`` on Stop lines, so a machine whose hook is older still ships v1.
@@ -90,6 +99,8 @@ HOOK_KEYS = (
     "v", "ts", "event", "session_id", "cwd", "branch", "notification", "asked",
 )  # fmt: skip
 LANDED_STATES = ("landed", "not_landed", "unknown")
+# A Remote Control session id, the path segment of https://claude.ai/code/<id>.
+BRIDGE_ID = re.compile(r"session_[A-Za-z0-9_-]+")
 
 Classifier = Callable[[str], bool]
 
@@ -277,6 +288,84 @@ def tmux_sessions(runner: Runner) -> list[dict[str, Any]]:
     return sessions
 
 
+# --- Claude Code's process registry -------------------------------------------
+
+Alive = Callable[[int], bool]
+
+
+def pid_alive(pid: int) -> bool:
+    """Whether a process with this pid exists; signal 0 delivers nothing."""
+    if pid <= 0:  # 0 and negatives name process groups, never one process
+        return False
+    try:
+        os.kill(pid, 0)
+    except PermissionError:
+        return True  # it exists, under another user
+    except OSError:
+        return False
+    return True
+
+
+def _opt_str(value: Any) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+def _iso_ms(ms: float) -> str | None:
+    """Epoch milliseconds as ``taken_at``'s form; None for 0 or out of range."""
+    try:
+        return _iso_epoch(ms / 1000) if ms > 0 else None
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def registry(registry_dir: Path, alive: Alive = pid_alive) -> list[dict[str, Any]]:
+    """One entry per live session in ``~/.claude/sessions/<pid>.json``.
+
+    Each entry is built from an allowlist, so ``messagingSocketPath`` and the
+    launch arguments never leave the file. An unreadable file, one without a
+    ``sessionId`` or an integer ``pid``, and one whose process is gone are
+    skipped. Of two live files for one session, the newest ``updatedAt`` wins.
+    """
+    best: dict[str, tuple[float, dict[str, Any]]] = {}
+    paths = sorted(registry_dir.glob("*.json")) if registry_dir.is_dir() else []
+    for path in paths:
+        try:
+            obj = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        if not isinstance(obj, dict):
+            continue
+        sid, pid = obj.get("sessionId"), obj.get("pid")
+        if not (isinstance(sid, str) and sid) or type(pid) is not int:
+            continue
+        if not alive(pid):
+            continue
+        updated = obj.get("updatedAt")
+        stamp = (
+            float(updated)
+            if isinstance(updated, int | float) and not isinstance(updated, bool)
+            else 0.0
+        )
+        bridge = _opt_str(obj.get("bridgeSessionId"))
+        entry = {
+            "session_id": sid,
+            # A malformed id is dropped; the rest of the entry still counts.
+            "bridge_session_id": bridge
+            if bridge and BRIDGE_ID.fullmatch(bridge)
+            else None,
+            "name": _opt_str(obj.get("name")),
+            "status": _opt_str(obj.get("status")),
+            "pid": pid,
+            "updated_at": _iso_ms(stamp),
+            "tmux": _opt_str(obj.get("tmux")),
+        }
+        if sid not in best or stamp > best[sid][0]:
+            best[sid] = (stamp, entry)
+    return [
+        entry for _, entry in sorted(best.values(), key=lambda b: b[1]["session_id"])
+    ]
+
+
 # --- cursor-tracked tails -----------------------------------------------------
 
 
@@ -406,12 +495,15 @@ def build(
     runner: Runner = run,
     classify: Classifier = approval_shaped,
     cursor: dict[str, Any] | None = None,
+    registry_dir: Path | None = None,
+    alive: Alive = pid_alive,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """The snapshot document and the cursor to save once it has been shipped.
 
     The deltas start at ``cursor``, else at the one saved in ``state_dir``. The
     collector passes the cursor of its newest unsent snapshot, so a snapshot
     waiting in its spool and the next one never carry the same lines.
+    ``registry_dir`` is Claude Code's ``sessions`` directory; None reads none.
     """
     if cursor is None:
         cursor = load_cursor(state_dir / CURSOR_NAME)
@@ -426,6 +518,7 @@ def build(
         "scan_errors": scan_errors,
         "handoffs": handoffs(src_root / "worktrees"),
         "tmux": tmux_sessions(runner),
+        "registry": registry(registry_dir, alive) if registry_dir else [],
         "sessions": sessions,
         "history": prompts,
     }
@@ -460,7 +553,7 @@ def _fields(
 
 
 def validate(doc: Any) -> list[str]:
-    """Every way ``doc`` departs from its schema (1 or 2); empty when it conforms.
+    """Every way ``doc`` departs from its schema (1, 2 or 3); empty when it conforms.
 
     Keys are closed: an unexpected key is a violation, which is what keeps a
     new field (prompt text, say) from shipping without a schema bump.
@@ -479,13 +572,15 @@ def validate(doc: Any) -> list[str]:
         "history",
     }
     version = doc.get("schema")
-    if version == 2:
+    if version in (2, 3) and not isinstance(version, bool):
         top.add("scan_errors")
+    if version == 3 and not isinstance(version, bool):
+        top.add("registry")
     for key in set(doc) ^ top:
         problems.append(f"{key}: {'unexpected' if key in doc else 'missing'}")
     _check(
         version in ACCEPTED_SCHEMAS and not isinstance(version, bool),
-        "schema: not 1 or 2",
+        "schema: not 1, 2 or 3",
         problems,
     )
     _check(isinstance(doc.get("host"), str), "host: not a string", problems)
@@ -510,7 +605,15 @@ def validate(doc: Any) -> list[str]:
     _fields(doc.get("handoffs"), "handoffs",
             {"path": s, "mtime": s, **dict.fromkeys(HANDOFF_KEYS, n)}, problems)  # fmt: skip
     _fields(doc.get("tmux"), "tmux", {"name": s, "created": s, "attached": b}, problems)
-    if version == 2:
+    if "registry" in top:
+        _fields(
+            doc.get("registry"),
+            "registry",
+            {"session_id": s, "bridge_session_id": n, "name": n, "status": n,
+             "pid": (int,), "updated_at": n, "tmux": n},
+            problems,
+        )  # fmt: skip
+    if "scan_errors" in top:
         errors = doc.get("scan_errors")
         _fields(errors, "scan_errors", {"repo": s, "step": s}, problems)
         for idx, err in enumerate(errors if isinstance(errors, list) else []):
@@ -557,6 +660,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--src-root", type=Path, default=home / "src")
     ap.add_argument("--state-dir", type=Path, default=home / ".local/state/fleet")
     ap.add_argument("--history", type=Path, default=home / ".claude/history.jsonl")
+    ap.add_argument(
+        "--registry-dir", type=Path, default=home / ".claude/sessions",
+        help="Claude Code's live session registry",
+    )  # fmt: skip
     ap.add_argument("--host", default=socket.gethostname().split(".")[0])
     ap.add_argument(
         "--no-advance", action="store_true", help="print the delta, keep the cursor"
@@ -568,6 +675,7 @@ def main(argv: list[str] | None = None) -> int:
         history=args.history,
         host=args.host,
         now=datetime.now(UTC),
+        registry_dir=args.registry_dir,
     )
     problems = validate(doc)
     if problems:

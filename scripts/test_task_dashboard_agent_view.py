@@ -35,6 +35,7 @@ import overlay  # type: ignore[import-not-found]  # noqa: E402
 import server  # type: ignore[import-not-found]  # noqa: E402
 import snapshot_adapter  # type: ignore[import-not-found]  # noqa: E402
 import test_task_dashboard_fleet_now as now_fx  # noqa: E402
+import test_task_dashboard_needs as needs_fx  # noqa: E402
 import test_task_dashboard_fleet_views as stale_fx  # noqa: E402
 import test_task_dashboard_server as server_harness  # noqa: E402
 import views  # type: ignore[import-not-found]  # noqa: E402
@@ -270,6 +271,29 @@ class FleetParityTests(Case):
         self.assertEqual(
             human[0]["action"]["review"], "decide it, then `/promote-tasks`"
         )
+
+
+class SessionLinkTests(Case):
+    """Needs you and Now carry a hook session's Remote Control id and url."""
+
+    def setUp(self):
+        super().setUp()
+        needs_fx.seed(self.conn)
+        needs_fx.seed_registry(self.conn)
+        self.cfg = needs_fx.fleet_cfg()
+
+    def test_needs_and_now_carry_the_bridge_id_and_the_session_url(self):
+        for view in ("needs", "now"):
+            doc = agent_view.build(self.conn, self.cfg, view, needs_fx.NOW)
+            items = {i["key"]: i for lane in doc["lanes"] for i in lane["items"]}
+            turn = items["s-turn"]
+            self.assertEqual(turn["bridge_session_id"], needs_fx.BRIDGE, view)
+            url = f"https://claude.ai/code/{needs_fx.BRIDGE}"
+            self.assertEqual(turn["url"], url, view)
+            self.assertEqual(turn["action"]["url"], url, view)
+            perm = items["s-perm"]
+            self.assertIsNone(perm["bridge_session_id"], view)
+            self.assertEqual(perm["action"]["url"], "https://claude.ai/code", view)
 
 
 class NowLimitTests(Case):

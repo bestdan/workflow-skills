@@ -295,7 +295,7 @@ def card(r: Ranked, now: datetime, ov: overlay.Overlay) -> str:
     )
     terms = ",".join(name for name, value, _ in r.terms if value)
     link = (
-        f'<a href="{_e(n.url)}">open it</a>'
+        view_model.link(n.url, needs.open_label(n, "open it"))
         if n.url and n.url.startswith("https://")
         else ""
     )

@@ -204,6 +204,7 @@ def collect(
     runner: Runner = run,
     poster: Poster = post,
     log: Callable[[str], None] = _stderr,
+    alive: snapshot.Alive = snapshot.pid_alive,
 ) -> int:
     """0 when the spool is empty at the end, 1 when something waits on a retry
     or the new snapshot failed validation. 0, with nothing built or sent, when
@@ -227,6 +228,8 @@ def collect(
             now=now,
             runner=runner,
             cursor=base,
+            registry_dir=home / ".claude/sessions",
+            alive=alive,
         )
         problems = snapshot.validate(doc)
         if problems:

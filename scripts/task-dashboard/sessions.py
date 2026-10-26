@@ -12,7 +12,8 @@ state. The two sources key sessions differently (a hook id is the local CLI's,
 a cloud id starts with `session_`) and nothing in either joins them, so a
 Remote Control session can appear once under each source.
 
-THE ROW. `summary` is the cwd's last component and branch (the hook records no
+THE ROW. `summary` is the registry's `name` when the session's process is live
+on its host, else the cwd's last component and branch (the hook records no
 title). `status_name` holds the status bucket and `status_category` the
 category; `created` and `updated` are the first and last event's times. The
 rest is in `raw_json`:
@@ -34,6 +35,12 @@ rest is in `raw_json`:
     empty_spawn       not has_prompt: a session that never got a prompt
     prompts, permission_prompts   counts over the session's recorded events
     brief             always null: the hook has no post-turn summary
+    bridge_session_id, live_name, live_status, pid, live_updated_at, tmux
+                      from the host's live registry entry for this session
+                      (snapshot.py `registry`, schema 3), all null when the
+                      process is gone or the collector predates schema 3.
+                      `bridge_session_id` is the Remote Control session, so
+                      `https://claude.ai/code/<it>` opens this session.
 
 A permission prompt answered mid-turn fires no hook event, so the session
 reads as need_input until that turn's Stop. The hook has no archive signal, so
@@ -143,6 +150,44 @@ def _label(cwd: "str | None", branch: "str | None") -> "str | None":
     return name or branch
 
 
+def registry(conn: sqlite3.Connection) -> dict[tuple[str, str], dict[str, Any]]:
+    """Each host's live registry entries (snapshot.py, schema 3), by
+    (host, session id)."""
+    out: dict[tuple[str, str], dict[str, Any]] = {}
+    for source, raw in conn.execute(
+        "SELECT source, raw_json FROM issues WHERE source LIKE 'machine:%'"
+        " AND kind = 'registry'"
+    ):
+        try:
+            entry = json.loads(raw or "{}")
+        except ValueError:
+            continue
+        if isinstance(entry, dict) and entry.get("session_id"):
+            out[(source.split(":", 1)[1], str(entry["session_id"]))] = entry
+    return out
+
+
+def with_registry(
+    row: dict[str, Any], entry: "dict[str, Any] | None"
+) -> dict[str, Any]:
+    """`row` with its live registry entry's fields; all null without one.
+
+    The registry's `name` becomes the title, since the hook records none.
+    """
+    entry = entry or {}
+    row.update(
+        bridge_session_id=entry.get("bridge_session_id"),
+        live_name=entry.get("name"),
+        live_status=entry.get("status"),
+        pid=entry.get("pid"),
+        live_updated_at=entry.get("updated_at"),
+        tmux=entry.get("tmux"),
+    )
+    if entry.get("name"):
+        row["title"] = entry["name"]
+    return row
+
+
 def derive(conn: sqlite3.Connection, now: datetime) -> list[dict[str, Any]]:
     """A row per session active in the last WINDOW_DAYS. Reads; writes nothing."""
     cutoff = _ts(now - timedelta(days=WINDOW_DAYS))
@@ -150,7 +195,12 @@ def derive(conn: sqlite3.Connection, now: datetime) -> list[dict[str, Any]]:
     for session_id, *rest in _events(conn, cutoff):
         if session_id:
             by_session.setdefault(session_id, []).append(tuple(rest))
-    return [fold(sid, evs) for sid, evs in by_session.items()]
+    live = registry(conn)
+    rows = [fold(sid, evs) for sid, evs in by_session.items()]
+    return [
+        with_registry(row, live.get((row["host"] or "", row["session_id"])))
+        for row in rows
+    ]
 
 
 def write(conn: sqlite3.Connection, rows: list[dict[str, Any]], now: datetime) -> None:

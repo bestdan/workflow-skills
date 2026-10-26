@@ -151,7 +151,8 @@ class TestDocument(Fixture):
     def test_validates_against_schema(self):
         doc, _ = self.build()
         self.assertEqual(snap.validate(doc), [])
-        self.assertEqual(doc["schema"], 2)
+        self.assertEqual(doc["schema"], 3)
+        self.assertEqual(doc["registry"], [])
         self.assertEqual(doc["scan_errors"], [])
         self.assertEqual(doc["host"], "testhost")
         self.assertEqual(doc["taken_at"], "2026-10-23T12:00:00.000Z")
@@ -398,6 +399,71 @@ class TestCursor(Fixture):
             {**base, "event": "Notification"},
         ]
         self.assertEqual(snap.validate(doc), [])
+
+
+class TestRegistry(unittest.TestCase):
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
+
+    def write(self, name, obj):
+        (self.dir / name).write_text(obj if isinstance(obj, str) else json.dumps(obj))
+
+    def test_pid_alive(self):
+        self.assertTrue(snap.pid_alive(os.getpid()))
+        for pid in (0, -1):  # a process group, never one process
+            self.assertFalse(snap.pid_alive(pid))
+
+    def test_unusable_files_are_skipped(self):
+        self.write("1.json", "{torn")
+        self.write("2.json", ["a list"])
+        self.write("3.json", {"pid": 3})  # no sessionId
+        self.write("4.json", {"pid": "4", "sessionId": "s"})  # pid not an int
+        self.write("5.json", {"pid": True, "sessionId": "s"})
+        self.assertEqual(snap.registry(self.dir, alive=lambda pid: True), [])
+
+    def test_wrong_types_become_null(self):
+        self.write("7.json", {"pid": 7, "sessionId": "s", "name": 5, "status": "",
+                              "bridgeSessionId": ["x"], "updatedAt": "soon",
+                              "tmux": None})  # fmt: skip
+        [entry] = snap.registry(self.dir, alive=lambda pid: True)
+        self.assertEqual(
+            entry,
+            {"session_id": "s", "bridge_session_id": None, "name": None,
+             "status": None, "pid": 7, "updated_at": None, "tmux": None},
+        )  # fmt: skip
+
+    def test_a_malformed_bridge_id_is_dropped_and_the_entry_kept(self):
+        bad = ("session_01/../x", "session_01?next=1", "session_01#x", "other_01",
+               "session_", " session_01")  # fmt: skip
+        for i, bridge in enumerate(bad, start=10):
+            self.write(f"{i}.json", {"pid": i, "sessionId": f"s{i}", "name": "n",
+                                     "status": "idle", "bridgeSessionId": bridge})  # fmt: skip
+        self.write("9.json", {"pid": 9, "sessionId": "s09",
+                              "bridgeSessionId": "session_01Ab-c_9"})  # fmt: skip
+        entries = {e["session_id"]: e for e in snap.registry(self.dir, lambda p: True)}
+        self.assertEqual(entries["s09"]["bridge_session_id"], "session_01Ab-c_9")
+        for i, bridge in enumerate(bad, start=10):
+            entry = entries[f"s{i}"]
+            self.assertIsNone(entry["bridge_session_id"], bridge)
+            self.assertEqual((entry["name"], entry["status"]), ("n", "idle"), bridge)
+
+    def test_a_dead_process_is_left_out(self):
+        self.write("8.json", {"pid": 8, "sessionId": "s"})
+        self.assertEqual(snap.registry(self.dir, alive=lambda pid: False), [])
+
+    def test_a_schema_3_document_needs_its_registry(self):
+        doc = {"schema": 3, "host": "h", "taken_at": "t", "worktrees": [],
+               "scan_errors": [], "handoffs": [], "tmux": [], "sessions": [],
+               "history": []}  # fmt: skip
+        self.assertIn("registry: missing", snap.validate(doc))
+        doc["registry"] = [{"session_id": "s", "pid": 1}]
+        problems = snap.validate(doc)
+        self.assertIn("registry[0].bridge_session_id: missing", problems)
+        doc["registry"] = []
+        self.assertEqual(snap.validate(doc), [])
+        doc["schema"] = 2
+        self.assertIn("registry: unexpected", snap.validate(doc))
 
 
 class TestApprovalShaped(unittest.TestCase):

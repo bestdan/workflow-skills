@@ -460,10 +460,7 @@ def card_title(href: str, title: "str | None", ref: str) -> str:
 
     With no title the ref is the link text, so the suffix is left off.
     """
-    link = (
-        f'<a class="title" href="{_e(href)}" target="_blank" rel="noopener">'
-        f"{_e(title or ref)}</a>"
-    )
+    link = view_model.link(href, title or ref, "title")
     return link + fleet_views.ref_suffix(ref) if title else link
 
 
