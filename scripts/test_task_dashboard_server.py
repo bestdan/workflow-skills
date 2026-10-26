@@ -429,6 +429,9 @@ class HeaderTest(HeaderCase):
         header = self.header()
         self.assertIn('class="stale"', header)
         self.assertIn("never synced", header)
+        # /status warns exactly when the header does.
+        fresh = json.loads(self.request("GET", "/status")[1])["freshness"]
+        self.assertEqual((fresh["text"], fresh["warn"]), ("never synced", True))
 
     def test_failed_run_shows_its_error_escaped(self):
         conn = self.conn()
@@ -647,7 +650,7 @@ class FreshnessTest(HeaderCase):
             ["sync", "github_fleet", "sessions", "machine:lindev", "machine:mini"],
         )
         self.assertEqual(
-            rows["sync"], ("Jira + GitHub incremental", "3m", "ok", "in 5m", False)
+            rows["sync"], ("Jira + GitHub sync", "3m", "ok", "in 5m", False)
         )
         self.assertEqual(
             rows["github_fleet"],
@@ -719,7 +722,7 @@ class SyncNoteTest(HeaderCase):
             (state["running"], state["trigger"], state["step"]),
             (True, "scheduled", "incremental"),
         )
-        self.assertEqual(state["step_label"], "Jira + GitHub incremental")
+        self.assertEqual(state["step_label"], "Jira + GitHub sync")
         self.assertIsNotNone(state["step_started_at"])
         self.assertIsNotNone(state["started_at"])
         self.assertIsNone(state["next_run_at"])
@@ -728,9 +731,7 @@ class SyncNoteTest(HeaderCase):
             self.button(header),
             '<button id="sync" title="Shift-click for a full reconcile">Sync now</button>',
         )
-        self.assertRegex(
-            self.note(header), r"^syncing Jira \+ GitHub incremental… \d+s$"
-        )
+        self.assertRegex(self.note(header), r"^syncing Jira \+ GitHub sync… \d+s$")
         # The sync function reports the next step; the panel follows it.
         self.syncer.step("github_fleet")
         state = json.loads(self.request("GET", "/status")[1])

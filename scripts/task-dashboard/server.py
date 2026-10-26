@@ -906,7 +906,7 @@ class App:
         try:
             health = self.health(conn)
             queue = gauges.review_queue(conn, self.fleet)
-            fresh = freshness.as_json(self.sources(conn, state))
+            fresh = freshness.as_json(self.sources(conn, state), bool(health["stale"]))
         finally:
             conn.close()
         return {**state, **health, "review_queue": queue, "freshness": fresh}

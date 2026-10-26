@@ -65,12 +65,13 @@ class Source:
 
 
 def main_label(cfg: dict[str, Any]) -> str:
-    """What the incremental/reconcile run reads, as configured."""
+    """What the incremental/reconcile run reads, as configured. No mode in
+    the name: one label covers incremental, reconcile and full runs."""
     jira = sync.jira_enabled(cfg)
     github = bool(cfg["github"]["enabled"])
     if jira and github:
-        return "Jira + GitHub incremental"
-    return "Jira incremental" if jira else "GitHub incremental"
+        return "Jira + GitHub sync"
+    return "Jira sync" if jira else "GitHub sync"
 
 
 def steps(cfg: dict[str, Any]) -> list[tuple[str, tuple[str, ...], str]]:
@@ -225,12 +226,13 @@ def summary(found: list[Source]) -> Summary:
     return Summary(f"Updated {short_age(oldest)} ago", oldest, warn)
 
 
-def as_json(found: list[Source]) -> dict[str, Any]:
+def as_json(found: list[Source], stale: bool = False) -> dict[str, Any]:
+    """The indicator for /status; `stale` warns as it does in render()."""
     s = summary(found)
     return {
         "text": s.text,
         "age_seconds": s.age_s,
-        "warn": s.warn,
+        "warn": s.warn or stale,
         "sources": [x.as_dict() for x in found],
     }
 
