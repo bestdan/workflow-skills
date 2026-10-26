@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.141.1] - 2026-10-26
+
+### Fixes
+
+- show transcript context on ended session cards [#1212] (#1213) (f51b0b4)
+
 ## [2.141.0] - 2026-10-26
 
 ### Features
