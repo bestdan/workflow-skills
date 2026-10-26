@@ -226,7 +226,7 @@ class RefusalTest(IngestCase):
         self.assert_nothing_written()
 
     def test_unknown_schema_is_400(self):
-        for schema in (4, "1", "2", "3", True, None):
+        for schema in (5, "1", "2", "3", "4", True, None):
             doc = make_doc()
             doc["schema"] = schema
             status, body = self.post(doc)
@@ -507,6 +507,17 @@ def schema_3(**kw):
 
 
 class RegistryTest(IngestCase):
+    def test_a_schema_4_registry_entry_keeps_its_cwd(self):
+        doc = schema_3()
+        doc.update(schema=4, registry=[dict(REG, cwd="/h/src/demo")])
+        status, body = self.post(doc)
+        self.assertEqual(status, 200, body)
+        [(raw,)] = self.q("SELECT raw_json FROM issues WHERE kind = 'registry'")
+        self.assertEqual(json.loads(raw)["cwd"], "/h/src/demo")
+        self.assertEqual(
+            self.q("SELECT json_extract(counts, '$.schema') FROM machines"), [(4,)]
+        )
+
     def test_registry_entries_land_as_machine_rows(self):
         status, body = self.post(schema_3())
         self.assertEqual(status, 200, body)

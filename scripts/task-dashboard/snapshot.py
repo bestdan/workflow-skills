@@ -8,14 +8,17 @@ Run under uv (Python 3.11+), as the rest of the dashboard is::
 
     uv run --no-project --python '>=3.11' python scripts/task-dashboard/snapshot.py
 
-DOCUMENT — ``schema: 3``; ``validate()`` below is the executable form of it.
-It also accepts ``schema: 2``, the same document without ``registry``, and
-``schema: 1``, without ``scan_errors`` either, so a collector that has not been
-updated yet still reaches ingest. Update the ingest server before any
-collector: an older server rejects a newer schema with a 400, and the
-collector drops that snapshot, deltas included.
+DOCUMENT — ``schema: 4``; ``validate()`` below is the executable form of it.
+It also accepts ``schema: 3``, the same document without a registry entry's
+``cwd``, ``schema: 2``, without ``registry`` at all, and ``schema: 1``, without
+``scan_errors`` either, so a collector that has not been updated yet still
+reaches ingest. Update the ingest server before any collector where you can:
+an older server rejects a newer schema with a 400. The collector resends a
+schema 4 snapshot refused that way as schema 3 (``downgrade``), so a collector
+updated first loses only the registry's ``cwd``; it drops a snapshot refused
+for any other reason, deltas included.
 
-    schema     3
+    schema     4
     host       this machine's short host name
     taken_at   UTC ISO 8601, ``Z`` suffix
     worktrees  one entry per ``git worktree list --porcelain`` record, for every
@@ -38,7 +41,8 @@ collector drops that snapshot, deltas included.
                ``~/.claude/sessions/<pid>.json``: one entry per session whose
                process is alive — ``session_id``, ``bridge_session_id`` (the
                Remote Control session), ``name``, ``status``, ``pid``,
-               ``updated_at`` and ``tmux`` (null when absent). Two files can
+               ``updated_at``, ``tmux`` and (schema 4) ``cwd``, the process's
+               working directory (null when absent). Two files can
                name one session when an old process's file lingers after a
                resume: the live one wins, then the newest ``updatedAt``. The
                socket path, the launch arguments and every other key stay here.
@@ -88,8 +92,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from github_gh import Runner, run  # noqa: E402
 
-SCHEMA_VERSION = 3
-ACCEPTED_SCHEMAS = (1, 2, 3)
+SCHEMA_VERSION = 4
+ACCEPTED_SCHEMAS = (1, 2, 3, 4)
 SCAN_STEPS = ("worktree_list",)
 # The hook formats read; a line of any other ``v`` is skipped. v2 added
 # ``asked`` on Stop lines, so a machine whose hook is older still ships v1.
@@ -372,6 +376,7 @@ def registry(
             "pid": pid,
             "updated_at": _iso_ms(stamp),
             "tmux": _opt_str(obj.get("tmux")),
+            "cwd": _opt_str(obj.get("cwd")),
         }
         if sid not in best or stamp > best[sid][0]:
             best[sid] = (stamp, entry)
@@ -571,8 +576,19 @@ def _fields(
                 problems.append(f"{name}[{i}].{key}: {type(item[key]).__name__}")
 
 
+def downgrade(doc: dict[str, Any]) -> "dict[str, Any] | None":
+    """A schema 4 ``doc`` as schema 3, without the registry's ``cwd``, for a
+    server that predates schema 4; None for any other schema."""
+    if doc.get("schema") != 4:
+        return None
+    registry = [
+        {k: v for k, v in entry.items() if k != "cwd"} for entry in doc["registry"]
+    ]
+    return {**doc, "schema": 3, "registry": registry}
+
+
 def validate(doc: Any) -> list[str]:
-    """Every way ``doc`` departs from its schema (1, 2 or 3); empty when it conforms.
+    """Every way ``doc`` departs from its schema (1 to 4); empty when it conforms.
 
     Keys are closed: an unexpected key is a violation, which is what keeps a
     new field (prompt text, say) from shipping without a schema bump.
@@ -591,15 +607,15 @@ def validate(doc: Any) -> list[str]:
         "history",
     }
     version = doc.get("schema")
-    if version in (2, 3) and not isinstance(version, bool):
+    if version in (2, 3, 4) and not isinstance(version, bool):
         top.add("scan_errors")
-    if version == 3 and not isinstance(version, bool):
+    if version in (3, 4) and not isinstance(version, bool):
         top.add("registry")
     for key in set(doc) ^ top:
         problems.append(f"{key}: {'unexpected' if key in doc else 'missing'}")
     _check(
         version in ACCEPTED_SCHEMAS and not isinstance(version, bool),
-        "schema: not 1, 2 or 3",
+        "schema: not 1, 2, 3 or 4",
         problems,
     )
     _check(isinstance(doc.get("host"), str), "host: not a string", problems)
@@ -629,7 +645,8 @@ def validate(doc: Any) -> list[str]:
             doc.get("registry"),
             "registry",
             {"session_id": s, "bridge_session_id": n, "name": n, "status": n,
-             "pid": (int,), "updated_at": n, "tmux": n},
+             "pid": (int,), "updated_at": n, "tmux": n,
+             **({"cwd": n} if version == 4 else {})},
             problems,
         )  # fmt: skip
     if "scan_errors" in top:

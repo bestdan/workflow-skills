@@ -49,9 +49,10 @@ rest is in `raw_json`:
                       registry id after `/clear` or a resume moves it to a
                       new session id, so a live entry in the same cwd under
                       another id may be this session, and it is not ended.
-                      A registry entry carries no cwd, so an entry's cwd is
-                      the one its own hook session last recorded; an entry
-                      with no hook events has none and protects nothing.
+                      An entry's cwd is its own `cwd` (schema 4); without
+                      one (schema 3, or none in the file), the one its own
+                      hook session last recorded. An entry with neither
+                      protects nothing.
                       False on a host whose latest snapshot has no registry
                       (an older collector, or a registry scan that failed),
                       where a missing entry proves nothing. Recomputed on
@@ -204,10 +205,14 @@ def registry_hosts(conn: sqlite3.Connection) -> set[str]:
 def live_cwds(
     conn: sqlite3.Connection, live: dict[tuple[str, str], dict[str, Any]]
 ) -> set[tuple[str, str]]:
-    """(host, cwd) for each live registry entry whose own hook session
-    recorded a cwd: the last one it recorded, at any age."""
+    """(host, cwd) for each live registry entry: its own `cwd` (schema 4),
+    else the last one its own hook session recorded, at any age."""
     out: set[tuple[str, str]] = set()
-    for host, sid in live:
+    for (host, sid), entry in live.items():
+        own = entry.get("cwd")
+        if isinstance(own, str) and own:
+            out.add((host, own))
+            continue
         found = conn.execute(
             "SELECT cwd FROM session_events WHERE host = ? AND session_id = ?"
             " AND cwd IS NOT NULL AND cwd != '' ORDER BY ts DESC, id DESC LIMIT 1",

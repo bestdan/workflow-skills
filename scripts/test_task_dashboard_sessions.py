@@ -318,6 +318,20 @@ class HookSessionTests(DbCase):
         self.assertFalse(rows["s2"][2]["ended"])
         self.assertTrue(rows["s3"][2]["ended"])
 
+    def test_a_registry_entrys_own_cwd_comes_first(self):
+        self.event("s2", 30, "UserPromptSubmit", cwd="/w/repo-b")
+        self.event("s3", 30, "UserPromptSubmit", cwd="/w/repo-c")
+        # No hook events, but the registry (schema 4) names its cwd.
+        self.registry("mini", "s-silent", cwd="/w/repo-b")
+        # Its own cwd wins over the one its hook session recorded.
+        self.event("s4", 60, "UserPromptSubmit", cwd="/w/repo-c")
+        self.registry("mini", "s4", cwd="/w/repo-d")
+        self.machine("mini", {"schema": 4})
+        rows = self.derive()
+        self.assertFalse(rows["s2"][2]["ended"])
+        self.assertTrue(rows["s3"][2]["ended"])
+        self.assertFalse(rows["s4"][2]["ended"])
+
 
 class ListSessionsTests(unittest.TestCase):
     def test_ok_page(self):

@@ -1,11 +1,12 @@
-"""Write one machine snapshot (snapshot.py, ``schema: 1``, ``2`` or ``3``) into
+"""Write one machine snapshot (snapshot.py, ``schema: 1`` to ``4``) into
 the mirror.
 
 The fleet view's ingest endpoint (ingest.py) calls ``ingest()`` once it has
 authenticated the caller and validated the document. Everything is written in
 one transaction, so a snapshot lands whole or not at all:
 
-- worktrees, handoffs, tmux sessions and live registry entries (schema 3)
+- worktrees, handoffs, tmux sessions and live registry entries (schema 3; 4
+  adds each entry's ``cwd``)
   become ``issues`` rows under ``source = 'machine:<host>'`` with ``kind``
   ``worktree`` | ``handoff`` | ``tmux`` | ``registry``; sessions.py joins a
   registry row to its session's row by host and session id. A snapshot is

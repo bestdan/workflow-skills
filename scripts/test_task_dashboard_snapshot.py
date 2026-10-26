@@ -152,7 +152,7 @@ class TestDocument(Fixture):
         # A registry directory that does not exist is an empty registry.
         doc, _ = self.build(registry_dir=self.state / "no-sessions")
         self.assertEqual(snap.validate(doc), [])
-        self.assertEqual(doc["schema"], 3)
+        self.assertEqual(doc["schema"], 4)
         self.assertEqual(doc["registry"], [])
         self.assertEqual(doc["scan_errors"], [])
         # No registry directory at all reads none: schema 2, which ingest
@@ -437,7 +437,8 @@ class TestRegistry(unittest.TestCase):
         self.assertEqual(
             entry,
             {"session_id": "s", "bridge_session_id": None, "name": None,
-             "status": None, "pid": 7, "updated_at": None, "tmux": None},
+             "status": None, "pid": 7, "updated_at": None, "tmux": None,
+             "cwd": None},
         )  # fmt: skip
 
     def test_a_malformed_bridge_id_is_dropped_and_the_entry_kept(self):
@@ -486,6 +487,30 @@ class TestRegistry(unittest.TestCase):
         self.assertEqual(snap.validate(doc), [])
         doc["schema"] = 2
         self.assertIn("registry: unexpected", snap.validate(doc))
+
+    def test_schema_4_adds_a_registry_cwd_and_downgrades_to_3(self):
+        entry = {"session_id": "s", "bridge_session_id": None, "name": None,
+                 "status": None, "pid": 1, "updated_at": None, "tmux": None}  # fmt: skip
+        sent = dict(entry)
+        doc = {"schema": 4, "host": "h", "taken_at": "t", "worktrees": [],
+               "scan_errors": [], "handoffs": [], "tmux": [], "sessions": [],
+               "history": [], "registry": [sent]}  # fmt: skip
+        self.assertIn("registry[0].cwd: missing", snap.validate(doc))
+        sent["cwd"] = "/h/src/x"
+        self.assertEqual(snap.validate(doc), [])
+        three = snap.downgrade(doc)
+        assert three is not None
+        self.assertEqual((three["schema"], three["registry"]), (3, [entry]))
+        self.assertEqual(snap.validate(three), [])
+        self.assertEqual(sent["cwd"], "/h/src/x")  # not mutated
+        self.assertIn("registry[0].cwd: unexpected key",
+                      snap.validate({**doc, "schema": 3}))  # fmt: skip
+        self.assertIsNone(snap.downgrade(three))
+
+    def test_the_registry_copies_the_process_cwd(self):
+        self.write("9.json", {"pid": 9, "sessionId": "s", "cwd": "/h/src/x"})
+        [entry] = snap.registry(self.dir, alive=lambda pid: True)
+        self.assertEqual(entry["cwd"], "/h/src/x")
 
 
 class TestApprovalShaped(unittest.TestCase):
