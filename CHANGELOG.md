@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.131.0] - 2026-10-26
+
+### Features
+
+- rank what to do next on the fleet instance's Now [#1179] (#1183) (837af6f)
+
 ## [2.130.0] - 2026-10-26
 
 ### Features
