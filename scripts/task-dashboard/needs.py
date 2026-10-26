@@ -573,7 +573,7 @@ def render(
     # Beside the heading, not in it: the page's text filter rewrites the h2.
     mark_all = (
         '<div class="visit"><button type="button" data-ov="visit"'
-        f' data-at="{fleet_views._stamp(now)}" title="Clear the new badges">'
+        f' data-at="{fleet_views._stamp(now)}" title="Clear the new badges and the Finished group">'
         "Mark all as read</button></div>"
     )
     parts.append(
