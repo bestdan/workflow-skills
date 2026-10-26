@@ -281,7 +281,7 @@ class HookSessionTests(DbCase):
 
     def test_a_session_missing_from_a_registry_host_has_ended(self):
         self.event("s1", 30, "UserPromptSubmit")
-        self.event("s2", 30, "UserPromptSubmit")
+        self.event("s2", 30, "UserPromptSubmit", cwd="/w/repo-b")
         self.registry("mini", "s1")
         # No machines row for mini, or one from before the schema was
         # recorded, or one from schema 2: nothing has ended.
@@ -299,6 +299,24 @@ class HookSessionTests(DbCase):
         self.machine("mini", {"schema": 2})
         self.machine("lindev", {"schema": 3})
         self.assertFalse(self.derive()["s2"][2]["ended"])
+
+    def test_a_live_entry_in_the_same_cwd_keeps_a_session_from_ending(self):
+        # s2's process may now run under s1's registry id: a `/clear` or a
+        # resume moves the session id and leaves the registry file alone.
+        self.event("s1", 60 * 24 * 40, "UserPromptSubmit")  # older than WINDOW
+        self.event("s2", 30, "UserPromptSubmit")
+        self.event("s3", 30, "UserPromptSubmit", cwd="/w/repo-b")
+        self.registry("mini", "s1")
+        # A live entry with no hook events has no known cwd: it protects
+        # nothing, and so does another host's entry in the same cwd.
+        self.registry("mini", "s-silent")
+        self.event("s9", 30, "UserPromptSubmit", host="lindev", cwd="/w/repo-b")
+        self.registry("lindev", "s9")
+        self.machine("mini", {"schema": 3})
+        rows = self.derive()
+        self.assertNotIn("s1", rows)
+        self.assertFalse(rows["s2"][2]["ended"])
+        self.assertTrue(rows["s3"][2]["ended"])
 
 
 class ListSessionsTests(unittest.TestCase):

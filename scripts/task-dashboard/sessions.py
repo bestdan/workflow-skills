@@ -43,12 +43,20 @@ rest is in `raw_json`:
                       `https://claude.ai/code/<it>` opens this session.
     ended             the host's latest snapshot carries a registry (schema 3
                       or later, recorded in `machines.counts`) and this
-                      session is not in it: its process is gone, so it can
-                      only be resumed. False on a host whose latest snapshot
-                      has no registry (an older collector, or a registry scan
-                      that failed), where a missing entry proves nothing.
-                      Recomputed on every derive, so a session that shows up
-                      in the registry again is no longer ended.
+                      session is not in it, and no live entry on that host
+                      runs in the session's cwd: its process is gone, so it
+                      can only be resumed. A live process can keep its
+                      registry id after `/clear` or a resume moves it to a
+                      new session id, so a live entry in the same cwd under
+                      another id may be this session, and it is not ended.
+                      A registry entry carries no cwd, so an entry's cwd is
+                      the one its own hook session last recorded; an entry
+                      with no hook events has none and protects nothing.
+                      False on a host whose latest snapshot has no registry
+                      (an older collector, or a registry scan that failed),
+                      where a missing entry proves nothing. Recomputed on
+                      every derive, so a session that shows up in the
+                      registry again is no longer ended.
 
 A permission prompt answered mid-turn fires no hook event, so the session
 reads as need_input until that turn's Stop. The hook has no archive signal, so
@@ -193,6 +201,23 @@ def registry_hosts(conn: sqlite3.Connection) -> set[str]:
     return out
 
 
+def live_cwds(
+    conn: sqlite3.Connection, live: dict[tuple[str, str], dict[str, Any]]
+) -> set[tuple[str, str]]:
+    """(host, cwd) for each live registry entry whose own hook session
+    recorded a cwd: the last one it recorded, at any age."""
+    out: set[tuple[str, str]] = set()
+    for host, sid in live:
+        found = conn.execute(
+            "SELECT cwd FROM session_events WHERE host = ? AND session_id = ?"
+            " AND cwd IS NOT NULL AND cwd != '' ORDER BY ts DESC, id DESC LIMIT 1",
+            (host, sid),
+        ).fetchone()
+        if found:
+            out.add((host, found[0]))
+    return out
+
+
 def with_registry(
     row: dict[str, Any], entry: "dict[str, Any] | None"
 ) -> dict[str, Any]:
@@ -223,12 +248,17 @@ def derive(conn: sqlite3.Connection, now: datetime) -> list[dict[str, Any]]:
             by_session.setdefault(session_id, []).append(tuple(rest))
     live = registry(conn)
     hosts = registry_hosts(conn)
+    occupied = live_cwds(conn, live)
     rows = []
     for sid, evs in by_session.items():
         row = fold(sid, evs)
         entry = live.get((row["host"] or "", sid))
         with_registry(row, entry)
-        row["ended"] = entry is None and row["host"] in hosts
+        row["ended"] = (
+            entry is None
+            and row["host"] in hosts
+            and (row["host"], row["cwd"]) not in occupied
+        )
         rows.append(row)
     return rows
 

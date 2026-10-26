@@ -103,6 +103,8 @@ def ev(sid, ts, event, cwd="/h/src/dotfiles", notification=None, asked=_V1):
     return line
 
 
+TURN_CWD = "/h/src/notes"
+
 SNAPSHOT = {
     "schema": 1,
     "host": "mini",
@@ -113,8 +115,9 @@ SNAPSHOT = {
     "sessions": [
         # Asked a question 6h ago: a real decision, in the main list. The
         # idle_prompt the harness raises a minute later does not clear it.
-        ev("s-turn", "2026-10-24T05:00:00.000Z", "UserPromptSubmit"),
-        ev("s-turn", "2026-10-24T06:00:00.000Z", "Stop", asked=True),
+        # Its own checkout, so no other session's process shares its cwd.
+        ev("s-turn", "2026-10-24T05:00:00.000Z", "UserPromptSubmit", TURN_CWD),
+        ev("s-turn", "2026-10-24T06:00:00.000Z", "Stop", TURN_CWD, asked=True),
         ev("s-turn", "2026-10-24T06:01:00.000Z", "Notification", None, "idle_prompt"),
         # Finished without a question, or the hook could not tell, or a
         # format-1 hook wrote the Stop: none of them waits on me.
@@ -650,10 +653,12 @@ class RegistryTests(NeedsCase):
         self.assertIn('href="https://claude.ai/code/session_01DONE"', done)
 
 
-def post_registry(conn, taken_at, registry=(), *, host="mini", schema=3):
-    """An empty snapshot from `host` at `taken_at`; a registry from schema 3."""
+def post_registry(conn, taken_at, registry=(), *, host="mini", schema=3, events=()):
+    """A snapshot from `host` at `taken_at` carrying only the hook `events`;
+    a registry from schema 3."""
     doc = {"schema": schema, "host": host, "taken_at": taken_at, "worktrees": [],
-           "handoffs": [], "tmux": [], "sessions": [], "history": []}  # fmt: skip
+           "handoffs": [], "tmux": [], "sessions": list(events),
+           "history": []}  # fmt: skip
     if schema >= 2:
         doc["scan_errors"] = []
     if schema >= 3:
@@ -663,7 +668,7 @@ def post_registry(conn, taken_at, registry=(), *, host="mini", schema=3):
 
 
 WITHOUT_TURN = REGISTRY[1:]  # every entry but s-turn's
-RESUME = "resume with `claude --resume s-turn` in /h/src/dotfiles on mini"
+RESUME = f"resume with `claude --resume s-turn` in {TURN_CWD} on mini"
 
 
 class EndedTests(NeedsCase):
@@ -686,7 +691,7 @@ class EndedTests(NeedsCase):
         row = card(section(page, "finished"), "s-turn")
         self.assertIn(
             '<div class="act">→ ended · resume with <code>claude --resume s-turn'
-            "</code> in /h/src/dotfiles on mini</div>",
+            f"</code> in {TURN_CWD} on mini</div>",
             row,
         )
         self.assertIn("on mini · last active 6h ago", row)
@@ -723,6 +728,23 @@ class EndedTests(NeedsCase):
         self.end_turn()
         post_registry(self.conn, "2026-10-24T11:59:50.000Z", schema=2)
         self.assertIn("s-turn", keys(section(self.page(), "needs")))
+
+    def test_a_live_process_in_the_same_cwd_under_another_id_ends_nothing(self):
+        # The process may have moved from s-turn to another id (a `/clear`, a
+        # resume) while its registry file kept the old one, so a live entry
+        # in s-turn's cwd may be s-turn itself.
+        other = {"session_id": "s-other", "bridge_session_id": None,
+                 "name": None, "status": "idle", "pid": 4200,
+                 "updated_at": None, "tmux": None}  # fmt: skip
+        post_registry(
+            self.conn, "2026-10-24T11:59:40.000Z", [*WITHOUT_TURN, other],
+            events=[ev("s-other", "2026-10-21T09:00:00.000Z",
+                         "UserPromptSubmit", TURN_CWD)],
+        )  # fmt: skip
+        self.assertIn("s-turn", keys(section(self.page(), "needs")))
+        # Once that process is gone too, s-turn has ended.
+        post_registry(self.conn, "2026-10-24T11:59:50.000Z", WITHOUT_TURN)
+        self.assertIn("s-turn", finished_keys(self.page()))
 
     def test_another_hosts_registry_ends_nothing_here(self):
         post_registry(self.conn, "2026-10-24T11:59:40.000Z", host="lindev")

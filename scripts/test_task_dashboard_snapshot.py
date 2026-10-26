@@ -134,10 +134,10 @@ class Fixture(unittest.TestCase):
             + history_line(1792784510000, "sess-1", "yes")
         )
 
-    def build(self, runner=None):
+    def build(self, runner=None, **kw):
         return snap.build(
             src_root=self.src, state_dir=self.state, history=self.history,
-            host="testhost", now=NOW, runner=runner or FakeRunner(),
+            host="testhost", now=NOW, runner=runner or FakeRunner(), **kw,
         )  # fmt: skip
 
     def take(self, runner=None):
@@ -149,11 +149,18 @@ class Fixture(unittest.TestCase):
 
 class TestDocument(Fixture):
     def test_validates_against_schema(self):
-        doc, _ = self.build()
+        # A registry directory that does not exist is an empty registry.
+        doc, _ = self.build(registry_dir=self.state / "no-sessions")
         self.assertEqual(snap.validate(doc), [])
         self.assertEqual(doc["schema"], 3)
         self.assertEqual(doc["registry"], [])
         self.assertEqual(doc["scan_errors"], [])
+        # No registry directory at all reads none: schema 2, which ingest
+        # never reads as every session ended.
+        doc, _ = self.build()
+        self.assertEqual(snap.validate(doc), [])
+        self.assertEqual(doc["schema"], 2)
+        self.assertNotIn("registry", doc)
         self.assertEqual(doc["host"], "testhost")
         self.assertEqual(doc["taken_at"], "2026-10-23T12:00:00.000Z")
 

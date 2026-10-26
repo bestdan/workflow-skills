@@ -517,15 +517,16 @@ def build(
     The deltas start at ``cursor``, else at the one saved in ``state_dir``. The
     collector passes the cursor of its newest unsent snapshot, so a snapshot
     waiting in its spool and the next one never carry the same lines.
-    ``registry_dir`` is Claude Code's ``sessions`` directory; None reads none.
-    A registry that cannot be read makes the document schema 2, without one.
+    ``registry_dir`` is Claude Code's ``sessions`` directory. None reads none,
+    and a registry that cannot be read is the same: either makes the document
+    schema 2, without one.
     """
     if cursor is None:
         cursor = load_cursor(state_dir / CURSOR_NAME)
     sessions, session_marks = hook_tails(state_dir / "sessions", cursor)
     prompts, history_mark = history_delta(history, cursor, classify)
     trees, scan_errors = worktrees(runner, src_root)
-    live = registry(registry_dir, alive) if registry_dir else []
+    live = registry(registry_dir, alive) if registry_dir is not None else None
     doc = {
         "schema": SCHEMA_VERSION if live is not None else 2,
         "host": host,
