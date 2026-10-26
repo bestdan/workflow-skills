@@ -668,6 +668,7 @@ def post_registry(conn, taken_at, registry=(), *, host="mini", schema=3, events=
 
 
 WITHOUT_TURN = REGISTRY[1:]  # every entry but s-turn's
+WITHOUT_PR = REGISTRY[:3]  # every entry but s-pr's
 
 
 def summary(sid, first=None, ask=None, branch=None, bridge=None):
@@ -675,9 +676,11 @@ def summary(sid, first=None, ask=None, branch=None, bridge=None):
             "branch": branch, "bridge_session_id": bridge}  # fmt: skip
 
 
-def post_transcripts(conn, transcripts, taken_at="2026-10-24T11:59:40.000Z"):
-    """A schema 5 snapshot: the same registry, with transcript summaries."""
-    registry: list = copy.deepcopy(REGISTRY)
+def post_transcripts(
+    conn, transcripts, taken_at="2026-10-24T11:59:40.000Z", registry=REGISTRY
+):
+    """A schema 5 snapshot: the registry, with transcript summaries."""
+    registry = copy.deepcopy(list(registry))
     for entry in registry:
         entry["cwd"] = None
     doc = {"schema": 5, "host": "mini", "taken_at": taken_at, "worktrees": [],
@@ -751,6 +754,18 @@ class TranscriptTests(NeedsCase):
         long_ask = "y" * 400
         post_transcripts(self.conn, [summary("s-turn", "go", long_ask)])
         self.assertIn(f"› …{long_ask}</div>", card(self.page(), "s-turn"))
+
+    def test_a_cut_ask_starts_at_its_next_word(self):
+        cut = "lia backend for servicing " + "z" * 374
+        self.assertEqual(len(cut), 400)
+        post_transcripts(self.conn, [summary("s-turn", "go", cut)])
+        self.assertIn(
+            f"› …backend for servicing {'z' * 374}</div>", card(self.page(), "s-turn")
+        )
+        # The cut may fall on a word's start; a space there is dropped alone.
+        self.assertEqual(needs.ask_excerpt(" " + cut[1:]), "…" + cut[1:].lstrip())
+        # One short of the cap was not cut, so it is quoted whole.
+        self.assertEqual(needs.ask_excerpt(cut[1:]), cut[1:])
 
 
 RESUME = f"resume with `claude --resume s-turn` in {TURN_CWD} on mini"
@@ -860,6 +875,64 @@ class EndedTests(NeedsCase):
         self.assertEqual(odd.hint, "")
         self.assertIn('<div class="act">→ ended</div>',
                       needs.finished_row(odd, NOW, overlay.load(self.conn)))  # fmt: skip
+
+    def test_an_ended_session_shows_its_prompt_ask_and_pr_but_no_link(self):
+        before = card(section(self.page(), "finished"), "s-done")
+        post_transcripts(self.conn, [
+            summary("s-pr", "fix task 1101", ASK, bridge="session_01ENDED"),
+        ], registry=WITHOUT_PR)  # fmt: skip
+        page = self.page()
+        row = card(section(page, "finished"), "s-pr")
+        self.assertIn(
+            '<span class="title">fix task 1101</span>'
+            ' <span class="stag">task-1101 @ bestdan/task-1101</span>',
+            row,
+        )
+        self.assertIn(f'<div class="ask">› {needs._e(ASK)}</div>', row)
+        self.assertIn(
+            f'<div class="act">→ ended · <a href="{pr_url(1201)}" target="_blank"'
+            ' rel="noopener">PR #1201</a> · resume with <code>claude --resume s-pr'
+            f"</code> in {WT}/task-1101 on mini</div>",
+            row,
+        )
+        # Its transcript's Remote Control id is not linked: the process is gone.
+        self.assertNotIn("session_01ENDED", page)
+        self.assertNotIn("claude.ai/code", row)
+        p = needs.build(self.conn, fleet_cfg(), NOW, overlay.load(self.conn))
+        [ended] = [n for n in p.finished if n.item[1] == "s-pr"]
+        self.assertIsNone(ended.url)
+        self.assertIsNone(ended.bridge_session_id)
+        # A finished row with no summary is unchanged.
+        self.assertEqual(card(section(page, "finished"), "s-done"), before)
+
+    def test_an_ended_session_without_a_summary_renders_as_before(self):
+        self.end_turn()
+        row = card(section(self.page(), "finished"), "s-turn")
+        self.assertIn(
+            '<summary><span class="title">notes</span> <span class="meta">on mini'
+            ' · last active 6h ago</span></summary><div class="act">→ ended ·'
+            f" resume with <code>claude --resume s-turn</code> in {TURN_CWD} on"
+            ' mini</div><div class="ov">',
+            row,
+        )
+
+    def test_a_finished_turn_links_the_pr_on_its_branch(self):
+        cwd = f"{WT}/task-1101"
+        events = [ev("s-fin", "2026-10-24T10:30:00.000Z", "UserPromptSubmit", cwd),
+                  ev("s-fin", "2026-10-24T11:00:00.000Z", "Stop", cwd, asked=False)]  # fmt: skip
+        for line in events:
+            line["branch"] = "bestdan/task-1101"
+        live = {"session_id": "s-fin", "bridge_session_id": None, "name": None,
+                "status": "idle", "pid": 4104, "updated_at": None, "tmux": None}  # fmt: skip
+        post_registry(self.conn, "2026-10-24T11:59:40.000Z", [*REGISTRY, live],
+                      events=events)  # fmt: skip
+        row = card(section(self.page(), "finished"), "s-fin")
+        self.assertIn("on mini · turn ended", row)
+        self.assertIn(
+            f'<div class="act">→ <a href="{pr_url(1201)}" target="_blank"'
+            ' rel="noopener">PR #1201</a></div>',
+            row,
+        )
 
 
 EXTERNAL = re.compile(r"<a\b([^>]*)>", re.S)
