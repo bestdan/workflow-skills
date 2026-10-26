@@ -41,7 +41,15 @@ rest is in `raw_json`:
                       process is gone or the collector predates schema 3.
                       `bridge_session_id` is the Remote Control session, so
                       `https://claude.ai/code/<it>` opens this session.
-    ended             the host's latest snapshot carries a registry (schema 3
+    first_prompt, last_ask, transcript_bridge_session_id
+                      from the host's transcript summary for this session
+                      (snapshot.py `transcripts`, schema 5): what it was first
+                      asked, the end of its last assistant text, and the
+                      transcript's Remote Control id, which may have the
+                      unverified `cse_` form and so is never linked as is. All
+                      null without a summary. The summary's `branch`, when it
+                      has one, replaces the hook's.
+    ended            the host's latest snapshot carries a registry (schema 3
                       or later, recorded in `machines.counts`) and this
                       session is not in it, and no live entry on that host
                       runs in the session's cwd: its process is gone, so it
@@ -167,13 +175,17 @@ def _label(cwd: "str | None", branch: "str | None") -> "str | None":
     return name or branch
 
 
-def registry(conn: sqlite3.Connection) -> dict[tuple[str, str], dict[str, Any]]:
-    """Each host's live registry entries (snapshot.py, schema 3), by
+def registry(
+    conn: sqlite3.Connection, kind: str = "registry"
+) -> dict[tuple[str, str], dict[str, Any]]:
+    """Each host's live registry entries (snapshot.py, schema 3), or with
+    `kind = 'transcript'` its transcript summaries (schema 5), by
     (host, session id)."""
     out: dict[tuple[str, str], dict[str, Any]] = {}
     for source, raw in conn.execute(
         "SELECT source, raw_json FROM issues WHERE source LIKE 'machine:%'"
-        " AND kind = 'registry'"
+        " AND kind = ?",
+        (kind,),
     ):
         try:
             entry = json.loads(raw or "{}")
@@ -244,6 +256,26 @@ def with_registry(
     return row
 
 
+def _text(value: Any) -> "str | None":
+    return value if isinstance(value, str) and value else None
+
+
+def with_transcript(
+    row: dict[str, Any], summary: "dict[str, Any] | None"
+) -> dict[str, Any]:
+    """`row` with its transcript summary's fields; all null without one, and
+    the hook's branch kept unless the summary names one."""
+    summary = summary or {}
+    row.update(
+        first_prompt=_text(summary.get("first_prompt")),
+        last_ask=_text(summary.get("last_ask")),
+        transcript_bridge_session_id=_text(summary.get("bridge_session_id")),
+    )
+    if _text(summary.get("branch")):
+        row["branch"] = summary["branch"]
+    return row
+
+
 def derive(conn: sqlite3.Connection, now: datetime) -> list[dict[str, Any]]:
     """A row per session active in the last WINDOW_DAYS. Reads; writes nothing."""
     cutoff = _ts(now - timedelta(days=WINDOW_DAYS))
@@ -252,6 +284,7 @@ def derive(conn: sqlite3.Connection, now: datetime) -> list[dict[str, Any]]:
         if session_id:
             by_session.setdefault(session_id, []).append(tuple(rest))
     live = registry(conn)
+    summaries = registry(conn, "transcript")
     hosts = registry_hosts(conn)
     occupied = live_cwds(conn, live)
     rows = []
@@ -259,6 +292,7 @@ def derive(conn: sqlite3.Connection, now: datetime) -> list[dict[str, Any]]:
         row = fold(sid, evs)
         entry = live.get((row["host"] or "", sid))
         with_registry(row, entry)
+        with_transcript(row, summaries.get((row["host"] or "", sid)))
         row["ended"] = (
             entry is None
             and row["host"] in hosts

@@ -306,12 +306,12 @@ def card(r: Ranked, now: datetime, ov: overlay.Overlay) -> str:
         if n.url and n.url.startswith("https://")
         else ""
     )
-    act = " · ".join(x for x in (link, view_model.code(n.hint)) if x)
+    act = " · ".join(x for x in (link, needs.pr_link(n), view_model.code(n.hint)) if x)
     act_html = f'<div class="act">→ {act}</div>' if act else ""
     return (
         f'<div {overlay.card_attrs(n.item, ov, now)} data-kind="{_e(n.kind)}"'
         f' data-category="{r.category}" data-total="{r.total}">'
-        f"{needs._title(n, n.url)}"
+        f"{needs._title(n, n.url)}{needs.ask_html(n)}"
         f'<div class="meta">{meta}</div>'
         f'<div class="why" data-terms="{terms}">{_e(why_line(r))}</div>'
         f"{act_html}{overlay.card_controls(n.item, ov, now, reorder=False, why_not=True)}"

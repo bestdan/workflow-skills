@@ -206,31 +206,63 @@ class TestPush(Home):
         self.assertTrue(any("refused" in m and "for good" in m for m in self.log_lines))
         self.assertEqual(len(self.ingest.calls), 1)  # not resent
 
-    def test_a_server_older_than_schema_4_gets_it_as_schema_3(self):
-        # A collector updated before its server: nothing is lost but the
-        # registry's cwd.
-        self.hook(("UserPromptSubmit", "2026-10-23T10:00:00.000Z"))
-        registry_file(self.home, 7, sessionId="s", cwd="/h/src/x")
-        self.ingest.script = [(400, '{"error": "unsupported schema 4"}')]
-        rc = collector.collect(
+    def collect_live(self):
+        return collector.collect(
             self.cfg(), home=self.home, now=NOW, runner=tmux_runner,
             log=self.log_lines.append, alive=lambda pid: True,
         )  # fmt: skip
-        self.assertEqual(rc, 0)
+
+    def test_a_server_older_than_schema_5_gets_it_as_schema_4(self):
+        # A collector updated before its server: nothing is lost but the
+        # transcript summaries.
+        self.hook(("UserPromptSubmit", "2026-10-23T10:00:00.000Z"))
+        registry_file(self.home, 7, sessionId="s1", cwd="/h/src/x")
+        transcript_file(self.home, "s1", "/h/src/x", [said("Shall I?")])
+        self.ingest.script = [(400, '{"error": "unsupported schema 5"}')]
+        self.assertEqual(self.collect_live(), 0)
         first, second = self.ingest.docs
-        self.assertEqual(first["schema"], 4)
-        self.assertEqual(first["registry"][0]["cwd"], "/h/src/x")
-        self.assertEqual(second["schema"], 3)
-        self.assertNotIn("cwd", second["registry"][0])
+        self.assertEqual(first["schema"], 5)
+        self.assertEqual(first["transcripts"][0]["last_ask"], "Shall I?")
+        self.assertEqual(second["schema"], 4)
+        self.assertNotIn("transcripts", second)
+        self.assertEqual(second["registry"][0]["cwd"], "/h/src/x")
         self.assertEqual(snapshot.validate(second), [])
         self.assertEqual(second["sessions"], first["sessions"])
-        self.assertEqual(len(second["sessions"]), 1)
         self.assertEqual(self.spool(), [])
         self.assertIn("sessions", self.cursor())
+
+    def test_a_server_older_than_schema_4_gets_it_as_schema_3(self):
+        # Two steps down: nothing is lost but the transcripts and the
+        # registry's cwd.
+        self.hook(("UserPromptSubmit", "2026-10-23T10:00:00.000Z"))
+        registry_file(self.home, 7, sessionId="s", cwd="/h/src/x")
+        self.ingest.script = [(400, '{"error": "unsupported schema 5"}'),
+                              (400, '{"error": "unsupported schema 4"}')]  # fmt: skip
+        self.assertEqual(self.collect_live(), 0)
+        first, second, third = self.ingest.docs
+        self.assertEqual([d["schema"] for d in (first, second, third)], [5, 4, 3])
+        self.assertEqual(first["registry"][0]["cwd"], "/h/src/x")
+        self.assertNotIn("cwd", third["registry"][0])
+        self.assertNotIn("transcripts", third)
+        self.assertEqual(snapshot.validate(third), [])
+        self.assertEqual(third["sessions"], first["sessions"])
+        self.assertEqual(len(third["sessions"]), 1)
+        self.assertEqual(self.spool(), [])
+        self.assertIn("sessions", self.cursor())
+        self.assertTrue(any("resending as 3" in m for m in self.log_lines))
         # Refused again as schema 3, it is dropped like any other 400.
-        self.ingest.script = [(400, '{"error": "unsupported schema 4"}'), 400]
+        self.ingest.script = [(400, '{"error": "unsupported schema 5"}'),
+                              (400, '{"error": "unsupported schema 4"}'), 400]  # fmt: skip
         self.assertEqual(self.run_once(), 0)
-        self.assertEqual(len(self.ingest.calls), 4)
+        self.assertEqual(len(self.ingest.calls), 6)
+
+    def test_schema_3_refused_as_unsupported_is_not_resent(self):
+        self.ingest.script = [(400, '{"error": "unsupported schema 5"}')] + [
+            (400, '{"error": "unsupported schema"}')] * 3  # fmt: skip
+        registry_file(self.home, 7, sessionId="s")
+        self.assertEqual(self.collect_live(), 0)
+        self.assertEqual([d["schema"] for d in self.ingest.docs], [5, 4, 3])
+        self.assertEqual(self.spool(), [])
 
     def test_401_and_a_redirect_are_kept(self):
         for code in (401, 403, 302):
@@ -388,6 +420,61 @@ class TestRegistry(Home):
     def test_no_registry_directory_sends_an_empty_list(self):
         self.assertEqual(self.run_once(), 0)
         self.assertEqual(self.ingest.docs[0]["registry"], [])
+
+
+PLANTED = "PLANTED-TOOL-OUTPUT-d41c"
+
+
+def said(text, msg_id="m1"):
+    return {"type": "assistant", "message": {"id": msg_id, "role": "assistant",
+            "content": [{"type": "text", "text": text}]}}  # fmt: skip
+
+
+def transcript_file(home, sid, cwd, records):
+    """An invented ``~/.claude/projects/<slug>/<sid>.jsonl``."""
+    d = home / ".claude/projects" / snapshot.project_slug(cwd)
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{sid}.jsonl").write_text("".join(json.dumps(r) + "\n" for r in records))
+
+
+class TestTranscripts(Home):
+    def test_the_posted_body_carries_no_tool_output(self):
+        cwd = "/h/src/demo"
+        registry_file(self.home, 7, sessionId="s1", cwd=cwd)
+        user = {"type": "user", "gitBranch": "bestdan/demo"}
+        transcript_file(self.home, "s1", cwd, [
+            {**user, "message": {"role": "user", "content": "can you fix the demo?"}},
+            {"type": "assistant", "message": {"id": "m0", "content": [
+                {"type": "tool_use", "id": "t1", "name": "Read",
+                 "input": {"file_path": f"/{PLANTED}"}}]}},
+            {**user, "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "t1", "content": PLANTED}]},
+             "toolUseResult": {"file": {"content": PLANTED}}},
+            {"type": "attachment", "attachment": {"content": PLANTED}},
+            {"type": "system", "content": PLANTED},
+            said("Should I open the PR?", "m1"),
+        ])  # fmt: skip
+        rc = collector.collect(
+            self.cfg(), home=self.home, now=NOW, runner=tmux_runner,
+            log=self.log_lines.append, alive=lambda pid: True,
+        )  # fmt: skip
+        self.assertEqual(rc, 0)
+        [(_, _, doc)] = self.ingest.calls
+        self.assertEqual(doc["transcripts"], [{
+            "session_id": "s1", "first_prompt": "can you fix the demo?",
+            "last_ask": "Should I open the PR?", "branch": "bestdan/demo",
+            "bridge_session_id": None,
+        }])  # fmt: skip
+        self.assertNotIn(PLANTED, json.dumps(doc))
+
+    def test_a_missing_transcript_sends_no_entry(self):
+        registry_file(self.home, 7, sessionId="s1", cwd="/h/src/demo")
+        rc = collector.collect(
+            self.cfg(), home=self.home, now=NOW, runner=tmux_runner,
+            log=self.log_lines.append, alive=lambda pid: True,
+        )  # fmt: skip
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.ingest.docs[0]["transcripts"], [])
 
 
 class TestPrune(Home):

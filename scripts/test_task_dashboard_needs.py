@@ -668,6 +668,91 @@ def post_registry(conn, taken_at, registry=(), *, host="mini", schema=3, events=
 
 
 WITHOUT_TURN = REGISTRY[1:]  # every entry but s-turn's
+
+
+def summary(sid, first=None, ask=None, branch=None, bridge=None):
+    return {"session_id": sid, "first_prompt": first, "last_ask": ask,
+            "branch": branch, "bridge_session_id": bridge}  # fmt: skip
+
+
+def post_transcripts(conn, transcripts, taken_at="2026-10-24T11:59:40.000Z"):
+    """A schema 5 snapshot: the same registry, with transcript summaries."""
+    registry: list = copy.deepcopy(REGISTRY)
+    for entry in registry:
+        entry["cwd"] = None
+    doc = {"schema": 5, "host": "mini", "taken_at": taken_at, "worktrees": [],
+           "handoffs": [], "tmux": [], "sessions": [], "history": [],
+           "scan_errors": [], "registry": registry,
+           "transcripts": list(transcripts)}  # fmt: skip
+    snapshot_adapter.ingest(conn, doc, NOW)
+    sessions.write(conn, sessions.derive(conn, NOW), NOW)
+
+
+ASK = "I can't see it. Should I clone it? And what change do you want?"
+
+
+class TranscriptTests(NeedsCase):
+    def setUp(self):
+        super().setUp()
+        seed(self.conn)
+        seed_registry(self.conn)
+
+    def test_the_card_shows_the_first_prompt_the_ask_and_the_branch(self):
+        before = self.page()
+        post_transcripts(self.conn, [
+            summary("s-turn", "can you see and edit the repo `debtmanager`?", ASK,
+                    "bestdan/notes-fix", "cse_01NOTLINKED"),
+        ])  # fmt: skip
+        page = self.page()
+        turn = card(section(page, "needs"), "s-turn")
+        self.assertIn(
+            '<span class="title">can you see and edit the repo `debtmanager`?</span>'
+            ' <span class="stag">src-32</span>',
+            turn,
+        )
+        self.assertIn(f'<div class="ask">› {needs._e(ASK)}</div>', turn)
+        self.assertIn("notes: bestdan/notes-fix", turn)
+        # The registry's own Remote Control id still decides the link.
+        self.assertIn(f'href="https://claude.ai/code/{BRIDGE}"', turn)
+        self.assertNotIn("cse_", page)
+        # A session with no summary keeps today's card exactly.
+        self.assertEqual(card(page, "s-perm"), card(before, "s-perm"))
+
+    def test_a_cse_id_is_never_linked_and_a_session_one_is(self):
+        post_transcripts(self.conn, [
+            summary("s-perm", "approve the thing", bridge="cse_01ABC"),
+            summary("s-pr", "fix task 1101", bridge="session_01FROMTRANSCRIPT"),
+        ])  # fmt: skip
+        page = self.page()
+        perm = card(page, "s-perm")
+        self.assertIn("(no Remote Control link)", perm)
+        self.assertNotIn("cse_01ABC", page)
+        pr_card = card(page, "s-pr")
+        self.assertIn('href="https://claude.ai/code/session_01FROMTRANSCRIPT"', pr_card)
+        # The transcript's id is carried in the mirror row all the same.
+        rows = {
+            r["key"]: r for r in needs._rows(self.conn, sessions.SOURCE, sessions.KIND)
+        }
+        self.assertEqual(rows["s-perm"]["transcript_bridge_session_id"], "cse_01ABC")
+
+    def test_the_open_pr_on_the_sessions_branch_is_linked(self):
+        pr_card = card(self.page(), "s-pr")
+        self.assertIn(
+            f'<a href="{pr_url(1201)}" target="_blank" rel="noopener">PR #1201</a>',
+            pr_card,
+        )
+        # Another repo's PR on the same branch name is not this session's.
+        self.assertIsNone(needs.session_pr(
+            needs.open_prs(self.conn, fleet_cfg()), "dotfiles", "bestdan/task-1101"))  # fmt: skip
+        # Nor is a branch with no open PR.
+        self.assertNotIn(">PR #", card(self.page(), "s-turn"))
+
+    def test_a_long_ask_is_shown_cut(self):
+        long_ask = "y" * 400
+        post_transcripts(self.conn, [summary("s-turn", "go", long_ask)])
+        self.assertIn(f"› …{long_ask}</div>", card(self.page(), "s-turn"))
+
+
 RESUME = f"resume with `claude --resume s-turn` in {TURN_CWD} on mini"
 
 

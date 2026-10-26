@@ -375,5 +375,37 @@ class JiraNowUnchangedTest(server_harness.ServerCase):
         self.assertIn('data-section="now"', page)
 
 
+class SessionCardTests(unittest.TestCase):
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        self.conn = db.connect(Path(self._td.name) / "d.db")
+        self.addCleanup(self.conn.close)
+        needs_fx.seed(self.conn)
+        needs_fx.seed_registry(self.conn)
+
+    def page(self):
+        return fleet_now.render(self.conn, needs_fx.fleet_cfg(), needs_fx.NOW)
+
+    def test_a_session_card_shows_what_it_asked_and_its_pr(self):
+        before = self.page()
+        needs_fx.post_transcripts(self.conn, [
+            needs_fx.summary("s-turn", "edit the notes", needs_fx.ASK, "bestdan/n"),
+        ])  # fmt: skip
+        page = self.page()
+        turn = needs_fx.card(page, "s-turn")
+        self.assertIn('>edit the notes</a> <span class="stag">src-32</span>', turn)
+        self.assertIn(f'<div class="ask">› {fleet_now._e(needs_fx.ASK)}</div>', turn)
+        self.assertIn("notes: bestdan/n", turn)
+        pr_card = needs_fx.card(page, "s-pr")
+        self.assertIn(
+            f'<a href="{needs_fx.pr_url(1201)}" target="_blank" rel="noopener">'
+            "PR #1201</a>",
+            pr_card,
+        )
+        # Without a summary, a session's card is as it was.
+        self.assertEqual(needs_fx.card(page, "s-perm"), needs_fx.card(before, "s-perm"))
+
+
 if __name__ == "__main__":
     unittest.main()

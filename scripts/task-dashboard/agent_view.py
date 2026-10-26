@@ -16,7 +16,10 @@ Every field is plain text. An item's `action` is structured: `review` (what to
 do by hand, a command in backticks), `command` (argv), and `url`, or null when
 the page suggests none. A Needs you or Now item also carries
 `bridge_session_id`: a hook session's Remote Control id, null for anything
-else, and the action's `url` is that session's page.
+else, and the action's `url` is that session's page. It carries `branch` too,
+and for a hook session `first_prompt` and `last_ask` (its transcript summary,
+needs.py) and `pr`, the open PR on its branch as {number, url, repo}; each is
+null when there is none.
 """
 
 import json
@@ -128,6 +131,8 @@ def need_item(n: needs.Need, lane: str, now: datetime) -> Item:
         evidence=n.state, why=why, action=n.action,
         waited=needs.waited(n.since, now), brief=n.brief,
         bridge_session_id=n.bridge_session_id,
+        first_prompt=n.first_prompt, last_ask=n.last_ask, branch=n.branch,
+        pr=dict(n.pr) if n.pr else None,
     )  # fmt: skip
 
 

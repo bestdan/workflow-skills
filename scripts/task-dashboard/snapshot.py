@@ -8,17 +8,18 @@ Run under uv (Python 3.11+), as the rest of the dashboard is::
 
     uv run --no-project --python '>=3.11' python scripts/task-dashboard/snapshot.py
 
-DOCUMENT — ``schema: 4``; ``validate()`` below is the executable form of it.
-It also accepts ``schema: 3``, the same document without a registry entry's
-``cwd``, ``schema: 2``, without ``registry`` at all, and ``schema: 1``, without
-``scan_errors`` either, so a collector that has not been updated yet still
-reaches ingest. Update the ingest server before any collector where you can:
-an older server rejects a newer schema with a 400. The collector resends a
-schema 4 snapshot refused that way as schema 3 (``downgrade``), so a collector
-updated first loses only the registry's ``cwd``; it drops a snapshot refused
-for any other reason, deltas included.
+DOCUMENT — ``schema: 5``; ``validate()`` below is the executable form of it.
+It also accepts ``schema: 4``, the same document without ``transcripts``,
+``schema: 3``, without a registry entry's ``cwd`` either, ``schema: 2``,
+without ``registry`` at all, and ``schema: 1``, without ``scan_errors``
+either, so a collector that has not been updated yet still reaches ingest.
+Update the ingest server before any collector where you can: an older server
+rejects a newer schema with a 400. The collector resends a snapshot refused
+that way one schema lower (``downgrade``), as far as schema 3, so a collector
+updated first loses only what the server cannot read; it drops a snapshot
+refused for any other reason, deltas included.
 
-    schema     4
+    schema     5
     host       this machine's short host name
     taken_at   UTC ISO 8601, ``Z`` suffix
     worktrees  one entry per ``git worktree list --porcelain`` record, for every
@@ -50,6 +51,18 @@ for any other reason, deltas included.
                listed sends the document as schema 2, without ``registry``:
                ingest reads a hook session missing from a registry as ended,
                and a failed scan must not end them all.
+    transcripts  (schema 5) what each recent session is about, from its
+               transcript, ``~/.claude/projects/<cwd slug>/<session id>.jsonl``:
+               one entry per session that is in ``registry`` or whose
+               session-state hook file changed in the last TRANSCRIPT_DAYS
+               days (TRANSCRIPT_MAX at most) and whose transcript could be
+               read. ``session_id``; ``first_prompt``, the first prompt's first
+               PROMPT_CHARS characters; ``last_ask``, the last ASK_CHARS of
+               the last assistant text; ``branch``, the latest ``gitBranch``
+               (null for ``HEAD``); and ``bridge_session_id``, the
+               transcript's Remote Control id (``session_`` or ``cse_``), null
+               when the registry has one for the session. Whitespace is
+               collapsed. TRANSCRIPTS, below, says what is never read.
     sessions   session-state hook lines (``scripts/session-state-hook.py``,
                format v1 or v2) appended since the last snapshot, each with
                its own ``v``. Only v2 ``Stop`` lines carry ``asked``.
@@ -57,9 +70,20 @@ for any other reason, deltas included.
                reduced to ``ts``, ``session_id``, ``project`` and
                ``approval_shaped``.
 
-PROMPT TEXT NEVER LEAVES THIS MACHINE. A history entry is built from an
-allowlist; the prompt and any pasted content are read only to classify them,
-in memory, and are dropped. Hook lines are allowlisted the same way.
+PROMPT TEXT NEVER LEAVES THIS MACHINE, but for ``transcripts``. A history
+entry is built from an allowlist; the prompt and any pasted content are read
+only to classify them, in memory, and are dropped. Hook lines are allowlisted
+the same way.
+
+TRANSCRIPTS are that exception, and it is kept narrow. A transcript is read
+only from its start up to the first prompt (HEAD_BYTES at most) and over its
+last TAIL_BYTES. Of the main conversation's records (never a subagent's), only
+a ``user`` record whose content is a plain string, the text blocks of an
+``assistant`` record, ``gitBranch`` and a ``bridge-session`` record's id are
+looked at. Tool calls, tool results, attachments, thinking, system records and
+every other field are never copied. What is copied is capped, and
+``validate()`` refuses anything longer, so ingest enforces the caps too. A
+transcript that is missing or unreadable sends no entry.
 
 CURSOR. ``sessions`` and ``history`` are deltas. Per-file byte offsets (and the
 inode, so a replaced file is read from the start) are kept in
@@ -92,10 +116,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from github_gh import Runner, run  # noqa: E402
 
-SCHEMA_VERSION = 4
-ACCEPTED_SCHEMAS = (1, 2, 3, 4)
+SCHEMA_VERSION = 5
+ACCEPTED_SCHEMAS = (1, 2, 3, 4, 5)
 # How ingest's 400 names a schema it does not accept. The collector matches
-# it to resend a schema 4 snapshot as 3, and deployed servers already send
+# it to resend a snapshot one schema lower, and deployed servers already send
 # it, so the text must not change.
 UNSUPPORTED_SCHEMA = "unsupported schema"
 SCAN_STEPS = ("worktree_list",)
@@ -113,6 +137,24 @@ HOOK_KEYS = (
 LANDED_STATES = ("landed", "not_landed", "unknown")
 # A Remote Control session id, the path segment of https://claude.ai/code/<id>.
 BRIDGE_ID = re.compile(r"session_[A-Za-z0-9_-]+")
+# A transcript's ``bridge-session`` id. It can have the ``cse_`` form, which
+# is not known to open as a claude.ai/code link: it is carried, and only an id
+# that is also a BRIDGE_ID is ever linked.
+TRANSCRIPT_BRIDGE_ID = re.compile(r"(?:session|cse)_[A-Za-z0-9_-]{1,120}")
+# The session ids a transcript is looked up by: a file name, never a path.
+SESSION_FILE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
+PROMPT_CHARS = 200
+ASK_CHARS = 400
+BRANCH_CHARS = 255
+TAIL_BYTES = 256 * 1024
+HEAD_BYTES = 256 * 1024
+TRANSCRIPT_DAYS = 3
+TRANSCRIPT_MAX = 50
+TRANSCRIPT_KEYS = ("first_prompt", "last_ask", "branch", "bridge_session_id")
+# What the harness writes as a user record's string content when the owner did
+# not type as a prompt: a slash command, a shell escape, their output. A caveat
+# is ``isMeta``.
+_NOT_A_PROMPT = ("<command-", "<local-command-", "<bash-", "<system-reminder>")
 
 Classifier = Callable[[str], bool]
 
@@ -389,6 +431,188 @@ def registry(
     ]
 
 
+# --- transcripts --------------------------------------------------------------
+
+
+def _collapse(text: str) -> str:
+    return " ".join(text.split())
+
+
+def _record(raw: bytes) -> dict[str, Any] | None:
+    """One transcript record of the main conversation; None for a subagent's."""
+    obj = _json_line(raw)
+    if obj is None or obj.get("isSidechain"):
+        return None
+    return obj
+
+
+def _prompt_of(rec: dict[str, Any]) -> str | None:
+    """A ``user`` record's prompt. Only string content is one: a tool result
+    is a list of blocks."""
+    if rec.get("type") != "user" or rec.get("isMeta"):
+        return None
+    message = rec.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(content, str):
+        return None
+    text = _collapse(content)
+    if not text or text.startswith(_NOT_A_PROMPT):
+        return None
+    return text
+
+
+def _texts_of(rec: dict[str, Any]) -> tuple[Any, list[str]]:
+    """An ``assistant`` record's message id and the text of its text blocks."""
+    if rec.get("type") != "assistant" or rec.get("isApiErrorMessage"):
+        return None, []
+    message = rec.get("message")
+    if not isinstance(message, dict):
+        return None, []
+    content = message.get("content")
+    if isinstance(content, str):
+        return message.get("id"), [content]
+    if not isinstance(content, list):
+        return None, []
+    texts = [
+        block["text"]
+        for block in content
+        if isinstance(block, dict)
+        and block.get("type") == "text"
+        and isinstance(block.get("text"), str)
+    ]
+    return message.get("id"), texts
+
+
+def _branch_of(rec: dict[str, Any]) -> str | None:
+    branch = rec.get("gitBranch")
+    if not isinstance(branch, str) or branch in ("", "HEAD"):
+        return None
+    return branch[:BRANCH_CHARS]
+
+
+def _bridge_of(rec: dict[str, Any]) -> str | None:
+    if rec.get("type") != "bridge-session":
+        return None
+    bridge = rec.get("bridgeSessionId")
+    if isinstance(bridge, str) and TRANSCRIPT_BRIDGE_ID.fullmatch(bridge):
+        return bridge
+    return None
+
+
+def project_slug(cwd: str) -> str:
+    """Claude Code's directory name for ``cwd`` under ``~/.claude/projects``."""
+    return re.sub(r"[^A-Za-z0-9]", "-", cwd)
+
+
+def transcript_path(
+    projects_dir: Path, session_id: str, cwd: str | None
+) -> Path | None:
+    """The session's transcript: under its cwd's directory, else under any
+    project's (a long cwd's directory name is shortened); None when none is."""
+    if not SESSION_FILE_ID.fullmatch(session_id):
+        return None
+    name = f"{session_id}.jsonl"
+    if cwd:
+        path = projects_dir / project_slug(cwd) / name
+        if path.is_file():
+            return path
+    try:
+        found = sorted(p for p in projects_dir.glob(f"*/{name}") if p.is_file())
+    except OSError:
+        return None
+    return found[0] if found else None
+
+
+def read_transcript(path: Path) -> dict[str, Any]:
+    """The allowlisted fields of one transcript (TRANSCRIPTS in the module
+    doc). Raises OSError when it cannot be read."""
+    first: str | None = None
+    branch: str | None = None
+    bridge: str | None = None
+    with path.open("rb") as fh:
+        head = fh.read(HEAD_BYTES)
+        if len(head) == HEAD_BYTES:
+            head = head[: head.rfind(b"\n") + 1]  # complete lines only
+        for raw in head.splitlines():
+            rec = _record(raw)
+            if rec is None:
+                continue
+            branch = _branch_of(rec) or branch
+            bridge = _bridge_of(rec) or bridge
+            first = _prompt_of(rec)
+            if first is not None:
+                break
+        size = fh.seek(0, os.SEEK_END)
+        start = max(0, size - TAIL_BYTES)
+        # One byte early, so a window that starts on a record keeps it.
+        fh.seek(max(0, start - 1))
+        tail = fh.read(TAIL_BYTES + 1 if start else TAIL_BYTES)
+    if start:
+        tail = tail[tail.find(b"\n") + 1 :] if b"\n" in tail else b""
+    last_id: Any = None
+    texts: list[str] = []
+    for raw in tail.splitlines():
+        rec = _record(raw)
+        if rec is None:
+            continue
+        branch = _branch_of(rec) or branch
+        bridge = _bridge_of(rec) or bridge
+        msg_id, got = _texts_of(rec)
+        if not got:
+            continue
+        # The harness writes one message as several records, a block each.
+        if msg_id is None or msg_id != last_id:
+            texts = []
+        texts.extend(got)
+        last_id = msg_id
+    ask = _collapse(" ".join(texts))
+    return {
+        "first_prompt": first[:PROMPT_CHARS] if first else None,
+        "last_ask": ask[-ASK_CHARS:] if ask else None,
+        "branch": branch,
+        "bridge_session_id": bridge,
+    }
+
+
+def recent_hook_sessions(sessions_dir: Path, now: datetime) -> list[str]:
+    """The session ids whose hook file changed in the last TRANSCRIPT_DAYS
+    days, newest first."""
+    cutoff = now.timestamp() - TRANSCRIPT_DAYS * 86400
+    found: list[tuple[float, str]] = []
+    paths = sorted(sessions_dir.glob("*.jsonl")) if sessions_dir.is_dir() else []
+    for path in paths:
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            continue
+        if mtime >= cutoff:
+            found.append((mtime, path.stem))
+    return [sid for _, sid in sorted(found, reverse=True)]
+
+
+def transcripts(
+    projects_dir: Path, live: list[dict[str, Any]], recent: list[str]
+) -> list[dict[str, Any]]:
+    """An entry per session in ``live`` (the registry), then in ``recent``,
+    TRANSCRIPT_MAX at most, whose transcript can be read; by session id."""
+    by_id = {e["session_id"]: e for e in live}
+    wanted = list(dict.fromkeys([*by_id, *recent]))[:TRANSCRIPT_MAX]
+    out = []
+    for sid in sorted(wanted):
+        entry = by_id.get(sid) or {}
+        try:
+            path = transcript_path(projects_dir, sid, entry.get("cwd"))
+            if path is None:
+                continue
+            got = read_transcript(path)
+        except (OSError, ValueError, RecursionError):
+            continue
+        if entry.get("bridge_session_id"):
+            got["bridge_session_id"] = None  # the registry's is the one sent
+        out.append({"session_id": sid, **got})
+    return out
+
+
 # --- cursor-tracked tails -----------------------------------------------------
 
 
@@ -520,6 +744,7 @@ def build(
     cursor: dict[str, Any] | None = None,
     registry_dir: Path | None = None,
     alive: Alive = pid_alive,
+    projects_dir: Path | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """The snapshot document and the cursor to save once it has been shipped.
 
@@ -528,7 +753,8 @@ def build(
     waiting in its spool and the next one never carry the same lines.
     ``registry_dir`` is Claude Code's ``sessions`` directory. None reads none,
     and a registry that cannot be read is the same: either makes the document
-    schema 2, without one.
+    schema 2, without one, and so without ``transcripts``. ``projects_dir``
+    is Claude Code's ``projects`` directory; None reads no transcripts.
     """
     if cursor is None:
         cursor = load_cursor(state_dir / CURSOR_NAME)
@@ -545,11 +771,15 @@ def build(
         "handoffs": handoffs(src_root / "worktrees"),
         "tmux": tmux_sessions(runner),
         "registry": live,
+        "transcripts": [],
         "sessions": sessions,
         "history": prompts,
     }
     if live is None:
-        del doc["registry"]
+        del doc["registry"], doc["transcripts"]
+    elif projects_dir is not None:
+        recent = recent_hook_sessions(state_dir / "sessions", now)
+        doc["transcripts"] = transcripts(projects_dir, live, recent)
     new_cursor = {"v": 1, "sessions": session_marks, "history": history_mark}
     return doc, new_cursor
 
@@ -581,8 +811,14 @@ def _fields(
 
 
 def downgrade(doc: dict[str, Any]) -> "dict[str, Any] | None":
-    """A schema 4 ``doc`` as schema 3, without the registry's ``cwd``, for a
-    server that predates schema 4; None for any other schema."""
+    """``doc`` one schema lower, for a server that predates its schema: 5 as 4,
+    without ``transcripts``; 4 as 3, without the registry's ``cwd``. None for
+    any other schema."""
+    if doc.get("schema") == 5:
+        return {
+            **{k: v for k, v in doc.items() if k != "transcripts"},
+            "schema": 4,
+        }
     if doc.get("schema") != 4:
         return None
     registry = [
@@ -591,8 +827,23 @@ def downgrade(doc: dict[str, Any]) -> "dict[str, Any] | None":
     return {**doc, "schema": 3, "registry": registry}
 
 
+_CAPS = {"first_prompt": PROMPT_CHARS, "last_ask": ASK_CHARS, "branch": BRANCH_CHARS}
+
+
+def _transcript_ok(entry: Any) -> bool:
+    """Every text within its cap, and an id of TRANSCRIPT_BRIDGE_ID's form."""
+    if not isinstance(entry, dict):
+        return True  # _fields reports it
+    for key, cap in _CAPS.items():
+        value = entry.get(key)
+        if isinstance(value, str) and len(value) > cap:
+            return False
+    bridge = entry.get("bridge_session_id")
+    return not isinstance(bridge, str) or bool(TRANSCRIPT_BRIDGE_ID.fullmatch(bridge))
+
+
 def validate(doc: Any) -> list[str]:
-    """Every way ``doc`` departs from its schema (1 to 4); empty when it conforms.
+    """Every way ``doc`` departs from its schema (1 to 5); empty when it conforms.
 
     Keys are closed: an unexpected key is a violation, which is what keeps a
     new field (prompt text, say) from shipping without a schema bump.
@@ -611,15 +862,17 @@ def validate(doc: Any) -> list[str]:
         "history",
     }
     version = doc.get("schema")
-    if version in (2, 3, 4) and not isinstance(version, bool):
+    if version in (2, 3, 4, 5) and not isinstance(version, bool):
         top.add("scan_errors")
-    if version in (3, 4) and not isinstance(version, bool):
+    if version in (3, 4, 5) and not isinstance(version, bool):
         top.add("registry")
+    if version == 5 and not isinstance(version, bool):
+        top.add("transcripts")
     for key in set(doc) ^ top:
         problems.append(f"{key}: {'unexpected' if key in doc else 'missing'}")
     _check(
         version in ACCEPTED_SCHEMAS and not isinstance(version, bool),
-        "schema: not 1, 2, 3 or 4",
+        "schema: not 1, 2, 3, 4 or 5",
         problems,
     )
     _check(isinstance(doc.get("host"), str), "host: not a string", problems)
@@ -650,9 +903,15 @@ def validate(doc: Any) -> list[str]:
             "registry",
             {"session_id": s, "bridge_session_id": n, "name": n, "status": n,
              "pid": (int,), "updated_at": n, "tmux": n,
-             **({"cwd": n} if version == 4 else {})},
+             **({"cwd": n} if version in (4, 5) else {})},
             problems,
         )  # fmt: skip
+    if "transcripts" in top:
+        entries = doc.get("transcripts")
+        _fields(entries, "transcripts",
+                {"session_id": s, **dict.fromkeys(TRANSCRIPT_KEYS, n)}, problems)  # fmt: skip
+        for idx, entry in enumerate(entries if isinstance(entries, list) else []):
+            _check(_transcript_ok(entry), f"transcripts[{idx}]: over a cap", problems)
     if "scan_errors" in top:
         errors = doc.get("scan_errors")
         _fields(errors, "scan_errors", {"repo": s, "step": s}, problems)
@@ -704,6 +963,10 @@ def main(argv: list[str] | None = None) -> int:
         "--registry-dir", type=Path, default=home / ".claude/sessions",
         help="Claude Code's live session registry",
     )  # fmt: skip
+    ap.add_argument(
+        "--projects-dir", type=Path, default=home / ".claude/projects",
+        help="Claude Code's session transcripts",
+    )  # fmt: skip
     ap.add_argument("--host", default=socket.gethostname().split(".")[0])
     ap.add_argument(
         "--no-advance", action="store_true", help="print the delta, keep the cursor"
@@ -716,6 +979,7 @@ def main(argv: list[str] | None = None) -> int:
         host=args.host,
         now=datetime.now(UTC),
         registry_dir=args.registry_dir,
+        projects_dir=args.projects_dir,
     )
     problems = validate(doc)
     if problems:

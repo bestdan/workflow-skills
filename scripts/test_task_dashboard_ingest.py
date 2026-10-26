@@ -226,13 +226,13 @@ class RefusalTest(IngestCase):
         self.assert_nothing_written()
 
     def test_unknown_schema_is_400(self):
-        for schema in (5, "1", "2", "3", "4", True, None):
+        for schema in (6, "1", "2", "3", "4", "5", True, None):
             doc = make_doc()
             doc["schema"] = schema
             status, body = self.post(doc)
             self.assertEqual(status, 400, schema)
-            # The collector matches this text to resend schema 4 as 3, and
-            # deployed servers send it, so the constant must keep it.
+            # The collector matches this text to resend a snapshot one schema
+            # lower, and deployed servers send it, so the constant must keep it.
             self.assertEqual(snapshot.UNSUPPORTED_SCHEMA, "unsupported schema")
             self.assertEqual(
                 json.loads(body), {"error": f"unsupported schema {schema!r}"}
@@ -522,6 +522,41 @@ class RegistryTest(IngestCase):
         self.assertEqual(
             self.q("SELECT json_extract(counts, '$.schema') FROM machines"), [(4,)]
         )
+
+    def test_schema_5_transcripts_land_as_machine_rows(self):
+        summary = {"session_id": "s-1", "first_prompt": "can you fix the demo?",
+                   "last_ask": "Should I open the PR?", "branch": "bestdan/a",
+                   "bridge_session_id": None}  # fmt: skip
+        doc = schema_3()
+        doc.update(schema=5, registry=[dict(REG, cwd="/h/src/demo")],
+                   transcripts=[summary])  # fmt: skip
+        status, body = self.post(doc)
+        self.assertEqual(status, 200, body)
+        self.assertEqual(json.loads(body)["transcripts"], 1)
+        [(key, raw)] = self.q(
+            "SELECT key, raw_json FROM issues WHERE source = 'machine:lindev'"
+            " AND kind = 'transcript'"
+        )
+        self.assertEqual((key, json.loads(raw)), ("transcript:s-1", summary))
+        # The next snapshot is the host's whole state: one without the entry
+        # (here a schema 4 one, from a collector resending for an older
+        # server) clears it.
+        older = schema_3(taken_at="2026-10-23T11:05:00.000Z")
+        older.update(schema=4, registry=[dict(REG, cwd="/h/src/demo")])
+        self.assertEqual(self.post(older)[0], 200)
+        self.assertEqual(
+            self.q("SELECT COUNT(*) FROM issues WHERE kind = 'transcript'"), [(0,)]
+        )
+
+    def test_a_transcript_over_a_cap_is_refused(self):
+        doc = schema_3()
+        doc.update(schema=5, registry=[dict(REG, cwd=None)], transcripts=[
+            {"session_id": "s-1", "first_prompt": "x" * 201, "last_ask": None,
+             "branch": None, "bridge_session_id": None}])  # fmt: skip
+        status, body = self.post(doc)
+        self.assertEqual(status, 400)
+        self.assertIn("transcripts[0]: over a cap", body)
+        self.assert_nothing_written()
 
     def test_registry_entries_land_as_machine_rows(self):
         status, body = self.post(schema_3())
