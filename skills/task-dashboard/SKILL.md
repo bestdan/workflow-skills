@@ -192,8 +192,8 @@ line per item.
 After acting on a PR or issue (merging, closing, labelling, pushing a fix), run
 `DASH refresh <owner/repo#N>`, unsandboxed, rather than `sync-now`: it re-reads
 that one item and rewrites its rows in seconds, with no server and no sync, and
-prints `updated`, `merged (removed)`, `closed (removed)` or `not found
-(removed)`; `--json` adds the item as each view's `view --json` lists it.
+prints `updated`, `merged (removed)`, `closed (removed)`, `archived repo
+(removed)` or `not found (removed)`; `--json` adds the item as each view's `view --json` lists it.
 
 `DASH overlay <action> --source S --key K` makes the write a card's button
 makes (`ignore`, `unignore`, `snooze --until YYYY-MM-DD`, `pin`, `unpin`,

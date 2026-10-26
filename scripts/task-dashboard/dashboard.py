@@ -458,19 +458,30 @@ def cmd_refresh(args: argparse.Namespace) -> int:
     conn = db.connect(db_arg)
     try:
         now = _now()
-        result = refresh.refresh(conn, cfg, args.ref, now, github_gh.run)
-        doc = refresh_doc(conn, cfg, result, now) if args.json else None
-    except refresh.RefreshError as exc:
-        print(f"task-dashboard: {exc}", file=sys.stderr)
-        return 2
-    except github_gh.AuthError as exc:
-        print(f"task-dashboard: {exc} (fix: run `gh auth login`)", file=sys.stderr)
-        return 1
-    except (github_gh.GhError, sqlite3.Error) as exc:
-        print(
-            f"task-dashboard: refresh failed, mirror unchanged: {exc}", file=sys.stderr
-        )
-        return 1
+        try:
+            result = refresh.refresh(conn, cfg, args.ref, now, github_gh.run)
+        except refresh.RefreshError as exc:
+            print(f"task-dashboard: {exc}", file=sys.stderr)
+            return 2
+        except github_gh.AuthError as exc:
+            print(f"task-dashboard: {exc} (fix: run `gh auth login`)", file=sys.stderr)
+            return 1
+        except (github_gh.GhError, sqlite3.Error) as exc:
+            print(
+                f"task-dashboard: refresh failed, mirror unchanged: {exc}",
+                file=sys.stderr,
+            )
+            return 1
+        try:
+            doc = refresh_doc(conn, cfg, result, now) if args.json else None
+        except sqlite3.Error as exc:
+            # The refresh committed; only reading it back failed.
+            print(
+                f"task-dashboard: refreshed ({result.line()}), but reading it"
+                f" back failed: {exc}",
+                file=sys.stderr,
+            )
+            return 1
     finally:
         conn.close()
     if doc is not None:

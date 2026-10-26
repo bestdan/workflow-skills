@@ -312,6 +312,14 @@ class PullRequestTests(Case):
         self.assertIsNone(self.fleet_row(pr_url(3)))
         self.assertIsNone(self.prs_row(pr_url(3)))
 
+    def test_a_merged_pr_in_an_archived_repo_still_leaves_merged_evidence(self):
+        node = pr_node(1, state="MERGED")
+        result = self.refresh(pr_url(1), FakeGh({1: answer(node, archived=True)}))
+        self.assertEqual(result.outcome, "merged")  # not "archived"
+        self.assertIsNone(self.prs_row(pr_url(1)))
+        kind, row = self.fleet_row(pr_url(1))
+        self.assertEqual((kind, row["merged"]), ("closed_pr", True))
+
     def test_a_pr_turned_draft_leaves_the_queue_for_drafts(self):
         self.refresh(pr_url(1), FakeGh({1: answer(pr_node(1, draft=True))}))
         self.assertIsNone(self.fleet_row(pr_url(1)))  # no search returns it
@@ -448,6 +456,8 @@ class CardTests(Case):
         self.assertIn("'moved to ' + lanes.map(label).join(', ')", js)
         # ...and the tab counts from the new page.
         self.assertIn("mine.dataset.count = t.dataset.count;", js)
+        # A tab whose lane the new page left out counts what is left here.
+        self.assertIn("var n = lane.querySelectorAll('.card').length;", js)
         self.assertIn("window.laneTabs.refresh('')", js)
         self.assertIn("window.cardFilter.apply()", js)
         self.assertIn("window.cardFilter = { apply: apply };", server.JS)

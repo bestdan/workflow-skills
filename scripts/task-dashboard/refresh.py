@@ -461,7 +461,10 @@ JS = """
       // The new page leaves this lane out (an optional lane, now empty).
       matching(cur, source, key).forEach(function (c) { c.remove(); });
       var h = cur.querySelector('h2');
-      if (h) h.textContent = label(id) + ' (' + cur.querySelectorAll('.card').length + ')';
+      if (h) {
+        h.textContent = h.textContent.replace(/\\s*\\(\\d+\\)$/, '') +
+          ' (' + cur.querySelectorAll('.card').length + ')';
+      }
     });
     var stays = now.some(function (c) { return laneOf(c) === was; });
     if (was && !stays) {
@@ -485,6 +488,16 @@ JS = """
       if (mine.dataset.off === undefined) {
         mine.querySelector('.count').textContent = '(' + t.dataset.count + ')';
       }
+    });
+    // A tab whose lane the new page left out (an optional lane, now empty)
+    // counts what is left in its lane here.
+    document.querySelectorAll('.lane-tabs a[data-lane]').forEach(function (mine) {
+      var id = mine.dataset.lane, lane = laneIn(document, id);
+      if (!lane || mine.dataset.off !== undefined) return;
+      if (doc.querySelector('.lane-tabs a[data-lane="' + id + '"]')) return;
+      var n = lane.querySelectorAll('.card').length;
+      mine.dataset.count = n;
+      mine.querySelector('.count').textContent = '(' + n + ')';
     });
     var box = document.getElementById('filter');
     var q = box ? box.value.trim() : '';

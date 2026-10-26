@@ -48,9 +48,9 @@ from urllib.parse import parse_qs, urlsplit
 
 import db
 import fleet_now
-import github_gh
 import fleet_views
 import gauges
+import github_gh
 import health
 import include
 import ingest
