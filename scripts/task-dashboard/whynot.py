@@ -18,7 +18,7 @@ without what Now showed. Each render records the items it showed, once per
 item per local day (record_shown, the `now_shown` table), with the same
 features, and prunes days older than RETAIN_DAYS.
 
-SHOWING. Health gets a "Why not now" section (section()): the last
+SHOWING. On the fleet instance, Health gets a "Why not now" section (section()): the last
 WINDOW_DAYS days' answers counted by reason against item kind and against the
 answer's dominant score term, and the latest LATEST answers.
 
@@ -368,9 +368,11 @@ def tune(
 
 def text_report(doc: dict[str, Any]) -> str:
     """`tune` without --json: the suggestions as a few lines."""
+    answers, shown = doc["answers"], doc["shown_item_days"]
     lines = [
-        f"tune {doc['since']} -> {doc['until']}: {doc['answers']} answers,"
-        f" {doc['shown_item_days']} item-days shown"
+        f"tune {doc['since']} -> {doc['until']}:"
+        f" {answers} answer{'' if answers == 1 else 's'},"
+        f" {shown} item-day{'' if shown == 1 else 's'} shown"
     ]
     for w in doc["weights"]:
         if w["suggest"]:
