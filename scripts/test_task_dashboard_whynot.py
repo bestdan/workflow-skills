@@ -113,6 +113,20 @@ class FeatureTests(now_fx.Case):
         self.assertEqual(issue["age"], "1-7d")
         self.assertEqual(issue["age_days"], 5.5)
 
+    def test_own_is_authorship_for_a_pr(self):
+        reviewer = now_fx.tabs_fx.awaiting(30, role="reviewer")  # in the queue
+        now_fx.seed(self.conn, rows=now_fx.ROWS + [reviewer])
+        by_item = self.by_item()
+        requested = whynot.snapshot(by_item[pr_url(30)], NOW)["features"]
+        self.assertEqual(
+            (requested["category"], requested["own"]), ("review_queue", "no")
+        )
+        mine = whynot.features(by_item[pr_url(1)], NOW)  # authored, in the queue
+        self.assertEqual((mine["category"], mine["own"]), ("review_queue", "yes"))
+        self.assertEqual(whynot.features(by_item[pr_url(4)], NOW)["own"], "yes")
+        self.assertEqual(whynot.features(by_item[issue_url(13)], NOW)["own"], "yes")
+        self.assertEqual(whynot.features(by_item[issue_url(10)], NOW)["own"], "no")
+
     def test_dominant_is_the_largest_positive_term(self):
         self.assertEqual(
             whynot.dominant([["a", 1, ""], ["b", 3, ""], ["c", 0, ""]]), "b"
@@ -342,7 +356,13 @@ class TuneTests(now_fx.Case):
     def test_no_base_rate_means_no_candidates(self):
         for i in range(5):
             answer(self.conn, i, "not_urgent", snap(repo="bestdan/finplan"))
-        self.assertEqual(self.tune()["candidates"], [])
+        doc = self.tune()
+        self.assertEqual(doc["candidates"], [])
+        text = whynot.text_report(doc)
+        self.assertIn("no base rate recorded yet", text)
+        self.assertNotIn("nothing to suggest", text)
+        shown(self.conn, 1, "bestdan/finplan")
+        self.assertNotIn("no base rate", whynot.text_report(self.tune()))
 
 
 class CliTests(unittest.TestCase):

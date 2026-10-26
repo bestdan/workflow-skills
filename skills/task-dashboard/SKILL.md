@@ -139,6 +139,8 @@ rebuilt from Jira or GitHub.
 - `DASH import <file>` **replaces** the whole overlay with the file's
   contents, and refuses a malformed file without changing anything. Confirm
   with the user before importing over an overlay that has rows.
+- The Now base rate `tune` compares answers with (`now_shown`) is not backed
+  up; it rebuilds as Now is viewed.
 
 ## tune
 

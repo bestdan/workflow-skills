@@ -65,11 +65,10 @@ GAP = 0.15
 
 WRONG_PRIORITY = "wrong_priority"
 
-# Categories that are the owner's own work rather than something waiting on
-# them from someone else.
-OWN_CATEGORIES = frozenset(
-    {"review_queue", "started", "ready", "own_pr", "own_ci_failing"}
-)
+# Issue categories that are the owner's own work. A PR is own work only when
+# the owner authored it (its row's role is `author`), whatever its category: a
+# review-queue PR that requests the owner's review is someone else's.
+OWN_ISSUE_CATEGORIES = frozenset({"started", "ready"})
 
 # The features tune compares, in report order. `age_days` is recorded beside
 # them but is a number; `age` is its bucket.
@@ -97,6 +96,12 @@ def _age(days: "float | None") -> "str | None":
     return "over 4w"
 
 
+def _own(r: Any, row: dict[str, Any]) -> bool:
+    if r.need.kind == "pr":
+        return row.get("role") == "author"
+    return r.category in OWN_ISSUE_CATEGORIES
+
+
 def features(r: Any, now: datetime) -> dict[str, Any]:
     """The features of a fleet_now.Ranked, scored or not."""
     n = r.need
@@ -120,7 +125,7 @@ def features(r: Any, now: datetime) -> dict[str, Any]:
         "ci": row.get("ci_state"),
         "age": _age(days),
         "age_days": None if days is None else round(days, 1),
-        "own": "yes" if r.category in OWN_CATEGORIES else "no",
+        "own": "yes" if _own(r, row) else "no",
     }
 
 
@@ -383,6 +388,11 @@ def text_report(doc: dict[str, Any]) -> str:
     for c in doc["candidates"]:
         scored = f"; already read by {c['scored_by']}" if c["scored_by"] else ""
         lines.append(f"  candidate {c['possible_term']}: {c['summary']}{scored}")
+    if not shown:
+        lines.append(
+            "  no base rate recorded yet (Now has shown nothing in this window),"
+            " so candidate dimensions cannot be computed"
+        )
     if len(lines) == 1:
         lines.append("  nothing to suggest yet")
     lines.append(f"  {doc['note']}")
