@@ -284,7 +284,10 @@ def open_issues(
     rows = {r["url"]: r for r in issues_needing_human(owners, runner, timeout)}
     truncated: list[str] = []
     for owner in owners:
-        query = f"is:issue is:open {github_gh.owner_qualifier(owner)}"
+        query = (
+            f'is:issue is:open -label:"{HUMAN_LABEL}"'
+            f" {github_gh.owner_qualifier(owner)}"
+        )
         nodes, more = github_gh.search_nodes(
             query, runner, timeout, ISSUE_QUERY, limit=cap
         )

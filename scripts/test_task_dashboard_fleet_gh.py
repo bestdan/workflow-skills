@@ -613,11 +613,15 @@ def paged(nodes, size):
 class OpenIssuesTests(unittest.TestCase):
     HUMAN = "auto:human-review-needed"
 
+    def wide(self, argv):
+        """The capped search, which excludes the human-review label."""
+        return f'-label:"{self.HUMAN}"' in search_q(argv)
+
     def runner(self, human, rest, size=2):
         return Router(
             [
+                (self.wide, paged(rest, size)),
                 (lambda a: self.HUMAN in search_q(a), paged(human, size)),
-                (lambda a: "is:issue" in search_q(a), paged(rest, size)),
             ]
         )
 
@@ -628,9 +632,12 @@ class OpenIssuesTests(unittest.TestCase):
         self.assertEqual([r["number"] for r in rows], [1, 2, 3])
         self.assertEqual(truncated, ["bestdan"])
         # It stops paging once the cap is reached: two pages of two, not four.
-        wide = [a for a in runner.calls if self.HUMAN not in search_q(a)]
+        wide = [a for a in runner.calls if self.wide(a)]
         self.assertEqual(len(wide), 2)
-        self.assertEqual(search_q(wide[0]), "is:issue is:open org:bestdan")
+        self.assertEqual(
+            search_q(wide[0]),
+            'is:issue is:open -label:"auto:human-review-needed" org:bestdan',
+        )
 
     def test_a_cap_met_exactly_on_the_last_page_is_not_truncation(self):
         rest = [issue_node(n) for n in range(1, 5)]
