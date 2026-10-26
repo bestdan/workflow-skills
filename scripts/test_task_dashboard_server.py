@@ -588,6 +588,18 @@ class FleetOffStatusTest(HeaderCase):
         self.assertEqual(review_gauge(header), "Review: — ready · — waiting")
         self.assertNotIn("/prs?lane=", header)
 
+    def test_leftover_workstreams_run_is_not_in_the_panel(self):
+        conn = self.conn()
+        add_run(conn, "ok", self.now())
+        add_run(conn, "failed", self.now(), "GhError: 502", kind="workstreams",
+                counts={"linear": "no key"})  # fmt: skip
+        conn.close()
+        header = self.header()
+        self.assertEqual(list(panel_rows(header)), ["sync"])
+        self.assertNotIn('class="fresh warn"', header)
+        fresh = json.loads(self.request("GET", "/status")[1])["freshness"]
+        self.assertEqual([s["id"] for s in fresh["sources"]], ["sync"])
+
 
 def add_machine(conn, host, taken, scan_errors=0):
     conn.execute(
