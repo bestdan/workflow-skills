@@ -82,8 +82,16 @@ def _secret_resolve() -> Any:
     spec = importlib.util.spec_from_file_location("_secret_resolve", _SECRET_RESOLVE)
     if spec is None or spec.loader is None:
         raise NoKey("unconfigured", "the plugin's _secret_resolve.py is missing")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    # A missing file still gets a spec, so the load itself is what fails;
+    # as NoKey it skips Linear alone rather than failing the whole step.
+    try:
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    except (OSError, SyntaxError, ImportError) as exc:
+        raise NoKey(
+            "missing",
+            f"cannot load the plugin's _secret_resolve.py: {type(exc).__name__}",
+        ) from None
     return module
 
 

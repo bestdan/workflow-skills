@@ -584,6 +584,9 @@ class Card:
     waiting: int = 0
     last_activity: "datetime | None" = None
     next: str = ""
+    # Whether `next` is something to do. A status line ("no activity for
+    # 21d") is not, so it is never an action, on the page or in the JSON.
+    todo: bool = False
 
     @property
     def id(self) -> str:
@@ -638,12 +641,13 @@ def card(
     else:
         c.total = len(members)
         c.done = sum(1 for m in members if not m["is_open"])
+    c.todo = True
     if c.waiting:
         c.next = f"{_plural(c.waiting, 'PR')} waiting on you"
     elif lane == "stalled" and ws.get("status_type") == "paused":
         c.next = "the project is paused: resume or close it"
     elif lane == "stalled":
-        c.next = f"no activity for {idle}d"
+        c.next, c.todo = f"no activity for {idle}d", False
     elif ws["source"] == "milestone" and not ws.get("approved"):
         c.next = "approve the milestone: add `approved: yes` to its description"
     elif ws["source"] == "design":
@@ -654,6 +658,9 @@ def card(
         c.next = "start it, or leave it to `/do-tasks`"
     elif c.open_prs:
         c.next = f"{_plural(c.open_prs, 'open PR')}, none waiting on you"
+        c.todo = False
+    else:
+        c.todo = False
     return c
 
 
@@ -693,7 +700,10 @@ def _card_html(c: Card, now: datetime) -> str:
         f'<a href="{_e(filter_href("/prs", c.id))}">Pull requests ({c.prs})</a> · '
         f'<a href="{_e(filter_href("/issues", c.id))}">Issues ({c.issues})</a>'
     )
-    act = f'<div class="act">→ {view_model.code(c.next)}</div>' if c.next else ""
+    if c.todo:
+        act = f'<div class="act">→ {view_model.code(c.next)}</div>'
+    else:
+        act = f'<div class="why">{_e(c.next)}</div>' if c.next else ""
     return (
         f'<div class="card" data-source="{KIND}" data-key="{_e(c.id)}"'
         f' data-ws-source="{_e(c.ws["source"])}">{head}'

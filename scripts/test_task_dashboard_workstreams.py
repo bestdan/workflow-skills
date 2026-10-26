@@ -142,9 +142,10 @@ class FakeGh:
 class FakeLinear:
     """Answers linear_api's two queries; records each request body and key."""
 
-    def __init__(self, fail=None):
+    def __init__(self, fail=None, projects=None):
         self.calls = []
         self.fail = fail
+        self.projects = PROJECTS if projects is None else projects
 
     def __call__(self, body, key, timeout):
         self.calls.append((body, key))
@@ -161,7 +162,7 @@ class FakeLinear:
                     "status": {"name": p["status"].title(), "type": p["status"]},
                     "teams": {"nodes": [{"key": "WID"}]},
                 }
-                for p in PROJECTS
+                for p in self.projects
             ]  # fmt: skip
             return {"data": {"projects": {"pageInfo": page, "nodes": nodes}}}
         assert "issues(" in body["query"], body
@@ -333,6 +334,46 @@ class SourcesTests(Case):
         self.assertIn(P1, cards)
         self.assertEqual([m["item_key"] for m in cards[P1].members], [pr_url(20)])
 
+    def test_a_refused_key_says_so_and_keeps_the_last_good_projects(self):
+        cfg = fleet_cfg(enabled=True)
+        self.step(cfg)
+        refused = FakeLinear(fail=linear_api.AuthError("Linear refused the key"))
+        run = self.step(cfg, linear=refused)
+        self.assertEqual(run["outcome"], "ok")
+        self.assertEqual(json.loads(run["counts"])["linear"], "auth failed")
+        self.assertIn(P1, self.by_id(cfg))
+        self.assertIn('data-linear="auth failed"', self.page(cfg))
+
+    def test_a_resolver_that_will_not_load_skips_only_linear(self):
+        cfg = fleet_cfg(enabled=True)
+        missing = Path(self.tmp.name) / "no-such" / "_secret_resolve.py"
+        env = {"LINEAR_API_KEY_REF": "op://TestVault/Item With Spaces/credential"}
+        no_file = Path(self.tmp.name) / "no-key-file"
+        with mock.patch.object(linear_api, "_SECRET_RESOLVE", missing):
+            with self.assertRaises(linear_api.NoKey) as caught:
+                linear_api.resolve_key(env, no_file)
+            self.assertEqual(caught.exception.category, "missing")
+            self.gh, self.linear = FakeGh(), FakeLinear(fail=AssertionError("called"))
+            run = sync.run_workstreams(
+                cfg, self.conn, NOW, runner=self.gh, linear_runner=self.linear,
+                resolve_key=lambda: linear_api.resolve_key(env, no_file),
+                clock=lambda: NOW,
+            )  # fmt: skip
+        self.assertEqual(run["outcome"], "ok")
+        self.assertEqual(json.loads(run["counts"])["linear"], "no key (missing)")
+        self.assertEqual(self.linear.calls, [])
+        self.assertIn(MS3, self.by_id(cfg))
+
+    def test_a_paused_project_is_stalled_whatever_its_activity(self):
+        cfg = fleet_cfg(enabled=True)
+        paused = [{"id": "p-9", "name": "On hold", "status": "paused", "progress": 0.5}]
+        self.step(cfg, linear=FakeLinear(projects=paused))
+        c = self.by_id(cfg)[workstreams.linear_id("p-9")]
+        self.assertEqual(
+            (c.lane, c.next, c.todo),
+            ("stalled", "the project is paused: resume or close it", True),
+        )
+
     def test_a_failed_milestone_read_fails_the_step_and_keeps_the_rows(self):
         cfg = fleet_cfg(enabled=False)
         self.step(cfg)
@@ -432,6 +473,12 @@ class AgentViewTests(Case):
             [(issue_url(10), "milestone"), (pr_url(20), "closes #10")],
         )
         self.assertEqual(ms3["filters"]["prs"], "/prs?ws=ms%3Aacme%2Fwidgets%233")
+        self.assertEqual(ms3["action"], {"review": "1 PR waiting on you"})
+        # A status line is evidence, never an action.
+        ms5 = next(i for lane in doc["lanes"] for i in lane["items"] if i["key"] == MS5)
+        self.assertIsNone(ms5["action"])
+        self.assertEqual(ms5["evidence"], "no activity for 20d")
+        self.assertNotIn("→ no activity", section(page, "stalled"))
         self.assertEqual(doc["notes"]["linear"], "ok")
 
     def test_the_nav_names_workstreams_after_issues(self):

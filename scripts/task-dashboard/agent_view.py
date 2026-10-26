@@ -168,7 +168,7 @@ def workstream_item(c: workstreams.Card, lane: str, now: datetime) -> Item:
         (workstreams.KIND, c.id), workstreams.KIND, lane, c.ws.get("title") or "",
         ref=workstreams.ref(c.ws), url=c.ws.get("url"), at=c.last_activity,
         evidence=c.next, why=" · ".join(workstreams.meta_parts(c, now)),
-        action=view_model.Action(review=c.next) if c.next else None,
+        action=view_model.Action(review=c.next) if c.todo else None,
         workstream_source=c.ws["source"], status=c.ws.get("status"),
         progress={"done": c.done, "total": c.total, "percent": c.percent},
         open_prs=c.open_prs, waiting_on_you=c.waiting,
