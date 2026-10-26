@@ -20,7 +20,8 @@
     "scripts/local-review/**",
     ".worktrees/**",
     ".claude/**",
-    "dev_docs/.handoffs/**"
+    "dev_docs/.handoffs/**",
+    "**/.mypy_cache"
   ],
   "plugins": [
     "https://plugins.dprint.dev/typescript-0.96.0.wasm",
