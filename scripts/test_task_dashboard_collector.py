@@ -302,6 +302,65 @@ OLD = "2026-09-01T10:00:00.000Z"  # 52 days before NOW
 RECENT = "2026-10-20T10:00:00.000Z"  # 3 days before NOW
 
 
+SOCKET = "/planted/messaging.sock"
+ARGV = "--planted-launch-arg"
+
+
+def registry_file(home, pid, **fields):
+    """An invented ``~/.claude/sessions/<pid>.json``, with the keys that must
+    never leave the machine planted in it."""
+    reg = home / ".claude/sessions"
+    reg.mkdir(parents=True, exist_ok=True)
+    entry = {"pid": pid, "messagingSocketPath": SOCKET, "args": [ARGV],
+             "argv": ["claude", ARGV], **fields}  # fmt: skip
+    (reg / f"{pid}.json").write_text(json.dumps(entry))
+
+
+class TestRegistry(Home):
+    def test_the_live_newest_entry_for_a_session_is_sent(self):
+        live = {201, 202, 300}
+        common = {"sessionId": "sid-1", "nameSource": "derived"}
+        # A lingering file from before a resume: newest of all, but its
+        # process is gone.
+        registry_file(self.home, 101, **common, bridgeSessionId="session_dead",
+                      name="dead", status="idle", updatedAt=1792800000000)  # fmt: skip
+        registry_file(self.home, 201, **common, bridgeSessionId="session_older",
+                      name="older", status="busy", updatedAt=1792700000000)  # fmt: skip
+        registry_file(self.home, 202, **common, bridgeSessionId="session_01NEW",
+                      name="src-32", status="idle", updatedAt=1792790000000,
+                      tmux="claude-rc:@56.%56")  # fmt: skip
+        registry_file(self.home, 300, sessionId="sid-2", name="plain", status="busy")
+        (self.home / ".claude/sessions/bad.json").write_text("{not json")
+        (self.home / ".claude/sessions/9.abc.key").write_text("not a registry file")
+        rc = collector.collect(
+            self.cfg(), home=self.home, now=NOW, runner=tmux_runner,
+            log=self.log_lines.append, alive=lambda pid: pid in live,
+        )  # fmt: skip
+        self.assertEqual(rc, 0)
+        doc = self.ingest.docs[0]
+        self.assertEqual(snapshot.validate(doc), [])
+        self.assertEqual(
+            doc["registry"],
+            [
+                {"session_id": "sid-1", "bridge_session_id": "session_01NEW",
+                 "name": "src-32", "status": "idle", "pid": 202,
+                 "updated_at": "2026-10-23T21:13:20.000Z",
+                 "tmux": "claude-rc:@56.%56"},
+                {"session_id": "sid-2", "bridge_session_id": None,
+                 "name": "plain", "status": "busy", "pid": 300,
+                 "updated_at": None, "tmux": None},
+            ],
+        )  # fmt: skip
+        body = json.dumps(doc)
+        self.assertNotIn(SOCKET, body)
+        self.assertNotIn(ARGV, body)
+        self.assertNotIn("messagingSocketPath", body)
+
+    def test_no_registry_directory_sends_an_empty_list(self):
+        self.assertEqual(self.run_once(), 0)
+        self.assertEqual(self.ingest.docs[0]["registry"], [])
+
+
 class TestPrune(Home):
     def session(self, name, *lines, age_days=60):
         """A session file of ``lines`` (raw strings), its mtime ``age_days`` old."""

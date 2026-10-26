@@ -23,6 +23,21 @@ def code(text: str) -> str:
     return _SPAN.sub(lambda m: f"<code>{m.group(1)}</code>", _e(text))
 
 
+def external(href: "str | None") -> bool:
+    """Whether `href` leaves the dashboard: an absolute http(s) URL."""
+    return bool(href) and str(href).startswith(("https://", "http://"))
+
+
+def link(href: str, text: str, cls: "str | None" = None) -> str:
+    """An `<a>` around plain `text`. Every link that leaves the dashboard is
+    built here and opens in a new tab; a link inside it stays in this one."""
+    attrs = f' class="{_e(cls)}"' if cls else ""
+    attrs += f' href="{_e(href)}"'
+    if external(href):
+        attrs += ' target="_blank" rel="noopener"'
+    return f"<a{attrs}>{_e(text)}</a>"
+
+
 @dataclass(frozen=True)
 class Action:
     """What resolves an item: something to do by hand, a command, or both.

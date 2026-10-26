@@ -313,14 +313,17 @@ class OrderTests(NeedsCase):
         self.assertEqual(first.count("waiting 3d"), 1)
         self.assertEqual(first.count("CI success"), 1)
         # The act line and the controls stay.
-        self.assertIn(f'→ <a href="{pr_url(1201)}">open the PR</a>', first)
+        self.assertIn(
+            f'→ <a href="{pr_url(1201)}" target="_blank" rel="noopener">open the PR</a>',
+            first,
+        )
         self.assertIn("data-ov=", first)
 
     def test_a_card_puts_its_title_first_and_its_ref_after(self):
         seed(self.conn)
         main = section(self.page(), "needs")
         self.assertIn(
-            f'<a class="title" href="{pr_url(1201)}">feat: thing 1201 [#1101]</a>'
+            f'<a class="title" href="{pr_url(1201)}" target="_blank" rel="noopener">feat: thing 1201 [#1101]</a>'
             f' <span class="ref">({REPO}#1201)</span>',
             main,
         )
@@ -543,6 +546,131 @@ class GateTests(NeedsCase):
         self.assertIn("s-turn", keys(page))
         server_harness.add_run(self.conn, "ok", NOW, kind=github_fleet.RUN_KIND)
         self.assertIn(issue_url(950), keys(self.page()))
+
+
+BRIDGE = "session_01TURNXYZ"
+TMUX = "claude-rc:@56.%56"
+REGISTRY = [
+    # The asked session, idle: the owner's turn, with its Remote Control id.
+    {"session_id": "s-turn", "bridge_session_id": BRIDGE, "name": "src-32",
+     "status": "idle", "pid": 4100, "updated_at": "2026-10-24T11:58:00.000Z",
+     "tmux": TMUX},
+    # A permission prompt with no Remote Control id.
+    {"session_id": "s-perm", "bridge_session_id": None, "name": None,
+     "status": "busy", "pid": 4101, "updated_at": "2026-10-24T11:58:00.000Z",
+     "tmux": None},
+    # A finished turn, still live.
+    {"session_id": "s-done", "bridge_session_id": "session_01DONE",
+     "name": "done-thing", "status": "idle", "pid": 4102,
+     "updated_at": "2026-10-24T11:58:00.000Z", "tmux": None},
+]  # fmt: skip
+
+
+def seed_registry(conn):
+    """A later schema 3 snapshot from the same host, carrying its registry."""
+    doc = copy.deepcopy(with_branch(SNAPSHOT))
+    doc.update(schema=3, taken_at="2026-10-24T11:59:30.000Z", scan_errors=[],
+               registry=copy.deepcopy(REGISTRY), sessions=[], history=[])  # fmt: skip
+    snapshot_adapter.ingest(conn, doc, NOW)
+    sessions.write(conn, sessions.derive(conn, NOW), NOW)
+
+
+def card(page, key):
+    """From a card's key to the next card or the end of its lane."""
+    start = page.find(f'data-key="{key}"')
+    assert start >= 0, f"no card {key}"
+    ends = [
+        i
+        for i in (page.find('class="card', start), page.find("</section>", start))
+        if i >= 0
+    ]
+    return page[start : min(ends) if ends else len(page)]
+
+
+class RegistryTests(NeedsCase):
+    def setUp(self):
+        super().setUp()
+        seed(self.conn)
+        seed_registry(self.conn)
+        self.page_html = self.page()
+
+    def test_a_session_with_a_bridge_id_links_to_its_remote_control_session(self):
+        turn = card(self.page_html, "s-turn")
+        self.assertIn(
+            f'<a href="https://claude.ai/code/{BRIDGE}" target="_blank"'
+            ' rel="noopener">open the session</a>',
+            turn,
+        )
+        self.assertIn('<span class="title">src-32</span>', turn)
+        self.assertIn("idle: your turn", turn)
+        self.assertNotIn("asked (heuristic)", turn)
+        self.assertIn(f"tmux: {TMUX}", turn)
+
+    def test_a_session_without_one_links_to_the_bare_url_and_says_why(self):
+        perm = card(self.page_html, "s-perm")
+        self.assertIn(
+            '<a href="https://claude.ai/code" target="_blank" rel="noopener">'
+            "open claude.ai/code (no Remote Control link)</a>",
+            perm,
+        )
+        self.assertIn("permission prompt · busy", perm)
+        # No registry entry at all: the heuristic label, the cwd title.
+        pr_card = card(self.page_html, "s-pr")
+        self.assertIn("asked (heuristic)", pr_card)
+        self.assertIn("(no Remote Control link)", pr_card)
+        self.assertIn(
+            '<span class="title">task-1101 @ bestdan/task-1101</span>', pr_card
+        )
+
+    def test_a_finished_session_takes_its_registry_name_and_link(self):
+        done = card(section(self.page_html, "finished"), "s-done")
+        self.assertIn('<span class="title">done-thing</span>', done)
+        self.assertIn('href="https://claude.ai/code/session_01DONE"', done)
+
+
+EXTERNAL = re.compile(r"<a\b([^>]*)>", re.S)
+
+
+def links(page):
+    """(href, attrs) for every `<a>` with an href."""
+    out = []
+    for m in EXTERNAL.finditer(page):
+        href = re.search(r'\bhref="([^"]*)"', m.group(1))
+        if href:
+            out.append((href.group(1), m.group(1)))
+    return out
+
+
+class NewTabTests(server_harness.ServerCase):
+    """Every page, on a fixture with Jira, PR, issue and session cards: each
+    link that leaves the dashboard opens in a new tab, and none inside it does."""
+
+    fleet = True
+
+    def setUp(self):
+        super().setUp()
+        self.httpd.app.now = lambda: NOW
+        self.httpd.app.cfg["ingest"]["machines"] = {"mini": "sha256:" + "0" * 64}
+        conn = db.connect(self.db_path)
+        server_harness.seed(conn)
+        seed(conn)
+        seed_registry(conn)
+        conn.close()
+
+    def test_external_links_open_in_a_new_tab_and_internal_ones_do_not(self):
+        paths = ["/", *views.ROUTES, "/board", "/health"]
+        seen = set()
+        for path in paths:
+            status, page = self.request("GET", path)
+            self.assertEqual(status, 200, path)
+            for href, attrs in links(page):
+                external = href.startswith(("http://", "https://"))
+                new_tab = 'target="_blank"' in attrs and 'rel="noopener"' in attrs
+                self.assertEqual(new_tab, external, (path, href))
+                if external:
+                    seen.add(href.split("/")[2])
+        # The fixture reaches every kind of external link the pages draw.
+        self.assertLessEqual({"github.com", "example.invalid", "claude.ai"}, seen)
 
 
 class RouteTests(server_harness.ServerCase):

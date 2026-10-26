@@ -14,7 +14,9 @@ document's `ignored` list, as on every page's Ignored footer.
 
 Every field is plain text. An item's `action` is structured: `review` (what to
 do by hand, a command in backticks), `command` (argv), and `url`, or null when
-the page suggests none.
+the page suggests none. A Needs you or Now item also carries
+`bridge_session_id`: a hook session's Remote Control id, null for anything
+else, and the action's `url` is that session's page.
 """
 
 import json
@@ -123,6 +125,7 @@ def need_item(n: needs.Need, lane: str, now: datetime) -> Item:
         ref=n.ref, url=n.url, host=n.host, path=n.path, at=n.since,
         evidence=n.state, why=why, action=n.action,
         waited=needs.waited(n.since, now), brief=n.brief,
+        bridge_session_id=n.bridge_session_id,
     )  # fmt: skip
 
 

@@ -226,7 +226,7 @@ class RefusalTest(IngestCase):
         self.assert_nothing_written()
 
     def test_unknown_schema_is_400(self):
-        for schema in (3, "1", "2", True, None):
+        for schema in (4, "1", "2", "3", True, None):
             doc = make_doc()
             doc["schema"] = schema
             status, body = self.post(doc)
@@ -492,6 +492,45 @@ class ScanErrorTest(IngestCase):
         self.assertEqual(later["schema"], 1)
         self.assertEqual(self.post(later)[0], 200)
         self.assertEqual(self.worktrees(), {})
+
+
+REG = {"session_id": "s-1", "bridge_session_id": "session_01RC", "name": "demo-1",
+       "status": "idle", "pid": 4242, "updated_at": "2026-10-23T10:59:00.000Z",
+       "tmux": "work:@1.%1"}  # fmt: skip
+
+
+def schema_3(**kw):
+    doc = make_doc(scan_errors=[], **kw)
+    doc.update(schema=3, registry=[dict(REG)])
+    assert snapshot.validate(doc) == [], snapshot.validate(doc)
+    return doc
+
+
+class RegistryTest(IngestCase):
+    def test_registry_entries_land_as_machine_rows(self):
+        status, body = self.post(schema_3())
+        self.assertEqual(status, 200, body)
+        self.assertEqual(json.loads(body)["registry"], 1)
+        [(raw,)] = self.q(
+            "SELECT raw_json FROM issues WHERE source = 'machine:lindev'"
+            " AND kind = 'registry' AND key = 'registry:s-1'"
+        )
+        self.assertEqual(json.loads(raw), REG)
+
+    def test_an_older_collector_still_ingests_and_clears_the_registry(self):
+        self.assertEqual(self.post(schema_3())[0], 200)
+        for schema, doc in (
+            (2, make_doc(taken_at="2026-10-23T11:05:00.000Z", scan_errors=[])),
+            (1, make_doc(taken_at="2026-10-23T11:10:00.000Z")),
+        ):
+            status, body = self.post(doc)
+            self.assertEqual(status, 200, (schema, body))
+            self.assertEqual(json.loads(body)["registry"], 0)
+            # A snapshot is the host's whole state: no registry means no live
+            # entries, not "keep the last ones".
+            self.assertEqual(
+                self.q("SELECT COUNT(*) FROM issues WHERE kind = 'registry'"), [(0,)]
+            )
 
 
 class SchemaTest(unittest.TestCase):

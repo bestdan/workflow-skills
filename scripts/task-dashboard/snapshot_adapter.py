@@ -1,12 +1,14 @@
-"""Write one machine snapshot (snapshot.py, ``schema: 1`` or ``2``) into the mirror.
+"""Write one machine snapshot (snapshot.py, ``schema: 1``, ``2`` or ``3``) into
+the mirror.
 
 The fleet view's ingest endpoint (ingest.py) calls ``ingest()`` once it has
 authenticated the caller and validated the document. Everything is written in
 one transaction, so a snapshot lands whole or not at all:
 
-- worktrees, handoffs and tmux sessions become ``issues`` rows under
-  ``source = 'machine:<host>'`` with ``kind`` ``worktree`` | ``handoff`` |
-  ``tmux``. A snapshot is that host's full current state, so the host's rows
+- worktrees, handoffs, tmux sessions and live registry entries (schema 3)
+  become ``issues`` rows under ``source = 'machine:<host>'`` with ``kind``
+  ``worktree`` | ``handoff`` | ``tmux`` | ``registry``; sessions.py joins a
+  registry row to its session's row by host and session id. A snapshot is that host's full current state, so the host's rows
   are deleted and rewritten; other hosts' rows, and the Jira sync's
   (``source = 'jira'``), are never touched.
 - The one exception is a repo named in ``scan_errors`` (schema 2): its scan
@@ -36,6 +38,7 @@ from typing import Any
 
 MAX_CLOCK_AHEAD = timedelta(minutes=5)
 HOOK_FIELDS = ("event", "session_id", "cwd", "branch", "notification", "asked")
+REGISTRY_KIND = "registry"
 
 # kind, key, summary, created, raw_json
 Row = tuple[str, str, "str | None", "str | None", str]
@@ -85,6 +88,9 @@ def item_rows(doc: dict[str, Any]) -> list[Row]:
     for tm in doc["tmux"]:
         key = f"tmux:{tm['name']}"
         rows.append(("tmux", key, tm["name"], tm["created"], _raw(tm)))
+    for reg in doc.get("registry", []):
+        key = f"registry:{reg['session_id']}"
+        rows.append((REGISTRY_KIND, key, reg["name"], None, _raw(reg)))
     return rows
 
 
@@ -120,6 +126,7 @@ def ingest(
         "worktrees": len(doc["worktrees"]),
         "handoffs": len(doc["handoffs"]),
         "tmux": len(doc["tmux"]),
+        "registry": len(doc.get("registry", [])),
         "sessions": len(doc["sessions"]),
         "history": len(doc["history"]),
         "scan_errors": len(doc.get("scan_errors", [])),

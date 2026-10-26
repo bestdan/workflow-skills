@@ -20,7 +20,11 @@ WHAT IT COLLECTS, each keyed by its overlay item `(source, key)`:
   hook): that is finished work, in the Finished lane below. A session quiet for
   longer is Stale's, and an empty spawn (never prompted) is Stale's too. A
   pending `AskUserQuestion` never reaches `Stop`, and the harness documents
-  no notification for it, so it is not seen here. And, with `claude_remote`
+  no notification for it, so it is not seen here. A hook session whose
+  process is live in its host's registry (sessions.py) links to its Remote
+  Control session and shows the registry's status; "idle: your turn" replaces
+  "asked (heuristic)" when that status is idle. Without a Remote Control id
+  the card links to the bare claude.ai/code and says so. And, with `claude_remote`
   enabled, a cloud session row (claude_remote.py) at `need_input` /
   `needs_action`. The wait starts at the hook row's `waiting_since`; a cloud
   row has none, so its `updated` stands in.
@@ -90,6 +94,9 @@ import view_model
 _e = html.escape
 
 CODE_URL = "https://claude.ai/code"
+# A session card with no Remote Control id still links somewhere useful, and
+# says why it is not the session itself.
+NO_RC_LABEL = "open claude.ai/code (no Remote Control link)"
 
 CSS = """
 .needs .need { padding:6px 10px; }
@@ -127,6 +134,8 @@ class Need:
     row: "dict[str, Any] | None" = None  # the mirror row, for a PR or an issue
     host: "str | None" = None  # a session's machine
     path: "str | None" = None  # a session's working directory
+    # A hook session's Remote Control id (sessions.py, from the registry).
+    bridge_session_id: "str | None" = None
 
     @property
     def action(self) -> view_model.Action:
@@ -194,20 +203,15 @@ def _session(row: dict[str, Any], now: datetime) -> "Need | None":
     asked = bool(row.get("asked"))
     brief = row.get("brief")
     repo = fleet_views.repo_of_path(row.get("cwd"))
-    where = [f"on {row.get('host') or 'an unknown host'}"]
-    if repo or row.get("cwd"):
-        where.append(
-            (repo or row.get("cwd") or "")
-            + (f": {row['branch']}" if row.get("branch") else "")
-        )
+    bridge = row.get("bridge_session_id") or None
     return Need(
         item=(sessions.SOURCE, str(row.get("key") or row.get("session_id"))),
         kind=sessions.KIND,
         title=row.get("title") or f"session {row.get('session_id')}",
         since=score.parse_ts(row.get("waiting_since")) or last,
-        url=CODE_URL,
-        state="asked (heuristic)" if asked else "permission prompt",
-        where=" · ".join(where),
+        url=session_url(bridge),
+        state=session_state(asked, row.get("live_status")),
+        where=session_where(row, repo),
         brief=brief,
         approval=not asked or approval_brief(brief),
         repo=repo,
@@ -215,7 +219,39 @@ def _session(row: dict[str, Any], now: datetime) -> "Need | None":
         hint="answer it in the session",
         host=row.get("host"),
         path=row.get("cwd"),
+        bridge_session_id=bridge,
     )
+
+
+def session_url(bridge: "str | None") -> str:
+    """The Remote Control session's own page, else the bare claude.ai/code."""
+    return f"{CODE_URL}/{bridge}" if bridge else CODE_URL
+
+
+def session_state(asked: bool, live: "str | None") -> str:
+    """What a waiting hook session waits on, with the registry's live status.
+
+    A turn that ended in a question while the process is idle is the owner's
+    turn, whatever the "?" heuristic would call it. A permission prompt keeps
+    its own label: idle is not what blocks it.
+    """
+    if asked and live == "idle":
+        return "idle: your turn"
+    state = "asked (heuristic)" if asked else "permission prompt"
+    return f"{state} · {live}" if live else state
+
+
+def session_where(row: dict[str, Any], repo: "str | None") -> str:
+    """`on <host> · <repo>: <branch> · tmux: <target>`, as plain text."""
+    where = [f"on {row.get('host') or 'an unknown host'}"]
+    if repo or row.get("cwd"):
+        where.append(
+            (repo or row.get("cwd") or "")
+            + (f": {row['branch']}" if row.get("branch") else "")
+        )
+    if row.get("tmux"):
+        where.append(f"tmux: {row['tmux']}")
+    return " · ".join(where)
 
 
 def _remote(row: dict[str, Any]) -> "Need | None":
@@ -388,18 +424,26 @@ def _body(n: Need, now: datetime, ov: overlay.Overlay) -> str:
     title, the wait and the state.
     """
     brief = f'<div class="brief">{_e(n.brief)}</div>' if n.brief else ""
-    what = {"pr": "the PR", "issue": "the issue", "session": "the session"}
-    opens = (
-        f"open {what.get(n.kind, 'it')}" if n.url != CODE_URL else "open claude.ai/code"
-    )
     link = (
-        f'<a href="{_e(n.url)}">{opens}</a>'
+        view_model.link(n.url, open_label(n))
         if n.url and n.url.startswith("https://")
         else ""
     )
     act = " · ".join(x for x in (link, view_model.code(n.hint)) if x)
     act = f'<div class="act">→ {act}</div>' if act else ""
     return brief + act + overlay.card_controls(n.item, ov, now, reorder=False)
+
+
+def open_label(n: Need, other: "str | None" = None) -> str:
+    """A card's "open" link text. The bare claude.ai/code says it is not the
+    session; a session's own page is "open the session"; anything else is
+    `other`, else "open the <kind>"."""
+    if n.url == CODE_URL:
+        return NO_RC_LABEL
+    if n.kind == sessions.KIND:
+        return "open the session"
+    what = {"pr": "the PR", "issue": "the issue"}
+    return other or f"open {what.get(n.kind, 'it')}"
 
 
 def expanded(n: Need, now: datetime, ov: overlay.Overlay) -> str:
@@ -421,9 +465,14 @@ def finished_row(n: Need, now: datetime, ov: overlay.Overlay) -> str:
     """One line in the Finished lane: title or branch, host, the turn's end."""
     meta = f"{_e(n.where)} · turn ended {_e(fleet_views.ago(n.since, now))}"
     controls = overlay.card_controls(n.item, ov, now, reorder=False, pin=False)
+    act = (
+        f'<div class="act">→ {view_model.link(n.url, open_label(n))}</div>'
+        if n.url
+        else ""
+    )
     return (
         f"<details {_attrs(n, ' done')}><summary>{_title(n, None)}"
-        f' <span class="meta">{meta}</span></summary>{controls}</details>'
+        f' <span class="meta">{meta}</span></summary>{act}{controls}</details>'
     )
 
 
@@ -432,14 +481,20 @@ def finished(
 ) -> list[Need]:
     """The sessions that finished a turn after `since`, as Needs."""
     out = []
+    mirror = {str(r.get("key")): r for r in _rows(conn, sessions.SOURCE, sessions.KIND)}
     for s in fleet_views.finished_sessions(fleet_views.load(conn, cfg), since):
+        row = mirror.get(s.session_id) or {}
+        bridge = row.get("bridge_session_id") or None
         out.append(
             Need(
                 item=(sessions.SOURCE, s.session_id),
                 kind=sessions.KIND,
-                title=sessions._label(s.cwd, s.branch) or f"session {s.session_id}",
+                title=row.get("live_name")
+                or sessions._label(s.cwd, s.branch)
+                or f"session {s.session_id}",
                 since=s.last,
-                url=None,
+                url=session_url(bridge) if bridge else None,
+                bridge_session_id=bridge,
                 state="turn ended",
                 where=f"on {s.host}",
                 repo=s.repo,

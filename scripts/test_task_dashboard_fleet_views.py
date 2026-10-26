@@ -400,7 +400,7 @@ class StaleTests(FleetCase):
     def test_an_old_pr_puts_its_title_first_and_its_ref_after(self):
         _, _, check = self.stale()
         self.assertIn(
-            f'<a class="title" href="{pr_url(900)}">open 900</a>'
+            f'<a class="title" href="{pr_url(900)}" target="_blank" rel="noopener">open 900</a>'
             f' <span class="ref">({REPO}#900)</span>',
             check,
         )

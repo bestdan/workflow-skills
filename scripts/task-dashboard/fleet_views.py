@@ -240,7 +240,7 @@ def ago(then: "datetime | None", now: datetime) -> str:
 def _link(url: "str | None", text: str) -> str:
     """A card's title, as a `.title` the page's filter box searches."""
     if url and url.startswith("https://"):
-        return f'<a class="title" href="{_e(url)}">{_e(text)}</a>'
+        return view_model.link(url, text, "title")
     return f'<span class="title">{_e(text)}</span>'
 
 

@@ -232,6 +232,44 @@ class HookSessionTests(DbCase):
         self.event(None, 5, "Stop")
         self.assertEqual(self.derive(), {})
 
+    def registry(self, host, session_id, **fields):
+        entry = {"session_id": session_id, "bridge_session_id": None, "name": None,
+                 "status": None, "pid": 1, "updated_at": None, "tmux": None,
+                 **fields}  # fmt: skip
+        self.conn.execute(
+            "INSERT INTO issues (source, kind, key, raw_json) VALUES (?, 'registry', ?, ?)",
+            (f"machine:{host}", f"registry:{session_id}", json.dumps(entry)),
+        )
+        self.conn.commit()
+
+    def test_a_live_registry_entry_joins_its_session_by_host(self):
+        self.event("s1", 30, "UserPromptSubmit")
+        self.event("s1", 25, "Stop", asked=1)
+        self.event("s2", 30, "UserPromptSubmit")
+        self.registry("mini", "s1", bridge_session_id="session_01RC", name="src-32",
+                      status="idle", pid=4242, tmux="rc:@5.%5",
+                      updated_at="2026-10-23T20:59:00.000Z")  # fmt: skip
+        # Another host's entry for the same id is not this session's.
+        self.registry("lindev", "s2", bridge_session_id="session_01OTHER", name="x")
+        rows = self.derive()
+        raw = rows["s1"][2]
+        self.assertEqual(raw["title"], "src-32")
+        self.assertEqual(raw["bridge_session_id"], "session_01RC")
+        self.assertEqual(raw["live_status"], "idle")
+        self.assertEqual(raw["live_name"], "src-32")
+        self.assertEqual(raw["pid"], 4242)
+        self.assertEqual(raw["tmux"], "rc:@5.%5")
+        self.assertEqual(raw["live_updated_at"], "2026-10-23T20:59:00.000Z")
+        summary = self.conn.execute(
+            "SELECT summary FROM issues WHERE source = ? AND key = 's1'",
+            (sessions.SOURCE,),
+        ).fetchone()
+        self.assertEqual(summary, ("src-32",))
+        other = rows["s2"][2]
+        self.assertEqual(other["title"], "repo-a @ feature/x")
+        self.assertIsNone(other["bridge_session_id"])
+        self.assertIsNone(other["live_status"])
+
 
 class ListSessionsTests(unittest.TestCase):
     def test_ok_page(self):
