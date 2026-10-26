@@ -333,6 +333,16 @@ write, **draft** otherwise. Detect with `gh repo view --json viewerPermission` �
 write, so it must count as ready.) If the permission can't be determined, default
 to **draft** — the safe choice.
 
+**Exception — auto-pilot on gh-issue opens a draft whatever the access.** When
+`--run-state` is present **and** the effective handler is `gh-issue`, open the PR
+as a **draft**; step 7 marks it ready at hand-off. The draft exists only to delay
+`.github/workflows/gh-issue-pr-sync.yml`, which moves the issue to
+`status:4_needs_review` on a non-draft PR's `opened` event — so a ready PR would
+read "needs review" while co-review and iteration are still running. Linear has
+no PR-open Action, and on repo-pr the ready `task-loop` PR is itself the review
+signal, so a draft there would cost bot reviews and buy nothing. Standalone
+`/deliver-task`, and every other handler, keep the write-access rule above.
+
 - On **repo-pr** this is the claim→review-PR **conversion** — relabel the draft
   `task-claim` PR to `task-loop`, fill the body — per `repo-pr-execute.md`; **do
   not open a second PR**. Call `gh pr ready` **only when the viewer can write**
@@ -432,6 +442,12 @@ remaining findings and proceed — don't loop.
   completion is merge-verified by `/sweep-for-complete`, per the `linear-claim.md`
   **hard rule** (the execute path never moves an issue to a completed/canceled
   state). This is the skill's terminal success state.
+
+  **Auto-pilot on gh-issue: ready the draft first.** Where step 4's exception
+  opened a draft, run `gh pr ready` **before** the handler's needs-review write,
+  and only when the viewer can write (step 4's gate). The Action then fires on
+  `ready_for_review`, after co-review, and is a no-op behind the handler's own
+  write. A viewer without write access hands off a draft, as today.
 - **Hand-off summary** (structured — for a human, or the `/auto-pilot` morning
   report). It ends on what the human must act on, because the end is what a
   terminal leaves on screen. In order:
