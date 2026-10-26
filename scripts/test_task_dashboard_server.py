@@ -8,6 +8,7 @@ through http.client so the Host and Origin headers can be forged. Needs Python
 """
 
 import contextlib
+import copy
 import http.client
 import io
 import json
@@ -711,18 +712,31 @@ class JiraDisabledTest(ServerCase):
             self.assertIn('href="/stale"', nav, path)
             self.assertNotIn("jira.me is not set", page, path)
 
-    def test_a_fleet_instance_drops_epics_and_board(self):
+    FLEET_TABS = ('href="/prs"', 'href="/issues"')
+
+    def test_a_fleet_instance_drops_every_jira_tab_for_its_own(self):
         self.httpd.app.cfg["github"].update(enabled=True, fleet=True)
         nav = server.views.nav("/now", self.httpd.app.cfg)
-        for tab in self.JIRA_TABS[:2]:
+        for tab in self.JIRA_TABS:
             self.assertNotIn(tab, nav)
-        for tab in self.JIRA_TABS[2:]:
+        for tab in self.FLEET_TABS:
             self.assertIn(tab, nav)
+
+    def test_a_fleet_instance_with_jira_keeps_epics_and_board_only(self):
+        cfg = copy.deepcopy(self.cfg)
+        cfg["github"].update(enabled=True, fleet=True)
+        nav = server.views.nav("/now", cfg)
+        for tab in self.JIRA_TABS[:2] + self.FLEET_TABS:
+            self.assertIn(tab, nav)
+        for tab in self.JIRA_TABS[2:]:
+            self.assertNotIn(tab, nav)
 
     def test_jira_enabled_keeps_every_tab_and_the_note(self):
         nav = server.views.nav("/now", self.cfg)
         for tab in self.JIRA_TABS:
             self.assertIn(tab, nav)
+        for tab in self.FLEET_TABS:
+            self.assertNotIn(tab, nav)
         self.httpd.app.cfg = self.cfg
         self.assertIn("jira.me is not set", self.request("GET", "/now")[1])
 

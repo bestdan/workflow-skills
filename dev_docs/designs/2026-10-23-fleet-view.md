@@ -83,7 +83,7 @@ mini ────┘   (per machine)   (POST, token)    + GitHub / Claude Remote
 | Source                      | Read by                                  | Gives                                                                                                                                                                       |
 | --------------------------- | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Claude Code Remote sessions | aggregator, adapter                      | optional, off by default: cloud-hosted sessions (not Remote Control), with title, repo, branch, `updated_at` and a coarse `status`; it has no post-turn fields (see below). |
-| GitHub, configured owners   | aggregator, adapter (task 3's `gh` code) | open PRs (age, draft, review decision, CI), issues at `auto:human-review-needed`, designs at `status: proposed`                                                             |
+| GitHub, configured owners   | aggregator, adapter (task 3's `gh` code) | open PRs (age, draft, review decision, CI), open issues (every one at `auto:human-review-needed`, the rest capped), designs at `status: proposed`                           |
 | Session-state hook          | collector                                | local sessions the Remote list misses, with exact turn-end and prompt times and permission prompts                                                                          |
 | Worktrees                   | collector                                | per repo: branch, dirty or unpushed state, and the landed-PR evidence `branch-remove.sh` already computes                                                                   |
 | Handoffs                    | collector                                | `$HOME/src/worktrees/*/.handoffs/*.md`: front matter `aim`, `expires`, `branch`, `pr`                                                                                       |
@@ -206,13 +206,19 @@ wins when both did.
    - **Review queue:** length against the cap of 5 from #952. A PR counts
      when its CI is green and it is co-reviewed at its head. A PR that closes
      an issue in a milestone also needs one of those milestones marked
-     `approved: yes`; a PR that closes none skips that rule, since most repos
-     use no milestones. The full rule set is `github_fleet.py`'s module
+     `approved: yes`; a PR that closes none skips that rule, since most of
+     the owner's repos use no milestones. The full rule set is `github_fleet.py`'s module
      docstring.
    - **Focus pin:** marks one item as the deep work. While it is set, Needs you
      shows the focus item's own needs and counts the rest as "held". It never
      shows the held items one by one. That is the deep-work pattern: others may
      notify, and no answer is expected.
+6. **Pull requests and Issues.** These two tabs replace the first instance's
+   Waiting on me and I'm waiting on, which read Jira blocker links. Pull
+   requests lanes every open PR of the owner's by the review queue: ready, or
+   waiting with the rules it misses, CI failing, drafts, and reviews requested
+   of the owner. Issues lanes every open issue by the gh-issue status ladder.
+   The lane rules are `fleet_tabs.py`'s module docstring.
 
 **The two caps limit different things and both stand.** The side-quest cap
 limits which tooling work is open. The review-queue cap limits how much

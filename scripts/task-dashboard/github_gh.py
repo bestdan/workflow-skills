@@ -69,7 +69,7 @@ query($q: String!, $after: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       ... on PullRequest {
-        url title headRefName isDraft reviewDecision updatedAt
+        url title headRefName isDraft reviewDecision createdAt updatedAt
         repository { nameWithOwner }
       }
     }
@@ -105,6 +105,20 @@ def search_prs(
     `pageInfo`, and `url`. The fleet view passes one selecting issues, or PRs
     with their body.
     """
+    return search_nodes(query, runner, timeout, graphql)[0]
+
+
+def search_nodes(
+    query: str,
+    runner: Runner = run,
+    timeout: float = DEFAULT_TIMEOUT,
+    graphql: str = SEARCH_QUERY,
+    limit: "int | None" = None,
+) -> "tuple[list[dict], bool]":
+    """search_prs, stopping at `limit` nodes: (nodes, whether more were left).
+
+    With no `limit` it follows every page and the flag is False.
+    """
     nodes: list[dict] = []
     after: str | None = None
     while True:
@@ -128,8 +142,11 @@ def search_prs(
         # A node of a type the selection skips (an issue in an is:pr search is
         # impossible, but the union allows it) comes back as {}.
         nodes.extend(n for n in search["nodes"] if n and n.get("url"))
+        if limit is not None and len(nodes) >= limit:
+            more = len(nodes) > limit or bool(page_info["hasNextPage"])
+            return nodes[:limit], more
         if not page_info["hasNextPage"]:
-            return nodes
+            return nodes, False
         after = page_info["endCursor"]
 
 

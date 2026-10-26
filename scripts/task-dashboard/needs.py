@@ -24,9 +24,10 @@ WHAT IT COLLECTS, each keyed by its overlay item `(source, key)`:
   gauges.review_queue_rows, the reader the header gauge counts, so the page
   and the gauge agree. The wait starts when the PR was opened: when it entered
   the queue is not recorded.
-- **Issues at `auto:human-review-needed`** (github_fleet's `issue` rows),
-  waiting since they were opened, for the same reason, and behind the same
-  gate as the PRs: none until a fleet sync run has succeeded.
+- **Issues at `auto:human-review-needed`** (github_fleet's `issue` rows that
+  carry it, github_fleet.needs_human), waiting since they were opened, for
+  the same reason, and behind the same gate as the PRs: none until a fleet
+  sync run has succeeded.
 - **Drain items marked "needs you"**: drain_items(), an empty hook point
   until a drain tracking issue is configured.
 
@@ -46,8 +47,8 @@ slots in at approval_brief().
 FOCUS. While the overlay has a focus item, only that item's own needs show:
 the item itself, and what is tied to it (related()). The rest are counted as
 held and never listed, snoozed or not; a snoozed need of the focus item is
-counted as snoozed. A focused design takes everything in its repo, so the
-design-focus section the Since you were away page had is not repeated here.
+counted as snoozed. A focused design takes every need in its repo, in the
+main list rather than a section of its own.
 
 NEW. A card whose wait began after the overlay's `last_visit` carries a `new`
 badge, expanded, collapsed and approval cards alike; the order is unchanged.
@@ -299,7 +300,11 @@ def collect(conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime) -> lis
         if row.get("in_queue"):
             out.append(_pr(row))
     if queue is not None:
-        out.extend(_issue(row) for row in _rows(conn, github_fleet.SOURCE, "issue"))
+        out.extend(
+            _issue(row)
+            for row in _rows(conn, github_fleet.SOURCE, "issue")
+            if github_fleet.needs_human(row)
+        )
     out.extend(drain_items(conn, cfg))
     return out
 

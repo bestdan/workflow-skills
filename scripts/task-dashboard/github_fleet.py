@@ -12,6 +12,13 @@ apart from `pr` so nothing that counts open PRs sees it. The Jira sync only
 touches `source = 'jira'` rows, and `write()` here only `source = 'github'`
 ones, so the two never overwrite each other.
 
+ISSUES are every open issue of the configured owners. The ones labelled
+`auto:human-review-needed` (needs_human()) are fetched in full by a search of
+their own, so Needs you and Stale, which read only those, see exactly that set
+whatever the cap. The rest come from a second search, at most MAX_OPEN_ISSUES
+per owner; an owner with more is reported in `issues_truncated`. The Issues
+tab (fleet_tabs.py) reads them all.
+
 THE REVIEW QUEUE, which the cap-of-5 gauge reads, holds a PR only when all
 four rules hold:
 
@@ -32,19 +39,22 @@ four rules hold:
    (`closingIssuesReferences`) is in a milestone, one of those milestones must
    have a description line reading `approved: yes` (case ignored, line
    trimmed). A PR that closes no issue in a milestone skips this rule, since
-   most repos use none. Descriptions are cached per repo for one run, and a
+   most of the owner's repos use none. Descriptions are cached per repo for one run, and a
    failed lookup counts as a miss.
 
 The PRs passing rule 1 alone are AWAITING. Every one is still a `kind = pr`
 row, with `status_name` set to `queue` or `awaiting`, `queue_misses` naming
-the rules it failed, and `queue_counts()` giving both totals. Rules 2 and 4
-are checked for every awaiting PR; `milestone_approved` is None when rule 4
-was skipped, so a skip is told apart from a pass. Rule 3 costs one call per
+the rules it failed, and `queue_counts()` giving both totals. Rule 2 is
+checked for every awaiting PR, and rule 4 only when a closing issue is in a
+milestone; `milestone_approved` is None when rule 4 was skipped, so a skip is
+told apart from a pass. Rule 3 costs one call per
 PR, so it runs only for those that passed the others (`stamped` is None when
 skipped).
 
 Run `python github_fleet.py review-queue <owner>...` (under uv, Python 3.11+)
-to print both counts and the searches behind the awaiting set.
+to print both counts and the searches behind the awaiting set, and
+`python github_fleet.py issues <owner>...` to print how many open issues the
+widened fetch mirrors and which owners the cap cut short.
 """
 
 import base64
@@ -77,9 +87,13 @@ DESIGNS_DIR = "dev_docs/designs"
 # MAX_DESIGN_FILES are read; a repo with more is truncated and reported.
 MAX_DESIGN_FILES = 40
 
+# Open issues mirrored per owner beyond the human-review set. GitHub's search
+# stops at 1000 results, so a cap under it is always seen when it bites.
+MAX_OPEN_ISSUES = 900
+
 ISSUE_QUERY = """
 query($q: String!, $after: String) {
-  search(query: $q, type: ISSUE, first: 50, after: $after) {
+  search(query: $q, type: ISSUE, first: 100, after: $after) {
     pageInfo { hasNextPage endCursor }
     nodes {
       ... on Issue {
@@ -190,6 +204,26 @@ def decision_brief(pr_body: "str | None") -> "str | None":
 # --- issues ------------------------------------------------------------------
 
 
+def needs_human(row: dict) -> bool:
+    """An `issue` row labelled auto:human-review-needed: Needs you's set."""
+    return HUMAN_LABEL in (row.get("labels") or [])
+
+
+def _issue_row(node: dict) -> dict:
+    labels = [n["name"] for n in (node.get("labels") or {}).get("nodes", [])]
+    return {
+        "kind": "issue",
+        "key": node["url"],
+        "url": node["url"],
+        "repo": node["repository"]["nameWithOwner"],
+        "number": node["number"],
+        "title": node["title"],
+        "labels": labels,
+        "created": node.get("createdAt"),
+        "updated": node.get("updatedAt"),
+    }
+
+
 def issues_needing_human(
     owners: Iterable[str], runner: Runner = run, timeout: float = DEFAULT_TIMEOUT
 ) -> list[dict]:
@@ -200,22 +234,34 @@ def issues_needing_human(
             f'is:issue is:open label:"{HUMAN_LABEL}" {github_gh.owner_qualifier(owner)}'
         )
         for node in github_gh.search_prs(query, runner, timeout, ISSUE_QUERY):
-            labels = [n["name"] for n in (node.get("labels") or {}).get("nodes", [])]
-            rows.setdefault(
-                node["url"],
-                {
-                    "kind": "issue",
-                    "key": node["url"],
-                    "url": node["url"],
-                    "repo": node["repository"]["nameWithOwner"],
-                    "number": node["number"],
-                    "title": node["title"],
-                    "labels": labels,
-                    "created": node.get("createdAt"),
-                    "updated": node.get("updatedAt"),
-                },
-            )
+            rows.setdefault(node["url"], _issue_row(node))
     return list(rows.values())
+
+
+def open_issues(
+    owners: Iterable[str],
+    runner: Runner = run,
+    timeout: float = DEFAULT_TIMEOUT,
+    cap: int = MAX_OPEN_ISSUES,
+) -> "tuple[list[dict], list[str]]":
+    """Every open issue of the owners, and the owners the cap cut short.
+
+    The human-review set comes first and in full (issues_needing_human); then
+    one search per owner adds its other open issues, at most `cap` of them.
+    """
+    owners = list(owners)
+    rows = {r["url"]: r for r in issues_needing_human(owners, runner, timeout)}
+    truncated: list[str] = []
+    for owner in owners:
+        query = f"is:issue is:open {github_gh.owner_qualifier(owner)}"
+        nodes, more = github_gh.search_nodes(
+            query, runner, timeout, ISSUE_QUERY, limit=cap
+        )
+        if more:
+            truncated.append(owner)
+        for node in nodes:
+            rows.setdefault(node["url"], _issue_row(node))
+    return list(rows.values()), truncated
 
 
 # --- recently closed PRs -----------------------------------------------------
@@ -597,11 +643,13 @@ def fetch(
         for r in recently_closed(owners, now, runner, timeout)
         if r["url"] not in open_urls  # an index lag; the open row wins
     ]
-    rows = queue + issues_needing_human(owners, runner, timeout) + designs + closed
+    issues, issues_truncated = open_issues(owners, runner, timeout)
+    rows = queue + issues + designs + closed
     return {
         "rows": rows,
         "failed": failed,
         "truncated": truncated,
+        "issues_truncated": issues_truncated,
         "missing": missing,
         "counts": queue_counts(rows),
     }
@@ -652,9 +700,17 @@ def write(conn: sqlite3.Connection, rows: list[dict], now: datetime) -> None:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) < 2 or argv[0] != "review-queue":
-        print("usage: github_fleet.py review-queue <owner>...", file=sys.stderr)
+    if len(argv) < 2 or argv[0] not in ("review-queue", "issues"):
+        print("usage: github_fleet.py review-queue|issues <owner>...", file=sys.stderr)
         return 2
+    if argv[0] == "issues":
+        issues, truncated = open_issues(argv[1:])
+        human = sum(1 for r in issues if needs_human(r))
+        print(f"open issues: {len(issues)}; {HUMAN_LABEL}: {human}")
+        print(f"cap: {MAX_OPEN_ISSUES} per owner beyond {HUMAN_LABEL}")
+        for owner in truncated:
+            print(f"  truncated: {owner}")
+        return 0
     rows, failed = review_queue(argv[1:])
     counts = queue_counts(rows)
     print(f"review queue: {counts['queue']}; awaiting: {counts['awaiting']}")

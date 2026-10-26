@@ -508,6 +508,90 @@ class IssuesTests(unittest.TestCase):
             fleet.issues_needing_human(["bestdan is:closed"], Router([]))
 
 
+def issue_node(n, *labels):
+    return {
+        "url": f"https://github.com/{REPO}/issues/{n}",
+        "number": n,
+        "title": f"issue {n}",
+        "createdAt": "2026-10-20T00:00:00Z",
+        "updatedAt": "2026-10-20T00:00:00Z",
+        "repository": {"nameWithOwner": REPO},
+        "labels": {"nodes": [{"name": name} for name in labels]},
+    }
+
+
+def paged(nodes, size):
+    """A search answered `size` nodes a page, following `after`."""
+
+    def answer(argv):
+        start = int(arg(argv, "after") or 0)
+        page = nodes[start : start + size]
+        more = start + size < len(nodes)
+        return ok(
+            {
+                "data": {
+                    "search": {
+                        "pageInfo": {
+                            "hasNextPage": more,
+                            "endCursor": str(start + size),
+                        },
+                        "nodes": page,
+                    }
+                }
+            }
+        )
+
+    return answer
+
+
+class OpenIssuesTests(unittest.TestCase):
+    HUMAN = "auto:human-review-needed"
+
+    def runner(self, human, rest, size=2):
+        return Router(
+            [
+                (lambda a: self.HUMAN in search_q(a), paged(human, size)),
+                (lambda a: "is:issue" in search_q(a), paged(rest, size)),
+            ]
+        )
+
+    def test_the_cap_is_enforced_and_reported(self):
+        rest = [issue_node(n, "status:2_ready") for n in range(1, 8)]
+        runner = self.runner([], rest)
+        rows, truncated = fleet.open_issues(["bestdan"], runner, cap=3)
+        self.assertEqual([r["number"] for r in rows], [1, 2, 3])
+        self.assertEqual(truncated, ["bestdan"])
+        # It stops paging once the cap is reached: two pages of two, not four.
+        wide = [a for a in runner.calls if self.HUMAN not in search_q(a)]
+        self.assertEqual(len(wide), 2)
+        self.assertEqual(search_q(wide[0]), "is:issue is:open org:bestdan")
+
+    def test_a_cap_met_exactly_on_the_last_page_is_not_truncation(self):
+        rest = [issue_node(n) for n in range(1, 5)]
+        rows, truncated = fleet.open_issues(["bestdan"], self.runner([], rest), cap=4)
+        self.assertEqual(len(rows), 4)
+        self.assertEqual(truncated, [])
+
+    def test_the_human_review_set_is_whole_past_the_cap(self):
+        human = [issue_node(n, self.HUMAN) for n in range(100, 106)]
+        rest = human[:2] + [issue_node(n) for n in range(1, 5)]
+        rows, truncated = fleet.open_issues(
+            ["bestdan"], self.runner(human, rest), cap=3
+        )
+        got = {r["number"] for r in rows if fleet.needs_human(r)}
+        self.assertEqual(got, set(range(100, 106)))
+        self.assertEqual(truncated, ["bestdan"])
+        urls = [r["url"] for r in rows]
+        self.assertEqual(len(urls), len(set(urls)))
+
+    def test_fetch_reports_the_truncated_owners(self):
+        runner = WriteTests().full_runner()
+        plan = fleet.fetch(
+            {"github": {"orgs": ["bestdan"], "design_repos": []}}, runner, now=NOW
+        )
+        self.assertEqual(plan["issues_truncated"], [])
+
+
 def designs_router(listing=None, extra=()):
     listing = fixture("fleet_designs_list.json") if listing is None else listing
     by_path = {
