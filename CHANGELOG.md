@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.133.2] - 2026-10-26
+
+### Fixes
+
+- exclude .mypy_cache from dprint [#1192] (#1193) (37b0378)
+
 ## [2.133.1] - 2026-10-26
 
 ### Fixes
