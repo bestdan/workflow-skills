@@ -2,14 +2,21 @@
 
 Every lane is a `section.lane[data-section]` whose first child is an `h2`
 reading "Title (N)". tabify() reads those back out of a rendered page body and
-draws one tab per lane, "Title (N)", under the include switches. So no view
-has to know about tabs, and a tab's count is the lane's own heading count.
+draws one tab per lane under the include switches, so a view has only to give
+each lane a counted heading, and a tab's count is that heading's. A lane with
+none is named by its capitalized id and counts (0).
+
+A tab reads "Label (N)". The label is the lane's `data-tab`, a short name for
+a long title (tab_attr() writes it), else the title itself; the full title is
+always the tab's tooltip, and stays the lane's heading.
 
 WHICH LANE SHOWS, first match wins:
 
 1. the URL's `?lane=<data-section>`, when the page has that lane;
 2. the lane last chosen on that view, which the page's script keeps in
-   `localStorage` per view and switches to on load (the server cannot see it);
+   `localStorage` per view and switches to on load (the server cannot see it),
+   unless the include filter has since switched it off. A lane `?lane=` names
+   opens even when off: the link asked for it;
 3. the first lane with rows; a page whose lanes are all empty shows its first
    lane the include filter has not switched off.
 
@@ -41,6 +48,7 @@ _LANE = re.compile(
     r"(?:<h2>(?P<h2>[^<]*)</h2>)?"
 )
 _COUNT = re.compile(r"^(?P<title>.*?)\s*\((?P<n>\d+)\)$", re.S)
+_TAB = re.compile(r'\sdata-tab="([^"]*)"')
 _SWITCHES = re.compile(r'<div class="include"[^>]*>.*?</div>', re.S)
 
 
@@ -48,6 +56,7 @@ _SWITCHES = re.compile(r'<div class="include"[^>]*>.*?</div>', re.S)
 class Lane:
     id: str
     title: str
+    label: str  # the tab's text: data-tab, else the title
     count: int
     off: bool
     start: int  # where the opening tag's `>` is, for adding `hidden`
@@ -66,9 +75,17 @@ def lanes(body: str) -> list[Lane]:
         counted = _COUNT.match(head)
         title = (counted["title"] if counted else head) or lane_id.capitalize()
         count = int(counted["n"]) if counted else 0
+        short = _TAB.search(m["attrs"])
+        label = html.unescape(short[1]).strip() if short else ""
         tag_end = m.start() + m.group(0).index(">")
-        out.append(Lane(lane_id, title, count, "data-filtered" in m["attrs"], tag_end))
+        off = "data-filtered" in m["attrs"]
+        out.append(Lane(lane_id, title, label or title, count, off, tag_end))
     return out
+
+
+def tab_attr(label: "str | None") -> str:
+    """The ` data-tab="..."` a lane carries for a short tab label, or ""."""
+    return f' data-tab="{_e(label)}"' if label else ""
 
 
 def chosen(found: list[Lane], query: "dict[str, list[str]]") -> tuple[Lane, str]:
@@ -107,8 +124,8 @@ def bar(
         tabs.append(
             f'<a role="tab" aria-selected="{"true" if selected else "false"}"'
             f' data-lane="{_e(lane.id)}" data-count="{lane.count}"{off}'
-            f' href="{_e(href(path, query, lane.id))}">'
-            f'<span class="name">{_e(lane.title)}</span> {count}</a>'
+            f' title="{_e(lane.title)}" href="{_e(href(path, query, lane.id))}">'
+            f'<span class="name">{_e(lane.label)}</span> {count}</a>'
         )
     return (
         f'<div class="lane-tabs" role="tablist" data-view="{_e(view)}"'
@@ -225,7 +242,8 @@ JS = """
     var saved = null;
     try { saved = localStorage.getItem(key); } catch (e) {}
     var tab = tabs.filter(function (t) { return t.dataset.lane === saved; })[0];
-    if (tab) show(tab, {});
+    // A remembered lane switched off since: the server's default stands.
+    if (tab && tab.dataset.off === undefined) show(tab, {});
   }
   var box = document.getElementById('filter');
   window.laneTabs = { refresh: refresh };

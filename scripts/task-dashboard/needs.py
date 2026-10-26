@@ -545,7 +545,7 @@ def finished_group(done: list[Need], now: datetime, ov: overlay.Overlay) -> str:
         note = f"Since your last visit, {fleet_views.ago(last, now)} ({ov.last_visit})."
     rows = "".join(finished_row(n, now, ov) for n in done)
     return (
-        '<section class="lane finished" data-section="finished">'
+        '<section class="lane finished" data-section="finished" data-tab="Finished">'
         f"<h2>Finished since you looked ({len(done)})</h2>"
         f'<div class="visit"><span data-last-visit="{_e(ov.last_visit or "")}">'
         f"{_e(note)}</span>"

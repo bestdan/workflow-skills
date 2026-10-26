@@ -32,8 +32,8 @@ NOW = tabs_fx.NOW
 SWITCHES = '<nav>x</nav><div class="include" data-view="v"><a>All</a></div>'
 
 
-def lane(name, title, n, *, off=False):
-    attrs = ' data-filtered="prs"' if off else ""
+def lane(name, title, n, *, off=False, tab=None):
+    attrs = (' data-filtered="prs"' if off else "") + lane_tabs.tab_attr(tab)
     cards = "".join('<div class="card">c</div>' for _ in range(n))
     return (
         f'<section class="lane" data-section="{name}"{attrs}>'
@@ -87,6 +87,21 @@ class TabifyTests(unittest.TestCase):
             tabs(page), [("a", "Alpha (0)", False), ("b", "Beta &amp; co (2)", True)]
         )
         self.assertIn('data-count="2"', page)
+
+    def test_a_short_label_names_the_tab_and_the_title_is_its_tooltip(self):
+        body = (
+            SWITCHES
+            + lane("a", "Alpha: a long title", 1, tab="Alpha")
+            + lane("b", "Beta", 2)
+        )
+        page = lane_tabs.tabify(body, "v", "/v", {})
+        self.assertEqual(
+            [label for _, label, _ in tabs(page)], ["Alpha (1)", "Beta (2)"]
+        )
+        self.assertIn('data-lane="a" data-count="1" title="Alpha: a long title"', page)
+        self.assertIn('data-lane="b" data-count="2" title="Beta"', page)
+        # The lane keeps its full heading.
+        self.assertIn("<h2>Alpha: a long title (1)</h2>", page)
 
     def test_the_bar_goes_right_under_the_include_switches(self):
         page = lane_tabs.tabify(self.body(), "v", "/v", {})
@@ -146,6 +161,8 @@ class TabifyTests(unittest.TestCase):
         self.assertIn("u.searchParams.set('lane', tab.dataset.lane);", js)
         # A remembered lane applies only when the URL named none.
         self.assertIn("if (bar.dataset.origin !== 'url')", js)
+        # ...and only while the include filter has not switched it off.
+        self.assertIn("if (tab && tab.dataset.off === undefined) show(tab, {});", js)
         # The text filter's per-lane count drives the tabs.
         self.assertIn("+l.dataset.shown", js)
         self.assertIn("t.classList.toggle('dim', !!q && n === 0)", js)
@@ -193,15 +210,17 @@ class FleetPageTests(server_harness.ServerCase):
         self.assertEqual(
             [label for _, label, _ in tabs(page)],
             [
-                "Ready for you (1)",
-                "Waiting on you (5)",
-                "From others on your repos (3)",
-                "Review requested of me (1)",
+                "Ready (1)",
+                "Waiting (5)",
+                "From others (3)",
+                "Review requested (1)",
                 "CI failing (1)",
                 "Drafts (1)",
             ],
         )
         self.assert_counts_match_lanes(page)
+        self.assertIn('title="Waiting on you"', page)
+        self.assertIn("<h2>Waiting on you (5)</h2>", page)
         self.assertEqual(len(visible(page)), 1)
         self.assertEqual(visible(page), ["ready"])
         page = self.get("/prs?lane=drafts")
@@ -210,17 +229,18 @@ class FleetPageTests(server_harness.ServerCase):
 
     def test_issues(self):
         page = self.get("/issues")
-        self.assertEqual(len(tabs(page)), 5)
+        self.assertEqual(
+            [label.rsplit(" (", 1)[0] for _, label, _ in tabs(page)],
+            ["Needs you", "Needs review", "Started", "Ready", "Untriaged"],
+        )
         self.assert_counts_match_lanes(page)
         self.assertEqual(len(visible(page)), 1)
 
     def test_stale(self):
         page = self.get("/stale")
         names = [label.rsplit(" (", 1)[0] for _, label, _ in tabs(page)]
-        self.assertEqual(
-            names,
-            ["Close: evidence found", "Check: no evidence, so not a reason to close"],
-        )
+        self.assertEqual(names, ["Close", "Check"])
+        self.assertIn('title="Check: no evidence, so not a reason to close"', page)
         self.assert_counts_match_lanes(page)
 
     def test_stale_with_jira_on_gives_the_jira_lane_a_titled_tab(self):
@@ -239,6 +259,8 @@ class FleetPageTests(server_harness.ServerCase):
         names = [n for n, _, _ in tabs(page)]
         self.assertEqual(names, visible(page) + names[1:])  # one shows: the first
         self.assertEqual((names[0], names[-1]), ("needs", "finished"))
+        self.assertEqual(tabs(page)[-1][1].rsplit(" (", 1)[0], "Finished")
+        self.assertIn('title="Finished since you looked"', page)
         self.assert_counts_match_lanes(page)
         self.assertNotIn('<details class="group"', page)
         # Mark as read stays in the Finished tab; Mark all as read by the heading.
@@ -253,6 +275,11 @@ class FleetPageTests(server_harness.ServerCase):
         page = self.get("/prs?include=tasks")
         self.assertTrue(all(label.endswith("(off)") for _, label, _ in tabs(page)))
         self.assertEqual(len(tabs(page)), 6)
+        self.assertEqual(tabs(page)[1][1], "Waiting (off)")  # off lanes keep the label
+        # A lane named by the URL opens even when it is off.
+        page = self.get("/prs?include=tasks&lane=drafts")
+        self.assertEqual(visible(page), ["drafts"])
+        self.assertIn('data-origin="url"', page)
 
     def test_now_is_one_lane_without_jira_and_two_with_it(self):
         self.assertEqual(tabs(self.get("/")), [])
