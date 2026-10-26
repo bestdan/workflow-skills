@@ -192,18 +192,18 @@ def snooze(conn: sqlite3.Connection, item: Item, until: str) -> None:
 def why_not(
     conn: sqlite3.Connection,
     item: Item,
-    until: str,
     reason: str,
     text: str = "",
     snap: "dict[str, Any] | None" = None,
     now: "datetime | None" = None,
 ) -> None:
-    """Snooze until a date and record why, in one transaction.
+    """Record why an item that is already snoozed was snoozed.
 
-    `snap` is the item as Now ranked it at this moment (whynot.snapshot): its
-    kind, title, fleet score, score terms and features. None when Now no
-    longer ranks it, as from a page left open: the answer is still kept,
-    with what is known.
+    Snooze writes the snooze; this only adds the answer, so it never snoozes
+    again and refuses an item with no snooze to explain. `snap` is the item as
+    Now ranked it at this moment (whynot.snapshot): its kind, title, fleet
+    score, score terms and features. None when Now no longer ranks it, as
+    from a page left open: the answer is still kept, with what is known.
     """
     if reason not in WHY_NOT_CODES:
         raise OverlayError(
@@ -211,12 +211,13 @@ def why_not(
         )
     if len(text) > MAX_WHY_TEXT:
         raise OverlayError(f"the reason text is longer than {MAX_WHY_TEXT} characters")
-    if not until:
-        raise OverlayError("whynot needs a snooze date")
-    until = _iso_date(until)
     snap = snap or {}
     with conn:
         conn.execute("BEGIN IMMEDIATE")
+        if not conn.execute(
+            "SELECT 1 FROM snoozes WHERE source = ? AND item_key = ?", item
+        ).fetchone():
+            raise OverlayError("whynot needs a snoozed item: snooze it first")
         conn.execute(
             "INSERT INTO why_not (source, item_key, kind, title, reason, text,"
             " score, terms, features, recorded_at)"
@@ -232,10 +233,6 @@ def why_not(
                 json.dumps(snap.get("features") or {}, sort_keys=True),
                 _now(now),
             ),
-        )
-        conn.execute(
-            "INSERT OR REPLACE INTO snoozes (source, item_key, until) VALUES (?, ?, ?)",
-            (*item, until),
         )
 
 
@@ -443,8 +440,8 @@ def apply(
     `visit` takes no key, only `at`: the render time of the page whose
     "Mark as read" was pressed (absent means now). `include` takes no key,
     only `view` and `include`, the view's comma-joined groups (empty: none).
-    `whynot` takes `until`, `reason` and an optional `text`, and asks
-    `snapshot` for the item as Now ranks it.
+    `whynot` takes `reason` and an optional `text` for an item that is
+    already snoozed, and asks `snapshot` for the item as Now ranks it.
     """
     if action not in ACTIONS:
         raise OverlayError(f"unknown overlay action: {action!r}")
@@ -477,7 +474,6 @@ def apply(
         why_not(
             conn,
             item,
-            (form.get("until") or [""])[0].strip(),
             (form.get("reason") or [""])[0].strip(),
             (form.get("text") or [""])[0],
             snapshot(item) if snapshot else None,
@@ -904,11 +900,13 @@ CSS = """
 .card .badge { color:var(--muted); }
 """
 
-# One delegated listener; every control posts a form and reloads on success.
+# One delegated listener; every control posts a form and reloads on success,
+# except on Now's cards, where Snooze, a reason and Undo change the card in
+# place (`done` runs instead of the reload).
 JS = """
 (function () {
   var token = document.querySelector('meta[name=dashboard-token]').content;
-  function post(action, fields) {
+  function post(action, fields, done) {
     var body = 'token=' + encodeURIComponent(token);
     fields.forEach(function (f) {
       body += '&' + f[0] + '=' + encodeURIComponent(f[1]);
@@ -916,7 +914,7 @@ JS = """
     return fetch('/overlay/' + action, { method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body
     }).then(function (r) {
-      if (r.ok) { location.reload(); return; }
+      if (r.ok) { if (done) done(); else location.reload(); return; }
       return r.text().then(function (t) { alert('Not saved (' + r.status + '): ' + t); });
     }).catch(function () { alert('Not saved: the server did not answer'); });
   }
@@ -933,15 +931,29 @@ JS = """
     }
     else if (act === 'visit') { post('visit', [['at', b.dataset.at]]); }
     else if (act === 'snooze') {
-      // On Now, Snooze first asks why; the picker's Skip snoozes without asking.
-      var picker = b.dataset.why && b.closest('.card').querySelector('.whynot');
-      if (picker) { picker.hidden = !picker.hidden; return; }
-      post('snooze', it.concat([['until', b.dataset.until]]));
+      // On Now, Snooze snoozes at once and the card gives way to a line that
+      // offers a reason and Undo; elsewhere it reloads as every control does.
+      var card = b.closest('.card');
+      var line = b.dataset.why && card.querySelector('.whynot');
+      post('snooze', it.concat([['until', b.dataset.until]]), line && function () {
+        line.querySelector('.whynot-until').textContent = b.dataset.until;
+        line.querySelector('input').value = '';
+        card.classList.add('just-snoozed');
+        line.hidden = false;
+      });
     }
     else if (act === 'whynot') {
       var box = b.closest('.whynot');
-      post('whynot', it.concat([['until', box.dataset.until],
-        ['reason', b.dataset.reason], ['text', box.querySelector('input').value]]));
+      post('whynot', it.concat([['reason', b.dataset.reason],
+        ['text', box.querySelector('input').value]]),
+        function () { box.closest('.card').remove(); });
+    }
+    else if (act === 'undo') {
+      var undone = b.closest('.whynot');
+      post('snooze', it.concat([['until', '']]), function () {
+        undone.hidden = true;
+        undone.closest('.card').classList.remove('just-snoozed');
+      });
     }
     else if (act === 'note') {
       post('note', it.concat([['text', b.closest('details').querySelector('textarea').value]]));
@@ -1002,8 +1014,9 @@ def card_controls(
 ) -> str:
     """The pin toggle, tag picker, snooze button, note editor, and
     (pinned lane) up/down. `pin=False` drops Pin where nothing ranks by it.
-    `why_not=True` makes Snooze open the card's "why not now" picker
-    (whynot.picker, which the caller puts in the card) instead of posting."""
+    `why_not=True` makes Snooze hide the card in place and show its "why
+    not now" line (whynot.picker, which the caller puts in the card) instead
+    of reloading the page."""
     pinned = ov.is_pinned(item)
     parts = []
     if pin:

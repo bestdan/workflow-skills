@@ -1,15 +1,17 @@
 """Why not now: what the owner says when they snooze a card on the fleet Now,
 and what `dashboard.py tune` makes of it.
 
-ASKING. On the fleet Now (fleet_now.py), Snooze opens a small picker before
-the snooze is applied: one click on a reason (overlay.WHY_NOT_REASONS), an
-optional line of free text, or Skip, which snoozes without asking. A reason
-is never required.
+ASKING. On the fleet Now (fleet_now.py), Snooze snoozes on the first click
+and the card gives way, in place, to one line: "Snoozed until <date> · why not
+now?", the reasons (overlay.WHY_NOT_REASONS), an optional line of free text,
+and Undo, which removes the snooze and brings the card back. A reason is
+never required: the line goes away after one, or on the next page load.
 
-STORING. A reason posts the overlay's `whynot` action, which snoozes the
-item and writes one `why_not` row in the same transaction
-(overlay.why_not). The row snapshots the item as Now ranked it at that
-moment (snapshot()): its fleet score, every score term, and its features
+STORING. A reason posts the overlay's `whynot` action, which writes one
+`why_not` row against the snooze that already exists and never snoozes again
+(overlay.why_not); an item with no snooze is refused. The row snapshots the
+item as Now ranked it at that moment (snapshot()): its fleet score, every
+score term, and its features
 (features()), scored or not, so that a pattern nothing scores today can still
 show up. Export and import carry these rows; they are overlay state.
 
@@ -409,6 +411,7 @@ CSS = """
 .card .whynot button, .card .whynot input { font:inherit; padding:1px 6px; border-radius:4px;
   border:1px solid var(--line); background:var(--bg); color:var(--fg); }
 .card .whynot input { flex:1 1 12em; }
+.card.just-snoozed > :not(.whynot) { display:none; }
 .whynot-health table { border-collapse:collapse; margin-bottom:8px; }
 .whynot-health th, .whynot-health td { text-align:left; padding:2px 8px;
   border-bottom:1px solid var(--line); }
@@ -418,18 +421,20 @@ CSS = """
 
 
 def picker(until: str) -> str:
-    """The card's hidden "why not now" picker; Snooze (data-why) shows it."""
+    """The card's hidden "why not now" line, shown in the card's place once
+    Snooze (data-why) has snoozed it; the script sets the date it shows."""
     reasons = "".join(
         f'<button type="button" data-ov="whynot" data-reason="{code}">{_e(label)}</button>'
         for code, label in overlay.WHY_NOT_REASONS
     )
     return (
-        f'<div class="whynot" hidden data-until="{_e(until)}">'
-        f"<span>Why not now?</span>{reasons}"
+        '<div class="whynot" hidden>'
+        f'<span>Snoozed until <b class="whynot-until">{_e(until)}</b> · why not now?</span>'
+        f"{reasons}"
         f'<input type="text" maxlength="{overlay.MAX_WHY_TEXT}"'
         ' placeholder="optional: say more" aria-label="Why not now, in your words">'
-        f'<button type="button" data-ov="snooze" data-until="{_e(until)}"'
-        ' title="Snooze without saying why">Skip</button></div>'
+        '<button type="button" data-ov="undo" title="Remove the snooze">'
+        "Undo</button></div>"
     )
 
 
