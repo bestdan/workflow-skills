@@ -429,10 +429,14 @@ class FleetRouteTests(server_harness.ServerCase):
         self.assertIn('data-key="ABC-1"', self.get("/board?include=tasks"))
         waiting = self.get("/waiting-on?include=tasks")
         self.assertIn('data-section="prs" data-filtered="prs"', waiting)
-        self.assertIn('<section class="lane" data-section="issues">', waiting)
+        self.assertRegex(
+            waiting, r'<section class="lane" data-section="issues"(?: hidden)?>'
+        )
         waiting = self.get("/waiting-on-me?include=prs")
         self.assertIn('data-section="issues" data-filtered="tasks"', waiting)
-        self.assertIn('<section class="lane" data-section="reviews">', waiting)
+        self.assertRegex(
+            waiting, r'<section class="lane" data-section="reviews"(?: hidden)?>'
+        )
         epics = self.get("/epics?include=sessions")
         self.assertIn('data-section="epics" data-filtered="tasks"', epics)
 

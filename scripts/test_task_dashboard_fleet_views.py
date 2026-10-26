@@ -286,11 +286,11 @@ class FinishedTests(FleetCase):
         self.assertIn("on mini · turn ended 12h ago", group)
         self.assertIn('<span class="title">dotfiles</span>', group)
 
-    def test_the_group_is_closed_and_marks_as_read_at_render_time(self):
+    def test_the_lane_marks_as_read_at_render_time(self):
         seed(self.conn)
         group = section(self.page(), "finished")
-        self.assertIn('<details class="group">', group)
-        self.assertNotIn('<details class="group" open', group)
+        # A lane, so a tab of its own, with Mark as read inside it.
+        self.assertNotIn('<details class="group"', group)
         self.assertIn('data-ov="visit" data-at="2026-10-23T21:00:00Z"', group)
         self.assertIn(f'data-last-visit="{overlay.load(self.conn).last_visit}"', group)
 

@@ -568,7 +568,9 @@ class BoardTest(ServerCase):
     def test_rows_land_where_the_classifier_puts_them(self):
         page = self.request("GET", "/")[1]
         lanes = dict(
-            re.findall(r'data-section="([a-z_]+)">(.*?)</section>', page, re.S)
+            re.findall(
+                r'data-section="([a-z_]+)"(?: hidden)?>(.*?)</section>', page, re.S
+            )
         )
         found = {
             s: re.findall(r"class=\"ref\">\((ABC-\d+)\)<", body)
@@ -643,7 +645,9 @@ class BoardTest(ServerCase):
         conn.close()
         page = self.request("GET", "/")[1]
         lanes = "".join(
-            re.findall(r'data-section="[a-z_]+">(.*?)</section>', page, re.S)
+            re.findall(
+                r'data-section="[a-z_]+"(?: hidden)?>(.*?)</section>', page, re.S
+            )
         )
         self.assertNotIn("(ABC-60)", lanes)  # a child of the ignored epic
         self.assertNotIn("(ABC-61)", lanes)  # ignored itself
@@ -656,7 +660,9 @@ class BoardTest(ServerCase):
         self.add_issue("ABC-50", "undefined", 5)
         page = self.request("GET", "/")[1]
         self.assertEqual(self.sections(page)[-1], "unmatched")
-        lane = re.search(r'data-section="unmatched">(.*?)</section>', page, re.S)
+        lane = re.search(
+            r'data-section="unmatched"(?: hidden)?>(.*?)</section>', page, re.S
+        )
         assert lane is not None
         self.assertIn("Unclassified (1)", lane.group(1))
         self.assertIn("(ABC-50)</span>", lane.group(1))

@@ -668,10 +668,17 @@ def render_waiting_on(m: Mirror, inc: include.Include) -> str:
 def render_stale(m: Mirror, inc: include.Include) -> str:
     """Jira's stale lane, then, on a fleet instance, the fleet's (fleet_views)."""
     cards = [issue_card(m, i, why) for i, why in stale(m)]
+    on_fleet = fleet_views.enabled(m.cfg)
+    # Beside the fleet's lanes it is a tab of its own, so it needs a title.
     jira = _lane(
-        "stale", None, cards, "Nothing in progress has gone quiet.", TICKETS, inc
+        "stale",
+        "Jira" if on_fleet else None,
+        cards,
+        "Nothing in progress has gone quiet.",
+        TICKETS,
+        inc,
     )
-    if not fleet_views.enabled(m.cfg):
+    if not on_fleet:
         return jira
     fleet = fleet_views.render_stale(m.conn, m.cfg, m.now, inc)
     return (jira if m.issues else "") + fleet

@@ -50,6 +50,7 @@ import gauges
 import health
 import include
 import ingest
+import lane_tabs
 import needs
 import overlay
 import score
@@ -469,8 +470,11 @@ JS = """
       });
       var h = lane.querySelector('h2');
       if (h && h.dataset.base) h.textContent = h.dataset.base + ' (' + shown + ')';
+      lane.dataset.shown = shown;
       lane.classList.toggle('filtered-empty', !!q && shown === 0);
     });
+    // The lane tabs (lane_tabs.py) recount from each lane's data-shown.
+    if (window.laneTabs) window.laneTabs.refresh(q);
   }
   box.addEventListener('input', function () {
     try { sessionStorage.setItem(saved, box.value); } catch (e) {}
@@ -615,9 +619,9 @@ def render_page(title: str, header: str, body: str, token: str, busy: bool) -> s
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
         f'<meta name="dashboard-token" content="{_e(token)}">'
         f"<title>{_e(title)}</title>"
-        f"<style>{CSS}{views.CSS}{fleet_views.CSS}{needs.CSS}{fleet_now.CSS}{overlay.CSS}{gauges.CSS}{include.CSS}</style></head>"
+        f"<style>{CSS}{views.CSS}{fleet_views.CSS}{needs.CSS}{fleet_now.CSS}{overlay.CSS}{gauges.CSS}{include.CSS}{lane_tabs.CSS}</style></head>"
         f'<body data-busy="{1 if busy else 0}">{header}<main>{body}</main>'
-        f"<script>{JS}{overlay.JS}{include.JS}</script></body></html>"
+        f"<script>{JS}{overlay.JS}{include.JS}{lane_tabs.JS}</script></body></html>"
     )
 
 
@@ -701,6 +705,7 @@ class App:
             inc = self.include_for(conn, path.lstrip("/"), query)
             health = self.health(conn)
             body = views.render(path, conn, self.cfg, self.now(), inc, query)
+            body = lane_tabs.tabify(body, path.lstrip("/"), path, query)
             # The header reads the mirror, never the filtered view: identical
             # gauges and machine ages whatever `inc` is.
             gauge_html = self.header_extras(conn)
@@ -775,6 +780,7 @@ class App:
             + render_board(board, self.cfg["jira"]["site"], ov, self.now(), inc)
             + ignored_html
         )
+        body = lane_tabs.tabify(body, "board", "/board", query)
         return render_page(
             "Task dashboard",
             render_header(health, busy, gauge_html),
