@@ -15,8 +15,9 @@ at every start. The design, including why the plist never names the plugin's
 versioned directory, is
 [`dev_docs/designs/2026-10-23-task-dashboard.md`](../../dev_docs/designs/2026-10-23-task-dashboard.md).
 
-Every subcommand below is one `dashboard.py` call (`open` is an alias of
-`url`). Spell it as:
+Every subcommand below except `clean` is one `dashboard.py` call (`open` is an
+alias of `url`); `clean` is the procedure in
+[`references/clean.md`](references/clean.md). Spell the call as:
 
 ```bash
 uv run --no-project --python ">=3.11" "${CLAUDE_PLUGIN_ROOT}/scripts/task-dashboard/dashboard.py" <subcommand> [args]
