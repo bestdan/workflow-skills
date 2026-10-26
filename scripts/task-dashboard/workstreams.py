@@ -58,12 +58,13 @@ import github_gh
 import include
 import linear_api
 import score
+import sync
 import view_model
 import views  # card_title and _lane, read at call time: views imports this
 
 _e = html.escape
 
-RUN_KIND = "workstreams"
+RUN_KIND = sync.WORKSTREAMS_KIND
 PARAM = "ws"
 KIND = "workstream"
 ITEM_SOURCE = github_fleet.SOURCE
@@ -697,8 +698,9 @@ def _card_html(c: Card, now: datetime) -> str:
     head = views.card_title(str(c.ws.get("url") or ""), c.ws.get("title"), ref(c.ws))
     meta = " · ".join(_e(b) for b in meta_parts(c, now))
     links = (
-        f'<a href="{_e(filter_href("/prs", c.id))}">Pull requests ({c.prs})</a> · '
-        f'<a href="{_e(filter_href("/issues", c.id))}">Issues ({c.issues})</a>'
+        view_model.link(filter_href("/prs", c.id), f"Pull requests ({c.prs})")
+        + " · "
+        + view_model.link(filter_href("/issues", c.id), f"Issues ({c.issues})")
     )
     if c.todo:
         act = f'<div class="act">→ {view_model.code(c.next)}</div>'
@@ -836,7 +838,7 @@ def filter_note(f: "Filter | None", path: str) -> str:
     """The line above a filtered Pull requests or Issues page."""
     if f is None:
         return ""
-    clear = f'<a href="{_e(path)}">show all</a>'
+    clear = view_model.link(path, "show all")
     if not f.known:
         return (
             f'<p class="note" data-ws="{_e(f.id)}">No workstream {_e(f.id)};'
@@ -844,5 +846,5 @@ def filter_note(f: "Filter | None", path: str) -> str:
         )
     return (
         f'<p class="note" data-ws="{_e(f.id)}">Only the members of'
-        f' <a href="/workstreams">{_e(f.title or f.id)}</a>. {clear}</p>'
+        f" {view_model.link('/workstreams', f.title or f.id)}. {clear}</p>"
     )

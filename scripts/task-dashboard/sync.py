@@ -55,7 +55,6 @@ import github_gh
 import jira_acli
 import linear_api
 import sessions
-import workstreams
 
 MODES = ("incremental", "reconcile", "full")
 SOURCE = "jira"
@@ -610,6 +609,8 @@ def _run_row(db: sqlite3.Connection, run_id: int) -> dict[str, Any]:
 # --- the fleet view's GitHub step --------------------------------------------
 
 FLEET_KIND = github_fleet.RUN_KIND
+# The `sync_runs.kind` of run_workstreams(); workstreams.RUN_KIND is this.
+WORKSTREAMS_KIND = "workstreams"
 
 
 def fleet_enabled(config: dict[str, Any]) -> bool:
@@ -778,6 +779,10 @@ def run_workstreams(
     row. It reads the fleet step's rows, so it runs after run_fleet, and
     only when fleet_enabled(). With `linear.enabled` off or no key it makes
     no Linear call."""
+    # Imported here: workstreams draws its cards through views, which imports
+    # fleet_now and needs, both of which import this module.
+    import workstreams
+
     run_id = workstreams.run_step(
         config, db, now, _finish_run, _start_run,
         gh_runner=runner, linear_runner=linear_runner, resolve_key=resolve_key,
@@ -815,7 +820,7 @@ def run_all(
     if fleet_enabled(config):
         step(FLEET_KIND)
         rows.append(run_fleet(config, db, clock(), runner=fleet_runner, clock=clock))
-        step(workstreams.RUN_KIND)
+        step(WORKSTREAMS_KIND)
         rows.append(
             run_workstreams(
                 config, db, clock(), runner=fleet_runner,
