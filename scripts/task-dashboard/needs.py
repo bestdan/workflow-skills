@@ -24,7 +24,9 @@ WHAT IT COLLECTS, each keyed by its overlay item `(source, key)`:
   process is live in its host's registry (sessions.py) links to its Remote
   Control session and shows the registry's status; "idle: your turn" replaces
   "asked (heuristic)" when that status is idle. Without a Remote Control id
-  the card links to the bare claude.ai/code and says so. And, with `claude_remote`
+  the card links to the bare claude.ai/code and says so. A session that has
+  ended (sessions.py `ended`: its host sent a registry without it) is not
+  listed: nobody can answer it in place, so it is in Finished, below. And, with `claude_remote`
   enabled, a cloud session row (claude_remote.py) at `need_input` /
   `needs_action`. The wait starts at the hook row's `waiting_since`; a cloud
   row has none, so its `updated` stands in.
@@ -63,7 +65,10 @@ FINISHED SINCE YOU LOOKED. The last lane, a tab of its own, lists the sessions
 whose last turn ended after `last_visit` without asking
 (fleet_views.finished_sessions), one line each; with no visit recorded it
 covers the last github_fleet.CLOSED_WINDOW_DAYS days. A turn that asked is in
-the main list instead. The lane, and so its tab, is left out when it is empty. The include
+the main list instead. An ended session is listed here too, when it was
+active after that time or would otherwise wait on me, as "ended · resume with
+`claude --resume <id>` in <cwd> on <host>"; its action carries that command as
+argv (ended_need). The lane, and so its tab, is left out when it is empty. The include
 filter, ignores and snoozes apply to it as to every other card.
 
 MARK AS READ, in that lane, and "Mark all as read" under the Needs you
@@ -98,6 +103,10 @@ CODE_URL = "https://claude.ai/code"
 # A session card with no Remote Control id still links somewhere useful, and
 # says why it is not the session itself.
 NO_RC_LABEL = "open claude.ai/code (no Remote Control link)"
+# An ended session's state (sessions.py `ended`), and the session ids its
+# resume command may carry.
+ENDED = "ended"
+RESUME_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 
 CSS = """
 .needs .need { padding:6px 10px; }
@@ -137,10 +146,12 @@ class Need:
     path: "str | None" = None  # a session's working directory
     # A hook session's Remote Control id (sessions.py, from the registry).
     bridge_session_id: "str | None" = None
+    # The command that resolves it, as argv: an ended session's resume.
+    command: "tuple[str, ...] | None" = None
 
     @property
     def action(self) -> view_model.Action:
-        return view_model.Action(self.hint, url=self.url)
+        return view_model.Action(self.hint, command=self.command, url=self.url)
 
 
 # --- approvals ---------------------------------------------------------------
@@ -192,15 +203,24 @@ def _rows(conn: sqlite3.Connection, source: str, kind: str) -> list[dict[str, An
     ]
 
 
-def _session(row: dict[str, Any], now: datetime) -> "Need | None":
-    """A hook session row waiting on me, or None."""
+def _waiting(row: dict[str, Any], now: datetime) -> bool:
+    """Whether a hook session row's last turn waits on me, recently."""
     if row.get("status_bucket") != "waiting" or row.get("empty_spawn"):
-        return None
+        return False
     if row.get("status_category") != "need_input":
+        return False
+    last = score.parse_ts(row.get("updated"))
+    return last is not None and now - last <= timedelta(
+        days=fleet_views.SESSION_IDLE_DAYS
+    )
+
+
+def _session(row: dict[str, Any], now: datetime) -> "Need | None":
+    """A hook session row waiting on me, or None. An ended session cannot be
+    answered in place, so it is the Finished lane's (ended_need)."""
+    if row.get("ended") or not _waiting(row, now):
         return None
     last = score.parse_ts(row.get("updated"))
-    if last is None or now - last > timedelta(days=fleet_views.SESSION_IDLE_DAYS):
-        return None
     asked = bool(row.get("asked"))
     brief = row.get("brief")
     repo = fleet_views.repo_of_path(row.get("cwd"))
@@ -476,14 +496,21 @@ def collapsed(n: Need, now: datetime, ov: overlay.Overlay) -> str:
 
 
 def finished_row(n: Need, now: datetime, ov: overlay.Overlay) -> str:
-    """One line in the Finished lane: title or branch, host, the turn's end."""
-    meta = f"{_e(n.where)} · turn ended {_e(fleet_views.ago(n.since, now))}"
+    """One line in the Finished lane: title or branch, host, the turn's end.
+    An ended session says so and how to resume it, with no link."""
+    ago = _e(fleet_views.ago(n.since, now))
     controls = overlay.card_controls(n.item, ov, now, reorder=False, pin=False)
-    act = (
-        f'<div class="act">→ {view_model.link(n.url, open_label(n))}</div>'
-        if n.url
-        else ""
-    )
+    if n.state == ENDED:
+        meta = f"{_e(n.where)} · last active {ago}"
+        resume = f" · {view_model.code(n.hint)}" if n.hint else ""
+        act = f'<div class="act">→ {ENDED}{resume}</div>'
+    else:
+        meta = f"{_e(n.where)} · turn ended {ago}"
+        act = (
+            f'<div class="act">→ {view_model.link(n.url, open_label(n))}</div>'
+            if n.url
+            else ""
+        )
     return (
         f"<details {_attrs(n, ' done')}><summary>{_title(n, None)}"
         f' <span class="meta">{meta}</span></summary>{act}{controls}</details>'
@@ -491,13 +518,20 @@ def finished_row(n: Need, now: datetime, ov: overlay.Overlay) -> str:
 
 
 def finished(
-    conn: sqlite3.Connection, cfg: dict[str, Any], since: datetime
+    conn: sqlite3.Connection, cfg: dict[str, Any], since: datetime, now: datetime
 ) -> list[Need]:
-    """The sessions that finished a turn after `since`, as Needs."""
+    """The sessions that finished a turn after `since`, then the ended ones
+    (ended_need), as Needs, latest first."""
     out = []
     mirror = {str(r.get("key")): r for r in _rows(conn, sessions.SOURCE, sessions.KIND)}
+    for row in mirror.values():
+        need = ended_need(row, since, now)
+        if need is not None:
+            out.append(need)
     for s in fleet_views.finished_sessions(fleet_views.load(conn, cfg), since):
         row = mirror.get(s.session_id) or {}
+        if row.get("ended"):
+            continue
         bridge = valid_bridge(row.get("bridge_session_id"))
         out.append(
             Need(
@@ -517,7 +551,47 @@ def finished(
                 path=s.cwd,
             )
         )
+    out.sort(key=lambda n: (n.since is not None, n.since or now), reverse=True)
     return out
+
+
+def ended_need(row: dict[str, Any], since: datetime, now: datetime) -> "Need | None":
+    """An ended hook session (sessions.py `ended`) for the Finished lane, or
+    None: one active after `since`, or one that would otherwise wait on me.
+
+    Its process is gone, so there is no Remote Control link: the action is
+    `claude --resume <id>`, run in its directory on its host. A session id
+    that is not plain letters, digits, `_` and `-` gets no command, since it
+    came from another machine and the command is meant to be pasted.
+    """
+    if not row.get("ended") or row.get("empty_spawn"):
+        return None
+    last = score.parse_ts(row.get("updated"))
+    if last is None or not (last > since or _waiting(row, now)):
+        return None
+    sid = str(row.get("key") or row.get("session_id"))
+    host = row.get("host") or "an unknown host"
+    cwd = row.get("cwd")
+    resumable = RESUME_ID.fullmatch(sid) is not None
+    hint = ""
+    if resumable:
+        where = f" in {cwd}" if cwd else ""
+        hint = f"resume with `claude --resume {sid}`{where} on {host}"
+    return Need(
+        item=(sessions.SOURCE, sid),
+        kind=sessions.KIND,
+        title=row.get("title") or f"session {sid}",
+        since=last,
+        url=None,
+        state=ENDED,
+        where=f"on {host}",
+        repo=fleet_views.repo_of_path(cwd),
+        branch=row.get("branch"),
+        hint=hint,
+        command=("claude", "--resume", sid) if resumable else None,
+        host=row.get("host"),
+        path=cwd,
+    )
 
 
 def since_looked(ov: overlay.Overlay, now: datetime) -> datetime:
@@ -543,7 +617,7 @@ def build(
 ) -> Page:
     # An ignored item is gone from the page; the Ignored footer can undo it.
     needs = [n for n in collect(conn, cfg, now) if n.item not in ov.ignored]
-    done = finished(conn, cfg, since_looked(ov, now))
+    done = finished(conn, cfg, since_looked(ov, now), now)
     done = [n for n in done if n.item not in ov.ignored]
     # Then the include filter: a need it switches off is neither snoozed nor
     # listed, so no count on the page reflects it.

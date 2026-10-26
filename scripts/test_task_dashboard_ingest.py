@@ -226,12 +226,17 @@ class RefusalTest(IngestCase):
         self.assert_nothing_written()
 
     def test_unknown_schema_is_400(self):
-        for schema in (4, "1", "2", "3", True, None):
+        for schema in (5, "1", "2", "3", "4", True, None):
             doc = make_doc()
             doc["schema"] = schema
             status, body = self.post(doc)
             self.assertEqual(status, 400, schema)
-            self.assertIn("unsupported schema", body)
+            # The collector matches this text to resend schema 4 as 3, and
+            # deployed servers send it, so the constant must keep it.
+            self.assertEqual(snapshot.UNSUPPORTED_SCHEMA, "unsupported schema")
+            self.assertEqual(
+                json.loads(body), {"error": f"unsupported schema {schema!r}"}
+            )
         self.assert_nothing_written()
 
     def test_malformed_schema_1_is_400(self):
@@ -507,6 +512,17 @@ def schema_3(**kw):
 
 
 class RegistryTest(IngestCase):
+    def test_a_schema_4_registry_entry_keeps_its_cwd(self):
+        doc = schema_3()
+        doc.update(schema=4, registry=[dict(REG, cwd="/h/src/demo")])
+        status, body = self.post(doc)
+        self.assertEqual(status, 200, body)
+        [(raw,)] = self.q("SELECT raw_json FROM issues WHERE kind = 'registry'")
+        self.assertEqual(json.loads(raw)["cwd"], "/h/src/demo")
+        self.assertEqual(
+            self.q("SELECT json_extract(counts, '$.schema') FROM machines"), [(4,)]
+        )
+
     def test_registry_entries_land_as_machine_rows(self):
         status, body = self.post(schema_3())
         self.assertEqual(status, 200, body)
@@ -530,6 +546,12 @@ class RegistryTest(IngestCase):
             # entries, not "keep the last ones".
             self.assertEqual(
                 self.q("SELECT COUNT(*) FROM issues WHERE kind = 'registry'"), [(0,)]
+            )
+            # The schema is recorded, so sessions.py can tell "no registry"
+            # from "an empty one".
+            self.assertEqual(
+                self.q("SELECT json_extract(counts, '$.schema') FROM machines"),
+                [(schema,)],
             )
 
 

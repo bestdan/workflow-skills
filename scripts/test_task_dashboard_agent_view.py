@@ -295,6 +295,25 @@ class SessionLinkTests(Case):
             self.assertIsNone(perm["bridge_session_id"], view)
             self.assertEqual(perm["action"]["url"], "https://claude.ai/code", view)
 
+    def test_an_ended_session_is_finished_with_its_resume_and_left_out_of_now(self):
+        needs_fx.post_registry(
+            self.conn, "2026-10-24T11:59:40.000Z", needs_fx.WITHOUT_TURN
+        )
+        doc = agent_view.build(self.conn, self.cfg, "needs", needs_fx.NOW)
+        lanes = {lane["id"]: lane for lane in doc["lanes"]}
+        self.assertNotIn("s-turn", [i["key"] for i in lanes["needs"]["items"]])
+        [turn] = [i for i in lanes["finished"]["items"] if i["key"] == "s-turn"]
+        self.assertEqual(turn["evidence"], "ended")
+        self.assertEqual(
+            turn["action"],
+            {"review": needs_fx.RESUME, "command": ["claude", "--resume", "s-turn"]},
+        )
+        self.assertIsNone(turn["url"])
+        now = agent_view.build(self.conn, self.cfg, "now", needs_fx.NOW)
+        keys = [i["key"] for lane in now["lanes"] for i in lane["items"]]
+        self.assertNotIn("s-turn", keys)
+        self.assertIn("s-perm", keys)
+
 
 class NowLimitTests(Case):
     def test_all_marks_what_the_list_length_cut_as_limit(self):

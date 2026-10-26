@@ -103,6 +103,8 @@ def ev(sid, ts, event, cwd="/h/src/dotfiles", notification=None, asked=_V1):
     return line
 
 
+TURN_CWD = "/h/src/notes"
+
 SNAPSHOT = {
     "schema": 1,
     "host": "mini",
@@ -113,8 +115,9 @@ SNAPSHOT = {
     "sessions": [
         # Asked a question 6h ago: a real decision, in the main list. The
         # idle_prompt the harness raises a minute later does not clear it.
-        ev("s-turn", "2026-10-24T05:00:00.000Z", "UserPromptSubmit"),
-        ev("s-turn", "2026-10-24T06:00:00.000Z", "Stop", asked=True),
+        # Its own checkout, so no other session's process shares its cwd.
+        ev("s-turn", "2026-10-24T05:00:00.000Z", "UserPromptSubmit", TURN_CWD),
+        ev("s-turn", "2026-10-24T06:00:00.000Z", "Stop", TURN_CWD, asked=True),
         ev("s-turn", "2026-10-24T06:01:00.000Z", "Notification", None, "idle_prompt"),
         # Finished without a question, or the hook could not tell, or a
         # format-1 hook wrote the Stop: none of them waits on me.
@@ -563,6 +566,9 @@ REGISTRY = [
     {"session_id": "s-done", "bridge_session_id": "session_01DONE",
      "name": "done-thing", "status": "idle", "pid": 4102,
      "updated_at": "2026-10-24T11:58:00.000Z", "tmux": None},
+    # Live, and nothing else known about it.
+    {"session_id": "s-pr", "bridge_session_id": None, "name": None,
+     "status": None, "pid": 4103, "updated_at": None, "tmux": None},
 ]  # fmt: skip
 
 
@@ -614,7 +620,8 @@ class RegistryTests(NeedsCase):
             perm,
         )
         self.assertIn("permission prompt · busy", perm)
-        # No registry entry at all: the heuristic label, the cwd title.
+        # A registry entry with nothing but its pid: the heuristic label, the
+        # cwd title.
         pr_card = card(self.page_html, "s-pr")
         self.assertIn("asked (heuristic)", pr_card)
         self.assertIn("(no Remote Control link)", pr_card)
@@ -644,6 +651,130 @@ class RegistryTests(NeedsCase):
         done = card(section(self.page_html, "finished"), "s-done")
         self.assertIn('<span class="title">done-thing</span>', done)
         self.assertIn('href="https://claude.ai/code/session_01DONE"', done)
+
+
+def post_registry(conn, taken_at, registry=(), *, host="mini", schema=3, events=()):
+    """A snapshot from `host` at `taken_at` carrying only the hook `events`;
+    a registry from schema 3."""
+    doc = {"schema": schema, "host": host, "taken_at": taken_at, "worktrees": [],
+           "handoffs": [], "tmux": [], "sessions": list(events),
+           "history": []}  # fmt: skip
+    if schema >= 2:
+        doc["scan_errors"] = []
+    if schema >= 3:
+        doc["registry"] = copy.deepcopy(list(registry))
+    snapshot_adapter.ingest(conn, doc, NOW)
+    sessions.write(conn, sessions.derive(conn, NOW), NOW)
+
+
+WITHOUT_TURN = REGISTRY[1:]  # every entry but s-turn's
+RESUME = f"resume with `claude --resume s-turn` in {TURN_CWD} on mini"
+
+
+class EndedTests(NeedsCase):
+    """A hook session missing from its host's registry has ended."""
+
+    def setUp(self):
+        super().setUp()
+        seed(self.conn)
+        seed_registry(self.conn)
+
+    def end_turn(self, taken_at="2026-10-24T11:59:40.000Z"):
+        post_registry(self.conn, taken_at, WITHOUT_TURN)
+
+    def test_an_ended_session_leaves_needs_and_is_finished_with_its_resume(self):
+        self.assertIn("s-turn", keys(section(self.page(), "needs")))
+        self.end_turn()
+        page = self.page()
+        self.assertNotIn("s-turn", keys(listed(page)))
+        self.assertIn("s-turn", finished_keys(page))
+        row = card(section(page, "finished"), "s-turn")
+        self.assertIn(
+            '<div class="act">→ ended · resume with <code>claude --resume s-turn'
+            f"</code> in {TURN_CWD} on mini</div>",
+            row,
+        )
+        self.assertIn("on mini · last active 6h ago", row)
+        self.assertNotIn("<a ", row.split('<div class="ov">')[0])
+        # The live sessions keep their places.
+        self.assertIn("s-perm", keys(section(page, "approvals")))
+        self.assertIn("s-done", finished_keys(page))
+
+    def test_a_waiting_session_is_listed_ended_even_before_the_last_visit(self):
+        overlay.set_last_visit(self.conn, NOW)
+        self.end_turn()
+        page = self.page()
+        self.assertEqual(finished_keys(page), ["s-turn"])
+        # With every process gone, each session that waited on me is listed,
+        # latest first; a turn that ended, or one working, before the visit
+        # stays out.
+        post_registry(self.conn, "2026-10-24T11:59:50.000Z", [])
+        self.assertEqual(finished_keys(self.page()), ["s-perm", "s-pr", "s-turn"])
+
+    def test_a_host_without_a_registry_ends_nothing(self):
+        # seed() alone is a schema 1 snapshot: no session there has ended.
+        conn = db.connect(Path(self._td.name) / "plain.db")
+        self.addCleanup(conn.close)
+        seed(conn)
+        post_registry(conn, "2026-10-24T11:59:10.000Z", schema=2)
+        rows = needs._rows(conn, sessions.SOURCE, sessions.KIND)
+        self.assertTrue(rows)
+        self.assertFalse(any(r["ended"] for r in rows))
+        self.assertIn(
+            "s-turn", keys(section(needs.render(conn, fleet_cfg(), NOW), "needs"))
+        )
+        # A host whose latest snapshot is schema 2 again ends nothing either,
+        # whatever an earlier schema 3 one said.
+        self.end_turn()
+        post_registry(self.conn, "2026-10-24T11:59:50.000Z", schema=2)
+        self.assertIn("s-turn", keys(section(self.page(), "needs")))
+
+    def test_a_live_process_in_the_same_cwd_under_another_id_ends_nothing(self):
+        # The process may have moved from s-turn to another id (a `/clear`, a
+        # resume) while its registry file kept the old one, so a live entry
+        # in s-turn's cwd may be s-turn itself.
+        other = {"session_id": "s-other", "bridge_session_id": None,
+                 "name": None, "status": "idle", "pid": 4200,
+                 "updated_at": None, "tmux": None}  # fmt: skip
+        post_registry(
+            self.conn, "2026-10-24T11:59:40.000Z", [*WITHOUT_TURN, other],
+            events=[ev("s-other", "2026-10-21T09:00:00.000Z",
+                         "UserPromptSubmit", TURN_CWD)],
+        )  # fmt: skip
+        self.assertIn("s-turn", keys(section(self.page(), "needs")))
+        # Once that process is gone too, s-turn has ended.
+        post_registry(self.conn, "2026-10-24T11:59:50.000Z", WITHOUT_TURN)
+        self.assertIn("s-turn", finished_keys(self.page()))
+
+    def test_another_hosts_registry_ends_nothing_here(self):
+        post_registry(self.conn, "2026-10-24T11:59:40.000Z", host="lindev")
+        self.assertIn("s-turn", keys(section(self.page(), "needs")))
+
+    def test_a_session_back_in_the_registry_is_restored(self):
+        self.end_turn()
+        self.assertNotIn("s-turn", keys(listed(self.page())))
+        post_registry(self.conn, "2026-10-24T11:59:50.000Z", REGISTRY)
+        page = self.page()
+        self.assertIn("s-turn", keys(section(page, "needs")))
+        self.assertNotIn("s-turn", finished_keys(page))
+        self.assertIn("idle: your turn", card(section(page, "needs"), "s-turn"))
+
+    def test_the_resume_action_is_structured_and_a_strange_id_gets_none(self):
+        self.end_turn()
+        p = needs.build(self.conn, fleet_cfg(), NOW, overlay.load(self.conn))
+        [turn] = [n for n in p.finished if n.item[1] == "s-turn"]
+        self.assertEqual(
+            turn.action.as_dict(),
+            {"review": RESUME, "command": ["claude", "--resume", "s-turn"]},
+        )
+        row = {"key": "s; rm -rf ~", "ended": True, "host": "mini",
+               "updated": "2026-10-24T11:00:00Z"}  # fmt: skip
+        odd = needs.ended_need(row, NOW.replace(hour=0), NOW)
+        assert odd is not None
+        self.assertIsNone(odd.command)
+        self.assertEqual(odd.hint, "")
+        self.assertIn('<div class="act">→ ended</div>',
+                      needs.finished_row(odd, NOW, overlay.load(self.conn)))  # fmt: skip
 
 
 EXTERNAL = re.compile(r"<a\b([^>]*)>", re.S)

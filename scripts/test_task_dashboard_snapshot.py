@@ -17,6 +17,7 @@ import tempfile
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest import mock
 
 os.environ["GIT_CONFIG_GLOBAL"] = "/dev/null"
 os.environ["GIT_CONFIG_NOSYSTEM"] = "1"
@@ -134,10 +135,10 @@ class Fixture(unittest.TestCase):
             + history_line(1792784510000, "sess-1", "yes")
         )
 
-    def build(self, runner=None):
+    def build(self, runner=None, **kw):
         return snap.build(
             src_root=self.src, state_dir=self.state, history=self.history,
-            host="testhost", now=NOW, runner=runner or FakeRunner(),
+            host="testhost", now=NOW, runner=runner or FakeRunner(), **kw,
         )  # fmt: skip
 
     def take(self, runner=None):
@@ -149,11 +150,18 @@ class Fixture(unittest.TestCase):
 
 class TestDocument(Fixture):
     def test_validates_against_schema(self):
-        doc, _ = self.build()
+        # A registry directory that does not exist is an empty registry.
+        doc, _ = self.build(registry_dir=self.state / "no-sessions")
         self.assertEqual(snap.validate(doc), [])
-        self.assertEqual(doc["schema"], 3)
+        self.assertEqual(doc["schema"], 4)
         self.assertEqual(doc["registry"], [])
         self.assertEqual(doc["scan_errors"], [])
+        # No registry directory at all reads none: schema 2, which ingest
+        # never reads as every session ended.
+        doc, _ = self.build()
+        self.assertEqual(snap.validate(doc), [])
+        self.assertEqual(doc["schema"], 2)
+        self.assertNotIn("registry", doc)
         self.assertEqual(doc["host"], "testhost")
         self.assertEqual(doc["taken_at"], "2026-10-23T12:00:00.000Z")
 
@@ -430,7 +438,8 @@ class TestRegistry(unittest.TestCase):
         self.assertEqual(
             entry,
             {"session_id": "s", "bridge_session_id": None, "name": None,
-             "status": None, "pid": 7, "updated_at": None, "tmux": None},
+             "status": None, "pid": 7, "updated_at": None, "tmux": None,
+             "cwd": None},
         )  # fmt: skip
 
     def test_a_malformed_bridge_id_is_dropped_and_the_entry_kept(self):
@@ -452,6 +461,29 @@ class TestRegistry(unittest.TestCase):
         self.write("8.json", {"pid": 8, "sessionId": "s"})
         self.assertEqual(snap.registry(self.dir, alive=lambda pid: False), [])
 
+    def test_an_unlistable_directory_is_a_failed_scan_sent_as_schema_2(self):
+        self.write("8.json", {"pid": 8, "sessionId": "s"})
+        # No directory, or a file in its place, is an empty registry.
+        self.assertEqual(snap.registry(self.dir / "absent", lambda p: True), [])
+        self.assertEqual(snap.registry(self.dir / "8.json", lambda p: True), [])
+        real = os.listdir
+
+        def denied(path):
+            if Path(path) == self.dir:
+                raise PermissionError(13, "Permission denied", str(path))
+            return real(path)
+
+        with mock.patch.object(snap.os, "listdir", side_effect=denied):
+            self.assertIsNone(snap.registry(self.dir, alive=lambda pid: True))
+            doc, _ = snap.build(
+                src_root=self.dir / "src", state_dir=self.dir / "state",
+                history=self.dir / "history.jsonl", host="h", now=NOW,
+                runner=FakeRunner(), registry_dir=self.dir, alive=lambda pid: True,
+            )  # fmt: skip
+        self.assertEqual(doc["schema"], 2)
+        self.assertNotIn("registry", doc)
+        self.assertEqual(snap.validate(doc), [])
+
     def test_a_schema_3_document_needs_its_registry(self):
         doc = {"schema": 3, "host": "h", "taken_at": "t", "worktrees": [],
                "scan_errors": [], "handoffs": [], "tmux": [], "sessions": [],
@@ -464,6 +496,30 @@ class TestRegistry(unittest.TestCase):
         self.assertEqual(snap.validate(doc), [])
         doc["schema"] = 2
         self.assertIn("registry: unexpected", snap.validate(doc))
+
+    def test_schema_4_adds_a_registry_cwd_and_downgrades_to_3(self):
+        entry = {"session_id": "s", "bridge_session_id": None, "name": None,
+                 "status": None, "pid": 1, "updated_at": None, "tmux": None}  # fmt: skip
+        sent = dict(entry)
+        doc = {"schema": 4, "host": "h", "taken_at": "t", "worktrees": [],
+               "scan_errors": [], "handoffs": [], "tmux": [], "sessions": [],
+               "history": [], "registry": [sent]}  # fmt: skip
+        self.assertIn("registry[0].cwd: missing", snap.validate(doc))
+        sent["cwd"] = "/h/src/x"
+        self.assertEqual(snap.validate(doc), [])
+        three = snap.downgrade(doc)
+        assert three is not None
+        self.assertEqual((three["schema"], three["registry"]), (3, [entry]))
+        self.assertEqual(snap.validate(three), [])
+        self.assertEqual(sent["cwd"], "/h/src/x")  # not mutated
+        self.assertIn("registry[0].cwd: unexpected key",
+                      snap.validate({**doc, "schema": 3}))  # fmt: skip
+        self.assertIsNone(snap.downgrade(three))
+
+    def test_the_registry_copies_the_process_cwd(self):
+        self.write("9.json", {"pid": 9, "sessionId": "s", "cwd": "/h/src/x"})
+        [entry] = snap.registry(self.dir, alive=lambda pid: True)
+        self.assertEqual(entry["cwd"], "/h/src/x")
 
 
 class TestApprovalShaped(unittest.TestCase):

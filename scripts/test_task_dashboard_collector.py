@@ -61,11 +61,13 @@ class FakeIngest:
                 length = int(self.headers.get("Content-Length") or 0)
                 body = self.rfile.read(length)
                 outer.calls.append((self.path, dict(self.headers), json.loads(body)))
+                # A script item is a status, or (status, body).
                 code = outer.script.pop(0) if outer.script else 200
+                code, out = code if isinstance(code, tuple) else (code, None)
                 self.send_response(code)
                 if 300 <= code < 400:
                     self.send_header("Location", "http://127.0.0.1:9/elsewhere")
-                out = json.dumps({"code": code}).encode()
+                out = (out or json.dumps({"code": code})).encode()
                 self.send_header("Content-Length", str(len(out)))
                 self.end_headers()
                 self.wfile.write(out)
@@ -202,6 +204,33 @@ class TestPush(Home):
         self.assertEqual(self.run_once(), 0)
         self.assertEqual(self.spool(), [])
         self.assertTrue(any("refused" in m and "for good" in m for m in self.log_lines))
+        self.assertEqual(len(self.ingest.calls), 1)  # not resent
+
+    def test_a_server_older_than_schema_4_gets_it_as_schema_3(self):
+        # A collector updated before its server: nothing is lost but the
+        # registry's cwd.
+        self.hook(("UserPromptSubmit", "2026-10-23T10:00:00.000Z"))
+        registry_file(self.home, 7, sessionId="s", cwd="/h/src/x")
+        self.ingest.script = [(400, '{"error": "unsupported schema 4"}')]
+        rc = collector.collect(
+            self.cfg(), home=self.home, now=NOW, runner=tmux_runner,
+            log=self.log_lines.append, alive=lambda pid: True,
+        )  # fmt: skip
+        self.assertEqual(rc, 0)
+        first, second = self.ingest.docs
+        self.assertEqual(first["schema"], 4)
+        self.assertEqual(first["registry"][0]["cwd"], "/h/src/x")
+        self.assertEqual(second["schema"], 3)
+        self.assertNotIn("cwd", second["registry"][0])
+        self.assertEqual(snapshot.validate(second), [])
+        self.assertEqual(second["sessions"], first["sessions"])
+        self.assertEqual(len(second["sessions"]), 1)
+        self.assertEqual(self.spool(), [])
+        self.assertIn("sessions", self.cursor())
+        # Refused again as schema 3, it is dropped like any other 400.
+        self.ingest.script = [(400, '{"error": "unsupported schema 4"}'), 400]
+        self.assertEqual(self.run_once(), 0)
+        self.assertEqual(len(self.ingest.calls), 4)
 
     def test_401_and_a_redirect_are_kept(self):
         for code in (401, 403, 302):
@@ -328,7 +357,7 @@ class TestRegistry(Home):
                       name="older", status="busy", updatedAt=1792700000000)  # fmt: skip
         registry_file(self.home, 202, **common, bridgeSessionId="session_01NEW",
                       name="src-32", status="idle", updatedAt=1792790000000,
-                      tmux="claude-rc:@56.%56")  # fmt: skip
+                      tmux="claude-rc:@56.%56", cwd="/h/src/repo")  # fmt: skip
         registry_file(self.home, 300, sessionId="sid-2", name="plain", status="busy")
         (self.home / ".claude/sessions/bad.json").write_text("{not json")
         (self.home / ".claude/sessions/9.abc.key").write_text("not a registry file")
@@ -345,10 +374,10 @@ class TestRegistry(Home):
                 {"session_id": "sid-1", "bridge_session_id": "session_01NEW",
                  "name": "src-32", "status": "idle", "pid": 202,
                  "updated_at": "2026-10-23T21:13:20.000Z",
-                 "tmux": "claude-rc:@56.%56"},
+                 "tmux": "claude-rc:@56.%56", "cwd": "/h/src/repo"},
                 {"session_id": "sid-2", "bridge_session_id": None,
                  "name": "plain", "status": "busy", "pid": 300,
-                 "updated_at": None, "tmux": None},
+                 "updated_at": None, "tmux": None, "cwd": None},
             ],
         )  # fmt: skip
         body = json.dumps(doc)

@@ -50,6 +50,9 @@ WHAT EACH ANSWER DOES:
     2xx                  accepted: delete, advance the cursor
     409 (stale)          the server already has this or newer; a resend of a
                          snapshot whose answer was lost lands here. Same as 2xx
+    400 "unsupported     a server older than this collector: a schema 4
+    schema"              snapshot is resent at once as schema 3
+                         (snapshot.downgrade), and that answer decides
     other 4xx but 401,   refused for good, and resending cannot change that:
     403, 408, 429        delete, advance the cursor, say why on stderr
     5xx, 3xx, 401, 403,  stop and keep it for the next run. 401, 403 and a
@@ -264,6 +267,17 @@ def flush(
             continue
         body = json.dumps(entry["doc"]).encode()
         status, detail = poster(cfg["ingest_url"], cfg["token"], body)
+        older = snapshot.downgrade(entry["doc"])
+        if (
+            status == 400
+            and older is not None
+            and snapshot.UNSUPPORTED_SCHEMA in detail
+        ):
+            # A server that predates this schema: send what it can read.
+            log(f"server refused schema {entry['doc']['schema']}; resending as 3")
+            status, detail = poster(
+                cfg["ingest_url"], cfg["token"], json.dumps(older).encode()
+            )
         outcome = verdict(status)
         if outcome == "keep":
             left = len(spooled(spool))

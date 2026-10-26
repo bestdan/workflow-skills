@@ -1,11 +1,12 @@
-"""Write one machine snapshot (snapshot.py, ``schema: 1``, ``2`` or ``3``) into
+"""Write one machine snapshot (snapshot.py, ``schema: 1`` to ``4``) into
 the mirror.
 
 The fleet view's ingest endpoint (ingest.py) calls ``ingest()`` once it has
 authenticated the caller and validated the document. Everything is written in
 one transaction, so a snapshot lands whole or not at all:
 
-- worktrees, handoffs, tmux sessions and live registry entries (schema 3)
+- worktrees, handoffs, tmux sessions and live registry entries (schema 3; 4
+  adds each entry's ``cwd``)
   become ``issues`` rows under ``source = 'machine:<host>'`` with ``kind``
   ``worktree`` | ``handoff`` | ``tmux`` | ``registry``; sessions.py joins a
   registry row to its session's row by host and session id. A snapshot is
@@ -22,7 +23,10 @@ one transaction, so a snapshot lands whole or not at all:
 - ``sessions`` and ``history`` are deltas, appended to ``session_events`` and
   ``history_entries``. A hook line's ``asked`` (format 2 Stop lines) is stored
   as 1 / 0, and NULL when it is null or absent.
-- ``machines.last_snapshot_at`` records the snapshot's own ``taken_at``.
+- ``machines.last_snapshot_at`` records the snapshot's own ``taken_at``, and
+  ``machines.counts`` its ``schema`` beside the counts: sessions.py reads a
+  host whose latest snapshot is schema 3 or later as one that sent a registry,
+  so a hook session missing from it has ended.
 
 A snapshot no newer than the last one ingested from its host is refused with
 ``StaleSnapshot`` and nothing is written. That is what makes a resend harmless:
@@ -124,6 +128,7 @@ def ingest(
     received = _ts(now)
     rows = item_rows(doc)
     counts = {
+        "schema": doc["schema"],
         "worktrees": len(doc["worktrees"]),
         "handoffs": len(doc["handoffs"]),
         "tmux": len(doc["tmux"]),
