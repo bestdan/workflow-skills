@@ -1,9 +1,11 @@
 """The overlay: the user's pins, pinned order, snoozes, notes, kind tags,
-ignores, last visit and each view's remembered include filter.
+ignores, last visit, each view's remembered include filter, and the answers
+to Now's "why not now" picker.
 
 Every row is keyed by (source, item_key), the same pair as `issues`, except
 `last_visit`, which is one timestamp for the whole overlay, and
-`view_includes`, which is keyed by view name (include.py). The sync
+`view_includes`, which is keyed by view name (include.py), and `why_not`,
+which holds any number of answers per item (whynot.py reads them). The sync
 never writes these tables, and nothing here reads `issues`: a row for an item
 that has left the mirror is kept as is, and the views simply have no card to
 show it on. It is the only state on the machine that cannot be rebuilt from
@@ -32,11 +34,11 @@ import score
 
 EXPORT_FORMAT = "task-dashboard-overlay"
 # 2 added kind_tags, focus and last_visit; 3 added ignores; 4 added
-# view_includes; 5 dropped focus, a feature since removed. An older file still
-# imports, with what it lacks empty and its focus rows dropped, so a backup
-# taken before an upgrade can be restored.
-EXPORT_VERSION = 5
-IMPORT_VERSIONS = (1, 2, 3, 4, 5)
+# view_includes; 5 dropped focus, a feature since removed; 6 added why_not. An
+# older file still imports, with what it lacks empty and its focus rows
+# dropped, so a backup taken before an upgrade can be restored.
+EXPORT_VERSION = 6
+IMPORT_VERSIONS = (1, 2, 3, 4, 5, 6)
 MAX_KEY = 512
 MAX_BODY = 256 * 1024  # a POST body; room for a long note, percent-encoded
 MAX_NOTE = 20_000
@@ -61,9 +63,26 @@ KIND_TAGS = ("side-quest", "substantial")
 # The Snooze button hides a card for this many days; Unsnooze clears it.
 SNOOZE_DAYS = 7
 
+# The "why not now" picker's reasons, (code, label), in the order it shows
+# them. A code is what is stored, so a label may change and a code may not.
+WHY_NOT_REASONS = (
+    ("not_urgent", "not urgent"),
+    ("blocked", "blocked / waiting on someone"),
+    ("wrong_priority", "wrong priority (too high)"),
+    ("elsewhere", "doing it elsewhere"),
+    ("other", "other"),
+)
+WHY_NOT_CODES = tuple(code for code, _ in WHY_NOT_REASONS)
+MAX_WHY_TEXT = 500
+# A `why_not` row as export writes it; `id` is the DB's and is not carried.
+WHY_NOT_COLUMNS = (
+    "source", "item_key", "kind", "title", "reason", "text", "score", "terms",
+    "features", "recorded_at",
+)  # fmt: skip
+
 ACTIONS = (
     "pin", "unpin", "order", "snooze", "note", "tag", "visit", "ignore",
-    "unignore", "include",
+    "unignore", "include", "whynot",
 )  # fmt: skip
 
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
@@ -167,6 +186,56 @@ def snooze(conn: sqlite3.Connection, item: Item, until: str) -> None:
         conn.execute(
             "INSERT OR REPLACE INTO snoozes (source, item_key, until) VALUES (?, ?, ?)",
             (*item, _iso_date(until)),
+        )
+
+
+def why_not(
+    conn: sqlite3.Connection,
+    item: Item,
+    until: str,
+    reason: str,
+    text: str = "",
+    snap: "dict[str, Any] | None" = None,
+    now: "datetime | None" = None,
+) -> None:
+    """Snooze until a date and record why, in one transaction.
+
+    `snap` is the item as Now ranked it at this moment (whynot.snapshot): its
+    kind, title, fleet score, score terms and features. None when Now no
+    longer ranks it, as from a page left open: the answer is still kept,
+    with what is known.
+    """
+    if reason not in WHY_NOT_CODES:
+        raise OverlayError(
+            f"reason must be one of {', '.join(WHY_NOT_CODES)}, got {reason!r}"
+        )
+    if len(text) > MAX_WHY_TEXT:
+        raise OverlayError(f"the reason text is longer than {MAX_WHY_TEXT} characters")
+    if not until:
+        raise OverlayError("whynot needs a snooze date")
+    until = _iso_date(until)
+    snap = snap or {}
+    with conn:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            "INSERT INTO why_not (source, item_key, kind, title, reason, text,"
+            " score, terms, features, recorded_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                *item,
+                snap.get("kind"),
+                snap.get("title"),
+                reason,
+                text.strip() or None,
+                snap.get("score"),
+                json.dumps(snap.get("terms") or []),
+                json.dumps(snap.get("features") or {}, sort_keys=True),
+                _now(now),
+            ),
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO snoozes (source, item_key, until) VALUES (?, ?, ?)",
+            (*item, until),
         )
 
 
@@ -364,6 +433,7 @@ def apply(
     action: str,
     form: "dict[str, list[str]]",
     now: "datetime | None" = None,
+    snapshot: "Callable[[Item], dict[str, Any] | None] | None" = None,
 ) -> None:
     """One overlay POST, from its parsed form. Raises OverlayError on bad input.
 
@@ -373,6 +443,8 @@ def apply(
     `visit` takes no key, only `at`: the render time of the page whose
     "Mark as read" was pressed (absent means now). `include` takes no key,
     only `view` and `include`, the view's comma-joined groups (empty: none).
+    `whynot` takes `until`, `reason` and an optional `text`, and asks
+    `snapshot` for the item as Now ranks it.
     """
     if action not in ACTIONS:
         raise OverlayError(f"unknown overlay action: {action!r}")
@@ -401,6 +473,16 @@ def apply(
         unpin(conn, item)
     elif action == "snooze":
         snooze(conn, item, (form.get("until") or [""])[0].strip())
+    elif action == "whynot":
+        why_not(
+            conn,
+            item,
+            (form.get("until") or [""])[0].strip(),
+            (form.get("reason") or [""])[0].strip(),
+            (form.get("text") or [""])[0],
+            snapshot(item) if snapshot else None,
+            now,
+        )
     elif action == "tag":
         kind = (form.get("tag") or [""])[0].strip()
         tag(conn, item, kind, (form.get("text") or [""])[0], now)
@@ -489,6 +571,7 @@ def export(conn: sqlite3.Connection, now: "datetime | None" = None) -> dict[str,
     tables: dict[str, list[dict[str, Any]]] = {}
     last_visit: "str | None" = None
     views: list[dict[str, Any]] = []
+    answers: list[dict[str, Any]] = []
     # One read transaction, so every table comes from the same snapshot: a pin
     # committed between two SELECTs would otherwise give a file import refuses.
     conn.execute("BEGIN")
@@ -508,6 +591,14 @@ def export(conn: sqlite3.Connection, now: "datetime | None" = None) -> dict[str,
             )
             if v not in include.RETIRED
         ]
+        cur = conn.execute(
+            f"SELECT {', '.join(WHY_NOT_COLUMNS)} FROM why_not ORDER BY recorded_at, id"
+        )
+        for row in cur:
+            answer = dict(zip(WHY_NOT_COLUMNS, row))
+            answer["terms"] = _json_or(answer["terms"], [])
+            answer["features"] = _json_or(answer["features"], {})
+            answers.append(answer)
     finally:
         conn.rollback()
     return {
@@ -516,8 +607,17 @@ def export(conn: sqlite3.Connection, now: "datetime | None" = None) -> dict[str,
         "exported_at": _now(now),
         "last_visit": last_visit,
         "view_includes": views,
+        "why_not": answers,
         "tables": tables,
     }
+
+
+def _json_or(text: "str | None", default: Any) -> Any:
+    try:
+        value = json.loads(text or "")
+    except ValueError:
+        return default
+    return value if isinstance(value, type(default)) else default
 
 
 def _finite(value: "int | float") -> bool:
@@ -591,6 +691,71 @@ def _check_view_includes(value: Any) -> list[tuple[Any, ...]]:
     return out
 
 
+def _number(value: Any) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and _finite(value)
+    )
+
+
+def _check_why_not(value: Any) -> list[tuple[Any, ...]]:
+    """A version 6 file's `why_not`, as rows in WHY_NOT_COLUMNS order."""
+    if not isinstance(value, list):
+        raise OverlayError("why_not must be a list")
+    out: list[tuple[Any, ...]] = []
+    for i, row in enumerate(value):
+        where = f"why_not[{i}]"
+        if not isinstance(row, dict) or set(row) != set(WHY_NOT_COLUMNS):
+            raise OverlayError(
+                f"{where} must have exactly: {', '.join(WHY_NOT_COLUMNS)}"
+            )
+        _ident(row["source"], "source")
+        _ident(row["item_key"], "key")
+        for col in ("kind", "title", "text"):
+            if row[col] is not None and not isinstance(row[col], str):
+                raise OverlayError(f"{where}: {col} has the wrong type")
+        if row["reason"] not in WHY_NOT_CODES:
+            raise OverlayError(
+                f"{where}: reason must be one of {', '.join(WHY_NOT_CODES)}"
+            )
+        if isinstance(row["text"], str) and len(row["text"]) > MAX_WHY_TEXT:
+            raise OverlayError(
+                f"{where}: text is longer than {MAX_WHY_TEXT} characters"
+            )
+        if row["score"] is not None and not _number(row["score"]):
+            raise OverlayError(f"{where}: score has the wrong type")
+        terms = row["terms"]
+        if not isinstance(terms, list) or not all(
+            isinstance(t, list)
+            and len(t) == 3
+            and isinstance(t[0], str)
+            and _number(t[1])
+            and isinstance(t[2], str)
+            for t in terms
+        ):
+            raise OverlayError(f"{where}: terms must be [name, value, why] triples")
+        features = row["features"]
+        if not isinstance(features, dict) or not all(
+            v is None or isinstance(v, str) or _number(v) for v in features.values()
+        ):
+            raise OverlayError(
+                f"{where}: features must map names to text, numbers or null"
+            )
+        at = row["recorded_at"]
+        if not isinstance(at, str) or not _STAMP.fullmatch(at):
+            raise OverlayError(f"{where}: recorded_at must be YYYY-MM-DDTHH:MM:SSZ")
+        out.append(
+            tuple(
+                json.dumps(row[c], sort_keys=c == "features")
+                if c in ("terms", "features")
+                else row[c]
+                for c in WHY_NOT_COLUMNS
+            )
+        )
+    return out
+
+
 def validate(
     doc: Any,
 ) -> "tuple[dict[str, list[tuple[Any, ...]]], str | None]":
@@ -600,7 +765,8 @@ def validate(
     A version 1 file has only the first four tables and no `last_visit`; the
     tables added in version 2 (and `ignores`, added in 3) come back empty. A
     version 1 to 3 file has no `view_includes`, which comes back empty. A
-    version 2 to 4 file's `focus` rows are dropped unread.
+    version 2 to 4 file's `focus` rows are dropped unread. A version 1 to 5
+    file has no `why_not`, which comes back empty.
     """
     if not isinstance(doc, dict):
         raise OverlayError("import file is not a JSON object")
@@ -634,6 +800,14 @@ def validate(
         if "view_includes" not in doc:
             raise OverlayError("view_includes is missing (an empty list when none)")
         views = _check_view_includes(doc["view_includes"])
+    if version < 6:
+        if "why_not" in doc:
+            raise OverlayError(f"a version {version} file has no why_not")
+        answers: list[tuple[Any, ...]] = []
+    else:
+        if "why_not" not in doc:
+            raise OverlayError("why_not is missing (an empty list when none)")
+        answers = _check_why_not(doc["why_not"])
     out: dict[str, list[tuple[Any, ...]]] = {}
     for table, cols in COLUMNS.items():
         rows = tables.get(table, [])
@@ -672,6 +846,7 @@ def validate(
     if bare:
         raise OverlayError(f"{SUBSTANTIAL_NEEDS_NOTE}: {', '.join(bare)}")
     out["view_includes"] = views
+    out["why_not"] = answers
     return out, last_visit
 
 
@@ -680,8 +855,18 @@ def import_(conn: sqlite3.Connection, doc: Any) -> dict[str, int]:
     rows, last_visit = validate(doc)
     with conn:
         conn.execute("BEGIN IMMEDIATE")
-        for table in (*COLUMNS, *db.OVERLAY_SINGLETONS, *db.OVERLAY_VIEW_TABLES):
+        for table in (
+            *COLUMNS,
+            *db.OVERLAY_SINGLETONS,
+            *db.OVERLAY_VIEW_TABLES,
+            *db.OVERLAY_LOG_TABLES,
+        ):
             conn.execute(f'DELETE FROM "{table}"')
+        conn.executemany(
+            f"INSERT INTO why_not ({', '.join(WHY_NOT_COLUMNS)})"
+            f" VALUES ({', '.join('?' * len(WHY_NOT_COLUMNS))})",
+            rows["why_not"],
+        )
         conn.executemany(
             "INSERT INTO view_includes (view, groups, set_at) VALUES (?, ?, ?)",
             rows["view_includes"],
@@ -748,7 +933,15 @@ JS = """
     }
     else if (act === 'visit') { post('visit', [['at', b.dataset.at]]); }
     else if (act === 'snooze') {
+      // On Now, Snooze first asks why; the picker's Skip snoozes without asking.
+      var picker = b.dataset.why && b.closest('.card').querySelector('.whynot');
+      if (picker) { picker.hidden = !picker.hidden; return; }
       post('snooze', it.concat([['until', b.dataset.until]]));
+    }
+    else if (act === 'whynot') {
+      var box = b.closest('.whynot');
+      post('whynot', it.concat([['until', box.dataset.until],
+        ['reason', b.dataset.reason], ['text', box.querySelector('input').value]]));
     }
     else if (act === 'note') {
       post('note', it.concat([['text', b.closest('details').querySelector('textarea').value]]));
@@ -784,11 +977,24 @@ def card_attrs(item: Item, ov: Overlay, now: datetime) -> str:
     return f'class="{cls}" data-source="{_e(item[0])}" data-key="{_e(item[1])}"'
 
 
+def snooze_until(now: datetime) -> str:
+    """The date the Snooze button snoozes until: SNOOZE_DAYS local days on."""
+    return (now.astimezone() + timedelta(days=SNOOZE_DAYS)).date().isoformat()
+
+
 def card_controls(
-    item: Item, ov: Overlay, now: datetime, *, reorder: bool, pin: bool = True
+    item: Item,
+    ov: Overlay,
+    now: datetime,
+    *,
+    reorder: bool,
+    pin: bool = True,
+    why_not: bool = False,
 ) -> str:
     """The pin toggle, tag picker, snooze button, note editor, and
-    (pinned lane) up/down. `pin=False` drops Pin where nothing ranks by it."""
+    (pinned lane) up/down. `pin=False` drops Pin where nothing ranks by it.
+    `why_not=True` makes Snooze open the card's "why not now" picker
+    (whynot.picker, which the caller puts in the card) instead of posting."""
     pinned = ov.is_pinned(item)
     parts = []
     if pin:
@@ -817,9 +1023,10 @@ def card_controls(
             '<button type="button" data-ov="snooze" data-until="">Unsnooze</button>'
         )
     else:
-        back = (now.astimezone() + timedelta(days=SNOOZE_DAYS)).date().isoformat()
+        back = snooze_until(now)
+        why = ' data-why="1"' if why_not else ""
         parts.append(
-            f'<button type="button" data-ov="snooze" data-until="{back}"'
+            f'<button type="button" data-ov="snooze" data-until="{back}"{why}'
             f' title="Snooze until {back}: hidden from Now and Needs, dimmed'
             f' elsewhere">Snooze {SNOOZE_DAYS}d</button>'
         )

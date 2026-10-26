@@ -30,7 +30,8 @@ why line names the terms that put it there, and they add up to its score.
 SHARED BEHAVIOUR, as on every view: the include filter, ignores and snoozes
 apply; a snoozed item is left out and counted. Below the list, "N more on
 Needs you" counts the Needs you items the list did not reach. A card's
-controls are the ordinary ones, the Snooze button included.
+controls are the ordinary ones, except that Snooze first asks "why not
+now?" (whynot.py, which also notes each day's shown items as its base rate).
 """
 
 import html
@@ -48,6 +49,7 @@ import needs
 import overlay
 import score
 import sync
+import whynot
 
 _e = html.escape
 
@@ -212,6 +214,17 @@ def candidates(
     return out
 
 
+def snapshot_of(
+    conn: sqlite3.Connection, cfg: dict[str, Any], item: overlay.Item, now: datetime
+) -> "dict[str, Any] | None":
+    """The item as Now ranks it right now, for a "why not now" answer; None
+    when Now no longer ranks it."""
+    for r in candidates(conn, cfg, now):
+        if r.need.item == item:
+            return whynot.snapshot(r, now)
+    return None
+
+
 def order(ranked: list[Ranked], ov: overlay.Overlay) -> list[Ranked]:
     """Pinned first in the overlay's order, then the highest score; a tie goes
     to the longer wait."""
@@ -293,7 +306,8 @@ def card(r: Ranked, now: datetime, ov: overlay.Overlay) -> str:
         f"{needs._title(n, n.url)}"
         f'<div class="meta">{meta}</div>'
         f'<div class="why" data-terms="{terms}">{_e(why_line(r))}</div>'
-        f"{act_html}{overlay.card_controls(n.item, ov, now, reorder=False)}</div>"
+        f"{act_html}{overlay.card_controls(n.item, ov, now, reorder=False, why_not=True)}"
+        f"{whynot.picker(overlay.snooze_until(now))}</div>"
     )
 
 
@@ -305,6 +319,7 @@ def render(
 ) -> str:
     ov = overlay.load(conn)
     p = build(conn, cfg, now, ov, inc)
+    whynot.record_shown(conn, p.shown, now)
     parts = []
     if not sync.fleet_enabled(cfg):
         parts.append(

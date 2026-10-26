@@ -2,10 +2,13 @@
 
 Two kinds of table share one file and must stay apart. MIRROR tables are the
 sync's: any row may be overwritten or deleted on the next run. OVERLAY tables
-(pins, order, snoozes, notes, kind tags, ignores, last visit, view filters) are
+(pins, order, snoozes, notes, kind tags, ignores, last visit, view filters,
+"why not now" answers) are
 the user's, keyed by (source, item key) apart from the one-row last visit and
 the per-view filters, and a sync never touches them; they are the only state
-here that cannot be rebuilt.
+here that cannot be rebuilt. `now_shown`, the base rate Now's "why not now"
+answers are compared with, is neither: nothing rebuilds it, but losing it costs
+only the comparison, so it is not exported either.
 
 The DB lives under ~/.local/state, outside every checkout and plugin directory,
 so a plugin update never wipes the overlay. WAL mode lets the HTTP thread read a
@@ -46,6 +49,8 @@ OVERLAY_TABLES = (
 OVERLAY_SINGLETONS = ("last_visit",)
 # Keyed by view name rather than by item: the remembered include filters.
 OVERLAY_VIEW_TABLES = ("view_includes",)
+# Append-only answers, many per item: Now's "why not now" (whynot.py).
+OVERLAY_LOG_TABLES = ("why_not",)
 
 _V1 = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -349,6 +354,39 @@ DROP INDEX IF EXISTS focus_one;
 DROP TABLE IF EXISTS focus;
 """
 
+# Version 9: Now's "why not now" (whynot.py).
+#
+# - `why_not`: one row per answer to the picker that opens when a Now card is
+#   snoozed, with the item's fleet score, its score terms (a JSON list of
+#   [name, value, why]) and its other features (a JSON object) as they stood
+#   at that moment. Overlay state: export and import carry it.
+# - `now_shown`: the items Now showed, one row per item per local day however
+#   often it rendered, with the same features. It is the base rate that
+#   `dashboard.py tune` compares the answers with.
+_V9 = """
+CREATE TABLE why_not (
+    id INTEGER PRIMARY KEY,
+    source TEXT NOT NULL,
+    item_key TEXT NOT NULL,
+    kind TEXT,
+    title TEXT,
+    reason TEXT NOT NULL,
+    text TEXT,
+    score REAL,
+    terms TEXT NOT NULL,
+    features TEXT NOT NULL,
+    recorded_at TEXT NOT NULL
+);
+CREATE INDEX why_not_recorded ON why_not (recorded_at);
+CREATE TABLE now_shown (
+    day TEXT NOT NULL,
+    source TEXT NOT NULL,
+    item_key TEXT NOT NULL,
+    features TEXT NOT NULL,
+    PRIMARY KEY (day, source, item_key)
+);
+"""
+
 # Ordered, ascending, append-only: never edit a shipped entry.
 #
 # migrate() runs a script one statement at a time through _statements, which
@@ -368,6 +406,7 @@ MIGRATIONS: list[tuple[int, str]] = [
     (6, _V6),
     (7, _V7),
     (8, _V8),
+    (9, _V9),
 ]
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 

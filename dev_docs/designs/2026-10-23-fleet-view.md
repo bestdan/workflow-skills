@@ -228,7 +228,11 @@ wins when both did.
 > queue drawn from Needs you plus the owner's own started and ready issues and
 > PRs, by the `[score.fleet]` weights. Item 1's "the home page" describes the
 > view as first designed. The ranking rules are `fleet_now.py`'s module
-> docstring.
+> docstring. Snoozing a card on Now asks "why not now?" and records the
+> answer with the item's score terms and features. Health shows the answers,
+> and `dashboard.py tune` suggests `[score.fleet]` changes from them. It
+> only suggests, and nothing calls a model at runtime. The rules are
+> `whynot.py`'s module docstring.
 
 **The two caps limit different things and both stand.** The side-quest cap
 limits which tooling work is open. The review-queue cap limits how much

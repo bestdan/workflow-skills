@@ -1,7 +1,7 @@
 ---
 name: task-dashboard
-description: Install, check, sync, open, back up, or remove the local task dashboard — the always-on, localhost-only page that mirrors your Jira work (through acli) and GitHub PRs (through gh) into SQLite and ranks what to do next. Subcommands install | status | sync-now | open | export | import | uninstall. Use when the user wants that dashboard set up as a login agent on their Mac, asks whether it is running or how stale it is, wants it refreshed now, wants its link, wants to back up or restore their pins, order, snoozes and notes, or wants it taken off the machine.
-argument-hint: "install | status | sync-now [--reconcile] | open | export <file> | import <file> | uninstall"
+description: Install, check, sync, open, back up, or remove the local task dashboard — the always-on, localhost-only page that mirrors your Jira work (through acli) and GitHub PRs (through gh) into SQLite and ranks what to do next. Subcommands install | status | sync-now | open | export | import | tune | uninstall. Use when the user wants that dashboard set up as a login agent on their Mac, asks whether it is running or how stale it is, wants it refreshed now, wants its link, wants to back up or restore their pins, order, snoozes and notes, wants the fleet Now's ranking tuned from their "why not now" answers, or wants it taken off the machine.
+argument-hint: "install | status | sync-now [--reconcile] | open | export <file> | import <file> | tune [--days N] | uninstall"
 ---
 
 # task-dashboard
@@ -32,7 +32,7 @@ needs the sandbox escape** because they reach Atlassian and GitHub hosts.
 the agent's launchd state; a sandbox refusal there is reported as "cannot read
 the agent's state", never as "not loaded". `sync-now` makes an HTTP request to
 the server on `127.0.0.1`, which the sandbox's network filter may refuse.
-`open`, `export` and `import` touch only local files.
+`open`, `export`, `import` and `tune` touch only local files.
 
 `status`, `sync-now`, `open` and `uninstall` use the config and DB paths that
 `install` recorded in the plist, unless a flag or a `TASK_DASHBOARD_*` variable
@@ -131,14 +131,46 @@ LAN address.
 
 ## export, import
 
-The overlay (pins, order, snoozes, notes, kind tags, ignores and each
-view's include filter) is the one thing on this machine that cannot be
+The overlay (pins, order, snoozes, notes, kind tags, ignores, each view's
+include filter, and the fleet Now's "why not now" answers) is the one thing on this machine that cannot be
 rebuilt from Jira or GitHub.
 
 - `DASH export <file>` writes it as JSON. With no file it prints to stdout.
 - `DASH import <file>` **replaces** the whole overlay with the file's
   contents, and refuses a malformed file without changing anything. Confirm
   with the user before importing over an overlay that has rows.
+- The Now base rate `tune` compares answers with (`now_shown`) is not backed
+  up; it rebuilds as Now is viewed.
+
+## tune
+
+On the fleet instance, snoozing a card on Now asks "why not now?" and records
+the answer with the item's score terms and other features; each day's shown
+items are kept as the base rate. `tune` turns those into proposals. **It only
+proposes: you never apply a change the user has not approved, and the
+dashboard itself never calls a model.**
+
+1. Run `DASH tune --json` (last 30 days; `--days N` for another window). It
+   reads the DB and the config's `[score.fleet]` weights and writes nothing.
+2. Read what it prints:
+   - `weights`: a term with `suggest` set was the largest term of most
+     "wrong priority" answers. Its `suggest.weight` is a starting point.
+   - `candidates`: feature values that snoozes lean towards, against what Now
+     showed, with the `free_text` and `reasons` of those answers. When
+     `scored_by` is set, a term already reads that feature: propose a weight.
+     Otherwise propose a new `[score.fleet]` term: its name, the field it
+     would read (the feature), its sign and a starting weight.
+   - `rows`: every answer. Read the free text for patterns no feature names.
+3. Put each proposal to the user, one at a time, with the evidence from the
+   output. Apply only what they approve:
+   - a weight edit goes in the config file (`~/.config/task-dashboard/config.toml`
+     unless install recorded another), and the server reads it at its next
+     start: `launchctl kickstart -k gui/$(id -u)/com.bestdan.task-dashboard`,
+     unsandboxed;
+   - a new term is a code change to `score.py` and `fleet_now.py`, made as an
+     ordinary pull request, never a config edit.
+
+With few answers `tune` suggests nothing; say so rather than guessing.
 
 ## uninstall
 
