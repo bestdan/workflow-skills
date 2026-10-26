@@ -50,6 +50,11 @@ def dump(conn):
         out[t] = conn.execute(f'SELECT * FROM "{t}"').fetchall()
     for t in db.OVERLAY_VIEW_TABLES:
         out[t] = conn.execute(f'SELECT * FROM "{t}" ORDER BY view').fetchall()
+    # The answers' own ids are the DB's and are not exported.
+    cols = ", ".join(overlay.WHY_NOT_COLUMNS)
+    out["why_not"] = conn.execute(
+        f"SELECT {cols} FROM why_not ORDER BY recorded_at, id"
+    ).fetchall()
     return out
 
 
@@ -58,13 +63,16 @@ FOCUS_ROWS = [{"source": "jira", "item_key": "ABC-1", "set_at": "2026-10-23T12:0
 
 
 def legacy(doc, version):
-    """`doc` (a current export) as a version 2 to 4 file, focus row included."""
+    """`doc` (a current export) as a version 2 to 5 file, with a focus row
+    up to version 4."""
     old = {
         k: v
         for k, v in copy.deepcopy(doc).items()
-        if version >= 4 or k != "view_includes"
+        if (version >= 4 or k != "view_includes") and k != "why_not"
     }
     old["version"] = version
+    if version == 5:
+        return old
     tables = overlay.V2_TABLES if version == 2 else overlay.V3_TABLES
     old["tables"] = {t: old["tables"].get(t, []) for t in tables}
     old["tables"]["focus"] = copy.deepcopy(FOCUS_ROWS)
@@ -74,8 +82,20 @@ def legacy(doc, version):
 def empty():
     return {
         t: []
-        for t in db.OVERLAY_TABLES + db.OVERLAY_SINGLETONS + db.OVERLAY_VIEW_TABLES
+        for t in db.OVERLAY_TABLES
+        + db.OVERLAY_SINGLETONS
+        + db.OVERLAY_VIEW_TABLES
+        + db.OVERLAY_LOG_TABLES
     }
+
+
+WHY_SNAP = {
+    "kind": "pr",
+    "title": "a bot PR",
+    "score": 10.3,
+    "terms": [["quick_win", 10.0, "bot PR"], ["age", 0.3, "waiting 2d"]],
+    "features": {"repo": "acme/app", "kind": "pr", "age_days": 2.1, "author": None},
+}
 
 
 def populate(conn):
@@ -92,6 +112,11 @@ def populate(conn):
     overlay.set_last_visit(conn, NOW)
     overlay.set_view_include(conn, "needs", frozenset({"sessions", "prs"}), NOW)
     overlay.set_view_include(conn, "board", frozenset(), NOW)
+    url = "https://github.com/acme/app/pull/9"
+    overlay.why_not(
+        conn, ("github", url), "2026-10-30", "wrong_priority", "later", WHY_SNAP, NOW
+    )
+    overlay.why_not(conn, ("github", url), "2026-10-30", "other", "", None, NOW)
 
 
 class OverlayCase(unittest.TestCase):
@@ -305,7 +330,13 @@ class ExportImportTests(OverlayCase):
         before = dump(self.conn)
         doc = json.loads(overlay.dumps(overlay.export(self.conn, NOW)))
         self.assertFalse(self.conn.in_transaction)  # the read snapshot is closed
-        self.assertEqual((doc["format"], doc["version"]), ("task-dashboard-overlay", 5))
+        self.assertEqual((doc["format"], doc["version"]), ("task-dashboard-overlay", 6))
+        self.assertEqual(
+            [(a["reason"], a["text"], a["score"]) for a in doc["why_not"]],
+            [("wrong_priority", "later", 10.3), ("other", None, None)],
+        )
+        self.assertEqual(doc["why_not"][0]["terms"], WHY_SNAP["terms"])
+        self.assertEqual(doc["why_not"][0]["features"], WHY_SNAP["features"])
         self.assertNotIn("focus", doc["tables"])
         self.assertEqual(doc["last_visit"], "2026-10-23T12:00:00Z")
         self.assertEqual(
@@ -328,11 +359,12 @@ class ExportImportTests(OverlayCase):
             {
                 "pins": 3,
                 "order": 3,
-                "snoozes": 1,
+                "snoozes": 2,  # one from the why_not answers
                 "notes": 2,
                 "kind_tags": 2,
                 "ignores": 1,
                 "view_includes": 2,
+                "why_not": 2,
             },
         )
         self.assertEqual(
@@ -393,12 +425,24 @@ class ExportImportTests(OverlayCase):
         self.assertEqual(after["pins"], before["pins"])
         self.assertEqual(after["ignores"], before["ignores"])
 
+    def test_a_version_5_file_still_imports_with_no_why_not_answers(self):
+        populate(self.conn)
+        doc = overlay.export(self.conn)
+        before = dump(self.conn)
+        counts = overlay.import_(self.conn, legacy(doc, 5))
+        after = dump(self.conn)
+        self.assertEqual(after["why_not"], [])
+        self.assertEqual(counts["why_not"], 0)
+        for t in db.OVERLAY_TABLES + db.OVERLAY_VIEW_TABLES:
+            self.assertEqual(after[t], before[t], t)
+
     def test_a_version_4_files_focus_rows_are_accepted_and_dropped(self):
         populate(self.conn)
         doc = overlay.export(self.conn)
         before = dump(self.conn)
         self.wipe()
         counts = overlay.import_(self.conn, legacy(doc, 4))
+        before["why_not"] = []  # a version 4 file has none
         self.assertEqual(dump(self.conn), before)
         self.assertNotIn("focus", counts)
         # Even rows the old schema refused (two focus items) are not read.
@@ -433,7 +477,27 @@ class ExportImportTests(OverlayCase):
         cases = {
             "not an object": [],
             "wrong format": bad(lambda d: d.update(format="other")),
-            "wrong version": bad(lambda d: d.update(version=6)),
+            "wrong version": bad(lambda d: d.update(version=7)),
+            "v5 with why_not": bad(lambda d: d.update(version=5)),
+            "missing why_not": bad(lambda d: d.pop("why_not")),
+            "why_not not a list": bad(lambda d: d.update(why_not={})),
+            "why_not unknown reason": bad(
+                lambda d: d["why_not"][0].update(reason="bored")
+            ),
+            "why_not extra field": bad(lambda d: d["why_not"][0].update(x=1)),
+            "why_not bad terms": bad(
+                lambda d: d["why_not"][0].update(terms=[["age", "high", "x"]])
+            ),
+            "why_not bad features": bad(
+                lambda d: d["why_not"][0].update(features={"repo": ["a"]})
+            ),
+            "why_not bool score": bad(lambda d: d["why_not"][0].update(score=True)),
+            "why_not bad stamp": bad(
+                lambda d: d["why_not"][0].update(recorded_at="today")
+            ),
+            "why_not text too long": bad(
+                lambda d: d["why_not"][0].update(text="x" * (overlay.MAX_WHY_TEXT + 1))
+            ),
             "v3 with view_includes": bad(
                 lambda d: (d.update(version=3), d["tables"].update(focus=[]))
             ),
@@ -744,6 +808,7 @@ class RouteTests(server_harness.ServerCase):
         "ignore": [("key", "ABC-1")],
         "unignore": [("key", "ABC-1")],
         "include": [("view", "needs"), ("include", "prs,sessions")],
+        "whynot": [("key", "ABC-1"), ("until", "2026-10-24"), ("reason", "other")],
     }
 
     def test_routes_cover_every_action(self):
@@ -931,7 +996,7 @@ class RouteTests(server_harness.ServerCase):
     def test_a_database_error_is_503_with_a_json_body(self):
         real = overlay.apply
 
-        def locked(conn, action, form, now=None):
+        def locked(conn, action, form, now=None, snapshot=None):
             raise sqlite3.OperationalError("database is locked")
 
         overlay.apply = locked

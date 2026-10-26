@@ -238,7 +238,7 @@ class DbTests(TmpCase):
         ver = conn.execute(
             "SELECT value FROM meta WHERE key='schema_version'"
         ).fetchone()[0]
-        self.assertEqual(int(ver), 8)
+        self.assertEqual(int(ver), db.SCHEMA_VERSION)
         conn.close()
 
     def test_failed_migration_releases_the_write_lock(self):

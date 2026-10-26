@@ -56,6 +56,7 @@ import overlay
 import score
 import sync
 import views
+import whynot
 
 BIND = "127.0.0.1"
 TOKEN_KEY = "server_token"
@@ -619,7 +620,7 @@ def render_page(title: str, header: str, body: str, token: str, busy: bool) -> s
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
         f'<meta name="dashboard-token" content="{_e(token)}">'
         f"<title>{_e(title)}</title>"
-        f"<style>{CSS}{views.CSS}{fleet_views.CSS}{needs.CSS}{fleet_now.CSS}{overlay.CSS}{gauges.CSS}{include.CSS}{lane_tabs.CSS}</style></head>"
+        f"<style>{CSS}{views.CSS}{fleet_views.CSS}{needs.CSS}{fleet_now.CSS}{overlay.CSS}{gauges.CSS}{include.CSS}{lane_tabs.CSS}{whynot.CSS}</style></head>"
         f'<body data-busy="{1 if busy else 0}">{header}<main>{body}</main>'
         f"<script>{JS}{overlay.JS}{include.JS}{lane_tabs.JS}</script></body></html>"
     )
@@ -729,6 +730,9 @@ class App:
             body = views.nav("/health", self.cfg, inc, query) + health.page(
                 conn, self.cfg, self.now(), days, fleet=self.fleet, inc=inc
             )
+            if fleet_views.enabled(self.cfg):
+                # Answers to the fleet Now's "why not now?" picker.
+                body += whynot.section(conn, self.now())
         finally:
             conn.close()
         return render_page("Health · Task dashboard", header, body, self.token, busy)
@@ -736,7 +740,12 @@ class App:
     def overlay_write(self, action: str, form: dict[str, list[str]]) -> None:
         conn = self.read()
         try:
-            overlay.apply(conn, action, form, self.now())
+            now = self.now()
+
+            def snapshot(item: overlay.Item) -> "dict[str, Any] | None":
+                return fleet_now.snapshot_of(conn, self.cfg, item, now)
+
+            overlay.apply(conn, action, form, now, snapshot)
         finally:
             conn.close()
 

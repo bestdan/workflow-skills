@@ -44,6 +44,7 @@ import overlay  # noqa: E402
 import server  # noqa: E402
 import server_install  # noqa: E402
 import sync  # noqa: E402
+import whynot  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -135,6 +136,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--config",
         help="config path (default: $TASK_DASHBOARD_CONFIG or ~/.config/task-dashboard)",
     )
+    tune_p = sub.add_parser(
+        "tune",
+        help='fleet view: Now\'s "why not now" answers joined to their score'
+        " terms, with suggested [score.fleet] changes; suggests only",
+    )
+    tune_p.add_argument(
+        "--days",
+        type=int,
+        default=whynot.WINDOW_DAYS,
+        help=f"window in days, ending now (default {whynot.WINDOW_DAYS})",
+    )
+    tune_p.add_argument("--json", action="store_true", help="print JSON")
+    _paths(tune_p)
     install_p = sub.add_parser(
         "install",
         help="macOS: install the dashboard server as a LaunchAgent (full sync, then"
@@ -324,6 +338,31 @@ def cmd_health(args: argparse.Namespace) -> int:
         print(json.dumps(result, indent=2))
     else:
         sys.stdout.write(health.text_table(result))
+    return 0
+
+
+def cmd_tune(args: argparse.Namespace) -> int:
+    """Exit 0, or 2 on a config error or a window under one day. Never writes
+    config: what it prints is for a human or a session to act on."""
+    if args.days < 1:
+        print("task-dashboard: --days must be at least 1", file=sys.stderr)
+        return 2
+    try:
+        cfg = config.load(args.config)
+    except config.ConfigError as exc:
+        print(f"task-dashboard: {exc}", file=sys.stderr)
+        return 2
+    conn = db.connect(args.db)
+    try:
+        doc = whynot.tune(
+            conn, cfg["score"]["fleet"], datetime.now(timezone.utc), args.days
+        )
+    finally:
+        conn.close()
+    if args.json:
+        print(json.dumps(doc, indent=2))
+    else:
+        sys.stdout.write(whynot.text_report(doc))
     return 0
 
 
@@ -572,6 +611,8 @@ def main(argv: "list[str] | None" = None) -> int:
         return cmd_url(args)
     if args.command == "health":
         return cmd_health(args)
+    if args.command == "tune":
+        return cmd_tune(args)
     parser.print_help()
     return 2
 
