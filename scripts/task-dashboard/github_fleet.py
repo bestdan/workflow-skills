@@ -675,7 +675,9 @@ _REF_SHORT = re.compile(
 
 
 def design_refs(text: str, repo: str) -> list[dict]:
-    """The issues and PRs a design names, each {repo, number}, in order.
+    """The issues and PRs a design names, each {repo, number}: the URLs
+    first, then the `owner/name#N` and bare `#N` refs, each in text order,
+    without duplicates.
 
     A GitHub issue or PR URL, an `owner/name#N`, and a bare `#N`, which
     means `repo`. GitHub numbers issues and PRs in one sequence, so a ref

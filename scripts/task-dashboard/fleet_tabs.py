@@ -35,9 +35,9 @@ Started, Ready, then Untriaged or needs refinement, which also takes an issue
 with no `status:` label.
 
 Both take a `?ws=<id>` filter (workstreams.py), which lists only that
-workstream's members, and the include filter, the page's text filter (each card's `.title`
-and `.ref`), ignores and snoozes as every other view does: an ignored item is
-left out, a snoozed one is left out and counted.
+workstream's members, and the include filter, the page's text filter (each
+card's `.title` and `.ref`), ignores and snoozes as every other view does: an
+ignored item is left out, a snoozed one is left out and counted.
 """
 
 import html
