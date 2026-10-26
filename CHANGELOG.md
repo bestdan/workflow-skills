@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.130.0] - 2026-10-26
+
+### Features
+
+- Pull requests and Issues tabs on the fleet instance [#1170] (#1178) (f4e6bfd)
+
 ## [2.129.1] - 2026-10-26
 
 ### Fixes
