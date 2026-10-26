@@ -38,6 +38,7 @@ sys.path.insert(0, str(PKG))
 # modules themselves are type-checked in their own group (scripts/typecheck.sh).
 import config  # type: ignore[import-not-found]  # noqa: E402
 import db  # type: ignore[import-not-found]  # noqa: E402
+import freshness  # type: ignore[import-not-found]  # noqa: E402
 import github_fleet  # type: ignore[import-not-found]  # noqa: E402
 import overlay  # type: ignore[import-not-found]  # noqa: E402
 import server  # type: ignore[import-not-found]  # noqa: E402
@@ -688,6 +689,35 @@ class FreshnessTest(HeaderCase):
         self.assertNotIn("warn", header.split('<div class="fresh-panel"', 1)[0])
         self.assertNotIn('role="alert"', header)
 
+    def test_a_host_asleep_past_a_day_is_listed_but_does_not_set_the_age(self):
+        self.seed(mini_minutes=3 * 24 * 60)  # lindev fresh, mini 3 days quiet
+        header = self.header()
+        # The headline follows the sync (its oldest step, 9m), not mini's 3d.
+        self.assertEqual(indicator(header), "Updated 9m ago")
+        self.assertNotIn('class="fresh warn"', header)
+        rows = panel_rows(header)
+        self.assertEqual(
+            rows["machine:lindev"],
+            ("lindev", "2m", "1 repo scan failed", "expected in 3m", False),
+        )
+        label, age, detail, nxt, warn = rows["machine:mini"]
+        self.assertEqual((label, age, nxt, warn), ("mini", "3d", "—", False))
+        self.assertRegex(detail, r"^asleep since \d{4}-\d\d-\d\d \d\d:\d\d UTC$")
+        self.assertIn(
+            '<tr data-source="machine:mini" data-outcome="ok" class="asleep">', header
+        )
+        fresh = json.loads(self.request("GET", "/status")[1])["freshness"]
+        self.assertEqual((fresh["text"], fresh["warn"]), ("Updated 9m ago", False))
+        self.assertEqual(
+            [s["id"] for s in fresh["sources"] if s["asleep"]], ["machine:mini"]
+        )
+
+    def test_a_host_quiet_under_a_day_still_warns(self):
+        self.seed(mini_minutes=23 * 60)
+        header = self.header()
+        self.assertEqual(indicator(header), "\u26a0 Updated 23h ago")
+        self.assertTrue(panel_rows(header)["machine:mini"][4])
+
 
 class SyncNoteTest(HeaderCase):
     """A scheduled sync shows a note and leaves the button alone."""
@@ -770,6 +800,10 @@ class SyncNoteTest(HeaderCase):
         finally:
             conn.close()
         self.assertEqual(steps, ["incremental", "sessions"])
+        # With Jira and GitHub both off, the sync row names neither.
+        self.assertEqual(freshness.main_label(cfg), "Sync")
+        cfg["github"]["enabled"] = True
+        self.assertEqual(freshness.main_label(cfg), "GitHub sync")
 
     def test_the_page_script_never_reloads_on_its_own(self):
         self.assertNotIn("location.reload", server.JS)

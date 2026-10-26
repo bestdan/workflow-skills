@@ -21,6 +21,11 @@ older than MACHINE_STALE_MINUTES. Any warning row turns the indicator into a
 warning. The failure alerts under the header (server._alert) still name the
 fix for a failed run.
 
+A host silent for longer than MACHINE_ASLEEP is ASLEEP: a laptop shut for the
+weekend, say. It stays in the panel, greyed, as "asleep since <time>", but it
+neither sets the headline age nor warns, so a sleeping machine never pins the
+header to a warning.
+
 `sources()` is the one reader: the header renders it and /status returns it.
 """
 
@@ -42,6 +47,8 @@ STALE_INTERVALS = 3
 # The collector runs every INTERVAL_SECONDS, so a host this far behind has
 # missed several runs: asleep, offline, or failing.
 MACHINE_STALE_MINUTES = 30
+# A host silent this long is asleep: shown, but out of the headline and warning.
+MACHINE_ASLEEP = timedelta(hours=24)
 COLLECTOR_INTERVAL = timedelta(seconds=collector_install.INTERVAL_SECONDS)
 
 OUTCOME_TEXT = {"ok": "ok", "failed": "failed", "auth_failed": "login expired"}
@@ -59,6 +66,7 @@ class Source:
     detail: str  # the outcome as text, with an error's first line
     next_text: str
     warn: bool
+    asleep: bool = False  # a host past MACHINE_ASLEEP: panel only
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -71,7 +79,9 @@ def main_label(cfg: dict[str, Any]) -> str:
     github = bool(cfg["github"]["enabled"])
     if jira and github:
         return "Jira + GitHub sync"
-    return "Jira sync" if jira else "GitHub sync"
+    if jira or github:
+        return "Jira sync" if jira else "GitHub sync"
+    return "Sync"  # both off: the run still records a row, reading nothing
 
 
 def steps(cfg: dict[str, Any]) -> list[tuple[str, tuple[str, ...], str]]:
@@ -187,9 +197,23 @@ def _machine_sources(conn: sqlite3.Connection, now: datetime) -> list[Source]:
         nxt = _until(
             None if at is None else at + COLLECTOR_INTERVAL, now, expected=True
         )
-        stale = age is None or age > MACHINE_STALE_MINUTES * 60
+        asleep = at is not None and now - at > MACHINE_ASLEEP
+        if at is not None and asleep:
+            detail = f"asleep since {at.strftime('%Y-%m-%d %H:%M')} UTC"
+            nxt = "—"
+        stale = not asleep and (age is None or age > MACHINE_STALE_MINUTES * 60)
         out.append(
-            Source(f"machine:{host}", str(host), age, taken, "ok", detail, nxt, stale)
+            Source(
+                f"machine:{host}",
+                str(host),
+                age,
+                taken,
+                "ok",
+                detail,
+                nxt,
+                stale,
+                asleep,
+            )
         )
     return out
 
@@ -218,7 +242,9 @@ class Summary:
 
 def summary(found: list[Source]) -> Summary:
     """The oldest age, and whether any source warns. A source that has never
-    succeeded is the oldest of all, so the page reads "never synced"."""
+    succeeded is the oldest of all, so the page reads "never synced". An
+    asleep host counts for neither."""
+    found = [s for s in found if not s.asleep]
     warn = any(s.warn for s in found)
     if not found or any(s.age_s is None for s in found):
         return Summary("never synced", None, warn)
@@ -255,6 +281,7 @@ header .fresh-panel th, header .fresh-panel td { text-align:left; padding:2px 6p
   white-space:nowrap; }
 header .fresh-panel th { color:var(--muted); font-weight:600; }
 header .fresh-panel tr.warn td { color:var(--bad); }
+header .fresh-panel tr.asleep td { color:var(--muted); opacity:.7; }
 header .sync-note, header .new-data { font-size:12px; color:var(--muted); }
 header .new-data a { color:var(--accent); }
 """
@@ -267,7 +294,7 @@ def render(found: list[Source], stale: bool = False) -> str:
     mark = "⚠ " if warn else ""
     rows = []
     for x in found:
-        cls = ' class="warn"' if x.warn else ""
+        cls = ' class="warn"' if x.warn else ' class="asleep"' if x.asleep else ""
         rows.append(
             f'<tr data-source="{_e(x.id)}" data-outcome="{_e(x.outcome or "")}"{cls}>'
             f"<td>{_e(x.label)}</td>"
