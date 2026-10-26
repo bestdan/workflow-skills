@@ -42,6 +42,7 @@ left out, a snoozed one is left out and counted.
 import html
 import json
 import sqlite3
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
@@ -52,6 +53,7 @@ import include
 import overlay
 import score
 import sync
+import view_model
 import views  # card_title and _lane, read at call time: views imports this
 
 _e = html.escape
@@ -209,8 +211,8 @@ def pr_lane(p: dict) -> "tuple[str, str]":
     return "waiting", "not mirrored as awaiting yet"
 
 
-def _pr_card(p: dict, why: str, ov: overlay.Overlay, now: datetime) -> str:
-    ref = f"{p.get('repo') or ''}#{p.get('number')}"
+def pr_meta(p: dict, why: str, now: datetime) -> list[str]:
+    """A PR card's meta line, as its plain-text parts."""
     row = p.get("awaiting") or {}
     bits = []
     if p.get("role") != "author" and row.get("author"):
@@ -219,7 +221,13 @@ def _pr_card(p: dict, why: str, ov: overlay.Overlay, now: datetime) -> str:
     bits.append(p.get("repo") or "")
     if why:
         bits.append(why)
-    meta = " · ".join(_e(b) for b in bits if b)
+    return [b for b in bits if b]
+
+
+def _pr_card(p: dict, why: str, ov: overlay.Overlay, now: datetime) -> str:
+    ref = f"{p.get('repo') or ''}#{p.get('number')}"
+    row = p.get("awaiting") or {}
+    meta = " · ".join(_e(b) for b in pr_meta(p, why, now))
     head = views.card_title(p["url"], p.get("title"), ref)
     if row.get("author_is_bot"):
         head += ' <span class="badge">bot</span>'
@@ -237,6 +245,55 @@ def _lane_order(name: str, p: dict) -> tuple:
     return (not (bot and p.get("ci_state") == "success"), created)
 
 
+@dataclass
+class Tab:
+    """A tab's lanes as the page shows them, and what the page notes."""
+
+    lanes: list[view_model.Lane]
+    snoozed: int  # left out and counted
+    synced: bool  # a fleet sync has succeeded
+
+
+def pr_lanes(conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime) -> Tab:
+    """The Pull requests lanes, each item a (PR, why) pair. Ignored and
+    snoozed PRs are left out, and so is an optional lane with no rows."""
+    ov = overlay.load(conn)
+    synced = gauges.review_queue_rows(conn, sync.fleet_enabled(cfg)) is not None
+    rows: dict[str, list[tuple[Any, str]]] = {name: [] for name, _, _ in PR_LANES}
+    snoozed = 0
+    for p in pull_requests(conn, cfg):
+        hidden = _hidden(ov, (github_fleet.SOURCE, str(p["url"])), now)
+        snoozed += hidden == "snoozed"
+        if hidden:
+            continue
+        lane, why = pr_lane(p)
+        rows[lane].append((p, why))
+    group = include.group_of("pr")
+    lanes = []
+    for name, title, empty in PR_LANES:
+        items = sorted(rows[name], key=lambda t: _lane_order(name, t[0]))
+        if name in OPTIONAL_LANES and not items:
+            continue
+        tab = PR_TABS.get(name)
+        lanes.append(view_model.Lane(name, title, items, empty, group, tab))
+    return Tab(lanes, snoozed, synced)
+
+
+def _render_lanes(tab: Tab, card: Any, inc: include.Include) -> list[str]:
+    return [
+        views._lane(
+            lane.id,
+            lane.title,
+            [card(x) for x in lane.items],
+            lane.empty,
+            lane.group,
+            inc,
+            lane.tab,
+        )
+        for lane in tab.lanes
+    ]
+
+
 def render_prs(
     conn: sqlite3.Connection,
     cfg: dict[str, Any],
@@ -245,27 +302,11 @@ def render_prs(
 ) -> str:
     inc = inc or include.everything("prs")
     ov = overlay.load(conn)
-    synced = gauges.review_queue_rows(conn, sync.fleet_enabled(cfg)) is not None
-    lanes: dict[str, list[tuple[Any, str]]] = {name: [] for name, _, _ in PR_LANES}
-    snoozed = 0
-    for p in pull_requests(conn, cfg):
-        hidden = _hidden(ov, (github_fleet.SOURCE, str(p["url"])), now)
-        snoozed += hidden == "snoozed"
-        if hidden:
-            continue
-        lane, why = pr_lane(p)
-        lanes[lane].append((p, why))
-    group = include.group_of("pr")
-    parts = [_gate_note(cfg, synced)]
-    for name, title, empty in PR_LANES:
-        rows = sorted(lanes[name], key=lambda t: _lane_order(name, t[0]))
-        if name in OPTIONAL_LANES and not rows:
-            continue
-        cards = [_pr_card(p, why, ov, now) for p, why in rows]
-        tab = PR_TABS.get(name)
-        parts.append(views._lane(name, title, cards, empty, group, inc, tab))
-    if inc.has(group):
-        parts.append(_snoozed_note(snoozed))
+    tab = pr_lanes(conn, cfg, now)
+    parts = [_gate_note(cfg, tab.synced)]
+    parts += _render_lanes(tab, lambda t: _pr_card(t[0], t[1], ov, now), inc)
+    if inc.has(include.group_of("pr")):
+        parts.append(_snoozed_note(tab.snoozed))
     return f'<div class="fleet">{"".join(parts)}</div>'
 
 
@@ -281,12 +322,17 @@ def issue_lane(labels: "list[str]") -> str:
     return "untriaged"
 
 
-def _issue_card(row: dict, ov: overlay.Overlay, now: datetime) -> str:
+def issue_meta(row: dict, now: datetime) -> list[str]:
+    """An issue card's meta line, as its plain-text parts."""
     labels = row.get("labels") or []
-    ref = f"{row.get('repo') or ''}#{row.get('number')}"
     bits = [lb for lb in labels if lb.startswith(("prio:", "est:"))]
     bits += [_age(row.get("created"), now), row.get("repo") or ""]
-    meta = " · ".join(_e(b) for b in bits if b)
+    return [b for b in bits if b]
+
+
+def _issue_card(row: dict, ov: overlay.Overlay, now: datetime) -> str:
+    ref = f"{row.get('repo') or ''}#{row.get('number')}"
+    meta = " · ".join(_e(b) for b in issue_meta(row, now))
     item = (github_fleet.SOURCE, str(row.get("key") or row.get("url")))
     head = views.card_title(str(row.get("url") or ""), row.get("title"), ref)
     return _card(item, ov, now, head, meta)
@@ -306,13 +352,9 @@ def _issues_truncated(conn: sqlite3.Connection) -> int:
     return int((counts or {}).get("issues_truncated") or 0)
 
 
-def render_issues(
-    conn: sqlite3.Connection,
-    cfg: dict[str, Any],
-    now: datetime,
-    inc: "include.Include | None" = None,
-) -> str:
-    inc = inc or include.everything("issues")
+def issue_lanes(conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime) -> Tab:
+    """The Issues lanes, each item a mirror row; ignored and snoozed issues
+    are left out."""
     ov = overlay.load(conn)
     # The same gate as Needs you's issues: none before a good fleet run.
     synced = gauges.review_queue_rows(conn, sync.fleet_enabled(cfg)) is not None
@@ -328,7 +370,7 @@ def render_issues(
         if synced
         else []
     )
-    lanes: dict[str, list[str]] = {name: [] for name, _, _ in ISSUE_LANES}
+    by_lane: dict[str, list[dict]] = {name: [] for name, _, _ in ISSUE_LANES}
     snoozed = 0
     for row in rows:
         item = (github_fleet.SOURCE, str(row.get("key") or row.get("url")))
@@ -336,10 +378,26 @@ def render_issues(
         snoozed += hidden == "snoozed"
         if hidden:
             continue
-        lanes[issue_lane(row.get("labels") or [])].append(_issue_card(row, ov, now))
+        by_lane[issue_lane(row.get("labels") or [])].append(row)
     group = include.group_of("issue")
-    parts = [_gate_note(cfg, synced)]
-    cut = _issues_truncated(conn) if synced else 0
+    lanes = [
+        view_model.Lane(name, title, by_lane[name], empty, group, ISSUE_TABS.get(name))
+        for name, title, empty in ISSUE_LANES
+    ]
+    return Tab(lanes, snoozed, synced)
+
+
+def render_issues(
+    conn: sqlite3.Connection,
+    cfg: dict[str, Any],
+    now: datetime,
+    inc: "include.Include | None" = None,
+) -> str:
+    inc = inc or include.everything("issues")
+    ov = overlay.load(conn)
+    tab = issue_lanes(conn, cfg, now)
+    parts = [_gate_note(cfg, tab.synced)]
+    cut = _issues_truncated(conn) if tab.synced else 0
     if cut:
         parts.append(
             f'<p class="note" data-truncated="{cut}">{cut} owner'
@@ -347,9 +405,7 @@ def render_issues(
             f" {github_fleet.MAX_OPEN_ISSUES} open issues besides those needing"
             " a human; the rest are not mirrored.</p>"
         )
-    for name, title, empty in ISSUE_LANES:
-        tab = ISSUE_TABS.get(name)
-        parts.append(views._lane(name, title, lanes[name], empty, group, inc, tab))
-    if inc.has(group):
-        parts.append(_snoozed_note(snoozed))
+    parts += _render_lanes(tab, lambda row: _issue_card(row, ov, now), inc)
+    if inc.has(include.group_of("issue")):
+        parts.append(_snoozed_note(tab.snoozed))
     return f'<div class="fleet">{"".join(parts)}</div>'

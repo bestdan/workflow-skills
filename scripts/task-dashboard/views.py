@@ -42,6 +42,7 @@ import needs
 import overlay
 import score
 import sync
+import view_model
 
 _e = html.escape
 
@@ -117,6 +118,14 @@ PR_COLUMNS = (
 )
 
 
+def hidden_tabs(cfg: dict[str, Any]) -> set[str]:
+    """The TABS paths this instance leaves out of its nav (see nav())."""
+    hidden = set(NOT_ON_FLEET if fleet_views.enabled(cfg) else fleet_views.ONLY)
+    if not sync.jira_enabled(cfg):
+        hidden.update(JIRA_ONLY)
+    return hidden
+
+
 def nav(
     active: str,
     cfg: "dict[str, Any] | None" = None,
@@ -131,11 +140,7 @@ def nav(
     include switches follow it (include.py); `query` is the request's own, so a
     switch keeps its other parameters.
     """
-    hidden: set[str] = set()
-    if cfg is not None:
-        hidden.update(NOT_ON_FLEET if fleet_views.enabled(cfg) else fleet_views.ONLY)
-        if not sync.jira_enabled(cfg):
-            hidden.update(JIRA_ONLY)
+    hidden = hidden_tabs(cfg) if cfg is not None else set()
     links = "".join(
         f'<a href="{href}"{" aria-current=page" if href == active else ""}>{_e(name)}</a>'
         for href, name in TABS
@@ -522,18 +527,16 @@ def _pr_line(p: dict[str, Any]) -> str:
     return card_title(p["url"], p["title"], ref) + meta
 
 
+def issue_meta(issue: dict[str, Any]) -> list[str]:
+    """A Jira issue card's meta line, as its plain-text parts."""
+    fields = (issue.get("status_name"), issue.get("assignee"), issue.get("priority"))
+    return [str(v) for v in fields if v]
+
+
 def issue_card(m: Mirror, issue: dict[str, Any], why: str = "") -> str:
     key = issue["key"]
     href = f"https://{m.cfg['jira']['site']}/browse/{key}"
-    meta = " · ".join(
-        _e(str(v))
-        for v in (
-            issue.get("status_name"),
-            issue.get("assignee"),
-            issue.get("priority"),
-        )
-        if v
-    )
+    meta = " · ".join(_e(v) for v in issue_meta(issue))
     pin = '<span class="pin">pinned</span> ' if key in m.pins else ""
     why_html = f'<div class="why">{_e(why)}</div>' if why else ""
     prs = m.prs_by_issue.get(key, [])
@@ -611,83 +614,95 @@ TICKETS = include.group_of("ticket")
 PRS = include.group_of("pr")
 
 
+def _ic(m: Mirror) -> Any:
+    return lambda t: issue_card(m, t[0], t[1])
+
+
+def _pc(m: Mirror) -> Any:
+    return lambda t: pr_card(m, t[0], t[1])
+
+
+def _render(lane: view_model.Lane, card: Any, inc: include.Include) -> str:
+    """A Lane of jira_lanes() as HTML, each item drawn by `card`."""
+    cards = [card(x) for x in lane.items]
+    return _lane(lane.id, lane.title, cards, lane.empty, lane.group, inc, lane.tab)
+
+
+def jira_now_lane(m: Mirror, title: "str | None") -> view_model.Lane:
+    """Jira's Now: (issue, why) pairs, `why` always empty."""
+    items = [(i, "") for i in now_items(m)]
+    return view_model.Lane("now", title, items, "Nothing open.", TICKETS)
+
+
 def render_now(m: Mirror, inc: include.Include) -> str:
     """A fleet instance's ranked queue (fleet_now), then, with Jira on, the
     Jira Now; a Jira instance's Now alone."""
     if not fleet_views.enabled(m.cfg):
-        cards = [issue_card(m, i) for i in now_items(m)]
-        return _me_note(m) + _lane("now", None, cards, "Nothing open.", TICKETS, inc)
+        return _me_note(m) + _render(jira_now_lane(m, None), _ic(m), inc)
     fleet = fleet_now.render(m.conn, m.cfg, m.now, inc)
     if not sync.jira_enabled(m.cfg):
         return fleet
-    cards = [issue_card(m, i) for i in now_items(m)]
-    jira = _lane("now", "Jira", cards, "Nothing open.", TICKETS, inc)
-    return fleet + _me_note(m) + jira
+    return fleet + _me_note(m) + _render(jira_now_lane(m, "Jira"), _ic(m), inc)
+
+
+def waiting_on_me_lanes(m: Mirror) -> list[view_model.Lane]:
+    """Issues as (issue, why), then review requests as (PR, why)."""
+    issues, prs = waiting_on_me(m)
+    return [
+        view_model.Lane(
+            "issues", "Issues", issues, "None of your open issues blocks anyone.", TICKETS
+        ),
+        view_model.Lane(
+            "reviews", "Pull requests", [(p, "") for p in prs], "No reviews requested.", PRS
+        ),
+    ]  # fmt: skip
 
 
 def render_waiting_on_me(m: Mirror, inc: include.Include) -> str:
-    issues, prs = waiting_on_me(m)
-    return (
-        _me_note(m)
-        + _lane(
-            "issues",
-            "Issues",
-            [issue_card(m, i, why) for i, why in issues],
-            "None of your open issues blocks anyone.",
-            TICKETS,
-            inc,
-        )
-        + _lane(
-            "reviews",
-            "Pull requests",
-            [pr_card(m, p) for p in prs],
-            "No reviews requested.",
-            PRS,
-            inc,
-        )
-    )
+    issues, prs = waiting_on_me_lanes(m)
+    return _me_note(m) + _render(issues, _ic(m), inc) + _render(prs, _pc(m), inc)
+
+
+def waiting_on_lanes(m: Mirror) -> list[view_model.Lane]:
+    """Blocked issues as (issue, why), then my waiting PRs as (PR, why)."""
+    issues, prs = waiting_on(m)
+    return [
+        view_model.Lane(
+            "issues", "Issues", issues,
+            "None of your open issues has an unresolved blocker.", TICKETS,
+        ),
+        view_model.Lane("prs", "Pull requests", prs, "No PR of yours is waiting.", PRS),
+    ]  # fmt: skip
 
 
 def render_waiting_on(m: Mirror, inc: include.Include) -> str:
-    issues, prs = waiting_on(m)
-    return (
-        _me_note(m)
-        + _lane(
-            "issues",
-            "Issues",
-            [issue_card(m, i, why) for i, why in issues],
-            "None of your open issues has an unresolved blocker.",
-            TICKETS,
-            inc,
-        )
-        + _lane(
-            "prs",
-            "Pull requests",
-            [pr_card(m, p, why) for p, why in prs],
-            "No PR of yours is waiting.",
-            PRS,
-            inc,
-        )
+    issues, prs = waiting_on_lanes(m)
+    return _me_note(m) + _render(issues, _ic(m), inc) + _render(prs, _pc(m), inc)
+
+
+def jira_stale_lane(m: Mirror) -> "view_model.Lane | None":
+    """Jira's stale lane as (issue, why) pairs; None on a fleet instance whose
+    mirror holds no Jira issue, where the page leaves it out."""
+    on_fleet = fleet_views.enabled(m.cfg)
+    if on_fleet and not m.issues:
+        return None
+    # Beside the fleet's lanes it is a tab of its own, so it needs a title.
+    return view_model.Lane(
+        "stale",
+        "Jira" if on_fleet else None,
+        stale(m),
+        "Nothing in progress has gone quiet.",
+        TICKETS,
     )
 
 
 def render_stale(m: Mirror, inc: include.Include) -> str:
     """Jira's stale lane, then, on a fleet instance, the fleet's (fleet_views)."""
-    cards = [issue_card(m, i, why) for i, why in stale(m)]
-    on_fleet = fleet_views.enabled(m.cfg)
-    # Beside the fleet's lanes it is a tab of its own, so it needs a title.
-    jira = _lane(
-        "stale",
-        "Jira" if on_fleet else None,
-        cards,
-        "Nothing in progress has gone quiet.",
-        TICKETS,
-        inc,
-    )
-    if not on_fleet:
+    lane = jira_stale_lane(m)
+    jira = _render(lane, _ic(m), inc) if lane is not None else ""
+    if not fleet_views.enabled(m.cfg):
         return jira
-    fleet = fleet_views.render_stale(m.conn, m.cfg, m.now, inc)
-    return (jira if m.issues else "") + fleet
+    return jira + fleet_views.render_stale(m.conn, m.cfg, m.now, inc)
 
 
 def render_needs(m: Mirror, inc: include.Include) -> str:
@@ -732,29 +747,37 @@ def _epic_card(m: Mirror, g: dict[str, Any]) -> str:
     )
 
 
+def epic_lanes(m: Mirror) -> list[view_model.Lane]:
+    """Mine, Involved and Pinned, then Other (a closed list on the page, and
+    left out when empty); each item an epics() group."""
+    groups = epics(m)
+    out = [
+        view_model.Lane(
+            role, title, [g for g in groups if g["role"] == role], empty, TICKETS
+        )
+        for role, title, empty in EPIC_LANES
+    ]
+    others = [g for g in groups if g["role"] == "other"]
+    if others:
+        out.append(view_model.Lane("other", "Other epics", others, "", TICKETS))
+    return out
+
+
 def render_epics(m: Mirror, inc: include.Include) -> str:
     if not inc.has(TICKETS):
         # Every epic and child is a ticket: one note, not one per lane.
         return _lane("epics", None, [], "", TICKETS, inc)
-    groups = epics(m)
-    out = "".join(
-        _lane(
-            role,
-            title,
-            [_epic_card(m, g) for g in groups if g["role"] == role],
-            empty,
-            TICKETS,
-            inc,
-        )
-        for role, title, empty in EPIC_LANES
-    )
-    others = [_epic_card(m, g) for g in groups if g["role"] == "other"]
-    if others:
+    out = ""
+    for lane in epic_lanes(m):
+        cards = [_epic_card(m, g) for g in lane.items]
+        if lane.id != "other":
+            out += _lane(lane.id, lane.title, cards, lane.empty, lane.group, inc)
+            continue
         out += (
             f'<details class="lane others" data-section="other">'
-            f"<summary>Other epics ({len(others)}): you have no issue in them."
+            f"<summary>Other epics ({len(cards)}): you have no issue in them."
             " Pin one to keep it above.</summary>"
-            f"{''.join(others)}</details>"
+            f"{''.join(cards)}</details>"
         )
     return out
 

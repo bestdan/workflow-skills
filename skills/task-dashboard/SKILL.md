@@ -1,7 +1,7 @@
 ---
 name: task-dashboard
-description: Install, check, sync, open, back up, or remove the local task dashboard — the always-on, localhost-only page that mirrors your Jira work (through acli) and GitHub PRs (through gh) into SQLite and ranks what to do next. Subcommands install | status | sync-now | open | export | import | tune | uninstall. Use when the user wants that dashboard set up as a login agent on their Mac, asks whether it is running or how stale it is, wants it refreshed now, wants its link, wants to back up or restore their pins, order, snoozes and notes, wants the fleet Now's ranking tuned from their "why not now" answers, or wants it taken off the machine.
-argument-hint: "install | status | sync-now [--reconcile] | open | export <file> | import <file> | tune [--days N] | uninstall"
+description: Install, check, sync, open, back up, read, clean up, or remove the local task dashboard — the always-on, localhost-only page that mirrors your Jira work (through acli) and GitHub PRs (through gh) into SQLite and ranks what to do next. Subcommands install | status | sync-now | open | export | import | tune | view | overlay | clean | uninstall. Use when the user wants that dashboard set up as a login agent on their Mac, asks whether it is running or how stale it is, wants it refreshed now, wants its link, wants to back up or restore their pins, order, snoozes and notes, wants the fleet Now's ranking tuned from their "why not now" answers, asks what a tab shows ("what's on Stale?"), asks to clean a tab up ("look at the Stale tab and clean it up"), wants an item ignored or snoozed, or wants it taken off the machine.
+argument-hint: "install | status | sync-now [--reconcile] | open | export <file> | import <file> | tune [--days N] | view <name> [--json] [--all] | overlay <action> | clean <view> | uninstall"
 ---
 
 # task-dashboard
@@ -15,8 +15,9 @@ at every start. The design, including why the plist never names the plugin's
 versioned directory, is
 [`dev_docs/designs/2026-10-23-task-dashboard.md`](../../dev_docs/designs/2026-10-23-task-dashboard.md).
 
-Every subcommand below is one `dashboard.py` call (`open` is an alias of
-`url`). Spell it as:
+Every subcommand below except `clean` is one `dashboard.py` call (`open` is an
+alias of `url`); `clean` is the procedure in
+[`references/clean.md`](references/clean.md). Spell the call as:
 
 ```bash
 uv run --no-project --python ">=3.11" "${CLAUDE_PLUGIN_ROOT}/scripts/task-dashboard/dashboard.py" <subcommand> [args]
@@ -32,7 +33,7 @@ needs the sandbox escape** because they reach Atlassian and GitHub hosts.
 the agent's launchd state; a sandbox refusal there is reported as "cannot read
 the agent's state", never as "not loaded". `sync-now` makes an HTTP request to
 the server on `127.0.0.1`, which the sandbox's network filter may refuse.
-`open`, `export`, `import` and `tune` touch only local files.
+`open`, `export`, `import`, `tune`, `view` and `overlay` touch only local files.
 
 `status`, `sync-now`, `open` and `uninstall` use the config and DB paths that
 `install` recorded in the plist, unless a flag or a `TASK_DASHBOARD_*` variable
@@ -171,6 +172,38 @@ dashboard itself never calls a model.**
      ordinary pull request, never a config edit.
 
 With few answers `tune` suggests nothing; say so rather than guessing.
+
+## view, overlay
+
+`DASH view <name> --json` prints one tab's lanes and items as its page shows
+them, read from the DB with no server: the include filter, ignores and snoozes
+apply as there, and `--all` adds what the page hides, each marked `hidden`
+with why. The names are the nav's, and an instance serves only those its nav
+shows: `now` and `stale` always; `needs`, `prs` and `issues` only on a fleet
+instance; `board` and `epics` only with Jira on; `waiting-on-me` and
+`waiting-on` only with Jira on and no fleet. Any other name exits 2.
+Each item carries its `source`, `key`, `kind`, `lane`, `title`, `url`, `host`
+and `path`, its `evidence` and `risks`, and its `action` as
+`{"review": ..., "command": [...]}`. `freshness` says when each sync last
+succeeded and when each host last snapshotted. Without `--json` it prints one
+line per item.
+
+`DASH overlay <action> --source S --key K` makes the write a card's button
+makes (`ignore`, `unignore`, `snooze --until YYYY-MM-DD`, `pin`, `unpin`,
+`note --text`, ...), through the same validation, straight to the DB. Exit 1
+means it was refused and nothing changed; the message is the server's.
+
+## clean
+
+`clean <view>` ("look at the Stale tab and clean it up") is a cleanup an agent
+runs with the owner. **Act alone only on an item with merged-PR evidence, a
+clean tree, no unpushed commits and no active session, re-checked live just
+before acting, and only through the plugin's own teardown scripts.** Propose
+everything else, grouped by suggested action, and wait for the owner's yes.
+For an item on another host, hand the owner a script rather than writing over
+ssh. Record each "leave it" as an ignore with `DASH overlay ignore`. The full
+procedure is [`references/clean.md`](references/clean.md); read it before
+starting.
 
 ## uninstall
 
