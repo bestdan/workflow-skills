@@ -25,10 +25,10 @@ open PRs, and my recently closed PRs) to workstreams, as rows of
 A DESIGN DOC FOLDS into the milestone it describes, and is then not a
 workstream of its own: the milestone's card links it ("design: <filename>").
 It describes a milestone, in any repo, when its normalized title (lowercased,
-runs of anything but letters and digits made one space) equals the
-milestone's, else when its refs name open issues in that milestone; the one
-with the most such refs wins. On a tie, a milestone in the doc's own repo
-wins, then the lowest id. A filename found in more than one repo is one doc:
+runs of anything but letters and digits made one space) is not empty and
+equals the milestone's, else when its refs name open issues in that
+milestone; the one with the most such refs wins. On a tie, a milestone in the
+doc's own repo wins, then the lowest id. A filename found in more than one repo is one doc:
 the copy whose repo owns the milestone it folds into is kept, else the first
 by id, and the other copies are dropped.
 
@@ -41,9 +41,10 @@ LANES, first match wins, after which an In progress or Planned workstream
 whose members (or, with none, the workstream itself) show no activity for
 `workstreams.stalled_days` days (default 14) moves to Stalled:
 
-- Complete: a milestone with at least one closed issue and none open. Its
-  card says "all N issues closed" and its next action is to close the
-  milestone. It never stalls.
+- Complete: a milestone with at least one closed issue, no open issue and
+  no open PR (one with an open PR is still In progress). Its card says "all
+  N issues closed" and its next action is to close the milestone. It never
+  stalls.
 - In progress: a started Linear project; a milestone with an open PR or a
   started issue (`status:3_started` or `status:4_needs_review`).
 - Planned: a planned Linear project; an approved milestone; an unapproved
@@ -245,7 +246,7 @@ def _member(ws: str, item: dict[str, Any], via: str) -> dict[str, Any]:
 
 
 def normalize_title(text: "str | None") -> str:
-    return " ".join(re.sub(r"[^a-z0-9]+", " ", str(text or "").lower()).split())
+    return " ".join(re.sub(r"[\W_]+", " ", str(text or "").lower()).split())
 
 
 def _filename(doc: dict[str, Any]) -> str:
@@ -259,7 +260,8 @@ def _described(
     rows: dict[str, dict],
 ) -> "dict | None":
     """The milestone row `doc` describes, or None (the module docstring)."""
-    found = by_title.get(normalize_title(doc["title"]))
+    title = normalize_title(doc["title"])
+    found = by_title.get(title) if title else None
     if not found:
         hits: dict[str, int] = {}
         for r in doc["refs"]:
@@ -694,12 +696,10 @@ def _base_lane(ws: dict[str, Any], members: list[dict[str, Any]]) -> str:
         return "design"
     done = int(ws.get("done") or 0)
     still_open = int(ws.get("total") or 0) - done
-    if done and not still_open:
+    open_pr = any(m["kind"] == "pr" and m["is_open"] for m in members)
+    if done and not still_open and not open_pr:
         return "complete"
-    started = any(
-        (m["kind"] == "pr" and m["is_open"]) or (m["kind"] == "issue" and m["started"])
-        for m in members
-    )
+    started = open_pr or any(m["kind"] == "issue" and m["started"] for m in members)
     if started:
         return "in-progress"
     return "planned" if ws.get("approved") or still_open else "design"

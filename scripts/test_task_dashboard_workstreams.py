@@ -123,18 +123,25 @@ class FakeGh:
     def __call__(self, argv, timeout):
         self.calls.append(argv)
         assert any("repositoryOwner" in a for a in argv), argv
-        nodes = [
-            {
-                "number": n, "title": t, "description": d, "dueOn": None,
-                "url": f"https://github.com/{REPO}/milestone/{n}",
-                "updatedAt": ts(u),
-                "open": {"totalCount": o}, "closed": {"totalCount": c},
-            }
-            for n, t, d, o, c, u in self.milestones
-        ]  # fmt: skip
+        # A milestone is (number, title, description, open, closed,
+        # updated days ago[, repo]); the repo defaults to REPO.
+        by_repo: dict = {}
+        for n, t, d, o, c, u, *rest in self.milestones:
+            repo = rest[0] if rest else REPO
+            by_repo.setdefault(repo, []).append(
+                {
+                    "number": n, "title": t, "description": d, "dueOn": None,
+                    "url": f"https://github.com/{repo}/milestone/{n}",
+                    "updatedAt": ts(u),
+                    "open": {"totalCount": o}, "closed": {"totalCount": c},
+                }
+            )  # fmt: skip
         repos = {
             "pageInfo": {"hasNextPage": False, "endCursor": None},
-            "nodes": [{"nameWithOwner": REPO, "milestones": {"nodes": nodes}}],
+            "nodes": [
+                {"nameWithOwner": r, "milestones": {"nodes": nodes}}
+                for r, nodes in by_repo.items()
+            ],
         }
         return 0, json.dumps({"data": {"repositoryOwner": {"repositories": repos}}}), ""
 
@@ -452,6 +459,18 @@ class LaneRuleTests(Case):
         self.assertEqual((item["lane"], item["action"]),
                          ("complete", {"review": "close the milestone"}))  # fmt: skip
 
+    def test_a_closed_milestone_with_an_open_pr_is_still_in_progress(self):
+        cfg = fleet_cfg()
+        github_fleet.write(
+            self.conn,
+            ROWS + [awaiting(30, "fix: follow-up", closes=[(99, 6)], role="others")],
+            NOW,
+        )
+        self.step(cfg, gh=FakeGh(MILESTONES + [(6, "Done", "approved: yes", 0, 5, 30)]))
+        c = self.by_id(cfg)[workstreams.ms_id(REPO, 6)]
+        self.assertEqual((c.lane, c.open_prs), ("in-progress", 1))
+        self.assertEqual(c.next, "1 open PR, none waiting on you")
+
     def test_an_unapproved_milestone_with_open_issues_is_planned_or_stalled(self):
         cfg = fleet_cfg()
         idle, fresh, empty = (workstreams.ms_id(REPO, n) for n in (7, 8, 9))
@@ -471,11 +490,14 @@ class LaneRuleTests(Case):
 
 
 class FoldTests(Case):
-    def fold(self, *docs):
-        github_fleet.write(self.conn, ROWS + list(docs), NOW)
+    def fold(self, *docs, milestones=MILESTONES, rows=ROWS):
+        github_fleet.write(self.conn, rows + list(docs), NOW)
         cfg = fleet_cfg()
-        self.step(cfg)
+        self.step(cfg, gh=FakeGh(milestones))
         return cfg
+
+    def designs_of(self, cfg, ws):
+        return [d["id"] for d in self.by_id(cfg)[ws].ws.get("designs") or []]
 
     def test_a_doc_titled_as_a_milestone_folds_into_it(self):
         cfg = self.fold(
@@ -524,6 +546,53 @@ class FoldTests(Case):
         self.assertEqual([k for k in keys(design_lane) if k.endswith(path)],
                          [workstreams.design_id("acme/tools", path)])  # fmt: skip
         self.assertIn("no members yet", design_lane)
+
+    def test_the_milestone_with_the_most_refs_wins(self):
+        path = "dev_docs/designs/split.md"
+        cfg = self.fold(
+            design(REPO, path, "Split", [(REPO, 10), (REPO, 11), (REPO, 15)]),
+            rows=ROWS + [issue(15, milestone=4)],
+        )
+        self.assertEqual(self.designs_of(cfg, MS4), [workstreams.design_id(REPO, path)])
+        self.assertEqual(self.designs_of(cfg, MS3), [])
+
+    def test_a_tie_goes_to_the_docs_own_repo_then_the_lowest_id(self):
+        shared = MILESTONES + [
+            (1, "Shared", "approved: yes", 1, 0, 1, "acme/tools"),
+            (7, "Shared", "approved: yes", 1, 0, 1),
+        ]
+        tools, widgets = workstreams.ms_id("acme/tools", 1), workstreams.ms_id(REPO, 7)
+        own = design(REPO, "dev_docs/designs/own.md", "Shared")
+        other = design("acme/other", "dev_docs/designs/other.md", "Shared")
+        cfg = self.fold(own, other, milestones=shared)
+        self.assertEqual(self.designs_of(cfg, widgets),
+                         [workstreams.design_id(REPO, "dev_docs/designs/own.md")])  # fmt: skip
+        self.assertEqual(self.designs_of(cfg, tools),
+                         [workstreams.design_id("acme/other", "dev_docs/designs/other.md")])  # fmt: skip
+
+    def test_the_first_copy_is_kept_when_the_milestones_repo_has_none(self):
+        path = "dev_docs/designs/2026-09-04-shared.md"
+        cfg = self.fold(
+            design("acme/zzz", path, "Export"), design("acme/other", path, "Export")
+        )
+        self.assertEqual(self.designs_of(cfg, MS3),
+                         [workstreams.design_id("acme/other", path)])  # fmt: skip
+
+    def test_titles_normalize_across_scripts_and_an_empty_one_never_folds(self):
+        self.assertEqual(workstreams.normalize_title("Café_Ünï — v2!"), "café ünï v2")
+        cfg = self.fold(
+            design(REPO, "dev_docs/designs/cafe.md", "CAFÉ"),
+            design(REPO, "dev_docs/designs/marks.md", "???"),
+            milestones=MILESTONES + [
+                (6, "café", "approved: yes", 1, 0, 1),
+                (7, "!!!", "approved: yes", 1, 0, 1),
+            ],
+        )  # fmt: skip
+        self.assertEqual(self.designs_of(cfg, workstreams.ms_id(REPO, 6)),
+                         [workstreams.design_id(REPO, "dev_docs/designs/cafe.md")])  # fmt: skip
+        self.assertEqual(self.designs_of(cfg, workstreams.ms_id(REPO, 7)), [])
+        marks = workstreams.design_id(REPO, "dev_docs/designs/marks.md")
+        self.assertEqual(self.by_id(cfg)[marks].lane, "design")
 
 
 class FilterTests(Case):
