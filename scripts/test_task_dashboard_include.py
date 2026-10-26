@@ -266,7 +266,6 @@ class FleetRouteTests(server_harness.ServerCase):
         needs_fx.seed(conn)
         server_harness.seed(conn)
         overlay.tag(conn, ("github", needs_fx.pr_url(1201)), "side-quest")
-        overlay.set_focus(conn, ("jira", "ABC-4"))
         conn.close()
 
     def get(self, path):
@@ -327,14 +326,12 @@ class FleetRouteTests(server_harness.ServerCase):
         for path in VIEW_PATHS:
             bare = header(self.get(path))
             self.assertIn("Side quests <b>1/3</b>", bare, path)
-            self.assertIn('data-gauge="focus"', bare, path)
             for groups in ("prs", "sessions", "tasks", "other", ""):
                 filtered = header(self.get(f"{path}?include={groups}"))
                 self.assertEqual(filtered, bare, (path, groups))
 
     def test_an_ignored_item_stays_hidden_whatever_the_filter(self):
         conn = db.connect(self.db_path)
-        overlay.clear_focus(conn, ("jira", "ABC-4"))
         overlay.ignore(conn, ("github", needs_fx.pr_url(1201)))
         overlay.ignore(conn, ("jira", "ABC-1"))
         conn.close()
@@ -363,9 +360,6 @@ class FleetRouteTests(server_harness.ServerCase):
         self.assertIn(".lane.filtered-empty .empty.switched-off", page)
 
     def test_needs_you_lists_only_the_included_groups(self):
-        overlay_clear = db.connect(self.db_path)
-        overlay.clear_focus(overlay_clear, ("jira", "ABC-4"))
-        overlay_clear.close()
         everything = needs_fx.keys(self.get("/"))
         self.assertIn("s-turn", everything)
         self.assertIn(needs_fx.pr_url(1201), everything)

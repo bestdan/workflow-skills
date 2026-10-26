@@ -1,4 +1,4 @@
-"""The header gauges every page shows: side quests, the review queue, focus.
+"""The header gauges every page shows: side quests and the review queue.
 
 From the fleet view design ("Views", item 5). The two caps limit different
 things and both stand: side quests in flight against 3 (the work-in-progress
@@ -15,16 +15,12 @@ own cap). Neither is enforced; the gauges only show them.
   `review_queue()`, so the gauge, `/status` and Needs you agree. Before the
   fleet sync step's first successful run, or while `github.fleet` is off, it
   is unknown and shows "—"; after one, a run that found nothing reads 0.
-- **Focus** is the overlay's one focus item, linked when its key gives a URL.
-  A focus that is ignored, or under an ignored item, is not shown
-  (overlay.load).
 """
 
 import html
 import json
 import sqlite3
 from dataclasses import dataclass
-from typing import Any
 
 import github_fleet
 import overlay
@@ -39,7 +35,6 @@ CSS = """
 header .gauge { color:var(--muted); }
 header .gauge b { color:var(--fg); }
 header .gauge.over b { color:var(--bad); }
-header .gauge a { color:var(--accent); text-decoration:none; }
 """
 
 
@@ -47,8 +42,6 @@ header .gauge a { color:var(--accent); text-decoration:none; }
 class Gauges:
     side_quests: int
     review_queue: "int | None"  # None: fleet off, or never synced successfully
-    focus: "overlay.Item | None"
-    focus_summary: "str | None"
 
 
 def review_queue_rows(conn: sqlite3.Connection, fleet: bool) -> "list[dict] | None":
@@ -111,23 +104,8 @@ def read(
         if row is not None and not score.is_done(row[0]):
             side_quests += 1
     counts = review_queue(conn, fleet)
-    summary = None
-    if ov.focus is not None:
-        row = conn.execute(
-            "SELECT summary FROM issues WHERE source = ? AND key = ?", ov.focus
-        ).fetchone()
-        summary = row[0] if row else None
     queue = None if counts is None else counts["queue"]
-    return Gauges(side_quests, queue, ov.focus, summary)
-
-
-def _href(item: "overlay.Item", cfg: dict[str, Any]) -> "str | None":
-    source, key = item
-    if key.startswith("https://"):
-        return key
-    if source == "jira":
-        return f"https://{cfg['jira']['site']}/browse/{key}"
-    return None
+    return Gauges(side_quests, queue)
 
 
 def _gauge(name: str, label: str, value: "int | None", cap: int) -> str:
@@ -142,22 +120,7 @@ def _gauge(name: str, label: str, value: "int | None", cap: int) -> str:
     )
 
 
-def render(g: Gauges, cfg: dict[str, Any]) -> str:
-    parts = [
-        _gauge("side-quests", "Side quests", g.side_quests, SIDE_QUEST_CAP),
-        _gauge("review-queue", "Review queue", g.review_queue, REVIEW_QUEUE_CAP),
-    ]
-    if g.focus is not None:
-        key = g.focus[1]
-        if key.startswith("https://") and g.focus_summary:
-            text = _e(g.focus_summary)  # a URL key: the title alone reads better
-        else:
-            text = _e(key + (f" {g.focus_summary}" if g.focus_summary else ""))
-        href = _href(g.focus, cfg)
-        inner = (
-            f'<a href="{_e(href)}" target="_blank" rel="noopener">{text}</a>'
-            if href
-            else text
-        )
-        parts.append(f'<span class="gauge" data-gauge="focus">Focus: {inner}</span>')
-    return "".join(parts)
+def render(g: Gauges) -> str:
+    return _gauge("side-quests", "Side quests", g.side_quests, SIDE_QUEST_CAP) + _gauge(
+        "review-queue", "Review queue", g.review_queue, REVIEW_QUEUE_CAP
+    )

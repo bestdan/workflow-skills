@@ -131,7 +131,7 @@ LAN address.
 
 ## export, import
 
-The overlay (pins, order, snoozes, notes, kind tags, focus, ignores and each
+The overlay (pins, order, snoozes, notes, kind tags, ignores and each
 view's include filter) is the one thing on this machine that cannot be
 rebuilt from Jira or GitHub.
 
