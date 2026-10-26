@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.141.0] - 2026-10-26
+
+### Features
+
+- show what a session asked on its card [#1208] (#1211) (b334610)
+
 ## [2.140.0] - 2026-10-26
 
 ### Features
