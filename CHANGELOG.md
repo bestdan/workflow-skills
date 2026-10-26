@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.133.0] - 2026-10-26
+
+### Features
+
+- ask why not now on snooze; add tune [#1180] (#1186) (d14a857)
+
 ## [2.132.0] - 2026-10-26
 
 ### Features
