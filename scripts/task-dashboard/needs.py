@@ -85,6 +85,7 @@ import overlay
 import score
 import sessions
 import sync
+import view_model
 
 _e = html.escape
 
@@ -119,9 +120,17 @@ class Need:
     repo: "str | None" = None  # bare repo name
     branch: "str | None" = None
     number: "int | None" = None
-    hint: str = ""  # where it is acted on, or the skill that resolves it
+    # Where it is acted on, or the skill that resolves it: plain text, a
+    # command in backticks (view_model.code).
+    hint: str = ""
     ref: "str | None" = None  # `repo#N`, shown muted after the title
     row: "dict[str, Any] | None" = None  # the mirror row, for a PR or an issue
+    host: "str | None" = None  # a session's machine
+    path: "str | None" = None  # a session's working directory
+
+    @property
+    def action(self) -> view_model.Action:
+        return view_model.Action(self.hint, url=self.url)
 
 
 # --- approvals ---------------------------------------------------------------
@@ -204,6 +213,8 @@ def _session(row: dict[str, Any], now: datetime) -> "Need | None":
         repo=repo,
         branch=row.get("branch"),
         hint="answer it in the session",
+        host=row.get("host"),
+        path=row.get("cwd"),
     )
 
 
@@ -273,7 +284,7 @@ def _issue(row: dict[str, Any]) -> Need:
         state=github_fleet.HUMAN_LABEL,
         repo=fleet_views._name(row.get("repo")),
         number=row.get("number"),
-        hint="decide it, then <code>/promote-tasks</code>",
+        hint="decide it, then `/promote-tasks`",
         row=row,
     )
 
@@ -386,7 +397,7 @@ def _body(n: Need, now: datetime, ov: overlay.Overlay) -> str:
         if n.url and n.url.startswith("https://")
         else ""
     )
-    act = " · ".join(x for x in (link, n.hint) if x)
+    act = " · ".join(x for x in (link, view_model.code(n.hint)) if x)
     act = f'<div class="act">→ {act}</div>' if act else ""
     return brief + act + overlay.card_controls(n.item, ov, now, reorder=False)
 
@@ -433,6 +444,8 @@ def finished(
                 where=f"on {s.host}",
                 repo=s.repo,
                 branch=s.branch,
+                host=s.host,
+                path=s.cwd,
             )
         )
     return out
@@ -480,6 +493,24 @@ def build(
     )
 
 
+def lanes(p: Page, inc: "include.Include | None" = None) -> list[view_model.Lane]:
+    """The page's lanes in order: Needs you, then Approvals and Finished,
+    each only when it has rows."""
+    if p.approvals:
+        empty = "No decisions waiting; only the plain approvals in Approvals."
+    elif inc is not None and not inc.everything:
+        empty = "Nothing included by the filter needs you."
+    else:
+        empty = "Nothing needs you."
+    out = [view_model.Lane("needs", "Needs you", p.main, empty)]
+    if p.approvals:
+        out.append(view_model.Lane("approvals", "Approvals", p.approvals))
+    if p.finished:
+        title = "Finished since you looked"
+        out.append(view_model.Lane("finished", title, p.finished, tab="Finished"))
+    return out
+
+
 def render(
     conn: sqlite3.Connection,
     cfg: dict[str, Any],
@@ -494,38 +525,36 @@ def render(
             '<p class="note">github.fleet is off, so no PRs or issues are'
             " shown here.</p>"
         )
-    cards = []
-    for i, n in enumerate(p.main):
-        cards.append(expanded(n, now, ov) if i == 0 else collapsed(n, now, ov))
-    if p.approvals:
-        empty = "No decisions waiting; only the plain approvals in Approvals."
-    elif inc is not None and not inc.everything:
-        empty = "Nothing included by the filter needs you."
-    else:
-        empty = "Nothing needs you."
-    body = "".join(cards) if cards else f'<p class="empty">{_e(empty)}</p>'
-    # Beside the heading, not in it: the page's text filter rewrites the h2.
-    mark_all = (
-        '<div class="visit"><button type="button" data-ov="visit"'
-        f' data-at="{fleet_views._stamp(now)}" title="Clear the new badges and the Finished group">'
-        "Mark all as read</button></div>"
-    )
-    parts.append(
-        f'<section class="lane" data-section="needs">'
-        f"<h2>Needs you ({len(p.main)})</h2>{mark_all}{body}</section>"
-    )
-    if p.approvals:
-        # A lane, so a tab of its own (lane_tabs.py), which opens first when
-        # nothing else waits: it is then the first lane with rows.
-        rows = "".join(collapsed(n, now, ov) for n in p.approvals)
-        parts.append(
-            '<section class="lane approvals" data-section="approvals">'
-            f"<h2>Approvals ({len(p.approvals)})</h2>"
-            '<p class="note">Plain approvals, batched: answer each in its'
-            f" session.</p>{rows}</section>"
-        )
-    if p.finished:
-        parts.append(finished_group(p.finished, now, ov))
+    for lane in lanes(p, inc):
+        if lane.id == "needs":
+            cards = [
+                expanded(n, now, ov) if i == 0 else collapsed(n, now, ov)
+                for i, n in enumerate(lane.items)
+            ]
+            body = "".join(cards) or f'<p class="empty">{_e(lane.empty)}</p>'
+            # Beside the heading, not in it: the page's text filter rewrites
+            # the h2.
+            mark_all = (
+                '<div class="visit"><button type="button" data-ov="visit"'
+                f' data-at="{fleet_views._stamp(now)}" title="Clear the new badges and the Finished group">'
+                "Mark all as read</button></div>"
+            )
+            parts.append(
+                f'<section class="lane" data-section="needs">'
+                f"<h2>{lane.title} ({len(lane.items)})</h2>{mark_all}{body}</section>"
+            )
+        elif lane.id == "approvals":
+            # A lane, so a tab of its own (lane_tabs.py), which opens first
+            # when nothing else waits: it is then the first lane with rows.
+            rows = "".join(collapsed(n, now, ov) for n in lane.items)
+            parts.append(
+                '<section class="lane approvals" data-section="approvals">'
+                f"<h2>{lane.title} ({len(lane.items)})</h2>"
+                '<p class="note">Plain approvals, batched: answer each in its'
+                f" session.</p>{rows}</section>"
+            )
+        else:
+            parts.append(finished_group(lane.items, now, ov))
     if p.snoozed:
         parts.append(
             f'<p class="note" data-snoozed="{p.snoozed}">{p.snoozed} snoozed.</p>'

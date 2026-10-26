@@ -34,11 +34,13 @@ from pathlib import Path  # noqa: E402
 # on sys.path and import the siblings as top-level modules.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import agent_view  # noqa: E402
 import collector  # noqa: E402
 import collector_install  # noqa: E402
 import config  # noqa: E402
 import db  # noqa: E402
 import health  # noqa: E402
+import include  # noqa: E402
 import ingest  # noqa: E402
 import overlay  # noqa: E402
 import server  # noqa: E402
@@ -149,6 +151,45 @@ def build_parser() -> argparse.ArgumentParser:
     )
     tune_p.add_argument("--json", action="store_true", help="print JSON")
     _paths(tune_p)
+    view_p = sub.add_parser(
+        "view",
+        help="print one view's lanes and items, as its page shows them; reads the"
+        " DB, no server needed",
+    )
+    view_p.add_argument("name", help="the view: " + ", ".join(agent_view.PATHS))
+    view_p.add_argument("--json", action="store_true", help="print JSON")
+    view_p.add_argument(
+        "--all",
+        action="store_true",
+        help="also list what the page hides, each marked with why",
+    )
+    view_p.add_argument(
+        "--include",
+        help="comma-separated groups, as the page's ?include= (default: the"
+        " view's remembered or configured filter)",
+    )
+    _paths(view_p)
+    ov_p = sub.add_parser(
+        "overlay",
+        help="one overlay write (ignore, snooze, pin, ...), as the page's buttons"
+        " post it, straight to the DB",
+    )
+    ov_p.add_argument("action", help="one of: " + ", ".join(overlay.ACTIONS))
+    ov_p.add_argument("--source", help="the item's source (default: jira)")
+    ov_p.add_argument(
+        "--key", action="append", help="the item's key; repeat it for `order`"
+    )
+    for name, what in (
+        ("until", "snooze/whynot date, YYYY-MM-DD (empty unsnoozes)"),
+        ("text", "note text, or a whynot or substantial tag's text"),
+        ("tag", "tag: side-quest or substantial (empty clears)"),
+        ("reason", "whynot reason code"),
+        ("at", "visit: the render time, YYYY-MM-DDTHH:MM:SSZ"),
+        ("view", "include: the view"),
+        ("groups", "include: comma-separated groups (empty: none)"),
+    ):
+        ov_p.add_argument(f"--{name}", help=what)
+    _paths(ov_p)
     install_p = sub.add_parser(
         "install",
         help="macOS: install the dashboard server as a LaunchAgent (full sync, then"
@@ -363,6 +404,72 @@ def cmd_tune(args: argparse.Namespace) -> int:
         print(json.dumps(doc, indent=2))
     else:
         sys.stdout.write(whynot.text_report(doc))
+    return 0
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def cmd_view(args: argparse.Namespace) -> int:
+    """Exit 0, or 2 on a config error, an unknown view or include group."""
+    cfg_path, db_arg = _agent_paths(args)
+    try:
+        cfg = config.load(cfg_path)
+    except config.ConfigError as exc:
+        print(f"task-dashboard: {exc}", file=sys.stderr)
+        return 2
+    conn = db.connect(db_arg)
+    try:
+        inc = agent_view.resolve_include(conn, cfg, args.name, args.include)
+        doc = agent_view.build(conn, cfg, args.name, _now(), inc, args.all)
+    except (agent_view.ViewError, include.IncludeError) as exc:
+        print(f"task-dashboard: {exc}", file=sys.stderr)
+        return 2
+    finally:
+        conn.close()
+    sys.stdout.write(agent_view.dumps(doc) if args.json else agent_view.text(doc))
+    return 0
+
+
+def cmd_overlay(args: argparse.Namespace) -> int:
+    """Exit 0 written, 1 refused (the overlay is unchanged), 2 a config error.
+
+    The same write the page's POST runs, through the same validation, minus
+    the page token: whoever runs this already owns the DB file.
+    """
+    cfg_path, db_arg = _agent_paths(args)
+    form: dict[str, list[str]] = {}
+    if args.source is not None:
+        form["source"] = [args.source]
+    if args.key:
+        form["key"] = list(args.key)
+    for name in ("until", "text", "tag", "reason", "at", "view"):
+        value = getattr(args, name)
+        if value is not None:
+            form[name] = [value]
+    if args.groups is not None:
+        form["include"] = [args.groups]
+    cfg: dict = {}
+    if args.action == "whynot":
+        # Only a "why not now" answer reads the config: for Now's ranking.
+        try:
+            cfg = config.load(cfg_path)
+        except config.ConfigError as exc:
+            print(f"task-dashboard: {exc}", file=sys.stderr)
+            return 2
+    conn = db.connect(db_arg)
+    try:
+        server.write_overlay(conn, cfg, args.action, form, _now())
+    except overlay.OverlayError as exc:
+        print(f"task-dashboard: overlay refused: {exc}", file=sys.stderr)
+        return 1
+    except sqlite3.Error as exc:
+        print(f"task-dashboard: overlay {args.action} failed: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        conn.close()
+    print(f"overlay {args.action}: done")
     return 0
 
 
@@ -613,6 +720,10 @@ def main(argv: "list[str] | None" = None) -> int:
         return cmd_health(args)
     if args.command == "tune":
         return cmd_tune(args)
+    if args.command == "view":
+        return cmd_view(args)
+    if args.command == "overlay":
+        return cmd_overlay(args)
     parser.print_help()
     return 2
 

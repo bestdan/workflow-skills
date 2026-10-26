@@ -23,7 +23,13 @@ resolves it, and goes in one of two lanes:
   cannot be evaluated (a compound condition included), or a PR or issue open
   past the threshold.
 
-Age orders each lane, oldest first, and is shown only as context.
+Age orders each lane, oldest first, and is shown only as context. An ignored
+item (overlay.py) leaves the lanes: a worktree or handoff under its mirror
+key, a session, PR or issue under the key Needs you ignores it by.
+
+Each row is a StaleItem of plain-text fields, its action structured
+(view_model.Action); the card is rendered from those fields, and
+`dashboard.py view stale` (agent_view.py) reads the same lanes as JSON.
 
 A worktree row kept from a failed scan (snapshot_adapter.py, `kept`) is never
 evidence: its landed verdict is as old as the snapshot that last saw it. It
@@ -49,6 +55,7 @@ import overlay
 import score
 import sessions
 import sync
+import view_model
 
 # Tabs that exist only on a fleet instance (views.nav hides them elsewhere).
 ONLY = {"/needs", "/prs", "/issues"}
@@ -255,12 +262,6 @@ def title_ref(url: "str | None", title: "str | None", ref: str) -> str:
     return _link(url, title or ref) + (ref_suffix(ref) if title else "")
 
 
-def _ref(row: dict[str, Any]) -> str:
-    """`title (repo#N)`, the title linked: a PR or issue row."""
-    label = f"{row.get('repo') or ''}#{row.get('number')}"
-    return title_ref(row.get("url"), row.get("title"), label)
-
-
 def _pr_merged(pr: dict[str, Any], at: "datetime | None", now: datetime) -> str:
     """`title (#N) merged <ago>`, or `PR #N merged <ago>` when untitled."""
     n = pr.get("number")
@@ -329,10 +330,32 @@ STALE_KINDS = ("worktree", "handoff", "session", "pr", "issue")
 
 @dataclass
 class StaleItem:
+    """One Stale row, as plain text: the card is rendered from these fields."""
+
     lane: str  # close | check
     at: "datetime | None"  # orders the lane, oldest first; never a reason
-    html: str
     kind: str  # the row's mirror kind, for the include filter
+    item: overlay.Item  # (source, key): the overlay identity
+    title: str
+    meta: str
+    why: str  # the line the card shows: the evidence, and any risks
+    action: view_model.Action
+    evidence: str = ""  # the evidence alone, without the risks
+    risks: list[str] = field(default_factory=list)
+    url: "str | None" = None
+    ref: "str | None" = None  # `repo#N`, shown muted after the title
+    host: "str | None" = None
+    path: "str | None" = None
+    branch: "str | None" = None
+
+    @property
+    def html(self) -> str:
+        head = (
+            title_ref(self.url, self.title, self.ref)
+            if self.ref is not None
+            else _link(self.url, self.title)
+        )
+        return _card(head, _e(self.meta), _e(self.why), self.action.html())
 
 
 # "when #N merges" is a merge condition only when it names exactly one #N. A
@@ -472,7 +495,8 @@ def stale_items(
 ) -> list[StaleItem]:
     """The Stale lanes' items. `ignored` (the overlay's) drops the sessions,
     PRs and issues the user ignored on Needs, under the same overlay keys, and
-    a worktree ignored under its mirror key, kept from a failed scan or not."""
+    a worktree or handoff ignored under its mirror key, kept from a failed
+    scan or not."""
     ignored = ignored or set()
     out: list[StaleItem] = []
     landed = _landed_worktrees(f)
@@ -483,8 +507,6 @@ def stale_items(
         if key not in landed or item in ignored:
             continue
         evidence, at = landed[key].evidence(now), landed[key].at
-        head = _link(None, f"worktree {wt['path']}")
-        meta = _e(f"on {wt['host']} · {wt.get('repo')}: {wt.get('branch')}")
         risks = []
         if wt.get("dirty"):
             risks.append("uncommitted changes")
@@ -493,59 +515,80 @@ def stale_items(
         active = _active_in(f, wt["host"], wt["path"], now)
         if active is not None:
             risks.append(f"session {active.session_id} used it {ago(active.last, now)}")
-        cmd = f"<code>worktree-remove.sh {_e(wt['path'])}</code>"
         if landed[key].kept:
-            why = f"{_e(kept_note(wt, now))}; when last seen: {_e(evidence)}"
+            lane = "check"
+            why = f"{kept_note(wt, now)}; when last seen: {evidence}"
             if risks:
-                why += f", and it had {_e(', '.join(risks))}"
-            act = f"wait for a scan that lists it, or check the host; then {cmd}"
-            out.append(StaleItem("check", at, _card(head, meta, why, act), "worktree"))
+                why += f", and it had {', '.join(risks)}"
+            review = "wait for a scan that lists it, or check the host"
         elif landed[key].pr is None:
             # The gate also calls a branch landed when its tip is on
             # origin/<default>, which a fresh worktree with no commits is.
             # Without a merged PR for the branch that is not evidence enough.
-            why = f"no merged PR found for its branch; the gate says: {_e(evidence)}"
+            lane = "check"
+            why = f"no merged PR found for its branch; the gate says: {evidence}"
             if risks:
-                why += f"; it has {_e(', '.join(risks))}"
-            act = f"check it has nothing left to do; then {cmd}"
-            out.append(StaleItem("check", at, _card(head, meta, why, act), "worktree"))
+                why += f"; it has {', '.join(risks)}"
+            review = "check it has nothing left to do"
         elif risks:
-            why = f"{_e(evidence)}, but it has {_e(', '.join(risks))}"
-            act = f"look before removing; then {cmd}"
-            out.append(StaleItem("check", at, _card(head, meta, why, act), "worktree"))
+            lane = "check"
+            why = f"{evidence}, but it has {', '.join(risks)}"
+            review = "look before removing"
         else:
-            out.append(
-                StaleItem("close", at, _card(head, meta, _e(evidence), cmd), "worktree")
+            lane, why, review = "close", evidence, ""
+        out.append(
+            StaleItem(
+                lane, at, "worktree", item,
+                title=f"worktree {wt['path']}",
+                meta=f"on {wt['host']} · {wt.get('repo')}: {wt.get('branch')}",
+                why=why,
+                action=view_model.Action(review, ("worktree-remove.sh", wt["path"])),
+                evidence=evidence,
+                risks=risks,
+                host=wt["host"],
+                path=wt["path"],
+                branch=wt.get("branch"),
             )
+        )  # fmt: skip
 
     for ho in f.handoffs:
         path = ho.get("path") or ""
+        item = (f"machine:{ho['host']}", f"handoff:{path}")
+        if item in ignored:
+            continue
         repo = PurePosixPath(path).parent.parent.name or None
         at = score.parse_ts(ho.get("created")) or score.parse_ts(ho.get("mtime"))
         expired, evidence = _expiry(ho.get("expires"), repo, f, now)
-        head = _link(None, f"handoff {ho.get('aim') or PurePosixPath(path).name}")
-        meta = _e(f"on {ho['host']} · {path}")
         if expired:
-            act = f"read it, then delete <code>{_e(path)}</code>"
-            out.append(
-                StaleItem("close", at, _card(head, meta, _e(evidence), act), "handoff")
-            )
+            lane, why = "close", evidence
+            action = view_model.Action("read it", ("rm", path))
         elif (
             expired is None
             and at is not None
             and now - at > timedelta(days=OPEN_ITEM_DAYS)
         ):
-            why = f"no evidence: {_e(evidence)}"
-            act = "read it: still needed, or delete it"
-            out.append(StaleItem("check", at, _card(head, meta, why, act), "handoff"))
+            lane, why = "check", f"no evidence: {evidence}"
+            action = view_model.Action("read it: still needed, or delete it")
+        else:
+            continue
+        out.append(
+            StaleItem(
+                lane, at, "handoff", item,
+                title=f"handoff {ho.get('aim') or PurePosixPath(path).name}",
+                meta=f"on {ho['host']} · {path}",
+                why=why,
+                action=action,
+                evidence=evidence,
+                host=ho["host"],
+                path=path,
+            )
+        )  # fmt: skip
 
     idle = now - timedelta(days=SESSION_IDLE_DAYS)
     forget = now - timedelta(days=SESSION_FORGET_DAYS)
     for s in f.sessions:
         if not forget < s.last <= idle or (sessions.SOURCE, s.session_id) in ignored:
             continue
-        head = _link(None, f"session {s.session_id}")
-        meta = f"{_session_where(s)} · last event {_e(ago(s.last, now))}"
         in_landed = next(
             (
                 ev
@@ -558,30 +601,33 @@ def stale_items(
             None,
         )
         if s.prompts == 0:
+            lane = "close"
             why = f"no prompt was ever sent (first event {ago(s.first, now)})"
-            act = "close the session: an empty spawn"
-            out.append(
-                StaleItem("close", s.last, _card(head, meta, _e(why), act), "session")
-            )
+            review = "close the session: an empty spawn"
         elif in_landed is not None:
+            lane = "close"
             why = "its worktree landed: " + in_landed.evidence(now)
-            out.append(
-                StaleItem(
-                    "close",
-                    s.last,
-                    _card(head, meta, _e(why), "close the session"),
-                    "session",
-                )
-            )
+            review = "close the session"
         else:
+            lane = "check"
             why = "no evidence: idle, with nothing that says its work is done"
-            act = "resume it, or close it"
-            out.append(
-                StaleItem("check", s.last, _card(head, meta, why, act), "session")
+            review = "resume it, or close it"
+        out.append(
+            StaleItem(
+                lane, s.last, "session", (sessions.SOURCE, s.session_id),
+                title=f"session {s.session_id}",
+                meta=f"{_session_where(s)} · last event {ago(s.last, now)}",
+                why=why,
+                action=view_model.Action(review),
+                evidence=why,
+                host=s.host,
+                path=s.cwd,
+                branch=s.branch,
             )
+        )  # fmt: skip
 
     old = now - timedelta(days=OPEN_ITEM_DAYS)
-    for kind, act in (
+    for kind, review in (
         ("pr", "review it: merge, close, or say what it waits on"),
         ("issue", "decide it, or say what it waits on"),
     ):
@@ -590,13 +636,59 @@ def stale_items(
             item = (github_fleet.SOURCE, str(row.get("key") or row.get("url")))
             if at is None or at > old or item in ignored:
                 continue
-            meta = f"opened {_e(ago(at, now))}"
-            why = "no evidence: nothing mirrored says it can close"
-            out.append(StaleItem("check", at, _card(_ref(row), meta, why, act), kind))
+            url = row.get("url")
+            out.append(
+                StaleItem(
+                    "check", at, kind, item,
+                    title=row.get("title") or "",
+                    ref=f"{row.get('repo') or ''}#{row.get('number')}",
+                    url=url,
+                    meta=f"opened {ago(at, now)}",
+                    why="no evidence: nothing mirrored says it can close",
+                    action=view_model.Action(review, url=url),
+                )
+            )  # fmt: skip
 
     epoch = datetime.min.replace(tzinfo=timezone.utc)
     out.sort(key=lambda i: (i.at is None, i.at or epoch))
     return out
+
+
+STALE_LANES = (
+    ("close", "Close: evidence found", "Nothing has evidence to close.", "Close"),
+    (
+        "check",
+        "Check: no evidence, so not a reason to close",
+        "Nothing old is waiting on a check.",
+        "Check",
+    ),
+)
+
+
+def stale_off(inc: "include.Include | None") -> bool:
+    """Every group the Stale lanes hold is switched off."""
+    groups = {include.group_of(k) for k in STALE_KINDS}
+    return inc is not None and not any(inc.has(g) for g in groups)
+
+
+def stale_lanes(
+    conn: sqlite3.Connection,
+    cfg: dict[str, Any],
+    now: datetime,
+    inc: "include.Include | None" = None,
+) -> list[view_model.Lane]:
+    """The Close and Check lanes as the page shows them, ignores and the
+    include filter applied; both are empty when every group is off."""
+    items: list[StaleItem] = []
+    if not stale_off(inc):
+        items = stale_items(load(conn, cfg), now, overlay.load(conn).ignored)
+        items = [i for i in items if inc is None or inc.shows(i.kind)]
+    return [
+        view_model.Lane(
+            lane, title, [i for i in items if i.lane == lane], empty, tab=tab
+        )
+        for lane, title, empty, tab in STALE_LANES
+    ]
 
 
 def render_stale(
@@ -605,40 +697,28 @@ def render_stale(
     now: datetime,
     inc: "include.Include | None" = None,
 ) -> str:
-    groups = sorted(
-        {include.group_of(k) for k in STALE_KINDS}, key=include.GROUPS.index
-    )
-    if inc is not None and not any(inc.has(g) for g in groups):
+    lanes = stale_lanes(conn, cfg, now, inc)
+    if stale_off(inc):
         # Every group these lanes hold is off: say so, as a Jira lane does.
+        groups = sorted(
+            {include.group_of(k) for k in STALE_KINDS}, key=include.GROUPS.index
+        )
         note = include.off_note(*groups)
-        return (
-            '<div class="fleet">'
-            '<section class="lane" data-section="close" data-filtered="all"'
-            f' data-tab="Close"><h2>Close: evidence found (0)</h2>{note}</section>'
-            '<section class="lane" data-section="check" data-filtered="all"'
-            ' data-tab="Check">'
-            f"<h2>Check: no evidence, so not a reason to close (0)</h2>{note}"
-            "</section></div>"
+        off = "".join(
+            f'<section class="lane" data-section="{lane.id}" data-filtered="all"'
+            f' data-tab="{lane.tab}"><h2>{_e(lane.title or "")} (0)</h2>{note}'
+            "</section>"
+            for lane in lanes
         )
-    items = stale_items(load(conn, cfg), now, overlay.load(conn).ignored)
-    items = [i for i in items if inc is None or inc.shows(i.kind)]
-    close = [i.html for i in items if i.lane == "close"]
-    check = [i.html for i in items if i.lane == "check"]
-    return (
-        '<div class="fleet">'
-        + _section(
-            "close",
-            "Close: evidence found",
-            close,
-            "Nothing has evidence to close.",
-            "Close",
+        return f'<div class="fleet">{off}</div>'
+    body = "".join(
+        _section(
+            lane.id,
+            lane.title or "",
+            [i.html for i in lane.items],
+            lane.empty,
+            lane.tab,
         )
-        + _section(
-            "check",
-            "Check: no evidence, so not a reason to close",
-            check,
-            "Nothing old is waiting on a check.",
-            "Check",
-        )
-        + "</div>"
+        for lane in lanes
     )
+    return f'<div class="fleet">{body}</div>'

@@ -49,6 +49,7 @@ import needs
 import overlay
 import score
 import sync
+import view_model
 import whynot
 
 _e = html.escape
@@ -65,7 +66,7 @@ CSS = """
 _OWN_ISSUE = {"status:3_started": "started", "status:2_ready": "ready"}
 
 MISS_ACTS = {
-    "co_review": ("no co-review stamp at its head", "run <code>/co-review</code>"),
+    "co_review": ("no co-review stamp at its head", "run `/co-review`"),
     "milestone": ("milestone not approved", "approve its milestone"),
 }
 
@@ -165,7 +166,7 @@ def _own_issues(conn: sqlite3.Connection, cfg: dict[str, Any]) -> list[Ranked]:
         hint = (
             "carry on with it"
             if category == "started"
-            else "start it, or leave it to <code>/do-tasks</code>"
+            else "start it, or leave it to `/do-tasks`"
         )
         need = needs.Need(
             item=(github_fleet.SOURCE, str(row.get("key") or row.get("url"))),
@@ -298,7 +299,7 @@ def card(r: Ranked, now: datetime, ov: overlay.Overlay) -> str:
         if n.url and n.url.startswith("https://")
         else ""
     )
-    act = " · ".join(x for x in (link, n.hint) if x)
+    act = " · ".join(x for x in (link, view_model.code(n.hint)) if x)
     act_html = f'<div class="act">→ {act}</div>' if act else ""
     return (
         f'<div {overlay.card_attrs(n.item, ov, now)} data-kind="{_e(n.kind)}"'
@@ -309,6 +310,15 @@ def card(r: Ranked, now: datetime, ov: overlay.Overlay) -> str:
         f"{act_html}{overlay.card_controls(n.item, ov, now, reorder=False, why_not=True)}"
         f"{whynot.picker(overlay.snooze_until(now))}</div>"
     )
+
+
+def lanes(p: Page, inc: "include.Include | None" = None) -> list[view_model.Lane]:
+    """The page's one lane, Next."""
+    if inc is not None and not inc.everything:
+        empty = "Nothing included by the filter is waiting."
+    else:
+        empty = "Nothing is waiting on you."
+    return [view_model.Lane("next", "Next", p.shown, empty)]
 
 
 def render(
@@ -326,16 +336,13 @@ def render(
             '<p class="note">github.fleet is off, so no PRs or issues are'
             " ranked here.</p>"
         )
-    if p.shown:
-        body = "".join(card(r, now, ov) for r in p.shown)
-    elif inc is not None and not inc.everything:
-        body = '<p class="empty">Nothing included by the filter is waiting.</p>'
-    else:
-        body = '<p class="empty">Nothing is waiting on you.</p>'
-    parts.append(
-        f'<section class="lane" data-section="next">'
-        f"<h2>Next ({len(p.shown)})</h2>{body}</section>"
-    )
+    for lane in lanes(p, inc):
+        body = "".join(card(r, now, ov) for r in lane.items)
+        body = body or f'<p class="empty">{_e(lane.empty)}</p>'
+        parts.append(
+            f'<section class="lane" data-section="{lane.id}">'
+            f"<h2>{lane.title} ({len(lane.items)})</h2>{body}</section>"
+        )
     if p.more_on_needs:
         parts.append(
             f'<p class="more" data-more="{p.more_on_needs}"><a href="/needs">'

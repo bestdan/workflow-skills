@@ -55,6 +55,7 @@ import needs
 import overlay
 import score
 import sync
+import view_model
 import views
 import whynot
 
@@ -561,6 +562,51 @@ def _card(
     )
 
 
+def board_lanes(
+    board: dict[str, Any], ov: "overlay.Overlay | None" = None
+) -> list[view_model.Lane]:
+    """The Board's lanes, each item a board_rows() row: with `ov`, Pinned
+    first, then each classifier section and Unclassified that has rows.
+
+    Pinned cards are repeated above the lanes, in their manual order; the
+    lanes themselves stay exactly what /list-tasks would show.
+    """
+    lanes = []
+    if ov is not None:
+        rows = [r for lane in board["sections"].values() for r in lane]
+        pinned = sorted(
+            (r for r in rows + board["unmatched"] if ov.is_pinned(("jira", r["id"]))),
+            key=lambda r: ov.pin_rank(("jira", r["id"])),
+        )
+        if pinned:
+            lanes.append(view_model.Lane("pinned", "Pinned", pinned))
+    for name in kanban().SECTION_ORDER:
+        if board["sections"][name]:
+            title = SECTION_TITLES.get(name, name)
+            lanes.append(view_model.Lane(name, title, board["sections"][name]))
+    if board["unmatched"]:
+        lanes.append(view_model.Lane("unmatched", "Unclassified", board["unmatched"]))
+    return lanes
+
+
+def board_data(conn: sqlite3.Connection, cfg: dict[str, Any]) -> dict[str, Any]:
+    """The Board's classified rows, less the ignored and what is under them."""
+    ignored = {k for s, k in overlay.load(conn).ignored if s == "jira"}
+    parents = dict(
+        conn.execute(
+            "SELECT key, parent_key FROM jira_issues WHERE parent_key IS NOT NULL"
+        )
+    )
+    me = str(cfg["jira"].get("me") or "").strip()
+    return classify_board(
+        [
+            r
+            for r in board_rows(conn, me)
+            if not views.under_ignored(r["id"], r["parent_key"], parents.get, ignored)
+        ]
+    )
+
+
 def render_board(
     board: dict[str, Any],
     site: str,
@@ -574,34 +620,13 @@ def render_board(
             f"<h2>Issues (0)</h2>{include.off_note('tasks')}</section>"
         )
     parts = []
-    if ov is not None and now is not None:
-        # Pinned cards are repeated above the lanes, in their manual order; the
-        # lanes themselves stay exactly what /list-tasks would show.
-        rows = [r for lane in board["sections"].values() for r in lane]
-        pinned = sorted(
-            (r for r in rows + board["unmatched"] if ov.is_pinned(("jira", r["id"]))),
-            key=lambda r: ov.pin_rank(("jira", r["id"])),
-        )
-        if pinned:
-            cards = "".join(_card(r, site, ov, now, reorder=True) for r in pinned)
-            parts.append(
-                '<section class="lane" data-section="pinned" data-pinned="1">'
-                f"<h2>Pinned ({len(pinned)})</h2>{cards}</section>"
-            )
-    for name in kanban().SECTION_ORDER:
-        rows = board["sections"][name]
-        if not rows:
-            continue
-        cards = "".join(_card(r, site, ov, now) for r in rows)
+    for lane in board_lanes(board, ov if now is not None else None):
+        pinned = lane.id == "pinned"
+        cards = "".join(_card(r, site, ov, now, reorder=pinned) for r in lane.items)
+        attr = ' data-pinned="1"' if pinned else ""
         parts.append(
-            f'<section class="lane" data-section="{name}">'
-            f"<h2>{SECTION_TITLES.get(name, name)} ({len(rows)})</h2>{cards}</section>"
-        )
-    if board["unmatched"]:
-        cards = "".join(_card(r, site, ov, now) for r in board["unmatched"])
-        parts.append(
-            '<section class="lane" data-section="unmatched">'
-            f"<h2>Unclassified ({len(board['unmatched'])})</h2>{cards}</section>"
+            f'<section class="lane" data-section="{lane.id}"{attr}>'
+            f"<h2>{lane.title} ({len(lane.items)})</h2>{cards}</section>"
         )
     if not parts:
         return '<p class="empty">No issues in an active sprint.</p>'
@@ -627,6 +652,23 @@ def render_page(title: str, header: str, body: str, token: str, busy: bool) -> s
 
 
 # --- HTTP --------------------------------------------------------------------
+
+
+def write_overlay(
+    conn: sqlite3.Connection,
+    cfg: dict[str, Any],
+    action: str,
+    form: dict[str, list[str]],
+    now: datetime,
+) -> None:
+    """One overlay write, from a parsed form: what `POST /overlay/<action>`
+    runs once its Host, Origin and token checks pass, and what
+    `dashboard.py overlay` runs directly. Raises overlay.OverlayError."""
+
+    def snapshot(item: overlay.Item) -> "dict[str, Any] | None":
+        return fleet_now.snapshot_of(conn, cfg, item, now)
+
+    overlay.apply(conn, action, form, now, snapshot)
 
 
 class App:
@@ -740,12 +782,7 @@ class App:
     def overlay_write(self, action: str, form: dict[str, list[str]]) -> None:
         conn = self.read()
         try:
-            now = self.now()
-
-            def snapshot(item: overlay.Item) -> "dict[str, Any] | None":
-                return fleet_now.snapshot_of(conn, self.cfg, item, now)
-
-            overlay.apply(conn, action, form, now, snapshot)
+            write_overlay(conn, self.cfg, action, form, self.now())
         finally:
             conn.close()
 
@@ -756,24 +793,7 @@ class App:
             inc = self.include_for(conn, "board", query)
             health = self.health(conn)
             ov = overlay.load(conn)
-            ignored = {k for s, k in ov.ignored if s == "jira"}
-            parents = dict(
-                conn.execute(
-                    "SELECT key, parent_key FROM jira_issues"
-                    " WHERE parent_key IS NOT NULL"
-                )
-            )
-            board = classify_board(
-                [
-                    r
-                    for r in board_rows(
-                        conn, str(self.cfg["jira"].get("me") or "").strip()
-                    )
-                    if not views.under_ignored(
-                        r["id"], r["parent_key"], parents.get, ignored
-                    )
-                ]
-            )
+            board = board_data(conn, self.cfg)
             ignored_html = views.render_ignored(conn)
             gauge_html = self.header_extras(conn, ov)
             sprints = [
