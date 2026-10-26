@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.141.2] - 2026-10-26
+
+### Fixes
+
+- Complete lane, stale backlogs, folded designs [#1214] (#1215) (d4ec726)
+
 ## [2.141.1] - 2026-10-26
 
 ### Fixes
