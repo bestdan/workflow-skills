@@ -686,7 +686,10 @@ the request the doctor just filed.
    draft PR **first** and writes the rung through `gh-issue-state.py` only once
    that succeeded — a rung on a draft is the state the
    [write order](#write-order) forbids. A PR that does not close its issue is
-   **reported only**: editing a PR body is not a safe doctor write. `linear` stays
+   **reported only** — the PR is not readied and the rung is not written — and
+   counts under `skipped` so the pass never reads as `ok`: without the link
+   nothing ties that PR to the issue, and editing a PR body is not a safe
+   doctor write. `linear` stays
    behind `--handler` as future work.
 5. **No orphan worker worktrees from a dead dispatch** (G2). → **repair**, remove
    them — but only when removal is provably safe: the worktree is under

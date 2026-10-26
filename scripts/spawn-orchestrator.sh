@@ -6624,8 +6624,10 @@ doctor() {
     # succeeded — the same remote-before-tracker order set_needs_review uses; a
     # rung on a draft PR is the state that order forbids. The rung goes through
     # gh-issue-state.py, never a raw label edit (which silently creates unknown
-    # labels). A PR that does not close the issue is REPORTED only: editing a
-    # PR body is not a safe doctor write. The issue number is the task cell's.
+    # labels). A PR that does not close the issue is REPORTED only, and its row
+    # gets no ready/rung write: without the link nothing on GitHub ties that
+    # PR to this issue, and editing a PR body is not a safe doctor write. The
+    # issue number is the task cell's.
     if [ "$phase" = "handed-off" ] && [ "$handler" = "gh-issue" ]; then
       local issue_num issue_labels issue_rc draft fixes="" closes closes_rc
       issue_num="$(_pr_number "$task")"
@@ -6651,9 +6653,21 @@ doctor() {
           i4_skipped=1
           skipped_notes+=("I4: $task (PR #$pr_num does not close #$issue_num)")
           report_bullets+=("- **I4 reported — $task**: PR #$pr_num does not close issue #$issue_num (no \`Closes #$issue_num\` link) — merging it will not complete the issue. Not repaired: editing a PR body is not a safe doctor write.")
+          continue
           ;;
       esac
       draft="$(_doctor_pr_draft "$gh_bin" "$pr_num")"
+      case "$draft" in
+        true | false) ;;
+        *)
+          # An unreadable isDraft is undetermined, never "not a draft": the
+          # rung below must not land on a PR that may still be one.
+          i4_skipped=1
+          skipped_notes+=("I4: $task (draft state unreadable)")
+          echo "spawn-orchestrator: doctor I4: $task — could not read isDraft for PR #$pr_num, skipping (undetermined)"
+          continue
+          ;;
+      esac
       if [ "$draft" = "true" ]; then
         if "$gh_bin" pr ready "$pr_num" >/dev/null 2>&1; then
           fixes="marked ready (was draft)"
