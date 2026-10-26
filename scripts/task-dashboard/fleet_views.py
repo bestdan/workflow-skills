@@ -34,9 +34,6 @@ Each row is a StaleItem of plain-text fields, its action structured
 A worktree row kept from a failed scan (snapshot_adapter.py, `kept`) is never
 evidence: its landed verdict is as old as the snapshot that last saw it. It
 goes under Check, naming the failure and how old the row is.
-
-MACHINES (`machines_line`) is the header's "lindev 4m · MacBook 2d": each
-host's snapshot age, with a host past MACHINE_STALE_MINUTES marked `stale`.
 """
 
 import html
@@ -63,9 +60,6 @@ ONLY = {"/needs", "/prs", "/issues"}
 SESSION_IDLE_DAYS = 3  # a session with no event for this long is idle
 SESSION_FORGET_DAYS = 30  # and one quiet for this long has left the list
 OPEN_ITEM_DAYS = 14  # a PR, issue or handoff older than this goes under Check
-# The collector runs every 5 minutes (collector_install.INTERVAL_SECONDS), so a
-# host this far behind has missed several runs: asleep, offline, or failing.
-MACHINE_STALE_MINUTES = 30
 
 _e = html.escape
 
@@ -73,8 +67,6 @@ CSS = """
 .fleet .card .why { color:var(--fg); font-size:12px; }
 .fleet .card .act { font-size:12px; }
 .fleet .card .act code { white-space:pre-wrap; word-break:break-all; }
-header .machines { color:var(--muted); }
-header .machines .stale { color:var(--bad); font-weight:600; }
 """
 
 
@@ -452,43 +444,6 @@ def kept_note(wt: dict[str, Any], now: datetime) -> str:
         f"kept from a failed scan ({kept.get('step')} failed {ago(failed, now)});"
         f" last listed {ago(seen, now)}"
     )
-
-
-def _short_age(then: "datetime | None", now: datetime) -> str:
-    if then is None:
-        return "?"
-    s = max((now - then).total_seconds(), 0)
-    if s < 90:
-        return f"{round(s)}s"
-    if s < 90 * 60:
-        return f"{round(s / 60)}m"
-    if s < 36 * 3600:
-        return f"{round(s / 3600)}h"
-    return f"{round(s / 86400)}d"
-
-
-def machines_line(conn: sqlite3.Connection, now: datetime) -> str:
-    """Each host's snapshot age, "lindev 4m · MacBook 2d"; empty with none.
-
-    A host whose last snapshot is older than MACHINE_STALE_MINUTES gets the
-    `stale` class, and a host whose last snapshot had a failed repo scan says
-    how many, since its kept rows are older than its age suggests.
-    """
-    parts = []
-    stale_after = timedelta(minutes=MACHINE_STALE_MINUTES)
-    for host, taken, counts in conn.execute(
-        "SELECT host, last_snapshot_at, counts FROM machines ORDER BY host"
-    ):
-        at = score.parse_ts(taken)
-        failed = _raw(counts).get("scan_errors") or 0
-        text = f"{host} {_short_age(at, now)}"
-        if failed:
-            text += f" ({failed} repo scan{'s' if failed > 1 else ''} failed)"
-        cls = ' class="stale"' if at is None or now - at > stale_after else ""
-        parts.append(f'<span{cls} title="{_e(taken)}">{_e(text)}</span>')
-    if not parts:
-        return ""
-    return '<span class="machines">' + " · ".join(parts) + "</span>"
 
 
 def stale_items(

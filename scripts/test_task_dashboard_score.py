@@ -34,8 +34,6 @@ sys.path.insert(0, str(ROOT / "scripts" / "task-dashboard"))
 import config  # type: ignore[import-not-found]  # noqa: E402
 import db  # type: ignore[import-not-found]  # noqa: E402
 import fleet_views  # type: ignore[import-not-found]  # noqa: E402
-import gauges  # type: ignore[import-not-found]  # noqa: E402
-import overlay  # type: ignore[import-not-found]  # noqa: E402
 import score  # type: ignore[import-not-found]  # noqa: E402
 import server  # type: ignore[import-not-found]  # noqa: E402
 import views  # type: ignore[import-not-found]  # noqa: E402
@@ -631,19 +629,6 @@ class ViewsTest(unittest.TestCase):
         unmirrored = self.card(page, "EPIC-9")
         self.assertNotIn(long, unmirrored)
         self.assertIn('title="Keep it on Epics"', unmirrored)
-
-    def test_a_side_quest_under_an_ignored_epic_stops_counting_until_unignored(
-        self,
-    ):
-        item = ("jira", "ABC-4")  # a child of the seeded epic
-        overlay.tag(self.conn, item, "side-quest", now=NOW)
-        self.assertEqual(gauges.read(self.conn, fleet=False).side_quests, 1)
-        overlay.ignore(self.conn, ("jira", "EPIC-1"), NOW)
-        g = gauges.read(self.conn, fleet=False)
-        self.assertEqual(g.side_quests, 0)
-        self.assertNotIn('data-gauge="focus"', gauges.render(g))
-        overlay.unignore(self.conn, ("jira", "EPIC-1"))
-        self.assertEqual(gauges.read(self.conn, fleet=False).side_quests, 1)
 
     def test_epic_name_falls_back_to_a_childs_copy(self):
         self.set_parent_summary("ABC-4", "Named by the child")

@@ -5,6 +5,11 @@ Each case starts the real server in-process on an ephemeral 127.0.0.1 port,
 over a temp DB, with a fake sync function in place of acli and gh. Requests go
 through http.client so the Host and Origin headers can be forged. Needs Python
 3.11: run via scripts/test-task-dashboard-server.sh.
+
+HeaderScriptTest runs the header's sync script under jsdom, through
+test_task_dashboard_header_dom.js. The repo vendors no npm packages, so it runs
+only with TASK_DASHBOARD_JSDOM naming a node_modules that holds jsdom (and node
+on PATH, or TASK_DASHBOARD_NODE), and skips otherwise.
 """
 
 import contextlib
@@ -12,8 +17,11 @@ import copy
 import http.client
 import io
 import json
+import os
 import re
+import shutil
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import threading
@@ -31,7 +39,9 @@ sys.path.insert(0, str(PKG))
 import config  # type: ignore[import-not-found]  # noqa: E402
 import db  # type: ignore[import-not-found]  # noqa: E402
 import github_fleet  # type: ignore[import-not-found]  # noqa: E402
+import overlay  # type: ignore[import-not-found]  # noqa: E402
 import server  # type: ignore[import-not-found]  # noqa: E402
+import sync  # type: ignore[import-not-found]  # noqa: E402
 
 USER_CONFIG = {
     "jira": {
@@ -440,12 +450,20 @@ class HeaderTest(HeaderCase):
         self.assertFalse(state["busy"])
 
 
+def review_gauge(header):
+    """The review gauge's text, tags stripped."""
+    m = re.search(r'data-gauge="review-queue"[^>]*>(.*?)</span><input', header, re.S)
+    assert m is not None, "header has no review-queue gauge"
+    return re.sub(r"<[^>]+>", "", m.group(1))
+
+
 def fleet_rows(queued, awaiting_only):
     """github_fleet rows: `queued` PRs in the queue, `awaiting_only` not, one issue."""
     prs = [
         {
             "kind": "pr",
             "key": f"https://g/pull/{n}",
+            "url": f"https://g/pull/{n}",
             "title": "t",
             "in_queue": n < queued,
         }
@@ -465,11 +483,7 @@ class FleetStatusTest(HeaderCase):
         return json.loads(self.request("GET", "/status")[1])
 
     def gauge(self):
-        m = re.search(
-            r'data-gauge="review-queue"[^>]*>(.*?)</span>', self.header(), re.S
-        )
-        assert m is not None, "header has no review-queue gauge"
-        return re.sub(r"<[^>]+>", "", m.group(1))
+        return review_gauge(self.header())
 
     def test_fleet_run_does_not_freshen_a_failing_jira_sync(self):
         conn = self.conn()
@@ -509,7 +523,7 @@ class FleetStatusTest(HeaderCase):
         add_run(conn, "failed", self.now(), "GhError: 502", kind="github_fleet")
         conn.close()
         self.assertIsNone(self.state()["review_queue"])
-        self.assertEqual(self.gauge(), "Review queue —/5")
+        self.assertEqual(self.gauge(), "Review: — ready · — waiting")
         # A successful run that found nothing reads 0 in both.
         conn = self.conn()
         github_fleet.write(conn, [], self.now())
@@ -518,7 +532,7 @@ class FleetStatusTest(HeaderCase):
         self.assertEqual(
             self.state()["review_queue"], {"queue": 0, "awaiting": 0, "others": 0}
         )
-        self.assertEqual(self.gauge(), "Review queue 0/5")
+        self.assertEqual(self.gauge(), "Review: 0 ready · 0 waiting")
         # Then the rows' counts, again in both.
         conn = self.conn()
         github_fleet.write(conn, fleet_rows(6, 2), self.now())
@@ -526,7 +540,28 @@ class FleetStatusTest(HeaderCase):
         self.assertEqual(
             self.state()["review_queue"], {"queue": 6, "awaiting": 8, "others": 0}
         )
-        self.assertEqual(self.gauge(), "Review queue 6/5")
+        self.assertEqual(self.gauge(), "Review: 6 ready · 2 waiting")
+        header = self.header()
+        self.assertIn('class="gauge over"', header)  # past the cap of 5
+        self.assertIn('href="/prs?lane=ready"', header)
+        self.assertIn('href="/prs?lane=waiting"', header)
+
+    def test_waiting_is_the_waiting_lanes_count(self):
+        conn = self.conn()
+        github_fleet.write(conn, fleet_rows(0, 3), self.now())
+        add_run(conn, "ok", self.now(), kind="github_fleet")
+        conn.close()
+        self.assertEqual(self.gauge(), "Review: 0 ready · 3 waiting")
+        prs = self.request("GET", "/prs")[1]
+        m = re.search(r'data-section="waiting"[^>]*><h2>([^<]*)</h2>', prs)
+        assert m is not None, "no Waiting lane"
+        self.assertEqual(m.group(1), "Waiting on you (3)")
+        # A snoozed PR leaves the lane, and so leaves the count.
+        conn = db.connect(self.db_path)
+        until = (self.now() + timedelta(days=2)).strftime("%Y-%m-%d")
+        overlay.snooze(conn, ("github", "https://g/pull/0"), until)
+        conn.close()
+        self.assertEqual(self.gauge(), "Review: 0 ready · 2 waiting")
 
 
 class FleetOffStatusTest(HeaderCase):
@@ -545,7 +580,270 @@ class FleetOffStatusTest(HeaderCase):
         self.assertEqual(state["last_run"]["outcome"], "ok")
         header = self.header()
         self.assertNotIn("GitHub fleet sync failed", header)
-        self.assertIn("Review queue <b>—/5</b>", header)
+        self.assertEqual(review_gauge(header), "Review: — ready · — waiting")
+        self.assertNotIn("/prs?lane=", header)
+
+
+def add_machine(conn, host, taken, scan_errors=0):
+    conn.execute(
+        "INSERT INTO machines (host, last_snapshot_at, received_at, counts)"
+        " VALUES (?, ?, ?, ?)",
+        (host, taken.strftime(TS), taken.strftime(TS),
+         json.dumps({"scan_errors": scan_errors})),
+    )  # fmt: skip
+    conn.commit()
+
+
+def panel_rows(header):
+    """{source id: (cells..., warn)} from the freshness panel, in page order."""
+    out = {}
+    for sid, attrs, body in re.findall(
+        r'<tr data-source="([^"]+)"([^>]*)>(.*?)</tr>', header, re.S
+    ):
+        cells = [
+            re.sub(r"<[^>]+>", "", c) for c in re.findall(r"<td[^>]*>(.*?)</td>", body)
+        ]
+        out[sid] = (*cells, 'class="warn"' in attrs)
+    return out
+
+
+def indicator(header):
+    m = re.search(
+        r'<button type="button" class="fresh-btn"[^>]*>(.*?)</button>', header
+    )
+    assert m is not None, "header has no freshness indicator"
+    return re.sub(r"<[^>]+>", "", m.group(1))
+
+
+class FreshnessTest(HeaderCase):
+    """One indicator, the oldest source's age; a panel row per source."""
+
+    fleet = True
+
+    def setUp(self):
+        super().setUp()
+        # An ingesting instance: the sessions step runs, and hosts report.
+        self.httpd.app.cfg["ingest"]["machines"] = {"mini": "sha256:" + "0" * 64}
+
+    def seed(self, *, fleet_fails=False, mini_minutes=45):
+        now = self.now()
+        conn = self.conn()
+        add_run(conn, "ok", now - timedelta(minutes=3))
+        add_run(conn, "ok", now - timedelta(minutes=9), kind="github_fleet")
+        if fleet_fails:
+            add_run(conn, "failed", now - timedelta(minutes=2), "GhError: 502",
+                    kind="github_fleet")  # fmt: skip
+        add_run(conn, "ok", now - timedelta(minutes=2), kind="sessions")
+        add_machine(conn, "lindev", now - timedelta(minutes=2), 1)
+        add_machine(conn, "mini", now - timedelta(minutes=mini_minutes))
+        conn.close()
+
+    def test_the_panel_lists_every_source_with_age_outcome_and_next_run(self):
+        self.seed(fleet_fails=True)
+        header = self.header()
+        rows = panel_rows(header)
+        self.assertEqual(
+            list(rows),
+            ["sync", "github_fleet", "sessions", "machine:lindev", "machine:mini"],
+        )
+        self.assertEqual(
+            rows["sync"], ("Jira + GitHub incremental", "3m", "ok", "in 5m", False)
+        )
+        self.assertEqual(
+            rows["github_fleet"],
+            ("GitHub fleet", "9m", "failed: GhError: 502", "in 5m", True),
+        )
+        self.assertEqual(rows["sessions"], ("Sessions", "2m", "ok", "in 5m", False))
+        self.assertEqual(
+            rows["machine:lindev"],
+            ("lindev", "2m", "1 repo scan failed", "expected in 3m", False),
+        )
+        self.assertEqual(rows["machine:mini"], ("mini", "45m", "ok", "overdue", True))
+        # The oldest source sets the age; a failed or stale one warns.
+        self.assertEqual(indicator(header), "⚠ Updated 45m ago")
+        self.assertIn('class="fresh warn"', header)
+        # The old split lines are gone.
+        self.assertNotIn("synced ", header)
+        self.assertNotIn('class="machines"', header)
+
+    def test_status_returns_the_same_sources(self):
+        self.seed(fleet_fails=True)
+        fresh = json.loads(self.request("GET", "/status")[1])["freshness"]
+        self.assertEqual(fresh["text"], "Updated 45m ago")
+        self.assertTrue(fresh["warn"])
+        self.assertEqual(
+            [s["id"] for s in fresh["sources"]],
+            ["sync", "github_fleet", "sessions", "machine:lindev", "machine:mini"],
+        )
+        by_id = {s["id"]: s for s in fresh["sources"]}
+        self.assertEqual(by_id["github_fleet"]["outcome"], "failed")
+
+    def test_all_fresh_is_no_warning(self):
+        self.seed(mini_minutes=6)
+        header = self.header()
+        self.assertEqual(indicator(header), "Updated 9m ago")
+        self.assertNotIn("warn", header.split('<div class="fresh-panel"', 1)[0])
+        self.assertNotIn('role="alert"', header)
+
+
+class SyncNoteTest(HeaderCase):
+    """A scheduled sync shows a note and leaves the button alone."""
+
+    fleet = True
+
+    def button(self, header):
+        m = re.search(r'<button id="sync"[^>]*>[^<]*</button>', header)
+        assert m is not None, "no Sync button"
+        return m.group(0)
+
+    def note(self, header):
+        m = re.search(
+            r'<span class="sync-note"[^>]*>(.*?)</span>(?=<span class="new-data")',
+            header,
+        )
+        assert m is not None, "no sync note"
+        hidden = " hidden" in m.group(0).split(">", 1)[0]
+        return None if hidden else re.sub(r"<[^>]+>", "", m.group(1))
+
+    def start_scheduled(self):
+        self.fake.release.clear()
+        with self.syncer._state:
+            self.syncer.next_due = 0.0  # due now
+        self.syncer._wake.set()
+        self.assertTrue(self.fake.started.acquire(timeout=5), "run never started")
+
+    def test_a_scheduled_sync_leaves_the_button_enabled_and_names_its_step(self):
+        self.start_scheduled()
+        state = json.loads(self.request("GET", "/status")[1])
+        self.assertEqual(
+            (state["running"], state["trigger"], state["step"]),
+            (True, "scheduled", "incremental"),
+        )
+        self.assertEqual(state["step_label"], "Jira + GitHub incremental")
+        self.assertIsNotNone(state["step_started_at"])
+        self.assertIsNotNone(state["started_at"])
+        self.assertIsNone(state["next_run_at"])
+        header = self.header()
+        self.assertEqual(
+            self.button(header),
+            '<button id="sync" title="Shift-click for a full reconcile">Sync now</button>',
+        )
+        self.assertRegex(
+            self.note(header), r"^syncing Jira \+ GitHub incremental… \d+s$"
+        )
+        # The sync function reports the next step; the panel follows it.
+        self.syncer.step("github_fleet")
+        state = json.loads(self.request("GET", "/status")[1])
+        self.assertEqual(
+            (state["step"], state["step_label"]), ("github_fleet", "GitHub fleet")
+        )
+        header = self.header()
+        self.assertRegex(self.note(header), r"^syncing GitHub fleet… \d+s$")
+        rows = panel_rows(header)
+        self.assertEqual(rows["github_fleet"][3], "running now")
+        self.assertEqual(rows["sync"][3], "after this run")
+        self.fake.release.set()
+        self.assertTrue(self.syncer.wait_idle(5))
+        state = json.loads(self.request("GET", "/status")[1])
+        self.assertEqual((state["trigger"], state["step"]), (None, None))
+        self.assertIsNotNone(state["next_run_at"])
+        self.assertIsNone(self.note(self.header()))
+
+    def test_a_sync_someone_asked_for_relabels_the_button(self):
+        self.fake.release.clear()
+        self.assertEqual(self.post_sync()[0], 202)
+        self.assertTrue(self.fake.started.acquire(timeout=5))
+        state = json.loads(self.request("GET", "/status")[1])
+        self.assertEqual(state["trigger"], "manual")
+        self.assertIn(" disabled>Syncing…</button>", self.button(self.header()))
+
+    def test_the_step_hook_runs_through_every_enabled_step(self):
+        steps: list[str] = []
+        conn = db.connect(self.db_path)
+        try:
+            cfg = copy.deepcopy(self.cfg)
+            cfg["jira"]["enabled"] = False
+            cfg["github"]["enabled"] = False  # no fleet step either
+            cfg["ingest"]["machines"] = {"mini": "sha256:" + "0" * 64}
+            sync.run_all("incremental", cfg, conn, self.now(), on_step=steps.append)
+        finally:
+            conn.close()
+        self.assertEqual(steps, ["incremental", "sessions"])
+
+    def test_the_page_script_never_reloads_on_its_own(self):
+        self.assertNotIn("location.reload", server.JS)
+        self.assertIn("s.trigger === 'manual'", server.JS)
+
+
+NODE = os.environ.get("TASK_DASHBOARD_NODE") or shutil.which("node") or ""
+JSDOM = os.environ.get("TASK_DASHBOARD_JSDOM") or ""
+HEADER_JS = ROOT / "scripts" / "test_task_dashboard_header_dom.js"
+
+
+@unittest.skipUnless(
+    NODE and JSDOM and (Path(JSDOM) / "jsdom").is_dir(),
+    "set TASK_DASHBOARD_JSDOM to a node_modules holding jsdom",
+)
+class HeaderScriptTest(HeaderCase):
+    """The header's sync script, run under jsdom over the real page."""
+
+    def drive(self, **case):
+        path = Path(self.tmp.name) / "case.json"
+        path.write_text(json.dumps({"page": self.request("GET", "/")[1], **case}))
+        out = subprocess.run(
+            [NODE, str(HEADER_JS), JSDOM, str(path)],
+            capture_output=True, text=True, timeout=120,
+        )  # fmt: skip
+        self.assertEqual(out.returncode, 0, out.stderr)
+        state = json.loads(out.stdout)
+        self.assertEqual(state["errors"], [])
+        self.assertFalse(state["reloaded"])
+        return state
+
+    BUSY = {"busy": True, "running": True, "step": "github_fleet",
+            "step_label": "GitHub fleet", "step_elapsed_s": 12,
+            "last_finished_at": None}  # fmt: skip
+
+    def idle(self):
+        return {"busy": False, "running": False, "trigger": None,
+                "last_finished_at": "2099-01-01T00:00:00Z"}  # fmt: skip
+
+    def test_a_scheduled_sync_shows_a_note_then_offers_new_data(self):
+        state = self.drive(
+            statuses=[{**self.BUSY, "trigger": "scheduled"}, self.idle()],
+        )
+        busy = state["seen"][1]  # after the first answer
+        self.assertEqual(
+            busy,
+            {"button": "Sync now", "disabled": False,
+             "note": "syncing GitHub fleet… 12s", "new_data": False},
+        )  # fmt: skip
+        self.assertEqual(
+            state["final"],
+            {"button": "Sync now", "disabled": False, "note": None, "new_data": True},
+        )
+
+    def test_a_sync_the_owner_starts_reads_syncing(self):
+        manual = {**self.BUSY, "trigger": "manual"}
+        state = self.drive(click=True, post=manual, statuses=[manual, self.idle()])
+        self.assertEqual(state["calls"][0]["method"], "POST")
+        busy = state["seen"][1]
+        self.assertEqual((busy["button"], busy["disabled"]), ("Syncing…", True))
+        self.assertEqual(
+            state["final"],
+            {"button": "Sync now", "disabled": False, "note": None, "new_data": True},
+        )
+
+    def test_the_same_finish_offers_nothing(self):
+        conn = self.conn()
+        add_run(conn, "ok", self.now())
+        conn.close()
+        page = self.request("GET", "/")[1]
+        m = re.search(r'data-synced="([^"]*)"', page)
+        assert m is not None and m.group(1), "page carries no data-synced"
+        synced = m.group(1)
+        state = self.drive(statuses=[{**self.idle(), "last_finished_at": synced}])
+        self.assertFalse(state["final"]["new_data"])
 
 
 class BoardTest(ServerCase):

@@ -1,20 +1,22 @@
-"""The header gauges every page shows: side quests and the review queue.
+"""The header's review gauge: "Review: 2 ready · 9 waiting".
 
-From the fleet view design ("Views", item 5). The two caps limit different
-things and both stand: side quests in flight against 3 (the work-in-progress
-reset design), PRs waiting on the owner against 5 (the human-review queue's
-own cap). Neither is enforced; the gauges only show them.
+From the fleet view design ("Views", item 5), which caps the human-review
+queue at 5. The cap is not enforced; the gauge only shows it.
 
-- **Side quests in flight** are overlay items tagged `side-quest` whose item
-  is still in the mirror and not done. A tag on an item that left the mirror
-  (a merged PR, a removed worktree) is kept, as every overlay row is, but no
-  longer counts, and neither does an ignored one (overlay.hidden).
-- **Review queue** is github_fleet's `queue` count over the mirrored
+- **Ready** is github_fleet's `queue` count over the mirrored
   `source = 'github'` PR rows that are not ignored. `review_queue()` counts
   `review_queue_rows()`, which Needs you lists, and `/status` reads
-  `review_queue()`, so the gauge, `/status` and Needs you agree. Before the
-  fleet sync step's first successful run, or while `github.fleet` is off, it
-  is unknown and shows "—"; after one, a run that found nothing reads 0.
+  `review_queue()`, so the gauge, `/status` and Needs you agree. It links to
+  the Pull requests tab's Ready lane and turns red past the cap.
+- **Waiting** is the count of that tab's Waiting on you lane
+  (fleet_tabs.waiting_count): PRs awaiting the owner that miss a queue rule,
+  each card saying which. It links to that lane. The queue's rules rarely all
+  hold at once, so a ready count alone reads 0 beside a long list of waiting
+  PRs, which looks broken.
+
+Before the fleet sync step's first successful run, or while `github.fleet` is
+off, both are unknown and show "—"; after one, a run that found nothing reads
+0.
 """
 
 import html
@@ -23,10 +25,7 @@ import sqlite3
 from dataclasses import dataclass
 
 import github_fleet
-import overlay
-import score
 
-SIDE_QUEST_CAP = 3
 REVIEW_QUEUE_CAP = 5
 
 _e = html.escape
@@ -34,14 +33,16 @@ _e = html.escape
 CSS = """
 header .gauge { color:var(--muted); }
 header .gauge b { color:var(--fg); }
-header .gauge.over b { color:var(--bad); }
+header .gauge a { color:inherit; text-decoration:none; }
+header .gauge a:hover { text-decoration:underline; }
+header .gauge.over .ready b { color:var(--bad); }
 """
 
 
 @dataclass
 class Gauges:
-    side_quests: int
     review_queue: "int | None"  # None: fleet off, or never synced successfully
+    waiting: "int | None"  # the Waiting on you lane's count; None as above
 
 
 def review_queue_rows(conn: sqlite3.Connection, fleet: bool) -> "list[dict] | None":
@@ -88,39 +89,33 @@ def review_queue(conn: sqlite3.Connection, fleet: bool) -> "dict[str, int] | Non
     return None if rows is None else github_fleet.queue_counts(rows)
 
 
-def read(
-    conn: sqlite3.Connection, ov: "overlay.Overlay | None" = None, *, fleet: bool
-) -> Gauges:
-    ov = ov if ov is not None else overlay.load(conn)
-    tagged = [item for item, t in ov.kind_tags.items() if t == "side-quest"]
-    side_quests = 0
-    for source, key in tagged:
-        if overlay.hidden(conn, ov.ignored, (source, key)):
-            continue
-        row = conn.execute(
-            "SELECT status_category FROM issues WHERE source = ? AND key = ?",
-            (source, key),
-        ).fetchone()
-        if row is not None and not score.is_done(row[0]):
-            side_quests += 1
+def read(conn: sqlite3.Connection, waiting: "int | None", *, fleet: bool) -> Gauges:
+    """The gauge's numbers; `waiting` is fleet_tabs.waiting_count()'s."""
     counts = review_queue(conn, fleet)
-    queue = None if counts is None else counts["queue"]
-    return Gauges(side_quests, queue)
+    if counts is None:
+        return Gauges(None, None)
+    return Gauges(counts["queue"], waiting)
 
 
-def _gauge(name: str, label: str, value: "int | None", cap: int) -> str:
+def _part(lane: str, value: "int | None") -> str:
     shown = "—" if value is None else str(value)
-    over = " over" if value is not None and value > cap else ""
-    title = f"{label}: cap {cap}, shown not enforced"
+    inner = f"<b>{shown}</b> {lane}"
     if value is None:
-        title += "; no data yet"
-    return (
-        f'<span class="gauge{over}" data-gauge="{name}" title="{_e(title)}">'
-        f"{_e(label)} <b>{shown}/{cap}</b></span>"
-    )
+        return f'<span class="{lane}">{inner}</span>'
+    return f'<a class="{lane}" href="/prs?lane={lane}">{inner}</a>'
 
 
 def render(g: Gauges) -> str:
-    return _gauge("side-quests", "Side quests", g.side_quests, SIDE_QUEST_CAP) + _gauge(
-        "review-queue", "Review queue", g.review_queue, REVIEW_QUEUE_CAP
+    queue = g.review_queue
+    over = " over" if queue is not None and queue > REVIEW_QUEUE_CAP else ""
+    title = (
+        f"Ready: the review queue, cap {REVIEW_QUEUE_CAP}, shown not enforced."
+        " Waiting: PRs awaiting you that miss a queue rule; each card says which."
+    )
+    if queue is None:
+        title += " No data yet."
+    return (
+        f'<span class="gauge{over}" data-gauge="review-queue" title="{_e(title)}">'
+        '<span class="lbl">Review: </span>'
+        f"{_part('ready', queue)} · {_part('waiting', g.waiting)}</span>"
     )

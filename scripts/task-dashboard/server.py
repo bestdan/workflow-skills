@@ -38,7 +38,7 @@ import sys
 import threading
 import time
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -48,7 +48,9 @@ from urllib.parse import parse_qs, urlsplit
 
 import db
 import fleet_now
+import fleet_tabs
 import fleet_views
+import freshness
 import gauges
 import github_gh
 import health
@@ -66,7 +68,7 @@ import whynot
 
 BIND = "127.0.0.1"
 TOKEN_KEY = "server_token"
-STALE_INTERVALS = 3
+STALE_INTERVALS = freshness.STALE_INTERVALS
 MAX_BODY = 4096
 SYNC_MODES = ("incremental", "reconcile")
 # Pages folded into another, kept as 302s to `/` so old bookmarks still land:
@@ -109,6 +111,12 @@ class Syncer:
     scheduled, restarts the interval, so a scheduled run never fires seconds
     after a manual one. A scheduled run is a reconcile once `reconcile_s` has
     passed since the last one, otherwise incremental.
+
+    The state also says who started the run in flight (`trigger`: `manual`
+    for a request, `scheduled` for the interval), which step of it is running
+    (`step`, set through `step()` by the sync function) and since when, and
+    when the next scheduled run is due. The page reads `trigger` so that only
+    a sync someone asked for relabels the Sync button.
     """
 
     def __init__(
@@ -119,11 +127,13 @@ class Syncer:
         *,
         run_at_start: bool = True,
         clock: Callable[[], float] = time.monotonic,
+        wall: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     ) -> None:
         self._sync_fn = sync_fn
         self.interval_s = interval_s
         self.reconcile_s = reconcile_s
         self._clock = clock
+        self._wall = wall
         self._wake = threading.Event()
         self._stop = threading.Event()
         self._run_lock = threading.Lock()  # one sync at a time
@@ -132,6 +142,10 @@ class Syncer:
         self._requested: "str | None" = None
         self._pending_reconcile = False
         self._running: "str | None" = None
+        self._trigger: "str | None" = None
+        self._started_at: "datetime | None" = None
+        self._step: "str | None" = None
+        self._step_started_at: "datetime | None" = None
         now = clock()
         self.next_due = now if run_at_start else now + interval_s
         self._last_reconcile = now
@@ -163,6 +177,14 @@ class Syncer:
         with self._state:
             return self._snapshot()
 
+    def step(self, kind: str) -> None:
+        """Record the step of the run in flight now starting (a `sync_runs`
+        kind); the sync function calls it before each step."""
+        with self._state:
+            if self._running is not None:
+                self._step = kind
+                self._step_started_at = self._wall()
+
     def wait_idle(self, timeout: float) -> bool:
         """True once nothing is running, queued or pending (for tests and CLI).
 
@@ -186,22 +208,41 @@ class Syncer:
         )
 
     def _snapshot(self) -> dict[str, Any]:
+        wall = self._wall()
+        running = self._running is not None
+        next_at = next_in = None
+        if not running:
+            next_in = max(0, int(self.next_due - self._clock()))
+            next_at = _iso(wall + timedelta(seconds=next_in))
         return {
-            "running": self._running is not None,
+            "running": running,
             "mode": self._running,
             "queued": self._requested,
             "pending_reconcile": self._pending_reconcile,
             "busy": self._busy(),
+            "trigger": self._trigger,
+            "started_at": _iso(self._started_at),
+            "step": self._step,
+            "step_started_at": _iso(self._step_started_at),
+            "step_elapsed_s": (
+                None
+                if self._step_started_at is None
+                else max(0, int((wall - self._step_started_at).total_seconds()))
+            ),
+            "next_run_at": next_at,
+            "next_run_in_s": next_in,
         }
 
     def _take(self) -> "str | None":
         with self._state:
+            trigger = "manual"
             if self._pending_reconcile:
                 self._pending_reconcile = False
                 mode = "reconcile"
             elif self._requested is not None:
                 mode, self._requested = self._requested, None
             elif self._clock() >= self.next_due:
+                trigger = "scheduled"
                 due = (
                     self.reconcile_s is not None
                     and self._clock() - self._last_reconcile >= self.reconcile_s
@@ -210,6 +251,9 @@ class Syncer:
             else:
                 return None
             self._running = mode
+            self._trigger = trigger
+            self._started_at = self._step_started_at = self._wall()
+            self._step = mode
             self._changed.notify_all()
             return mode
 
@@ -234,19 +278,35 @@ class Syncer:
                 if mode == "reconcile":
                     self._last_reconcile = self._clock()
                 self._running = None
+                self._trigger = self._started_at = None
+                self._step = self._step_started_at = None
                 self.next_due = self._clock() + self.interval_s
                 if self._pending_reconcile:
                     self._wake.set()
                 self._changed.notify_all()
 
 
-def make_sync_fn(cfg: dict[str, Any], db_path: Path) -> Callable[[str], None]:
-    """The real sync: a fresh connection per run, on the sync thread."""
+def _iso(dt: "datetime | None") -> "str | None":
+    return None if dt is None else dt.astimezone(timezone.utc).strftime(_TS)
+
+
+_TS = "%Y-%m-%dT%H:%M:%SZ"
+
+
+def make_sync_fn(
+    cfg: dict[str, Any],
+    db_path: Path,
+    on_step: "Callable[[str], None] | None" = None,
+) -> Callable[[str], None]:
+    """The real sync: a fresh connection per run, on the sync thread.
+    `on_step` hears each step's `sync_runs` kind as it starts."""
 
     def run(mode: str) -> None:
         conn = db.connect(db_path)
         try:
-            rows = sync.run_all(mode, cfg, conn, datetime.now(timezone.utc))
+            rows = sync.run_all(
+                mode, cfg, conn, datetime.now(timezone.utc), on_step=on_step
+            )
         finally:
             conn.close()
         for row in rows:
@@ -273,9 +333,7 @@ def _parse_ts(value: "str | None") -> "datetime | None":
     if not value:
         return None
     try:
-        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(
-            tzinfo=timezone.utc
-        )
+        return datetime.strptime(value, _TS).replace(tzinfo=timezone.utc)
     except ValueError:
         return None
 
@@ -305,6 +363,9 @@ def sync_health(
         " WHERE finished_at IS NOT NULL AND kind = ? ORDER BY id DESC LIMIT 1",
         (sync.FLEET_KIND,),
     ).fetchone()
+    # Any step's finish, so a page can tell that data newer than its own
+    # landed (the header's "New data — reload").
+    (finished,) = conn.execute("SELECT MAX(finished_at) FROM sync_runs").fetchone()
     ok_at = _parse_ts(ok[0]) if ok else None
     age = (now - ok_at).total_seconds() if ok_at else None
     return {
@@ -313,6 +374,7 @@ def sync_health(
         "stale": age is None or age > STALE_INTERVALS * interval_s,
         "last_run": _run_dict(last),
         "fleet_run": _run_dict(fleet),
+        "last_finished_at": finished,
     }
 
 
@@ -407,14 +469,18 @@ CSS = """
 * { box-sizing: border-box; }
 body { margin:0; font:14px/1.45 -apple-system,system-ui,sans-serif; color:var(--fg);
   background:var(--bg); }
-header { display:flex; flex-wrap:wrap; gap:8px 16px; align-items:center;
-  padding:10px 16px; border-bottom:1px solid var(--line); }
+header { padding:10px 16px; border-bottom:1px solid var(--line); }
+header .bar { display:flex; flex-wrap:wrap; gap:8px 16px; align-items:center; }
+header .bar > * { white-space:nowrap; }
 header h1 { font-size:16px; margin:0; }
-header .age { color:var(--muted); }
-header.stale .age { color:var(--bad); font-weight:600; }
-header .alert { width:100%; padding:6px 10px; border-radius:6px;
+header .alert { margin-top:8px; padding:6px 10px; border-radius:6px;
   background:var(--badbg); color:var(--bad); }
 header #filter { margin-left:auto; }
+@media (max-width:600px) {
+  header .bar { flex-wrap:nowrap; gap:8px; }
+  header h1, header .lbl { display:none; }
+  header #filter { flex:1 1 3em; min-width:0; width:3em; }
+}
 header button { font:inherit; padding:4px 12px; border-radius:6px;
   border:1px solid var(--line); background:var(--card); color:var(--fg); cursor:pointer; }
 main { padding:12px 16px; }
@@ -428,30 +494,91 @@ main { padding:12px 16px; }
 .empty { color:var(--muted); }
 """
 
+# The header's sync controls. The page polls /status (every BUSY_POLL_MS while
+# a sync is in flight, IDLE_POLL_MS otherwise, and not while the tab is
+# hidden). A sync in flight shows as a note beside the freshness indicator,
+# naming the running step and its elapsed seconds. Only a sync someone asked
+# for (trigger `manual`, this page's click or any other) relabels and
+# disables the button; a scheduled one leaves it reading "Sync now". When any
+# step finishes after the page was drawn, the page offers "New data — reload"
+# and never reloads itself, so an open note editor or a typed filter is never
+# thrown away.
 JS = """
 (function () {
+  var BUSY_POLL_MS = 1500, IDLE_POLL_MS = 15000;
   var btn = document.getElementById('sync');
+  var note = document.getElementById('sync-note');
+  var fresh = document.getElementById('new-data');
   var token = document.querySelector('meta[name=dashboard-token]').content;
+  var drawn = document.body.dataset.synced || '';
+  var asked = false, timer = null;
+  function esc(t) {
+    return String(t).replace(/[&<>"]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+    });
+  }
+  function show(s) {
+    if (s.busy && (asked || s.trigger === 'manual')) {
+      btn.textContent = 'Syncing\\u2026'; btn.disabled = true;
+    } else {
+      btn.textContent = 'Sync now'; btn.disabled = false;
+    }
+    if (!s.busy) asked = false;
+    if (s.running && s.step_label) {
+      note.innerHTML = '<span class="lbl">syncing ' + esc(s.step_label) +
+        '\\u2026 </span>' + (s.step_elapsed_s || 0) + 's';
+      note.hidden = false;
+    } else if (s.busy) {
+      note.innerHTML = '<span class="lbl">sync </span>starting\\u2026';
+      note.hidden = false;
+    } else {
+      note.hidden = true;
+    }
+    if (s.last_finished_at && s.last_finished_at !== drawn) fresh.hidden = false;
+  }
   function poll() {
+    clearTimeout(timer);
+    if (document.hidden) { timer = setTimeout(poll, IDLE_POLL_MS); return; }
     fetch('/status').then(function (r) { return r.json(); }).then(function (s) {
-      if (s.busy) { btn.textContent = 'Syncing\\u2026'; btn.disabled = true;
-        setTimeout(poll, 1500); }
-      else if (btn.disabled) { location.reload(); }
-    }).catch(function () { setTimeout(poll, 3000); });
+      show(s);
+      timer = setTimeout(poll, s.busy ? BUSY_POLL_MS : IDLE_POLL_MS);
+    }).catch(function () { timer = setTimeout(poll, IDLE_POLL_MS); });
   }
   btn.addEventListener('click', function (ev) {
     var mode = ev.shiftKey ? 'reconcile' : 'incremental';
+    asked = true;
     btn.textContent = 'Syncing\\u2026'; btn.disabled = true;
     fetch('/sync', { method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: 'mode=' + mode + '&token=' + encodeURIComponent(token)
     }).then(function (r) {
-      if (r.status !== 202) { btn.textContent = 'Sync refused (' + r.status + ')';
+      if (r.status !== 202) { asked = false;
+        btn.textContent = 'Sync refused (' + r.status + ')';
         btn.disabled = false; return; }
-      poll();
-    }).catch(function () { btn.textContent = 'Sync failed'; btn.disabled = false; });
+      return r.json().then(function (s) { show(s); poll(); });
+    }).catch(function () { asked = false; btn.textContent = 'Sync failed';
+      btn.disabled = false; });
   });
-  if (document.body.dataset.busy === '1') { btn.disabled = true; poll(); }
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) poll();
+  });
+  timer = setTimeout(poll, document.body.dataset.busy === '1' ? BUSY_POLL_MS : IDLE_POLL_MS);
+})();
+(function () {
+  var f = document.querySelector('header .fresh');
+  if (!f) return;
+  var b = f.querySelector('.fresh-btn');
+  function set(on) {
+    f.classList.toggle('open', on);
+    b.setAttribute('aria-expanded', on ? 'true' : 'false');
+  }
+  b.addEventListener('click', function () { set(!f.classList.contains('open')); });
+  document.addEventListener('click', function (ev) {
+    if (!f.contains(ev.target)) set(false);
+  });
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Escape') set(false);
+  });
 })();
 (function () {
   var box = document.getElementById('filter');
@@ -498,18 +625,6 @@ JS = """
 """
 
 
-def _age_text(seconds: "int | None") -> str:
-    if seconds is None:
-        return "never synced"
-    if seconds < 90:
-        return f"synced {seconds}s ago"
-    if seconds < 90 * 60:
-        return f"synced {round(seconds / 60)}m ago"
-    if seconds < 36 * 3600:
-        return f"synced {round(seconds / 3600)}h ago"
-    return f"synced {round(seconds / 86400)}d ago"
-
-
 def _alert(last_run: "dict[str, Any] | None", what: str = "Last sync") -> str:
     """The header's failure line for the latest finished run, if it failed."""
     if not last_run or last_run["outcome"] in (None, "ok"):
@@ -528,16 +643,43 @@ def _alert(last_run: "dict[str, Any] | None", what: str = "Last sync") -> str:
     return f'<div class="alert" role="alert">{what} failed: {_e(first)}</div>'
 
 
-def render_header(health: dict[str, Any], busy: bool, gauge_html: str = "") -> str:
+def sync_note(state: dict[str, Any]) -> str:
+    """The note beside the freshness indicator while a sync is in flight;
+    the page's script keeps it current."""
+    hidden = "" if state.get("busy") else " hidden"
+    text = ""
+    if state.get("running") and state.get("step_label"):
+        text = (
+            f'<span class="lbl">syncing {_e(state["step_label"])}… </span>'
+            f"{state.get('step_elapsed_s') or 0}s"
+        )
+    elif state.get("busy"):
+        text = '<span class="lbl">sync </span>starting…'
+    return f'<span class="sync-note" id="sync-note"{hidden} aria-live="polite">{text}</span>'
+
+
+def render_header(
+    health: dict[str, Any],
+    state: dict[str, Any],
+    fresh_html: str = "",
+    gauge_html: str = "",
+) -> str:
+    """One line: the freshness indicator, the sync note, the gauge, the text
+    filter and Sync now. `state` is App.sync_state(). The button reads
+    "Syncing…" only for a sync someone asked for; a scheduled one leaves it
+    alone. Failure alerts go under the line."""
     cls = ' class="stale"' if health["stale"] else ""
-    title = _e(health["last_ok_at"] or "no successful sync recorded")
-    label = "Syncing…" if busy else "Sync now"
+    manual = state.get("busy") and state.get("trigger") == "manual"
+    label = "Syncing…" if manual else "Sync now"
+    disabled = " disabled" if manual else ""
     return (
-        f"<header{cls}><h1>Task dashboard</h1>"
-        f'<span class="age" title="{title}">{_age_text(health["age_seconds"])}</span>'
+        f'<header{cls}><div class="bar"><h1>Task dashboard</h1>'
+        f"{fresh_html}{sync_note(state)}"
+        '<span class="new-data" id="new-data" hidden aria-live="polite">'
+        'New data — <a href="">reload</a></span>'
         f"{gauge_html}{FILTER}"
-        f'<button id="sync" title="Shift-click for a full reconcile">{label}</button>'
-        f"{_alert(health['last_run'])}"
+        f'<button id="sync" title="Shift-click for a full reconcile"{disabled}>{label}</button>'
+        f"</div>{_alert(health['last_run'])}"
         f"{_alert(health.get('fleet_run'), 'GitHub fleet sync')}</header>"
     )
 
@@ -649,14 +791,19 @@ FILTER = (
 )
 
 
-def render_page(title: str, header: str, body: str, token: str, busy: bool) -> str:
+def render_page(
+    title: str, header: str, body: str, token: str, busy: bool, synced: str = ""
+) -> str:
+    """`synced` is the latest step finish the page was drawn from
+    (sync_health's `last_finished_at`); the script compares /status with it."""
     return (
         "<!doctype html><html lang=en><head><meta charset=utf-8>"
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
         f'<meta name="dashboard-token" content="{_e(token)}">'
         f"<title>{_e(title)}</title>"
-        f"<style>{CSS}{views.CSS}{fleet_views.CSS}{needs.CSS}{fleet_now.CSS}{overlay.CSS}{gauges.CSS}{include.CSS}{lane_tabs.CSS}{whynot.CSS}{refresh.CSS}</style></head>"
-        f'<body data-busy="{1 if busy else 0}">{header}<main>{body}</main>'
+        f"<style>{CSS}{views.CSS}{fleet_views.CSS}{needs.CSS}{fleet_now.CSS}{overlay.CSS}{gauges.CSS}{freshness.CSS}{include.CSS}{lane_tabs.CSS}{whynot.CSS}{refresh.CSS}</style></head>"
+        f'<body data-busy="{1 if busy else 0}" data-synced="{_e(synced)}">'
+        f"{header}<main>{body}</main>"
         f"<script>{JS}{overlay.JS}{include.JS}{lane_tabs.JS}{refresh.JS}</script></body></html>"
     )
 
@@ -724,23 +871,45 @@ class App:
             health["fleet_run"] = None
         return health
 
-    def header_extras(
-        self, conn: sqlite3.Connection, ov: "overlay.Overlay | None" = None
-    ) -> str:
-        """The header's gauges, then each machine's snapshot age (fleet only)."""
-        out = gauges.render(gauges.read(conn, ov, fleet=self.fleet))
-        if fleet_views.enabled(self.cfg):
-            out += fleet_views.machines_line(conn, self.now())
-        return out
+    def sync_state(self) -> dict[str, Any]:
+        """Syncer.state(), with the running step's label."""
+        state = self.syncer.state()
+        state["step_label"] = (
+            freshness.step_label(self.cfg, state["step"]) if state["step"] else None
+        )
+        return state
+
+    def sources(
+        self, conn: sqlite3.Connection, state: dict[str, Any]
+    ) -> list[freshness.Source]:
+        return freshness.sources(conn, self.cfg, self.now(), self.interval_s, state)
+
+    def header(self, conn: sqlite3.Connection) -> "tuple[str, bool, str]":
+        """(the header, whether a sync is in flight, the page's `synced`).
+
+        The header reads the mirror, never a view's include filter, so it is
+        identical whatever the filter is.
+        """
+        state = self.sync_state()
+        health = self.health(conn)
+        fresh = freshness.render(self.sources(conn, state), bool(health["stale"]))
+        waiting = (
+            fleet_tabs.waiting_count(conn, self.cfg, self.now()) if self.fleet else None
+        )
+        gauge = gauges.render(gauges.read(conn, waiting, fleet=self.fleet))
+        header = render_header(health, state, fresh, gauge)
+        return header, bool(state["busy"]), health["last_finished_at"] or ""
 
     def status(self) -> dict[str, Any]:
+        state = self.sync_state()
         conn = self.read()
         try:
             health = self.health(conn)
             queue = gauges.review_queue(conn, self.fleet)
+            fresh = freshness.as_json(self.sources(conn, state))
         finally:
             conn.close()
-        return {**self.syncer.state(), **health, "review_queue": queue}
+        return {**state, **health, "review_queue": queue, "freshness": fresh}
 
     def include_for(
         self, conn: sqlite3.Connection, view: str, query: dict[str, list[str]]
@@ -758,29 +927,23 @@ class App:
         conn = self.read()
         try:
             inc = self.include_for(conn, path.lstrip("/"), query)
-            health = self.health(conn)
             body = views.render(path, conn, self.cfg, self.now(), inc, query)
             body = lane_tabs.tabify(body, path.lstrip("/"), path, query)
-            # The header reads the mirror, never the filtered view: identical
-            # gauges and machine ages whatever `inc` is.
-            gauge_html = self.header_extras(conn)
+            header, busy, synced = self.header(conn)
         finally:
             conn.close()
-        busy = bool(self.syncer.state()["busy"])
         title = f"{views.ROUTES[path][0]} · Task dashboard"
-        header = render_header(health, busy, gauge_html)
-        return render_page(title, header, body, self.token, busy)
+        return render_page(title, header, body, self.token, busy, synced)
 
     def health_page(
         self, days: int, query: "dict[str, list[str]] | None" = None
     ) -> str:
         """The Health panel (health.py) over the last `days` days."""
         query = query or {}
-        busy = bool(self.syncer.state()["busy"])
         conn = self.read()
         try:
             inc = self.include_for(conn, "health", query)
-            header = render_header(self.health(conn), busy, self.header_extras(conn))
+            header, busy, synced = self.header(conn)
             body = views.nav("/health", self.cfg, inc, query) + health.page(
                 conn, self.cfg, self.now(), days, fleet=self.fleet, inc=inc
             )
@@ -789,7 +952,9 @@ class App:
                 body += whynot.section(conn, self.now())
         finally:
             conn.close()
-        return render_page("Health · Task dashboard", header, body, self.token, busy)
+        return render_page(
+            "Health · Task dashboard", header, body, self.token, busy, synced
+        )
 
     def overlay_write(self, action: str, form: dict[str, list[str]]) -> None:
         conn = self.read()
@@ -814,17 +979,15 @@ class App:
         conn = self.read()
         try:
             inc = self.include_for(conn, "board", query)
-            health = self.health(conn)
             ov = overlay.load(conn)
             board = board_data(conn, self.cfg)
             ignored_html = views.render_ignored(conn)
-            gauge_html = self.header_extras(conn, ov)
+            header, busy, synced = self.header(conn)
             sprints = [
                 r[0] for r in conn.execute("SELECT name FROM sprints ORDER BY id")
             ]
         finally:
             conn.close()
-        busy = bool(self.syncer.state()["busy"])
         title = "Board" + (f": {', '.join(sprints)}" if sprints else "")
         body = (
             views.nav("/board", self.cfg, inc, query)
@@ -833,13 +996,7 @@ class App:
             + ignored_html
         )
         body = lane_tabs.tabify(body, "board", "/board", query)
-        return render_page(
-            "Task dashboard",
-            render_header(health, busy, gauge_html),
-            body,
-            self.token,
-            busy,
-        )
+        return render_page("Task dashboard", header, body, self.token, busy, synced)
 
 
 class DashboardServer(ThreadingHTTPServer):
@@ -1035,8 +1192,9 @@ def build(
         token = ensure_token(conn)
     finally:
         conn.close()
+    # The lambda reads `syncer` when a step starts, after it is assigned.
     syncer = Syncer(
-        sync_fn or make_sync_fn(cfg, db_path),
+        sync_fn or make_sync_fn(cfg, db_path, lambda kind: syncer.step(kind)),
         float(cfg["sync"]["interval_minutes"]) * 60,
         float(cfg["sync"]["reconcile_minutes"]) * 60,
         run_at_start=run_at_start,

@@ -279,6 +279,17 @@ def pr_lanes(conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime) -> Ta
     return Tab(lanes, snoozed, synced)
 
 
+def waiting_count(
+    conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime
+) -> "int | None":
+    """The Waiting on you lane's count, which the header's review gauge
+    shows; None before a good fleet sync, as the lane itself shows nothing."""
+    tab = pr_lanes(conn, cfg, now)
+    if not tab.synced:
+        return None
+    return next((len(lane.items) for lane in tab.lanes if lane.id == "waiting"), 0)
+
+
 def _render_lanes(tab: Tab, card: Any, inc: include.Include) -> list[str]:
     return [
         views._lane(

@@ -10,6 +10,9 @@
 # because the dashboard needs Python 3.11 and the python3 on a stock macOS box
 # may be 3.9.
 #
+# The header-script tests run under jsdom and skip unless TASK_DASHBOARD_JSDOM
+# names a node_modules directory holding it (see the .py file's docstring).
+#
 # Run directly: bash scripts/test-task-dashboard-server.sh
 set -uo pipefail
 

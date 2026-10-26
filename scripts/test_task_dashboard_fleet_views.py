@@ -517,30 +517,6 @@ class KeptRowTests(FleetCase):
         self.assertIn("session s-landed", check)
 
 
-class MachinesLineTests(FleetCase):
-    def test_each_host_with_its_age_and_a_stale_one_marked(self):
-        seed(self.conn)  # mini at 20:00, 60 minutes before NOW
-        fresh = dict(failed_scan("lindev", "2026-10-23T20:56:00.000Z"))
-        fresh["scan_errors"] = []
-        snapshot_adapter.ingest(self.conn, fresh, NOW)
-        line = fleet_views.machines_line(self.conn, NOW)
-        self.assertEqual(re.sub(r"<[^>]+>", "", line), "lindev 4m · mini 60m")
-        self.assertIn('<span title="2026-10-23T20:56:00.000Z">lindev 4m</span>', line)
-        self.assertIn(
-            '<span class="stale" title="2026-10-23T20:00:00.000Z">mini 60m', line
-        )
-
-    def test_a_failed_scan_is_named_on_the_host(self):
-        seed(self.conn)
-        snapshot_adapter.ingest(self.conn, failed_scan(), NOW)
-        line = fleet_views.machines_line(self.conn, NOW)
-        self.assertIn("mini 30m (1 repo scan failed)", line)
-        self.assertNotIn('class="stale"', line)
-
-    def test_no_machines_renders_nothing(self):
-        self.assertEqual(fleet_views.machines_line(self.conn, NOW), "")
-
-
 class NavTests(unittest.TestCase):
     def test_the_away_tab_is_gone(self):
         jira = config.deep_merge(config.DEFAULTS, server_harness.USER_CONFIG)
@@ -603,11 +579,17 @@ class FleetRouteTests(server_harness.ServerCase):
         page = self.request("GET", "/needs")[1]
         self.assertNotIn('data-section="finished"', page)
 
-    def test_header_shows_each_machines_age(self):
+    def test_the_freshness_panel_has_a_row_per_machine(self):
         page = self.request("GET", "/")[1]
         header = page.split("<header", 1)[1].split("</header>", 1)[0]
-        self.assertIn('<span class="machines">', header)
-        self.assertIn("mini 60m", header)
+        self.assertNotIn('class="machines"', header)
+        self.assertIn(
+            '<tr data-source="machine:mini" data-outcome="ok" class="warn"><td>mini</td>'
+            '<td title="2026-10-23T20:00:00.000Z">60m</td>',
+            header,
+        )
+        # No sync step has succeeded here, so the page is not "60m" fresh.
+        self.assertIn("never synced", header)
 
     def test_stale_shows_the_fleet_lanes_under_jira(self):
         page = self.request("GET", "/stale")[1]
