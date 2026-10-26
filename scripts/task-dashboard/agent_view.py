@@ -182,6 +182,9 @@ def workstream_item(c: workstreams.Card, lane: str, now: datetime) -> Item:
             "prs": workstreams.filter_href("/prs", c.id),
             "issues": workstreams.filter_href("/issues", c.id),
         },
+        designs=[
+            {"name": d["name"], "url": d.get("url")} for d in c.ws.get("designs") or []
+        ],
         members=[
             {"source": m["item_source"], "key": m["item_key"], "kind": m["kind"],
              "via": m["via"], "open": m["is_open"]}

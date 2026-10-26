@@ -22,6 +22,16 @@ open PRs, and my recently closed PRs) to workstreams, as rows of
   a project (`linear:<KEY>`), looked up in one batched query per sync;
 - an issue or PR a design doc names (`design`), by URL or `#N`.
 
+A DESIGN DOC FOLDS into the milestone it describes, and is then not a
+workstream of its own: the milestone's card links it ("design: <filename>").
+It describes a milestone, in any repo, when its normalized title (lowercased,
+runs of anything but letters and digits made one space) is not empty and
+equals the milestone's, else when its refs name open issues in that
+milestone; the one with the most such refs wins. On a tie, a milestone in the
+doc's own repo wins, then the lowest id. A filename found in more than one repo is one doc:
+the copy whose repo owns the milestone it folds into is kept, else the first
+by id, and the other copies are dropped.
+
 The `workstreams` sync step (run_step) builds both tables and replaces them in
 one transaction, so a render reads rows and recomputes nothing. A failed
 Linear read keeps the last good Linear rows; a failed GitHub read fails the
@@ -31,12 +41,20 @@ LANES, first match wins, after which an In progress or Planned workstream
 whose members (or, with none, the workstream itself) show no activity for
 `workstreams.stalled_days` days (default 14) moves to Stalled:
 
+- Complete: a milestone with at least one closed issue, no open issue and
+  no open PR (one with an open PR is still In progress). Its card says "all
+  N issues closed" and its next action is to close the milestone. It never
+  stalls.
 - In progress: a started Linear project; a milestone with an open PR or a
   started issue (`status:3_started` or `status:4_needs_review`).
-- Planned: a planned Linear project; an approved milestone.
-- Design: a design doc; a backlog or triage Linear project; an unapproved
-  milestone.
+- Planned: a planned Linear project; an approved milestone; an unapproved
+  milestone with open issues, whose status reads "not approved".
+- Design: a design doc that folds into no milestone; a backlog or triage
+  Linear project; an unapproved milestone with no issues at all.
 - Stalled: also a paused Linear project, whatever its activity.
+
+An unapproved milestone's next action is to approve it, and once it has
+stalled, to approve or close it.
 
 A card links to Pull requests and Issues filtered to its members
 (`?ws=<id>`, fleet_tabs.py), and `dashboard.py view workstreams --json`
@@ -45,10 +63,12 @@ A card links to Pull requests and Issues filtered to its members
 
 import html
 import json
+import re
 import sqlite3
 import traceback
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from pathlib import PurePosixPath
 from typing import Any, Callable
 from urllib.parse import quote
 
@@ -74,6 +94,7 @@ LANES = (
     ("planned", "Planned", "No workstream is planned."),
     ("design", "Design", "No workstream is at the design stage."),
     ("stalled", "Stalled", "No workstream has stalled."),
+    ("complete", "Complete", "No milestone is complete."),
 )
 
 SOURCE_LABELS = {
@@ -224,6 +245,71 @@ def _member(ws: str, item: dict[str, Any], via: str) -> dict[str, Any]:
     }
 
 
+def normalize_title(text: "str | None") -> str:
+    return " ".join(re.sub(r"[\W_]+", " ", str(text or "").lower()).split())
+
+
+def _filename(doc: dict[str, Any]) -> str:
+    return PurePosixPath(str(doc.get("path") or doc["id"])).name
+
+
+def _described(
+    doc: dict[str, Any],
+    by_title: dict[str, list[dict]],
+    issue_ms: dict[tuple, str],
+    rows: dict[str, dict],
+) -> "dict | None":
+    """The milestone row `doc` describes, or None (the module docstring)."""
+    title = normalize_title(doc["title"])
+    found = by_title.get(title) if title else None
+    if not found:
+        hits: dict[str, int] = {}
+        for r in doc["refs"]:
+            target = issue_ms.get((r.get("repo"), r.get("number")))
+            if target:
+                hits[target] = hits.get(target, 0) + 1
+        top = max(hits.values(), default=0)
+        found = [rows[w] for w, n in hits.items() if n == top]
+    if not found:
+        return None
+    return min(found, key=lambda m: (m["repo"] != doc["repo"], m["id"]))
+
+
+def _fold_designs(
+    docs: list[dict],
+    rows: list[dict],
+    ms_ids: dict[tuple, str],
+    items: list[dict],
+) -> list[dict]:
+    """The design rows that stay workstreams. A doc that describes a
+    milestone is added to that row's `designs` instead, and a filename's
+    copies beyond the first are dropped (the module docstring)."""
+    milestones = {r["id"]: r for r in rows if r["source"] == "milestone"}
+    by_title: dict[str, list[dict]] = {}
+    for m in milestones.values():
+        by_title.setdefault(normalize_title(m["title"]), []).append(m)
+    issue_ms = {
+        (i["repo"], i["number"]): ms_ids[(i["repo"], i["milestone"])]
+        for i in items
+        if i["kind"] == "issue" and (i["repo"], i["milestone"]) in ms_ids
+    }
+    copies: dict[str, list[dict]] = {}
+    for doc in sorted(docs, key=lambda d: d["id"]):
+        copies.setdefault(_filename(doc), []).append(doc)
+    kept: list[dict] = []
+    for name, group in copies.items():
+        targets = [(d, _described(d, by_title, issue_ms, milestones)) for d in group]
+        folded = [(d, m) for d, m in targets if m is not None]
+        if not folded:
+            kept.append(group[0])
+            continue
+        doc, m = next(((d, m) for d, m in folded if d["repo"] == m["repo"]), folded[0])
+        m.setdefault("designs", []).append(
+            {"id": doc["id"], "name": name, "url": doc.get("url")}
+        )
+    return kept
+
+
 def build(
     milestones: list[dict],
     designs: list[dict],
@@ -271,29 +357,30 @@ def build(
                 "updated": p.get("updated"),
             }
         )
-    for d in designs:
-        out.append(
-            {
-                "id": design_id(d["repo"], d.get("path") or d["key"]),
-                "source": "design",
-                "title": d.get("title") or d.get("path") or d["key"],
-                "status": d.get("status") or "proposed",
-                "url": d.get("url"),
-                "repo": d["repo"],
-                "path": d.get("path"),
-                "refs": list(d.get("refs") or []),
-                "updated": d.get("created"),
-            }
-        )
+    ms_ids = {
+        (m["repo"], m["number"]): ms_id(m["repo"], m["number"]) for m in milestones
+    }
+    docs = [
+        {
+            "id": design_id(d["repo"], d.get("path") or d["key"]),
+            "source": "design",
+            "title": d.get("title") or d.get("path") or d["key"],
+            "status": d.get("status") or "proposed",
+            "url": d.get("url"),
+            "repo": d["repo"],
+            "path": d.get("path"),
+            "refs": list(d.get("refs") or []),
+            "updated": d.get("created"),
+        }
+        for d in designs
+    ]
+    out += _fold_designs(docs, out, ms_ids, items)
 
     members: dict[tuple[str, str], dict] = {}
 
     def add(ws: str, item: dict, via: str) -> None:
         members.setdefault((ws, item["key"]), _member(ws, item, via))
 
-    ms_ids = {
-        (m["repo"], m["number"]): ms_id(m["repo"], m["number"]) for m in milestones
-    }
     project_ids = {p["id"] for p in projects}
     teams = {t for p in projects for t in p.get("teams") or []}
     by_ref = {(i["repo"], i["number"]): i for i in items if i["repo"]}
@@ -607,13 +694,15 @@ def _base_lane(ws: dict[str, Any], members: list[dict[str, Any]]) -> str:
         return LINEAR_LANES.get(str(ws.get("status_type") or ""), "design")
     if ws["source"] == "design":
         return "design"
-    started = any(
-        (m["kind"] == "pr" and m["is_open"]) or (m["kind"] == "issue" and m["started"])
-        for m in members
-    )
+    done = int(ws.get("done") or 0)
+    still_open = int(ws.get("total") or 0) - done
+    open_pr = any(m["kind"] == "pr" and m["is_open"] for m in members)
+    if done and not still_open and not open_pr:
+        return "complete"
+    started = open_pr or any(m["kind"] == "issue" and m["started"] for m in members)
     if started:
         return "in-progress"
-    return "planned" if ws.get("approved") else "design"
+    return "planned" if ws.get("approved") or still_open else "design"
 
 
 def _plural(n: int, word: str) -> str:
@@ -645,12 +734,16 @@ def card(
     c.todo = True
     if c.waiting:
         c.next = f"{_plural(c.waiting, 'PR')} waiting on you"
+    elif lane == "complete":
+        c.next = "close the milestone"
     elif lane == "stalled" and ws.get("status_type") == "paused":
         c.next = "the project is paused: resume or close it"
-    elif lane == "stalled":
-        c.next, c.todo = f"no activity for {idle}d", False
     elif ws["source"] == "milestone" and not ws.get("approved"):
         c.next = "approve the milestone: add `approved: yes` to its description"
+        if lane == "stalled":
+            c.next += ", or close it"
+    elif lane == "stalled":
+        c.next, c.todo = f"no activity for {idle}d", False
     elif ws["source"] == "design":
         c.next = "decide the design"
     elif ws["source"] == "linear" and lane == "design":
@@ -668,6 +761,8 @@ def card(
 def progress_text(c: Card) -> str:
     if c.percent is not None:
         return f"{c.percent}% done"
+    if c.lane == "complete":
+        return f"all {_plural(c.total or 0, 'issue')} closed"
     if c.total:
         return f"{c.done}/{c.total} done"
     return "no members yet" if c.ws["source"] == "design" else "0/0 done"
@@ -702,6 +797,9 @@ def _card_html(c: Card, now: datetime) -> str:
         + " · "
         + view_model.link(filter_href("/issues", c.id), f"Issues ({c.issues})")
     )
+    for d in c.ws.get("designs") or []:
+        name = f"design: {d['name']}"
+        links += " · " + (view_model.link(d["url"], name) if d.get("url") else _e(name))
     if c.todo:
         act = f'<div class="act">→ {view_model.code(c.next)}</div>'
     else:
