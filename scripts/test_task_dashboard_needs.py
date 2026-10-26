@@ -622,6 +622,24 @@ class RegistryTests(NeedsCase):
             '<span class="title">task-1101 @ bestdan/task-1101</span>', pr_card
         )
 
+    def test_a_malformed_bridge_id_gets_the_bare_url(self):
+        for bad in ("session_01/../x", "session_01?x=1", "session_01#x",
+                    "other_01", "session_", None, 5):  # fmt: skip
+            self.assertEqual(needs.session_url(bad), needs.CODE_URL, bad)
+            self.assertIsNone(needs.valid_bridge(bad), bad)
+        good = "session_01Ab-c_9"
+        self.assertEqual(needs.session_url(good), f"{needs.CODE_URL}/{good}")
+        # A mirror row written before the check: the card says why it has no
+        # session link, and the agent view carries no id.
+        row = {"key": "s", "session_id": "s", "status_bucket": "waiting",
+               "status_category": "need_input", "updated": "2026-10-24T11:00:00Z",
+               "bridge_session_id": "session_01/../evil"}  # fmt: skip
+        n = needs._session(row, NOW)
+        assert n is not None
+        self.assertEqual(n.url, needs.CODE_URL)
+        self.assertIsNone(n.bridge_session_id)
+        self.assertEqual(needs.open_label(n), needs.NO_RC_LABEL)
+
     def test_a_finished_session_takes_its_registry_name_and_link(self):
         done = card(section(self.page_html, "finished"), "s-done")
         self.assertIn('<span class="title">done-thing</span>', done)

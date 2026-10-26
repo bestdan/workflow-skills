@@ -99,6 +99,8 @@ HOOK_KEYS = (
     "v", "ts", "event", "session_id", "cwd", "branch", "notification", "asked",
 )  # fmt: skip
 LANDED_STATES = ("landed", "not_landed", "unknown")
+# A Remote Control session id, the path segment of https://claude.ai/code/<id>.
+BRIDGE_ID = re.compile(r"session_[A-Za-z0-9_-]+")
 
 Classifier = Callable[[str], bool]
 
@@ -344,9 +346,13 @@ def registry(registry_dir: Path, alive: Alive = pid_alive) -> list[dict[str, Any
             if isinstance(updated, int | float) and not isinstance(updated, bool)
             else 0.0
         )
+        bridge = _opt_str(obj.get("bridgeSessionId"))
         entry = {
             "session_id": sid,
-            "bridge_session_id": _opt_str(obj.get("bridgeSessionId")),
+            # A malformed id is dropped; the rest of the entry still counts.
+            "bridge_session_id": bridge
+            if bridge and BRIDGE_ID.fullmatch(bridge)
+            else None,
             "name": _opt_str(obj.get("name")),
             "status": _opt_str(obj.get("status")),
             "pid": pid,

@@ -88,6 +88,7 @@ import include
 import overlay
 import score
 import sessions
+import snapshot
 import sync
 import view_model
 
@@ -203,7 +204,7 @@ def _session(row: dict[str, Any], now: datetime) -> "Need | None":
     asked = bool(row.get("asked"))
     brief = row.get("brief")
     repo = fleet_views.repo_of_path(row.get("cwd"))
-    bridge = row.get("bridge_session_id") or None
+    bridge = valid_bridge(row.get("bridge_session_id"))
     return Need(
         item=(sessions.SOURCE, str(row.get("key") or row.get("session_id"))),
         kind=sessions.KIND,
@@ -223,9 +224,22 @@ def _session(row: dict[str, Any], now: datetime) -> "Need | None":
     )
 
 
+def valid_bridge(bridge: Any) -> "str | None":
+    """`bridge` when it is a Remote Control session id, else None.
+
+    It comes from another machine's file, and a `/`, `?` or `#` in it would
+    move the link, so anything but `session_<letters, digits, _ or ->` is
+    treated as no id at all.
+    """
+    if isinstance(bridge, str) and snapshot.BRIDGE_ID.fullmatch(bridge):
+        return bridge
+    return None
+
+
 def session_url(bridge: "str | None") -> str:
     """The Remote Control session's own page, else the bare claude.ai/code."""
-    return f"{CODE_URL}/{bridge}" if bridge else CODE_URL
+    valid = valid_bridge(bridge)
+    return f"{CODE_URL}/{valid}" if valid else CODE_URL
 
 
 def session_state(asked: bool, live: "str | None") -> str:
@@ -484,7 +498,7 @@ def finished(
     mirror = {str(r.get("key")): r for r in _rows(conn, sessions.SOURCE, sessions.KIND)}
     for s in fleet_views.finished_sessions(fleet_views.load(conn, cfg), since):
         row = mirror.get(s.session_id) or {}
-        bridge = row.get("bridge_session_id") or None
+        bridge = valid_bridge(row.get("bridge_session_id"))
         out.append(
             Need(
                 item=(sessions.SOURCE, s.session_id),

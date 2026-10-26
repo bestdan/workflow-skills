@@ -433,6 +433,21 @@ class TestRegistry(unittest.TestCase):
              "status": None, "pid": 7, "updated_at": None, "tmux": None},
         )  # fmt: skip
 
+    def test_a_malformed_bridge_id_is_dropped_and_the_entry_kept(self):
+        bad = ("session_01/../x", "session_01?next=1", "session_01#x", "other_01",
+               "session_", " session_01")  # fmt: skip
+        for i, bridge in enumerate(bad, start=10):
+            self.write(f"{i}.json", {"pid": i, "sessionId": f"s{i}", "name": "n",
+                                     "status": "idle", "bridgeSessionId": bridge})  # fmt: skip
+        self.write("9.json", {"pid": 9, "sessionId": "s09",
+                              "bridgeSessionId": "session_01Ab-c_9"})  # fmt: skip
+        entries = {e["session_id"]: e for e in snap.registry(self.dir, lambda p: True)}
+        self.assertEqual(entries["s09"]["bridge_session_id"], "session_01Ab-c_9")
+        for i, bridge in enumerate(bad, start=10):
+            entry = entries[f"s{i}"]
+            self.assertIsNone(entry["bridge_session_id"], bridge)
+            self.assertEqual((entry["name"], entry["status"]), ("n", "idle"), bridge)
+
     def test_a_dead_process_is_left_out(self):
         self.write("8.json", {"pid": 8, "sessionId": "s"})
         self.assertEqual(snap.registry(self.dir, alive=lambda pid: False), [])
