@@ -257,9 +257,10 @@ class SourcesTests(Case):
             lanes,
             {
                 "in-progress": sorted([MS3, P1]),
-                "planned": [P2],
-                "design": sorted([MS4, P4, DOC]),
+                "planned": sorted([MS4, P2]),
+                "design": sorted([P4, DOC]),
                 "stalled": [MS5],
+                "complete": [],
             },
         )
         cards = self.by_id(cfg)
@@ -418,6 +419,111 @@ class StalledTests(Case):
         cfg = fleet_cfg()
         self.step(cfg, gh=FakeGh([(9, "Empty", "approved: yes", 0, 0, 40)]))
         self.assertEqual(self.by_id(cfg)[workstreams.ms_id(REPO, 9)].lane, "stalled")
+
+
+def design(repo, path, title, refs=()):
+    url = f"https://github.com/{repo}/blob/main/{path}"
+    return {
+        "kind": "design", "key": url, "url": url, "repo": repo, "path": path,
+        "title": title, "status": "proposed", "created": "2026-10-01",
+        "refs": [{"repo": r, "number": n} for r, n in refs],
+    }  # fmt: skip
+
+
+class LaneRuleTests(Case):
+    def test_a_milestone_with_every_issue_closed_is_complete(self):
+        cfg = fleet_cfg()
+        done = workstreams.ms_id(REPO, 6)
+        self.step(cfg, gh=FakeGh(MILESTONES + [(6, "Done", "approved: yes", 0, 5, 30)]))
+        c = self.by_id(cfg)[done]
+        self.assertEqual(
+            (c.lane, c.next, c.todo), ("complete", "close the milestone", True)
+        )
+        self.assertEqual(workstreams.progress_text(c), "all 5 issues closed")
+        lane = section(self.page(cfg), "complete")
+        self.assertEqual(keys(lane), [done])
+        self.assertIn("all 5 issues closed", lane)
+        self.assertIn("close the milestone", lane)
+        doc = agent_view.build(self.conn, cfg, "workstreams", NOW)
+        self.assertEqual([lane["id"] for lane in doc["lanes"]][-1], "complete")
+        item = next(
+            i for lane in doc["lanes"] for i in lane["items"] if i["key"] == done
+        )
+        self.assertEqual((item["lane"], item["action"]),
+                         ("complete", {"review": "close the milestone"}))  # fmt: skip
+
+    def test_an_unapproved_milestone_with_open_issues_is_planned_or_stalled(self):
+        cfg = fleet_cfg()
+        idle, fresh, empty = (workstreams.ms_id(REPO, n) for n in (7, 8, 9))
+        self.step(cfg, gh=FakeGh(MILESTONES + [
+            (7, "Old backlog", "Not agreed.", 3, 2, 40),
+            (8, "New backlog", "", 2, 0, 2),
+            (9, "Idea", "", 0, 0, 1),
+        ]))  # fmt: skip
+        cards = self.by_id(cfg)
+        approve = "approve the milestone: add `approved: yes` to its description"
+        self.assertEqual((cards[idle].lane, cards[idle].next, cards[idle].todo),
+                         ("stalled", approve + ", or close it", True))  # fmt: skip
+        self.assertEqual((cards[fresh].lane, cards[fresh].next), ("planned", approve))
+        self.assertIn("not approved", workstreams.meta_parts(cards[fresh], NOW))
+        self.assertIn("not approved", section(self.page(cfg), "planned"))
+        self.assertEqual(cards[empty].lane, "design")
+
+
+class FoldTests(Case):
+    def fold(self, *docs):
+        github_fleet.write(self.conn, ROWS + list(docs), NOW)
+        cfg = fleet_cfg()
+        self.step(cfg)
+        return cfg
+
+    def test_a_doc_titled_as_a_milestone_folds_into_it(self):
+        cfg = self.fold(
+            design(REPO, "dev_docs/designs/2026-09-01-export.md", "Export!")
+        )
+        cards = self.by_id(cfg)
+        folded = workstreams.design_id(REPO, "dev_docs/designs/2026-09-01-export.md")
+        self.assertNotIn(folded, cards)
+        self.assertEqual([d["name"] for d in cards[MS3].ws["designs"]],
+                         ["2026-09-01-export.md"])  # fmt: skip
+        card = section(self.page(cfg), "in-progress")
+        self.assertIn(">design: 2026-09-01-export.md</a>", card)
+        doc = agent_view.build(self.conn, cfg, "workstreams", NOW)
+        ms3 = next(i for lane in doc["lanes"] for i in lane["items"] if i["key"] == MS3)
+        self.assertEqual(ms3["designs"][0]["name"], "2026-09-01-export.md")
+        self.assertNotIn(
+            folded, [i["key"] for lane in doc["lanes"] for i in lane["items"]]
+        )
+
+    def test_a_doc_whose_refs_are_a_milestones_issues_folds_into_it(self):
+        cfg = self.fold(
+            design(REPO, "dev_docs/designs/bulk.md", "Importing in bulk", [(REPO, 11)])
+        )
+        cards = self.by_id(cfg)
+        self.assertNotIn(workstreams.design_id(REPO, "dev_docs/designs/bulk.md"), cards)
+        self.assertEqual([d["name"] for d in cards[MS4].ws["designs"]], ["bulk.md"])
+        # The doc that names a milestoneless issue stays a design.
+        self.assertEqual(cards[DOC].lane, "design")
+
+    def test_a_filename_in_two_repos_is_listed_once(self):
+        path = "dev_docs/designs/2026-09-02-export.md"
+        cfg = self.fold(
+            design("acme/tools", path, "Export"), design(REPO, path, "Export")
+        )
+        cards = self.by_id(cfg)
+        self.assertFalse([c for c in cards if c.endswith(path)])
+        self.assertEqual([d["id"] for d in cards[MS3].ws["designs"]],
+                         [workstreams.design_id(REPO, path)])  # fmt: skip
+
+    def test_an_unmatched_doc_in_two_repos_stays_in_design_once(self):
+        path = "dev_docs/designs/2026-09-03-later.md"
+        cfg = self.fold(
+            design("acme/tools", path, "Later"), design(REPO, path, "Later")
+        )
+        design_lane = section(self.page(cfg), "design")
+        self.assertEqual([k for k in keys(design_lane) if k.endswith(path)],
+                         [workstreams.design_id("acme/tools", path)])  # fmt: skip
+        self.assertIn("no members yet", design_lane)
 
 
 class FilterTests(Case):
