@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.139.0] - 2026-10-26
+
+### Features
+
+- add a Workstreams tab [#1199] (#1203) (f01fca3)
+
 ## [2.138.0] - 2026-10-26
 
 ### Features
