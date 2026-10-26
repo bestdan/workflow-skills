@@ -33,8 +33,9 @@ needs the sandbox escape** because they reach Atlassian and GitHub hosts.
 the agent's launchd state; a sandbox refusal there is reported as "cannot read
 the agent's state", never as "not loaded". `sync-now` makes an HTTP request to
 the server on `127.0.0.1`, which the sandbox's network filter may refuse.
-`refresh` makes one `gh` call, or two for a PR with a team review request or
-more than 100 checks.
+`refresh` makes one `gh` call, plus the `review-requested:@me` search (one
+call per page) for someone else's PR with a team review request, and one
+`gh pr view` for a PR with more than 100 checks.
 `open`, `export`, `import`, `tune`, `view` and `overlay` touch only local files.
 
 `status`, `sync-now`, `open` and `uninstall` use the config and DB paths that

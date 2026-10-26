@@ -11,10 +11,11 @@ one item and rewrites its rows the way a sync would:
   comments (for the co-review stamp), an issue's labels, and the repo's
   `isArchived`. `gh pr view --json` has no archived flag and no viewer login,
   so it cannot answer the archived rule or the `@me` roles on its own.
-  Two cases take one more call. A PR with a team review request runs the
-  `review-requested:@me` search over its repo, since whether I am in the
-  team is not in the read; a head commit with more than 100 check contexts
-  takes its CI state from `gh pr view`, as the sync does.
+  Two cases add calls, and both can apply to one PR. Someone else's PR with
+  a team review request runs the `review-requested:@me` search over its
+  repo (one call per page), since whether I am in the team is not in the
+  read; a head commit with more than 100 check contexts takes its CI state
+  from one `gh pr view`, as the sync does.
 - An open PR gets the rows each search would have given it. Its `prs` row
   (the Jira sync's GitHub step) when it is mine or asks for my review; its
   `kind = pr` row (github_fleet) through github_fleet.queue_row(), with the
@@ -260,7 +261,9 @@ def _pr_rows(
     would return it."""
     author = (node.get("author") or {}).get("login")
     mine = author == viewer
-    requested = _requested(node, viewer, repo, runner, timeout)
+    # The role of my own PR never depends on a review request, so a team
+    # request on it (a CODEOWNERS one, say) costs no search.
+    requested = not mine and _requested(node, viewer, repo, runner, timeout)
     ci = _rollup(node, runner, timeout)
     node = {**node, "repository": {"nameWithOwner": repo}}
 

@@ -409,6 +409,12 @@ class PullRequestTests(Case):
         keys = lane_keys(agent_view.build(self.conn, self.cfg, "prs", NOW))
         self.assertIn(pr_url(7), keys["others"])
 
+    def test_a_team_request_on_my_own_pr_runs_no_search(self):
+        fake = FakeGh({4: answer(pr_node(4, teams=("core",)))})
+        self.refresh(pr_url(4), fake)
+        self.assertEqual(len(fake.calls), 1)
+        self.assertEqual(self.prs_row(pr_url(4))[0], "author")
+
     def test_no_team_request_runs_no_search(self):
         fake = FakeGh({7: answer(pr_node(7, author="azack", requested=(VIEWER,)))})
         self.refresh(pr_url(7), fake)
