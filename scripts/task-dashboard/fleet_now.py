@@ -51,6 +51,7 @@ import score
 import sync
 import view_model
 import whynot
+import workstreams
 
 _e = html.escape
 
@@ -77,6 +78,9 @@ class Ranked:
     category: str
     why: str  # what put it in its category
     prio: "str | None" = None
+    # The title of a workstream the item is in (workstreams.membership), or
+    # None. Not scored: recorded as a feature so `tune` can propose it.
+    workstream: "str | None" = None
     from_needs: bool = True  # Needs you lists it too
     total: float = 0.0
     terms: list[score.Term] = field(default_factory=list)
@@ -200,6 +204,9 @@ def candidates(
         if r.need.item not in seen:
             seen.add(r.need.item)
             out.append(r)
+    member_of = workstreams.membership(conn)
+    for r in out:
+        r.workstream = member_of.get(r.need.item)
     weights = cfg["score"]["fleet"]
     for r in out:
         r.total, r.terms = score.fleet_score(

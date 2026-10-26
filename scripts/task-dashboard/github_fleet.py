@@ -109,6 +109,7 @@ query($q: String!, $after: String) {
         url number title createdAt updatedAt
         repository { nameWithOwner }
         labels(first: 20) { nodes { name } }
+        milestone { number title }
       }
     }
   }
@@ -255,9 +256,17 @@ def _issue_row(node: dict) -> dict:
         "number": node["number"],
         "title": node["title"],
         "labels": labels,
+        "milestone": _milestone(node.get("milestone")),
         "created": node.get("createdAt"),
         "updated": node.get("updatedAt"),
     }
+
+
+def _milestone(node: "dict | None") -> "dict | None":
+    """An issue's milestone as {number, title}, or None."""
+    if not node or node.get("number") is None:
+        return None
+    return {"number": node["number"], "title": node.get("title")}
 
 
 def issues_needing_human(
@@ -441,6 +450,24 @@ def _closes_approved(node: dict, milestones: MilestoneCache) -> "bool | None":
     return False
 
 
+def closes(node: dict) -> list[dict]:
+    """The issues a PR closes, each {repo, number, milestone}: the milestone's
+    number, or None. Workstreams (workstreams.py) reads it."""
+    out = []
+    for issue in (node.get("closingIssuesReferences") or {}).get("nodes") or []:
+        if not issue or issue.get("number") is None:
+            continue
+        ms = issue.get("milestone") or {}
+        out.append(
+            {
+                "repo": issue["repository"]["nameWithOwner"],
+                "number": issue["number"],
+                "milestone": ms.get("number"),
+            }
+        )
+    return out
+
+
 def pr_comments(
     repo: str, number: int, runner: Runner = run, timeout: float = DEFAULT_TIMEOUT
 ) -> "tuple[str, list[dict]]":
@@ -534,6 +561,7 @@ def queue_row(
         "stamped": stamped,
         "in_queue": role != "others" and not misses,
         "queue_misses": misses,
+        "closes": closes(node),
         "created": node.get("createdAt"),
         "updated": node.get("updatedAt"),
     }
@@ -637,6 +665,30 @@ def _contents(repo: str, path: str, runner: Runner, timeout: float) -> "Any | No
     return github_gh._call(argv, lambda _argv, _timeout: (rc, out, err), timeout)
 
 
+_REF_URL = re.compile(
+    r"https://github\.com/([A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+)"
+    r"/(?:issues|pull)/(\d+)"
+)
+_REF_SHORT = re.compile(
+    r"(?<![\w/&#])(?:([A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+))?#(\d+)\b"
+)
+
+
+def design_refs(text: str, repo: str) -> list[dict]:
+    """The issues and PRs a design names, each {repo, number}, in order.
+
+    A GitHub issue or PR URL, an `owner/name#N`, and a bare `#N`, which
+    means `repo`. GitHub numbers issues and PRs in one sequence, so a ref
+    names whichever of the two the number is.
+    """
+    found: dict[tuple[str, int], None] = {}
+    for m in _REF_URL.finditer(text):
+        found.setdefault((m[1], int(m[2])), None)
+    for m in _REF_SHORT.finditer(_REF_URL.sub(" ", text)):
+        found.setdefault((m[1] or repo, int(m[2])), None)
+    return [{"repo": r, "number": n} for r, n in found]
+
+
 def proposed_designs(
     repos: Iterable[str],
     runner: Runner = run,
@@ -702,9 +754,83 @@ def proposed_designs(
                     "status": "proposed",
                     "created": meta.get("created")
                     or (dated.group(1) if dated else None),
+                    "refs": design_refs(text, repo),
                 }
             )
     return rows, truncated, missing
+
+
+# --- milestones --------------------------------------------------------------
+
+# One page of an owner's unarchived repos with their open milestones. A repo
+# with more than 25 open milestones shows its first 25 only.
+MILESTONES_QUERY = """
+query($owner: String!, $after: String) {
+  repositoryOwner(login: $owner) {
+    repositories(first: 50, after: $after, isArchived: false) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        nameWithOwner
+        milestones(first: 25, states: OPEN) {
+          nodes {
+            number title description dueOn url updatedAt
+            open: issues(states: OPEN) { totalCount }
+            closed: issues(states: CLOSED) { totalCount }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+
+def milestone_row(repo: str, ms: dict) -> dict:
+    """One open milestone (MILESTONES_QUERY's fields) as the Workstreams
+    source reads it."""
+    return {
+        "repo": repo,
+        "number": ms["number"],
+        "title": ms.get("title") or f"milestone {ms['number']}",
+        "url": ms.get("url"),
+        "due": ms.get("dueOn"),
+        "approved": milestone_approved(ms.get("description")),
+        "open": (ms.get("open") or {}).get("totalCount") or 0,
+        "closed": (ms.get("closed") or {}).get("totalCount") or 0,
+        "updated": ms.get("updatedAt"),
+    }
+
+
+def open_milestones(
+    owners: Iterable[str], runner: Runner = run, timeout: float = DEFAULT_TIMEOUT
+) -> list[dict]:
+    """The open milestones in the owners' unarchived repos (milestone_row),
+    one paged query per owner."""
+    out = []
+    for owner in owners:
+        github_gh.owner_qualifier(owner)  # validates the name
+        after: "str | None" = None
+        while True:
+            argv = [
+                "gh", "api", "graphql",
+                "-f", f"query={MILESTONES_QUERY}",
+                "-f", f"owner={owner}",
+            ]  # fmt: skip
+            if after:
+                argv += ["-f", f"after={after}"]
+            data = github_gh._call(argv, runner, timeout)
+            try:
+                repos = data["data"]["repositoryOwner"]["repositories"]
+                page, nodes = repos["pageInfo"], repos["nodes"]
+            except (KeyError, TypeError):
+                raise GhError(f"unexpected milestones response for {owner}") from None
+            for repo in nodes:
+                for ms in (repo.get("milestones") or {}).get("nodes") or []:
+                    out.append(milestone_row(repo["nameWithOwner"], ms))
+            if not page.get("hasNextPage"):
+                break
+            after = page.get("endCursor")
+    return out
 
 
 # --- sync --------------------------------------------------------------------

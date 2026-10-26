@@ -43,6 +43,7 @@ import overlay
 import score
 import sync
 import view_model
+import workstreams
 
 _e = html.escape
 
@@ -55,6 +56,7 @@ TABS = (
     ("/waiting-on", "I'm waiting on"),
     ("/prs", "Pull requests"),
     ("/issues", "Issues"),
+    ("/workstreams", "Workstreams"),
     ("/board", "Board"),
     ("/stale", "Stale"),
     ("/epics", "Epics"),
@@ -165,6 +167,8 @@ class Mirror:
         self.cfg = cfg
         self.now = now
         self.conn = conn
+        # The request's query, which views.render sets: the `?ws=` filter.
+        self.query: dict[str, list[str]] = {}
         self.me = str(cfg["jira"].get("me") or "").strip()
         self.ov = overlay.load(conn)
         conn.row_factory = sqlite3.Row
@@ -707,11 +711,17 @@ def render_needs(m: Mirror, inc: include.Include) -> str:
 
 
 def render_prs(m: Mirror, inc: include.Include) -> str:
-    return fleet_tabs.render_prs(m.conn, m.cfg, m.now, inc)
+    ws = workstreams.from_query(m.conn, m.query)
+    return fleet_tabs.render_prs(m.conn, m.cfg, m.now, inc, ws)
 
 
 def render_issues(m: Mirror, inc: include.Include) -> str:
-    return fleet_tabs.render_issues(m.conn, m.cfg, m.now, inc)
+    ws = workstreams.from_query(m.conn, m.query)
+    return fleet_tabs.render_issues(m.conn, m.cfg, m.now, inc, ws)
+
+
+def render_workstreams(m: Mirror, inc: include.Include) -> str:
+    return workstreams.render(m.conn, m.cfg, m.now, inc)
 
 
 EPIC_LANES = (
@@ -788,6 +798,7 @@ ROUTES = {
     "/epics": ("Epics", render_epics),
     "/prs": ("Pull requests", render_prs),
     "/issues": ("Issues", render_issues),
+    "/workstreams": ("Workstreams", render_workstreams),
 }
 
 
@@ -807,6 +818,7 @@ def render(
     _, fn = ROUTES[path]
     shown = inc if inc is not None else include.everything(path.lstrip("/"))
     m = Mirror(conn, cfg, now)
+    m.query = query or {}
     return nav(path, cfg, inc, query) + fn(m, shown) + render_ignored(conn)
 
 

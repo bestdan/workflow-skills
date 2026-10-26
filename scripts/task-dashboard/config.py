@@ -58,6 +58,13 @@ DEFAULTS: dict[str, Any] = {
     # for the fleet view that runs `claude -p` once per sync. Off by default:
     # it relies on a request Claude Code marks internal.
     "claude_remote": {"enabled": False, "claude_path": "claude", "timeout_seconds": 45},
+    # Linear projects as workstreams (linear_api.py), read with the GraphQL
+    # API. Off by default. The key is never set here: linear_api.resolve_key
+    # says where it is read from.
+    "linear": {"enabled": False, "timeout_seconds": 30},
+    # The Workstreams tab (workstreams.py): an in-progress or planned
+    # workstream with no member activity for this many days is Stalled.
+    "workstreams": {"stalled_days": 14},
     # View name -> {"include": [group, ...]}: what a view shows when neither its
     # URL nor a remembered switch choice says (include.py has the names).
     "views": {},
@@ -177,6 +184,25 @@ def load(path: "str | os.PathLike[str] | None" = None) -> dict[str, Any]:
     t = cr["timeout_seconds"]
     if not isinstance(t, (int, float)) or isinstance(t, bool) or t <= 0:
         raise ConfigError("claude_remote.timeout_seconds must be a positive number")
+    lin = cfg["linear"]
+    if not isinstance(lin, dict) or not isinstance(lin.get("enabled"), bool):
+        raise ConfigError("linear.enabled must be true or false")
+    if set(lin) - {"enabled", "timeout_seconds"}:
+        # Refused rather than ignored: a key pasted here would sit in a file
+        # the daemon reads and backups copy. linear_api says where it goes.
+        extra = ", ".join(sorted(set(lin) - {"enabled", "timeout_seconds"}))
+        raise ConfigError(
+            f"linear holds only enabled and timeout_seconds, not {extra};"
+            " the API key goes in ~/.config/workflow-skills/linear_api_key"
+            " (mode 600) or $LINEAR_API_KEY, never in config"
+        )
+    t = lin["timeout_seconds"]
+    if not isinstance(t, (int, float)) or isinstance(t, bool) or t <= 0:
+        raise ConfigError("linear.timeout_seconds must be a positive number")
+    ws = cfg["workstreams"]
+    days = ws.get("stalled_days") if isinstance(ws, dict) else None
+    if not isinstance(days, int) or isinstance(days, bool) or days < 1:
+        raise ConfigError("workstreams.stalled_days must be a positive integer")
     if not isinstance(cfg["ingest"], dict):
         raise ConfigError("ingest must be a table")
     machines = cfg["ingest"]["machines"]

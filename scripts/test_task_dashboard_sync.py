@@ -719,6 +719,11 @@ class FleetGh:
                 }
             ]
             return 0, json.dumps({"statusCheckRollup": rollup}), ""
+        if any("repositoryOwner" in a for a in argv):
+            # The Workstreams step's open-milestones read: no repos.
+            repos = {"pageInfo": {"hasNextPage": False}, "nodes": []}
+            owner = {"repositoryOwner": {"repositories": repos}}
+            return 0, json.dumps({"data": owner}), ""
         if len(argv) > 2 and "/milestones/" in argv[2]:
             approved = argv[2].endswith("/milestones/7")
             body = "approved: yes" if approved else "approved: no"
@@ -782,7 +787,7 @@ class FleetTests(SyncCase):
         rows = self.run_all(make_config(enabled=True, fleet=True), FleetGh())
         self.assertEqual(
             [(r["kind"], r["outcome"]) for r in rows],
-            [("full", "ok"), ("github_fleet", "ok")],
+            [("full", "ok"), ("github_fleet", "ok"), ("workstreams", "ok")],
         )
         self.assertEqual(
             self.github_rows(),
@@ -802,7 +807,7 @@ class FleetTests(SyncCase):
         gh = FleetGh()
         gh.error = "HTTP 502: bad gateway"
         rows = self.run_all(make_config(enabled=True, fleet=True), gh)
-        self.assertEqual([r["outcome"] for r in rows], ["ok", "failed"])
+        self.assertEqual([r["outcome"] for r in rows], ["ok", "failed", "failed"])
         self.assertIn("502", rows[1]["error"])
         self.assertEqual(self.keys(), ["DEMO-1"])
 
@@ -819,7 +824,9 @@ class FleetTests(SyncCase):
         gh = FleetGh()
         gh.error = "To get started with GitHub CLI, please run:  gh auth login"
         rows = self.run_all(make_config(enabled=True, fleet=True), gh)
-        self.assertEqual([r["outcome"] for r in rows], ["ok", "auth_failed"])
+        self.assertEqual(
+            [r["outcome"] for r in rows], ["ok", "auth_failed", "auth_failed"]
+        )
         self.assertIn("gh auth login", rows[1]["error"])
         self.assertEqual(self.keys(), ["DEMO-1"])
 
@@ -836,14 +843,15 @@ class FleetTests(SyncCase):
         acli = FakeAcli(["DEMO-1"])
         acli.auth = True
         rows = self.run_all(make_config(enabled=True, fleet=True), FleetGh(), acli)
-        self.assertEqual([r["outcome"] for r in rows], ["auth_failed", "ok"])
+        self.assertEqual([r["outcome"] for r in rows], ["auth_failed", "ok", "ok"])
         self.assertEqual(len(self.github_rows()), 3)
 
     def test_fleet_run_is_not_a_jira_cursor(self):
         # The fleet run starts after the Jira run, as it does in production, so
         # a cursor query that ignored kind would pick the fleet row.
         later = NOW + timedelta(minutes=1)
-        ticks = iter([NOW, later, later])  # Jira finish, fleet start, fleet finish
+        # Jira finish, fleet start, fleet finish, workstreams start and finish.
+        ticks = iter([NOW, later, later, later, later])
         cfg = make_config(enabled=True, fleet=True)
         sync.run_all(
             "full", cfg, self.conn, NOW,
@@ -853,7 +861,12 @@ class FleetTests(SyncCase):
         )  # fmt: skip
         runs = self.conn.execute("SELECT kind, started_at FROM sync_runs").fetchall()
         self.assertEqual(
-            runs, [("full", sync._ts(NOW)), ("github_fleet", sync._ts(later))]
+            runs,
+            [
+                ("full", sync._ts(NOW)),
+                ("github_fleet", sync._ts(later)),
+                ("workstreams", sync._ts(later)),
+            ],
         )
         self.assertEqual(sync.last_cursor_run(self.conn)[0], sync._ts(NOW))
 
@@ -911,7 +924,7 @@ class ArchivedRepoTests(SyncCase):
             github=sync.GithubSource(cfg, runner=gh), fleet_runner=fleet_gh,
             clock=lambda: NOW,
         )  # fmt: skip
-        self.assertEqual([r["outcome"] for r in rows], ["ok", "ok"])
+        self.assertEqual([r["outcome"] for r in rows], ["ok", "ok", "ok"])
 
     def seen(self, cfg):
         """Where the archived repo's PR shows, by place."""

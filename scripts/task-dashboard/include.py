@@ -3,7 +3,8 @@
 Every mirrored row carries a `kind`, and KIND_GROUPS, the one place that maps
 a kind onto a group, sorts it into one of four groups:
 
-- `tasks`: Jira tickets and GitHub issues (and a drain's "needs you" items);
+- `tasks`: Jira tickets and GitHub issues (and a drain's "needs you" items,
+  and the Workstreams tab's workstreams);
 - `prs`: pull requests, open or closed;
 - `sessions`: hook and cloud Claude sessions;
 - `other`: worktrees, handoffs, tmux sessions and designs, and any kind this
@@ -57,6 +58,7 @@ KIND_GROUPS = {
     "ticket": "tasks",  # Jira
     "issue": "tasks",  # GitHub, github_fleet
     "drain": "tasks",  # needs.drain_items
+    "workstream": "tasks",  # workstreams.py: a theme of tasks and PRs
     "pr": "prs",
     "closed_pr": "prs",
     "session": "sessions",  # sessions.py and claude_remote.py
@@ -76,6 +78,7 @@ VIEWS = (
     "waiting-on",
     "prs",
     "issues",
+    "workstreams",
     "board",
     "stale",
     "epics",
