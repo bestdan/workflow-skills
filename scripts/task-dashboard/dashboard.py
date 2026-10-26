@@ -39,10 +39,12 @@ import collector  # noqa: E402
 import collector_install  # noqa: E402
 import config  # noqa: E402
 import db  # noqa: E402
+import github_gh  # noqa: E402
 import health  # noqa: E402
 import include  # noqa: E402
 import ingest  # noqa: E402
 import overlay  # noqa: E402
+import refresh  # noqa: E402
 import server  # noqa: E402
 import server_install  # noqa: E402
 import sync  # noqa: E402
@@ -169,6 +171,18 @@ def build_parser() -> argparse.ArgumentParser:
         " view's remembered or configured filter)",
     )
     _paths(view_p)
+    refresh_p = sub.add_parser(
+        "refresh",
+        help="re-read one GitHub PR or issue and rewrite its rows, as the card's"
+        " Refresh button does; no server needed, and not a sync",
+    )
+    refresh_p.add_argument("ref", help="owner/repo#N, or the PR or issue URL")
+    refresh_p.add_argument(
+        "--json",
+        action="store_true",
+        help="print the outcome and the item in each view, as `view --json` shapes it",
+    )
+    _paths(refresh_p)
     ov_p = sub.add_parser(
         "overlay",
         help="one overlay write (ignore, snooze, pin, ...), as the page's buttons"
@@ -430,6 +444,65 @@ def cmd_view(args: argparse.Namespace) -> int:
         conn.close()
     sys.stdout.write(agent_view.dumps(doc) if args.json else agent_view.text(doc))
     return 0
+
+
+def cmd_refresh(args: argparse.Namespace) -> int:
+    """Exit 0 refreshed (updated or removed), 1 GitHub or the DB failed, 2 a
+    config error or a ref this instance does not refresh."""
+    cfg_path, db_arg = _agent_paths(args)
+    try:
+        cfg = config.load(cfg_path)
+    except config.ConfigError as exc:
+        print(f"task-dashboard: {exc}", file=sys.stderr)
+        return 2
+    conn = db.connect(db_arg)
+    try:
+        now = _now()
+        result = refresh.refresh(conn, cfg, args.ref, now, github_gh.run)
+        doc = refresh_doc(conn, cfg, result, now) if args.json else None
+    except refresh.RefreshError as exc:
+        print(f"task-dashboard: {exc}", file=sys.stderr)
+        return 2
+    except github_gh.AuthError as exc:
+        print(f"task-dashboard: {exc} (fix: run `gh auth login`)", file=sys.stderr)
+        return 1
+    except (github_gh.GhError, sqlite3.Error) as exc:
+        print(
+            f"task-dashboard: refresh failed, mirror unchanged: {exc}", file=sys.stderr
+        )
+        return 1
+    finally:
+        conn.close()
+    if doc is not None:
+        sys.stdout.write(agent_view.dumps(doc))
+    else:
+        print(result.line())
+    return 0
+
+
+def refresh_doc(
+    conn: sqlite3.Connection, cfg: dict, result: "refresh.Result", now: datetime
+) -> dict:
+    """The outcome, then the item as each view's `view --json` lists it.
+
+    `views` maps each view to the item's entries there (one per lane it is
+    in), under that view's remembered or configured include filter; a view
+    that does not list it is left out, so a removed item has none.
+    """
+    keys = set(refresh._urls(result.repo, result.number)) | {result.url}
+    found: dict = {}
+    for view in agent_view.available(cfg):
+        inc = agent_view.resolve_include(conn, cfg, view, None)
+        lanes = agent_view.build(conn, cfg, view, now, inc)["lanes"]
+        items = [
+            i
+            for lane in lanes
+            for i in lane["items"]
+            if i["source"] == "github" and i["key"] in keys
+        ]
+        if items:
+            found[view] = items
+    return {"schema": agent_view.SCHEMA_VERSION, **result.as_dict(), "views": found}
 
 
 def cmd_overlay(args: argparse.Namespace) -> int:
@@ -724,6 +797,8 @@ def main(argv: "list[str] | None" = None) -> int:
         return cmd_view(args)
     if args.command == "overlay":
         return cmd_overlay(args)
+    if args.command == "refresh":
+        return cmd_refresh(args)
     parser.print_help()
     return 2
 

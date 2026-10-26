@@ -982,6 +982,15 @@ def snooze_until(now: datetime) -> str:
     return (now.astimezone() + timedelta(days=SNOOZE_DAYS)).date().isoformat()
 
 
+# A GitHub PR or issue, as its card's key: what the Refresh button re-reads.
+_REFRESHABLE = re.compile(r"^https://github\.com/[^/]+/[^/]+/(?:pull|issues)/\d+$")
+
+
+def refreshable(item: Item) -> bool:
+    """Whether the card for `item` carries a Refresh button."""
+    return item[0] == "github" and bool(_REFRESHABLE.match(item[1]))
+
+
 def card_controls(
     item: Item,
     ov: Overlay,
@@ -1033,6 +1042,13 @@ def card_controls(
     parts.append(
         '<button type="button" data-ov="ignore" title="Not mine: hide it">Ignore</button>'
     )
+    if refreshable(item):
+        # refresh.JS handles it: POST /refresh, then the card follows the item.
+        parts.append(
+            '<button type="button" data-refresh=""'
+            ' title="Re-read this item from GitHub, without a full sync">'
+            "Refresh</button>"
+        )
     body = ov.notes.get(item, "")
     parts.append(
         f"<details><summary>{'Edit note' if body else 'Add note'}</summary>"
