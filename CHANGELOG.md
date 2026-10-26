@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.140.0] - 2026-10-26
+
+### Features
+
+- mark a session ended when its process is gone [#1207] (#1209) (3626737)
+
 ## [2.139.1] - 2026-10-26
 
 ### Fixes
