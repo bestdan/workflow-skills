@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.129.1] - 2026-10-26
+
+### Fixes
+
+- restore "branch-pinned environment" in exit-4 rows [#982] (#1126) (d95ec91)
+
 ## [2.129.0] - 2026-10-26
 
 ### Features
