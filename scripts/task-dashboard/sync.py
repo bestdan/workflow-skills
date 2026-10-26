@@ -815,6 +815,7 @@ def run_all(
     if fleet_enabled(config):
         step(FLEET_KIND)
         rows.append(run_fleet(config, db, clock(), runner=fleet_runner, clock=clock))
+        step(workstreams.RUN_KIND)
         rows.append(
             run_workstreams(
                 config, db, clock(), runner=fleet_runner,

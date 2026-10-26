@@ -145,7 +145,7 @@ class FakeLinear:
     def __init__(self, fail=None, projects=None):
         self.calls = []
         self.fail = fail
-        self.projects = PROJECTS if projects is None else projects
+        self.projects: list = PROJECTS if projects is None else projects
 
     def __call__(self, body, key, timeout):
         self.calls.append((body, key))
