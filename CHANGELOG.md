@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.137.0] - 2026-10-26
+
+### Features
+
+- one freshness indicator, quiet sync [#1198] (#1202) (c1ac13e)
+
 ## [2.136.0] - 2026-10-26
 
 ### Features
