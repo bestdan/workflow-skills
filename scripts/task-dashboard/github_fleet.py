@@ -72,7 +72,7 @@ import json
 import re
 import sqlite3
 import sys
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -333,25 +333,27 @@ def recently_closed(
         for node in github_gh.search_prs(query, runner, timeout, CLOSED_QUERY):
             if not node.get("closedAt"):
                 continue
-            rows.setdefault(
-                node["url"],
-                {
-                    "kind": "closed_pr",
-                    "key": node["url"],
-                    "url": node["url"],
-                    "repo": node["repository"]["nameWithOwner"],
-                    "number": node["number"],
-                    "title": node["title"],
-                    "head_ref": node.get("headRefName"),
-                    "merged": bool(node.get("mergedAt")),
-                    "status": "merged" if node.get("mergedAt") else "closed",
-                    "closed_at": node.get("closedAt"),
-                    "merged_at": node.get("mergedAt"),
-                    "created": node.get("createdAt"),
-                    "updated": node.get("closedAt"),
-                },
-            )
+            rows.setdefault(node["url"], closed_row(node))
     return list(rows.values())
+
+
+def closed_row(node: dict) -> dict:
+    """A `closed_pr` row from a closed PR node (CLOSED_QUERY's fields)."""
+    return {
+        "kind": "closed_pr",
+        "key": node["url"],
+        "url": node["url"],
+        "repo": node["repository"]["nameWithOwner"],
+        "number": node["number"],
+        "title": node["title"],
+        "head_ref": node.get("headRefName"),
+        "merged": bool(node.get("mergedAt")),
+        "status": "merged" if node.get("mergedAt") else "closed",
+        "closed_at": node.get("closedAt"),
+        "merged_at": node.get("mergedAt"),
+        "created": node.get("createdAt"),
+        "updated": node.get("closedAt"),
+    }
 
 
 # --- review queue ------------------------------------------------------------
@@ -466,6 +468,78 @@ def pr_comments(
         raise GhError(f"unexpected comments response for {repo}#{number}") from None
 
 
+def queue_row(
+    node: dict,
+    role: str,
+    ci: "str | None",
+    milestones: Any,
+    comments_of: Callable[[str, int], "tuple[str, list[dict]]"],
+) -> "tuple[dict, bool]":
+    """One awaiting PR's `kind = pr` row, with rules 2-4 applied to it.
+
+    `node` has REVIEW_QUERY's fields and `ci` is its rollup state (None when
+    that lookup failed). `milestones` answers description(repo, number) and
+    `comments_of(repo, number)` gives the viewer and the PR's comments, so a
+    caller that already holds them (the per-item refresh) makes no more calls.
+    Also returns whether a milestone or comments lookup failed; that counts
+    as a miss of its rule. An AuthError raises.
+    """
+    url = node["url"]
+    repo = node["repository"]["nameWithOwner"]
+    lookup_failed = False
+    misses = []
+    approved: "bool | None" = None
+    stamped = None
+    if role != "others" and ci != "success":
+        misses.append("ci")
+    if role != "others":
+        try:
+            approved = _closes_approved(node, milestones)
+        except github_gh.AuthError:
+            raise
+        except GhError:
+            approved = False
+            lookup_failed = True
+    if approved is False:
+        misses.append("milestone")
+    if role != "others" and not misses:
+        try:
+            viewer, comments = comments_of(repo, node["number"])
+            head = stamp_head(comments, viewer)
+            current = (node.get("headRefOid") or "").lower()
+            stamped = head is not None and head == current
+        except github_gh.AuthError:
+            raise
+        except GhError:
+            stamped = False
+            lookup_failed = True
+        if not stamped:
+            misses.append("co_review")
+    row = {
+        "kind": "pr",
+        "key": url,
+        "url": url,
+        "repo": repo,
+        "number": node["number"],
+        "title": node["title"],
+        "head_ref": node.get("headRefName"),
+        "head_oid": node.get("headRefOid"),
+        "review_decision": node.get("reviewDecision"),
+        "role": role,
+        "author": (node.get("author") or {}).get("login"),
+        "author_is_bot": is_bot(node.get("author")),
+        "brief": decision_brief(node.get("body")),
+        "ci_state": ci,
+        "milestone_approved": approved,
+        "stamped": stamped,
+        "in_queue": role != "others" and not misses,
+        "queue_misses": misses,
+        "created": node.get("createdAt"),
+        "updated": node.get("updatedAt"),
+    }
+    return row, lookup_failed
+
+
 def review_queue(
     owners: Iterable[str], runner: Runner = run, timeout: float = DEFAULT_TIMEOUT
 ) -> "tuple[list[dict], list[str]]":
@@ -495,8 +569,11 @@ def review_queue(
     milestones = MilestoneCache(runner, timeout)
     rows: list[dict] = []
     failed: list[str] = []
+
+    def comments_of(repo: str, number: int) -> "tuple[str, list[dict]]":
+        return pr_comments(repo, number, runner, timeout)
+
     for url, (node, role) in nodes.items():
-        repo = node["repository"]["nameWithOwner"]
         ci: "str | None"
         try:
             ci = github_gh.ci_state(url, runner, timeout)
@@ -505,59 +582,10 @@ def review_queue(
         except GhError:
             ci = None
             failed.append(url)
-        misses = []
-        approved: "bool | None" = None
-        stamped = None
-        if role != "others" and ci != "success":
-            misses.append("ci")
-        if role != "others":
-            try:
-                approved = _closes_approved(node, milestones)
-            except github_gh.AuthError:
-                raise
-            except GhError:
-                approved = False
-                if url not in failed:
-                    failed.append(url)
-        if approved is False:
-            misses.append("milestone")
-        if role != "others" and not misses:
-            try:
-                viewer, comments = pr_comments(repo, node["number"], runner, timeout)
-                head = stamp_head(comments, viewer)
-                current = (node.get("headRefOid") or "").lower()
-                stamped = head is not None and head == current
-            except github_gh.AuthError:
-                raise
-            except GhError:
-                stamped = False
-                failed.append(url)
-            if not stamped:
-                misses.append("co_review")
-        rows.append(
-            {
-                "kind": "pr",
-                "key": url,
-                "url": url,
-                "repo": repo,
-                "number": node["number"],
-                "title": node["title"],
-                "head_ref": node.get("headRefName"),
-                "head_oid": node.get("headRefOid"),
-                "review_decision": node.get("reviewDecision"),
-                "role": role,
-                "author": (node.get("author") or {}).get("login"),
-                "author_is_bot": is_bot(node.get("author")),
-                "brief": decision_brief(node.get("body")),
-                "ci_state": ci,
-                "milestone_approved": approved,
-                "stamped": stamped,
-                "in_queue": role != "others" and not misses,
-                "queue_misses": misses,
-                "created": node.get("createdAt"),
-                "updated": node.get("updatedAt"),
-            }
-        )
+        row, lookup_failed = queue_row(node, role, ci, milestones, comments_of)
+        if lookup_failed and url not in failed:
+            failed.append(url)
+        rows.append(row)
     return rows, failed
 
 
@@ -721,6 +749,30 @@ def _status(row: dict) -> "str | None":
     return row.get("status")
 
 
+def insert(conn: sqlite3.Connection, rows: list[dict], stamp: str) -> None:
+    """INSERT `rows` as `source = 'github'` rows, inside the caller's transaction."""
+    conn.executemany(
+        "INSERT INTO issues (source, kind, key, summary, status_name, labels,"
+        " created, updated, raw_json, synced_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+            (
+                SOURCE,
+                row["kind"],
+                row["key"],
+                row["title"],
+                _status(row),
+                json.dumps(row["labels"]) if "labels" in row else None,
+                row.get("created"),
+                row.get("updated"),
+                json.dumps(row, sort_keys=True),
+                stamp,
+            )
+            for row in rows
+        ],
+    )
+
+
 def write(conn: sqlite3.Connection, rows: list[dict], now: datetime) -> None:
     """Replace every `source = 'github'` row with `rows`, in one transaction.
 
@@ -733,26 +785,7 @@ def write(conn: sqlite3.Connection, rows: list[dict], now: datetime) -> None:
     conn.execute("BEGIN IMMEDIATE")
     try:
         conn.execute("DELETE FROM issues WHERE source = ?", (SOURCE,))
-        conn.executemany(
-            "INSERT INTO issues (source, kind, key, summary, status_name, labels,"
-            " created, updated, raw_json, synced_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            [
-                (
-                    SOURCE,
-                    row["kind"],
-                    row["key"],
-                    row["title"],
-                    _status(row),
-                    json.dumps(row["labels"]) if "labels" in row else None,
-                    row.get("created"),
-                    row.get("updated"),
-                    json.dumps(row, sort_keys=True),
-                    stamp,
-                )
-                for row in rows
-            ],
-        )
+        insert(conn, rows, stamp)
         conn.commit()
     except BaseException:
         conn.rollback()

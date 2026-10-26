@@ -1,7 +1,7 @@
 ---
 name: task-dashboard
-description: Install, check, sync, open, back up, read, clean up, or remove the local task dashboard — the always-on, localhost-only page that mirrors your Jira work (through acli) and GitHub PRs (through gh) into SQLite and ranks what to do next. Subcommands install | status | sync-now | open | export | import | tune | view | overlay | clean | uninstall. Use when the user wants that dashboard set up as a login agent on their Mac, asks whether it is running or how stale it is, wants it refreshed now, wants its link, wants to back up or restore their pins, order, snoozes and notes, wants the fleet Now's ranking tuned from their "why not now" answers, asks what a tab shows ("what's on Stale?"), asks to clean a tab up ("look at the Stale tab and clean it up"), wants an item ignored or snoozed, or wants it taken off the machine.
-argument-hint: "install | status | sync-now [--reconcile] | open | export <file> | import <file> | tune [--days N] | view <name> [--json] [--all] | overlay <action> | clean <view> | uninstall"
+description: Install, check, sync, open, back up, read, clean up, or remove the local task dashboard — the always-on, localhost-only page that mirrors your Jira work (through acli) and GitHub PRs (through gh) into SQLite and ranks what to do next. Subcommands install | status | sync-now | open | export | import | tune | view | refresh | overlay | clean | uninstall. Use when the user wants that dashboard set up as a login agent on their Mac, asks whether it is running or how stale it is, wants it refreshed now, wants its link, wants to back up or restore their pins, order, snoozes and notes, wants the fleet Now's ranking tuned from their "why not now" answers, asks what a tab shows ("what's on Stale?"), asks to clean a tab up ("look at the Stale tab and clean it up"), wants an item ignored or snoozed, or wants it taken off the machine.
+argument-hint: "install | status | sync-now [--reconcile] | open | export <file> | import <file> | tune [--days N] | view <name> [--json] [--all] | refresh <owner/repo#N> [--json] | overlay <action> | clean <view> | uninstall"
 ---
 
 # task-dashboard
@@ -26,13 +26,14 @@ uv run --no-project --python ">=3.11" "${CLAUDE_PLUGIN_ROOT}/scripts/task-dashbo
 Call that `DASH <subcommand>` below. Relay its output; it already names the
 fix for each failure it knows.
 
-**Run `install`, `uninstall`, `status` and `sync-now` unsandboxed**, each for
-its own reason. `install` runs a full sync, and **every `acli` and `gh` call
+**Run `install`, `uninstall`, `status`, `sync-now` and `refresh` unsandboxed**,
+each for its own reason. `install` runs a full sync, and **every `acli` and `gh` call
 needs the sandbox escape** because they reach Atlassian and GitHub hosts.
 `install` and `uninstall` also load and unload the LaunchAgent. `status` reads
 the agent's launchd state; a sandbox refusal there is reported as "cannot read
 the agent's state", never as "not loaded". `sync-now` makes an HTTP request to
 the server on `127.0.0.1`, which the sandbox's network filter may refuse.
+`refresh` makes one `gh` call.
 `open`, `export`, `import`, `tune`, `view` and `overlay` touch only local files.
 
 `status`, `sync-now`, `open` and `uninstall` use the config and DB paths that
@@ -188,6 +189,12 @@ and `path`, its `evidence` and `risks`, and its `action` as
 succeeded and when each host last snapshotted. Without `--json` it prints one
 line per item.
 
+After acting on a PR or issue (merging, closing, labelling, pushing a fix), run
+`DASH refresh <owner/repo#N>`, unsandboxed, rather than `sync-now`: it re-reads
+that one item and rewrites its rows in seconds, with no server and no sync, and
+prints `updated`, `merged (removed)`, `closed (removed)`, `archived repo
+(removed)` or `not found (removed)`; `--json` adds the item as each view's `view --json` lists it.
+
 `DASH overlay <action> --source S --key K` makes the write a card's button
 makes (`ignore`, `unignore`, `snooze --until YYYY-MM-DD`, `pin`, `unpin`,
 `note --text`, ...), through the same validation, straight to the DB. Exit 1
@@ -201,7 +208,8 @@ clean tree, no unpushed commits and no active session, re-checked live just
 before acting, and only through the plugin's own teardown scripts.** Propose
 everything else, grouped by suggested action, and wait for the owner's yes.
 For an item on another host, hand the owner a script rather than writing over
-ssh. Record each "leave it" as an ignore with `DASH overlay ignore`. The full
+ssh. Record each "leave it" as an ignore with `DASH overlay ignore`, and after
+acting on a PR or issue, `DASH refresh` it rather than `sync-now`. The full
 procedure is [`references/clean.md`](references/clean.md); read it before
 starting.
 

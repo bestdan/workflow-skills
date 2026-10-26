@@ -2,7 +2,9 @@
 
 The server reads SQLite and nothing else, so a page never waits on acli or gh.
 Syncs run on one background thread that the interval and the Sync now button
-both wake. That keeps one sync path and one writer to the mirror tables.
+both wake. That keeps one sync path and one writer to the mirror tables. The
+one exception is a card's Refresh button: `POST /refresh` re-reads that one
+PR or issue (refresh.py) on its own request thread and rewrites only its rows.
 
 Access control, from the Hosting and access section of
 dev_docs/designs/2026-10-23-task-dashboard.md:
@@ -15,6 +17,7 @@ dev_docs/designs/2026-10-23-task-dashboard.md:
 - Every POST also needs an `Origin` naming the same allowed host, and the
   per-install token from `meta`, which the page embeds. The token holds only
   because the Host check stops another origin from reading the page.
+  `POST /refresh` takes exactly the checks `POST /overlay/*` does.
 - `POST /ingest` (fleet view) exists only when `[ingest.machines]` is set. It
   passes the same Host check, then a per-machine bearer token instead of the
   Origin and page token; ingest.py has the rest.
@@ -47,12 +50,14 @@ import db
 import fleet_now
 import fleet_views
 import gauges
+import github_gh
 import health
 import include
 import ingest
 import lane_tabs
 import needs
 import overlay
+import refresh
 import score
 import sync
 import view_model
@@ -456,9 +461,13 @@ JS = """
       card.querySelectorAll('.title, .ref, .epic, .meta'),
       function (el) { return el.textContent; }).join(' ').toLowerCase();
   }
-  document.querySelectorAll('.lane > h2').forEach(function (h) {
-    h.dataset.base = h.textContent.replace(/\\s*\\(\\d+\\)$/, '');
-  });
+  // A heading's title without its count; read again for a heading a card
+  // refresh (refresh.py) put back.
+  function base(h) {
+    if (!h.dataset.base) h.dataset.base = h.textContent.replace(/\\s*\\(\\d+\\)$/, '');
+    return h.dataset.base;
+  }
+  document.querySelectorAll('.lane > h2').forEach(base);
   // Every card action reloads the page; keep the filter across that, per tab.
   var saved = 'filter:' + location.pathname;
   function apply() {
@@ -471,7 +480,7 @@ JS = """
         if (hit) shown++;
       });
       var h = lane.querySelector('h2');
-      if (h && h.dataset.base) h.textContent = h.dataset.base + ' (' + shown + ')';
+      if (h) h.textContent = base(h) + ' (' + shown + ')';
       lane.dataset.shown = shown;
       lane.classList.toggle('filtered-empty', !!q && shown === 0);
     });
@@ -483,6 +492,7 @@ JS = """
     apply();
   });
   try { box.value = sessionStorage.getItem(saved) || ''; } catch (e) {}
+  window.cardFilter = { apply: apply };
   if (box.value) apply();
 })();
 """
@@ -645,9 +655,9 @@ def render_page(title: str, header: str, body: str, token: str, busy: bool) -> s
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
         f'<meta name="dashboard-token" content="{_e(token)}">'
         f"<title>{_e(title)}</title>"
-        f"<style>{CSS}{views.CSS}{fleet_views.CSS}{needs.CSS}{fleet_now.CSS}{overlay.CSS}{gauges.CSS}{include.CSS}{lane_tabs.CSS}{whynot.CSS}</style></head>"
+        f"<style>{CSS}{views.CSS}{fleet_views.CSS}{needs.CSS}{fleet_now.CSS}{overlay.CSS}{gauges.CSS}{include.CSS}{lane_tabs.CSS}{whynot.CSS}{refresh.CSS}</style></head>"
         f'<body data-busy="{1 if busy else 0}">{header}<main>{body}</main>'
-        f"<script>{JS}{overlay.JS}{include.JS}{lane_tabs.JS}</script></body></html>"
+        f"<script>{JS}{overlay.JS}{include.JS}{lane_tabs.JS}{refresh.JS}</script></body></html>"
     )
 
 
@@ -681,8 +691,10 @@ class App:
         token: str,
         syncer: Syncer,
         now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+        gh_runner: github_gh.Runner = github_gh.run,
     ) -> None:
         self.cfg = cfg
+        self.gh_runner = gh_runner
         self.db_path = db_path
         self.token = token
         self.syncer = syncer
@@ -783,6 +795,17 @@ class App:
         conn = self.read()
         try:
             write_overlay(conn, self.cfg, action, form, self.now())
+        finally:
+            conn.close()
+
+    def refresh(self, form: dict[str, list[str]]) -> refresh.Result:
+        """`POST /refresh`: re-read the one item the form names (`key`, the
+        card's URL, or `ref`, `owner/repo#N`). Raises refresh.RefreshError
+        and github_gh.GhError."""
+        ref = (form.get("key") or form.get("ref") or [""])[0]
+        conn = self.read()
+        try:
+            return refresh.refresh(conn, self.cfg, ref, self.now(), self.gh_runner)
         finally:
             conn.close()
 
@@ -930,7 +953,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         path = urlsplit(self.path).path
         action = path[len("/overlay/") :] if path.startswith("/overlay/") else None
-        if path != "/sync" and action not in overlay.ACTIONS:
+        if path not in ("/sync", "/refresh") and action not in overlay.ACTIONS:
             self._text(404, "not found\n")
             return
         if not self._origin_ok():
@@ -947,6 +970,9 @@ class Handler(BaseHTTPRequestHandler):
         app = self.server.app
         if not hmac.compare_digest(token.encode(), app.token.encode()):
             self._refuse("missing or wrong token")
+            return
+        if path == "/refresh":
+            self._refresh(form)
             return
         if action is not None:
             try:
@@ -968,6 +994,31 @@ class Handler(BaseHTTPRequestHandler):
             return
         app.syncer.request(mode)
         self._json(202, app.status())
+
+    def _refresh(self, form: dict[str, list[str]]) -> None:
+        """Answer JSON: `ok` with the outcome, or `ok: false` with `error`.
+
+        A ref this instance does not refresh is a 400; GitHub failing is a
+        502, and the mirror is unchanged either way.
+        """
+        try:
+            result = self.server.app.refresh(form)
+        except refresh.RefreshError as exc:
+            self._json(400, {"ok": False, "error": str(exc)})
+            return
+        except github_gh.AuthError:
+            error = "GitHub login expired: run gh auth login"
+            self._json(502, {"ok": False, "error": error})
+            return
+        except github_gh.GhError as exc:
+            sys.stderr.write(f"task-dashboard: refresh failed: {exc}\n")
+            self._json(502, {"ok": False, "error": "GitHub did not answer; try again"})
+            return
+        except sqlite3.Error as exc:
+            sys.stderr.write(f"task-dashboard: refresh failed: {exc}\n")
+            self._json(503, {"ok": False, "error": "database busy, try again"})
+            return
+        self._json(200, {"ok": True, **result.as_dict()})
 
 
 def build(
