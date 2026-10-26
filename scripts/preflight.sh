@@ -14,7 +14,7 @@
 # creates and removes for the confinement smoke.
 #
 # Usage:
-#   scripts/preflight.sh --source <plan|linear> --run-root <path>
+#   scripts/preflight.sh --source <plan|linear|gh-issue> --run-root <path>
 #                        [--base <branch>]
 #   scripts/preflight.sh --scout-run-md <path to RUN.md>
 #
@@ -287,8 +287,8 @@ if [ -n "$scout_run_md" ]; then
 fi
 
 case "$source_arg" in
-  plan | linear) ;;
-  "") die "requires --source <plan|linear>" ;;
+  plan | linear | gh-issue) ;;
+  "") die "requires --source <plan|linear|gh-issue>" ;;
   *) die "unknown --source (fail-closed): $source_arg" ;;
 esac
 

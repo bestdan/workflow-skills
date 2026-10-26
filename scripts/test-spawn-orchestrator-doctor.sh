@@ -577,6 +577,211 @@ GHWEOF
   have "doctor I4 (write blip): the failed ready write is announced" 'gh pr ready` FAILED' "$d4wout"
   unset DOCTOR_GH_DB
 
+  # --- I4 (gh-issue): the issue's rung, a ready PR, and the closing link -----
+  # gh-issue's review signal is the ISSUE on status:4_needs_review with a
+  # non-draft PR that closes it. This fake serves the doctor's own reads and
+  # writes AND the `gh issue view` / `gh api PATCH` pair gh-issue-state.py
+  # makes, which doctor reaches through a PATH shim to this same binary. Every
+  # write is appended to $db/calls, so the ORDER (ready before rung) is
+  # observable, not inferred. DOCTOR_GH_READY_FAIL=1 makes `pr ready` fail;
+  # DOCTOR_GH_PATCH_FAIL=1 makes the rung's `api` PATCH fail.
+  DOCTOR_GH_ISSUE="$DOC/gh-issue"
+  cat >"$DOCTOR_GH_ISSUE" <<'GHIEOF'
+#!/usr/bin/env bash
+set -uo pipefail
+db="${DOCTOR_GH_DB:?DOCTOR_GH_DB not set}"
+noun="$1"; sub="$2"; shift 2
+jqexpr=""
+case "$noun $sub" in
+  "repo view") echo o/r ;;
+  "pr view")
+    num="$1"; shift
+    while [ $# -gt 0 ]; do case "$1" in --jq) jqexpr="$2"; shift 2 ;; *) shift ;; esac; done
+    case "$jqexpr" in
+      .state) cat "$db/$num.state" ;;
+      .isDraft) cat "$db/$num.draft" ;;
+      *closingIssuesReferences*) cat "$db/$num.closes" ;;
+      *) exit 1 ;;
+    esac
+    ;;
+  "pr ready")
+    [ "${DOCTOR_GH_READY_FAIL:-0}" = 1 ] && exit 1
+    printf 'false\n' >"$db/$1.draft"
+    echo "pr ready $1" >>"$db/calls"
+    ;;
+  "pr edit") echo "pr edit $1" >>"$db/calls" ;;
+  "issue view")
+    num="$1"; shift
+    while [ $# -gt 0 ]; do case "$1" in --jq) jqexpr="$2"; shift 2 ;; *) shift ;; esac; done
+    if [ -n "$jqexpr" ]; then
+      cat "$db/issue-$num.labels"
+    else
+      python3 -c 'import json,sys; print(json.dumps({"labels": [{"name": n} for n in sys.argv[1].split(",") if n], "state": "OPEN"}))' "$(cat "$db/issue-$num.labels")"
+    fi
+    ;;
+  "api --method")
+    # gh api --method PATCH repos/o/r/issues/<n> --input -
+    [ "${DOCTOR_GH_PATCH_FAIL:-0}" = 1 ] && exit 1
+    num="${2##*/}"
+    python3 -c 'import json,sys; print(",".join(json.load(sys.stdin)["labels"]))' >"$db/issue-$num.labels"
+    echo "issue patch $num" >>"$db/calls"
+    ;;
+  *) exit 1 ;;
+esac
+GHIEOF
+  chmod +x "$DOCTOR_GH_ISSUE"
+
+  _doctor_gh_issue_run() {
+    local root="$1" run_id="$2"
+    shift 2
+    _doctor_new_run "$root" "$run_id"
+    {
+      printf -- '---\nrun_id: %s\nstatus: active\nbase_branch: main\n---\n\n' "$run_id"
+      printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+      printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+      printf '%s\n' "$@"
+    } >"$root/run/.auto-pilot/RUN.md"
+    : >"$root/run/.auto-pilot/QUESTIONS.md"
+    printf '# report\n' >"$root/run/.auto-pilot/REPORT.md"
+    git -C "$root/run" add .auto-pilot
+    git -C "$root/run" commit -q -m "seed run state"
+    mkdir -p "$root/ghdb"
+    : >"$root/ghdb/calls"
+  }
+
+  D4G="$DOC/i4-gh-issue"
+  RUN_ID4G="doctor-i4-gh-issue"
+  _doctor_gh_issue_run "$D4G" "$RUN_ID4G" \
+    '| #501 | handed-off | bestdan/task-501 | main | - | #601 | |' \
+    '| #502 | handed-off | bestdan/task-502 | main | - | #602 | |' \
+    '| #503 | handed-off | bestdan/task-503 | main | - | #603 | |' \
+    '| #504 | handed-off | bestdan/task-504 | main | - | #604 | |' \
+    '| #505 | handed-off | bestdan/task-505 | main | - | #605 | |'
+  I4GDB="$D4G/ghdb"
+  # #501: a G6/G7 crash gap -- issue still status:3_started, PR still a draft.
+  printf 'OPEN\n' >"$I4GDB/601.state"
+  printf 'true\n' >"$I4GDB/601.draft"
+  printf '501\n' >"$I4GDB/601.closes"
+  printf 'status:3_started,auto:eligible,prio:1,est:3,follow-up\n' >"$I4GDB/issue-501.labels"
+  # #502: already carries the review signal and the closing link -- a no-op.
+  printf 'OPEN\n' >"$I4GDB/602.state"
+  printf 'false\n' >"$I4GDB/602.draft"
+  printf '502\n' >"$I4GDB/602.closes"
+  printf 'status:4_needs_review,auto:eligible,prio:2,est:2\n' >"$I4GDB/issue-502.labels"
+  # #503: signal correct, but the PR closes a DIFFERENT issue -- report only.
+  printf 'OPEN\n' >"$I4GDB/603.state"
+  printf 'false\n' >"$I4GDB/603.draft"
+  printf '999\n' >"$I4GDB/603.closes"
+  printf 'status:4_needs_review,auto:eligible,prio:2,est:2\n' >"$I4GDB/issue-503.labels"
+  # #504: PR already ready, issue alone still on status:3_started -- rung only.
+  printf 'OPEN\n' >"$I4GDB/604.state"
+  printf 'false\n' >"$I4GDB/604.draft"
+  printf '504\n' >"$I4GDB/604.closes"
+  printf 'status:3_started,auto:eligible,prio:2,est:1\n' >"$I4GDB/issue-504.labels"
+  # #505: stale AND the PR closes a different issue -- reported, no writes.
+  printf 'OPEN\n' >"$I4GDB/605.state"
+  printf 'true\n' >"$I4GDB/605.draft"
+  printf '999\n' >"$I4GDB/605.closes"
+  printf 'status:3_started,auto:eligible,prio:2,est:1\n' >"$I4GDB/issue-505.labels"
+  export DOCTOR_GH_DB="$I4GDB"
+  d4gout="$("$SCRIPT" doctor --dir "$D4G/run" --run-id "$RUN_ID4G" --handler gh-issue --gh "$DOCTOR_GH_ISSUE" --questions .auto-pilot/QUESTIONS.md 2>&1)"
+  d4grc=$?
+  [ "$d4grc" = 0 ] && ok "doctor I4 gh-issue: exits 0" || bad "doctor I4 gh-issue: exits 0" "$d4gout"
+  have "doctor I4 gh-issue: summary reports the repair for the stale issue" 'I4: #501 PR #601' "$d4gout"
+  [ "$(cat "$I4GDB/issue-501.labels")" = "status:4_needs_review,auto:eligible,prio:1,est:3,follow-up" ] \
+    && ok "doctor I4 gh-issue: rung moved to status:4_needs_review, other labels carried" \
+    || bad "doctor I4 gh-issue: rung moved to status:4_needs_review, other labels carried" "$(cat "$I4GDB/issue-501.labels")"
+  have "doctor I4 gh-issue: marks the draft PR ready" 'false' "$(cat "$I4GDB/601.draft")"
+  [ "$(cat "$I4GDB/calls")" = "$(printf 'pr ready 601\nissue patch 501\nissue patch 504')" ] \
+    && ok "doctor I4 gh-issue: readies the PR BEFORE writing the rung" \
+    || bad "doctor I4 gh-issue: readies the PR BEFORE writing the rung" "$(cat "$I4GDB/calls")"
+  lack "doctor I4 gh-issue: no repair for the already-correct issue" 'I4: #502' "$d4gout"
+  [ "$(cat "$I4GDB/issue-502.labels")" = "status:4_needs_review,auto:eligible,prio:2,est:2" ] \
+    && ok "doctor I4 gh-issue: already-correct issue's labels are untouched" \
+    || bad "doctor I4 gh-issue: already-correct issue's labels are untouched" "$(cat "$I4GDB/issue-502.labels")"
+  lack "doctor I4 gh-issue: a PR that closes its issue is not reported" 'I4 reported — #502' "$(cat "$D4G/run/.auto-pilot/REPORT.md")"
+  have "doctor I4 gh-issue: a PR missing the closing link is reported" 'I4 reported — #503' "$(cat "$D4G/run/.auto-pilot/REPORT.md")"
+  have "doctor I4 gh-issue: the missing link shows in the summary" 'PR #603 does not close #503' "$d4gout"
+  lack "doctor I4 gh-issue: the missing link is never repaired (no PR edit)" 'pr edit' "$(cat "$I4GDB/calls")"
+  [ "$(cat "$I4GDB/issue-504.labels")" = "status:4_needs_review,auto:eligible,prio:2,est:1" ] \
+    && ok "doctor I4 gh-issue: a non-draft PR's issue still on status:3_started gets the rung" \
+    || bad "doctor I4 gh-issue: a non-draft PR's issue still on status:3_started gets the rung" "$(cat "$I4GDB/issue-504.labels")"
+  lack "doctor I4 gh-issue: an already-ready PR is not readied again" 'pr ready 604' "$(cat "$I4GDB/calls")"
+  [ "$(cat "$I4GDB/issue-505.labels")" = "status:3_started,auto:eligible,prio:2,est:1" ] \
+    && ok "doctor I4 gh-issue: a stale issue whose PR lacks the closing link gets no rung" \
+    || bad "doctor I4 gh-issue: a stale issue whose PR lacks the closing link gets no rung" "$(cat "$I4GDB/issue-505.labels")"
+  have "doctor I4 gh-issue: a draft PR lacking the closing link stays a draft" 'true' "$(cat "$I4GDB/605.draft")"
+  have "doctor I4 gh-issue: the stale row lacking the link is reported" 'I4 reported — #505' "$(cat "$D4G/run/.auto-pilot/REPORT.md")"
+  have "doctor I4 gh-issue: REPORT.md records the repair" 'I4 repaired — #501' "$(cat "$D4G/run/.auto-pilot/REPORT.md")"
+
+  # --- I4 (gh-issue): a draft PR that cannot be readied gets NO rung ----------
+  # Writing status:4_needs_review onto a draft PR is the state the write order
+  # forbids, so a failed `gh pr ready` must leave the issue on status:3_started.
+  D4GF="$DOC/i4-gh-issue-ready-fail"
+  RUN_ID4GF="doctor-i4-gh-issue-ready-fail"
+  _doctor_gh_issue_run "$D4GF" "$RUN_ID4GF" \
+    '| #511 | handed-off | bestdan/task-511 | main | - | #611 | |'
+  I4GFDB="$D4GF/ghdb"
+  printf 'OPEN\n' >"$I4GFDB/611.state"
+  printf 'true\n' >"$I4GFDB/611.draft"
+  printf '511\n' >"$I4GFDB/611.closes"
+  printf 'status:3_started,auto:eligible,prio:1,est:3\n' >"$I4GFDB/issue-511.labels"
+  export DOCTOR_GH_DB="$I4GFDB"
+  d4gfout="$(DOCTOR_GH_READY_FAIL=1 "$SCRIPT" doctor --dir "$D4GF/run" --run-id "$RUN_ID4GF" --handler gh-issue --gh "$DOCTOR_GH_ISSUE" --questions .auto-pilot/QUESTIONS.md 2>&1)"
+  d4gfrc=$?
+  [ "$d4gfrc" = 0 ] && ok "doctor I4 gh-issue (ready fails): exits 0" || bad "doctor I4 gh-issue (ready fails): exits 0" "$d4gfout"
+  [ "$(cat "$I4GFDB/issue-511.labels")" = "status:3_started,auto:eligible,prio:1,est:3" ] \
+    && ok "doctor I4 gh-issue (ready fails): the rung is NOT written onto a draft PR" \
+    || bad "doctor I4 gh-issue (ready fails): the rung is NOT written onto a draft PR" "$(cat "$I4GFDB/issue-511.labels")"
+  have "doctor I4 gh-issue (ready fails): the failed ready is announced" 'gh pr ready` FAILED' "$d4gfout"
+  have "doctor I4 gh-issue (ready fails): the summary counts no repairs" 'repaired=0' "$d4gfout"
+  unset DOCTOR_GH_DB
+
+  # --- I4 (gh-issue): ready succeeds, rung write fails -> partial repair -----
+  # fixes only grows on a successful write, so the report names the ready and
+  # not the rung, and the issue stays on status:3_started for the next pass.
+  D4GP="$DOC/i4-gh-issue-patch-fail"
+  RUN_ID4GP="doctor-i4-gh-issue-patch-fail"
+  _doctor_gh_issue_run "$D4GP" "$RUN_ID4GP" \
+    '| #531 | handed-off | bestdan/task-531 | main | - | #631 | |'
+  I4GPDB="$D4GP/ghdb"
+  printf 'OPEN\n' >"$I4GPDB/631.state"
+  printf 'true\n' >"$I4GPDB/631.draft"
+  printf '531\n' >"$I4GPDB/631.closes"
+  printf 'status:3_started,auto:eligible,prio:1,est:3\n' >"$I4GPDB/issue-531.labels"
+  export DOCTOR_GH_DB="$I4GPDB"
+  d4gpout="$(DOCTOR_GH_PATCH_FAIL=1 "$SCRIPT" doctor --dir "$D4GP/run" --run-id "$RUN_ID4GP" --handler gh-issue --gh "$DOCTOR_GH_ISSUE" --questions .auto-pilot/QUESTIONS.md 2>&1)"
+  d4gprc=$?
+  [ "$d4gprc" = 0 ] && ok "doctor I4 gh-issue (rung fails): exits 0" || bad "doctor I4 gh-issue (rung fails): exits 0" "$d4gpout"
+  [ "$(cat "$I4GPDB/issue-531.labels")" = "status:3_started,auto:eligible,prio:1,est:3" ] \
+    && ok "doctor I4 gh-issue (rung fails): the rung stays as it was" \
+    || bad "doctor I4 gh-issue (rung fails): the rung stays as it was" "$(cat "$I4GPDB/issue-531.labels")"
+  have "doctor I4 gh-issue (rung fails): the failed rung write is announced" 'gh-issue-state.py FAILED' "$d4gpout"
+  have "doctor I4 gh-issue (rung fails): the ready is reported as the repair" 'marked ready (was draft)' "$(cat "$D4GP/run/.auto-pilot/REPORT.md")"
+  lack "doctor I4 gh-issue (rung fails): the rung is not reported as written" 'status:4_needs_review' "$(cat "$D4GP/run/.auto-pilot/REPORT.md")"
+  unset DOCTOR_GH_DB
+
+  # --- I4 (gh-issue): an unreadable isDraft is undetermined, never a rung ----
+  # No 621.draft file, so the fake's isDraft read fails with empty output.
+  D4GU="$DOC/i4-gh-issue-draft-unreadable"
+  RUN_ID4GU="doctor-i4-gh-issue-draft-unreadable"
+  _doctor_gh_issue_run "$D4GU" "$RUN_ID4GU" \
+    '| #521 | handed-off | bestdan/task-521 | main | - | #621 | |'
+  I4GUDB="$D4GU/ghdb"
+  printf 'OPEN\n' >"$I4GUDB/621.state"
+  printf '521\n' >"$I4GUDB/621.closes"
+  printf 'status:3_started,auto:eligible,prio:1,est:3\n' >"$I4GUDB/issue-521.labels"
+  export DOCTOR_GH_DB="$I4GUDB"
+  d4guout="$("$SCRIPT" doctor --dir "$D4GU/run" --run-id "$RUN_ID4GU" --handler gh-issue --gh "$DOCTOR_GH_ISSUE" --questions .auto-pilot/QUESTIONS.md 2>&1)"
+  d4gurc=$?
+  [ "$d4gurc" = 0 ] && ok "doctor I4 gh-issue (isDraft unreadable): exits 0" || bad "doctor I4 gh-issue (isDraft unreadable): exits 0" "$d4guout"
+  [ "$(cat "$I4GUDB/issue-521.labels")" = "status:3_started,auto:eligible,prio:1,est:3" ] \
+    && ok "doctor I4 gh-issue (isDraft unreadable): the rung is NOT written" \
+    || bad "doctor I4 gh-issue (isDraft unreadable): the rung is NOT written" "$(cat "$I4GUDB/issue-521.labels")"
+  [ ! -s "$I4GUDB/calls" ] && ok "doctor I4 gh-issue (isDraft unreadable): no gh writes" || bad "doctor I4 gh-issue (isDraft unreadable): no gh writes" "$(cat "$I4GUDB/calls")"
+  have "doctor I4 gh-issue (isDraft unreadable): counted as skipped" 'skipped=1' "$d4guout"
+  unset DOCTOR_GH_DB
+
   # --- I5: orphan worker worktrees under <run root>/workers/ (G2) -----------
   # D4: `pending` is deliberately NOT on the safe list any more — the phase
   # cell lags a live dispatch (it flips AFTER the orchestrator's RUN.md

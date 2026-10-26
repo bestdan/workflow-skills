@@ -363,6 +363,15 @@ fi
 "$SCRIPT" render-settings --source plan --coder codex --out "$BASE/plan.json" >/dev/null 2>&1
 lack "settings: plan source omits linear" 'api.linear.app' "$(cat "$BASE/plan.json" 2>/dev/null)"
 
+# gh-issue source needs no host beyond the always-present GitHub ones, so its
+# allowlist is byte-identical to a plan source's.
+if "$SCRIPT" render-settings --source gh-issue --coder codex --out "$BASE/gh-issue.json" >/dev/null 2>&1 \
+  && [ -s "$BASE/gh-issue.json" ] && cmp -s "$BASE/plan.json" "$BASE/gh-issue.json"; then
+  ok "settings: gh-issue source renders the same allowlist as plan"
+else
+  bad "settings: gh-issue source renders the same allowlist as plan" "$(diff "$BASE/plan.json" "$BASE/gh-issue.json" 2>&1)"
+fi
+
 # fail-closed: unresolved / wildcard agy host writes nothing
 sfc() { # <name> <want-substr> <args...>
   local name="$1" want="$2"
