@@ -550,12 +550,19 @@ class RouteTests(server_harness.ServerCase):
         seed(conn)
         conn.close()
 
-    def test_needs_you_is_the_fleet_home_page(self):
-        for path in ("/", "/needs"):
-            status, page = self.request("GET", path)
-            self.assertEqual(status, 200, path)
-            self.assertIn("aria-current=page>Needs you", page, path)
-            self.assertIn(pr_url(1201), keys(section(page, "needs")), path)
+    def test_now_is_the_fleet_home_page_and_needs_you_its_second_tab(self):
+        status, page = self.request("GET", "/needs")
+        self.assertEqual(status, 200)
+        self.assertIn("aria-current=page>Needs you", page)
+        self.assertIn(pr_url(1201), keys(section(page, "needs")))
+        status, home = self.request("GET", "/")
+        self.assertEqual(status, 200)
+        self.assertIn("aria-current=page>Now", home)
+        self.assertNotIn('data-section="needs"', home)
+        self.assertIn('data-section="next"', home)
+        nav = home.split("<nav>", 1)[1].split("</nav>", 1)[0]
+        tabs = re.findall(r'<a href="([^"]+)"', nav)
+        self.assertEqual(tabs[:2], ["/now", "/needs"])
         status, page = self.request("GET", "/board")
         self.assertEqual(status, 200)
         self.assertNotIn('data-section="needs"', page)

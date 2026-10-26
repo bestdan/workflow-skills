@@ -222,6 +222,14 @@ wins when both did.
    agent PRs and do not apply to them. Issues lanes every open issue by the gh-issue status ladder.
    The lane rules are `fleet_tabs.py`'s module docstring.
 
+> **Later changes, 2026-10-25.** The focus pin in item 5 was removed (#1182),
+> so no view holds items back for deep work any more. Now is the fleet
+> instance's home page and first tab, with Needs you second: Now ranks a short
+> queue drawn from Needs you plus the owner's own started and ready issues and
+> PRs, by the `[score.fleet]` weights. Item 1's "the home page" describes the
+> view as first designed. The ranking rules are `fleet_now.py`'s module
+> docstring.
+
 **The two caps limit different things and both stand.** The side-quest cap
 limits which tooling work is open. The review-queue cap limits how much
 finished work waits on the owner. The reset design rejected a cap on live

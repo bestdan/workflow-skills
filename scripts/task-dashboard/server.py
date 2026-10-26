@@ -44,6 +44,7 @@ from typing import Any, Callable
 from urllib.parse import parse_qs, urlsplit
 
 import db
+import fleet_now
 import fleet_views
 import gauges
 import health
@@ -614,7 +615,7 @@ def render_page(title: str, header: str, body: str, token: str, busy: bool) -> s
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
         f'<meta name="dashboard-token" content="{_e(token)}">'
         f"<title>{_e(title)}</title>"
-        f"<style>{CSS}{views.CSS}{fleet_views.CSS}{needs.CSS}{overlay.CSS}{gauges.CSS}{include.CSS}</style></head>"
+        f"<style>{CSS}{views.CSS}{fleet_views.CSS}{needs.CSS}{fleet_now.CSS}{overlay.CSS}{gauges.CSS}{include.CSS}</style></head>"
         f'<body data-busy="{1 if busy else 0}">{header}<main>{body}</main>'
         f"<script>{JS}{overlay.JS}{include.JS}</script></body></html>"
     )
@@ -860,11 +861,13 @@ class Handler(BaseHTTPRequestHandler):
         html_type = "text/html; charset=utf-8"
         try:
             if path == "/" and fleet_views.enabled(app.cfg):
-                # A fleet instance's home page is Needs you; the Jira one's the
-                # Board.
-                self._send(200, app.view_page("/needs", query).encode(), html_type)
+                # A fleet instance's home page is Now, its ranked queue; the
+                # Jira one's the Board.
+                self._send(200, app.view_page("/now", query).encode(), html_type)
             elif path in RETIRED_ROUTES:
-                self._redirect("/")
+                # Since you were away folded into Needs you, a fleet-only tab.
+                fleet = fleet_views.enabled(app.cfg)
+                self._redirect("/needs" if fleet else "/")
             elif path in ("/", "/board"):
                 self._send(200, app.board_page(query).encode(), html_type)
             elif path in views.ROUTES:

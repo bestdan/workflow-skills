@@ -67,7 +67,7 @@ KIND_GROUPS = {
 }
 
 # The views a filter applies to, by the name config and the overlay use: the
-# route path without its slash. `/` is `needs` on a fleet instance and `board`
+# route path without its slash. `/` is `now` on a fleet instance and `board`
 # on a Jira one.
 VIEWS = (
     "needs",
