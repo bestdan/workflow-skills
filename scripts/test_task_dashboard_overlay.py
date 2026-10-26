@@ -113,10 +113,9 @@ def populate(conn):
     overlay.set_view_include(conn, "needs", frozenset({"sessions", "prs"}), NOW)
     overlay.set_view_include(conn, "board", frozenset(), NOW)
     url = "https://github.com/acme/app/pull/9"
-    overlay.why_not(
-        conn, ("github", url), "2026-10-30", "wrong_priority", "later", WHY_SNAP, NOW
-    )
-    overlay.why_not(conn, ("github", url), "2026-10-30", "other", "", None, NOW)
+    overlay.snooze(conn, ("github", url), "2026-10-30")
+    overlay.why_not(conn, ("github", url), "wrong_priority", "later", WHY_SNAP, NOW)
+    overlay.why_not(conn, ("github", url), "other", "", None, NOW)
 
 
 class OverlayCase(unittest.TestCase):
@@ -179,6 +178,34 @@ class WriteTests(OverlayCase):
         self.assertFalse(ov.is_snoozed(("jira", "A-1"), midnight))
         overlay.snooze(self.conn, ("jira", "A-1"), "")
         self.assertEqual(dump(self.conn)["snoozes"], [])
+
+    def test_a_reason_needs_a_snooze_and_never_snoozes_again(self):
+        item = ("github", "https://github.com/acme/app/pull/9")
+        before = dump(self.conn)
+        with self.assertRaisesRegex(overlay.OverlayError, "snooze it first"):
+            overlay.why_not(self.conn, item, "other", "", WHY_SNAP, NOW)
+        with self.assertRaisesRegex(overlay.OverlayError, "snooze it first"):
+            overlay.apply(
+                self.conn, "whynot", {"source": [item[0]], "key": [item[1]],
+                                      "reason": ["other"]}, NOW
+            )  # fmt: skip
+        self.assertEqual(dump(self.conn), before)
+        overlay.snooze(self.conn, item, "2026-10-30")
+        # A stray date on the form is not a second snooze.
+        overlay.apply(
+            self.conn,
+            "whynot",
+            {"source": [item[0]], "key": [item[1]], "reason": ["not_urgent"],
+             "until": ["2026-12-01"]},
+            NOW,
+            lambda _: WHY_SNAP,
+        )  # fmt: skip
+        after = dump(self.conn)
+        self.assertEqual(after["snoozes"], [(*item, "2026-10-30")])
+        [row] = after["why_not"]
+        self.assertEqual(row[4], "not_urgent")
+        self.assertEqual(json.loads(row[7]), WHY_SNAP["terms"])
+        self.assertEqual(json.loads(row[8]), WHY_SNAP["features"])
 
     def test_blank_note_deletes(self):
         overlay.note(self.conn, ("jira", "A-1"), "hello", NOW)
@@ -359,7 +386,7 @@ class ExportImportTests(OverlayCase):
             {
                 "pins": 3,
                 "order": 3,
-                "snoozes": 2,  # one from the why_not answers
+                "snoozes": 2,  # one is the snooze the why_not answers explain
                 "notes": 2,
                 "kind_tags": 2,
                 "ignores": 1,
@@ -808,7 +835,7 @@ class RouteTests(server_harness.ServerCase):
         "ignore": [("key", "ABC-1")],
         "unignore": [("key", "ABC-1")],
         "include": [("view", "needs"), ("include", "prs,sessions")],
-        "whynot": [("key", "ABC-1"), ("until", "2026-10-24"), ("reason", "other")],
+        "whynot": [("key", "ABC-1"), ("reason", "other")],
     }
 
     def test_routes_cover_every_action(self):

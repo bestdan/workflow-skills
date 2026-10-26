@@ -194,7 +194,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--key", action="append", help="the item's key; repeat it for `order`"
     )
     for name, what in (
-        ("until", "snooze/whynot date, YYYY-MM-DD (empty unsnoozes)"),
+        ("until", "snooze date, YYYY-MM-DD (empty unsnoozes)"),
         ("text", "note text, or a whynot or substantial tag's text"),
         ("tag", "tag: side-quest or substantial (empty clears)"),
         ("reason", "whynot reason code"),

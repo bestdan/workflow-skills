@@ -10,13 +10,16 @@ or network runs. Needs Python 3.11: run via scripts/test-task-dashboard-whynot.s
 """
 
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import parse_qsl
 
 ROOT = Path(__file__).resolve().parents[1]
 PKG = ROOT / "scripts" / "task-dashboard"
@@ -52,7 +55,8 @@ def snap(repo="acme/app", top="quick_win", value=10.0, **features):
 
 
 def answer(conn, n, reason, s, text="", at=NOW):
-    overlay.why_not(conn, (GH, f"k{n}"), "2026-11-01", reason, text, s, at)
+    overlay.snooze(conn, (GH, f"k{n}"), "2026-11-01")
+    overlay.why_not(conn, (GH, f"k{n}"), reason, text, s, at)
 
 
 def shown(conn, n, repo, day="2026-10-20"):
@@ -64,22 +68,25 @@ def shown(conn, n, repo, day="2026-10-20"):
 
 
 class PickerTests(now_fx.Case):
-    def test_snooze_on_a_now_card_opens_the_picker_and_skip_still_snoozes(self):
+    def test_a_now_card_carries_the_hidden_why_not_now_line(self):
         now_fx.seed(self.conn)
         page = views.render("/now", self.conn, self.cfg, NOW)
         card = page.split('<div class="card"', 2)[1]
         until = overlay.snooze_until(NOW)
         self.assertIn(f'data-ov="snooze" data-until="{until}" data-why="1"', card)
-        picker = re.search(r'<div class="whynot" hidden[^>]*>(.*?)</div>', card)
-        assert picker is not None, card
+        line = re.search(r'<div class="whynot" hidden>(.*?)</div>', card)
+        assert line is not None, card
+        self.assertIn(
+            f'Snoozed until <b class="whynot-until">{until}</b>', line.group(1)
+        )
         self.assertEqual(
-            re.findall(r'data-reason="([^"]+)"', picker.group(1)),
+            re.findall(r'data-reason="([^"]+)"', line.group(1)),
             list(overlay.WHY_NOT_CODES),
         )
-        # Skip is a plain snooze to the same date, not a reason.
-        self.assertIn(f'data-ov="snooze" data-until="{until}"', picker.group(1))
-        self.assertIn(">Skip</button>", picker.group(1))
-        self.assertIn('maxlength="500"', picker.group(1))
+        # No second snooze in the line: only Undo, which posts an empty date.
+        self.assertNotIn('data-ov="snooze"', line.group(1))
+        self.assertIn('data-ov="undo"', line.group(1))
+        self.assertIn('maxlength="500"', line.group(1))
 
     def test_other_views_snooze_without_asking(self):
         html = overlay.card_controls((GH, "x"), overlay.Overlay(), NOW, reorder=False)
@@ -155,7 +162,7 @@ class BaseRateTests(now_fx.Case):
         self.assertIn("repo", json.loads(row[0]))
 
 
-class RouteTests(server_harness.ServerCase):
+class RouteCase(server_harness.ServerCase):
     fleet = True
 
     def setUp(self):
@@ -185,21 +192,38 @@ class RouteTests(server_harness.ServerCase):
         page = self.request("GET", "/now")[1]
         return now_fx.item_keys(page.split('data-section="next"', 1)[1])
 
-    def test_a_reason_records_the_score_terms_and_snoozes(self):
+    def snooze(self, key=pr_url(22), until=None):
+        fields = [
+            ("key", key),
+            ("until", overlay.snooze_until(NOW) if until is None else until),
+        ]
+        self.assertEqual(self.post("snooze", fields)[0], 200)
+
+    def snoozes(self):
+        conn = self.conn()
+        try:
+            return conn.execute("SELECT item_key, until FROM snoozes").fetchall()
+        finally:
+            conn.close()
+
+
+class RouteTests(RouteCase):
+    def test_a_reason_after_the_snooze_records_the_score_terms(self):
         conn = db.connect(self.db_path)
         expected = fleet_now.snapshot_of(
             conn, self.httpd.app.cfg, (GH, pr_url(22)), NOW
         )
         conn.close()
         assert expected is not None
-        until = overlay.snooze_until(NOW)
+        self.snooze()
+        snoozed = self.snoozes()
         fields = [
             ("key", pr_url(22)),
-            ("until", until),
             ("reason", "wrong_priority"),
             ("text", "  bots can wait  "),
         ]
         self.assertEqual(self.post("whynot", fields)[0], 200)
+        self.assertEqual(self.snoozes(), snoozed)
         [(key, reason, text, total, terms, features)] = self.rows()
         self.assertEqual(
             (key, reason, text), (pr_url(22), "wrong_priority", "bots can wait")
@@ -210,37 +234,37 @@ class RouteTests(server_harness.ServerCase):
         self.assertEqual(json.loads(features), expected["features"])
         self.assertNotIn(pr_url(22), self.now_keys())
 
-    def test_skipping_still_snoozes_and_records_nothing(self):
-        until = overlay.snooze_until(NOW)
-        self.assertEqual(
-            self.post("snooze", [("key", pr_url(22)), ("until", until)])[0], 200
-        )
+    def test_a_snooze_with_no_reason_records_nothing(self):
+        self.snooze()
         self.assertEqual(self.rows(), [])
         self.assertNotIn(pr_url(22), self.now_keys())
 
     def test_an_item_now_no_longer_ranks_is_kept_with_what_is_known(self):
-        fields = [("key", "gone"), ("until", "2026-11-01"), ("reason", "other")]
+        self.snooze("gone", "2026-11-01")
+        fields = [("key", "gone"), ("reason", "other")]
         self.assertEqual(self.post("whynot", fields)[0], 200)
         self.assertEqual(self.rows(), [("gone", "other", None, None, "[]", "{}")])
 
-    def test_bad_answers_are_refused_and_nothing_is_written(self):
-        for fields in (
-            [("key", pr_url(22)), ("until", "2026-11-01"), ("reason", "bored")],
-            [("key", pr_url(22)), ("until", ""), ("reason", "other")],
-            [("key", pr_url(22)), ("until", "2026-11-01"), ("reason", "other"),
-             ("text", "x" * 501)],
-        ):  # fmt: skip
-            self.assertEqual(self.post("whynot", fields)[0], 400, fields)
-        self.assertEqual(self.rows(), [])
+    def test_a_reason_for_an_item_with_no_snooze_is_refused(self):
+        status, body = self.post("whynot", [("key", pr_url(22)), ("reason", "other")])
+        self.assertEqual(status, 400)
+        self.assertIn("snooze it first", body)
+        self.assertEqual((self.rows(), self.snoozes()), ([], []))
         self.assertIn(pr_url(22), self.now_keys())
 
+    def test_bad_answers_are_refused_and_nothing_is_written(self):
+        self.snooze()
+        snoozed = self.snoozes()
+        for fields in (
+            [("key", pr_url(22)), ("reason", "bored")],
+            [("key", pr_url(22)), ("reason", "other"), ("text", "x" * 501)],
+        ):
+            self.assertEqual(self.post("whynot", fields)[0], 400, fields)
+        self.assertEqual((self.rows(), self.snoozes()), ([], snoozed))
+
     def test_health_shows_the_why_not_now_section(self):
-        fields = [
-            ("key", pr_url(22)),
-            ("until", "2026-11-01"),
-            ("reason", "not_urgent"),
-        ]
-        self.post("whynot", fields)
+        self.snooze()
+        self.post("whynot", [("key", pr_url(22)), ("reason", "not_urgent")])
         page = self.request("GET", "/health")[1]
         sec = re.search(r'data-section="why-not">(.*?)</section>', page, re.S)
         assert sec is not None
@@ -249,6 +273,100 @@ class RouteTests(server_harness.ServerCase):
         self.assertIn('<table data-by="dominant">', sec.group(1))
         self.assertIn("<th>quick_win</th>", sec.group(1))
         self.assertIn('<li data-reason="not_urgent">', sec.group(1))
+
+
+NODE = os.environ.get("TASK_DASHBOARD_NODE") or shutil.which("node") or ""
+# A node_modules directory holding jsdom; the repo vendors no npm packages.
+JSDOM = os.environ.get("TASK_DASHBOARD_JSDOM") or ""
+DOM_JS = ROOT / "scripts" / "test_task_dashboard_whynot_dom.js"
+
+
+@unittest.skipUnless(
+    NODE and JSDOM and Path(JSDOM, "jsdom").is_dir(),
+    "needs node and jsdom: set TASK_DASHBOARD_JSDOM to a node_modules holding it",
+)
+class PageScriptTests(RouteCase):
+    """Now's Snooze, reason and Undo, run under jsdom over the served page.
+    The script's POSTs are then replayed against the server, so each case
+    pins both what the card does and what lands in the DB."""
+
+    KEY = pr_url(22)
+
+    def drive(self, steps, text="", status=200):
+        path = Path(self.tmp.name) / "case.json"
+        page = self.request("GET", "/now")[1]
+        path.write_text(
+            json.dumps(
+                {"page": page, "key": self.KEY, "steps": steps, "text": text,
+                 "status": status}
+            )
+        )  # fmt: skip
+        out = subprocess.run(
+            [NODE, str(DOM_JS), JSDOM, str(path)],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(out.returncode, 0, out.stderr)
+        state = json.loads(out.stdout)
+        self.assertEqual(state["errors"], [])
+        self.assertFalse(state["reloaded"])
+        return state
+
+    def replay(self, calls):
+        """Each POST the script made, sent to the server; their statuses."""
+        origin = f"http://127.0.0.1:{self.port}"
+        return [
+            self.request("POST", c["url"], origin=origin, body=parse_qsl(c["body"]))[0]
+            for c in calls
+        ]
+
+    def test_one_click_snoozes_and_hides_the_card_in_place(self):
+        state = self.drive(["snooze"])
+        before, after = state["states"]
+        self.assertTrue(before["title_shown"] and not before["line_shown"])
+        self.assertFalse(after["title_shown"])
+        self.assertTrue(after["connected"] and after["line_shown"])
+        until = overlay.snooze_until(NOW)
+        self.assertIn(f"Snoozed until {until} · why not now?", after["line_text"])
+        [call] = state["calls"]
+        self.assertEqual(call["url"], "/overlay/snooze")
+        self.assertEqual(self.replay(state["calls"]), [200])
+        self.assertEqual(self.snoozes(), [(self.KEY, until)])
+        self.assertEqual(self.rows(), [])
+        self.assertNotIn(self.KEY, self.now_keys())
+
+    def test_a_reason_afterwards_adds_one_answer_and_no_second_snooze(self):
+        state = self.drive(["snooze", "reason:not_urgent"], text="after the release")
+        self.assertFalse(state["states"][-1]["connected"])  # the line went away
+        urls = [c["url"] for c in state["calls"]]
+        self.assertEqual(urls, ["/overlay/snooze", "/overlay/whynot"])
+        self.assertNotIn("until", dict(parse_qsl(state["calls"][1]["body"])))
+        self.assertEqual(self.replay(state["calls"]), [200, 200])
+        self.assertEqual(self.snoozes(), [(self.KEY, overlay.snooze_until(NOW))])
+        [(key, reason, text, total, terms, _)] = self.rows()
+        self.assertEqual(
+            (key, reason, text), (self.KEY, "not_urgent", "after the release")
+        )
+        self.assertIsNotNone(total)
+        self.assertEqual(json.loads(terms)[0][0], "quick_win")
+
+    def test_undo_removes_the_snooze_and_brings_the_card_back(self):
+        state = self.drive(["snooze", "undo"])
+        back = state["states"][-1]
+        self.assertTrue(back["connected"] and back["title_shown"])
+        self.assertFalse(back["line_shown"])
+        self.assertEqual(self.replay(state["calls"]), [200, 200])
+        self.assertEqual(self.snoozes(), [])
+        self.assertEqual(self.rows(), [])
+        self.assertIn(self.KEY, self.now_keys())
+
+    def test_a_refused_snooze_leaves_the_card_and_says_so(self):
+        state = self.drive(["snooze"], status=500)
+        after = state["states"][-1]
+        self.assertTrue(after["title_shown"] and not after["line_shown"])
+        self.assertEqual(len(state["alerts"]), 1)
+        self.assertIn("Not saved (500)", state["alerts"][0])
 
 
 class JiraHealthTest(server_harness.ServerCase):
