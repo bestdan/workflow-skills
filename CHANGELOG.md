@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.136.0] - 2026-10-26
+
+### Features
+
+- accept a gh-issue source and handler in the scripts [#1022] (#1164) (961ff97)
+
 ## [2.135.2] - 2026-10-26
 
 ### Fixes
