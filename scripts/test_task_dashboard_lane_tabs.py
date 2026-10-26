@@ -141,6 +141,9 @@ class TabifyTests(unittest.TestCase):
         self.assertIn("history.replaceState(null, '', tab.getAttribute('href'))", js)
         self.assertIn("localStorage.setItem(key, tab.dataset.lane)", js)
         self.assertIn("var key = 'lane:' + bar.dataset.view;", js)
+        # The include switches follow the lane shown, so a switch keeps it.
+        self.assertIn("document.querySelectorAll('.include a[data-include]')", js)
+        self.assertIn("u.searchParams.set('lane', tab.dataset.lane);", js)
         # A remembered lane applies only when the URL named none.
         self.assertIn("if (bar.dataset.origin !== 'url')", js)
         # The text filter's per-lane count drives the tabs.
@@ -218,6 +221,17 @@ class FleetPageTests(server_harness.ServerCase):
             names,
             ["Close: evidence found", "Check: no evidence, so not a reason to close"],
         )
+        self.assert_counts_match_lanes(page)
+
+    def test_stale_with_jira_on_gives_the_jira_lane_a_titled_tab(self):
+        self.httpd.app.cfg["jira"]["enabled"] = True
+        conn = self.conn()
+        server_harness.seed(conn)  # mirrored Jira issues, so the Jira lane draws
+        conn.close()
+        page = self.get("/stale")
+        got = tabs(page)
+        self.assertEqual([n for n, _, _ in got], ["stale", "close", "check"])
+        self.assertRegex(got[0][1], r"^Jira \(\d+\)$")
         self.assert_counts_match_lanes(page)
 
     def test_needs_you(self):

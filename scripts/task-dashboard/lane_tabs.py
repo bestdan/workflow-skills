@@ -178,6 +178,19 @@ JS = """
     });
     if (how.url) {
       try { history.replaceState(null, '', tab.getAttribute('href')); } catch (e) {}
+      // The include switches were built from the URL the page loaded with;
+      // keep them on the lane now shown.
+      document.querySelectorAll('.include a[data-include]').forEach(function (a) {
+        ['href', 'data-toggle-href'].forEach(function (name) {
+          var v = a.getAttribute(name);
+          if (v === null) return;
+          try {
+            var u = new URL(v, location.href);
+            u.searchParams.set('lane', tab.dataset.lane);
+            a.setAttribute(name, u.pathname + u.search);
+          } catch (e) {}
+        });
+      });
     }
     if (how.remember) {
       try { localStorage.setItem(key, tab.dataset.lane); } catch (e) {}
