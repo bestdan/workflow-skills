@@ -294,12 +294,13 @@ def _section(
 
 
 def _session_where(s: Session) -> str:
+    """Where a session ran, as plain text: the card escapes it."""
     bits = [f"on {s.host}"]
     if s.repo:
         bits.append(s.repo + (f": {s.branch}" if s.branch else ""))
     elif s.cwd:
         bits.append(s.cwd)
-    return " · ".join(_e(b) for b in bits)
+    return " · ".join(bits)
 
 
 # --- finished sessions, for Needs you ----------------------------------------

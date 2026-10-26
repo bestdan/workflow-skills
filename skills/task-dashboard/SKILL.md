@@ -178,8 +178,10 @@ With few answers `tune` suggests nothing; say so rather than guessing.
 `DASH view <name> --json` prints one tab's lanes and items as its page shows
 them, read from the DB with no server: the include filter, ignores and snoozes
 apply as there, and `--all` adds what the page hides, each marked `hidden`
-with why. The names are the nav's: `now`, `needs`, `prs`, `issues`, `stale`,
-and on a Jira instance `board`, `waiting-on-me`, `waiting-on` and `epics`.
+with why. The names are the nav's, and an instance serves only those its nav
+shows: `now` and `stale` always; `needs`, `prs` and `issues` only on a fleet
+instance; `board` and `epics` only with Jira on; `waiting-on-me` and
+`waiting-on` only with Jira on and no fleet. Any other name exits 2.
 Each item carries its `source`, `key`, `kind`, `lane`, `title`, `url`, `host`
 and `path`, its `evidence` and `risks`, and its `action` as
 `{"review": ..., "command": [...]}`. `freshness` says when each sync last

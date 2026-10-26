@@ -9,6 +9,7 @@ run via scripts/test-task-dashboard-agent-view.sh.
 """
 
 import contextlib
+import copy
 import io
 import json
 import re
@@ -25,11 +26,14 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import agent_view  # type: ignore[import-not-found]  # noqa: E402
 import dashboard  # type: ignore[import-not-found]  # noqa: E402
 import db  # type: ignore[import-not-found]  # noqa: E402
+import fleet_now  # type: ignore[import-not-found]  # noqa: E402
 import fleet_views  # type: ignore[import-not-found]  # noqa: E402
+import github_fleet  # type: ignore[import-not-found]  # noqa: E402
 import include  # type: ignore[import-not-found]  # noqa: E402
 import lane_tabs  # type: ignore[import-not-found]  # noqa: E402
 import overlay  # type: ignore[import-not-found]  # noqa: E402
 import server  # type: ignore[import-not-found]  # noqa: E402
+import snapshot_adapter  # type: ignore[import-not-found]  # noqa: E402
 import test_task_dashboard_fleet_now as now_fx  # noqa: E402
 import test_task_dashboard_fleet_views as stale_fx  # noqa: E402
 import test_task_dashboard_server as server_harness  # noqa: E402
@@ -266,6 +270,44 @@ class FleetParityTests(Case):
         self.assertEqual(
             human[0]["action"]["review"], "decide it, then `/promote-tasks`"
         )
+
+
+class NowLimitTests(Case):
+    def test_all_marks_what_the_list_length_cut_as_limit(self):
+        now_fx.seed(self.conn)
+        cfg = now_fx.fleet_cfg()
+        self.assertGreater(len(now_fx.EXPECTED), fleet_now.LIMIT)
+        doc = agent_view.build(self.conn, cfg, "now", now_fx.NOW, show_all=True)
+        (lane,) = [lane for lane in doc["lanes"] if lane["id"] == "next"]
+        shown = [i["key"] for i in lane["items"] if i["hidden"] is None]
+        cut = {i["key"]: i["hidden"] for i in lane["items"] if i["hidden"]}
+        self.assertEqual(shown, now_fx.EXPECTED[: fleet_now.LIMIT])
+        self.assertEqual(cut, {k: "limit" for k in now_fx.EXPECTED[fleet_now.LIMIT :]})
+        self.assertEqual(lane["count"], fleet_now.LIMIT)
+
+
+class EscapeOnceTests(Case):
+    """A session's host and branch are plain text in the JSON and escaped
+    exactly once on the page."""
+
+    def test_an_ampersand_in_a_host_and_a_branch(self):
+        snap = copy.deepcopy(stale_fx.SNAPSHOT)
+        snap["host"] = "r&d"
+        for line in snap["sessions"]:
+            if line["session_id"] == "s-idle":
+                line["branch"] = "fix&go"
+        github_fleet.write(self.conn, stale_fx.GITHUB_ROWS, stale_fx.NOW)
+        snapshot_adapter.ingest(self.conn, snap, stale_fx.NOW)
+        cfg = stale_fx.fleet_cfg()
+        doc = agent_view.build(self.conn, cfg, "stale", stale_fx.NOW)
+        (item,) = [
+            i for lane in doc["lanes"] for i in lane["items"] if i["key"] == "s-idle"
+        ]
+        self.assertTrue(item["meta"].startswith("on r&d · dotfiles: fix&go · "))
+        self.assertEqual(item["host"], "r&d")
+        page = fleet_views.render_stale(self.conn, cfg, stale_fx.NOW)
+        self.assertIn("on r&amp;d · dotfiles: fix&amp;go · last event", page)
+        self.assertNotIn("&amp;amp;", page)
 
 
 class StaleHtmlFreeTests(Case):
