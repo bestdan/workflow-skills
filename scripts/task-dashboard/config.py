@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 import include
+import score
 
 ENV_VAR = "TASK_DASHBOARD_CONFIG"
 DEFAULT_PATH = Path("~/.config/task-dashboard/config.toml")
@@ -74,6 +75,22 @@ DEFAULTS: dict[str, Any] = {
         # in status: acli cannot read the changelog (Fields, under Sync, in
         # dev_docs/designs/2026-10-23-task-dashboard.md).
         "stuck_days": {"new": 14, "indeterminate": 5},
+        # The fleet instance's Now (score.fleet_score): one weight per
+        # category, highest first, then `prio` per prio: level (prio:0 is 4)
+        # and `age` per week waiting (capped at score.AGE_CAP_WEEKS).
+        "fleet": {
+            "quick_win": 10,
+            "asked": 8,
+            "review_queue": 6,
+            "started": 5,
+            "others_pr": 4,
+            "human_issue": 3,
+            "own_ci_failing": 2,
+            "ready": 1.5,
+            "own_pr": 1,
+            "prio": 0.2,
+            "age": 0.1,
+        },
     },
 }
 
@@ -194,10 +211,28 @@ def load(path: "str | os.PathLike[str] | None" = None) -> dict[str, Any]:
             raise ConfigError(
                 f'health.targets.{fid} must be "observed" or a comparison like "<= 5"'
             )
+    _validate_fleet_weights(cfg["score"]["fleet"])
     problem = include.validate_config(cfg["views"])
     if problem is not None:
         raise ConfigError(problem)
     return cfg
+
+
+def _validate_fleet_weights(weights: Any) -> None:
+    """Each `[score.fleet]` key names a fleet term and holds a number.
+
+    A misspelt key would otherwise leave its default in force with no sign.
+    """
+    if not isinstance(weights, dict):
+        raise ConfigError("score.fleet must be a table of term = weight")
+    for name, value in weights.items():
+        if name not in score.FLEET_TERMS:
+            raise ConfigError(
+                f"score.fleet.{name} names no fleet term; valid terms are"
+                f" {', '.join(score.FLEET_TERMS)}"
+            )
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            raise ConfigError(f"score.fleet.{name} must be a number")
 
 
 def _validate_jira(cfg: dict[str, Any]) -> None:

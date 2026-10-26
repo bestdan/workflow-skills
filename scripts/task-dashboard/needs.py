@@ -1,4 +1,8 @@
-"""The fleet view's Needs you page (`/needs`), the fleet instance's home page.
+"""The fleet view's Needs you page (`/needs`): everything waiting on the owner.
+
+Needs you is the full list. The fleet instance's home page is Now
+(fleet_now.py), the short ranked queue drawn from this collection plus the
+owner's own work.
 
 From dev_docs/designs/2026-10-23-fleet-view.md, "Principles" 1 and "Views"
 item 1: one decision first, the rest collapsed, plain approvals batched. It
@@ -119,6 +123,7 @@ class Need:
     number: "int | None" = None
     hint: str = ""  # where it is acted on, or the skill that resolves it
     ref: "str | None" = None  # `repo#N`, shown muted after the title
+    row: "dict[str, Any] | None" = None  # the mirror row, for a PR or an issue
 
 
 # --- approvals ---------------------------------------------------------------
@@ -255,6 +260,7 @@ def _pr(row: dict[str, Any]) -> Need:
         branch=row.get("head_ref"),
         number=row.get("number"),
         hint="review and merge it on GitHub",
+        row=row,
     )
 
 
@@ -270,6 +276,7 @@ def _issue(row: dict[str, Any]) -> Need:
         repo=fleet_views._name(row.get("repo")),
         number=row.get("number"),
         hint="decide it, then <code>/promote-tasks</code>",
+        row=row,
     )
 
 

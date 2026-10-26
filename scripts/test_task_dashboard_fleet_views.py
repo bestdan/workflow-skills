@@ -569,7 +569,7 @@ class FleetRouteTests(server_harness.ServerCase):
         finally:
             conn.close()
 
-    def test_away_redirects_to_the_home_page(self):
+    def test_away_redirects_to_needs_you(self):
         for path in ("/away", "/away?include=prs"):
             c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
             c.request("GET", path, headers={"Host": f"127.0.0.1:{self.port}"})
@@ -577,18 +577,19 @@ class FleetRouteTests(server_harness.ServerCase):
             resp.read()
             c.close()
             self.assertEqual(resp.status, 302, path)
-            self.assertEqual(resp.getheader("Location"), "/", path)
+            # Its Finished group lives on Needs you, not on the home page.
+            self.assertEqual(resp.getheader("Location"), "/needs", path)
 
     def test_loading_needs_you_does_not_move_last_visit(self):
         before = self.last_visit()
         for _ in range(2):
-            status, page = self.request("GET", "/")
+            status, page = self.request("GET", "/needs")
             self.assertEqual(status, 200)
             self.assertIn('data-key="s-done"', page)
         self.assertEqual(self.last_visit(), before)
 
     def test_mark_as_read_records_the_render_time(self):
-        page = self.request("GET", "/")[1]
+        page = self.request("GET", "/needs")[1]
         m = re.search(r'data-ov="visit" data-at="([^"]+)"', section(page, "finished"))
         assert m is not None
         status, _ = self.request(
@@ -599,7 +600,7 @@ class FleetRouteTests(server_harness.ServerCase):
         )
         self.assertEqual(status, 200)
         self.assertEqual(self.last_visit(), "2026-10-23T21:00:00Z")
-        page = self.request("GET", "/")[1]
+        page = self.request("GET", "/needs")[1]
         self.assertNotIn('data-section="finished"', page)
 
     def test_header_shows_each_machines_age(self):

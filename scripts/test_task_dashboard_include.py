@@ -337,9 +337,11 @@ class FleetRouteTests(server_harness.ServerCase):
         conn.close()
         for query in ("", "?include=prs", "?include=tasks,prs,sessions,other"):
             self.assertNotIn(
-                needs_fx.pr_url(1201), needs_fx.keys(self.get(f"/{query}")), query
+                needs_fx.pr_url(1201), needs_fx.keys(self.get(f"/needs{query}")), query
             )
-        self.assertIn(needs_fx.pr_url(1202), needs_fx.keys(self.get("/?include=prs")))
+        self.assertIn(
+            needs_fx.pr_url(1202), needs_fx.keys(self.get("/needs?include=prs"))
+        )
         for query in ("", "?include=tasks"):
             board = self.get(f"/board{query}").split("</header>", 1)[1]
             lanes = board.split('class="ignored"', 1)[0]
@@ -360,30 +362,31 @@ class FleetRouteTests(server_harness.ServerCase):
         self.assertIn(".lane.filtered-empty .empty.switched-off", page)
 
     def test_needs_you_lists_only_the_included_groups(self):
-        everything = needs_fx.keys(self.get("/"))
+        everything = needs_fx.keys(self.get("/needs"))
         self.assertIn("s-turn", everything)
         self.assertIn(needs_fx.pr_url(1201), everything)
-        prs = needs_fx.keys(self.get("/?include=prs"))
+        prs = needs_fx.keys(self.get("/needs?include=prs"))
         self.assertEqual(prs, [needs_fx.pr_url(1201), needs_fx.pr_url(1202)])
         self.assertEqual(
             needs_fx.keys(self.get("/needs?include=tasks")), [needs_fx.issue_url(950)]
         )
         # Sessions: the main list and the batched permission prompt.
         self.assertEqual(
-            needs_fx.keys(self.get("/?include=sessions")), ["s-turn", "s-pr", "s-perm"]
+            needs_fx.keys(self.get("/needs?include=sessions")),
+            ["s-turn", "s-pr", "s-perm"],
         )
-        page = self.get("/?include=other")
+        page = self.get("/needs?include=other")
         self.assertEqual(needs_fx.keys(page), [])
         self.assertIn("Nothing included by the filter needs you.", page)
 
     def test_a_remembered_choice_survives_a_restart_and_a_url_overrides_it(self):
         self.remember("needs", "sessions")
         self.restart()
-        row = switch_row(self.get("/"))
+        row = switch_row(self.get("/needs"))
         self.assertIn('data-include="sessions"', row)
         self.assertIn('data-origin="remembered"', row)
         # An explicit URL wins, and reading it records nothing.
-        row = switch_row(self.get("/?include=prs"))
+        row = switch_row(self.get("/needs?include=prs"))
         self.assertIn('data-origin="url"', row)
         row = switch_row(self.get("/needs"))
         self.assertIn('data-include="sessions"', row)

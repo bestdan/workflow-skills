@@ -8,7 +8,7 @@ deltas snapshot_adapter.py writes, and the overlay.
 FINISHED SESSIONS (`finished_sessions`) are the sessions whose last turn ended
 after a time without asking. Needs you (needs.py) lists them, after the
 overlay's `last_visit`, in its "Finished since you looked" group. The `/away`
-route redirects to `/`, where that group is.
+route redirects to `/needs`, where that group is.
 
 STALE (`/stale`, under Jira's own stale lane on a fleet instance) closes by
 evidence, never by age. Each row names its evidence and the action that

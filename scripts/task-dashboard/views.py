@@ -1,5 +1,7 @@
 """The Needs you, Now, Waiting on me, I'm waiting on, Stale and Epics views.
 
+On a fleet instance Now is fleet_now.py's ranked queue (and the home page),
+with the Jira Now below it when Jira is on; Needs you is needs.py's.
 The fleet instance's Pull requests and Issues tabs are fleet_tabs.py's; they
 replace Waiting on me and I'm waiting on in a fleet instance's nav.
 
@@ -31,6 +33,7 @@ import sqlite3
 from datetime import datetime
 from typing import Any
 
+import fleet_now
 import fleet_tabs
 import fleet_views
 import include
@@ -41,9 +44,11 @@ import sync
 
 _e = html.escape
 
+# Now leads: on a fleet instance it is the home page, with Needs you, the
+# full list it is drawn from, second.
 TABS = (
-    ("/needs", "Needs you"),
     ("/now", "Now"),
+    ("/needs", "Needs you"),
     ("/waiting-on-me", "Waiting on me"),
     ("/waiting-on", "I'm waiting on"),
     ("/prs", "Pull requests"),
@@ -601,8 +606,17 @@ PRS = include.group_of("pr")
 
 
 def render_now(m: Mirror, inc: include.Include) -> str:
+    """A fleet instance's ranked queue (fleet_now), then, with Jira on, the
+    Jira Now; a Jira instance's Now alone."""
+    if not fleet_views.enabled(m.cfg):
+        cards = [issue_card(m, i) for i in now_items(m)]
+        return _me_note(m) + _lane("now", None, cards, "Nothing open.", TICKETS, inc)
+    fleet = fleet_now.render(m.conn, m.cfg, m.now, inc)
+    if not sync.jira_enabled(m.cfg):
+        return fleet
     cards = [issue_card(m, i) for i in now_items(m)]
-    return _me_note(m) + _lane("now", None, cards, "Nothing open.", TICKETS, inc)
+    jira = _lane("now", "Jira", cards, "Nothing open.", TICKETS, inc)
+    return fleet + _me_note(m) + jira
 
 
 def render_waiting_on_me(m: Mirror, inc: include.Include) -> str:

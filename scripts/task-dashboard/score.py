@@ -5,6 +5,10 @@ ranking is stable between refreshes and every card can show why it ranks where
 it does. There is no LLM here on purpose. The spec is the Prioritization score
 and Blocked paragraphs of dev_docs/designs/2026-10-23-task-dashboard.md.
 
+fleet_score() is the second score, for the fleet instance's Now: what waits
+on the owner, and the owner's own work, ranked by category (see the comment
+above FLEET_CATEGORIES).
+
 `issue` is a `jira_issues` row as a dict. `links` are that issue's `links` rows,
 each carrying the linked issue's *effective* status category: the mirror's own
 row when the linked issue is mirrored, else the category Jira inlined in the
@@ -224,6 +228,75 @@ def score(
         "blocked", 1 if blocked else 0, ", ".join(signals) if blocked else "not blocked"
     )
 
+    return _round(math.fsum(v for _, v, _ in terms)), terms
+
+
+# --- the fleet score ---------------------------------------------------------
+#
+# The fleet instance's Now (fleet_now.py) ranks what waits on the owner, and
+# the owner's own work, by this second score. Each item belongs to exactly one
+# category, whose term is its weight; `prio` and `age` add to every item. With
+# the defaults (config.DEFAULTS["score"]["fleet"]) the categories sit in
+# FLEET_CATEGORIES order, and prio plus age stay small enough that they reorder
+# items within a category, or across two neighbouring ones, but never jump an
+# item over a green bot PR or a session that asked.
+
+FLEET_CATEGORIES = (
+    "quick_win",  # a green-CI bot PR: one click to merge
+    "asked",  # a session that asked, or waits on a permission prompt
+    "review_queue",  # a PR in the review queue
+    "started",  # my issue at status:3_started
+    "others_pr",  # someone else's PR on my repos, a bot's with CI not green
+    "human_issue",  # an issue at auto:human-review-needed
+    "own_ci_failing",  # my PR, CI failing
+    "ready",  # my issue at status:2_ready
+    "own_pr",  # my PR out of the queue on something I can do
+)
+FLEET_TERMS = FLEET_CATEGORIES + ("prio", "age")
+
+# The prio: label as a level, as the gh-issue handler ranks it (prio:0 first).
+PRIO_LEVEL = {"prio:0": 4, "prio:1": 3, "prio:2": 2, "prio:3": 1}
+
+# Age term = weight x weeks waiting, capped here, so an old item gains a little
+# and never more than AGE_CAP_WEEKS weeks' worth.
+AGE_CAP_WEEKS = 5.0
+
+
+def prio_of(labels: "list[str] | None") -> "str | None":
+    """The issue's `prio:` label, the most urgent when it carries several."""
+    found = [lb for lb in labels or [] if lb in PRIO_LEVEL]
+    return max(found, key=PRIO_LEVEL.__getitem__, default=None)
+
+
+def fleet_score(
+    item: dict[str, Any], now: datetime, weights: dict[str, Any]
+) -> tuple[float, list[Term]]:
+    """`(total, [(term, value, why), ...])`, one entry per name in FLEET_TERMS.
+
+    `item` carries `category` (one of FLEET_CATEGORIES), `why` (what put it in
+    that category, shown beside the term), `prio` (a `prio:` label or None)
+    and `since` (an aware datetime, or None when the wait's start is unknown).
+    As in score(), each value is rounded to 2 places and the total is their
+    sum, so the terms on a card add up to the total shown.
+    """
+    category = item["category"]
+    if category not in FLEET_CATEGORIES:
+        raise ValueError(f"unknown fleet category: {category!r}")
+    terms: list[Term] = []
+
+    def add(name: str, factor: float, why: str) -> None:
+        terms.append((name, _round(float(weights.get(name, 0)) * factor), why))
+
+    for name in FLEET_CATEGORIES:
+        add(name, 1 if name == category else 0, item["why"] if name == category else "")
+    prio = item.get("prio")
+    add("prio", PRIO_LEVEL.get(prio or "", 0), prio or "no prio: label")
+    since: "datetime | None" = item.get("since")
+    if since is None:
+        add("age", 0, "waiting for an unknown time")
+    else:
+        days = max(0.0, (now - since).total_seconds() / 86400)
+        add("age", min(AGE_CAP_WEEKS, days / 7), f"waiting {days:.0f}d")
     return _round(math.fsum(v for _, v, _ in terms)), terms
 
 
