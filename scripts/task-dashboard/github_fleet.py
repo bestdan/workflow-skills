@@ -12,6 +12,13 @@ apart from `pr` so nothing that counts open PRs sees it. The Jira sync only
 touches `source = 'jira'` rows, and `write()` here only `source = 'github'`
 ones, so the two never overwrite each other.
 
+ISSUES are every open issue of the configured owners. The ones labelled
+`auto:human-review-needed` (needs_human()) are fetched in full by a search of
+their own, so Needs you and Stale, which read only those, see exactly that set
+whatever the cap. The rest come from a second search, at most MAX_OPEN_ISSUES
+per owner; an owner with more is reported in `issues_truncated`. The Issues
+tab (fleet_tabs.py) reads them all.
+
 THE REVIEW QUEUE, which the cap-of-5 gauge reads, holds a PR only when all
 four rules hold:
 
@@ -32,19 +39,31 @@ four rules hold:
    (`closingIssuesReferences`) is in a milestone, one of those milestones must
    have a description line reading `approved: yes` (case ignored, line
    trimmed). A PR that closes no issue in a milestone skips this rule, since
-   most repos use none. Descriptions are cached per repo for one run, and a
-   failed lookup counts as a miss.
+   most of the owner's repos use none. Descriptions are cached per repo for
+   one run, and a failed lookup counts as a miss.
 
 The PRs passing rule 1 alone are AWAITING. Every one is still a `kind = pr`
 row, with `status_name` set to `queue` or `awaiting`, `queue_misses` naming
-the rules it failed, and `queue_counts()` giving both totals. Rules 2 and 4
-are checked for every awaiting PR; `milestone_approved` is None when rule 4
-was skipped, so a skip is told apart from a pass. Rule 3 costs one call per
-PR, so it runs only for those that passed the others (`stamped` is None when
-skipped).
+the rules it failed, and `queue_counts()` giving the totals. Rule 2 is checked
+for every awaiting PR, and rule 4 only when a closing issue is in a milestone;
+`milestone_approved` is None when rule 4 was skipped, so a skip is told apart
+from a pass. Rule 3 costs one call per PR, so it runs only for those that
+passed the others (`stamped` is None when skipped).
+
+PRS FROM OTHERS are the open, non-draft PRs someone else opened on the owners'
+repos without requesting my review: a third search, `-author:@me`, role
+`others`, deduplicated by URL after the two above, so a review-requested PR
+keeps its `reviewer` role. Bot authors are included: a dependency or version
+bump waits on the owner too, and is the quickest merge. Every row records
+`author` and `author_is_bot` (is_bot()). Rules 2-4 are for the owner's agent
+PRs and are not applied: an `others` row has its CI state for display,
+`in_queue` false, no `queue_misses`, and `status_name` `others`. The gauge
+never counts one; `queue_counts()` gives them as `others`.
 
 Run `python github_fleet.py review-queue <owner>...` (under uv, Python 3.11+)
-to print both counts and the searches behind the awaiting set.
+to print the counts and the searches behind them, and
+`python github_fleet.py issues <owner>...` to print how many open issues the
+widened fetch mirrors and which owners the cap cut short.
 """
 
 import base64
@@ -77,9 +96,13 @@ DESIGNS_DIR = "dev_docs/designs"
 # MAX_DESIGN_FILES are read; a repo with more is truncated and reported.
 MAX_DESIGN_FILES = 40
 
+# Open issues mirrored per owner beyond the human-review set. GitHub's search
+# stops at 1000 results, so a cap under it is always seen when it bites.
+MAX_OPEN_ISSUES = 900
+
 ISSUE_QUERY = """
 query($q: String!, $after: String) {
-  search(query: $q, type: ISSUE, first: 50, after: $after) {
+  search(query: $q, type: ISSUE, first: 100, after: $after) {
     pageInfo { hasNextPage endCursor }
     nodes {
       ... on Issue {
@@ -100,6 +123,7 @@ query($q: String!, $after: String) {
       ... on PullRequest {
         url number title body headRefName headRefOid isDraft reviewDecision
         createdAt updatedAt
+        author { login __typename }
         repository { nameWithOwner }
         closingIssuesReferences(first: 10) {
           nodes { number repository { nameWithOwner } milestone { number } }
@@ -153,6 +177,27 @@ def review_searches(owner: str) -> list[str]:
     ]
 
 
+def others_search(owner: str) -> str:
+    """The search for PRs others opened on one owner's repos."""
+    return f"is:pr is:open draft:false -author:@me {github_gh.owner_qualifier(owner)}"
+
+
+# Bot accounts that open PRs here, named in case a node does not mark them.
+BOT_LOGINS = {"github-actions", "dependabot", "copilot-swe-agent"}
+
+
+def is_bot(author: "dict | None") -> bool:
+    """A bot author: a `Bot` node, an `app/` or `[bot]` login, or BOT_LOGINS."""
+    author = author or {}
+    login = str(author.get("login") or "")
+    return (
+        author.get("__typename") == "Bot"
+        or login.startswith("app/")
+        or login.endswith("[bot]")
+        or login in BOT_LOGINS
+    )
+
+
 # --- decision brief ----------------------------------------------------------
 
 _BRIEF_HEADING = re.compile(r"^##\s+decision brief\s*#*\s*$", re.IGNORECASE)
@@ -190,6 +235,26 @@ def decision_brief(pr_body: "str | None") -> "str | None":
 # --- issues ------------------------------------------------------------------
 
 
+def needs_human(row: dict) -> bool:
+    """An `issue` row labelled auto:human-review-needed: Needs you's set."""
+    return HUMAN_LABEL in (row.get("labels") or [])
+
+
+def _issue_row(node: dict) -> dict:
+    labels = [n["name"] for n in (node.get("labels") or {}).get("nodes", [])]
+    return {
+        "kind": "issue",
+        "key": node["url"],
+        "url": node["url"],
+        "repo": node["repository"]["nameWithOwner"],
+        "number": node["number"],
+        "title": node["title"],
+        "labels": labels,
+        "created": node.get("createdAt"),
+        "updated": node.get("updatedAt"),
+    }
+
+
 def issues_needing_human(
     owners: Iterable[str], runner: Runner = run, timeout: float = DEFAULT_TIMEOUT
 ) -> list[dict]:
@@ -200,22 +265,37 @@ def issues_needing_human(
             f'is:issue is:open label:"{HUMAN_LABEL}" {github_gh.owner_qualifier(owner)}'
         )
         for node in github_gh.search_prs(query, runner, timeout, ISSUE_QUERY):
-            labels = [n["name"] for n in (node.get("labels") or {}).get("nodes", [])]
-            rows.setdefault(
-                node["url"],
-                {
-                    "kind": "issue",
-                    "key": node["url"],
-                    "url": node["url"],
-                    "repo": node["repository"]["nameWithOwner"],
-                    "number": node["number"],
-                    "title": node["title"],
-                    "labels": labels,
-                    "created": node.get("createdAt"),
-                    "updated": node.get("updatedAt"),
-                },
-            )
+            rows.setdefault(node["url"], _issue_row(node))
     return list(rows.values())
+
+
+def open_issues(
+    owners: Iterable[str],
+    runner: Runner = run,
+    timeout: float = DEFAULT_TIMEOUT,
+    cap: int = MAX_OPEN_ISSUES,
+) -> "tuple[list[dict], list[str]]":
+    """Every open issue of the owners, and the owners the cap cut short.
+
+    The human-review set comes first and in full (issues_needing_human); then
+    one search per owner adds its other open issues, at most `cap` of them.
+    """
+    owners = list(owners)
+    rows = {r["url"]: r for r in issues_needing_human(owners, runner, timeout)}
+    truncated: list[str] = []
+    for owner in owners:
+        query = (
+            f'is:issue is:open -label:"{HUMAN_LABEL}"'
+            f" {github_gh.owner_qualifier(owner)}"
+        )
+        nodes, more = github_gh.search_nodes(
+            query, runner, timeout, ISSUE_QUERY, limit=cap
+        )
+        if more:
+            truncated.append(owner)
+        for node in nodes:
+            rows.setdefault(node["url"], _issue_row(node))
+    return list(rows.values()), truncated
 
 
 # --- recently closed PRs -----------------------------------------------------
@@ -381,7 +461,8 @@ def pr_comments(
 def review_queue(
     owners: Iterable[str], runner: Runner = run, timeout: float = DEFAULT_TIMEOUT
 ) -> "tuple[list[dict], list[str]]":
-    """Every awaiting PR (rule 1), each marked `in_queue` by rules 2-4.
+    """Every awaiting PR (rule 1), each marked `in_queue` by rules 2-4, then
+    the PRs from others (role `others`), which those rules do not apply to.
 
     Rule 4 is skipped, with `milestone_approved` None, for a PR that closes no
     issue in a milestone.
@@ -391,12 +472,18 @@ def review_queue(
     `milestone` miss, a `co_review` miss), so one flaky call does not fail
     the run. An AuthError still raises.
     """
+    owners = list(owners)
     nodes: dict[str, tuple[dict, str]] = {}
     for owner in owners:
         for (_, role), query in zip(REVIEW_ROLES, review_searches(owner)):
             for node in github_gh.search_prs(query, runner, timeout, REVIEW_QUERY):
                 if in_review_queue(node):
                     nodes.setdefault(node["url"], (node, role))
+    for owner in owners:
+        query = others_search(owner)
+        for node in github_gh.search_prs(query, runner, timeout, REVIEW_QUERY):
+            if not node.get("isDraft"):
+                nodes.setdefault(node["url"], (node, "others"))
     milestones = MilestoneCache(runner, timeout)
     rows: list[dict] = []
     failed: list[str] = []
@@ -411,21 +498,22 @@ def review_queue(
             ci = None
             failed.append(url)
         misses = []
-        if ci != "success":
+        approved: "bool | None" = None
+        stamped = None
+        if role != "others" and ci != "success":
             misses.append("ci")
-        approved: "bool | None"
-        try:
-            approved = _closes_approved(node, milestones)
-        except github_gh.AuthError:
-            raise
-        except GhError:
-            approved = False
-            if url not in failed:
-                failed.append(url)
+        if role != "others":
+            try:
+                approved = _closes_approved(node, milestones)
+            except github_gh.AuthError:
+                raise
+            except GhError:
+                approved = False
+                if url not in failed:
+                    failed.append(url)
         if approved is False:
             misses.append("milestone")
-        stamped = None
-        if not misses:
+        if role != "others" and not misses:
             try:
                 viewer, comments = pr_comments(repo, node["number"], runner, timeout)
                 head = stamp_head(comments, viewer)
@@ -450,11 +538,13 @@ def review_queue(
                 "head_oid": node.get("headRefOid"),
                 "review_decision": node.get("reviewDecision"),
                 "role": role,
+                "author": (node.get("author") or {}).get("login"),
+                "author_is_bot": is_bot(node.get("author")),
                 "brief": decision_brief(node.get("body")),
                 "ci_state": ci,
                 "milestone_approved": approved,
                 "stamped": stamped,
-                "in_queue": not misses,
+                "in_queue": role != "others" and not misses,
                 "queue_misses": misses,
                 "created": node.get("createdAt"),
                 "updated": node.get("updatedAt"),
@@ -464,9 +554,15 @@ def review_queue(
 
 
 def queue_counts(rows: Iterable[dict]) -> dict[str, int]:
-    """`queue` (the gauge: all four rules) and `awaiting` (rule 1 only)."""
+    """`queue` (the gauge: all four rules), `awaiting` (rule 1 only) and
+    `others` (PRs from others)."""
     prs = [r for r in rows if r["kind"] == "pr"]
-    return {"queue": sum(1 for r in prs if r["in_queue"]), "awaiting": len(prs)}
+    others = sum(1 for r in prs if r.get("role") == "others")
+    return {
+        "queue": sum(1 for r in prs if r["in_queue"]),
+        "awaiting": len(prs) - others,
+        "others": others,
+    }
 
 
 # --- design docs -------------------------------------------------------------
@@ -597,11 +693,13 @@ def fetch(
         for r in recently_closed(owners, now, runner, timeout)
         if r["url"] not in open_urls  # an index lag; the open row wins
     ]
-    rows = queue + issues_needing_human(owners, runner, timeout) + designs + closed
+    issues, issues_truncated = open_issues(owners, runner, timeout)
+    rows = queue + issues + designs + closed
     return {
         "rows": rows,
         "failed": failed,
         "truncated": truncated,
+        "issues_truncated": issues_truncated,
         "missing": missing,
         "counts": queue_counts(rows),
     }
@@ -609,6 +707,8 @@ def fetch(
 
 def _status(row: dict) -> "str | None":
     if row["kind"] == "pr":
+        if row.get("role") == "others":
+            return "others"
         return "queue" if row["in_queue"] else "awaiting"
     return row.get("status")
 
@@ -652,18 +752,38 @@ def write(conn: sqlite3.Connection, rows: list[dict], now: datetime) -> None:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) < 2 or argv[0] != "review-queue":
-        print("usage: github_fleet.py review-queue <owner>...", file=sys.stderr)
+    if len(argv) < 2 or argv[0] not in ("review-queue", "issues"):
+        print("usage: github_fleet.py review-queue|issues <owner>...", file=sys.stderr)
         return 2
+    if argv[0] == "issues":
+        issues, truncated = open_issues(argv[1:])
+        human = sum(1 for r in issues if needs_human(r))
+        print(f"open issues: {len(issues)}; {HUMAN_LABEL}: {human}")
+        print(f"cap: {MAX_OPEN_ISSUES} per owner beyond {HUMAN_LABEL}")
+        for owner in truncated:
+            print(f"  truncated: {owner}")
+        return 0
     rows, failed = review_queue(argv[1:])
     counts = queue_counts(rows)
-    print(f"review queue: {counts['queue']}; awaiting: {counts['awaiting']}")
+    print(
+        f"review queue: {counts['queue']}; awaiting: {counts['awaiting']};"
+        f" from others: {counts['others']}"
+    )
     print("awaiting is GitHub's own count for the union of:")
     for owner in argv[1:]:
         for query in review_searches(owner):
             print(f"  {query}")
+    print("from others is, less the PRs already above:")
+    for owner in argv[1:]:
+        print(f"  {others_search(owner)}")
     for row in rows:
-        mark = "queue" if row["in_queue"] else "miss " + ",".join(row["queue_misses"])
+        if row["role"] == "others":
+            bot = " (bot)" if row.get("author_is_bot") else ""
+            mark = f"from {row.get('author')}{bot}"
+        elif row["in_queue"]:
+            mark = "queue"
+        else:
+            mark = "miss " + ",".join(row["queue_misses"])
         print(f"  {row['url']}  [{mark}]")
     for url in failed:
         print(f"  lookup failed: {url}")

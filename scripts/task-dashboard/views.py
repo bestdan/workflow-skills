@@ -1,5 +1,8 @@
 """The Needs you, Now, Waiting on me, I'm waiting on, Stale and Epics views.
 
+The fleet instance's Pull requests and Issues tabs are fleet_tabs.py's; they
+replace Waiting on me and I'm waiting on in a fleet instance's nav.
+
 Each view reads SQLite only: Jira rows through the `jira_issues` view, so a
 non-Jira row never reaches them, plus `links`, `prs` and the overlay tables.
 Every issue card carries its score broken into terms (score.py) and the PRs
@@ -28,6 +31,7 @@ import sqlite3
 from datetime import datetime
 from typing import Any
 
+import fleet_tabs
 import fleet_views
 import include
 import needs
@@ -42,16 +46,19 @@ TABS = (
     ("/now", "Now"),
     ("/waiting-on-me", "Waiting on me"),
     ("/waiting-on", "I'm waiting on"),
+    ("/prs", "Pull requests"),
+    ("/issues", "Issues"),
     ("/board", "Board"),
     ("/stale", "Stale"),
     ("/epics", "Epics"),
     ("/health", "Health"),
 )
 
-# Tabs left out with `jira.enabled` false: the first set on every instance, the
-# second only on an instance with no fleet.
-JIRA_ONLY = {"/epics", "/board"}
-JIRA_ONLY_OFF_FLEET = {"/waiting-on-me", "/waiting-on"}
+# Tabs left out with `jira.enabled` false.
+JIRA_ONLY = {"/epics", "/board", "/waiting-on-me", "/waiting-on"}
+# Jira tabs a fleet instance leaves out: its Pull requests and Issues tabs
+# (fleet_views.ONLY) replace them.
+NOT_ON_FLEET = {"/waiting-on-me", "/waiting-on"}
 
 CSS = """
 nav { display:flex; flex-wrap:wrap; gap:4px; padding:8px 16px 0;
@@ -112,20 +119,17 @@ def nav(
 ) -> str:
     """The tab bar, less the tabs this instance has no data for.
 
-    A fleet-only tab is left out of an instance with no fleet, and a Jira-only
-    one out of an instance with `jira.enabled` false. With `inc`, the view's
+    A fleet-only tab is left out of an instance with no fleet, Waiting on me
+    and I'm waiting on out of a fleet instance, and a Jira-only tab out of an
+    instance with `jira.enabled` false. With `inc`, the view's
     include switches follow it (include.py); `query` is the request's own, so a
     switch keeps its other parameters.
     """
     hidden: set[str] = set()
     if cfg is not None:
-        fleet = fleet_views.enabled(cfg)
-        if not fleet:
-            hidden.update(fleet_views.ONLY)
+        hidden.update(NOT_ON_FLEET if fleet_views.enabled(cfg) else fleet_views.ONLY)
         if not sync.jira_enabled(cfg):
             hidden.update(JIRA_ONLY)
-            if not fleet:
-                hidden.update(JIRA_ONLY_OFF_FLEET)
     links = "".join(
         f'<a href="{href}"{" aria-current=page" if href == active else ""}>{_e(name)}</a>'
         for href, name in TABS
@@ -663,6 +667,14 @@ def render_needs(m: Mirror, inc: include.Include) -> str:
     return needs.render(m.conn, m.cfg, m.now, inc)
 
 
+def render_prs(m: Mirror, inc: include.Include) -> str:
+    return fleet_tabs.render_prs(m.conn, m.cfg, m.now, inc)
+
+
+def render_issues(m: Mirror, inc: include.Include) -> str:
+    return fleet_tabs.render_issues(m.conn, m.cfg, m.now, inc)
+
+
 EPIC_LANES = (
     ("mine", "Mine", "No epic is assigned to you."),
     ("involved", "Involved", "You have no issue under anyone else's epic."),
@@ -727,6 +739,8 @@ ROUTES = {
     "/waiting-on": ("I'm waiting on", render_waiting_on),
     "/stale": ("Stale", render_stale),
     "/epics": ("Epics", render_epics),
+    "/prs": ("Pull requests", render_prs),
+    "/issues": ("Issues", render_issues),
 }
 
 

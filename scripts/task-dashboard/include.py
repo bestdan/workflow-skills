@@ -74,6 +74,8 @@ VIEWS = (
     "now",
     "waiting-on-me",
     "waiting-on",
+    "prs",
+    "issues",
     "board",
     "stale",
     "epics",

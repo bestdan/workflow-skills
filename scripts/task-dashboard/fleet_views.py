@@ -7,9 +7,8 @@ deltas snapshot_adapter.py writes, and the overlay.
 
 FINISHED SESSIONS (`finished_sessions`) are the sessions whose last turn ended
 after a time without asking. Needs you (needs.py) lists them, after the
-overlay's `last_visit`, in its "Finished since you looked" group. That group
-replaced the Since you were away page, whose `/away` route now redirects to
-`/`.
+overlay's `last_visit`, in its "Finished since you looked" group. The `/away`
+route redirects to `/`, where that group is.
 
 STALE (`/stale`, under Jira's own stale lane on a fleet instance) closes by
 evidence, never by age. Each row names its evidence and the action that
@@ -51,7 +50,7 @@ import sessions
 import sync
 
 # Tabs that exist only on a fleet instance (views.nav hides them elsewhere).
-ONLY = {"/needs"}
+ONLY = {"/needs", "/prs", "/issues"}
 
 SESSION_IDLE_DAYS = 3  # a session with no event for this long is idle
 SESSION_FORGET_DAYS = 30  # and one quiet for this long has left the list
@@ -101,7 +100,11 @@ class Session:
 
 @dataclass
 class Fleet:
-    """One read of the fleet rows the two pages need."""
+    """One read of the fleet rows the two pages need.
+
+    Its `issue` rows are the human-review set only (github_fleet.needs_human):
+    the mirror holds every open issue, which only the Issues tab lists.
+    """
 
     github: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     worktrees: list[dict[str, Any]] = field(default_factory=list)
@@ -170,7 +173,9 @@ def load(conn: sqlite3.Connection, cfg: "dict[str, Any] | None" = None) -> Fleet
         else []
     )
     for kind, raw in rows:
-        f.github.setdefault(kind, []).append(_raw(raw))
+        row = _raw(raw)
+        if kind != "issue" or github_fleet.needs_human(row):
+            f.github.setdefault(kind, []).append(row)
     for source, kind, raw, synced in conn.execute(
         "SELECT source, kind, raw_json, synced_at FROM issues"
         " WHERE source LIKE 'machine:%' AND kind IN ('worktree', 'handoff')"

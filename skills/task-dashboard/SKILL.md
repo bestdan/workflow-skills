@@ -71,8 +71,9 @@ flag again, and a reinstall keeps them too.
      the Jira questions above (`board_ids` and the sprint and Flagged field
      ids); still ask for `github.orgs`. The four `jira.*` keys are then not
      required, install does not look for acli, and the sync makes no acli
-     call. Epics and Board leave the nav, and so do Waiting on me and I'm
-     waiting on on an instance with no fleet. To try the Jira views without
+     call. Epics, Board, Waiting on me and I'm waiting on leave the nav. (A
+     fleet instance never shows the last two: its Pull requests and Issues
+     tabs replace them.) To try the Jira views without
      a Jira login, point `jira.acli_path` at the fake acli,
      `${CLAUDE_PLUGIN_ROOT}/scripts/task-dashboard/dev/fake-acli`, instead.
      That path is inside the versioned plugin directory and moves on a plugin

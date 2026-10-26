@@ -192,9 +192,13 @@ def queue_rules(
 
 
 class ReviewQueueTests(unittest.TestCase):
-    def run_queue(self, author_nodes, reviewer_nodes=(), **rules):
+    def run_queue(self, author_nodes, reviewer_nodes=(), others_nodes=(), **rules):
         runner = Router(
             [
+                (
+                    lambda a: "-author:@me" in search_q(a),
+                    ok(review_page(list(others_nodes))),
+                ),
                 (lambda a: "author:@me" in search_q(a), ok(review_page(author_nodes))),
                 (
                     lambda a: "review-requested:@me" in search_q(a),
@@ -216,6 +220,7 @@ class ReviewQueueTests(unittest.TestCase):
             [
                 "is:pr is:open draft:false -review:approved author:@me org:bestdan",
                 "is:pr is:open draft:false -review:approved review-requested:@me org:bestdan",
+                "is:pr is:open draft:false -author:@me org:bestdan",
             ],
         )
         query = arg(runner.calls[0], "query")
@@ -227,7 +232,9 @@ class ReviewQueueTests(unittest.TestCase):
         # stamp, so the live count is 0 until co-review writes stamps.
         rows, failed, runner = self.run_queue(None)
         self.assertEqual(failed, [])
-        self.assertEqual(fleet.queue_counts(rows), {"queue": 0, "awaiting": 4})
+        self.assertEqual(
+            fleet.queue_counts(rows), {"queue": 0, "awaiting": 4, "others": 0}
+        )
         row = next(r for r in rows if r["number"] == 1114)
         self.assertEqual(row["kind"], "pr")
         self.assertEqual(row["key"], f"https://github.com/{REPO}/pull/1114")
@@ -251,7 +258,9 @@ class ReviewQueueTests(unittest.TestCase):
         self.assertEqual(by[1116]["queue_misses"], ["co_review"])
         self.assertFalse(by[1116]["stamped"])
         self.assertEqual(by[1117]["queue_misses"], ["milestone"])
-        self.assertEqual(fleet.queue_counts(rows), {"queue": 1, "awaiting": 4})
+        self.assertEqual(
+            fleet.queue_counts(rows), {"queue": 1, "awaiting": 4, "others": 0}
+        )
 
     def test_ci_must_be_success(self):
         node = review_page()["data"]["search"]["nodes"][1]
@@ -489,6 +498,63 @@ class ReviewQueueTests(unittest.TestCase):
         )
         self.assertEqual(rows[0]["brief"], "a\nb\nc")
 
+    def test_a_human_pr_from_others_is_mirrored_without_the_queue_rules(self):
+        node = pr_node(
+            url="u/pull/237",
+            number=237,
+            author={"login": "azack", "__typename": "User"},
+        )
+        rows, failed, runner = self.run_queue([], others_nodes=[node], ci=GREEN)
+        (row,) = rows
+        self.assertEqual((row["role"], row["author"]), ("others", "azack"))
+        self.assertFalse(row["author_is_bot"])
+        self.assertFalse(row["in_queue"])
+        self.assertEqual(row["queue_misses"], [])
+        self.assertEqual(row["ci_state"], "success")
+        self.assertIsNone(row["stamped"])
+        self.assertIsNone(row["milestone_approved"])
+        self.assertEqual(failed, [])
+        # No milestone or comments lookup: the queue rules are not applied.
+        self.assertFalse(any("/milestones/" in a[2] for a in runner.calls))
+        self.assertFalse(any(arg(a, "owner") for a in runner.calls))
+        self.assertEqual(
+            fleet.queue_counts(rows), {"queue": 0, "awaiting": 0, "others": 1}
+        )
+
+    def test_a_bot_pr_from_others_is_included_and_flagged(self):
+        nodes = [
+            pr_node(
+                url="u/pull/253",
+                number=253,
+                author={"login": "github-actions", "__typename": "Bot"},
+            ),
+            pr_node(
+                url="u/pull/254",
+                number=254,
+                author={"login": "dependabot[bot]", "__typename": "User"},
+            ),
+            pr_node(url="u/pull/255", number=255, author={"login": "app/renovate"}),
+        ]
+        rows, _, _ = self.run_queue([], others_nodes=nodes)
+        self.assertEqual(
+            [(r["number"], r["author_is_bot"]) for r in rows],
+            [(253, True), (254, True), (255, True)],
+        )
+
+    def test_a_pr_both_searches_return_appears_once_as_reviewer(self):
+        node = pr_node(
+            url="u/pull/240",
+            number=240,
+            author={"login": "azack", "__typename": "User"},
+        )
+        rows, _, _ = self.run_queue([], [node], others_nodes=[node])
+        self.assertEqual([(r["number"], r["role"]) for r in rows], [(240, "reviewer")])
+
+    def test_a_draft_from_others_is_left_out(self):
+        node = pr_node(url="u/pull/241", number=241, isDraft=True)
+        rows, _, _ = self.run_queue([], others_nodes=[node])
+        self.assertEqual(rows, [])
+
 
 class IssuesTests(unittest.TestCase):
     def test_fixture_rows_and_query(self):
@@ -506,6 +572,97 @@ class IssuesTests(unittest.TestCase):
     def test_owner_name_validated(self):
         with self.assertRaises(ValueError):
             fleet.issues_needing_human(["bestdan is:closed"], Router([]))
+
+
+def issue_node(n, *labels):
+    return {
+        "url": f"https://github.com/{REPO}/issues/{n}",
+        "number": n,
+        "title": f"issue {n}",
+        "createdAt": "2026-10-20T00:00:00Z",
+        "updatedAt": "2026-10-20T00:00:00Z",
+        "repository": {"nameWithOwner": REPO},
+        "labels": {"nodes": [{"name": name} for name in labels]},
+    }
+
+
+def paged(nodes, size):
+    """A search answered `size` nodes a page, following `after`."""
+
+    def answer(argv):
+        start = int(arg(argv, "after") or 0)
+        page = nodes[start : start + size]
+        more = start + size < len(nodes)
+        return ok(
+            {
+                "data": {
+                    "search": {
+                        "pageInfo": {
+                            "hasNextPage": more,
+                            "endCursor": str(start + size),
+                        },
+                        "nodes": page,
+                    }
+                }
+            }
+        )
+
+    return answer
+
+
+class OpenIssuesTests(unittest.TestCase):
+    HUMAN = "auto:human-review-needed"
+
+    def wide(self, argv):
+        """The capped search, which excludes the human-review label."""
+        return f'-label:"{self.HUMAN}"' in search_q(argv)
+
+    def runner(self, human, rest, size=2):
+        return Router(
+            [
+                (self.wide, paged(rest, size)),
+                (lambda a: self.HUMAN in search_q(a), paged(human, size)),
+            ]
+        )
+
+    def test_the_cap_is_enforced_and_reported(self):
+        rest = [issue_node(n, "status:2_ready") for n in range(1, 8)]
+        runner = self.runner([], rest)
+        rows, truncated = fleet.open_issues(["bestdan"], runner, cap=3)
+        self.assertEqual([r["number"] for r in rows], [1, 2, 3])
+        self.assertEqual(truncated, ["bestdan"])
+        # It stops paging once the cap is reached: two pages of two, not four.
+        wide = [a for a in runner.calls if self.wide(a)]
+        self.assertEqual(len(wide), 2)
+        self.assertEqual(
+            search_q(wide[0]),
+            'is:issue is:open -label:"auto:human-review-needed" org:bestdan',
+        )
+
+    def test_a_cap_met_exactly_on_the_last_page_is_not_truncation(self):
+        rest = [issue_node(n) for n in range(1, 5)]
+        rows, truncated = fleet.open_issues(["bestdan"], self.runner([], rest), cap=4)
+        self.assertEqual(len(rows), 4)
+        self.assertEqual(truncated, [])
+
+    def test_the_human_review_set_is_whole_past_the_cap(self):
+        human = [issue_node(n, self.HUMAN) for n in range(100, 106)]
+        rest = human[:2] + [issue_node(n) for n in range(1, 5)]
+        rows, truncated = fleet.open_issues(
+            ["bestdan"], self.runner(human, rest), cap=3
+        )
+        got = {r["number"] for r in rows if fleet.needs_human(r)}
+        self.assertEqual(got, set(range(100, 106)))
+        self.assertEqual(truncated, ["bestdan"])
+        urls = [r["url"] for r in rows]
+        self.assertEqual(len(urls), len(set(urls)))
+
+    def test_fetch_reports_the_truncated_owners(self):
+        runner = WriteTests().full_runner()
+        plan = fleet.fetch(
+            {"github": {"orgs": ["bestdan"], "design_repos": []}}, runner, now=NOW
+        )
+        self.assertEqual(plan["issues_truncated"], [])
 
 
 def designs_router(listing=None, extra=()):
@@ -655,7 +812,9 @@ class ClosedTests(unittest.TestCase):
             {"kind": "closed_pr", "key": "u", "title": "t", "in_queue": True},
             {"kind": "pr", "key": "v", "title": "t", "in_queue": False},
         ]
-        self.assertEqual(fleet.queue_counts(rows), {"queue": 0, "awaiting": 1})
+        self.assertEqual(
+            fleet.queue_counts(rows), {"queue": 0, "awaiting": 1, "others": 0}
+        )
 
 
 class WriteTests(unittest.TestCase):
@@ -705,7 +864,7 @@ class WriteTests(unittest.TestCase):
             ).fetchone()[0]
         )
         self.assertEqual(raw["ci_state"], "none")
-        self.assertEqual(plan["counts"], {"queue": 0, "awaiting": 4})
+        self.assertEqual(plan["counts"], {"queue": 0, "awaiting": 4, "others": 0})
         self.assertEqual(
             self.conn.execute(
                 "SELECT DISTINCT status_name FROM issues WHERE kind = 'pr'"

@@ -24,9 +24,13 @@ WHAT IT COLLECTS, each keyed by its overlay item `(source, key)`:
   gauges.review_queue_rows, the reader the header gauge counts, so the page
   and the gauge agree. The wait starts when the PR was opened: when it entered
   the queue is not recorded.
-- **Issues at `auto:human-review-needed`** (github_fleet's `issue` rows),
-  waiting since they were opened, for the same reason, and behind the same
-  gate as the PRs: none until a fleet sync run has succeeded.
+- **PRs from others on my repos** (github_fleet's `others` rows, bots
+  included), stated as "PR from <author>". The queue rules are for agent PRs
+  and do not apply to them, and the header gauge does not count them.
+- **Issues at `auto:human-review-needed`** (github_fleet's `issue` rows that
+  carry it, github_fleet.needs_human), waiting since they were opened, for
+  the same reason, and behind the same gate as the PRs: none until a fleet
+  sync run has succeeded.
 - **Drain items marked "needs you"**: drain_items(), an empty hook point
   until a drain tracking issue is configured.
 
@@ -46,8 +50,8 @@ slots in at approval_brief().
 FOCUS. While the overlay has a focus item, only that item's own needs show:
 the item itself, and what is tied to it (related()). The rest are counted as
 held and never listed, snoozed or not; a snoozed need of the focus item is
-counted as snoozed. A focused design takes everything in its repo, so the
-design-focus section the Since you were away page had is not repeated here.
+counted as snoozed. A focused design takes every need in its repo, in the
+main list rather than a section of its own.
 
 NEW. A card whose wait began after the overlay's `last_visit` carries a `new`
 badge, expanded, collapsed and approval cards alike; the order is unchanged.
@@ -241,7 +245,13 @@ def _pr(row: dict[str, Any]) -> Need:
     bits = [f"CI {row.get('ci_state') or 'unknown'}"]
     if row.get("review_decision"):
         bits.append(str(row["review_decision"]).lower().replace("_", " "))
-    bits.append("your PR" if row.get("role") == "author" else "review requested")
+    role = row.get("role")
+    if role == "others":
+        bits.insert(0, f"PR from {row.get('author') or 'someone else'}")
+        if row.get("author_is_bot"):
+            bits.insert(1, "bot")
+    else:
+        bits.append("your PR" if role == "author" else "review requested")
     return Need(
         item=(github_fleet.SOURCE, str(row.get("key") or row.get("url"))),
         kind="pr",
@@ -296,10 +306,14 @@ def collect(conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime) -> lis
     # fleet run, so leftovers from an earlier run are never shown as current.
     queue = gauges.review_queue_rows(conn, sync.fleet_enabled(cfg))
     for row in queue or []:
-        if row.get("in_queue"):
+        if row.get("in_queue") or row.get("role") == "others":
             out.append(_pr(row))
     if queue is not None:
-        out.extend(_issue(row) for row in _rows(conn, github_fleet.SOURCE, "issue"))
+        out.extend(
+            _issue(row)
+            for row in _rows(conn, github_fleet.SOURCE, "issue")
+            if github_fleet.needs_human(row)
+        )
     out.extend(drain_items(conn, cfg))
     return out
 

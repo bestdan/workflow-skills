@@ -287,7 +287,8 @@ def current_figures(
             (github_fleet.SOURCE,),
         ).fetchone()[0]
     return {
-        "open_prs": None if counts is None else counts["awaiting"],
+        # A PR someone else opened on the owner's repos awaits the owner too.
+        "open_prs": None if counts is None else counts["awaiting"] + counts["others"],
         "issues_opened_closed": None,
         "designs_proposed": designs,
         "side_quests": gauges.read(conn, fleet=fleet).side_quests,

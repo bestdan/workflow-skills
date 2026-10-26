@@ -645,6 +645,7 @@ def run_fleet(
             "lookup_failed": len(plan["failed"]),
             "designs_missing": len(plan["missing"]),
             "designs_truncated": len(plan["truncated"]),
+            "issues_truncated": len(plan["issues_truncated"]),
         }
         github_fleet.write(db, plan["rows"], now)
     except github_gh.AuthError as exc:

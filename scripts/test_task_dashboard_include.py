@@ -50,6 +50,8 @@ VIEW_PATHS = (
     "/now",
     "/waiting-on-me",
     "/waiting-on",
+    "/prs",
+    "/issues",
     "/board",
     "/stale",
     "/epics",
