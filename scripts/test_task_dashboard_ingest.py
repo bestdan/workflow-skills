@@ -231,7 +231,12 @@ class RefusalTest(IngestCase):
             doc["schema"] = schema
             status, body = self.post(doc)
             self.assertEqual(status, 400, schema)
-            self.assertIn("unsupported schema", body)
+            # The collector matches this text to resend schema 4 as 3, and
+            # deployed servers send it, so the constant must keep it.
+            self.assertEqual(snapshot.UNSUPPORTED_SCHEMA, "unsupported schema")
+            self.assertEqual(
+                json.loads(body), {"error": f"unsupported schema {schema!r}"}
+            )
         self.assert_nothing_written()
 
     def test_malformed_schema_1_is_400(self):

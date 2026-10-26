@@ -85,8 +85,6 @@ from github_gh import Runner, run
 POST_TIMEOUT = 30.0
 SPOOL_VERSION = 1
 KEEP_STATUSES = frozenset({401, 403, 408, 429})
-# ingest.py's 400 body for a schema it does not accept.
-UNSUPPORTED = "unsupported schema"
 
 # (status or None when there was no answer, a one-line detail for stderr)
 Poster = Callable[[str, str, bytes], tuple["int | None", str]]
@@ -270,7 +268,11 @@ def flush(
         body = json.dumps(entry["doc"]).encode()
         status, detail = poster(cfg["ingest_url"], cfg["token"], body)
         older = snapshot.downgrade(entry["doc"])
-        if status == 400 and older is not None and UNSUPPORTED in detail:
+        if (
+            status == 400
+            and older is not None
+            and snapshot.UNSUPPORTED_SCHEMA in detail
+        ):
             # A server that predates this schema: send what it can read.
             log(f"server refused schema {entry['doc']['schema']}; resending as 3")
             status, detail = poster(

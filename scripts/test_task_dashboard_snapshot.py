@@ -17,6 +17,7 @@ import tempfile
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest import mock
 
 os.environ["GIT_CONFIG_GLOBAL"] = "/dev/null"
 os.environ["GIT_CONFIG_NOSYSTEM"] = "1"
@@ -462,15 +463,23 @@ class TestRegistry(unittest.TestCase):
 
     def test_an_unlistable_directory_is_a_failed_scan_sent_as_schema_2(self):
         self.write("8.json", {"pid": 8, "sessionId": "s"})
+        # No directory, or a file in its place, is an empty registry.
         self.assertEqual(snap.registry(self.dir / "absent", lambda p: True), [])
-        self.dir.chmod(0o300)  # searchable, not listable
-        self.addCleanup(self.dir.chmod, 0o700)
-        self.assertIsNone(snap.registry(self.dir, alive=lambda pid: True))
-        doc, _ = snap.build(
-            src_root=self.dir / "src", state_dir=self.dir / "state",
-            history=self.dir / "history.jsonl", host="h", now=NOW,
-            runner=FakeRunner(), registry_dir=self.dir, alive=lambda pid: True,
-        )  # fmt: skip
+        self.assertEqual(snap.registry(self.dir / "8.json", lambda p: True), [])
+        real = os.listdir
+
+        def denied(path):
+            if Path(path) == self.dir:
+                raise PermissionError(13, "Permission denied", str(path))
+            return real(path)
+
+        with mock.patch.object(snap.os, "listdir", side_effect=denied):
+            self.assertIsNone(snap.registry(self.dir, alive=lambda pid: True))
+            doc, _ = snap.build(
+                src_root=self.dir / "src", state_dir=self.dir / "state",
+                history=self.dir / "history.jsonl", host="h", now=NOW,
+                runner=FakeRunner(), registry_dir=self.dir, alive=lambda pid: True,
+            )  # fmt: skip
         self.assertEqual(doc["schema"], 2)
         self.assertNotIn("registry", doc)
         self.assertEqual(snap.validate(doc), [])

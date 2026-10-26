@@ -110,7 +110,7 @@ class Ingest:
             return 400, {"error": "body is not JSON"}, None
         got = doc.get("schema") if isinstance(doc, dict) else None
         if isinstance(got, bool) or got not in snapshot.ACCEPTED_SCHEMAS:
-            return 400, {"error": f"unsupported schema {got!r}"}, None
+            return 400, {"error": f"{snapshot.UNSUPPORTED_SCHEMA} {got!r}"}, None
         problems = snapshot.validate(doc)
         if problems:
             return 400, {"error": f"snapshot does not match schema {doc['schema']}",

@@ -94,6 +94,10 @@ from github_gh import Runner, run  # noqa: E402
 
 SCHEMA_VERSION = 4
 ACCEPTED_SCHEMAS = (1, 2, 3, 4)
+# How ingest's 400 names a schema it does not accept. The collector matches
+# it to resend a schema 4 snapshot as 3, and deployed servers already send
+# it, so the text must not change.
+UNSUPPORTED_SCHEMA = "unsupported schema"
 SCAN_STEPS = ("worktree_list",)
 # The hook formats read; a line of any other ``v`` is skipped. v2 added
 # ``asked`` on Stop lines, so a machine whose hook is older still ships v1.
@@ -335,17 +339,17 @@ def registry(
     launch arguments never leave the file. An unreadable file, one without a
     ``sessionId`` or an integer ``pid``, and one whose process is gone are
     skipped. Of two live files for one session, the newest ``updatedAt`` wins.
-    No directory is an empty registry; one that cannot be listed is None, a
-    failed scan, since ``glob`` would report it as empty.
+    No directory (or a file in its place) is an empty registry; any other
+    failure to list it is None, a failed scan.
     """
     best: dict[str, tuple[float, dict[str, Any]]] = {}
-    if not registry_dir.is_dir():
-        return []
     try:
-        os.listdir(registry_dir)
+        names = os.listdir(registry_dir)
+    except (FileNotFoundError, NotADirectoryError):
+        return []
     except OSError:
         return None
-    paths = sorted(registry_dir.glob("*.json"))
+    paths = sorted(registry_dir / n for n in names if n.endswith(".json"))
     for path in paths:
         try:
             obj = json.loads(path.read_text())
