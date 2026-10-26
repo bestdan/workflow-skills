@@ -36,6 +36,7 @@ import server
 import sync
 import view_model
 import views
+import workstreams
 
 SCHEMA_VERSION = 1
 
@@ -45,6 +46,7 @@ PATHS = {
     "needs": "/needs",
     "prs": "/prs",
     "issues": "/issues",
+    "workstreams": "/workstreams",
     "stale": "/stale",
     "board": "/board",
     "waiting-on-me": "/waiting-on-me",
@@ -158,6 +160,27 @@ def issue_item(row: dict, lane: str, now: datetime) -> Item:
         at=score.parse_ts(row.get("created")),
         why=" · ".join(fleet_tabs.issue_meta(row, now)),
         labels=list(row.get("labels") or []),
+    )  # fmt: skip
+
+
+def workstream_item(c: workstreams.Card, lane: str, now: datetime) -> Item:
+    return _item(
+        (workstreams.KIND, c.id), workstreams.KIND, lane, c.ws.get("title") or "",
+        ref=workstreams.ref(c.ws), url=c.ws.get("url"), at=c.last_activity,
+        evidence=c.next, why=" · ".join(workstreams.meta_parts(c, now)),
+        action=view_model.Action(review=c.next) if c.todo else None,
+        workstream_source=c.ws["source"], status=c.ws.get("status"),
+        progress={"done": c.done, "total": c.total, "percent": c.percent},
+        open_prs=c.open_prs, waiting_on_you=c.waiting,
+        filters={
+            "prs": workstreams.filter_href("/prs", c.id),
+            "issues": workstreams.filter_href("/issues", c.id),
+        },
+        members=[
+            {"source": m["item_source"], "key": m["item_key"], "kind": m["kind"],
+             "via": m["via"], "open": m["is_open"]}
+            for m in c.members
+        ],
     )  # fmt: skip
 
 
@@ -351,6 +374,16 @@ def _issues(ctx: "Ctx") -> list[dict[str, Any]]:
     return _tab(ctx, tab, lambda row, lid: issue_item(row, lid, ctx.now), every)
 
 
+def _workstreams(ctx: "Ctx") -> list[dict[str, Any]]:
+    tab = workstreams.lanes(ctx.conn, ctx.cfg, ctx.now)
+    ctx.notes["workstreams_synced"] = tab.synced
+    ctx.notes["linear"] = tab.linear
+    return [
+        _lane(lane, ctx.inc, lambda c, lid: workstream_item(c, lid, ctx.now))
+        for lane in tab.lanes
+    ]
+
+
 def _jira_lanes(ctx: "Ctx", lanes: list[view_model.Lane]) -> list[dict[str, Any]]:
     m = ctx.mirror()
 
@@ -404,6 +437,7 @@ BUILDERS: dict[str, Callable[["Ctx"], list[dict[str, Any]]]] = {
     "needs": _needs,
     "prs": _prs,
     "issues": _issues,
+    "workstreams": _workstreams,
     "stale": _stale,
     "board": _board,
     "waiting-on-me": _waiting_on_me,

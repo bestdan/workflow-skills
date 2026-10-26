@@ -28,6 +28,10 @@ run after this one when `github.fleet` is on. It records its own `sync_runs`
 row (kind `github_fleet`), so its failure never reaches the Jira rows or the
 Jira run's outcome.
 
+After it, `run_workstreams()` (kind `workstreams`, workstreams.py) rebuilds
+the Workstreams tables from GitHub milestones, the fleet rows and, when
+`linear.enabled` is on, Linear projects.
+
 The fleet view's session rows are two more steps of the same shape, each with
 its own `sync_runs` row: `run_sessions()` (kind `sessions`) folds the ingested
 session-state hook events into rows whenever the instance ingests snapshots,
@@ -49,6 +53,7 @@ import claude_remote
 import github_fleet
 import github_gh
 import jira_acli
+import linear_api
 import sessions
 
 MODES = ("incremental", "reconcile", "full")
@@ -604,6 +609,8 @@ def _run_row(db: sqlite3.Connection, run_id: int) -> dict[str, Any]:
 # --- the fleet view's GitHub step --------------------------------------------
 
 FLEET_KIND = github_fleet.RUN_KIND
+# The `sync_runs.kind` of run_workstreams(); workstreams.RUN_KIND is this.
+WORKSTREAMS_KIND = "workstreams"
 
 
 def fleet_enabled(config: dict[str, Any]) -> bool:
@@ -758,6 +765,32 @@ def run_claude_remote(
     return _run_step(db, claude_remote.RUN_KIND, now, clock or _wall, body)
 
 
+def run_workstreams(
+    config: dict[str, Any],
+    db: sqlite3.Connection,
+    now: datetime,
+    *,
+    runner: github_gh.Runner = github_gh.run,
+    linear_runner: linear_api.Runner = linear_api.post,
+    resolve_key: "Callable[[], str]" = linear_api.resolve_key,
+    clock: "Callable[[], datetime] | None" = None,
+) -> dict[str, Any]:
+    """Rebuild the Workstreams tables (workstreams.py); return its `sync_runs`
+    row. It reads the fleet step's rows, so it runs after run_fleet, and
+    only when fleet_enabled(). With `linear.enabled` off or no key it makes
+    no Linear call."""
+    # Imported here: workstreams draws its cards through views, which imports
+    # fleet_now and needs, both of which import this module.
+    import workstreams
+
+    run_id = workstreams.run_step(
+        config, db, now, _finish_run, _start_run,
+        gh_runner=runner, linear_runner=linear_runner, resolve_key=resolve_key,
+        clock=clock or _wall,
+    )  # fmt: skip
+    return _run_row(db, run_id)
+
+
 def run_all(
     mode: str,
     config: dict[str, Any],
@@ -768,6 +801,8 @@ def run_all(
     github: "GithubSource | None" = None,
     fleet_runner: github_gh.Runner = github_gh.run,
     claude_runner: claude_remote.Runner = claude_remote.run,
+    linear_runner: linear_api.Runner = linear_api.post,
+    resolve_key: "Callable[[], str]" = linear_api.resolve_key,
     clock: "Callable[[], datetime] | None" = None,
     on_step: "Callable[[str], None] | None" = None,
 ) -> list[dict[str, Any]]:
@@ -785,6 +820,13 @@ def run_all(
     if fleet_enabled(config):
         step(FLEET_KIND)
         rows.append(run_fleet(config, db, clock(), runner=fleet_runner, clock=clock))
+        step(WORKSTREAMS_KIND)
+        rows.append(
+            run_workstreams(
+                config, db, clock(), runner=fleet_runner,
+                linear_runner=linear_runner, resolve_key=resolve_key, clock=clock,
+            )
+        )  # fmt: skip
     if sessions.enabled(config):
         step(sessions.RUN_KIND)
         rows.append(run_sessions(db, clock(), clock=clock))

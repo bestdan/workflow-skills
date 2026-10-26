@@ -76,7 +76,7 @@ OWN_ISSUE_CATEGORIES = frozenset({"started", "ready"})
 # them but is a number; `age` is its bucket.
 FEATURES = (
     "kind", "category", "repo", "author", "bot", "prio", "est", "status", "ci",
-    "age", "own",
+    "age", "own", "workstream",
 )  # fmt: skip
 # Features a [score.fleet] term already reads, and which.
 SCORED_BY = {"category": "the category terms", "prio": "prio", "age": "age"}
@@ -128,6 +128,9 @@ def features(r: Any, now: datetime) -> dict[str, Any]:
         "age": _age(days),
         "age_days": None if days is None else round(days, 1),
         "own": "yes" if _own(r, row) else "no",
+        # Whether workstream membership should move an item up Now is left
+        # for tune to propose; nothing scores it yet.
+        "workstream": getattr(r, "workstream", None),
     }
 
 

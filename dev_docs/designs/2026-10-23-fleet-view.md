@@ -234,6 +234,15 @@ wins when both did.
 > only suggests, and nothing calls a model at runtime. The rules are
 > `whynot.py`'s module docstring.
 
+> **Later changes, 2026-10-26.** A Workstreams tab follows Issues. It groups
+> the mirror's PRs and issues by theme: an open GitHub milestone, a Linear
+> project (off by default, read with the GraphQL API) or a design at
+> `proposed`, laned In progress, Planned, Design or Stalled. A card opens
+> Pull requests and Issues filtered to its members with `?ws=<id>`. This
+> also gives proposed designs a listing again, which they lost when the
+> `/away` page was retired. The rules are `workstreams.py`'s module
+> docstring.
+
 **The two caps limit different things and both stand.** The side-quest cap
 limits which tooling work is open. The review-queue cap limits how much
 finished work waits on the owner. The reset design rejected a cap on live

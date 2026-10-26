@@ -35,6 +35,8 @@ MIRROR_TABLES = (
     "machines",
     "session_events",
     "history_entries",
+    "workstreams",
+    "workstream_members",
 )
 # Keyed by (source, item_key). `last_visit` is overlay state too, but one row
 # with no item key, so it is named apart.
@@ -387,6 +389,40 @@ CREATE TABLE now_shown (
 );
 """
 
+# Version 10: the Workstreams tab (workstreams.py). Both are mirror tables,
+# rebuilt whole by the `workstreams` sync step.
+#
+# - `workstreams`: one row per theme, from a GitHub milestone, a Linear
+#   project or a design doc at `proposed`; `id` is what `?ws=` names.
+# - `workstream_members`: which mirrored item belongs to which workstream and
+#   why (`via`), with the item facts the card counts, so a render reads rows
+#   rather than recomputing membership.
+_V10 = """
+CREATE TABLE workstreams (
+    id TEXT PRIMARY KEY,
+    source TEXT NOT NULL,
+    title TEXT,
+    status TEXT,
+    url TEXT,
+    updated TEXT,
+    raw_json TEXT,
+    synced_at TEXT
+);
+CREATE TABLE workstream_members (
+    ws_id TEXT NOT NULL,
+    item_source TEXT NOT NULL,
+    item_key TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    via TEXT NOT NULL,
+    is_open INTEGER NOT NULL,
+    started INTEGER NOT NULL,
+    waiting INTEGER NOT NULL,
+    updated TEXT,
+    PRIMARY KEY (ws_id, item_source, item_key)
+);
+CREATE INDEX workstream_members_item ON workstream_members (item_source, item_key);
+"""
+
 # Ordered, ascending, append-only: never edit a shipped entry.
 #
 # migrate() runs a script one statement at a time through _statements, which
@@ -407,6 +443,7 @@ MIGRATIONS: list[tuple[int, str]] = [
     (7, _V7),
     (8, _V8),
     (9, _V9),
+    (10, _V10),
 ]
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 

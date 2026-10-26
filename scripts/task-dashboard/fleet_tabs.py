@@ -34,9 +34,10 @@ Needs you (`auto:human-review-needed`, the set Needs you lists), Needs review,
 Started, Ready, then Untriaged or needs refinement, which also takes an issue
 with no `status:` label.
 
-Both take the include filter, the page's text filter (each card's `.title`
-and `.ref`), ignores and snoozes as every other view does: an ignored item is
-left out, a snoozed one is left out and counted.
+Both take a `?ws=<id>` filter (workstreams.py), which lists only that
+workstream's members, and the include filter, the page's text filter (each
+card's `.title` and `.ref`), ignores and snoozes as every other view does: an
+ignored item is left out, a snoozed one is left out and counted.
 """
 
 import html
@@ -55,6 +56,7 @@ import score
 import sync
 import view_model
 import views  # card_title and _lane, read at call time: views imports this
+import workstreams
 
 _e = html.escape
 
@@ -254,14 +256,22 @@ class Tab:
     synced: bool  # a fleet sync has succeeded
 
 
-def pr_lanes(conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime) -> Tab:
+def pr_lanes(
+    conn: sqlite3.Connection,
+    cfg: dict[str, Any],
+    now: datetime,
+    ws: "workstreams.Filter | None" = None,
+) -> Tab:
     """The Pull requests lanes, each item a (PR, why) pair. Ignored and
-    snoozed PRs are left out, and so is an optional lane with no rows."""
+    snoozed PRs are left out, and so is an optional lane with no rows. With
+    `ws` (`?ws=`), only that workstream's members are listed."""
     ov = overlay.load(conn)
     synced = gauges.review_queue_rows(conn, sync.fleet_enabled(cfg)) is not None
     rows: dict[str, list[tuple[Any, str]]] = {name: [] for name, _, _ in PR_LANES}
     snoozed = 0
     for p in pull_requests(conn, cfg):
+        if ws is not None and not ws.keeps((github_fleet.SOURCE, str(p["url"]))):
+            continue
         hidden = _hidden(ov, (github_fleet.SOURCE, str(p["url"])), now)
         snoozed += hidden == "snoozed"
         if hidden:
@@ -310,11 +320,12 @@ def render_prs(
     cfg: dict[str, Any],
     now: datetime,
     inc: "include.Include | None" = None,
+    ws: "workstreams.Filter | None" = None,
 ) -> str:
     inc = inc or include.everything("prs")
     ov = overlay.load(conn)
-    tab = pr_lanes(conn, cfg, now)
-    parts = [_gate_note(cfg, tab.synced)]
+    tab = pr_lanes(conn, cfg, now, ws)
+    parts = [_gate_note(cfg, tab.synced), workstreams.filter_note(ws, "/prs")]
     parts += _render_lanes(tab, lambda t: _pr_card(t[0], t[1], ov, now), inc)
     if inc.has(include.group_of("pr")):
         parts.append(_snoozed_note(tab.snoozed))
@@ -363,9 +374,14 @@ def _issues_truncated(conn: sqlite3.Connection) -> int:
     return int((counts or {}).get("issues_truncated") or 0)
 
 
-def issue_lanes(conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime) -> Tab:
+def issue_lanes(
+    conn: sqlite3.Connection,
+    cfg: dict[str, Any],
+    now: datetime,
+    ws: "workstreams.Filter | None" = None,
+) -> Tab:
     """The Issues lanes, each item a mirror row; ignored and snoozed issues
-    are left out."""
+    are left out. With `ws` (`?ws=`), only that workstream's members."""
     ov = overlay.load(conn)
     # The same gate as Needs you's issues: none before a good fleet run.
     synced = gauges.review_queue_rows(conn, sync.fleet_enabled(cfg)) is not None
@@ -385,6 +401,8 @@ def issue_lanes(conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime) ->
     snoozed = 0
     for row in rows:
         item = (github_fleet.SOURCE, str(row.get("key") or row.get("url")))
+        if ws is not None and not ws.keeps(item):
+            continue
         hidden = _hidden(ov, item, now)
         snoozed += hidden == "snoozed"
         if hidden:
@@ -403,11 +421,12 @@ def render_issues(
     cfg: dict[str, Any],
     now: datetime,
     inc: "include.Include | None" = None,
+    ws: "workstreams.Filter | None" = None,
 ) -> str:
     inc = inc or include.everything("issues")
     ov = overlay.load(conn)
-    tab = issue_lanes(conn, cfg, now)
-    parts = [_gate_note(cfg, tab.synced)]
+    tab = issue_lanes(conn, cfg, now, ws)
+    parts = [_gate_note(cfg, tab.synced), workstreams.filter_note(ws, "/issues")]
     cut = _issues_truncated(conn) if tab.synced else 0
     if cut:
         parts.append(
