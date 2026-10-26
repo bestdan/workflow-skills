@@ -293,6 +293,26 @@ class ExportImportTests(OverlayCase):
             for t in empty():
                 self.conn.execute(f'DELETE FROM "{t}"')
 
+    def test_a_retired_views_include_is_left_out_everywhere(self):
+        # Since you were away folded into Needs you. A choice remembered for
+        # it before, or carried by an older backup, loads as nothing.
+        populate(self.conn)
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO view_includes (view, groups, set_at)"
+                " VALUES ('away', 'prs', '2026-10-23T12:00:00Z')"
+            )
+        self.assertNotIn("away", overlay.load(self.conn).view_includes)
+        doc = json.loads(overlay.dumps(overlay.export(self.conn, NOW)))
+        self.assertNotIn("away", [r["view"] for r in doc["view_includes"]])
+        doc["view_includes"].append(
+            {"view": "away", "include": ["prs"], "set_at": "2026-10-23T12:00:00Z"}
+        )
+        self.wipe()
+        counts = overlay.import_(self.conn, doc)
+        self.assertEqual(counts["view_includes"], 2)
+        self.assertNotIn("away", overlay.load(self.conn).view_includes)
+
     def test_round_trip_leaves_tables_identical(self):
         populate(self.conn)
         before = dump(self.conn)
@@ -857,6 +877,13 @@ class RouteTests(server_harness.ServerCase):
             self.post("include", [("view", "now"), ("include", "")])[0], 200
         )
         self.assertEqual(self.overlay_rows()["view_includes"][0][:2], ("now", ""))
+
+    def test_a_retired_views_include_is_dropped_not_refused(self):
+        # Since you were away folded into Needs you: a tab open from before
+        # can still post its switches, and that is a no-op.
+        status, _ = self.post("include", [("view", "away"), ("include", "prs")])
+        self.assertEqual(status, 200)
+        self.assertEqual(self.overlay_rows()["view_includes"], [])
 
     def test_unknown_overlay_route_is_404(self):
         self.assertEqual(self.post("drop", [("key", "ABC-1")])[0], 404)

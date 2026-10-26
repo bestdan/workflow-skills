@@ -72,7 +72,6 @@ KIND_GROUPS = {
 VIEWS = (
     "needs",
     "now",
-    "away",
     "waiting-on-me",
     "waiting-on",
     "board",
@@ -80,6 +79,11 @@ VIEWS = (
     "epics",
     "health",
 )
+
+# Views that no longer exist. A `[views.<one>]` table, or a choice the overlay
+# remembered for one, is ignored rather than refused, so a config or overlay
+# written before the view went still loads. `away` folded into Needs you.
+RETIRED = ("away",)
 
 PARAM = "include"
 
@@ -176,6 +180,8 @@ def validate_config(views: Any) -> "str | None":
     if not isinstance(views, dict):
         return "views must be a table of [views.<view>] tables"
     for view, table in views.items():
+        if view in RETIRED:
+            continue
         if view not in VIEWS:
             return f"views.{view} names no view; valid views are {', '.join(VIEWS)}"
         if not isinstance(table, dict) or set(table) - {"include"}:
@@ -261,7 +267,9 @@ def toggle(inc: Include, group: str) -> frozenset[str]:
     return inc.groups - {group} if inc.has(group) else inc.groups | {group}
 
 
-HINT = "Click shows one group; shift-click adds or removes one."
+HINT = (
+    "Click shows one group (click it again for all); shift-click adds or removes one."
+)
 
 
 def switches(inc: Include, path: str, query: "dict[str, list[str]]") -> str:

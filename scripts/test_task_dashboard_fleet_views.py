@@ -2,12 +2,13 @@
 """Hermetic tests for scripts/task-dashboard/fleet_views.py.
 
 A fixture DB is built through the real writers (github_fleet.write and
-snapshot_adapter.ingest), then the Since you were away and Stale pages are
-rendered from it, directly and through the in-process server. No gh, git or
+snapshot_adapter.ingest), then the Stale page and Needs you's Finished group
+are rendered from it, directly and through the in-process server. No gh, git or
 network is touched: the server runs with a fake sync function. Needs Python
 3.11: run via scripts/test-task-dashboard-fleet-views.sh.
 """
 
+import http.client
 import re
 import sys
 import tempfile
@@ -25,6 +26,7 @@ import db  # type: ignore[import-not-found]  # noqa: E402
 import fleet_views  # type: ignore[import-not-found]  # noqa: E402
 import github_fleet  # type: ignore[import-not-found]  # noqa: E402
 import include  # type: ignore[import-not-found]  # noqa: E402
+import needs  # type: ignore[import-not-found]  # noqa: E402
 import overlay  # type: ignore[import-not-found]  # noqa: E402
 import snapshot_adapter  # type: ignore[import-not-found]  # noqa: E402
 import test_task_dashboard_server as server_harness  # noqa: E402
@@ -236,7 +238,9 @@ def fleet_cfg(**github):
 
 def section(page, name):
     m = re.search(
-        rf'<section class="lane" data-section="{name}"[^>]*>(.*?)</section>', page, re.S
+        rf'<section class="lane[^"]*" data-section="{name}"[^>]*>(.*?)</section>',
+        page,
+        re.S,
     )
     assert m, f"no section {name}"
     return m.group(1)
@@ -260,108 +264,78 @@ class FleetCase(unittest.TestCase):
         return found[0]
 
 
-class AwayTests(FleetCase):
-    def away(self, cfg=None):
-        return fleet_views.render_away(self.conn, cfg or fleet_cfg(), NOW)
+class FinishedTests(FleetCase):
+    """The sessions Since you were away listed as finished, now Needs you's
+    Finished group: the same query, after the same last visit."""
 
-    def test_a_merged_or_closed_pr_is_never_listed(self):
-        seed(self.conn)
-        page = self.away()
-        self.assertNotIn('data-section="landed"', page)
-        for n in (1135, 1101):  # merged and closed after the visit
-            self.assertNotIn(pr_url(n), page)
-        self.assertNotIn("closed without merging", page)
+    def finished(self, since=LAST_VISIT):
+        f = fleet_views.load(self.conn, fleet_cfg())
+        return [s.session_id for s in fleet_views.finished_sessions(f, since)]
 
-    def test_a_pr_or_issue_card_puts_its_title_first_and_its_ref_after(self):
-        seed(self.conn)
-        waiting = section(self.away(), "waiting")
-        self.assertIn(
-            f'<a class="title" href="{pr_url(1140)}">open 1140</a>'
-            f' <span class="ref">({REPO}#1140)</span>',
-            waiting,
-        )
-        self.assertIn(
-            '>needs a human</a> <span class="ref">(bestdan/workflow-skills#950)</span>',
-            waiting,
-        )
-        self.assertNotIn(f"{REPO}#1140</a>", waiting)
+    def page(self, cfg=None, inc=None):
+        return needs.render(self.conn, cfg or fleet_cfg(), NOW, inc)
 
-    def test_sessions_that_finished_and_what_newly_waits(self):
+    def test_only_a_turn_that_ended_without_asking_since_the_visit(self):
         seed(self.conn)
-        page = self.away()
-        self.assertEqual(keys(section(page, "finished")), ["s-done"])
-        waiting = keys(section(page, "waiting"))
-        self.assertIn("s-wait", waiting)
-        self.assertIn("s-asked", waiting)
-        self.assertIn("asked (heuristic)", section(page, "waiting"))
-        # A permission prompt after the question is what blocks it now.
-        self.assertIn("s-askperm", waiting)
-        card = re.search(
-            r'data-key="s-askperm".*?</div>', section(page, "waiting"), re.S
-        )
-        assert card is not None
-        self.assertNotIn("asked (heuristic)", card.group(0))
-        self.assertIn("permission_prompt", card.group(0))
-        self.assertIn(pr_url(1140), waiting)
-        self.assertIn(f"https://github.com/{REPO}/issues/950", waiting)
-        self.assertIn(DESIGN_URL, waiting)
-        self.assertNotIn(pr_url(900), waiting)
-        self.assertNotIn(OTHER_DESIGN, waiting)
+        # s-asked and s-askperm asked; s-wait's last event is a notification;
+        # s-before finished before the visit.
+        self.assertEqual(self.finished(), ["s-done"])
+        group = section(self.page(), "finished")
+        self.assertEqual(keys(group), ["s-done"])
+        self.assertIn("<h2>Finished since you looked (1)</h2>", group)
+        self.assertIn("on mini · turn ended 12h ago", group)
+        self.assertIn('<span class="title">dotfiles</span>', group)
 
-    def test_the_include_filter_reaches_an_asked_session(self):
+    def test_the_group_is_closed_and_marks_as_read_at_render_time(self):
         seed(self.conn)
-        cfg = fleet_cfg()
-        off = include.Include("away", frozenset({"tasks", "prs", "other"}), "url")
-        page = fleet_views.render_away(self.conn, cfg, NOW, off)
-        self.assertNotIn('data-key="s-asked"', page)
-        on = include.Include("away", include.ALL, "url")
-        page = fleet_views.render_away(self.conn, cfg, NOW, on)
-        self.assertIn("s-asked", keys(section(page, "waiting")))
+        group = section(self.page(), "finished")
+        self.assertIn('<details class="group">', group)
+        self.assertNotIn('<details class="group" open', group)
+        self.assertIn('data-ov="visit" data-at="2026-10-23T21:00:00Z"', group)
+        self.assertIn(f'data-last-visit="{overlay.load(self.conn).last_visit}"', group)
 
     def test_rendering_does_not_move_the_visit(self):
         seed(self.conn)
         before = overlay.load(self.conn).last_visit
-        page = self.away()
+        self.page()
         self.assertEqual(overlay.load(self.conn).last_visit, before)
-        self.assertIn('data-ov="visit" data-at="2026-10-23T21:00:00Z"', page)
-        self.assertIn(f'data-last-visit="{before}"', page)
 
     def test_no_visit_covers_the_closed_window(self):
         seed(self.conn, last_visit=None)
-        page = self.away()
-        self.assertIn("No visit recorded yet", page)
-        self.assertIn(f"covers the last {github_fleet.CLOSED_WINDOW_DAYS} days", page)
+        group = section(self.page(), "finished")
+        self.assertIn("No visit recorded yet", group)
+        self.assertIn(f"covers the last {github_fleet.CLOSED_WINDOW_DAYS} days", group)
         # s-before finished a turn two days ago, inside the window.
-        self.assertIn("s-before", keys(section(page, "finished")))
-        self.assertNotIn(pr_url(1100), page)  # merged inside it, still not listed
+        self.assertIn("s-before", keys(group))
 
-    def test_a_design_focus_puts_its_repo_first(self):
+    def test_the_group_is_hidden_when_nothing_finished(self):
+        seed(self.conn, last_visit=NOW)
+        self.assertNotIn('data-section="finished"', self.page())
+
+    def test_ignores_snoozes_and_the_include_filter_reach_it(self):
+        seed(self.conn)
+        off = include.Include("needs", frozenset({"tasks", "prs", "other"}), "url")
+        self.assertNotIn('data-section="finished"', self.page(inc=off))
+        overlay.snooze(self.conn, ("claude-hook", "s-done"), "2999-01-01")
+        page = self.page()
+        self.assertNotIn('data-section="finished"', page)
+        self.assertIn('data-snoozed="1"', page)
+        overlay.snooze(self.conn, ("claude-hook", "s-done"), "")
+        overlay.ignore(self.conn, ("claude-hook", "s-done"), NOW)
+        self.assertNotIn('data-key="s-done"', self.page())
+
+    def test_a_focus_leaves_out_an_unrelated_finished_session(self):
         seed(self.conn)
         overlay.set_focus(self.conn, ("github", DESIGN_URL), NOW)
-        page = self.away()
-        self.assertLess(
-            page.index('data-section="focus"'), page.index('data-section="finished"')
-        )
-        focus = keys(section(page, "focus"))
-        self.assertIn(pr_url(1140), focus)
-        self.assertNotIn(pr_url(1140), keys(section(page, "waiting")))
-        self.assertNotIn(pr_url(1135), page)
-        # s-done ran in dotfiles, outside the focus design's repo.
-        self.assertEqual(keys(section(page, "finished")), ["s-done"])
+        # s-done ran in dotfiles, outside the focused design's repo.
+        self.assertNotIn('data-section="finished"', self.page())
 
-    def test_a_non_design_focus_adds_no_section(self):
-        seed(self.conn)
-        overlay.set_focus(self.conn, ("github", pr_url(1140)), NOW)
-        self.assertNotIn('data-section="focus"', self.away())
-
-    def test_fleet_off_hides_leftover_github_rows(self):
+    def test_fleet_off_still_lists_finished_sessions(self):
         seed(self.conn)
         cfg = fleet_cfg()
         cfg["github"]["fleet"] = False
         cfg["ingest"]["machines"] = {"mini": "sha256:" + "0" * 64}
-        page = self.away(cfg)
-        self.assertIn("github.fleet is off", page)
-        self.assertNotIn("https://github.com/", page)
+        page = self.page(cfg)
         self.assertEqual(keys(section(page, "finished")), ["s-done"])
         stale = fleet_views.render_stale(self.conn, cfg, NOW)
         self.assertNotIn(pr_url(900), stale)
@@ -469,15 +443,19 @@ class TitleTests(FleetCase):
     def test_every_card_on_each_fleet_page_carries_a_title(self):
         seed(self.conn)
         pages = {
-            "away": fleet_views.render_away(self.conn, fleet_cfg(), NOW),
+            "finished": section(needs.render(self.conn, fleet_cfg(), NOW), "finished"),
             "stale": fleet_views.render_stale(self.conn, fleet_cfg(), NOW),
         }
         for name, page in pages.items():
             lanes = re.findall(
-                r'<section class="lane"[^>]*>(.*?)</section>', page, re.S
-            )
-            cards = [c for lane in lanes for c in lane.split('<div class="card"')[1:]]
-            self.assertGreater(len(cards), 3, name)
+                r'<section class="lane[^"]*"[^>]*>(.*?)</section>', page, re.S
+            ) or [page]
+            cards = [
+                c
+                for lane in lanes
+                for c in re.split(r'<(?:div|details) class="card', lane)[1:]
+            ]
+            self.assertGreater(len(cards), 0, name)
             for card in cards:
                 m = re.search(r'class="title"[^>]*>([^<]+)<', card)
                 assert m is not None, (name, card[:200])
@@ -570,16 +548,17 @@ class MachinesLineTests(FleetCase):
 
 
 class NavTests(unittest.TestCase):
-    def test_away_tab_only_on_a_fleet_instance(self):
+    def test_the_away_tab_is_gone(self):
         jira = config.deep_merge(config.DEFAULTS, server_harness.USER_CONFIG)
-        self.assertNotIn('href="/away"', views.nav("/now", jira))
-        self.assertIn('href="/away"', views.nav("/now", fleet_cfg()))
+        for cfg in (jira, fleet_cfg()):
+            self.assertNotIn('href="/away"', views.nav("/now", cfg))
+        self.assertIn('href="/needs"', views.nav("/now", fleet_cfg()))
         machines = config.deep_merge(jira, {"ingest": {"machines": {"mini": "x"}}})
         self.assertTrue(fleet_views.enabled(machines))
         self.assertFalse(fleet_views.enabled(jira))
 
 
-class AwayRouteTests(server_harness.ServerCase):
+class FleetRouteTests(server_harness.ServerCase):
     fleet = True
 
     def setUp(self):
@@ -596,33 +575,41 @@ class AwayRouteTests(server_harness.ServerCase):
         finally:
             conn.close()
 
-    def test_loading_the_page_does_not_move_last_visit(self):
+    def test_away_redirects_to_the_home_page(self):
+        for path in ("/away", "/away?include=prs"):
+            c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+            c.request("GET", path, headers={"Host": f"127.0.0.1:{self.port}"})
+            resp = c.getresponse()
+            resp.read()
+            c.close()
+            self.assertEqual(resp.status, 302, path)
+            self.assertEqual(resp.getheader("Location"), "/", path)
+
+    def test_loading_needs_you_does_not_move_last_visit(self):
         before = self.last_visit()
         for _ in range(2):
-            status, page = self.request("GET", "/away")
+            status, page = self.request("GET", "/")
             self.assertEqual(status, 200)
-            self.assertIn(pr_url(1140), page)
-            self.assertIn("aria-current=page>Since you were away", page)
+            self.assertIn('data-key="s-done"', page)
         self.assertEqual(self.last_visit(), before)
 
     def test_mark_as_read_records_the_render_time(self):
-        page = self.request("GET", "/away")[1]
-        m = re.search(r'data-ov="visit" data-at="([^"]+)"', page)
+        page = self.request("GET", "/")[1]
+        m = re.search(r'data-ov="visit" data-at="([^"]+)"', section(page, "finished"))
         assert m is not None
-        at = m.group(1)
         status, _ = self.request(
             "POST",
             "/overlay/visit",
             origin=f"http://127.0.0.1:{self.port}",
-            body=[("token", self.token), ("at", at)],
+            body=[("token", self.token), ("at", m.group(1))],
         )
         self.assertEqual(status, 200)
         self.assertEqual(self.last_visit(), "2026-10-23T21:00:00Z")
-        page = self.request("GET", "/away")[1]
-        self.assertNotIn(pr_url(1140), section(page, "waiting"))
+        page = self.request("GET", "/")[1]
+        self.assertNotIn('data-section="finished"', page)
 
     def test_header_shows_each_machines_age(self):
-        page = self.request("GET", "/away")[1]
+        page = self.request("GET", "/")[1]
         header = page.split("<header", 1)[1].split("</header>", 1)[0]
         self.assertIn('<span class="machines">', header)
         self.assertIn("mini 60m", header)

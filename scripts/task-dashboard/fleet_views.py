@@ -1,23 +1,15 @@
-"""The fleet view's Since you were away and Stale pages.
+"""The fleet view's Stale page, and the fleet rows Needs you reads.
 
-From dev_docs/designs/2026-10-23-fleet-view.md, "Views" items 2 and 3. Both
-read SQLite only: the `source = 'github'` rows github_fleet.py writes, the
+From dev_docs/designs/2026-10-23-fleet-view.md, "Views" items 2 and 3. It
+reads SQLite only: the `source = 'github'` rows github_fleet.py writes, the
 `source = 'machine:<host>'` rows and the `session_events` / `history_entries`
 deltas snapshot_adapter.py writes, and the overlay.
 
-SINCE YOU WERE AWAY (`/away`) lists what changed after the overlay's
-`last_visit`: sessions whose last turn ended, and what newly waits on me (a
-session's notification or a turn that ended in a question, labelled "asked
-(heuristic)", an awaiting PR, an issue needing a human, a newly proposed
-design). A turn that asked is never listed as finished. My merged or closed
-PRs are not listed: they would be noise here, and only Stale reads them, as
-evidence. Loading the page records nothing. Only its "Mark as read" button
-does, through overlay's `visit` action with the page's render time, so a phone
-preview does not swallow the digest and an item that arrives while the page is
-open is still new next time. With no visit recorded, the page covers the last
-github_fleet.CLOSED_WINDOW_DAYS days. When the overlay's focus item is a
-design, the items in that design's repo come first, in a section of their own:
-the weekend design block opens there.
+FINISHED SESSIONS (`finished_sessions`) are the sessions whose last turn ended
+after a time without asking. Needs you (needs.py) lists them, after the
+overlay's `last_visit`, in its "Finished since you looked" group. That group
+replaced the Since you were away page, whose `/away` route now redirects to
+`/`.
 
 STALE (`/stale`, under Jira's own stale lane on a fleet instance) closes by
 evidence, never by age. Each row names its evidence and the action that
@@ -59,7 +51,7 @@ import sessions
 import sync
 
 # Tabs that exist only on a fleet instance (views.nav hides them elsewhere).
-ONLY = {"/needs", "/away"}
+ONLY = {"/needs"}
 
 SESSION_IDLE_DAYS = 3  # a session with no event for this long is idle
 SESSION_FORGET_DAYS = 30  # and one quiet for this long has left the list
@@ -74,10 +66,6 @@ CSS = """
 .fleet .card .why { color:var(--fg); font-size:12px; }
 .fleet .card .act { font-size:12px; }
 .fleet .card .act code { white-space:pre-wrap; word-break:break-all; }
-.fleet .visit { display:flex; flex-wrap:wrap; gap:8px; align-items:center;
-  margin-bottom:12px; color:var(--muted); }
-.fleet .visit button { font:inherit; padding:4px 12px; border-radius:6px;
-  border:1px solid var(--line); background:var(--card); color:var(--fg); }
 header .machines { color:var(--muted); }
 header .machines .stale { color:var(--bad); font-weight:600; }
 """
@@ -304,148 +292,23 @@ def _session_where(s: Session) -> str:
     return " · ".join(_e(b) for b in bits)
 
 
-# --- Since you were away -----------------------------------------------------
+# --- finished sessions, for Needs you ----------------------------------------
 
 
-@dataclass
-class AwayItem:
-    section: str  # finished | waiting
-    at: datetime
-    repo: "str | None"  # bare repo name, for the design-focus section
-    html: str
-    kind: str  # the row's mirror kind, for the include filter
+def finished_sessions(f: Fleet, since: datetime) -> list[Session]:
+    """Sessions whose last turn ended after `since` without asking, latest
+    first: Needs you's "Finished since you looked" group.
 
-
-SECTIONS = (
-    ("finished", "Sessions that finished", "No session finished a turn."),
-    ("waiting", "Newly waiting on you", "Nothing new is waiting on you."),
-)
-
-
-def away_items(f: Fleet, since: datetime, now: datetime) -> list[AwayItem]:
-    out: list[AwayItem] = []
-    for s in f.sessions:
-        if s.last <= since or s.last_event not in ("Stop", "Notification"):
-            continue
-        if s.asked:
-            # A turn that ended in a question did not finish: it waits on me.
-            card = _card(
-                _link(None, f"session {s.session_id}"),
-                f"{_session_where(s)} · asked (heuristic) {_e(ago(s.last, now))}",
-                key=s.session_id,
-            )
-            out.append(AwayItem("waiting", s.last, s.repo, card, "session"))
-        elif s.last_event == "Stop":
-            card = _card(
-                _link(None, f"session {s.session_id}"),
-                f"{_session_where(s)} · turn ended {_e(ago(s.last, now))}",
-                key=s.session_id,
-            )
-            out.append(AwayItem("finished", s.last, s.repo, card, "session"))
-        else:
-            kind = s.notification or "notification"
-            card = _card(
-                _link(None, f"session {s.session_id}"),
-                f"{_session_where(s)} · {_e(kind)} {_e(ago(s.last, now))}",
-                key=s.session_id,
-            )
-            out.append(AwayItem("waiting", s.last, s.repo, card, "session"))
-    for kind, label in (("pr", "PR awaiting you"), ("issue", "issue needs a human")):
-        for row in f.github.get(kind, []):
-            at = score.parse_ts(row.get("created"))
-            if at is None or at <= since:
-                continue
-            card = _card(
-                _ref(row),
-                f"{label} · opened {_e(ago(at, now))}",
-                key=str(row.get("url") or ""),
-            )
-            out.append(AwayItem("waiting", at, _name(row.get("repo")), card, kind))
-    since_day = since.astimezone().date()
-    for d in f.github.get("design", []):
-        created = d.get("created")
-        try:
-            day = date.fromisoformat(str(created)[:10])
-        except ValueError:
-            continue
-        if day < since_day:
-            continue
-        card = _card(
-            f"{_link(d.get('url'), d.get('title') or d.get('path') or '')}",
-            f"design proposed {_e(str(created))} · {_e(d.get('repo') or '')}",
-            key=str(d.get("url") or ""),
-        )
-        at = score.local_day_start(day)
-        out.append(AwayItem("waiting", at, _name(d.get("repo")), card, "design"))
-    out.sort(key=lambda i: i.at, reverse=True)
-    return out
-
-
-def design_focus(conn: sqlite3.Connection, ov: overlay.Overlay) -> "dict | None":
-    """The overlay's focus item when it is a mirrored design, else None."""
-    if ov.focus is None:
-        return None
-    row = conn.execute(
-        "SELECT kind, raw_json FROM issues WHERE source = ? AND key = ?", ov.focus
-    ).fetchone()
-    if row is None or row[0] != "design":
-        return None
-    return _raw(row[1])
-
-
-def render_away(
-    conn: sqlite3.Connection,
-    cfg: dict[str, Any],
-    now: datetime,
-    inc: "include.Include | None" = None,
-) -> str:
-    ov = overlay.load(conn)
-    f = load(conn, cfg)
-    window = timedelta(days=github_fleet.CLOSED_WINDOW_DAYS)
-    last = score.parse_ts(ov.last_visit)
-    since = last or now - window
-    if last is None:
-        note = (
-            f"No visit recorded yet, so this covers the last"
-            f" {github_fleet.CLOSED_WINDOW_DAYS} days."
-        )
-    else:
-        note = f"Since your last visit, {ago(last, now)} ({ov.last_visit})."
-    parts = [
-        '<div class="visit">'
-        f'<span data-last-visit="{_e(ov.last_visit or "")}">{_e(note)}</span>'
-        f'<button type="button" data-ov="visit" data-at="{_stamp(now)}">'
-        "Mark as read</button></div>"
+    A turn that asked is not finished (it waits on me, and Needs you lists
+    it), and neither is a session whose last event is a notification.
+    """
+    out = [
+        s
+        for s in f.sessions
+        if s.last > since and s.last_event == "Stop" and not s.asked
     ]
-    if not sync.fleet_enabled(cfg):
-        parts.append(
-            '<p class="note">github.fleet is off, so no PRs, issues or designs'
-            " are shown here.</p>"
-        )
-    items = [i for i in away_items(f, since, now) if inc is None or inc.shows(i.kind)]
-    focus = design_focus(conn, ov)
-    if focus is not None:
-        repo = _name(focus.get("repo"))
-        mine = [i for i in items if i.repo == repo]
-        items = [i for i in items if i.repo != repo]
-        # The focused design is itself a `design` row, so it obeys the filter;
-        # the section and its repo's included items stay.
-        head = ""
-        if inc is None or inc.shows("design"):
-            head = _card(
-                _link(focus.get("url"), focus.get("title") or ""),
-                f"design focus · {_e(focus.get('repo') or '')}",
-                key=str(focus.get("url") or ""),
-            )
-        parts.append(
-            f'<section class="lane" data-section="focus" data-repo="{_e(repo or "")}">'
-            f"<h2>Design focus: {_e(focus.get('repo') or '')} ({len(mine)})</h2>"
-            f"{head}{''.join(i.html for i in mine)}</section>"
-        )
-    for name, title, empty in SECTIONS:
-        cards = [i.html for i in items if i.section == name]
-        parts.append(_section(name, title, cards, empty))
-    return f'<div class="fleet">{"".join(parts)}</div>'
+    out.sort(key=lambda s: s.last, reverse=True)
+    return out
 
 
 # --- Stale, with evidence ----------------------------------------------------

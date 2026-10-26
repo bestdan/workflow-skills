@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # test-task-dashboard-fleet-views.sh — hermetic tests for the fleet view's
-# Since you were away and Stale pages (scripts/task-dashboard/fleet_views.py):
-# what changed since the overlay's last visit, that loading the page records no
-# visit while "Mark as read" does, and the close-by-evidence lanes of Stale.
+# Stale page and the sessions Needs you lists as finished
+# (scripts/task-dashboard/fleet_views.py): what finished since the overlay's
+# last visit, that loading the page records no visit while "Mark as read"
+# does, that /away redirects, and the close-by-evidence lanes of Stale.
 #
 # Wraps scripts/test_task_dashboard_fleet_views.py (stdlib unittest). The
 # fixture DB is written through github_fleet.write and snapshot_adapter.ingest,

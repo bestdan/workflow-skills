@@ -25,6 +25,7 @@ import config  # type: ignore[import-not-found]  # noqa: E402
 import db  # type: ignore[import-not-found]  # noqa: E402
 import fleet_views  # type: ignore[import-not-found]  # noqa: E402
 import include  # type: ignore[import-not-found]  # noqa: E402
+import needs  # type: ignore[import-not-found]  # noqa: E402
 import overlay  # type: ignore[import-not-found]  # noqa: E402
 import server  # type: ignore[import-not-found]  # noqa: E402
 import sessions  # type: ignore[import-not-found]  # noqa: E402
@@ -47,7 +48,6 @@ VIEW_PATHS = (
     "/",
     "/needs",
     "/now",
-    "/away",
     "/waiting-on-me",
     "/waiting-on",
     "/board",
@@ -85,6 +85,7 @@ class GroupTests(unittest.TestCase):
         routes = {p.lstrip("/") for p in views.ROUTES}
         self.assertEqual(set(include.VIEWS), routes | {"board", "health"})
         self.assertEqual(len(include.VIEWS), len(set(include.VIEWS)))
+        self.assertFalse(set(include.RETIRED) & set(include.VIEWS))
 
     def test_parse(self):
         self.assertEqual(include.parse(["tasks,prs"]), {"tasks", "prs"})
@@ -146,6 +147,11 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaises(config.ConfigError, msg=text) as cm:
                 self.load(text)
             self.assertIn(message, str(cm.exception), text)
+
+    def test_a_retired_view_table_still_loads(self):
+        # Since you were away folded into Needs you; its config is a no-op.
+        cfg = self.load('[views.away]\ninclude = ["prs"]\n')
+        self.assertEqual(include.resolve("needs", {}, None, cfg).origin, "default")
 
 
 def switch_attrs(row):
@@ -219,6 +225,8 @@ class SwitchTests(unittest.TestCase):
         row = include.switches(inc("prs", view="now"), "/now", {})
         self.assertIn(include.HINT, row)
         self.assertIn("shift-click", include.HINT)
+        # A plain click on the only group shown brings every group back.
+        self.assertIn("click it again for all", include.HINT)
 
     def test_the_script_picks_the_shift_target_on_shift_click(self):
         # The suite has no JavaScript runtime, so this pins the one branch the
@@ -444,7 +452,7 @@ class FleetRouteTests(server_harness.ServerCase):
 
 
 class FleetViewTests(unittest.TestCase):
-    """Since you were away and fleet Stale, rendered directly."""
+    """Needs you's Finished group and fleet Stale, rendered directly."""
 
     def setUp(self):
         self._td = tempfile.TemporaryDirectory()
@@ -454,43 +462,20 @@ class FleetViewTests(unittest.TestCase):
         fleet_fx.seed(self.conn)
         self.cfg = fleet_fx.fleet_cfg()
 
-    def away(self, *groups):
-        return fleet_views.render_away(self.conn, self.cfg, fleet_fx.NOW, inc(*groups))
+    def finished(self, *groups):
+        page = needs.render(self.conn, self.cfg, fleet_fx.NOW, inc(*groups))
+        if 'data-section="finished"' not in page:
+            return []
+        return fleet_fx.keys(fleet_fx.section(page, "finished"))
 
     def stale(self, *groups):
         return fleet_views.render_stale(self.conn, self.cfg, fleet_fx.NOW, inc(*groups))
 
-    def test_away_keeps_only_the_included_groups(self):
-        issue = f"https://github.com/{fleet_fx.REPO}/issues/950"
-        every = fleet_fx.keys(
-            fleet_views.render_away(self.conn, self.cfg, fleet_fx.NOW)
-        )
-        for key in (fleet_fx.pr_url(1140), "s-done", issue, fleet_fx.DESIGN_URL):
-            self.assertIn(key, every)
-        self.assertNotIn(fleet_fx.pr_url(1135), every)  # closed PRs are not listed
-        prs = fleet_fx.keys(self.away("prs"))
-        self.assertEqual(prs, [fleet_fx.pr_url(1140)])
-        self.assertNotIn("s-done", prs)
-        self.assertNotIn(issue, prs)
-        self.assertEqual(
-            sorted(fleet_fx.keys(self.away("sessions"))),
-            sorted(["s-asked", "s-askperm", "s-done", "s-wait"]),
-        )
-        self.assertEqual(fleet_fx.keys(self.away("tasks")), [issue])
-        self.assertEqual(fleet_fx.keys(self.away("other")), [fleet_fx.DESIGN_URL])
-
-    def test_the_focused_design_card_shows_only_with_other(self):
-        overlay.set_focus(self.conn, ("github", fleet_fx.DESIGN_URL), fleet_fx.NOW)
-        for groups, shown in ((("prs",), False), (("other",), True), ((), False)):
-            focus = fleet_fx.section(self.away(*groups), "focus")
-            self.assertEqual(fleet_fx.DESIGN_URL in fleet_fx.keys(focus), shown, groups)
-        # The section stays, with its repo's included items.
-        focus = fleet_fx.section(self.away("prs"), "focus")
-        self.assertIn(fleet_fx.pr_url(1140), fleet_fx.keys(focus))
-        unfiltered = fleet_views.render_away(self.conn, self.cfg, fleet_fx.NOW)
-        self.assertIn(
-            fleet_fx.DESIGN_URL, fleet_fx.keys(fleet_fx.section(unfiltered, "focus"))
-        )
+    def test_the_finished_group_follows_the_sessions_switch(self):
+        self.assertEqual(self.finished(*include.GROUPS), ["s-done"])
+        self.assertEqual(self.finished("sessions"), ["s-done"])
+        for groups in (("prs",), ("tasks", "other"), ()):
+            self.assertEqual(self.finished(*groups), [], groups)
 
     def test_stale_says_switched_off_when_its_groups_are_off(self):
         page = self.stale()
