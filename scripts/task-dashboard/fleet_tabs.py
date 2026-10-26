@@ -64,6 +64,14 @@ PR_LANES = (
     ("ci", "CI failing", "No PR has failing CI."),
     ("drafts", "Drafts", "No drafts."),
 )
+# Short tab labels (lane_tabs.py) for the lanes whose title is long.
+PR_TABS = {
+    "ready": "Ready",
+    "waiting": "Waiting",
+    "others": "From others",
+    "review": "Review requested",
+}
+ISSUE_TABS = {"untriaged": "Untriaged"}
 # Lanes drawn only when they have rows.
 OPTIONAL_LANES = {"others", "review"}
 
@@ -254,7 +262,8 @@ def render_prs(
         if name in OPTIONAL_LANES and not rows:
             continue
         cards = [_pr_card(p, why, ov, now) for p, why in rows]
-        parts.append(views._lane(name, title, cards, empty, group, inc))
+        tab = PR_TABS.get(name)
+        parts.append(views._lane(name, title, cards, empty, group, inc, tab))
     if inc.has(group):
         parts.append(_snoozed_note(snoozed))
     return f'<div class="fleet">{"".join(parts)}</div>'
@@ -339,7 +348,8 @@ def render_issues(
             " a human; the rest are not mirrored.</p>"
         )
     for name, title, empty in ISSUE_LANES:
-        parts.append(views._lane(name, title, lanes[name], empty, group, inc))
+        tab = ISSUE_TABS.get(name)
+        parts.append(views._lane(name, title, lanes[name], empty, group, inc, tab))
     if inc.has(group):
         parts.append(_snoozed_note(snoozed))
     return f'<div class="fleet">{"".join(parts)}</div>'

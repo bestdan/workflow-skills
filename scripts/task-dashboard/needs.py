@@ -17,7 +17,7 @@ WHAT IT COLLECTS, each keyed by its overlay item `(source, key)`:
   "asked (heuristic)": the hook's test is a trailing "?"). Active within
   fleet_views.SESSION_IDLE_DAYS. A turn that ended without a question is not
   listed, nor is one the hook could not judge (`asked` null, or a format-1
-  hook): that is finished work, in the Finished group below. A session quiet for
+  hook): that is finished work, in the Finished lane below. A session quiet for
   longer is Stale's, and an empty spawn (never prompted) is Stale's too. A
   pending `AskUserQuestion` never reaches `Stop`, and the harness documents
   no notification for it, so it is not seen here. And, with `claude_remote`
@@ -44,8 +44,8 @@ ignored item is left out entirely; the page's Ignored list can undo it.
 
 APPROVALS. A session waiting on a harness permission prompt (`need_input` on
 a hook row) is a plain approval, and so is one whose brief ends in any short
-yes/no-shaped ask (approval_brief). Those go into one collapsed
-Approvals group, out of the main list. No session source carries a post-turn
+yes/no-shaped ask (approval_brief). Those go into the Approvals lane, a
+tab of its own, out of the main list. No session source carries a post-turn
 summary yet (`brief` is null on both), so today only permission prompts land
 there, and an `asked` session stays in the main list: without the question's
 text there is no telling a yes/no from a decision. A brief-carrying source
@@ -55,14 +55,14 @@ NEW. A card whose wait began after the overlay's `last_visit` carries a `new`
 badge, expanded, collapsed and approval cards alike; the order is unchanged.
 With no visit recorded, nothing is new.
 
-FINISHED SINCE YOU LOOKED. A collapsed group at the bottom lists the sessions
+FINISHED SINCE YOU LOOKED. The last lane, a tab of its own, lists the sessions
 whose last turn ended after `last_visit` without asking
 (fleet_views.finished_sessions), one line each; with no visit recorded it
 covers the last github_fleet.CLOSED_WINDOW_DAYS days. A turn that asked is in
-the main list instead. The group is hidden when it is empty. The include
+the main list instead. The lane, and so its tab, is left out when it is empty. The include
 filter, ignores and snoozes apply to it as to every other card.
 
-MARK AS READ, in that group, and "Mark all as read" under the Needs you
+MARK AS READ, in that lane, and "Mark all as read" under the Needs you
 heading, record a visit through overlay's `visit` action with the page's
 render time. Loading the page records nothing, so a phone preview does not
 swallow the digest, and an item that arrives while the page is open is still
@@ -96,8 +96,6 @@ CSS = """
 .needs .need.first { border-width:2px; }
 .needs .brief { white-space:pre-line; margin:6px 0; }
 .needs .wait { color:var(--fg); font-weight:600; }
-.needs .approvals details.group > summary h2,
-.needs .finished details.group > summary h2 { display:inline; }
 .needs .new { font-size:11px; font-weight:600; color:var(--accent);
   border:1px solid var(--accent); border-radius:999px; padding:0 6px; }
 .needs .visit { display:flex; flex-wrap:wrap; gap:8px; align-items:center;
@@ -409,7 +407,7 @@ def collapsed(n: Need, now: datetime, ov: overlay.Overlay) -> str:
 
 
 def finished_row(n: Need, now: datetime, ov: overlay.Overlay) -> str:
-    """One line in the Finished group: title or branch, host, the turn's end."""
+    """One line in the Finished lane: title or branch, host, the turn's end."""
     meta = f"{_e(n.where)} · turn ended {_e(fleet_views.ago(n.since, now))}"
     controls = overlay.card_controls(n.item, ov, now, reorder=False, pin=False)
     return (
@@ -441,7 +439,7 @@ def finished(
 
 
 def since_looked(ov: overlay.Overlay, now: datetime) -> datetime:
-    """Where the Finished group starts: the last visit, else the closed window."""
+    """Where the Finished lane starts: the last visit, else the closed window."""
     last = score.parse_ts(ov.last_visit)
     return last or now - timedelta(days=github_fleet.CLOSED_WINDOW_DAYS)
 
@@ -500,7 +498,7 @@ def render(
     for i, n in enumerate(p.main):
         cards.append(expanded(n, now, ov) if i == 0 else collapsed(n, now, ov))
     if p.approvals:
-        empty = "No decisions waiting; only the approvals below."
+        empty = "No decisions waiting; only the plain approvals in Approvals."
     elif inc is not None and not inc.everything:
         empty = "Nothing included by the filter needs you."
     else:
@@ -517,14 +515,14 @@ def render(
         f"<h2>Needs you ({len(p.main)})</h2>{mark_all}{body}</section>"
     )
     if p.approvals:
+        # A lane, so a tab of its own (lane_tabs.py), which opens first when
+        # nothing else waits: it is then the first lane with rows.
         rows = "".join(collapsed(n, now, ov) for n in p.approvals)
-        is_open = "" if p.main else " open"
         parts.append(
             '<section class="lane approvals" data-section="approvals">'
-            f'<details class="group"{is_open}>'
-            f"<summary><h2>Approvals ({len(p.approvals)})</h2></summary>"
+            f"<h2>Approvals ({len(p.approvals)})</h2>"
             '<p class="note">Plain approvals, batched: answer each in its'
-            f" session.</p>{rows}</details></section>"
+            f" session.</p>{rows}</section>"
         )
     if p.finished:
         parts.append(finished_group(p.finished, now, ov))
@@ -536,7 +534,7 @@ def render(
 
 
 def finished_group(done: list[Need], now: datetime, ov: overlay.Overlay) -> str:
-    """The closed "Finished since you looked (N)" group, with Mark as read."""
+    """The "Finished since you looked (N)" lane, with Mark as read."""
     last = score.parse_ts(ov.last_visit)
     if last is None:
         note = (
@@ -547,11 +545,10 @@ def finished_group(done: list[Need], now: datetime, ov: overlay.Overlay) -> str:
         note = f"Since your last visit, {fleet_views.ago(last, now)} ({ov.last_visit})."
     rows = "".join(finished_row(n, now, ov) for n in done)
     return (
-        '<section class="lane finished" data-section="finished">'
-        '<details class="group">'
-        f"<summary><h2>Finished since you looked ({len(done)})</h2></summary>"
+        '<section class="lane finished" data-section="finished" data-tab="Finished">'
+        f"<h2>Finished since you looked ({len(done)})</h2>"
         f'<div class="visit"><span data-last-visit="{_e(ov.last_visit or "")}">'
         f"{_e(note)}</span>"
         f'<button type="button" data-ov="visit" data-at="{fleet_views._stamp(now)}">'
-        f"Mark as read</button></div>{rows}</details></section>"
+        f"Mark as read</button></div>{rows}</section>"
     )

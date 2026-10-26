@@ -28,6 +28,7 @@ import db  # type: ignore[import-not-found]  # noqa: E402
 import gauges  # type: ignore[import-not-found]  # noqa: E402
 import github_fleet  # type: ignore[import-not-found]  # noqa: E402
 import include  # type: ignore[import-not-found]  # noqa: E402
+import lane_tabs  # type: ignore[import-not-found]  # noqa: E402
 import needs  # type: ignore[import-not-found]  # noqa: E402
 import overlay  # type: ignore[import-not-found]  # noqa: E402
 import sessions  # type: ignore[import-not-found]  # noqa: E402
@@ -398,17 +399,22 @@ class ApprovalTests(NeedsCase):
         page = self.page()
         self.assertEqual(keys(section(page, "approvals")), ["s-perm"])
         self.assertNotIn("s-perm", keys(section(page, "needs")))
-        self.assertIn('<details class="group">', section(page, "approvals"))
+        # A lane of its own, so a tab of its own, not a collapsed group.
+        self.assertIn("<h2>Approvals (1)</h2>", section(page, "approvals"))
+        self.assertNotIn('<details class="group"', page)
 
-    def test_approvals_open_when_nothing_else_waits(self):
+    def test_approvals_is_the_default_tab_when_nothing_else_waits(self):
         snapshot_adapter.ingest(self.conn, with_branch(SNAPSHOT), NOW)
         rows = [r for r in sessions.derive(self.conn, NOW) if r["key"] == "s-perm"]
         sessions.write(self.conn, rows, NOW)
         page = self.page()
-        self.assertIn('<details class="group" open>', section(page, "approvals"))
         needs_lane = section(page, "needs")
         self.assertNotIn("Nothing needs you.", needs_lane)
-        self.assertIn("only the approvals below", needs_lane)
+        self.assertIn("only the plain approvals in Approvals", needs_lane)
+        # Needs you is empty, so the first lane with rows opens: Approvals.
+        tabbed = lane_tabs.tabify(page, "needs", "/needs", {})
+        self.assertIn('aria-selected="true" data-lane="approvals"', tabbed)
+        self.assertIn('data-section="needs" hidden>', tabbed)
 
     def test_an_approval_shaped_brief(self):
         for text in (

@@ -44,6 +44,7 @@ from typing import Any
 
 import github_fleet
 import include
+import lane_tabs
 import overlay
 import score
 import sessions
@@ -280,10 +281,13 @@ def _card(head: str, meta: str = "", why: str = "", act: str = "", **data: str) 
     return f'<div class="card"{attrs}>{"".join(parts)}</div>'
 
 
-def _section(name: str, title: str, cards: list[str], empty: str) -> str:
+def _section(
+    name: str, title: str, cards: list[str], empty: str, tab: "str | None" = None
+) -> str:
+    """A lane; `tab` is a short label for its tab (lane_tabs.py)."""
     body = "".join(cards) if cards else f'<p class="empty">{_e(empty)}</p>'
     return (
-        f'<section class="lane" data-section="{_e(name)}">'
+        f'<section class="lane" data-section="{_e(name)}"{lane_tabs.tab_attr(tab)}>'
         f"<h2>{_e(title)} ({len(cards)})</h2>{body}</section>"
     )
 
@@ -609,9 +613,10 @@ def render_stale(
         note = include.off_note(*groups)
         return (
             '<div class="fleet">'
-            f'<section class="lane" data-section="close" data-filtered="all">'
-            f"<h2>Close: evidence found (0)</h2>{note}</section>"
-            f'<section class="lane" data-section="check" data-filtered="all">'
+            '<section class="lane" data-section="close" data-filtered="all"'
+            f' data-tab="Close"><h2>Close: evidence found (0)</h2>{note}</section>'
+            '<section class="lane" data-section="check" data-filtered="all"'
+            ' data-tab="Check">'
             f"<h2>Check: no evidence, so not a reason to close (0)</h2>{note}"
             "</section></div>"
         )
@@ -622,13 +627,18 @@ def render_stale(
     return (
         '<div class="fleet">'
         + _section(
-            "close", "Close: evidence found", close, "Nothing has evidence to close."
+            "close",
+            "Close: evidence found",
+            close,
+            "Nothing has evidence to close.",
+            "Close",
         )
         + _section(
             "check",
             "Check: no evidence, so not a reason to close",
             check,
             "Nothing old is waiting on a check.",
+            "Check",
         )
         + "</div>"
     )

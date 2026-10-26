@@ -37,6 +37,7 @@ import fleet_now
 import fleet_tabs
 import fleet_views
 import include
+import lane_tabs
 import needs
 import overlay
 import score
@@ -575,20 +576,25 @@ def _lane(
     empty: str,
     group: "str | None" = None,
     inc: "include.Include | None" = None,
+    tab: "str | None" = None,
 ) -> str:
     """A lane of cards; `title` is None where the tab already names it.
 
     A lane whose `group` the include filter switched off says so instead.
+    `tab` is a short label for its tab (lane_tabs.py), where the title is long.
     """
+    tab_attr = lane_tabs.tab_attr(tab)
     if group is not None and inc is not None and not inc.has(group):
         head = f"<h2>{_e(title)} (0)</h2>" if title else ""
         return (
-            f'<section class="lane" data-section="{name}" data-filtered="{group}">'
-            f"{head}{include.off_note(group)}</section>"
+            f'<section class="lane" data-section="{name}" data-filtered="{group}"'
+            f"{tab_attr}>{head}{include.off_note(group)}</section>"
         )
     body = "".join(cards) if cards else f'<p class="empty">{_e(empty)}</p>'
     head = f"<h2>{_e(title)} ({len(cards)})</h2>" if title else ""
-    return f'<section class="lane" data-section="{name}">{head}{body}</section>'
+    return (
+        f'<section class="lane" data-section="{name}"{tab_attr}>{head}{body}</section>'
+    )
 
 
 def _me_note(m: Mirror) -> str:
@@ -668,10 +674,17 @@ def render_waiting_on(m: Mirror, inc: include.Include) -> str:
 def render_stale(m: Mirror, inc: include.Include) -> str:
     """Jira's stale lane, then, on a fleet instance, the fleet's (fleet_views)."""
     cards = [issue_card(m, i, why) for i, why in stale(m)]
+    on_fleet = fleet_views.enabled(m.cfg)
+    # Beside the fleet's lanes it is a tab of its own, so it needs a title.
     jira = _lane(
-        "stale", None, cards, "Nothing in progress has gone quiet.", TICKETS, inc
+        "stale",
+        "Jira" if on_fleet else None,
+        cards,
+        "Nothing in progress has gone quiet.",
+        TICKETS,
+        inc,
     )
-    if not fleet_views.enabled(m.cfg):
+    if not on_fleet:
         return jira
     fleet = fleet_views.render_stale(m.conn, m.cfg, m.now, inc)
     return (jira if m.issues else "") + fleet
