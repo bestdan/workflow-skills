@@ -6,8 +6,8 @@ clicking it, opens a panel with one row per source:
 
 - each sync step the scheduled sync runs, from its `sync_runs` rows: the
   incremental/reconcile run (Jira, its GitHub PR step, or both, as configured),
-  and when enabled the GitHub fleet step, the session rows and the cloud
-  session list;
+  and when enabled the GitHub fleet step, the Workstreams step, the session
+  rows and the cloud session list;
 - each collector host in `machines`, from its last snapshot.
 
 A row shows its age (since its last success), its last outcome, and its next
@@ -17,9 +17,12 @@ interval, which the server can only expect, not schedule.
 
 A row is a WARNING when its last run failed, when a sync step's last success
 is older than STALE_INTERVALS sync intervals, or when a host's last snapshot is
-older than MACHINE_STALE_MINUTES. Any warning row turns the indicator into a
-warning. The failure alerts under the header (server._alert) still name the
-fix for a failed run.
+older than MACHINE_STALE_MINUTES. The Workstreams row also names what happened
+to Linear when `[linear] enabled = true`, and warns when that read did not
+succeed ("no key" included); with Linear off it says nothing about Linear and
+never warns for it. Any warning row turns the indicator into a warning. The
+failure alerts under the header (server._alert) still name the fix for a
+failed run.
 
 A host silent for longer than MACHINE_ASLEEP is ASLEEP: a laptop shut for the
 weekend, say. It stays in the panel, greyed, as "asleep since <time>", but it
@@ -92,6 +95,7 @@ def steps(cfg: dict[str, Any]) -> list[tuple[str, tuple[str, ...], str]]:
     ]
     if sync.fleet_enabled(cfg):
         out.append((sync.FLEET_KIND, (sync.FLEET_KIND,), "GitHub fleet"))
+        out.append((sync.WORKSTREAMS_KIND, (sync.WORKSTREAMS_KIND,), "Workstreams"))
     if sessions.enabled(cfg):
         out.append((sessions.RUN_KIND, (sessions.RUN_KIND,), "Sessions"))
     if cfg["claude_remote"]["enabled"]:
@@ -136,8 +140,24 @@ def _first_line(text: "str | None") -> str:
     return lines[0] if lines else ""
 
 
+def _linear(cfg: dict[str, Any], counts: "str | None") -> "tuple[str, bool]":
+    """The Workstreams run's Linear outcome (its `counts.linear`) as panel
+    text, and whether it warns. Nothing, and no warning, with Linear off:
+    then the step makes no Linear call, whatever an older run recorded."""
+    if not cfg["linear"]["enabled"]:
+        return "", False
+    try:
+        linear = (json.loads(counts or "{}") or {}).get("linear")
+    except (ValueError, TypeError, AttributeError):
+        linear = None
+    if not isinstance(linear, str):
+        return "", False  # a run that failed before reading Linear
+    return f"Linear: {linear}", linear not in ("ok", "off")
+
+
 def _step_source(
     conn: sqlite3.Connection,
+    cfg: dict[str, Any],
     sid: str,
     kinds: tuple[str, ...],
     label: str,
@@ -152,7 +172,7 @@ def _step_source(
         kinds,
     ).fetchone()
     last = conn.execute(
-        f"SELECT outcome, error FROM sync_runs WHERE finished_at IS NOT NULL"
+        f"SELECT outcome, error, counts FROM sync_runs WHERE finished_at IS NOT NULL"
         f" AND kind IN ({marks}) ORDER BY id DESC LIMIT 1",
         kinds,
     ).fetchone()
@@ -162,6 +182,14 @@ def _step_source(
     detail = OUTCOME_TEXT.get(outcome or "", outcome or "never run")
     if outcome not in (None, "ok") and _first_line(last[1]):
         detail += f": {_first_line(last[1])}"
+    linear, linear_warn = ("", False)
+    if sid == sync.WORKSTREAMS_KIND and last:
+        linear, linear_warn = _linear(cfg, last[2])
+    if linear:
+        detail += f"; {linear}"
+        # A Linear failure leaves the run ok, with Linear's reason as its error.
+        if linear_warn and outcome == "ok" and _first_line(last[1]):
+            detail += f": {_first_line(last[1])}"
     if state.get("running"):
         nxt = "running now" if state.get("step") in kinds else "after this run"
     else:
@@ -175,8 +203,9 @@ def _step_source(
     failed = outcome in ("failed", "auth_failed")
     stale = age is not None and age > STALE_INTERVALS * interval_s
     return Source(
-        sid, label, age, ok[0] if ok else None, outcome, detail, nxt, failed or stale
-    )
+        sid, label, age, ok[0] if ok else None, outcome, detail, nxt,
+        failed or stale or linear_warn,
+    )  # fmt: skip
 
 
 def _machine_sources(conn: sqlite3.Connection, now: datetime) -> list[Source]:
@@ -227,7 +256,7 @@ def sources(
 ) -> list[Source]:
     """Every source the indicator covers; `state` is Syncer.state()."""
     out = [
-        _step_source(conn, sid, kinds, label, now, interval_s, state)
+        _step_source(conn, cfg, sid, kinds, label, now, interval_s, state)
         for sid, kinds, label in steps(cfg)
     ]
     return out + _machine_sources(conn, now)

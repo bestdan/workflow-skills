@@ -119,12 +119,13 @@ def seed(conn, *, issues=ISSUES):
     conn.commit()
 
 
-def add_run(conn, outcome, finished, error=None, kind="incremental"):
+def add_run(conn, outcome, finished, error=None, kind="incremental", counts=None):
     conn.execute(
-        "INSERT INTO sync_runs (kind, started_at, finished_at, outcome, error)"
-        " VALUES (?, ?, ?, ?, ?)",
-        (kind, finished.strftime(TS), finished.strftime(TS), outcome, error),
-    )
+        "INSERT INTO sync_runs (kind, started_at, finished_at, outcome, error,"
+        " counts) VALUES (?, ?, ?, ?, ?, ?)",
+        (kind, finished.strftime(TS), finished.strftime(TS), outcome, error,
+         None if counts is None else json.dumps(counts)),
+    )  # fmt: skip
     conn.commit()
 
 
@@ -629,7 +630,7 @@ class FreshnessTest(HeaderCase):
         # An ingesting instance: the sessions step runs, and hosts report.
         self.httpd.app.cfg["ingest"]["machines"] = {"mini": "sha256:" + "0" * 64}
 
-    def seed(self, *, fleet_fails=False, mini_minutes=45):
+    def seed(self, *, fleet_fails=False, mini_minutes=45, linear="off"):
         now = self.now()
         conn = self.conn()
         add_run(conn, "ok", now - timedelta(minutes=3))
@@ -637,6 +638,9 @@ class FreshnessTest(HeaderCase):
         if fleet_fails:
             add_run(conn, "failed", now - timedelta(minutes=2), "GhError: 502",
                     kind="github_fleet")  # fmt: skip
+        # The scheduled sync runs the workstreams step right after the fleet's.
+        add_run(conn, "ok", now - timedelta(minutes=8), kind="workstreams",
+                counts={"workstreams": 2, "linear": linear})  # fmt: skip
         add_run(conn, "ok", now - timedelta(minutes=2), kind="sessions")
         add_machine(conn, "lindev", now - timedelta(minutes=2), 1)
         add_machine(conn, "mini", now - timedelta(minutes=mini_minutes))
@@ -648,14 +652,19 @@ class FreshnessTest(HeaderCase):
         rows = panel_rows(header)
         self.assertEqual(
             list(rows),
-            ["sync", "github_fleet", "sessions", "machine:lindev", "machine:mini"],
-        )
+            ["sync", "github_fleet", "workstreams", "sessions", "machine:lindev",
+             "machine:mini"],
+        )  # fmt: skip
         self.assertEqual(
             rows["sync"], ("Jira + GitHub sync", "3m", "ok", "in 5m", False)
         )
         self.assertEqual(
             rows["github_fleet"],
             ("GitHub fleet", "9m", "failed: GhError: 502", "in 5m", True),
+        )
+        # Linear is off by default, so the row says nothing about it.
+        self.assertEqual(
+            rows["workstreams"], ("Workstreams", "8m", "ok", "in 5m", False)
         )
         self.assertEqual(rows["sessions"], ("Sessions", "2m", "ok", "in 5m", False))
         self.assertEqual(
@@ -677,8 +686,9 @@ class FreshnessTest(HeaderCase):
         self.assertTrue(fresh["warn"])
         self.assertEqual(
             [s["id"] for s in fresh["sources"]],
-            ["sync", "github_fleet", "sessions", "machine:lindev", "machine:mini"],
-        )
+            ["sync", "github_fleet", "workstreams", "sessions", "machine:lindev",
+             "machine:mini"],
+        )  # fmt: skip
         by_id = {s["id"]: s for s in fresh["sources"]}
         self.assertEqual(by_id["github_fleet"]["outcome"], "failed")
 
@@ -711,6 +721,65 @@ class FreshnessTest(HeaderCase):
         self.assertEqual(
             [s["id"] for s in fresh["sources"] if s["asleep"]], ["machine:mini"]
         )
+
+    def test_a_failed_workstreams_run_warns(self):
+        self.seed(mini_minutes=6)
+        conn = self.conn()
+        add_run(conn, "failed", self.now() - timedelta(minutes=1), "GhError: 502",
+                kind="workstreams")  # fmt: skip
+        conn.close()
+        header = self.header()
+        self.assertEqual(
+            panel_rows(header)["workstreams"],
+            ("Workstreams", "8m", "failed: GhError: 502", "in 5m", True),
+        )
+        self.assertEqual(indicator(header), "\u26a0 Updated 9m ago")
+
+    def test_linear_on_shows_its_outcome_and_warns_with_no_key(self):
+        self.httpd.app.cfg["linear"]["enabled"] = True
+        self.seed(mini_minutes=6, linear="no key")
+        header = self.header()
+        self.assertEqual(
+            panel_rows(header)["workstreams"],
+            ("Workstreams", "8m", "ok; Linear: no key", "in 5m", True),
+        )
+        self.assertEqual(indicator(header), "\u26a0 Updated 9m ago")
+        fresh = json.loads(self.request("GET", "/status")[1])["freshness"]
+        self.assertTrue(fresh["warn"])
+
+    def test_linear_on_and_read_is_shown_without_a_warning(self):
+        self.httpd.app.cfg["linear"]["enabled"] = True
+        self.seed(mini_minutes=6, linear="ok")
+        header = self.header()
+        self.assertEqual(
+            panel_rows(header)["workstreams"],
+            ("Workstreams", "8m", "ok; Linear: ok", "in 5m", False),
+        )
+        self.assertEqual(indicator(header), "Updated 9m ago")
+
+    def test_a_failed_linear_read_warns_and_names_why(self):
+        self.httpd.app.cfg["linear"]["enabled"] = True
+        self.seed(mini_minutes=6)
+        conn = self.conn()
+        add_run(conn, "ok", self.now() - timedelta(minutes=1),
+                "LinearAuthError: 401", kind="workstreams",
+                counts={"linear": "auth failed"})  # fmt: skip
+        conn.close()
+        self.assertEqual(
+            panel_rows(self.header())["workstreams"],
+            ("Workstreams", "60s", "ok; Linear: auth failed: LinearAuthError: 401",
+             "in 5m", True),
+        )  # fmt: skip
+
+    def test_linear_off_never_warns_for_an_old_no_key(self):
+        # A run from when Linear was on, read after it was switched off.
+        self.seed(mini_minutes=6, linear="no key")
+        header = self.header()
+        self.assertEqual(
+            panel_rows(header)["workstreams"],
+            ("Workstreams", "8m", "ok", "in 5m", False),
+        )
+        self.assertEqual(indicator(header), "Updated 9m ago")
 
     def test_a_host_quiet_under_a_day_still_warns(self):
         self.seed(mini_minutes=23 * 60)
