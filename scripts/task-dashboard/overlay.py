@@ -997,6 +997,12 @@ JS = """
       post(act, it);
     }
     else if (act === 'visit') { post('visit', [['at', b.dataset.at]]); }
+    else if (act === 'mode') {
+      // Saved, then Now again without a one-off ?mode= in the URL.
+      post('mode', [['mode', b.dataset.mode]], function () {
+        location.assign(location.pathname);
+      });
+    }
     else if (act === 'snooze') {
       // On Now, Snooze snoozes at once and the card gives way to a line that
       // offers a reason and Undo; elsewhere it reloads as every control does.
@@ -1012,7 +1018,8 @@ JS = """
     else if (act === 'whynot') {
       var box = b.closest('.whynot');
       post('whynot', it.concat([['reason', b.dataset.reason],
-        ['text', box.querySelector('input').value]]),
+        ['text', box.querySelector('input').value],
+        ['mode', box.closest('.card').dataset.mode || '']]),
         function () { box.closest('.card').remove(); });
     }
     else if (act === 'undo') {

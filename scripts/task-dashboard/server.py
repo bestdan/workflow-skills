@@ -822,8 +822,12 @@ def write_overlay(
     runs once its Host, Origin and token checks pass, and what
     `dashboard.py overlay` runs directly. Raises overlay.OverlayError."""
 
+    # The mode the card was shown in (its data-mode), so the answer records
+    # the item as that mode ranked it.
+    mode = (form.get("mode") or [""])[0].strip() or None
+
     def snapshot(item: overlay.Item) -> "dict[str, Any] | None":
-        return fleet_now.snapshot_of(conn, cfg, item, now)
+        return fleet_now.snapshot_of(conn, cfg, item, now, mode)
 
     overlay.apply(conn, action, form, now, snapshot)
 
@@ -1094,7 +1098,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, app.status())
             else:
                 self._text(404, "not found\n")
-        except include.IncludeError as exc:
+        except (include.IncludeError, fleet_now.ModeError) as exc:
             self._text(400, f"{exc}\n")
 
     def do_POST(self) -> None:

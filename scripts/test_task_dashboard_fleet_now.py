@@ -10,6 +10,7 @@ Python 3.11: run via scripts/test-task-dashboard-fleet-now.sh.
 """
 
 import copy
+import json
 import re
 import sys
 import tempfile
@@ -692,6 +693,266 @@ class CloseOutTests(Case):
         self.assertEqual(by_item[pr_url(8)].category, "own_pr")
         self.assertEqual(fleet_now.tier_of("own_approved"), (2, "ready to merge"))
         self.assertEqual(fleet_now.tier_of("own_pr")[1], fleet_now.REST)
+
+
+# --- Little ------------------------------------------------------------------
+
+
+def sized(row, files, adds, dels, paths=None):
+    """`row` with a PR size, as github_gh.pr_size() reads one."""
+    paths = paths if paths is not None else [f"f{i}.py" for i in range(files)]
+    row["size"] = {"files": files, "additions": adds, "deletions": dels,
+                   "paths": paths}  # fmt: skip
+    return row
+
+
+LITTLE_ROWS = [
+    tabs_fx.others(22, "github-actions", bot=True),  # bot, green: bot PR
+    tabs_fx.others(21, "dependabot[bot]", ci="pending", bot=True),  # pending: out
+    sized(tabs_fx.awaiting(30), 1, 3, 1, ["README.md"]),  # docs-only
+    sized(tabs_fx.awaiting(31, misses=["co_review"]), 2, 14, 3),  # small
+    sized(tabs_fx.awaiting(32), 4, 10, 0),  # 4 files: not small
+    sized(tabs_fx.awaiting(33), 2, 40, 20),  # 60 lines: not small
+    sized(tabs_fx.awaiting(34, misses=["ci"], ci="failure"), 1, 1, 1),  # CI: out
+    tabs_fx.awaiting(35),  # no size: unknown is not little
+    tabs_fx.issue(40, "est:1", "status:2_ready", "prio:1"),
+    tabs_fx.issue(41, "est:1", "status:0_untriaged"),
+    tabs_fx.issue(42, "est:2", HUMAN, "status:1_needs_refinement"),
+    tabs_fx.issue(43, "est:1", "status:3_started"),  # started: out
+    tabs_fx.issue(44, "status:2_ready"),  # unsized: out
+    tabs_fx.issue(45, "est:3", "status:2_ready"),  # not small
+]
+
+# Smallest tier first, then prio, then the longer wait. PR 37 is only in the
+# `prs` table, opened 10-02; PR 31 was opened 10-12.
+EXPECTED_LITTLE = [
+    pr_url(22),  # bot PR
+    pr_url(30),  # docs-only PR
+    issue_url(40),  # est:1, prio:1
+    issue_url(41),  # est:1
+    pr_url(37),  # small PR, the longer wait
+    pr_url(31),
+    issue_url(42),  # est:2
+]
+
+
+def seed_little(conn):
+    tabs_fx.seed(conn, rows=LITTLE_ROWS, prs=[])
+    small = {"createdAt": "2026-10-02T00:00:00Z", "changedFiles": 1,
+             "additions": 2, "deletions": 2,
+             "files": {"nodes": [{"path": "a.py"}]}}  # fmt: skip
+    conn.executemany(
+        "INSERT INTO prs (url, repo, number, title, is_draft, review_decision,"
+        " ci_state, role, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+            (pr_url(36), tabs_fx.REPO, 36, "a draft", 1, None, "success", "author",
+             json.dumps(small)),  # a draft: out
+            (pr_url(37), tabs_fx.REPO, 37, "review me", 0, None, "success",
+             "reviewer", json.dumps(small)),
+        ],
+    )  # fmt: skip
+    conn.commit()
+
+
+class LittleTests(Case):
+    def setUp(self):
+        super().setUp()
+        seed_little(self.conn)
+
+    def little(self, inc=None):
+        ov = overlay.load(self.conn)
+        return fleet_now.build(self.conn, self.cfg, NOW, ov, inc, fleet_now.LITTLE)
+
+    def test_only_small_items_smallest_first(self):
+        page = self.little()
+        self.assertEqual([r.need.item[1] for r in page.shown], EXPECTED_LITTLE)
+        self.assertEqual(page.mode, fleet_now.LITTLE)
+        self.assertEqual(
+            [r.tier[1] for r in page.shown],
+            ["bot PR", "docs-only PR", "est:1 issue", "est:1 issue", "small PR",
+             "small PR", "est:2 issue"],
+        )  # fmt: skip
+
+    def test_why_lines_name_littles_terms(self):
+        why = {r.need.item[1]: fleet_now.why_line(r) for r in self.little().shown}
+        self.assertEqual(why[pr_url(22)], "little · bot PR from github-actions")
+        self.assertEqual(why[pr_url(30)], "little · docs-only PR, 1 file, +3/−1")
+        self.assertEqual(why[pr_url(31)], "little · PR, 2 files, +14/−3")
+        self.assertEqual(why[issue_url(40)], "little · est:1 issue · prio:1")
+        self.assertEqual(why[issue_url(42)], "little · est:2 issue")
+
+    def test_docs_only(self):
+        self.assertTrue(fleet_now.docs_only(["a.md", "docs/x.txt", "dev_docs/y.png"]))
+        self.assertFalse(fleet_now.docs_only(["a.md", "a.py"]))
+        self.assertFalse(fleet_now.docs_only([]))
+        self.assertFalse(fleet_now.docs_only(None))  # the list was cut short
+
+    def test_the_limit_and_n_more(self):
+        with mock.patch.object(fleet_now, "LIMIT", 3):
+            page = self.little()
+        self.assertEqual(len(page.shown), 3)
+        self.assertEqual(page.more_in_mode, len(EXPECTED_LITTLE) - 3)
+
+    def test_pins_snoozes_and_ignores_apply(self):
+        overlay.pin(self.conn, ("github", issue_url(42)), NOW)
+        overlay.snooze(self.conn, ("github", pr_url(22)), "2026-11-01")
+        overlay.ignore(self.conn, ("github", pr_url(30)), NOW)
+        page = self.little()
+        keys = [r.need.item[1] for r in page.shown]
+        self.assertEqual(keys[0], issue_url(42))
+        self.assertNotIn(pr_url(22), keys)
+        self.assertNotIn(pr_url(30), keys)
+        self.assertEqual(page.snoozed, 1)
+
+    def test_a_pinned_item_little_does_not_rank_shows_under_ship(self):
+        # In the review queue, so Ship ranks it; too big for Little.
+        overlay.pin(self.conn, ("github", pr_url(32)), NOW)
+        first = self.little().shown[0]
+        self.assertEqual(first.need.item[1], pr_url(32))
+        self.assertEqual(first.mode, fleet_now.SHIP)
+        self.assertTrue(fleet_now.why_line(first).startswith("ship: review queue"))
+
+    def test_the_include_filter_applies(self):
+        inc = include.resolve("now", {include.PARAM: ["tasks"]}, None, self.cfg)
+        kinds = {r.need.kind for r in self.little(inc).shown}
+        self.assertEqual(kinds, {"issue"})
+
+    def closed_row(self, since):
+        conn = self.conn
+        conn.execute(
+            "INSERT INTO issues (source, kind, key, summary, raw_json) VALUES"
+            " ('github', ?, ?, 'closed today', ?)",
+            (
+                github_fleet.CLOSED_TODAY,
+                github_fleet.CLOSED_TODAY,
+                json.dumps({"kind": github_fleet.CLOSED_TODAY, "since": since,
+                            "count": 5, "merged": 3, "closed": 2}),
+            ),
+        )  # fmt: skip
+        conn.commit()
+
+    def test_closed_today_reads_todays_count_only(self):
+        midnight = NOW.astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
+        self.closed_row(midnight.isoformat(timespec="seconds"))
+        self.assertEqual(self.little().closed_today, 5)
+        page = fleet_now.render(self.conn, self.cfg, NOW, mode=fleet_now.LITTLE)
+        self.assertIn('data-closed-today="5">closed today: 5</p>', page)
+        # Ship has no such header.
+        self.assertNotIn("closed today", fleet_now.render(self.conn, self.cfg, NOW))
+        later = NOW + timedelta(days=1)
+        self.assertIsNone(fleet_now.closed_today(self.conn, later))
+
+    def test_no_count_no_header(self):
+        self.assertIsNone(self.little().closed_today)
+        page = fleet_now.render(self.conn, self.cfg, NOW, mode=fleet_now.LITTLE)
+        self.assertNotIn("closed today", page)
+
+    def test_the_snapshot_records_the_mode(self):
+        item = ("github", pr_url(31))
+        snap = fleet_now.snapshot_of(self.conn, self.cfg, item, NOW, fleet_now.LITTLE)
+        self.assertEqual(snap["features"]["mode"], "little")
+        self.assertEqual(snap["features"]["category"], "small_pr")
+        # Not a Little item: looked up under Ship, as any mode falls back.
+        ship_item = ("github", pr_url(30))
+        snap = fleet_now.snapshot_of(self.conn, self.cfg, ship_item, NOW, "nap")
+        self.assertTrue(snap is None or snap["features"]["mode"] == "ship")
+
+    def test_shown_items_record_the_mode(self):
+        fleet_now.render(self.conn, self.cfg, NOW, mode=fleet_now.LITTLE)
+        modes = {
+            json.loads(f)["mode"]
+            for (f,) in self.conn.execute("SELECT features FROM now_shown")
+        }
+        self.assertEqual(modes, {"little"})
+
+
+class ModeTests(Case):
+    def setUp(self):
+        super().setUp()
+        seed_little(self.conn)
+
+    def test_no_saved_mode_is_ship_and_the_saved_one_is_read(self):
+        ov = overlay.load(self.conn)
+        self.assertEqual(fleet_now.resolve_mode(None, ov), fleet_now.SHIP)
+        overlay.set_now_mode(self.conn, "little", NOW)
+        ov = overlay.load(self.conn)
+        self.assertEqual(fleet_now.resolve_mode(None, ov), "little")
+        self.assertEqual(fleet_now.resolve_mode("ship", ov), "ship")
+        with self.assertRaises(fleet_now.ModeError):
+            fleet_now.resolve_mode("nap", ov)
+
+    def test_the_button_cycles_the_modes(self):
+        for mode in fleet_now.MODES:
+            page = fleet_now.render(self.conn, self.cfg, NOW, mode=mode)
+            nxt = fleet_now.next_mode(mode)
+            self.assertIn(f'<div class="modes" data-mode="{mode}">', page)
+            self.assertIn(f'data-ov="mode" data-mode="{nxt}"', page)
+            self.assertIn(f"Mode: {mode.title()}</button>", page)
+        self.assertEqual(fleet_now.next_mode(fleet_now.MODES[-1]), fleet_now.MODES[0])
+
+    def test_cards_carry_their_mode_for_the_why_not_answer(self):
+        page = fleet_now.render(self.conn, self.cfg, NOW, mode="little")
+        self.assertIn(f'data-key="{pr_url(31)}"', page)
+        self.assertNotIn('data-mode="ship">', page.split('data-section="next"')[1])
+        self.assertIn('data-mode="little">', page)
+
+    def test_the_agent_view_takes_a_mode(self):
+        import agent_view  # type: ignore[import-not-found]
+
+        doc = agent_view.build(self.conn, self.cfg, "now", NOW, mode="little")
+        self.assertEqual(doc["notes"]["mode"], "little")
+        self.assertIsNone(doc["notes"]["closed_today"])
+        keys = [i["key"] for i in doc["lanes"][0]["items"]]
+        self.assertEqual(keys, EXPECTED_LITTLE)
+        # No --mode reads the saved one, so an agent sees what the owner sees.
+        overlay.set_now_mode(self.conn, "little", NOW)
+        doc = agent_view.build(self.conn, self.cfg, "now", NOW)
+        self.assertEqual(doc["notes"]["mode"], "little")
+        with self.assertRaises(fleet_now.ModeError):
+            agent_view.build(self.conn, self.cfg, "now", NOW, mode="nap")
+
+
+class ModeRouteTests(server_harness.ServerCase):
+    fleet = True
+
+    def setUp(self):
+        super().setUp()
+        self.httpd.app.now = lambda: NOW
+        self.httpd.app.cfg["jira"]["enabled"] = False
+        conn = db.connect(self.db_path)
+        seed_little(conn)
+        conn.close()
+
+    def saved(self):
+        conn = db.connect(self.db_path)
+        try:
+            return overlay.saved_now_mode(conn)
+        finally:
+            conn.close()
+
+    def test_a_get_mode_is_a_one_off_view(self):
+        status, page = self.request("GET", "/now?mode=little")
+        self.assertEqual(status, 200)
+        self.assertIn('<div class="modes" data-mode="little">', page)
+        self.assertIsNone(self.saved())
+        status, page = self.request("GET", "/now")
+        self.assertIn('<div class="modes" data-mode="ship">', page)
+
+    def test_an_unknown_mode_is_a_400(self):
+        self.assertEqual(self.request("GET", "/now?mode=nap")[0], 400)
+
+    def test_the_button_post_saves_the_mode(self):
+        origin = f"http://127.0.0.1:{self.port}"
+        body = [("token", self.token), ("mode", "little")]
+        status, _ = self.request("POST", "/overlay/mode", origin=origin, body=body)
+        self.assertEqual(status, 200)
+        self.assertEqual(self.saved(), "little")
+        page = self.request("GET", "/")[1]
+        self.assertIn('<div class="modes" data-mode="little">', page)
+        bad = [("token", self.token), ("mode", "nap")]
+        status, _ = self.request("POST", "/overlay/mode", origin=origin, body=bad)
+        self.assertEqual(status, 400)
+        self.assertEqual(self.saved(), "little")
 
 
 if __name__ == "__main__":

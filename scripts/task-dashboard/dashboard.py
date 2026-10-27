@@ -39,6 +39,7 @@ import collector  # noqa: E402
 import collector_install  # noqa: E402
 import config  # noqa: E402
 import db  # noqa: E402
+import fleet_now  # noqa: E402
 import github_gh  # noqa: E402
 import health  # noqa: E402
 import include  # noqa: E402
@@ -170,6 +171,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="comma-separated groups, as the page's ?include= (default: the"
         " view's remembered or configured filter)",
     )
+    view_p.add_argument(
+        "--mode",
+        help="now only: the mode, as the page's ?mode= (default: the saved"
+        " mode, else ship)",
+    )
     _paths(view_p)
     refresh_p = sub.add_parser(
         "refresh",
@@ -201,6 +207,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("at", "visit: the render time, YYYY-MM-DDTHH:MM:SSZ"),
         ("view", "include: the view"),
         ("groups", "include: comma-separated groups (empty: none)"),
+        ("mode", "mode: the fleet Now's mode; whynot: the mode it was shown in"),
     ):
         ov_p.add_argument(f"--{name}", help=what)
     _paths(ov_p)
@@ -436,8 +443,10 @@ def cmd_view(args: argparse.Namespace) -> int:
     conn = db.connect(db_arg)
     try:
         inc = agent_view.resolve_include(conn, cfg, args.name, args.include)
-        doc = agent_view.build(conn, cfg, args.name, _now(), inc, args.all)
-    except (agent_view.ViewError, include.IncludeError) as exc:
+        doc = agent_view.build(
+            conn, cfg, args.name, _now(), inc, args.all, mode=args.mode
+        )
+    except (agent_view.ViewError, include.IncludeError, fleet_now.ModeError) as exc:
         print(f"task-dashboard: {exc}", file=sys.stderr)
         return 2
     finally:
@@ -528,7 +537,7 @@ def cmd_overlay(args: argparse.Namespace) -> int:
         form["source"] = [args.source]
     if args.key:
         form["key"] = list(args.key)
-    for name in ("until", "text", "tag", "reason", "at", "view"):
+    for name in ("until", "text", "tag", "reason", "at", "view", "mode"):
         value = getattr(args, name)
         if value is not None:
             form[name] = [value]

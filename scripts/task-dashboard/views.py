@@ -640,7 +640,8 @@ def render_now(m: Mirror, inc: include.Include) -> str:
     Jira Now; a Jira instance's Now alone."""
     if not fleet_views.enabled(m.cfg):
         return _me_note(m) + _render(jira_now_lane(m, None), _ic(m), inc)
-    fleet = fleet_now.render(m.conn, m.cfg, m.now, inc)
+    asked = (m.query.get("mode") or [""])[0].strip() or None
+    fleet = fleet_now.render(m.conn, m.cfg, m.now, inc, asked)
     if not sync.jira_enabled(m.cfg):
         return fleet
     return fleet + _me_note(m) + _render(jira_now_lane(m, "Jira"), _ic(m), inc)

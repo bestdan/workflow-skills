@@ -20,8 +20,14 @@ session and for anything else; when it is set, the action's `url` is that
 session's page. It carries `branch` too, and for a hook session
 `first_prompt` and `last_ask` (its transcript summary, needs.py) and `pr`,
 the open PR on its branch as {number, url, repo}; each is null when there is
-none. A Now item adds `tier` (its Ship tier, fleet_now.TIERS) and `checklist`,
-a close-out's steps with evidence as [{step, done}], empty for anything else.
+none. A Now item adds `tier` (its tier in the mode that ranked it:
+fleet_now.TIERS, or LITTLE_TIERS) and `checklist`, a close-out's steps with
+evidence as [{step, done}], empty for anything else.
+
+A fleet Now document's `notes` carry `mode`, the mode it was built in (the
+`--mode` asked for, else the saved one, else ship), and in Little
+`closed_today` (null when the fleet step has no count from today) and
+`more_in_mode`.
 """
 
 import json
@@ -339,14 +345,21 @@ def _needs(ctx: "Ctx") -> list[dict[str, Any]]:
 def _now(ctx: "Ctx") -> list[dict[str, Any]]:
     out = []
     if fleet_views.enabled(ctx.cfg):
-        page = fleet_now.build(ctx.conn, ctx.cfg, ctx.now, ctx.ov, ctx.inc)
+        mode = fleet_now.resolve_mode(ctx.mode, ctx.ov)
+        page = fleet_now.build(ctx.conn, ctx.cfg, ctx.now, ctx.ov, ctx.inc, mode)
         for lane in fleet_now.lanes(page, ctx.inc):
             out.append(
                 _lane(lane, ctx.inc, lambda r, lid: ranked_item(r, lid, ctx.now))
             )
-        ctx.notes.update(snoozed=page.snoozed, more_on_needs=page.more_on_needs)
+        ctx.notes.update(
+            mode=mode, snoozed=page.snoozed, more_on_needs=page.more_on_needs
+        )
+        if mode == fleet_now.LITTLE:
+            ctx.notes.update(
+                closed_today=page.closed_today, more_in_mode=page.more_in_mode
+            )
         if ctx.show_all:
-            every = fleet_now.candidates(ctx.conn, ctx.cfg, ctx.now)
+            every = fleet_now.mode_candidates(ctx.conn, ctx.cfg, ctx.now, mode)
             _hidden(out, [ranked_item(r, "next", ctx.now) for r in every], ctx.reason)
         if not sync.jira_enabled(ctx.cfg):
             return out
@@ -468,9 +481,11 @@ class Ctx:
         now: datetime,
         inc: include.Include,
         show_all: bool,
+        mode: "str | None" = None,
     ) -> None:
         self.conn, self.cfg, self.now, self.inc = conn, cfg, now, inc
         self.show_all = show_all
+        self.mode = mode
         self.ov = overlay.load(conn)
         self.reason = _reason(self.ov, inc, now)
         self.notes: dict[str, Any] = {}
@@ -533,14 +548,16 @@ def build(
     now: datetime,
     inc: "include.Include | None" = None,
     show_all: bool = False,
+    mode: "str | None" = None,
 ) -> dict[str, Any]:
-    """The view's document. Raises ViewError for a view the nav leaves out."""
+    """The view's document. Raises ViewError for a view the nav leaves out,
+    and fleet_now.ModeError for an unknown `mode`, which only Now reads."""
     if view not in available(cfg):
         raise ViewError(
             f"no view {view!r} on this instance; views: {', '.join(available(cfg))}"
         )
     inc = inc or include.everything(view)
-    ctx = Ctx(conn, cfg, now, inc, show_all)
+    ctx = Ctx(conn, cfg, now, inc, show_all, mode)
     lanes = BUILDERS[view](ctx)
     for lane in lanes:
         off = lane.pop("_off")
