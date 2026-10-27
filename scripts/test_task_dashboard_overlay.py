@@ -63,15 +63,17 @@ FOCUS_ROWS = [{"source": "jira", "item_key": "ABC-1", "set_at": "2026-10-23T12:0
 
 
 def legacy(doc, version):
-    """`doc` (a current export) as a version 2 to 5 file, with a focus row
+    """`doc` (a current export) as a version 2 to 6 file, with a focus row
     up to version 4."""
     old = {
         k: v
         for k, v in copy.deepcopy(doc).items()
-        if (version >= 4 or k != "view_includes") and k != "why_not"
+        if (version >= 4 or k != "view_includes")
+        and (version >= 6 or k != "why_not")
+        and k != "now_mode"
     }
     old["version"] = version
-    if version == 5:
+    if version >= 5:
         return old
     tables = overlay.V2_TABLES if version == 2 else overlay.V3_TABLES
     old["tables"] = {t: old["tables"].get(t, []) for t in tables}
@@ -116,6 +118,7 @@ def populate(conn):
     overlay.snooze(conn, ("github", url), "2026-10-30")
     overlay.why_not(conn, ("github", url), "wrong_priority", "later", WHY_SNAP, NOW)
     overlay.why_not(conn, ("github", url), "other", "", None, NOW)
+    overlay.set_now_mode(conn, "little", NOW)
 
 
 class OverlayCase(unittest.TestCase):
@@ -357,7 +360,10 @@ class ExportImportTests(OverlayCase):
         before = dump(self.conn)
         doc = json.loads(overlay.dumps(overlay.export(self.conn, NOW)))
         self.assertFalse(self.conn.in_transaction)  # the read snapshot is closed
-        self.assertEqual((doc["format"], doc["version"]), ("task-dashboard-overlay", 6))
+        self.assertEqual((doc["format"], doc["version"]), ("task-dashboard-overlay", 7))
+        self.assertEqual(
+            doc["now_mode"], {"mode": "little", "set_at": "2026-10-23T12:00:00Z"}
+        )
         self.assertEqual(
             [(a["reason"], a["text"], a["score"]) for a in doc["why_not"]],
             [("wrong_priority", "later", 10.3), ("other", None, None)],
@@ -392,6 +398,7 @@ class ExportImportTests(OverlayCase):
                 "ignores": 1,
                 "view_includes": 2,
                 "why_not": 2,
+                "now_mode": 1,
             },
         )
         self.assertEqual(
@@ -452,6 +459,25 @@ class ExportImportTests(OverlayCase):
         self.assertEqual(after["pins"], before["pins"])
         self.assertEqual(after["ignores"], before["ignores"])
 
+    def test_a_version_6_file_imports_with_no_mode_saved(self):
+        populate(self.conn)
+        doc = overlay.export(self.conn)
+        before = dump(self.conn)
+        counts = overlay.import_(self.conn, legacy(doc, 6))
+        after = dump(self.conn)
+        self.assertEqual(after["now_mode"], [])
+        self.assertEqual(counts["now_mode"], 0)
+        self.assertIsNone(overlay.load(self.conn).now_mode)  # Now reads Ship
+        for t in db.OVERLAY_TABLES + db.OVERLAY_VIEW_TABLES + db.OVERLAY_LOG_TABLES:
+            self.assertEqual(after[t], before[t], t)
+
+    def test_a_null_now_mode_imports_as_none_saved(self):
+        populate(self.conn)
+        doc = overlay.export(self.conn)
+        doc["now_mode"] = None
+        overlay.import_(self.conn, doc)
+        self.assertIsNone(overlay.saved_now_mode(self.conn))
+
     def test_a_version_5_file_still_imports_with_no_why_not_answers(self):
         populate(self.conn)
         doc = overlay.export(self.conn)
@@ -470,6 +496,7 @@ class ExportImportTests(OverlayCase):
         self.wipe()
         counts = overlay.import_(self.conn, legacy(doc, 4))
         before["why_not"] = []  # a version 4 file has none
+        before["now_mode"] = []
         self.assertEqual(dump(self.conn), before)
         self.assertNotIn("focus", counts)
         # Even rows the old schema refused (two focus items) are not read.
@@ -504,8 +531,15 @@ class ExportImportTests(OverlayCase):
         cases = {
             "not an object": [],
             "wrong format": bad(lambda d: d.update(format="other")),
-            "wrong version": bad(lambda d: d.update(version=7)),
-            "v5 with why_not": bad(lambda d: d.update(version=5)),
+            "wrong version": bad(lambda d: d.update(version=8)),
+            "v6 with now_mode": bad(lambda d: d.update(version=6)),
+            "missing now_mode": bad(lambda d: d.pop("now_mode")),
+            "now_mode unknown mode": bad(lambda d: d["now_mode"].update(mode="nap")),
+            "now_mode extra field": bad(lambda d: d["now_mode"].update(x=1)),
+            "now_mode bad stamp": bad(lambda d: d["now_mode"].update(set_at="today")),
+            "v5 with why_not": bad(
+                lambda d: (d.update(version=5), d.pop("now_mode"))
+            ),
             "missing why_not": bad(lambda d: d.pop("why_not")),
             "why_not not a list": bad(lambda d: d.update(why_not={})),
             "why_not unknown reason": bad(
@@ -836,6 +870,7 @@ class RouteTests(server_harness.ServerCase):
         "unignore": [("key", "ABC-1")],
         "include": [("view", "needs"), ("include", "prs,sessions")],
         "whynot": [("key", "ABC-1"), ("reason", "other")],
+        "mode": [("mode", "little")],
     }
 
     def test_routes_cover_every_action(self):

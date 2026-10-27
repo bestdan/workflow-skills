@@ -38,8 +38,8 @@ MIRROR_TABLES = (
     "workstreams",
     "workstream_members",
 )
-# Keyed by (source, item_key). `last_visit` is overlay state too, but one row
-# with no item key, so it is named apart.
+# Keyed by (source, item_key). `last_visit` and `now_mode` are overlay state
+# too, but one row each with no item key, so they are named apart.
 OVERLAY_TABLES = (
     "pins",
     "order",
@@ -48,7 +48,7 @@ OVERLAY_TABLES = (
     "kind_tags",
     "ignores",
 )
-OVERLAY_SINGLETONS = ("last_visit",)
+OVERLAY_SINGLETONS = ("last_visit", "now_mode")
 # Keyed by view name rather than by item: the remembered include filters.
 OVERLAY_VIEW_TABLES = ("view_includes",)
 # Append-only answers, many per item: Now's "why not now" (whynot.py).
@@ -423,6 +423,17 @@ CREATE TABLE workstream_members (
 CREATE INDEX workstream_members_item ON workstream_members (item_source, item_key);
 """
 
+# Version 11: `now_mode`, the fleet Now's mode (overlay.NOW_MODES) as its mode
+# button last saved it. One row; no row is Ship. Overlay state: export and
+# import carry it.
+_V11 = """
+CREATE TABLE now_mode (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    mode TEXT NOT NULL,
+    set_at TEXT
+);
+"""
+
 # Ordered, ascending, append-only: never edit a shipped entry.
 #
 # migrate() runs a script one statement at a time through _statements, which
@@ -444,6 +455,7 @@ MIGRATIONS: list[tuple[int, str]] = [
     (8, _V8),
     (9, _V9),
     (10, _V10),
+    (11, _V11),
 ]
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 
