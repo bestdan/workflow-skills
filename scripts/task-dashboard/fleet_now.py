@@ -29,6 +29,11 @@ score.FLEET_CATEGORIES category:
 An item already collected keeps its first category: a session that asked is
 `asked`, never a close-out.
 
+THE SOURCE SEAM (candidate.py). Each collector above, and each of Little's,
+is a source that returns candidate.Candidate rows: the item, its category,
+its why, the score terms it has data for, and its features. rank() reads
+those only, and every ordering and render below reads its Ranked.
+
 MODES (dev_docs/designs/2026-10-26-now-modes.md). The owner picks one with the
 button at the top, which cycles overlay.NOW_MODES and saves the pick in the
 overlay; `?mode=` shows one mode once and saves nothing. With none saved the
@@ -71,6 +76,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+import candidate
 import close_out
 import fleet_tabs
 import fleet_views
@@ -148,21 +154,42 @@ MISS_ACTS = {
 
 @dataclass
 class Ranked:
-    need: needs.Need
-    category: str
-    why: str  # what put it in its category
-    prio: "str | None" = None
+    """A candidate as the ranker placed it (rank)."""
+
+    candidate: "candidate.Candidate"
     # The title of a workstream the item is in (workstreams.membership), or
     # None. Not scored: recorded as a feature so `tune` can propose it.
     workstream: "str | None" = None
-    from_needs: bool = True  # Needs you lists it too
     total: float = 0.0
-    terms: list[score.Term] = field(default_factory=list)
-    # A close-out's steps that have evidence (close_out.Step); empty otherwise.
-    # Quoted: close_out -> workstreams -> views -> fleet_now is a cycle, so
-    # close_out is half-initialised when this class body runs.
-    checklist: "list[close_out.Step]" = field(default_factory=list)
-    mode: str = SHIP  # the mode whose collector found it
+    terms: list[score.Term] = field(default_factory=list)  # the scored terms
+
+    @property
+    def need(self) -> needs.Need:
+        return self.candidate.need
+
+    @property
+    def category(self) -> str:
+        return self.candidate.category
+
+    @property
+    def why(self) -> str:
+        return self.candidate.why
+
+    @property
+    def prio(self) -> "str | None":
+        return self.candidate.terms.get(candidate.PRIO)
+
+    @property
+    def from_needs(self) -> bool:
+        return self.candidate.from_needs
+
+    @property
+    def checklist(self) -> "list[close_out.Step]":
+        return self.candidate.checklist
+
+    @property
+    def mode(self) -> str:
+        return self.candidate.mode
 
     @property
     def tier(self) -> "tuple[int, str]":
@@ -207,6 +234,28 @@ def next_mode(mode: str) -> str:
 
 
 # --- collect -----------------------------------------------------------------
+# Each collector is a source: it returns candidate.Candidate rows, and rank()
+# reads nothing else.
+
+
+def _candidate(
+    need: needs.Need,
+    category: str,
+    why: str,
+    prio: "str | None" = None,
+    **kw: Any,
+) -> candidate.Candidate:
+    """A GitHub or session item as a candidate: its wait and `prio:` label
+    as score terms, and its row's features."""
+    terms = {candidate.SINCE: need.since, candidate.PRIO: prio}
+    return candidate.Candidate(
+        need,
+        category,
+        why,
+        terms={k: v for k, v in terms.items() if v is not None},
+        features=whynot.row_features(need, category),
+        **kw,
+    )
 
 
 def need_category(n: needs.Need) -> "tuple[str, str]":
@@ -253,7 +302,20 @@ def own_pr_category(p: dict[str, Any]) -> "tuple[str, str, str] | None":
     return None
 
 
-def _own_prs(conn: sqlite3.Connection, cfg: dict[str, Any]) -> list[Ranked]:
+def _needs_you(
+    conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime
+) -> list[candidate.Candidate]:
+    out = []
+    for n in needs.collect(conn, cfg, now):
+        category, why = need_category(n)
+        prio = score.prio_of((n.row or {}).get("labels")) if n.kind == "issue" else None
+        out.append(_candidate(n, category, why, prio, from_needs=True))
+    return out
+
+
+def _own_prs(
+    conn: sqlite3.Connection, cfg: dict[str, Any]
+) -> list[candidate.Candidate]:
     out = []
     for p in fleet_tabs.pull_requests(conn, cfg):
         found = own_pr_category(p)
@@ -274,11 +336,13 @@ def _own_prs(conn: sqlite3.Connection, cfg: dict[str, Any]) -> list[Ranked]:
             hint=hint,
             row=p,
         )
-        out.append(Ranked(need, category, why, from_needs=False))
+        out.append(_candidate(need, category, why))
     return out
 
 
-def _own_issues(conn: sqlite3.Connection, cfg: dict[str, Any]) -> list[Ranked]:
+def _own_issues(
+    conn: sqlite3.Connection, cfg: dict[str, Any]
+) -> list[candidate.Candidate]:
     if gauges.review_queue_rows(conn, sync.fleet_enabled(cfg)) is None:
         return []
     out = []
@@ -309,49 +373,68 @@ def _own_issues(conn: sqlite3.Connection, cfg: dict[str, Any]) -> list[Ranked]:
             row=row,
         )
         why = f"your issue, {status.split(':', 1)[1].split('_', 1)[1]}"
-        out.append(Ranked(need, category, why, score.prio_of(labels), from_needs=False))
+        out.append(_candidate(need, category, why, score.prio_of(labels)))
     return out
 
 
 def _close_outs(
     conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime
-) -> list[Ranked]:
+) -> list[candidate.Candidate]:
     return [
-        Ranked(c.need, close_out.CATEGORY, c.why, from_needs=False, checklist=c.steps)
+        _candidate(c.need, close_out.CATEGORY, c.why, checklist=c.steps)
         for c in close_out.collect(conn, cfg, now)
     ]
 
 
-def candidates(
+def ship_sources(
     conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime
+) -> list[candidate.Candidate]:
+    """Every candidate Ship ranks, Needs you's first."""
+    return (
+        _needs_you(conn, cfg, now)
+        + _own_prs(conn, cfg)
+        + _own_issues(conn, cfg)
+        + _close_outs(conn, cfg, now)
+    )
+
+
+def rank(
+    cands: list[candidate.Candidate],
+    conn: sqlite3.Connection,
+    cfg: dict[str, Any],
+    now: datetime,
 ) -> list[Ranked]:
-    """Everything Now ranks, scored, unordered and unfiltered."""
-    out = []
-    for n in needs.collect(conn, cfg, now):
-        category, why = need_category(n)
-        prio = score.prio_of((n.row or {}).get("labels")) if n.kind == "issue" else None
-        out.append(Ranked(n, category, why, prio))
-    seen = {r.need.item for r in out}
-    for r in _own_prs(conn, cfg) + _own_issues(conn, cfg) + _close_outs(conn, cfg, now):
-        if r.need.item not in seen:
-            seen.add(r.need.item)
-            out.append(r)
+    """The candidates, each once (an item keeps the first category it was
+    collected under), with its workstream; a Ship candidate scored."""
+    out, seen = [], set()
+    for c in cands:
+        if c.item not in seen:
+            seen.add(c.item)
+            out.append(Ranked(c))
     member_of = workstreams.membership(conn)
-    for r in out:
-        r.workstream = member_of.get(r.need.item)
     weights = cfg["score"]["fleet"]
     for r in out:
+        r.workstream = member_of.get(r.candidate.item)
+        if r.mode != SHIP:
+            continue
         r.total, r.terms = score.fleet_score(
             {
-                "category": r.category,
-                "why": r.why,
-                "prio": r.prio,
-                "since": r.need.since,
+                "category": r.candidate.category,
+                "why": r.candidate.why,
+                "prio": r.candidate.terms.get(candidate.PRIO),
+                "since": r.candidate.terms.get(candidate.SINCE),
             },
             now,
             weights,
         )
     return out
+
+
+def candidates(
+    conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime
+) -> list[Ranked]:
+    """Everything Ship ranks, scored, unordered and unfiltered."""
+    return rank(ship_sources(conn, cfg, now), conn, cfg, now)
 
 
 def docs_only(paths: "list[str] | None") -> bool:
@@ -398,7 +481,9 @@ _LITTLE_HINT = {
 }
 
 
-def _little_prs(conn: sqlite3.Connection, cfg: dict[str, Any]) -> list[Ranked]:
+def _little_prs(
+    conn: sqlite3.Connection, cfg: dict[str, Any]
+) -> list[candidate.Candidate]:
     out = []
     for p in fleet_tabs.pull_requests(conn, cfg):
         found = little_pr(p)
@@ -419,11 +504,13 @@ def _little_prs(conn: sqlite3.Connection, cfg: dict[str, Any]) -> list[Ranked]:
             hint=_LITTLE_HINT.get(role, _LITTLE_HINT["others"]),
             row={**(p.get("awaiting") or {}), **p},
         )
-        out.append(Ranked(need, category, why, from_needs=False, mode=LITTLE))
+        out.append(_candidate(need, category, why, mode=LITTLE))
     return out
 
 
-def _little_issues(conn: sqlite3.Connection, cfg: dict[str, Any]) -> list[Ranked]:
+def _little_issues(
+    conn: sqlite3.Connection, cfg: dict[str, Any]
+) -> list[candidate.Candidate]:
     if gauges.review_queue_rows(conn, sync.fleet_enabled(cfg)) is None:
         return []
     out = []
@@ -451,17 +538,22 @@ def _little_issues(conn: sqlite3.Connection, cfg: dict[str, Any]) -> list[Ranked
             row=row,
         )
         why = f"{est} issue"
-        out.append(Ranked(need, _EST[est], why, prio, from_needs=False, mode=LITTLE))
+        out.append(_candidate(need, _EST[est], why, prio, mode=LITTLE))
     return out
 
 
-def little_candidates(conn: sqlite3.Connection, cfg: dict[str, Any]) -> list[Ranked]:
+def little_sources(
+    conn: sqlite3.Connection, cfg: dict[str, Any]
+) -> list[candidate.Candidate]:
+    """Every candidate Little ranks."""
+    return _little_prs(conn, cfg) + _little_issues(conn, cfg)
+
+
+def little_candidates(
+    conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime
+) -> list[Ranked]:
     """Everything Little ranks, unordered and unfiltered."""
-    out = _little_prs(conn, cfg) + _little_issues(conn, cfg)
-    member_of = workstreams.membership(conn)
-    for r in out:
-        r.workstream = member_of.get(r.need.item)
-    return out
+    return rank(little_sources(conn, cfg), conn, cfg, now)
 
 
 def mode_candidates(
@@ -469,7 +561,7 @@ def mode_candidates(
 ) -> list[Ranked]:
     """What `mode` ranks, unordered and unfiltered."""
     if mode == LITTLE:
-        return little_candidates(conn, cfg)
+        return little_candidates(conn, cfg, now)
     return candidates(conn, cfg, now)
 
 
@@ -615,7 +707,7 @@ def _build_little(
     ov: overlay.Overlay,
     inc: "include.Include | None",
 ) -> Page:
-    little = little_candidates(conn, cfg)
+    little = little_candidates(conn, cfg, now)
     seen = {r.need.item for r in little}
     if ov.pinned_at:
         # Pins lead in every mode: a pinned item Little does not rank comes

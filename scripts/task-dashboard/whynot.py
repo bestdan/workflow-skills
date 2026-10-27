@@ -98,25 +98,20 @@ def _age(days: "float | None") -> "str | None":
     return "over 4w"
 
 
-def _own(r: Any, row: dict[str, Any]) -> bool:
-    if r.need.kind == "pr":
+def _own(kind: str, category: str, row: dict[str, Any]) -> bool:
+    if kind == "pr":
         return row.get("role") == "author"
-    return r.category in OWN_ISSUE_CATEGORIES
+    return category in OWN_ISSUE_CATEGORIES
 
 
-def features(r: Any, now: datetime) -> dict[str, Any]:
-    """The features of a fleet_now.Ranked, scored or not."""
-    n = r.need
-    row = n.row or {}
+def row_features(need: Any, category: str) -> dict[str, Any]:
+    """The features a source reads off an item's mirrored row (a needs.Need's
+    `row`): a candidate.Candidate's `features` for every source today."""
+    row = need.row or {}
     labels = [str(x) for x in row.get("labels") or []]
     author = row.get("author")
-    days = None
-    if n.since is not None:
-        days = max(0.0, (now - n.since).total_seconds() / 86400)
     return {
-        "kind": n.kind,
-        "category": r.category,
-        "repo": row.get("repo") or n.repo,
+        "repo": row.get("repo") or need.repo,
         "author": author,
         "bot": None
         if author is None
@@ -125,15 +120,29 @@ def features(r: Any, now: datetime) -> dict[str, Any]:
         "est": _label(labels, "est:"),
         "status": _label(labels, "status:"),
         "ci": row.get("ci_state"),
+        "own": "yes" if _own(need.kind, category, row) else "no",
+    }
+
+
+def features(r: Any, now: datetime) -> dict[str, Any]:
+    """The features of a fleet_now.Ranked, scored or not: what every item
+    has, and what its source supplied (candidate.Candidate.features)."""
+    n = r.need
+    days = None
+    if n.since is not None:
+        days = max(0.0, (now - n.since).total_seconds() / 86400)
+    return {
+        "kind": n.kind,
+        "category": r.category,
+        **r.candidate.features,
         "age": _age(days),
         "age_days": None if days is None else round(days, 1),
-        "own": "yes" if _own(r, row) else "no",
         # Whether workstream membership should move an item up Now is left
         # for tune to propose; nothing scores it yet.
-        "workstream": getattr(r, "workstream", None),
+        "workstream": r.workstream,
         # The Now mode that ranked it. Recorded for a per-mode tune; not in
         # FEATURES, so tune does not compare it yet.
-        "mode": getattr(r, "mode", "ship"),
+        "mode": r.mode,
     }
 
 

@@ -11,6 +11,7 @@ Python 3.11: run via scripts/test-task-dashboard-fleet-now.sh.
 
 import copy
 import json
+import os
 import re
 import sys
 import tempfile
@@ -35,6 +36,7 @@ import score  # type: ignore[import-not-found]  # noqa: E402
 import sessions  # type: ignore[import-not-found]  # noqa: E402
 import snapshot_adapter  # type: ignore[import-not-found]  # noqa: E402
 import views  # type: ignore[import-not-found]  # noqa: E402
+import whynot  # type: ignore[import-not-found]  # noqa: E402
 import workstreams  # type: ignore[import-not-found]  # noqa: E402
 import test_task_dashboard_fleet_tabs as tabs_fx  # noqa: E402
 import test_task_dashboard_needs as needs_fx  # noqa: E402
@@ -954,6 +956,71 @@ class ModeRouteTests(server_harness.ServerCase):
         status, _ = self.request("POST", "/overlay/mode", origin=origin, body=bad)
         self.assertEqual(status, 400)
         self.assertEqual(self.saved(), "little")
+
+
+# --- the source seam ---------------------------------------------------------
+
+# What Now showed over the fixtures below before its collectors moved behind
+# candidate.Candidate (#1228), recorded from main at 71f44039. Regenerate with
+# NOW_GOLDEN=write only for a change that means to alter what Now shows.
+GOLDEN = PKG / "fixtures" / "now" / "golden.json"
+
+
+def _ship_seed(conn):
+    seed(conn)
+    overlay.pin(conn, (GH, issue_url(13)), NOW)
+    overlay.snooze(conn, (GH, pr_url(20)), "2026-11-30")
+
+
+def _little_seed(conn):
+    seed_little(conn)
+    overlay.pin(conn, (GH, pr_url(21)), NOW)  # only Ship ranks it
+    overlay.snooze(conn, (GH, issue_url(41)), "2026-11-30")
+
+
+SCENARIOS = {"ship": _ship_seed, "close_out": co_seed, "little": _little_seed}
+
+
+class SeamEquivalenceTests(unittest.TestCase):
+    """Now renders the same items, order and why lines as it did before the
+    seam, in every mode, through the page, the agent view and the "why not
+    now" snapshot of every candidate."""
+
+    def observe(self, seed_fn):
+        import agent_view  # type: ignore[import-not-found]
+
+        out = {}
+        with tempfile.TemporaryDirectory() as td:
+            conn = db.connect(Path(td) / "d.db")
+            try:
+                seed_fn(conn)
+                cfg = fleet_cfg()
+                for mode in fleet_now.MODES:
+                    every = fleet_now.mode_candidates(conn, cfg, NOW, mode)
+                    out[mode] = {
+                        "page": fleet_now.render(conn, cfg, NOW, mode=mode),
+                        "agent": agent_view.build(conn, cfg, "now", NOW, mode=mode),
+                        "snapshots": sorted(
+                            ([*r.need.item, whynot.snapshot(r, NOW)] for r in every),
+                            key=lambda x: (x[0], x[1]),
+                        ),
+                    }
+            finally:
+                conn.close()
+        return json.loads(json.dumps(out, sort_keys=True, default=str))
+
+    def test_now_is_unchanged_by_the_seam(self):
+        seen = {name: self.observe(fn) for name, fn in SCENARIOS.items()}
+        if os.environ.get("NOW_GOLDEN") == "write":
+            GOLDEN.parent.mkdir(exist_ok=True)
+            GOLDEN.write_text(json.dumps(seen, indent=1, sort_keys=True) + "\n")
+        want = json.loads(GOLDEN.read_text())
+        self.maxDiff = None
+        for name in SCENARIOS:
+            for mode in fleet_now.MODES:
+                for part in ("page", "agent", "snapshots"):
+                    with self.subTest(scenario=name, mode=mode, part=part):
+                        self.assertEqual(seen[name][mode][part], want[name][mode][part])
 
 
 if __name__ == "__main__":
