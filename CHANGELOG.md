@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.145.0] - 2026-10-27
+
+### Features
+
+- Deep and Tidy Now modes [#1219] (#1235) (23560a1)
+
 ## [2.144.0] - 2026-10-27
 
 ### Features
