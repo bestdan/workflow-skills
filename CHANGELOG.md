@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.142.0] - 2026-10-27
+
+### Features
+
+- Ship mode with automatic close-outs [#1217] (#1221) (b8d50ec)
+
 ## [2.141.2] - 2026-10-26
 
 ### Fixes
