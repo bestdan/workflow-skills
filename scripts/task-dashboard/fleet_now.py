@@ -37,7 +37,8 @@ those only, and every ordering and render below reads its Ranked.
 MODES (dev_docs/designs/2026-10-26-now-modes.md). The owner picks one with the
 button at the top, which cycles overlay.NOW_MODES and saves the pick in the
 overlay; `?mode=` shows one mode once and saves nothing. With none saved the
-mode is Ship. Everything below this paragraph is Ship, except LITTLE.
+mode is Ship. Everything below this paragraph is Ship, except LITTLE, DEEP
+and TIDY.
 
 ORDER is Ship's (the design's "Ship"). Pinned items first, in the overlay's order
 (overlay.Overlay.pin_rank). Then the fixed TIERS, in order: a session that
@@ -61,11 +62,28 @@ smallest first, then `prio`, then the longer wait, with no score. The header
 reads "closed today: N" from the fleet step's `closed_today` row, and only
 when that row counts from today's local midnight.
 
+DEEP ranks the questions that need thinking, not doing (deep_sources): a
+proposed design (workstreams.mirrored_designs), an issue that blocks open
+issues (`blocks`, from GitHub's native dependencies), one at
+`status:1_needs_refinement`, and a `status:2_ready` one estimated at
+`est:DEEP_EST` or more. They go by the open issues each blocks, most first,
+then `prio`, then the larger estimate, then the longer wait, with no score.
+An item with no `blocks` evidence (a design, or an issue synced before the
+field) shows no blocks term and sorts as blocking none. DEEP_LIMIT are shown,
+pins aside: one to take up and two alternates.
+
+TIDY ranks the backlog that rots (tidy_sources): an issue labelled
+auto:human-review-needed, `status:0_untriaged` or `status:1_needs_refinement`,
+and my own PR open longer than fleet_views.OPEN_ITEM_DAYS, drafts and pending
+CI included. Strictly oldest first, with no score; age is the point. The
+action is to close it, supersede it, or decide it.
+
 SHARED BEHAVIOUR, as on every view and in every mode: pinned items lead,
 the include filter, ignores and snoozes apply, and a snoozed item is left out
-and counted. In Little a pinned item Ship ranks shows too, under its Ship why
-line. Below Ship's list, "N more on Needs you" counts the Needs you items the
-list did not reach; below Little's, "N more small items". A card's
+and counted. Outside Ship a pinned item Ship ranks shows too, under its Ship
+why line. Below Ship's list, "N more on Needs you" counts the Needs you items
+the list did not reach; below another mode's, MORE_IN_MODE counts its own
+items the list did not reach. A card's
 controls are the ordinary ones, except that Snooze first asks "why not
 now?" (whynot.py, which also notes each day's shown items as its base rate).
 """
@@ -73,7 +91,7 @@ now?" (whynot.py, which also notes each day's shown items as its base rate).
 import html
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 import candidate
@@ -109,13 +127,26 @@ TIERS = (
 REST = "the rest"
 
 MODES = overlay.NOW_MODES
-SHIP, LITTLE = "ship", "little"
+SHIP, LITTLE, DEEP, TIDY = "ship", "little", "deep", "tidy"
 # What each mode answers: the mode button's title, and the line beside it.
 QUESTIONS = {
     SHIP: "What is closest to done?",
     LITTLE: "What can I knock out fast?",
+    DEEP: "Which decision unblocks the most?",
+    TIDY: "What is rotting?",
 }
 assert set(QUESTIONS) == set(MODES)
+# Below a mode's list: "<N> <what>", the items it ranks that it did not show.
+MORE_IN_MODE = {LITTLE: "more small items", DEEP: "more to think about",
+                TIDY: "more to tidy"}  # fmt: skip
+# The list's empty line, per mode outside Ship.
+EMPTY = {LITTLE: "Nothing small is waiting", DEEP: "Nothing needs deciding",
+         TIDY: "Nothing is rotting"}  # fmt: skip
+
+# Deep: how many it shows, pins aside, and the estimate at which a ready
+# issue is big enough to be one.
+DEEP_LIMIT = 3
+DEEP_EST = 8
 
 # Little's small test, and its tiers, smallest first: (label, category).
 LITTLE_FILES = 3
@@ -195,6 +226,8 @@ class Ranked:
     def tier(self) -> "tuple[int, str]":
         if self.mode == LITTLE:
             return little_tier(self.category)
+        if self.mode in (DEEP, TIDY):
+            return 0, self.mode  # one tier: the mode's own order
         return tier_of(self.category)
 
 
@@ -243,11 +276,12 @@ def _candidate(
     category: str,
     why: str,
     prio: "str | None" = None,
+    more: "dict[str, Any] | None" = None,
     **kw: Any,
 ) -> candidate.Candidate:
-    """A GitHub or session item as a candidate: its wait and `prio:` label
-    as score terms, and its row's features."""
-    terms = {candidate.SINCE: need.since, candidate.PRIO: prio}
+    """A GitHub or session item as a candidate: its wait, its `prio:` label
+    and any `more` terms, and its row's features."""
+    terms = {candidate.SINCE: need.since, candidate.PRIO: prio, **(more or {})}
     return candidate.Candidate(
         need,
         category,
@@ -556,12 +590,170 @@ def little_candidates(
     return rank(little_sources(conn, cfg), conn, cfg, now)
 
 
+def est_of(labels: "list[str] | None") -> "int | None":
+    """N of the largest `est:N` label, or None for an unsized issue."""
+    sizes = [
+        int(lb[4:]) for lb in labels or [] if lb.startswith("est:") and lb[4:].isdigit()
+    ]
+    return max(sizes) if sizes else None
+
+
+def _issue_need(row: dict[str, Any], state: str, hint: str) -> needs.Need:
+    return needs.Need(
+        item=(github_fleet.SOURCE, str(row.get("key") or row.get("url"))),
+        kind="issue",
+        title=row.get("title") or "",
+        ref=f"{row.get('repo') or ''}#{row.get('number')}",
+        since=score.parse_ts(row.get("created")),
+        url=row.get("url"),
+        state=state,
+        repo=fleet_views._name(row.get("repo")),
+        number=row.get("number"),
+        hint=hint,
+        row=row,
+    )
+
+
+def _status(labels: list[str]) -> "str | None":
+    return next((lb for lb in labels if lb.startswith("status:")), None)
+
+
+def deep_category(row: dict[str, Any]) -> "tuple[str, str] | None":
+    """(category, why) for an issue Deep ranks, else None."""
+    labels = row.get("labels") or []
+    blocks = row.get("blocks")
+    est = est_of(labels)
+    if blocks:
+        return "blocker", f"blocks {blocks} open issue{'' if blocks == 1 else 's'}"
+    if "status:1_needs_refinement" in labels:
+        return "refinement", "needs refinement"
+    if est is not None and est >= DEEP_EST and "status:2_ready" in labels:
+        return "big", f"est:{est}, ready"
+    return None
+
+
+def _deep_issues(
+    conn: sqlite3.Connection, cfg: dict[str, Any]
+) -> list[candidate.Candidate]:
+    if gauges.review_queue_rows(conn, sync.fleet_enabled(cfg)) is None:
+        return []
+    out = []
+    for row in needs._rows(conn, github_fleet.SOURCE, "issue"):
+        found = deep_category(row)
+        if found is None:
+            continue
+        category, why = found
+        labels = row.get("labels") or []
+        need = _issue_need(
+            row,
+            _status(labels) or "no status",
+            "decide it, or split it with `/break-down-task`",
+        )
+        more = {candidate.BLOCKS: row.get("blocks"), candidate.SIZE: est_of(labels)}
+        out.append(
+            _candidate(need, category, why, score.prio_of(labels), more, mode=DEEP)
+        )
+    return out
+
+
+def _deep_designs(conn: sqlite3.Connection) -> list[candidate.Candidate]:
+    out = []
+    for d in workstreams.mirrored_designs(conn):
+        need = needs.Need(
+            item=(github_fleet.SOURCE, str(d.get("key") or d.get("url"))),
+            kind="design",
+            title=d.get("title") or "",
+            ref=d.get("path"),
+            since=score.parse_ts(d.get("created")),
+            url=d.get("url"),
+            state="design · proposed",
+            repo=fleet_views._name(d.get("repo")),
+            hint="accept it, change it, or drop it",
+            row=d,
+        )
+        out.append(_candidate(need, "design", "proposed design", mode=DEEP))
+    return out
+
+
+def deep_sources(
+    conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime
+) -> list[candidate.Candidate]:
+    """Every candidate Deep ranks."""
+    return _deep_designs(conn) + _deep_issues(conn, cfg)
+
+
+# Tidy's issue labels, first match wins: label -> (category, why).
+_TIDY_ISSUE = (
+    (github_fleet.HUMAN_LABEL, ("human_issue", github_fleet.HUMAN_LABEL)),
+    ("status:0_untriaged", ("untriaged", "untriaged")),
+    ("status:1_needs_refinement", ("refinement", "needs refinement")),
+)
+
+
+def _tidy_issues(
+    conn: sqlite3.Connection, cfg: dict[str, Any]
+) -> list[candidate.Candidate]:
+    if gauges.review_queue_rows(conn, sync.fleet_enabled(cfg)) is None:
+        return []
+    out = []
+    for row in needs._rows(conn, github_fleet.SOURCE, "issue"):
+        labels = row.get("labels") or []
+        found = next((cw for lb, cw in _TIDY_ISSUE if lb in labels), None)
+        if found is None:
+            continue
+        category, why = found
+        need = _issue_need(
+            row, _status(labels) or "no status", "close it, supersede it, or decide it"
+        )
+        out.append(_candidate(need, category, why, score.prio_of(labels), mode=TIDY))
+    return out
+
+
+def _tidy_prs(
+    conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime
+) -> list[candidate.Candidate]:
+    old = now - timedelta(days=fleet_views.OPEN_ITEM_DAYS)
+    out = []
+    for p in fleet_tabs.pull_requests(conn, cfg):
+        created = score.parse_ts(p.get("created"))
+        if p.get("role") != "author" or created is None or created > old:
+            continue
+        draft = "draft, " if p.get("is_draft") else ""
+        need = needs.Need(
+            item=(github_fleet.SOURCE, str(p["url"])),
+            kind="pr",
+            title=p.get("title") or "",
+            ref=f"{p.get('repo') or ''}#{p.get('number')}",
+            since=created,
+            url=p.get("url"),
+            state=f"your PR · {draft}CI {p.get('ci_state') or 'unknown'}",
+            repo=fleet_views._name(p.get("repo")),
+            number=p.get("number"),
+            hint="merge it, close it, or say what it waits on",
+            row={**(p.get("awaiting") or {}), **p},
+        )
+        why = f"your PR, open over {fleet_views.OPEN_ITEM_DAYS}d"
+        out.append(_candidate(need, "stale_pr", why, mode=TIDY))
+    return out
+
+
+def tidy_sources(
+    conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime
+) -> list[candidate.Candidate]:
+    """Every candidate Tidy ranks."""
+    return _tidy_issues(conn, cfg) + _tidy_prs(conn, cfg, now)
+
+
 def mode_candidates(
     conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime, mode: str
 ) -> list[Ranked]:
     """What `mode` ranks, unordered and unfiltered."""
     if mode == LITTLE:
         return little_candidates(conn, cfg, now)
+    if mode == DEEP:
+        return rank(deep_sources(conn, cfg, now), conn, cfg, now)
+    if mode == TIDY:
+        return rank(tidy_sources(conn, cfg, now), conn, cfg, now)
     return candidates(conn, cfg, now)
 
 
@@ -623,22 +815,48 @@ def cap_close_outs(
     return out, dropped
 
 
-def little_order(ranked: list[Ranked], ov: overlay.Overlay) -> list[Ranked]:
-    """Pinned first in the overlay's order, then Little's tiers; within a
-    tier the more urgent `prio`, then the longer wait."""
+def _pins_then(ranked: list[Ranked], ov: overlay.Overlay, key: Any) -> list[Ranked]:
+    """Pinned first in the overlay's order, then the rest by `key`."""
     pinned = sorted(
         (r for r in ranked if ov.is_pinned(r.need.item)),
         key=lambda r: ov.pin_rank(r.need.item),
     )
-    rest = sorted(
-        (r for r in ranked if not ov.is_pinned(r.need.item)),
-        key=lambda r: (
-            r.tier[0],
-            -score.PRIO_LEVEL.get(r.prio or "", -1),
-            *_wait_key(r),
-        ),
-    )
+    rest = sorted((r for r in ranked if not ov.is_pinned(r.need.item)), key=key)
     return pinned + rest
+
+
+def _prio_key(r: Ranked) -> int:
+    return -score.PRIO_LEVEL.get(r.prio or "", -1)
+
+
+def little_order(ranked: list[Ranked], ov: overlay.Overlay) -> list[Ranked]:
+    """Pinned first in the overlay's order, then Little's tiers; within a
+    tier the more urgent `prio`, then the longer wait."""
+    return _pins_then(ranked, ov, lambda r: (r.tier[0], _prio_key(r), *_wait_key(r)))
+
+
+def deep_order(ranked: list[Ranked], ov: overlay.Overlay) -> list[Ranked]:
+    """Pinned first in the overlay's order, then the most open issues
+    blocked, the more urgent `prio`, the larger estimate, the longer wait."""
+
+    def key(r: Ranked) -> tuple:
+        terms = r.candidate.terms
+        return (
+            -(terms.get(candidate.BLOCKS) or 0),
+            _prio_key(r),
+            -(terms.get(candidate.SIZE) or 0),
+            *_wait_key(r),
+        )
+
+    return _pins_then(ranked, ov, key)
+
+
+def tidy_order(ranked: list[Ranked], ov: overlay.Overlay) -> list[Ranked]:
+    """Pinned first in the overlay's order, then strictly oldest first."""
+    return _pins_then(ranked, ov, _wait_key)
+
+
+MODE_ORDER = {LITTLE: little_order, DEEP: deep_order, TIDY: tidy_order}
 
 
 def closed_today(conn: sqlite3.Connection, now: datetime) -> "int | None":
@@ -663,7 +881,7 @@ class Page:
     snoozed: int
     more_close_outs: int = 0  # close-outs past CLOSE_OUT_CAP
     mode: str = SHIP
-    more_in_mode: int = 0  # Little: its items the list did not reach
+    more_in_mode: int = 0  # outside Ship: its items the list did not reach
     closed_today: "int | None" = None  # Little's header figure
 
 
@@ -690,8 +908,8 @@ def build(
     inc: "include.Include | None" = None,
     mode: str = SHIP,
 ) -> Page:
-    if mode == LITTLE:
-        return _build_little(conn, cfg, now, ov, inc)
+    if mode != SHIP:
+        return _build_mode(conn, cfg, now, ov, inc, mode)
     ranked, snoozed = _visible(candidates(conn, cfg, now), ov, now, inc)
     ranked, more_close_outs = cap_close_outs(order(ranked, ov), ov)
     pins = sum(ov.is_pinned(r.need.item) for r in ranked)
@@ -700,32 +918,35 @@ def build(
     return Page(shown, more, snoozed, more_close_outs)
 
 
-def _build_little(
+def _build_mode(
     conn: sqlite3.Connection,
     cfg: dict[str, Any],
     now: datetime,
     ov: overlay.Overlay,
     inc: "include.Include | None",
+    mode: str,
 ) -> Page:
-    little = little_candidates(conn, cfg, now)
-    seen = {r.need.item for r in little}
+    """A mode other than Ship: its own collector's items, in its own order."""
+    own = mode_candidates(conn, cfg, now, mode)
+    seen = {r.need.item for r in own}
     if ov.pinned_at:
-        # Pins lead in every mode: a pinned item Little does not rank comes
-        # from Ship, with its Ship why line.
-        little += [
+        # Pins lead in every mode: a pinned item this mode does not rank
+        # comes from Ship, with its Ship why line.
+        own += [
             r
             for r in candidates(conn, cfg, now)
             if ov.is_pinned(r.need.item) and r.need.item not in seen
         ]
-    ranked, snoozed = _visible(little, ov, now, inc)
-    ranked = little_order(ranked, ov)
+    ranked, snoozed = _visible(own, ov, now, inc)
+    ranked = MODE_ORDER[mode](ranked, ov)
     pins = sum(ov.is_pinned(r.need.item) for r in ranked)
-    shown = ranked[: max(LIMIT, pins)]
+    # Deep's limit counts only the unpinned; the others' counts pins too.
+    shown = ranked[: pins + DEEP_LIMIT if mode == DEEP else max(LIMIT, pins)]
     return Page(
         shown, 0, snoozed,
-        mode=LITTLE,
+        mode=mode,
         more_in_mode=len(ranked) - len(shown),
-        closed_today=closed_today(conn, now),
+        closed_today=closed_today(conn, now) if mode == LITTLE else None,
     )  # fmt: skip
 
 
@@ -738,10 +959,11 @@ def _fmt(value: float) -> str:
 
 def why_line(r: Ranked) -> str:
     """`ship: ready to merge · score 10.3: quick_win +10 (bot PR …) · age +0.3
-    (waiting 2d)`: the tier, then the terms with a value, as text. A Little
-    item has no score: `little · PR, 2 files, +14/−3 · prio:1`."""
-    if r.mode == LITTLE:
-        return " · ".join(["little", r.why] + ([r.prio] if r.prio else []))
+    (waiting 2d)`: the tier, then the terms with a value, as text. Another
+    mode's item has no score, only its mode, why and `prio`: `little · PR, 2
+    files, +14/−3 · prio:1`, `deep · blocks 4 open issues · prio:1`."""
+    if r.mode != SHIP:
+        return " · ".join([r.mode, r.why] + ([r.prio] if r.prio else []))
     bits = [f"{name} {_fmt(value)} ({why})" for name, value, why in r.terms if value]
     total = f"{r.total:g}".replace("-", "−")
     head = f"ship: {r.tier[1]} · score {total}"
@@ -784,8 +1006,8 @@ def card(r: Ranked, now: datetime, ov: overlay.Overlay) -> str:
 def lanes(p: Page, inc: "include.Include | None" = None) -> list[view_model.Lane]:
     """The page's one lane, Next."""
     filtered = inc is not None and not inc.everything
-    if p.mode == LITTLE:
-        empty = "Nothing small is waiting" + (" in the filter." if filtered else ".")
+    if p.mode != SHIP:
+        empty = EMPTY[p.mode] + (" in the filter." if filtered else ".")
     elif filtered:
         empty = "Nothing included by the filter is waiting."
     else:
@@ -844,7 +1066,7 @@ def render(
     if p.more_in_mode:
         parts.append(
             f'<p class="more" data-more-in-mode="{p.more_in_mode}">'
-            f"{p.more_in_mode} more small items.</p>"
+            f"{p.more_in_mode} {MORE_IN_MODE[p.mode]}.</p>"
         )
     if p.more_close_outs:
         parts.append(

@@ -82,7 +82,7 @@ WHY_NOT_COLUMNS = (
 
 # The fleet Now's modes (fleet_now.py), in the order its button cycles them.
 # The first is the default: what Now shows with no saved mode.
-NOW_MODES = ("ship", "little")
+NOW_MODES = ("ship", "little", "deep", "tidy")
 
 ACTIONS = (
     "pin", "unpin", "order", "snooze", "note", "tag", "visit", "ignore",

@@ -958,6 +958,158 @@ class ModeRouteTests(server_harness.ServerCase):
         self.assertEqual(self.saved(), "little")
 
 
+# --- Deep and Tidy -----------------------------------------------------------
+
+
+def blocking(row, n):
+    """`row` as the fleet step mirrors it, blocking `n` open issues (None: a
+    row synced before the field)."""
+    row["blocks"] = n
+    return row
+
+
+DESIGN_URL = f"https://github.com/{tabs_fx.REPO}/blob/main/dev_docs/designs/x.md"
+DESIGN = {"kind": "design", "key": DESIGN_URL, "url": DESIGN_URL,
+          "repo": tabs_fx.REPO, "path": "dev_docs/designs/x.md",
+          "title": "X design", "status": "proposed", "created": "2026-10-01",
+          "refs": []}  # fmt: skip
+
+DEEP_ROWS = [
+    blocking(tabs_fx.issue(50, "status:2_ready", "prio:2"), 4),
+    blocking(tabs_fx.issue(51, "prio:0"), 1),
+    blocking(tabs_fx.issue(52, "status:1_needs_refinement", "prio:1"), None),
+    blocking(tabs_fx.issue(53, "est:8", "status:2_ready"), 0),
+    blocking(tabs_fx.issue(54, "est:13", "status:2_ready", "prio:1"), 0),
+    blocking(tabs_fx.issue(55, "est:5", "status:2_ready"), 0),  # too small
+    blocking(tabs_fx.issue(56, "status:2_ready"), 0),  # unsized, blocks none
+    blocking(tabs_fx.issue(57, "est:8", "status:1_needs_refinement"), 0),
+    blocking(tabs_fx.issue(58, "est:8", "status:3_started"), 0),  # started
+    DESIGN,
+]
+
+# Most blocked first, then prio, then the larger estimate, then the wait. 52
+# has no blocks evidence and sorts as blocking none; 53 and 57 tie on size and
+# age and go by key; the design has no prio and no size.
+EXPECTED_DEEP = [
+    issue_url(50),  # blocks 4
+    issue_url(51),  # blocks 1
+    issue_url(54),  # prio:1, est:13
+    issue_url(52),  # prio:1, unsized
+    issue_url(53),
+    issue_url(57),
+    DESIGN_URL,
+]
+
+
+class DeepTests(Case):
+    def setUp(self):
+        super().setUp()
+        tabs_fx.seed(self.conn, rows=DEEP_ROWS, prs=[])
+
+    def every(self):
+        ov = overlay.load(self.conn)
+        return [
+            r.need.item[1]
+            for r in fleet_now.deep_order(
+                fleet_now.mode_candidates(self.conn, self.cfg, NOW, "deep"), ov
+            )
+        ]
+
+    def test_deep_orders_by_blocks_then_prio_then_size(self):
+        self.assertEqual(self.every(), EXPECTED_DEEP)
+
+    def test_three_are_shown_and_a_pin_does_not_count(self):
+        page = fleet_now.build(self.conn, self.cfg, NOW, overlay.load(self.conn),
+                               mode="deep")  # fmt: skip
+        self.assertEqual([r.need.item[1] for r in page.shown], EXPECTED_DEEP[:3])
+        self.assertEqual(page.more_in_mode, 4)
+        overlay.pin(self.conn, (GH, DESIGN_URL), NOW)
+        page = fleet_now.build(self.conn, self.cfg, NOW, overlay.load(self.conn),
+                               mode="deep")  # fmt: skip
+        self.assertEqual(
+            [r.need.item[1] for r in page.shown], [DESIGN_URL] + EXPECTED_DEEP[:3]
+        )
+
+    def test_why_lines_name_the_mode_and_its_evidence(self):
+        text = fleet_now.render(self.conn, self.cfg, NOW, mode="deep")
+        self.assertIn("deep · blocks 4 open issues · prio:2", text)
+        self.assertIn('data-tier="deep"', text)
+        self.assertIn('data-more-in-mode="4">4 more to think about.', text)
+        by = {r.need.item[1]: r for r in
+              fleet_now.mode_candidates(self.conn, self.cfg, NOW, "deep")}  # fmt: skip
+        self.assertEqual(fleet_now.why_line(by[issue_url(51)]),
+                         "deep · blocks 1 open issue · prio:0")  # fmt: skip
+        self.assertEqual(fleet_now.why_line(by[issue_url(54)]),
+                         "deep · est:13, ready · prio:1")  # fmt: skip
+        self.assertEqual(fleet_now.why_line(by[DESIGN_URL]), "deep · proposed design")
+        self.assertEqual(by[DESIGN_URL].need.kind, "design")
+
+    def test_issues_wait_for_a_fleet_run_and_designs_do_not(self):
+        conn = db.connect(Path(self._td.name) / "e.db")
+        self.addCleanup(conn.close)
+        tabs_fx.seed(conn, rows=DEEP_ROWS, prs=[], fleet_ran=False)
+        keys = [r.need.item[1]
+                for r in fleet_now.mode_candidates(conn, self.cfg, NOW, "deep")]  # fmt: skip
+        self.assertEqual(keys, [DESIGN_URL])
+
+
+# Tidy over the main fixture: the human-review issues, the untriaged one, and
+# my own PRs, all past fleet_views.OPEN_ITEM_DAYS, drafts and pending CI
+# included. PRs 5 and 6 are only in `prs` (opened 10-01); 1-4 carry their
+# awaiting rows' dates, 10-02 to 10-05.
+EXPECTED_TIDY = [
+    issue_url(14),  # untriaged, opened 09-01
+    pr_url(5),  # a draft
+    pr_url(6),
+    pr_url(1),
+    pr_url(2),
+    pr_url(3),  # CI pending
+    pr_url(4),
+    issue_url(10),  # human_issue
+    issue_url(16),  # human_issue
+]
+
+
+class TidyTests(Case):
+    def setUp(self):
+        super().setUp()
+        rows = copy.deepcopy(ROWS)
+        for row in rows:
+            if row.get("number") == 14 and row["kind"] == "issue":
+                row["created"] = "2026-09-01T00:00:00Z"
+        seed(self.conn, rows=rows, with_sessions=False)
+
+    def test_tidy_is_strictly_oldest_first(self):
+        page = fleet_now.build(self.conn, self.cfg, NOW, overlay.load(self.conn),
+                               mode="tidy")  # fmt: skip
+        self.assertEqual([r.need.item[1] for r in page.shown], EXPECTED_TIDY)
+        self.assertEqual(page.more_in_mode, 0)
+        cats = {r.need.item[1]: r.category for r in page.shown}
+        self.assertEqual(cats[issue_url(14)], "untriaged")
+        self.assertEqual(cats[issue_url(10)], "human_issue")
+        self.assertEqual(cats[pr_url(5)], "stale_pr")
+
+    def test_a_pr_inside_the_window_is_not_stale(self):
+        late = NOW - timedelta(days=3)
+        self.conn.execute(
+            "UPDATE prs SET raw_json = ? WHERE number = 5",
+            (json.dumps({"createdAt": late.strftime("%Y-%m-%dT%H:%M:%SZ")}),),
+        )
+        self.conn.commit()
+        keys = [r.need.item[1]
+                for r in fleet_now.mode_candidates(self.conn, self.cfg, NOW, "tidy")]  # fmt: skip
+        self.assertNotIn(pr_url(5), keys)
+        self.assertIn(pr_url(6), keys)
+
+    def test_the_card_says_what_to_do(self):
+        text = fleet_now.render(self.conn, self.cfg, NOW, mode="tidy")
+        card = needs_fx.card(text, issue_url(14))
+        self.assertIn("tidy · untriaged", card)
+        self.assertIn("close it, supersede it, or decide it", card)
+        self.assertIn("Mode: Tidy", text)
+        self.assertIn('data-ov="mode" data-mode="ship"', text)  # Tidy wraps
+
+
 # --- the source seam ---------------------------------------------------------
 
 # Golden output of Now over the fixtures below. Regenerate with

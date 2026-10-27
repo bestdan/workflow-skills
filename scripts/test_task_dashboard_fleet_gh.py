@@ -639,6 +639,20 @@ class OpenIssuesTests(unittest.TestCase):
             'is:issue is:open archived:false -label:"auto:human-review-needed" org:bestdan',
         )
 
+    def test_blocks_counts_the_open_dependents_and_none_without_the_field(self):
+        blocker = issue_node(1)
+        blocker["blocking"] = {
+            "nodes": [{"state": "OPEN"}, {"state": "CLOSED"}, {"state": "OPEN"}]
+        }
+        blocks_none = issue_node(2)
+        blocks_none["blocking"] = {"nodes": []}
+        rows, _ = fleet.open_issues(
+            ["bestdan"], self.runner([], [blocker, blocks_none, issue_node(3)])
+        )
+        got = {r["number"]: r["blocks"] for r in rows}
+        # No `blocking` field is no evidence, not zero.
+        self.assertEqual(got, {1: 2, 2: 0, 3: None})
+
     def test_a_cap_met_exactly_on_the_last_page_is_not_truncation(self):
         rest = [issue_node(n) for n in range(1, 5)]
         rows, truncated = fleet.open_issues(["bestdan"], self.runner([], rest), cap=4)

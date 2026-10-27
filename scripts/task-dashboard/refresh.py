@@ -62,6 +62,7 @@ query($owner: String!, $name: String!, $number: Int!) {
         url number title state createdAt updatedAt
         labels(first: 20) { nodes { name } }
         milestone { number title }
+        blocking(first: 50) { nodes { state } }
       }
       ... on PullRequest {
         url number title body state isDraft reviewDecision

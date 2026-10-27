@@ -17,6 +17,8 @@ from typing import Any
 # for is left out, never set to a stand-in value.
 PRIO = "prio"  # a `prio:N` label, as score.prio_of returns it
 SINCE = "since"  # when the wait began (datetime): the `age` term
+BLOCKS = "blocks"  # how many open issues it blocks (Deep)
+SIZE = "size"  # its `est:N` estimate, N (Deep)
 
 
 @dataclass

@@ -198,9 +198,10 @@ Each item carries its `source`, `key`, `kind`, `lane`, `title`, `url`, `host`
 and `path`, its `evidence` and `risks`, and its `action` as
 `{"review": ..., "command": [...]}`; a Now item adds its `tier` and, for
 a close-out, its `checklist` of steps ticked from evidence. On a fleet
-instance, Now is built in a mode: `--mode ship|little` picks one, and without
+instance, Now is built in a mode: `--mode ship|little|deep|tidy` picks one, and without
 it the mode the owner last saved with Now's mode button is used (ship when
-none is), so you see what they see; `notes.mode` names it, and in Little
+none is), so you see what they see; `notes.mode` names it, outside Ship
+`notes.more_in_mode` counts what the list left out, and in Little
 `notes.closed_today` is the day's count. `freshness` says when each sync last
 succeeded and when each host last snapshotted. Without `--json` it prints one
 line per item.

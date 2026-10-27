@@ -21,13 +21,13 @@ session's page. It carries `branch` too, and for a hook session
 `first_prompt` and `last_ask` (its transcript summary, needs.py) and `pr`,
 the open PR on its branch as {number, url, repo}; each is null when there is
 none. A Now item adds `tier` (its tier in the mode that ranked it:
-fleet_now.TIERS, or LITTLE_TIERS) and `checklist`, a close-out's steps with
-evidence as [{step, done}], empty for anything else.
+fleet_now.TIERS, LITTLE_TIERS, or `deep` or `tidy`) and `checklist`, a
+close-out's steps with evidence as [{step, done}], empty for anything else.
 
 A fleet Now document's `notes` carry `mode`, the mode it was built in (the
-`--mode` asked for, else the saved one, else ship), and in Little
-`closed_today` (null when the fleet step has no count from today) and
-`more_in_mode`.
+`--mode` asked for, else the saved one, else ship); outside Ship,
+`more_in_mode`; and in Little `closed_today` (null when the fleet step has no
+count from today).
 """
 
 import json
@@ -354,10 +354,10 @@ def _now(ctx: "Ctx") -> list[dict[str, Any]]:
         ctx.notes.update(
             mode=mode, snoozed=page.snoozed, more_on_needs=page.more_on_needs
         )
+        if mode != fleet_now.SHIP:
+            ctx.notes["more_in_mode"] = page.more_in_mode
         if mode == fleet_now.LITTLE:
-            ctx.notes.update(
-                closed_today=page.closed_today, more_in_mode=page.more_in_mode
-            )
+            ctx.notes["closed_today"] = page.closed_today
         if ctx.show_all:
             every = fleet_now.mode_candidates(ctx.conn, ctx.cfg, ctx.now, mode)
             _hidden(out, [ranked_item(r, "next", ctx.now) for r in every], ctx.reason)
