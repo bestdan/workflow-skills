@@ -1,5 +1,51 @@
 {
   "close_out": {
+    "deep": {
+      "agent": {
+        "all": false,
+        "freshness": {
+          "scanned": {
+            "mini": {
+              "received_at": "2026-10-25T12:00:00Z",
+              "scan_errors": 0,
+              "snapshot_at": "2026-10-25T11:00:00.000Z"
+            }
+          },
+          "synced": {
+            "github_fleet": "2026-10-25T11:01:00Z",
+            "workstreams": "2026-10-25T12:00:00Z"
+          }
+        },
+        "generated_at": "2026-10-25T12:00:00Z",
+        "ignored": [],
+        "include": [
+          "tasks",
+          "prs",
+          "sessions",
+          "other"
+        ],
+        "include_origin": "default",
+        "lanes": [
+          {
+            "count": 0,
+            "id": "next",
+            "items": [],
+            "off": false,
+            "title": "Next"
+          }
+        ],
+        "notes": {
+          "mode": "deep",
+          "more_in_mode": 0,
+          "more_on_needs": 0,
+          "snoozed": 0
+        },
+        "schema": 1,
+        "view": "now"
+      },
+      "page": "<div class=\"fleet now\"><div class=\"modes\" data-mode=\"deep\"><button type=\"button\" data-ov=\"mode\" data-mode=\"tidy\" title=\"Switch to Tidy: What is rotting?\">Mode: Deep</button><span class=\"q\">Which decision unblocks the most?</span></div><section class=\"lane\" data-section=\"next\"><h2>Next (0)</h2><p class=\"empty\">Nothing needs deciding.</p></section></div>",
+      "snapshots": []
+    },
     "little": {
       "agent": {
         "all": false,
@@ -77,7 +123,7 @@
         "schema": 1,
         "view": "now"
       },
-      "page": "<div class=\"fleet now\"><div class=\"modes\" data-mode=\"little\"><button type=\"button\" data-ov=\"mode\" data-mode=\"ship\" title=\"Switch to Ship: What is closest to done?\">Mode: Little</button><span class=\"q\">What can I knock out fast?</span></div><section class=\"lane\" data-section=\"next\"><h2>Next (1)</h2><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/pull/22\" data-kind=\"pr\" data-category=\"bot_pr\" data-tier=\"bot PR\" data-total=\"0.0\" data-mode=\"little\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/pull/22\" target=\"_blank\" rel=\"noopener\">awaiting 22</a> <span class=\"ref\">(bestdan/workflow-skills#22)</span><div class=\"meta\"><span class=\"wait\">waiting 22d</span> \u00b7 PR \u00b7 CI success</div><div class=\"why\" data-terms=\"\">little \u00b7 bot PR from github-actions</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/pull/22\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 review it and merge it</div><div class=\"ov\"><button type=\"button\" data-ov=\"pin\" title=\"Keep it at the top of Now, the Board and Epics\">Pin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div></section></div>",
+      "page": "<div class=\"fleet now\"><div class=\"modes\" data-mode=\"little\"><button type=\"button\" data-ov=\"mode\" data-mode=\"deep\" title=\"Switch to Deep: Which decision unblocks the most?\">Mode: Little</button><span class=\"q\">What can I knock out fast?</span></div><section class=\"lane\" data-section=\"next\"><h2>Next (1)</h2><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/pull/22\" data-kind=\"pr\" data-category=\"bot_pr\" data-tier=\"bot PR\" data-total=\"0.0\" data-mode=\"little\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/pull/22\" target=\"_blank\" rel=\"noopener\">awaiting 22</a> <span class=\"ref\">(bestdan/workflow-skills#22)</span><div class=\"meta\"><span class=\"wait\">waiting 22d</span> \u00b7 PR \u00b7 CI success</div><div class=\"why\" data-terms=\"\">little \u00b7 bot PR from github-actions</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/pull/22\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 review it and merge it</div><div class=\"ov\"><button type=\"button\" data-ov=\"pin\" title=\"Keep it at the top of Now, the Board and Epics\">Pin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div></section></div>",
       "snapshots": [
         [
           "github",
@@ -1053,9 +1099,197 @@
           }
         ]
       ]
+    },
+    "tidy": {
+      "agent": {
+        "all": false,
+        "freshness": {
+          "scanned": {
+            "mini": {
+              "received_at": "2026-10-25T12:00:00Z",
+              "scan_errors": 0,
+              "snapshot_at": "2026-10-25T11:00:00.000Z"
+            }
+          },
+          "synced": {
+            "github_fleet": "2026-10-25T11:01:00Z",
+            "workstreams": "2026-10-25T12:00:00Z"
+          }
+        },
+        "generated_at": "2026-10-25T12:00:00Z",
+        "ignored": [],
+        "include": [
+          "tasks",
+          "prs",
+          "sessions",
+          "other"
+        ],
+        "include_origin": "default",
+        "lanes": [
+          {
+            "count": 0,
+            "id": "next",
+            "items": [],
+            "off": false,
+            "title": "Next"
+          }
+        ],
+        "notes": {
+          "mode": "tidy",
+          "more_in_mode": 0,
+          "more_on_needs": 0,
+          "snoozed": 0
+        },
+        "schema": 1,
+        "view": "now"
+      },
+      "page": "<div class=\"fleet now\"><div class=\"modes\" data-mode=\"tidy\"><button type=\"button\" data-ov=\"mode\" data-mode=\"ship\" title=\"Switch to Ship: What is closest to done?\">Mode: Tidy</button><span class=\"q\">What is rotting?</span></div><section class=\"lane\" data-section=\"next\"><h2>Next (0)</h2><p class=\"empty\">Nothing is rotting.</p></section></div>",
+      "snapshots": []
     }
   },
   "little": {
+    "deep": {
+      "agent": {
+        "all": false,
+        "freshness": {
+          "scanned": {},
+          "synced": {
+            "github_fleet": "2026-10-25T11:01:00Z"
+          }
+        },
+        "generated_at": "2026-10-25T12:00:00Z",
+        "ignored": [],
+        "include": [
+          "tasks",
+          "prs",
+          "sessions",
+          "other"
+        ],
+        "include_origin": "default",
+        "lanes": [
+          {
+            "count": 2,
+            "id": "next",
+            "items": [
+              {
+                "action": {
+                  "review": "review and merge it on GitHub",
+                  "url": "https://github.com/bestdan/workflow-skills/pull/21"
+                },
+                "at": "2026-10-02T00:00:00Z",
+                "branch": null,
+                "bridge_session_id": null,
+                "brief": null,
+                "category": "others_pr",
+                "checklist": [],
+                "evidence": "bot PR from dependabot[bot], CI pending",
+                "first_prompt": null,
+                "hidden": null,
+                "host": null,
+                "key": "https://github.com/bestdan/workflow-skills/pull/21",
+                "kind": "pr",
+                "lane": "next",
+                "last_ask": null,
+                "path": null,
+                "pr": null,
+                "ref": "bestdan/workflow-skills#21",
+                "risks": [],
+                "score": 4.34,
+                "source": "github",
+                "terms": [
+                  [
+                    "others_pr",
+                    4.0,
+                    "bot PR from dependabot[bot], CI pending"
+                  ],
+                  [
+                    "age",
+                    0.34,
+                    "waiting 24d"
+                  ]
+                ],
+                "tier": "the rest",
+                "title": "awaiting 21",
+                "url": "https://github.com/bestdan/workflow-skills/pull/21",
+                "waited": "waiting 24d",
+                "why": "ship: the rest \u00b7 score 4.34: others_pr +4 (bot PR from dependabot[bot], CI pending) \u00b7 age +0.34 (waiting 24d)"
+              },
+              {
+                "action": {
+                  "review": "decide it, or split it with `/break-down-task`",
+                  "url": "https://github.com/bestdan/workflow-skills/issues/42"
+                },
+                "at": "2026-10-20T00:00:00Z",
+                "branch": null,
+                "bridge_session_id": null,
+                "brief": null,
+                "category": "refinement",
+                "checklist": [],
+                "evidence": "needs refinement",
+                "first_prompt": null,
+                "hidden": null,
+                "host": null,
+                "key": "https://github.com/bestdan/workflow-skills/issues/42",
+                "kind": "issue",
+                "lane": "next",
+                "last_ask": null,
+                "path": null,
+                "pr": null,
+                "ref": "bestdan/workflow-skills#42",
+                "risks": [],
+                "score": 0.0,
+                "source": "github",
+                "terms": [],
+                "tier": "deep",
+                "title": "issue 42",
+                "url": "https://github.com/bestdan/workflow-skills/issues/42",
+                "waited": "waiting 6d",
+                "why": "deep \u00b7 needs refinement"
+              }
+            ],
+            "off": false,
+            "title": "Next"
+          }
+        ],
+        "notes": {
+          "mode": "deep",
+          "more_in_mode": 0,
+          "more_on_needs": 0,
+          "snoozed": 0
+        },
+        "schema": 1,
+        "view": "now"
+      },
+      "page": "<div class=\"fleet now\"><div class=\"modes\" data-mode=\"deep\"><button type=\"button\" data-ov=\"mode\" data-mode=\"tidy\" title=\"Switch to Tidy: What is rotting?\">Mode: Deep</button><span class=\"q\">Which decision unblocks the most?</span></div><section class=\"lane\" data-section=\"next\"><h2>Next (2)</h2><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/pull/21\" data-kind=\"pr\" data-category=\"others_pr\" data-tier=\"the rest\" data-total=\"4.34\" data-mode=\"ship\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/pull/21\" target=\"_blank\" rel=\"noopener\">awaiting 21</a> <span class=\"ref\">(bestdan/workflow-skills#21)</span><div class=\"meta\"><span class=\"pin\">pinned</span> \u00b7 <span class=\"wait\">waiting 24d</span> \u00b7 PR from dependabot[bot] \u00b7 bot \u00b7 CI pending</div><div class=\"why\" data-terms=\"others_pr,age\">ship: the rest \u00b7 score 4.34: others_pr +4 (bot PR from dependabot[bot], CI pending) \u00b7 age +0.34 (waiting 24d)</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/pull/21\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 review and merge it on GitHub</div><div class=\"ov\"><button type=\"button\" data-ov=\"unpin\" title=\"Keep it at the top of Now, the Board and Epics\">Unpin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/issues/42\" data-kind=\"issue\" data-category=\"refinement\" data-tier=\"deep\" data-total=\"0.0\" data-mode=\"deep\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/issues/42\" target=\"_blank\" rel=\"noopener\">issue 42</a> <span class=\"ref\">(bestdan/workflow-skills#42)</span><div class=\"meta\"><span class=\"wait\">waiting 6d</span> \u00b7 status:1_needs_refinement</div><div class=\"why\" data-terms=\"\">deep \u00b7 needs refinement</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/issues/42\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 decide it, or split it with <code>/break-down-task</code></div><div class=\"ov\"><button type=\"button\" data-ov=\"pin\" title=\"Keep it at the top of Now, the Board and Epics\">Pin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div></section></div>",
+      "snapshots": [
+        [
+          "github",
+          "https://github.com/bestdan/workflow-skills/issues/42",
+          {
+            "features": {
+              "age": "1-7d",
+              "age_days": 5.5,
+              "author": null,
+              "bot": null,
+              "category": "refinement",
+              "ci": null,
+              "est": "est:2",
+              "kind": "issue",
+              "mode": "deep",
+              "own": "no",
+              "prio": null,
+              "repo": "bestdan/workflow-skills",
+              "status": "status:1_needs_refinement",
+              "workstream": null
+            },
+            "kind": "issue",
+            "score": 0.0,
+            "terms": [],
+            "title": "issue 42"
+          }
+        ]
+      ]
+    },
     "little": {
       "agent": {
         "all": false,
@@ -1329,7 +1563,7 @@
         "schema": 1,
         "view": "now"
       },
-      "page": "<div class=\"fleet now\"><div class=\"modes\" data-mode=\"little\"><button type=\"button\" data-ov=\"mode\" data-mode=\"ship\" title=\"Switch to Ship: What is closest to done?\">Mode: Little</button><span class=\"q\">What can I knock out fast?</span></div><section class=\"lane\" data-section=\"next\"><h2>Next (7)</h2><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/pull/21\" data-kind=\"pr\" data-category=\"others_pr\" data-tier=\"the rest\" data-total=\"4.34\" data-mode=\"ship\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/pull/21\" target=\"_blank\" rel=\"noopener\">awaiting 21</a> <span class=\"ref\">(bestdan/workflow-skills#21)</span><div class=\"meta\"><span class=\"pin\">pinned</span> \u00b7 <span class=\"wait\">waiting 24d</span> \u00b7 PR from dependabot[bot] \u00b7 bot \u00b7 CI pending</div><div class=\"why\" data-terms=\"others_pr,age\">ship: the rest \u00b7 score 4.34: others_pr +4 (bot PR from dependabot[bot], CI pending) \u00b7 age +0.34 (waiting 24d)</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/pull/21\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 review and merge it on GitHub</div><div class=\"ov\"><button type=\"button\" data-ov=\"unpin\" title=\"Keep it at the top of Now, the Board and Epics\">Unpin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/pull/22\" data-kind=\"pr\" data-category=\"bot_pr\" data-tier=\"bot PR\" data-total=\"0.0\" data-mode=\"little\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/pull/22\" target=\"_blank\" rel=\"noopener\">awaiting 22</a> <span class=\"ref\">(bestdan/workflow-skills#22)</span><div class=\"meta\"><span class=\"wait\">waiting 22d</span> \u00b7 PR \u00b7 CI success</div><div class=\"why\" data-terms=\"\">little \u00b7 bot PR from github-actions</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/pull/22\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 review it and merge it</div><div class=\"ov\"><button type=\"button\" data-ov=\"pin\" title=\"Keep it at the top of Now, the Board and Epics\">Pin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/pull/30\" data-kind=\"pr\" data-category=\"docs_pr\" data-tier=\"docs-only PR\" data-total=\"0.0\" data-mode=\"little\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/pull/30\" target=\"_blank\" rel=\"noopener\">awaiting 30</a> <span class=\"ref\">(bestdan/workflow-skills#30)</span><div class=\"meta\"><span class=\"wait\">waiting 14d</span> \u00b7 your PR \u00b7 CI success</div><div class=\"why\" data-terms=\"\">little \u00b7 docs-only PR, 1 file, +3/\u22121</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/pull/30\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 finish it and merge it</div><div class=\"ov\"><button type=\"button\" data-ov=\"pin\" title=\"Keep it at the top of Now, the Board and Epics\">Pin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/issues/40\" data-kind=\"issue\" data-category=\"est1_issue\" data-tier=\"est:1 issue\" data-total=\"0.0\" data-mode=\"little\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/issues/40\" target=\"_blank\" rel=\"noopener\">issue 40</a> <span class=\"ref\">(bestdan/workflow-skills#40)</span><div class=\"meta\"><span class=\"wait\">waiting 6d</span> \u00b7 status:2_ready</div><div class=\"why\" data-terms=\"\">little \u00b7 est:1 issue \u00b7 prio:1</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/issues/40\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 do it now, or leave it to <code>/do-tasks</code></div><div class=\"ov\"><button type=\"button\" data-ov=\"pin\" title=\"Keep it at the top of Now, the Board and Epics\">Pin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/pull/37\" data-kind=\"pr\" data-category=\"small_pr\" data-tier=\"small PR\" data-total=\"0.0\" data-mode=\"little\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/pull/37\" target=\"_blank\" rel=\"noopener\">review me</a> <span class=\"ref\">(bestdan/workflow-skills#37)</span><div class=\"meta\"><span class=\"wait\">waiting 24d</span> \u00b7 PR \u00b7 CI success</div><div class=\"why\" data-terms=\"\">little \u00b7 PR, 1 file, +2/\u22122</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/pull/37\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 review it</div><div class=\"ov\"><button type=\"button\" data-ov=\"pin\" title=\"Keep it at the top of Now, the Board and Epics\">Pin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/pull/31\" data-kind=\"pr\" data-category=\"small_pr\" data-tier=\"small PR\" data-total=\"0.0\" data-mode=\"little\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/pull/31\" target=\"_blank\" rel=\"noopener\">awaiting 31</a> <span class=\"ref\">(bestdan/workflow-skills#31)</span><div class=\"meta\"><span class=\"wait\">waiting 14d</span> \u00b7 your PR \u00b7 CI success</div><div class=\"why\" data-terms=\"\">little \u00b7 PR, 2 files, +14/\u22123</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/pull/31\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 finish it and merge it</div><div class=\"ov\"><button type=\"button\" data-ov=\"pin\" title=\"Keep it at the top of Now, the Board and Epics\">Pin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/issues/42\" data-kind=\"issue\" data-category=\"est2_issue\" data-tier=\"est:2 issue\" data-total=\"0.0\" data-mode=\"little\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/issues/42\" target=\"_blank\" rel=\"noopener\">issue 42</a> <span class=\"ref\">(bestdan/workflow-skills#42)</span><div class=\"meta\"><span class=\"wait\">waiting 6d</span> \u00b7 status:1_needs_refinement</div><div class=\"why\" data-terms=\"\">little \u00b7 est:2 issue</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/issues/42\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 do it now, or leave it to <code>/do-tasks</code></div><div class=\"ov\"><button type=\"button\" data-ov=\"pin\" title=\"Keep it at the top of Now, the Board and Epics\">Pin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div></section><p class=\"note\" data-snoozed=\"1\">1 snoozed.</p></div>",
+      "page": "<div class=\"fleet now\"><div class=\"modes\" data-mode=\"little\"><button type=\"button\" data-ov=\"mode\" data-mode=\"deep\" title=\"Switch to Deep: Which decision unblocks the most?\">Mode: Little</button><span class=\"q\">What can I knock out fast?</span></div><section class=\"lane\" data-section=\"next\"><h2>Next (7)</h2><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/pull/21\" data-kind=\"pr\" data-category=\"others_pr\" data-tier=\"the rest\" data-total=\"4.34\" data-mode=\"ship\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/pull/21\" target=\"_blank\" rel=\"noopener\">awaiting 21</a> <span class=\"ref\">(bestdan/workflow-skills#21)</span><div class=\"meta\"><span class=\"pin\">pinned</span> \u00b7 <span class=\"wait\">waiting 24d</span> \u00b7 PR from dependabot[bot] \u00b7 bot \u00b7 CI pending</div><div class=\"why\" data-terms=\"others_pr,age\">ship: the rest \u00b7 score 4.34: others_pr +4 (bot PR from dependabot[bot], CI pending) \u00b7 age +0.34 (waiting 24d)</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/pull/21\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 review and merge it on GitHub</div><div class=\"ov\"><button type=\"button\" data-ov=\"unpin\" title=\"Keep it at the top of Now, the Board and Epics\">Unpin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/pull/22\" data-kind=\"pr\" data-category=\"bot_pr\" data-tier=\"bot PR\" data-total=\"0.0\" data-mode=\"little\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/pull/22\" target=\"_blank\" rel=\"noopener\">awaiting 22</a> <span class=\"ref\">(bestdan/workflow-skills#22)</span><div class=\"meta\"><span class=\"wait\">waiting 22d</span> \u00b7 PR \u00b7 CI success</div><div class=\"why\" data-terms=\"\">little \u00b7 bot PR from github-actions</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/pull/22\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 review it and merge it</div><div class=\"ov\"><button type=\"button\" data-ov=\"pin\" title=\"Keep it at the top of Now, the Board and Epics\">Pin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/pull/30\" data-kind=\"pr\" data-category=\"docs_pr\" data-tier=\"docs-only PR\" data-total=\"0.0\" data-mode=\"little\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/pull/30\" target=\"_blank\" rel=\"noopener\">awaiting 30</a> <span class=\"ref\">(bestdan/workflow-skills#30)</span><div class=\"meta\"><span class=\"wait\">waiting 14d</span> \u00b7 your PR \u00b7 CI success</div><div class=\"why\" data-terms=\"\">little \u00b7 docs-only PR, 1 file, +3/\u22121</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/pull/30\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 finish it and merge it</div><div class=\"ov\"><button type=\"button\" data-ov=\"pin\" title=\"Keep it at the top of Now, the Board and Epics\">Pin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/issues/40\" data-kind=\"issue\" data-category=\"est1_issue\" data-tier=\"est:1 issue\" data-total=\"0.0\" data-mode=\"little\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/issues/40\" target=\"_blank\" rel=\"noopener\">issue 40</a> <span class=\"ref\">(bestdan/workflow-skills#40)</span><div class=\"meta\"><span class=\"wait\">waiting 6d</span> \u00b7 status:2_ready</div><div class=\"why\" data-terms=\"\">little \u00b7 est:1 issue \u00b7 prio:1</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/issues/40\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 do it now, or leave it to <code>/do-tasks</code></div><div class=\"ov\"><button type=\"button\" data-ov=\"pin\" title=\"Keep it at the top of Now, the Board and Epics\">Pin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/pull/37\" data-kind=\"pr\" data-category=\"small_pr\" data-tier=\"small PR\" data-total=\"0.0\" data-mode=\"little\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/pull/37\" target=\"_blank\" rel=\"noopener\">review me</a> <span class=\"ref\">(bestdan/workflow-skills#37)</span><div class=\"meta\"><span class=\"wait\">waiting 24d</span> \u00b7 PR \u00b7 CI success</div><div class=\"why\" data-terms=\"\">little \u00b7 PR, 1 file, +2/\u22122</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/pull/37\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 review it</div><div class=\"ov\"><button type=\"button\" data-ov=\"pin\" title=\"Keep it at the top of Now, the Board and Epics\">Pin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/pull/31\" data-kind=\"pr\" data-category=\"small_pr\" data-tier=\"small PR\" data-total=\"0.0\" data-mode=\"little\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/pull/31\" target=\"_blank\" rel=\"noopener\">awaiting 31</a> <span class=\"ref\">(bestdan/workflow-skills#31)</span><div class=\"meta\"><span class=\"wait\">waiting 14d</span> \u00b7 your PR \u00b7 CI success</div><div class=\"why\" data-terms=\"\">little \u00b7 PR, 2 files, +14/\u22123</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/pull/31\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 finish it and merge it</div><div class=\"ov\"><button type=\"button\" data-ov=\"pin\" title=\"Keep it at the top of Now, the Board and Epics\">Pin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/issues/42\" data-kind=\"issue\" data-category=\"est2_issue\" data-tier=\"est:2 issue\" data-total=\"0.0\" data-mode=\"little\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/issues/42\" target=\"_blank\" rel=\"noopener\">issue 42</a> <span class=\"ref\">(bestdan/workflow-skills#42)</span><div class=\"meta\"><span class=\"wait\">waiting 6d</span> \u00b7 status:1_needs_refinement</div><div class=\"why\" data-terms=\"\">little \u00b7 est:2 issue</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/issues/42\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 do it now, or leave it to <code>/do-tasks</code></div><div class=\"ov\"><button type=\"button\" data-ov=\"pin\" title=\"Keep it at the top of Now, the Board and Epics\">Pin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div></section><p class=\"note\" data-snoozed=\"1\">1 snoozed.</p></div>",
       "snapshots": [
         [
           "github",
@@ -3185,9 +3419,441 @@
           }
         ]
       ]
+    },
+    "tidy": {
+      "agent": {
+        "all": false,
+        "freshness": {
+          "scanned": {},
+          "synced": {
+            "github_fleet": "2026-10-25T11:01:00Z"
+          }
+        },
+        "generated_at": "2026-10-25T12:00:00Z",
+        "ignored": [],
+        "include": [
+          "tasks",
+          "prs",
+          "sessions",
+          "other"
+        ],
+        "include_origin": "default",
+        "lanes": [
+          {
+            "count": 4,
+            "id": "next",
+            "items": [
+              {
+                "action": {
+                  "review": "review and merge it on GitHub",
+                  "url": "https://github.com/bestdan/workflow-skills/pull/21"
+                },
+                "at": "2026-10-02T00:00:00Z",
+                "branch": null,
+                "bridge_session_id": null,
+                "brief": null,
+                "category": "others_pr",
+                "checklist": [],
+                "evidence": "bot PR from dependabot[bot], CI pending",
+                "first_prompt": null,
+                "hidden": null,
+                "host": null,
+                "key": "https://github.com/bestdan/workflow-skills/pull/21",
+                "kind": "pr",
+                "lane": "next",
+                "last_ask": null,
+                "path": null,
+                "pr": null,
+                "ref": "bestdan/workflow-skills#21",
+                "risks": [],
+                "score": 4.34,
+                "source": "github",
+                "terms": [
+                  [
+                    "others_pr",
+                    4.0,
+                    "bot PR from dependabot[bot], CI pending"
+                  ],
+                  [
+                    "age",
+                    0.34,
+                    "waiting 24d"
+                  ]
+                ],
+                "tier": "the rest",
+                "title": "awaiting 21",
+                "url": "https://github.com/bestdan/workflow-skills/pull/21",
+                "waited": "waiting 24d",
+                "why": "ship: the rest \u00b7 score 4.34: others_pr +4 (bot PR from dependabot[bot], CI pending) \u00b7 age +0.34 (waiting 24d)"
+              },
+              {
+                "action": {
+                  "review": "merge it, close it, or say what it waits on",
+                  "url": "https://github.com/bestdan/workflow-skills/pull/36"
+                },
+                "at": "2026-10-02T00:00:00Z",
+                "branch": null,
+                "bridge_session_id": null,
+                "brief": null,
+                "category": "stale_pr",
+                "checklist": [],
+                "evidence": "your PR, open over 14d",
+                "first_prompt": null,
+                "hidden": null,
+                "host": null,
+                "key": "https://github.com/bestdan/workflow-skills/pull/36",
+                "kind": "pr",
+                "lane": "next",
+                "last_ask": null,
+                "path": null,
+                "pr": null,
+                "ref": "bestdan/workflow-skills#36",
+                "risks": [],
+                "score": 0.0,
+                "source": "github",
+                "terms": [],
+                "tier": "tidy",
+                "title": "a draft",
+                "url": "https://github.com/bestdan/workflow-skills/pull/36",
+                "waited": "waiting 24d",
+                "why": "tidy \u00b7 your PR, open over 14d"
+              },
+              {
+                "action": {
+                  "review": "merge it, close it, or say what it waits on",
+                  "url": "https://github.com/bestdan/workflow-skills/pull/30"
+                },
+                "at": "2026-10-11T00:00:00Z",
+                "branch": null,
+                "bridge_session_id": null,
+                "brief": null,
+                "category": "stale_pr",
+                "checklist": [],
+                "evidence": "your PR, open over 14d",
+                "first_prompt": null,
+                "hidden": null,
+                "host": null,
+                "key": "https://github.com/bestdan/workflow-skills/pull/30",
+                "kind": "pr",
+                "lane": "next",
+                "last_ask": null,
+                "path": null,
+                "pr": null,
+                "ref": "bestdan/workflow-skills#30",
+                "risks": [],
+                "score": 0.0,
+                "source": "github",
+                "terms": [],
+                "tier": "tidy",
+                "title": "awaiting 30",
+                "url": "https://github.com/bestdan/workflow-skills/pull/30",
+                "waited": "waiting 14d",
+                "why": "tidy \u00b7 your PR, open over 14d"
+              },
+              {
+                "action": {
+                  "review": "close it, supersede it, or decide it",
+                  "url": "https://github.com/bestdan/workflow-skills/issues/42"
+                },
+                "at": "2026-10-20T00:00:00Z",
+                "branch": null,
+                "bridge_session_id": null,
+                "brief": null,
+                "category": "human_issue",
+                "checklist": [],
+                "evidence": "auto:human-review-needed",
+                "first_prompt": null,
+                "hidden": null,
+                "host": null,
+                "key": "https://github.com/bestdan/workflow-skills/issues/42",
+                "kind": "issue",
+                "lane": "next",
+                "last_ask": null,
+                "path": null,
+                "pr": null,
+                "ref": "bestdan/workflow-skills#42",
+                "risks": [],
+                "score": 0.0,
+                "source": "github",
+                "terms": [],
+                "tier": "tidy",
+                "title": "issue 42",
+                "url": "https://github.com/bestdan/workflow-skills/issues/42",
+                "waited": "waiting 6d",
+                "why": "tidy \u00b7 auto:human-review-needed"
+              }
+            ],
+            "off": false,
+            "title": "Next"
+          }
+        ],
+        "notes": {
+          "mode": "tidy",
+          "more_in_mode": 0,
+          "more_on_needs": 0,
+          "snoozed": 1
+        },
+        "schema": 1,
+        "view": "now"
+      },
+      "page": "<div class=\"fleet now\"><div class=\"modes\" data-mode=\"tidy\"><button type=\"button\" data-ov=\"mode\" data-mode=\"ship\" title=\"Switch to Ship: What is closest to done?\">Mode: Tidy</button><span class=\"q\">What is rotting?</span></div><section class=\"lane\" data-section=\"next\"><h2>Next (4)</h2><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/pull/21\" data-kind=\"pr\" data-category=\"others_pr\" data-tier=\"the rest\" data-total=\"4.34\" data-mode=\"ship\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/pull/21\" target=\"_blank\" rel=\"noopener\">awaiting 21</a> <span class=\"ref\">(bestdan/workflow-skills#21)</span><div class=\"meta\"><span class=\"pin\">pinned</span> \u00b7 <span class=\"wait\">waiting 24d</span> \u00b7 PR from dependabot[bot] \u00b7 bot \u00b7 CI pending</div><div class=\"why\" data-terms=\"others_pr,age\">ship: the rest \u00b7 score 4.34: others_pr +4 (bot PR from dependabot[bot], CI pending) \u00b7 age +0.34 (waiting 24d)</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/pull/21\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 review and merge it on GitHub</div><div class=\"ov\"><button type=\"button\" data-ov=\"unpin\" title=\"Keep it at the top of Now, the Board and Epics\">Unpin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/pull/36\" data-kind=\"pr\" data-category=\"stale_pr\" data-tier=\"tidy\" data-total=\"0.0\" data-mode=\"tidy\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/pull/36\" target=\"_blank\" rel=\"noopener\">a draft</a> <span class=\"ref\">(bestdan/workflow-skills#36)</span><div class=\"meta\"><span class=\"wait\">waiting 24d</span> \u00b7 your PR \u00b7 draft, CI success</div><div class=\"why\" data-terms=\"\">tidy \u00b7 your PR, open over 14d</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/pull/36\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 merge it, close it, or say what it waits on</div><div class=\"ov\"><button type=\"button\" data-ov=\"pin\" title=\"Keep it at the top of Now, the Board and Epics\">Pin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/pull/30\" data-kind=\"pr\" data-category=\"stale_pr\" data-tier=\"tidy\" data-total=\"0.0\" data-mode=\"tidy\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/pull/30\" target=\"_blank\" rel=\"noopener\">awaiting 30</a> <span class=\"ref\">(bestdan/workflow-skills#30)</span><div class=\"meta\"><span class=\"wait\">waiting 14d</span> \u00b7 your PR \u00b7 CI success</div><div class=\"why\" data-terms=\"\">tidy \u00b7 your PR, open over 14d</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/pull/30\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 merge it, close it, or say what it waits on</div><div class=\"ov\"><button type=\"button\" data-ov=\"pin\" title=\"Keep it at the top of Now, the Board and Epics\">Pin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/issues/42\" data-kind=\"issue\" data-category=\"human_issue\" data-tier=\"tidy\" data-total=\"0.0\" data-mode=\"tidy\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/issues/42\" target=\"_blank\" rel=\"noopener\">issue 42</a> <span class=\"ref\">(bestdan/workflow-skills#42)</span><div class=\"meta\"><span class=\"wait\">waiting 6d</span> \u00b7 status:1_needs_refinement</div><div class=\"why\" data-terms=\"\">tidy \u00b7 auto:human-review-needed</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/issues/42\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 close it, supersede it, or decide it</div><div class=\"ov\"><button type=\"button\" data-ov=\"pin\" title=\"Keep it at the top of Now, the Board and Epics\">Pin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div></section><p class=\"note\" data-snoozed=\"1\">1 snoozed.</p></div>",
+      "snapshots": [
+        [
+          "github",
+          "https://github.com/bestdan/workflow-skills/issues/41",
+          {
+            "features": {
+              "age": "1-7d",
+              "age_days": 5.5,
+              "author": null,
+              "bot": null,
+              "category": "untriaged",
+              "ci": null,
+              "est": "est:1",
+              "kind": "issue",
+              "mode": "tidy",
+              "own": "no",
+              "prio": null,
+              "repo": "bestdan/workflow-skills",
+              "status": "status:0_untriaged",
+              "workstream": null
+            },
+            "kind": "issue",
+            "score": 0.0,
+            "terms": [],
+            "title": "issue 41"
+          }
+        ],
+        [
+          "github",
+          "https://github.com/bestdan/workflow-skills/issues/42",
+          {
+            "features": {
+              "age": "1-7d",
+              "age_days": 5.5,
+              "author": null,
+              "bot": null,
+              "category": "human_issue",
+              "ci": null,
+              "est": "est:2",
+              "kind": "issue",
+              "mode": "tidy",
+              "own": "no",
+              "prio": null,
+              "repo": "bestdan/workflow-skills",
+              "status": "status:1_needs_refinement",
+              "workstream": null
+            },
+            "kind": "issue",
+            "score": 0.0,
+            "terms": [],
+            "title": "issue 42"
+          }
+        ],
+        [
+          "github",
+          "https://github.com/bestdan/workflow-skills/pull/30",
+          {
+            "features": {
+              "age": "1-4w",
+              "age_days": 14.5,
+              "author": null,
+              "bot": null,
+              "category": "stale_pr",
+              "ci": "success",
+              "est": null,
+              "kind": "pr",
+              "mode": "tidy",
+              "own": "yes",
+              "prio": null,
+              "repo": "bestdan/workflow-skills",
+              "status": null,
+              "workstream": null
+            },
+            "kind": "pr",
+            "score": 0.0,
+            "terms": [],
+            "title": "awaiting 30"
+          }
+        ],
+        [
+          "github",
+          "https://github.com/bestdan/workflow-skills/pull/36",
+          {
+            "features": {
+              "age": "1-4w",
+              "age_days": 23.5,
+              "author": null,
+              "bot": null,
+              "category": "stale_pr",
+              "ci": "success",
+              "est": null,
+              "kind": "pr",
+              "mode": "tidy",
+              "own": "yes",
+              "prio": null,
+              "repo": "bestdan/workflow-skills",
+              "status": null,
+              "workstream": null
+            },
+            "kind": "pr",
+            "score": 0.0,
+            "terms": [],
+            "title": "a draft"
+          }
+        ]
+      ]
     }
   },
   "ship": {
+    "deep": {
+      "agent": {
+        "all": false,
+        "freshness": {
+          "scanned": {
+            "mini": {
+              "received_at": "2026-10-25T12:00:00Z",
+              "scan_errors": 0,
+              "snapshot_at": "2026-10-24T11:59:00.000Z"
+            }
+          },
+          "synced": {
+            "github_fleet": "2026-10-25T11:01:00Z"
+          }
+        },
+        "generated_at": "2026-10-25T12:00:00Z",
+        "ignored": [],
+        "include": [
+          "tasks",
+          "prs",
+          "sessions",
+          "other"
+        ],
+        "include_origin": "default",
+        "lanes": [
+          {
+            "count": 2,
+            "id": "next",
+            "items": [
+              {
+                "action": {
+                  "review": "start it, or leave it to `/do-tasks`",
+                  "url": "https://github.com/bestdan/workflow-skills/issues/13"
+                },
+                "at": "2026-10-20T00:00:00Z",
+                "branch": null,
+                "bridge_session_id": null,
+                "brief": null,
+                "category": "ready",
+                "checklist": [],
+                "evidence": "your issue, ready",
+                "first_prompt": null,
+                "hidden": null,
+                "host": null,
+                "key": "https://github.com/bestdan/workflow-skills/issues/13",
+                "kind": "issue",
+                "lane": "next",
+                "last_ask": null,
+                "path": null,
+                "pr": null,
+                "ref": "bestdan/workflow-skills#13",
+                "risks": [],
+                "score": 1.58,
+                "source": "github",
+                "terms": [
+                  [
+                    "ready",
+                    1.5,
+                    "your issue, ready"
+                  ],
+                  [
+                    "age",
+                    0.08,
+                    "waiting 6d"
+                  ]
+                ],
+                "tier": "the rest",
+                "title": "issue 13",
+                "url": "https://github.com/bestdan/workflow-skills/issues/13",
+                "waited": "waiting 6d",
+                "why": "ship: the rest \u00b7 score 1.58: ready +1.5 (your issue, ready) \u00b7 age +0.08 (waiting 6d)"
+              },
+              {
+                "action": {
+                  "review": "decide it, or split it with `/break-down-task`",
+                  "url": "https://github.com/bestdan/workflow-skills/issues/10"
+                },
+                "at": "2026-10-20T00:00:00Z",
+                "branch": null,
+                "bridge_session_id": null,
+                "brief": null,
+                "category": "refinement",
+                "checklist": [],
+                "evidence": "needs refinement",
+                "first_prompt": null,
+                "hidden": null,
+                "host": null,
+                "key": "https://github.com/bestdan/workflow-skills/issues/10",
+                "kind": "issue",
+                "lane": "next",
+                "last_ask": null,
+                "path": null,
+                "pr": null,
+                "ref": "bestdan/workflow-skills#10",
+                "risks": [],
+                "score": 0.0,
+                "source": "github",
+                "terms": [],
+                "tier": "deep",
+                "title": "issue 10",
+                "url": "https://github.com/bestdan/workflow-skills/issues/10",
+                "waited": "waiting 6d",
+                "why": "deep \u00b7 needs refinement \u00b7 prio:1"
+              }
+            ],
+            "off": false,
+            "title": "Next"
+          }
+        ],
+        "notes": {
+          "mode": "deep",
+          "more_in_mode": 0,
+          "more_on_needs": 0,
+          "snoozed": 0
+        },
+        "schema": 1,
+        "view": "now"
+      },
+      "page": "<div class=\"fleet now\"><div class=\"modes\" data-mode=\"deep\"><button type=\"button\" data-ov=\"mode\" data-mode=\"tidy\" title=\"Switch to Tidy: What is rotting?\">Mode: Deep</button><span class=\"q\">Which decision unblocks the most?</span></div><section class=\"lane\" data-section=\"next\"><h2>Next (2)</h2><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/issues/13\" data-kind=\"issue\" data-category=\"ready\" data-tier=\"the rest\" data-total=\"1.58\" data-mode=\"ship\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/issues/13\" target=\"_blank\" rel=\"noopener\">issue 13</a> <span class=\"ref\">(bestdan/workflow-skills#13)</span><div class=\"meta\"><span class=\"pin\">pinned</span> \u00b7 <span class=\"wait\">waiting 6d</span> \u00b7 status:2_ready</div><div class=\"why\" data-terms=\"ready,age\">ship: the rest \u00b7 score 1.58: ready +1.5 (your issue, ready) \u00b7 age +0.08 (waiting 6d)</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/issues/13\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 start it, or leave it to <code>/do-tasks</code></div><div class=\"ov\"><button type=\"button\" data-ov=\"unpin\" title=\"Keep it at the top of Now, the Board and Epics\">Unpin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/issues/10\" data-kind=\"issue\" data-category=\"refinement\" data-tier=\"deep\" data-total=\"0.0\" data-mode=\"deep\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/issues/10\" target=\"_blank\" rel=\"noopener\">issue 10</a> <span class=\"ref\">(bestdan/workflow-skills#10)</span><div class=\"meta\"><span class=\"wait\">waiting 6d</span> \u00b7 status:1_needs_refinement</div><div class=\"why\" data-terms=\"\">deep \u00b7 needs refinement \u00b7 prio:1</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/issues/10\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 decide it, or split it with <code>/break-down-task</code></div><div class=\"ov\"><button type=\"button\" data-ov=\"pin\" title=\"Keep it at the top of Now, the Board and Epics\">Pin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div></section></div>",
+      "snapshots": [
+        [
+          "github",
+          "https://github.com/bestdan/workflow-skills/issues/10",
+          {
+            "features": {
+              "age": "1-7d",
+              "age_days": 5.5,
+              "author": null,
+              "bot": null,
+              "category": "refinement",
+              "ci": null,
+              "est": null,
+              "kind": "issue",
+              "mode": "deep",
+              "own": "no",
+              "prio": "prio:1",
+              "repo": "bestdan/workflow-skills",
+              "status": "status:1_needs_refinement",
+              "workstream": null
+            },
+            "kind": "issue",
+            "score": 0.0,
+            "terms": [],
+            "title": "issue 10"
+          }
+        ]
+      ]
+    },
     "little": {
       "agent": {
         "all": false,
@@ -3307,7 +3973,7 @@
         "schema": 1,
         "view": "now"
       },
-      "page": "<div class=\"fleet now\"><div class=\"modes\" data-mode=\"little\"><button type=\"button\" data-ov=\"mode\" data-mode=\"ship\" title=\"Switch to Ship: What is closest to done?\">Mode: Little</button><span class=\"q\">What can I knock out fast?</span></div><section class=\"lane\" data-section=\"next\"><h2>Next (2)</h2><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/issues/13\" data-kind=\"issue\" data-category=\"ready\" data-tier=\"the rest\" data-total=\"1.58\" data-mode=\"ship\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/issues/13\" target=\"_blank\" rel=\"noopener\">issue 13</a> <span class=\"ref\">(bestdan/workflow-skills#13)</span><div class=\"meta\"><span class=\"pin\">pinned</span> \u00b7 <span class=\"wait\">waiting 6d</span> \u00b7 status:2_ready</div><div class=\"why\" data-terms=\"ready,age\">ship: the rest \u00b7 score 1.58: ready +1.5 (your issue, ready) \u00b7 age +0.08 (waiting 6d)</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/issues/13\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 start it, or leave it to <code>/do-tasks</code></div><div class=\"ov\"><button type=\"button\" data-ov=\"unpin\" title=\"Keep it at the top of Now, the Board and Epics\">Unpin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/pull/22\" data-kind=\"pr\" data-category=\"bot_pr\" data-tier=\"bot PR\" data-total=\"0.0\" data-mode=\"little\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/pull/22\" target=\"_blank\" rel=\"noopener\">awaiting 22</a> <span class=\"ref\">(bestdan/workflow-skills#22)</span><div class=\"meta\"><span class=\"wait\">waiting 22d</span> \u00b7 PR \u00b7 CI success</div><div class=\"why\" data-terms=\"\">little \u00b7 bot PR from github-actions</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/pull/22\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 review it and merge it</div><div class=\"ov\"><button type=\"button\" data-ov=\"pin\" title=\"Keep it at the top of Now, the Board and Epics\">Pin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div></section></div>",
+      "page": "<div class=\"fleet now\"><div class=\"modes\" data-mode=\"little\"><button type=\"button\" data-ov=\"mode\" data-mode=\"deep\" title=\"Switch to Deep: Which decision unblocks the most?\">Mode: Little</button><span class=\"q\">What can I knock out fast?</span></div><section class=\"lane\" data-section=\"next\"><h2>Next (2)</h2><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/issues/13\" data-kind=\"issue\" data-category=\"ready\" data-tier=\"the rest\" data-total=\"1.58\" data-mode=\"ship\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/issues/13\" target=\"_blank\" rel=\"noopener\">issue 13</a> <span class=\"ref\">(bestdan/workflow-skills#13)</span><div class=\"meta\"><span class=\"pin\">pinned</span> \u00b7 <span class=\"wait\">waiting 6d</span> \u00b7 status:2_ready</div><div class=\"why\" data-terms=\"ready,age\">ship: the rest \u00b7 score 1.58: ready +1.5 (your issue, ready) \u00b7 age +0.08 (waiting 6d)</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/issues/13\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 start it, or leave it to <code>/do-tasks</code></div><div class=\"ov\"><button type=\"button\" data-ov=\"unpin\" title=\"Keep it at the top of Now, the Board and Epics\">Unpin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/pull/22\" data-kind=\"pr\" data-category=\"bot_pr\" data-tier=\"bot PR\" data-total=\"0.0\" data-mode=\"little\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/pull/22\" target=\"_blank\" rel=\"noopener\">awaiting 22</a> <span class=\"ref\">(bestdan/workflow-skills#22)</span><div class=\"meta\"><span class=\"wait\">waiting 22d</span> \u00b7 PR \u00b7 CI success</div><div class=\"why\" data-terms=\"\">little \u00b7 bot PR from github-actions</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/pull/22\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 review it and merge it</div><div class=\"ov\"><button type=\"button\" data-ov=\"pin\" title=\"Keep it at the top of Now, the Board and Epics\">Pin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div></section></div>",
       "snapshots": [
         [
           "github",
@@ -5106,6 +5772,618 @@
                 "waiting 24d"
               ]
             ],
+            "title": "pr 6"
+          }
+        ]
+      ]
+    },
+    "tidy": {
+      "agent": {
+        "all": false,
+        "freshness": {
+          "scanned": {
+            "mini": {
+              "received_at": "2026-10-25T12:00:00Z",
+              "scan_errors": 0,
+              "snapshot_at": "2026-10-24T11:59:00.000Z"
+            }
+          },
+          "synced": {
+            "github_fleet": "2026-10-25T11:01:00Z"
+          }
+        },
+        "generated_at": "2026-10-25T12:00:00Z",
+        "ignored": [],
+        "include": [
+          "tasks",
+          "prs",
+          "sessions",
+          "other"
+        ],
+        "include_origin": "default",
+        "lanes": [
+          {
+            "count": 10,
+            "id": "next",
+            "items": [
+              {
+                "action": {
+                  "review": "start it, or leave it to `/do-tasks`",
+                  "url": "https://github.com/bestdan/workflow-skills/issues/13"
+                },
+                "at": "2026-10-20T00:00:00Z",
+                "branch": null,
+                "bridge_session_id": null,
+                "brief": null,
+                "category": "ready",
+                "checklist": [],
+                "evidence": "your issue, ready",
+                "first_prompt": null,
+                "hidden": null,
+                "host": null,
+                "key": "https://github.com/bestdan/workflow-skills/issues/13",
+                "kind": "issue",
+                "lane": "next",
+                "last_ask": null,
+                "path": null,
+                "pr": null,
+                "ref": "bestdan/workflow-skills#13",
+                "risks": [],
+                "score": 1.58,
+                "source": "github",
+                "terms": [
+                  [
+                    "ready",
+                    1.5,
+                    "your issue, ready"
+                  ],
+                  [
+                    "age",
+                    0.08,
+                    "waiting 6d"
+                  ]
+                ],
+                "tier": "the rest",
+                "title": "issue 13",
+                "url": "https://github.com/bestdan/workflow-skills/issues/13",
+                "waited": "waiting 6d",
+                "why": "ship: the rest \u00b7 score 1.58: ready +1.5 (your issue, ready) \u00b7 age +0.08 (waiting 6d)"
+              },
+              {
+                "action": {
+                  "review": "merge it, close it, or say what it waits on",
+                  "url": "https://github.com/bestdan/workflow-skills/pull/5"
+                },
+                "at": "2026-10-01T00:00:00Z",
+                "branch": null,
+                "bridge_session_id": null,
+                "brief": null,
+                "category": "stale_pr",
+                "checklist": [],
+                "evidence": "your PR, open over 14d",
+                "first_prompt": null,
+                "hidden": null,
+                "host": null,
+                "key": "https://github.com/bestdan/workflow-skills/pull/5",
+                "kind": "pr",
+                "lane": "next",
+                "last_ask": null,
+                "path": null,
+                "pr": null,
+                "ref": "bestdan/workflow-skills#5",
+                "risks": [],
+                "score": 0.0,
+                "source": "github",
+                "terms": [],
+                "tier": "tidy",
+                "title": "pr 5",
+                "url": "https://github.com/bestdan/workflow-skills/pull/5",
+                "waited": "waiting 24d",
+                "why": "tidy \u00b7 your PR, open over 14d"
+              },
+              {
+                "action": {
+                  "review": "merge it, close it, or say what it waits on",
+                  "url": "https://github.com/bestdan/workflow-skills/pull/6"
+                },
+                "at": "2026-10-01T00:00:00Z",
+                "branch": null,
+                "bridge_session_id": null,
+                "brief": null,
+                "category": "stale_pr",
+                "checklist": [],
+                "evidence": "your PR, open over 14d",
+                "first_prompt": null,
+                "hidden": null,
+                "host": null,
+                "key": "https://github.com/bestdan/workflow-skills/pull/6",
+                "kind": "pr",
+                "lane": "next",
+                "last_ask": null,
+                "path": null,
+                "pr": null,
+                "ref": "bestdan/workflow-skills#6",
+                "risks": [],
+                "score": 0.0,
+                "source": "github",
+                "terms": [],
+                "tier": "tidy",
+                "title": "pr 6",
+                "url": "https://github.com/bestdan/workflow-skills/pull/6",
+                "waited": "waiting 24d",
+                "why": "tidy \u00b7 your PR, open over 14d"
+              },
+              {
+                "action": {
+                  "review": "merge it, close it, or say what it waits on",
+                  "url": "https://github.com/bestdan/workflow-skills/pull/1"
+                },
+                "at": "2026-10-02T00:00:00Z",
+                "branch": null,
+                "bridge_session_id": null,
+                "brief": null,
+                "category": "stale_pr",
+                "checklist": [],
+                "evidence": "your PR, open over 14d",
+                "first_prompt": null,
+                "hidden": null,
+                "host": null,
+                "key": "https://github.com/bestdan/workflow-skills/pull/1",
+                "kind": "pr",
+                "lane": "next",
+                "last_ask": null,
+                "path": null,
+                "pr": null,
+                "ref": "bestdan/workflow-skills#1",
+                "risks": [],
+                "score": 0.0,
+                "source": "github",
+                "terms": [],
+                "tier": "tidy",
+                "title": "pr 1",
+                "url": "https://github.com/bestdan/workflow-skills/pull/1",
+                "waited": "waiting 24d",
+                "why": "tidy \u00b7 your PR, open over 14d"
+              },
+              {
+                "action": {
+                  "review": "merge it, close it, or say what it waits on",
+                  "url": "https://github.com/bestdan/workflow-skills/pull/2"
+                },
+                "at": "2026-10-03T00:00:00Z",
+                "branch": null,
+                "bridge_session_id": null,
+                "brief": null,
+                "category": "stale_pr",
+                "checklist": [],
+                "evidence": "your PR, open over 14d",
+                "first_prompt": null,
+                "hidden": null,
+                "host": null,
+                "key": "https://github.com/bestdan/workflow-skills/pull/2",
+                "kind": "pr",
+                "lane": "next",
+                "last_ask": null,
+                "path": null,
+                "pr": null,
+                "ref": "bestdan/workflow-skills#2",
+                "risks": [],
+                "score": 0.0,
+                "source": "github",
+                "terms": [],
+                "tier": "tidy",
+                "title": "pr 2",
+                "url": "https://github.com/bestdan/workflow-skills/pull/2",
+                "waited": "waiting 22d",
+                "why": "tidy \u00b7 your PR, open over 14d"
+              },
+              {
+                "action": {
+                  "review": "merge it, close it, or say what it waits on",
+                  "url": "https://github.com/bestdan/workflow-skills/pull/3"
+                },
+                "at": "2026-10-04T00:00:00Z",
+                "branch": null,
+                "bridge_session_id": null,
+                "brief": null,
+                "category": "stale_pr",
+                "checklist": [],
+                "evidence": "your PR, open over 14d",
+                "first_prompt": null,
+                "hidden": null,
+                "host": null,
+                "key": "https://github.com/bestdan/workflow-skills/pull/3",
+                "kind": "pr",
+                "lane": "next",
+                "last_ask": null,
+                "path": null,
+                "pr": null,
+                "ref": "bestdan/workflow-skills#3",
+                "risks": [],
+                "score": 0.0,
+                "source": "github",
+                "terms": [],
+                "tier": "tidy",
+                "title": "pr 3",
+                "url": "https://github.com/bestdan/workflow-skills/pull/3",
+                "waited": "waiting 22d",
+                "why": "tidy \u00b7 your PR, open over 14d"
+              },
+              {
+                "action": {
+                  "review": "merge it, close it, or say what it waits on",
+                  "url": "https://github.com/bestdan/workflow-skills/pull/4"
+                },
+                "at": "2026-10-05T00:00:00Z",
+                "branch": null,
+                "bridge_session_id": null,
+                "brief": null,
+                "category": "stale_pr",
+                "checklist": [],
+                "evidence": "your PR, open over 14d",
+                "first_prompt": null,
+                "hidden": null,
+                "host": null,
+                "key": "https://github.com/bestdan/workflow-skills/pull/4",
+                "kind": "pr",
+                "lane": "next",
+                "last_ask": null,
+                "path": null,
+                "pr": null,
+                "ref": "bestdan/workflow-skills#4",
+                "risks": [],
+                "score": 0.0,
+                "source": "github",
+                "terms": [],
+                "tier": "tidy",
+                "title": "pr 4",
+                "url": "https://github.com/bestdan/workflow-skills/pull/4",
+                "waited": "waiting 20d",
+                "why": "tidy \u00b7 your PR, open over 14d"
+              },
+              {
+                "action": {
+                  "review": "close it, supersede it, or decide it",
+                  "url": "https://github.com/bestdan/workflow-skills/issues/10"
+                },
+                "at": "2026-10-20T00:00:00Z",
+                "branch": null,
+                "bridge_session_id": null,
+                "brief": null,
+                "category": "human_issue",
+                "checklist": [],
+                "evidence": "auto:human-review-needed",
+                "first_prompt": null,
+                "hidden": null,
+                "host": null,
+                "key": "https://github.com/bestdan/workflow-skills/issues/10",
+                "kind": "issue",
+                "lane": "next",
+                "last_ask": null,
+                "path": null,
+                "pr": null,
+                "ref": "bestdan/workflow-skills#10",
+                "risks": [],
+                "score": 0.0,
+                "source": "github",
+                "terms": [],
+                "tier": "tidy",
+                "title": "issue 10",
+                "url": "https://github.com/bestdan/workflow-skills/issues/10",
+                "waited": "waiting 6d",
+                "why": "tidy \u00b7 auto:human-review-needed \u00b7 prio:1"
+              },
+              {
+                "action": {
+                  "review": "close it, supersede it, or decide it",
+                  "url": "https://github.com/bestdan/workflow-skills/issues/14"
+                },
+                "at": "2026-10-20T00:00:00Z",
+                "branch": null,
+                "bridge_session_id": null,
+                "brief": null,
+                "category": "untriaged",
+                "checklist": [],
+                "evidence": "untriaged",
+                "first_prompt": null,
+                "hidden": null,
+                "host": null,
+                "key": "https://github.com/bestdan/workflow-skills/issues/14",
+                "kind": "issue",
+                "lane": "next",
+                "last_ask": null,
+                "path": null,
+                "pr": null,
+                "ref": "bestdan/workflow-skills#14",
+                "risks": [],
+                "score": 0.0,
+                "source": "github",
+                "terms": [],
+                "tier": "tidy",
+                "title": "issue 14",
+                "url": "https://github.com/bestdan/workflow-skills/issues/14",
+                "waited": "waiting 6d",
+                "why": "tidy \u00b7 untriaged"
+              },
+              {
+                "action": {
+                  "review": "close it, supersede it, or decide it",
+                  "url": "https://github.com/bestdan/workflow-skills/issues/16"
+                },
+                "at": "2026-10-20T00:00:00Z",
+                "branch": null,
+                "bridge_session_id": null,
+                "brief": null,
+                "category": "human_issue",
+                "checklist": [],
+                "evidence": "auto:human-review-needed",
+                "first_prompt": null,
+                "hidden": null,
+                "host": null,
+                "key": "https://github.com/bestdan/workflow-skills/issues/16",
+                "kind": "issue",
+                "lane": "next",
+                "last_ask": null,
+                "path": null,
+                "pr": null,
+                "ref": "bestdan/workflow-skills#16",
+                "risks": [],
+                "score": 0.0,
+                "source": "github",
+                "terms": [],
+                "tier": "tidy",
+                "title": "ready but held",
+                "url": "https://github.com/bestdan/workflow-skills/issues/16",
+                "waited": "waiting 6d",
+                "why": "tidy \u00b7 auto:human-review-needed"
+              }
+            ],
+            "off": false,
+            "title": "Next"
+          }
+        ],
+        "notes": {
+          "mode": "tidy",
+          "more_in_mode": 0,
+          "more_on_needs": 0,
+          "snoozed": 0
+        },
+        "schema": 1,
+        "view": "now"
+      },
+      "page": "<div class=\"fleet now\"><div class=\"modes\" data-mode=\"tidy\"><button type=\"button\" data-ov=\"mode\" data-mode=\"ship\" title=\"Switch to Ship: What is closest to done?\">Mode: Tidy</button><span class=\"q\">What is rotting?</span></div><section class=\"lane\" data-section=\"next\"><h2>Next (10)</h2><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/issues/13\" data-kind=\"issue\" data-category=\"ready\" data-tier=\"the rest\" data-total=\"1.58\" data-mode=\"ship\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/issues/13\" target=\"_blank\" rel=\"noopener\">issue 13</a> <span class=\"ref\">(bestdan/workflow-skills#13)</span><div class=\"meta\"><span class=\"pin\">pinned</span> \u00b7 <span class=\"wait\">waiting 6d</span> \u00b7 status:2_ready</div><div class=\"why\" data-terms=\"ready,age\">ship: the rest \u00b7 score 1.58: ready +1.5 (your issue, ready) \u00b7 age +0.08 (waiting 6d)</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/issues/13\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 start it, or leave it to <code>/do-tasks</code></div><div class=\"ov\"><button type=\"button\" data-ov=\"unpin\" title=\"Keep it at the top of Now, the Board and Epics\">Unpin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/pull/5\" data-kind=\"pr\" data-category=\"stale_pr\" data-tier=\"tidy\" data-total=\"0.0\" data-mode=\"tidy\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/pull/5\" target=\"_blank\" rel=\"noopener\">pr 5</a> <span class=\"ref\">(bestdan/workflow-skills#5)</span><div class=\"meta\"><span class=\"wait\">waiting 24d</span> \u00b7 your PR \u00b7 draft, CI failure</div><div class=\"why\" data-terms=\"\">tidy \u00b7 your PR, open over 14d</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/pull/5\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 merge it, close it, or say what it waits on</div><div class=\"ov\"><button type=\"button\" data-ov=\"pin\" title=\"Keep it at the top of Now, the Board and Epics\">Pin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/pull/6\" data-kind=\"pr\" data-category=\"stale_pr\" data-tier=\"tidy\" data-total=\"0.0\" data-mode=\"tidy\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/pull/6\" target=\"_blank\" rel=\"noopener\">pr 6</a> <span class=\"ref\">(bestdan/workflow-skills#6)</span><div class=\"meta\"><span class=\"wait\">waiting 24d</span> \u00b7 your PR \u00b7 CI success</div><div class=\"why\" data-terms=\"\">tidy \u00b7 your PR, open over 14d</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/pull/6\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 merge it, close it, or say what it waits on</div><div class=\"ov\"><button type=\"button\" data-ov=\"pin\" title=\"Keep it at the top of Now, the Board and Epics\">Pin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/pull/1\" data-kind=\"pr\" data-category=\"stale_pr\" data-tier=\"tidy\" data-total=\"0.0\" data-mode=\"tidy\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/pull/1\" target=\"_blank\" rel=\"noopener\">pr 1</a> <span class=\"ref\">(bestdan/workflow-skills#1)</span><div class=\"meta\"><span class=\"wait\">waiting 24d</span> \u00b7 your PR \u00b7 CI success</div><div class=\"why\" data-terms=\"\">tidy \u00b7 your PR, open over 14d</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/pull/1\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 merge it, close it, or say what it waits on</div><div class=\"ov\"><button type=\"button\" data-ov=\"pin\" title=\"Keep it at the top of Now, the Board and Epics\">Pin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/pull/2\" data-kind=\"pr\" data-category=\"stale_pr\" data-tier=\"tidy\" data-total=\"0.0\" data-mode=\"tidy\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/pull/2\" target=\"_blank\" rel=\"noopener\">pr 2</a> <span class=\"ref\">(bestdan/workflow-skills#2)</span><div class=\"meta\"><span class=\"wait\">waiting 22d</span> \u00b7 your PR \u00b7 CI success</div><div class=\"why\" data-terms=\"\">tidy \u00b7 your PR, open over 14d</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/pull/2\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 merge it, close it, or say what it waits on</div><div class=\"ov\"><button type=\"button\" data-ov=\"pin\" title=\"Keep it at the top of Now, the Board and Epics\">Pin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/pull/3\" data-kind=\"pr\" data-category=\"stale_pr\" data-tier=\"tidy\" data-total=\"0.0\" data-mode=\"tidy\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/pull/3\" target=\"_blank\" rel=\"noopener\">pr 3</a> <span class=\"ref\">(bestdan/workflow-skills#3)</span><div class=\"meta\"><span class=\"wait\">waiting 22d</span> \u00b7 your PR \u00b7 CI pending</div><div class=\"why\" data-terms=\"\">tidy \u00b7 your PR, open over 14d</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/pull/3\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 merge it, close it, or say what it waits on</div><div class=\"ov\"><button type=\"button\" data-ov=\"pin\" title=\"Keep it at the top of Now, the Board and Epics\">Pin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/pull/4\" data-kind=\"pr\" data-category=\"stale_pr\" data-tier=\"tidy\" data-total=\"0.0\" data-mode=\"tidy\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/pull/4\" target=\"_blank\" rel=\"noopener\">pr 4</a> <span class=\"ref\">(bestdan/workflow-skills#4)</span><div class=\"meta\"><span class=\"wait\">waiting 20d</span> \u00b7 your PR \u00b7 CI failure</div><div class=\"why\" data-terms=\"\">tidy \u00b7 your PR, open over 14d</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/pull/4\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 merge it, close it, or say what it waits on</div><div class=\"ov\"><button type=\"button\" data-ov=\"pin\" title=\"Keep it at the top of Now, the Board and Epics\">Pin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/issues/10\" data-kind=\"issue\" data-category=\"human_issue\" data-tier=\"tidy\" data-total=\"0.0\" data-mode=\"tidy\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/issues/10\" target=\"_blank\" rel=\"noopener\">issue 10</a> <span class=\"ref\">(bestdan/workflow-skills#10)</span><div class=\"meta\"><span class=\"wait\">waiting 6d</span> \u00b7 status:1_needs_refinement</div><div class=\"why\" data-terms=\"\">tidy \u00b7 auto:human-review-needed \u00b7 prio:1</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/issues/10\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 close it, supersede it, or decide it</div><div class=\"ov\"><button type=\"button\" data-ov=\"pin\" title=\"Keep it at the top of Now, the Board and Epics\">Pin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/issues/14\" data-kind=\"issue\" data-category=\"untriaged\" data-tier=\"tidy\" data-total=\"0.0\" data-mode=\"tidy\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/issues/14\" target=\"_blank\" rel=\"noopener\">issue 14</a> <span class=\"ref\">(bestdan/workflow-skills#14)</span><div class=\"meta\"><span class=\"wait\">waiting 6d</span> \u00b7 status:0_untriaged</div><div class=\"why\" data-terms=\"\">tidy \u00b7 untriaged</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/issues/14\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 close it, supersede it, or decide it</div><div class=\"ov\"><button type=\"button\" data-ov=\"pin\" title=\"Keep it at the top of Now, the Board and Epics\">Pin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/issues/16\" data-kind=\"issue\" data-category=\"human_issue\" data-tier=\"tidy\" data-total=\"0.0\" data-mode=\"tidy\"><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/issues/16\" target=\"_blank\" rel=\"noopener\">ready but held</a> <span class=\"ref\">(bestdan/workflow-skills#16)</span><div class=\"meta\"><span class=\"wait\">waiting 6d</span> \u00b7 status:2_ready</div><div class=\"why\" data-terms=\"\">tidy \u00b7 auto:human-review-needed</div><div class=\"act\">\u2192 <a href=\"https://github.com/bestdan/workflow-skills/issues/16\" target=\"_blank\" rel=\"noopener\">open it</a> \u00b7 close it, supersede it, or decide it</div><div class=\"ov\"><button type=\"button\" data-ov=\"pin\" title=\"Keep it at the top of Now, the Board and Epics\">Pin</button><select data-ov=\"tag\" data-was=\"\" title=\"Kind\"><option value=\"\" selected>no tag</option><option value=\"side-quest\">side-quest</option><option value=\"substantial\">substantial</option></select><button type=\"button\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" title=\"Snooze until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\">Snooze 7d</button><button type=\"button\" data-ov=\"ignore\" title=\"Not mine: hide it\">Ignore</button><button type=\"button\" data-refresh=\"\" title=\"Re-read this item from GitHub, without a full sync\">Refresh</button><details><summary>Add note</summary><textarea maxlength=\"20000\"></textarea><button type=\"button\" data-ov=\"note\">Save note</button></details></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div></section></div>",
+      "snapshots": [
+        [
+          "github",
+          "https://github.com/bestdan/workflow-skills/issues/10",
+          {
+            "features": {
+              "age": "1-7d",
+              "age_days": 5.5,
+              "author": null,
+              "bot": null,
+              "category": "human_issue",
+              "ci": null,
+              "est": null,
+              "kind": "issue",
+              "mode": "tidy",
+              "own": "no",
+              "prio": "prio:1",
+              "repo": "bestdan/workflow-skills",
+              "status": "status:1_needs_refinement",
+              "workstream": null
+            },
+            "kind": "issue",
+            "score": 0.0,
+            "terms": [],
+            "title": "issue 10"
+          }
+        ],
+        [
+          "github",
+          "https://github.com/bestdan/workflow-skills/issues/14",
+          {
+            "features": {
+              "age": "1-7d",
+              "age_days": 5.5,
+              "author": null,
+              "bot": null,
+              "category": "untriaged",
+              "ci": null,
+              "est": null,
+              "kind": "issue",
+              "mode": "tidy",
+              "own": "no",
+              "prio": null,
+              "repo": "bestdan/workflow-skills",
+              "status": "status:0_untriaged",
+              "workstream": null
+            },
+            "kind": "issue",
+            "score": 0.0,
+            "terms": [],
+            "title": "issue 14"
+          }
+        ],
+        [
+          "github",
+          "https://github.com/bestdan/workflow-skills/issues/16",
+          {
+            "features": {
+              "age": "1-7d",
+              "age_days": 5.5,
+              "author": null,
+              "bot": null,
+              "category": "human_issue",
+              "ci": null,
+              "est": null,
+              "kind": "issue",
+              "mode": "tidy",
+              "own": "no",
+              "prio": null,
+              "repo": "bestdan/workflow-skills",
+              "status": "status:2_ready",
+              "workstream": null
+            },
+            "kind": "issue",
+            "score": 0.0,
+            "terms": [],
+            "title": "ready but held"
+          }
+        ],
+        [
+          "github",
+          "https://github.com/bestdan/workflow-skills/pull/1",
+          {
+            "features": {
+              "age": "1-4w",
+              "age_days": 23.5,
+              "author": null,
+              "bot": null,
+              "category": "stale_pr",
+              "ci": "success",
+              "est": null,
+              "kind": "pr",
+              "mode": "tidy",
+              "own": "yes",
+              "prio": null,
+              "repo": "bestdan/workflow-skills",
+              "status": null,
+              "workstream": null
+            },
+            "kind": "pr",
+            "score": 0.0,
+            "terms": [],
+            "title": "pr 1"
+          }
+        ],
+        [
+          "github",
+          "https://github.com/bestdan/workflow-skills/pull/2",
+          {
+            "features": {
+              "age": "1-4w",
+              "age_days": 22.5,
+              "author": null,
+              "bot": null,
+              "category": "stale_pr",
+              "ci": "success",
+              "est": null,
+              "kind": "pr",
+              "mode": "tidy",
+              "own": "yes",
+              "prio": null,
+              "repo": "bestdan/workflow-skills",
+              "status": null,
+              "workstream": null
+            },
+            "kind": "pr",
+            "score": 0.0,
+            "terms": [],
+            "title": "pr 2"
+          }
+        ],
+        [
+          "github",
+          "https://github.com/bestdan/workflow-skills/pull/3",
+          {
+            "features": {
+              "age": "1-4w",
+              "age_days": 21.5,
+              "author": null,
+              "bot": null,
+              "category": "stale_pr",
+              "ci": "pending",
+              "est": null,
+              "kind": "pr",
+              "mode": "tidy",
+              "own": "yes",
+              "prio": null,
+              "repo": "bestdan/workflow-skills",
+              "status": null,
+              "workstream": null
+            },
+            "kind": "pr",
+            "score": 0.0,
+            "terms": [],
+            "title": "pr 3"
+          }
+        ],
+        [
+          "github",
+          "https://github.com/bestdan/workflow-skills/pull/4",
+          {
+            "features": {
+              "age": "1-4w",
+              "age_days": 20.5,
+              "author": null,
+              "bot": null,
+              "category": "stale_pr",
+              "ci": "failure",
+              "est": null,
+              "kind": "pr",
+              "mode": "tidy",
+              "own": "yes",
+              "prio": null,
+              "repo": "bestdan/workflow-skills",
+              "status": null,
+              "workstream": null
+            },
+            "kind": "pr",
+            "score": 0.0,
+            "terms": [],
+            "title": "pr 4"
+          }
+        ],
+        [
+          "github",
+          "https://github.com/bestdan/workflow-skills/pull/5",
+          {
+            "features": {
+              "age": "1-4w",
+              "age_days": 24.5,
+              "author": null,
+              "bot": null,
+              "category": "stale_pr",
+              "ci": "failure",
+              "est": null,
+              "kind": "pr",
+              "mode": "tidy",
+              "own": "yes",
+              "prio": null,
+              "repo": "bestdan/workflow-skills",
+              "status": null,
+              "workstream": null
+            },
+            "kind": "pr",
+            "score": 0.0,
+            "terms": [],
+            "title": "pr 5"
+          }
+        ],
+        [
+          "github",
+          "https://github.com/bestdan/workflow-skills/pull/6",
+          {
+            "features": {
+              "age": "1-4w",
+              "age_days": 24.5,
+              "author": null,
+              "bot": null,
+              "category": "stale_pr",
+              "ci": "success",
+              "est": null,
+              "kind": "pr",
+              "mode": "tidy",
+              "own": "yes",
+              "prio": null,
+              "repo": "bestdan/workflow-skills",
+              "status": null,
+              "workstream": null
+            },
+            "kind": "pr",
+            "score": 0.0,
+            "terms": [],
             "title": "pr 6"
           }
         ]
