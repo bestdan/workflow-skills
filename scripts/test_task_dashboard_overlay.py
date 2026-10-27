@@ -840,7 +840,7 @@ class ReconcileTests(sync_harness.SyncCase):
 
 
 class RouteTests(server_harness.ServerCase):
-    fleet = True  # the review-queue gauge reads "—" with github.fleet off
+    fleet = True  # the review-queue gauge reads "—" unless github.scope is "owner"
 
     def post(self, action, fields, **kw):
         origin = kw.pop("origin", f"http://127.0.0.1:{self.port}")

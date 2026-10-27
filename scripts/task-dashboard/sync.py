@@ -24,7 +24,7 @@ dropped here.
 
 The fleet view's GitHub rows (github_fleet.py, `source = 'github'`) are a
 separate step, `run_fleet()`, which the scheduled sync and `dashboard.py sync`
-run after this one when `github.fleet` is on. It records its own `sync_runs`
+run after this one when `github.scope` is "owner". It records its own `sync_runs`
 row (kind `github_fleet`), so its failure never reaches the Jira rows or the
 Jira run's outcome.
 
@@ -614,9 +614,9 @@ WORKSTREAMS_KIND = "workstreams"
 
 
 def fleet_enabled(config: dict[str, Any]) -> bool:
-    """`github.fleet` is on and GitHub is not switched off as a whole."""
+    """`github.scope` is "owner" and GitHub is not switched off as a whole."""
     gh = config["github"]
-    return bool(gh["enabled"] and gh["fleet"])
+    return bool(gh["enabled"] and gh["scope"] == "owner")
 
 
 def run_fleet(

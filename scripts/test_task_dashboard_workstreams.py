@@ -199,7 +199,7 @@ def seed(conn, rows=ROWS):
 
 def fleet_cfg(**linear):
     cfg = config.deep_merge(config.DEFAULTS, server_harness.USER_CONFIG)
-    cfg["github"].update(enabled=True, fleet=True, orgs=["acme"])
+    cfg["github"].update(enabled=True, scope="owner", orgs=["acme"])
     cfg["linear"].update(linear)
     return cfg
 
@@ -396,7 +396,7 @@ class SourcesTests(Case):
 
     def test_fleet_off_runs_no_step_and_the_tab_says_so(self):
         cfg = fleet_cfg()
-        cfg["github"]["fleet"] = False
+        cfg["github"]["scope"] = "me"
         cfg["ingest"]["machines"] = {"box": "sha256:" + "0" * 64}
         rows = sync.run_all(
             "full", cfg, self.conn, NOW,
@@ -404,7 +404,9 @@ class SourcesTests(Case):
             fleet_runner=FakeGh(), linear_runner=FakeLinear(fail=AssertionError()),
         )  # fmt: skip
         self.assertNotIn("workstreams", [r["kind"] for r in rows])
-        self.assertIn("github.fleet is off", workstreams.render(self.conn, cfg, NOW))
+        self.assertIn(
+            'github.scope is not "owner"', workstreams.render(self.conn, cfg, NOW)
+        )
 
 
 class StalledTests(Case):

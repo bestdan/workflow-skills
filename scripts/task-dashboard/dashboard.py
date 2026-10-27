@@ -74,7 +74,7 @@ def build_parser() -> argparse.ArgumentParser:
     sync_p.add_argument(
         "--fleet-warns",
         action="store_true",
-        help="exit on the Jira run alone; a failed github.fleet step only warns",
+        help="exit on the Jira run alone; a failed GitHub fleet step only warns",
     )
     sync_p.add_argument(
         "--config",
@@ -581,7 +581,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
 def cmd_sync(args: argparse.Namespace) -> int:
     """Exit 0 on ok, 1 on failed, 3 on auth_failed, 2 on a config error.
 
-    With `github.fleet` on, the GitHub fleet step runs after the Jira sync as
+    With `github.scope = "owner"`, the GitHub fleet step runs after the Jira sync as
     its own sync_runs row, and a failure of either run makes the exit nonzero
     — unless --fleet-warns, which install's warm-up sync passes: then only the
     Jira run decides the exit, and a failed fleet step prints a warning.
@@ -605,7 +605,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
         if args.fleet_warns:
             if fleet_code:
                 print(
-                    f"WARNING: the github.fleet step ended {row['outcome']};"
+                    f"WARNING: the GitHub fleet step ended {row['outcome']};"
                     " not counted (--fleet-warns)",
                     file=sys.stderr,
                 )

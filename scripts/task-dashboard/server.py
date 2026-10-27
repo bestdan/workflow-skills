@@ -865,7 +865,7 @@ class App:
         return sqlite3.connect(self.db_path)
 
     def health(self, conn: sqlite3.Connection) -> dict[str, Any]:
-        """sync_health, without a fleet run once `github.fleet` is off.
+        """sync_health, without a fleet run once `github.scope` is not "owner".
 
         A failed fleet run would otherwise keep its header alert after the
         step that could clear it was switched off.

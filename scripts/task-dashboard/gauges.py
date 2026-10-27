@@ -14,8 +14,8 @@ queue at 5. The cap is not enforced; the gauge only shows it.
   hold at once, so a ready count alone reads 0 beside a long list of waiting
   PRs, which looks broken.
 
-Before the fleet sync step's first successful run, or while `github.fleet` is
-off, both are unknown and show "—"; after one, a run that found nothing reads
+Before the fleet sync step's first successful run, or while `github.scope` is not
+"owner", both are unknown and show "—"; after one, a run that found nothing reads
 0.
 """
 

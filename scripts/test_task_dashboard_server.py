@@ -131,14 +131,14 @@ def add_run(conn, outcome, finished, error=None, kind="incremental", counts=None
 
 class ServerCase(unittest.TestCase):
     extra_hosts: list = []
-    fleet = False  # github.enabled and github.fleet both on when True
+    fleet = False  # github.enabled on and github.scope "owner" when True
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.db_path = Path(self.tmp.name) / "dashboard.db"
         self.cfg = make_config(extra_allowed_hosts=list(self.extra_hosts))
         if self.fleet:
-            self.cfg["github"].update(enabled=True, fleet=True)
+            self.cfg["github"].update(enabled=True, scope="owner")
         self.fake = FakeSync()
         self.httpd, self.syncer = server.build(
             self.cfg, self.db_path, 0, self.fake, run_at_start=False
@@ -480,7 +480,7 @@ def fleet_rows(queued, awaiting_only):
 
 
 class FleetStatusTest(HeaderCase):
-    """/status, the header alert and the review-queue gauge with github.fleet on."""
+    """/status, the header alert and the review-queue gauge with github.scope "owner"."""
 
     fleet = True
 
@@ -570,7 +570,7 @@ class FleetStatusTest(HeaderCase):
 
 
 class FleetOffStatusTest(HeaderCase):
-    """github.fleet off: leftover fleet rows and runs are not reported."""
+    """github.scope not "owner": leftover fleet rows and runs are not reported."""
 
     def test_leftover_rows_and_failed_run_are_not_reported(self):
         conn = self.conn()
@@ -1139,7 +1139,7 @@ class JiraDisabledTest(ServerCase):
     FLEET_TABS = ('href="/prs"', 'href="/issues"')
 
     def test_a_fleet_instance_drops_every_jira_tab_for_its_own(self):
-        self.httpd.app.cfg["github"].update(enabled=True, fleet=True)
+        self.httpd.app.cfg["github"].update(enabled=True, scope="owner")
         nav = server.views.nav("/now", self.httpd.app.cfg)
         for tab in self.JIRA_TABS:
             self.assertNotIn(tab, nav)
@@ -1148,7 +1148,7 @@ class JiraDisabledTest(ServerCase):
 
     def test_a_fleet_instance_with_jira_keeps_epics_and_board_only(self):
         cfg = copy.deepcopy(self.cfg)
-        cfg["github"].update(enabled=True, fleet=True)
+        cfg["github"].update(enabled=True, scope="owner")
         nav = server.views.nav("/now", cfg)
         for tab in self.JIRA_TABS[:2] + self.FLEET_TABS:
             self.assertIn(tab, nav)

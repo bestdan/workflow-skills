@@ -240,7 +240,7 @@ PrIndex = dict[tuple[str, str], dict[str, Any]]
 def open_prs(conn: sqlite3.Connection, cfg: dict[str, Any]) -> PrIndex:
     """The mirror's open PRs by (bare repo name, head branch): the `prs`
     table's and the review-queue rows'. Of two on one branch, the newest
-    number wins. Empty with `github.fleet` off, as the page shows no PRs then."""
+    number wins. Empty unless `github.scope` is "owner", as the page shows no PRs then."""
     if not sync.fleet_enabled(cfg):
         return {}
     found: list[dict[str, Any]] = [
@@ -806,7 +806,7 @@ def render(
     parts = []
     if not sync.fleet_enabled(cfg):
         parts.append(
-            '<p class="note">github.fleet is off, so no PRs or issues are'
+            '<p class="note">The owner-wide GitHub read is off (github.enabled is false, or github.scope is not "owner"), so no PRs or issues are'
             " shown here.</p>"
         )
     for lane in lanes(p, inc):

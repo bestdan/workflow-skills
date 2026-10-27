@@ -159,7 +159,7 @@ def seed(conn, *, fleet_ran=True, prs=PRS, rows=None, counts=None):
 
 def fleet_cfg():
     cfg = config.deep_merge(config.DEFAULTS, server_harness.USER_CONFIG)
-    cfg["github"].update(enabled=True, fleet=True)
+    cfg["github"].update(enabled=True, scope="owner")
     return cfg
 
 

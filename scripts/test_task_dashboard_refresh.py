@@ -784,7 +784,7 @@ sprint = "customfield_10303"
 flagged = "customfield_10007"
 [github]
 enabled = true
-fleet = true
+scope = "owner"
 orgs = ["bestdan"]
 """
 

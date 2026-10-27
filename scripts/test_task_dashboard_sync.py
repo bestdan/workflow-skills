@@ -769,9 +769,9 @@ class FleetTests(SyncCase):
 
     def test_gate(self):
         self.assertFalse(sync.fleet_enabled(make_config()))
-        self.assertFalse(sync.fleet_enabled(make_config(enabled=False, fleet=True)))
+        self.assertFalse(sync.fleet_enabled(make_config(enabled=False, scope="owner")))
         self.assertFalse(sync.fleet_enabled(make_config(enabled=True)))
-        self.assertTrue(sync.fleet_enabled(make_config(enabled=True, fleet=True)))
+        self.assertTrue(sync.fleet_enabled(make_config(enabled=True, scope="owner")))
 
     def test_gate_off_makes_no_fleet_calls(self):
         gh = FleetGh()
@@ -787,7 +787,7 @@ class FleetTests(SyncCase):
         self.assertEqual(self.github_rows(), {})
 
     def test_gate_on_writes_github_rows_and_records_a_run(self):
-        rows = self.run_all(make_config(enabled=True, fleet=True), FleetGh())
+        rows = self.run_all(make_config(enabled=True, scope="owner"), FleetGh())
         self.assertEqual(
             [(r["kind"], r["outcome"]) for r in rows],
             [("full", "ok"), ("github_fleet", "ok"), ("workstreams", "ok")],
@@ -810,13 +810,13 @@ class FleetTests(SyncCase):
     def test_failure_leaves_jira_rows_and_outcome(self):
         gh = FleetGh()
         gh.error = "HTTP 502: bad gateway"
-        rows = self.run_all(make_config(enabled=True, fleet=True), gh)
+        rows = self.run_all(make_config(enabled=True, scope="owner"), gh)
         self.assertEqual([r["outcome"] for r in rows], ["ok", "failed", "failed"])
         self.assertIn("502", rows[1]["error"])
         self.assertEqual(self.keys(), ["DEMO-1"])
 
     def test_failure_keeps_the_last_good_github_rows(self):
-        cfg = make_config(enabled=True, fleet=True)
+        cfg = make_config(enabled=True, scope="owner")
         self.run_all(cfg, FleetGh())
         before = self.github_rows()
         gh = FleetGh()
@@ -827,7 +827,7 @@ class FleetTests(SyncCase):
     def test_auth_failure_carries_the_gh_hint(self):
         gh = FleetGh()
         gh.error = "To get started with GitHub CLI, please run:  gh auth login"
-        rows = self.run_all(make_config(enabled=True, fleet=True), gh)
+        rows = self.run_all(make_config(enabled=True, scope="owner"), gh)
         self.assertEqual(
             [r["outcome"] for r in rows], ["ok", "auth_failed", "auth_failed"]
         )
@@ -838,7 +838,7 @@ class FleetTests(SyncCase):
         gh = FleetGh()
         bad = "https://github.com/acme/app/pull/1"
         gh.ci_fail = {bad}
-        rows = self.run_all(make_config(enabled=True, fleet=True), gh)
+        rows = self.run_all(make_config(enabled=True, scope="owner"), gh)
         self.assertEqual(rows[1]["outcome"], "ok")
         self.assertEqual(json.loads(rows[1]["failed_keys"]), [bad])
         self.assertEqual(self.github_rows()[bad], "awaiting")
@@ -846,7 +846,7 @@ class FleetTests(SyncCase):
     def test_jira_failure_still_runs_the_fleet_step(self):
         acli = FakeAcli(["DEMO-1"])
         acli.auth = True
-        rows = self.run_all(make_config(enabled=True, fleet=True), FleetGh(), acli)
+        rows = self.run_all(make_config(enabled=True, scope="owner"), FleetGh(), acli)
         self.assertEqual([r["outcome"] for r in rows], ["auth_failed", "ok", "ok"])
         self.assertEqual(len(self.github_rows()), 4)  # with closed_today
 
@@ -856,7 +856,7 @@ class FleetTests(SyncCase):
         later = NOW + timedelta(minutes=1)
         # Jira finish, fleet start, fleet finish, workstreams start and finish.
         ticks = iter([NOW, later, later, later, later])
-        cfg = make_config(enabled=True, fleet=True)
+        cfg = make_config(enabled=True, scope="owner")
         sync.run_all(
             "full", cfg, self.conn, NOW,
             jira=sync.JiraSource(cfg, runner=FakeAcli(["DEMO-1"])),
@@ -950,7 +950,7 @@ class ArchivedRepoTests(SyncCase):
         return dict(zip(self.PLACES, found))
 
     def test_a_pr_left_open_in_an_archived_repo_drops_out_on_the_next_sync(self):
-        cfg = make_config(enabled=True, fleet=True)
+        cfg = make_config(enabled=True, scope="owner")
         fleet_inner = FleetGh()
         fleet_inner.extra = [
             self.old_node(
@@ -1199,7 +1199,7 @@ class CmdSyncTests(unittest.TestCase):
         self.cfg.write_text(
             '[jira]\nsite = "example.invalid"\nboard_ids = [77]\n'
             '[jira.fields]\nsprint = "c1"\nflagged = "c2"\n'
-            "[github]\nenabled = true\nfleet = true\n"
+            '[github]\nenabled = true\nscope = "owner"\n'
         )
         self.db = tmp / "d.db"
 
@@ -1248,7 +1248,7 @@ class CmdSyncTests(unittest.TestCase):
         )
         self.assertEqual(code, 0)
         self.assertIn("sync github_fleet: auth_failed", out)
-        self.assertIn("WARNING: the github.fleet step ended auth_failed", err)
+        self.assertIn("WARNING: the GitHub fleet step ended auth_failed", err)
 
     def test_fleet_warns_still_fails_on_a_failed_jira_run(self):
         code, _, _ = self.cmd_sync(
@@ -1285,13 +1285,53 @@ class ConfigTests(unittest.TestCase):
         u["jira"]["board_ids"] = []
         self.assertEqual(self.load(u)["jira"]["board_ids"], [])
 
-    def test_github_fleet_defaults_off_and_must_be_a_bool(self):
-        self.assertIs(self.load(self.base())["github"]["fleet"], False)
+    def test_url_refuses_github_fleet_and_names_the_replacement(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "c.toml"
+            p.write_text(
+                '[jira]\nsite = "s"\nboard_ids = [1]\n'
+                '[jira.fields]\nsprint = "c1"\nflagged = "c2"\n'
+                "[github]\nfleet = true\n"
+            )
+            err = io.StringIO()
+            with (
+                contextlib.redirect_stderr(err),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                code = dashboard.main(["url", "--config", str(p)])
+        self.assertEqual(code, 2)
+        self.assertIn('github.scope = "owner"', err.getvalue())
+
+    def test_github_scope_defaults_to_me(self):
+        cfg = self.load(self.base())
+        self.assertEqual(cfg["github"]["scope"], "me")
+        self.assertFalse(sync.fleet_enabled(cfg))
+
+    def test_github_scope_owner_enables_the_fleet_step(self):
         u = self.base()
-        u["github"] = {"fleet": "yes"}
+        u["github"] = {"scope": "owner"}
+        self.assertTrue(sync.fleet_enabled(self.load(u)))
+        u["github"] = {"scope": "owner", "enabled": False}
+        self.assertFalse(sync.fleet_enabled(self.load(u)))
+
+    def test_github_scope_must_be_owner_or_me(self):
+        u = self.base()
+        u["github"] = {"scope": "everyone"}
         with self.assertRaises(config.ConfigError) as cm:
             self.load(u)
-        self.assertIn("github.fleet", str(cm.exception))
+        self.assertIn("github.scope", str(cm.exception))
+
+    def test_github_fleet_is_refused_true_or_false(self):
+        for value in (True, False):
+            u = self.base()
+            u["github"] = {"fleet": value}
+            with self.subTest(fleet=value):
+                with self.assertRaises(config.ConfigError) as cm:
+                    self.load(u)
+                msg = str(cm.exception)
+                self.assertIn("github.fleet", msg)
+                self.assertIn('github.scope = "owner"', msg)
+                self.assertIn("ingest.machines", msg)
 
     def test_empty_site_is_an_error(self):
         u = self.base()

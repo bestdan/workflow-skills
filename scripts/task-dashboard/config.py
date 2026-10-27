@@ -26,6 +26,7 @@ import score
 
 ENV_VAR = "TASK_DASHBOARD_CONFIG"
 DEFAULT_PATH = Path("~/.config/task-dashboard/config.toml")
+GITHUB_SCOPES = ("owner", "me")
 
 DEFAULTS: dict[str, Any] = {
     # `me` is my Jira display name, which the mirror stores people by. Empty
@@ -36,10 +37,12 @@ DEFAULTS: dict[str, Any] = {
     "jira": {"enabled": True, "blocked_statuses": [], "acli_path": "acli", "me": ""},
     # design_repos: `owner/name` repos whose dev_docs/designs/ the fleet view
     # reads for `status: proposed` (github_fleet.py). Empty reads none.
-    # fleet: run github_fleet's fetch (review queue, issues needing a human,
-    # proposed designs) in every sync. Off by default, so the work-laptop
-    # Jira instance never runs it; `enabled = false` turns it off too.
-    "github": {"enabled": True, "orgs": [], "design_repos": [], "fleet": False},
+    # scope: how wide github_fleet's fetch reads. "owner" is every open issue
+    # and others' PRs on the `orgs` repos, and runs the fetch in every sync
+    # (sync.fleet_enabled); "me" is only what involves me (github_fleet's
+    # module docstring). "me" by default, so an unset key never mirrors a
+    # whole work org. `enabled = false` turns GitHub off whatever it says.
+    "github": {"enabled": True, "orgs": [], "design_repos": [], "scope": "me"},
     "sync": {
         "interval_minutes": 5,
         "reconcile_minutes": 60,
@@ -175,8 +178,14 @@ def load(path: "str | os.PathLike[str] | None" = None) -> dict[str, Any]:
         cfg["jira"].setdefault("site", "")
         cfg["jira"].setdefault("board_ids", [])
         cfg["jira"].setdefault("fields", {})
-    if not isinstance(cfg["github"]["fleet"], bool):
-        raise ConfigError("github.fleet must be true or false")
+    if "fleet" in cfg["github"]:
+        # Refused, not aliased: it set two things that are now separate.
+        raise ConfigError(
+            'github.fleet is retired: set github.scope = "owner" for the wider'
+            " GitHub read, and ingest.machines to collect from other hosts"
+        )
+    if cfg["github"]["scope"] not in GITHUB_SCOPES:
+        raise ConfigError('github.scope must be "owner" or "me"')
     port = cfg["server"]["port"]
     if not isinstance(port, int) or isinstance(port, bool) or not 0 < port < 65536:
         raise ConfigError("server.port must be an integer port (1-65535)")
