@@ -734,7 +734,7 @@ def render(
         )
     if not sync.fleet_enabled(cfg):
         parts.append(
-            '<p class="note">github.fleet is off, so no PRs or issues are'
+            '<p class="note">github.scope is not "owner", so no PRs or issues are'
             " ranked here.</p>"
         )
     for lane in lanes(p, inc):

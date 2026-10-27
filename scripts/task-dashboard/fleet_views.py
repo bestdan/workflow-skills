@@ -161,7 +161,7 @@ def _raw(value: "str | None") -> dict[str, Any]:
 
 
 def load(conn: sqlite3.Connection, cfg: "dict[str, Any] | None" = None) -> Fleet:
-    """The fleet rows. With `cfg` and `github.fleet` off, no github rows: the
+    """The fleet rows. With `cfg` and `github.scope` not "owner", no github rows: the
     ones left from an earlier run are not current (as gauges.review_queue)."""
     f = Fleet()
     rows = (

@@ -131,8 +131,7 @@ def design_id(repo: str, path: str) -> str:
 
 def enabled(cfg: dict[str, Any]) -> bool:
     """The step runs with the fleet's GitHub step: it reads that step's rows."""
-    gh = cfg["github"]
-    return bool(gh["enabled"] and gh["fleet"])
+    return sync.fleet_enabled(cfg)
 
 
 # --- the mirror's items ------------------------------------------------------
@@ -869,7 +868,9 @@ def lanes(conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime) -> Tab:
 
 def _notes(cfg: dict[str, Any], tab: Tab) -> str:
     if not enabled(cfg):
-        return '<p class="note">github.fleet is off, so nothing is shown here.</p>'
+        return (
+            '<p class="note">github.scope is not "owner", so nothing is shown here.</p>'
+        )
     if not tab.synced:
         return '<p class="note">No workstreams sync has succeeded yet.</p>'
     linear = tab.linear or ""

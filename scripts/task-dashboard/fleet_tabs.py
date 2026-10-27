@@ -114,7 +114,9 @@ def _hidden(ov: overlay.Overlay, item: overlay.Item, now: datetime) -> str:
 
 def _gate_note(cfg: dict[str, Any], synced: bool) -> str:
     if not sync.fleet_enabled(cfg):
-        return '<p class="note">github.fleet is off, so nothing is shown here.</p>'
+        return (
+            '<p class="note">github.scope is not "owner", so nothing is shown here.</p>'
+        )
     if not synced:
         return '<p class="note">No fleet sync has succeeded yet.</p>'
     return ""

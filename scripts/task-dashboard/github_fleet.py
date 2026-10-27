@@ -60,6 +60,14 @@ PRs and are not applied: an `others` row has its CI state for display,
 `in_queue` false, no `queue_misses`, and `status_name` `others`. The gauge
 never counts one; `queue_counts()` gives them as `others`.
 
+SCOPE (`github.scope`) sets how wide these reads are. "owner" is all of the
+above. "me" keeps only what involves me, for an org whose repos are not mine
+alone: the review queue's two searches (already mine), no PRs from others,
+issues assigned to me or opened by me (ISSUE_WHO, in both issue searches),
+and a closed-today count of my merged PRs and the issues assigned to me. My
+closed PRs and the design repos are the same in both. The sync runs fetch()
+only with "owner" (sync.fleet_enabled).
+
 Run `python github_fleet.py review-queue <owner>...` (under uv, Python 3.11+)
 to print the counts and the searches behind them, and
 `python github_fleet.py issues <owner>...` to print how many open issues the
@@ -99,6 +107,11 @@ MAX_DESIGN_FILES = 40
 # Open issues mirrored per owner beyond the human-review set. GitHub's search
 # stops at 1000 results, so a cap under it is always seen when it bites.
 MAX_OPEN_ISSUES = 900
+
+# What `github.scope` narrows an issue search to: one search per qualifier,
+# their results unioned by URL. "owner" adds none, so it reads every open
+# issue; "me" reads the issues assigned to me and the ones I opened.
+ISSUE_WHO = {"owner": ("",), "me": ("assignee:@me", "author:@me")}
 
 ISSUE_QUERY = """
 query($q: String!, $after: String) {
@@ -277,18 +290,25 @@ def _milestone(node: "dict | None") -> "dict | None":
     return {"number": node["number"], "title": node.get("title")}
 
 
+def issue_searches(base: str, owner: str, scope: str = "owner") -> list[str]:
+    """`base` narrowed to one owner's repos and to `scope` (ISSUE_WHO)."""
+    org = github_gh.owner_qualifier(owner)
+    return [" ".join(p for p in (base, who, org) if p) for who in ISSUE_WHO[scope]]
+
+
 def issues_needing_human(
-    owners: Iterable[str], runner: Runner = run, timeout: float = DEFAULT_TIMEOUT
+    owners: Iterable[str],
+    runner: Runner = run,
+    timeout: float = DEFAULT_TIMEOUT,
+    scope: str = "owner",
 ) -> list[dict]:
-    """Open issues labelled auto:human-review-needed, one search per owner."""
+    """Open issues labelled auto:human-review-needed, per owner and scope."""
     rows: dict[str, dict] = {}
+    base = f'is:issue is:open archived:false label:"{HUMAN_LABEL}"'
     for owner in owners:
-        query = (
-            f'is:issue is:open archived:false label:"{HUMAN_LABEL}"'
-            f" {github_gh.owner_qualifier(owner)}"
-        )
-        for node in github_gh.search_prs(query, runner, timeout, ISSUE_QUERY):
-            rows.setdefault(node["url"], _issue_row(node))
+        for query in issue_searches(base, owner, scope):
+            for node in github_gh.search_prs(query, runner, timeout, ISSUE_QUERY):
+                rows.setdefault(node["url"], _issue_row(node))
     return list(rows.values())
 
 
@@ -297,27 +317,26 @@ def open_issues(
     runner: Runner = run,
     timeout: float = DEFAULT_TIMEOUT,
     cap: int = MAX_OPEN_ISSUES,
+    scope: str = "owner",
 ) -> "tuple[list[dict], list[str]]":
-    """Every open issue of the owners, and the owners the cap cut short.
+    """Every open issue of the owners in `scope`, and the owners the cap cut short.
 
     The human-review set comes first and in full (issues_needing_human); then
-    one search per owner adds its other open issues, at most `cap` of them.
+    each owner's other open issues, at most `cap` per search.
     """
     owners = list(owners)
-    rows = {r["url"]: r for r in issues_needing_human(owners, runner, timeout)}
+    rows = {r["url"]: r for r in issues_needing_human(owners, runner, timeout, scope)}
     truncated: list[str] = []
+    base = f'is:issue is:open archived:false -label:"{HUMAN_LABEL}"'
     for owner in owners:
-        query = (
-            f'is:issue is:open archived:false -label:"{HUMAN_LABEL}"'
-            f" {github_gh.owner_qualifier(owner)}"
-        )
-        nodes, more = github_gh.search_nodes(
-            query, runner, timeout, ISSUE_QUERY, limit=cap
-        )
-        if more:
-            truncated.append(owner)
-        for node in nodes:
-            rows.setdefault(node["url"], _issue_row(node))
+        for query in issue_searches(base, owner, scope):
+            nodes, more = github_gh.search_nodes(
+                query, runner, timeout, ISSUE_QUERY, limit=cap
+            )
+            if more and owner not in truncated:
+                truncated.append(owner)
+            for node in nodes:
+                rows.setdefault(node["url"], _issue_row(node))
     return list(rows.values()), truncated
 
 
@@ -596,10 +615,14 @@ def queue_row(
 
 
 def review_queue(
-    owners: Iterable[str], runner: Runner = run, timeout: float = DEFAULT_TIMEOUT
+    owners: Iterable[str],
+    runner: Runner = run,
+    timeout: float = DEFAULT_TIMEOUT,
+    scope: str = "owner",
 ) -> "tuple[list[dict], list[str]]":
     """Every awaiting PR (rule 1), each marked `in_queue` by rules 2-4, then
     the PRs from others (role `others`), which those rules do not apply to.
+    Scope "me" skips the PRs from others: they do not involve me.
 
     Rule 4 is skipped, with `milestone_approved` None, for a PR that closes no
     issue in a milestone.
@@ -616,7 +639,7 @@ def review_queue(
             for node in github_gh.search_prs(query, runner, timeout, REVIEW_QUERY):
                 if in_review_queue(node):
                     nodes.setdefault(node["url"], (node, role))
-    for owner in owners:
+    for owner in owners if scope == "owner" else ():
         query = others_search(owner)
         for node in github_gh.search_prs(query, runner, timeout, REVIEW_QUERY):
             if not node.get("isDraft"):
@@ -649,9 +672,11 @@ def closed_today(
     now: datetime,
     runner: Runner = run,
     timeout: float = DEFAULT_TIMEOUT,
+    scope: str = "owner",
 ) -> "dict | None":
     """PRs merged and issues closed since local midnight, by anyone, in the
-    owners' repos: the `closed_today` row, or None with no owner.
+    owners' repos: the `closed_today` row, or None with no owner. Scope "me"
+    counts only my PRs and the issues assigned to me.
 
     One GraphQL call: two `issueCount` searches per owner, as aliases, so it
     costs no page of nodes. A failed call raises GhError, as any search here.
@@ -664,9 +689,12 @@ def closed_today(
     parts = []
     for i, owner in enumerate(owners):
         org = github_gh.owner_qualifier(owner)  # validated: safe to inline
+        pr_who, issue_who = (
+            ("author:@me ", "assignee:@me ") if scope == "me" else ("", "")
+        )
         for alias, q in (
-            (f"m{i}", f"is:pr is:merged merged:>={since} {org}"),
-            (f"i{i}", f"is:issue is:closed closed:>={since} {org}"),
+            (f"m{i}", f"is:pr is:merged merged:>={since} {pr_who}{org}"),
+            (f"i{i}", f"is:issue is:closed closed:>={since} {issue_who}{org}"),
         ):
             parts.append(
                 f'{alias}: search(query: "{q}", type: ISSUE, first: 0) {{ issueCount }}'
@@ -924,7 +952,8 @@ def fetch(
     """Every github row for the fleet view. Reads GitHub; writes nothing."""
     now = now or datetime.now(timezone.utc)
     owners = list(config["github"]["orgs"])
-    queue, failed = review_queue(owners, runner, timeout)
+    scope = config["github"]["scope"]
+    queue, failed = review_queue(owners, runner, timeout, scope)
     designs, truncated, missing = proposed_designs(
         config["github"].get("design_repos", []), runner, timeout
     )
@@ -934,11 +963,11 @@ def fetch(
         for r in recently_closed(owners, now, runner, timeout)
         if r["url"] not in open_urls  # an index lag; the open row wins
     ]
-    issues, issues_truncated = open_issues(owners, runner, timeout)
+    issues, issues_truncated = open_issues(owners, runner, timeout, scope=scope)
     rows = queue + issues + designs + closed
     # A header figure: a failed count is listed, and the run still lands.
     try:
-        today = closed_today(owners, now, runner, timeout)
+        today = closed_today(owners, now, runner, timeout, scope)
     except github_gh.AuthError:
         raise
     except GhError:

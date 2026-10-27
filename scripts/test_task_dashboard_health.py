@@ -291,7 +291,7 @@ class PanelTest(server_harness.ServerCase):
             cfg_path.write_text(
                 '[jira]\nsite = "x.invalid"\nboard_ids = []\n'
                 '[jira.fields]\nsprint = "a"\nflagged = "b"\n'
-                "[github]\nenabled = true\nfleet = true\n"
+                '[github]\nenabled = true\nscope = "owner"\n'
             )
             out = io.StringIO()
             with contextlib.redirect_stdout(out):

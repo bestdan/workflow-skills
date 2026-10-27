@@ -660,7 +660,9 @@ class OpenIssuesTests(unittest.TestCase):
     def test_fetch_reports_the_truncated_owners(self):
         runner = WriteTests().full_runner()
         plan = fleet.fetch(
-            {"github": {"orgs": ["bestdan"], "design_repos": []}}, runner, now=NOW
+            {"github": {"orgs": ["bestdan"], "scope": "owner", "design_repos": []}},
+            runner,
+            now=NOW,
         )
         self.assertEqual(plan["issues_truncated"], [])
 
@@ -839,7 +841,9 @@ class ClosedTests(unittest.TestCase):
         runner = WriteTests().full_runner()
         runner.rules.insert(0, (lambda a: "is:closed" in search_q(a), ok(page)))
         plan = fleet.fetch(
-            {"github": {"orgs": ["bestdan"], "design_repos": []}}, runner, now=NOW
+            {"github": {"orgs": ["bestdan"], "scope": "owner", "design_repos": []}},
+            runner,
+            now=NOW,
         )
         urls = [r["url"] for r in plan["rows"] if r["kind"] != fleet.CLOSED_TODAY]
         self.assertEqual(len(urls), len(set(urls)))
@@ -865,7 +869,9 @@ class WriteTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def config(self):
-        return {"github": {"orgs": ["bestdan"], "design_repos": [REPO]}}
+        return {
+            "github": {"orgs": ["bestdan"], "scope": "owner", "design_repos": [REPO]}
+        }
 
     def full_runner(self, ci=None):
         ci = ci or ok({"statusCheckRollup": []})
@@ -928,6 +934,56 @@ class WriteTests(unittest.TestCase):
             self.assertIn("archived:false", q.split())
         self.assertNotIn("archived:false", closed[0])
 
+    def test_me_scope_reads_only_what_involves_me(self):
+        runner = designs_router(
+            extra=queue_rules(ci=ok({"statusCheckRollup": []}))
+            + [
+                (
+                    lambda a: "is:closed" in search_q(a),
+                    ok(fixture("fleet_closed_search.json")),
+                ),
+                # Ahead of the PR rules: a "me" issue search says author:@me too.
+                (
+                    lambda a: "is:issue" in search_q(a),
+                    ok(fixture("fleet_issues_search.json")),
+                ),
+                (lambda a: "author:@me" in search_q(a), ok(review_page())),
+                (lambda a: "review-requested:@me" in search_q(a), ok(review_page([]))),
+            ]
+        )
+        cfg = self.config()
+        cfg["github"]["scope"] = "me"
+        plan = fleet.fetch(cfg, runner, now=NOW)
+        searches = [search_q(a) for a in runner.calls if search_q(a)]
+        self.assertFalse([q for q in searches if "-author:@me" in q.split()])
+        self.assertEqual(plan["counts"]["others"], 0)
+        prs = [q for q in searches if "is:pr" in q and "is:open" in q]
+        self.assertEqual(
+            sorted(q.split()[-2] for q in prs), ["author:@me", "review-requested:@me"]
+        )
+        issues = [q for q in searches if "is:issue" in q]
+        whos = sorted(w for q in issues for w in q.split() if w.endswith(":@me"))
+        self.assertEqual(whos, ["assignee:@me"] * 2 + ["author:@me"] * 2)
+        self.assertEqual(len(issues), 4)  # human-review and the rest, each twice
+        counts = next(
+            arg(a, "query")
+            for a in runner.calls
+            if "issueCount" in (arg(a, "query") or "")
+        )
+        self.assertIn("is:pr is:merged", counts)
+        self.assertIn("author:@me", counts)
+        self.assertIn("assignee:@me", counts)
+
+    def test_owner_scope_issue_searches_name_no_one(self):
+        org = fleet.github_gh.owner_qualifier("bestdan")
+        self.assertEqual(
+            fleet.issue_searches("is:issue", "bestdan"), [f"is:issue {org}"]
+        )
+        self.assertEqual(
+            fleet.issue_searches("is:issue", "bestdan", "me"),
+            [f"is:issue assignee:@me {org}", f"is:issue author:@me {org}"],
+        )
+
     def test_jira_rows_untouched_and_github_replaced(self):
         self.conn.execute(
             "INSERT INTO issues (source, kind, key, summary) VALUES ('jira', 'ticket', 'AB-1', 's')"
@@ -948,7 +1004,11 @@ class WriteTests(unittest.TestCase):
 
     def test_fetch_reports_missing_design_repos(self):
         config = {
-            "github": {"orgs": ["bestdan"], "design_repos": ["bestdan/typo", REPO]}
+            "github": {
+                "orgs": ["bestdan"],
+                "scope": "owner",
+                "design_repos": ["bestdan/typo", REPO],
+            }
         }
         runner = self.full_runner()
         runner.rules.insert(0, (lambda a: "bestdan/typo/" in a[2], NOT_FOUND))
@@ -1021,7 +1081,9 @@ class ClosedTodayTests(unittest.TestCase):
             0, (lambda a: "issueCount" in (arg(a, "query") or ""), (1, "", "HTTP 502"))
         )
         plan = fleet.fetch(
-            {"github": {"orgs": ["bestdan"], "design_repos": []}}, runner, now=NOW
+            {"github": {"orgs": ["bestdan"], "scope": "owner", "design_repos": []}},
+            runner,
+            now=NOW,
         )
         self.assertIn(fleet.CLOSED_TODAY, plan["failed"])
         self.assertFalse([r for r in plan["rows"] if r["kind"] == fleet.CLOSED_TODAY])

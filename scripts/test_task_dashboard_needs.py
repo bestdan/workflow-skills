@@ -194,7 +194,7 @@ def seed(conn, *, fleet_ran=True):
 
 def fleet_cfg(remote=False):
     cfg = config.deep_merge(config.DEFAULTS, server_harness.USER_CONFIG)
-    cfg["github"].update(enabled=True, fleet=True)
+    cfg["github"].update(enabled=True, scope="owner")
     cfg["ingest"]["machines"] = {"mini": "sha256:" + "0" * 64}
     cfg["claude_remote"]["enabled"] = remote
     return cfg
@@ -535,9 +535,9 @@ class GateTests(NeedsCase):
     def test_fleet_off_shows_no_github_rows(self):
         seed(self.conn)
         cfg = fleet_cfg()
-        cfg["github"]["fleet"] = False
+        cfg["github"]["scope"] = "me"
         page = self.page(cfg)
-        self.assertIn("github.fleet is off", page)
+        self.assertIn('github.scope is not "owner"', page)
         self.assertNotIn("https://github.com/", page)
         self.assertIn("s-turn", keys(page))
 

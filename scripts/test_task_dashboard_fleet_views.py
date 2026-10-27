@@ -232,7 +232,7 @@ def seed(conn, last_visit=LAST_VISIT):
 
 def fleet_cfg(**github):
     cfg = config.deep_merge(config.DEFAULTS, server_harness.USER_CONFIG)
-    cfg["github"].update(enabled=True, fleet=True, **github)
+    cfg["github"].update(enabled=True, scope="owner", **github)
     return cfg
 
 
@@ -327,7 +327,7 @@ class FinishedTests(FleetCase):
     def test_fleet_off_still_lists_finished_sessions(self):
         seed(self.conn)
         cfg = fleet_cfg()
-        cfg["github"]["fleet"] = False
+        cfg["github"]["scope"] = "me"
         cfg["ingest"]["machines"] = {"mini": "sha256:" + "0" * 64}
         page = self.page(cfg)
         self.assertEqual(keys(section(page, "finished")), ["s-done"])

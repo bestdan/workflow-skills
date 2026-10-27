@@ -36,7 +36,7 @@ its lanes from these rows as it always does.
 A refresh is not a sync: it writes no `sync_runs` row, so the sync figures on
 Health and the header's age do not move. Only items under the configured
 `github.orgs` are refreshed, as only those are synced; the `kind = pr` and
-`kind = issue` rows are written only with `github.fleet` on, as the sync
+`kind = issue` rows are written only with `github.scope = "owner"`, as the sync
 writes them.
 """
 

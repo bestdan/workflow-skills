@@ -228,7 +228,7 @@ def plan(
     p.steps.append(
         Step(
             # --fleet-warns: the warm-up is judged on the Jira run alone; a
-            # failed github.fleet step prints a warning and does not undo.
+            # failed GitHub fleet step prints a warning and does not undo.
             [*fg, "sync", "--mode", "full", "--fleet-warns"],
             timeout=FULL_SYNC_TIMEOUT,
             why="first full sync",
