@@ -50,6 +50,7 @@ from typing import Any
 import fleet_views
 import gauges
 import github_fleet
+import github_gh
 import include
 import overlay
 import score
@@ -152,9 +153,10 @@ def pull_requests(conn: sqlite3.Connection, cfg: dict[str, Any]) -> list[dict]:
         " role, raw_json FROM prs ORDER BY repo, number"
     ):
         try:
-            created = (json.loads(raw or "{}") or {}).get("createdAt")
+            node = json.loads(raw or "{}") or {}
         except ValueError:
-            created = None
+            node = {}
+        created = node.get("createdAt")
         out[url] = {
             "url": url,
             "repo": repo,
@@ -165,6 +167,7 @@ def pull_requests(conn: sqlite3.Connection, cfg: dict[str, Any]) -> list[dict]:
             "ci_state": ci,
             "role": role,
             "created": created,
+            "size": github_gh.pr_size(node),
             "awaiting": awaiting.get(url),
         }
     for url, row in awaiting.items():
@@ -180,12 +183,14 @@ def pull_requests(conn: sqlite3.Connection, cfg: dict[str, Any]) -> list[dict]:
                 "ci_state": row.get("ci_state"),
                 "role": row.get("role"),
                 "created": None,
+                "size": None,
             },
         )
         p["awaiting"] = row
         # The fleet step's verdict was reached on its own CI read: show that one.
         p["ci_state"] = row.get("ci_state")
         p["created"] = row.get("created") or p["created"]
+        p["size"] = row.get("size") or p["size"]
     return list(out.values())
 
 

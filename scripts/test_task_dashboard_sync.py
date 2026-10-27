@@ -708,6 +708,9 @@ class FleetGh:
                 nodes = []
             page = {"pageInfo": {"hasNextPage": False, "endCursor": None}}
             return 0, json.dumps({"data": {"search": {**page, "nodes": nodes}}}), ""
+        if any("issueCount" in a for a in argv):
+            counts = {"m0": {"issueCount": 0}, "i0": {"issueCount": 0}}
+            return 0, json.dumps({"data": counts}), ""
         if argv[:3] == ["gh", "pr", "view"]:
             if any(a in self.ci_fail for a in argv):
                 return 1, "", "HTTP 502: bad gateway"
@@ -795,11 +798,12 @@ class FleetTests(SyncCase):
                 "https://github.com/acme/app/pull/1": "queue",
                 "https://github.com/acme/app/pull/2": "awaiting",
                 "https://github.com/acme/app/issues/5": None,
+                "closed_today": None,
             },
         )
         counts = json.loads(rows[1]["counts"])
         self.assertEqual(
-            (counts["queue"], counts["awaiting"], counts["rows"]), (1, 2, 3)
+            (counts["queue"], counts["awaiting"], counts["rows"]), (1, 2, 4)
         )
         self.assertEqual(self.keys(), ["DEMO-1"])
 
@@ -844,7 +848,7 @@ class FleetTests(SyncCase):
         acli.auth = True
         rows = self.run_all(make_config(enabled=True, fleet=True), FleetGh(), acli)
         self.assertEqual([r["outcome"] for r in rows], ["auth_failed", "ok", "ok"])
-        self.assertEqual(len(self.github_rows()), 3)
+        self.assertEqual(len(self.github_rows()), 4)  # with closed_today
 
     def test_fleet_run_is_not_a_jira_cursor(self):
         # The fleet run starts after the Jira run, as it does in production, so

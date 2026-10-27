@@ -131,6 +131,9 @@ def features(r: Any, now: datetime) -> dict[str, Any]:
         # Whether workstream membership should move an item up Now is left
         # for tune to propose; nothing scores it yet.
         "workstream": getattr(r, "workstream", None),
+        # The Now mode that ranked it. Recorded for a per-mode tune; not in
+        # FEATURES, so tune does not compare it yet.
+        "mode": getattr(r, "mode", "ship"),
     }
 
 

@@ -1,9 +1,9 @@
 """The overlay: the user's pins, pinned order, snoozes, notes, kind tags,
-ignores, last visit, each view's remembered include filter, and the answers
-to Now's "why not now" picker.
+ignores, last visit, each view's remembered include filter, the answers to
+Now's "why not now" picker, and the fleet Now's mode.
 
 Every row is keyed by (source, item_key), the same pair as `issues`, except
-`last_visit`, which is one timestamp for the whole overlay, and
+`last_visit` and `now_mode`, one row each for the whole overlay, and
 `view_includes`, which is keyed by view name (include.py), and `why_not`,
 which holds any number of answers per item (whynot.py reads them). The sync
 never writes these tables, and nothing here reads `issues`: a row for an item
@@ -34,11 +34,11 @@ import score
 
 EXPORT_FORMAT = "task-dashboard-overlay"
 # 2 added kind_tags, focus and last_visit; 3 added ignores; 4 added
-# view_includes; 5 dropped focus, a feature since removed; 6 added why_not. An
-# older file still imports, with what it lacks empty and its focus rows
-# dropped, so a backup taken before an upgrade can be restored.
-EXPORT_VERSION = 6
-IMPORT_VERSIONS = (1, 2, 3, 4, 5, 6)
+# view_includes; 5 dropped focus, a feature since removed; 6 added why_not; 7
+# added now_mode. An older file still imports, with what it lacks empty and its
+# focus rows dropped, so a backup taken before an upgrade can be restored.
+EXPORT_VERSION = 7
+IMPORT_VERSIONS = (1, 2, 3, 4, 5, 6, 7)
 MAX_KEY = 512
 MAX_BODY = 256 * 1024  # a POST body; room for a long note, percent-encoded
 MAX_NOTE = 20_000
@@ -80,9 +80,13 @@ WHY_NOT_COLUMNS = (
     "features", "recorded_at",
 )  # fmt: skip
 
+# The fleet Now's modes (fleet_now.py), in the order its button cycles them.
+# The first is the default: what Now shows with no saved mode.
+NOW_MODES = ("ship", "little")
+
 ACTIONS = (
     "pin", "unpin", "order", "snooze", "note", "tag", "visit", "ignore",
-    "unignore", "include", "whynot",
+    "unignore", "include", "whynot", "mode",
 )  # fmt: skip
 
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
@@ -411,6 +415,32 @@ def set_view_include(
         )
 
 
+def now_mode_of(value: Any, what: str = "mode") -> str:
+    """`value` if it is one of NOW_MODES; else OverlayError."""
+    if value not in NOW_MODES:
+        raise OverlayError(
+            f"{what} must be one of {', '.join(NOW_MODES)}, got {value!r}"
+        )
+    return value
+
+
+def set_now_mode(
+    conn: sqlite3.Connection, mode: str, now: "datetime | None" = None
+) -> None:
+    """Save the fleet Now's mode, as its mode button does."""
+    with conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO now_mode (id, mode, set_at) VALUES (1, ?, ?)",
+            (now_mode_of(mode), _now(now)),
+        )
+
+
+def saved_now_mode(conn: sqlite3.Connection) -> "str | None":
+    """The saved mode, or None when none is saved or it is no longer a mode."""
+    row = conn.execute("SELECT mode FROM now_mode WHERE id = 1").fetchone()
+    return row[0] if row and row[0] in NOW_MODES else None
+
+
 def _visit_at(value: str, now: "datetime | None") -> datetime:
     """The `visit` action's `at`: a page's render time, never past `now`."""
     now = now or datetime.now(timezone.utc)
@@ -441,10 +471,14 @@ def apply(
     "Mark as read" was pressed (absent means now). `include` takes no key,
     only `view` and `include`, the view's comma-joined groups (empty: none).
     `whynot` takes `reason` and an optional `text` for an item that is
-    already snoozed, and asks `snapshot` for the item as Now ranks it.
+    already snoozed, and asks `snapshot` for the item as Now ranks it. `mode`
+    takes no key, only `mode`, one of NOW_MODES.
     """
     if action not in ACTIONS:
         raise OverlayError(f"unknown overlay action: {action!r}")
+    if action == "mode":
+        set_now_mode(conn, (form.get("mode") or [""])[0].strip(), now)
+        return
     if action == "include":
         try:
             groups = include.parse(form.get("include") or [""])
@@ -505,6 +539,7 @@ class Overlay:
     last_visit: "str | None" = None
     ignored: "set[Item]" = field(default_factory=set)
     view_includes: "dict[str, frozenset[str]]" = field(default_factory=dict)
+    now_mode: "str | None" = None  # None: none saved, which is NOW_MODES[0]
 
     def is_pinned(self, item: Item) -> bool:
         return item in self.pinned_at
@@ -547,6 +582,7 @@ def load(conn: sqlite3.Connection) -> Overlay:
     row = conn.execute("SELECT at FROM last_visit WHERE id = 1").fetchone()
     ov.last_visit = row[0] if row else None
     ov.view_includes = view_includes(conn)
+    ov.now_mode = saved_now_mode(conn)
     return ov
 
 
@@ -568,6 +604,7 @@ def export(conn: sqlite3.Connection, now: "datetime | None" = None) -> dict[str,
     last_visit: "str | None" = None
     views: list[dict[str, Any]] = []
     answers: list[dict[str, Any]] = []
+    mode: "dict[str, Any] | None" = None
     # One read transaction, so every table comes from the same snapshot: a pin
     # committed between two SELECTs would otherwise give a file import refuses.
     conn.execute("BEGIN")
@@ -595,6 +632,9 @@ def export(conn: sqlite3.Connection, now: "datetime | None" = None) -> dict[str,
             answer["terms"] = _json_or(answer["terms"], [])
             answer["features"] = _json_or(answer["features"], {})
             answers.append(answer)
+        row = conn.execute("SELECT mode, set_at FROM now_mode WHERE id = 1").fetchone()
+        if row and row[0] in NOW_MODES:
+            mode = {"mode": row[0], "set_at": row[1]}
     finally:
         conn.rollback()
     return {
@@ -604,6 +644,7 @@ def export(conn: sqlite3.Connection, now: "datetime | None" = None) -> dict[str,
         "last_visit": last_visit,
         "view_includes": views,
         "why_not": answers,
+        "now_mode": mode,
         "tables": tables,
     }
 
@@ -752,6 +793,18 @@ def _check_why_not(value: Any) -> list[tuple[Any, ...]]:
     return out
 
 
+def _check_now_mode(value: Any) -> list[tuple[Any, ...]]:
+    """A version 7 file's `now_mode`, as zero or one (mode, set_at) rows."""
+    if value is None:
+        return []
+    if not isinstance(value, dict) or set(value) != {"mode", "set_at"}:
+        raise OverlayError("now_mode must be null or have exactly: mode, set_at")
+    at = value["set_at"]
+    if at is not None and (not isinstance(at, str) or not _STAMP.fullmatch(at)):
+        raise OverlayError("now_mode: set_at must be null or YYYY-MM-DDTHH:MM:SSZ")
+    return [(now_mode_of(value["mode"], "now_mode: mode"), at)]
+
+
 def validate(
     doc: Any,
 ) -> "tuple[dict[str, list[tuple[Any, ...]]], str | None]":
@@ -762,7 +815,8 @@ def validate(
     tables added in version 2 (and `ignores`, added in 3) come back empty. A
     version 1 to 3 file has no `view_includes`, which comes back empty. A
     version 2 to 4 file's `focus` rows are dropped unread. A version 1 to 5
-    file has no `why_not`, which comes back empty.
+    file has no `why_not`, which comes back empty. A version 1 to 6 file has
+    no `now_mode`, which comes back empty: Now reads that as its first mode.
     """
     if not isinstance(doc, dict):
         raise OverlayError("import file is not a JSON object")
@@ -804,6 +858,14 @@ def validate(
         if "why_not" not in doc:
             raise OverlayError("why_not is missing (an empty list when none)")
         answers = _check_why_not(doc["why_not"])
+    if version < 7:
+        if "now_mode" in doc:
+            raise OverlayError(f"a version {version} file has no now_mode")
+        mode: list[tuple[Any, ...]] = []
+    else:
+        if "now_mode" not in doc:
+            raise OverlayError("now_mode is missing (null when none is saved)")
+        mode = _check_now_mode(doc["now_mode"])
     out: dict[str, list[tuple[Any, ...]]] = {}
     for table, cols in COLUMNS.items():
         rows = tables.get(table, [])
@@ -843,6 +905,7 @@ def validate(
         raise OverlayError(f"{SUBSTANTIAL_NEEDS_NOTE}: {', '.join(bare)}")
     out["view_includes"] = views
     out["why_not"] = answers
+    out["now_mode"] = mode
     return out, last_visit
 
 
@@ -866,6 +929,10 @@ def import_(conn: sqlite3.Connection, doc: Any) -> dict[str, int]:
         conn.executemany(
             "INSERT INTO view_includes (view, groups, set_at) VALUES (?, ?, ?)",
             rows["view_includes"],
+        )
+        conn.executemany(
+            "INSERT INTO now_mode (id, mode, set_at) VALUES (1, ?, ?)",
+            rows["now_mode"],
         )
         if last_visit is not None:
             conn.execute("INSERT INTO last_visit (id, at) VALUES (1, ?)", (last_visit,))
@@ -930,6 +997,15 @@ JS = """
       post(act, it);
     }
     else if (act === 'visit') { post('visit', [['at', b.dataset.at]]); }
+    else if (act === 'mode') {
+      // Saved, then Now again without a one-off ?mode= in the URL; any
+      // other parameter (?include=) is kept.
+      post('mode', [['mode', b.dataset.mode]], function () {
+        var u = new URL(location.href);
+        u.searchParams.delete('mode');
+        location.assign(u.pathname + u.search);
+      });
+    }
     else if (act === 'snooze') {
       // On Now, Snooze snoozes at once and the card gives way to a line that
       // offers a reason and Undo; elsewhere it reloads as every control does.
@@ -945,7 +1021,8 @@ JS = """
     else if (act === 'whynot') {
       var box = b.closest('.whynot');
       post('whynot', it.concat([['reason', b.dataset.reason],
-        ['text', box.querySelector('input').value]]),
+        ['text', box.querySelector('input').value],
+        ['mode', box.closest('.card').dataset.mode || '']]),
         function () { box.closest('.card').remove(); });
     }
     else if (act === 'undo') {

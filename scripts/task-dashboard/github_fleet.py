@@ -124,6 +124,7 @@ query($q: String!, $after: String) {
       ... on PullRequest {
         url number title body headRefName headRefOid isDraft reviewDecision
         createdAt updatedAt
+        changedFiles additions deletions files(first: 20) { nodes { path } }
         author { login __typename }
         repository { nameWithOwner }
         closingIssuesReferences(first: 10) {
@@ -156,6 +157,10 @@ query($q: String!, $after: String) {
 # merged. Needs you's Finished group also covers this many days when no visit
 # is recorded.
 CLOSED_WINDOW_DAYS = 14
+
+# The one `closed_today` row (closed_today()): what the fleet closed since
+# local midnight, for Little mode's header (fleet_now.py).
+CLOSED_TODAY = "closed_today"
 
 COMMENTS_QUERY = """
 query($owner: String!, $name: String!, $number: Int!) {
@@ -583,6 +588,7 @@ def queue_row(
         "in_queue": role != "others" and not misses,
         "queue_misses": misses,
         "closes": closes(node),
+        "size": github_gh.pr_size(node),
         "created": node.get("createdAt"),
         "updated": node.get("updatedAt"),
     }
@@ -636,6 +642,56 @@ def review_queue(
             failed.append(url)
         rows.append(row)
     return rows, failed
+
+
+def closed_today(
+    owners: Iterable[str],
+    now: datetime,
+    runner: Runner = run,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> "dict | None":
+    """PRs merged and issues closed since local midnight, by anyone, in the
+    owners' repos: the `closed_today` row, or None with no owner.
+
+    One GraphQL call: two `issueCount` searches per owner, as aliases, so it
+    costs no page of nodes. A failed call raises GhError, as any search here.
+    """
+    owners = list(owners)
+    if not owners:
+        return None
+    midnight = now.astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
+    since = midnight.isoformat(timespec="seconds")
+    parts = []
+    for i, owner in enumerate(owners):
+        org = github_gh.owner_qualifier(owner)  # validated: safe to inline
+        for alias, q in (
+            (f"m{i}", f"is:pr is:merged merged:>={since} {org}"),
+            (f"i{i}", f"is:issue is:closed closed:>={since} {org}"),
+        ):
+            parts.append(
+                f'{alias}: search(query: "{q}", type: ISSUE, first: 0) {{ issueCount }}'
+            )
+    query = "query { " + " ".join(parts) + " }"
+    data = github_gh._call(
+        ["gh", "api", "graphql", "-f", f"query={query}"], runner, timeout
+    )
+    try:
+        got = data["data"]
+        merged = sum(int(got[f"m{i}"]["issueCount"]) for i in range(len(owners)))
+        closed = sum(int(got[f"i{i}"]["issueCount"]) for i in range(len(owners)))
+    except (KeyError, TypeError, ValueError):
+        raise GhError(
+            "unexpected GraphQL response for the closed-today counts"
+        ) from None
+    return {
+        "kind": CLOSED_TODAY,
+        "key": CLOSED_TODAY,
+        "title": "closed today",
+        "since": since,
+        "merged": merged,
+        "closed": closed,
+        "count": merged + closed,
+    }
 
 
 def queue_counts(rows: Iterable[dict]) -> dict[str, int]:
@@ -880,6 +936,16 @@ def fetch(
     ]
     issues, issues_truncated = open_issues(owners, runner, timeout)
     rows = queue + issues + designs + closed
+    # A header figure: a failed count is listed, and the run still lands.
+    try:
+        today = closed_today(owners, now, runner, timeout)
+    except github_gh.AuthError:
+        raise
+    except GhError:
+        today = None
+        failed.append(CLOSED_TODAY)
+    if today is not None:
+        rows.append(today)
     return {
         "rows": rows,
         "failed": failed,

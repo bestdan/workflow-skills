@@ -665,6 +665,15 @@ class OpenIssuesTests(unittest.TestCase):
         self.assertEqual(plan["issues_truncated"], [])
 
 
+def closed_today(merged=2, closed=1, owners=1):
+    """The closed-today counts' answer: the same counts for each owner."""
+    data = {}
+    for i in range(owners):
+        data[f"m{i}"] = {"issueCount": merged}
+        data[f"i{i}"] = {"issueCount": closed}
+    return {"data": data}
+
+
 def designs_router(listing=None, extra=()):
     listing = fixture("fleet_designs_list.json") if listing is None else listing
     by_path = {
@@ -690,6 +699,7 @@ def designs_router(listing=None, extra=()):
     return Router(
         list(extra)
         + [
+            (lambda a: "issueCount" in (arg(a, "query") or ""), ok(closed_today())),
             (lambda a: a[2].endswith("/contents/dev_docs/designs"), ok(listing)),
             (lambda a: "/contents/dev_docs/designs/" in a[2], file_response),
         ]
@@ -831,7 +841,7 @@ class ClosedTests(unittest.TestCase):
         plan = fleet.fetch(
             {"github": {"orgs": ["bestdan"], "design_repos": []}}, runner, now=NOW
         )
-        urls = [r["url"] for r in plan["rows"]]
+        urls = [r["url"] for r in plan["rows"] if r["kind"] != fleet.CLOSED_TODAY]
         self.assertEqual(len(urls), len(set(urls)))
         self.assertEqual(sum(1 for r in plan["rows"] if r["kind"] == "closed_pr"), 2)
 
@@ -885,7 +895,10 @@ class WriteTests(unittest.TestCase):
                 "SELECT kind, COUNT(*) FROM issues WHERE source = 'github' GROUP BY kind"
             ).fetchall()
         )
-        self.assertEqual(kinds, {"pr": 4, "issue": 3, "design": 1, "closed_pr": 3})
+        self.assertEqual(
+            kinds,
+            {"pr": 4, "issue": 3, "design": 1, "closed_pr": 3, "closed_today": 1},
+        )
         raw = json.loads(
             self.conn.execute(
                 "SELECT raw_json FROM issues WHERE kind = 'pr' LIMIT 1"
@@ -962,6 +975,98 @@ class WriteTests(unittest.TestCase):
                 "SELECT key FROM issues WHERE source='github'"
             ).fetchall(),
             [("kept",)],
+        )
+
+
+class ClosedTodayTests(unittest.TestCase):
+    def test_one_call_counts_merged_prs_and_closed_issues_per_owner(self):
+        runner = Router([(lambda a: True, ok(closed_today(3, 2, owners=2)))])
+        row = fleet.closed_today(["bestdan", "acme"], NOW, runner)
+        self.assertEqual(len(runner.calls), 1)
+        since = (
+            NOW.astimezone()
+            .replace(hour=0, minute=0, second=0, microsecond=0)
+            .isoformat(timespec="seconds")
+        )
+        query = arg(runner.calls[0], "query")
+        for i, org in enumerate(("bestdan", "acme")):
+            self.assertIn(
+                f'm{i}: search(query: "is:pr is:merged merged:>={since} org:{org}"',
+                query,
+            )
+            self.assertIn(
+                f'i{i}: search(query: "is:issue is:closed closed:>={since} org:{org}"',
+                query,
+            )
+        self.assertEqual(query.count("first: 0"), 4)
+        self.assertEqual(
+            (row["kind"], row["key"], row["merged"], row["closed"], row["count"]),
+            (fleet.CLOSED_TODAY, fleet.CLOSED_TODAY, 6, 4, 10),
+        )
+        self.assertEqual(row["since"], since)
+
+    def test_no_owner_makes_no_call(self):
+        runner = Router([])
+        self.assertIsNone(fleet.closed_today([], NOW, runner))
+        self.assertEqual(runner.calls, [])
+
+    def test_a_malformed_answer_is_a_gh_error(self):
+        runner = Router([(lambda a: True, ok({"data": {"m0": {}}}))])
+        with self.assertRaises(fleet.GhError):
+            fleet.closed_today(["bestdan"], NOW, runner)
+
+    def test_a_failed_count_is_listed_and_the_run_still_lands(self):
+        runner = WriteTests().full_runner()
+        runner.rules.insert(
+            0, (lambda a: "issueCount" in (arg(a, "query") or ""), (1, "", "HTTP 502"))
+        )
+        plan = fleet.fetch(
+            {"github": {"orgs": ["bestdan"], "design_repos": []}}, runner, now=NOW
+        )
+        self.assertIn(fleet.CLOSED_TODAY, plan["failed"])
+        self.assertFalse([r for r in plan["rows"] if r["kind"] == fleet.CLOSED_TODAY])
+        self.assertTrue([r for r in plan["rows"] if r["kind"] == "pr"])
+
+
+class SizeTests(unittest.TestCase):
+    def test_both_pr_queries_ask_for_the_size_fields(self):
+        gh = _load("github_gh")
+        want = (
+            "changedFiles additions deletions"
+            f" files(first: {gh.SIZE_PATHS}) {{ nodes {{ path }} }}"
+        )
+        self.assertIn(want, gh.SEARCH_QUERY)
+        self.assertIn(want, fleet.REVIEW_QUERY)
+        # A plain import: its dataclasses need it in sys.modules, which _load
+        # leaves out.
+        import refresh  # type: ignore[import-not-found]
+
+        self.assertIn(want, refresh.QUERY)
+
+    def test_size_of_a_node(self):
+        gh = _load("github_gh")
+        node = {
+            "changedFiles": 2, "additions": 14, "deletions": 3,
+            "files": {"nodes": [{"path": "README.md"}, {"path": "docs/a.md"}]},
+        }  # fmt: skip
+        self.assertEqual(
+            gh.pr_size(node),
+            {"files": 2, "additions": 14, "deletions": 3,
+             "paths": ["README.md", "docs/a.md"]},
+        )  # fmt: skip
+        # More files than the list holds: the paths are not the whole PR.
+        self.assertIsNone(gh.pr_size({**node, "changedFiles": 30})["paths"])
+        # A row synced before the fields were asked for has no size.
+        self.assertIsNone(gh.pr_size({"url": "u"}))
+        self.assertIsNone(gh.pr_size(None))
+
+    def test_the_review_row_carries_the_size(self):
+        node = pr_node(changedFiles=1, additions=5, deletions=0,
+                       files={"nodes": [{"path": "dev_docs/x.md"}]})  # fmt: skip
+        row, _ = fleet.queue_row(node, "others", "success", None, None)
+        self.assertEqual(row["size"]["paths"], ["dev_docs/x.md"])
+        self.assertIsNone(
+            fleet.queue_row(pr_node(), "others", "success", None, None)[0]["size"]
         )
 
 
