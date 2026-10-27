@@ -259,6 +259,12 @@ The overlay comes on top: a pin forces an item to the top, a manual order
 overrides the score within the pinned set, and a snooze hides the item until a
 date.
 
+> **Proposed change, 2026-10-27.** This score ranks Jira tickets only, and
+> only on an instance that isn't a fleet.
+> [`2026-10-27-shared-now-ranker.md`](2026-10-27-shared-now-ranker.md)
+> proposes one Now ranker for every instance, over every source, with these
+> terms supplied by the Jira source inside the fleet view's tiers (#1225).
+
 An LLM-written "what should I do next" summary would fit as a later, opt-in
 button that reads the same DB. It is not part of v1.
 

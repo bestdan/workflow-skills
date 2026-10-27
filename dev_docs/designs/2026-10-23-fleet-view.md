@@ -243,6 +243,12 @@ wins when both did.
 > `/away` page was retired. The rules are `workstreams.py`'s module
 > docstring.
 
+> **Proposed change, 2026-10-27.** Now's ranking would stop being a fleet
+> feature. [`2026-10-27-shared-now-ranker.md`](2026-10-27-shared-now-ranker.md)
+> proposes one ranker that every instance runs, with being a fleet meaning
+> only that the instance collects from more than one machine. It also splits
+> `github.fleet`'s wider GitHub read into a `github.scope` setting (#1225).
+
 **The two caps limit different things and both stand.** The side-quest cap
 limits which tooling work is open. The review-queue cap limits how much
 finished work waits on the owner. The reset design rejected a cap on live
