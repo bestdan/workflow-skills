@@ -53,7 +53,7 @@ copied.
 - `--handler <h>` — override the §0 config read; one of `repo-pr | linear |
   gh-issue | jira`. Omit to resolve from `.task-config.yml` as today. The
   `/auto-pilot` orchestrator passes its run's effective handler (a plan source
-  ⇒ `repo-pr`, per `references/adapters.md`) so the handler is never
+  ⇒ `repo-pr`, per `skills/auto-pilot/references/adapters/plan.md`) so the handler is never
   mis-derived from a repo whose `.task-config.yml` default differs from the
   run's source.
 

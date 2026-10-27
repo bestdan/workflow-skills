@@ -156,7 +156,7 @@ handler other than `linear`/`repo-pr` → stop (v1 supports linear + plan
 only). The run's **effective handler** — what actually gets passed to
 `/deliver-task` — is source-derived, not read back off that config: a
 **plan** source ⇒ `repo-pr`, a **linear** source ⇒ `linear`, per the
-matching adapter (`references/adapters.md`) — this keeps a plan-source run
+matching adapter (`references/adapters/plan.md`, `references/adapters/linear.md`) — this keeps a plan-source run
 correct even when the repo's own `.task-config.yml` default is `linear`.
 
 **Size `--until` realistically.** A single `/deliver-task` floors well above a
@@ -412,4 +412,4 @@ task sits at whatever phase it reached (`handed-off` on the tracker as
 For a **plan** source, the exit also does **not** delete the plan's
 `<name>_plan/` scaffolding — that graduate-then-delete cleanup is a **run-level
 teardown** and ultimately a human follow-up, never a graph task the loop
-dispatches (see [`references/adapters.md`](references/adapters.md) "plan adapter").
+dispatches (see the [plan adapter](references/adapters/plan.md)).

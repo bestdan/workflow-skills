@@ -587,7 +587,7 @@ a second launch never opens a duplicate PR, because an existing PR for the head
 branch is detected and adopted.
 
 gh-issue only: a claim-time lock ref with no commits ahead of the row's `base` is
-"no branch" (G1/G2), not G4 — see [adapters.md](adapters.md#gh-issue-adapter).
+"no branch" (G1/G2), not G4 — see the [gh-issue adapter](adapters/gh-issue.md).
 
 ## Run doctor
 
