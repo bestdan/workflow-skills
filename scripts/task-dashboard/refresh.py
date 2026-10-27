@@ -66,6 +66,7 @@ query($owner: String!, $name: String!, $number: Int!) {
       ... on PullRequest {
         url number title body state isDraft reviewDecision
         headRefName headRefOid createdAt updatedAt closedAt mergedAt
+        changedFiles additions deletions files(first: 20) { nodes { path } }
         author { login __typename }
         reviewRequests(first: 20) {
           nodes { requestedReviewer { __typename ... on User { login } } }
@@ -275,7 +276,8 @@ def _pr_rows(
             k: node.get(k)
             for k in (
                 "url", "title", "headRefName", "isDraft", "reviewDecision",
-                "createdAt", "updatedAt", "repository",
+                "createdAt", "updatedAt", "repository", "changedFiles",
+                "additions", "deletions", "files",
             )
         }  # fmt: skip
         prs_row = github_gh._row(search_node, role)

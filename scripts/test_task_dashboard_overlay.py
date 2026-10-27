@@ -537,9 +537,7 @@ class ExportImportTests(OverlayCase):
             "now_mode unknown mode": bad(lambda d: d["now_mode"].update(mode="nap")),
             "now_mode extra field": bad(lambda d: d["now_mode"].update(x=1)),
             "now_mode bad stamp": bad(lambda d: d["now_mode"].update(set_at="today")),
-            "v5 with why_not": bad(
-                lambda d: (d.update(version=5), d.pop("now_mode"))
-            ),
+            "v5 with why_not": bad(lambda d: (d.update(version=5), d.pop("now_mode"))),
             "missing why_not": bad(lambda d: d.pop("why_not")),
             "why_not not a list": bad(lambda d: d.update(why_not={})),
             "why_not unknown reason": bad(

@@ -71,11 +71,42 @@ query($q: String!, $after: String) {
       ... on PullRequest {
         url title headRefName isDraft reviewDecision createdAt updatedAt
         repository { nameWithOwner }
+        changedFiles additions deletions files(first: 20) { nodes { path } }
       }
     }
   }
 }
 """
+
+# How many changed paths a PR query reads (`files(first: N)` in SEARCH_QUERY,
+# github_fleet.REVIEW_QUERY and refresh.py's query): enough for Little mode's
+# docs-only test (fleet_now.py), which a longer PR never passes anyway.
+SIZE_PATHS = 20
+
+
+def pr_size(node: "dict | None") -> "dict | None":
+    """A PR node's size, {files, additions, deletions, paths}, or None when
+    the node has no size fields (a row synced before they were asked for).
+
+    `paths` is None when the PR changes more files than SIZE_PATHS, since the
+    list is then cut short.
+    """
+    node = node or {}
+    files = node.get("changedFiles")
+    adds, dels = node.get("additions"), node.get("deletions")
+    if not all(
+        isinstance(v, int) and not isinstance(v, bool) for v in (files, adds, dels)
+    ):
+        return None
+    nodes = (node.get("files") or {}).get("nodes") or []
+    paths = [str(n["path"]) for n in nodes if n and n.get("path")]
+    return {
+        "files": files,
+        "additions": adds,
+        "deletions": dels,
+        "paths": paths if files <= len(paths) else None,
+    }
+
 
 _OWNER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*$")
 
