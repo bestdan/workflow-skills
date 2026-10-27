@@ -575,6 +575,24 @@ class CloseOutTests(Case):
         )
         self.assertEqual(self.steps(found[MS]), [(close_out.MILESTONE_CLOSED, False)])
 
+    def test_a_host_without_a_registry_gives_no_session_ended_evidence(self):
+        snap = copy.deepcopy(CO_SNAPSHOT)
+        snap["schema"] = 2
+        del snap["registry"]
+        snapshot_adapter.ingest(self.conn, snap, NOW)
+        sessions.write(self.conn, sessions.derive(self.conn, NOW), NOW)
+        tabs_fx.seed(self.conn, rows=CO_CLOSED, prs=[])
+        found = self.found()
+        # Nothing can show a session ended, so that step is skipped rather than
+        # left open: c-merged now has every step ticked and leaves, and c-ended
+        # stays only for its open task.
+        self.assertNotIn("c-merged", found)
+        self.assertEqual(
+            self.steps(found["c-ended"]),
+            [(close_out.PR_MERGED, True), (close_out.TASK_CLOSED, False),
+             (close_out.WORKTREE_REMOVED, True)],
+        )  # fmt: skip
+
     def test_no_newer_snapshot_or_an_unscanned_repo_is_no_worktree_evidence(self):
         co_seed(self.conn)
         self.conn.execute(

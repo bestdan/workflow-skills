@@ -231,6 +231,9 @@ def _sessions(
         by_host.setdefault(str(w.get("host")), []).append(w)
     taken = _snapshots(conn)
     prs = needs.open_prs(conn, cfg)
+    # `ended` is evidence only on a host whose snapshot carries the registry;
+    # elsewhere the step has no evidence and is skipped, not left open.
+    registry = sessions.registry_hosts(conn)
     out = []
     for row in needs._rows(conn, sessions.SOURCE, sessions.KIND):
         last = score.parse_ts(row.get("updated"))
@@ -253,7 +256,8 @@ def _sessions(
             continue
         wt_step = _worktree_step(rows, taken.get(host), last, cwd)
         steps += [wt_step] if wt_step else []
-        steps.append(Step(SESSION_ENDED, ended, "end this session"))
+        if host in registry:
+            steps.append(Step(SESSION_ENDED, ended, "end this session"))
         if all(s.done for s in steps):
             continue
         hint, command, url = _resume(row, sid, steps)
