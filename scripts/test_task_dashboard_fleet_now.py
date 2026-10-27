@@ -1044,6 +1044,14 @@ class DeepTests(Case):
         self.assertEqual(fleet_now.why_line(by[DESIGN_URL]), "deep · proposed design")
         self.assertEqual(by[DESIGN_URL].need.kind, "design")
 
+    def test_a_design_renders_as_a_card(self):
+        overlay.pin(self.conn, (GH, DESIGN_URL), NOW)
+        text = fleet_now.render(self.conn, self.cfg, NOW, mode="deep")
+        card = needs_fx.card(text, DESIGN_URL)
+        for part in ('data-kind="design"', "design · proposed",
+                     "deep · proposed design", "accept it, change it, or drop it"):  # fmt: skip
+            self.assertIn(part, card)
+
     def test_issues_wait_for_a_fleet_run_and_designs_do_not(self):
         conn = db.connect(Path(self._td.name) / "e.db")
         self.addCleanup(conn.close)
@@ -1088,6 +1096,21 @@ class TidyTests(Case):
         self.assertEqual(cats[issue_url(14)], "untriaged")
         self.assertEqual(cats[issue_url(10)], "human_issue")
         self.assertEqual(cats[pr_url(5)], "stale_pr")
+
+    def test_the_first_matching_label_names_the_category(self):
+        self.conn.execute("DELETE FROM issues")
+        self.conn.commit()
+        github_fleet.write(self.conn, [
+            tabs_fx.issue(60, "status:1_needs_refinement"),
+            tabs_fx.issue(61, HUMAN, "status:0_untriaged"),
+            tabs_fx.issue(62, "status:0_untriaged", "status:1_needs_refinement"),
+        ], NOW)  # fmt: skip
+        cats = {r.need.item[1]: r.category
+                for r in fleet_now.mode_candidates(self.conn, self.cfg, NOW, "tidy")
+                if r.need.kind == "issue"}  # fmt: skip
+        self.assertEqual(cats, {issue_url(60): "refinement",
+                                issue_url(61): "human_issue",
+                                issue_url(62): "untriaged"})  # fmt: skip
 
     def test_a_pr_inside_the_window_is_not_stale(self):
         late = NOW - timedelta(days=3)
