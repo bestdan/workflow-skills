@@ -20,7 +20,8 @@ session and for anything else; when it is set, the action's `url` is that
 session's page. It carries `branch` too, and for a hook session
 `first_prompt` and `last_ask` (its transcript summary, needs.py) and `pr`,
 the open PR on its branch as {number, url, repo}; each is null when there is
-none.
+none. A Now item adds `tier` (its Ship tier, fleet_now.TIERS) and `checklist`,
+a close-out's steps with evidence as [{step, done}], empty for anything else.
 """
 
 import json
@@ -143,6 +144,8 @@ def ranked_item(r: fleet_now.Ranked, lane: str, now: datetime) -> Item:
         evidence=r.why,
         why=fleet_now.why_line(r),
         category=r.category,
+        tier=r.tier[1],
+        checklist=[{"step": s.name, "done": s.done} for s in r.checklist],
         score=r.total,
         terms=[[name, value, why] for name, value, why in r.terms if value],
     )

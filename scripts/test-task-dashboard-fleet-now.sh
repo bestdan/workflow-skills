@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # test-task-dashboard-fleet-now.sh — hermetic tests for the fleet instance's
 # Now (scripts/task-dashboard/fleet_now.py) and its score (score.fleet_score):
-# the default category order, pins first, each card's why line adding up to
-# its score, the [score.fleet] weights' defaults and validation, and `/`
-# serving Now on a fleet instance.
+# Ship's tier order, pins first, each card's why line adding up to its score,
+# the [score.fleet] weights' defaults and validation, close-outs
+# (close_out.py: entry on evidence, the checklist, the window and the cap),
+# and `/` serving Now on a fleet instance.
 #
 # Wraps scripts/test_task_dashboard_fleet_now.py (stdlib unittest). The
 # fixture DB is written through the real writers, and the server runs

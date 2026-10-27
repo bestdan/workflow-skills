@@ -84,10 +84,13 @@ DEFAULTS: dict[str, Any] = {
         "stuck_days": {"new": 14, "indeterminate": 5},
         # The fleet instance's Now (score.fleet_score): one weight per
         # category, highest first, then `prio` per prio: level (prio:0 is 4)
-        # and `age` per week waiting (capped at score.AGE_CAP_WEEKS).
+        # and `age` per week waiting (capped at score.AGE_CAP_WEEKS). Now's
+        # Ship tiers (fleet_now.TIERS) come first; these order within a tier.
         "fleet": {
             "quick_win": 10,
+            "own_approved": 9,
             "asked": 8,
+            "close_out": 7,
             "review_queue": 6,
             "started": 5,
             "others_pr": 4,

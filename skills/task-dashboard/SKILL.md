@@ -165,6 +165,9 @@ dashboard itself never calls a model.**
 2. Read what it prints:
    - `weights`: a term with `suggest` set was the largest term of most
      "wrong priority" answers. Its `suggest.weight` is a starting point.
+     Weights order items only within Now's fixed Ship tiers (asked, close
+     out, ready to merge, review queue, started, the rest), so no weight
+     moves an item into another tier.
    - `candidates`: feature values that snoozes lean towards, against what Now
      showed, with the `free_text` and `reasons` of those answers. When
      `scored_by` is set, a term already reads that feature: propose a weight.
@@ -193,7 +196,8 @@ instance; `board` and `epics` only with Jira on; `waiting-on-me` and
 `waiting-on` only with Jira on and no fleet. Any other name exits 2.
 Each item carries its `source`, `key`, `kind`, `lane`, `title`, `url`, `host`
 and `path`, its `evidence` and `risks`, and its `action` as
-`{"review": ..., "command": [...]}`. `freshness` says when each sync last
+`{"review": ..., "command": [...]}`; a Now item adds its Ship `tier` and, for
+a close-out, its `checklist` of steps ticked from evidence. `freshness` says when each sync last
 succeeded and when each host last snapshotted. Without `--json` it prints one
 line per item.
 

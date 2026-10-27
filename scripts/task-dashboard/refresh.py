@@ -72,7 +72,7 @@ query($owner: String!, $name: String!, $number: Int!) {
         }
         closingIssuesReferences(first: 10) {
           nodes {
-            number repository { nameWithOwner }
+            number state repository { nameWithOwner }
             milestone { number description }
           }
         }

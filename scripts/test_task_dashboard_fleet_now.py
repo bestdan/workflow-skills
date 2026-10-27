@@ -23,6 +23,7 @@ PKG = ROOT / "scripts" / "task-dashboard"
 sys.path.insert(0, str(PKG))
 sys.path.insert(0, str(ROOT / "scripts"))
 
+import close_out  # type: ignore[import-not-found]  # noqa: E402
 import config  # type: ignore[import-not-found]  # noqa: E402
 import db  # type: ignore[import-not-found]  # noqa: E402
 import fleet_now  # type: ignore[import-not-found]  # noqa: E402
@@ -33,6 +34,7 @@ import score  # type: ignore[import-not-found]  # noqa: E402
 import sessions  # type: ignore[import-not-found]  # noqa: E402
 import snapshot_adapter  # type: ignore[import-not-found]  # noqa: E402
 import views  # type: ignore[import-not-found]  # noqa: E402
+import workstreams  # type: ignore[import-not-found]  # noqa: E402
 import test_task_dashboard_fleet_tabs as tabs_fx  # noqa: E402
 import test_task_dashboard_needs as needs_fx  # noqa: E402
 import test_task_dashboard_server as server_harness  # noqa: E402
@@ -70,22 +72,23 @@ PRS = [
     (7, False, None, "none", "reviewer"),
 ]
 
-# Default-weight order, by category; the sessions tie at `asked` and go by the
-# longest wait (s-turn asked 30h ago, s-pr 26h, s-perm 25h).
+# Ship's order: the tiers, then the default weights within each. The sessions
+# tie at `asked` and go by the longest wait (s-turn asked 30h ago, s-pr 26h,
+# s-perm 25h). Nothing here has close-out evidence.
 EXPECTED = [
-    pr_url(22),  # quick_win
     "s-turn",  # asked
     "s-pr",
     "s-perm",
+    pr_url(22),  # ready to merge: quick_win
+    pr_url(6),  # ready to merge: own_approved (approved, CI green)
     pr_url(1),  # review_queue
     issue_url(12),  # started
-    pr_url(20),  # others_pr (opened earlier, so older)
+    pr_url(20),  # the rest: others_pr (opened earlier, so older)
     pr_url(21),
     issue_url(10),  # human_issue, prio:1
     issue_url(16),  # human_issue, no prio
     pr_url(4),  # own_ci_failing
     issue_url(13),  # ready
-    pr_url(6),  # own_pr, opened 10-01 (no awaiting row: its age is the prs row's)
     pr_url(2),  # own_pr, opened 10-03
 ]
 
@@ -228,7 +231,7 @@ class RankTests(Case):
         self.assertLess(everything.index(pr_url(22)), everything.index(issue_url(10)))
         overlay.pin(self.conn, (GH, pr_url(4)), NOW)
         overlay.pin(self.conn, (GH, issue_url(13)), NOW + timedelta(minutes=1))
-        self.assertEqual(self.ranked()[:3], [pr_url(4), issue_url(13), pr_url(22)])
+        self.assertEqual(self.ranked()[:3], [pr_url(4), issue_url(13), "s-turn"])
         # Pins keep the overlay's order, not the score's.
         overlay.set_order(self.conn, [(GH, issue_url(13)), (GH, pr_url(4))])
         self.assertEqual(self.ranked()[:2], [issue_url(13), pr_url(4)])
@@ -239,8 +242,8 @@ class RankTests(Case):
             r.need.item[1]: r for r in fleet_now.candidates(self.conn, self.cfg, NOW)
         }
         self.assertEqual(by_item[pr_url(4)].category, "own_ci_failing")
-        self.assertEqual(by_item[pr_url(6)].category, "own_pr")
-        self.assertIn("approved", by_item[pr_url(6)].why)
+        self.assertEqual(by_item[pr_url(6)].category, "own_approved")
+        self.assertIn("approved, CI green", by_item[pr_url(6)].why)
         self.assertIn("no co-review stamp", by_item[pr_url(2)].why)
         self.assertIn("/co-review", by_item[pr_url(2)].need.hint)
         # Waiting on CI, a draft, a review request out of the queue: not mine to act on.
@@ -268,7 +271,7 @@ class RankTests(Case):
         prs = include.Include("now", frozenset({"prs"}), "url")
         self.assertEqual(
             self.ranked(prs),
-            [pr_url(1), pr_url(20), pr_url(21), pr_url(4), pr_url(6), pr_url(2)],
+            [pr_url(6), pr_url(1), pr_url(20), pr_url(21), pr_url(4), pr_url(2)],
         )
         tasks = include.Include("now", frozenset({"tasks"}), "url")
         self.assertEqual(
@@ -298,7 +301,10 @@ class RenderTests(Case):
         cards = page.split('<div class="card"')[1:]
         self.assertEqual(item_keys(page), EXPECTED[: fleet_now.LIMIT])
         for c in cards:
-            m = re.search(r'<div class="why" data-terms="([^"]+)">score ([0-9.]+): ', c)
+            m = re.search(
+                r'<div class="why" data-terms="([^"]+)">ship: [a-z ]+ · score ([0-9.]+): ',
+                c,
+            )
             assert m is not None, c[:300]
             t = re.search(r'data-total="([^"]+)"', c)
             assert t is not None
@@ -308,14 +314,15 @@ class RenderTests(Case):
             # The ordinary snooze control, and Pin.
             self.assertIn('data-ov="snooze"', c)
             self.assertIn('data-ov="pin"', c)
-        quick = cards[0]
+        quick = cards[3]
         self.assertIn('data-category="quick_win"', quick)
+        self.assertIn('data-tier="ready to merge"', quick)
         self.assertIn("quick_win +10 (bot PR from github-actions, CI green", quick)
 
     def test_the_link_to_needs_you_counts_what_the_list_did_not_reach(self):
         seed(self.conn)
-        # Past a limit of 5: started issue 12 is own work, while PRs 20 and 21
-        # and issues 10 and 16 are Needs you's.
+        # Past a limit of 5: own PR 6 and started issue 12 are own work,
+        # while PRs 1, 20 and 21 and issues 10 and 16 are Needs you's.
         with mock.patch.object(fleet_now, "LIMIT", 5):
             page = self.page()
         self.assertEqual(item_keys(page), EXPECTED[:5])
@@ -324,9 +331,10 @@ class RenderTests(Case):
             page,
         )
         assert m is not None
-        self.assertEqual(m.groups(), ("4", "4"))
-        # At the default limit every Needs you item is reached: no link.
-        self.assertNotIn('class="more"', self.page())
+        self.assertEqual(m.groups(), ("5", "5"))
+        # At the default limit, own PR 6 moved up into the ready-to-merge
+        # tier, so human_issue 16 is the one Needs you item past the list.
+        self.assertIn('data-more="1"', self.page())
 
     def test_empty_and_filtered_out(self):
         seed(self.conn, rows=[], prs=[], with_sessions=False)
@@ -362,7 +370,7 @@ class RouteTests(server_harness.ServerCase):
             self.assertIn("<title>Now · Task dashboard</title>", page, path)
             self.assertIn("aria-current=page>Now", page, path)
             self.assertEqual(
-                item_keys(page.split('data-section="next"', 1)[1])[0], pr_url(22)
+                item_keys(page.split('data-section="next"', 1)[1])[0], "s-turn"
             )
         nav = page.split("<nav>", 1)[1].split("</nav>", 1)[0]
         self.assertEqual(re.findall(r'href="([^"]+)"', nav)[:2], ["/now", "/needs"])
@@ -405,6 +413,267 @@ class SessionCardTests(unittest.TestCase):
         )
         # Without a summary, a session's card is as it was.
         self.assertEqual(needs_fx.card(page, "s-perm"), needs_fx.card(before, "s-perm"))
+
+
+# --- close-outs (close_out.py) -----------------------------------------------
+
+CO_WT = "/h/src/worktrees/workflow-skills"
+CO_TAKEN = "2026-10-25T11:00:00.000Z"
+
+
+def co_ev(sid, ts, event, cwd, branch, asked=None):
+    line = {"v": 2, "ts": ts, "event": event, "session_id": sid, "cwd": cwd,
+            "branch": branch}  # fmt: skip
+    if event == "Stop":
+        line["asked"] = asked
+    return line
+
+
+def co_session(sid, day, name, *, asked=False):
+    """A prompt then a Stop on 2026-10-<day>, in worktree `name`."""
+    cwd, branch = f"{CO_WT}/{name}", f"bestdan/{name}"
+    return [
+        co_ev(sid, f"2026-10-{day}T09:00:00.000Z", "UserPromptSubmit", cwd, branch),
+        co_ev(sid, f"2026-10-{day}T10:00:00.000Z", "Stop", cwd, branch, asked),
+    ]
+
+
+def co_live(sid, name, bridge=None):
+    return {"session_id": sid, "bridge_session_id": bridge, "name": None,
+            "status": "idle", "pid": 5000, "updated_at": CO_TAKEN,
+            "tmux": None, "cwd": f"{CO_WT}/{name}"}  # fmt: skip
+
+
+def co_worktree(name, branch, state, path=None):
+    return {"repo": "workflow-skills", "path": path or f"{CO_WT}/{name}",
+            "branch": branch, "head": "a" * 40, "dirty": False, "unpushed": 0,
+            "landed": {"state": state, "reason": state}}  # fmt: skip
+
+
+CO_SNAPSHOT = {
+    "schema": 4,
+    "host": "mini",
+    "taken_at": CO_TAKEN,
+    "scan_errors": [],
+    "handoffs": [],
+    "tmux": [],
+    "history": [],
+    "worktrees": [
+        co_worktree("main", "main", "landed", path="/h/src/workflow-skills"),
+        co_worktree("task-2", "bestdan/task-2", "landed"),  # landed, still there
+        co_worktree("task-5", "bestdan/task-5", "not_landed"),  # idle only
+    ],
+    # Live: c-merged (with a Remote Control id), c-landed, c-idle, c-asked. Every other
+    # session is missing from the registry, so it has ended.
+    "registry": [
+        co_live("c-merged", "task-1", "session_01MERGED"),
+        co_live("c-landed", "task-2"),
+        co_live("c-idle", "task-5"),
+        co_live("c-asked", "task-6"),
+    ],
+    "sessions": (
+        co_session("c-merged", "23", "task-1")  # PR 301 merged, 401 closed
+        + co_session("c-landed", "22", "task-2")  # branch landed, no PR
+        + co_session("c-ended", "21", "task-3")  # ended; PR 303 merged, 403 open
+        + co_session("c-open", "24", "task-4")  # ended; PR 304 still open
+        + co_session("c-idle", "24", "task-5")  # a turn ended: no evidence
+        + co_session("c-asked", "24", "task-6", asked=True)  # asked: not a close-out
+        + co_session("c-old", "08", "task-7")  # ended; PR 307 merged, too old
+        + co_session("c-all", "20", "task-8")  # ended; every step done
+    ),
+}
+
+
+def co_closed(n, branch, closes=(), merged=True):
+    node = {
+        "url": pr_url(n), "number": n, "title": f"closed {n}",
+        "state": "MERGED" if merged else "CLOSED", "headRefName": branch,
+        "createdAt": "2026-10-01T00:00:00Z", "closedAt": "2026-10-20T00:00:00Z",
+        "mergedAt": "2026-10-20T00:00:00Z" if merged else None,
+        "repository": {"nameWithOwner": tabs_fx.REPO},
+        "closingIssuesReferences": {"nodes": [
+            {"number": i, "state": st,
+             "repository": {"nameWithOwner": tabs_fx.REPO}}
+            for i, st in closes
+        ]},
+    }  # fmt: skip
+    return github_fleet.closed_row(node)
+
+
+CO_CLOSED = [
+    co_closed(301, "bestdan/task-1", [(401, "CLOSED")]),
+    co_closed(303, "bestdan/task-3", [(403, "OPEN"), (404, "CLOSED")]),
+    co_closed(307, "bestdan/task-7"),
+    co_closed(308, "bestdan/task-8", [(408, "CLOSED")]),
+]
+
+MS = "ms:bestdan/workflow-skills#7"
+
+
+def co_seed(conn, with_workstream=True):
+    snapshot_adapter.ingest(conn, copy.deepcopy(CO_SNAPSHOT), NOW)
+    sessions.write(conn, sessions.derive(conn, NOW), NOW)
+    tabs_fx.seed(
+        conn, rows=[tabs_fx.others(22, "github-actions", bot=True)] + CO_CLOSED, prs=[]
+    )
+    conn.execute(
+        "INSERT INTO prs (url, repo, number, title, head_ref, is_draft, role)"
+        " VALUES (?, ?, ?, ?, ?, 0, 'author')",
+        (pr_url(304), tabs_fx.REPO, 304, "open 304", "bestdan/task-4"),
+    )
+    conn.commit()
+    if with_workstream:
+        ws = {"id": MS, "source": "milestone", "title": "Now modes",
+              "status": "open", "url": "https://github.com/bestdan/workflow-skills/milestone/7",
+              "repo": tabs_fx.REPO, "done": 2, "total": 2,
+              "updated": "2026-10-19T00:00:00Z"}  # fmt: skip
+        members = [
+            {"ws_id": MS, "item_source": GH, "item_key": issue_url(n),
+             "kind": "issue", "via": "milestone", "is_open": False,
+             "started": False, "waiting": False,
+             "updated": "2026-10-19T00:00:00Z"}
+            for n in (501, 502)
+        ]  # fmt: skip
+        workstreams.write(conn, [ws], members, NOW)
+        server_harness.add_run(conn, "ok", NOW, kind=workstreams.RUN_KIND)
+
+
+class CloseOutTests(Case):
+    def found(self):
+        return {c.need.item[1]: c for c in close_out.collect(self.conn, self.cfg, NOW)}
+
+    def steps(self, c):
+        return [(s.name, s.done) for s in c.steps]
+
+    def test_a_session_enters_only_on_evidence(self):
+        co_seed(self.conn)
+        found = self.found()
+        self.assertEqual(set(found), {"c-merged", "c-landed", "c-ended", "c-open", MS})
+        # c-idle merely ended a turn, c-asked waits on me, c-old is past the
+        # window, and c-all has every step ticked.
+        self.assertIn("PR #301 merged", found["c-merged"].why)
+        self.assertIn("branch bestdan/task-2 landed", found["c-landed"].why)
+        self.assertEqual(found["c-open"].why, "finished: the session ended")
+
+    def test_the_checklist_ticks_from_evidence_and_skips_what_has_none(self):
+        co_seed(self.conn)
+        found = self.found()
+        P, T, W, S = (close_out.PR_MERGED, close_out.TASK_CLOSED,
+                      close_out.WORKTREE_REMOVED, close_out.SESSION_ENDED)  # fmt: skip
+        self.assertEqual(
+            self.steps(found["c-merged"]), [(P, True), (T, True), (W, True), (S, False)]
+        )
+        # No PR on its branch: no PR or task step. Its worktree is still listed.
+        self.assertEqual(self.steps(found["c-landed"]), [(W, False), (S, False)])
+        # One closing issue still open leaves the task step open.
+        self.assertEqual(
+            self.steps(found["c-ended"]), [(P, True), (T, False), (W, True), (S, True)]
+        )
+        # An open PR is an open step; it says nothing about the task yet.
+        self.assertEqual(
+            self.steps(found["c-open"]), [(P, False), (W, True), (S, True)]
+        )
+        self.assertEqual(self.steps(found[MS]), [(close_out.MILESTONE_CLOSED, False)])
+
+    def test_no_newer_snapshot_or_an_unscanned_repo_is_no_worktree_evidence(self):
+        co_seed(self.conn)
+        self.conn.execute(
+            "UPDATE machines SET last_snapshot_at = '2026-10-20T00:00:00.000Z'"
+        )
+        self.conn.commit()
+        names = [s.name for s in self.found()["c-merged"].steps]
+        self.assertNotIn(close_out.WORKTREE_REMOVED, names)
+        rows = [co_worktree("x", "bestdan/x", "landed")]
+        rows[0]["repo"] = "other"
+        last = NOW - timedelta(days=2)
+        self.assertIsNone(close_out._worktree_step(rows, NOW, last, f"{CO_WT}/task-1"))
+
+    def test_the_window_ends_a_close_out(self):
+        co_seed(self.conn)
+        # c-ended's last event was 2026-10-21T10:00Z: it stays for the window
+        # after that, whatever its checklist, and then leaves.
+        last = NOW.replace(day=21, hour=10)
+        later = last + timedelta(days=close_out.WINDOW_DAYS, hours=-1)
+        self.assertIn("c-ended", {c.need.item[1] for c in close_out.collect(
+            self.conn, self.cfg, later)})  # fmt: skip
+        later = last + timedelta(days=close_out.WINDOW_DAYS, hours=1)
+        self.assertNotIn("c-ended", {c.need.item[1] for c in close_out.collect(
+            self.conn, self.cfg, later)})  # fmt: skip
+
+    def test_the_resume_action_carries_the_steps_left(self):
+        co_seed(self.conn)
+        found = self.found()
+        live = found["c-merged"].need
+        self.assertEqual(live.url, "https://claude.ai/code/session_01MERGED")
+        self.assertIn("send: Finish closing out this session: end this session.",
+                      live.hint)  # fmt: skip
+        ended = found["c-ended"].need
+        self.assertIsNone(ended.url)
+        self.assertEqual(
+            ended.command,
+            ("claude", "--resume", "c-ended",
+             "Finish closing out this session: close bestdan/workflow-skills#403."),
+        )  # fmt: skip
+        self.assertIn("`claude --resume c-ended 'Finish closing out", ended.hint)
+        self.assertIn(f"in {CO_WT}/task-3 on mini", ended.hint)
+
+    def test_ship_tiers_asked_then_close_outs_capped_oldest_first(self):
+        co_seed(self.conn)
+        page = fleet_now.build(self.conn, self.cfg, NOW, overlay.load(self.conn))
+        shown = [(r.need.item[1], r.category) for r in page.shown]
+        # Five close-outs, oldest first: MS (10-19), c-ended (10-21),
+        # c-landed (10-22), then c-merged (10-23) and c-open (10-24), cut.
+        self.assertEqual(
+            shown,
+            [
+                ("c-asked", "asked"),
+                (MS, "close_out"),
+                ("c-ended", "close_out"),
+                ("c-landed", "close_out"),
+                (pr_url(22), "quick_win"),
+            ],
+        )
+        self.assertEqual(page.more_close_outs, 2)
+        # A pinned close-out is shown whatever the cap, and leaves room.
+        overlay.pin(self.conn, (sessions.SOURCE, "c-open"), NOW)
+        page = fleet_now.build(self.conn, self.cfg, NOW, overlay.load(self.conn))
+        keys = [r.need.item[1] for r in page.shown]
+        self.assertEqual(keys[:2], ["c-open", "c-asked"])
+        self.assertEqual(keys.count("c-merged"), 0)
+
+    def test_a_workstream_close_out_snoozes_and_ignores_by_its_own_key(self):
+        co_seed(self.conn)
+        item = (close_out.WS_SOURCE, MS)
+        overlay.ignore(self.conn, item, NOW)
+        page = fleet_now.build(self.conn, self.cfg, NOW, overlay.load(self.conn))
+        keys = [r.need.item[1] for r in page.shown]
+        self.assertNotIn(MS, keys)
+        # The next-oldest close-out takes its place under the cap.
+        self.assertIn("c-merged", keys)
+
+    def test_the_card_shows_its_checklist(self):
+        co_seed(self.conn)
+        page = fleet_now.render(self.conn, self.cfg, NOW)
+        card = needs_fx.card(page, "c-ended")
+        self.assertIn('data-tier="close out"', card)
+        self.assertIn(
+            '<div class="checklist">✓ PR merged · ○ task closed · ✓ worktree removed'
+            " · ✓ session ended</div>",
+            card,
+        )
+        self.assertIn("ship: close out · score", card)
+        self.assertIn('data-more-close-outs="2"', page)
+
+    def test_own_approved_needs_ci_green(self):
+        seed(self.conn, prs=[(6, False, "APPROVED", "success", "author"),
+                             (8, False, "APPROVED", "pending", "author")])  # fmt: skip
+        by_item = {
+            r.need.item[1]: r for r in fleet_now.candidates(self.conn, self.cfg, NOW)
+        }
+        self.assertEqual(by_item[pr_url(6)].category, "own_approved")
+        self.assertEqual(by_item[pr_url(8)].category, "own_pr")
+        self.assertEqual(fleet_now.tier_of("own_approved"), (2, "ready to merge"))
+        self.assertEqual(fleet_now.tier_of("own_pr")[1], fleet_now.REST)
 
 
 if __name__ == "__main__":
