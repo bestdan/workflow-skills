@@ -27,13 +27,13 @@ class Candidate:
     category: str  # one of score.FLEET_CATEGORIES, or of fleet_now.LITTLE_TIERS
     why: str  # the evidence that put it in its category
     terms: dict[str, Any] = field(default_factory=dict)
-    # Whether the item is blocked. No source sets it yet; the blocked tier
-    # that reads it is the Jira-source slice's (#1229).
+    # Whether the item is blocked. No source sets it yet, and no tier reads
+    # it yet.
     blocked: bool = False
     # What `tune` and "why not now" record beyond what every item has
     # (whynot.features adds kind, category, age, workstream and mode).
     features: dict[str, Any] = field(default_factory=dict)
-    # Items this one folds into. No source sets it yet; the fold is #1230's.
+    # Items this one folds into. No source sets it yet.
     links: tuple = ()
     from_needs: bool = False  # Needs you lists it too
     # A close-out's steps that have evidence (close_out.Step); empty otherwise.

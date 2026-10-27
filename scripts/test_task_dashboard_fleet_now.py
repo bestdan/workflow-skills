@@ -960,8 +960,7 @@ class ModeRouteTests(server_harness.ServerCase):
 
 # --- the source seam ---------------------------------------------------------
 
-# What Now showed over the fixtures below before its collectors moved behind
-# candidate.Candidate (#1228), recorded from main at 71f44039. Regenerate with
+# Golden output of Now over the fixtures below. Regenerate with
 # NOW_GOLDEN=write only for a change that means to alter what Now shows.
 GOLDEN = PKG / "fixtures" / "now" / "golden.json"
 
