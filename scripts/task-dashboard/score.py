@@ -235,15 +235,18 @@ def score(
 #
 # The fleet instance's Now (fleet_now.py) ranks what waits on the owner, and
 # the owner's own work, by this second score. Each item belongs to exactly one
-# category, whose term is its weight; `prio` and `age` add to every item. With
-# the defaults (config.DEFAULTS["score"]["fleet"]) the categories sit in
-# FLEET_CATEGORIES order, and prio plus age stay small enough that they reorder
-# items within a category, or across two neighbouring ones, but never jump an
-# item over a green bot PR or a session that asked.
+# category, whose term is its weight; `prio` and `age` add to every item. Now's
+# Ship order puts each category in a fixed tier first (fleet_now.TIERS), so
+# this score orders items only within a tier. With the defaults
+# (config.DEFAULTS["score"]["fleet"]) the categories sit in FLEET_CATEGORIES
+# order, and prio plus age stay small enough that they reorder items within a
+# category, or across two neighbouring ones.
 
 FLEET_CATEGORIES = (
     "quick_win",  # a green-CI bot PR: one click to merge
+    "own_approved",  # my PR, approved with CI green: merge it
     "asked",  # a session that asked, or waits on a permission prompt
+    "close_out",  # finished work to close out (close_out.py)
     "review_queue",  # a PR in the review queue
     "started",  # my issue at status:3_started
     "others_pr",  # someone else's PR on my repos, a bot's with CI not green

@@ -143,6 +143,9 @@ query($q: String!, $after: String) {
       ... on PullRequest {
         url number title state headRefName createdAt closedAt mergedAt
         repository { nameWithOwner }
+        closingIssuesReferences(first: 10) {
+          nodes { number state repository { nameWithOwner } }
+        }
       }
     }
   }
@@ -362,7 +365,25 @@ def closed_row(node: dict) -> dict:
         "merged_at": node.get("mergedAt"),
         "created": node.get("createdAt"),
         "updated": node.get("closedAt"),
+        "closes": closing_issues(node),
     }
+
+
+def closing_issues(node: dict) -> list[dict]:
+    """The issues a PR closes, each {repo, number, state}: what Now's
+    close-out checklist ticks "task closed" from (close_out.py)."""
+    out = []
+    for issue in (node.get("closingIssuesReferences") or {}).get("nodes") or []:
+        if not isinstance(issue, dict) or type(issue.get("number")) is not int:
+            continue
+        out.append(
+            {
+                "repo": (issue.get("repository") or {}).get("nameWithOwner"),
+                "number": issue["number"],
+                "state": issue.get("state"),
+            }
+        )
+    return out
 
 
 # --- review queue ------------------------------------------------------------

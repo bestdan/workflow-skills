@@ -20,12 +20,26 @@ score.FLEET_CATEGORIES category:
 - my open issues at `status:3_started` (`started`) and `status:2_ready`
   (`ready`), from the widened `issues` fetch, behind the same gate as Needs
   you's issues: none before a successful fleet run. One that carries the
-  human-review label is Needs you's `human_issue` instead.
+  human-review label is Needs you's `human_issue` instead;
+- close-outs (close_out.py, `close_out`): a finished session, on evidence
+  that its work is done (its PR merged, its branch landed, or it ended), and a
+  workstream in the Complete lane. Each card carries its checklist, ticked
+  from evidence, and leaves once every step with evidence is ticked.
 
-ORDER. Pinned items first, in the overlay's order (overlay.Overlay.pin_rank),
-then by score.fleet_score, highest first; a tie goes to the longer wait. The
-list stops at LIMIT items, pins aside: every pinned item is shown. Each card's
-why line names the terms that put it there, and they add up to its score.
+An item already collected keeps its first category: a session that asked is
+`asked`, never a close-out.
+
+ORDER is Ship's (dev_docs/designs/2026-10-26-now-modes.md, "Ship"), the only
+mode so far. Pinned items first, in the overlay's order
+(overlay.Overlay.pin_rank). Then the fixed TIERS, in order: a session that
+asked; close-outs, at most CLOSE_OUT_CAP of them (pins aside), oldest first;
+ready to merge (`quick_win`, and `own_approved`: my PR approved with CI
+green); the review queue; started issues; then the rest. Within a tier,
+score.fleet_score orders, highest first, and a tie goes to the longer wait, so
+the rest keep the category order the `[score.fleet]` weights give. The list
+stops at LIMIT items, pins aside: every pinned item is shown. Each card's why
+line names its tier and the terms that put it there, and the terms add up to
+its score.
 
 SHARED BEHAVIOUR, as on every view: the include filter, ignores and snoozes
 apply; a snoozed item is left out and counted. Below the list, "N more on
@@ -40,6 +54,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+import close_out
 import fleet_tabs
 import fleet_views
 import gauges
@@ -56,11 +71,25 @@ import workstreams
 _e = html.escape
 
 LIMIT = 10
+# Close-outs shown at once, pins aside: the oldest first.
+CLOSE_OUT_CAP = 3
+
+# Ship's tiers, first to last: (label, categories). A category in none of
+# them is in the last tier, REST.
+TIERS = (
+    ("asked", ("asked",)),
+    ("close out", ("close_out",)),
+    ("ready to merge", ("quick_win", "own_approved")),
+    ("review queue", ("review_queue",)),
+    ("started", ("started",)),
+)
+REST = "the rest"
 
 CSS = """
 .now .card .why { margin-top:2px; }
 .now .wait { color:var(--fg); font-weight:600; }
 .now .more { margin-top:8px; font-size:12px; }
+.now .checklist { margin:4px 0; font-size:12px; color:var(--fg); }
 """
 
 # Status label -> the own-work category it puts an issue in.
@@ -84,6 +113,22 @@ class Ranked:
     from_needs: bool = True  # Needs you lists it too
     total: float = 0.0
     terms: list[score.Term] = field(default_factory=list)
+    # A close-out's steps that have evidence (close_out.Step); empty otherwise.
+    # Quoted: close_out -> workstreams -> views -> fleet_now is a cycle, so
+    # close_out is half-initialised when this class body runs.
+    checklist: "list[close_out.Step]" = field(default_factory=list)
+
+    @property
+    def tier(self) -> "tuple[int, str]":
+        return tier_of(self.category)
+
+
+def tier_of(category: str) -> "tuple[int, str]":
+    """(rank, label) of the Ship tier a category is in; REST is last."""
+    for i, (label, categories) in enumerate(TIERS):
+        if category in categories:
+            return i, label
+    return len(TIERS), REST
 
 
 # --- collect -----------------------------------------------------------------
@@ -121,6 +166,9 @@ def own_pr_category(p: dict[str, Any]) -> "tuple[str, str, str] | None":
     if p.get("ci_state") == "failure":
         return "own_ci_failing", "your PR, CI failing", "fix its CI"
     if p.get("review_decision") == "APPROVED":
+        if p.get("ci_state") == "success":
+            why = "your PR, approved, CI green: merge it"
+            return "own_approved", why, "merge it on GitHub"
         return "own_pr", "your PR, approved: merge it", "merge it on GitHub"
     misses = row.get("queue_misses") or []
     if p.get("ci_state") == "success" and misses and set(misses) <= set(MISS_ACTS):
@@ -190,6 +238,15 @@ def _own_issues(conn: sqlite3.Connection, cfg: dict[str, Any]) -> list[Ranked]:
     return out
 
 
+def _close_outs(
+    conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime
+) -> list[Ranked]:
+    return [
+        Ranked(c.need, close_out.CATEGORY, c.why, from_needs=False, checklist=c.steps)
+        for c in close_out.collect(conn, cfg, now)
+    ]
+
+
 def candidates(
     conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime
 ) -> list[Ranked]:
@@ -200,7 +257,7 @@ def candidates(
         prio = score.prio_of((n.row or {}).get("labels")) if n.kind == "issue" else None
         out.append(Ranked(n, category, why, prio))
     seen = {r.need.item for r in out}
-    for r in _own_prs(conn, cfg) + _own_issues(conn, cfg):
+    for r in _own_prs(conn, cfg) + _own_issues(conn, cfg) + _close_outs(conn, cfg, now):
         if r.need.item not in seen:
             seen.add(r.need.item)
             out.append(r)
@@ -233,9 +290,15 @@ def snapshot_of(
     return None
 
 
+def _wait_key(r: Ranked) -> tuple:
+    since = r.need.since
+    return (since is None, since.timestamp() if since else 0.0, r.need.item)
+
+
 def order(ranked: list[Ranked], ov: overlay.Overlay) -> list[Ranked]:
-    """Pinned first in the overlay's order, then the highest score; a tie goes
-    to the longer wait."""
+    """Pinned first in the overlay's order, then Ship's tiers; within a tier
+    the highest score, a tie going to the longer wait. Close-outs go oldest
+    first, so the cap keeps the ones that have waited longest."""
     pinned = sorted(
         (r for r in ranked if ov.is_pinned(r.need.item)),
         key=lambda r: ov.pin_rank(r.need.item),
@@ -243,13 +306,28 @@ def order(ranked: list[Ranked], ov: overlay.Overlay) -> list[Ranked]:
     rest = sorted(
         (r for r in ranked if not ov.is_pinned(r.need.item)),
         key=lambda r: (
-            -r.total,
-            r.need.since is None,
-            r.need.since or datetime.max,
-            r.need.item,
+            r.tier[0],
+            0.0 if r.category == close_out.CATEGORY else -r.total,
+            *_wait_key(r),
         ),
     )
     return pinned + rest
+
+
+def cap_close_outs(
+    ranked: list[Ranked], ov: overlay.Overlay
+) -> "tuple[list[Ranked], int]":
+    """Every close-out past the first CLOSE_OUT_CAP unpinned ones dropped, and
+    how many were."""
+    out, kept, dropped = [], 0, 0
+    for r in ranked:
+        if r.category == close_out.CATEGORY and not ov.is_pinned(r.need.item):
+            if kept >= CLOSE_OUT_CAP:
+                dropped += 1
+                continue
+            kept += 1
+        out.append(r)
+    return out, dropped
 
 
 @dataclass
@@ -257,6 +335,7 @@ class Page:
     shown: list[Ranked]
     more_on_needs: int  # Needs you items the list did not reach
     snoozed: int
+    more_close_outs: int = 0  # close-outs past CLOSE_OUT_CAP
 
 
 def build(
@@ -271,10 +350,11 @@ def build(
         ranked = [r for r in ranked if inc.shows(r.need.kind)]
     snoozed = sum(ov.is_snoozed(r.need.item, now) for r in ranked)
     ranked = order([r for r in ranked if not ov.is_snoozed(r.need.item, now)], ov)
+    ranked, more_close_outs = cap_close_outs(ranked, ov)
     pins = sum(ov.is_pinned(r.need.item) for r in ranked)
     shown = ranked[: max(LIMIT, pins)]
     more = sum(r.from_needs for r in ranked[len(shown) :])
-    return Page(shown, more, snoozed)
+    return Page(shown, more, snoozed, more_close_outs)
 
 
 # --- render ------------------------------------------------------------------
@@ -285,11 +365,12 @@ def _fmt(value: float) -> str:
 
 
 def why_line(r: Ranked) -> str:
-    """`score 10.3: quick_win +10 (bot PR …) · age +0.3 (waiting 2d)`, the
-    terms with a value, as text."""
+    """`ship: ready to merge · score 10.3: quick_win +10 (bot PR …) · age +0.3
+    (waiting 2d)`: the tier, then the terms with a value, as text."""
     bits = [f"{name} {_fmt(value)} ({why})" for name, value, why in r.terms if value]
     total = f"{r.total:g}".replace("-", "−")
-    return f"score {total}: " + " · ".join(bits) if bits else f"score {total}"
+    head = f"ship: {r.tier[1]} · score {total}"
+    return f"{head}: " + " · ".join(bits) if bits else head
 
 
 def card(r: Ranked, now: datetime, ov: overlay.Overlay) -> str:
@@ -308,11 +389,17 @@ def card(r: Ranked, now: datetime, ov: overlay.Overlay) -> str:
     )
     act = " · ".join(x for x in (link, needs.pr_link(n), view_model.code(n.hint)) if x)
     act_html = f'<div class="act">→ {act}</div>' if act else ""
+    steps = (
+        f'<div class="checklist">{_e(close_out.checklist_text(r.checklist))}</div>'
+        if r.checklist
+        else ""
+    )
     return (
         f'<div {overlay.card_attrs(n.item, ov, now)} data-kind="{_e(n.kind)}"'
-        f' data-category="{r.category}" data-total="{r.total}">'
+        f' data-category="{r.category}" data-tier="{_e(r.tier[1])}"'
+        f' data-total="{r.total}">'
         f"{needs._title(n, n.url)}{needs.ask_html(n)}"
-        f'<div class="meta">{meta}</div>'
+        f'<div class="meta">{meta}</div>{steps}'
         f'<div class="why" data-terms="{terms}">{_e(why_line(r))}</div>'
         f"{act_html}{overlay.card_controls(n.item, ov, now, reorder=False, why_not=True)}"
         f"{whynot.picker(overlay.snooze_until(now))}</div>"
@@ -354,6 +441,11 @@ def render(
         parts.append(
             f'<p class="more" data-more="{p.more_on_needs}"><a href="/needs">'
             f"{p.more_on_needs} more on Needs you</a></p>"
+        )
+    if p.more_close_outs:
+        parts.append(
+            f'<p class="note" data-more-close-outs="{p.more_close_outs}">'
+            f"{p.more_close_outs} more to close out, after these.</p>"
         )
     if p.snoozed:
         parts.append(

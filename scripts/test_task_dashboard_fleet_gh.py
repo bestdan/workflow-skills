@@ -793,6 +793,34 @@ class ClosedTests(unittest.TestCase):
         self.assertFalse(rows[1134]["merged"])
         self.assertEqual(rows[1134]["status"], "closed")
 
+    def test_rows_carry_each_closing_issues_own_state(self):
+        self.assertIn(
+            "closingIssuesReferences(first: 10) {\n"
+            "          nodes { number state repository { nameWithOwner } }",
+            fleet.CLOSED_QUERY,
+        )
+        page = self.closed_page()
+        page["data"]["search"]["nodes"][0]["closingIssuesReferences"] = {
+            "nodes": [
+                {"number": 1133, "state": "CLOSED",
+                 "repository": {"nameWithOwner": "bestdan/workflow-skills"}},
+                {"number": 7, "state": "OPEN",
+                 "repository": {"nameWithOwner": "bestdan/dotfiles"}},
+                {"number": None, "state": "OPEN"},  # malformed: dropped
+            ]
+        }  # fmt: skip
+        runner = Router([(lambda a: True, ok(page))])
+        rows = {r["number"]: r for r in fleet.recently_closed(["bestdan"], NOW, runner)}
+        self.assertEqual(
+            rows[1135]["closes"],
+            [
+                {"repo": "bestdan/workflow-skills", "number": 1133, "state": "CLOSED"},
+                {"repo": "bestdan/dotfiles", "number": 7, "state": "OPEN"},
+            ],
+        )
+        # A node without the field closes nothing: no evidence for the step.
+        self.assertEqual(rows[1134]["closes"], [])
+
     def test_an_open_pr_wins_over_a_closed_row_for_the_same_url(self):
         page = self.closed_page()
         page["data"]["search"]["nodes"][0]["url"] = review_page()["data"]["search"][
