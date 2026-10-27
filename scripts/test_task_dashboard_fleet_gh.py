@@ -1037,6 +1037,11 @@ class SizeTests(unittest.TestCase):
         )
         self.assertIn(want, gh.SEARCH_QUERY)
         self.assertIn(want, fleet.REVIEW_QUERY)
+        # A plain import: its dataclasses need it in sys.modules, which _load
+        # leaves out.
+        import refresh  # type: ignore[import-not-found]
+
+        self.assertIn(want, refresh.QUERY)
 
     def test_size_of_a_node(self):
         gh = _load("github_gh")

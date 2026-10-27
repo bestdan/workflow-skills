@@ -49,8 +49,8 @@ LITTLE ranks its own collector's items (little_candidates), not the ones
 above: a PR or an issue that passes the small test. A PR is small when a bot
 opened it, when it is docs-only (every changed path `*.md` or under `docs/`
 or `dev_docs/`), or when it changes at most LITTLE_FILES files and
-LITTLE_LINES lines; a draft and one whose CI is failing, pending or unknown
-are left out. An issue is small when it carries `est:1` or `est:2` and is
+LITTLE_LINES lines; a draft, and one whose CI is anything but green or
+absent (no checks at all), are left out. An issue is small when it carries `est:1` or `est:2` and is
 not `status:3_started`; an unsized one is not small. They go by LITTLE_TIERS,
 smallest first, then `prio`, then the longer wait, with no score. The header
 reads "closed today: N" from the fleet step's `closed_today` row, and only

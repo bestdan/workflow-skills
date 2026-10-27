@@ -998,9 +998,12 @@ JS = """
     }
     else if (act === 'visit') { post('visit', [['at', b.dataset.at]]); }
     else if (act === 'mode') {
-      // Saved, then Now again without a one-off ?mode= in the URL.
+      // Saved, then Now again without a one-off ?mode= in the URL; any
+      // other parameter (?include=) is kept.
       post('mode', [['mode', b.dataset.mode]], function () {
-        location.assign(location.pathname);
+        var u = new URL(location.href);
+        u.searchParams.delete('mode');
+        location.assign(u.pathname + u.search);
       });
     }
     else if (act === 'snooze') {

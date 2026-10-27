@@ -852,10 +852,11 @@ class LittleTests(Case):
         snap = fleet_now.snapshot_of(self.conn, self.cfg, item, NOW, fleet_now.LITTLE)
         self.assertEqual(snap["features"]["mode"], "little")
         self.assertEqual(snap["features"]["category"], "small_pr")
-        # Not a Little item: looked up under Ship, as any mode falls back.
+        # Not a mode: looked up under Ship, where PR 30 is in the review queue.
         ship_item = ("github", pr_url(30))
         snap = fleet_now.snapshot_of(self.conn, self.cfg, ship_item, NOW, "nap")
-        self.assertTrue(snap is None or snap["features"]["mode"] == "ship")
+        self.assertIsNotNone(snap)
+        self.assertEqual(snap["features"]["mode"], "ship")
 
     def test_shown_items_record_the_mode(self):
         fleet_now.render(self.conn, self.cfg, NOW, mode=fleet_now.LITTLE)
