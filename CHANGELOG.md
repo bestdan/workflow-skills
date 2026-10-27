@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.144.0] - 2026-10-27
+
+### Features
+
+- add github.scope and retire github.fleet [#1227] (#1234) (4308a56)
+
 ## [2.143.0] - 2026-10-27
 
 ### Features
