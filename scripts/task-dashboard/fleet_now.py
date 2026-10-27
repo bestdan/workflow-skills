@@ -54,11 +54,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+import close_out
 import fleet_tabs
 import fleet_views
 import gauges
 import github_fleet
-import close_out
 import include
 import needs
 import overlay
@@ -114,7 +114,9 @@ class Ranked:
     total: float = 0.0
     terms: list[score.Term] = field(default_factory=list)
     # A close-out's steps that have evidence (close_out.Step); empty otherwise.
-    checklist: list[close_out.Step] = field(default_factory=list)
+    # Quoted: close_out -> workstreams -> views -> fleet_now is a cycle, so
+    # close_out is half-initialised when this class body runs.
+    checklist: "list[close_out.Step]" = field(default_factory=list)
 
     @property
     def tier(self) -> "tuple[int, str]":

@@ -222,6 +222,8 @@ def _resume(
 def _sessions(
     conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime
 ) -> list[CloseOut]:
+    if not sessions.enabled(cfg):
+        return []  # as Needs you: the sessions mirror is off
     cutoff = now - timedelta(days=WINDOW_DAYS)
     f = fleet_views.load(conn, cfg)
     by_host: dict[str, list[dict[str, Any]]] = {}
