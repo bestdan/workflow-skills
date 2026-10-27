@@ -806,7 +806,7 @@ def render(
     parts = []
     if not sync.fleet_enabled(cfg):
         parts.append(
-            '<p class="note">github.scope is not "owner", so no PRs or issues are'
+            '<p class="note">The owner-wide GitHub read is off (github.enabled is false, or github.scope is not "owner"), so no PRs or issues are'
             " shown here.</p>"
         )
     for lane in lanes(p, inc):

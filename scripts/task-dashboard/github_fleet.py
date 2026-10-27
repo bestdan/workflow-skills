@@ -674,9 +674,10 @@ def closed_today(
     timeout: float = DEFAULT_TIMEOUT,
     scope: str = "owner",
 ) -> "dict | None":
-    """PRs merged and issues closed since local midnight, by anyone, in the
-    owners' repos: the `closed_today` row, or None with no owner. Scope "me"
-    counts only my PRs and the issues assigned to me.
+    """PRs merged and issues closed since local midnight in the owners' repos:
+    the `closed_today` row, or None with no owner. Scope "owner" counts them by
+    anyone; scope "me" counts only my merged PRs and the closed issues assigned
+    to me.
 
     One GraphQL call: two `issueCount` searches per owner, as aliases, so it
     costs no page of nodes. A failed call raises GhError, as any search here.

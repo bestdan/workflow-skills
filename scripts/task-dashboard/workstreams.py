@@ -868,9 +868,7 @@ def lanes(conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime) -> Tab:
 
 def _notes(cfg: dict[str, Any], tab: Tab) -> str:
     if not enabled(cfg):
-        return (
-            '<p class="note">github.scope is not "owner", so nothing is shown here.</p>'
-        )
+        return '<p class="note">The owner-wide GitHub read is off (github.enabled is false, or github.scope is not "owner"), so nothing is shown here.</p>'
     if not tab.synced:
         return '<p class="note">No workstreams sync has succeeded yet.</p>'
     linear = tab.linear or ""
