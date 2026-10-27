@@ -92,12 +92,11 @@ def pr_size(node: "dict | None") -> "dict | None":
     list is then cut short.
     """
     node = node or {}
-    files = node.get("changedFiles")
-    adds, dels = node.get("additions"), node.get("deletions")
-    if not all(
-        isinstance(v, int) and not isinstance(v, bool) for v in (files, adds, dels)
-    ):
+    counts = [node.get(k) for k in ("changedFiles", "additions", "deletions")]
+    ints = [v for v in counts if isinstance(v, int) and not isinstance(v, bool)]
+    if len(ints) != len(counts):
         return None
+    files, adds, dels = ints
     nodes = (node.get("files") or {}).get("nodes") or []
     paths = [str(n["path"]) for n in nodes if n and n.get("path")]
     return {

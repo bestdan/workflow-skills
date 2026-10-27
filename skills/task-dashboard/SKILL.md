@@ -1,7 +1,7 @@
 ---
 name: task-dashboard
 description: Install, check, sync, open, back up, read, clean up, or remove the local task dashboard — the always-on, localhost-only page that mirrors your Jira work (through acli) and GitHub PRs (through gh) into SQLite and ranks what to do next. Subcommands install | status | sync-now | open | export | import | tune | view | refresh | overlay | clean | uninstall. Use when the user wants that dashboard set up as a login agent on their Mac, asks whether it is running or how stale it is, wants it refreshed now, wants its link, wants to back up or restore their pins, order, snoozes and notes, wants the fleet Now's ranking tuned from their "why not now" answers, asks what a tab shows ("what's on Stale?"), asks to clean a tab up ("look at the Stale tab and clean it up"), wants an item ignored or snoozed, or wants it taken off the machine.
-argument-hint: "install | status | sync-now [--reconcile] | open | export <file> | import <file> | tune [--days N] | view <name> [--json] [--all] | refresh <owner/repo#N> [--json] | overlay <action> | clean <view> | uninstall"
+argument-hint: "install | status | sync-now [--reconcile] | open | export <file> | import <file> | tune [--days N] | view <name> [--json] [--all] [--mode M] | refresh <owner/repo#N> [--json] | overlay <action> | clean <view> | uninstall"
 ---
 
 # task-dashboard
@@ -142,7 +142,7 @@ LAN address.
 ## export, import
 
 The overlay (pins, order, snoozes, notes, kind tags, ignores, each view's
-include filter, and the fleet Now's "why not now" answers) is the one thing on this machine that cannot be
+include filter, the fleet Now's "why not now" answers and its saved mode) is the one thing on this machine that cannot be
 rebuilt from Jira or GitHub.
 
 - `DASH export <file>` writes it as JSON. With no file it prints to stdout.
@@ -196,8 +196,12 @@ instance; `board` and `epics` only with Jira on; `waiting-on-me` and
 `waiting-on` only with Jira on and no fleet. Any other name exits 2.
 Each item carries its `source`, `key`, `kind`, `lane`, `title`, `url`, `host`
 and `path`, its `evidence` and `risks`, and its `action` as
-`{"review": ..., "command": [...]}`; a Now item adds its Ship `tier` and, for
-a close-out, its `checklist` of steps ticked from evidence. `freshness` says when each sync last
+`{"review": ..., "command": [...]}`; a Now item adds its `tier` and, for
+a close-out, its `checklist` of steps ticked from evidence. On a fleet
+instance, Now is built in a mode: `--mode ship|little` picks one, and without
+it the mode the owner last saved with Now's mode button is used (ship when
+none is), so you see what they see; `notes.mode` names it, and in Little
+`notes.closed_today` is the day's count. `freshness` says when each sync last
 succeeded and when each host last snapshotted. Without `--json` it prints one
 line per item.
 
@@ -213,7 +217,8 @@ GitHub or the DB fails, with the mirror unchanged.
 
 `DASH overlay <action> --source S --key K` makes the write a card's button
 makes (`ignore`, `unignore`, `snooze --until YYYY-MM-DD`, `pin`, `unpin`,
-`note --text`, ...), through the same validation, straight to the DB. Exit 1
+`note --text`, `mode --mode little`, ...), through the same validation,
+straight to the DB. Exit 1
 means it was refused and nothing changed; the message is the server's.
 
 ## clean
