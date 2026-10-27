@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.143.0] - 2026-10-27
+
+### Features
+
+- Now mode button and Little mode [#1218] (#1224) (b3fbfdb)
+
 ## [2.142.0] - 2026-10-27
 
 ### Features
