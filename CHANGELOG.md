@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.146.0] - 2026-10-28
+
+### Features
+
+- Now's mode button beside a sync icon in the header [N/A] (#1236) (7658073)
+
 ## [2.145.0] - 2026-10-27
 
 ### Features
