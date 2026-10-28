@@ -614,17 +614,18 @@ class FleetSwitchTests(server_harness.ServerCase):
         conn.close()
 
     def combos(self):
-        for scope in ("owner", "me"):
+        # GitHub off with scope "owner" is a Jira-only instance: no owner read.
+        for github, scope in ((True, "owner"), (True, "me"), (False, "owner")):
             for machines in ({"mini": "x"}, {}):
                 cfg = self.httpd.app.cfg
-                cfg["github"].update(enabled=True, scope=scope)
+                cfg["github"].update(enabled=github, scope=scope)
                 cfg["ingest"]["machines"] = machines
-                yield (scope, bool(machines)), cfg
+                yield (github, scope, bool(machines)), cfg
 
     def test_each_caller_under_scope_and_ingest(self):
-        for (scope, ingest), cfg in self.combos():
-            with self.subTest(scope=scope, ingest=ingest):
-                pages = scope == "owner" or ingest
+        for (github, scope, ingest), cfg in self.combos():
+            with self.subTest(github=github, scope=scope, ingest=ingest):
+                pages = (github and scope == "owner") or ingest
                 self.assertEqual(fleet_views.enabled(cfg), ingest)
                 self.assertEqual(fleet_views.fleet_pages(cfg), pages)
                 # Tabs: the fleet's own, or the Jira ones they replace.

@@ -1130,8 +1130,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, app.view_page("/now", query).encode(), html_type)
             elif path in RETIRED_ROUTES:
                 # Since you were away folded into Needs you, a fleet-only tab.
-                fleet = fleet_views.fleet_pages(app.cfg)
-                self._redirect("/needs" if fleet else "/")
+                self._redirect("/needs" if fleet_views.fleet_pages(app.cfg) else "/")
             elif path in ("/", "/board"):
                 self._send(200, app.board_page(query).encode(), html_type)
             elif path in views.ROUTES:

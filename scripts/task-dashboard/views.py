@@ -646,8 +646,9 @@ def render_waiting_on(m: Mirror, inc: include.Include) -> str:
 
 
 def jira_stale_lane(m: Mirror) -> "view_model.Lane | None":
-    """Jira's stale lane as (issue, why) pairs; None on a fleet instance whose
-    mirror holds no Jira issue, where the page leaves it out."""
+    """Jira's stale lane as (issue, why) pairs; None with the fleet pages
+    (fleet_views.fleet_pages) and no Jira issue mirrored, where the page
+    leaves it out."""
     on_fleet = fleet_views.fleet_pages(m.cfg)
     if on_fleet and not m.issues:
         return None
@@ -662,7 +663,7 @@ def jira_stale_lane(m: Mirror) -> "view_model.Lane | None":
 
 
 def render_stale(m: Mirror, inc: include.Include) -> str:
-    """Jira's stale lane, then, on a fleet instance, the fleet's (fleet_views)."""
+    """Jira's stale lane, then, with the fleet pages, the fleet's (fleet_views)."""
     lane = jira_stale_lane(m)
     jira = _render(lane, _ic(m), inc) if lane is not None else ""
     if not fleet_views.fleet_pages(m.cfg):
