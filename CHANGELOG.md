@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.148.0] - 2026-10-28
+
+### Features
+
+- fold a linked PR into its ticket or issue on Now [#1230] (#1239) (bcb3a59)
+
 ## [2.147.0] - 2026-10-28
 
 ### Features
