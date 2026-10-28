@@ -107,7 +107,7 @@ docs_only=0
 if [[ -n "$base_ref" ]]; then
   base_output="$(scripts/ci-docs-only.sh "$base_ref" HEAD)"
   base_rc=$?
-  if [[ "$base_rc" == 0 && "$base_output" == "docs_only=true"$'\n'* ]]; then
+  if [[ "$base_rc" == 0 ]] && grep -qx 'docs_only=true' <<<"$base_output"; then
     docs_only=1
   fi
 fi

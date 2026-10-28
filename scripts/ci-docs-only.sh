@@ -10,9 +10,10 @@
 #   docs_only=true|false    every changed file is under dev_docs/. check.sh
 #                           --base reads this to skip the slow suites.
 #   shell_free=true|false   every changed file is somewhere scripts/test-shell.sh
-#                           cannot reach: dev_docs/, or the task-dashboard's
-#                           Python. ci.yml uses it to skip the macOS job, whose
-#                           runtime is all test-shell.sh. docs_only implies it.
+#                           cannot reach: dev_docs/, the scripts/task-dashboard/
+#                           tree (code and fixtures alike), or its Python tests.
+#                           ci.yml uses it to skip the macOS job, whose runtime
+#                           is all test-shell.sh. docs_only implies it.
 #
 # The shell_free list is an allowlist, not "no shell file changed": the bats
 # and orchestrator suites drive scripts that shell out to Python helpers, so a

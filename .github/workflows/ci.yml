@@ -26,8 +26,9 @@ jobs:
     name: Deterministic gate
     runs-on: ubuntu-latest
     # A normal run is 2-3 minutes. Without a limit, a hung check holds the job
-    # for GitHub's default of 6 hours; check.sh names the hung check when the
-    # timeout signals it.
+    # for GitHub's default of 6 hours. check.sh's INT/TERM trap names every
+    # check still running; see the `exec` in the gate step for why it gets
+    # the signal.
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
@@ -99,18 +100,23 @@ jobs:
         # of what any individual PR skipped. The branch is on $EVENT_NAME, an
         # env var, rather than interpolated into the run body, so a crafted
         # event name can't inject shell.
+        #
+        # `exec` makes check.sh the step's own process. On a timeout or cancel
+        # the runner signals that pid alone (SIGINT, then SIGTERM), never its
+        # children, so without exec check.sh's trap would never run and the log
+        # would not name the hung check.
         env:
           EVENT_NAME: ${{ github.event_name }}
         run: |
           if [ "$EVENT_NAME" = "pull_request" ]; then
-            bash scripts/check.sh --base HEAD^1
+            exec bash scripts/check.sh --base HEAD^1
           else
-            bash scripts/check.sh
+            exec bash scripts/check.sh
           fi
 
   # Classifies a PR's diff so `macos` can skip one that scripts/test-shell.sh
   # cannot reach — the job's runtime is almost all that suite, and nothing it
-  # runs reads the real dev_docs/ tree or the task-dashboard's Python
+  # runs reads the real dev_docs/ tree or the scripts/task-dashboard/ tree
   # (scripts/ci-docs-only.sh carries the allowlist). PRs only: a push to main skips this job,
   # which leaves its output empty, which runs `macos` — so main always gets the
   # full coverage as a backstop.
