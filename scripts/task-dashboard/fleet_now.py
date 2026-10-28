@@ -45,6 +45,8 @@ when that is ready to merge or the review queue and beats its own, blocked
 included, and its why line names the PR (`ship: ready to merge via o/r#12`).
 Every overlay action on the card acts on the parent's key, so snoozing it
 hides the PR too. A PR whose parent Ship does not rank keeps its own card.
+A Jira ticket's card also lists, as `↳` lines that change nothing, every
+other PR joined to it (joined_pr): a draft, or one waiting on CI or review.
 
 THE SOURCE SEAM (candidate.py). Each collector above, and each of Little's,
 is a source that returns candidate.Candidate rows: the item, its category,
@@ -266,6 +268,13 @@ class Ranked:
         if self.candidate.blocked:
             return len(TIERS) + 1, BLOCKED
         return tier_of(self.category)
+
+    @property
+    def linked(self) -> list[dict[str, Any]]:
+        """The candidate's related lines less the ones folded in, which the
+        card already shows."""
+        folded = {f.need.item[1] for f in self.folded}
+        return [x for x in self.candidate.related if x.get("url") not in folded]
 
     @property
     def raised_by(self) -> "Ranked | None":
@@ -608,9 +617,27 @@ def _jira_tickets(
                     "blocked": ",".join(signals) or None,
                     "own": "yes" if m.is_mine(issue) else "no",
                 },
+                related=[joined_pr(p) for p in m.prs_by_issue.get(key, [])],
             )
         )
     return out
+
+
+def joined_pr(p: dict[str, Any]) -> dict[str, Any]:
+    """A `prs` row joined to a ticket, as a related line: `{url, ref, why}`,
+    the why reading `draft · CI failure · review required`."""
+    bits = (["draft"] if p.get("is_draft") else []) + [
+        f"CI {p.get('ci_state') or 'unknown'}"
+    ]
+    if p.get("review_decision"):
+        bits.append(str(p["review_decision"]).lower().replace("_", " "))
+    if p.get("role") == "reviewer":
+        bits.append("asks for your review")
+    return {
+        "url": p.get("url"),
+        "ref": f"{p.get('repo') or ''}#{p.get('number')}",
+        "why": " · ".join(bits),
+    }
 
 
 def _close_outs(
@@ -1219,6 +1246,17 @@ def _folded_html(f: Ranked) -> str:
     )
 
 
+def _linked_html(x: dict[str, Any]) -> str:
+    """A related PR on its ticket's card: evidence only, never ranked."""
+    url = str(x.get("url") or "")
+    name = str(x.get("ref") or url)
+    ref = view_model.link(url, name) if url.startswith("https://") else _e(name)
+    return (
+        f'<div class="folded linked" data-key="{_e(url)}">'
+        f"↳ {ref}: {_e(str(x.get('why') or ''))}</div>"
+    )
+
+
 def card(r: Ranked, now: datetime, ov: overlay.Overlay) -> str:
     n = r.need
     pin = '<span class="pin">pinned</span> · ' if ov.is_pinned(n.item) else ""
@@ -1240,7 +1278,9 @@ def card(r: Ranked, now: datetime, ov: overlay.Overlay) -> str:
         if r.checklist
         else ""
     )
-    folded = "".join(_folded_html(f) for f in r.folded)
+    folded = "".join(_folded_html(f) for f in r.folded) + "".join(
+        _linked_html(x) for x in r.linked
+    )
     return (
         f'<div {overlay.card_attrs(n.item, ov, now)} data-kind="{_e(n.kind)}"'
         f' data-category="{r.category}" data-tier="{_e(r.tier[1])}"'

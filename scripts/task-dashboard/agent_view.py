@@ -24,7 +24,9 @@ none. A Now item adds `tier` (its tier in the mode that ranked it:
 fleet_now.TIERS, `the rest` or `blocked`, LITTLE_TIERS, or `deep` or
 `tidy`), `checklist`, a close-out's steps with evidence as [{step, done}],
 empty for anything else, and `folded`, the linked PRs folded into it as
-[{source, key, kind, ref, url, category, evidence}], empty when none are.
+[{source, key, kind, ref, url, category, evidence}], empty when none are,
+and `linked`, a Jira ticket's other joined PRs as [{url, ref, why}]: shown
+on its card as evidence, never ranked.
 
 A Now document's `notes` carry `mode`, the mode it was built in (the
 `--mode` asked for, else the saved one, else ship); outside Ship,
@@ -161,6 +163,7 @@ def ranked_item(r: fleet_now.Ranked, lane: str, now: datetime) -> Item:
              "evidence": f.why}
             for f in r.folded
         ],
+        linked=[dict(x) for x in r.linked],
     )  # fmt: skip
     return out
 

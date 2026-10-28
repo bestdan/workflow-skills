@@ -82,13 +82,14 @@ class Case(unittest.TestCase):
         )
         self.conn.commit()
 
-    def pr(self, number, role, ci="success", decision=None, issue_key=None):
+    def pr(self, number, role, ci="success", decision=None, issue_key=None,
+           draft=False):  # fmt: skip
         url = f"https://github.com/o/r/pull/{number}"
         self.conn.execute(
             "INSERT INTO prs (url, repo, number, title, is_draft, role,"
             " review_decision, ci_state, issue_key, raw_json) VALUES (?, 'o/r', ?,"
-            " ?, 0, ?, ?, ?, ?, ?)",
-            (url, number, f"pr {number}", role, decision, ci, issue_key,
+            " ?, ?, ?, ?, ?, ?, ?)",
+            (url, number, f"pr {number}", int(draft), role, decision, ci, issue_key,
              json.dumps({"createdAt": ts(NOW - timedelta(days=2))})),
         )  # fmt: skip
         self.conn.commit()
@@ -351,6 +352,33 @@ class TicketFoldTests(Case):
     def test_a_pr_whose_ticket_is_not_ranked_keeps_its_own_card(self):
         other = self.pr(6, "author", decision="APPROVED", issue_key="ZZZ-9")
         self.assertEqual(self.by_key()[other].tier[1], "ready to merge")
+
+    def test_a_draft_pr_shows_on_the_ticket_card_and_changes_nothing(self):
+        self.ticket("ABC-2")
+        draft = self.pr(7, "author", ci="failure", decision="REVIEW_REQUIRED",
+                        issue_key="ABC-2", draft=True)  # fmt: skip
+        shown = self.by_key()
+        self.assertNotIn(draft, shown)
+        r = shown["ABC-2"]
+        self.assertEqual(r.folded, [])
+        self.assertEqual(r.tier[1], "started")
+        self.assertEqual(
+            r.linked,
+            [{"url": draft, "ref": "o/r#7",
+              "why": "draft · CI failure · review required"}],
+        )  # fmt: skip
+        page = fleet_now.render(self.conn, CFG, NOW)
+        self.assertIn(f'<div class="folded linked" data-key="{draft}">', page)
+        doc = agent_view.build(self.conn, CFG, "now", NOW)
+        (item,) = [i for i in doc["lanes"][0]["items"] if i["key"] == "ABC-2"]
+        self.assertEqual([x["url"] for x in item["linked"]], [draft])
+
+    def test_a_folded_pr_is_not_listed_twice(self):
+        r = self.by_key()["ABC-1"]
+        self.assertEqual([f.need.item[1] for f in r.folded], [self.url])
+        self.assertEqual(r.linked, [])
+        page = fleet_now.render(self.conn, CFG, NOW)
+        self.assertEqual(page.count(f'data-key="{self.url}"'), 1)
 
     def test_an_ignored_pr_is_left_off_the_card(self):
         self.conn.execute(

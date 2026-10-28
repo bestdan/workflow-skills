@@ -40,6 +40,10 @@ class Candidate:
     # The overlay items this one folds into, when Ship ranks one of them: a
     # PR's Jira ticket and the GitHub issues it closes (fleet_now.pr_links).
     links: tuple = ()
+    # Linked items shown on the card as evidence only, never ranked: a Jira
+    # ticket's joined PRs, each {url, ref, why}. One that folds in is shown
+    # once, as folded.
+    related: list = field(default_factory=list)
     from_needs: bool = False  # Needs you lists it too
     # A close-out's steps that have evidence (close_out.Step); empty otherwise.
     checklist: list = field(default_factory=list)
