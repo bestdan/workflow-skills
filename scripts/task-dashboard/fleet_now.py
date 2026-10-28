@@ -28,7 +28,7 @@ score.FLEET_CATEGORIES category:
 - my open Jira tickets, and any open one I pinned (jira_category): in
   progress is `started`, and to do is `ready` in the active sprint. Each
   brings score.score's priority, deadline, unblocks and stuck terms
-  (`[score.weights]`), added to its category's;
+  (`[score.terms]`), its priority in place of the prio: label's;
 - close-outs (close_out.py, `close_out`): a finished session, on evidence
   that its work is done (its PR merged, its branch landed, or it ended), and a
   workstream in the Complete lane. Each card carries its checklist, ticked
@@ -71,7 +71,7 @@ last, blocked, whatever the category. Blocked is a Jira ticket score.is_blocked
 calls blocked, or a GitHub issue with the `blocked` label or an open native
 `blocked_by` (issue_blocked); its why line reads `ship: blocked`. Within a tier,
 score.fleet_score orders, highest first, and a tie goes to the longer wait, so
-the rest keep the category order the `[score.fleet]` weights give. The list
+the rest keep the category order the `[score.categories]` weights give. The list
 stops at LIMIT items, pins aside: every pinned item is shown. Each card's why
 line names its tier and the terms that put it there, and the terms add up to
 its score.
@@ -542,11 +542,8 @@ def _review_requests(
     return out
 
 
-# A Jira ticket's status category -> its category, and the score.score terms
-# it brings; its review and blocked terms are left out, because tiers now do
-# what they did.
+# A Jira ticket's status category -> its category.
 _JIRA_CATEGORY = {"indeterminate": "started", "new": "ready"}
-JIRA_TERMS = ("priority", "deadline", "unblocks", "stuck")
 
 
 def jira_category(
@@ -603,13 +600,12 @@ def _jira_tickets(
             hint="carry on with it" if category == "started" else "start it",
             row=issue,
         )
-        scored = [t for t in m.scores[key][1] if t[0] in JIRA_TERMS]
         out.append(
             candidate.Candidate(
                 need,
                 category,
                 why,
-                terms={candidate.SCORED: scored},
+                terms={candidate.SCORED: m.scores[key][1]},
                 blocked=blocked,
                 features={
                     "project": key.split("-", 1)[0],
@@ -678,7 +674,7 @@ def rank(
             seen.add(c.item)
             out.append(Ranked(c))
     member_of = workstreams.membership(conn)
-    weights = cfg["score"]["fleet"]
+    categories, weights = cfg["score"]["categories"], cfg["score"]["terms"]
     for r in out:
         r.workstream = member_of.get(r.candidate.item)
         if r.mode != SHIP:
@@ -691,11 +687,14 @@ def rank(
                 "since": r.candidate.terms.get(candidate.SINCE),
             },
             now,
+            categories,
             weights,
         )
         scored = r.candidate.terms.get(candidate.SCORED)
         if scored:
-            terms = terms + list(scored)
+            # A term the source scored replaces the one of the same name.
+            mine = {t[0] for t in scored}
+            terms = [t for t in terms if t[0] not in mine] + list(scored)
             total = score._round(math.fsum(v for _, v, _ in terms))
         r.total, r.terms = total, terms
     # Folded after scoring, so a PR _visible hands back has its own score.

@@ -142,13 +142,15 @@ class TierMappingTests(Case):
         self.ticket("ABC-1", priority="Highest")
         r = self.by_key()["ABC-1"]
         names = [name for name, _, _ in r.terms]
-        for name in fleet_now.JIRA_TERMS:
+        for name in ("priority", "deadline", "unblocks", "stuck"):
             self.assertIn(name, names)
         self.assertNotIn("review", names)
         self.assertNotIn("blocked", names)
-        self.assertEqual(dict((n, v) for n, v, _ in r.terms)["priority"], 12)
+        # The ticket's priority replaces the fleet's prio: one: one term.
+        self.assertEqual(names.count("priority"), 1)
+        self.assertEqual(dict((n, v) for n, v, _ in r.terms)["priority"], 0.8)
         self.assertAlmostEqual(r.total, sum(v for _, v, _ in r.terms))
-        self.assertIn("priority +12 (Highest (urgent))", fleet_now.why_line(r))
+        self.assertIn("priority +0.8 (Highest (urgent))", fleet_now.why_line(r))
 
     def test_jira_off_ranks_no_tickets(self):
         self.ticket("ABC-1")

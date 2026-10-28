@@ -5,9 +5,9 @@ ranking is stable between refreshes and every card can show why it ranks where
 it does. There is no LLM here on purpose. The spec is the Prioritization score
 and Blocked paragraphs of dev_docs/designs/2026-10-23-task-dashboard.md.
 
-fleet_score() is the second score, for the fleet instance's Now: what waits
-on the owner, and the owner's own work, ranked by category (see the comment
-above FLEET_CATEGORIES).
+fleet_score() is Now's score: what waits on the owner, and the owner's own
+work, ranked by category (see the comment above FLEET_CATEGORIES). score()'s
+terms add to a Jira ticket's there.
 
 `issue` is a `jira_issues` row as a dict. `links` are that issue's `links` rows,
 each carrying the linked issue's *effective* status category: the mirror's own
@@ -47,7 +47,9 @@ DEADLINE_CAP = 2.0
 # Stuck term = weight x (days past threshold / threshold), capped here.
 STUCK_CAP = 2.0
 
-TERMS = ("priority", "deadline", "unblocks", "stuck", "review", "blocked")
+# The `[score.terms]` weights. score() reads the first four off a Jira issue;
+# fleet_score() reads priority (as a prio: label) and age off any item.
+TERMS = ("priority", "deadline", "unblocks", "stuck", "age")
 
 Term = tuple[str, float, str]
 
@@ -175,13 +177,14 @@ def _round(value: float) -> float:
 def score(
     issue: dict[str, Any], ctx: dict[str, Any], weights: dict[str, Any]
 ) -> tuple[float, list[Term]]:
-    """`(total, [(term, value, why), ...])`, one entry per name in TERMS.
+    """`(total, [(term, value, why), ...])`: priority, deadline, unblocks and
+    stuck, weighted by `[score.terms]`.
 
     `ctx` carries what is not on the issue row: `now` (aware datetime),
-    `unblocks` (count of open issues this one blocks), `prs` (the joined `prs`
-    rows), `blocked` (the `is_blocked` result) and optionally `stuck_days`
-    (per-category thresholds). Each value is rounded to 2 places and the total
-    is their sum, so the terms on a card add up to the total shown.
+    `unblocks` (count of open issues this one blocks) and optionally
+    `stuck_days` (per-category thresholds). Each value is rounded to 2 places
+    and the total is their sum, so the terms on a card add up to the total
+    shown.
     """
     now: datetime = ctx["now"]
     terms: list[Term] = []
@@ -209,37 +212,18 @@ def score(
     add("unblocks", count, f"blocks {count} open issue{'s' if count != 1 else ''}")
 
     add(*_stuck(issue, now, ctx.get("stuck_days") or {}))
-
-    ready = [
-        p for p in ctx.get("prs", [])
-        if p.get("role") == "author"
-        and not p.get("is_draft")
-        and (p.get("review_decision") == "APPROVED" or p.get("ci_state") == "success")
-    ]  # fmt: skip
-    if ready:
-        p = ready[0]
-        state = "approved" if p.get("review_decision") == "APPROVED" else "green"
-        add("review", 1, f"PR #{p.get('number')} is {state}")
-    else:
-        add("review", 0, "no PR of mine approved or green")
-
-    blocked, signals = ctx.get("blocked") or (False, [])
-    add(
-        "blocked", 1 if blocked else 0, ", ".join(signals) if blocked else "not blocked"
-    )
-
     return _round(math.fsum(v for _, v, _ in terms)), terms
 
 
 # --- the fleet score ---------------------------------------------------------
 #
-# The fleet instance's Now (fleet_now.py) ranks what waits on the owner, and
-# the owner's own work, by this second score. Each item belongs to exactly one
-# category, whose term is its weight; `prio` and `age` add to every item. Now's
-# Ship order puts each category in a fixed tier first (fleet_now.TIERS), so
-# this score orders items only within a tier. With the defaults
-# (config.DEFAULTS["score"]["fleet"]) the categories sit in FLEET_CATEGORIES
-# order, and prio plus age stay small enough that they reorder items within a
+# Now (fleet_now.py) ranks what waits on the owner, and the owner's own work,
+# by this score. Each item belongs to exactly one category, whose
+# `[score.categories]` weight is its term; `priority` and `age` (`[score.terms]`)
+# add to every item. Now's Ship order puts each category in a fixed tier first
+# (fleet_now.TIERS), so this score orders items only within a tier. With the
+# defaults (config.DEFAULTS["score"]) the categories sit in FLEET_CATEGORIES
+# order, and the terms stay small enough that they reorder items within a
 # category, or across two neighbouring ones.
 
 FLEET_CATEGORIES = (
@@ -255,9 +239,10 @@ FLEET_CATEGORIES = (
     "ready",  # my issue at status:2_ready
     "own_pr",  # my PR out of the queue on something I can do
 )
-FLEET_TERMS = FLEET_CATEGORIES + ("prio", "age")
+FLEET_TERMS = FLEET_CATEGORIES + ("priority", "age")
 
-# The prio: label as a level, as the gh-issue handler ranks it (prio:0 first).
+# The prio: label as a level, as the gh-issue handler ranks it (prio:0 first),
+# on PRIORITY_LEVEL's scale, so prio:0 weighs as Jira's highest.
 PRIO_LEVEL = {"prio:0": 4, "prio:1": 3, "prio:2": 2, "prio:3": 1}
 
 # Age term = weight x weeks waiting, capped here, so an old item gains a little
@@ -272,13 +257,17 @@ def prio_of(labels: "list[str] | None") -> "str | None":
 
 
 def fleet_score(
-    item: dict[str, Any], now: datetime, weights: dict[str, Any]
+    item: dict[str, Any],
+    now: datetime,
+    categories: dict[str, Any],
+    weights: dict[str, Any],
 ) -> tuple[float, list[Term]]:
     """`(total, [(term, value, why), ...])`, one entry per name in FLEET_TERMS.
 
     `item` carries `category` (one of FLEET_CATEGORIES), `why` (what put it in
     that category, shown beside the term), `prio` (a `prio:` label or None)
     and `since` (an aware datetime, or None when the wait's start is unknown).
+    `categories` is `[score.categories]` and `weights` is `[score.terms]`.
     As in score(), each value is rounded to 2 places and the total is their
     sum, so the terms on a card add up to the total shown.
     """
@@ -288,12 +277,13 @@ def fleet_score(
     terms: list[Term] = []
 
     def add(name: str, factor: float, why: str) -> None:
-        terms.append((name, _round(float(weights.get(name, 0)) * factor), why))
+        table = categories if name in FLEET_CATEGORIES else weights
+        terms.append((name, _round(float(table.get(name, 0)) * factor), why))
 
     for name in FLEET_CATEGORIES:
         add(name, 1 if name == category else 0, item["why"] if name == category else "")
     prio = item.get("prio")
-    add("prio", PRIO_LEVEL.get(prio or "", 0), prio or "no prio: label")
+    add("priority", PRIO_LEVEL.get(prio or "", 0), prio or "no prio: label")
     since: "datetime | None" = item.get("since")
     if since is None:
         add("age", 0, "waiting for an unknown time")

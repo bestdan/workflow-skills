@@ -1,7 +1,7 @@
-"""Why not now: what the owner says when they snooze a card on the fleet Now,
-and what `dashboard.py tune` makes of it.
+"""Why not now: what the owner says when they snooze a card on Now, and what
+`dashboard.py tune` makes of it. Both work on every instance.
 
-ASKING. On the fleet Now (fleet_now.py), Snooze snoozes on the first click
+ASKING. On Now (fleet_now.py), Snooze snoozes on the first click
 and the card gives way, in place, to one line: "Snoozed until <date> · why not
 now?", the reasons (overlay.WHY_NOT_REASONS), an optional line of free text,
 and Undo, which removes the snooze and brings the card back. A reason is
@@ -27,7 +27,8 @@ answer's dominant score term, and the latest LATEST answers.
 LEARNING, offline. tune() is what `dashboard.py tune --json` prints:
 
 - every answer in the window, joined to its score terms;
-- for each [score.fleet] term, how often it was the dominant term of a
+- for each Now term ([score.categories] and [score.terms]), how often it
+  was the dominant term of a
   "wrong priority" answer, and a suggested lower weight when it dominates
   them (at least MIN_COUNT answers and DOMINANT_SHARE of them);
 - candidate dimensions: feature values over-represented among the snoozes
@@ -78,8 +79,8 @@ FEATURES = (
     "kind", "category", "repo", "author", "bot", "prio", "est", "status", "ci",
     "age", "own", "workstream",
 )  # fmt: skip
-# Features a [score.fleet] term already reads, and which.
-SCORED_BY = {"category": "the category terms", "prio": "prio", "age": "age"}
+# Features a Now term already reads, and which.
+SCORED_BY = {"category": "the category terms", "prio": "priority", "age": "age"}
 
 AGE_BUCKETS = ((1, "under 1d"), (7, "1-7d"), (28, "1-4w"))
 
@@ -263,13 +264,16 @@ def _pct(share: "float | None") -> str:
 def weight_suggestions(
     rows: list[dict[str, Any]], weights: dict[str, Any]
 ) -> list[dict[str, Any]]:
-    """One entry per [score.fleet] term: how often it dominated a "wrong
-    priority" answer, and a lower weight when it dominates them."""
+    """One entry per Now term, naming the `[score.<table>]` that weighs it:
+    how often it dominated a "wrong priority" answer, and a lower weight when
+    it dominates them. `weights` is the config's `score` table."""
     wrong = [a for a in rows if a["reason"] == WRONG_PRIORITY]
     counts = Counter(a["dominant"] for a in wrong if a["dominant"])
     out = []
-    for term in score.FLEET_TERMS:
-        weight = float(weights.get(term, 0))
+    tables = [("categories", t) for t in score.FLEET_CATEGORIES]
+    tables += [("terms", t) for t in score.TERMS]
+    for table, term in tables:
+        weight = float(weights[table].get(term, 0))
         n = counts.get(term, 0)
         share = _share(n, len(wrong))
         suggest = None
@@ -289,6 +293,7 @@ def weight_suggestions(
         out.append(
             {
                 "term": term,
+                "table": table,
                 "weight": weight,
                 "wrong_priority_dominant": n,
                 "share": share,
@@ -366,8 +371,9 @@ def tune(
         "weights": weight_suggestions(rows, weights),
         "candidates": candidates(rows, base),
         "note": (
-            "Suggestions only. Edit [score.fleet] in the config to apply a"
-            " weight; a new term is a code change. Nothing here was written."
+            "Suggestions only. Edit the term's [score.<table>] in the config to"
+            " apply a weight; a new term is a code change. Nothing here was"
+            " written."
         ),
         "rows": [
             {
@@ -399,7 +405,8 @@ def text_report(doc: dict[str, Any]) -> str:
     for w in doc["weights"]:
         if w["suggest"]:
             lines.append(
-                f"  weight {w['term']}: {w['weight']:g} -> {w['suggest']['weight']:g}"
+                f"  weight score.{w['table']}.{w['term']}:"
+                f" {w['weight']:g} -> {w['suggest']['weight']:g}"
                 f" ({w['suggest']['why']})"
             )
     for c in doc["candidates"]:

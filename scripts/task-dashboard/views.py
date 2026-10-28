@@ -217,7 +217,7 @@ class Mirror:
             if _in_future(r[1], now)
         }
         conn.row_factory = None
-        weights = cfg["score"]["weights"]
+        weights = cfg["score"]["terms"]
         stuck_days = cfg["score"].get("stuck_days") or {}
         self.blocked: dict[str, tuple[bool, list[str]]] = {}
         self.scores: dict[str, tuple[float, list[score.Term]]] = {}
@@ -227,8 +227,6 @@ class Mirror:
             ctx = {
                 "now": now,
                 "unblocks": len(score.open_blocked(links)),
-                "prs": self.prs_by_issue.get(key, []),
-                "blocked": self.blocked[key],
                 "stuck_days": stuck_days,
             }
             self.scores[key] = score.score(issue, ctx, weights)
