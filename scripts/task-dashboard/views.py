@@ -122,7 +122,7 @@ PR_COLUMNS = (
 
 def hidden_tabs(cfg: dict[str, Any]) -> set[str]:
     """The TABS paths this instance leaves out of its nav (see nav())."""
-    hidden = set(NOT_ON_FLEET if fleet_views.enabled(cfg) else fleet_views.ONLY)
+    hidden = set(NOT_ON_FLEET if fleet_views.fleet_pages(cfg) else fleet_views.ONLY)
     if not sync.jira_enabled(cfg):
         hidden.update(JIRA_ONLY)
     return hidden
@@ -646,9 +646,10 @@ def render_waiting_on(m: Mirror, inc: include.Include) -> str:
 
 
 def jira_stale_lane(m: Mirror) -> "view_model.Lane | None":
-    """Jira's stale lane as (issue, why) pairs; None on a fleet instance whose
-    mirror holds no Jira issue, where the page leaves it out."""
-    on_fleet = fleet_views.enabled(m.cfg)
+    """Jira's stale lane as (issue, why) pairs; None with the fleet pages
+    (fleet_views.fleet_pages) and no Jira issue mirrored, where the page
+    leaves it out."""
+    on_fleet = fleet_views.fleet_pages(m.cfg)
     if on_fleet and not m.issues:
         return None
     # Beside the fleet's lanes it is a tab of its own, so it needs a title.
@@ -662,10 +663,10 @@ def jira_stale_lane(m: Mirror) -> "view_model.Lane | None":
 
 
 def render_stale(m: Mirror, inc: include.Include) -> str:
-    """Jira's stale lane, then, on a fleet instance, the fleet's (fleet_views)."""
+    """Jira's stale lane, then, with the fleet pages, the fleet's (fleet_views)."""
     lane = jira_stale_lane(m)
     jira = _render(lane, _ic(m), inc) if lane is not None else ""
-    if not fleet_views.enabled(m.cfg):
+    if not fleet_views.fleet_pages(m.cfg):
         return jira
     return jira + fleet_views.render_stale(m.conn, m.cfg, m.now, inc)
 

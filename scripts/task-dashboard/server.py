@@ -973,8 +973,9 @@ class App:
             body = views.render(path, conn, self.cfg, self.now(), inc, query)
             body = lane_tabs.tabify(body, path.lstrip("/"), path, query)
             mode_html = ""
-            if path == "/now" and fleet_views.enabled(self.cfg):
-                # The page was built, so a bad ?mode= has already raised.
+            if path == "/now":
+                # Every instance's Now has modes. The page was built, so a
+                # bad ?mode= has already raised.
                 asked = (query.get("mode") or [""])[0].strip() or None
                 mode = fleet_now.resolve_mode(asked, overlay.load(conn))
                 mode_html = fleet_now.mode_button(mode)
@@ -996,9 +997,8 @@ class App:
             body = views.nav("/health", self.cfg, inc, query) + health.page(
                 conn, self.cfg, self.now(), days, fleet=self.fleet, inc=inc
             )
-            if fleet_views.enabled(self.cfg):
-                # Answers to the fleet Now's "why not now?" picker.
-                body += whynot.section(conn, self.now())
+            # Answers to the "why not now?" picker on every Now card.
+            body += whynot.section(conn, self.now())
         finally:
             conn.close()
         return render_page(
@@ -1124,14 +1124,13 @@ class Handler(BaseHTTPRequestHandler):
         app = self.server.app
         html_type = "text/html; charset=utf-8"
         try:
-            if path == "/" and fleet_views.enabled(app.cfg):
+            if path == "/" and fleet_views.fleet_pages(app.cfg):
                 # A fleet instance's home page is Now, its ranked queue; the
                 # Jira one's the Board.
                 self._send(200, app.view_page("/now", query).encode(), html_type)
             elif path in RETIRED_ROUTES:
                 # Since you were away folded into Needs you, a fleet-only tab.
-                fleet = fleet_views.enabled(app.cfg)
-                self._redirect("/needs" if fleet else "/")
+                self._redirect("/needs" if fleet_views.fleet_pages(app.cfg) else "/")
             elif path in ("/", "/board"):
                 self._send(200, app.board_page(query).encode(), html_type)
             elif path in views.ROUTES:

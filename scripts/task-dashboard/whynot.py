@@ -20,7 +20,7 @@ without what Now showed. Each render records the items it showed, once per
 item per local day (record_shown, the `now_shown` table), with the same
 features, and prunes days older than RETAIN_DAYS.
 
-SHOWING. On the fleet instance, Health gets a "Why not now" section (section()): the last
+SHOWING. On every instance, Health gets a "Why not now" section (section()): the last
 WINDOW_DAYS days' answers counted by reason against item kind and against the
 answer's dominant score term, and the latest LATEST answers.
 

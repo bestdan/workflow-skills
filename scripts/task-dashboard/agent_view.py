@@ -319,7 +319,7 @@ def _stale(ctx: "Ctx") -> list[dict[str, Any]]:
     lane = views.jira_stale_lane(m)
     if lane is not None:
         out.append(_lane(lane, ctx.inc, lambda t, lid: jira_item(m, t[0], t[1], lid)))
-    if not fleet_views.enabled(ctx.cfg):
+    if not fleet_views.fleet_pages(ctx.cfg):
         return out
     off = fleet_views.stale_off(ctx.inc)
     for lane in fleet_views.stale_lanes(ctx.conn, ctx.cfg, ctx.now, ctx.inc):
