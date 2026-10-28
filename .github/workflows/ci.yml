@@ -25,6 +25,10 @@ jobs:
   quality:
     name: Deterministic gate
     runs-on: ubuntu-latest
+    # A normal run is 2-3 minutes. Without a limit, a hung check holds the job
+    # for GitHub's default of 6 hours; check.sh names the hung check when the
+    # timeout signals it.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
         with:
@@ -104,9 +108,10 @@ jobs:
             bash scripts/check.sh
           fi
 
-  # Classifies a PR's diff so `macos` can skip one confined to dev_docs/ — the
-  # job's runtime is almost all scripts/test-shell.sh, and nothing that suite
-  # runs reads the real dev_docs/ tree. PRs only: a push to main skips this job,
+  # Classifies a PR's diff so `macos` can skip one that scripts/test-shell.sh
+  # cannot reach — the job's runtime is almost all that suite, and nothing it
+  # runs reads the real dev_docs/ tree or the task-dashboard's Python
+  # (scripts/ci-docs-only.sh carries the allowlist). PRs only: a push to main skips this job,
   # which leaves its output empty, which runs `macos` — so main always gets the
   # full coverage as a backstop.
   changes:
@@ -114,7 +119,7 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     outputs:
-      docs_only: ${{ steps.classify.outputs.docs_only }}
+      shell_free: ${{ steps.classify.outputs.shell_free }}
     steps:
       # The PR merge ref's first parent is the base branch tip, so depth 2 is
       # enough for HEAD^1..HEAD to be exactly the PR's change. GitHub rebuilds
@@ -133,9 +138,11 @@ jobs:
     # skipped this way reports as passing, where a workflow skipped by path
     # filters leaves a required check pending forever. `!cancelled()` lets it
     # run when `changes` itself was skipped (a push) or failed — the empty
-    # output then reads as not-docs-only, so every failure runs the suites.
-    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
+    # output then reads as not-shell-free, so every failure runs the suites.
+    if: ${{ !cancelled() && needs.changes.outputs.shell_free != 'true' }}
     runs-on: macos-latest
+    # A normal run is 5-7 minutes; see the quality job's timeout.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
         with:

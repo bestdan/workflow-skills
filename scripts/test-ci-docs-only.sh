@@ -2,7 +2,7 @@
 # test-ci-docs-only.sh — fixture-based tests for scripts/ci-docs-only.sh.
 #
 # Each case commits a change on top of a base commit in a fresh `git init`
-# fixture and asserts the one line the classifier prints. The cases that
+# fixture and asserts the two lines the classifier prints. The cases that
 # matter most are the fail-safe ones: an empty diff, an unknown ref, a shell
 # file under dev_docs/, and a rename out of scripts/ into dev_docs/ must all
 # read as code, because a wrong `true` skips CI.
@@ -24,6 +24,10 @@ export GIT_CEILING_DIRECTORIES="$BASE"
 # config (a global pre-commit hook refusing commits to main would trip here).
 export GIT_CONFIG_GLOBAL=/dev/null
 export GIT_CONFIG_SYSTEM=/dev/null
+
+DOCS=$'docs_only=true\nshell_free=true'
+CODE=$'docs_only=false\nshell_free=false'
+DASH=$'docs_only=false\nshell_free=true'
 
 fail=0
 pass_count=0
@@ -75,41 +79,68 @@ new_fixture docs
 echo more >>"$fixture/dev_docs/doc.md"
 echo '{}' >"$fixture/dev_docs/new.json"
 commit_all
-expect "dev_docs-only change is docs" "docs_only=true"
+expect "dev_docs-only change is docs" "$DOCS"
 
 new_fixture code
 echo more >>"$fixture/dev_docs/doc.md"
 echo more >>"$fixture/scripts/foo.sh"
 commit_all
-expect "a change outside dev_docs/ is code" "docs_only=false"
+expect "a change outside dev_docs/ is code" "$CODE"
 
 new_fixture shell
 echo 'echo x' >"$fixture/dev_docs/probe.sh"
 commit_all
-expect "a shell file under dev_docs/ is code" "docs_only=false"
+expect "a shell file under dev_docs/ is code" "$CODE"
 
 new_fixture bats
 echo '@test x { :; }' >"$fixture/dev_docs/probe.bats"
 commit_all
-expect "a bats file under dev_docs/ is code" "docs_only=false"
+expect "a bats file under dev_docs/ is code" "$CODE"
 
 new_fixture rename
 gitf mv scripts/foo.sh dev_docs/foo.md
 commit_all
-expect "a rename out of scripts/ into dev_docs/ is code" "docs_only=false"
+expect "a rename out of scripts/ into dev_docs/ is code" "$CODE"
 
 new_fixture empty
 commit_all
-expect "an empty diff is code, not vacuously docs" "docs_only=false"
+expect "an empty diff is code, not vacuously docs" "$CODE"
 
 new_fixture badref
-expect "an unknown base ref is code" "docs_only=false" deadbeef HEAD
+expect "an unknown base ref is code" "$CODE" deadbeef HEAD
 
 new_fixture prefix
 mkdir -p "$fixture/dev_docs_extra"
 echo x >"$fixture/dev_docs_extra/a.md"
 commit_all
-expect "a sibling directory sharing the prefix is code" "docs_only=false"
+expect "a sibling directory sharing the prefix is code" "$CODE"
+
+new_fixture dashboard
+mkdir -p "$fixture/scripts/task-dashboard"
+echo x >"$fixture/scripts/task-dashboard/now.py"
+echo x >"$fixture/scripts/test_task_dashboard_now.py"
+echo more >>"$fixture/dev_docs/doc.md"
+commit_all
+expect "task-dashboard Python is shell-free but not docs" "$DASH"
+
+new_fixture dashboard-shell
+mkdir -p "$fixture/scripts/task-dashboard"
+echo 'echo x' >"$fixture/scripts/task-dashboard/run.sh"
+commit_all
+expect "a shell file under task-dashboard/ is code" "$CODE"
+
+new_fixture dashboard-and-code
+mkdir -p "$fixture/scripts/task-dashboard"
+echo x >"$fixture/scripts/task-dashboard/now.py"
+echo x >"$fixture/scripts/helper.py"
+commit_all
+expect "task-dashboard plus other Python is code" "$CODE"
+
+new_fixture dashboard-prefix
+mkdir -p "$fixture/scripts/task-dashboard-extra"
+echo x >"$fixture/scripts/task-dashboard-extra/a.py"
+commit_all
+expect "a sibling of task-dashboard/ sharing its prefix is code" "$CODE"
 
 echo "test-ci-docs-only: $pass_count passed, $fail_count failed"
 exit "$fail"

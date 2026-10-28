@@ -107,7 +107,7 @@ docs_only=0
 if [[ -n "$base_ref" ]]; then
   base_output="$(scripts/ci-docs-only.sh "$base_ref" HEAD)"
   base_rc=$?
-  if [[ "$base_rc" == 0 && "$base_output" == "docs_only=true" ]]; then
+  if [[ "$base_rc" == 0 && "$base_output" == "docs_only=true"$'\n'* ]]; then
     docs_only=1
   fi
 fi
@@ -164,7 +164,19 @@ trap 'rm -rf "$tmp"' EXIT
 # foreground child took the signal and died with the script. Kill the direct
 # children explicitly. `:-` because set -u is on and this can fire before any
 # pid is recorded.
-trap 'kill "${pids[@]:-}" 2>/dev/null; rm -rf "$tmp"; exit 130' INT TERM
+#
+# Before killing them, name every check still running and replay what it has
+# written so far. Output is buffered per check, so without this a hung check
+# killed by CI's timeout-minutes leaves a log that says nothing at all.
+report_unfinished() {
+  local i
+  for i in "${!pids[@]}"; do
+    kill -0 "${pids[$i]}" 2>/dev/null || continue
+    echo "→ still running when interrupted: ${checks[$i]}" >&2
+    cat "$tmp/$i.out" >&2
+  done
+}
+trap 'report_unfinished; kill "${pids[@]:-}" 2>/dev/null; rm -rf "$tmp"; exit 130' INT TERM
 
 checks=()
 pids=()
