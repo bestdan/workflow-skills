@@ -37,10 +37,20 @@ sources — it is the Bats **runner and helper libraries** (`bats-core`,
 | `Deterministic gate`            | `ubuntu-latest` | `scripts/check.sh` — the whole gate                   |
 | `Host-sensitive suites (macOS)` | `macos-latest`  | `scripts/test-shell.sh`, `SO_TEST_REQUIRE_SEATBELT=1` |
 
-The macOS job is skipped on a PR whose diff is confined to `dev_docs/`: a
-`Classify changed files` job runs `scripts/ci-docs-only.sh` first, and nothing
-`test-shell.sh` runs reads the real `dev_docs/` tree. It always runs on a push to
-`main`, and on any PR the classifier cannot positively call docs-only.
+The macOS job is skipped on a PR whose diff `test-shell.sh` cannot reach: a
+`Classify changed files` job runs `scripts/ci-docs-only.sh` first, and only
+when every changed file is on its allowlist (`dev_docs/` and the
+`scripts/task-dashboard/` tree, no shell files) does it report
+`shell_free=true`. The script's header says what a path must satisfy to join
+that list. The job always runs on a push to `main`, and on any PR the
+classifier cannot positively call shell-free.
+
+Both jobs carry `timeout-minutes`, so a hung check fails the run instead of
+holding it for GitHub's six-hour default. On SIGINT or SIGTERM, `check.sh`
+names every check still running and prints its output so far. The runner
+signals only the step's own process, not its children, so the gate step
+`exec`s `check.sh` to make it that process. No real timeout has exercised this
+yet.
 
 The macOS job runs the host-dependent layer only — the Bats files and the
 orchestrator suite. Everything else in `check.sh` (dprint, `validate.py`,
