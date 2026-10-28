@@ -48,7 +48,10 @@ whichever comes first.
 
 THE ACTION resumes the session to finish its own close-out, with the steps
 left as its prompt: by its Remote Control link when its process is live and
-has one, else `claude --resume <id> '<prompt>'`, run in its cwd on its host.
+has one; a process that may be live without one has no command, only where it
+runs (its cwd and host, and its tmux target when the registry names one),
+since resuming would start a second process on its open transcript; else
+`claude --resume <id> '<prompt>'`, run in its cwd on its host.
 A workstream's action is to close the milestone.
 """
 
@@ -196,18 +199,33 @@ def _resume(
     row: dict[str, Any], sid: str, steps: list[Step]
 ) -> "tuple[str, tuple[str, ...] | None, str | None]":
     """(hint, command, url): the Remote Control link with the prompt to give
-    it, else `claude --resume` with the prompt as its argument."""
+    it; else, while its process may be live, where it runs and no command,
+    since `claude --resume` would start a second process on its open
+    transcript; else `claude --resume` with the prompt as its argument.
+
+    A session may be live when it is in its host's registry, or when a live
+    entry under another id holds its cwd (sessions.py `cwd_held`): after a
+    `/clear` that entry may be this session. Otherwise, as on a host without
+    a registry, nothing says it is live, so it is resumed.
+    """
     text = prompt(steps)
-    bridge = (
-        None if row.get("ended") else needs.valid_bridge(row.get("bridge_session_id"))
-    )
+    ended = row.get("ended")
+    bridge = None if ended else needs.valid_bridge(row.get("bridge_session_id"))
     if bridge:
         return f"open the session and send: {text}", None, needs.session_url(bridge)
-    if needs.RESUME_ID.fullmatch(sid) is None:
-        return text, None, None
     host = row.get("host") or "an unknown host"
     cwd = row.get("cwd")
     where = f" in {cwd}" if cwd else ""
+    if not ended and row.get("pid") is not None:  # in its host's registry
+        tmux = f" in tmux {row['tmux']}" if row.get("tmux") else ""
+        return f"still running{tmux}{where} on {host}; send it: {text}", None, None
+    if row.get("cwd_held"):
+        hint = (
+            f"a session is running{where} on {host}; if it is this one, send it: {text}"
+        )
+        return hint, None, None
+    if needs.RESUME_ID.fullmatch(sid) is None:
+        return text, None, None
     cmd = f"claude --resume {sid} {shlex.quote(text)}"
     return (
         f"resume with `{cmd}`{where} on {host}",

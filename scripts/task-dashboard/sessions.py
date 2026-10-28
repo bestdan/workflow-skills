@@ -66,6 +66,8 @@ rest is in `raw_json`:
                       where a missing entry proves nothing. Recomputed on
                       every derive, so a session that shows up in the
                       registry again is no longer ended.
+    cwd_held         a live entry on the session's host runs in its cwd, as
+                      `ended` reads it: true keeps the session from ending.
 
 A permission prompt answered mid-turn fires no hook event, so the session
 reads as need_input until that turn's Stop. The hook has no archive signal, so
@@ -293,11 +295,8 @@ def derive(conn: sqlite3.Connection, now: datetime) -> list[dict[str, Any]]:
         entry = live.get((row["host"] or "", sid))
         with_registry(row, entry)
         with_transcript(row, summaries.get((row["host"] or "", sid)))
-        row["ended"] = (
-            entry is None
-            and row["host"] in hosts
-            and (row["host"], row["cwd"]) not in occupied
-        )
+        row["cwd_held"] = (row["host"], row["cwd"]) in occupied
+        row["ended"] = entry is None and row["host"] in hosts and not row["cwd_held"]
         rows.append(row)
     return rows
 

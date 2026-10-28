@@ -596,6 +596,25 @@ class CloseOutTests(Case):
             [(close_out.PR_MERGED, True), (close_out.TASK_CLOSED, False),
              (close_out.WORKTREE_REMOVED, True)],
         )  # fmt: skip
+        # Nor can anything show it live, so it is still offered a resume.
+        self.assertEqual(
+            found["c-ended"].need.command[:3], ("claude", "--resume", "c-ended")
+        )
+
+    def test_a_registry_ingested_after_derive_withholds_no_resume(self):
+        snap = copy.deepcopy(CO_SNAPSHOT)
+        snap["schema"] = 2
+        del snap["registry"]
+        snapshot_adapter.ingest(self.conn, snap, NOW)
+        sessions.write(self.conn, sessions.derive(self.conn, NOW), NOW)
+        tabs_fx.seed(self.conn, rows=CO_CLOSED, prs=[])
+        # The host now carries a registry, but its rows were derived without
+        # one: nothing they say holds c-ended's cwd, so it is still resumed.
+        later = copy.deepcopy(CO_SNAPSHOT)
+        later["taken_at"] = "2026-10-25T11:30:00.000Z"
+        snapshot_adapter.ingest(self.conn, later, NOW)
+        need = self.found()["c-ended"].need
+        self.assertEqual(need.command[:3], ("claude", "--resume", "c-ended"))
 
     def test_no_newer_snapshot_or_an_unscanned_repo_is_no_worktree_evidence(self):
         co_seed(self.conn)
@@ -638,6 +657,40 @@ class CloseOutTests(Case):
         )  # fmt: skip
         self.assertIn("`claude --resume c-ended 'Finish closing out", ended.hint)
         self.assertIn(f"in {CO_WT}/task-3 on mini", ended.hint)
+
+    def test_a_live_session_without_a_link_is_not_offered_a_resume(self):
+        co_seed(self.conn)
+        # c-landed's process is in the registry with no Remote Control id:
+        # `claude --resume` would start a second process on its open transcript.
+        need = self.found()["c-landed"].need
+        self.assertIsNone(need.url)
+        self.assertIsNone(need.command)
+        self.assertNotIn("--resume", need.hint)
+        self.assertTrue(
+            need.hint.startswith(f"still running in {CO_WT}/task-2 on mini; send it: ")
+        )
+        row = {"host": "mini", "pid": 5000, "tmux": "work:2", "ended": False}
+        steps = [close_out.Step(close_out.SESSION_ENDED, False, "end this session")]
+        hint, command, url = close_out._resume(row, "c-x", steps)
+        self.assertEqual((command, url), (None, None))
+        self.assertTrue(hint.startswith("still running in tmux work:2 on mini; "))
+
+    def test_a_session_whose_cwd_a_live_entry_holds_is_not_offered_a_resume(self):
+        snap = copy.deepcopy(CO_SNAPSHOT)
+        # A live process under another id runs in c-ended's cwd: after a
+        # `/clear` it may be c-ended itself, so c-ended has not ended.
+        snap["registry"].append(co_live("c-new", "task-3"))
+        snapshot_adapter.ingest(self.conn, snap, NOW)
+        sessions.write(self.conn, sessions.derive(self.conn, NOW), NOW)
+        tabs_fx.seed(self.conn, rows=CO_CLOSED, prs=[])
+        need = self.found()["c-ended"].need
+        self.assertIsNone(need.command)
+        self.assertEqual(
+            need.hint,
+            f"a session is running in {CO_WT}/task-3 on mini; if it is this one,"
+            " send it: Finish closing out this session: close"
+            " bestdan/workflow-skills#403; then end this session.",
+        )
 
     def test_ship_tiers_asked_then_close_outs_capped_oldest_first(self):
         co_seed(self.conn)
