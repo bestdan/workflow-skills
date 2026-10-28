@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.150.0] - 2026-10-28
+
+### Features
+
+- rename the score tables, and tune on every instance [#1231] (#1241) (05fb980)
+
 ## [2.149.0] - 2026-10-28
 
 ### Features
