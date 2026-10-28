@@ -21,6 +21,7 @@ PKG = ROOT / "scripts" / "task-dashboard"
 sys.path.insert(0, str(PKG))
 sys.path.insert(0, str(ROOT / "scripts"))
 
+import agent_view  # type: ignore[import-not-found]  # noqa: E402
 import config  # type: ignore[import-not-found]  # noqa: E402
 import db  # type: ignore[import-not-found]  # noqa: E402
 import fleet_views  # type: ignore[import-not-found]  # noqa: E402
@@ -595,6 +596,64 @@ class FleetRouteTests(server_harness.ServerCase):
         page = self.request("GET", "/stale")[1]
         self.assertIn("closed 1135 (#1135) merged", section(page, "close"))
         self.assertIn(pr_url(900), section(page, "check"))
+
+
+class FleetSwitchTests(server_harness.ServerCase):
+    """Each caller of the fleet switch under scope x ingest (#1232).
+
+    Being a fleet means ingesting from other hosts. The tabs, the home page
+    and the Stale lanes stay on scope "owner" or any ingest machine; Now's
+    mode button and Health's why-not section show on every instance.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.httpd.app.now = lambda: NOW
+        conn = db.connect(self.db_path)
+        seed(conn)
+        conn.close()
+
+    def combos(self):
+        for scope in ("owner", "me"):
+            for machines in ({"mini": "x"}, {}):
+                cfg = self.httpd.app.cfg
+                cfg["github"].update(enabled=True, scope=scope)
+                cfg["ingest"]["machines"] = machines
+                yield (scope, bool(machines)), cfg
+
+    def test_each_caller_under_scope_and_ingest(self):
+        for (scope, ingest), cfg in self.combos():
+            with self.subTest(scope=scope, ingest=ingest):
+                pages = scope == "owner" or ingest
+                self.assertEqual(fleet_views.enabled(cfg), ingest)
+                self.assertEqual(fleet_views.fleet_pages(cfg), pages)
+                # Tabs: the fleet's own, or the Jira ones they replace.
+                nav = views.nav("/now", cfg)
+                self.assertEqual('href="/prs"' in nav, pages)
+                self.assertEqual('href="/waiting-on-me"' in nav, not pages)
+                # Home page: Now on a fleet, else the Board.
+                home = self.request("GET", "/")[1]
+                self.assertEqual("<title>Now ·" in home, pages)
+                c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+                c.request("GET", "/away", headers={"Host": f"127.0.0.1:{self.port}"})
+                resp = c.getresponse()
+                resp.read()
+                c.close()
+                self.assertEqual(resp.getheader("Location"), "/needs" if pages else "/")
+                # Stale: the fleet's lanes, on the page and in the agent view.
+                stale = self.request("GET", "/stale")[1]
+                self.assertEqual('data-section="close"' in stale, pages)
+                conn = db.connect(self.db_path)
+                try:
+                    doc = agent_view.build(conn, cfg, "stale", NOW)
+                finally:
+                    conn.close()
+                ids = [lane["id"] for lane in doc["lanes"]]
+                self.assertEqual("close" in ids, pages)
+                # Now's modes and why-not answers work on every instance.
+                self.assertIn('id="mode"', self.request("GET", "/now")[1])
+                health = self.request("GET", "/health")[1]
+                self.assertIn('data-section="why-not"', health)
 
 
 if __name__ == "__main__":

@@ -71,9 +71,16 @@ CSS = """
 
 
 def enabled(cfg: dict[str, Any]) -> bool:
-    """A fleet instance: the GitHub fleet step is on, or machines can ingest."""
+    """A fleet instance: it ingests snapshots from other hosts."""
     machines = (cfg.get("ingest") or {}).get("machines") or {}
-    return sync.fleet_enabled(cfg) or bool(machines)
+    return bool(machines)
+
+
+def fleet_pages(cfg: dict[str, Any]) -> bool:
+    """The fleet's tabs (ONLY), Now as the home page, and the Stale lanes:
+    on a fleet, or with GitHub's owner scope, which mirrors what they show.
+    Kept apart from enabled() until the design settles the tabs question."""
+    return sync.fleet_enabled(cfg) or enabled(cfg)
 
 
 # --- data --------------------------------------------------------------------

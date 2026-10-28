@@ -370,8 +370,9 @@ class PageScriptTests(RouteCase):
 
 
 class JiraHealthTest(server_harness.ServerCase):
-    def test_a_jira_instance_has_no_why_not_section(self):
-        self.assertNotIn('data-section="why-not"', self.request("GET", "/health")[1])
+    def test_a_jira_instance_has_the_why_not_section_too(self):
+        # Every instance's Now asks "why not now?", so its Health shows them.
+        self.assertIn('data-section="why-not"', self.request("GET", "/health")[1])
 
 
 class SectionTests(now_fx.Case):
