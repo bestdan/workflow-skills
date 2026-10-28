@@ -54,20 +54,28 @@ new_dir() {
   D="$tmp/case$case_n"
 }
 
-# hold <tail> [lock flags…] — start a dispatch line that takes the lock and then
-# runs <tail>, and return once the lock is actually held. The script writes the
-# lock file only after flock succeeds, so a non-empty file is the signal; this
-# replaces fixed sleeps, which raced python's startup on a loaded machine.
+# hold [lock flags…] — start a dispatch line that takes the lock and then runs
+# until release(), and return once the lock is actually held. The script writes
+# the lock file only after flock succeeds, so a non-empty file is the signal.
+# Neither side is timed: a line that slept a fixed time ended early under CI
+# load, before the next assertion's own python had started (#1136).
 hold() {
-  local tail=$1
-  shift
-  bash -c "python3 '$SCRIPT' agy --dir '$D' $* && $tail" &
+  bash -c "python3 '$SCRIPT' agy --dir '$D' $* && until [ -e '$D/release' ]; do sleep 0.05; done" &
   holder=$!
   local i=0
-  while [ ! -s "$D/co-review-input.agy.lock" ] && [ "$i" -lt 50 ]; do
+  while [ ! -s "$D/co-review-input.agy.lock" ] && [ "$i" -lt 300 ]; do
     sleep 0.1
     i=$((i + 1))
   done
+  if [ ! -s "$D/co-review-input.agy.lock" ]; then
+    bad "the holding line never took the lock"
+  fi
+}
+
+# release — let the holding line end, and wait for it.
+release() {
+  touch "$D/release"
+  wait "$holder"
 }
 
 # try <wait-seconds> [agent] — exit status of one acquire attempt from its own
@@ -81,7 +89,7 @@ try() {
 echo "coreview-input-lock: contention"
 
 new_dir
-hold "sleep 3"
+hold
 err="$(try 0.3 2>&1)"
 assert_eq "a second run is refused while the first line runs" 3 "$?"
 case "$err" in
@@ -89,49 +97,52 @@ case "$err" in
   *) bad "the refusal does not say the input is in use: '$err'" ;;
 esac
 
-start=$(date +%s)
+(
+  sleep 1
+  touch "$D/release"
+) &
+releaser=$!
 try 10
 rc=$?
-waited=$(($(date +%s) - start))
 assert_eq "a second run that waits gets the lock once the first line ends" 0 "$rc"
-# The holder still had more than 2 s of its 3 s line to run, so even with
-# whole-second `date` this cannot read 0 unless the lock was not held.
-if [ "$waited" -ge 1 ]; then
-  ok "the waiting run actually waited (${waited}s)"
+# The lock frees only after the release file exists, so a run that got it with
+# no such file got a lock nobody held.
+if [ -e "$D/release" ]; then
+  ok "the waiting run waited for the first line to end"
 else
-  bad "the waiting run did not wait (${waited}s) — the lock was not held"
+  bad "the waiting run did not wait — the lock was not held"
 fi
+wait "$releaser"
 wait "$holder"
 
 echo "coreview-input-lock: release"
 
 new_dir
-hold "sleep 30"
+hold
 kill "$holder"
 wait "$holder" 2>/dev/null
 try 3
 assert_eq "killing the holding line frees the lock" 0 "$?"
 
 new_dir
-hold "sleep 5" --max-hold 0.5
-try 3
+hold --max-hold 0.5
+try 10
 assert_eq "--max-hold frees the lock while the line still runs" 0 "$?"
-kill "$holder" 2>/dev/null
-wait "$holder" 2>/dev/null
+release
 
 new_dir
-hold "sleep 2"
+hold
 try 0 devin
 assert_eq "different reviewers do not share a lock" 0 "$?"
-wait "$holder"
+release
 
 echo "coreview-input-lock: refusal gates the chain"
 
 new_dir
-hold "sleep 2"
+hold
 out="$(bash -c "python3 '$SCRIPT' agy --dir '$D' --wait 0 2>/dev/null && echo dispatched")"
 assert_eq "a refused lock stops the && chain before dispatch" "" "$out"
-wait "$holder"
+release
 
 echo "coreview-input-lock: usage"
 
