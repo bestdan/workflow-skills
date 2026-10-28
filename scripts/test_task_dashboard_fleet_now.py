@@ -596,6 +596,10 @@ class CloseOutTests(Case):
             [(close_out.PR_MERGED, True), (close_out.TASK_CLOSED, False),
              (close_out.WORKTREE_REMOVED, True)],
         )  # fmt: skip
+        # Nor can anything show it live, so it is still offered a resume.
+        self.assertEqual(
+            found["c-ended"].need.command[:3], ("claude", "--resume", "c-ended")
+        )
 
     def test_no_newer_snapshot_or_an_unscanned_repo_is_no_worktree_evidence(self):
         co_seed(self.conn)
@@ -647,11 +651,30 @@ class CloseOutTests(Case):
         self.assertIsNone(need.url)
         self.assertIsNone(need.command)
         self.assertNotIn("--resume", need.hint)
-        self.assertTrue(need.hint.startswith("still running on mini; send it: "))
+        self.assertTrue(
+            need.hint.startswith(f"still running in {CO_WT}/task-2 on mini; send it: ")
+        )
         row = {"host": "mini", "pid": 5000, "tmux": "work:2", "ended": False}
-        hint, command, url = close_out._resume(row, "c-x", [])
+        hint, command, url = close_out._resume(row, "c-x", [], {"mini"})
         self.assertEqual((command, url), (None, None))
         self.assertTrue(hint.startswith("still running in tmux work:2 on mini; "))
+
+    def test_a_session_whose_cwd_a_live_entry_holds_is_not_offered_a_resume(self):
+        snap = copy.deepcopy(CO_SNAPSHOT)
+        # A live process under another id runs in c-ended's cwd: after a
+        # `/clear` it may be c-ended itself, so c-ended has not ended.
+        snap["registry"].append(co_live("c-new", "task-3"))
+        snapshot_adapter.ingest(self.conn, snap, NOW)
+        sessions.write(self.conn, sessions.derive(self.conn, NOW), NOW)
+        tabs_fx.seed(self.conn, rows=CO_CLOSED, prs=[])
+        need = self.found()["c-ended"].need
+        self.assertIsNone(need.command)
+        self.assertEqual(
+            need.hint,
+            f"a session is running in {CO_WT}/task-3 on mini; if it is this one,"
+            " send it: Finish closing out this session: close"
+            " bestdan/workflow-skills#403; then end this session.",
+        )
 
     def test_ship_tiers_asked_then_close_outs_capped_oldest_first(self):
         co_seed(self.conn)

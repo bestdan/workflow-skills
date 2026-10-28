@@ -48,9 +48,9 @@ whichever comes first.
 
 THE ACTION resumes the session to finish its own close-out, with the steps
 left as its prompt: by its Remote Control link when its process is live and
-has one; a live process without one has no command, only where it runs (its
-host, and its tmux target when the registry names one), since resuming would
-start a second process on its open transcript; else
+has one; a process that may be live without one has no command, only where it
+runs (its cwd and host, and its tmux target when the registry names one),
+since resuming would start a second process on its open transcript; else
 `claude --resume <id> '<prompt>'`, run in its cwd on its host.
 A workstream's action is to close the milestone.
 """
@@ -196,25 +196,36 @@ def _entry(
 
 
 def _resume(
-    row: dict[str, Any], sid: str, steps: list[Step]
+    row: dict[str, Any], sid: str, steps: list[Step], registry: set[str]
 ) -> "tuple[str, tuple[str, ...] | None, str | None]":
     """(hint, command, url): the Remote Control link with the prompt to give
-    it; else, while its process is live, where it runs and no command, since
-    `claude --resume` would start a second process on its open transcript;
-    else `claude --resume` with the prompt as its argument."""
+    it; else, while its process may be live, where it runs and no command,
+    since `claude --resume` would start a second process on its open
+    transcript; else `claude --resume` with the prompt as its argument.
+
+    A session may be live when it is in its host's registry, or when it is
+    not ended on a host with a registry: then a live entry under another id
+    holds its cwd, and may be this session after a `/clear` (sessions.py
+    `ended`). On a host without a registry nothing says, so it is resumed.
+    """
     text = prompt(steps)
     ended = row.get("ended")
     bridge = None if ended else needs.valid_bridge(row.get("bridge_session_id"))
     if bridge:
         return f"open the session and send: {text}", None, needs.session_url(bridge)
     host = row.get("host") or "an unknown host"
-    if not ended and row.get("pid") is not None:  # in its host's registry
-        tmux = f" in tmux {row['tmux']}" if row.get("tmux") else ""
-        return f"still running{tmux} on {host}; send it: {text}", None, None
-    if needs.RESUME_ID.fullmatch(sid) is None:
-        return text, None, None
     cwd = row.get("cwd")
     where = f" in {cwd}" if cwd else ""
+    if not ended and row.get("pid") is not None:  # in its host's registry
+        tmux = f" in tmux {row['tmux']}" if row.get("tmux") else ""
+        return f"still running{tmux}{where} on {host}; send it: {text}", None, None
+    if not ended and row.get("host") in registry:
+        hint = (
+            f"a session is running{where} on {host}; if it is this one, send it: {text}"
+        )
+        return hint, None, None
+    if needs.RESUME_ID.fullmatch(sid) is None:
+        return text, None, None
     cmd = f"claude --resume {sid} {shlex.quote(text)}"
     return (
         f"resume with `{cmd}`{where} on {host}",
@@ -267,7 +278,7 @@ def _sessions(
             steps.append(Step(SESSION_ENDED, ended, "end this session"))
         if all(s.done for s in steps):
             continue
-        hint, command, url = _resume(row, sid, steps)
+        hint, command, url = _resume(row, sid, steps, registry)
         extra = needs.transcript_fields(row, row.get("title") or f"session {sid}", prs)
         bridge = extra.pop("bridge_session_id")
         need = needs.Need(
