@@ -37,6 +37,15 @@ score.FLEET_CATEGORIES category:
 An item already collected keeps its first category: a session that asked is
 `asked`, never a close-out.
 
+FOLDING (fold). A Ship PR whose `links` (pr_links: the Jira key in its title
+or branch, and each GitHub issue it closes) name an item Ship also ranks has
+no card of its own: it folds into that item, the first such link winning, and
+shows on its card as a `↳` line with its why. The parent takes the PR's tier
+when that is ready to merge or the review queue and beats its own, blocked
+included, and its why line names the PR (`ship: ready to merge via o/r#12`).
+Every overlay action on the card acts on the parent's key, so snoozing it
+hides the PR too. A PR whose parent Ship does not rank keeps its own card.
+
 THE SOURCE SEAM (candidate.py). Each collector above, and each of Little's,
 is a source that returns candidate.Candidate rows: the item, its category,
 its why, the score terms it has data for, and its features. rank() reads
@@ -143,6 +152,9 @@ TIERS = (
 )
 REST = "the rest"
 BLOCKED = "blocked"
+# The categories whose tier a folded PR lends its parent: ready to merge,
+# and the review queue.
+RAISES = ("quick_win", "own_approved", "review_queue")
 
 MODES = overlay.NOW_MODES
 SHIP, LITTLE, DEEP, TIDY = "ship", "little", "deep", "tidy"
@@ -189,6 +201,7 @@ CSS = """
 .now .wait { color:var(--fg); font-weight:600; }
 .now .more { margin-top:8px; font-size:12px; }
 .now .checklist { margin:4px 0; font-size:12px; color:var(--fg); }
+.now .folded { margin:2px 0; font-size:12px; color:var(--muted); }
 """
 
 # Status label -> the own-work category it puts an issue in.
@@ -210,6 +223,8 @@ class Ranked:
     workstream: "str | None" = None
     total: float = 0.0
     terms: list[score.Term] = field(default_factory=list)  # the scored terms
+    # The linked PRs folded into this item (rank): no card of their own.
+    folded: "list[Ranked]" = field(default_factory=list)
 
     @property
     def need(self) -> needs.Need:
@@ -245,9 +260,31 @@ class Ranked:
             return little_tier(self.category)
         if self.mode in (DEEP, TIDY):
             return 0, self.mode  # one tier: the mode's own order
+        raised = self.raised_by
+        if raised is not None:
+            return tier_of(raised.category)
         if self.candidate.blocked:
             return len(TIERS) + 1, BLOCKED
         return tier_of(self.category)
+
+    @property
+    def raised_by(self) -> "Ranked | None":
+        """The folded PR whose tier this item takes: the highest RAISES
+        tier among them when it beats the item's own, else None. A raise
+        lifts a blocked item too: its PR is ready, so the work is done."""
+        own = tier_of(self.category)[0]
+        best = min(
+            (f for f in self.folded if f.category in RAISES),
+            key=lambda f: tier_of(f.category)[0],
+            default=None,
+        )
+        if (
+            best is None
+            or tier_of(best.category)[0] >= own
+            and not self.candidate.blocked
+        ):
+            return None
+        return best
 
 
 def tier_of(category: str) -> "tuple[int, str]":
@@ -303,6 +340,9 @@ def _candidate(
     is blocked (issue_blocked)."""
     terms = {candidate.SINCE: need.since, candidate.PRIO: prio, **(more or {})}
     blocked = need.kind == "issue" and issue_blocked(need.row or {})
+    links = kw.pop("links", None)
+    if links is None and need.kind == "pr":
+        links = pr_links(need.row or {})
     return candidate.Candidate(
         need,
         category,
@@ -310,8 +350,25 @@ def _candidate(
         terms={k: v for k, v in terms.items() if v is not None},
         blocked=blocked,
         features=whynot.row_features(need, category),
+        links=links or (),
         **kw,
     )
+
+
+def pr_links(row: dict[str, Any], issue_key: "str | None" = None) -> tuple:
+    """The overlay items a PR row folds into: the Jira ticket its title or
+    branch names (`issue_key`), and each GitHub issue it closes (`closes`,
+    on its fleet row)."""
+    links = []
+    key = issue_key or row.get("issue_key")
+    if key:
+        links.append(("jira", str(key)))
+    closes = row.get("closes") or (row.get("awaiting") or {}).get("closes") or []
+    for c in closes:
+        if c.get("repo") and c.get("number") is not None:
+            url = f"https://github.com/{c['repo']}/issues/{c['number']}"
+            links.append((github_fleet.SOURCE, url))
+    return tuple(links)
 
 
 def issue_blocked(row: dict[str, Any]) -> bool:
@@ -367,11 +424,16 @@ def own_pr_category(p: dict[str, Any]) -> "tuple[str, str, str] | None":
 def _needs_you(
     conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime
 ) -> list[candidate.Candidate]:
+    # A fleet PR row carries no Jira key; the `prs` row for its URL does.
+    keys = dict(
+        conn.execute("SELECT url, issue_key FROM prs WHERE issue_key IS NOT NULL")
+    )
     out = []
     for n in needs.collect(conn, cfg, now):
         category, why = need_category(n)
         prio = score.prio_of((n.row or {}).get("labels")) if n.kind == "issue" else None
-        out.append(_candidate(n, category, why, prio, from_needs=True))
+        links = pr_links(n.row or {}, keys.get(n.item[1])) if n.kind == "pr" else None
+        out.append(_candidate(n, category, why, prio, links=links, from_needs=True))
     return out
 
 
@@ -587,6 +649,7 @@ def rank(
         if c.item not in seen:
             seen.add(c.item)
             out.append(Ranked(c))
+    out = fold(out)
     member_of = workstreams.membership(conn)
     weights = cfg["score"]["fleet"]
     for r in out:
@@ -608,6 +671,24 @@ def rank(
             terms = terms + list(scored)
             total = score._round(math.fsum(v for _, v, _ in terms))
         r.total, r.terms = total, terms
+    return out
+
+
+def fold(ranked: list[Ranked]) -> list[Ranked]:
+    """`ranked` less each Ship PR that links to a Ship item ranked here (its
+    first such link), which goes into that item's `folded` instead."""
+    parents = {
+        r.candidate.item: r for r in ranked if r.mode == SHIP and r.need.kind != "pr"
+    }
+    out = []
+    for r in ranked:
+        parent = None
+        if r.mode == SHIP and r.need.kind == "pr":
+            parent = next((parents[i] for i in r.candidate.links if i in parents), None)
+        if parent is None:
+            out.append(r)
+        else:
+            parent.folded.append(r)
     return out
 
 
@@ -1041,6 +1122,8 @@ def _visible(
     """`ranked` less the ignored, the filtered and the snoozed; and how many
     were snoozed."""
     ranked = [r for r in ranked if r.need.item not in ov.ignored]
+    for r in ranked:
+        r.folded = [f for f in r.folded if f.need.item not in ov.ignored]
     if inc is not None:
         ranked = [r for r in ranked if inc.shows(r.need.kind)]
     snoozed = sum(ov.is_snoozed(r.need.item, now) for r in ranked)
@@ -1113,8 +1196,27 @@ def why_line(r: Ranked) -> str:
         return " · ".join([r.mode, r.why] + ([r.prio] if r.prio else []))
     bits = [f"{name} {_fmt(value)} ({why})" for name, value, why in r.terms if value]
     total = f"{r.total:g}".replace("-", "−")
-    head = f"ship: {r.tier[1]} · score {total}"
+    raised = r.raised_by
+    via = f" via {raised.need.ref or raised.need.title}" if raised else ""
+    head = f"ship: {r.tier[1]}{via} · score {total}"
     return f"{head}: " + " · ".join(bits) if bits else head
+
+
+def folded_line(f: Ranked) -> str:
+    """One folded PR's evidence on its parent's card: `o/r#12: your PR,
+    approved, CI green: merge it`."""
+    return f"{f.need.ref or f.need.title}: {f.why}"
+
+
+def _folded_html(f: Ranked) -> str:
+    """A folded PR on its parent's card: its ref, linked, then its why."""
+    name = f.need.ref or f.need.title
+    url = f.need.url or ""
+    ref = view_model.link(url, name) if url.startswith("https://") else _e(name)
+    return (
+        f'<div class="folded" data-key="{_e(f.need.item[1])}">'
+        f"↳ {ref}: {_e(f.why)}</div>"
+    )
 
 
 def card(r: Ranked, now: datetime, ov: overlay.Overlay) -> str:
@@ -1138,12 +1240,13 @@ def card(r: Ranked, now: datetime, ov: overlay.Overlay) -> str:
         if r.checklist
         else ""
     )
+    folded = "".join(_folded_html(f) for f in r.folded)
     return (
         f'<div {overlay.card_attrs(n.item, ov, now)} data-kind="{_e(n.kind)}"'
         f' data-category="{r.category}" data-tier="{_e(r.tier[1])}"'
         f' data-total="{r.total}" data-mode="{r.mode}">'
         f"{needs._title(n, n.url)}{needs.ask_html(n)}"
-        f'<div class="meta">{meta}</div>{steps}'
+        f'<div class="meta">{meta}</div>{steps}{folded}'
         f'<div class="why" data-terms="{terms}">{_e(why_line(r))}</div>'
         f"{act_html}{overlay.card_controls(n.item, ov, now, reorder=False, why_not=True)}"
         f"{whynot.picker(overlay.snooze_until(now))}</div>"

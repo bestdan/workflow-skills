@@ -37,7 +37,8 @@ class Candidate:
     # What `tune` and "why not now" record beyond what every item has
     # (whynot.features adds kind, category, age, workstream and mode).
     features: dict[str, Any] = field(default_factory=dict)
-    # Items this one folds into. No source sets it yet.
+    # The overlay items this one folds into, when Ship ranks one of them: a
+    # PR's Jira ticket and the GitHub issues it closes (fleet_now.pr_links).
     links: tuple = ()
     from_needs: bool = False  # Needs you lists it too
     # A close-out's steps that have evidence (close_out.Step); empty otherwise.
