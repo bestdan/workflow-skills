@@ -281,13 +281,10 @@ class FleetPageTests(server_harness.ServerCase):
         self.assertEqual(visible(page), ["drafts"])
         self.assertIn('data-origin="url"', page)
 
-    def test_now_is_one_lane_without_jira_and_two_with_it(self):
+    def test_now_is_one_lane_with_jira_or_without_it(self):
         self.assertEqual(tabs(self.get("/")), [])
         self.httpd.app.cfg["jira"]["enabled"] = True
-        page = self.get("/")
-        self.assertEqual([n for n, _, _ in tabs(page)], ["next", "now"])
-        self.assertIn('href="/now?lane=now"', page)
-        self.assertIn('data-view="now"', page.split('class="lane-tabs"', 1)[1])
+        self.assertEqual(tabs(self.get("/")), [])
 
     def test_the_filter_and_the_tabs_share_the_page(self):
         page = self.get("/prs")
@@ -321,7 +318,7 @@ class JiraPageTests(server_harness.ServerCase):
     def test_a_one_lane_page_has_no_tabs(self):
         page = self.request("GET", "/now")[1]
         self.assertEqual(tabs(page), [])
-        self.assertNotIn(" hidden>", page)
+        self.assertNotRegex(page, r'<section class="lane"[^>]* hidden>')
 
 
 if __name__ == "__main__":

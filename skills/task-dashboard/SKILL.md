@@ -166,8 +166,8 @@ dashboard itself never calls a model.**
    - `weights`: a term with `suggest` set was the largest term of most
      "wrong priority" answers. Its `suggest.weight` is a starting point.
      Weights order items only within Now's fixed Ship tiers (asked, close
-     out, ready to merge, review queue, started, the rest), so no weight
-     moves an item into another tier.
+     out, ready to merge, review queue, started, the rest, blocked), so no
+     weight moves an item into another tier.
    - `candidates`: feature values that snoozes lean towards, against what Now
      showed, with the `free_text` and `reasons` of those answers. When
      `scored_by` is set, a term already reads that feature: propose a weight.
@@ -197,8 +197,9 @@ instance; `board` and `epics` only with Jira on; `waiting-on-me` and
 Each item carries its `source`, `key`, `kind`, `lane`, `title`, `url`, `host`
 and `path`, its `evidence` and `risks`, and its `action` as
 `{"review": ..., "command": [...]}`; a Now item adds its `tier` and, for
-a close-out, its `checklist` of steps ticked from evidence. On a fleet
-instance, Now is built in a mode: `--mode ship|little|deep|tidy` picks one, and without
+a close-out, its `checklist` of steps ticked from evidence. Now is one
+ranked list on every instance, Jira tickets included, built in a mode:
+`--mode ship|little|deep|tidy` picks one, and without
 it the mode the owner last saved with Now's mode button is used (ship when
 none is), so you see what they see; `notes.mode` names it, outside Ship
 `notes.more_in_mode` counts what the list left out, and in Little

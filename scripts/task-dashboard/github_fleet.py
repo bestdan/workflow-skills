@@ -124,6 +124,7 @@ query($q: String!, $after: String) {
         labels(first: 20) { nodes { name } }
         milestone { number title }
         blocking(first: 50) { nodes { state } }
+        blockedBy(first: 50) { nodes { state } }
       }
     }
   }
@@ -282,13 +283,15 @@ def _issue_row(node: dict) -> dict:
         "created": node.get("createdAt"),
         "updated": node.get("updatedAt"),
         "blocks": _blocks(node.get("blocking")),
+        "blocked_by": _blocks(node.get("blockedBy")),
     }
 
 
 def _blocks(node: "dict | None") -> "int | None":
-    """How many open issues an issue blocks, from GitHub's native issue
-    dependencies (of the first 50 it lists); None when the read carried no
-    `blocking` field, which is no evidence rather than zero."""
+    """How many open issues an issue blocks (`blocking`), or is blocked by
+    (`blockedBy`), from GitHub's native issue dependencies (of the first 50
+    it lists); None when the read carried no such field, which is no
+    evidence rather than zero."""
     if not node:
         return None
     return sum(1 for n in node.get("nodes") or [] if (n or {}).get("state") == "OPEN")

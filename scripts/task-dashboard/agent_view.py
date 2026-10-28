@@ -21,10 +21,11 @@ session's page. It carries `branch` too, and for a hook session
 `first_prompt` and `last_ask` (its transcript summary, needs.py) and `pr`,
 the open PR on its branch as {number, url, repo}; each is null when there is
 none. A Now item adds `tier` (its tier in the mode that ranked it:
-fleet_now.TIERS, LITTLE_TIERS, or `deep` or `tidy`) and `checklist`, a
-close-out's steps with evidence as [{step, done}], empty for anything else.
+fleet_now.TIERS, `the rest` or `blocked`, LITTLE_TIERS, or `deep` or
+`tidy`) and `checklist`, a close-out's steps with evidence as [{step, done}],
+empty for anything else.
 
-A fleet Now document's `notes` carry `mode`, the mode it was built in (the
+A Now document's `notes` carry `mode`, the mode it was built in (the
 `--mode` asked for, else the saved one, else ship); outside Ship,
 `more_in_mode`; and in Little `closed_today` (null when the fleet step has no
 count from today).
@@ -44,7 +45,6 @@ import needs
 import overlay
 import score
 import server
-import sync
 import view_model
 import views
 import workstreams
@@ -343,32 +343,20 @@ def _needs(ctx: "Ctx") -> list[dict[str, Any]]:
 
 
 def _now(ctx: "Ctx") -> list[dict[str, Any]]:
-    out = []
-    if fleet_views.enabled(ctx.cfg):
-        mode = fleet_now.resolve_mode(ctx.mode, ctx.ov)
-        page = fleet_now.build(ctx.conn, ctx.cfg, ctx.now, ctx.ov, ctx.inc, mode)
-        for lane in fleet_now.lanes(page, ctx.inc):
-            out.append(
-                _lane(lane, ctx.inc, lambda r, lid: ranked_item(r, lid, ctx.now))
-            )
-        ctx.notes.update(
-            mode=mode, snoozed=page.snoozed, more_on_needs=page.more_on_needs
-        )
-        if mode != fleet_now.SHIP:
-            ctx.notes["more_in_mode"] = page.more_in_mode
-        if mode == fleet_now.LITTLE:
-            ctx.notes["closed_today"] = page.closed_today
-        if ctx.show_all:
-            every = fleet_now.mode_candidates(ctx.conn, ctx.cfg, ctx.now, mode)
-            _hidden(out, [ranked_item(r, "next", ctx.now) for r in every], ctx.reason)
-        if not sync.jira_enabled(ctx.cfg):
-            return out
-        title: "str | None" = "Jira"
-    else:
-        title = None
-    m = ctx.mirror()
-    lane = views.jira_now_lane(m, title)
-    out.append(_lane(lane, ctx.inc, lambda t, lid: jira_item(m, t[0], t[1], lid)))
+    mode = fleet_now.resolve_mode(ctx.mode, ctx.ov)
+    page = fleet_now.build(ctx.conn, ctx.cfg, ctx.now, ctx.ov, ctx.inc, mode)
+    out = [
+        _lane(lane, ctx.inc, lambda r, lid: ranked_item(r, lid, ctx.now))
+        for lane in fleet_now.lanes(page, ctx.inc)
+    ]
+    ctx.notes.update(mode=mode, snoozed=page.snoozed, more_on_needs=page.more_on_needs)
+    if mode != fleet_now.SHIP:
+        ctx.notes["more_in_mode"] = page.more_in_mode
+    if mode == fleet_now.LITTLE:
+        ctx.notes["closed_today"] = page.closed_today
+    if ctx.show_all:
+        every = fleet_now.mode_candidates(ctx.conn, ctx.cfg, ctx.now, mode)
+        _hidden(out, [ranked_item(r, "next", ctx.now) for r in every], ctx.reason)
     return out
 
 
