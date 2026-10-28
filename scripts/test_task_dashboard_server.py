@@ -945,7 +945,11 @@ class HeaderScriptTest(HeaderCase):
 
     def test_a_sync_the_owner_starts_reads_syncing(self):
         manual = {**self.BUSY, "trigger": "manual"}
-        state = self.drive(click=True, post=manual, statuses=[manual, self.idle()])
+        state = self.drive(
+            click=True, post=manual, statuses=[manual, manual, manual, self.idle()]
+        )
+        # Polls during the sync keep the icon node, so its spin runs on.
+        self.assertEqual(state["icon_swaps"], 0)
         self.assertEqual(state["calls"][0]["method"], "POST")
         busy = state["seen"][1]
         self.assertEqual((busy["button"], busy["disabled"]), ("Syncing…", True))

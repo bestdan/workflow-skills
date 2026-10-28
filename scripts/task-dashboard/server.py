@@ -526,12 +526,15 @@ JS = """
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
     });
   }
-  var glyph = btn.querySelector('.glyph').outerHTML;
-  // The icon's name and tooltip; a failure also shows beside the icon.
+  var glyph = btn.querySelector('.glyph').outerHTML, drawn_html = btn.innerHTML;
+  // The icon's name and tooltip; a failure also shows beside the icon. The
+  // icon is redrawn only when that text changes, so a poll during a sync
+  // does not restart its spin.
   function label(t, failed) {
     btn.setAttribute('aria-label', t);
     btn.title = t + ' (shift-click for a full reconcile)';
-    btn.innerHTML = glyph + (failed ? ' ' + esc(t) : '');
+    var html = glyph + (failed ? ' ' + esc(t) : '');
+    if (html !== drawn_html) { btn.innerHTML = html; drawn_html = html; }
   }
   function show(s) {
     if (s.busy && (asked || s.trigger === 'manual')) {
@@ -674,8 +677,9 @@ def sync_note(state: dict[str, Any]) -> str:
     return f'<span class="sync-note" id="sync-note"{hidden} aria-live="polite">{text}</span>'
 
 
-# Two arrows chasing round a circle, drawn in the text colour (the shape is
-# Lucide's refresh-cw, ISC licence).
+# Two arrows chasing round a circle, drawn in the text colour. The shape is
+# Lucide's refresh-cw (https://lucide.dev), ISC licence, Copyright (c) Lucide
+# Contributors; portions MIT, Copyright (c) Cole Bemis (Feather).
 SYNC_ICON = (
     '<svg class="glyph" viewBox="0 0 24 24" width="16" height="16" fill="none"'
     ' stroke="currentColor" stroke-width="2" stroke-linecap="round"'
@@ -704,8 +708,8 @@ def render_header(
     gauge_html: str = "",
     mode_html: str = "",
 ) -> str:
-    """One line: the freshness indicator, the sync note, the gauge, the text
-    filter, then Now's mode button (`mode_html`, on Now only) and the sync
+    """The header bar, one line (two under 600px): the freshness indicator,
+    the sync note, the gauge, the text filter, then Now's mode button (`mode_html`, on Now only) and the sync
     icon. `state` is App.sync_state(). The icon reads "Syncing…" and spins
     only for a sync someone asked for; a scheduled one leaves it alone.
     Failure alerts go under the line."""

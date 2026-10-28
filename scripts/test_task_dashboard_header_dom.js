@@ -71,6 +71,13 @@ const dom = new JSDOM(spec.page, {
 });
 const { window } = dom;
 doc = window.document;
+// How many times the sync icon's node was replaced: a redraw restarts its spin.
+let iconSwaps = 0;
+new window.MutationObserver((records) => {
+  for (const r of records) {
+    for (const n of r.removedNodes) if (n.classList && n.classList.contains("glyph")) iconSwaps++;
+  }
+}).observe(doc.getElementById("sync"), { childList: true });
 
 const settle = () => new Promise((r) => window.setTimeout(r, 30));
 
@@ -83,6 +90,8 @@ const settle = () => new Promise((r) => window.setTimeout(r, 30));
   for (let i = 0; i < 200 && next <= spec.statuses.length; i++) await settle();
   await settle();
   const final = snap();
-  process.stdout.write(JSON.stringify({ seen, final, calls, reloaded, errors }));
+  process.stdout.write(
+    JSON.stringify({ seen, final, calls, reloaded, errors, icon_swaps: iconSwaps }),
+  );
   window.close();
 })();
