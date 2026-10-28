@@ -27,6 +27,7 @@ import config  # type: ignore[import-not-found]  # noqa: E402
 import db  # type: ignore[import-not-found]  # noqa: E402
 import fleet_now  # type: ignore[import-not-found]  # noqa: E402
 import github_fleet  # type: ignore[import-not-found]  # noqa: E402
+import include  # type: ignore[import-not-found]  # noqa: E402
 import needs  # type: ignore[import-not-found]  # noqa: E402
 import overlay  # type: ignore[import-not-found]  # noqa: E402
 import views  # type: ignore[import-not-found]  # noqa: E402
@@ -82,13 +83,14 @@ class Case(unittest.TestCase):
         )
         self.conn.commit()
 
-    def pr(self, number, role, ci="success", decision=None):
+    def pr(self, number, role, ci="success", decision=None, issue_key=None,
+           draft=False):  # fmt: skip
         url = f"https://github.com/o/r/pull/{number}"
         self.conn.execute(
             "INSERT INTO prs (url, repo, number, title, is_draft, role,"
-            " review_decision, ci_state, raw_json) VALUES (?, 'o/r', ?, ?, 0, ?,"
-            " ?, ?, ?)",
-            (url, number, f"pr {number}", role, decision, ci,
+            " review_decision, ci_state, issue_key, raw_json) VALUES (?, 'o/r', ?,"
+            " ?, ?, ?, ?, ?, ?, ?)",
+            (url, number, f"pr {number}", int(draft), role, decision, ci, issue_key,
              json.dumps({"createdAt": ts(NOW - timedelta(days=2))})),
         )  # fmt: skip
         self.conn.commit()
@@ -301,6 +303,163 @@ class OneNowTests(Case):
         self.assertEqual(page.count('<section class="lane"'), 1)
         self.assertIn('data-key="ABC-1"', page)
         self.assertNotIn('data-section="now"', page)
+
+
+class TicketFoldTests(Case):
+    """A PR naming a ranked ticket folds into it (fleet_now.fold)."""
+
+    def setUp(self):
+        super().setUp()
+        self.ticket("ABC-1")
+        self.url = self.pr(4, "author", decision="APPROVED", issue_key="ABC-1")
+
+    def test_a_ticket_with_an_approved_green_pr_shows_once_ready_to_merge(self):
+        shown = self.by_key()
+        self.assertNotIn(self.url, shown)
+        r = shown["ABC-1"]
+        self.assertEqual(r.tier[1], "ready to merge")
+        self.assertEqual([f.need.item[1] for f in r.folded], [self.url])
+        self.assertTrue(
+            fleet_now.why_line(r).startswith("ship: ready to merge via o/r#4 · score ")
+        )
+        page = fleet_now.render(self.conn, CFG, NOW)
+        self.assertNotIn(f'data-key="{self.url}" data-kind', page)
+        self.assertIn(f'<div class="folded" data-key="{self.url}">', page)
+        self.assertIn("your PR, approved, CI green: merge it", page)
+        doc = agent_view.build(self.conn, CFG, "now", NOW)
+        (item,) = [i for i in doc["lanes"][0]["items"] if i["key"] == "ABC-1"]
+        self.assertEqual(item["tier"], "ready to merge")
+        self.assertEqual(
+            [(f["key"], f["category"]) for f in item["folded"]],
+            [(self.url, "own_approved")],
+        )
+
+    def test_snoozing_the_card_hides_the_ticket_and_its_pr(self):
+        overlay.snooze(self.conn, ("jira", "ABC-1"), "2026-11-03")
+        shown = self.by_key()
+        self.assertNotIn("ABC-1", shown)
+        self.assertNotIn(self.url, shown)
+        page = fleet_now.render(self.conn, CFG, NOW)
+        self.assertNotIn("o/r/pull/4", page)
+
+    def test_with_tasks_switched_off_the_pr_gets_its_own_card_back(self):
+        prs = include.Include("now", frozenset({"prs"}), "url")
+        page = fleet_now.build(self.conn, CFG, NOW, overlay.load(self.conn), prs)
+        shown = {r.need.item[1]: r for r in page.shown}
+        self.assertEqual(list(shown), [self.url])
+        r = shown[self.url]
+        self.assertEqual(r.tier[1], "ready to merge")
+        self.assertGreater(r.total, 0)  # scored before it was folded
+        overlay.snooze(self.conn, ("jira", "ABC-1"), "2026-11-03")
+        page = fleet_now.build(self.conn, CFG, NOW, overlay.load(self.conn), prs)
+        self.assertEqual(page.shown, [])  # a snoozed card hides its PR too
+
+    def test_a_pr_that_does_not_raise_keeps_the_ticket_tier(self):
+        self.ticket("ABC-2", "new", "To Do")
+        failing = self.pr(5, "author", ci="failure", issue_key="ABC-2")
+        r = self.by_key()["ABC-2"]
+        self.assertEqual(r.tier[1], fleet_now.REST)
+        self.assertEqual([f.need.item[1] for f in r.folded], [failing])
+        self.assertNotIn("via", fleet_now.why_line(r))
+
+    def test_a_pr_whose_ticket_is_not_ranked_keeps_its_own_card(self):
+        other = self.pr(6, "author", decision="APPROVED", issue_key="ZZZ-9")
+        self.assertEqual(self.by_key()[other].tier[1], "ready to merge")
+
+    def test_a_draft_pr_shows_on_the_ticket_card_and_changes_nothing(self):
+        self.ticket("ABC-2")
+        draft = self.pr(7, "author", ci="failure", decision="REVIEW_REQUIRED",
+                        issue_key="ABC-2", draft=True)  # fmt: skip
+        shown = self.by_key()
+        self.assertNotIn(draft, shown)
+        r = shown["ABC-2"]
+        self.assertEqual(r.folded, [])
+        self.assertEqual(r.tier[1], "started")
+        self.assertEqual(
+            r.linked,
+            [{"url": draft, "ref": "o/r#7",
+              "why": "draft · CI failure · review required"}],
+        )  # fmt: skip
+        page = fleet_now.render(self.conn, CFG, NOW)
+        self.assertIn(f'<div class="folded linked" data-key="{draft}">', page)
+        doc = agent_view.build(self.conn, CFG, "now", NOW)
+        (item,) = [i for i in doc["lanes"][0]["items"] if i["key"] == "ABC-2"]
+        self.assertEqual([x["url"] for x in item["linked"]], [draft])
+
+    def test_a_folded_pr_is_not_listed_twice(self):
+        r = self.by_key()["ABC-1"]
+        self.assertEqual([f.need.item[1] for f in r.folded], [self.url])
+        self.assertEqual(r.linked, [])
+        page = fleet_now.render(self.conn, CFG, NOW)
+        self.assertEqual(page.count(f'data-key="{self.url}"'), 1)
+
+    def test_an_ignored_pr_is_left_off_the_card(self):
+        self.conn.execute(
+            "INSERT INTO ignores (source, item_key) VALUES ('github', ?)", (self.url,)
+        )
+        self.conn.commit()
+        r = self.by_key()["ABC-1"]
+        self.assertEqual(r.folded, [])
+        self.assertEqual(r.linked, [])
+        self.assertEqual(r.tier[1], "started")
+        self.assertNotIn("o/r/pull/4", fleet_now.render(self.conn, CFG, NOW))
+
+
+class IssueFoldTests(unittest.TestCase):
+    """A PR that closes a ranked GitHub issue folds into it."""
+
+    ISSUE = "https://github.com/o/r/issues/7"
+
+    def ranked(self, kind, item, category, links=(), blocked=False):
+        need = needs.Need(
+            item=("github", item), kind=kind, title=item, since=NOW, url=item,
+            state="s", ref=item.rsplit("/", 1)[-1],
+        )  # fmt: skip
+        c = candidate.Candidate(need, category, "why", blocked=blocked, links=links)
+        return fleet_now.Ranked(c)
+
+    def test_pr_links_names_its_ticket_and_closed_issues(self):
+        row = {"closes": [{"repo": "o/r", "number": 7}, {"repo": None, "number": 8}]}
+        self.assertEqual(
+            fleet_now.pr_links(row, "ABC-1"),
+            (("jira", "ABC-1"), ("github", self.ISSUE)),
+        )
+        nested = {"awaiting": {"closes": [{"repo": "o/r", "number": 7}]}}
+        self.assertEqual(fleet_now.pr_links(nested), (("github", self.ISSUE),))
+        self.assertEqual(fleet_now.pr_links({}), ())
+
+    def test_a_review_queue_pr_raises_its_started_issue(self):
+        issue = self.ranked("issue", self.ISSUE, "started")
+        pr = self.ranked("pr", "https://github.com/o/r/pull/9", "review_queue",
+                         links=(("github", self.ISSUE),))  # fmt: skip
+        self.assertEqual(fleet_now.fold([issue, pr]), [issue])
+        self.assertEqual(issue.folded, [pr])
+        self.assertEqual(issue.tier[1], "review queue")
+
+    def test_a_ready_pr_lifts_a_blocked_issue(self):
+        issue = self.ranked("issue", self.ISSUE, "ready", blocked=True)
+        self.assertEqual(issue.tier[1], fleet_now.BLOCKED)
+        pr = self.ranked("pr", "https://github.com/o/r/pull/9", "own_approved",
+                         links=(("github", self.ISSUE),))  # fmt: skip
+        fleet_now.fold([issue, pr])
+        self.assertEqual(issue.tier[1], "ready to merge")
+
+    def test_a_pr_never_folds_outside_ship_or_into_another_pr(self):
+        other = self.ranked("pr", self.ISSUE, "own_pr")
+        pr = self.ranked("pr", "https://github.com/o/r/pull/9", "own_pr",
+                         links=(("github", self.ISSUE),))  # fmt: skip
+        self.assertEqual(fleet_now.fold([other, pr]), [other, pr])
+        issue = self.ranked("issue", self.ISSUE, "started")
+        pr.candidate.mode = fleet_now.LITTLE
+        self.assertEqual(fleet_now.fold([issue, pr]), [issue, pr])
+
+    def test_an_ignored_issue_hides_its_folded_prs(self):
+        issue = self.ranked("issue", self.ISSUE, "started")
+        pr = self.ranked("pr", "https://github.com/o/r/pull/9", "review_queue",
+                         links=(("github", self.ISSUE),))  # fmt: skip
+        ov = overlay.Overlay(ignored={("github", self.ISSUE)})
+        shown, _ = fleet_now._visible(fleet_now.fold([issue, pr]), ov, NOW, None)
+        self.assertEqual(shown, [])
 
 
 if __name__ == "__main__":

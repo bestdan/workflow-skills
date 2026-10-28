@@ -22,8 +22,11 @@ session's page. It carries `branch` too, and for a hook session
 the open PR on its branch as {number, url, repo}; each is null when there is
 none. A Now item adds `tier` (its tier in the mode that ranked it:
 fleet_now.TIERS, `the rest` or `blocked`, LITTLE_TIERS, or `deep` or
-`tidy`) and `checklist`, a close-out's steps with evidence as [{step, done}],
-empty for anything else.
+`tidy`), `checklist`, a close-out's steps with evidence as [{step, done}],
+empty for anything else, and `folded`, the linked PRs folded into it as
+[{source, key, kind, ref, url, category, evidence}], empty when none are,
+and `linked`, a Jira ticket's other joined PRs as [{url, ref, why}]: shown
+on its card as evidence, never ranked.
 
 A Now document's `notes` carry `mode`, the mode it was built in (the
 `--mode` asked for, else the saved one, else ship); outside Ship,
@@ -154,7 +157,14 @@ def ranked_item(r: fleet_now.Ranked, lane: str, now: datetime) -> Item:
         checklist=[{"step": s.name, "done": s.done} for s in r.checklist],
         score=r.total,
         terms=[[name, value, why] for name, value, why in r.terms if value],
-    )
+        folded=[
+            {"source": f.need.item[0], "key": f.need.item[1], "kind": f.need.kind,
+             "ref": f.need.ref, "url": f.need.url, "category": f.category,
+             "evidence": f.why}
+            for f in r.folded
+        ],
+        linked=[dict(x) for x in r.linked],
+    )  # fmt: skip
     return out
 
 

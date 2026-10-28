@@ -148,9 +148,9 @@ def pull_requests(conn: sqlite3.Connection, cfg: dict[str, Any]) -> list[dict]:
         for r in gauges.review_queue_rows(conn, sync.fleet_enabled(cfg)) or []
     }
     out: dict[str, dict] = {}
-    for url, repo, number, title, draft, decision, ci, role, raw in conn.execute(
+    for url, repo, number, title, draft, decision, ci, role, key, raw in conn.execute(
         "SELECT url, repo, number, title, is_draft, review_decision, ci_state,"
-        " role, raw_json FROM prs ORDER BY repo, number"
+        " role, issue_key, raw_json FROM prs ORDER BY repo, number"
     ):
         try:
             node = json.loads(raw or "{}") or {}
@@ -168,6 +168,7 @@ def pull_requests(conn: sqlite3.Connection, cfg: dict[str, Any]) -> list[dict]:
             "role": role,
             "created": created,
             "size": github_gh.pr_size(node),
+            "issue_key": key,  # the Jira key in its title or branch (sync.py)
             "awaiting": awaiting.get(url),
         }
     for url, row in awaiting.items():
