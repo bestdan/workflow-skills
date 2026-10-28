@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.149.0] - 2026-10-28
+
+### Features
+
+- being a fleet means ingesting from other hosts [#1232] (#1242) (f9e4789)
+
 ## [2.148.1] - 2026-10-28
 
 ### Fixes
