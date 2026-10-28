@@ -723,7 +723,9 @@ class RoutesTest(unittest.TestCase):
                 page = self.get(path)[1]
                 self.assertEqual(page.count('id="filter"'), 1)
                 header = page[page.index("<header") : page.index("</header>")]
-                self.assertLess(header.index('id="filter"'), header.index('id="sync"'))
+                # The sync icon follows the title; the filter comes after.
+                self.assertLess(header.index("</h1>"), header.index('id="sync"'))
+                self.assertLess(header.index('id="sync"'), header.index('id="filter"'))
 
     def test_board_carries_the_tab_bar(self):
         page = self.get("/board")[1]

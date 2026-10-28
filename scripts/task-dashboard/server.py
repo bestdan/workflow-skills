@@ -54,6 +54,7 @@ import freshness
 import gauges
 import github_gh
 import health
+import icons
 import include
 import ingest
 import lane_tabs
@@ -477,12 +478,22 @@ header .alert { margin-top:8px; padding:6px 10px; border-radius:6px;
   background:var(--badbg); color:var(--bad); }
 header #filter { margin-left:auto; }
 @media (max-width:600px) {
-  header .bar { flex-wrap:nowrap; gap:8px; }
+  /* Two lines: what is fresh, then the filter with the buttons after it,
+     so the mode and sync buttons never fall off the edge. */
+  header .bar { gap:8px; }
   header h1, header .lbl { display:none; }
-  header #filter { flex:1 1 3em; min-width:0; width:3em; }
+  header #filter { flex:1 1 8em; min-width:0; margin-left:0; }
 }
 header button { font:inherit; padding:4px 12px; border-radius:6px;
   border:1px solid var(--line); background:var(--card); color:var(--fg); cursor:pointer; }
+header #sync { display:inline-flex; align-items:center; gap:6px; padding:5px 8px; }
+header #mode { display:inline-flex; align-items:center; gap:6px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+header #sync:disabled { cursor:default; }
+header #sync .glyph { display:block; }
+@media (prefers-reduced-motion: no-preference) {
+  header #sync[aria-label^="Syncing"] .glyph { animation:spin 1.2s linear infinite; }
+}
 main { padding:12px 16px; }
 .lane { margin-bottom:16px; }
 .lane h2 { font-size:13px; text-transform:uppercase; letter-spacing:.04em;
@@ -517,11 +528,21 @@ JS = """
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
     });
   }
+  var glyph = btn.querySelector('.glyph').outerHTML, drawn_html = btn.innerHTML;
+  // The icon's name and tooltip; a failure also shows beside the icon. The
+  // icon is redrawn only when that text changes, so a poll during a sync
+  // does not restart its spin.
+  function label(t, failed) {
+    btn.setAttribute('aria-label', t);
+    btn.title = t + ' (shift-click for a full reconcile)';
+    var html = glyph + (failed ? ' ' + esc(t) : '');
+    if (html !== drawn_html) { btn.innerHTML = html; drawn_html = html; }
+  }
   function show(s) {
     if (s.busy && (asked || s.trigger === 'manual')) {
-      btn.textContent = 'Syncing\\u2026'; btn.disabled = true;
+      label('Syncing\\u2026'); btn.disabled = true;
     } else {
-      btn.textContent = 'Sync now'; btn.disabled = false;
+      label('Sync now'); btn.disabled = false;
     }
     if (!s.busy) asked = false;
     if (s.running && s.step_label) {
@@ -547,16 +568,16 @@ JS = """
   btn.addEventListener('click', function (ev) {
     var mode = ev.shiftKey ? 'reconcile' : 'incremental';
     asked = true;
-    btn.textContent = 'Syncing\\u2026'; btn.disabled = true;
+    label('Syncing\\u2026'); btn.disabled = true;
     fetch('/sync', { method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: 'mode=' + mode + '&token=' + encodeURIComponent(token)
     }).then(function (r) {
       if (r.status !== 202) { asked = false;
-        btn.textContent = 'Sync refused (' + r.status + ')';
+        label('Sync refused (' + r.status + ')', true);
         btn.disabled = false; return; }
       return r.json().then(function (s) { show(s); poll(); });
-    }).catch(function () { asked = false; btn.textContent = 'Sync failed';
+    }).catch(function () { asked = false; label('Sync failed', true);
       btn.disabled = false; });
   });
   document.addEventListener('visibilitychange', function () {
@@ -658,27 +679,42 @@ def sync_note(state: dict[str, Any]) -> str:
     return f'<span class="sync-note" id="sync-note"{hidden} aria-live="polite">{text}</span>'
 
 
+# Two arrows chasing round a circle.
+SYNC_ICON = icons.svg("refresh-cw")
+
+
+def sync_button(label: str, disabled: bool) -> str:
+    """The sync icon. `label` ("Sync now", "Syncing…") is its accessible name
+    and tooltip; the header script keeps both current."""
+    return (
+        f'<button id="sync" aria-label="{label}"'
+        f' title="{label} (shift-click for a full reconcile)"'
+        f"{' disabled' if disabled else ''}>{SYNC_ICON}</button>"
+    )
+
+
 def render_header(
     health: dict[str, Any],
     state: dict[str, Any],
     fresh_html: str = "",
     gauge_html: str = "",
+    mode_html: str = "",
 ) -> str:
-    """One line: the freshness indicator, the sync note, the gauge, the text
-    filter and Sync now. `state` is App.sync_state(). The button reads
-    "Syncing…" only for a sync someone asked for; a scheduled one leaves it
-    alone. Failure alerts go under the line."""
+    """The header bar, one line (two under 600px): the title, the sync icon,
+    the freshness indicator, the sync note, the gauge, the text filter, then
+    Now's mode button (`mode_html`, on Now only). `state` is
+    App.sync_state(). The icon reads "Syncing…" and spins only for a sync
+    someone asked for; a scheduled one leaves it alone. Failure alerts go
+    under the line."""
     cls = ' class="stale"' if health["stale"] else ""
-    manual = state.get("busy") and state.get("trigger") == "manual"
+    manual = bool(state.get("busy") and state.get("trigger") == "manual")
     label = "Syncing…" if manual else "Sync now"
-    disabled = " disabled" if manual else ""
     return (
         f'<header{cls}><div class="bar"><h1>Task dashboard</h1>'
-        f"{fresh_html}{sync_note(state)}"
+        f"{sync_button(label, manual)}{fresh_html}{sync_note(state)}"
         '<span class="new-data" id="new-data" hidden aria-live="polite">'
         'New data — <a href="">reload</a></span>'
-        f"{gauge_html}{FILTER}"
-        f'<button id="sync" title="Shift-click for a full reconcile"{disabled}>{label}</button>'
+        f"{gauge_html}{FILTER}{mode_html}"
         f"</div>{_alert(health['last_run'])}"
         f"{_alert(health.get('fleet_run'), 'GitHub fleet sync')}</header>"
     )
@@ -888,11 +924,14 @@ class App:
     ) -> list[freshness.Source]:
         return freshness.sources(conn, self.cfg, self.now(), self.interval_s, state)
 
-    def header(self, conn: sqlite3.Connection) -> "tuple[str, bool, str]":
+    def header(
+        self, conn: sqlite3.Connection, mode_html: str = ""
+    ) -> "tuple[str, bool, str]":
         """(the header, whether a sync is in flight, the page's `synced`).
 
         The header reads the mirror, never a view's include filter, so it is
-        identical whatever the filter is.
+        identical whatever the filter is. `mode_html` is Now's mode button,
+        which only the fleet Now passes.
         """
         state = self.sync_state()
         health = self.health(conn)
@@ -901,7 +940,7 @@ class App:
             fleet_tabs.waiting_count(conn, self.cfg, self.now()) if self.fleet else None
         )
         gauge = gauges.render(gauges.read(conn, waiting, fleet=self.fleet))
-        header = render_header(health, state, fresh, gauge)
+        header = render_header(health, state, fresh, gauge, mode_html)
         return header, bool(state["busy"]), health["last_finished_at"] or ""
 
     def status(self) -> dict[str, Any]:
@@ -933,7 +972,13 @@ class App:
             inc = self.include_for(conn, path.lstrip("/"), query)
             body = views.render(path, conn, self.cfg, self.now(), inc, query)
             body = lane_tabs.tabify(body, path.lstrip("/"), path, query)
-            header, busy, synced = self.header(conn)
+            mode_html = ""
+            if path == "/now" and fleet_views.enabled(self.cfg):
+                # The page was built, so a bad ?mode= has already raised.
+                asked = (query.get("mode") or [""])[0].strip() or None
+                mode = fleet_now.resolve_mode(asked, overlay.load(conn))
+                mode_html = fleet_now.mode_button(mode)
+            header, busy, synced = self.header(conn, mode_html)
         finally:
             conn.close()
         title = f"{views.ROUTES[path][0]} · Task dashboard"
