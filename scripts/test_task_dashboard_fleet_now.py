@@ -639,6 +639,20 @@ class CloseOutTests(Case):
         self.assertIn("`claude --resume c-ended 'Finish closing out", ended.hint)
         self.assertIn(f"in {CO_WT}/task-3 on mini", ended.hint)
 
+    def test_a_live_session_without_a_link_is_not_offered_a_resume(self):
+        co_seed(self.conn)
+        # c-landed's process is in the registry with no Remote Control id:
+        # `claude --resume` would start a second process on its open transcript.
+        need = self.found()["c-landed"].need
+        self.assertIsNone(need.url)
+        self.assertIsNone(need.command)
+        self.assertNotIn("--resume", need.hint)
+        self.assertTrue(need.hint.startswith("still running on mini; send it: "))
+        row = {"host": "mini", "pid": 5000, "tmux": "work:2", "ended": False}
+        hint, command, url = close_out._resume(row, "c-x", [])
+        self.assertEqual((command, url), (None, None))
+        self.assertTrue(hint.startswith("still running in tmux work:2 on mini; "))
+
     def test_ship_tiers_asked_then_close_outs_capped_oldest_first(self):
         co_seed(self.conn)
         page = fleet_now.build(self.conn, self.cfg, NOW, overlay.load(self.conn))
