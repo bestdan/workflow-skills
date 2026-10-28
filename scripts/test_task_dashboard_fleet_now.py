@@ -950,9 +950,12 @@ class ModeRouteTests(server_harness.ServerCase):
         status, page = self.request("GET", "/now")
         self.assertIn('data-now="ship"', self.header(page))
 
-    def test_the_mode_button_sits_beside_the_sync_icon_on_now_only(self):
+    def test_the_mode_button_ends_the_header_on_now_only(self):
         header = self.header(self.request("GET", "/now")[1])
-        self.assertLess(header.index('id="mode"'), header.index('id="sync"'))
+        self.assertLess(header.index('id="filter"'), header.index('id="mode"'))
+        # Nothing follows it on the bar: its closing tag ends the bar.
+        mode = header[header.index('id="mode"') :]
+        self.assertEqual(mode.index("</button>"), mode.index("</button></div>"))
         self.assertIn(">Ship</button>", header)
         self.assertNotIn('id="mode"', self.header(self.request("GET", "/stale")[1]))
 

@@ -700,20 +700,21 @@ def render_header(
     gauge_html: str = "",
     mode_html: str = "",
 ) -> str:
-    """The header bar, one line (two under 600px): the freshness indicator,
-    the sync note, the gauge, the text filter, then Now's mode button (`mode_html`, on Now only) and the sync
-    icon. `state` is App.sync_state(). The icon reads "Syncing…" and spins
-    only for a sync someone asked for; a scheduled one leaves it alone.
-    Failure alerts go under the line."""
+    """The header bar, one line (two under 600px): the title, the sync icon,
+    the freshness indicator, the sync note, the gauge, the text filter, then
+    Now's mode button (`mode_html`, on Now only). `state` is
+    App.sync_state(). The icon reads "Syncing…" and spins only for a sync
+    someone asked for; a scheduled one leaves it alone. Failure alerts go
+    under the line."""
     cls = ' class="stale"' if health["stale"] else ""
     manual = bool(state.get("busy") and state.get("trigger") == "manual")
     label = "Syncing…" if manual else "Sync now"
     return (
         f'<header{cls}><div class="bar"><h1>Task dashboard</h1>'
-        f"{fresh_html}{sync_note(state)}"
+        f"{sync_button(label, manual)}{fresh_html}{sync_note(state)}"
         '<span class="new-data" id="new-data" hidden aria-live="polite">'
         'New data — <a href="">reload</a></span>'
-        f"{gauge_html}{FILTER}{mode_html}{sync_button(label, manual)}"
+        f"{gauge_html}{FILTER}{mode_html}"
         f"</div>{_alert(health['last_run'])}"
         f"{_alert(health.get('fleet_run'), 'GitHub fleet sync')}</header>"
     )
