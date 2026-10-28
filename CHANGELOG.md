@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.147.0] - 2026-10-28
+
+### Features
+
+- Jira tickets as a Now source, with a blocked tier [#1229] (#1237) (ff47b92)
+
 ## [2.146.0] - 2026-10-28
 
 ### Features
