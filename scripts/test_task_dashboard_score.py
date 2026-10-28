@@ -33,7 +33,9 @@ sys.path.insert(0, str(ROOT / "scripts" / "task-dashboard"))
 # modules themselves are type-checked in their own group (scripts/typecheck.sh).
 import config  # type: ignore[import-not-found]  # noqa: E402
 import db  # type: ignore[import-not-found]  # noqa: E402
+import fleet_now  # type: ignore[import-not-found]  # noqa: E402
 import fleet_views  # type: ignore[import-not-found]  # noqa: E402
+import overlay  # type: ignore[import-not-found]  # noqa: E402
 import score  # type: ignore[import-not-found]  # noqa: E402
 import server  # type: ignore[import-not-found]  # noqa: E402
 import views  # type: ignore[import-not-found]  # noqa: E402
@@ -368,9 +370,23 @@ class ViewsTest(unittest.TestCase):
     def mirror(self, cfg=CFG):
         return views.Mirror(self.conn, cfg, NOW)
 
+    def now(self, cfg=CFG):
+        """The Jira cards Now shows (fleet_now), with every to-do ticket in
+        the active sprint so the Jira source takes it."""
+        self.conn.execute(
+            "UPDATE issues SET sprint_state = 'active' WHERE source = 'jira'"
+        )
+        self.conn.commit()
+        page = fleet_now.build(self.conn, cfg, NOW, overlay.load(self.conn))
+        return [r for r in page.shown if r.need.item[0] == "jira"]
+
+    def now_keys(self, cfg=CFG):
+        return [r.need.item[1] for r in self.now(cfg)]
+
     def test_now_puts_the_pin_first_and_hides_the_snoozed(self):
         m = self.mirror()
-        keys = [i["key"] for i in views.now_items(m)]
+        shown = self.now()
+        keys = [r.need.item[1] for r in shown]
         self.assertEqual(keys[0], "ABC-2")
         self.assertLess(m.scores["ABC-2"][0], m.scores["ABC-1"][0])
         self.assertNotIn("ABC-3", keys)  # snoozed until tomorrow
@@ -378,8 +394,8 @@ class ViewsTest(unittest.TestCase):
         self.assertNotIn("ABC-6", keys)  # done
         self.assertNotIn("ABC-5", keys)  # not mine
         self.assertNotIn("ZZZ-1", keys)  # not a Jira row
-        rest = keys[1:]
-        self.assertEqual(rest, sorted(rest, key=lambda k: (-m.scores[k][0], k)))
+        rest = shown[1:]
+        self.assertEqual(rest, sorted(rest, key=lambda r: (r.tier[0], -r.total)))
 
     def test_pins_follow_overlay_order(self):
         self.conn.execute(
@@ -393,7 +409,7 @@ class ViewsTest(unittest.TestCase):
             "INSERT INTO \"order\" (source, item_key, position) VALUES ('jira', 'ABC-2', 2)"
         )
         self.conn.commit()
-        keys = [i["key"] for i in views.now_items(self.mirror())]
+        keys = self.now_keys()
         self.assertEqual(keys[:2], ["ABC-4", "ABC-2"])
 
     def test_waiting_on_me(self):
@@ -459,7 +475,10 @@ class ViewsTest(unittest.TestCase):
 
     def test_card_leads_with_the_title_and_shows_the_epic(self):
         self.set_parent_summary("ABC-1", "Checkout <rewrite>")
-        page = views.render("/now", self.conn, CFG, NOW)
+        m = self.mirror()
+        page = views.issue_card(m, m.issues["ABC-1"]) + views.issue_card(
+            m, m.issues["ABC-2"]
+        )
         one = self.card(page, "ABC-1")
         self.assertRegex(
             one, r'<a class="title" href="[^"]*/browse/ABC-1" target="_blank" '
@@ -478,7 +497,10 @@ class ViewsTest(unittest.TestCase):
         )
 
     def test_status_icon_by_category_and_blocked(self):
-        page = views.render("/now", self.conn, CFG, NOW)
+        m = self.mirror()
+        page = views.issue_card(m, m.issues["ABC-1"]) + views.issue_card(
+            m, m.issues["ABC-2"]
+        )
         # ABC-1 is blocked by ABC-8, which is open.
         self.assertIn('aria-label="Blocked: ', self.card(page, "ABC-1"))
         self.assertIn('class="icon s-', self.card(page, "ABC-2"))
@@ -490,7 +512,7 @@ class ViewsTest(unittest.TestCase):
         self.assertIn('aria-label="Unknown status"', views.status_icon(None, None))
 
     def test_ignoring_an_issue_or_its_epic_hides_it(self):
-        before = [i["key"] for i in views.now_items(self.mirror())]
+        before = self.now_keys()
         self.assertIn("ABC-1", before)
         self.assertIn("ABC-4", before)  # a child of EPIC-1
         self.conn.executemany(
@@ -499,7 +521,7 @@ class ViewsTest(unittest.TestCase):
         )
         self.conn.commit()
         m = self.mirror()
-        after = [i["key"] for i in views.now_items(m)]
+        after = self.now_keys()
         self.assertNotIn("ABC-1", after)
         self.assertNotIn("ABC-4", after)
         self.assertEqual(views.epics(m), [])
@@ -574,9 +596,8 @@ class ViewsTest(unittest.TestCase):
         self.assertNotIn('data-ov="pin"', pr)
 
     def test_single_lane_views_have_no_heading(self):
-        for path in ("/now", "/stale"):
-            page = views.render(path, self.conn, CFG, NOW)
-            self.assertNotIn("<h2>", page, path)
+        page = views.render("/stale", self.conn, CFG, NOW)
+        self.assertNotIn("<h2>", page)
         page = views.render("/waiting-on", self.conn, CFG, NOW)
         self.assertIn("<h2>Issues (", page)
         self.assertIn("<h2>Pull requests (", page)
@@ -587,12 +608,12 @@ class ViewsTest(unittest.TestCase):
     def test_ignoring_an_epic_hides_its_grandchildren(self):
         # A sub-task of a story that sits under the seeded epic.
         self.add_issue("ABC-30", ME, "ABC-4")
-        self.assertIn("ABC-30", [i["key"] for i in views.now_items(self.mirror())])
+        self.assertIn("ABC-30", self.now_keys())
         self.conn.execute(
             "INSERT INTO ignores (source, item_key) VALUES ('jira', 'EPIC-1')"
         )
         self.conn.commit()
-        self.assertNotIn("ABC-30", [i["key"] for i in views.now_items(self.mirror())])
+        self.assertNotIn("ABC-30", self.now_keys())
         self.assertIn("hides 4 child issues", views.render_ignored(self.conn))
 
     def test_the_ancestry_walk_survives_a_parent_cycle(self):
@@ -637,7 +658,7 @@ class ViewsTest(unittest.TestCase):
 
     def test_unset_me_falls_back_to_scope(self):
         cfg = config.deep_merge(CFG, {"jira": {"me": ""}})
-        keys = [i["key"] for i in views.now_items(self.mirror(cfg))]
+        keys = self.now_keys(cfg)
         self.assertIn("ABC-5", keys)  # in scope, someone else's
         self.assertNotIn("ABC-8", keys)  # linked-only
         self.assertIn("jira.me is not set", views.render("/now", self.conn, cfg, NOW))
@@ -689,26 +710,33 @@ class RoutesTest(unittest.TestCase):
             cards = re.findall(
                 r'<div class="card" data-source="jira" data-key="([^"]+)"', page
             )
-            if path != "/epics":
+            if path == "/now":
+                # Now's cards are fleet_now's: the terms are on the why line.
+                self.assertTrue(cards, path)
+                self.assertEqual(page.count('data-terms="'), len(cards), path)
+            elif path != "/epics":
                 self.assertTrue(cards, path)
                 self.assertEqual(page.count('class="terms"'), len(cards), path)
 
-    def test_now_card_shows_terms_and_joined_pr(self):
+    def test_now_card_shows_the_jira_terms_and_the_blocked_tier(self):
         page = self.get("/now")[1]
         (text,) = [
             c for c in page.split('<div class="card"') if 'data-key="ABC-1"' in c
         ]
-        self.assertIn("priority <b>+12</b>", text)
-        self.assertIn("blocked <b>−10</b>", text)
-        self.assertIn("https://github.com/o/r/pull/1", text)
+        # ABC-1 is blocked by ABC-8: the blocked tier, not a -10 term.
+        self.assertIn('data-tier="blocked"', text)
+        why = re.search(r'<div class="why"[^>]*>([^<]+)</div>', text)
+        assert why is not None
+        self.assertTrue(why.group(1).startswith("ship: blocked · score "))
+        self.assertIn("priority +12 (Highest (urgent))", why.group(1))
+        self.assertNotIn("review", why.group(1))
         found = re.search(r'data-total="([^"]+)"', text)
         assert found is not None
-        total = float(found.group(1))
         values = [
             float(v.replace("−", "-"))
-            for v in re.findall(r"</?li[^>]*>[a-z]+ <b>([^<]+)</b>", text)
+            for v in re.findall(r" [+−][0-9.]+(?= \()", why.group(1))
         ]
-        self.assertTrue(math.isclose(total, sum(values)))
+        self.assertTrue(math.isclose(float(found.group(1)), sum(values)))
 
     def test_every_page_has_the_filter_box_beside_sync_now(self):
         for path in (

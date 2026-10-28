@@ -346,13 +346,13 @@ class RenderTests(Case):
         page = self.page(include.Include("now", frozenset({"other"}), "url"))
         self.assertIn("Nothing included by the filter is waiting.", page)
 
-    def test_a_fleet_instance_with_jira_on_keeps_the_jira_now_below(self):
+    def test_a_fleet_instance_with_jira_on_has_no_separate_jira_lane(self):
         self.cfg = fleet_cfg(jira=True)
         seed(self.conn)
         page = self.page()
-        self.assertLess(
-            page.index('data-section="next"'), page.index('data-section="now"')
-        )
+        self.assertEqual(page.count('<section class="lane"'), 1)
+        self.assertIn('data-section="next"', page)
+        self.assertNotIn('data-section="now"', page)
 
 
 class RouteTests(server_harness.ServerCase):
@@ -380,11 +380,11 @@ class RouteTests(server_harness.ServerCase):
         self.assertEqual(re.findall(r'href="([^"]+)"', nav)[:2], ["/now", "/needs"])
 
 
-class JiraNowUnchangedTest(server_harness.ServerCase):
-    def test_a_jira_instance_now_has_no_fleet_queue(self):
+class JiraNowTest(server_harness.ServerCase):
+    def test_a_jira_instance_now_is_the_shared_queue(self):
         page = self.request("GET", "/now")[1]
-        self.assertNotIn('data-section="next"', page)
-        self.assertIn('data-section="now"', page)
+        self.assertIn('data-section="next"', page)
+        self.assertNotIn('data-section="now"', page)
 
 
 class SessionCardTests(unittest.TestCase):

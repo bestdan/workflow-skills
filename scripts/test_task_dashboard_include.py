@@ -357,7 +357,7 @@ class FleetRouteTests(server_harness.ServerCase):
         self.assertIn('<input id="filter"', header(page))
         self.assertIn('class="include"', page)
         # A switched-off lane keeps its note while the text filter hides empties.
-        page = self.get("/now?include=prs")
+        page = self.get("/stale?include=prs")
         self.assertIn('class="empty switched-off"', page)
         self.assertIn(".lane.filtered-empty .empty.switched-off", page)
 
@@ -416,11 +416,11 @@ class FleetRouteTests(server_harness.ServerCase):
         self.httpd.app.cfg["views"] = {"now": {"include": ["prs"]}}
         page = self.get("/now")
         self.assertIn('data-origin="config"', switch_row(page))
-        self.assertIn('data-filtered="tasks"', page)
+        self.assertNotIn('data-key="ABC-1"', page)
         self.remember("now", "tasks")
         page = self.get("/now")
         self.assertIn('data-origin="remembered"', switch_row(page))
-        self.assertNotIn('data-filtered="', page)
+        self.assertIn('data-key="ABC-1"', page)
 
     def test_the_board_and_the_jira_lanes_follow_their_group(self):
         board = self.get("/board?include=prs")

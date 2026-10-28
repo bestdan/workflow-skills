@@ -19,6 +19,9 @@ PRIO = "prio"  # a `prio:N` label, as score.prio_of returns it
 SINCE = "since"  # when the wait began (datetime): the `age` term
 BLOCKS = "blocks"  # how many open issues it blocks (Deep)
 SIZE = "size"  # its `est:N` estimate, N (Deep)
+# Terms the source scored itself, as score.Term tuples the ranker adds to the
+# fleet score: a Jira ticket's priority, deadline, unblocks and stuck.
+SCORED = "scored"
 
 
 @dataclass
@@ -29,8 +32,7 @@ class Candidate:
     category: str  # one of score.FLEET_CATEGORIES, or of fleet_now.LITTLE_TIERS
     why: str  # the evidence that put it in its category
     terms: dict[str, Any] = field(default_factory=dict)
-    # Whether the item is blocked. No source sets it yet, and no tier reads
-    # it yet.
+    # Whether the item is blocked: Ship puts it in its last tier, "blocked".
     blocked: bool = False
     # What `tune` and "why not now" record beyond what every item has
     # (whynot.features adds kind, category, age, workstream and mode).

@@ -1,8 +1,9 @@
-"""The fleet instance's Now (`/now`, and `/` there): what to do next.
+"""Now (`/now`, and `/` on a fleet instance): what to do next.
 
-Needs you (needs.py) is the full list of what waits on the owner; Now is the
-short queue drawn from it, ranked, with the owner's own work added. A Jira
-instance's Now is views.render_now's and does not read this module.
+Every instance's Now is this one ranker, over every source the instance has
+(dev_docs/designs/2026-10-27-shared-now-ranker.md). Needs you (needs.py) is
+the full list of what waits on the owner; Now is the short queue drawn from
+it, ranked, with the owner's own work added.
 
 WHAT IT RANKS, each keyed by its overlay item `(source, key)` and put in one
 score.FLEET_CATEGORIES category:
@@ -21,6 +22,13 @@ score.FLEET_CATEGORIES category:
   (`ready`), from the widened `issues` fetch, behind the same gate as Needs
   you's issues: none before a successful fleet run. One that carries the
   human-review label is Needs you's `human_issue` instead;
+- on a `github.scope = "me"` instance, which has no fleet read, the PRs
+  asking for my review (`others_pr`): the `prs` table's reviewer rows. Its
+  author rows are already my own PRs above, through fleet_tabs.pull_requests;
+- my open Jira tickets, and any open one I pinned (jira_category): in
+  progress is `started`, and to do is `ready` in the active sprint. Each
+  brings score.score's priority, deadline, unblocks and stuck terms
+  (`[score.weights]`), added to its category's;
 - close-outs (close_out.py, `close_out`): a finished session, on evidence
   that its work is done (its PR merged, its branch landed, or it ended), and a
   workstream in the Complete lane. Each card carries its checklist, ticked
@@ -46,7 +54,10 @@ ORDER is Ship's (the design's "Ship"). Pinned items first, in the overlay's orde
 (overlay.Overlay.pin_rank). Then the fixed TIERS, in order: a session that
 asked; close-outs, at most CLOSE_OUT_CAP of them (pins aside), oldest first;
 ready to merge (`quick_win`, and `own_approved`: my PR approved with CI
-green); the review queue; started issues; then the rest. Within a tier,
+green); the review queue; started issues and tickets; then the rest; and
+last, blocked, whatever the category. Blocked is a Jira ticket score.is_blocked
+calls blocked, or a GitHub issue with the `blocked` label or an open native
+`blocked_by` (issue_blocked); its why line reads `ship: blocked`. Within a tier,
 score.fleet_score orders, highest first, and a tie goes to the longer wait, so
 the rest keep the category order the `[score.fleet]` weights give. The list
 stops at LIMIT items, pins aside: every pinned item is shown. Each card's why
@@ -91,6 +102,7 @@ now?" (whynot.py, which also notes each day's shown items as its base rate).
 """
 
 import html
+import math
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -109,6 +121,7 @@ import overlay
 import score
 import sync
 import view_model
+import views
 import whynot
 import workstreams
 
@@ -119,7 +132,8 @@ LIMIT = 10
 CLOSE_OUT_CAP = 3
 
 # Ship's tiers, first to last: (label, categories). A category in none of
-# them is in the last tier, REST.
+# them is in REST, and a blocked item, whatever its category, in BLOCKED,
+# the last tier of all.
 TIERS = (
     ("asked", ("asked",)),
     ("close out", ("close_out",)),
@@ -128,6 +142,7 @@ TIERS = (
     ("started", ("started",)),
 )
 REST = "the rest"
+BLOCKED = "blocked"
 
 MODES = overlay.NOW_MODES
 SHIP, LITTLE, DEEP, TIDY = "ship", "little", "deep", "tidy"
@@ -230,6 +245,8 @@ class Ranked:
             return little_tier(self.category)
         if self.mode in (DEEP, TIDY):
             return 0, self.mode  # one tier: the mode's own order
+        if self.candidate.blocked:
+            return len(TIERS) + 1, BLOCKED
         return tier_of(self.category)
 
 
@@ -282,16 +299,25 @@ def _candidate(
     **kw: Any,
 ) -> candidate.Candidate:
     """A GitHub or session item as a candidate: its wait, its `prio:` label
-    and any `more` terms, and its row's features."""
+    and any `more` terms, its row's features, and, for an issue, whether it
+    is blocked (issue_blocked)."""
     terms = {candidate.SINCE: need.since, candidate.PRIO: prio, **(more or {})}
+    blocked = need.kind == "issue" and issue_blocked(need.row or {})
     return candidate.Candidate(
         need,
         category,
         why,
         terms={k: v for k, v in terms.items() if v is not None},
+        blocked=blocked,
         features=whynot.row_features(need, category),
         **kw,
     )
+
+
+def issue_blocked(row: dict[str, Any]) -> bool:
+    """A GitHub issue row is blocked: it carries the `blocked` label, or an
+    open issue blocks it through GitHub's native dependencies."""
+    return "blocked" in (row.get("labels") or []) or bool(row.get("blocked_by"))
 
 
 def need_category(n: needs.Need) -> "tuple[str, str]":
@@ -352,6 +378,8 @@ def _needs_you(
 def _own_prs(
     conn: sqlite3.Connection, cfg: dict[str, Any]
 ) -> list[candidate.Candidate]:
+    if not cfg["github"]["enabled"]:
+        return []
     out = []
     for p in fleet_tabs.pull_requests(conn, cfg):
         found = own_pr_category(p)
@@ -413,6 +441,116 @@ def _own_issues(
     return out
 
 
+def _review_requests(
+    conn: sqlite3.Connection, cfg: dict[str, Any]
+) -> list[candidate.Candidate]:
+    """PRs asking for my review, from the `prs` table, on an instance with no
+    fleet read (`github.scope = "me"`). With one, Needs you's `others_pr`
+    rows are the review requests, and this source adds none."""
+    if sync.fleet_enabled(cfg) or not cfg["github"]["enabled"]:
+        return []
+    out = []
+    for p in fleet_tabs.pull_requests(conn, cfg):
+        if p.get("role") != "reviewer" or p.get("is_draft"):
+            continue
+        need = needs.Need(
+            item=(github_fleet.SOURCE, str(p["url"])),
+            kind="pr",
+            title=p.get("title") or "",
+            ref=f"{p.get('repo') or ''}#{p.get('number')}",
+            since=score.parse_ts(p.get("created")),
+            url=p.get("url"),
+            state=f"review requested · CI {p.get('ci_state') or 'unknown'}",
+            repo=fleet_views._name(p.get("repo")),
+            number=p.get("number"),
+            hint="review it",
+            row=p,
+        )
+        out.append(_candidate(need, "others_pr", "review requested"))
+    return out
+
+
+# A Jira ticket's status category -> its category, and the score.score terms
+# it brings; its review and blocked terms are left out, because tiers now do
+# what they did.
+_JIRA_CATEGORY = {"indeterminate": "started", "new": "ready"}
+JIRA_TERMS = ("priority", "deadline", "unblocks", "stuck")
+
+
+def jira_category(
+    issue: dict[str, Any], pinned: bool, mine: bool = True
+) -> "tuple[str, str] | None":
+    """(category, why) for an open Jira ticket, else None: in progress is
+    `started`, and to do is `ready` when it is in the active sprint or
+    pinned. A ticket that is not `mine` is named a pinned ticket."""
+    cat = (issue.get("status_category") or "").lower()
+    status = issue.get("status_name") or cat
+    whose = "your ticket" if mine else "pinned ticket"
+    if cat == "indeterminate":
+        return "started", f"{whose}, {status}"
+    if cat == "new" and (pinned or (issue.get("sprint_state") or "") == "active"):
+        sprint = issue.get("sprint_name")
+        return "ready", f"{whose}, {status}" + (f" in {sprint}" if sprint else "")
+    return None
+
+
+def _jira_tickets(
+    conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime
+) -> list[candidate.Candidate]:
+    """My open tickets, and any open one I pinned, as views.Mirror scores
+    them. A pinned ticket is mine for Now even when it is assigned elsewhere."""
+    if not sync.jira_enabled(cfg):
+        return []
+    factory = conn.row_factory
+    try:
+        m = views.Mirror(conn, cfg, now)
+    finally:
+        conn.row_factory = factory  # Mirror leaves it None
+    issues = {i["key"]: i for i in m.open_mine()}
+    for key in m.pins:
+        i = m.issues.get(key)
+        if i and not score.is_done(i["status_category"]) and not m.is_ignored(i):
+            issues.setdefault(key, i)
+    out = []
+    for key, issue in issues.items():
+        found = jira_category(issue, key in m.pins, m.is_mine(issue))
+        if found is None:
+            continue
+        category, why = found
+        blocked, signals = m.blocked[key]
+        if blocked:
+            why += f"; blocked: {', '.join(signals)}"
+        need = needs.Need(
+            item=("jira", key),
+            kind="ticket",
+            title=issue.get("summary") or "",
+            ref=key,
+            since=score.parse_ts(issue.get("status_category_changed")),
+            url=f"https://{cfg['jira']['site']}/browse/{key}",
+            state=" · ".join(views.issue_meta(issue)),
+            hint="carry on with it" if category == "started" else "start it",
+            row=issue,
+        )
+        scored = [t for t in m.scores[key][1] if t[0] in JIRA_TERMS]
+        out.append(
+            candidate.Candidate(
+                need,
+                category,
+                why,
+                terms={candidate.SCORED: scored},
+                blocked=blocked,
+                features={
+                    "project": key.split("-", 1)[0],
+                    "priority": issue.get("priority"),
+                    "status": issue.get("status_name"),
+                    "blocked": ",".join(signals) or None,
+                    "own": "yes" if m.is_mine(issue) else "no",
+                },
+            )
+        )
+    return out
+
+
 def _close_outs(
     conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime
 ) -> list[candidate.Candidate]:
@@ -429,7 +567,9 @@ def ship_sources(
     return (
         _needs_you(conn, cfg, now)
         + _own_prs(conn, cfg)
+        + _review_requests(conn, cfg)
         + _own_issues(conn, cfg)
+        + _jira_tickets(conn, cfg, now)
         + _close_outs(conn, cfg, now)
     )
 
@@ -453,7 +593,7 @@ def rank(
         r.workstream = member_of.get(r.candidate.item)
         if r.mode != SHIP:
             continue
-        r.total, r.terms = score.fleet_score(
+        total, terms = score.fleet_score(
             {
                 "category": r.candidate.category,
                 "why": r.candidate.why,
@@ -463,6 +603,11 @@ def rank(
             now,
             weights,
         )
+        scored = r.candidate.terms.get(candidate.SCORED)
+        if scored:
+            terms = terms + list(scored)
+            total = score._round(math.fsum(v for _, v, _ in terms))
+        r.total, r.terms = total, terms
     return out
 
 
@@ -1048,10 +1193,15 @@ def render(
             f'<p class="note" data-closed-today="{p.closed_today}">'
             f"closed today: {p.closed_today}</p>"
         )
-    if not sync.fleet_enabled(cfg):
+    if not cfg["github"]["enabled"]:
         parts.append(
-            '<p class="note">The owner-wide GitHub read is off (github.enabled is false, or github.scope is not "owner"), so no PRs or issues are'
+            '<p class="note">github.enabled is false, so no PRs or issues are'
             " ranked here.</p>"
+        )
+    elif not sync.fleet_enabled(cfg):
+        parts.append(
+            '<p class="note">github.scope is not "owner", so GitHub issues are'
+            " not ranked here; your PRs and review requests are.</p>"
         )
     for lane in lanes(p, inc):
         body = "".join(card(r, now, ov) for r in lane.items)

@@ -1,7 +1,7 @@
 """The Needs you, Now, Waiting on me, I'm waiting on, Stale and Epics views.
 
-On a fleet instance Now is fleet_now.py's ranked queue (and the home page),
-with the Jira Now below it when Jira is on; Needs you is needs.py's.
+Now is fleet_now.py's ranked queue on every instance, Jira tickets included
+(and the home page on a fleet instance); Needs you is needs.py's.
 The fleet instance's Pull requests and Issues tabs are fleet_tabs.py's; they
 replace Waiting on me and I'm waiting on in a fleet instance's nav.
 
@@ -266,32 +266,6 @@ def _in_future(value: "str | None", now: datetime) -> bool:
 
 
 # --- views -------------------------------------------------------------------
-
-
-def now_items(m: Mirror) -> list[dict[str, Any]]:
-    """Pinned first (overlay order, then pin time), then by score; no snoozed."""
-    keys = {i["key"] for i in m.open_mine()}
-    keys |= {
-        k
-        for k in m.pins
-        if k in m.issues
-        and not score.is_done(m.issues[k]["status_category"])
-        and not m.is_ignored(m.issues[k])
-    }
-    keys -= m.snoozed
-    pinned = sorted(
-        (k for k in keys if k in m.pins),
-        key=lambda k: (
-            m.pins[k][0] is None,
-            m.pins[k][0] or 0,
-            m.pins[k][1] or "",
-            k,
-        ),
-    )
-    rest = sorted(
-        (k for k in keys if k not in m.pins), key=lambda k: (-m.scores[k][0], k)
-    )
-    return [m.issues[k] for k in pinned + rest]
 
 
 def waiting_on_me(m: Mirror) -> tuple[list[tuple[dict, str]], list[dict]]:
@@ -629,22 +603,11 @@ def _render(lane: view_model.Lane, card: Any, inc: include.Include) -> str:
     return _lane(lane.id, lane.title, cards, lane.empty, lane.group, inc, lane.tab)
 
 
-def jira_now_lane(m: Mirror, title: "str | None") -> view_model.Lane:
-    """Jira's Now: (issue, why) pairs, `why` always empty."""
-    items = [(i, "") for i in now_items(m)]
-    return view_model.Lane("now", title, items, "Nothing open.", TICKETS)
-
-
 def render_now(m: Mirror, inc: include.Include) -> str:
-    """A fleet instance's ranked queue (fleet_now), then, with Jira on, the
-    Jira Now; a Jira instance's Now alone."""
-    if not fleet_views.enabled(m.cfg):
-        return _me_note(m) + _render(jira_now_lane(m, None), _ic(m), inc)
+    """Now (fleet_now): one ranked queue over every source, Jira tickets
+    included, on every instance."""
     asked = (m.query.get("mode") or [""])[0].strip() or None
-    fleet = fleet_now.render(m.conn, m.cfg, m.now, inc, asked)
-    if not sync.jira_enabled(m.cfg):
-        return fleet
-    return fleet + _me_note(m) + _render(jira_now_lane(m, "Jira"), _ic(m), inc)
+    return _me_note(m) + fleet_now.render(m.conn, m.cfg, m.now, inc, asked)
 
 
 def waiting_on_me_lanes(m: Mirror) -> list[view_model.Lane]:
@@ -736,7 +699,8 @@ def _epic_card(m: Mirror, g: dict[str, Any]) -> str:
     href = f"https://{m.cfg['jira']['site']}/browse/{g['key']}"
     blocked = f" · {g['blocked']} blocked" if g["blocked"] else ""
     pinned = g["key"] in m.pins
-    # Now lists a pin only when the mirror holds its issue (now_items).
+    # Now lists a pin only when the mirror holds its open issue
+    # (fleet_now._jira_tickets).
     pin_tip = (
         "Keep it on Epics; while it is open it also shows on Now"
         if g["key"] in m.issues
