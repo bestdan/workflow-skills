@@ -453,6 +453,14 @@ class IssueFoldTests(unittest.TestCase):
         pr.candidate.mode = fleet_now.LITTLE
         self.assertEqual(fleet_now.fold([issue, pr]), [issue, pr])
 
+    def test_an_ignored_issue_hides_its_folded_prs(self):
+        issue = self.ranked("issue", self.ISSUE, "started")
+        pr = self.ranked("pr", "https://github.com/o/r/pull/9", "review_queue",
+                         links=(("github", self.ISSUE),))  # fmt: skip
+        ov = overlay.Overlay(ignored={("github", self.ISSUE)})
+        shown, _ = fleet_now._visible(fleet_now.fold([issue, pr]), ov, NOW, None)
+        self.assertEqual(shown, [])
+
 
 if __name__ == "__main__":
     unittest.main()
