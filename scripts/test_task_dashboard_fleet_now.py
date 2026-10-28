@@ -892,8 +892,10 @@ class ModeTests(Case):
             self.assertIn(f'<div class="fleet now" data-mode="{mode}">', page)
             button = fleet_now.mode_button(mode)
             self.assertIn(f'data-ov="mode" data-now="{mode}" data-mode="{nxt}"', button)
-            # It reads just the mode's name; its question is the tooltip.
-            self.assertIn(f">{mode.title()}</button>", button)
+            # Its icon and the mode's name; its question is the tooltip.
+            self.assertIn(f"</svg>{mode.title()}</button>", button)
+            icon = fleet_now.icons.svg(fleet_now.MODE_ICONS[mode])
+            self.assertIn(icon, button)
             self.assertIn(html.escape(fleet_now.QUESTIONS[mode]), button)
         self.assertEqual(fleet_now.next_mode(fleet_now.MODES[-1]), fleet_now.MODES[0])
 

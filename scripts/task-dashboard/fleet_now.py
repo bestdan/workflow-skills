@@ -102,6 +102,7 @@ import fleet_tabs
 import fleet_views
 import gauges
 import github_fleet
+import icons
 import include
 import needs
 import overlay
@@ -138,6 +139,9 @@ QUESTIONS = {
     TIDY: "What is rotting?",
 }
 assert set(QUESTIONS) == set(MODES)
+# Each mode's icon on the mode button (icons.PATHS).
+MODE_ICONS = {SHIP: "rocket", LITTLE: "zap", DEEP: "brain", TIDY: "sparkles"}
+assert set(MODE_ICONS) == set(MODES)
 # Below a mode's list: "<N> <what>", the items it ranks that it did not show.
 MORE_IN_MODE = {LITTLE: "more small items", DEEP: "more to think about",
                 TIDY: "more to tidy"}  # fmt: skip
@@ -1014,13 +1018,14 @@ def lanes(p: Page, inc: "include.Include | None" = None) -> list[view_model.Lane
 
 
 def mode_button(mode: str) -> str:
-    """The header's mode button: it reads the mode's name, says its question
-    on hover, and saves the next mode when clicked."""
+    """The header's mode button: the mode's icon and name, its question on
+    hover; a click saves the next mode."""
     nxt = next_mode(mode)
     title = f"{QUESTIONS[mode]} Click for {nxt.title()}: {QUESTIONS[nxt]}"
     return (
         f'<button type="button" id="mode" data-ov="mode" data-now="{mode}"'
-        f' data-mode="{nxt}" title="{_e(title)}">{mode.title()}</button>'
+        f' data-mode="{nxt}" title="{_e(title)}">'
+        f"{icons.svg(MODE_ICONS[mode])}{mode.title()}</button>"
     )
 
 
