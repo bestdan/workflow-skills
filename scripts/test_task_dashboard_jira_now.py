@@ -118,6 +118,14 @@ class TierMappingTests(Case):
         overlay.pin(self.conn, ("jira", "ABC-3"), NOW)
         self.assertEqual(self.by_key()["ABC-3"].category, "ready")
 
+    def test_someone_elses_pinned_ticket_is_named_a_pinned_ticket(self):
+        self.ticket("ABC-6", assignee="Sam Sample")
+        overlay.pin(self.conn, ("jira", "ABC-6"), NOW)
+        r = self.by_key()["ABC-6"]
+        self.assertEqual(r.why, "pinned ticket, In Progress")
+        self.ticket("ABC-1")
+        self.assertEqual(self.by_key()["ABC-1"].why, "your ticket, In Progress")
+
     def test_done_someone_elses_and_ignored_tickets_are_left_out(self):
         self.ticket("ABC-5", "done", "Done")
         self.ticket("ABC-6", assignee="Sam Sample")

@@ -475,17 +475,20 @@ _JIRA_CATEGORY = {"indeterminate": "started", "new": "ready"}
 JIRA_TERMS = ("priority", "deadline", "unblocks", "stuck")
 
 
-def jira_category(issue: dict[str, Any], pinned: bool) -> "tuple[str, str] | None":
+def jira_category(
+    issue: dict[str, Any], pinned: bool, mine: bool = True
+) -> "tuple[str, str] | None":
     """(category, why) for an open Jira ticket, else None: in progress is
     `started`, and to do is `ready` when it is in the active sprint or
-    pinned."""
+    pinned. A ticket that is not `mine` is named a pinned ticket."""
     cat = (issue.get("status_category") or "").lower()
     status = issue.get("status_name") or cat
+    whose = "your ticket" if mine else "pinned ticket"
     if cat == "indeterminate":
-        return "started", f"your ticket, {status}"
+        return "started", f"{whose}, {status}"
     if cat == "new" and (pinned or (issue.get("sprint_state") or "") == "active"):
         sprint = issue.get("sprint_name")
-        return "ready", f"your ticket, {status}" + (f" in {sprint}" if sprint else "")
+        return "ready", f"{whose}, {status}" + (f" in {sprint}" if sprint else "")
     return None
 
 
@@ -508,7 +511,7 @@ def _jira_tickets(
             issues.setdefault(key, i)
     out = []
     for key, issue in issues.items():
-        found = jira_category(issue, key in m.pins)
+        found = jira_category(issue, key in m.pins, m.is_mine(issue))
         if found is None:
             continue
         category, why = found
