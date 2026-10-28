@@ -601,6 +601,21 @@ class CloseOutTests(Case):
             found["c-ended"].need.command[:3], ("claude", "--resume", "c-ended")
         )
 
+    def test_a_registry_ingested_after_derive_withholds_no_resume(self):
+        snap = copy.deepcopy(CO_SNAPSHOT)
+        snap["schema"] = 2
+        del snap["registry"]
+        snapshot_adapter.ingest(self.conn, snap, NOW)
+        sessions.write(self.conn, sessions.derive(self.conn, NOW), NOW)
+        tabs_fx.seed(self.conn, rows=CO_CLOSED, prs=[])
+        # The host now carries a registry, but its rows were derived without
+        # one: nothing they say holds c-ended's cwd, so it is still resumed.
+        later = copy.deepcopy(CO_SNAPSHOT)
+        later["taken_at"] = "2026-10-25T11:30:00.000Z"
+        snapshot_adapter.ingest(self.conn, later, NOW)
+        need = self.found()["c-ended"].need
+        self.assertEqual(need.command[:3], ("claude", "--resume", "c-ended"))
+
     def test_no_newer_snapshot_or_an_unscanned_repo_is_no_worktree_evidence(self):
         co_seed(self.conn)
         self.conn.execute(
@@ -655,7 +670,8 @@ class CloseOutTests(Case):
             need.hint.startswith(f"still running in {CO_WT}/task-2 on mini; send it: ")
         )
         row = {"host": "mini", "pid": 5000, "tmux": "work:2", "ended": False}
-        hint, command, url = close_out._resume(row, "c-x", [], {"mini"})
+        steps = [close_out.Step(close_out.SESSION_ENDED, False, "end this session")]
+        hint, command, url = close_out._resume(row, "c-x", steps)
         self.assertEqual((command, url), (None, None))
         self.assertTrue(hint.startswith("still running in tmux work:2 on mini; "))
 

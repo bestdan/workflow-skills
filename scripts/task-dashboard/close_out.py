@@ -196,17 +196,17 @@ def _entry(
 
 
 def _resume(
-    row: dict[str, Any], sid: str, steps: list[Step], registry: set[str]
+    row: dict[str, Any], sid: str, steps: list[Step]
 ) -> "tuple[str, tuple[str, ...] | None, str | None]":
     """(hint, command, url): the Remote Control link with the prompt to give
     it; else, while its process may be live, where it runs and no command,
     since `claude --resume` would start a second process on its open
     transcript; else `claude --resume` with the prompt as its argument.
 
-    A session may be live when it is in its host's registry, or when it is
-    not ended on a host with a registry: then a live entry under another id
-    holds its cwd, and may be this session after a `/clear` (sessions.py
-    `ended`). On a host without a registry nothing says, so it is resumed.
+    A session may be live when it is in its host's registry, or when a live
+    entry under another id holds its cwd (sessions.py `cwd_held`): after a
+    `/clear` that entry may be this session. Otherwise, as on a host without
+    a registry, nothing says it is live, so it is resumed.
     """
     text = prompt(steps)
     ended = row.get("ended")
@@ -219,7 +219,7 @@ def _resume(
     if not ended and row.get("pid") is not None:  # in its host's registry
         tmux = f" in tmux {row['tmux']}" if row.get("tmux") else ""
         return f"still running{tmux}{where} on {host}; send it: {text}", None, None
-    if not ended and row.get("host") in registry:
+    if row.get("cwd_held"):
         hint = (
             f"a session is running{where} on {host}; if it is this one, send it: {text}"
         )
@@ -278,7 +278,7 @@ def _sessions(
             steps.append(Step(SESSION_ENDED, ended, "end this session"))
         if all(s.done for s in steps):
             continue
-        hint, command, url = _resume(row, sid, steps, registry)
+        hint, command, url = _resume(row, sid, steps)
         extra = needs.transcript_fields(row, row.get("title") or f"session {sid}", prs)
         bridge = extra.pop("bridge_session_id")
         need = needs.Need(
