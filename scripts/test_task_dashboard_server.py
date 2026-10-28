@@ -806,7 +806,7 @@ class SyncNoteTest(HeaderCase):
     fleet = True
 
     def button(self, header):
-        m = re.search(r'<button id="sync"[^>]*>[^<]*</button>', header)
+        m = re.search(r'<button id="sync".*?</button>', header)
         assert m is not None, "no Sync button"
         return m.group(0)
 
@@ -840,7 +840,9 @@ class SyncNoteTest(HeaderCase):
         header = self.header()
         self.assertEqual(
             self.button(header),
-            '<button id="sync" title="Shift-click for a full reconcile">Sync now</button>',
+            '<button id="sync" aria-label="Sync now"'
+            f' title="Sync now (shift-click for a full reconcile)">{server.SYNC_ICON}'
+            "</button>",
         )
         self.assertRegex(self.note(header), r"^syncing Jira \+ GitHub sync… \d+s$")
         # The sync function reports the next step; the panel follows it.
@@ -867,7 +869,9 @@ class SyncNoteTest(HeaderCase):
         self.assertTrue(self.fake.started.acquire(timeout=5))
         state = json.loads(self.request("GET", "/status")[1])
         self.assertEqual(state["trigger"], "manual")
-        self.assertIn(" disabled>Syncing…</button>", self.button(self.header()))
+        button = self.button(self.header())
+        self.assertIn('aria-label="Syncing…"', button)
+        self.assertIn(" disabled>", button)
 
     def test_the_step_hook_runs_through_every_enabled_step(self):
         steps: list[str] = []

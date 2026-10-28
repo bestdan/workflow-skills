@@ -33,7 +33,8 @@ function snap() {
   const note = doc.getElementById("sync-note");
   const fresh = doc.getElementById("new-data");
   return {
-    button: btn.textContent,
+    // The sync icon's state is its accessible name.
+    button: btn.getAttribute("aria-label"),
     disabled: btn.disabled,
     note: note.hidden ? null : note.textContent,
     new_data: !fresh.hidden,

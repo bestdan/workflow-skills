@@ -35,8 +35,10 @@ its why, the score terms it has data for, and its features. rank() reads
 those only, and every ordering and render below reads its Ranked.
 
 MODES (dev_docs/designs/2026-10-26-now-modes.md). The owner picks one with the
-button at the top, which cycles overlay.NOW_MODES and saves the pick in the
-overlay; `?mode=` shows one mode once and saves nothing. With none saved the
+mode button in the page header, beside the sync button (mode_button, which the
+server puts there on Now only). It reads the mode's name, cycles
+overlay.NOW_MODES and saves the pick in the overlay; `?mode=` shows one mode
+once and saves nothing. With none saved the
 mode is Ship. Everything below this paragraph is Ship, except LITTLE, DEEP
 and TIDY.
 
@@ -164,10 +166,6 @@ _DOCS_DIRS = ("docs/", "dev_docs/")
 _LITTLE_CI = ("success", "none")
 
 CSS = """
-.now .modes { display:flex; gap:8px; align-items:baseline; margin:4px 0 8px; }
-.now .modes button { font:inherit; padding:2px 10px; border-radius:4px;
-  border:1px solid var(--line); background:var(--bg); color:var(--fg); }
-.now .modes .q { color:var(--muted); }
 .now .card .why { margin-top:2px; }
 .now .wait { color:var(--fg); font-weight:600; }
 .now .more { margin-top:8px; font-size:12px; }
@@ -1015,15 +1013,14 @@ def lanes(p: Page, inc: "include.Include | None" = None) -> list[view_model.Lane
     return [view_model.Lane("next", "Next", p.shown, empty)]
 
 
-def mode_bar(mode: str) -> str:
-    """The mode button, which saves the next mode, and the mode's question."""
+def mode_button(mode: str) -> str:
+    """The header's mode button: it reads the mode's name, says its question
+    on hover, and saves the next mode when clicked."""
     nxt = next_mode(mode)
+    title = f"{QUESTIONS[mode]} Click for {nxt.title()}: {QUESTIONS[nxt]}"
     return (
-        f'<div class="modes" data-mode="{mode}">'
-        f'<button type="button" data-ov="mode" data-mode="{nxt}"'
-        f' title="Switch to {nxt.title()}: {_e(QUESTIONS[nxt])}">'
-        f"Mode: {mode.title()}</button>"
-        f'<span class="q">{_e(QUESTIONS[mode])}</span></div>'
+        f'<button type="button" id="mode" data-ov="mode" data-now="{mode}"'
+        f' data-mode="{nxt}" title="{_e(title)}">{mode.title()}</button>'
     )
 
 
@@ -1040,7 +1037,7 @@ def render(
     mode = resolve_mode(mode, ov)
     p = build(conn, cfg, now, ov, inc, mode)
     whynot.record_shown(conn, p.shown, now)
-    parts = [mode_bar(mode)]
+    parts = []
     if p.closed_today is not None:
         parts.append(
             f'<p class="note" data-closed-today="{p.closed_today}">'
@@ -1077,4 +1074,4 @@ def render(
         parts.append(
             f'<p class="note" data-snoozed="{p.snoozed}">{p.snoozed} snoozed.</p>'
         )
-    return f'<div class="fleet now">{"".join(parts)}</div>'
+    return f'<div class="fleet now" data-mode="{mode}">{"".join(parts)}</div>'

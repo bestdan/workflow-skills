@@ -10,6 +10,7 @@ Python 3.11: run via scripts/test-task-dashboard-fleet-now.sh.
 """
 
 import copy
+import html
 import json
 import os
 import re
@@ -888,9 +889,12 @@ class ModeTests(Case):
         for mode in fleet_now.MODES:
             page = fleet_now.render(self.conn, self.cfg, NOW, mode=mode)
             nxt = fleet_now.next_mode(mode)
-            self.assertIn(f'<div class="modes" data-mode="{mode}">', page)
-            self.assertIn(f'data-ov="mode" data-mode="{nxt}"', page)
-            self.assertIn(f"Mode: {mode.title()}</button>", page)
+            self.assertIn(f'<div class="fleet now" data-mode="{mode}">', page)
+            button = fleet_now.mode_button(mode)
+            self.assertIn(f'data-ov="mode" data-now="{mode}" data-mode="{nxt}"', button)
+            # It reads just the mode's name; its question is the tooltip.
+            self.assertIn(f">{mode.title()}</button>", button)
+            self.assertIn(html.escape(fleet_now.QUESTIONS[mode]), button)
         self.assertEqual(fleet_now.next_mode(fleet_now.MODES[-1]), fleet_now.MODES[0])
 
     def test_cards_carry_their_mode_for_the_why_not_answer(self):
@@ -933,13 +937,22 @@ class ModeRouteTests(server_harness.ServerCase):
         finally:
             conn.close()
 
+    def header(self, page):
+        return page.split("</header>", 1)[0]
+
     def test_a_get_mode_is_a_one_off_view(self):
         status, page = self.request("GET", "/now?mode=little")
         self.assertEqual(status, 200)
-        self.assertIn('<div class="modes" data-mode="little">', page)
+        self.assertIn('data-now="little"', self.header(page))
         self.assertIsNone(self.saved())
         status, page = self.request("GET", "/now")
-        self.assertIn('<div class="modes" data-mode="ship">', page)
+        self.assertIn('data-now="ship"', self.header(page))
+
+    def test_the_mode_button_sits_beside_the_sync_icon_on_now_only(self):
+        header = self.header(self.request("GET", "/now")[1])
+        self.assertLess(header.index('id="mode"'), header.index('id="sync"'))
+        self.assertIn(">Ship</button>", header)
+        self.assertNotIn('id="mode"', self.header(self.request("GET", "/stale")[1]))
 
     def test_an_unknown_mode_is_a_400(self):
         self.assertEqual(self.request("GET", "/now?mode=nap")[0], 400)
@@ -951,7 +964,7 @@ class ModeRouteTests(server_harness.ServerCase):
         self.assertEqual(status, 200)
         self.assertEqual(self.saved(), "little")
         page = self.request("GET", "/")[1]
-        self.assertIn('<div class="modes" data-mode="little">', page)
+        self.assertIn('data-now="little"', self.header(page))
         bad = [("token", self.token), ("mode", "nap")]
         status, _ = self.request("POST", "/overlay/mode", origin=origin, body=bad)
         self.assertEqual(status, 400)
@@ -1129,8 +1142,7 @@ class TidyTests(Case):
         card = needs_fx.card(text, issue_url(14))
         self.assertIn("tidy · untriaged", card)
         self.assertIn("close it, supersede it, or decide it", card)
-        self.assertIn("Mode: Tidy", text)
-        self.assertIn('data-ov="mode" data-mode="ship"', text)  # Tidy wraps
+        self.assertIn('data-mode="ship"', fleet_now.mode_button("tidy"))  # wraps
 
 
 # --- the source seam ---------------------------------------------------------
