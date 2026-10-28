@@ -217,14 +217,14 @@ def score(
 
 # --- the fleet score ---------------------------------------------------------
 #
-# Now (fleet_now.py) ranks what waits on the owner, and
-# the owner's own work, by this second score. Each item belongs to exactly one
-# category, whose `[score.categories]` weight is its term; `priority` and `age`
-# (`[score.terms]`) add to every item. Now's Ship order puts each category in a
-# fixed tier first (fleet_now.TIERS), so this score orders items only within a
-# tier. With the defaults (config.DEFAULTS["score"]) the categories sit in
-# FLEET_CATEGORIES order, and the terms stay small enough that they reorder
-# items within a category, or across two neighbouring ones.
+# Now (fleet_now.py) ranks what waits on the owner, and the owner's own work,
+# by this score. Each item belongs to exactly one category, whose
+# `[score.categories]` weight is its term; `priority` and `age` (`[score.terms]`)
+# add to every item. Now's Ship order puts each category in a fixed tier first
+# (fleet_now.TIERS), so this score orders items only within a tier. With the
+# defaults (config.DEFAULTS["score"]) the categories sit in FLEET_CATEGORIES
+# order, and the terms stay small enough that they reorder items within a
+# category, or across two neighbouring ones.
 
 FLEET_CATEGORIES = (
     "quick_win",  # a green-CI bot PR: one click to merge
