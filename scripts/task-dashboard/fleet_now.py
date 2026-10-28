@@ -44,7 +44,8 @@ shows on its card as a `↳` line with its why. The parent takes the PR's tier
 when that is ready to merge or the review queue and beats its own, blocked
 included, and its why line names the PR (`ship: ready to merge via o/r#12`).
 Every overlay action on the card acts on the parent's key, so snoozing it
-hides the PR too. A PR whose parent Ship does not rank keeps its own card.
+hides the PR too. A PR whose parent Ship does not rank keeps its own card,
+and so does one whose parent the include filter leaves out (_visible).
 A Jira ticket's card also lists, as `↳` lines that change nothing, every
 other PR joined to it (joined_pr): a draft, or one waiting on CI or review.
 
@@ -676,7 +677,6 @@ def rank(
         if c.item not in seen:
             seen.add(c.item)
             out.append(Ranked(c))
-    out = fold(out)
     member_of = workstreams.membership(conn)
     weights = cfg["score"]["fleet"]
     for r in out:
@@ -698,7 +698,8 @@ def rank(
             terms = terms + list(scored)
             total = score._round(math.fsum(v for _, v, _ in terms))
         r.total, r.terms = total, terms
-    return out
+    # Folded after scoring, so a PR _visible hands back has its own score.
+    return fold(out)
 
 
 def fold(ranked: list[Ranked]) -> list[Ranked]:
@@ -1147,12 +1148,19 @@ def _visible(
     inc: "include.Include | None",
 ) -> "tuple[list[Ranked], int]":
     """`ranked` less the ignored, the filtered and the snoozed; and how many
-    were snoozed."""
+    were snoozed. A parent the include filter leaves out hands its folded PRs
+    back as cards of their own, unless it is snoozed, which hides them too."""
     ranked = [r for r in ranked if r.need.item not in ov.ignored]
     for r in ranked:
         r.folded = [f for f in r.folded if f.need.item not in ov.ignored]
     if inc is not None:
-        ranked = [r for r in ranked if inc.shows(r.need.kind)]
+        kept = []
+        for r in ranked:
+            if inc.shows(r.need.kind):
+                kept.append(r)
+            elif not ov.is_snoozed(r.need.item, now):
+                kept += [f for f in r.folded if inc.shows(f.need.kind)]
+        ranked = kept
     snoozed = sum(ov.is_snoozed(r.need.item, now) for r in ranked)
     return [r for r in ranked if not ov.is_snoozed(r.need.item, now)], snoozed
 
@@ -1227,12 +1235,6 @@ def why_line(r: Ranked) -> str:
     via = f" via {raised.need.ref or raised.need.title}" if raised else ""
     head = f"ship: {r.tier[1]}{via} · score {total}"
     return f"{head}: " + " · ".join(bits) if bits else head
-
-
-def folded_line(f: Ranked) -> str:
-    """One folded PR's evidence on its parent's card: `o/r#12: your PR,
-    approved, CI green: merge it`."""
-    return f"{f.need.ref or f.need.title}: {f.why}"
 
 
 def _folded_html(f: Ranked) -> str:

@@ -27,6 +27,7 @@ import config  # type: ignore[import-not-found]  # noqa: E402
 import db  # type: ignore[import-not-found]  # noqa: E402
 import fleet_now  # type: ignore[import-not-found]  # noqa: E402
 import github_fleet  # type: ignore[import-not-found]  # noqa: E402
+import include  # type: ignore[import-not-found]  # noqa: E402
 import needs  # type: ignore[import-not-found]  # noqa: E402
 import overlay  # type: ignore[import-not-found]  # noqa: E402
 import views  # type: ignore[import-not-found]  # noqa: E402
@@ -341,6 +342,18 @@ class TicketFoldTests(Case):
         page = fleet_now.render(self.conn, CFG, NOW)
         self.assertNotIn("o/r/pull/4", page)
 
+    def test_with_tasks_switched_off_the_pr_gets_its_own_card_back(self):
+        prs = include.Include("now", frozenset({"prs"}), "url")
+        page = fleet_now.build(self.conn, CFG, NOW, overlay.load(self.conn), prs)
+        shown = {r.need.item[1]: r for r in page.shown}
+        self.assertEqual(list(shown), [self.url])
+        r = shown[self.url]
+        self.assertEqual(r.tier[1], "ready to merge")
+        self.assertGreater(r.total, 0)  # scored before it was folded
+        overlay.snooze(self.conn, ("jira", "ABC-1"), "2026-11-03")
+        page = fleet_now.build(self.conn, CFG, NOW, overlay.load(self.conn), prs)
+        self.assertEqual(page.shown, [])  # a snoozed card hides its PR too
+
     def test_a_pr_that_does_not_raise_keeps_the_ticket_tier(self):
         self.ticket("ABC-2", "new", "To Do")
         failing = self.pr(5, "author", ci="failure", issue_key="ABC-2")
@@ -387,7 +400,9 @@ class TicketFoldTests(Case):
         self.conn.commit()
         r = self.by_key()["ABC-1"]
         self.assertEqual(r.folded, [])
+        self.assertEqual(r.linked, [])
         self.assertEqual(r.tier[1], "started")
+        self.assertNotIn("o/r/pull/4", fleet_now.render(self.conn, CFG, NOW))
 
 
 class IssueFoldTests(unittest.TestCase):
