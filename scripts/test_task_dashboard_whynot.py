@@ -40,7 +40,7 @@ import test_task_dashboard_server as server_harness  # noqa: E402
 NOW = now_fx.NOW
 GH = github_fleet.SOURCE
 pr_url, issue_url = now_fx.pr_url, now_fx.issue_url
-WEIGHTS = config.DEFAULTS["score"]["fleet"]
+WEIGHTS = config.DEFAULTS["score"]
 
 
 def snap(repo="acme/app", top="quick_win", value=10.0, **features):
@@ -374,6 +374,21 @@ class JiraHealthTest(server_harness.ServerCase):
         # Every instance's Now asks "why not now?", so its Health shows them.
         self.assertIn('data-section="why-not"', self.request("GET", "/health")[1])
 
+    def test_snoozing_on_a_jira_instances_now_asks_why_not(self):
+        conn = self.conn()
+        conn.execute(
+            "INSERT INTO issues (source, kind, key, summary, status_name,"
+            " status_category, scope) VALUES ('jira', 'ticket', 'ABC-1', 's',"
+            " 'In Progress', 'indeterminate', 'search')"
+        )
+        conn.commit()
+        conn.close()
+        page = self.request("GET", "/now")[1]
+        self.assertIn('data-source="jira"', page)
+        self.assertIn('data-ov="snooze"', page)
+        self.assertEqual(page.count('data-ov="snooze"'), page.count('data-why="1"'))
+        self.assertIn('class="whynot"', page)
+
 
 class SectionTests(now_fx.Case):
     def test_latest_twenty_newest_first_and_the_window(self):
@@ -408,13 +423,18 @@ class TuneTests(now_fx.Case):
             (3, 0.75),
         )
         self.assertEqual(
-            w["quick_win"]["suggest"]["weight"], WEIGHTS["quick_win"] * whynot.LOWER_BY
+            w["quick_win"]["suggest"]["weight"],
+            WEIGHTS["categories"]["quick_win"] * whynot.LOWER_BY,
         )
         self.assertIn("3 of 4", w["quick_win"]["suggest"]["why"])
         self.assertIsNone(
             w["asked"]["suggest"]
         )  # 1 of 4, and not_urgent is not counted
-        self.assertEqual(set(w), set(now_fx.score.FLEET_TERMS))
+        self.assertEqual(
+            set(w), set(now_fx.score.FLEET_CATEGORIES + now_fx.score.TERMS)
+        )
+        self.assertEqual(w["quick_win"]["table"], "categories")
+        self.assertEqual(w["deadline"]["table"], "terms")
         self.assertEqual(doc["by_reason"], {"wrong_priority": 4, "not_urgent": 1})
         self.assertEqual(doc["rows"][0]["terms"], {"quick_win": 10.0, "age": 0.2})
         self.assertEqual(doc["rows"][0]["dominant"], "quick_win")
@@ -492,7 +512,7 @@ class CliTests(unittest.TestCase):
         self.db_path = self.tmp / "d.db"
         self.cfg_path = self.tmp / "config.toml"
         self.cfg_path.write_text(
-            "[score.fleet]\nquick_win = 8\n[jira]\nenabled = false\n"
+            "[score.categories]\nquick_win = 8\n[jira]\nenabled = false\n"
         )
 
     def cli(self, *args):
@@ -518,10 +538,30 @@ class CliTests(unittest.TestCase):
         self.assertEqual(self.cfg_path.read_bytes(), before)
         text = self.cli()
         self.assertEqual(text.returncode, 0, text.stderr)
-        self.assertIn("weight quick_win: 8 -> 6", text.stdout)
+        self.assertIn("weight score.categories.quick_win: 8 -> 6", text.stdout)
 
     def test_a_bad_window_is_refused(self):
         self.assertEqual(self.cli("--days", "0").returncode, 2)
+
+    def test_tune_runs_on_a_jira_only_instance(self):
+        self.cfg_path.write_text(
+            '[jira]\nsite = "x.atlassian.net"\nboard_ids = [1]\n'
+            '[jira.fields]\nsprint = "customfield_1"\nflagged = "customfield_2"\n'
+            "[github]\nenabled = false\n"
+        )
+        conn = db.connect(self.db_path)
+        answer(conn, 0, "wrong_priority", snap(), at=datetime.now(timezone.utc))
+        conn.close()
+        out = self.cli("--json")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(json.loads(out.stdout)["answers"], 1)
+
+    def test_an_old_score_table_is_refused_naming_the_new_one(self):
+        for old, new in (("fleet", "categories"), ("weights", "terms")):
+            self.cfg_path.write_text(f"[score.{old}]\n[jira]\nenabled = false\n")
+            out = self.cli("--json")
+            self.assertEqual(out.returncode, 2)
+            self.assertIn(f"use [score.{new}]", out.stderr)
 
 
 if __name__ == "__main__":

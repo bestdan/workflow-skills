@@ -369,18 +369,17 @@ class ConfigTests(TmpCase):
         self.assertIn(str(p), str(cm.exception))
 
     def test_defaults_and_partial_weights(self):
-        p = self.write_config(MINIMAL + "\n[score.weights]\npriority = 9\n")
+        p = self.write_config(MINIMAL + "\n[score.terms]\npriority = 9\n")
         cfg = config.load(p)
         self.assertEqual(cfg["sync"]["interval_minutes"], 5)
         self.assertEqual(cfg["server"]["port"], 8765)
         self.assertEqual(cfg["jira"]["acli_path"], "acli")
         self.assertTrue(cfg["github"]["enabled"])
-        w = cfg["score"]["weights"]
+        w = cfg["score"]["terms"]
         self.assertEqual(w["priority"], 9)
-        self.assertEqual(w["blocked"], -10)
-        self.assertEqual(w["deadline"], 2)
+        self.assertEqual(w["deadline"], 0.13)
         self.assertEqual(
-            config.DEFAULTS["score"]["weights"]["priority"], 3
+            config.DEFAULTS["score"]["terms"]["priority"], 0.2
         )  # not mutated
 
     def test_env_var_override(self):

@@ -143,18 +143,19 @@ class Case(unittest.TestCase):
 
 
 class ScoreTests(unittest.TestCase):
-    W = config.DEFAULTS["score"]["fleet"]
+    C = config.DEFAULTS["score"]["categories"]
+    W = config.DEFAULTS["score"]["terms"]
 
     def score(self, category, prio=None, since=None):
         item = {"category": category, "why": "because", "prio": prio, "since": since}
-        return score.fleet_score(item, NOW, self.W)
+        return score.fleet_score(item, NOW, self.C, self.W)
 
     def test_one_term_per_name_and_they_add_up(self):
         total, terms = self.score("human_issue", "prio:0", NOW - timedelta(days=14))
         self.assertEqual([t[0] for t in terms], list(score.FLEET_TERMS))
         values = dict((n, v) for n, v, _ in terms)
         self.assertEqual(values["human_issue"], 3)
-        self.assertEqual(values["prio"], 0.8)
+        self.assertEqual(values["priority"], 0.8)
         self.assertEqual(values["age"], 0.2)
         self.assertEqual(values["quick_win"], 0)
         self.assertEqual(total, 4.0)
@@ -170,13 +171,18 @@ class ScoreTests(unittest.TestCase):
         )
 
     def test_the_default_categories_are_in_their_declared_order(self):
-        tops = [self.W[c] for c in score.FLEET_CATEGORIES]
+        tops = [self.C[c] for c in score.FLEET_CATEGORIES]
         self.assertEqual(tops, sorted(tops, reverse=True))
-        # The most prio and age can add never lifts an item past a session
+        # The most priority and age can add never lifts an item past a session
         # that asked, or a session past a green bot PR.
-        lift = self.W["prio"] * 4 + self.W["age"] * score.AGE_CAP_WEEKS
-        self.assertLess(self.W["started"] + lift, self.W["asked"])
-        self.assertLess(self.W["asked"] + lift, self.W["quick_win"])
+        lift = self.W["priority"] * 4 + self.W["age"] * score.AGE_CAP_WEEKS
+        self.assertLess(self.C["started"] + lift, self.C["asked"])
+        self.assertLess(self.C["asked"] + lift, self.C["quick_win"])
+
+    def test_prio_0_weighs_as_jiras_highest(self):
+        _, terms = self.score("ready", "prio:0")
+        jira = score.score({"priority": "Highest"}, {"now": NOW}, self.W)[1]
+        self.assertEqual(dict((n, v) for n, v, _ in terms)["priority"], jira[0][1])
 
     def test_an_unknown_category_is_refused(self):
         with self.assertRaises(ValueError):
@@ -196,31 +202,53 @@ class ConfigTests(unittest.TestCase):
             return config.load(p)
 
     def test_defaults_and_a_partial_override(self):
-        self.assertEqual(
-            self.load("")["score"]["fleet"], config.DEFAULTS["score"]["fleet"]
-        )
-        cfg = self.load("[score.fleet]\nready = 7\n")
-        self.assertEqual(cfg["score"]["fleet"]["ready"], 7)
-        self.assertEqual(cfg["score"]["fleet"]["quick_win"], 10)
-        # The Jira weights are untouched by it.
-        self.assertEqual(cfg["score"]["weights"], config.DEFAULTS["score"]["weights"])
+        cfg = self.load("")["score"]
+        self.assertEqual(cfg["categories"], config.DEFAULTS["score"]["categories"])
+        self.assertEqual(cfg["terms"], config.DEFAULTS["score"]["terms"])
+        cfg = self.load("[score.categories]\nready = 7\n")
+        self.assertEqual(cfg["score"]["categories"]["ready"], 7)
+        self.assertEqual(cfg["score"]["categories"]["quick_win"], 10)
+        # The terms are untouched by it.
+        self.assertEqual(cfg["score"]["terms"], config.DEFAULTS["score"]["terms"])
 
     def test_every_default_names_a_term(self):
-        self.assertEqual(set(config.DEFAULTS["score"]["fleet"]), set(score.FLEET_TERMS))
+        self.assertEqual(
+            set(config.DEFAULTS["score"]["categories"]), set(score.FLEET_CATEGORIES)
+        )
+        self.assertEqual(set(config.DEFAULTS["score"]["terms"]), set(score.TERMS))
 
     def test_bad_weights_are_config_errors(self):
         for extra, needle in (
             (
-                "[score.fleet]\nquickwin = 3\n",
-                "score.fleet.quickwin names no fleet term",
+                "[score.categories]\nquickwin = 3\n",
+                "score.categories.quickwin is not one of quick_win",
             ),
-            ('[score.fleet]\nasked = "high"\n', "score.fleet.asked must be a number"),
-            ("[score.fleet]\nasked = true\n", "score.fleet.asked must be a number"),
-            ("[score]\nfleet = 3\n", "score.fleet must be a table"),
+            ("[score.terms]\nreview = 2\n", "score.terms.review is not one of"),
+            (
+                '[score.categories]\nasked = "high"\n',
+                "score.categories.asked must be a number",
+            ),
+            ("[score.terms]\nage = true\n", "score.terms.age must be a number"),
+            ("[score]\ncategories = 3\n", "score.categories must be a table"),
         ):
             with self.assertRaises(config.ConfigError) as cm:
                 self.load(extra)
             self.assertIn(needle, str(cm.exception), extra)
+
+    def test_an_old_table_is_refused_naming_its_replacement(self):
+        for extra, needle in (
+            (
+                "[score.fleet]\nready = 7\n",
+                "score.fleet is renamed: use [score.categories]",
+            ),
+            (
+                "[score.weights]\npriority = 3\n",
+                "score.weights is renamed: use [score.terms]",
+            ),
+        ):
+            with self.assertRaises(config.ConfigError) as cm:
+                self.load(extra)
+            self.assertEqual(str(cm.exception), needle)
 
 
 class RankTests(Case):

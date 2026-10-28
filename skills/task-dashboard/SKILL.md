@@ -154,24 +154,28 @@ rebuilt from Jira or GitHub.
 
 ## tune
 
-On the fleet instance, snoozing a card on Now asks "why not now?" and records
+On every instance, snoozing a card on Now asks "why not now?" and records
 the answer with the item's score terms and other features; each day's shown
 items are kept as the base rate. `tune` turns those into proposals. **It only
 proposes: you never apply a change the user has not approved, and the
 dashboard itself never calls a model.**
 
 1. Run `DASH tune --json` (last 30 days; `--days N` for another window). It
-   reads the DB and the config's `[score.fleet]` weights and writes nothing.
+   reads the DB and the config's `[score.categories]` and `[score.terms]`
+   weights and writes nothing.
 2. Read what it prints:
    - `weights`: a term with `suggest` set was the largest term of most
-     "wrong priority" answers. Its `suggest.weight` is a starting point.
+     "wrong priority" answers. Its `suggest.weight` is a starting point, and
+     its `table` names where the weight lives: `[score.categories]` for a
+     category, `[score.terms]` for priority, deadline, unblocks, stuck and
+     age.
      Weights order items only within Now's fixed Ship tiers (asked, close
      out, ready to merge, review queue, started, the rest, blocked), so no
      weight moves an item into another tier.
    - `candidates`: feature values that snoozes lean towards, against what Now
      showed, with the `free_text` and `reasons` of those answers. When
      `scored_by` is set, a term already reads that feature: propose a weight.
-     Otherwise propose a new `[score.fleet]` term: its name, the field it
+     Otherwise propose a new `[score.terms]` term: its name, the field it
      would read (the feature), its sign and a starting weight.
    - `rows`: every answer. Read the free text for patterns no feature names.
 3. Put each proposal to the user, one at a time, with the evidence from the

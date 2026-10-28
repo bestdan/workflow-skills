@@ -20,7 +20,8 @@ SINCE = "since"  # when the wait began (datetime): the `age` term
 BLOCKS = "blocks"  # how many open issues it blocks (Deep)
 SIZE = "size"  # its `est:N` estimate, N (Deep)
 # Terms the source scored itself, as score.Term tuples the ranker adds to the
-# fleet score: a Jira ticket's priority, deadline, unblocks and stuck.
+# fleet score, each replacing the fleet term of its name: a Jira ticket's
+# priority, deadline, unblocks and stuck.
 SCORED = "scored"
 
 

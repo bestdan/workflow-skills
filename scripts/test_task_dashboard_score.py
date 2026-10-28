@@ -56,7 +56,10 @@ CFG = config.deep_merge(
         "github": {"enabled": False},
     },
 )
-WEIGHTS = CFG["score"]["weights"]
+# Round weights, so the expected values below are exact. The defaults
+# (config.DEFAULTS["score"]["terms"]) are these over 15.
+WEIGHTS = {"priority": 3, "deadline": 2, "unblocks": 2, "stuck": 1}
+JIRA_TERMS = ["priority", "deadline", "unblocks", "stuck"]
 
 
 def ts(dt):
@@ -79,7 +82,7 @@ def issue(**kw):
 
 
 def ctx(**kw):
-    base = {"now": NOW, "unblocks": 0, "prs": [], "blocked": (False, [])}
+    base = {"now": NOW, "unblocks": 0}
     base.update(kw)
     return base
 
@@ -96,14 +99,6 @@ def link(direction, category, key="ABC-9", link_type="Blocks"):
 class ScoreTest(unittest.TestCase):
     def total(self, i, **c):
         return score.score(i, ctx(**c), WEIGHTS)[0]
-
-    def test_blocked_urgent_ranks_below_unblocked_medium(self):
-        urgent = issue(priority="Highest")
-        blocked = score.is_blocked(urgent, [link("inward", "new")], CFG)
-        self.assertTrue(blocked[0])
-        self.assertLess(
-            self.total(urgent, blocked=blocked), self.total(issue(priority="Medium"))
-        )
 
     def test_due_tomorrow_outranks_due_next_month(self):
         soon = issue(due_date=(NOW + timedelta(days=1)).date().isoformat())
@@ -122,24 +117,14 @@ class ScoreTest(unittest.TestCase):
             due_date=(NOW - timedelta(days=3)).date().isoformat(),
             status_category_changed=ts(NOW - timedelta(days=12)),
         )
-        prs = [{"role": "author", "review_decision": "APPROVED", "number": 4}]
         total, terms = score.score(
-            i,
-            ctx(
-                unblocks=2,
-                prs=prs,
-                blocked=(True, ["flagged"]),
-                stuck_days=CFG["score"]["stuck_days"],
-            ),
-            WEIGHTS,
+            i, ctx(unblocks=2, stuck_days=CFG["score"]["stuck_days"]), WEIGHTS
         )
-        self.assertEqual([t[0] for t in terms], list(score.TERMS))
+        self.assertEqual([t[0] for t in terms], JIRA_TERMS)
         self.assertTrue(math.isclose(total, sum(v for _, v, _ in terms)))
         values = {n: v for n, v, _ in terms}
         self.assertEqual(values["priority"], 9)
         self.assertEqual(values["unblocks"], 4)
-        self.assertEqual(values["review"], 2)
-        self.assertEqual(values["blocked"], -10)
         self.assertGreater(values["deadline"], 2)  # overdue: past the day-of 1.0
         self.assertGreater(values["stuck"], 0)
 
@@ -174,16 +159,6 @@ class ScoreTest(unittest.TestCase):
 
         self.assertEqual(self.values(new(13))["stuck"], 0)
         self.assertGreater(self.values(new(20))["stuck"], 0)
-
-    def test_green_pr_of_mine_counts_and_a_reviewers_does_not(self):
-        mine = [{"role": "author", "ci_state": "success", "number": 1}]
-        theirs = [{"role": "reviewer", "review_decision": "APPROVED", "number": 2}]
-        self.assertGreater(self.total(issue(), prs=mine), self.total(issue()))
-        self.assertEqual(self.total(issue(), prs=theirs), self.total(issue()))
-
-    def test_a_green_draft_adds_nothing(self):
-        draft = [{"role": "author", "ci_state": "success", "is_draft": 1, "number": 5}]
-        self.assertEqual(self.total(issue(), prs=draft), self.total(issue()))
 
 
 # 22:00 on 2026-10-23 in New York, already 2026-10-24 in UTC.
@@ -728,7 +703,9 @@ class RoutesTest(unittest.TestCase):
         why = re.search(r'<div class="why"[^>]*>([^<]+)</div>', text)
         assert why is not None
         self.assertTrue(why.group(1).startswith("ship: blocked · score "))
-        self.assertIn("priority +12 (Highest (urgent))", why.group(1))
+        # One priority term, the ticket's, in place of the prio: label's.
+        self.assertIn("priority +0.8 (Highest (urgent))", why.group(1))
+        self.assertEqual(why.group(1).count("priority"), 1)
         self.assertNotIn("review", why.group(1))
         found = re.search(r'data-total="([^"]+)"', text)
         assert found is not None

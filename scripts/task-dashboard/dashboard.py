@@ -143,8 +143,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     tune_p = sub.add_parser(
         "tune",
-        help='fleet view: Now\'s "why not now" answers joined to their score'
-        " terms, with suggested [score.fleet] changes; suggests only",
+        help='Now\'s "why not now" answers joined to their score'
+        " terms, with suggested [score.categories] and [score.terms]"
+        " changes; suggests only",
     )
     tune_p.add_argument(
         "--days",
@@ -416,9 +417,7 @@ def cmd_tune(args: argparse.Namespace) -> int:
         return 2
     conn = db.connect(args.db)
     try:
-        doc = whynot.tune(
-            conn, cfg["score"]["fleet"], datetime.now(timezone.utc), args.days
-        )
+        doc = whynot.tune(conn, cfg["score"], datetime.now(timezone.utc), args.days)
     finally:
         conn.close()
     if args.json:

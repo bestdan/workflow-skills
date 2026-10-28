@@ -72,24 +72,28 @@ DEFAULTS: dict[str, Any] = {
     # URL nor a remembered switch choice says (include.py has the names).
     "views": {},
     "score": {
-        "weights": {
-            "priority": 3,
-            "deadline": 2,
-            "unblocks": 2,
-            "stuck": 1,
-            "review": 2,
-            "blocked": -10,
+        # Now's terms (score.TERMS), each added to an item's category weight
+        # below. `priority` is per level, a GitHub prio: label and a Jira
+        # priority on one scale (prio:0 and Jira's highest are 4); `age` is
+        # per week waiting (capped at score.AGE_CAP_WEEKS); deadline,
+        # unblocks and stuck are a Jira ticket's (score.score). They are small
+        # beside the categories, so they order items within one.
+        "terms": {
+            "priority": 0.2,
+            "deadline": 0.13,
+            "unblocks": 0.13,
+            "stuck": 0.07,
+            "age": 0.1,
         },
         # Days in a status category before the Stuck term starts counting.
         # Stale uses the `indeterminate` one. v1 measures time in category, not
         # in status: acli cannot read the changelog (Fields, under Sync, in
         # dev_docs/designs/2026-10-23-task-dashboard.md).
         "stuck_days": {"new": 14, "indeterminate": 5},
-        # The fleet instance's Now (score.fleet_score): one weight per
-        # category, highest first, then `prio` per prio: level (prio:0 is 4)
-        # and `age` per week waiting (capped at score.AGE_CAP_WEEKS). Now's
-        # Ship tiers (fleet_now.TIERS) come first; these order within a tier.
-        "fleet": {
+        # Now's categories (score.fleet_score), one weight each, highest
+        # first. Now's Ship tiers (fleet_now.TIERS) come first; these order
+        # within a tier.
+        "categories": {
             "quick_win": 10,
             "own_approved": 9,
             "asked": 8,
@@ -101,11 +105,12 @@ DEFAULTS: dict[str, Any] = {
             "own_ci_failing": 2,
             "ready": 1.5,
             "own_pr": 1,
-            "prio": 0.2,
-            "age": 0.1,
         },
     },
 }
+
+# A retired [score.<old>] table -> the one that replaced it.
+RENAMED_SCORE_TABLES = {"fleet": "categories", "weights": "terms"}
 
 REQUIRED_KEYS = (
     "jira.site",
@@ -184,6 +189,10 @@ def load(path: "str | os.PathLike[str] | None" = None) -> dict[str, Any]:
             'github.fleet is retired: set github.scope = "owner" for the wider'
             " GitHub read, and ingest.machines to collect from other hosts"
         )
+    for old, new in RENAMED_SCORE_TABLES.items():
+        if old in cfg["score"]:
+            # Refused, not aliased, as github.fleet is.
+            raise ConfigError(f"score.{old} is renamed: use [score.{new}]")
     if cfg["github"]["scope"] not in GITHUB_SCOPES:
         raise ConfigError('github.scope must be "owner" or "me"')
     port = cfg["server"]["port"]
@@ -249,28 +258,26 @@ def load(path: "str | os.PathLike[str] | None" = None) -> dict[str, Any]:
             raise ConfigError(
                 f'health.targets.{fid} must be "observed" or a comparison like "<= 5"'
             )
-    _validate_fleet_weights(cfg["score"]["fleet"])
+    _validate_weights(cfg["score"]["categories"], "categories", score.FLEET_CATEGORIES)
+    _validate_weights(cfg["score"]["terms"], "terms", score.TERMS)
     problem = include.validate_config(cfg["views"])
     if problem is not None:
         raise ConfigError(problem)
     return cfg
 
 
-def _validate_fleet_weights(weights: Any) -> None:
-    """Each `[score.fleet]` key names a fleet term and holds a number.
+def _validate_weights(weights: Any, table: str, names: tuple[str, ...]) -> None:
+    """Each `[score.<table>]` key is one of `names` and holds a number.
 
     A misspelt key would otherwise leave its default in force with no sign.
     """
     if not isinstance(weights, dict):
-        raise ConfigError("score.fleet must be a table of term = weight")
+        raise ConfigError(f"score.{table} must be a table of name = weight")
     for name, value in weights.items():
-        if name not in score.FLEET_TERMS:
-            raise ConfigError(
-                f"score.fleet.{name} names no fleet term; valid terms are"
-                f" {', '.join(score.FLEET_TERMS)}"
-            )
+        if name not in names:
+            raise ConfigError(f"score.{table}.{name} is not one of {', '.join(names)}")
         if not isinstance(value, (int, float)) or isinstance(value, bool):
-            raise ConfigError(f"score.fleet.{name} must be a number")
+            raise ConfigError(f"score.{table}.{name} must be a number")
 
 
 def _validate_jira(cfg: dict[str, Any]) -> None:
