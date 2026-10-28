@@ -4,7 +4,8 @@
 // Usage: node test_task_dashboard_header_dom.js <jsdom dir> <case.json>
 //
 // The case names the page, the /status answers in order (the last repeats),
-// the POST /sync answer, and whether to click Sync now. Timers are cut to a
+// the POST /sync answer (and its status, `post_status`, 202 by default), and
+// whether to click the sync icon. Timers are cut to a
 // few milliseconds so the poll runs through every answer. Prints the header's
 // state as each /status answer is about to be read (so `seen[i]` is the state
 // the answer before it left), then once more at the end, as JSON.
@@ -24,6 +25,7 @@ vc.on("jsdomError", (e) => {
 });
 
 const seen = [];
+let afterPost = null; // its visible text just after the POST /sync answer
 const calls = [];
 let doc = null;
 let next = 0;
@@ -61,7 +63,16 @@ const dom = new JSDOM(spec.page, {
     window.fetch = (url, opts) => {
       const method = (opts && opts.method) || "GET";
       calls.push({ url: String(url), method });
-      if (method === "POST") return answer(202, spec.post);
+      if (method === "POST") {
+        const p = answer(spec.post_status || 202, spec.post);
+        // Read the button right after the page's own handler has taken the
+        // answer: this chain's second step queues behind that handler, and a
+        // microtask runs before any poll timer can clear the text.
+        p.then(() => {}).then(() => {
+          afterPost = doc.getElementById("sync").textContent;
+        });
+        return p;
+      }
       seen.push(snap());
       const s = spec.statuses[Math.min(next, spec.statuses.length - 1)];
       next++;
@@ -91,7 +102,16 @@ const settle = () => new Promise((r) => window.setTimeout(r, 30));
   await settle();
   const final = snap();
   process.stdout.write(
-    JSON.stringify({ seen, final, calls, reloaded, errors, icon_swaps: iconSwaps }),
+    JSON.stringify({
+      seen,
+      final,
+      calls,
+      reloaded,
+      errors,
+      icon_swaps: iconSwaps,
+      after_post: afterPost,
+      final_text: doc.getElementById("sync").textContent,
+    }),
   );
   window.close();
 })();

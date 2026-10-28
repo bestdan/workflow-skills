@@ -35,8 +35,8 @@ its why, the score terms it has data for, and its features. rank() reads
 those only, and every ordering and render below reads its Ranked.
 
 MODES (dev_docs/designs/2026-10-26-now-modes.md). The owner picks one with the
-mode button in the page header, beside the sync button (mode_button, which the
-server puts there on Now only). It reads the mode's name, cycles
+mode button at the end of the page header bar, after the filter (mode_button,
+which the server puts there on Now only). It reads the mode's name, cycles
 overlay.NOW_MODES and saves the pick in the overlay; `?mode=` shows one mode
 once and saves nothing. With none saved the
 mode is Ship. Everything below this paragraph is Ship, except LITTLE, DEEP

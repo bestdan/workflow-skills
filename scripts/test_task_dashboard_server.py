@@ -943,6 +943,14 @@ class HeaderScriptTest(HeaderCase):
             {"button": "Sync now", "disabled": False, "note": None, "new_data": True},
         )
 
+    def test_a_refused_sync_shows_beside_the_icon_until_the_next_poll(self):
+        state = self.drive(click=True, post_status=403, post={},
+                           statuses=[self.idle(), self.idle()])  # fmt: skip
+        self.assertEqual(state["after_post"].strip(), "Sync refused (403)")
+        # The next idle poll puts the plain icon back, named Sync now.
+        self.assertEqual(state["final_text"].strip(), "")
+        self.assertEqual(state["final"]["button"], "Sync now")
+
     def test_a_sync_the_owner_starts_reads_syncing(self):
         manual = {**self.BUSY, "trigger": "manual"}
         state = self.drive(
