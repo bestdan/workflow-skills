@@ -239,9 +239,12 @@ only.
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/co-review-record.py" --run "$HOME/.claude/co-review-input/record/<run_id>.run.json" --findings "$HOME/.claude/co-review-input/record/<run_id>.findings.json" --mapping "$HOME/.claude/co-review-input/record/<run_id>.mapping.json"
 ```
 
-Call it by the plugin-root path exactly as written. A relative `scripts/…` path
-resolves only when the repo under review is this plugin, and since a failure is
-non-fatal, the ledger would silently stay empty everywhere else. SKILL.md's
+**Type the path as SKILL.md renders `${CLAUDE_PLUGIN_ROOT}`**, the absolute
+plugin path (the `--plugin-root` value in its allow-rule pre-flight). The
+variable is not expanded in this file or in the Bash tool, so a literal copy
+runs `/scripts/co-review-record.py` and exits `2`. A relative `scripts/…` path
+resolves only when the repo under review is this plugin. Either way, since a
+failure is non-fatal, the ledger would silently stay empty. SKILL.md's
 `allowed-tools` grants the call. It writes under `~/.claude/co-review/`, so
 where a Bash sandbox denies that write, run it unsandboxed.
 

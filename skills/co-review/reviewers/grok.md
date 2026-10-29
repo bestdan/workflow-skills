@@ -82,6 +82,8 @@ Run both before dispatching. Either one failing means **skip `grok`** (noted in 
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/grok-telemetry-gate.py"
 ```
 
+**Type the gate's path as SKILL.md renders `${CLAUDE_PLUGIN_ROOT}`**, the absolute plugin path (the `--plugin-root` value in its allow-rule pre-flight). The variable is not expanded in this file or in the Bash tool, so a literal copy runs `/scripts/grok-telemetry-gate.py` and exits `2`, which skips grok below.
+
 **Exit 0** means pinned. **Exit 1** means a key is missing, wrong, in the wrong table, or overridden by the environment. **Exit 2** means the config is absent or unparseable. On anything but 0, **skip grok** and carry the script's one-line reason into the run summary. Failing closed costs one reviewer. Failing open ships the reviewed diff, and the contents of anything grok reads, to xAI's trace channel.
 
 > **This started as a `grep` one-liner and had two fail-opens, both found by review.** The first counted **commented-out** lines, so `# trace_upload = false` satisfied it. Anchoring the pattern fixed that and left the second: a `grep` cannot tell which **table** an assignment landed in, so a real, uncommented `trace_upload = false` under the wrong table also satisfied it, while grok went on using its uploading default. Both are regression cases in [`../../../scripts/test-grok-telemetry-gate.sh`](../../../scripts/test-grok-telemetry-gate.sh). Parsing the file is what closes them, which is why this gate is a script and not a fenced one-liner.
