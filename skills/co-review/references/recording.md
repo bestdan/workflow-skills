@@ -209,7 +209,8 @@ script: a rejected run stays unrecorded, and the warning says why.
 - `diff_lines` is insertions plus deletions: `additions` plus `deletions` from
   step 3's metadata read in the PR modes, `git diff --shortstat <base>` under
   `--local`.
-- `co_review_version` is `version` in `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json`.
+- `co_review_version` is `version` in `.claude-plugin/plugin.json` under the
+  plugin root SKILL.md renders for `${CLAUDE_PLUGIN_ROOT}`.
   `reconciler_model` is the model the reconciler ran on; it inherits this
   session's.
 - `reviewers` lists every reviewer this run resolved, plus each GitHub bot
@@ -243,8 +244,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/co-review-record.py" --run "$HOME/.claude
 plugin path (the `--plugin-root` value in its allow-rule pre-flight). The
 variable is not expanded in this file or in the Bash tool, so a literal copy
 runs `/scripts/co-review-record.py` and exits `2`. A relative `scripts/…` path
-resolves only when the repo under review is this plugin. Either way, since a
-failure is non-fatal, the ledger would silently stay empty. SKILL.md's
+resolves only when the repo under review is this plugin. Any path that does not
+resolve fails non-fatally, so the ledger would silently stay empty. SKILL.md's
 `allowed-tools` grants the call. It writes under `~/.claude/co-review/`, so
 where a Bash sandbox denies that write, run it unsandboxed.
 

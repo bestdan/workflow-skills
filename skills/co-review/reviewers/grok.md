@@ -82,7 +82,7 @@ Run both before dispatching. Either one failing means **skip `grok`** (noted in 
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/grok-telemetry-gate.py"
 ```
 
-**Type the gate's path as SKILL.md renders `${CLAUDE_PLUGIN_ROOT}`**, the absolute plugin path (the `--plugin-root` value in its allow-rule pre-flight). The variable is not expanded in this file or in the Bash tool, so a literal copy runs `/scripts/grok-telemetry-gate.py` and exits `2`, which skips grok below.
+**Type the gate's path as SKILL.md renders `${CLAUDE_PLUGIN_ROOT}`**, the absolute plugin path (the `--plugin-root` value in its allow-rule pre-flight). The variable is not expanded in this file or in the Bash tool, so a literal copy runs `/scripts/grok-telemetry-gate.py`, which Python cannot open: it exits `2` with `can't open file` before the gate runs. Skip grok as for any non-zero exit, but carry that line as the reason, not "config absent".
 
 **Exit 0** means pinned. **Exit 1** means a key is missing, wrong, in the wrong table, or overridden by the environment. **Exit 2** means the config is absent or unparseable. On anything but 0, **skip grok** and carry the script's one-line reason into the run summary. Failing closed costs one reviewer. Failing open ships the reviewed diff, and the contents of anything grok reads, to xAI's trace channel.
 
