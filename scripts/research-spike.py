@@ -1147,8 +1147,15 @@ def frontmatter_status(path: Path) -> str | None:
         if line.strip() == "---":
             return status
         if line.startswith("status:"):
-            value = line[len("status:") :].split(" #", 1)[0].strip()
-            status = value.strip("'\"") or None
+            value = line[len("status:") :].strip()
+            # A quoted value runs to its closing quote, so a ` #` inside it is
+            # text; only an unquoted value carries an inline comment.
+            if value[:1] in ("'", '"'):
+                end = value.find(value[0], 1)
+                value = value[1:end] if end != -1 else value[1:]
+            else:
+                value = value.split(" #", 1)[0]
+            status = value.strip() or None
     return None
 
 
