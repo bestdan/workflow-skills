@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.151.1] - 2026-10-29
+
+### Fixes
+
+- say to type the plugin path SKILL.md renders, not a literal ${CLAUDE_PLUGIN_ROOT} [#1075] (#1244) (7be1847)
+
 ## [2.151.0] - 2026-10-29
 
 ### Features
