@@ -42,6 +42,11 @@ the new head re-stamps the same comment with that head.
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/co-review-stamp.py" --repo <owner>/<name> --pr <n> --head <headRefOid> --summary "<one line>"
 ```
 
+**Type the path as SKILL.md renders `${CLAUDE_PLUGIN_ROOT}`**, the absolute plugin
+path (the `--plugin-root` value in its allow-rule pre-flight). The variable is
+not expanded in this file or in the Bash tool, so a literal copy runs
+`/scripts/co-review-stamp.py` and exits `2`.
+
 - `<owner>/<name>` is the repo resolved in step 2. Under `--post` that can be
   a repo other than `cwd`'s.
 - `--head` takes the full 40-character sha, never a short one. The script
