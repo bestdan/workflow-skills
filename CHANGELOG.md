@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.152.0] - 2026-10-29
+
+### Features
+
+- give the scope verdict its own template line [N/A] (#1245) (c014c9a)
+
 ## [2.151.1] - 2026-10-29
 
 ### Fixes
