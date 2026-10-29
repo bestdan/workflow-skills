@@ -383,7 +383,7 @@ label is the only signal of how hard each finding is meant to land.
    - Distinct logical units that could land independently without breaking each other.
    - A reviewer realistically cannot hold the whole change in their head.
 
-   Mere line count or file count alone is **not** sufficient — a large mechanical rename is fine as one unit. If you do call a split, name the proposed pieces concretely (files/hunks + one-line description each). Either way the verdict goes on the output template's **Scope** line, which is never omitted: an appropriately sized change says so there, so a missing verdict can't pass for a clean one. (This runs in `--local` mode too — useful before a PR even exists.)
+   Mere line count or file count alone is **not** sufficient — a large mechanical rename is fine as one unit. If you do call a split, name the proposed pieces concretely (files/hunks + one-line description each). Either way the verdict goes on the output template's **Scope** line, with any proposed pieces listed beneath it, and that line is never omitted: an appropriately sized change says so there, so a missing verdict can't pass for a clean one. (This runs in `--local` mode too — useful before a PR even exists.)
 
 7. **Review the change yourself.** Form an independent review focused on:
    - Correctness and obvious bugs
