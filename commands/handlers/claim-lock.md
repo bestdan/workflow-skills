@@ -4,25 +4,27 @@ disable-model-invocation: true
 user-invocable: false
 ---
 
-# Atomic claim lock — shared by the jira and gh-issue handlers
+# Atomic claim lock — the gh-issue handler's ref lock
 
-Read by `commands/handlers/jira-claim.md` and `commands/handlers/gh-issue-claim.md`
-("Claim the issue"). It defines the **one** primitive both handlers lock on, the
-fallback for environments that cannot use it, and how a claim is released.
+Read by `commands/handlers/gh-issue-claim.md` ("Claim the issue"). It defines the
+primitive that handler locks on, the fallback for environments that cannot use it, and
+how a claim is released. The jira handler does **not** use it: `jira-claim.md` decides
+its claim from the Jira assignee field and accepts the same-account race described
+below, so that a leftover branch cannot hold a Jira ticket (#1247).
 
-> **`<KEY>`** below is the handler's issue identifier — the Jira key (`PLAT-142`) for
-> `jira-claim.md`, the bare issue number (`142`) for `gh-issue-claim.md`. **`<branch>`**
-> is the handler's deterministic branch name, which is also the lock ref: `task/<KEY>`
-> for jira, and `<branch_prefix>task-<KEY>` for gh-issue, whose prefix comes from the
-> `gh-issue.branch_prefix` config key (see `gh-issue-claim.md` → "Branch name"). Only
-> two properties matter to this file: both racers compute the **same** name from the
-> issue alone, and the name is a legal ref. Everything below is written in terms of
-> `<branch>`.
+> **`<KEY>`** below is the bare issue number (`142`). **`<branch>`** is the handler's
+> deterministic branch name, which is also the lock ref: `<branch_prefix>task-<KEY>`,
+> whose prefix comes from the `gh-issue.branch_prefix` config key (see
+> `gh-issue-claim.md` → "Branch name"). Only two properties matter to this file: both
+> racers compute the **same** name from the issue alone, and the name is a legal ref.
+> Everything below is written in terms of `<branch>`, and the primitive itself is
+> tracker-neutral — `acquire-ref` takes any branch name.
 
 ## Why the assignee cannot be the lock
 
-Both handlers used to confirm a claim by re-reading the issue and checking that the
-final assignee was **their own** account. That defeats a _different_ user racing you,
+A claim used to be confirmed by re-reading the issue and checking that the final
+assignee was **this session's own** account — the check `jira-claim.md` still makes, by
+choice, accepting the race below. That defeats a _different_ user racing you,
 but not a **second session authenticated as the same user** — both write the identical
 account id, both read it back, and both conclude they won, then both build the same
 issue. `linear-claim.md` documents the same reasoning and elects a winner on an
@@ -43,7 +45,7 @@ a no-op — see the plain-`git push` warning below, which measured exactly that.
 `POST /repos/<owner>/<repo>/git/refs` **creates** a ref or fails — it never updates one.
 A second call for a ref that exists returns **HTTP 422 `Reference already exists`**
 regardless of the sha it names, so exactly one caller wins no matter which account each
-session is authenticated as. Both handlers already probe
+session is authenticated as. The handler already probes
 `git ls-remote --heads origin <branch>` in pre-flight; creating the ref at **claim**
 time (rather than at PR time, ~an hour of work later) is what turns that read into a
 real lock instead of a TOCTOU probe spanning the whole execution.
@@ -62,7 +64,7 @@ real lock instead of a TOCTOU probe spanning the whole execution.
 assignee/status/label write. `<repo>` is the handler's configured repo
 (`gh-issue.repo`) or, when unset, the current one (`gh repo view --json nameWithOwner
 --jq .nameWithOwner`); `<base>` is the handler's configured base branch, else the repo
-default. The POST/422 dispatch is not hand-walked here — both handlers call the one
+default. The POST/422 dispatch is not hand-walked here — the handler calls the one
 implementation in `commands/handlers/assets/gh-issue-claim.py`, named for gh-issue but
 tracker-neutral at this entry point (it takes the branch name directly, not an issue
 number):
@@ -215,9 +217,9 @@ which is a decided race — degrade to the election below and
 API error>`. A silent degrade would claim atomicity the run does not have.
 
 The election is `linear-claim.md`'s, ported to the handler's own comment API
-(`addCommentToJiraIssue` / `gh issue comment`). Comment ids are numeric and increase
-with creation time on both trackers, so a lowest-id-wins ordering is deterministic —
-**verified** on a live Jira instance: ids `324986` (13:02:13) < `324988` (13:02:31) <
+(`gh issue comment`). Comment ids are numeric and increase with creation time, so a
+lowest-id-wins ordering is deterministic — the same holds on Jira, **verified** on a
+live instance while the jira handler still ran this election: ids `324986` (13:02:13) < `324988` (13:02:31) <
 `325216` (next day), and editing a comment moves `updated` without changing its `id`.
 
 1. **Record `T_unclaimed`** — the wall-clock time of the last read that showed this
@@ -228,12 +230,12 @@ with creation time on both trackers, so a lowest-id-wins ordering is determinist
    `<!-- do-tasks-claim:<rand> -->`. No email, hostname, or pid — the election needs
    only uniqueness.
 
-   > **The token is invisible on gh-issue, visible on Jira.** GitHub renders the HTML
-   > comment away; Jira does **not** — the Atlassian MCP converts the body to ADF and
+   > **The token is invisible on gh-issue, and would not be on Jira.** GitHub renders the
+   > HTML comment away; Jira does **not** — the Atlassian MCP converts the body to ADF and
    > stores the marker as a literal text paragraph (verified: `{"type":"text","text":"<!--
-   > do-tasks-claim:… -->"}`), so it shows verbatim on the issue. Accept that on the
-   > degraded path rather than dropping the token — it is the ordering key — but do not
-   > tell the user it is hidden.
+   > do-tasks-claim:… -->"}`), so it shows verbatim on the issue. A port of this election
+   > to Jira must accept that rather than drop the token — it is the ordering key — and
+   > must not tell the user it is hidden.
 
 3. **Post the claim comment first** — it is the lock:
 
@@ -250,8 +252,7 @@ with creation time on both trackers, so a lowest-id-wins ordering is determinist
 5. **Re-list the comments and elect** — among comments carrying the
    `do-tasks-claim:` marker, keep only those (a) created at or after `T_unclaimed` and
    (b) **state-backed**: the issue currently carries this handler's claim markers
-   (assignee set, and the In-Progress status on jira / the `status:3_started` label on
-   gh-issue), proving the poster's
+   (assignee set, and the `status:3_started` label), proving the poster's
    issue write landed. The winner is the **lowest comment id** (equivalently the
    earliest `createdAt`). Both filters are load-bearing: without (a) a stale orphan
    from a dead session is elected and the issue deadlocks with no owner; without (b) a
@@ -260,14 +261,13 @@ with creation time on both trackers, so a lowest-id-wins ordering is determinist
    your own claim comment (below), leave the assignee/status **untouched** (they are the
    winner's), and advance to the next candidate.
 
-   **Retract, per tracker — jira cannot delete.** The Atlassian MCP exposes no
-   delete-comment tool (`addCommentToJiraIssue`, `addWorklogToJiraIssue`, … — there is
-   no `deleteJiraComment`), so a jira loser **cannot** remove its comment. Instead
-   **rewrite the body without the token**, which is what makes it inert for every future
+   **Retract** by deleting it outright:
+   `gh api --method DELETE repos/<repo>/issues/comments/<id>`. A port to Jira could not
+   delete: the Atlassian MCP exposes no delete-comment tool (`addCommentToJiraIssue`,
+   `addWorklogToJiraIssue`, … — there is no `deleteJiraComment`). There the retraction is
+   to **rewrite the body without the token**, which makes it inert for every future
    election: `addCommentToJiraIssue` with `commentId: <your id>` updates in place
-   (verified — same id, `updated` advances). Use a body that says the claim was retracted
-   and no work started. On gh-issue, delete it outright:
-   `gh api --method DELETE repos/<repo>/issues/comments/<id>`.
+   (verified — same id, `updated` advances).
 
    > **In a cloud routine this retraction is impossible** — the connector exposes no
    > delete-comment tool, and the `gh api` form cannot run there (see "Cloud routines"
@@ -277,8 +277,8 @@ with creation time on both trackers, so a lowest-id-wins ordering is determinist
 
    Retraction is hygiene, not correctness: a loser's comment always has a **higher** id
    than the winner's, so it can never win its own race. What it protects is the _next_
-   session, whose `T_unclaimed` may fall before a leftover token — the tokenless
-   rewrite means there is nothing left to elect.
+   session, whose `T_unclaimed` may fall before a leftover token — once the comment is
+   gone there is nothing left to elect.
 7. **Read-lag residual.** If the re-list returns **only** your own marker, treat it as
    inconclusive and re-poll once or twice before declaring a win — no server-side CAS
    backs this path, which is why it is the fallback and not the default.
@@ -295,8 +295,7 @@ git push origin --delete "<branch>"   # only if this session acquired the ref ab
 Delete the remote ref **before** clearing the issue's assignee/status, so the issue
 never sits unclaimed while a stale lock ref still blocks the next session's acquire. On
 the fallback path there is no ref to delete — **retract** this session's token comment
-instead, per step 6 above (rewrite it tokenless on jira, which cannot delete; delete it
-on gh-issue). Never delete a `<branch>` ref this session did not acquire.
+instead, per step 6 above. Never delete a `<branch>` ref this session did not acquire.
 
 > **A routine cannot run this step** — which is exactly why routines do not take the
 > ref lock in the first place (see "Cloud routines" above). A stranded ref has to be

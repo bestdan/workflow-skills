@@ -99,18 +99,19 @@ that message — never a question).
     execute". The created lock ref plus the assigned, started issue is the
     reservation marker — no PR.
   - `jira`: run through "Claim the issue" in `commands/handlers/jira-claim.md`
-    (pre-claim WIP gate → find candidates → pre-flight → judge → acquire the atomic
-    `task/<KEY>` claim lock → self-assign + transition to an In-Progress status), then
-    stop before "Branch + execute". The created `task/<KEY>` lock ref plus the assigned,
-    In-Progress issue is the reservation marker — no PR.
+    (pre-claim WIP gate → find candidates → pre-flight → judge → self-assign +
+    transition to an In-Progress status), then stop before "Branch + execute". The
+    assigned, In-Progress issue is the reservation marker — no branch, no PR.
 
-  On `gh-issue` and `jira` the lock is the **atomic creation of that ref** (GitHub's
-  create-ref API, which returns 422 rather than updating an existing ref), not the
-  assignee — so two sessions
-  authenticated as the **same** account cannot both win (see
+  On `gh-issue` the lock is the **atomic creation of that ref** (GitHub's create-ref
+  API, which returns 422 rather than updating an existing ref), not the assignee — so
+  two sessions authenticated as the **same** account cannot both win (see
   `commands/handlers/claim-lock.md`, which also carries the comment-token election
-  these handlers degrade to in a branch-pinned environment that cannot push
-  `task/<KEY>`).
+  the handler degrades to in a branch-pinned environment that cannot create the ref).
+  On `jira` the claim is the **assignee** itself: the state of a Jira claim lives in
+  Jira, so a leftover `task/<KEY>` branch cannot hold a ticket, at the accepted cost
+  that two same-account sessions racing one ticket could both claim it (see
+  `jira-claim.md` → "Claim the issue").
 - **`--no-claim`** — skip the claim step and execute a task this caller has
   **already** claimed. **Requires an explicit `<slug>`/`<identifier>`** — there is
   no default selection, since the target is a specific already-claimed task, not
@@ -142,11 +143,13 @@ that message — never a question).
     never by spelling it** — `gh-issue.branch_prefix` is per-repo, so a literal is right in one
     repo and wrong in the next. Then do the work, open the PR, and "Move to review on PR
     open" (per `gh-issue-claim.md`) — without re-claiming.
-  - `jira`: check out the handler's deterministic claim branch `task/<KEY>`
-    (`git fetch origin && git switch task/<KEY>`), which the claim pushed as its lock;
-    create it (`git switch -c task/<KEY> origin/<base>`) only when the claim ran on the
-    degraded comment-election path, which pushes no ref. Then do the work, open the PR,
-    and "Move to review on PR open" (per `jira-claim.md`) — without re-claiming.
+  - `jira`: first check for an open PR carrying `[<KEY>]` (pre-flight step 1 in
+    `jira-claim.md`) — if one exists, the work is already published, so stop and report
+    it. Otherwise run "Branch + execute" in its resume form: reuse the handler's
+    deterministic work branch `task/<KEY>` when it exists as this caller's own work,
+    and create it from `origin/<base>` when it does not (the claim creates no branch).
+    Then do the work, open the PR, and "Move to review on PR open" (per
+    `jira-claim.md`) — without re-claiming.
 
 **Batching.** `--claim-only` is the one execute-family action safe to batch — it
 runs no foreground execution — so `--all` / `-n N --claim-only` may reserve several
@@ -1170,9 +1173,8 @@ step 5's self-check stops each session loudly on its own issue.
 
 Read and follow **`commands/handlers/jira-claim.md`** end to end — it holds the
 config read (`ready_status` is required here), the find-candidates JQL, the
-in-flight pre-flight, the feasibility judgment, the atomic `task/<KEY>` claim lock
-(defined in `commands/handlers/claim-lock.md`) plus the self-assign + transition board
-marker, `gh pr create` with a
+in-flight pre-flight, the feasibility judgment, the assignee-based claim (self-assign +
+transition to In Progress), the `task/<KEY>` work branch, `gh pr create` with a
 Conventional Commits title ending in `[<KEY>]`, the move-to-review transition,
 bail mechanics, and the
 report format. `/do-tasks` runs these phases in the **current session** over the

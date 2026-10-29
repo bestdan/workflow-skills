@@ -196,8 +196,9 @@ class AcquireConcurrencyTests(unittest.TestCase):
 
 class AcquireRefTests(unittest.TestCase):
     """`acquire-ref` shares acquire_ref() with `acquire` but takes the branch
-    name directly, for callers (claim-lock.md, the jira handler) that derive
-    it under their own naming rule instead of gh-issue's issue-number rule."""
+    name directly, for callers (claim-lock.md, or any tracker-neutral caller)
+    that derive it under their own naming rule instead of gh-issue's
+    issue-number rule."""
 
     def setUp(self):
         self._orig = gh_issue_claim.run_gh

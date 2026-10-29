@@ -220,7 +220,7 @@ both the split and that recovery cost were measured.
 `origin/<base>`, so the prefix and the `base_sha` can come from different
 revisions. The cross-prefix probe contains it — the later session stops and
 reports rather than double-claiming — and closing it properly means pinning one
-SHA through the `claim-lock.md` contract the jira handler shares (#818).
+SHA through the `claim-lock.md` contract (#818).
 
 ## 2. Claim (the handler's protocol, verbatim)
 
@@ -235,13 +235,18 @@ version has hard-won race handling that must not be forked:
 - **linear** → "Pre-flight: is work already in flight?" then "Claim the issue" in
   `linear-claim.md` (the token-comment election with the live-window + state-backed
   eligibility filters).
-- **gh-issue** / **jira** → "Claim the issue" in the respective handler file (acquire
-  the atomic `task/<KEY>` ref lock per `commands/handlers/claim-lock.md`, then write the
-  assignee + label/transition board marker). The lock is the ref **creation**, not the
+- **gh-issue** → "Claim the issue" in `gh-issue-claim.md` (acquire the atomic
+  `<branch_prefix>task-<n>` ref lock per `commands/handlers/claim-lock.md`, then write
+  the assignee + label board marker). The lock is the ref **creation**, not the
   assignee; a 422 is a lost race, and a create blocked by a branch-pinned environment
   degrades to the comment-token election with an explicit note.
+- **jira** → "Claim the issue" in `jira-claim.md` (re-read the assignee: empty or this
+  caller proceeds, anyone else is a race; then self-assign, confirm, and transition to
+  In Progress). The claim is the assignee, not a ref — a leftover `task/<KEY>` branch is
+  reported as stale with a fix, never as a lost claim.
 
-**`--base`:** when the handler's claim acquires the work branch, base it on
+**`--base`:** when the handler acquires or creates the work branch (jira creates it
+in "Branch + execute", after the claim), base it on
 `--base` (default `main`) instead of the handler's default base — step 1 has
 already fetched it, so the branch starts from its current tip. Everything else in
 the claim section is unchanged.
