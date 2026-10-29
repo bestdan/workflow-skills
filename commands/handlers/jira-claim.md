@@ -163,7 +163,9 @@ Runs on the candidate **before "Judge feasibility" and "Claim the issue"**, on e
 
    If either of the first two finds the branch, report it with the fix rather than as an in-flight build — `Skipped <KEY>: stale branch task/<KEY> (<local|origin|both>; <its closed/merged PR url, or "no PR">)`, followed by the fix that fits:
    - **Its PR is closed or merged** — the branch is dead. Delete it: `git push origin --delete "task/<KEY>"` and/or `git branch -D "task/<KEY>"`.
-   - **It has no PR** — it may carry unpublished work. Inspect it first (`git log "origin/<base>..origin/task/<KEY>"`), then either delete it as above or keep it under another name: `git branch -m "task/<KEY>" "task/<KEY>-old"` locally, and for the remote copy `git push origin "origin/task/<KEY>:refs/heads/task/<KEY>-old"` followed by the delete.
+   - **It has no PR** — it may carry unpublished work. Inspect each copy the report names, then either delete it as above or keep it under another name:
+     - **On origin** — fetch it first, since pre-flight only listed it (`git fetch origin "task/<KEY>"`), inspect with `git log "origin/<base>..origin/task/<KEY>"`, and keep it with `git push origin "origin/task/<KEY>:refs/heads/task/<KEY>-old"` followed by `git push origin --delete "task/<KEY>"`.
+     - **Local** — inspect with `git log "origin/<base>..task/<KEY>"`, and keep it with `git branch -m "task/<KEY>" "task/<KEY>-old"`.
 
    Do not delete or rename it yourself: the branch belongs to whoever pushed it, and the report is enough to unblock the next run.
 
@@ -196,17 +198,18 @@ The claim is decided by the issue's **assignee**: unassigned, or assigned to thi
 
 2. **Re-read** the chosen issue — `<atlassian-mcp>__getJiraIssue` (`cloudId`, `issueIdOrKey: <KEY>`, `fields: ["assignee", "status"]`) — and decide:
    - **Assignee empty** → proceed.
-   - **Assignee is your own `account_id`** → proceed. This is this caller resuming its own claim — an earlier run that stopped after the self-assign — not a competitor. (It is also exactly what a same-account twin looks like, which is the accepted tradeoff above.)
+   - **Assignee is your own `account_id`, on a direct key** → proceed. This is this caller resuming its own claim — an earlier run that stopped after the self-assign — not a competitor. (It is also exactly what a same-account twin looks like, which is the accepted tradeoff above.)
+   - **Assignee is your own `account_id`, on the ranked path** → **another session on your account claimed it** since "Find candidates" read it empty (the ranked query selects only `assignee IS EMPTY`, and this session has written nothing yet): return `race` and fall back to the next candidate. Leave the issue untouched.
    - **Any other assignee** → **another claimant beat you**: return `race` and fall back to the next candidate (on a direct key: stop and report `<KEY> is assigned to <other> — not claimed`). Leave the issue untouched.
 
    Independently, its status must still be the one you admitted in "Find candidates" (`ready_status` on the ranked path; the held status the direct-key override admitted). A different status means someone moved it since — return `race` as above. An overridden issue keeps its held status here; step 5 resolves the start transition from that status and stops with its existing message if none exists.
 
-3. **Assign yourself** — skip when step 2 found your own account already there. Call `<atlassian-mcp>__editJiraIssue` with:
+3. **Assign yourself** — skip when step 2 found your own account already there on a direct key. Call `<atlassian-mcp>__editJiraIssue` with:
    - `cloudId`: `<jira.site>`
    - `issueIdOrKey`: `<KEY>`
    - `fields`: `{ "assignee": { "accountId": "<account_id>" } }`
 
-4. **Confirm the assignee landed.** Re-read the issue's `assignee` (`getJiraIssue`, `fields: ["assignee"]`). If it is your `account_id`, the claim is yours — continue. If a **different** `accountId` appears, another claimant's write landed after yours, and the field now names them: leave the assignee and status alone (they are the winner's, or a human's deliberate reassignment), report `<KEY>: assignee is now <other> — claim not taken, no work started`, and fall back to the next candidate (on a direct key: stop). This runs **before** the transition so a losing session never moves the issue's status. A competing write that lands after this read is caught by the re-read in "PR", before anything is published.
+4. **Confirm the assignee landed.** Re-read the issue's `assignee` (`getJiraIssue`, `fields: ["assignee"]`). If it is your `account_id`, the claim is yours — continue. If a **different** `accountId` appears, another claimant's write landed after yours, and the field now names them: leave the assignee and status alone (they are the winner's, or a human's deliberate reassignment), report `<KEY>: assignee is now <other> — claim not taken, no work started`, and fall back to the next candidate (on a direct key: stop). If it reads back **empty**, someone cleared it after your write: leave the issue alone, report `<KEY>: assignee was cleared after the self-assign — claim not taken, no work started`, and fall back the same way. This runs **before** the transition so a losing session never moves the issue's status. A competing write that lands after this read is caught by the re-read in "PR", before anything is published.
 
 5. **Transition to In Progress.** `transitionJiraIssue` takes a transition **id**, not a status name. Fetch the candidate's transitions, write the response to a file, and let the helper resolve the start-work one:
 

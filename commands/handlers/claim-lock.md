@@ -10,7 +10,7 @@ Read by `commands/handlers/gh-issue-claim.md` ("Claim the issue"). It defines th
 primitive that handler locks on, the fallback for environments that cannot use it, and
 how a claim is released. The jira handler does **not** use it: `jira-claim.md` decides
 its claim from the Jira assignee field and accepts the same-account race described
-below, so that a leftover branch cannot hold a Jira ticket (#1247).
+below, so that a leftover branch cannot hold a Jira ticket.
 
 > **`<KEY>`** below is the bare issue number (`142`). **`<branch>`** is the handler's
 > deterministic branch name, which is also the lock ref: `<branch_prefix>task-<KEY>`,
@@ -22,9 +22,9 @@ below, so that a leftover branch cannot hold a Jira ticket (#1247).
 
 ## Why the assignee cannot be the lock
 
-A claim used to be confirmed by re-reading the issue and checking that the final
-assignee was **this session's own** account — the check `jira-claim.md` still makes, by
-choice, accepting the race below. That defeats a _different_ user racing you,
+Confirming a claim by re-reading the issue and checking that the final assignee is
+**this session's own** account — the check `jira-claim.md` makes, by choice, accepting
+the race below — defeats a _different_ user racing you,
 but not a **second session authenticated as the same user** — both write the identical
 account id, both read it back, and both conclude they won, then both build the same
 issue. `linear-claim.md` documents the same reasoning and elects a winner on an
@@ -218,9 +218,7 @@ API error>`. A silent degrade would claim atomicity the run does not have.
 
 The election is `linear-claim.md`'s, ported to the handler's own comment API
 (`gh issue comment`). Comment ids are numeric and increase with creation time, so a
-lowest-id-wins ordering is deterministic — the same holds on Jira, **verified** on a
-live instance while the jira handler still ran this election: ids `324986` (13:02:13) < `324988` (13:02:31) <
-`325216` (next day), and editing a comment moves `updated` without changing its `id`.
+lowest-id-wins ordering is deterministic.
 
 1. **Record `T_unclaimed`** — the wall-clock time of the last read that showed this
    issue unclaimed (the handler's re-read guard). Claim comments older than it are
@@ -230,12 +228,7 @@ live instance while the jira handler still ran this election: ids `324986` (13:0
    `<!-- do-tasks-claim:<rand> -->`. No email, hostname, or pid — the election needs
    only uniqueness.
 
-   > **The token is invisible on gh-issue, and would not be on Jira.** GitHub renders the
-   > HTML comment away; Jira does **not** — the Atlassian MCP converts the body to ADF and
-   > stores the marker as a literal text paragraph (verified: `{"type":"text","text":"<!--
-   > do-tasks-claim:… -->"}`), so it shows verbatim on the issue. A port of this election
-   > to Jira must accept that rather than drop the token — it is the ordering key — and
-   > must not tell the user it is hidden.
+   > **The token is invisible on the issue:** GitHub renders the HTML comment away.
 
 3. **Post the claim comment first** — it is the lock:
 
@@ -262,12 +255,7 @@ live instance while the jira handler still ran this election: ids `324986` (13:0
    winner's), and advance to the next candidate.
 
    **Retract** by deleting it outright:
-   `gh api --method DELETE repos/<repo>/issues/comments/<id>`. A port to Jira could not
-   delete: the Atlassian MCP exposes no delete-comment tool (`addCommentToJiraIssue`,
-   `addWorklogToJiraIssue`, … — there is no `deleteJiraComment`). There the retraction is
-   to **rewrite the body without the token**, which makes it inert for every future
-   election: `addCommentToJiraIssue` with `commentId: <your id>` updates in place
-   (verified — same id, `updated` advances).
+   `gh api --method DELETE repos/<repo>/issues/comments/<id>`.
 
    > **In a cloud routine this retraction is impossible** — the connector exposes no
    > delete-comment tool, and the `gh api` form cannot run there (see "Cloud routines"
