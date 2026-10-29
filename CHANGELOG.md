@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.151.0] - 2026-10-29
+
+### Features
+
+- keep the auto-pilot PR a draft until hand-off on gh-issue [#1023] (#1187) (01c6270)
+
 ## [2.150.0] - 2026-10-28
 
 ### Features
