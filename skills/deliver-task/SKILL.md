@@ -333,6 +333,18 @@ write, **draft** otherwise. Detect with `gh repo view --json viewerPermission` �
 write, so it must count as ready.) If the permission can't be determined, default
 to **draft** — the safe choice.
 
+**Exception — auto-pilot on gh-issue opens a draft whatever the access.** When
+`--run-state` is present **and** the effective handler is `gh-issue`, open the PR
+as a **draft**; step 7 marks it ready at hand-off. The draft exists only to delay
+`.github/workflows/gh-issue-pr-sync.yml`, which moves the issue to
+`status:4_needs_review` on a non-draft PR's `opened` event — so a ready PR would
+read "needs review" while co-review and iteration are still running. Linear has
+no PR-open Action, and on repo-pr the ready `task-loop` PR is itself the review
+signal, so a draft there would cost bot reviews and buy nothing. gh-issue
+accepts that cost: where bots skip drafts, the `bot review skipped (draft)`
+rule below applies. Standalone
+`/deliver-task`, and every other handler, keep the write-access rule above.
+
 - On **repo-pr** this is the claim→review-PR **conversion** — relabel the draft
   `task-claim` PR to `task-loop`, fill the body — per `repo-pr-execute.md`; **do
   not open a second PR**. Call `gh pr ready` **only when the viewer can write**
@@ -340,7 +352,8 @@ to **draft** — the safe choice.
   off in that state — never fail trying to ready a PR you lack permission to. On
   **linear/gh-issue/jira**, open the PR with the handler's own title/link
   conventions (e.g. `fix(scope): … [PRE-12]` + the linked issue), draft per the
-  same gate. The title grammar is the `agent-guidance` plugin's
+  same gate (gh-issue under `--run-state`: always draft, per the exception
+  above). The title grammar is the `agent-guidance` plugin's
   `portable.md` (`Git:` bullet), not this file.
 - **PR body:** the evidence captured in step 3 (check output, screenshots,
   artifact paths) **plus how-to-evaluate steps** for any human-judgment item —
@@ -432,6 +445,14 @@ remaining findings and proceed — don't loop.
   completion is merge-verified by `/sweep-for-complete`, per the `linear-claim.md`
   **hard rule** (the execute path never moves an issue to a completed/canceled
   state). This is the skill's terminal success state.
+
+  **Auto-pilot on gh-issue: ready the draft last.** Where step 4's exception
+  opened a draft, run `gh pr ready` **after** the handler's needs-review write,
+  and only when `viewerPermission` is `ADMIN`/`MAINTAIN`/`WRITE` (step 4's
+  write-access check). The Action then fires on `ready_for_review`, after
+  co-review, and is a no-op because the issue has already left
+  `status:3_started`. A viewer without write access hands off a draft; the
+  handler's needs-review write alone moves the issue.
 - **Hand-off summary** (structured — for a human, or the `/auto-pilot` morning
   report). It ends on what the human must act on, because the end is what a
   terminal leaves on screen. In order:
