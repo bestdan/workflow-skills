@@ -5,6 +5,9 @@ Symbols: ✅ pass / ran / done · 🟡 pass with suggestions · ⛔ blocking · 
 <✅ **pass** | 🟡 **pass with suggestions** | ⛔ **blocking**> — <N> fixes · <N> skipped · <N> calls · <N> checks
 <one line of why, judged as the change will stand once the auto-fixes below are applied>
 
+**Scope:** <✅ **one unit** — <why it holds together> | 🟡 **split recommended** — <why>>
+<only when split: - <piece>: <files/hunks> — <one-line description>>
+
 <reviewer> <✅ ran | ❌ failed | ⏱️ timed out | ➖ skipped — reason> · … · conventions <✅ attached | ➖ not attached — reason> · ledger <✅ <receipt> | ❌ not recorded — reason> · stamp <✅ <receipt> | ⚠️ <receipt> — warning | ❌ not written — reason | ➖ not applicable — `--local`>
 
 ## Findings & verification
