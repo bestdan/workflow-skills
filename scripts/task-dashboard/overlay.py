@@ -29,6 +29,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import db
+import icons
 import include
 import score
 
@@ -957,8 +958,11 @@ _e = html.escape
 CSS = """
 .card .ov { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:4px;
   font-size:12px; }
-.card .ov button, .card .ov input, .card .ov select { font:inherit; padding:1px 6px; border-radius:4px;
+.card .ov button, .card .ov input { font:inherit; padding:1px 6px; border-radius:4px;
   border:1px solid var(--line); background:var(--bg); color:var(--fg); }
+.card .ov button.icon { display:inline-flex; align-items:center; padding:2px 4px; cursor:pointer; }
+.card .ov button.icon .glyph { display:block; width:14px; height:14px; }
+@media (pointer:coarse) { .card .ov button.icon { padding:7px; } }
 .card .ov details { width:100%; }
 .card .ov textarea { width:100%; min-height:4em; font:inherit; color:var(--fg);
   background:var(--bg); border:1px solid var(--line); border-radius:4px; }
@@ -1044,18 +1048,6 @@ JS = """
         cards.map(function (c) { return ['key', c.dataset.key]; })));
     }
   });
-  document.addEventListener('change', function (ev) {
-    var s = ev.target.closest('select[data-ov=tag]');
-    if (!s) return;
-    var fields = item(s).concat([['tag', s.value]]);
-    // A substantial item must name the figure it moves; ask when it has no note.
-    if (s.value === 'substantial' && !s.closest('.card').querySelector('.note')) {
-      var fig = prompt('Substantial: which figure does this move?');
-      if (!fig || !fig.trim()) { s.value = s.dataset.was; return; }
-      fields.push(['text', fig]);
-    }
-    post('tag', fields);
-  });
 })();
 """
 
@@ -1089,7 +1081,7 @@ def card_controls(
     pin: bool = True,
     why_not: bool = False,
 ) -> str:
-    """The pin toggle, tag picker, snooze button, note editor, and
+    """The pin toggle, snooze button, note editor, and
     (pinned lane) up/down. `pin=False` drops Pin where nothing ranks by it.
     `why_not=True` makes Snooze hide the card in place and show its "why
     not now" line (whynot.picker, which the caller puts in the card) instead
@@ -1097,19 +1089,16 @@ def card_controls(
     pinned = ov.is_pinned(item)
     parts = []
     if pin:
+        if pinned:
+            act, label, glyph = "unpin", "Unpin", "pin-off"
+            tip = "Unpin: rank it like any other item"
+        else:
+            act, label, glyph = "pin", "Pin", "pin"
+            tip = "Pin: keep it at the top of Now, the Board and Epics"
         parts.append(
-            f'<button type="button" data-ov="{"unpin" if pinned else "pin"}"'
-            ' title="Keep it at the top of Now, the Board and Epics">'
-            f"{'Unpin' if pinned else 'Pin'}</button>"
+            f'<button type="button" class="icon" data-ov="{act}"'
+            f' aria-label="{label}" title="{tip}">{icons.svg(glyph)}</button>'
         )
-    current = ov.kind_tags.get(item, "")
-    options = "".join(
-        f'<option value="{v}"{" selected" if v == current else ""}>{label}</option>'
-        for v, label in (("", "no tag"), *((t, t) for t in KIND_TAGS))
-    )
-    parts.append(
-        f'<select data-ov="tag" data-was="{_e(current)}" title="Kind">{options}</select>'
-    )
     if reorder:
         parts.append(
             '<button type="button" data-ov="up" title="Move up">↑</button>'
@@ -1119,15 +1108,18 @@ def card_controls(
         until = ov.snoozed_until.get(item, "")
         parts.append(
             f'<span class="badge">snoozed until {_e(until)}</span>'
-            '<button type="button" data-ov="snooze" data-until="">Unsnooze</button>'
+            '<button type="button" class="icon" data-ov="snooze" data-until=""'
+            ' aria-label="Unsnooze" title="Unsnooze">'
+            f"{icons.svg('alarm-clock-off')}</button>"
         )
     else:
         back = snooze_until(now)
         why = ' data-why="1"' if why_not else ""
         parts.append(
-            f'<button type="button" data-ov="snooze" data-until="{back}"{why}'
-            f' title="Snooze until {back}: hidden from Now and Needs, dimmed'
-            f' elsewhere">Snooze {SNOOZE_DAYS}d</button>'
+            f'<button type="button" class="icon" data-ov="snooze"'
+            f' data-until="{back}"{why} aria-label="Snooze {SNOOZE_DAYS}d"'
+            f' title="Snooze {SNOOZE_DAYS}d, until {back}: hidden from Now and'
+            f' Needs, dimmed elsewhere">{icons.svg("alarm-clock")}</button>'
         )
     parts.append(
         '<button type="button" data-ov="ignore" title="Not mine: hide it">Ignore</button>'

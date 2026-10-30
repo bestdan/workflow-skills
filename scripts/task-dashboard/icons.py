@@ -1,4 +1,5 @@
-"""The header's icons, as inline SVG drawn in the text colour.
+"""The header's and the card controls' icons, as inline SVG drawn in the text
+colour.
 
 The shapes are Lucide's (lucide-static 0.454.0, https://lucide.dev), ISC
 licence, Copyright (c) Lucide Contributors; portions MIT, Copyright (c) Cole
@@ -39,6 +40,33 @@ PATHS = {
         "M22 5h-4",
         "M4 17v2",
         "M5 18H3",
+    ),
+    "pin": (
+        "M12 17v5",
+        "M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z",
+    ),
+    "pin-off": (
+        "M12 17v5",
+        "M15 9.34V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H7.89",
+        "m2 2 20 20",
+        "M9 9v1.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h11",
+    ),
+    "alarm-clock": (
+        # Lucide's <circle cx="12" cy="13" r="8"/>, as a path.
+        "M20 13a8 8 0 1 1-16 0a8 8 0 1 1 16 0",
+        "M12 9v4l2 2",
+        "M5 3 2 6",
+        "m22 6-3-3",
+        "M6.38 18.7 4 21",
+        "M17.64 18.67 20 21",
+    ),
+    "alarm-clock-off": (
+        "M6.87 6.87a8 8 0 1 0 11.26 11.26",
+        "M19.9 14.25a8 8 0 0 0-9.15-9.15",
+        "m22 6-3-3",
+        "M6.26 18.67 4 21",
+        "m2 2 20 20",
+        "M4 4 2 6",
     ),
 }
 

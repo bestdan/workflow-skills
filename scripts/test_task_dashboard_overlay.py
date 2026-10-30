@@ -813,7 +813,7 @@ class LocalDateTests(unittest.TestCase):
             ("jira", "A-1"), overlay.Overlay(), self.INSTANT, reorder=False
         )
         self.assertIn('data-ov="snooze" data-until="2026-10-31"', html)
-        self.assertIn("Snooze 7d", html)
+        self.assertIn('aria-label="Snooze 7d"', html)
         self.assertNotIn('type="date"', html)
 
     def test_a_snoozed_card_offers_unsnooze(self):
@@ -821,7 +821,21 @@ class LocalDateTests(unittest.TestCase):
         ov = overlay.Overlay(snoozed_until={("jira", "A-1"): "2026-10-24"})
         html = overlay.card_controls(("jira", "A-1"), ov, self.INSTANT, reorder=False)
         self.assertIn("snoozed until 2026-10-24", html)
-        self.assertIn('data-ov="snooze" data-until="">Unsnooze', html)
+        self.assertIn('data-ov="snooze" data-until="" aria-label="Unsnooze"', html)
+
+    def test_pin_and_snooze_are_labelled_icons_and_there_is_no_tag_picker(self):
+        self.in_zone("UTC")
+        item = ("jira", "A-1")
+        html = overlay.card_controls(
+            item, overlay.Overlay(), self.INSTANT, reorder=False
+        )
+        self.assertIn('data-ov="pin" aria-label="Pin"', html)
+        self.assertNotIn(">Pin<", html)
+        self.assertNotIn("Snooze 7d<", html)
+        self.assertNotIn('data-ov="tag"', html)
+        pinned = overlay.Overlay(pinned_at={item: "2026-10-24"})
+        html = overlay.card_controls(item, pinned, self.INSTANT, reorder=False)
+        self.assertIn('data-ov="unpin" aria-label="Unpin"', html)
 
 
 class ReconcileTests(sync_harness.SyncCase):
