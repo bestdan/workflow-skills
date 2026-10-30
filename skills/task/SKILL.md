@@ -47,7 +47,7 @@ comment log carrying a unique per-session token; both elect one winner even amon
 sessions authenticated as the **same** tracker account. In a branch-pinned environment
 that cannot create that ref, gh-issue degrades to the same comment-token election and
 says so explicitly — never report an atomic claim the run did not make. jira claims on
-the **assignee** alone: unassigned or already yours proceeds, anyone else's is skipped.
+the **assignee** alone: unassigned, or on a named key already yours, proceeds; anyone else's is skipped.
 That cannot tell two sessions on the same account apart — an accepted tradeoff, since
 jira execution runs one ticket at a time, in exchange for a claim that lives entirely in
 Jira (see `jira-claim.md` → "Claim the issue").

@@ -163,7 +163,7 @@ Runs on the candidate **before "Judge feasibility" and "Claim the issue"**, on e
 
    If either of the first two finds the branch, report it with the fix rather than as an in-flight build — `Skipped <KEY>: stale branch task/<KEY> (<local|origin|both>; <its closed/merged PR url, or "no PR">)`, followed by the fix that fits:
    - **Its PR is closed or merged** — the branch is dead. Delete it: `git push origin --delete "task/<KEY>"` and/or `git branch -D "task/<KEY>"`.
-   - **It has no PR** — it may carry unpublished work. Inspect each copy the report names, then either delete it as above or keep it under another name:
+   - **It has no PR** — it may carry unpublished work. Inspect each copy the report names (`<base>` is resolved as in "Branch + execute" step 1: `jira.base_branch`, else the repo's default branch), then either delete it as above or keep it under another name:
      - **On origin** — fetch it first, since pre-flight only listed it (`git fetch origin "task/<KEY>"`), inspect with `git log "origin/<base>..origin/task/<KEY>"`, and keep it with `git push origin "origin/task/<KEY>:refs/heads/task/<KEY>-old"` followed by `git push origin --delete "task/<KEY>"`.
      - **Local** — inspect with `git log "origin/<base>..task/<KEY>"`, and keep it with `git branch -m "task/<KEY>" "task/<KEY>-old"`.
 
@@ -190,7 +190,7 @@ Keeping the order as pre-flight → judge → claim is acceptable here because t
 
 ## Claim the issue
 
-The claim is decided by the issue's **assignee**: unassigned, or assigned to this caller, means proceed; any other account means someone else holds it. The self-assign and the In-Progress transition below are both the claim and its human-visible marker — there is no separate lock, and no GitHub write happens at claim time.
+The claim is decided by the issue's **assignee**: unassigned, or (on a named key) already assigned to this caller, means proceed; any other account means someone else holds it. The self-assign and the In-Progress transition below are both the claim and its human-visible marker — there is no separate lock, and no GitHub write happens at claim time.
 
 **Accepted tradeoff: two sessions on the same account can both claim.** Jira exposes no compare-and-swap on issue fields, so two sessions authenticated as the **same** account can both read an empty assignee, both write their identical account id, both read it back, and both build the issue. That is why the gh-issue handler locks on ref creation instead (`commands/handlers/claim-lock.md` → "Why the assignee cannot be the lock"). Here the race needs two same-account sessions started by hand on the same ticket within the same few seconds: `/do-tasks` runs jira execution in the foreground, one ticket per session (§5), and no orchestrator dispatches jira tickets at all — `/auto-pilot` takes only linear and plan sources. Nothing stops two terminals, but nothing automated produces them. That is rare enough to accept in exchange for a claim whose whole state lives in Jira — a leftover `task/<KEY>` branch cannot hold a ticket, and a claim needs no GitHub API write, which some environments block. The pre-PR re-read in "PR" catches a **different** account that took the issue mid-build; it cannot catch a same-account twin.
 
@@ -317,7 +317,11 @@ and name the new branch in the bail comment so a human can find the work. **Rena
 never `git branch -D` it**: the stash holds only uncommitted changes, so a delete loses
 any committed work, and once the remote copy is gone the reflog is the only one left.
 Touch either branch **only** if this session created it; a branch that existed before
-this run is someone else's to clear. Then, over the Atlassian MCP:
+this run is someone else's to clear. Then, over the Atlassian MCP — first re-reading the
+issue (`getJiraIssue`, `fields: ["assignee", "status"]`). If the assignee is no longer your
+`account_id`, or the status has left the `indeterminate` (In Progress) category, someone
+took or moved the issue during the build: skip steps 1 and 2, which would clobber their
+claim, and say so in the step-3 comment.
 
 1. **Unassign** — `editJiraIssue` (`cloudId`, `issueIdOrKey: <KEY>`, `fields: { "assignee": null }`).
 2. **Transition back** to `ready_status` (resolve its transition id via `getTransitionsForJiraIssue`, matching `to.name == <ready_status>`) so the issue returns to the lane it came from. If a `human-approval-requested` label is configured on the board, re-read the issue's current labels (`getJiraIssue`, `fields: ["labels"]`), append `human-approval-requested` to that list, and write the combined list back via `editJiraIssue` (`fields: { "labels": [<existing…>, "human-approval-requested"] }`) so a human knows to look — `editJiraIssue` **replaces** the whole label set, so omitting the existing labels would drop them. Otherwise the comment below carries that signal.

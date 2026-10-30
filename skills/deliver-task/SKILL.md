@@ -240,8 +240,8 @@ version has hard-won race handling that must not be forked:
   the assignee + label board marker). The lock is the ref **creation**, not the
   assignee; a 422 is a lost race, and a create blocked by a branch-pinned environment
   degrades to the comment-token election with an explicit note.
-- **jira** → "Claim the issue" in `jira-claim.md` (re-read the assignee: empty or this
-  caller proceeds, anyone else is a race; then self-assign, confirm, and transition to
+- **jira** → "Claim the issue" in `jira-claim.md` (re-read the assignee: empty, or this
+  caller on a named key, proceeds; anyone else is a race; then self-assign, confirm, and transition to
   In Progress). The claim is the assignee, not a ref — a leftover `task/<KEY>` branch is
   reported as stale with a fix, never as a lost claim.
 
