@@ -165,9 +165,12 @@ def load(
                         )
                         # A skipped entry was never dispatched, so it pins no
                         # model; split out, it would only add an empty row.
-                        if by_model and lbl == r["name"]:
-                            if r.get("disposition") == "skipped":
-                                continue
+                        if (
+                            by_model
+                            and lbl == r["name"]
+                            and r.get("disposition") == "skipped"
+                        ):
+                            continue
                         labels[r["name"]] = lbl
                         disp[lbl] = r.get("disposition")
                         d = r.get("duration_s")
