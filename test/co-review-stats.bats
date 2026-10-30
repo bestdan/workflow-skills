@@ -351,3 +351,23 @@ model_fixture() {
   assert_line --regexp '^devin +1 +1 +0\.0 '
   assert_line --regexp '^claude +1 +0 '
 }
+
+@test "--by-model drops a skipped entry with no model, but keeps a failed one" {
+  rec_run h s1 $TS org/a 1 "[$(rev claude ran 1), $(revm crush ran 10 '"m-a"')]"
+  rec_run h s2 $TS org/a 1 "[$(rev claude ran 1), $(revm crush skipped null null)]"
+  rec_run h s3 $TS org/a 1 "[$(rev claude ran 1), $(revm grok failed 5 null)]"
+  stats --by-model
+  assert_success
+  assert_line --regexp '^crush@m-a +1 +0 '
+  refute_line --regexp '^crush '
+  assert_line --regexp '^grok +0 +0 .* 100\.0$'
+}
+
+@test "a reviewer name containing @ is not mistaken for claude" {
+  rec_run h a1 $TS org/a 1 "[$(rev claude ran 1), $(rev 'claude@home' ran 1)]"
+  rec_finding h a1 '["claude"]' wrong
+  rec_finding h a1 '["claude@home"]' high
+  stats
+  assert_success
+  assert_line --regexp '^claude@home +1 +1 +0\.0 +-100\.0 \(n=1\) '
+}

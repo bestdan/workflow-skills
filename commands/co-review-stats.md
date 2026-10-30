@@ -43,7 +43,7 @@ line, show it and stop.
 - After a reviewer's model pin changes, `--by-model` gives one
   `name@model` row per model; `--since` cannot separate them when old and new
   ran on the same day. `Δ claude` still pairs against claude across all its
-  models.
+  models. A reviewer that pins no model, like `copilot`, keeps its bare name.
 - If every reviewer, `claude` included, looks bad, suspect the reconciler
   prompt, not the reviewers.
 - Verdict to action: `wrong` means drop or retune the model; `not-applicable`

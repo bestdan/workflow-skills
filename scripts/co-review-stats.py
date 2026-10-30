@@ -21,8 +21,10 @@ this machine's full rows win over its own redacted copies.
 
 --by-model keys each row by name@model, the model the run recorded for that
 reviewer, so a reviewer whose pin changed gets one row per model. A run that
-recorded no model keeps the bare name. claude is split the same way, but Δ
-claude still pairs against claude across all its models.
+recorded no model keeps the bare name, except a skipped entry, which is
+dropped: it was never dispatched, so it adds only an empty row. claude is
+split the same way, but Δ claude still pairs against claude across all its
+models.
 
 Definitions (a run is identified by the pair (host, run_id), never run_id alone):
   runs         runs where the reviewer's disposition was "ran".
@@ -110,10 +112,6 @@ def label(name: str, model: Any) -> str:
     return f"{name}@{model}" if isinstance(model, str) and model else name
 
 
-def base_name(lbl: str) -> str:
-    return lbl.split("@", 1)[0]
-
-
 def load(
     paths: List[Path], since: Optional[str], repo: Optional[str], by_model: bool = False
 ):
@@ -165,6 +163,11 @@ def load(
                         lbl = (
                             label(r["name"], r.get("model")) if by_model else r["name"]
                         )
+                        # A skipped entry was never dispatched, so it pins no
+                        # model; split out, it would only add an empty row.
+                        if by_model and lbl == r["name"]:
+                            if r.get("disposition") == "skipped":
+                                continue
                         labels[r["name"]] = lbl
                         disp[lbl] = r.get("disposition")
                         d = r.get("duration_s")
@@ -205,6 +208,13 @@ def compute(runs, findings) -> List[Dict[str, Any]]:
 
     def wrong_rate(fs: List[Dict[str, Any]]) -> Optional[float]:
         return pct(sum(1 for f in fs if f.get("verdict") == "wrong"), len(fs))
+
+    reviewer_of = {
+        lbl: name for run in runs.values() for name, lbl in run["labels"].items()
+    }
+
+    def base_name(lbl: str) -> str:
+        return reviewer_of.get(lbl, lbl)
 
     base_labels = sorted(n for n in names if base_name(n) == BASE)
     base_runs: Set[Key] = set().union(*(ran_by[n] for n in base_labels))
@@ -274,7 +284,7 @@ def compute(runs, findings) -> List[Dict[str, Any]]:
 
 
 def delta_cell(row: Dict[str, Any]) -> str:
-    if base_name(row["name"]) == BASE or not row["cohort"]:
+    if not row["cohort"]:
         return DASH
     if row["delta"] is None:
         return f"{DASH} (n={row['cohort']})"
