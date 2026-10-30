@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.153.0] - 2026-10-30
+
+### Features
+
+- claim from the assignee field, not a ref lock [#1247] (#1248) (3c6ff45)
+
 ## [2.152.0] - 2026-10-29
 
 ### Features
