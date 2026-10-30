@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.154.0] - 2026-10-30
+
+### Features
+
+- split a reviewer's rows by model [#1251] (#1253) (b22f1c8)
+
 ## [2.153.1] - 2026-10-30
 
 ### Fixes
