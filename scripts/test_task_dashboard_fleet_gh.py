@@ -358,7 +358,8 @@ class ReviewQueueTests(unittest.TestCase):
         )
         self.assertEqual(failed, [node["url"]])
         self.assertEqual(rows[0]["queue_misses"], ["co_review"])
-        self.assertFalse(rows[0]["stamped"])
+        # Unanswered rather than False, so the next sync asks again.
+        self.assertIsNone(rows[0]["stamped"])
 
     def test_lookup_auth_failure_still_raises(self):
         auth = (1, "", "HTTP 401: Bad credentials")
@@ -557,6 +558,17 @@ class ReviewQueueTests(unittest.TestCase):
             node, previous={row["url"]: unasked}, approved={14}, comments=good
         )
         self.assertEqual(len(comments), 1)
+
+    def test_a_failed_comments_read_is_retried_on_an_unchanged_pr(self):
+        node, good = self.stamped_node()
+        (row,), _ = self.queue_with(
+            node, approved={14}, comments_error=(1, "", "HTTP 502")
+        )
+        (again,), comments = self.queue_with(
+            node, previous={row["url"]: row}, approved={14}, comments=good
+        )
+        self.assertEqual(len(comments), 1)
+        self.assertTrue(again["in_queue"])
 
     def test_a_budget_under_the_floor_skips_the_comments(self):
         node, good = self.stamped_node()

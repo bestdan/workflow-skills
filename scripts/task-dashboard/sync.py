@@ -204,7 +204,8 @@ class GithubSource:
         self.runner = runner
 
     def prs(self, allowed_projects: "set[str]") -> "tuple[list[dict], list[str]]":
-        """Rows for my PRs and reviews requested of me, and URLs whose CI failed.
+        """Rows for my PRs and reviews requested of me, and an always-empty
+        list of failed lookups.
 
         CI state comes with the searches (github_gh.rollup_state), so this
         makes no call per PR, and no CI lookup can fail on its own: the list

@@ -57,9 +57,10 @@ def review_queue_rows(conn: sqlite3.Connection, fleet: bool) -> "list[dict] | No
     """
     if not fleet:
         return None
+    marks = ", ".join("?" * len(sync.SUCCESS_OUTCOMES))
     if (
         conn.execute(
-            "SELECT 1 FROM sync_runs WHERE kind = ? AND outcome IN (?, ?) LIMIT 1",
+            f"SELECT 1 FROM sync_runs WHERE kind = ? AND outcome IN ({marks}) LIMIT 1",
             (github_fleet.RUN_KIND, *sync.SUCCESS_OUTCOMES),
         ).fetchone()
         is None

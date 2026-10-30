@@ -701,7 +701,9 @@ class FleetGh:
         raise AssertionError(f"unexpected gh call: {argv}")
 
 
-class FleetTests(SyncCase):
+class FleetCase(SyncCase):
+    """The fleet tests' helpers, with no tests of its own to inherit."""
+
     def run_all(self, cfg, gh, acli=None):
         acli = acli or FakeAcli(["DEMO-1"])
         # `github.enabled` is on, so the Jira run's PR step needs a fake too;
@@ -720,6 +722,8 @@ class FleetTests(SyncCase):
             ).fetchall()
         )
 
+
+class FleetTests(FleetCase):
     def test_gate(self):
         self.assertFalse(sync.fleet_enabled(make_config()))
         self.assertFalse(sync.fleet_enabled(make_config(enabled=False, scope="owner")))
@@ -843,7 +847,7 @@ def issue_pages(calls):
     return [a for a in calls if any(x.startswith("q=is:issue") for x in a)]
 
 
-class FleetBudgetTests(FleetTests):
+class FleetBudgetTests(FleetCase):
     """#1252: a sync over PRs and issues that have not changed reads neither
     again, and a low GraphQL budget throttles the per-PR reads."""
 

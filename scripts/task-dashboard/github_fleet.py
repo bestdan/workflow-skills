@@ -620,7 +620,9 @@ def queue_row(
             except github_gh.AuthError:
                 raise
             except GhError:
-                stamped = False
+                # Unanswered, not False: known_stamp() would reuse a False
+                # until the PR changes, pinning one failed read as a miss.
+                stamped = None
                 lookup_failed = True
         if not stamped:
             misses.append("co_review")
