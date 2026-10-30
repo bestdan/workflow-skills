@@ -324,6 +324,17 @@ class RenderTests(Case):
     def page(self, inc=None):
         return views.render("/now", self.conn, self.cfg, NOW, inc)
 
+    def test_the_card_leads_with_its_act_and_folds_its_score_away(self):
+        seed(self.conn, rows=[], prs=[PRS[3]], with_sessions=False)
+        card = needs_fx.card(self.page(), pr_url(4))  # own_ci_failing
+        # The act comes before the title, with no "open it": the title links there.
+        self.assertLess(card.index('<div class="act">'), card.index('class="title"'))
+        self.assertNotIn(">open it<", card)
+        self.assertIn('<span class="ci-bad">CI failure</span>', card)
+        self.assertIn(
+            '<details class="why-more"><summary>why</summary><div class="why"', card
+        )
+
     def test_jira_off_now_lists_the_queue_with_a_why_line_on_every_card(self):
         seed(self.conn)
         page = self.page()

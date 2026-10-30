@@ -200,7 +200,14 @@ _DOCS_DIRS = ("docs/", "dev_docs/")
 _LITTLE_CI = ("success", "none")
 
 CSS = """
+.now .card { display:flow-root; }
 .now .card .why { margin-top:2px; }
+.now .card .why-more > summary { cursor:pointer; color:var(--muted); font-size:12px; width:max-content; }
+.now .card > .act { float:right; margin:0 0 4px 12px; padding:1px 8px; border-radius:999px;
+  border:1px solid var(--line); background:var(--bg); font-weight:600; }
+@media (max-width:600px) {
+  .now .card > .act { float:none; width:max-content; max-width:100%; margin:0 0 4px; }
+}
 .now .wait { color:var(--fg); font-weight:600; }
 .now .more { margin-top:8px; font-size:12px; }
 .now .checklist { margin:4px 0; font-size:12px; color:var(--fg); }
@@ -1261,19 +1268,26 @@ def _linked_html(x: dict[str, Any]) -> str:
 def card(r: Ranked, now: datetime, ov: overlay.Overlay) -> str:
     n = r.need
     pin = '<span class="pin">pinned</span> · ' if ov.is_pinned(n.item) else ""
-    bits = [_e(n.state)] + ([_e(n.where)] if n.where else [])
     meta = (
         f'{pin}<span class="wait">{_e(needs.waited(n.since, now))}</span> · '
-        + " · ".join(bits)
+        + needs.state_html(n)
     )
     terms = ",".join(name for name, value, _ in r.terms if value)
+    # The title already links to n.url, so an "open it" link only earns its
+    # place when it says something the title does not (claude.ai/code is
+    # not the session).
     link = (
         view_model.link(n.url, needs.open_label(n, "open it"))
-        if n.url and n.url.startswith("https://")
+        if n.url == needs.CODE_URL
         else ""
     )
     act = " · ".join(x for x in (link, needs.pr_link(n), view_model.code(n.hint)) if x)
     act_html = f'<div class="act">→ {act}</div>' if act else ""
+    why = f'<div class="why" data-terms="{terms}">{_e(why_line(r))}</div>'
+    if terms:
+        # A Ship score's breakdown runs to three lines on a phone; it is
+        # there for when the order looks wrong, so it waits behind a toggle.
+        why = f'<details class="why-more"><summary>why</summary>{why}</details>'
     steps = (
         f'<div class="checklist">{_e(close_out.checklist_text(r.checklist))}</div>'
         if r.checklist
@@ -1286,10 +1300,9 @@ def card(r: Ranked, now: datetime, ov: overlay.Overlay) -> str:
         f'<div {overlay.card_attrs(n.item, ov, now)} data-kind="{_e(n.kind)}"'
         f' data-category="{r.category}" data-tier="{_e(r.tier[1])}"'
         f' data-total="{r.total}" data-mode="{r.mode}">'
-        f"{needs._title(n, n.url)}{needs.ask_html(n)}"
-        f'<div class="meta">{meta}</div>{steps}{folded}'
-        f'<div class="why" data-terms="{terms}">{_e(why_line(r))}</div>'
-        f"{act_html}{overlay.card_controls(n.item, ov, now, reorder=False, why_not=True)}"
+        f"{act_html}{needs._title(n, n.url)}{needs.ask_html(n)}"
+        f'<div class="meta">{meta}</div>{steps}{folded}{why}'
+        f"{overlay.card_controls(n.item, ov, now, reorder=False, why_not=True)}"
         f"{whynot.picker(overlay.snooze_until(now))}</div>"
     )
 

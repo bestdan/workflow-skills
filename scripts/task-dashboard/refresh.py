@@ -430,10 +430,9 @@ def refresh(
 CSS = """
 .card [data-refresh] { cursor:pointer; }
 .card.refreshing { opacity:.65; }
-.card.refreshing [data-refresh]::after { content:""; display:inline-block;
-  width:.75em; height:.75em; margin-left:4px; vertical-align:-1px;
-  border:2px solid currentColor; border-right-color:transparent; border-radius:50%;
-  animation:refresh-spin .8s linear infinite; }
+@media (prefers-reduced-motion: no-preference) {
+  .card.refreshing [data-refresh] .glyph { animation:refresh-spin .8s linear infinite; }
+}
 @keyframes refresh-spin { to { transform:rotate(360deg); } }
 .card .refresh-error { color:var(--bad); font-size:12px; margin-top:4px; }
 .refresh-note { color:var(--muted); font-size:12px; font-style:italic;

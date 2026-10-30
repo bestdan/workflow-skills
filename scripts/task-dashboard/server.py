@@ -502,6 +502,7 @@ main { padding:12px 16px; }
   padding:6px 10px; margin-bottom:6px; }
 .card a { color:var(--accent); font-weight:600; text-decoration:none; }
 .card .meta { color:var(--muted); font-size:12px; }
+.card .ci-bad { color:var(--bad); font-weight:600; }
 .empty { color:var(--muted); }
 """
 

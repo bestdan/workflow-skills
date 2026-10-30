@@ -833,6 +833,8 @@ class LocalDateTests(unittest.TestCase):
         self.assertNotIn(">Pin<", html)
         self.assertNotIn("Snooze 7d<", html)
         self.assertNotIn('data-ov="tag"', html)
+        self.assertIn('data-ov="ignore" aria-label="Ignore"', html)
+        self.assertIn('<summary class="ov-icon" aria-label="Add note"', html)
         pinned = overlay.Overlay(pinned_at={item: "2026-10-24"})
         html = overlay.card_controls(item, pinned, self.INSTANT, reorder=False)
         self.assertIn('data-ov="unpin" aria-label="Unpin"', html)

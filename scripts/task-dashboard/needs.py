@@ -556,12 +556,19 @@ def is_new(n: Need, ov: overlay.Overlay) -> bool:
     return last is not None and n.since is not None and n.since > last
 
 
+def state_html(n: Need) -> str:
+    """The card's state and where, escaped, with a failing CI in red."""
+    bits = [_e(n.state)] + ([_e(n.where)] if n.where else [])
+    return " · ".join(bits).replace(
+        "CI failure", '<span class="ci-bad">CI failure</span>'
+    )
+
+
 def _meta(n: Need, now: datetime, ov: overlay.Overlay) -> str:
     new = '<span class="new">new</span> · ' if is_new(n, ov) else ""
     pin = '<span class="pin">pinned</span> · ' if ov.is_pinned(n.item) else ""
-    bits = [_e(n.state)] + ([_e(n.where)] if n.where else [])
     wait = f'<span class="wait">{_e(waited(n.since, now))}</span>'
-    return f"{new}{pin}{wait} · " + " · ".join(bits)
+    return f"{new}{pin}{wait} · " + state_html(n)
 
 
 def _attrs(n: Need, cls: str) -> str:

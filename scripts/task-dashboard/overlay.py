@@ -960,10 +960,15 @@ CSS = """
   font-size:12px; }
 .card .ov button, .card .ov input { font:inherit; padding:1px 6px; border-radius:4px;
   border:1px solid var(--line); background:var(--bg); color:var(--fg); }
-.card .ov button.ov-icon { display:inline-flex; align-items:center; padding:2px 4px; cursor:pointer; }
-.card .ov button.ov-icon .glyph { display:block; width:14px; height:14px; }
-@media (pointer:coarse) { .card .ov button.ov-icon { padding:7px; } }
-.card .ov details { width:100%; }
+.card .ov .ov-icon { display:inline-flex; align-items:center; padding:2px 4px; cursor:pointer;
+  border:1px solid var(--line); border-radius:4px; background:var(--bg); color:var(--fg); }
+.card .ov .ov-icon:hover { border-color:var(--muted); }
+.card .ov .ov-icon .glyph { display:block; width:14px; height:14px; }
+@media (pointer:coarse) { .card .ov .ov-icon { padding:7px; } }
+.card .ov summary.ov-icon { list-style:none; }
+.card .ov summary.ov-icon::-webkit-details-marker { display:none; }
+.card .ov details[open] { width:100%; }
+.card .ov details[open] textarea { margin-top:4px; }
 .card .ov textarea { width:100%; min-height:4em; font:inherit; color:var(--fg);
   background:var(--bg); border:1px solid var(--line); border-radius:4px; }
 .card .note { white-space:pre-wrap; color:var(--muted); font-size:12px; margin-top:4px; }
@@ -1122,18 +1127,21 @@ def card_controls(
             f' Needs, dimmed elsewhere">{icons.svg("alarm-clock")}</button>'
         )
     parts.append(
-        '<button type="button" data-ov="ignore" title="Not mine: hide it">Ignore</button>'
+        '<button type="button" class="ov-icon" data-ov="ignore" aria-label="Ignore"'
+        f' title="Ignore: not mine, hide it">{icons.svg("eye-off")}</button>'
     )
     if refreshable(item):
         # refresh.JS handles it: POST /refresh, then the card follows the item.
         parts.append(
-            '<button type="button" data-refresh=""'
-            ' title="Re-read this item from GitHub, without a full sync">'
-            "Refresh</button>"
+            '<button type="button" class="ov-icon" data-refresh="" aria-label="Refresh"'
+            ' title="Refresh: re-read this item from GitHub, without a full sync">'
+            f"{icons.svg('refresh-cw')}</button>"
         )
     body = ov.notes.get(item, "")
+    label = "Edit note" if body else "Add note"
     parts.append(
-        f"<details><summary>{'Edit note' if body else 'Add note'}</summary>"
+        f'<details><summary class="ov-icon" aria-label="{label}" title="{label}">'
+        f"{icons.svg('sticky-note')}</summary>"
         f'<textarea maxlength="{MAX_NOTE}">{_e(body)}</textarea>'
         '<button type="button" data-ov="note">Save note</button></details>'
     )
