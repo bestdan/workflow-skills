@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.155.0] - 2026-10-30
+
+### Features
+
+- add a score column and sort by it [N/A] (#1257) (bd3d57c)
+
 ## [2.154.0] - 2026-10-30
 
 ### Features
