@@ -612,14 +612,23 @@ def fleet_enabled(config: dict[str, Any]) -> bool:
     return bool(gh["enabled"] and gh["scope"] == "owner")
 
 
-def fleet_issue_cache(conn: sqlite3.Connection, before: int) -> "dict | None":
+def issue_owners(owners: "list[str]") -> str:
+    """The owner set a full issue read covered, as recorded in its counts."""
+    return ",".join(sorted(owners))
+
+
+def fleet_issue_cache(
+    conn: sqlite3.Connection, before: int, owners: "list[str]"
+) -> "dict | None":
     """github_fleet.fetch's `issue_cache`: the mirror's issue rows, the start
     of the last good fleet run before run `before`, and the start of the
     last good one that read the issues in full with none cut short by the
-    cap. None when there is no such run, so the issues are read in full."""
+    cap. None when there is no such run, or when that full read covered
+    other owners than `owners` (an edit to `github.orgs`, which takes effect
+    on a restart that keeps the mirror), so the issues are read in full."""
     marks = ", ".join("?" * len(SUCCESS_OUTCOMES))
     base = (
-        f"SELECT started_at FROM sync_runs WHERE kind = ? AND id < ?"
+        f"SELECT started_at, counts FROM sync_runs WHERE kind = ? AND id < ?"
         f" AND outcome IN ({marks})"
     )
     args = (FLEET_KIND, before, *SUCCESS_OUTCOMES)
@@ -631,6 +640,12 @@ def fleet_issue_cache(conn: sqlite3.Connection, before: int) -> "dict | None":
         args,
     ).fetchone()
     if last is None or full is None:
+        return None
+    try:
+        covered = (json.loads(full[1] or "{}") or {}).get("issue_owners")
+    except ValueError:
+        covered = None
+    if covered != issue_owners(owners):
         return None
     rows = []
     for (raw,) in conn.execute(
@@ -673,7 +688,7 @@ def run_fleet(
         previous = github_fleet.previous_prs(db)
         plan = github_fleet.fetch(
             config, runner, now=now, previous=previous,
-            issue_cache=fleet_issue_cache(db, run_id),
+            issue_cache=fleet_issue_cache(db, run_id, config["github"]["orgs"]),
         )  # fmt: skip
         failed_keys = list(plan["failed"])
         counts = {
@@ -685,6 +700,8 @@ def run_fleet(
             "issues_truncated": len(plan["issues_truncated"]),
         }
         counts["issues_reused"] = int(plan["issues_reused"])
+        if not plan["issues_reused"]:
+            counts["issue_owners"] = issue_owners(config["github"]["orgs"])
         if plan["remaining"] is not None:
             counts["graphql_remaining"] = plan["remaining"]
         if plan["throttled"]:

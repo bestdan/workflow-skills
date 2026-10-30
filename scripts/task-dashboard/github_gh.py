@@ -8,15 +8,16 @@ PRs come from a paginated GraphQL `search`, not `gh search prs`, because the
 latter has no `headRefName` and the branch is half of the Jira join. CI state
 comes from the same search, as the head commit's rollup `state` alone
 (rollup_state()). Asking for the full rollup, every check context, in a
-100-node search made GitHub return an HTML error after 12s; the state alone
-adds no connection to the query's cost. A sync used to read CI with one
-`gh pr view` per PR, which spent most of the user's shared GraphQL budget
-(#1252); ci_state() is that read, kept for the per-card Refresh.
+100-node search made GitHub return an HTML error after 12s. The state alone,
+measured at 50 nodes, left SEARCH_QUERY at 1 point and took
+github_fleet.REVIEW_QUERY from 1 to 2, with no timeout. ci_state() reads CI
+with one `gh pr view` per PR, so only the per-card Refresh uses it (#1252).
 
-Each search also asks for `rateLimit { remaining resetAt }`. That is the
-user-wide budget every token and app acting as the user draws from, which
-`gh api rate_limit` does not report: that endpoint counts the calling token
-alone. search_nodes() hands it to a caller that asks (Budget).
+Each search also asks for `rateLimit { remaining resetAt }`, the budget every
+token and app acting as the user draws from. `gh api rate_limit` is not used
+for it: in one measurement its graphql `used` (1,065) disagreed with
+`rateLimit`'s (5,000, with a different reset), for a reason not established.
+search_nodes() hands it to a caller that asks (Budget).
 
 All `gh` calls go through one runner seam, `run(argv, timeout)`, so tests pass a
 fake instead of reaching the network.

@@ -58,7 +58,7 @@ OUTCOME_TEXT = {
     "ok": "ok",
     "failed": "failed",
     "auth_failed": "login expired",
-    sync.THROTTLED: "throttled: GitHub budget low, per-PR reads skipped",
+    sync.THROTTLED: "throttled: GitHub budget low, per-PR reads paused",
 }
 
 _e = html.escape

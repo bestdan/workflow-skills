@@ -671,7 +671,10 @@ class FleetGh:
             return 0, json.dumps({"data": data}), ""
         if any("c0: search" in a for a in argv):
             # The issue change probe (github_fleet.issues_changed).
-            counts = {"c0": {"issueCount": self.issues_changed}}
+            query = next(a for a in argv if a.startswith("query="))
+            aliases = re.findall(r"(c\d+): search", query)
+            counts = {a: {"issueCount": 0} for a in aliases}
+            counts["c0"] = {"issueCount": self.issues_changed}
             return 0, json.dumps({"data": counts}), ""
         if any("issueCount" in a for a in argv):
             counts = {"m0": {"issueCount": 0}, "i0": {"issueCount": 0}}
@@ -895,6 +898,15 @@ class FleetBudgetTests(FleetCase):
         stale = FleetGh()
         sync.run_fleet(cfg, self.conn, later, runner=stale, clock=lambda: later)
         self.assertEqual(len(issue_pages(stale.calls)), 2)
+
+    def test_an_edit_to_the_orgs_reads_the_issues_again(self):
+        self.run_all(make_config(**self.CFG), FleetGh())
+        edited = FleetGh()  # nothing changed on GitHub, but the config did
+        self.run_all(make_config(orgs=["acme", "other"], **self.CFG), edited)
+        self.assertEqual(len(issue_pages(edited.calls)), 4)  # two owners now
+        again = FleetGh()
+        self.run_all(make_config(orgs=["other", "acme"], **self.CFG), again)
+        self.assertEqual(issue_pages(again.calls), [])  # order does not matter
 
     def test_a_low_budget_throttles_the_per_pr_reads(self):
         cfg = make_config(**self.CFG)

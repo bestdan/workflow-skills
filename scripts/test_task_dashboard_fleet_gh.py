@@ -596,6 +596,18 @@ class ReviewQueueTests(unittest.TestCase):
         self.assertIs(rows[0]["milestone_approved"], True)
         self.assertFalse(any("/milestones/" in a[2] for a in runner.calls))
 
+    def test_a_null_milestone_description_is_not_approved_and_needs_no_lookup(self):
+        node = pr_node(url="u/pull/8", number=8)
+        for issue in node["closingIssuesReferences"]["nodes"]:
+            if issue.get("milestone"):
+                issue["milestone"]["description"] = None
+        rows, failed, runner = self.run_queue(
+            [node], milestone_error=(1, "", "must not be asked")
+        )
+        self.assertEqual(failed, [])
+        self.assertIs(rows[0]["milestone_approved"], False)
+        self.assertFalse(any("/milestones/" in a[2] for a in runner.calls))
+
     def test_a_bot_pr_from_others_is_included_and_flagged(self):
         nodes = [
             pr_node(

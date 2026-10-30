@@ -49,11 +49,12 @@ the rules it failed, and `queue_counts()` giving the totals. Rule 2 is checked
 for every awaiting PR, and rule 4 only when a closing issue is in a milestone;
 `milestone_approved` is None when rule 4 was skipped, so a skip is told apart
 from a pass. Rule 3 costs one call per PR, so it runs only for those that
-passed the others (`stamped` is None when skipped), and only when the PR's
-head or `updatedAt` moved since the last sync (known_stamp). Every other rule
-is answered by the searches, so a sync over PRs that have not changed makes
-no call per PR: the user's GraphQL budget is shared by every token and app
-acting as the user, and the per-PR reads used to spend most of it (#1252).
+passed the others (`stamped` is None when skipped), only when the last sync
+holds no answer for the PR's current head and `updatedAt` (known_stamp), and
+only while the GraphQL budget is above `github.min_remaining`. Every other
+rule is answered by the searches, so a sync over PRs that have not changed
+makes no call per PR: the user's GraphQL budget is shared by every token and
+app acting as the user, so per-PR reads are the costly part (#1252).
 
 PRS FROM OTHERS are the open, non-draft PRs someone else opened on the owners'
 repos without requesting my review: a third search, `-author:@me`, role
@@ -515,8 +516,9 @@ def _closes_approved(node: dict, milestones: MilestoneCache) -> "bool | None":
         ms = issue["milestone"]
         # REVIEW_QUERY selects the description, so a sync makes no call here;
         # a node from a query that does not (an older row) is looked up.
-        description = ms.get("description")
-        if description is None:
+        if "description" in ms:
+            description = ms["description"]  # null: none written, not approved
+        else:
             description = milestones.description(repo, ms["number"])
         if milestone_approved(description):
             return True

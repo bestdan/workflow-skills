@@ -169,6 +169,19 @@ class StaleParityTests(Case):
             stale_fx.SNAPSHOT["taken_at"],
         )
 
+    def test_freshness_counts_a_throttled_fleet_run_as_synced(self):
+        # A throttled run wrote its rows; a failed one did not.
+        for outcome, at in (("throttled", "2030-01-01T00:00:00Z"),
+                            ("failed", "2030-01-02T00:00:00Z")):  # fmt: skip
+            self.conn.execute(
+                "INSERT INTO sync_runs (kind, started_at, finished_at, outcome)"
+                " VALUES ('github_fleet', ?, ?, ?)",
+                (at, at, outcome),
+            )
+        self.conn.commit()
+        synced = agent_view.freshness(self.conn)["synced"]
+        self.assertEqual(synced["github_fleet"], "2030-01-01T00:00:00Z")
+
     def test_every_group_off_is_off_in_both(self):
         inc = include.Include("stale", frozenset(), "url")
         _, doc = self.assert_parity(self.cfg, "stale", stale_fx.NOW, inc)
