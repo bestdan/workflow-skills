@@ -562,7 +562,7 @@ class ViewsTest(unittest.TestCase):
     def test_view_cards_carry_the_board_controls(self):
         page = views.render("/waiting-on", self.conn, CFG, NOW)
         issue = self.card(page, "ABC-1")
-        for act in ("pin", "snooze", "ignore", "note"):
+        for act in ("pin", "snooze", "ignore"):
             self.assertIn(f'data-ov="{act}"', issue, act)
         self.assertNotIn('data-ov="focus"', page)
         pr = page.split('data-key="https://github.com/o/r/pull/2"')[1]

@@ -965,13 +965,6 @@ CSS = """
 .card .ov .ov-icon:hover { border-color:var(--muted); }
 .card .ov .ov-icon .glyph { display:block; width:14px; height:14px; }
 @media (pointer:coarse) { .card .ov .ov-icon { padding:7px; } }
-.card .ov summary.ov-icon { list-style:none; }
-.card .ov summary.ov-icon::-webkit-details-marker { display:none; }
-.card .ov details[open] { width:100%; }
-.card .ov details[open] textarea { margin-top:4px; }
-.card .ov textarea { width:100%; min-height:4em; font:inherit; color:var(--fg);
-  background:var(--bg); border:1px solid var(--line); border-radius:4px; }
-.card .note { white-space:pre-wrap; color:var(--muted); font-size:12px; margin-top:4px; }
 .card.snoozed { opacity:.6; }
 .card .badge { color:var(--muted); }
 """
@@ -1041,9 +1034,7 @@ JS = """
         undone.closest('.card').classList.remove('just-snoozed');
       });
     }
-    else if (act === 'note') {
-      post('note', it.concat([['text', b.closest('details').querySelector('textarea').value]]));
-    } else if (act === 'up' || act === 'down') {
+    else if (act === 'up' || act === 'down') {
       var lane = b.closest('[data-pinned]');
       var cards = Array.prototype.slice.call(lane.querySelectorAll('.card'));
       var i = cards.indexOf(b.closest('.card')), j = act === 'up' ? i - 1 : i + 1;
@@ -1086,7 +1077,7 @@ def card_controls(
     pin: bool = True,
     why_not: bool = False,
 ) -> str:
-    """The pin toggle, snooze button, note editor, and
+    """The pin toggle, snooze, ignore and refresh buttons, and
     (pinned lane) up/down. `pin=False` drops Pin where nothing ranks by it.
     `why_not=True` makes Snooze hide the card in place and show its "why
     not now" line (whynot.picker, which the caller puts in the card) instead
@@ -1137,13 +1128,4 @@ def card_controls(
             ' title="Refresh: re-read this item from GitHub, without a full sync">'
             f"{icons.svg('refresh-cw')}</button>"
         )
-    body = ov.notes.get(item, "")
-    label = "Edit note" if body else "Add note"
-    parts.append(
-        f'<details><summary class="ov-icon" aria-label="{label}" title="{label}">'
-        f"{icons.svg('sticky-note')}</summary>"
-        f'<textarea maxlength="{MAX_NOTE}">{_e(body)}</textarea>'
-        '<button type="button" data-ov="note">Save note</button></details>'
-    )
-    shown = f'<div class="note">{_e(body)}</div>' if body else ""
-    return f'{shown}<div class="ov">{"".join(parts)}</div>'
+    return f'<div class="ov">{"".join(parts)}</div>'

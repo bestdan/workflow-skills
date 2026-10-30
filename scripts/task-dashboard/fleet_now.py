@@ -202,8 +202,20 @@ _LITTLE_CI = ("success", "none")
 CSS = """
 .now .card { display:flow-root; }
 .now .card .why { margin-top:2px; }
-.now .card .why-more > summary { cursor:pointer; color:var(--muted); font-size:12px; width:max-content; }
-.now .card > .act { float:right; margin:0 0 4px 12px; padding:1px 8px; border-radius:999px;
+/* A session's score is its state, which the meta line already reads. */
+.now .card[data-kind="session"] > .why { display:none; }
+.now .card .why-more { position:relative; display:inline-block; vertical-align:-3px; cursor:help; }
+.now .card .why-more .glyph { display:block; width:14px; height:14px; }
+.now .card .why-more:hover, .now .card .why-more:focus { color:var(--fg); outline:none; }
+.now .card .why-more .why { display:none; position:absolute; z-index:5; top:calc(100% + 4px); left:-8px;
+  width:max-content; max-width:min(420px, 80vw); margin:0; padding:6px 8px; border:1px solid var(--line);
+  border-radius:6px; background:var(--card); color:var(--fg); box-shadow:0 2px 8px rgba(0,0,0,.25); }
+.now .card .why-more:hover .why, .now .card .why-more:focus .why { display:block; }
+@media (max-width:600px) {
+  .now .card .why-more { position:static; }
+  .now .card .why-more .why { top:auto; left:8px; right:8px; width:auto; max-width:none; margin-top:4px; }
+}
+.now .card > .act { float:right; margin:0 0 4px 12px; padding:1px 8px; border-radius:10px;
   border:1px solid var(--line); background:var(--bg); font-weight:600; }
 @media (max-width:600px) {
   .now .card > .act { float:none; width:max-content; max-width:100%; margin:0 0 4px; }
@@ -1284,10 +1296,15 @@ def card(r: Ranked, now: datetime, ov: overlay.Overlay) -> str:
     act = " · ".join(x for x in (link, needs.pr_link(n), view_model.code(n.hint)) if x)
     act_html = f'<div class="act">→ {act}</div>' if act else ""
     why = f'<div class="why" data-terms="{terms}">{_e(why_line(r))}</div>'
-    if terms:
+    if terms and n.kind != "session":
         # A Ship score's breakdown runs to three lines on a phone; it is
-        # there for when the order looks wrong, so it waits behind a toggle.
-        why = f'<details class="why-more"><summary>why</summary>{why}</details>'
+        # there for when the order looks wrong, so it waits behind a "?" at
+        # the end of the meta line and pops over on hover, focus or tap.
+        meta += (
+            ' <span class="why-more" tabindex="0" aria-label="Why it ranks here">'
+            f"{icons.svg('circle-help')}{why}</span>"
+        )
+        why = ""
     steps = (
         f'<div class="checklist">{_e(close_out.checklist_text(r.checklist))}</div>'
         if r.checklist

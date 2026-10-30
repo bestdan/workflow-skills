@@ -331,9 +331,11 @@ class RenderTests(Case):
         self.assertLess(card.index('<div class="act">'), card.index('class="title"'))
         self.assertNotIn(">open it<", card)
         self.assertIn('<span class="ci-bad">CI failure</span>', card)
-        self.assertIn(
-            '<details class="why-more"><summary>why</summary><div class="why"', card
-        )
+        # The score's breakdown pops over from a "?" at the end of the meta line.
+        meta = re.search(r'<div class="meta">.*?</span></div>', card)
+        assert meta is not None
+        self.assertIn('<span class="why-more" tabindex="0"', meta.group(0))
+        self.assertIn('<div class="why" data-terms=', meta.group(0))
 
     def test_jira_off_now_lists_the_queue_with_a_why_line_on_every_card(self):
         seed(self.conn)
