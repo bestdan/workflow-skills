@@ -40,8 +40,8 @@ four rules hold:
    have a description line reading `approved: yes` (case ignored, line
    trimmed). A PR that closes no issue in a milestone skips this rule, since
    most of the owner's repos use none. The search reads each description
-   with the PR; a node without one (the per-card refresh's) is looked up,
-   cached per repo for one run, and a failed lookup counts as a miss.
+   with the PR; a node whose query did not select it is looked up, cached
+   per repo for one run, and a failed lookup counts as a miss.
 
 The PRs passing rule 1 alone are AWAITING. Every one is still a `kind = pr`
 row, with `status_name` set to `queue` or `awaiting`, `queue_misses` naming
@@ -515,7 +515,7 @@ def _closes_approved(node: dict, milestones: MilestoneCache) -> "bool | None":
         repo = issue["repository"]["nameWithOwner"]
         ms = issue["milestone"]
         # REVIEW_QUERY selects the description, so a sync makes no call here;
-        # a node from a query that does not (an older row) is looked up.
+        # a node whose query did not select it is looked up.
         if "description" in ms:
             description = ms["description"]  # null: none written, not approved
         else:

@@ -899,6 +899,21 @@ class FleetBudgetTests(FleetCase):
         sync.run_fleet(cfg, self.conn, later, runner=stale, clock=lambda: later)
         self.assertEqual(len(issue_pages(stale.calls)), 2)
 
+    def test_a_capped_issue_read_is_not_reused(self):
+        cfg = make_config(**self.CFG)
+        self.run_all(cfg, FleetGh())
+        # As if the cap had cut that read short: it is no complete base.
+        self.conn.execute(
+            "UPDATE sync_runs SET counts = json_set(counts, '$.issues_truncated', 1)"
+            " WHERE kind = ?",
+            (sync.FLEET_KIND,),
+        )
+        self.conn.commit()
+        quiet = FleetGh()  # issues_changed is 0
+        rows = self.run_all(cfg, quiet)
+        self.assertEqual(len(issue_pages(quiet.calls)), 2)
+        self.assertEqual(json.loads(rows[1]["counts"])["issues_reused"], 0)
+
     def test_an_edit_to_the_orgs_reads_the_issues_again(self):
         self.run_all(make_config(**self.CFG), FleetGh())
         edited = FleetGh()  # nothing changed on GitHub, but the config did
@@ -1313,6 +1328,14 @@ class CmdSyncTests(unittest.TestCase):
         self.assertIn("AcliError: boom", err)
         self.assertIn("gh auth login", err)
         self.assertIn(f"PR lookup failed, logged: {url}", err)
+
+    def test_a_throttled_fleet_run_exits_zero(self):
+        # It wrote its rows; only the per-PR reads were paused.
+        code, out, _ = self.cmd_sync(
+            [run_row("incremental", "ok"), run_row("github_fleet", "throttled")]
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("sync github_fleet: throttled", out)
 
     def test_fleet_failure_alone_sets_the_exit_code(self):
         code, out, _ = self.cmd_sync(
