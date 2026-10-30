@@ -473,6 +473,7 @@ body { margin:0; font:14px/1.45 -apple-system,system-ui,sans-serif; color:var(--
 header { padding:10px 16px; border-bottom:1px solid var(--line); }
 header .bar { display:flex; flex-wrap:wrap; gap:8px 16px; align-items:center; }
 header .bar > * { white-space:nowrap; }
+header .sync-note { margin-left:-10px; }
 header h1 { font-size:16px; margin:0; }
 header .alert { margin-top:8px; padding:6px 10px; border-radius:6px;
   background:var(--badbg); color:var(--bad); }
@@ -547,8 +548,8 @@ JS = """
     }
     if (!s.busy) asked = false;
     if (s.running && s.step_label) {
-      note.innerHTML = '<span class="lbl">syncing ' + esc(s.step_label) +
-        '\\u2026 </span>' + (s.step_elapsed_s || 0) + 's';
+      note.innerHTML = '<span class="lbl">syncing ' +
+        esc(s.step_label.replace(/ sync$/, '')) + ' </span>' + (s.step_elapsed_s || 0) + 's';
       note.hidden = false;
     } else if (s.busy) {
       note.innerHTML = '<span class="lbl">sync </span>starting\\u2026';
@@ -671,8 +672,11 @@ def sync_note(state: dict[str, Any]) -> str:
     hidden = "" if state.get("busy") else " hidden"
     text = ""
     if state.get("running") and state.get("step_label"):
+        # "Jira + GitHub sync" names the main step; after "syncing" the
+        # word is said once already.
+        step = state["step_label"].removesuffix(" sync")
         text = (
-            f'<span class="lbl">syncing {_e(state["step_label"])}… </span>'
+            f'<span class="lbl">syncing {_e(step)} </span>'
             f"{state.get('step_elapsed_s') or 0}s"
         )
     elif state.get("busy"):
