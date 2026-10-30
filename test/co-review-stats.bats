@@ -301,3 +301,73 @@ multi_fixture() {
   assert_success
   assert_line --regexp '^claude +1 +1 +0\.0 '
 }
+
+# revm <name> <disposition> <duration_s|null> <model-json>
+revm() { printf '{"name": "%s", "disposition": "%s", "duration_s": %s, "model": %s}' "$1" "$2" "$3" "$4"; }
+
+# crush moved from kimi-k3 to deepseek on one day (#1079), and claude changed model too.
+#   kimi runs m1, m2: crush 2 findings, both wrong. deepseek run m3: crush 2 findings, none wrong.
+#   claude over {m1, m2}: 2 of 3 wrong (66.7); over {m3}: 0 of 1 (0.0).
+model_fixture() {
+  rec_run h m1 2026-10-21T01:00:00Z org/a 1 "[$(revm claude ran 5 '"opus-a"'), $(revm crush ran 10 '"hyper/kimi-k3"')]"
+  rec_run h m2 2026-10-21T02:00:00Z org/a 1 "[$(revm claude ran 5 '"opus-b"'), $(revm crush ran 10 '"hyper/kimi-k3"')]"
+  rec_run h m3 2026-10-21T03:00:00Z org/a 1 "[$(revm claude ran 5 '"opus-b"'), $(revm crush ran 30 '"hyper/deepseek-v4.1-flash-1017"')]"
+  rec_finding h m1 '["claude"]' wrong
+  rec_finding h m2 '["claude"]' high
+  rec_finding h m3 '["claude"]' high
+  rec_finding h m1 '["crush"]' wrong
+  rec_finding h m2 '["crush", "claude"]' wrong
+  rec_finding h m3 '["crush"]' high
+  rec_finding h m3 '["crush"]' medium
+}
+
+@test "without --by-model, a reviewer's models are pooled into one row" {
+  model_fixture
+  stats --since 2026-10-21
+  assert_success
+  assert_line --regexp '^crush +3 +4 +50\.0 '
+  refute_output --partial '@'
+}
+
+@test "--by-model splits a reviewer's rows by model and pairs each against claude" {
+  model_fixture
+  stats --by-model
+  assert_success
+  # kimi cohort {m1, m2}: crush 100.0 - claude 66.7 = +33.3.
+  assert_line --regexp '^crush@hyper/kimi-k3 +2 +2 +100\.0 +\+33\.3 \(n=2\) '
+  # deepseek cohort {m3}: crush 0.0 - claude 0.0 = +0.0.
+  assert_line --regexp '^crush@hyper/deepseek-v4\.1-flash-1017 +1 +2 +0\.0 +\+0\.0 \(n=1\) .* 30\.0 +30\.0 +0\.0$'
+  # claude splits too, has no delta against itself, and its rows sort first.
+  assert_line --regexp '^claude@opus-a +1 +1 +100\.0 +— '
+  assert_line --regexp '^claude@opus-b +2 +3 +33\.3 +— '
+  assert_equal "$(printf '%s\n' "${lines[@]}" | sed -n '3,4p' | cut -d' ' -f1 | tr '\n' ' ')" 'claude@opus-a claude@opus-b '
+}
+
+@test "--by-model keeps the bare name for a run that recorded no model" {
+  rec_run h n1 $TS org/a 1 "[$(rev claude ran 1), $(revm devin ran 1 null)]"
+  rec_finding h n1 '["devin"]' high
+  stats --by-model
+  assert_success
+  assert_line --regexp '^devin +1 +1 +0\.0 '
+  assert_line --regexp '^claude +1 +0 '
+}
+
+@test "--by-model drops a skipped entry with no model, but keeps a failed one" {
+  rec_run h s1 $TS org/a 1 "[$(rev claude ran 1), $(revm crush ran 10 '"m-a"')]"
+  rec_run h s2 $TS org/a 1 "[$(rev claude ran 1), $(revm crush skipped null null)]"
+  rec_run h s3 $TS org/a 1 "[$(rev claude ran 1), $(revm grok failed 5 null)]"
+  stats --by-model
+  assert_success
+  assert_line --regexp '^crush@m-a +1 +0 '
+  refute_line --regexp '^crush '
+  assert_line --regexp '^grok +0 +0 .* 100\.0$'
+}
+
+@test "a reviewer name containing @ is not mistaken for claude" {
+  rec_run h a1 $TS org/a 1 "[$(rev claude ran 1), $(rev 'claude@home' ran 1)]"
+  rec_finding h a1 '["claude"]' wrong
+  rec_finding h a1 '["claude@home"]' high
+  stats
+  assert_success
+  assert_line --regexp '^claude@home +1 +1 +0\.0 +-100\.0 \(n=1\) '
+}
