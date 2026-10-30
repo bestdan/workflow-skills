@@ -52,21 +52,21 @@ paired_fixture() {
   paired_fixture
   stats
   assert_success
-  assert_line --regexp '^devin +2 +3 +33\.3 +\+8\.3 \(n=2\) +0\.0 +0\.0 +1 +1 +1\.50 +10\.0 +20\.0 +0\.0$'
+  assert_line --regexp '^devin +2 +3 +33\.3 +\+8\.3 \(n=2\) +0\.0 +0\.0 +1 +1 +1\.50 +10\.0 +20\.0 +0\.0 +—$'
   refute_output --partial '-16.7'
 }
 
 @test "claude is its own row, first, with no delta against itself" {
   paired_fixture
   stats
-  assert_line --regexp '^claude +4 +6 +50\.0 +— +0\.0 +0\.0 +3 +3 +1\.50 +5\.0 +5\.0 +0\.0$'
+  assert_line --regexp '^claude +4 +6 +50\.0 +— +0\.0 +0\.0 +3 +3 +1\.50 +5\.0 +5\.0 +0\.0 +—$'
   assert_equal "$(printf '%s\n' "${lines[@]}" | sed -n '3p' | cut -d' ' -f1)" claude
   assert_equal "$(printf '%s\n' "${lines[@]}" | sed -n '4p' | cut -d' ' -f1)" devin
 }
 
-@test "rows are ordered claude first, then by name" {
+@test "--sort name orders claude first, then by name" {
   rec_run h r1 $TS org/a 1 "[$(rev zed ran 1), $(rev claude ran 1), $(rev alpha ran 1)]"
-  stats
+  stats --sort name
   assert_equal "$(printf '%s\n' "${lines[@]}" | sed -n '3,5p' | cut -d' ' -f1 | tr '\n' ' ')" 'claude alpha zed '
 }
 
@@ -104,13 +104,13 @@ paired_fixture() {
   assert_success
   # runs: 3 ran. Percentiles (nearest-rank) over [10, 20, 30]: p50=20, p90=30; 600 excluded.
   # fail %: (1 failed + 1 timed-out) / (3 ran + 1 failed + 1 timed-out) = 40.0; skipped is not a dispatch.
-  assert_line --regexp '^devin +3 +0 +— +— +— +— +0 +0 +0\.00 +20\.0 +30\.0 +40\.0$'
+  assert_line --regexp '^devin +3 +0 +— +— +— +— +0 +0 +0\.00 +20\.0 +30\.0 +40\.0 +—$'
 }
 
 @test "a reviewer with no ran or failed durations prints dashes for p50 and p90" {
   rec_run h t1 $TS org/a 1 "[$(rev devin timed-out 600)]"
   stats
-  assert_line --regexp '^devin +0 +0 +— +— +— +— +0 +0 +— +— +— +100\.0$'
+  assert_line --regexp '^devin +0 +0 +— +— +— +— +0 +0 +— +— +— +100\.0 +—$'
 }
 
 @test "a run is keyed on host and run_id together" {
@@ -321,9 +321,9 @@ model_fixture() {
   rec_finding h m3 '["crush"]' medium
 }
 
-@test "without --by-model, a reviewer's models are pooled into one row" {
+@test "--no-by-model pools a reviewer's models into one row" {
   model_fixture
-  stats --since 2026-10-21
+  stats --no-by-model
   assert_success
   assert_line --regexp '^crush +3 +4 +50\.0 '
   refute_output --partial '@'
@@ -336,7 +336,7 @@ model_fixture() {
   # kimi cohort {m1, m2}: crush 100.0 - claude 66.7 = +33.3.
   assert_line --regexp '^crush@hyper/kimi-k3 +2 +2 +100\.0 +\+33\.3 \(n=2\) '
   # deepseek cohort {m3}: crush 0.0 - claude 0.0 = +0.0.
-  assert_line --regexp '^crush@hyper/deepseek-v4\.1-flash-1017 +1 +2 +0\.0 +\+0\.0 \(n=1\) .* 30\.0 +30\.0 +0\.0$'
+  assert_line --regexp '^crush@hyper/deepseek-v4\.1-flash-1017 +1 +2 +0\.0 +\+0\.0 \(n=1\) .* 30\.0 +30\.0 +0\.0 +—$'
   # claude splits too, has no delta against itself, and its rows sort first.
   assert_line --regexp '^claude@opus-a +1 +1 +100\.0 +— '
   assert_line --regexp '^claude@opus-b +2 +3 +33\.3 +— '
@@ -360,7 +360,7 @@ model_fixture() {
   assert_success
   assert_line --regexp '^crush@m-a +1 +0 '
   refute_line --regexp '^crush '
-  assert_line --regexp '^grok +0 +0 .* 100\.0$'
+  assert_line --regexp '^grok +0 +0 .* 100\.0 +—$'
 }
 
 @test "a reviewer name containing @ is not mistaken for claude" {
@@ -370,4 +370,49 @@ model_fixture() {
   stats
   assert_success
   assert_line --regexp '^claude@home +1 +1 +0\.0 +-100\.0 \(n=1\) '
+}
+
+# Ten runs. claude takes 60s, alpha 30s, devin 180s (p90 two minutes past
+# claude's); devin's tenth dispatch fails, so it has 9 runs but 10 dispatches.
+#   devin: 4 unique highs, 2 wrong. alpha: 1 wrong. claude: none.
+score_fixture() {
+  for i in 1 2 3 4 5 6 7 8 9; do
+    rec_run h s$i $TS org/a 1 "[$(rev claude ran 60), $(rev alpha ran 30), $(rev devin ran 180)]"
+  done
+  rec_run h s10 $TS org/a 1 "[$(rev claude ran 60), $(rev alpha ran 30), $(rev devin failed 180)]"
+  for i in 1 2 3 4; do rec_finding h s$i '["devin"]' high; done
+  rec_finding h s5 '["devin"]' wrong
+  rec_finding h s6 '["devin"]' wrong
+  rec_finding h s7 '["alpha"]' wrong
+}
+
+@test "score is net catches per dispatch less the wait past claude's p90" {
+  score_fixture
+  stats
+  assert_success
+  # devin: (4 - 0.5 × 2) / 10 - 0.05 × 2 = +0.20. alpha is faster than claude, so
+  # it is charged no wait: (0 - 0.5 × 1) / 10 = -0.05.
+  assert_line --regexp '^devin +9 +6 .* \+0\.20$'
+  assert_line --regexp '^alpha +10 +1 .* -0\.05$'
+  assert_line --regexp '^claude +10 +0 .* \+0\.00$'
+  assert_output --partial "score: (unique-high - 0.5 × wrong) per dispatch, minus 0.05 per minute of p90 past claude's; — under 10 dispatches."
+}
+
+@test "rows are ordered by score by default, highest first, dashes last" {
+  score_fixture
+  rec_run h t1 $TS org/a 1 "[$(rev zed ran 1)]"
+  stats
+  assert_success
+  assert_equal "$(printf '%s\n' "${lines[@]}" | sed -n '3,6p' | cut -d' ' -f1 | tr '\n' ' ')" 'devin claude alpha zed '
+}
+
+@test "--wrong-weight, --wait-cost and --min-runs change the score and the footer" {
+  score_fixture
+  # devin: (4 - 2 × 2) / 10 - 0.1 × 2 = -0.20.
+  stats --wrong-weight 2 --wait-cost 0.1
+  assert_line --regexp '^devin .* -0\.20$'
+  assert_output --partial 'score: (unique-high - 2 × wrong) per dispatch, minus 0.1 per minute'
+  stats --min-runs 11
+  assert_line --regexp '^devin .* +—$'
+  assert_output --partial '— under 11 dispatches.'
 }
