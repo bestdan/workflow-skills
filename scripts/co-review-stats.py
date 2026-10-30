@@ -10,7 +10,9 @@ ledger that scripts/co-review-record.py writes, and the arithmetic lives here,
 not in a model, so every number on stdout is computed.
 
 Usage:
-  uv run scripts/co-review-stats.py [--ledger <path>]... [--since <ISO date>] [--repo <name>] [--by-model]
+  uv run scripts/co-review-stats.py [--ledger <path>]... [--since <ISO date>] [--repo <name>]
+                                    [--no-by-model] [--sort name] [--min-runs <n>]
+                                    [--wrong-weight <w>] [--wait-cost <c>]
 
 --ledger may repeat, and a directory means every *.jsonl in it, sorted. The
 default is the local ledger; with CO_REVIEW_LEDGER_REMOTE set, it is the local
@@ -19,8 +21,9 @@ scripts/co-review-ledger-sync.py --pull keeps current. Files are read in order,
 and a (host, run_id) seen in an earlier file is dropped from a later one, so
 this machine's full rows win over its own redacted copies.
 
---by-model keys each row by name@model, the model the run recorded for that
-reviewer, so a reviewer whose pin changed gets one row per model. A run that
+Rows are keyed by name@model, the model the run recorded for that reviewer, so
+a reviewer whose pin changed gets one row per model; --no-by-model pools a
+reviewer's models into one row. A run that
 recorded no model keeps the bare name, except a skipped entry, which is
 dropped: it was never dispatched, so it adds only an empty row. claude is
 split the same way, but Δ claude still pairs against claude across all its
@@ -45,6 +48,20 @@ Definitions (a run is identified by the pair (host, run_id), never run_id alone)
                excluded; null or missing durations are skipped. "—" if none.
   fail %       (timed-out + failed) / (ran + failed + timed-out); skipped
                dispositions are not dispatches. "—" when never dispatched.
+  score        net catches per dispatch, less the wait the reviewer adds:
+               (unique-high - W × wrong) / dispatches
+                 - C × max(0, p90 s - claude's p90 s) / 60
+               where dispatches = ran + failed + timed-out, so a failure
+               lowers the score by adding a dispatch with no catches. Only
+               wait past claude's p90 is charged, since claude runs on nearly
+               every run and already sets that much of the wait. W is
+               --wrong-weight (default 0.5: a wrong finding is skipped by the
+               reconciler, not acted on) and C is --wait-cost (default 0.05);
+               both are judgement, so the footer prints them. "—" under
+               --min-runs dispatches (default 10) or with no p90.
+
+Rows are ordered by score, highest first, "—" last, then by name; --sort name
+orders claude first, then by name.
 
 The denominator is reconciled runs: invocations that aborted before
 reconciliation never reached the ledger, by design. Runs whose schema is not 1
@@ -188,7 +205,27 @@ def load(
     return runs, findings, {"schema": skipped_schema, "torn": torn}
 
 
-def compute(runs, findings) -> List[Dict[str, Any]]:
+def score(
+    unique_high: int,
+    wrong: int,
+    dispatches: int,
+    p90: Optional[float],
+    base_p90: Optional[float],
+    weights: Dict[str, float],
+) -> Optional[float]:
+    if dispatches < max(weights["min_runs"], 1) or p90 is None:
+        return None
+    net = (unique_high - weights["wrong_weight"] * wrong) / dispatches
+    extra_min = max(0.0, p90 - (base_p90 or 0.0)) / 60.0
+    return net - weights["wait_cost"] * extra_min
+
+
+WEIGHTS = {"min_runs": 10, "wrong_weight": 0.5, "wait_cost": 0.05}
+
+
+def compute(
+    runs, findings, weights: Dict[str, float] = WEIGHTS
+) -> List[Dict[str, Any]]:
     names: Set[str] = set()
     for run in runs.values():
         names.update(run["disp"])
@@ -221,6 +258,16 @@ def compute(runs, findings) -> List[Dict[str, Any]]:
 
     base_labels = sorted(n for n in names if base_name(n) == BASE)
     base_runs: Set[Key] = set().union(*(ran_by[n] for n in base_labels))
+    base_p90 = nearest_rank(
+        [
+            secs
+            for run in runs.values()
+            for n in base_labels
+            if run["disp"].get(n) in ("ran", "failed")
+            and (secs := run["dur"].get(n)) is not None
+        ],
+        0.9,
+    )
 
     def of_base(keys: Set[Key]) -> List[Dict[str, Any]]:
         out: List[Dict[str, Any]] = []
@@ -259,6 +306,14 @@ def compute(runs, findings) -> List[Dict[str, Any]]:
             mine, base = wrong_rate(of(name, common)), wrong_rate(of_base(common))
             if mine is not None and base is not None:
                 delta = mine - base
+        unique_high = sum(
+            1
+            for f in fs
+            if f.get("verdict") == "high"
+            and f.get("sources") == [name]
+            and not f.get("human_corroborated")
+        )
+        p90 = nearest_rank(durs, 0.9)
         rows.append(
             {
                 "name": name,
@@ -270,17 +325,19 @@ def compute(runs, findings) -> List[Dict[str, Any]]:
                 "na": pct(verdicts.count("not-applicable"), n_f),
                 "oos": pct(verdicts.count("out-of-scope"), n_f),
                 "high": verdicts.count("high"),
-                "unique_high": sum(
-                    1
-                    for f in fs
-                    if f.get("verdict") == "high"
-                    and f.get("sources") == [name]
-                    and not f.get("human_corroborated")
-                ),
+                "unique_high": unique_high,
                 "per_run": (n_f / n_runs) if n_runs else None,
                 "p50": nearest_rank(durs, 0.5),
-                "p90": nearest_rank(durs, 0.9),
+                "p90": p90,
                 "fail": pct(failed + timed_out, ran + failed + timed_out),
+                "score": score(
+                    unique_high,
+                    verdicts.count("wrong"),
+                    ran + failed + timed_out,
+                    p90,
+                    base_p90,
+                    weights,
+                ),
             }
         )
     return rows
@@ -294,10 +351,10 @@ def delta_cell(row: Dict[str, Any]) -> str:
     return f"{row['delta']:+.1f} (n={row['cohort']})"
 
 
-def render(rows, n_runs: int, stats) -> str:
+def render(rows, n_runs: int, stats, weights: Dict[str, float] = WEIGHTS) -> str:
     header = [
         "reviewer", "runs", "findings", "wrong %", "Δ claude", "n/a %", "oos %",
-        "high", "unique-high", "finds/run", "p50 s", "p90 s", "fail %",
+        "high", "unique-high", "finds/run", "p50 s", "p90 s", "fail %", "score",
     ]  # fmt: skip
     table = [header]
     for r in rows:
@@ -306,7 +363,7 @@ def render(rows, n_runs: int, stats) -> str:
             r["name"], str(r["runs"]), str(r["findings"]), fmt_num(r["wrong"]),
             delta_cell(r), fmt_num(r["na"]), fmt_num(r["oos"]), str(r["high"]),
             str(r["unique_high"]), per_run, fmt_num(r["p50"]), fmt_num(r["p90"]),
-            fmt_num(r["fail"]),
+            fmt_num(r["fail"]), DASH if r["score"] is None else f"{r['score']:+.2f}",
         ])  # fmt: skip
     widths = [max(len(row[i]) for row in table) for i in range(len(header))]
     lines = []
@@ -330,6 +387,11 @@ def render(rows, n_runs: int, stats) -> str:
         "Δ claude: paired wrong-% delta in points over runs where both ran; "
         "p50/p90 exclude timed-out runs."
     )
+    lines.append(
+        f"score: (unique-high - {weights['wrong_weight']:g} × wrong) per dispatch, "
+        f"minus {weights['wait_cost']:g} per minute of p90 past claude's; "
+        f"— under {weights['min_runs']:g} dispatches."
+    )
     return "\n".join(lines)
 
 
@@ -346,10 +408,40 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--repo", help="only runs for this repo")
     ap.add_argument(
         "--by-model",
-        action="store_true",
-        help="one row per reviewer@model instead of per reviewer",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="one row per reviewer@model (default); --no-by-model pools models",
+    )
+    ap.add_argument(
+        "--sort",
+        choices=["name", "score"],
+        default="score",
+        help="row order: by score (default), or claude first then by name",
+    )
+    ap.add_argument(
+        "--min-runs",
+        type=int,
+        default=WEIGHTS["min_runs"],
+        help="dispatches a reviewer needs before it gets a score (default 10)",
+    )
+    ap.add_argument(
+        "--wrong-weight",
+        type=float,
+        default=WEIGHTS["wrong_weight"],
+        help="unique-highs one wrong finding cancels in the score (default 0.5)",
+    )
+    ap.add_argument(
+        "--wait-cost",
+        type=float,
+        default=WEIGHTS["wait_cost"],
+        help="score lost per minute of p90 past claude's (default 0.05)",
     )
     args = ap.parse_args(argv)
+    weights = {
+        "min_runs": args.min_runs,
+        "wrong_weight": args.wrong_weight,
+        "wait_cost": args.wait_cost,
+    }
     values = args.ledger or [str(DEFAULT_LEDGER)]
     if not args.ledger and os.environ.get("CO_REVIEW_LEDGER_REMOTE"):
         values.append(str(SHARED_LEDGERS))
@@ -365,7 +457,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             f"{stats['schema']} unknown-schema run(s), {stats['torn']} unparseable line(s))."
         )
         return 0
-    print(render(compute(runs, findings), len(runs), stats))
+    rows = compute(runs, findings, weights)
+    if args.sort == "score":
+        rows.sort(key=lambda r: (r["score"] is None, -(r["score"] or 0.0), r["name"]))
+    print(render(rows, len(runs), stats, weights))
     return 0
 
 

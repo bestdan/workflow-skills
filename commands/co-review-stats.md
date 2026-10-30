@@ -1,7 +1,7 @@
 ---
 description: Use when the user asks how useful, accurate or fast each co-review reviewer has been — e.g. "is agy worth running", "which reviewers are wrong most", "show reviewer stats", or /co-review-stats. Prints the per-reviewer quality table from the co-review findings ledger, verbatim. Never invoke it from inside a review, or to inform one; it is the human end of the feedback loop.
 allowed-tools: Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/co-review-ledger-sync.py" --pull), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/co-review-stats.py":*)
-argument-hint: "[--since YYYY-MM-DD] [--repo <owner/name>] [--by-model]"
+argument-hint: "[--since YYYY-MM-DD] [--repo <owner/name>] [--no-by-model] [--sort name] [--min-runs N] [--wrong-weight W] [--wait-cost C]"
 ---
 
 # Co-review Stats
@@ -19,11 +19,12 @@ The plugin's `SessionEnd` hook also pushes this machine's new runs when a
 session ends, so the pull here mostly fetches the other machines'. The design is
 [`dev_docs/designs/2026-10-18-co-review-ledger-sync.md`](../dev_docs/designs/2026-10-18-co-review-ledger-sync.md).
 
-Then run the stats, passing through only `--since`, `--repo` and `--by-model`
-from the arguments, and show its stdout **verbatim** in a code block:
+Then run the stats, passing through only `--since`, `--repo`, `--no-by-model`,
+`--sort`, `--min-runs`, `--wrong-weight` and `--wait-cost` from the arguments,
+and show its stdout **verbatim** in a code block:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/co-review-stats.py" [--since <date>] [--repo <owner/name>] [--by-model]
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/co-review-stats.py" [--since <date>] [--repo <owner/name>] [--no-by-model] [--sort name] [--min-runs <n>] [--wrong-weight <w>] [--wait-cost <c>]
 ```
 
 Add no numbers of your own: no summary that restates, computes, or rounds any
@@ -40,10 +41,15 @@ line, show it and stop.
 - Read speed against quality. `p90 s` is the wait for the whole run. Slow, high
   `fail %`, low `unique-high` is the clearest drop; slow but a sole catcher may
   be worth it.
-- After a reviewer's model pin changes, `--by-model` gives one
-  `name@model` row per model; `--since` cannot separate them when old and new
-  ran on the same day. `Δ claude` still pairs against claude across all its
-  models. A reviewer whose runs record no model keeps its bare name.
+- Rows are sorted by `score`, which folds unique catches, wrong findings, fail rate and wait into one number: net
+  catches per dispatch, less the wait a reviewer adds past `claude`'s p90. Its
+  two exchange rates, `--wrong-weight` and `--wait-cost`, are judgement and are
+  printed in the footer; the order can change with them, so check it holds
+  before acting on a close one. The definition is the script's docstring.
+- Each row is one `name@model`, so a reviewer whose model pin changed gets a
+  row per model; `--no-by-model` pools them. `Δ claude` still pairs against
+  claude across all its models. A reviewer whose runs record no model keeps its
+  bare name.
 - If every reviewer, `claude` included, looks bad, suspect the reconciler
   prompt, not the reviewers.
 - Verdict to action: `wrong` means drop or retune the model; `not-applicable`
