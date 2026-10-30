@@ -16,9 +16,9 @@ sessions could each interpret slightly differently:
   neither won nor lost) mean different things to the caller, and the caller
   branches on the number, not on parsing prose. `acquire-ref` is the same
   election with the branch name passed in directly instead of derived from an
-  issue number, so `claim-lock.md` and the jira handler — which have their own
-  branch-naming rules — share this one implementation instead of hand-walking
-  the POST/422 dispatch a second time.
+  issue number — a tracker-neutral entry point, so `claim-lock.md` and any
+  caller with its own branch-naming rule share this one implementation instead
+  of hand-walking the POST/422 dispatch a second time.
 - `find-task-refs` is the cross-prefix read pre-flight cannot do with its own
   `<branch>`: it lists every claim-lock ref for an issue under ANY prefix, so a
   session whose `branch_prefix` disagrees with a sibling's can SEE the other
