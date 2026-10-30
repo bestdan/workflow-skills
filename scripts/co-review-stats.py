@@ -10,7 +10,7 @@ ledger that scripts/co-review-record.py writes, and the arithmetic lives here,
 not in a model, so every number on stdout is computed.
 
 Usage:
-  uv run scripts/co-review-stats.py [--ledger <path>]... [--since <ISO date>] [--repo <name>]
+  uv run scripts/co-review-stats.py [--ledger <path>]... [--since <ISO date>] [--repo <name>] [--by-model]
 
 --ledger may repeat, and a directory means every *.jsonl in it, sorted. The
 default is the local ledger; with CO_REVIEW_LEDGER_REMOTE set, it is the local
@@ -18,6 +18,11 @@ ledger followed by the shared clone's ledgers/ directory, which
 scripts/co-review-ledger-sync.py --pull keeps current. Files are read in order,
 and a (host, run_id) seen in an earlier file is dropped from a later one, so
 this machine's full rows win over its own redacted copies.
+
+--by-model keys each row by name@model, the model the run recorded for that
+reviewer, so a reviewer whose pin changed gets one row per model. A run that
+recorded no model keeps the bare name. claude is split the same way, but Δ
+claude still pairs against claude across all its models.
 
 Definitions (a run is identified by the pair (host, run_id), never run_id alone):
   runs         runs where the reviewer's disposition was "ran".
@@ -101,7 +106,17 @@ def expand(values: List[str]) -> List[Path]:
     return files
 
 
-def load(paths: List[Path], since: Optional[str], repo: Optional[str]):
+def label(name: str, model: Any) -> str:
+    return f"{name}@{model}" if isinstance(model, str) and model else name
+
+
+def base_name(lbl: str) -> str:
+    return lbl.split("@", 1)[0]
+
+
+def load(
+    paths: List[Path], since: Optional[str], repo: Optional[str], by_model: bool = False
+):
     """Return (runs, findings, stats). runs: key -> {disp, dur}; findings: key -> [rec]."""
     runs: Dict[Key, Dict[str, Any]] = {}
     findings: Dict[Key, List[Dict[str, Any]]] = {}
@@ -144,16 +159,26 @@ def load(paths: List[Path], since: Optional[str], repo: Optional[str]):
                     continue
                 disp: Dict[str, Any] = {}
                 dur: Dict[str, Optional[float]] = {}
+                labels: Dict[str, str] = {}
                 for r in rec.get("reviewers") or []:
                     if isinstance(r, dict) and r.get("name"):
-                        disp[r["name"]] = r.get("disposition")
+                        lbl = (
+                            label(r["name"], r.get("model")) if by_model else r["name"]
+                        )
+                        labels[r["name"]] = lbl
+                        disp[lbl] = r.get("disposition")
                         d = r.get("duration_s")
                         ok = isinstance(d, (int, float)) and not isinstance(d, bool)
-                        dur[r["name"]] = d if ok else None
-                runs[key] = {"disp": disp, "dur": dur}
+                        dur[lbl] = d if ok else None
+                runs[key] = {"disp": disp, "dur": dur, "labels": labels}
             elif rec.get("type") == "finding" and key != dropping:
                 findings.setdefault(key, []).append(rec)
     findings = {k: v for k, v in findings.items() if k in runs}
+    if by_model:
+        for key, recs in findings.items():
+            labels = runs[key]["labels"]
+            for f in recs:
+                f["sources"] = [labels.get(s, s) for s in f.get("sources") or []]
     return runs, findings, {"schema": skipped_schema, "torn": torn}
 
 
@@ -181,8 +206,22 @@ def compute(runs, findings) -> List[Dict[str, Any]]:
     def wrong_rate(fs: List[Dict[str, Any]]) -> Optional[float]:
         return pct(sum(1 for f in fs if f.get("verdict") == "wrong"), len(fs))
 
+    base_labels = sorted(n for n in names if base_name(n) == BASE)
+    base_runs: Set[Key] = set().union(*(ran_by[n] for n in base_labels))
+
+    def of_base(keys: Set[Key]) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        for key, recs in findings.items():
+            if key in keys:
+                out.extend(
+                    f
+                    for f in recs
+                    if any(base_name(s) == BASE for s in f.get("sources") or [])
+                )
+        return out
+
     rows = []
-    for name in sorted(names, key=lambda n: (n != BASE, n)):
+    for name in sorted(names, key=lambda n: (base_name(n) != BASE, n)):
         fs = of(name)
         n_f = len(fs)
         verdicts = [f.get("verdict") for f in fs]
@@ -201,10 +240,10 @@ def compute(runs, findings) -> List[Dict[str, Any]]:
             if d in ("ran", "failed") and secs is not None:
                 durs.append(secs)
         delta = cohort = None
-        if name != BASE:
-            common = ran_by[name] & ran_by.get(BASE, set())
+        if base_name(name) != BASE:
+            common = ran_by[name] & base_runs
             cohort = len(common)
-            mine, base = wrong_rate(of(name, common)), wrong_rate(of(BASE, common))
+            mine, base = wrong_rate(of(name, common)), wrong_rate(of_base(common))
             if mine is not None and base is not None:
                 delta = mine - base
         rows.append(
@@ -235,7 +274,7 @@ def compute(runs, findings) -> List[Dict[str, Any]]:
 
 
 def delta_cell(row: Dict[str, Any]) -> str:
-    if row["name"] == BASE or not row["cohort"]:
+    if base_name(row["name"]) == BASE or not row["cohort"]:
         return DASH
     if row["delta"] is None:
         return f"{DASH} (n={row['cohort']})"
@@ -292,6 +331,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--since", type=iso_date, help="only runs on or after this date (YYYY-MM-DD)"
     )
     ap.add_argument("--repo", help="only runs for this repo")
+    ap.add_argument(
+        "--by-model",
+        action="store_true",
+        help="one row per reviewer@model instead of per reviewer",
+    )
     args = ap.parse_args(argv)
     values = args.ledger or [str(DEFAULT_LEDGER)]
     if not args.ledger and os.environ.get("CO_REVIEW_LEDGER_REMOTE"):
@@ -301,7 +345,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not paths:
         print(f"No co-review ledger data at {where}.")
         return 0
-    runs, findings, stats = load(paths, args.since, args.repo)
+    runs, findings, stats = load(paths, args.since, args.repo, args.by_model)
     if not runs:
         print(
             f"No reconciled runs match in {where} (across the whole ledger: "
