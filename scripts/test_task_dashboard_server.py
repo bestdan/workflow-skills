@@ -773,13 +773,14 @@ class FreshnessTest(HeaderCase):
         self.httpd.app.cfg["linear"]["enabled"] = True
         self.seed(mini_minutes=6)
         conn = self.conn()
-        add_run(conn, "ok", self.now() - timedelta(minutes=1),
+        # Two minutes, not one: a slow runner read 60s as 61s.
+        add_run(conn, "ok", self.now() - timedelta(minutes=2),
                 "LinearAuthError: 401", kind="workstreams",
                 counts={"linear": "auth failed"})  # fmt: skip
         conn.close()
         self.assertEqual(
             panel_rows(self.header())["workstreams"],
-            ("Workstreams", "60s", "ok; Linear: auth failed: LinearAuthError: 401",
+            ("Workstreams", "2m","ok; Linear: auth failed: LinearAuthError: 401",
              "in 5m", True),
         )  # fmt: skip
 
