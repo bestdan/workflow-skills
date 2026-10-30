@@ -493,6 +493,17 @@ class JiraModeTests(Case):
         self.assertEqual(shown["ABC-1"].category, "refinement")
         self.assertEqual(shown["ABC-1"].need.kind, "ticket")
 
+    def test_deep_leaves_out_a_started_ticket_in_a_refinement_status(self):
+        self.ticket("ABC-1", "indeterminate", "Planning")
+        self.assertEqual(self.mode("deep"), {})
+
+    def test_deep_names_a_single_blocked_ticket(self):
+        self.ticket("ABC-1")
+        self.blocks("ABC-1", "ABC-9")
+        shown = self.mode("deep")
+        self.assertEqual(fleet_now.why_line(shown["ABC-1"]),
+                         "deep · blocks 1 open ticket")  # fmt: skip
+
     def test_tidy_ranks_tickets_untouched_past_the_window_oldest_first(self):
         days = lambda n: ts(NOW - timedelta(days=n))  # noqa: E731
         self.ticket("ABC-1", updated=days(20))
