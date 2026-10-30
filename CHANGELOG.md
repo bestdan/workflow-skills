@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.153.1] - 2026-10-30
+
+### Fixes
+
+- stop re-reading idle PRs every sync [#1252] (#1254) (547b8c9)
+
 ## [2.153.0] - 2026-10-30
 
 ### Features
