@@ -91,7 +91,9 @@ DEEP ranks the questions that need thinking, not doing (deep_sources): a
 proposed design (workstreams.mirrored_designs), an issue that blocks open
 issues (`blocks`, from GitHub's native dependencies), one at
 `status:1_needs_refinement`, and a `status:2_ready` one estimated at
-`est:DEEP_EST` or more. They go by the open issues each blocks, most first,
+`est:DEEP_EST` or more; and my open Jira tickets (deep_ticket) that block
+open tickets (outward `Blocks` links), or that sit, still to do, in a status
+DEEP_JIRA_STATUSES names. They go by the open issues each blocks, most first,
 then `prio`, then the larger estimate, then the longer wait, with no score.
 An item with no `blocks` evidence (a design, or an issue synced before the
 field) shows no blocks term and sorts as blocking none. DEEP_LIMIT are shown,
@@ -99,9 +101,14 @@ pins aside: one to take up and two alternates.
 
 TIDY ranks the backlog that rots (tidy_sources): an issue labelled
 auto:human-review-needed, `status:0_untriaged` or `status:1_needs_refinement`,
-and my own PR open longer than fleet_views.OPEN_ITEM_DAYS, drafts and pending
-CI included. Strictly oldest first, with no score; age is the point. The
-action is to close it, supersede it, or decide it.
+my own PR open longer than fleet_views.OPEN_ITEM_DAYS, drafts and pending CI
+included, and my open Jira ticket not updated in as long. Strictly oldest
+first, with no score; age is the point. The action is to close it, supersede
+it, or decide it.
+
+No mode needs the owner-wide GitHub read: without it the issue sources are
+empty and the rest, PRs and Jira tickets, still rank, so every instance has
+the mode button.
 
 SHARED BEHAVIOUR, as on every view and in every mode: pinned items lead,
 the include filter, ignores and snoozes apply, and a snoozed item is left out
@@ -183,6 +190,9 @@ EMPTY = {LITTLE: "Nothing small is waiting", DEEP: "Nothing needs deciding",
 # issue is big enough to be one.
 DEEP_LIMIT = 3
 DEEP_EST = 8
+# Deep: the to-do Jira statuses that mean a ticket still needs deciding,
+# casefolded.
+DEEP_JIRA_STATUSES = ("needs refinement", "refinement", "discovery", "planning")
 
 # Little's small test, and its tiers, smallest first: (label, category).
 LITTLE_FILES = 3
@@ -563,18 +573,48 @@ def jira_category(
     return None
 
 
+def _mirror(
+    conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime
+) -> "views.Mirror | None":
+    """The Jira mirror, or None when Jira is off."""
+    if not sync.jira_enabled(cfg):
+        return None
+    factory = conn.row_factory
+    try:
+        return views.Mirror(conn, cfg, now)
+    finally:
+        conn.row_factory = factory  # Mirror leaves it None
+
+
+def _ticket_need(
+    cfg: dict[str, Any],
+    issue: dict[str, Any],
+    hint: str,
+    since: "datetime | None" = None,
+) -> needs.Need:
+    """A Jira ticket as a Need; `since` defaults to its status change."""
+    key = issue["key"]
+    return needs.Need(
+        item=("jira", key),
+        kind="ticket",
+        title=issue.get("summary") or "",
+        ref=key,
+        since=since or score.parse_ts(issue.get("status_category_changed")),
+        url=f"https://{cfg['jira']['site']}/browse/{key}",
+        state=" · ".join(views.issue_meta(issue)),
+        hint=hint,
+        row=issue,
+    )
+
+
 def _jira_tickets(
     conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime
 ) -> list[candidate.Candidate]:
     """My open tickets, and any open one I pinned, as views.Mirror scores
     them. A pinned ticket is mine for Now even when it is assigned elsewhere."""
-    if not sync.jira_enabled(cfg):
+    m = _mirror(conn, cfg, now)
+    if m is None:
         return []
-    factory = conn.row_factory
-    try:
-        m = views.Mirror(conn, cfg, now)
-    finally:
-        conn.row_factory = factory  # Mirror leaves it None
     issues = {i["key"]: i for i in m.open_mine()}
     for key in m.pins:
         i = m.issues.get(key)
@@ -589,16 +629,8 @@ def _jira_tickets(
         blocked, signals = m.blocked[key]
         if blocked:
             why += f"; blocked: {', '.join(signals)}"
-        need = needs.Need(
-            item=("jira", key),
-            kind="ticket",
-            title=issue.get("summary") or "",
-            ref=key,
-            since=score.parse_ts(issue.get("status_category_changed")),
-            url=f"https://{cfg['jira']['site']}/browse/{key}",
-            state=" · ".join(views.issue_meta(issue)),
-            hint="carry on with it" if category == "started" else "start it",
-            row=issue,
+        need = _ticket_need(
+            cfg, issue, "carry on with it" if category == "started" else "start it"
         )
         out.append(
             candidate.Candidate(
@@ -930,11 +962,45 @@ def _deep_designs(conn: sqlite3.Connection) -> list[candidate.Candidate]:
     return out
 
 
+def deep_ticket(issue: dict[str, Any], blocks: int) -> "tuple[str, str] | None":
+    """(category, why) for an open Jira ticket Deep ranks, else None: one
+    that blocks `blocks` open tickets, or a to-do one in DEEP_JIRA_STATUSES."""
+    if blocks:
+        return "blocker", f"blocks {blocks} open ticket{'' if blocks == 1 else 's'}"
+    status = issue.get("status_name") or ""
+    if (issue.get("status_category") or "").lower() == "new" and (
+        status.casefold() in DEEP_JIRA_STATUSES
+    ):
+        return "refinement", f"your ticket, {status}"
+    return None
+
+
+def _deep_tickets(
+    conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime
+) -> list[candidate.Candidate]:
+    m = _mirror(conn, cfg, now)
+    if m is None:
+        return []
+    out = []
+    for issue in m.open_mine():
+        blocks = len(score.open_blocked(m.links.get(issue["key"], [])))
+        found = deep_ticket(issue, blocks)
+        if found is None:
+            continue
+        category, why = found
+        need = _ticket_need(
+            cfg, issue, "decide it, or split it with `/break-down-task`"
+        )
+        more = {candidate.BLOCKS: blocks or None}
+        out.append(_candidate(need, category, why, more=more, mode=DEEP))
+    return out
+
+
 def deep_sources(
     conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime
 ) -> list[candidate.Candidate]:
     """Every candidate Deep ranks."""
-    return _deep_designs(conn) + _deep_issues(conn, cfg)
+    return _deep_designs(conn) + _deep_issues(conn, cfg) + _deep_tickets(conn, cfg, now)
 
 
 # Tidy's issue labels, first match wins: label -> (category, why).
@@ -992,11 +1058,38 @@ def _tidy_prs(
     return out
 
 
+def _tidy_tickets(
+    conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime
+) -> list[candidate.Candidate]:
+    m = _mirror(conn, cfg, now)
+    if m is None:
+        return []
+    old = now - timedelta(days=fleet_views.OPEN_ITEM_DAYS)
+    out = []
+    for issue in m.open_mine():
+        updated = score.parse_ts(issue.get("updated"))
+        if updated is None or updated > old:
+            continue
+        need = _ticket_need(
+            cfg, issue, "close it, supersede it, or decide it", since=updated
+        )
+        why = (
+            f"your ticket, {issue.get('status_name') or 'open'},"
+            f" untouched over {fleet_views.OPEN_ITEM_DAYS}d"
+        )
+        out.append(_candidate(need, "stale_ticket", why, mode=TIDY))
+    return out
+
+
 def tidy_sources(
     conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime
 ) -> list[candidate.Candidate]:
     """Every candidate Tidy ranks."""
-    return _tidy_issues(conn, cfg) + _tidy_prs(conn, cfg, now)
+    return (
+        _tidy_issues(conn, cfg)
+        + _tidy_prs(conn, cfg, now)
+        + _tidy_tickets(conn, cfg, now)
+    )
 
 
 def mode_candidates(
@@ -1342,7 +1435,8 @@ def render(
             '<p class="note">github.enabled is false, so no PRs or issues are'
             " ranked here.</p>"
         )
-    elif not sync.fleet_enabled(cfg):
+    elif not sync.fleet_enabled(cfg) and not sync.jira_enabled(cfg):
+        # A Jira instance ranks its tickets as its tasks: nothing is missing.
         parts.append(
             '<p class="note">github.scope is not "owner", so GitHub issues are'
             " not ranked here; your PRs and review requests are.</p>"

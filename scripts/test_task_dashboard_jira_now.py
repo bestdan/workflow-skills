@@ -464,5 +464,60 @@ class IssueFoldTests(unittest.TestCase):
         self.assertEqual(shown, [])
 
 
+class JiraModeTests(Case):
+    """Deep and Tidy rank Jira tickets, with no owner-wide GitHub read."""
+
+    def mode(self, mode):
+        page = fleet_now.build(self.conn, CFG, NOW, overlay.load(self.conn),
+                               mode=mode)  # fmt: skip
+        return {r.need.item[1]: r for r in page.shown}
+
+    def blocks(self, key, linked):
+        self.conn.execute(
+            "INSERT INTO links (issue_key, linked_key, link_type, direction,"
+            " linked_status_category) VALUES (?, ?, 'Blocks', 'outward', 'new')",
+            (key, linked),
+        )
+        self.conn.commit()
+
+    def test_deep_ranks_blockers_first_then_tickets_to_refine(self):
+        self.ticket("ABC-1", "new", "Needs Refinement", sprint_state=None)
+        self.ticket("ABC-2")
+        self.blocks("ABC-2", "ABC-8")
+        self.blocks("ABC-2", "ABC-9")
+        self.ticket("ABC-3", "new", "To Do")
+        shown = self.mode("deep")
+        self.assertEqual(list(shown), ["ABC-2", "ABC-1"])
+        self.assertEqual(fleet_now.why_line(shown["ABC-2"]),
+                         "deep · blocks 2 open tickets")  # fmt: skip
+        self.assertEqual(shown["ABC-1"].category, "refinement")
+        self.assertEqual(shown["ABC-1"].need.kind, "ticket")
+
+    def test_tidy_ranks_tickets_untouched_past_the_window_oldest_first(self):
+        days = lambda n: ts(NOW - timedelta(days=n))  # noqa: E731
+        self.ticket("ABC-1", updated=days(20))
+        self.ticket("ABC-2", "new", "To Do", sprint_state=None, updated=days(40))
+        self.ticket("ABC-3", updated=days(3))
+        shown = self.mode("tidy")
+        self.assertEqual(list(shown), ["ABC-2", "ABC-1"])
+        self.assertEqual(shown["ABC-1"].category, "stale_ticket")
+        self.assertIn("untouched over 14d", shown["ABC-1"].why)
+
+    def test_a_ticket_not_mine_is_left_out(self):
+        self.ticket("ABC-1", "new", "Needs Refinement", assignee="Someone Else",
+                    updated=ts(NOW - timedelta(days=40)))  # fmt: skip
+        self.assertEqual(self.mode("deep"), {})
+        self.assertEqual(self.mode("tidy"), {})
+
+    def test_a_jira_instance_has_no_scope_note(self):
+        self.ticket("ABC-1")
+        self.assertNotIn("github.scope", fleet_now.render(self.conn, CFG, NOW))
+        github_only = config.deep_merge(CFG, {"jira": {"enabled": False}})
+        self.assertIn(
+            'github.scope is not "owner"',
+            fleet_now.render(self.conn, github_only, NOW),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
