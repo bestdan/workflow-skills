@@ -960,9 +960,9 @@ CSS = """
   font-size:12px; }
 .card .ov button, .card .ov input { font:inherit; padding:1px 6px; border-radius:4px;
   border:1px solid var(--line); background:var(--bg); color:var(--fg); }
-.card .ov button.icon { display:inline-flex; align-items:center; padding:2px 4px; cursor:pointer; }
-.card .ov button.icon .glyph { display:block; width:14px; height:14px; }
-@media (pointer:coarse) { .card .ov button.icon { padding:7px; } }
+.card .ov button.ov-icon { display:inline-flex; align-items:center; padding:2px 4px; cursor:pointer; }
+.card .ov button.ov-icon .glyph { display:block; width:14px; height:14px; }
+@media (pointer:coarse) { .card .ov button.ov-icon { padding:7px; } }
 .card .ov details { width:100%; }
 .card .ov textarea { width:100%; min-height:4em; font:inherit; color:var(--fg);
   background:var(--bg); border:1px solid var(--line); border-radius:4px; }
@@ -1096,7 +1096,7 @@ def card_controls(
             act, label, glyph = "pin", "Pin", "pin"
             tip = "Pin: keep it at the top of Now, the Board and Epics"
         parts.append(
-            f'<button type="button" class="icon" data-ov="{act}"'
+            f'<button type="button" class="ov-icon" data-ov="{act}"'
             f' aria-label="{label}" title="{tip}">{icons.svg(glyph)}</button>'
         )
     if reorder:
@@ -1108,7 +1108,7 @@ def card_controls(
         until = ov.snoozed_until.get(item, "")
         parts.append(
             f'<span class="badge">snoozed until {_e(until)}</span>'
-            '<button type="button" class="icon" data-ov="snooze" data-until=""'
+            '<button type="button" class="ov-icon" data-ov="snooze" data-until=""'
             ' aria-label="Unsnooze" title="Unsnooze">'
             f"{icons.svg('alarm-clock-off')}</button>"
         )
@@ -1116,7 +1116,7 @@ def card_controls(
         back = snooze_until(now)
         why = ' data-why="1"' if why_not else ""
         parts.append(
-            f'<button type="button" class="icon" data-ov="snooze"'
+            f'<button type="button" class="ov-icon" data-ov="snooze"'
             f' data-until="{back}"{why} aria-label="Snooze {SNOOZE_DAYS}d"'
             f' title="Snooze {SNOOZE_DAYS}d, until {back}: hidden from Now and'
             f' Needs, dimmed elsewhere">{icons.svg("alarm-clock")}</button>'
