@@ -45,7 +45,6 @@ import json
 import math
 import sqlite3
 import traceback
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -57,6 +56,14 @@ import linear_api
 import sessions
 
 MODES = ("incremental", "reconcile", "full")
+
+# A fleet run whose searches found the user's GraphQL budget under
+# `github.min_remaining`: it wrote its rows but skipped the per-PR comments
+# reads, so the dashboard gives way to interactive sessions. Its rows are
+# written, so it counts as a success wherever SUCCESS_OUTCOMES is read.
+THROTTLED = "throttled"
+SUCCESS_OUTCOMES = ("ok", THROTTLED)
+
 SOURCE = "jira"
 KIND = "ticket"
 
@@ -194,37 +201,23 @@ class GithubSource:
         self, config: dict[str, Any], runner: github_gh.Runner = github_gh.run
     ) -> None:
         self.orgs = list(config["github"]["orgs"])
-        self.concurrency = int(config["sync"]["view_concurrency"])
         self.runner = runner
 
-    def _ci(self, url: str) -> "str | None":
-        try:
-            return github_gh.ci_state(url, self.runner)
-        except github_gh.AuthError:
-            raise
-        except github_gh.GhError:
-            return None
-
     def prs(self, allowed_projects: "set[str]") -> "tuple[list[dict], list[str]]":
-        """Rows for my PRs and reviews requested of me, and URLs whose CI failed.
+        """Rows for my PRs and reviews requested of me, and an always-empty
+        list of failed lookups.
 
-        CI is one `pr view` per PR, so the lookups fan out over a thread pool;
-        serially they dominated sync time. A PR whose CI lookup fails keeps a
-        NULL `ci_state` and is reported, not fatal: one flaky `pr view` should
-        not fail the whole run. An AuthError still raises.
+        CI state comes with the searches (github_gh.rollup_state), so this
+        makes no call per PR, and no CI lookup can fail on its own: the list
+        is always empty. It stays in the return for the `failed_keys` shape.
         """
         rows: dict[str, dict] = {}
         for row in github_gh.my_prs(self.orgs, self.runner):
             rows.setdefault(row["url"], row)
         for row in github_gh.review_requested(self.orgs, self.runner):
             rows.setdefault(row["url"], row)
-        with ThreadPoolExecutor(max_workers=max(1, self.concurrency)) as pool:
-            states = list(pool.map(self._ci, rows))
         failed: list[str] = []
-        for (url, row), state in zip(rows.items(), states):
-            row["ci_state"] = state
-            if state is None:
-                failed.append(url)
+        for row in rows.values():
             text = f"{row['title']} {row.get('head_ref') or ''}"
             keys = github_gh.jira_keys(text, allowed_projects)
             row["issue_key"] = keys[0] if keys else None
@@ -261,7 +254,7 @@ def _finish_run(
     run_id: int,
     outcome: str,
     finished: datetime,
-    counts: dict[str, int],
+    counts: dict[str, Any],
     failed_keys: list[str],
     error: "str | None",
 ) -> None:
@@ -270,9 +263,9 @@ def _finish_run(
         " error = ?, issues_seen = ?, counts = ?, failed_keys = ? WHERE id = ?",
         (
             _ts(finished),
-            1 if outcome == "ok" else 0,
+            1 if outcome in SUCCESS_OUTCOMES else 0,
             outcome,
-            None if outcome == "ok" else outcome,
+            None if outcome in SUCCESS_OUTCOMES else outcome,
             error,
             counts.get("searched", 0),
             json.dumps(counts, sort_keys=True),
@@ -619,6 +612,53 @@ def fleet_enabled(config: dict[str, Any]) -> bool:
     return bool(gh["enabled"] and gh["scope"] == "owner")
 
 
+def issue_owners(owners: "list[str]") -> str:
+    """The owner set a full issue read covered, as recorded in its counts."""
+    return ",".join(sorted(owners))
+
+
+def fleet_issue_cache(
+    conn: sqlite3.Connection, before: int, owners: "list[str]"
+) -> "dict | None":
+    """github_fleet.fetch's `issue_cache`: the mirror's issue rows, the start
+    of the last good fleet run before run `before`, and the start of the
+    last good one that read the issues in full with none cut short by the
+    cap. None when there is no such run, or when that full read covered
+    other owners than `owners` (an edit to `github.orgs`, which takes effect
+    on a restart that keeps the mirror), so the issues are read in full."""
+    marks = ", ".join("?" * len(SUCCESS_OUTCOMES))
+    base = (
+        f"SELECT started_at, counts FROM sync_runs WHERE kind = ? AND id < ?"
+        f" AND outcome IN ({marks})"
+    )
+    args = (FLEET_KIND, before, *SUCCESS_OUTCOMES)
+    last = conn.execute(f"{base} ORDER BY id DESC LIMIT 1", args).fetchone()
+    full = conn.execute(
+        f"{base} AND COALESCE(json_extract(counts, '$.issues_reused'), 0) = 0"
+        " AND COALESCE(json_extract(counts, '$.issues_truncated'), 0) = 0"
+        " ORDER BY id DESC LIMIT 1",
+        args,
+    ).fetchone()
+    if last is None or full is None:
+        return None
+    try:
+        covered = (json.loads(full[1] or "{}") or {}).get("issue_owners")
+    except ValueError:
+        covered = None
+    if covered != issue_owners(owners):
+        return None
+    rows = []
+    for (raw,) in conn.execute(
+        "SELECT raw_json FROM issues WHERE source = ? AND kind = 'issue'",
+        (github_fleet.SOURCE,),
+    ):
+        try:
+            rows.append(json.loads(raw))
+        except (TypeError, ValueError):
+            return None  # a row it cannot carry forward: read them all
+    return {"rows": rows, "since": _parse_ts(last[0]), "read_at": _parse_ts(full[0])}
+
+
 def run_fleet(
     config: dict[str, Any],
     db: sqlite3.Connection,
@@ -630,9 +670,10 @@ def run_fleet(
     """Fetch and write the fleet view's GitHub rows; return its `sync_runs` row.
 
     Failures are treated as the Jira sync's GitHub step treats them: an
-    AuthError is `auth_failed` with the `gh auth login` hint, a CI, milestone
-    or comments lookup that failed for one PR is listed in `failed_keys`, and
-    anything else is `failed`. No Exception is raised (an interrupt is recorded
+    AuthError is `auth_failed` with the `gh auth login` hint, a milestone or
+    comments lookup that failed for one PR is listed in `failed_keys`, and
+    anything else is `failed`. A run that skipped the comments reads for a
+    low budget is THROTTLED, not failed. No Exception is raised (an interrupt is recorded
     as a failed run, then re-raised), and none reaches the Jira rows:
     `github_fleet.write` replaces only `source = 'github'` rows, in its own
     transaction, so a failed run leaves the last good GitHub rows in place. The
@@ -640,11 +681,17 @@ def run_fleet(
     """
     clock = clock or (lambda: datetime.now(timezone.utc))
     run_id = _start_run(db, FLEET_KIND, now)
-    counts: dict[str, int] = {}
+    # Mostly counts, plus `issue_owners`, the owner set a full issue read
+    # covered (fleet_issue_cache).
+    counts: dict[str, Any] = {}
     failed_keys: list[str] = []
     outcome, error = "ok", None
     try:
-        plan = github_fleet.fetch(config, runner, now=now)
+        previous = github_fleet.previous_prs(db)
+        plan = github_fleet.fetch(
+            config, runner, now=now, previous=previous,
+            issue_cache=fleet_issue_cache(db, run_id, config["github"]["orgs"]),
+        )  # fmt: skip
         failed_keys = list(plan["failed"])
         counts = {
             **plan["counts"],
@@ -654,6 +701,13 @@ def run_fleet(
             "designs_truncated": len(plan["truncated"]),
             "issues_truncated": len(plan["issues_truncated"]),
         }
+        counts["issues_reused"] = int(plan["issues_reused"])
+        if not plan["issues_reused"]:
+            counts["issue_owners"] = issue_owners(config["github"]["orgs"])
+        if plan["remaining"] is not None:
+            counts["graphql_remaining"] = plan["remaining"]
+        if plan["throttled"]:
+            outcome = THROTTLED
         github_fleet.write(db, plan["rows"], now)
     except github_gh.AuthError as exc:
         outcome, error = "auth_failed", f"{exc} (fix: run `gh auth login`)"

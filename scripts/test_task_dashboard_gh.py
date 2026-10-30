@@ -213,6 +213,66 @@ class SearchTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             gh.my_prs(["bestdan is:closed"], FakeRunner([]))
 
+    def test_search_asks_for_ci_state_and_the_budget(self):
+        _, second = two_pages()
+        runner = FakeRunner([ok(second)])
+        gh.my_prs(["bestdan"], runner)
+        query = arg(runner.calls[0], "query")
+        self.assertIn(gh.ROLLUP_STATE, query)
+        self.assertIn("rateLimit { remaining resetAt }", query)
+        # The state alone: the full rollup's contexts timed the search out.
+        self.assertNotIn("contexts", query)
+
+    def test_row_ci_state_comes_from_the_node(self):
+        _, second = two_pages()
+        second["data"]["search"]["nodes"][0]["commits"] = rollup("FAILURE")
+        rows = gh.my_prs(["bestdan"], FakeRunner([ok(second)]))
+        self.assertEqual(rows[0]["ci_state"], "failure")
+        # A node captured before the field was asked for has no state.
+        self.assertIsNone(rows[1]["ci_state"])
+
+    def test_budget_keeps_the_lowest_remaining(self):
+        first, second = two_pages()
+        first["data"]["rateLimit"] = {"remaining": 900, "resetAt": "T1"}
+        second["data"]["rateLimit"] = {"remaining": 4000, "resetAt": "T2"}
+        budget = gh.Budget()
+        gh.search_prs("q", FakeRunner([ok(first), ok(second)]), budget=budget)
+        self.assertEqual((budget.remaining, budget.reset_at), (900, "T1"))
+        self.assertTrue(budget.below(1000))
+        self.assertFalse(budget.below(900))
+
+    def test_budget_unknown_never_reads_as_low(self):
+        budget = gh.Budget()
+        budget.note({"search": {}})
+        budget.note(None)
+        self.assertIsNone(budget.remaining)
+        self.assertFalse(budget.below(10**9))
+
+
+def rollup(state):
+    """A node's `commits` as ROLLUP_STATE selects it; None: no checks."""
+    found = {"state": state} if state else None
+    return {"nodes": [{"commit": {"statusCheckRollup": found}}]}
+
+
+class RollupStateTests(unittest.TestCase):
+    def test_states(self):
+        for state, want in (
+            ("SUCCESS", "success"),
+            ("FAILURE", "failure"),
+            ("ERROR", "failure"),
+            ("PENDING", "pending"),
+            ("EXPECTED", "pending"),
+            ("SOMETHING_NEW", "pending"),
+            (None, "none"),
+        ):
+            with self.subTest(state=state):
+                self.assertEqual(gh.rollup_state({"commits": rollup(state)}), want)
+
+    def test_no_commit_is_none_and_no_field_is_unknown(self):
+        self.assertEqual(gh.rollup_state({"commits": {"nodes": []}}), "none")
+        self.assertIsNone(gh.rollup_state({}))
+
 
 class ErrorTests(unittest.TestCase):
     def test_auth_failure(self):

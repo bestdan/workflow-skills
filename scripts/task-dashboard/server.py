@@ -648,7 +648,7 @@ JS = """
 
 def _alert(last_run: "dict[str, Any] | None", what: str = "Last sync") -> str:
     """The header's failure line for the latest finished run, if it failed."""
-    if not last_run or last_run["outcome"] in (None, "ok"):
+    if not last_run or last_run["outcome"] in (None, *sync.SUCCESS_OUTCOMES):
         return ""
     error = last_run["error"] or ""
     if last_run["outcome"] == "auth_failed":

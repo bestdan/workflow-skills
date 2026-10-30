@@ -42,7 +42,17 @@ DEFAULTS: dict[str, Any] = {
     # (sync.fleet_enabled); "me" is only what involves me (github_fleet's
     # module docstring). "me" by default, so an unset key never mirrors a
     # whole work org. `enabled = false` turns GitHub off whatever it says.
-    "github": {"enabled": True, "orgs": [], "design_repos": [], "scope": "me"},
+    # min_remaining: when a fleet sync's searches report fewer points than
+    # this left in the user's hourly GraphQL budget (5,000, shared with every
+    # token and app acting as the user), it skips its per-PR reads and records
+    # the run `throttled`. 0 never throttles.
+    "github": {
+        "enabled": True,
+        "orgs": [],
+        "design_repos": [],
+        "scope": "me",
+        "min_remaining": 1000,
+    },
     "sync": {
         "interval_minutes": 5,
         "reconcile_minutes": 60,
@@ -195,6 +205,9 @@ def load(path: "str | os.PathLike[str] | None" = None) -> dict[str, Any]:
             raise ConfigError(f"score.{old} is renamed: use [score.{new}]")
     if cfg["github"]["scope"] not in GITHUB_SCOPES:
         raise ConfigError('github.scope must be "owner" or "me"')
+    floor = cfg["github"]["min_remaining"]
+    if not isinstance(floor, int) or isinstance(floor, bool) or floor < 0:
+        raise ConfigError("github.min_remaining must be a whole number, 0 or more")
     port = cfg["server"]["port"]
     if not isinstance(port, int) or isinstance(port, bool) or not 0 < port < 65536:
         raise ConfigError("server.port must be an integer port (1-65535)")

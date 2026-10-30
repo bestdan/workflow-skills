@@ -54,7 +54,12 @@ MACHINE_STALE_MINUTES = 30
 MACHINE_ASLEEP = timedelta(hours=24)
 COLLECTOR_INTERVAL = timedelta(seconds=collector_install.INTERVAL_SECONDS)
 
-OUTCOME_TEXT = {"ok": "ok", "failed": "failed", "auth_failed": "login expired"}
+OUTCOME_TEXT = {
+    "ok": "ok",
+    "failed": "failed",
+    "auth_failed": "login expired",
+    sync.THROTTLED: "throttled: GitHub budget low, per-PR reads paused",
+}
 
 _e = html.escape
 
@@ -166,10 +171,11 @@ def _step_source(
     state: dict[str, Any],
 ) -> Source:
     marks = ", ".join("?" * len(kinds))
+    ok_marks = ", ".join("?" * len(sync.SUCCESS_OUTCOMES))
     ok = conn.execute(
-        f"SELECT finished_at FROM sync_runs WHERE outcome = 'ok' AND kind IN ({marks})"
-        " ORDER BY finished_at DESC, id DESC LIMIT 1",
-        kinds,
+        f"SELECT finished_at FROM sync_runs WHERE outcome IN ({ok_marks})"
+        f" AND kind IN ({marks}) ORDER BY finished_at DESC, id DESC LIMIT 1",
+        (*sync.SUCCESS_OUTCOMES, *kinds),
     ).fetchone()
     last = conn.execute(
         f"SELECT outcome, error, counts FROM sync_runs WHERE finished_at IS NOT NULL"
@@ -180,7 +186,7 @@ def _step_source(
     age = None if ok_at is None else max(0, int((now - ok_at).total_seconds()))
     outcome = last[0] if last else None
     detail = OUTCOME_TEXT.get(outcome or "", outcome or "never run")
-    if outcome not in (None, "ok") and _first_line(last[1]):
+    if outcome not in (None, *sync.SUCCESS_OUTCOMES) and _first_line(last[1]):
         detail += f": {_first_line(last[1])}"
     linear, linear_warn = ("", False)
     if sid == sync.WORKSTREAMS_KIND and last:

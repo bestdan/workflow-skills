@@ -614,7 +614,8 @@ def cmd_sync(args: argparse.Namespace) -> int:
 
 
 def _report_sync(row: dict, pr_failed: str = "CI lookup failed") -> int:
-    """Print one sync_runs row; exit 0 on ok, 1 on failed, 3 on auth_failed."""
+    """Print one sync_runs row; exit 0 on ok or throttled, 1 on failed, 3 on
+    auth_failed."""
     print(
         f"sync {row['kind']}: {row['outcome']} "
         f"({row['started_at']} -> {row['finished_at']}) {row['counts'] or '{}'}"
@@ -628,7 +629,9 @@ def _report_sync(row: dict, pr_failed: str = "CI lookup failed") -> int:
         print(f"{pr_failed}, logged: {', '.join(ci)}", file=sys.stderr)
     if row["error"]:
         print(row["error"], file=sys.stderr)
-    return {"ok": 0, "auth_failed": 3}.get(row["outcome"], 1)
+    if row["outcome"] in sync.SUCCESS_OUTCOMES:
+        return 0
+    return 3 if row["outcome"] == "auth_failed" else 1
 
 
 def _overrides(args: argparse.Namespace) -> dict[str, str]:

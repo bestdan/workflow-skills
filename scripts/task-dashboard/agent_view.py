@@ -48,6 +48,7 @@ import needs
 import overlay
 import score
 import server
+import sync
 import view_model
 import views
 import workstreams
@@ -503,8 +504,10 @@ def freshness(conn: sqlite3.Connection) -> dict[str, Any]:
     synced = {
         kind: at
         for kind, at in conn.execute(
-            "SELECT kind, MAX(finished_at) FROM sync_runs WHERE outcome = 'ok'"
-            " GROUP BY kind ORDER BY kind"
+            "SELECT kind, MAX(finished_at) FROM sync_runs WHERE outcome IN"
+            f" ({', '.join('?' * len(sync.SUCCESS_OUTCOMES))})"
+            " GROUP BY kind ORDER BY kind",
+            sync.SUCCESS_OUTCOMES,
         )
     }
     scanned = {}
