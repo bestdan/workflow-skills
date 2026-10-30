@@ -18,8 +18,6 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
-import threading
-import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -41,6 +39,8 @@ import db  # type: ignore[import-not-found]  # noqa: E402
 import fleet_now  # type: ignore[import-not-found]  # noqa: E402
 import fleet_tabs  # type: ignore[import-not-found]  # noqa: E402
 import fleet_views  # type: ignore[import-not-found]  # noqa: E402
+import freshness  # type: ignore[import-not-found]  # noqa: E402
+import gauges  # type: ignore[import-not-found]  # noqa: E402
 import jira_acli  # type: ignore[import-not-found]  # noqa: E402
 import server  # type: ignore[import-not-found]  # noqa: E402
 import sync  # type: ignore[import-not-found]  # noqa: E402
@@ -139,57 +139,46 @@ class FakeAcli:
 
 
 class FakeGh:
-    """A runner answering the GitHub adapter's gh calls."""
+    """A runner answering the GitHub adapter's gh calls; records every argv.
+
+    CI state rides on the search nodes (ROLLUP_STATE), from `ci` or a node's
+    own `commits`, so a `gh pr view` is an unexpected call. `remaining` is
+    the user-wide budget each search page reports.
+    """
 
     def __init__(self, authored=(), ci="SUCCESS"):
         self.authored = list(authored)
         self.ci = ci
         self.error = None
-        self.ci_fail = set()
-        self.ci_auth_fail = False
-        self.ci_delay = 0.0
-        self.in_flight = 0
-        self.max_in_flight = 0
-        self.lock = threading.Lock()
+        self.remaining = 4000
+        self.calls = []
 
     def __call__(self, argv, timeout):
-        if argv[:3] == ["gh", "pr", "view"]:
-            with self.lock:
-                self.in_flight += 1
-                self.max_in_flight = max(self.max_in_flight, self.in_flight)
-            try:
-                time.sleep(self.ci_delay)
-                return self._answer(argv)
-            finally:
-                with self.lock:
-                    self.in_flight -= 1
-        return self._answer(argv)
-
-    def _answer(self, argv):
+        self.calls.append(argv)
         if self.error:
             return 1, "", self.error
         if argv[:3] == ["gh", "api", "graphql"]:
             q = next(a for a in argv if a.startswith("q="))
-            nodes = self.authored if "author:@me" in q else []
+            nodes = copy.deepcopy(self.authored) if "author:@me" in q else []
+            for node in nodes:
+                node.setdefault("commits", rollup(self.ci))
             page = {
                 "data": {
+                    "rateLimit": {"remaining": self.remaining, "resetAt": None},
                     "search": {
                         "pageInfo": {"hasNextPage": False, "endCursor": None},
                         "nodes": nodes,
-                    }
+                    },
                 }
             }
             return 0, json.dumps(page), ""
-        if argv[:3] == ["gh", "pr", "view"]:
-            if self.ci_auth_fail:
-                return 1, "", "HTTP 401: Bad credentials"
-            if any(a in self.ci_fail for a in argv):
-                return 1, "", "HTTP 502: bad gateway"
-            rollup = [
-                {"__typename": "CheckRun", "status": "COMPLETED", "conclusion": self.ci}
-            ]
-            return 0, json.dumps({"statusCheckRollup": rollup}), ""
         raise AssertionError(f"unexpected gh call: {argv}")
+
+
+def rollup(state="SUCCESS"):
+    """A node's `commits` field as ROLLUP_STATE selects it; None: no checks."""
+    found = {"state": state} if state else None
+    return {"nodes": [{"commit": {"statusCheckRollup": found}}]}
 
 
 def pr_node(number, title, branch):
@@ -567,66 +556,20 @@ class GithubTests(SyncCase):
         self.assertEqual(ci, {"success"})
         self.assertEqual(json.loads(row["counts"])["prs"], 3)
 
-    def test_ci_lookup_failure_is_logged_not_fatal(self):
-        gh = FakeGh(authored=[pr_node(1, "feat [DEMO-1]", "a"), pr_node(2, "b", "b")])
-        bad = "https://github.com/acme/app/pull/2"
-        gh.ci_fail = {bad}
+    def test_ci_state_comes_from_the_search_with_no_call_per_pr(self):
+        nodes = [pr_node(n, f"pr {n}", f"b{n}") for n in range(1, 5)]
+        for node, state in zip(nodes, ("SUCCESS", "FAILURE", "PENDING", None)):
+            node["commits"] = rollup(state)
+        gh = FakeGh(authored=nodes)
         row = self.run_sync(
             "full", FakeAcli(["DEMO-1"]), gh=gh, cfg=make_config(enabled=True)
         )
         self.assertEqual(row["outcome"], "ok")
-        ci = dict(self.conn.execute("SELECT url, ci_state FROM prs").fetchall())
-        self.assertEqual(
-            ci, {"https://github.com/acme/app/pull/1": "success", bad: None}
-        )
-        self.assertEqual(json.loads(row["failed_keys"]), [bad])
-        self.assertEqual(json.loads(row["counts"])["ci_failed"], 1)
-
-    def test_ci_lookups_run_concurrently(self):
-        gh = FakeGh(authored=[pr_node(n, f"pr {n}", f"b{n}") for n in range(1, 9)])
-        gh.ci_delay = 0.05
-        cfg = make_config(enabled=True)
-        cfg["sync"]["view_concurrency"] = 3
-        row = self.run_sync("full", FakeAcli(["DEMO-1"]), gh=gh, cfg=cfg)
-        self.assertEqual(row["outcome"], "ok")
-        self.assertGreater(gh.max_in_flight, 1)
-        self.assertLessEqual(gh.max_in_flight, 3)
-        ci = {r[0] for r in self.conn.execute("SELECT ci_state FROM prs")}
-        self.assertEqual(ci, {"success"})
-
-    def test_ci_auth_error_fails_the_run(self):
-        gh = FakeGh(authored=[pr_node(1, "a", "a"), pr_node(2, "b", "b")])
-        gh.ci_auth_fail = True
-        row = self.run_sync(
-            "full", FakeAcli(["DEMO-1"]), gh=gh, cfg=make_config(enabled=True)
-        )
-        self.assertEqual(row["outcome"], "auth_failed")
-
-    def test_ci_auth_error_cancels_the_remaining_lookups(self):
-        # `pool.map`'s result generator cancels the queued futures once one
-        # raises; collecting per future (submit + .result(), as_completed)
-        # without cancelling runs all 40 lookups.
-        # The good lookups are slow and the bad one is instant, so at most
-        # the first batch, the failing one, and the batch it freed have started.
-        gh = FakeGh(authored=[pr_node(n, f"pr {n}", f"b{n}") for n in range(1, 41)])
-        bad = "https://github.com/acme/app/pull/4"
-        started = []
-        lock = threading.Lock()
-
-        def runner(argv, timeout):
-            if argv[:3] == ["gh", "pr", "view"]:
-                with lock:
-                    started.append(argv)
-                if bad in argv:
-                    return 1, "", "HTTP 401: Bad credentials"
-                time.sleep(0.5)
-            return gh(argv, timeout)
-
-        cfg = make_config(enabled=True)
-        cfg["sync"]["view_concurrency"] = 3
-        row = self.run_sync("full", FakeAcli(["DEMO-1"]), gh=runner, cfg=cfg)
-        self.assertEqual(row["outcome"], "auth_failed")
-        self.assertLessEqual(len(started), 2 * 3 + 1)
+        ci = dict(self.conn.execute("SELECT number, ci_state FROM prs").fetchall())
+        self.assertEqual(ci, {1: "success", 2: "failure", 3: "pending", 4: "none"})
+        # The two searches (mine, review requested) and nothing per PR.
+        self.assertEqual(len(gh.calls), 2)
+        self.assertEqual(json.loads(row["failed_keys"]), [])
 
     def test_disabled_github_leaves_prs_alone(self):
         self.conn.execute(
@@ -648,7 +591,12 @@ def fleet_pr(number, milestone=None):
             {
                 "number": 900 + number,
                 "repository": {"nameWithOwner": "acme/app"},
-                "milestone": {"number": milestone},
+                # REVIEW_QUERY reads the description with the PR; only
+                # milestone 7 is approved.
+                "milestone": {
+                    "number": milestone,
+                    "description": f"approved: {'yes' if milestone == 7 else 'no'}",
+                },
             }
         )
     return {
@@ -664,6 +612,7 @@ def fleet_pr(number, milestone=None):
         "updatedAt": "2026-10-22T10:00:00Z",
         "repository": {"nameWithOwner": "acme/app"},
         "closingIssuesReferences": {"nodes": refs},
+        "commits": rollup(),
     }
 
 
@@ -674,14 +623,20 @@ class FleetGh:
     the viewer's stamp at its head); PR 2 closes an issue in milestone 8, which
     is not approved, so it only awaits.
     `error` answers every call with that stderr; `extra` nodes join PRs 1 and 2
-    in the author search.
+    in the author search; a PR number in `comments_fail` gets a 502 for its
+    comments; `remaining` is the user-wide budget each search page reports;
+    `issues_changed` is what the issue change probe counts; `updated` maps a
+    PR number to the `updatedAt` its node carries instead.
     """
 
     def __init__(self):
         self.calls = []
         self.error = None
-        self.ci_fail = set()
+        self.comments_fail = set()
         self.extra = []
+        self.remaining = 4000
+        self.issues_changed = 0
+        self.updated = {}
 
     def __call__(self, argv, timeout):
         self.calls.append(argv)
@@ -693,6 +648,10 @@ class FleetGh:
                 nodes = []
             elif "author:@me" in q:
                 nodes = [fleet_pr(1, milestone=7), fleet_pr(2, milestone=8)]
+                for node in nodes:
+                    node["updatedAt"] = self.updated.get(
+                        node["number"], node["updatedAt"]
+                    )
                 nodes += self.extra
             elif "is:issue" in q:
                 nodes = [
@@ -707,31 +666,25 @@ class FleetGh:
             else:
                 nodes = []
             page = {"pageInfo": {"hasNextPage": False, "endCursor": None}}
-            return 0, json.dumps({"data": {"search": {**page, "nodes": nodes}}}), ""
+            rate = {"remaining": self.remaining, "resetAt": None}
+            data = {"rateLimit": rate, "search": {**page, "nodes": nodes}}
+            return 0, json.dumps({"data": data}), ""
+        if any("c0: search" in a for a in argv):
+            # The issue change probe (github_fleet.issues_changed).
+            counts = {"c0": {"issueCount": self.issues_changed}}
+            return 0, json.dumps({"data": counts}), ""
         if any("issueCount" in a for a in argv):
             counts = {"m0": {"issueCount": 0}, "i0": {"issueCount": 0}}
             return 0, json.dumps({"data": counts}), ""
-        if argv[:3] == ["gh", "pr", "view"]:
-            if any(a in self.ci_fail for a in argv):
-                return 1, "", "HTTP 502: bad gateway"
-            rollup = [
-                {
-                    "__typename": "CheckRun",
-                    "status": "COMPLETED",
-                    "conclusion": "SUCCESS",
-                }
-            ]
-            return 0, json.dumps({"statusCheckRollup": rollup}), ""
         if any("repositoryOwner" in a for a in argv):
             # The Workstreams step's open-milestones read: no repos.
             repos = {"pageInfo": {"hasNextPage": False}, "nodes": []}
             owner = {"repositoryOwner": {"repositories": repos}}
             return 0, json.dumps({"data": owner}), ""
-        if len(argv) > 2 and "/milestones/" in argv[2]:
-            approved = argv[2].endswith("/milestones/7")
-            body = "approved: yes" if approved else "approved: no"
-            return 0, json.dumps({"description": body}), ""
         if any(a.startswith("owner=") for a in argv):
+            number = next(int(a[7:]) for a in argv if a.startswith("number="))
+            if number in self.comments_fail:
+                return 1, "", "HTTP 502: bad gateway"
             stamp = f"<!-- co-review-stamp v1 head={HEAD} -->"
             comments = [
                 {
@@ -837,7 +790,7 @@ class FleetTests(SyncCase):
     def test_lookup_failure_is_listed_not_fatal(self):
         gh = FleetGh()
         bad = "https://github.com/acme/app/pull/1"
-        gh.ci_fail = {bad}
+        gh.comments_fail = {1}
         rows = self.run_all(make_config(enabled=True, scope="owner"), gh)
         self.assertEqual(rows[1]["outcome"], "ok")
         self.assertEqual(json.loads(rows[1]["failed_keys"]), [bad])
@@ -873,6 +826,118 @@ class FleetTests(SyncCase):
             ],
         )
         self.assertEqual(sync.last_cursor_run(self.conn)[0], sync._ts(NOW))
+
+
+def per_pr_calls(calls):
+    """The calls a sync made for one PR: CI views, comments, milestones."""
+    return [
+        a
+        for a in calls
+        if a[:3] == ["gh", "pr", "view"]
+        or any(x.startswith("number=") for x in a)
+        or (len(a) > 2 and "/milestones/" in a[2])
+    ]
+
+
+def issue_pages(calls):
+    return [a for a in calls if any(x.startswith("q=is:issue") for x in a)]
+
+
+class FleetBudgetTests(FleetTests):
+    """#1252: a sync over PRs and issues that have not changed reads neither
+    again, and a low GraphQL budget throttles the per-PR reads."""
+
+    CFG = {"enabled": True, "scope": "owner"}
+
+    def test_steady_state_sync_makes_no_per_pr_call(self):
+        cfg = make_config(**self.CFG)
+        first = FleetGh()
+        self.run_all(cfg, first)
+        # The first sync knows no stamp, so it reads PR 1's comments; PR 2
+        # misses its milestone first, so rule 3 is never asked for it.
+        self.assertEqual(len(per_pr_calls(first.calls)), 1)
+        before = self.github_rows()
+        again = FleetGh()
+        rows = self.run_all(cfg, again)
+        self.assertEqual(rows[1]["outcome"], "ok")
+        self.assertEqual(per_pr_calls(again.calls), [])
+        self.assertEqual(issue_pages(again.calls), [])
+        self.assertEqual(self.github_rows(), before)
+        counts = json.loads(rows[1]["counts"])
+        self.assertEqual((counts["queue"], counts["issues_reused"]), (1, 1))
+
+    def test_a_pr_that_moved_has_its_comments_read_again(self):
+        cfg = make_config(**self.CFG)
+        self.run_all(cfg, FleetGh())
+        moved = FleetGh()
+        moved.updated = {1: "2026-10-23T09:00:00Z"}  # a new comment, say
+        self.run_all(cfg, moved)
+        comments = per_pr_calls(moved.calls)
+        self.assertEqual(
+            [next(x for x in a if x.startswith("number=")) for a in comments],
+            ["number=1"],
+        )
+
+    def test_a_changed_issue_or_an_old_full_read_reads_the_issues_again(self):
+        cfg = make_config(**self.CFG)
+        self.run_all(cfg, FleetGh())
+        changed = FleetGh()
+        changed.issues_changed = 2
+        rows = self.run_all(cfg, changed)
+        self.assertEqual(len(issue_pages(changed.calls)), 2)  # human-review, rest
+        self.assertEqual(json.loads(rows[1]["counts"])["issues_reused"], 0)
+        # Nothing changed, but the last full read is past ISSUE_REUSE_MINUTES.
+        later = NOW + timedelta(minutes=sync.github_fleet.ISSUE_REUSE_MINUTES + 1)
+        stale = FleetGh()
+        sync.run_fleet(cfg, self.conn, later, runner=stale, clock=lambda: later)
+        self.assertEqual(len(issue_pages(stale.calls)), 2)
+
+    def test_a_low_budget_throttles_the_per_pr_reads(self):
+        cfg = make_config(**self.CFG)
+        low = FleetGh()
+        low.remaining = 999  # under the default github.min_remaining, 1000
+        rows = self.run_all(cfg, low)
+        self.assertEqual(rows[1]["outcome"], "throttled")
+        self.assertIsNone(rows[1]["error"])
+        self.assertEqual(per_pr_calls(low.calls), [])
+        counts = json.loads(rows[1]["counts"])
+        self.assertEqual(counts["graphql_remaining"], 999)
+        # PR 1 passes every rule it could check; rule 3 was not asked.
+        raw = json.loads(
+            self.conn.execute(
+                "SELECT raw_json FROM issues WHERE key = ?",
+                ("https://github.com/acme/app/pull/1",),
+            ).fetchone()[0]
+        )
+        self.assertEqual((raw["stamped"], raw["queue_misses"]), (None, ["co_review"]))
+        # The rows still land, and the next sync with budget reads the stamp.
+        self.assertIn("https://github.com/acme/app/pull/1", self.github_rows())
+        rows = self.run_all(cfg, FleetGh())
+        self.assertEqual(rows[1]["outcome"], "ok")
+        self.assertEqual(json.loads(rows[1]["counts"])["queue"], 1)
+
+    def test_a_throttled_run_is_neither_failed_nor_stale(self):
+        cfg = make_config(**self.CFG)
+        low = FleetGh()
+        low.remaining = 10
+        self.run_all(cfg, low)
+        src = next(
+            s
+            for s in freshness.sources(self.conn, cfg, NOW, 300.0, {})
+            if s.id == sync.FLEET_KIND
+        )
+        self.assertEqual(src.outcome, "throttled")
+        self.assertFalse(src.warn)
+        self.assertEqual(src.age_s, 0)
+        self.assertIn("budget low", src.detail)
+        self.assertIsNotNone(gauges.review_queue_rows(self.conn, True))
+
+    def test_floor_zero_never_throttles(self):
+        cfg = make_config(min_remaining=0, **self.CFG)
+        low = FleetGh()
+        low.remaining = 0
+        rows = self.run_all(cfg, low)
+        self.assertEqual(rows[1]["outcome"], "ok")
 
 
 class ArchivedRepo:
@@ -918,6 +983,7 @@ class ArchivedRepoTests(SyncCase):
             "createdAt": "2026-09-01T10:00:00Z",
             "updatedAt": "2026-09-02T10:00:00Z",
             "repository": {"nameWithOwner": self.OLD},
+            "commits": rollup(),
             **extra,
         }
 
@@ -1313,6 +1379,18 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(sync.fleet_enabled(self.load(u)))
         u["github"] = {"scope": "owner", "enabled": False}
         self.assertFalse(sync.fleet_enabled(self.load(u)))
+
+    def test_github_min_remaining_defaults_and_is_validated(self):
+        self.assertEqual(self.load(self.base())["github"]["min_remaining"], 1000)
+        for bad in (-1, 1.5, True, "1000"):
+            u = self.base()
+            u["github"] = {"min_remaining": bad}
+            with self.subTest(value=bad), self.assertRaises(config.ConfigError) as cm:
+                self.load(u)
+            self.assertIn("github.min_remaining", str(cm.exception))
+        u = self.base()
+        u["github"] = {"min_remaining": 0}
+        self.assertEqual(self.load(u)["github"]["min_remaining"], 0)
 
     def test_github_scope_must_be_owner_or_me(self):
         u = self.base()

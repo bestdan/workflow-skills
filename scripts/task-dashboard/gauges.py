@@ -25,6 +25,7 @@ import sqlite3
 from dataclasses import dataclass
 
 import github_fleet
+import sync
 
 REVIEW_QUEUE_CAP = 5
 
@@ -58,8 +59,8 @@ def review_queue_rows(conn: sqlite3.Connection, fleet: bool) -> "list[dict] | No
         return None
     if (
         conn.execute(
-            "SELECT 1 FROM sync_runs WHERE kind = ? AND outcome = 'ok' LIMIT 1",
-            (github_fleet.RUN_KIND,),
+            "SELECT 1 FROM sync_runs WHERE kind = ? AND outcome IN (?, ?) LIMIT 1",
+            (github_fleet.RUN_KIND, *sync.SUCCESS_OUTCOMES),
         ).fetchone()
         is None
     ):

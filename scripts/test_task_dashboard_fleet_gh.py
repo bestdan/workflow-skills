@@ -14,7 +14,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -77,10 +77,20 @@ def search_q(argv):
     return arg(argv, "q") or ""
 
 
-def review_page(nodes=None):
+def rollup(state="SUCCESS"):
+    """A node's `commits` field as ROLLUP_STATE selects it; None: no checks."""
+    found = {"state": state} if state else None
+    return {"nodes": [{"commit": {"statusCheckRollup": found}}]}
+
+
+def review_page(nodes=None, ci="SUCCESS"):
+    """The review search page. The fixture predates ROLLUP_STATE, so each
+    node without `commits` gets the rollup state `ci` (None: no checks)."""
     page = fixture("fleet_review_search.json")
     if nodes is not None:
         page["data"]["search"]["nodes"] = nodes
+    for node in page["data"]["search"]["nodes"]:
+        node.setdefault("commits", rollup(ci))
     return page
 
 
@@ -88,6 +98,7 @@ def pr_node(**kw):
     node = copy.deepcopy(
         fixture("fleet_review_search.json")["data"]["search"]["nodes"][0]
     )
+    node["commits"] = rollup()
     node.update(kw)
     return node
 
@@ -128,15 +139,6 @@ class DecisionBriefTests(unittest.TestCase):
         self.assertIsNone(fleet.decision_brief("Decision brief: x\n"))
 
 
-GREEN = ok(
-    {
-        "statusCheckRollup": [
-            {"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "SUCCESS"}
-        ]
-    }
-)
-
-
 def milestone(number, approved=False):
     data = fixture(f"fleet_milestone_{number}.json")
     if approved:
@@ -162,9 +164,7 @@ def comments_page(nodes):
     return page
 
 
-def queue_rules(
-    ci=GREEN, approved=(), comments=None, milestone_error=None, comments_error=None
-):
+def queue_rules(approved=(), comments=None, milestone_error=None, comments_error=None):
     """Router rules for everything review_queue calls after its searches.
 
     `approved` names the milestone numbers whose description says
@@ -184,8 +184,9 @@ def queue_rules(
             return comments_error
         return ok(comments_page(comments.get(int(arg(argv, "number")), [])))
 
+    # No `gh pr view` rule: CI state comes with the search, so a per-PR CI
+    # call is an unexpected call and fails the test.
     return [
-        (lambda a: a[:3] == ["gh", "pr", "view"], ci),
         (lambda a: "/milestones/" in a[2], milestone_response),
         (lambda a: arg(a, "owner") is not None, comments_response),
     ]
@@ -265,30 +266,11 @@ class ReviewQueueTests(unittest.TestCase):
     def test_ci_must_be_success(self):
         node = review_page()["data"]["search"]["nodes"][1]
         ok_stamp = {node["number"]: [stamp(node["headRefOid"])]}
-        for ci in (
-            ok({"statusCheckRollup": []}),
-            ok(
-                {
-                    "statusCheckRollup": [
-                        {"__typename": "CheckRun", "status": "IN_PROGRESS"}
-                    ]
-                }
-            ),
-            ok(
-                {
-                    "statusCheckRollup": [
-                        {
-                            "__typename": "CheckRun",
-                            "status": "COMPLETED",
-                            "conclusion": "FAILURE",
-                        }
-                    ]
-                }
-            ),
-            (1, "", "HTTP 502"),
-        ):
-            rows, _, _ = self.run_queue([node], ci=ci, approved={14}, comments=ok_stamp)
-            self.assertEqual(rows[0]["queue_misses"], ["ci"], ci)
+        for state in (None, "PENDING", "EXPECTED", "FAILURE", "ERROR"):
+            node["commits"] = rollup(state)
+            rows, _, _ = self.run_queue([node], approved={14}, comments=ok_stamp)
+            self.assertEqual(rows[0]["queue_misses"], ["ci"], state)
+        node["commits"] = rollup()
         rows, _, _ = self.run_queue([node], approved={14}, comments=ok_stamp)
         self.assertTrue(rows[0]["in_queue"])
 
@@ -438,8 +420,10 @@ class ReviewQueueTests(unittest.TestCase):
         self.assertEqual(sum(1 for c in runner.calls if arg(c, "owner")), 2)
 
     def test_skipped_rule_still_needs_ci(self):
-        failing = (1, "", "HTTP 502")
-        rows, _, _ = self.run_queue(self.outside_milestones(), ci=failing)
+        nodes = self.outside_milestones()
+        for node in nodes:
+            node["commits"] = rollup("FAILURE")
+        rows, _, _ = self.run_queue(nodes)
         self.assertEqual([r["queue_misses"] for r in rows], [["ci"]] * 2)
         self.assertTrue(all(r["milestone_approved"] is None for r in rows))
 
@@ -504,7 +488,7 @@ class ReviewQueueTests(unittest.TestCase):
             number=237,
             author={"login": "azack", "__typename": "User"},
         )
-        rows, failed, runner = self.run_queue([], others_nodes=[node], ci=GREEN)
+        rows, failed, runner = self.run_queue([], others_nodes=[node])
         (row,) = rows
         self.assertEqual((row["role"], row["author"]), ("others", "azack"))
         self.assertFalse(row["author_is_bot"])
@@ -520,6 +504,85 @@ class ReviewQueueTests(unittest.TestCase):
         self.assertEqual(
             fleet.queue_counts(rows), {"queue": 0, "awaiting": 0, "others": 1}
         )
+
+    def stamped_node(self):
+        node = review_page()["data"]["search"]["nodes"][1]
+        return node, {node["number"]: [stamp(node["headRefOid"])]}
+
+    def queue_with(self, node, previous=None, remaining=None, floor=0, **rules):
+        page = review_page([node])
+        if remaining is not None:
+            page["data"]["rateLimit"] = {"remaining": remaining, "resetAt": None}
+        runner = Router(
+            [
+                (lambda a: "-author:@me" in search_q(a), ok(review_page([]))),
+                (lambda a: "author:@me" in search_q(a), ok(page)),
+                (lambda a: "review-requested:@me" in search_q(a), ok(review_page([]))),
+            ]
+            + queue_rules(**rules)
+        )
+        budget = fleet.github_gh.Budget()
+        rows, failed = fleet.review_queue(
+            ["bestdan"], runner, previous=previous, budget=budget, floor=floor
+        )
+        comments = [a for a in runner.calls if arg(a, "owner")]
+        return rows, comments
+
+    def test_an_unchanged_pr_reuses_its_stamp_without_reading_comments(self):
+        node, good = self.stamped_node()
+        (row,), comments = self.queue_with(node, approved={14}, comments=good)
+        self.assertEqual((row["in_queue"], len(comments)), (True, 1))
+        (again,), comments = self.queue_with(
+            node, previous={row["url"]: row}, approved={14}, comments={}
+        )
+        self.assertEqual((again["in_queue"], again["stamped"]), (True, True))
+        self.assertEqual(comments, [])
+
+    def test_a_new_head_or_update_reads_the_comments_again(self):
+        node, good = self.stamped_node()
+        (row,), _ = self.queue_with(node, approved={14}, comments=good)
+        for field, value in (
+            ("headRefOid", "f" * 40),
+            ("updatedAt", "2030-01-01T00:00:00Z"),
+        ):
+            with self.subTest(field=field):
+                moved = dict(node, **{field: value})
+                (again,), comments = self.queue_with(
+                    moved, previous={row["url"]: row}, approved={14}, comments=good
+                )
+                self.assertEqual(len(comments), 1)
+        # A row with no answer (rule 3 never asked, or throttled) is read too.
+        unasked = dict(row, stamped=None)
+        _, comments = self.queue_with(
+            node, previous={row["url"]: unasked}, approved={14}, comments=good
+        )
+        self.assertEqual(len(comments), 1)
+
+    def test_a_budget_under_the_floor_skips_the_comments(self):
+        node, good = self.stamped_node()
+        (row,), comments = self.queue_with(
+            node, remaining=999, floor=1000, approved={14}, comments=good
+        )
+        self.assertEqual(comments, [])
+        self.assertIsNone(row["stamped"])
+        self.assertEqual(row["queue_misses"], ["co_review"])
+        # At the floor it reads them; a known stamp needs no read either way.
+        _, comments = self.queue_with(
+            node, remaining=1000, floor=1000, approved={14}, comments=good
+        )
+        self.assertEqual(len(comments), 1)
+
+    def test_a_milestone_description_in_the_search_needs_no_lookup(self):
+        node = pr_node(url="u/pull/8", number=8)
+        for issue in node["closingIssuesReferences"]["nodes"]:
+            if issue.get("milestone"):
+                issue["milestone"]["description"] = "Goal\napproved: yes"
+        rows, failed, runner = self.run_queue(
+            [node], milestone_error=(1, "", "must not be asked")
+        )
+        self.assertEqual(failed, [])
+        self.assertIs(rows[0]["milestone_approved"], True)
+        self.assertFalse(any("/milestones/" in a[2] for a in runner.calls))
 
     def test_a_bot_pr_from_others_is_included_and_flagged(self):
         nodes = [
@@ -887,16 +950,15 @@ class WriteTests(unittest.TestCase):
             "github": {"orgs": ["bestdan"], "scope": "owner", "design_repos": [REPO]}
         }
 
-    def full_runner(self, ci=None):
-        ci = ci or ok({"statusCheckRollup": []})
+    def full_runner(self):
         return designs_router(
-            extra=queue_rules(ci=ci)
+            extra=queue_rules()
             + [
                 (
                     lambda a: "is:closed" in search_q(a),
                     ok(fixture("fleet_closed_search.json")),
                 ),
-                (lambda a: "author:@me" in search_q(a), ok(review_page())),
+                (lambda a: "author:@me" in search_q(a), ok(review_page(ci=None))),
                 (lambda a: "review-requested:@me" in search_q(a), ok(review_page([]))),
                 (
                     lambda a: "is:issue" in search_q(a),
@@ -950,7 +1012,7 @@ class WriteTests(unittest.TestCase):
 
     def test_me_scope_reads_only_what_involves_me(self):
         runner = designs_router(
-            extra=queue_rules(ci=ok({"statusCheckRollup": []}))
+            extra=queue_rules()
             + [
                 (
                     lambda a: "is:closed" in search_q(a),
@@ -1030,12 +1092,71 @@ class WriteTests(unittest.TestCase):
         self.assertEqual(plan["missing"], ["bestdan/typo"])
         self.assertEqual(sum(1 for r in plan["rows"] if r["kind"] == "design"), 1)
 
-    def test_ci_failure_is_reported_not_fatal(self):
-        plan = fleet.fetch(self.config(), self.full_runner(ci=(1, "", "HTTP 502")))
-        self.assertEqual(len(plan["failed"]), 4)
-        self.assertTrue(
-            all(r.get("ci_state") is None for r in plan["rows"] if r["kind"] == "pr")
+    def test_ci_state_comes_from_the_search(self):
+        runner = self.full_runner()
+        plan = fleet.fetch(self.config(), runner)
+        self.assertEqual(plan["failed"], [])
+        self.assertEqual(
+            {r["ci_state"] for r in plan["rows"] if r["kind"] == "pr"}, {"none"}
         )
+        self.assertFalse([a for a in runner.calls if a[:3] == ["gh", "pr", "view"]])
+        query = next(
+            arg(a, "query") for a in runner.calls if "author:@me" in search_q(a)
+        )
+        self.assertIn("statusCheckRollup { state }", query)
+
+    def cached(self, read_minutes_ago=5):
+        rows = [{"kind": "issue", "key": "u/issues/1", "title": "kept"}]
+        read_at = NOW - timedelta(minutes=read_minutes_ago)
+        return {"rows": rows, "since": NOW - timedelta(minutes=5), "read_at": read_at}
+
+    def probed(self, runner, answer):
+        runner.rules.insert(
+            0, (lambda a: "c0: search" in (arg(a, "query") or ""), answer)
+        )
+        return runner
+
+    def issue_reads(self, runner):
+        return [a for a in runner.calls if "is:issue" in search_q(a)]
+
+    def test_unchanged_issues_are_kept_without_a_read(self):
+        runner = self.probed(
+            self.full_runner(), ok({"data": {"c0": {"issueCount": 0}}})
+        )
+        plan = fleet.fetch(self.config(), runner, now=NOW, issue_cache=self.cached())
+        self.assertTrue(plan["issues_reused"])
+        self.assertEqual(self.issue_reads(runner), [])
+        issues = [r for r in plan["rows"] if r["kind"] == "issue"]
+        self.assertEqual([r["title"] for r in issues], ["kept"])
+        probe = next(
+            arg(a, "query")
+            for a in runner.calls
+            if "c0: search" in (arg(a, "query") or "")
+        )
+        # Five minutes before the last run, to cover the index's lag.
+        self.assertIn("is:issue updated:>=2026-10-23T20:50:00+00:00 org:bestdan", probe)
+
+    def test_a_changed_issue_a_failed_probe_or_an_old_read_reads_them_all(self):
+        for answer, cache in (
+            (ok({"data": {"c0": {"issueCount": 1}}}), self.cached()),
+            ((1, "", "HTTP 502"), self.cached()),
+            (ok({"data": {}}), self.cached()),
+            (ok({"data": {"c0": {"issueCount": 0}}}), self.cached(read_minutes_ago=31)),
+            (ok({"data": {"c0": {"issueCount": 0}}}), None),
+        ):
+            with self.subTest(answer=answer, cache=cache and cache["read_at"]):
+                runner = self.probed(self.full_runner(), answer)
+                plan = fleet.fetch(self.config(), runner, now=NOW, issue_cache=cache)
+                self.assertFalse(plan["issues_reused"])
+                self.assertEqual(len(self.issue_reads(runner)), 2)
+                self.assertNotIn(
+                    "kept", [r["title"] for r in plan["rows"] if r["kind"] == "issue"]
+                )
+
+    def test_the_probe_raises_auth_errors(self):
+        runner = self.probed(self.full_runner(), (1, "", "HTTP 401: Bad credentials"))
+        with self.assertRaises(fleet.github_gh.AuthError):
+            fleet.fetch(self.config(), runner, now=NOW, issue_cache=self.cached())
 
     def test_failed_write_rolls_back(self):
         self.conn.execute(

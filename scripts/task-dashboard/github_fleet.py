@@ -27,8 +27,8 @@ four rules hold:
    search asks GitHub for exactly that (`draft:false -review:approved`), and
    the draft and approved filters run again on the returned nodes so an index
    lag cannot let one through.
-2. CI is `success`, by github_gh's rollup reduction. Pending, failed, no
-   checks, and a failed lookup all miss.
+2. CI is `success`: the head commit's rollup state, read with the search
+   (github_gh.rollup_state). Pending, failed and no checks all miss.
 3. Co-reviewed at its current head: a PR comment written by the viewer (the
    account `gh` is logged in as) carries
    `<!-- co-review-stamp v1 head=<40-hex sha> -->` and the sha equals the PR's
@@ -39,8 +39,9 @@ four rules hold:
    (`closingIssuesReferences`) is in a milestone, one of those milestones must
    have a description line reading `approved: yes` (case ignored, line
    trimmed). A PR that closes no issue in a milestone skips this rule, since
-   most of the owner's repos use none. Descriptions are cached per repo for
-   one run, and a failed lookup counts as a miss.
+   most of the owner's repos use none. The search reads each description
+   with the PR; a node without one (the per-card refresh's) is looked up,
+   cached per repo for one run, and a failed lookup counts as a miss.
 
 The PRs passing rule 1 alone are AWAITING. Every one is still a `kind = pr`
 row, with `status_name` set to `queue` or `awaiting`, `queue_misses` naming
@@ -48,7 +49,11 @@ the rules it failed, and `queue_counts()` giving the totals. Rule 2 is checked
 for every awaiting PR, and rule 4 only when a closing issue is in a milestone;
 `milestone_approved` is None when rule 4 was skipped, so a skip is told apart
 from a pass. Rule 3 costs one call per PR, so it runs only for those that
-passed the others (`stamped` is None when skipped).
+passed the others (`stamped` is None when skipped), and only when the PR's
+head or `updatedAt` moved since the last sync (known_stamp). Every other rule
+is answered by the searches, so a sync over PRs that have not changed makes
+no call per PR: the user's GraphQL budget is shared by every token and app
+acting as the user, and the per-PR reads used to spend most of it (#1252).
 
 PRS FROM OTHERS are the open, non-draft PRs someone else opened on the owners'
 repos without requesting my review: a third search, `-author:@me`, role
@@ -131,24 +136,28 @@ query($q: String!, $after: String) {
 }
 """
 
-REVIEW_QUERY = """
-query($q: String!, $after: String) {
-  search(query: $q, type: ISSUE, first: 50, after: $after) {
-    pageInfo { hasNextPage endCursor }
-    nodes {
-      ... on PullRequest {
+REVIEW_QUERY = f"""
+query($q: String!, $after: String) {{
+  rateLimit {{ remaining resetAt }}
+  search(query: $q, type: ISSUE, first: 50, after: $after) {{
+    pageInfo {{ hasNextPage endCursor }}
+    nodes {{
+      ... on PullRequest {{
         url number title body headRefName headRefOid isDraft reviewDecision
         createdAt updatedAt
-        changedFiles additions deletions files(first: 20) { nodes { path } }
-        author { login __typename }
-        repository { nameWithOwner }
-        closingIssuesReferences(first: 10) {
-          nodes { number repository { nameWithOwner } milestone { number } }
-        }
-      }
-    }
-  }
-}
+        changedFiles additions deletions files(first: 20) {{ nodes {{ path }} }}
+        author {{ login __typename }}
+        repository {{ nameWithOwner }}
+        closingIssuesReferences(first: 10) {{
+          nodes {{
+            number repository {{ nameWithOwner }} milestone {{ number description }}
+          }}
+        }}
+        {github_gh.ROLLUP_STATE}
+      }}
+    }}
+  }}
+}}
 """
 
 CLOSED_QUERY = """
@@ -503,8 +512,13 @@ def _closes_approved(node: dict, milestones: MilestoneCache) -> "bool | None":
         return None
     for issue in milestoned:
         repo = issue["repository"]["nameWithOwner"]
-        number = issue["milestone"]["number"]
-        if milestone_approved(milestones.description(repo, number)):
+        ms = issue["milestone"]
+        # REVIEW_QUERY selects the description, so a sync makes no call here;
+        # a node from a query that does not (an older row) is looked up.
+        description = ms.get("description")
+        if description is None:
+            description = milestones.description(repo, ms["number"])
+        if milestone_approved(description):
             return True
     return False
 
@@ -560,6 +574,8 @@ def queue_row(
     ci: "str | None",
     milestones: Any,
     comments_of: Callable[[str, int], "tuple[str, list[dict]]"],
+    known_stamp: "bool | None" = None,
+    skip_comments: bool = False,
 ) -> "tuple[dict, bool]":
     """One awaiting PR's `kind = pr` row, with rules 2-4 applied to it.
 
@@ -567,6 +583,10 @@ def queue_row(
     that lookup failed). `milestones` answers description(repo, number) and
     `comments_of(repo, number)` gives the viewer and the PR's comments, so a
     caller that already holds them (the per-item refresh) makes no more calls.
+    `known_stamp`, when not None, is rule 3's answer from an earlier sync of
+    the same head and updatedAt, used without reading comments. With
+    `skip_comments` and no known stamp, rule 3 is not checked: `stamped` is
+    None and it counts as a `co_review` miss.
     Also returns whether a milestone or comments lookup failed; that counts
     as a miss of its rule. An AuthError raises.
     """
@@ -589,16 +609,19 @@ def queue_row(
     if approved is False:
         misses.append("milestone")
     if role != "others" and not misses:
-        try:
-            viewer, comments = comments_of(repo, node["number"])
-            head = stamp_head(comments, viewer)
-            current = (node.get("headRefOid") or "").lower()
-            stamped = head is not None and head == current
-        except github_gh.AuthError:
-            raise
-        except GhError:
-            stamped = False
-            lookup_failed = True
+        if known_stamp is not None:
+            stamped = known_stamp
+        elif not skip_comments:
+            try:
+                viewer, comments = comments_of(repo, node["number"])
+                head = stamp_head(comments, viewer)
+                current = (node.get("headRefOid") or "").lower()
+                stamped = head is not None and head == current
+            except github_gh.AuthError:
+                raise
+            except GhError:
+                stamped = False
+                lookup_failed = True
         if not stamped:
             misses.append("co_review")
     row = {
@@ -628,36 +651,61 @@ def queue_row(
     return row, lookup_failed
 
 
+def known_stamp(node: dict, previous: "dict | None") -> "bool | None":
+    """Rule 3's answer from the last sync's row for this PR, or None when it
+    must be read again: no earlier row, no answer in it, or a different head
+    or `updatedAt`. A new comment moves `updatedAt`, so a stamp written since
+    the last sync is never missed."""
+    if not previous or previous.get("stamped") is None:
+        return None
+    same_head = (node.get("headRefOid") or "") == (previous.get("head_oid") or "")
+    same_update = node.get("updatedAt") == previous.get("updated")
+    return bool(previous["stamped"]) if same_head and same_update else None
+
+
 def review_queue(
     owners: Iterable[str],
     runner: Runner = run,
     timeout: float = DEFAULT_TIMEOUT,
     scope: str = "owner",
+    previous: "dict[str, dict] | None" = None,
+    budget: "github_gh.Budget | None" = None,
+    floor: int = 0,
 ) -> "tuple[list[dict], list[str]]":
     """Every awaiting PR (rule 1), each marked `in_queue` by rules 2-4, then
     the PRs from others (role `others`), which those rules do not apply to.
     Scope "me" skips the PRs from others: they do not involve me.
 
-    Rule 4 is skipped, with `milestone_approved` None, for a PR that closes no
-    issue in a milestone.
+    CI state (rule 2) comes with the searches. Rule 4 is skipped, with
+    `milestone_approved` None, for a PR that closes no issue in a milestone.
+    Rule 3 reads a PR's comments only when `previous` (the last sync's rows by
+    URL) holds no answer for its current head and `updatedAt` (known_stamp),
+    so an idle PR costs no call. When the searches report fewer than `floor`
+    points of the user's GraphQL budget left (`budget`), no comments are read
+    at all: a PR with no known answer misses rule 3 with `stamped` None.
 
-    Also returns the URLs where a CI, milestone or comments lookup failed.
-    A failed lookup counts as a miss of its rule (a None `ci_state`, a
-    `milestone` miss, a `co_review` miss), so one flaky call does not fail
-    the run. An AuthError still raises.
+    Also returns the URLs where a milestone or comments lookup failed.
+    A failed lookup counts as a miss of its rule (a `milestone` miss, a
+    `co_review` miss), so one flaky call does not fail the run. An AuthError
+    still raises.
     """
     owners = list(owners)
+    previous = previous or {}
+    budget = budget if budget is not None else github_gh.Budget()
     nodes: dict[str, tuple[dict, str]] = {}
     for owner in owners:
         for (_, role), query in zip(REVIEW_ROLES, review_searches(owner)):
-            for node in github_gh.search_prs(query, runner, timeout, REVIEW_QUERY):
+            for node in github_gh.search_prs(
+                query, runner, timeout, REVIEW_QUERY, budget
+            ):
                 if in_review_queue(node):
                     nodes.setdefault(node["url"], (node, role))
     for owner in owners if scope == "owner" else ():
         query = others_search(owner)
-        for node in github_gh.search_prs(query, runner, timeout, REVIEW_QUERY):
+        for node in github_gh.search_prs(query, runner, timeout, REVIEW_QUERY, budget):
             if not node.get("isDraft"):
                 nodes.setdefault(node["url"], (node, "others"))
+    skip_comments = budget.below(floor)
     milestones = MilestoneCache(runner, timeout)
     rows: list[dict] = []
     failed: list[str] = []
@@ -666,16 +714,13 @@ def review_queue(
         return pr_comments(repo, number, runner, timeout)
 
     for url, (node, role) in nodes.items():
-        ci: "str | None"
-        try:
-            ci = github_gh.ci_state(url, runner, timeout)
-        except github_gh.AuthError:
-            raise
-        except GhError:
-            ci = None
-            failed.append(url)
-        row, lookup_failed = queue_row(node, role, ci, milestones, comments_of)
-        if lookup_failed and url not in failed:
+        ci = github_gh.rollup_state(node)
+        row, lookup_failed = queue_row(
+            node, role, ci, milestones, comments_of,
+            known_stamp=known_stamp(node, previous.get(url)),
+            skip_comments=skip_comments,
+        )  # fmt: skip
+        if lookup_failed:
             failed.append(url)
         rows.append(row)
     return rows, failed
@@ -958,17 +1003,97 @@ def open_milestones(
 # --- sync --------------------------------------------------------------------
 
 
+def previous_prs(conn: sqlite3.Connection) -> dict[str, dict]:
+    """The last sync's `kind = pr` rows by URL, for review_queue's `previous`."""
+    out = {}
+    for (raw,) in conn.execute(
+        "SELECT raw_json FROM issues WHERE source = ? AND kind = 'pr'", (SOURCE,)
+    ):
+        try:
+            row = json.loads(raw or "{}")
+        except ValueError:
+            continue
+        if isinstance(row, dict) and row.get("url"):
+            out[row["url"]] = row
+    return out
+
+
+# The open-issue rows are the costliest read of a sync: 3 points per page of
+# 100, against 1 or 2 for a page of PRs. A sync first asks whether any issue
+# in the owners' repos was updated since the last one (issues_changed, one
+# call), and when none was it keeps the rows it has. Some changes reach no
+# issue's `updatedAt`, a blocker closing in another repo for one, so the rows
+# are read in full again once the last full read is this old.
+ISSUE_REUSE_MINUTES = 30
+# Taken off the probe's `updated:>=` time to cover the search index's lag.
+PROBE_OVERLAP_MINUTES = 5
+
+
+def issues_changed(
+    owners: Iterable[str],
+    since: datetime,
+    runner: Runner = run,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> int:
+    """How many issues in the owners' repos, open or closed and whoever's,
+    were updated at or after `since`. One GraphQL call of `issueCount`
+    aliases, so it costs one point and no page of nodes.
+
+    It does not narrow by `github.scope`: a superset only means a full read
+    more often, while a narrower probe would miss an issue leaving the scope.
+    """
+    stamp = since.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    parts = []
+    for i, owner in enumerate(owners):
+        org = github_gh.owner_qualifier(owner)  # validated: safe to inline
+        q = f"is:issue updated:>={stamp} {org}"
+        parts.append(
+            f'c{i}: search(query: "{q}", type: ISSUE, first: 0) {{ issueCount }}'
+        )
+    if not parts:
+        return 0
+    query = "query { " + " ".join(parts) + " }"
+    data = github_gh._call(
+        ["gh", "api", "graphql", "-f", f"query={query}"], runner, timeout
+    )
+    try:
+        return sum(int(data["data"][f"c{i}"]["issueCount"]) for i in range(len(parts)))
+    except (KeyError, TypeError, ValueError):
+        raise GhError(
+            "unexpected GraphQL response for the issue change probe"
+        ) from None
+
+
 def fetch(
     config: dict[str, Any],
     runner: Runner = run,
     timeout: float = DEFAULT_TIMEOUT,
     now: "datetime | None" = None,
+    previous: "dict[str, dict] | None" = None,
+    issue_cache: "dict | None" = None,
 ) -> dict[str, Any]:
-    """Every github row for the fleet view. Reads GitHub; writes nothing."""
+    """Every github row for the fleet view. Reads GitHub; writes nothing.
+
+    `previous` is previous_prs() of the mirror, which lets an unchanged PR
+    skip its comments read. `throttled` in the result is true when the user's
+    GraphQL budget was under `github.min_remaining` and the comments reads
+    were skipped.
+
+    `issue_cache` is the mirror's issue rows as {rows, since, read_at}: the
+    start of the last good fleet run, and of the last one that read the
+    issues in full. When the full read is under ISSUE_REUSE_MINUTES old and
+    issues_changed() finds nothing since, the rows are kept and
+    `issues_reused` is true. A failed probe reads them in full.
+    """
     now = now or datetime.now(timezone.utc)
     owners = list(config["github"]["orgs"])
     scope = config["github"]["scope"]
-    queue, failed = review_queue(owners, runner, timeout, scope)
+    floor = int(config["github"].get("min_remaining", 0))
+    budget = github_gh.Budget()
+    queue, failed = review_queue(
+        owners, runner, timeout, scope, previous, budget, floor
+    )
+    throttled = budget.below(floor)
     designs, truncated, missing = proposed_designs(
         config["github"].get("design_repos", []), runner, timeout
     )
@@ -978,7 +1103,21 @@ def fetch(
         for r in recently_closed(owners, now, runner, timeout)
         if r["url"] not in open_urls  # an index lag; the open row wins
     ]
-    issues, issues_truncated = open_issues(owners, runner, timeout, scope=scope)
+    issues: "list[dict] | None" = None
+    issues_truncated: list[str] = []
+    fresh = timedelta(minutes=ISSUE_REUSE_MINUTES)
+    if issue_cache is not None and now - issue_cache["read_at"] < fresh:
+        since = issue_cache["since"] - timedelta(minutes=PROBE_OVERLAP_MINUTES)
+        try:
+            if issues_changed(owners, since, runner, timeout) == 0:
+                issues = list(issue_cache["rows"])
+        except github_gh.AuthError:
+            raise
+        except GhError:
+            pass  # no answer is not "nothing changed": read them in full
+    reused = issues is not None
+    if issues is None:
+        issues, issues_truncated = open_issues(owners, runner, timeout, scope=scope)
     rows = queue + issues + designs + closed
     # A header figure: a failed count is listed, and the run still lands.
     try:
@@ -997,6 +1136,9 @@ def fetch(
         "issues_truncated": issues_truncated,
         "missing": missing,
         "counts": queue_counts(rows),
+        "throttled": throttled,
+        "remaining": budget.remaining,
+        "issues_reused": reused,
     }
 
 

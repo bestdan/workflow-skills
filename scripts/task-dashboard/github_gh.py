@@ -5,9 +5,18 @@ orgs, so every search is scoped to the owners in config `github.orgs`; unscoped,
 `author:@me` returned 220 PRs in the spike, 141 of them personal.
 
 PRs come from a paginated GraphQL `search`, not `gh search prs`, because the
-latter has no `headRefName` and the branch is half of the Jira join. CI state is
-fetched per PR: putting `statusCheckRollup` in a 100-node search made GitHub
-return an HTML error after 12s.
+latter has no `headRefName` and the branch is half of the Jira join. CI state
+comes from the same search, as the head commit's rollup `state` alone
+(rollup_state()). Asking for the full rollup, every check context, in a
+100-node search made GitHub return an HTML error after 12s; the state alone
+adds no connection to the query's cost. A sync used to read CI with one
+`gh pr view` per PR, which spent most of the user's shared GraphQL budget
+(#1252); ci_state() is that read, kept for the per-card Refresh.
+
+Each search also asks for `rateLimit { remaining resetAt }`. That is the
+user-wide budget every token and app acting as the user draws from, which
+`gh api rate_limit` does not report: that endpoint counts the calling token
+alone. search_nodes() hands it to a caller that asks (Budget).
 
 All `gh` calls go through one runner seam, `run(argv, timeout)`, so tests pass a
 fake instead of reaching the network.
@@ -63,19 +72,25 @@ def _call(argv: list[str], runner: Runner, timeout: float) -> Any:
         raise GhError(f"{' '.join(argv[:3])} returned non-JSON: {exc}") from None
 
 
-SEARCH_QUERY = """
-query($q: String!, $after: String) {
-  search(query: $q, type: ISSUE, first: 50, after: $after) {
-    pageInfo { hasNextPage endCursor }
-    nodes {
-      ... on PullRequest {
-        url title headRefName isDraft reviewDecision createdAt updatedAt
-        repository { nameWithOwner }
-        changedFiles additions deletions files(first: 20) { nodes { path } }
-      }
-    }
-  }
-}
+# The head commit's CI rollup state, without its contexts. A PR query that
+# needs CI state selects this instead of a per-PR `gh pr view`.
+ROLLUP_STATE = "commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }"
+
+SEARCH_QUERY = f"""
+query($q: String!, $after: String) {{
+  rateLimit {{ remaining resetAt }}
+  search(query: $q, type: ISSUE, first: 50, after: $after) {{
+    pageInfo {{ hasNextPage endCursor }}
+    nodes {{
+      ... on PullRequest {{
+        url title headRefName headRefOid isDraft reviewDecision createdAt updatedAt
+        repository {{ nameWithOwner }}
+        changedFiles additions deletions files(first: 20) {{ nodes {{ path }} }}
+        {ROLLUP_STATE}
+      }}
+    }}
+  }}
+}}
 """
 
 # How many changed paths a PR query reads (`files(first: N)` in SEARCH_QUERY,
@@ -123,19 +138,48 @@ def owner_qualifier(owner: str) -> str:
     return f"org:{owner}"
 
 
+class Budget:
+    """The user-wide GraphQL budget: the lowest `remaining` any response this
+    run reported.
+
+    The lowest, not the newest: measured on 2026-10-30, consecutive calls
+    answered from two different counters (one 4,972 and the next 3,875, a
+    minute apart), and the limit trips on whichever runs out first.
+    `remaining` is None until a query that selects `rateLimit` has answered.
+    """
+
+    def __init__(self) -> None:
+        self.remaining: "int | None" = None
+        self.reset_at: "str | None" = None
+
+    def note(self, data: Any) -> None:
+        rate = (data or {}).get("rateLimit") if isinstance(data, dict) else None
+        if not isinstance(rate, dict) or not isinstance(rate.get("remaining"), int):
+            return
+        if self.remaining is None or rate["remaining"] < self.remaining:
+            self.remaining = rate["remaining"]
+            self.reset_at = rate.get("resetAt")
+
+    def below(self, floor: int) -> bool:
+        """True when a response has reported fewer than `floor` points left."""
+        return self.remaining is not None and self.remaining < floor
+
+
 def search_prs(
     query: str,
     runner: Runner = run,
     timeout: float = DEFAULT_TIMEOUT,
     graphql: str = SEARCH_QUERY,
+    budget: "Budget | None" = None,
 ) -> list[dict]:
     """Every node with a `url` for a search, following endCursor to the end.
 
     `graphql` swaps the node selection; it must keep the `search(...)` shape,
     `pageInfo`, and `url`. The fleet view passes one selecting issues, or PRs
-    with their body.
+    with their body. `budget`, when given, is updated from each page whose
+    query selects `rateLimit`.
     """
-    return search_nodes(query, runner, timeout, graphql)[0]
+    return search_nodes(query, runner, timeout, graphql, budget=budget)[0]
 
 
 def search_nodes(
@@ -144,6 +188,7 @@ def search_nodes(
     timeout: float = DEFAULT_TIMEOUT,
     graphql: str = SEARCH_QUERY,
     limit: "int | None" = None,
+    budget: "Budget | None" = None,
 ) -> "tuple[list[dict], bool]":
     """search_prs, stopping at `limit` nodes: (nodes, whether more were left).
 
@@ -164,6 +209,8 @@ def search_nodes(
         if after:
             argv += ["-f", f"after={after}"]
         data = _call(argv, runner, timeout)
+        if budget is not None and isinstance(data, dict):
+            budget.note(data.get("data"))
         try:
             search = data["data"]["search"]
             page_info = search["pageInfo"]
@@ -189,6 +236,7 @@ def _row(node: dict, role: str) -> dict:
         "head_ref": node.get("headRefName"),
         "is_draft": bool(node.get("isDraft")),
         "review_decision": node.get("reviewDecision"),
+        "ci_state": rollup_state(node),
         "role": role,
         "updated": node.get("updatedAt"),
         "raw_json": json.dumps(node, sort_keys=True),
@@ -263,8 +311,41 @@ def reduce_rollup(entries: list[dict]) -> str:
     return "success"
 
 
+# GitHub's StatusState for a rollup, in reduce_rollup()'s terms. EXPECTED is a
+# required status that has not reported yet, so it is pending.
+_ROLLUP_STATES = {
+    "SUCCESS": "success",
+    "FAILURE": "failure",
+    "ERROR": "failure",
+    "PENDING": "pending",
+    "EXPECTED": "pending",
+}
+
+
+def rollup_state(node: dict) -> "str | None":
+    """`success | failure | pending | none` from a node selecting ROLLUP_STATE,
+    or None when the node did not select it (a row synced before it was).
+
+    GitHub reduces the contexts itself, so this can differ from
+    reduce_rollup() at the edges: a state GitHub adds later reads as pending.
+    """
+    commits = node.get("commits")
+    if not isinstance(commits, dict):
+        return None
+    nodes = commits.get("nodes") or []
+    commit = (nodes[0] or {}).get("commit") if nodes else None
+    rollup = (commit or {}).get("statusCheckRollup")
+    if not rollup:
+        return "none"
+    return _ROLLUP_STATES.get(str(rollup.get("state") or "").upper(), "pending")
+
+
 def ci_state(url: str, runner: Runner = run, timeout: float = DEFAULT_TIMEOUT) -> str:
-    """One PR's CI state, from `gh pr view <url> --json statusCheckRollup`."""
+    """One PR's CI state, from `gh pr view <url> --json statusCheckRollup`.
+
+    One call per PR, so only the per-card Refresh uses it; a sync reads
+    rollup_state() off its search instead.
+    """
     data = _call(
         ["gh", "pr", "view", url, "--json", "statusCheckRollup"], runner, timeout
     )

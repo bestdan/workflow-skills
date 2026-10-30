@@ -369,9 +369,9 @@ def _issue_card(row: dict, ov: overlay.Overlay, now: datetime) -> str:
 def _issues_truncated(conn: sqlite3.Connection) -> int:
     """Owners the last good fleet run's issue cap cut short."""
     row = conn.execute(
-        "SELECT counts FROM sync_runs WHERE kind = ? AND outcome = 'ok'"
+        "SELECT counts FROM sync_runs WHERE kind = ? AND outcome IN (?, ?)"
         " ORDER BY id DESC LIMIT 1",
-        (github_fleet.RUN_KIND,),
+        (github_fleet.RUN_KIND, *sync.SUCCESS_OUTCOMES),
     ).fetchone()
     try:
         counts = json.loads(row[0] or "{}") if row else {}
