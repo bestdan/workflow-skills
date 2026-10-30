@@ -109,9 +109,11 @@ issues (`blocks`, from GitHub's native dependencies), one at
 open tickets (outward `Blocks` links), or that sit, still to do, in a status
 DEEP_JIRA_STATUSES names. They go by the open issues each blocks, most first,
 then `prio`, then the larger estimate, then the longer wait, with no score.
-An item with no `blocks` evidence (a design, a doc PR, or an issue synced before the
-field) shows no blocks term and sorts as blocking none. DEEP_LIMIT are shown,
-pins aside: one to take up and two alternates.
+A ticket carries no `prio` (Jira priority is not a `prio:` label), so it goes
+by blocks and then wait. An item with no `blocks` evidence (a design, a doc PR,
+or an issue synced before the field) shows no blocks term and sorts as
+blocking none. DEEP_LIMIT are shown, pins aside: one to take up and two
+alternates.
 
 TIDY ranks the backlog that rots (tidy_sources): an issue labelled
 auto:human-review-needed, `status:0_untriaged` or `status:1_needs_refinement`,
