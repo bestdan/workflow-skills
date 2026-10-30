@@ -254,7 +254,7 @@ def _finish_run(
     run_id: int,
     outcome: str,
     finished: datetime,
-    counts: dict[str, int],
+    counts: dict[str, Any],
     failed_keys: list[str],
     error: "str | None",
 ) -> None:
@@ -681,7 +681,9 @@ def run_fleet(
     """
     clock = clock or (lambda: datetime.now(timezone.utc))
     run_id = _start_run(db, FLEET_KIND, now)
-    counts: dict[str, int] = {}
+    # Mostly counts, plus `issue_owners`, the owner set a full issue read
+    # covered (fleet_issue_cache).
+    counts: dict[str, Any] = {}
     failed_keys: list[str] = []
     outcome, error = "ok", None
     try:
