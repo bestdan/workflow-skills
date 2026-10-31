@@ -6,8 +6,7 @@ both wake. That keeps one sync path and one writer to the mirror tables. The
 one exception is a card's Refresh button: `POST /refresh` re-reads that one
 PR or issue (refresh.py) on its own request thread and rewrites only its rows.
 
-Access control, from the Hosting and access section of
-dev_docs/designs/2026-10-23-task-dashboard.md:
+Access control (dev_docs/task-dashboard.md, "Security model"):
 
 - The socket binds to 127.0.0.1 only.
 - Every request's `Host` must be exactly `127.0.0.1:<port>`, `localhost:<port>`

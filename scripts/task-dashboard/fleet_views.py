@@ -1,6 +1,6 @@
 """The fleet view's Stale page, and the fleet rows Needs you reads.
 
-From dev_docs/designs/2026-10-23-fleet-view.md, "Views" items 2 and 3. It
+Part of the fleet instance (dev_docs/task-dashboard.md, "Fleet views"). It
 reads SQLite only: the `source = 'github'` rows github_fleet.py writes, the
 `source = 'machine:<host>'` rows and the `session_events` / `history_entries`
 deltas snapshot_adapter.py writes, and the overlay.

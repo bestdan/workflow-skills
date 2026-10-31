@@ -5,9 +5,8 @@ status: proposed
 
 # Ideas to borrow from workdesk for the task dashboard and fleet view
 
-Four suggestions for the task dashboard
-([`2026-10-23-task-dashboard.md`](2026-10-23-task-dashboard.md)) and the fleet
-view ([`2026-10-23-fleet-view.md`](2026-10-23-fleet-view.md)), taken from
+Four suggestions for the task dashboard and its fleet view
+([`../task-dashboard.md`](../task-dashboard.md)), taken from
 [adbutler007/workdesk](https://github.com/adbutler007/workdesk) at commit
 `f33e7d3`. Two of them change what the fleet view can know about a session; the
 other two are small fixes that stop stale or missing data from looking current. They
@@ -233,8 +232,8 @@ the failure and the host's age, never as current.
   stops an invented quote.
 - **Acting on sessions**: Close, Close idle, Fresh start, Resume, Go to window,
   and launch scripts (`start.py`, `terminal.py`, `procs.py`). Our fleet view is
-  read-only by principle 2 of the fleet design ("Read-only, as in the first
-  instance", in [`2026-10-23-fleet-view.md`](2026-10-23-fleet-view.md)), and the owner's sessions run under tmux, not in
+  read-only, as the whole dashboard is
+  ([`../task-dashboard.md`](../task-dashboard.md)), and the owner's sessions run under tmux, not in
   Terminal.app windows. workdesk's four-part identity check (pid, start time, tty, tty
   leader) exists to make a kill safe; we only need the pid and start time half,
   for liveness, which suggestion 1 covers.

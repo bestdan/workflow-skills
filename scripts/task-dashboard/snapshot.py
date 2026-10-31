@@ -1,8 +1,8 @@
 """Machine snapshot for the fleet view: the state only this machine can see.
 
 Prints one JSON document on stdout. The fleet view's collector ships it to the
-Mac mini's ingest endpoint; the design is
-``dev_docs/designs/2026-10-23-fleet-view.md`` ("Deployment", "Sources").
+aggregator's ingest endpoint; the live doc is ``dev_docs/task-dashboard.md``
+("Fleet instance").
 
 Run under uv (Python 3.11+), as the rest of the dashboard is::
 

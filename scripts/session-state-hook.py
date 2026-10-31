@@ -3,8 +3,8 @@
 
 Registered in hooks/hooks.json on ``UserPromptSubmit``, ``Stop`` and
 ``Notification``. It feeds the fleet view's collector, which reads the files
-this writes; the design is ``dev_docs/designs/2026-10-23-fleet-view.md``
-("Sources").
+this writes; the live doc is ``dev_docs/task-dashboard.md`` ("Fleet
+instance").
 
 OPT-IN, AND OFF BY DEFAULT. The plugin is public and installed by people who
 never asked to have their sessions logged, so the hook does nothing unless

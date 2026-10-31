@@ -5,10 +5,11 @@ created: 2026-10-23
 # Can a background process read the Claude Code Remote session list?
 
 **Measured 2026-10-23** on the Mac mini, over SSH with no desktop session, using
-Claude Code 2.1.309 signed in with a claude.ai (Max) account. This record answers
-the first "Verify before building" item in
-[`../designs/2026-10-23-fleet-view.md`](../designs/2026-10-23-fleet-view.md) for
-#1098, and it decides the shape of #1100. Session titles, ids and the org id are
+Claude Code 2.1.309 signed in with a claude.ai (Max) account. This record answers,
+for #1098, the first "Verify before building" item in the fleet view's design,
+and it decides the shape of #1100. The live doc's
+[Fleet instance](../task-dashboard.md#fleet-instance) section has since replaced
+that design. Session titles, ids and the org id are
 left out because this repo is public. Counts, timings and field names are as
 measured.
 

@@ -2,8 +2,8 @@
 
 The score is a deterministic sum of named, config-weighted terms, so the
 ranking is stable between refreshes and every card can show why it ranks where
-it does. There is no LLM here on purpose. The spec is the Prioritization score
-and Blocked paragraphs of dev_docs/designs/2026-10-23-task-dashboard.md.
+it does. There is no LLM here on purpose. score() and is_blocked() below are
+the spec; dev_docs/task-dashboard.md places them in the ranker.
 
 fleet_score() is Now's score: what waits on the owner, and the owner's own
 work, ranked by category (see the comment above FLEET_CATEGORIES). score()'s
