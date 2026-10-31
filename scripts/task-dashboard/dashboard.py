@@ -230,6 +230,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="the header on line one, then one item a line",
     )
     _paths(items_p)
+    item_p = sub.add_parser(
+        "item",
+        help="one item's dossier as JSON: its record and tracker detail, linked"
+        " PRs, sessions, worktrees, workstreams, links and overlay",
+    )
+    item_p.add_argument(
+        "ref",
+        help="source:key as `items` prints them, or a bare key or ref that"
+        " names exactly one item",
+    )
+    item_p.add_argument(
+        "--sections",
+        help="comma list of: " + ", ".join(agent_query.SECTIONS) + " (default: all)",
+    )
+    _paths(item_p)
     plan_p = sub.add_parser(
         "plan",
         help="set, show or clear a plan: an ordered list of items for one scope"
@@ -569,6 +584,14 @@ def _query(args: argparse.Namespace, build: Any) -> int:
         return 1
     try:
         out = build(conn, cfg, _now())
+    except agent_query.AmbiguousRef as exc:
+        # The matches go to stdout as JSON, so an agent can pick one.
+        print(f"task-dashboard: {exc}", file=sys.stderr)
+        sys.stdout.write(agent_query.dumps({
+            "schema": agent_query.SCHEMA_VERSION, "ambiguous": exc.ref,
+            "matches": exc.matches,
+        }))  # fmt: skip
+        return 2
     except agent_query.QueryError as exc:
         print(f"task-dashboard: {exc}", file=sys.stderr)
         return 2
@@ -593,6 +616,14 @@ def cmd_items(args: argparse.Namespace) -> int:
             fields=args.fields, limit=args.limit, offset=args.offset,
         )  # fmt: skip
         return agent_query.jsonl(doc) if args.jsonl else agent_query.dumps(doc)
+
+    return _query(args, build)
+
+
+def cmd_item(args: argparse.Namespace) -> int:
+    def build(conn: sqlite3.Connection, cfg: dict, now: datetime) -> str:
+        doc = agent_query.item_doc(conn, cfg, now, args.ref, args.sections)
+        return agent_query.dumps(doc)
 
     return _query(args, build)
 
@@ -1008,6 +1039,8 @@ def main(argv: "list[str] | None" = None) -> int:
         return cmd_scopes(args)
     if args.command == "items":
         return cmd_items(args)
+    if args.command == "item":
+        return cmd_item(args)
     if args.command == "overlay":
         return cmd_overlay(args)
     if args.command == "plan":

@@ -376,11 +376,21 @@ itself; the CLI never grows a full-transcript read. The remote endpoint in
 Later is where a default-off switch belongs, because that reader is a model
 off the machine.
 
+> **2026-10-31, as shipped (#1284).** The argument is `source:key`, which is
+> unique; a bare key or ref is accepted when it names one item, and otherwise
+> the command exits 2 listing every match. The sections are
+> `tracker,prs,sessions,worktrees,workstreams,links,overlay`: `workstreams`,
+> which the prose above names, is a section of its own. `tracker` is the
+> `full` record plus `detail`, what the mirrored row holds beyond it. `links`
+> says which form it is in, `refs` or, for a GitHub issue, `counts`. The
+> output carries `schema`, as `items` does. `brief` takes `--sections` the same
+> way, a comma list of section names, not numbers.
+
 ### 4. `brief`: one call for a prioritization
 
 ```
 dashboard.py brief [--scope X ...] [--mode ship|little|deep|tidy] [--minutes N]
-    [--sections 1,2,...]
+    [--sections <name,...>]
 ```
 
 With no `--scope`, the brief covers every scope the instance has, which is

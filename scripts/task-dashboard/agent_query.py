@@ -1,9 +1,10 @@
-"""`dashboard.py scopes` and `dashboard.py items`: the mirror as a query.
+"""`dashboard.py scopes`, `items` and `item`: the mirror as a query.
 
 dev_docs/designs/2026-10-30-dashboard-as-agent-data-source.md, sections 1
-and 2. `view` prints a whole tab shaped for its page; these print what an
-agent asked for: the scopes a word can mean, and one compact record per item
-in a scope. Each reads the DB directly and needs no running server.
+to 3. `view` prints a whole tab shaped for its page; these print what an
+agent asked for: the scopes a word can mean, one compact record per item
+in a scope, and one item's dossier. Each reads the DB directly and needs no
+running server.
 
 Every field comes from the code the views already use, so the two cannot
 disagree: fleet_tabs.pull_requests for PRs, fleet_now for the Now terms and
@@ -296,6 +297,7 @@ def _item(source: str, key: str, kind: str, **fields: Any) -> Item:
         "created": None, "updated": None, "blocks": None, "blocked_by": None,
         "assignee": None, "cycle": None, "mine": None, "_team": None,
         "_blocked": False, "_waiting": False, "_size": None, "_pr_row": None,
+        "_raw": None,
     }  # fmt: skip
     base.update(fields)
     base["_repo_bare"] = fleet_views._name(base["repo"])
@@ -331,7 +333,7 @@ def _issues(conn: sqlite3.Connection, cfg: dict[str, Any]) -> list[Item]:
             updated=row.get("updated") or updated,
             blocks=row.get("blocks"), blocked_by=row.get("blocked_by"),
             _blocked=fleet_now.issue_blocked(row),
-            _size=(f"est:{est}", f"label est:{est}") if est else None,
+            _size=(f"est:{est}", f"label est:{est}") if est else None, _raw=row,
         ))  # fmt: skip
     return out
 
@@ -355,7 +357,7 @@ def _prs(conn: sqlite3.Connection, cfg: dict[str, Any]) -> list[Item]:
                    "category": "started"},
             repo=p.get("repo"), branch=awaiting.get("head_ref") or head,
             created=p.get("created"), updated=awaiting.get("updated") or updated,
-            _size=fleet_now.pr_bucket(p), _pr_row=p,
+            _size=fleet_now.pr_bucket(p), _pr_row=p, _raw=p,
         ))  # fmt: skip
     return out
 
@@ -374,6 +376,7 @@ def _designs(conn: sqlite3.Connection, cfg: dict[str, Any]) -> list[Item]:
             state={"name": d.get("status") or "proposed", "category": "todo"},
             repo=d.get("repo"),
             created=d.get("created"),
+            _raw=d,
         )  # fmt: skip
         for d in workstreams.mirrored_designs(conn)
     ]
@@ -400,6 +403,7 @@ def _sessions(
             _waiting=waiting,
             # As Needs you dates the wait (needs._session).
             _waiting_since=row.get("waiting_since") or row.get("updated"),
+            _raw=row,
         ))  # fmt: skip
     return out
 
@@ -427,6 +431,7 @@ def _worktrees(conn: sqlite3.Connection) -> list[Item]:
             title=path or key, state=_worktree_state(row),
             repo=row.get("repo") or fleet_views.repo_of_path(path),
             branch=row.get("branch"), host=source.split(":", 1)[1], path=path,
+            _raw=row,
         ))  # fmt: skip
     return out
 
@@ -463,7 +468,7 @@ def _tickets(m: "views.Mirror | None") -> list[Item]:
             blocks=score.open_blocked(links),
             blocked_by=score.unresolved_blockers(links),
             _blocked=score.is_blocked(issue, links, m.cfg)[0],
-            _size=_est_size(labels),
+            _size=_est_size(labels), _raw=issue,
         ))  # fmt: skip
     return out
 
@@ -513,7 +518,7 @@ def _linear_tickets(conn: sqlite3.Connection, cfg: dict[str, Any]) -> list[Item]
             _team=raw.get("team") or key.split("-", 1)[0],
             _project_id=raw.get("project_id"), _project=raw.get("project"),
             _blocked=blocked or bool(raw.get("blocked_by")),
-            _size=_est_size(labels, raw.get("estimate")),
+            _size=_est_size(labels, raw.get("estimate")), _raw=raw,
         ))  # fmt: skip
     return out
 
@@ -541,10 +546,13 @@ def _link_prs(items: list[Item]) -> None:
     updated (else created), the number breaking a tie: one Jira key can be
     named by PRs in several repos, whose numbers do not compare. A PR whose
     head is a default branch is never matched by branch: a fork's `main` would
-    otherwise claim every session and checkout on the owner's `main`."""
+    otherwise claim every session and checkout on the owner's `main`.
+
+    `_prs` keeps every PR so matched, newest first, for the dossier."""
     by_issue: dict[str, Item] = {}
     by_jira: dict[str, Item] = {}
     by_branch: dict[tuple, Item] = {}
+    every: dict[tuple, list[Item]] = {}
 
     def recency(x: Item) -> tuple:
         at = score.parse_ts(x["updated"]) or score.parse_ts(x["created"])
@@ -552,6 +560,9 @@ def _link_prs(items: list[Item]) -> None:
                 x["_pr_row"].get("number") or 0)  # fmt: skip
 
     def newer(index: dict, k: Any, pr: Item) -> None:
+        found = every.setdefault((id(index), k), [])
+        if not any(f is pr for f in found):
+            found.append(pr)
         if k not in index or recency(pr) > recency(index[k]):
             index[k] = pr
 
@@ -570,13 +581,17 @@ def _link_prs(items: list[Item]) -> None:
     for i in items:
         found: "Item | None"
         if i["_pr_row"] is not None:
-            found = i
-        elif i["kind"] == "issue":
-            found = by_issue.get(i["key"])
-        elif i["kind"] == "ticket":
-            found = by_jira.get(i["key"])
+            found, i["_prs"] = i, [i]
         else:
-            found = by_branch.get((i["_repo_bare"], i["branch"]))
+            index: dict[Any, Item]
+            k: Any
+            index, k = (
+                (by_issue, i["key"]) if i["kind"] == "issue"
+                else (by_jira, i["key"]) if i["kind"] == "ticket"
+                else (by_branch, (i["_repo_bare"], i["branch"]))
+            )  # fmt: skip
+            found = index.get(k)
+            i["_prs"] = sorted(every.get((id(index), k), []), key=recency, reverse=True)
         i["pr"] = _pr_brief(found["_pr_row"]) if found else None
         # Sessions and worktrees are found on the PR's branch, in its repo;
         # never on a PR's default-branch head, for the reason above.
@@ -621,15 +636,15 @@ def _activity(items: list[Item]) -> None:
     matched by checkout instead (same host, the deepest worktree holding the
     session's cwd): every machine's `main` of a repo shares the key, and a
     checkout must not show another host's session as its own."""
-    on: dict[tuple, list[dict[str, Any]]] = {}
+    on: dict[tuple, list[Item]] = {}
     for i in items:
         if i["kind"] in ("session", "worktree") and _is_open(i) and i["branch"]:
-            on.setdefault((i["_repo_bare"], i["branch"]), []).append(_entry(i))
+            on.setdefault((i["_repo_bare"], i["branch"]), []).append(i)
     checkout = _checkouts(items)
-    held: dict[int, list[dict[str, Any]]] = {}
+    held: dict[int, list[Item]] = {}
     for i in items:
         if id(i) in checkout:
-            held.setdefault(checkout[id(i)], []).append(_entry(i))
+            held.setdefault(checkout[id(i)], []).append(i)
     for i in items:
         branch = i["_linked"][1]
         if (
@@ -637,9 +652,12 @@ def _activity(items: list[Item]) -> None:
             and branch in close_out.DEFAULT_BRANCHES
             and id(i) in checkout
         ):
-            i["activity"] = list(held[checkout[id(i)]])
+            found = held[checkout[id(i)]]
         else:
-            i["activity"] = list(on.get(i["_linked"], [])) if branch else []
+            found = on.get(i["_linked"], []) if branch else []
+        # The items themselves, for the dossier's sessions and worktrees.
+        i["_on"] = list(found)
+        i["activity"] = [_entry(x) for x in found]
         if i["kind"] != "session":
             i["_waiting"] = any(a["state"] == "waiting" for a in i["activity"])
 
@@ -901,6 +919,247 @@ def _record(
     return {
         k: v for k, v in out.items() if k in IDENTITY or v not in (None, [], {}, "")
     }
+
+
+# --- item: the dossier -------------------------------------------------------
+
+SECTIONS = (
+    "tracker", "prs", "sessions", "worktrees", "workstreams", "links", "overlay",
+)  # fmt: skip
+# Mirror bookkeeping, and the raw names of what the record or another section
+# already carries, which the tracker's `detail` leaves out.
+_NOT_DETAIL = {
+    "raw_json", "synced_at", "awaiting", "key", "summary", "status_name",
+    "status_category", "priority", "due_date", "parent_key", "sprint_name",
+    "head_ref", "is_draft", "review_decision", "ci_state", "cwd", "first_prompt",
+    "last_ask", "number", "due", "scope",
+}  # fmt: skip
+_VIA = {"pr": "self", "issue": "closes", "ticket": "names_key"}
+
+
+class AmbiguousRef(QueryError):
+    """A bare ref that names more than one item; `matches` lists them."""
+
+    def __init__(self, ref: str, found: list[Item]) -> None:
+        self.ref = ref
+        self.matches = [{k: i[k] for k in (*IDENTITY, "title")} for i in found]
+        names = ", ".join(f"{i['source']}:{i['key']}" for i in found)
+        super().__init__(
+            f"{ref!r} names {len(found)} items; pass one as source:key: {names}"
+        )
+
+
+def find(items: list[Item], ref: str) -> Item:
+    """The item `ref` names: `source:key` exactly, else the one item whose key
+    or ref it is. A ref is not unique (a session's is its title, a worktree's
+    its branch), so several matches raise AmbiguousRef, and none QueryError."""
+    found = [i for i in items if f"{i['source']}:{i['key']}" == ref]
+    found = found or [i for i in items if ref in (i["key"], i["ref"])]
+    if len(found) == 1:
+        return found[0]
+    if not found:
+        raise QueryError(f"no item matches {ref!r}; `items` lists them")
+    raise AmbiguousRef(ref, found)
+
+
+def _sparse(d: dict[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in d.items() if v not in (None, [], {}, "")}
+
+
+def _tracker(item: Item, terms: dict, stale: dict) -> dict[str, Any]:
+    """The `full` record, less identity, plus `detail`: what the mirrored row
+    holds beyond it."""
+    out = _record(item, list(FULL), terms, stale, sparse=True)
+    for k in IDENTITY:
+        out.pop(k, None)
+    raw = item["_raw"] or {}
+    detail = _sparse({
+        k: v for k, v in raw.items()
+        if k not in FULL and k not in _NOT_DETAIL and not k.startswith("_")
+    })  # fmt: skip
+    if detail:
+        out["detail"] = detail
+    return out
+
+
+def _prs_of(item: Item) -> list[dict[str, Any]]:
+    """Every linked PR, newest first, with its checks as the mirror has them,
+    and how it is linked: the item itself, closing it, naming its key, or on
+    its branch."""
+    out = []
+    for pr in item["_prs"]:
+        p = pr["_pr_row"]
+        awaiting = p.get("awaiting")
+        out.append({
+            **_pr_brief(p), "url": p.get("url"), "title": p.get("title"),
+            "branch": pr["branch"], "role": p.get("role"), "updated": pr["updated"],
+            "queue_misses": None if awaiting is None
+            else list(awaiting.get("queue_misses") or []),
+            "size": pr["size"], "via": _VIA.get(item["kind"], "branch"),
+        })  # fmt: skip
+    return out
+
+
+def _sessions_of(item: Item) -> list[dict[str, Any]]:
+    out = []
+    for s in item["_on"]:
+        if s["kind"] != "session":
+            continue
+        raw = s["_raw"] or {}
+        out.append({
+            "key": s["key"], "host": s["host"], "state": s["state"]["name"],
+            "waiting_since": s.get("_waiting_since") if s["_waiting"] else None,
+            "title": s["ref"], "first_prompt": raw.get("first_prompt"),
+            "last_ask": raw.get("last_ask"), "branch": s["branch"],
+            "path": s["path"], "updated": s["updated"],
+        })  # fmt: skip
+    return out
+
+
+def _worktrees_of(item: Item) -> list[dict[str, Any]]:
+    out = []
+    for w in item["_on"]:
+        if w["kind"] != "worktree":
+            continue
+        raw = w["_raw"] or {}
+        out.append({
+            "source": w["source"], "key": w["key"], "host": w["host"],
+            "path": w["path"], "branch": w["branch"], "state": w["state"]["name"],
+            "dirty": bool(raw.get("dirty")), "unpushed": raw.get("unpushed"),
+        })  # fmt: skip
+    return out
+
+
+def _workstreams_of(conn: sqlite3.Connection, item: Item) -> list[dict[str, Any]]:
+    """Each workstream it is in, and why: the member row's `via`, or
+    `project` for a Linear ticket joined through its project."""
+    ids = item["workstreams"]
+    if not ids:
+        return []
+    rows = {
+        r[0]: r
+        for r in conn.execute(
+            "SELECT id, source, title, status, url FROM workstreams"
+            f" WHERE id IN ({', '.join('?' * len(ids))})",
+            ids,
+        )
+    }
+    via = {
+        r[0]: r[1]
+        for r in conn.execute(
+            "SELECT ws_id, via FROM workstream_members"
+            " WHERE item_source = ? AND item_key = ?",
+            (item["source"], item["key"]),
+        )
+    }
+    out = []
+    for ws in ids:
+        r = rows.get(ws)
+        out.append({
+            "id": ws, "scope": f"ws:{ws}", "title": r[2] if r else None,
+            "source": r[1] if r else None, "status": r[3] if r else None,
+            "url": r[4] if r else None,
+            "via": via.get(ws) or ("project" if item["source"] == linear_issues.SOURCE
+                                   else None),
+        })  # fmt: skip
+    return out
+
+
+def _links_of(item: Item, m: "views.Mirror | None") -> "dict[str, Any] | None":
+    """Its links. `form` says what the mirror holds: `refs` (Jira's links
+    table, both directions; Linear's relations; a PR's closing issues and the
+    key it names) or `counts` (a GitHub issue: only how many open issues it
+    blocks and is blocked by, github_fleet._blocks). None for a design,
+    session or worktree, which have no links."""
+    kind, source = item["kind"], item["source"]
+    if kind == "ticket" and source == "jira":
+        rows = m.links.get(item["key"], []) if m is not None else []
+        return {
+            "form": "refs", "parent": item["parent"],
+            "blocks": item["blocks"] or [], "blocked_by": item["blocked_by"] or [],
+            "links": [
+                {"key": r["linked_key"], "type": r["link_type"],
+                 "direction": r["direction"],
+                 "status": r.get("linked_status_name"),
+                 "category": r.get("linked_status_category")}
+                for r in rows
+            ],
+        }  # fmt: skip
+    if kind == "ticket":
+        return {"form": "refs", "parent": item["parent"],
+                "blocks": item["blocks"] or [],
+                "blocked_by": item["blocked_by"] or []}  # fmt: skip
+    if kind == "issue":
+        return {"form": "counts", "blocks": item["blocks"] or 0,
+                "blocked_by": item["blocked_by"] or 0}  # fmt: skip
+    if kind == "pr":
+        p = item["_pr_row"]
+        closes = [
+            f"{c['repo']}#{c['number']}"
+            for c in (p.get("awaiting") or {}).get("closes") or []
+            if c.get("repo") and c.get("number") is not None
+        ]
+        return {"form": "refs", "closes": closes, "names_key": p.get("issue_key")}
+    return None
+
+
+def _overlay_of(conn: sqlite3.Connection, item: Item, now: datetime) -> dict[str, Any]:
+    """The owner's whole record for it: pin, snooze, ignore, note, tag, and
+    every why-not answer, oldest first."""
+    it = (item["source"], item["key"])
+    ov = overlay.load(conn)
+    until = ov.snoozed_until.get(it)
+    why = [
+        {"reason": r[0], "text": r[1] or None, "score": r[2], "at": r[3]}
+        for r in conn.execute(
+            "SELECT reason, text, score, recorded_at FROM why_not"
+            " WHERE source = ? AND item_key = ? ORDER BY recorded_at, id",
+            it,
+        )
+    ]
+    return {
+        "pinned": ov.is_pinned(it), "pinned_at": ov.pinned_at.get(it),
+        "snoozed_until": until, "snoozed": ov.is_snoozed(it, now) if until else False,
+        "ignored": it in ov.ignored, "note": ov.notes.get(it),
+        "tag": ov.kind_tags.get(it), "why_not": why,
+    }  # fmt: skip
+
+
+def item_doc(
+    conn: sqlite3.Connection,
+    cfg: dict[str, Any],
+    now: datetime,
+    ref: str,
+    sections: "str | None" = None,
+) -> dict[str, Any]:
+    """The `item` dossier: everything the mirror holds about one item, in the
+    sections asked for (all by default). Raises QueryError for a bad section
+    or a ref that names no item, AmbiguousRef for one naming several."""
+    names = _csv(sections, SECTIONS, "--sections") or list(SECTIONS)
+    m = mirror(conn, cfg, now)
+    item = find(collect(conn, cfg, now, m), ref)
+    doc: dict[str, Any] = {
+        "schema": SCHEMA_VERSION, "generated_at": _stamp(now),
+        **{k: item[k] for k in IDENTITY}, "title": item["title"],
+        "sections": [s for s in SECTIONS if s in names],
+    }  # fmt: skip
+    if "tracker" in names:
+        doc["tracker"] = _tracker(
+            item, _now_terms(conn, cfg, now), _stale(conn, cfg, now, m)
+        )
+    if "prs" in names:
+        doc["prs"] = _prs_of(item)
+    if "sessions" in names:
+        doc["sessions"] = _sessions_of(item)
+    if "worktrees" in names:
+        doc["worktrees"] = _worktrees_of(item)
+    if "workstreams" in names:
+        doc["workstreams"] = _workstreams_of(conn, item)
+    if "links" in names:
+        doc["links"] = _links_of(item, m)
+    if "overlay" in names:
+        doc["overlay"] = _overlay_of(conn, item, now)
+    return doc
 
 
 def dumps(doc: dict[str, Any]) -> str:

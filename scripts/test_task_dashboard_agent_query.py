@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Hermetic tests for scripts/task-dashboard/agent_query.py and the CLI's
-`scopes` and `items` commands.
+`scopes`, `items` and `item` commands.
 
 The fixture DB is written through the real writers (github_fleet.write, the
 snapshot adapter, sessions.write, linear_issues.write), plus the few mirror rows no writer here
@@ -752,6 +752,170 @@ class FieldTests(Case):
         self.assertEqual(stamps[: len(dated)], dated)  # undated last
 
 
+class DossierTests(Case):
+    def item(self, ref, sections=None):
+        return agent_query.item_doc(self.conn, self.cfg, NOW, ref, sections)
+
+    def test_identity_schema_and_every_section_by_default(self):
+        doc = self.item(f"github:{issue_url(1)}")
+        self.assertEqual(
+            {k: doc[k] for k in ("schema", "source", "key", "ref", "kind")},
+            {"schema": agent_query.SCHEMA_VERSION, "source": "github",
+             "key": issue_url(1), "ref": f"{REPO}#1", "kind": "issue"},
+        )  # fmt: skip
+        self.assertEqual(doc["sections"], list(agent_query.SECTIONS))
+        self.assertLessEqual(set(agent_query.SECTIONS), set(doc))
+
+    def test_sections_prints_only_those_in_the_one_order(self):
+        doc = self.item("PAY-7", "links,prs")
+        self.assertEqual(doc["sections"], ["prs", "links"])
+        self.assertFalse((set(agent_query.SECTIONS) - {"prs", "links"}) & set(doc))
+        with self.assertRaisesRegex(agent_query.QueryError, "--sections"):
+            self.item("PAY-7", "prs,checks")
+
+    def test_tracker_is_the_full_record_plus_detail(self):
+        t = self.item("PRE-1", "tracker")["tracker"]
+        record = self.by_key()["PRE-1"]
+        for k in ("title", "state", "size", "cycle", "assignee", "now"):
+            self.assertEqual(t[k], record[k], k)
+        self.assertNotIn("key", t)  # identity is the dossier's own
+        # What the mirror holds beyond the record, under the tracker's names.
+        self.assertEqual(t["detail"]["state_type"], "started")
+        self.assertEqual(t["detail"]["priority_label"], "High")
+        self.assertNotIn("blocked_by", t["detail"])  # the record's already
+        jira = self.item("jira:PAY-7", "tracker")["tracker"]
+        self.assertEqual(jira["parent"], "PAY-1")
+        self.assertNotIn("detail", jira)  # nothing beyond the record here
+
+    def test_prs_lists_every_linked_pr_newest_first(self):
+        prs = self.item("jira:PAY-7", "prs")["prs"]
+        self.assertEqual([p["ref"] for p in prs], ["acme/pay#77", "acme/old#900"])
+        self.assertEqual({p["via"] for p in prs}, {"names_key"})
+        self.assertEqual(prs[1]["ci"], "failure")
+        issue = self.item(f"github:{issue_url(1)}", "prs")["prs"]
+        self.assertEqual(
+            {k: issue[0][k] for k in ("ref", "ci", "co_reviewed", "queue_misses",
+                                      "branch", "via")},
+            {"ref": f"{REPO}#10", "ci": "success", "co_reviewed": False,
+             "queue_misses": ["co_review"], "branch": "bestdan/fix-10",
+             "via": "closes"},
+        )  # fmt: skip
+        self.assertEqual(self.item(pr_url(10), "prs")["prs"][0]["via"], "self")
+        self.assertEqual(self.item(f"github:{issue_url(2)}", "prs")["prs"], [])
+
+    def test_sessions_carry_the_capped_summary(self):
+        rw = db.connect(self.db_path)
+        rw.execute(
+            "UPDATE issues SET raw_json = json_set(raw_json, '$.first_prompt',"
+            " 'fix the thing', '$.last_ask', 'merge it?') WHERE key = 's-10'"
+        )
+        rw.commit()
+        rw.close()
+        sessions_ = self.item(f"github:{issue_url(1)}", "sessions")["sessions"]
+        self.assertEqual(
+            sessions_,
+            [{"key": "s-10", "host": "mini", "state": "waiting",
+              "waiting_since": "2026-10-24T11:00:00.000Z",
+              "title": "fix-10 @ bestdan/fix-10", "first_prompt": "fix the thing",
+              "last_ask": "merge it?", "branch": "bestdan/fix-10",
+              "path": f"{WT}/fix-10", "updated": "2026-10-24T11:00:00.000Z"}],
+        )  # fmt: skip
+        # A session's dossier lists itself.
+        self.assertEqual([s["key"] for s in self.item("s-10")["sessions"]], ["s-10"])
+
+    def test_worktrees_carry_unpushed(self):
+        wts = self.item(pr_url(10), "worktrees")["worktrees"]
+        self.assertEqual(
+            wts,
+            [{"source": "machine:mini", "key": f"worktree:{WT}/fix-10",
+              "host": "mini", "path": f"{WT}/fix-10", "branch": "bestdan/fix-10",
+              "state": "dirty", "dirty": True, "unpushed": 0}],
+        )  # fmt: skip
+
+    def test_workstreams_say_why(self):
+        ws = self.item(f"github:{issue_url(2)}", "workstreams")["workstreams"]
+        self.assertEqual(
+            ws,
+            [{"id": WS, "scope": f"ws:{WS}", "title": "FinPlan Tax Engine",
+              "source": "linear", "status": None, "url": None, "via": "test"}],
+        )  # fmt: skip
+        pre = self.item("PRE-1", "workstreams")["workstreams"]
+        self.assertEqual((pre[0]["id"], pre[0]["via"]), (WS, "project"))
+
+    def test_links_by_what_the_mirror_holds(self):
+        self.assertEqual(
+            self.item("jira:PAY-7", "links")["links"],
+            {"form": "refs", "parent": "PAY-1", "blocks": [], "blocked_by": ["PAY-1"],
+             "links": [{"key": "PAY-1", "type": "Blocks", "direction": "inward",
+                        "status": "To Do", "category": "new"}]},
+        )  # fmt: skip
+        # A GitHub issue: counts of open blockers, not refs.
+        self.assertEqual(
+            self.item(f"github:{issue_url(4)}", "links")["links"],
+            {"form": "counts", "blocks": 0, "blocked_by": 1},
+        )
+        self.assertEqual(
+            self.item("PRE-1", "links")["links"],
+            {"form": "refs", "parent": None, "blocks": ["PRE-4"],
+             "blocked_by": ["PRE-9"]},
+        )  # fmt: skip
+        self.assertEqual(
+            self.item(pr_url(10), "links")["links"],
+            {"form": "refs", "closes": [f"{REPO}#1"], "names_key": None},
+        )
+        self.assertIsNone(self.item("s-10", "links")["links"])
+
+    def test_overlay_holds_every_why_not_answer(self):
+        it = (github_fleet.SOURCE, issue_url(2))
+        rw = db.connect(self.db_path)
+        overlay.pin(rw, it, NOW)
+        overlay.snooze(rw, it, "2026-11-30")
+        overlay.note(rw, it, "after the tax engine", NOW)
+        overlay.why_not(rw, it, "not_urgent", now=NOW)
+        overlay.why_not(rw, it, "other", "waiting on Ana", now=NOW)
+        rw.close()
+        ov = self.item(f"github:{issue_url(2)}", "overlay")["overlay"]
+        self.assertEqual(
+            {k: ov[k] for k in ("pinned", "snoozed_until", "snoozed", "ignored",
+                                "note", "tag")},
+            {"pinned": True, "snoozed_until": "2026-11-30", "snoozed": True,
+             "ignored": False, "note": "after the tax engine", "tag": None},
+        )  # fmt: skip
+        self.assertEqual(
+            [(w["reason"], w["text"]) for w in ov["why_not"]],
+            [("not_urgent", None), ("other", "waiting on Ana")],
+        )
+        bare = self.item(f"github:{issue_url(3)}", "overlay")["overlay"]
+        self.assertEqual((bare["pinned"], bare["why_not"]), (False, []))
+
+    def test_a_bare_key_or_ref_naming_one_item(self):
+        self.assertEqual(self.item("PAY-7", "links")["source"], "jira")
+        self.assertEqual(self.item(f"{REPO}#1", "links")["key"], issue_url(1))
+        self.assertEqual(self.item(issue_url(1), "links")["kind"], "issue")
+
+    def test_an_ambiguous_ref_lists_every_match(self):
+        # Both hosts' `main` checkouts: one key, one ref, two sources.
+        for ref in ("main", "worktree:/h/src/finplan"):
+            with self.subTest(ref=ref):
+                with self.assertRaises(agent_query.AmbiguousRef) as cm:
+                    self.item(ref)
+                self.assertEqual(
+                    sorted(m["source"] for m in cm.exception.matches),
+                    ["machine:lin", "machine:mini"],
+                )
+        # Its source:key names just one.
+        doc = self.item("machine:lin:worktree:/h/src/finplan", "worktrees")
+        self.assertEqual(doc["source"], "machine:lin")
+
+    def test_no_match_is_an_error(self):
+        with self.assertRaisesRegex(agent_query.QueryError, "no item matches"):
+            self.item("nope")
+
+    def test_a_done_item_still_has_a_dossier(self):
+        self.assertEqual(self.item("PAY-9", "tracker")["tracker"]["state"]["category"],
+                         "done")  # fmt: skip
+
+
 class CliTests(Case):
     def run_cli(self, *argv):
         cfg_path = Path(self._td.name) / "config.toml"
@@ -790,10 +954,39 @@ class CliTests(Case):
         self.assertEqual((code, out), (2, ""))
         self.assertIn("no scope matches", err)
 
+    def test_item_prints_a_dossier_for_each_kind_of_ref(self):
+        for ref in (f"github:{issue_url(1)}", "jira:PAY-7", "s-10"):
+            with self.subTest(ref=ref):
+                code, out, _ = self.run_cli("item", ref)
+                self.assertEqual(code, 0)
+                doc = json.loads(out)
+                self.assertEqual(doc["schema"], agent_query.SCHEMA_VERSION)
+                self.assertEqual(doc["sections"], list(agent_query.SECTIONS))
+        code, out, _ = self.run_cli("item", "PAY-7", "--sections", "prs")
+        self.assertEqual(json.loads(out)["sections"], ["prs"])
+
+    def test_an_ambiguous_item_exits_2_and_lists_the_matches(self):
+        code, out, err = self.run_cli("item", "main")
+        self.assertEqual(code, 2)
+        self.assertIn("names 2 items", err)
+        doc = json.loads(out)
+        self.assertEqual(doc["ambiguous"], "main")
+        self.assertEqual(
+            sorted(f"{m['source']}:{m['key']}" for m in doc["matches"]),
+            ["machine:lin:worktree:/h/src/finplan",
+             "machine:mini:worktree:/h/src/finplan"],
+        )  # fmt: skip
+
+    def test_an_unknown_item_or_section_exits_2(self):
+        for argv in (("item", "nope"), ("item", "PAY-7", "--sections", "x")):
+            code, out, _ = self.run_cli(*argv)
+            self.assertEqual((code, out), (2, ""))
+
     def test_never_prints_the_server_token_or_writes(self):
         before = self.db_path.read_bytes()
         for argv in (("scopes",), ("items", "--fields", "full", "--state",
-                                   "todo,started,done")):  # fmt: skip
+                                   "todo,started,done"),
+                     ("item", "s-10"), ("item", "jira:PAY-7")):  # fmt: skip
             code, out, _ = self.run_cli(*argv)
             self.assertEqual(code, 0)
             self.assertNotIn(TOKEN, out)
