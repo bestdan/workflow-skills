@@ -23,9 +23,10 @@ only because it exposes the most gaps.
 
 **Updated 2026-10-31.** Slice 1 (`scopes` and `items`) shipped in #1266, and
 Linear issues as a Now source shipped in #1264. Both differ from what this
-document first proposed. The sections below now describe what shipped, and
-each change carries a dated note giving what the proposal said and why it
-moved. The note in §5 also records the owner's decisions for the plans slice.
+document first proposed. Where a section covers something that shipped (§1,
+§2 and §7), it now describes what shipped, and each change carries a dated
+note giving what the proposal said and why it moved. The rest is still the
+proposal; the note in §5 records the owner's decisions for the plans slice.
 #1281 tracks the re-cut rollout (see Rollout).
 
 ## What is true today
@@ -158,8 +159,10 @@ So the id prefixes are `repo:`, `ws:`, `jira:`, `epic:`, `label:` and
 `host:`. A repo that only a worktree or session names gets a bare id
 (`repo:dotfiles`), because a checkout's path names no owner. **`repo:<bare>`
 matches by bare name**: typed with no owner, it names every
-`repo:<owner>/<bare>` too. A session or worktree in a `dotfiles` checkout
-belongs to every owner's `dotfiles` scope, and counts in each one's `open`.
+`repo:<owner>/<bare>` too. A session or worktree in a `dotfiles` checkout is
+a member of `repo:bestdan/dotfiles` and of every other owner's `dotfiles`
+scope, and counts in each one's `open`. `repo:dotfiles` is listed as a scope
+of its own only when no `<owner>/dotfiles` repo is mirrored.
 
 > **2026-10-31, as shipped (#1266).** The proposal folded `epic:` into the
 > `jira` row and gave repos only an `owner/name` id. Shipped, `epic` is a
@@ -204,9 +207,10 @@ The output shape, for `scopes finplan` (ids, titles and counts illustrative):
 }
 ```
 
-`open` counts open items of every kind. `related` is listed only when a
-repo scope matched, as the next paragraph explains, and is empty otherwise.
-With no query, `matched` lists every scope and `related` is absent.
+`open` counts open items of every kind. `related` is printed for any query
+other than `all`, and is empty unless a repo scope matched, as the next
+paragraph explains. With no query, or `all`, `matched` lists every scope and
+`related` is absent.
 
 **Names miss most of the work, so a repo scope also reports `related`
 workstreams.** On the mini's mirror, `bestdan/finplan` PRs belong to 14
@@ -240,7 +244,7 @@ dashboard.py items --scope finplan
 ```
 
 `--kind` takes the dashboard's own word for each item: `issue` (a mirrored
-GitHub issue), `pr` (an open PR), `ticket` (a Jira issue), `design` (a design
+GitHub issue), `pr` (an open PR), `ticket` (a Jira issue; Linear tickets join it with #1283), `design` (a design
 doc at `status: proposed`), `session` (a live Claude Code session) and
 `worktree` (a worktree a machine snapshot reported).
 
@@ -319,7 +323,8 @@ is `bot_pr` whatever its size data says. As in Little mode, an unknown size neve
 counts as small, and the agent says so rather than guessing one.
 
 > **2026-10-31, as shipped (#1266).** The proposal described the buckets in
-> words and placed `est:1` and `est:2` between the PR buckets. Shipped, the
+> words, as one ladder with `est:1` between the docs and small PR buckets and
+> `est:2` after small PR. Shipped, the
 > buckets have the names above, `large_pr` is added so a big PR is sized
 > rather than null, and only the five listed have default minutes. Size reads
 > `est:` labels only: Jira story points are not mapped onto the ladder, and
@@ -340,8 +345,8 @@ says so.
 
 The fields come from the same code the views use: `fleet_now.candidates`
 builds the Now terms, `needs.py` the session match, `workstreams.py` the
-membership. `items` adds no ranking rule of its own; it lists newest activity
-first.
+membership. `items` adds no ranking rule of its own; it lists newest
+`updated` first.
 
 > **2026-10-31, as shipped (#1266).** The proposal said `full` adds only the
 > evidence, risks and action; shipped, it also adds the location and time
