@@ -119,8 +119,7 @@ visible here):
   #830, #871 here; about 20 comments in dotfiles). It is the single most
   repeated owner correction, and it is mechanical enough to detect.
 - **The owner as relay.** He carried messages between agents on different
-  machines ("ask the other agent", "the mac mini put comments in the issue").
-  That is task-tracking work, not review.
+  machines. That is task-tracking work, not review.
 - **Unattended output piled up.** In one private repo, an unattended routine
   opened PRs faster than they were reviewed.
 

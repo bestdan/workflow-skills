@@ -58,8 +58,9 @@ Taken from the field survey; every component below serves one.
    by identity. It comes from the lander being a deterministic script whose
    inputs the authoring agent cannot argue with.
 3. **Verdicts bind to the head SHA.** A push after review clears the verdict.
-4. **Fail closed.** Missing status, unparseable output, a skipped reviewer, CI
-   not green, a hold label: hold.
+4. **Fail closed.** Missing status, unparseable output, a reviewer that timed
+   out or failed to run, CI not green, a hold label: hold. A reviewer skipped
+   by configuration is not a failure.
 5. **The policy that grants autonomy is itself human-tier.** So are
    `.github/workflows/`, the ruleset, and the tier script.
 6. **Every agent landing is labelled and auditable** on GitHub, which owns that
@@ -121,7 +122,9 @@ The policy lives in each repo (e.g. `.github/merge-policy.yml`), lists `auto`
 path globs and always-human globs, a size cap, and allowed title types.
 Defaults are human; a path matching no `auto` glob is human; an always-human
 match wins over any `auto` match; the policy file and the script are always
-human.
+human. The lander runs the installed plugin's `merge-tier.py` and reads the
+policy file from the PR's base branch, never from the PR head or the working
+tree, so a PR cannot classify itself with its own edits to either.
 
 Built-in demotions, independent of policy:
 
@@ -136,7 +139,8 @@ Built-in demotions, independent of policy:
 
 The lander reads co-review's summary and demotes to human on: any unresolved
 finding of any severity; a verification item marked "inconclusive" or left for
-the user; any judgement call not resolved under component 5; "another round"
+the user; a consult-decided call below 85%, a preference call, or a
+stack-reaching call awaiting the owner (component 5); "another round"
 as co-review's next-round recommendation. A clean co-review never promotes —
 it is a necessary condition for `auto`, not a sufficient one. Reviewer
 agreement is weak evidence when reviewers share a model family (the field
@@ -150,9 +154,10 @@ executed check — the repo's gate green on the head SHA.
 `gh pr merge --squash --match-head-commit <sha> --body <audit>`, where the
 squash commit body carries the audit record — the tier reasons, the verdict
 SHA and the evidence pointers — so it lands atomically with the merge. The
-`landed-by-agent` label and a PR comment repeating the record follow as
-best effort; the weekly audit keys on the commit trailer, and lists any
-trailer-carrying merge that lacks the label. `/deliver-task` calls it as a new final step
+record ends in two trailers, `Landed-by: land-pr.sh` and
+`Co-review-head: <sha>`. The `landed-by-agent` label and a PR comment repeating
+the record follow as best effort; every audit keys on the `Landed-by` trailer,
+and lists any trailer-carrying merge that lacks the label. `/deliver-task` calls it as a new final step
 instead of stopping at hand-off when the tier is `auto`; `/auto-pilot`'s
 "nothing is merged unattended" invariant becomes "nothing outside the `auto`
 tier is merged unattended".
@@ -165,13 +170,17 @@ release. A scheduled sweeper is a reasonable Phase 2 addition for PRs whose
 session ended, not a starting point.
 
 Merge authority reaches the session only through the lander. Today the owner's
-`agents/settings.json` (dotfiles) holds `Bash(gh pr merge:*)` and
-`Bash(rtk gh pr merge:*)` under `ask`, beside `dli gh merge`, and a guard hook
-refuses every other route into a merge, so each merge is an owner approval.
-Moving that pair to `allow` would let the authoring agent call `gh pr merge`
-directly and skip `merge-tier`, because the required checks carry no tier
-signal. So when shadow mode ends, the one new allow rule is scoped to
-`scripts/land-pr.sh`, and raw `gh pr merge` stays `ask`.
+global agent settings hold every merge command under `ask`, and a guard hook
+refuses any other merge route it can read in the command text, so each direct
+merge is an owner approval. Moving the merge commands to `allow` would let the
+authoring agent merge directly and skip `merge-tier`, because the required
+checks carry no tier signal. So when shadow mode ends, the one new allow rule
+names the installed plugin's `land-pr.sh` by its absolute path, globbed over
+the version directory, and raw merges stay `ask`. A repo-relative or
+working-tree copy is never allowed: the authoring agent can edit those before
+running them, and finplan and dotfiles have no such script. The guard hook is a
+precondition of that allow rule, not a convenience: the `ask` rules cover only
+the named merge commands, so if the hook is removed, so is the rule.
 
 ### 5. Judgement calls and `/consult`
 
@@ -182,7 +191,7 @@ without asking"; only the rest reach the owner. A quarter to a third of the
 owner's session turns were bare approvals of calls an independent reviewer had
 already endorsed, the class that step absorbs.
 
-Proposal — the one change: a consult-decided call may leave the PR `auto` only
+Proposal — two changes. First, a consult-decided call may leave the PR `auto` only
 when the consultant agreed at **≥85%** — its "deciding fact checked" level,
 not the 70% that decides a call today. Below that, the decided call still
 applies, but the PR demotes to human. The call, the confidence and the crux
@@ -191,10 +200,12 @@ always demote. `/consult` is Claude-only, so its agreement correlates with the
 author's; the higher bar is the price of that. Where a cross-family reviewer is
 available, prefer asking it.
 
-**A call whose answer reaches down a stack.** In a stack, a call on one PR can
+**Second: a call whose answer reaches down a stack.** In a stack, a call on one PR can
 fix something every later PR builds on: an interface, a name, a schema, a
 convention. Such a call is never settled by `/consult`, whatever its
-confidence, because being wrong costs the whole stack, not one PR. The agent
+confidence, because being wrong costs the whole stack, not one PR. Co-review
+step 9 therefore excludes it from the consult batch, as it does preference
+calls today. The agent
 makes a provisional call, records it as such in the PR body and in
 `QUESTIONS.md`, and keeps building the PRs above it on that call. Building is
 reversible; landing is not. Nothing at or above that PR lands until the owner
@@ -259,8 +270,8 @@ answering per-PR pings. `/auto-pilot`'s `REPORT.md` is the existing seed.
   revert with the right title type is cheap.
 - finplan: deploy freshness, not just `/health`, which can stay green while
   deploys fail (that gate has since been added).
-- Weekly: list `landed-by-agent` PRs that received a follow-up fix within 7
-  days. Any one whose defect a gate could not catch shrinks that slice.
+- Weekly: list merges carrying the `Landed-by` trailer that received a
+  follow-up fix within 7 days. Any one whose defect a gate could not catch shrinks that slice.
 
 ## Initial per-repo policy (Phase 1)
 
@@ -323,8 +334,16 @@ Each gate converts a class of B PRs; build them in this order, by B volume:
   writer posted a status with that name, and every agent holds the same
   `bestdan` token, so the authoring agent could post it without a completed
   co-review. Pinning the check to an App's `integration_id` would not help
-  while co-review runs in the session that holds the App's credential too. The
-  weekly audit in component 1 is the backstop.
+  while co-review runs in the session that holds the App's credential too.
+  This is accepted residual risk: the weekly audit in component 1 catches a
+  missing status, not a forged one, and the PR stamp is posted with the same
+  token, so it adds no independence.
+- **A merge the guard cannot read.** The guard hook in component 4 reads only
+  the Bash command text, so a merge inside a script or interpreter the agent
+  wrote is invisible to it. Author ≠ lander holds against direct calls, not
+  against a determined agent. Such a merge still needs the required checks,
+  and component 1's audit catches one without a `co-review` `success`; one
+  that skipped only `merge-tier` leaves no trailer and nothing flags it.
 - **Consult correlation.** If resolved technical calls are later overturned,
   raise the bar or drop component 5.
 - **Install base.** If many users other than the owner pull workflow-skills
@@ -336,7 +355,7 @@ Each gate converts a class of B PRs; build them in this order, by B volume:
 1. **Release-cutting titles in workflow-skills' first slice.** Option A: only
    non-releasing types, about 12 PRs in 60 days (~5%), too few for useful
    shadow data. Option B: `feat`/`fix` too when the path tier allows, about 52
-   (~21%). Recommended: A, because a bad release reaches every user before
+   (~22%). Recommended: A, because a bad release reaches every user before
    the revert. A blind consult picked B at 70%, with the crux "how many
    consumers besides the owner pull releases."
 2. **The workflow-skills release bypass.** Moving it off the admin role touches
@@ -353,6 +372,8 @@ Each checked with a blind `/consult`, with its confidence and crux:
 - Lander as plugin scripts run by the session (75%): "if the D1 status could
   not be read from the session … B or C wins".
 - No `dev_docs` in the first slice (75%).
-- `/consult` resolves only technical calls, at ≥85% (60% — weak agreement):
-  "whether 'calls for you' items are genuinely reversible and confined to the
-  technical class".
+- A consult-decided technical call keeps the PR `auto` only at ≥85%; below
+  that it still applies, but the PR demotes to human (60% — weak agreement,
+  from a consult on an earlier framing in which consult resolved calls only at
+  85%): "whether 'calls for you' items are genuinely reversible and confined to
+  the technical class".
