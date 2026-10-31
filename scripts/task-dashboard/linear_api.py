@@ -1,5 +1,6 @@
-"""Linear reads for the Workstreams tab: open projects, and which project each
-Linear key the mirror mentions belongs to.
+"""Linear reads: for the Workstreams tab, open projects and which project each
+Linear key the mirror mentions belongs to; for Now (linear_issues.py), the
+key owner's open assigned issues.
 
 Off by default (`[linear] enabled = false`). Every call goes through one
 runner seam, `Runner(body, key, timeout) -> payload`, where `body` is the
@@ -180,11 +181,15 @@ def _data(payload: Any) -> dict:
 def _pages(
     runner: Runner, key: str, timeout: float, query: str, variables: dict, field: str
 ) -> list[dict]:
+    """Every node of the connection at `field`, a dotted path under `data`
+    (`issues`, `viewer.assignedIssues`), following its cursor."""
     nodes: list[dict] = []
     after = None
     while True:
         body = {"query": query, "variables": {**variables, "after": after}}
-        conn: Any = _data(runner(body, key, timeout)).get(field)
+        conn: Any = _data(runner(body, key, timeout))
+        for part in field.split("."):
+            conn = conn.get(part) if isinstance(conn, dict) else None
         try:
             nodes += conn["nodes"]
             page = conn["pageInfo"]
@@ -298,4 +303,121 @@ def project_of_keys(
         project = (node or {}).get("project") or {}
         if node.get("identifier") and project.get("id"):
             out[node["identifier"]] = project["id"]
+    return out
+
+
+# --- my issues ---------------------------------------------------------------
+
+# The issue states Now ranks: Todo-like (`unstarted`) and In Progress-like
+# (`started`). Triage, backlog, done and canceled are not the owner's to do now.
+OPEN_STATE_TYPES = ("unstarted", "started")
+
+# Linear refuses a query whose page size times its nested connections' sizes
+# is "too complex": with the nested ones at their default of 50, a page of 50
+# issues was refused (2026-10-31). An issue rarely carries more than 10
+# labels or relations; one that does loses the rest.
+_ISSUE_NODES = """
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        identifier title url priority priorityLabel dueDate
+        createdAt updatedAt startedAt
+        state { name type }
+        team { key }
+        labels(first: 10) { nodes { name } }
+        cycle { name endsAt isActive }
+        project { id name }
+        relations(first: 10) {
+          nodes { type relatedIssue { identifier state { type } } }
+        }
+        inverseRelations(first: 10) {
+          nodes { type issue { identifier state { type } } }
+        }
+      }"""
+
+# With no assignee named: the key's own user's issues.
+ASSIGNED_QUERY = f"""
+query($after: String, $types: [String!]) {{
+  viewer {{
+    assignedIssues(first: 50, after: $after,
+                   filter: {{state: {{type: {{in: $types}}}}}}) {{{_ISSUE_NODES}
+    }}
+  }}
+}}
+"""
+
+# With an assignee named by email (`linear.me`): for a key that belongs to an
+# agent account, whose own user is assigned nothing.
+ASSIGNEE_QUERY = f"""
+query($after: String, $types: [String!], $email: String!) {{
+  issues(first: 50, after: $after,
+         filter: {{state: {{type: {{in: $types}}}},
+                  assignee: {{email: {{eqIgnoreCase: $email}}}}}}) {{{_ISSUE_NODES}
+  }}
+}}
+"""
+
+
+def _open_blocks(relations: Any, side: str) -> list[str]:
+    """The keys of the open issues on `side` of each `blocks` relation."""
+    out = []
+    for rel in (relations or {}).get("nodes") or []:
+        other = (rel or {}).get(side) or {}
+        state = str((other.get("state") or {}).get("type") or "").lower()
+        if rel.get("type") == "blocks" and other.get("identifier"):
+            if state not in CLOSED_TYPES:
+                out.append(other["identifier"])
+    return sorted(set(out))
+
+
+def assigned_issues(
+    key: str,
+    runner: Runner = post,
+    timeout: float = DEFAULT_TIMEOUT,
+    assignee: str = "",
+) -> list[dict]:
+    """The issues in OPEN_STATE_TYPES assigned to `assignee` (an email), or
+    with none named to the key's own user, each: {key, title,
+    url, state, state_type, priority (0 none, 1 urgent .. 4 low),
+    priority_label, due, created, updated, started, team, labels, cycle,
+    cycle_end, cycle_active, project, blocked_by, blocks}. `blocked_by` and
+    `blocks` are the open issues on the other end of a `blocks` relation."""
+    variables: dict[str, Any] = {"types": list(OPEN_STATE_TYPES)}
+    if assignee:
+        query, field = ASSIGNEE_QUERY, "issues"
+        variables["email"] = assignee
+    else:
+        query, field = ASSIGNED_QUERY, "viewer.assignedIssues"
+    out = []
+    for node in _pages(runner, key, timeout, query, variables, field):
+        if not (node or {}).get("identifier"):
+            continue
+        state = node.get("state") or {}
+        cycle = node.get("cycle") or {}
+        out.append(
+            {
+                "key": node["identifier"],
+                "title": node.get("title") or "",
+                "url": node.get("url"),
+                "state": state.get("name"),
+                "state_type": str(state.get("type") or "").lower(),
+                "priority": int(node.get("priority") or 0),
+                "priority_label": node.get("priorityLabel"),
+                "due": node.get("dueDate"),
+                "created": node.get("createdAt"),
+                "updated": node.get("updatedAt"),
+                "started": node.get("startedAt"),
+                "team": (node.get("team") or {}).get("key"),
+                "labels": [
+                    str(n["name"])
+                    for n in (node.get("labels") or {}).get("nodes") or []
+                    if n and n.get("name")
+                ],
+                "cycle": cycle.get("name"),
+                "cycle_end": cycle.get("endsAt"),
+                "cycle_active": bool(cycle.get("isActive")),
+                "project": (node.get("project") or {}).get("name"),
+                "blocked_by": _open_blocks(node.get("inverseRelations"), "issue"),
+                "blocks": _open_blocks(node.get("relations"), "relatedIssue"),
+            }
+        )
     return out

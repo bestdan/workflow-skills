@@ -148,10 +148,12 @@ def pull_requests(conn: sqlite3.Connection, cfg: dict[str, Any]) -> list[dict]:
         for r in gauges.review_queue_rows(conn, sync.fleet_enabled(cfg)) or []
     }
     out: dict[str, dict] = {}
-    for url, repo, number, title, draft, decision, ci, role, key, raw in conn.execute(
-        "SELECT url, repo, number, title, is_draft, review_decision, ci_state,"
-        " role, issue_key, raw_json FROM prs ORDER BY repo, number"
-    ):
+    for (
+        url, repo, number, title, head, draft, decision, ci, role, key, raw
+    ) in conn.execute(
+        "SELECT url, repo, number, title, head_ref, is_draft, review_decision,"
+        " ci_state, role, issue_key, raw_json FROM prs ORDER BY repo, number"
+    ):  # fmt: skip
         try:
             node = json.loads(raw or "{}") or {}
         except ValueError:
@@ -162,6 +164,7 @@ def pull_requests(conn: sqlite3.Connection, cfg: dict[str, Any]) -> list[dict]:
             "repo": repo,
             "number": number,
             "title": title,
+            "head_ref": head,
             "is_draft": bool(draft),
             "review_decision": decision,
             "ci_state": ci,
@@ -179,6 +182,7 @@ def pull_requests(conn: sqlite3.Connection, cfg: dict[str, Any]) -> list[dict]:
                 "repo": row.get("repo"),
                 "number": row.get("number"),
                 "title": row.get("title"),
+                "head_ref": row.get("head_ref"),
                 "is_draft": False,
                 "review_decision": row.get("review_decision"),
                 "ci_state": row.get("ci_state"),

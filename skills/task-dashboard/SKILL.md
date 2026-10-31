@@ -83,12 +83,16 @@ flag again, and a reinstall keeps them too.
      `${CLAUDE_PLUGIN_ROOT}/scripts/task-dashboard/dev/fake-acli`, instead.
      That path is inside the versioned plugin directory and moves on a plugin
      update, so it is not for daily use.
-   - A fleet instance's Workstreams tab shows milestones and proposed designs
-     on its own. Linear projects join it only with `enabled = true` under
-     `[linear]` and a key. The key never goes in config.toml: it goes in
-     `~/.config/workflow-skills/linear_api_key`, mode 600, or in
+   - `enabled = true` under `[linear]`, with a key, puts the owner's open
+     assigned Linear issues on Now on every instance, and on a fleet instance
+     adds Linear projects to the Workstreams tab, which otherwise shows
+     milestones and proposed designs. If the key belongs to an agent account,
+     set `me = "<the owner's Linear email>"` under `[linear]` too: without it
+     Now reads the key's own user's issues, which is none. The key never goes in config.toml: it
+     goes in `~/.config/workflow-skills/linear_api_key`, mode 600, or in
      `$LINEAR_API_KEY` (`linear_api.py` has the full ladder). Without one the
-     sync records `linear: no key` and the tab shows the other sources.
+     Linear issues step fails with `no Linear key` and Workstreams records
+     `linear: no key`; everything else still syncs.
    - Write the file with `Write`, then check it loads: `DASH url` prints the URL
      only when the config is valid, and names the bad key otherwise.
 3. **Install.** `DASH install --dry-run` prints every file and command first,

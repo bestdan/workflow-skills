@@ -71,10 +71,13 @@ DEFAULTS: dict[str, Any] = {
     # for the fleet view that runs `claude -p` once per sync. Off by default:
     # it relies on a request Claude Code marks internal.
     "claude_remote": {"enabled": False, "claude_path": "claude", "timeout_seconds": 45},
-    # Linear projects as workstreams (linear_api.py), read with the GraphQL
-    # API. Off by default. The key is never set here: linear_api.resolve_key
-    # says where it is read from.
-    "linear": {"enabled": False, "timeout_seconds": 30},
+    # Linear, read with the GraphQL API (linear_api.py): projects as
+    # workstreams on a fleet instance, and my open assigned issues on Now on
+    # every instance (linear_issues.py). Off by default. The key is never set
+    # here: linear_api.resolve_key says where it is read from. `me` is the
+    # email whose assigned issues Now ranks; empty means the key's own user,
+    # which is wrong when the key belongs to an agent account.
+    "linear": {"enabled": False, "timeout_seconds": 30, "me": ""},
     # The Workstreams tab (workstreams.py): an in-progress or planned
     # workstream with no member activity for this many days is Stalled.
     "workstreams": {"stalled_days": 14},
@@ -221,18 +224,21 @@ def load(path: "str | os.PathLike[str] | None" = None) -> dict[str, Any]:
     lin = cfg["linear"]
     if not isinstance(lin, dict) or not isinstance(lin.get("enabled"), bool):
         raise ConfigError("linear.enabled must be true or false")
-    if set(lin) - {"enabled", "timeout_seconds"}:
+    allowed = {"enabled", "timeout_seconds", "me"}
+    if set(lin) - allowed:
         # Refused rather than ignored: a key pasted here would sit in a file
         # the daemon reads and backups copy. linear_api says where it goes.
-        extra = ", ".join(sorted(set(lin) - {"enabled", "timeout_seconds"}))
+        extra = ", ".join(sorted(set(lin) - allowed))
         raise ConfigError(
-            f"linear holds only enabled and timeout_seconds, not {extra};"
+            f"linear holds only enabled, timeout_seconds and me, not {extra};"
             " the API key goes in ~/.config/workflow-skills/linear_api_key"
             " (mode 600) or $LINEAR_API_KEY, never in config"
         )
     t = lin["timeout_seconds"]
     if not isinstance(t, (int, float)) or isinstance(t, bool) or t <= 0:
         raise ConfigError("linear.timeout_seconds must be a positive number")
+    if not isinstance(lin.get("me"), str):
+        raise ConfigError("linear.me must be a string: an email, or empty")
     ws = cfg["workstreams"]
     days = ws.get("stalled_days") if isinstance(ws, dict) else None
     if not isinstance(days, int) or isinstance(days, bool) or days < 1:

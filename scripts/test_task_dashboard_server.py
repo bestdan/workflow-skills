@@ -653,6 +653,8 @@ class FreshnessTest(HeaderCase):
         # The scheduled sync runs the workstreams step right after the fleet's.
         add_run(conn, "ok", now - timedelta(minutes=8), kind="workstreams",
                 counts={"workstreams": 2, "linear": linear})  # fmt: skip
+        # Listed only with Linear on (freshness.steps), so harmless when off.
+        add_run(conn, "ok", now - timedelta(minutes=4), kind="linear_issues")
         add_run(conn, "ok", now - timedelta(minutes=2), kind="sessions")
         add_machine(conn, "lindev", now - timedelta(minutes=2), 1)
         add_machine(conn, "mini", now - timedelta(minutes=mini_minutes))

@@ -32,6 +32,10 @@ After it, `run_workstreams()` (kind `workstreams`, workstreams.py) rebuilds
 the Workstreams tables from GitHub milestones, the fleet rows and, when
 `linear.enabled` is on, Linear projects.
 
+With `linear.enabled` on, on any instance, `run_linear_issues()` (kind
+`linear_issues`, linear_issues.py) mirrors my open assigned Linear issues for
+Now under `source = 'linear'`.
+
 The fleet view's session rows are two more steps of the same shape, each with
 its own `sync_runs` row: `run_sessions()` (kind `sessions`) folds the ingested
 session-state hook events into rows whenever the instance ingests snapshots,
@@ -53,6 +57,7 @@ import github_fleet
 import github_gh
 import jira_acli
 import linear_api
+import linear_issues
 import sessions
 
 MODES = ("incremental", "reconcile", "full")
@@ -793,6 +798,24 @@ def run_sessions(
     return _run_step(db, sessions.RUN_KIND, now, clock or _wall, body)
 
 
+def run_linear_issues(
+    config: dict[str, Any],
+    db: sqlite3.Connection,
+    now: datetime,
+    *,
+    runner: linear_api.Runner = linear_api.post,
+    resolve_key: "Callable[[], str]" = linear_api.resolve_key,
+    clock: "Callable[[], datetime] | None" = None,
+) -> dict[str, Any]:
+    """Mirror my open assigned Linear issues (linear_issues.py) for Now. The
+    caller checks `linear.enabled` first."""
+
+    def body() -> "tuple[dict[str, Any], str | None]":
+        return linear_issues.step_body(config, db, now, runner, resolve_key)
+
+    return _run_step(db, linear_issues.RUN_KIND, now, clock or _wall, body)
+
+
 def run_claude_remote(
     config: dict[str, Any],
     db: sqlite3.Connection,
@@ -879,6 +902,14 @@ def run_all(
             run_workstreams(
                 config, db, clock(), runner=fleet_runner,
                 linear_runner=linear_runner, resolve_key=resolve_key, clock=clock,
+            )
+        )  # fmt: skip
+    if linear_issues.enabled(config):
+        step(linear_issues.RUN_KIND)
+        rows.append(
+            run_linear_issues(
+                config, db, clock(), runner=linear_runner,
+                resolve_key=resolve_key, clock=clock,
             )
         )  # fmt: skip
     if sessions.enabled(config):

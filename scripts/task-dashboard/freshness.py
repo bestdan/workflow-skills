@@ -40,6 +40,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import claude_remote
+import linear_issues
 import collector_install
 import score
 import sessions
@@ -101,6 +102,8 @@ def steps(cfg: dict[str, Any]) -> list[tuple[str, tuple[str, ...], str]]:
     if sync.fleet_enabled(cfg):
         out.append((sync.FLEET_KIND, (sync.FLEET_KIND,), "GitHub fleet"))
         out.append((sync.WORKSTREAMS_KIND, (sync.WORKSTREAMS_KIND,), "Workstreams"))
+    if linear_issues.enabled(cfg):
+        out.append((linear_issues.RUN_KIND, (linear_issues.RUN_KIND,), "Linear issues"))
     if sessions.enabled(cfg):
         out.append((sessions.RUN_KIND, (sessions.RUN_KIND,), "Sessions"))
     if cfg["claude_remote"]["enabled"]:
