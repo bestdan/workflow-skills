@@ -95,9 +95,9 @@ carries:
 | `links`        | keys of items it folds into (see Decisions)                                                    |
 | `why`          | its evidence line                                                                              |
 
-The sync-side seam
-([`../task-dashboard.md`](../task-dashboard.md#sync-steps), "Sync steps")
-stays. This is the ranking-side half that seam never had.
+The sync-side seam stays: the source adapters `sync.py` calls, such as
+`sync.JiraSource` (see
+[`../task-dashboard.md`](../task-dashboard.md#sync-steps), "Sync steps"). This is the ranking-side half that seam never had.
 
 Each source supplies what its data supports:
 

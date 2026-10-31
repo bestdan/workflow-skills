@@ -122,15 +122,15 @@ Shared by every page:
 
 ### Agent-facing commands
 
-These all read or write the DB directly, with no server needed:
+None of these needs the server running:
 
 - **`view <name> [--json] [--all] [--mode M]`** prints one tab's lanes as the
   page shows them. `--all` adds the hidden items, each with the reason it was
   hidden.
 - **`overlay <action> --source S --key K`** makes the same write a card button
   makes, and goes through the same validation (`overlay.apply`).
-- **`refresh <owner/repo#N>`** re-reads one PR or issue in a single GraphQL
-  call and rewrites its rows the way a sync would. It writes no `sync_runs`
+- **`refresh <owner/repo#N>`** re-reads one PR or issue from GitHub in a
+  single GraphQL call (so it needs the network) and rewrites its rows the way a sync would. It writes no `sync_runs`
   row, so the header's age does not move.
 - **`clean <view>`** is a procedure the skill runs with the owner, in
   [`references/clean.md`](../skills/task-dashboard/references/clean.md).
@@ -349,6 +349,11 @@ is read from a phone over the tailnet through Tailscale Serve, with the
 forwarded `Host` in `server.extra_allowed_hosts`. It shares code with a Jira
 instance, never data.
 
+**Non-goals.** The view never answers a prompt or an approval, and never
+relays messages between sessions. It also never enforces a cap: the gauges
+show the review-queue cap and nothing blocks on it. Like every instance, it
+writes nothing to GitHub, Jira or a session.
+
 ### The push model
 
 ```
@@ -487,8 +492,20 @@ queue, and designs at `proposed`.
 
 Targets come from `[health.targets]`, either `"observed"` or a comparison such
 as `"<= 5"`. The review-queue cap of 5 is shown by the header gauge and is never
-enforced. The review queue's four rules (CI green, co-reviewed at head, the
-milestone approved, and so on) are in `github_fleet.py`'s docstring.
+enforced. Health takes the queue count from `gauges.review_queue`. The rules
+that decide which PRs are in the queue are defined in `github_fleet.py`'s
+docstring, and a PR is in the queue only when all four hold:
+
+1. It is open, not a draft and not approved, and it waits on the owner: the
+   owner authored it, or it requests the owner's review.
+2. Its head commit's CI rollup is `success`. Pending, failed and no checks all
+   miss.
+3. It is co-reviewed at its current head. That means a comment by the viewer
+   carries a `co-review-stamp` naming the PR's `headRefOid`, and the newest
+   such stamp wins.
+4. Its milestone is approved, when this applies: if an issue the PR closes is
+   in a milestone, one of those milestones must have an `approved: yes` line.
+   A PR that closes no issue in a milestone skips this rule.
 
 ### Fleet views
 
