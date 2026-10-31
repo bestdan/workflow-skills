@@ -51,8 +51,9 @@ Release-bot commits (161 in workflow-skills, pushed to `main` directly),
 dependabot, probe, closed and open PRs are excluded.
 
 **Where the transcript exists, the picture is harsher.** In workflow-skills the
-33 merged PRs with a local transcript are 48% A+B, not 83%, and 36% verified C
-— though that subsample is dominated by the Jev research workstream, whose
+33 merged PRs with a local transcript are 48% A+B, not 83%, and 36% verified C;
+the remaining ~16% is not broken out. That subsample is dominated by the Jev
+research workstream ([typed model calls](../typed-model-calls.md)), whose
 research and decision PRs drew 9 of 15 corrections while its code and skill PRs
 drew 3 of 18. A reasonable central estimate for workflow-skills is **65–75%**
 mergeable without him.
@@ -71,24 +72,23 @@ The C class is different in each repo, which is the main input to the design.
   (21%)**, because here `docs:` marks decision content, not low risk.
 - **finplan.** **Model semantics**, not size or path: real-vs-nominal price
   levels, default assumptions, how success and the contribution solver are
-  defined, percentile methodology. About 15 of 27 C cases are of that kind.
+  defined, percentile methodology. Most of finplan's C cases are of that kind.
   Statute and tax-table transcription is mostly **B**, because it has an
   external ground truth that a fact-reviewer or golden tests can check —
   and Copilot or co-review already caught statute misreads before merge on
-  several PRs. The post-merge numeric defects in the window were of two kinds:
-  transcription errors (a fact-reviewer catches them) and a nominal/real frame
-  mismatch (typed money catches it; already proposed in finplan).
-- **agent-guidance.** Two thirds of C are **rules every agent loads** (#22,
-  #23, #32, #33, #64, #76, #77, #83, #87, #88). Three were owner redirections of
-  a taxonomy or approach (#31, #47, #60). One closed PR (#4) carried private
-  names into the public repo — the clearest judgement that no gate in hand
-  would have made.
+  several PRs. The post-merge numeric defects in the window were transcription
+  errors and a unit-of-account mismatch; each has a gate below.
+- **agent-guidance.** Two thirds of C are **rules every agent loads**
+  (bestdan/agent-guidance#22, #23, #32, #33, #64, #76, #77, #83, #87, #88).
+  Three were owner redirections of a taxonomy or approach
+  (bestdan/agent-guidance#31, #47, #60). Outside these counts, one closed PR
+  (bestdan/agent-guidance#4) carried private names into the public repo — the
+  clearest judgement that no gate in hand would have made.
 - **dotfiles.** **Permissions and always-loaded rules**: allow-rule and sandbox
   widening, global guidance changes, irreversible or network-exposing
-  automation, and guard loosening — two guard changes opened bypasses found
-  later. The owner left **no review comment on any of the 41 PRs touching
-  `settings.json`**; those stay C by rule, not because he demonstrably caught
-  something.
+  automation, and guard loosening. The owner left **no review comment on any of the 41 PRs touching
+  `settings.json`**. Those that widen permissions stay C by rule, not because
+  he demonstrably caught something; narrowing ones were classed B.
 
 ## How the owner's attention was actually spent
 
@@ -106,8 +106,7 @@ visible here):
   finplan it fell from ~110 h in August to under 1 h in the last week. That
   bounds how deep a silent read can have been.
 - **Merging outran review** in all four repos: workflow-skills #388, #492, #550,
-  #556; agent-guidance #41; five dotfiles PRs; two finplan PRs, one with the
-  owner's own "oops, I merged it".
+  #556; bestdan/agent-guidance#41; five dotfiles PRs; two finplan PRs.
 - **Real interventions** were direction and precision: the agent sidetracked
   onto unrelated tracker work (#787); a design that was too onerous for
   attended use (#785); terminology confused between two 1Password features
@@ -122,8 +121,8 @@ visible here):
 - **The owner as relay.** He carried messages between agents on different
   machines ("ask the other agent", "the mac mini put comments in the issue").
   That is task-tracking work, not review.
-- **Unattended output piled up.** finplan's weekly cloud review routine opened
-  PRs that sat unmerged until he consolidated them by hand.
+- **Unattended output piled up.** In one private repo, an unattended routine
+  opened PRs faster than they were reviewed.
 
 ## Gates that would move B to A
 
@@ -138,18 +137,19 @@ Named by the per-repo reviews, with the PRs that motivate them:
 | "Check sibling paths for the same bug" in the co-review rubric                                 | ws       | #805→#898, #437→#438, #442→#443                                        |
 | Historical-narrative prose detector                                                            | all      | ~25 owner comments                                                     |
 | Fact-reviewer against cited statute/regulation tables; golden worked examples                  | finplan  | transcription defects fixed after merge                                |
-| Typed nominal/real money                                                                       | finplan  | the frame-mismatch defect and its follow-ups                           |
+| Typed nominal/real money                                                                       | finplan  | post-merge numeric defects                                             |
 | Invariant/property tests (categories sum to total, real values invariant under inflation)      | finplan  | —                                                                      |
-| Deploy smoke plus prod freshness, not just `/health`                                           | finplan  | a tooling pin silently broke deploys for days                          |
+| Deploy smoke plus prod freshness, not just `/health`                                           | finplan  | a deploy failure `/health` did not show                                |
 | Permission-diff classifier: narrowing, repins and `$HOME`-equivalents pass; any widening holds | dotfiles | 13 narrowing PRs were B; 12 widening PRs were C                        |
-| Shell run under macOS `/bin/bash` 3.2; guard suites with bypass cases                          | dotfiles | follow-ups from first-run-on-3.2 and two guard bypasses                |
+| Shell run under macOS `/bin/bash` 3.2; guard suites with bypass cases                          | dotfiles | post-merge follow-ups in both areas                                    |
 
 ## Method
 
 Three subagents, one per repo group, each:
 
 - pulled every PR created in the window with reviews, comments, review threads,
-  commits and files (`gh pr view` / `gh api`), 264 + 207 + 47 + 294 PRs;
+  commits and files (`gh pr view` / `gh api`): 264 workflow-skills, 207 finplan,
+  47 agent-guidance and 294 dotfiles PRs;
 - separated the owner's comments from agents' — agents post as `bestdan`, so
   the login means nothing; comments were read and classed by voice and agent
   markers (owner voice found on 10 workflow-skills PRs, 3 finplan, 5

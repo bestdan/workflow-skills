@@ -22,7 +22,7 @@ How close this can get, estimated from the 667-PR history:
 | ------------------------------------------------------ | --------------------: | ------------------------------------------------------------------------------- |
 | Today                                                  |                    0% | —                                                                               |
 | Phase 0 — review-complete gate + tier script in shadow |                    0% | no autonomy change; closes the 12 merged-mid-review gap                         |
-| Phase 1 — auto tier on, initial per-repo policy        |           **~20–30%** | 3–4 weeks of clean shadow data                                                  |
+| Phase 1 — auto tier on, initial per-repo policy        |           **~20–30%** | 30 clean would-land PRs per repo in shadow                                      |
 | Phase 2 — the B→A gates built                          |           **~60–70%** | the gate backlog below, one repo at a time                                      |
 | Ceiling                                                |                  ~80% | —                                                                               |
 | Stays with the owner for good                          |               ~15–20% | rules every agent loads, permission widening, model semantics, decision records |
@@ -69,23 +69,27 @@ Taken from the field survey; every component below serves one.
 
 ### 1. Review-complete status check (Phase 0)
 
-`/co-review` posts a commit status, context `co-review`, on the PR's head SHA
-**after** its own fixes are pushed (step 12), so it lands on the SHA that will
-merge. `success` only when every planned reviewer class ran or was skipped by
-configuration; `failure` when a reviewer timed out or the run aborted;
-`pending` while running. Any new push leaves the new SHA without the status,
-which is the head binding for free.
+`/co-review` posts a commit status, context `co-review`, on the head SHA the
+round **reviewed** — step 3's `headRefOid`, the same head its PR stamp names
+(`skills/co-review/references/stamping.md`). It never posts on its own fix
+commit, which no reviewer has seen. `success` only when every planned reviewer
+class ran or was skipped by configuration; `failure` when a reviewer timed out
+or the run aborted; `pending` while running. Any new push, co-review's own
+included, leaves the new SHA without the status, which is the head binding for
+free. So `success` reaches the SHA that merges only through a round that
+applied no fixes: a round that fixes something costs one more round, which
+reviews the fix commit.
 
 Each repo's existing `protect-main` ruleset adds `co-review` as a required
-check. finplan and agent-guidance already require Actions checks with no bypass
-actor, so this is one more context on a mechanism already in use. In
+check. finplan, agent-guidance and dotfiles already require Actions checks with
+no bypass actor, so this is one more context on a mechanism already in use. In
 workflow-skills the ruleset's admin bypass (`bypass_mode: always`) exists for
 the release workflow's `RELEASE_TOKEN`; move that bypass to a dedicated actor
 (a GitHub App or deploy key) so the check binds the owner there too.
 Overriding it stays possible, but becomes a deliberate click.
 
 This blocks the owner's own early merges as well as agents'. That is the point:
-those were human UI merges ("oops, I merged it").
+those were human UI merges.
 
 It also makes the local co-review the review cycle that gates, and GitHub's
 Copilot review an advisory input that nothing waits on. Today that review
@@ -110,21 +114,22 @@ reviewer.
 
 A typed script in this plugin (`scripts/merge-tier.py` with its test pair, per
 the repo's logic-in-typed-files rule). Input: the PR's changed paths and line
-counts, title, labels, and the repo's policy file. Output: `auto` | `human`,
+counts, title, body, labels, and the repo's policy file. Output: `auto` | `human`,
 plus the reasons — every rule that fired.
 
 The policy lives in each repo (e.g. `.github/merge-policy.yml`), lists `auto`
 path globs and always-human globs, a size cap, and allowed title types.
-Defaults are human; a path matching no `auto` glob is human; the policy file
-and the script are always human.
+Defaults are human; a path matching no `auto` glob is human; an always-human
+match wins over any `auto` match; the policy file and the script are always
+human.
 
 Built-in demotions, independent of policy:
 
 - title `!` or a `BREAKING CHANGE` footer;
 - in workflow-skills, a `skills/` or `commands/` change with a non-releasing
   type (the #593 class) — already human by path, so this is a lint;
-- diff over the size cap (start at 300 changed lines; Intercom and Anthropic's
-  data both show review quality falling with size);
+- diff over the size cap (start at 300 changed lines; Intercom's reviewer
+  refuses large PRs, and shadow data calibrates the number);
 - any `merge:hold` label, or the repo variable `AGENT_LAND=off` (kill switch).
 
 ### 3. Evidence demotions from review
@@ -142,9 +147,12 @@ executed check — the repo's gate green on the head SHA.
 
 `scripts/land-pr.sh <pr>`: runs `merge-tier`, checks the `co-review` status is
 `success` on `headRefOid`, checks required CI is green, and merges with
-`gh pr merge --squash --match-head-commit <sha>`. It adds the label
-`landed-by-agent` and a PR comment carrying the tier reasons, the verdict SHA
-and the evidence pointers. `/deliver-task` calls it as a new final step
+`gh pr merge --squash --match-head-commit <sha> --body <audit>`, where the
+squash commit body carries the audit record — the tier reasons, the verdict
+SHA and the evidence pointers — so it lands atomically with the merge. The
+`landed-by-agent` label and a PR comment repeating the record follow as
+best effort; the weekly audit keys on the commit trailer, and lists any
+trailer-carrying merge that lacks the label. `/deliver-task` calls it as a new final step
 instead of stopping at hand-off when the tier is `auto`; `/auto-pilot`'s
 "nothing is merged unattended" invariant becomes "nothing outside the `auto`
 tier is merged unattended".
@@ -156,20 +164,28 @@ and, in workflow-skills, a bypass-capable token for the merge to trigger the
 release. A scheduled sweeper is a reasonable Phase 2 addition for PRs whose
 session ended, not a starting point.
 
-The permission pair `Bash(gh pr merge:*)` / `Bash(rtk gh pr merge:*)` is added
-only when shadow mode ends. Today neither exists in `agents/settings.json`.
+Merge authority reaches the session only through the lander. Today the owner's
+`agents/settings.json` (dotfiles) holds `Bash(gh pr merge:*)` and
+`Bash(rtk gh pr merge:*)` under `ask`, beside `dli gh merge`, and a guard hook
+refuses every other route into a merge, so each merge is an owner approval.
+Moving that pair to `allow` would let the authoring agent call `gh pr merge`
+directly and skip `merge-tier`, because the required checks carry no tier
+signal. So when shadow mode ends, the one new allow rule is scoped to
+`scripts/land-pr.sh`, and raw `gh pr merge` stays `ask`.
 
 ### 5. Judgement calls and `/consult`
 
-Co-review already splits medium items into **technical calls** ("a reasonable
-engineer could resolve from the code and conventions alone") and
-**preference calls** (priority, scope, worth doing). A quarter to a third of
-the owner's session turns are bare approvals of technical calls an independent
-reviewer had already endorsed.
+Co-review step 9 already runs `agent-guidance:consult` once over every medium
+item except user-preference calls (priority, scope, worth doing), and applies
+what consult decides — agreed, at least 70%, cheap to undo — as "Decided
+without asking"; only the rest reach the owner. A quarter to a third of the
+owner's session turns were bare approvals of calls an independent reviewer had
+already endorsed, the class that step absorbs.
 
-Proposal: for a technical call only, a `/consult` that agrees with the agent's
-pick at **≥85%** — the consultant's "deciding fact checked" level, not 70% —
-resolves it, and the PR may stay `auto`. The call, the confidence and the crux
+Proposal — the one change: a consult-decided call may leave the PR `auto` only
+when the consultant agreed at **≥85%** — its "deciding fact checked" level,
+not the 70% that decides a call today. Below that, the decided call still
+applies, but the PR demotes to human. The call, the confidence and the crux
 go in the PR body so the morning read can overturn it cheaply. Preference calls
 always demote. `/consult` is Claude-only, so its agreement correlates with the
 author's; the higher bar is the price of that. Where a cross-family reviewer is
@@ -224,8 +240,8 @@ answering per-PR pings. `/auto-pilot`'s `REPORT.md` is the existing seed.
 
 - **WIP tied to review capacity.** `/do-tasks` and `/auto-pilot` stop claiming
   when the human-tier `needs_review` queue exceeds a limit (start at 5; Osmani's
-  3–5). finplan's unattended review routine piled up PRs until consolidated by
-  hand — the queue grew faster than it drained.
+  3–5). In the history, unattended runs opened PRs faster than the owner
+  drained them.
 - **Every task carries a finish condition.** Without an objective done-check, a
   task's PR is human tier whatever its diff — Devin's and pstack's clearest
   lesson. `/promote-tasks`' confidence check is where to enforce it.
@@ -241,19 +257,19 @@ answering per-PR pings. `/auto-pilot`'s `REPORT.md` is the existing seed.
 - workflow-skills: a bad landing ships a version; the undo is a revert PR and
   the next release. Keep it fast — a `/revert-landing <pr>` that opens the
   revert with the right title type is cheap.
-- finplan: deploy freshness, not just `/health` (a tooling pin once failed
-  deploys for days while health stayed green; the gate has since been added).
+- finplan: deploy freshness, not just `/health`, which can stay green while
+  deploys fail (that gate has since been added).
 - Weekly: list `landed-by-agent` PRs that received a follow-up fix within 7
   days. Any one whose defect a gate could not catch shrinks that slice.
 
 ## Initial per-repo policy (Phase 1)
 
-| Repo            | `auto` candidates                                                                             | Always human                                                                                                                                           |
-| --------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| workflow-skills | `scripts/**` whose test pair passes on the head SHA; test-only changes                        | `skills/**`, `commands/**`, `agents/**`, hooks, `plugin.json`, `marketplace.json`, `.github/**`, all `dev_docs/**`                                     |
-| finplan         | tests, CI, `chore`/`refactor` with golden outputs byte-identical, docs that are not decisions | anything that can change a computed number, default, assumption, tax table or success definition; decision docs                                        |
-| agent-guidance  | broken links, tests, harness fixes                                                            | every rule file, skill descriptions, plan and design docs                                                                                              |
-| dotfiles        | personal machine config (shell, terminal, UI), tests, version pins                            | `settings.json` permissions and sandbox, hooks and guards, global `CLAUDE.md`/`AGENTS.md`, anything executable at login, anything referencing a secret |
+| Repo            | `auto` candidates                                                                             | Always human                                                                                                                                                      |
+| --------------- | --------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| workflow-skills | `scripts/**` whose test pair passes on the head SHA; test-only changes                        | `skills/**`, `commands/**`, `agents/**`, hooks, `plugin.json`, `marketplace.json`, `.github/**`, all `dev_docs/**`, `scripts/merge-tier.py`, `scripts/land-pr.sh` |
+| finplan         | tests, CI, `chore`/`refactor` with golden outputs byte-identical, docs that are not decisions | anything that can change a computed number, default, assumption, tax table or success definition; decision docs                                                   |
+| agent-guidance  | broken links, tests, harness fixes                                                            | every rule file, skill descriptions, plan and design docs                                                                                                         |
+| dotfiles        | personal machine config (shell, terminal, UI), tests, version pins                            | `settings.json` permissions and sandbox, hooks and guards, global `CLAUDE.md`/`AGENTS.md`, anything executable at login, anything referencing a secret            |
 
 `dev_docs/` stays human in every repo for now. In workflow-skills `docs:` PRs
 drew the most owner corrections (21%), because they carry research verdicts
@@ -284,9 +300,12 @@ Each gate converts a class of B PRs; build them in this order, by B volume:
    `land-pr.sh --dry-run` posting "would land: yes/no — reasons" on every
    delivered PR; the structural check and weekly audit from component 1; the
    tier forecast in `/promote-tasks`.
-2. **Shadow, 3–4 weeks.** Graduation per repo: at least 30 would-land PRs, none
-   in which the owner made a substantive change, and no follow-up fix a gate
-   could not have caught.
+2. **Shadow, until the count is met.** Graduation per repo: at least 30
+   would-land PRs, none in which the owner made a substantive change, and no
+   follow-up fix a gate could not have caught. The count is the gate and the
+   duration only an estimate: at the history's rates, about 5 weeks for
+   workflow-skills under open question 1's option B, and about 5 months under
+   option A.
 3. **Phase 1.** Enable landing per repo, workflow-skills and dotfiles first.
 4. **Phase 2.** One gate at a time; widen the matching `auto` globs only after
    its own shadow window.
@@ -300,6 +319,12 @@ Each gate converts a class of B PRs; build them in this order, by B volume:
   size cap or pick a title to fit a tier. The tier reads paths, not intent,
   so a split still hits the same always-human globs; the title lint covers the
   release lever.
+- **A self-attested status.** The `co-review` status proves only that some
+  writer posted a status with that name, and every agent holds the same
+  `bestdan` token, so the authoring agent could post it without a completed
+  co-review. Pinning the check to an App's `integration_id` would not help
+  while co-review runs in the session that holds the App's credential too. The
+  weekly audit in component 1 is the backstop.
 - **Consult correlation.** If resolved technical calls are later overturned,
   raise the bar or drop component 5.
 - **Install base.** If many users other than the owner pull workflow-skills
@@ -311,16 +336,17 @@ Each gate converts a class of B PRs; build them in this order, by B volume:
 1. **Release-cutting titles in workflow-skills' first slice.** Option A: only
    non-releasing types, about 12 PRs in 60 days (~5%), too few for useful
    shadow data. Option B: `feat`/`fix` too when the path tier allows, about 52
-   (~21%). My pick was A; a blind consult picked B at 70%. Its crux: "how many
+   (~21%). Recommended: A, because a bad release reaches every user before
+   the revert. A blind consult picked B at 70%, with the crux "how many
    consumers besides the owner pull releases."
 2. **The workflow-skills release bypass.** Moving it off the admin role touches
    `release.yml`'s token. Acceptable?
 3. **Starting thresholds**: size cap 300 lines, human-tier WIP limit 5, consult
    bar 85%.
 
-## Decided in drafting
+## Decisions
 
-Checked with a blind `/consult`:
+Each checked with a blind `/consult`, with its confidence and crux:
 
 - Enforce review-complete as a required status, not in script or prose (85%):
   "whether the merges that outran review were human UI merges" — they were.

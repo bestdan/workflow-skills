@@ -74,6 +74,10 @@ source's. Fetch failures are listed at the end.
 | 34 | [Anthropic — Property-based testing with Claude](https://www.anthropic.com/research/property-based-testing)                                                   | 2026-01-14 | Agent-written Hypothesis properties found real bugs; weak on subtle semantics                                                                     |
 | 35 | [Google — Practical mutation testing at scale](https://arxiv.org/abs/2102.11378)                                                                              | 2021       | Mutate changed lines only and surface survivors in code review                                                                                    |
 
+Only rows 1 and 2 were re-fetched and their quotes checked word for word.
+Every other row's quote, date and identifier is summarizer-derived and
+unverified.
+
 The subagent's full per-source notes (including sources 19, 23, 32, 33, cut
 here as redundant) were not kept; the table is the durable part.
 
