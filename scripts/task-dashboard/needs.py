@@ -585,7 +585,9 @@ def _need_html(
         c.flags.append('<span class="new">new</span>')
     if n.brief:
         c.below.append(f'<div class="brief">{_e(n.brief)}</div>')
-    c.controls = overlay.card_controls(n.item, ov, now, reorder=False)
+    c.controls = overlay.card_controls(
+        n.item, ov, now, reorder=False, pin_tip="Pin: keep it at the top of Needs"
+    )
     return cards.render(c, ov, now)
 
 

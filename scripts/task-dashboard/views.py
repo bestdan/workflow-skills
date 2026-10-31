@@ -707,17 +707,25 @@ EPIC_LANES = (
 )
 
 
+def epic_pin_tip(role: str, mirrored: bool) -> str:
+    """An epic's Pin tooltip. Now lists a pin only when the mirror holds its
+    open issue (fleet_now._jira_tickets). Mine and Involved already hold the
+    epic, so a pin there changes nothing on Epics."""
+    if role in ("mine", "involved"):
+        lane = {r: t for r, t, _ in EPIC_LANES}[role]
+        if mirrored:
+            return f"Already in {lane}; a pin also shows it on Now while it is open"
+        return f"Already in {lane}, so a pin changes nothing here"
+    if mirrored:
+        return "Keep it on Epics; while it is open it also shows on Now"
+    return "Keep it on Epics"
+
+
 def _epic_card(m: Mirror, g: dict[str, Any]) -> str:
     href = f"https://{m.cfg['jira']['site']}/browse/{g['key']}"
     blocked = f" · {g['blocked']} blocked" if g["blocked"] else ""
     pinned = g["key"] in m.pins
-    # Now lists a pin only when the mirror holds its open issue
-    # (fleet_now._jira_tickets).
-    pin_tip = (
-        "Keep it on Epics; while it is open it also shows on Now"
-        if g["key"] in m.issues
-        else "Keep it on Epics"
-    )
+    pin_tip = epic_pin_tip(g["role"], g["key"] in m.issues)
     act, label, glyph = (
         ("unpin", "Unpin", "pin-off") if pinned else ("pin", "Pin", "pin")
     )

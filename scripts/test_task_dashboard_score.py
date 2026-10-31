@@ -614,15 +614,24 @@ class ViewsTest(unittest.TestCase):
     def test_tooltips_say_what_snooze_and_an_epic_pin_do(self):
         page = views.render("/waiting-on", self.conn, CFG, NOW)
         self.assertIn("hidden from Now and Needs, dimmed elsewhere", page)
-        self.add_issue("EPIC-2", THEM, None)  # an epic the mirror holds
-        self.add_issue("ABC-20", ME, "EPIC-2")
-        self.add_issue("ABC-21", ME, "EPIC-9")  # its epic is not mirrored
+        self.add_issue("EPIC-2", ME, None)  # mine, and the mirror holds it
+        self.add_issue("ABC-20", THEM, "EPIC-2")
+        self.add_issue("ABC-21", ME, "EPIC-9")  # involved; not mirrored
+        self.add_issue("EPIC-6", THEM, None, scope="linked")  # other, mirrored
+        self.add_issue("ABC-22", THEM, "EPIC-6", scope="linked")
+        self.add_issue("ABC-23", THEM, "EPIC-7", scope="linked")  # other, not
         page = views.render("/epics", self.conn, CFG, NOW)
-        long = "Keep it on Epics; while it is open it also shows on Now"
-        self.assertIn(long, self.card(page, "EPIC-2"))
-        unmirrored = self.card(page, "EPIC-9")
-        self.assertNotIn(long, unmirrored)
-        self.assertIn('title="Keep it on Epics"', unmirrored)
+        tips = {
+            "EPIC-2": "Already in Mine; a pin also shows it on Now while it is open",
+            "EPIC-9": "Already in Involved, so a pin changes nothing here",
+            "EPIC-6": "Keep it on Epics; while it is open it also shows on Now",
+            "EPIC-7": "Keep it on Epics",
+        }
+        for key, tip in tips.items():
+            pin = f'data-ov="pin" aria-label="Pin" title="{tip}"'
+            self.assertIn(pin, self.card(page, key), key)
+        # An owned epic's tooltip promises nothing on Epics.
+        self.assertNotIn("Keep it on Epics", self.card(page, "EPIC-2"))
 
     def test_an_epic_card_has_the_shared_icon_controls(self):
         # Epics render through cards.render: a pin shows as the "pinned"

@@ -1084,6 +1084,9 @@ def refreshable(item: Item) -> bool:
     return item[0] == "github" and bool(_REFRESHABLE.match(item[1]))
 
 
+PIN_TIP = "Pin: keep it at the top of Now, the Board and Epics"
+
+
 def card_controls(
     item: Item,
     ov: Overlay,
@@ -1091,10 +1094,12 @@ def card_controls(
     *,
     reorder: bool,
     pin: bool = True,
+    pin_tip: str = PIN_TIP,
     why_not: bool = False,
 ) -> str:
     """The pin toggle, snooze, ignore and refresh buttons, and
-    (pinned lane) up/down. `pin=False` drops Pin where nothing ranks by it.
+    (pinned lane) up/down. `pin=False` drops Pin where nothing ranks by it;
+    `pin_tip` is Pin's tooltip, for a page whose pin does something else.
     `why_not=True` makes Snooze hide the card in place and show its "why
     not now" line (whynot.picker, which the caller puts in the card) instead
     of reloading the page."""
@@ -1106,7 +1111,7 @@ def card_controls(
             tip = "Unpin: rank it like any other item"
         else:
             act, label, glyph = "pin", "Pin", "pin"
-            tip = "Pin: keep it at the top of Now, the Board and Epics"
+            tip = pin_tip
         parts.append(
             f'<button type="button" class="ov-icon" data-ov="{act}"'
             f' aria-label="{label}" title="{tip}">{icons.svg(glyph)}</button>'

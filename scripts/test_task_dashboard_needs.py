@@ -371,6 +371,16 @@ class OrderTests(NeedsCase):
         overlay.pin(self.conn, ("claude-hook", "s-turn"), NOW)
         self.assertEqual(keys(section(self.page(), "needs"))[0], "s-turn")
 
+    def test_pin_says_it_keeps_a_card_at_the_top_of_needs(self):
+        # Needs items never appear on Now, the Board or Epics.
+        seed(self.conn)
+        main = section(self.page(), "needs")
+        self.assertIn(
+            'data-ov="pin" aria-label="Pin" title="Pin: keep it at the top of Needs"',
+            main,
+        )
+        self.assertNotIn("the Board", main)
+
     def test_left_out(self):
         seed(self.conn)
         page = self.page()
