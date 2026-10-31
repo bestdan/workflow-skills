@@ -173,7 +173,11 @@ def _scopes(conn: sqlite3.Connection, items: list[Item]) -> list[Scope]:
             add(f"repo:{bare}", "repo", bare, _in_repo(bare))
     for ws_id, title in conn.execute("SELECT id, title FROM workstreams ORDER BY id"):
         add(f"ws:{ws_id}", "workstream", title or ws_id, _in_ws(ws_id))
-    titles = {i["key"]: i["title"] for i in items if i["kind"] == "ticket"}
+    titles = {
+        i["key"]: i["title"]
+        for i in items
+        if i["kind"] == "ticket" and i["source"] == "jira"
+    }
     for i in items:
         if i["kind"] == "ticket" and i["source"] == "jira":
             proj = i["key"].split("-", 1)[0]
