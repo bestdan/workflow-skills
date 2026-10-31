@@ -6,11 +6,8 @@ created: 2026-10-31
 
 **Measured 2026-10-31** against the fleet instance on the Mac mini, serving
 plugin 2.157.0, with the Mac mini, lindev and the MacBook each running a
-collector. This is #1109's record. Its Health snapshot is the fleet view's
-starting point, and it replaces the work-in-progress reset design's manual
-re-measure. How the instance works is in the live doc's
-[Fleet instance](../task-dashboard.md#fleet-instance) section. Hostnames,
-addresses and session content are left out because this repo is public.
+collector. This is the record for [issue #1109](https://github.com/bestdan/workflow-skills/issues/1109). Its Health snapshot is the fleet view's starting point. How the instance works is in the live doc's
+[Fleet instance](../task-dashboard.md#fleet-instance) section. Tailnet names, addresses and session content are left out because this repo is public.
 
 ## Checks
 
@@ -27,7 +24,7 @@ unverified.
 | Needs you: a lindev session ending with a question     | **unverified** | not run                                                                                     |
 | Stale: a worktree whose PR merged, with its evidence   | verified       | the Close lane listed one, with the merge as its evidence                                   |
 | Health: non-baseline approval and switch figures       | verified       | both have `baseline: false` in the snapshot below                                           |
-| Health: wait figures stay baseline until 14 days       | verified       | all four wait figures read "baseline: under 14 days of hook data", at 6.2 hook days         |
+| Health: wait figures are baseline under 14 days        | verified       | all four wait figures read "baseline: under 14 days of hook data", at 6.2 hook days         |
 
 The Claude Code Remote adapter is off in the live config (`[claude_remote]
 enabled = false`), so no check exercised it.
@@ -46,7 +43,7 @@ Neither was a dashboard bug, so neither became an issue.
 ## First Health snapshot
 
 From `dashboard.py health --since 2026-10-24 --json`, taken after the
-MacBook's first snapshot. The window runs 2026-10-24 to 2026-11-01, the
+MacBook's first snapshot. The window runs from 2026-10-24 through 2026-10-31 (the JSON's `until` of 2026-11-01 is its exclusive end), the
 previous window starts 2026-10-16, and the hook had 6.2 days of data.
 
 | Figure                                     | Source             |               Value | Previous | Baseline |
@@ -68,6 +65,5 @@ The MacBook's first snapshot carried 8,223 prompt-history lines, so the
 prompt-history figures shifted when it landed. With only the mini and lindev,
 approval-shaped prompts read 6.1 per 100 and the switch rate 55.8%.
 
-Every target is `observed`, because `[health.targets]` is empty, so no figure
-is met or missed yet. "Issues opened : closed" has no source because the
+Every target but the review queue's is `observed`, because `[health.targets]` is empty. The review queue carries the built-in cap of 5, which 1 PR meets. No other figure is met or missed yet. "Issues opened : closed" has no source because the
 GitHub sync mirrors only the issues that need a human.
