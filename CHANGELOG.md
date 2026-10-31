@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.159.0] - 2026-10-31
+
+### Features
+
+- GitHub-style card icons and lists [N/A] (#1267) (49eddc1)
+
 ## [2.158.0] - 2026-10-31
 
 ### Features
