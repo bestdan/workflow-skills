@@ -4,7 +4,7 @@ Every lane is a `section.lane[data-section]` whose first child is an `h2`
 reading "Title (N)". tabify() reads those back out of a rendered page body and
 draws one tab per lane under the include switches, so a view has only to give
 each lane a counted heading, and a tab's count is that heading's. A lane with
-none is named by its capitalized id and counts (0).
+none is named by its capitalized id and counts 0.
 
 A tab reads its label, then its count in a pill. The label is the lane's
 `data-tab`, a short name for a long title (tab_attr() writes it), else the

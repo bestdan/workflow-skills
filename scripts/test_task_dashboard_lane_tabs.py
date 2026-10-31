@@ -52,8 +52,8 @@ def tabs(page):
         r'<span class="name">([^<]*)</span> <span class="count[^"]*">([^<]*)</span>',
         bar.group(1),
     ):
-        # The pill holds the bare count ("2", "off"); the label reads it in
-        # parentheses, as a tab's text did before the pill.
+        # The pill holds the bare count ("2", "off"); the helper wraps it in
+        # parentheses so each expectation reads as one "Label (N)" string.
         out.append((m[2], f"{m[3]} ({m[4]})", m[1] == "true"))
     return out
 
