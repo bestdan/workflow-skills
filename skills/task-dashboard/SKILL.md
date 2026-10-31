@@ -224,24 +224,30 @@ beside the DB). Both print compact JSON and never write, except to migrate
 a DB that is behind the current schema, once, as `view` does.
 
 - `DASH scopes <word>` says what a word can mean: each matching scope id
-  (`repo:`, `ws:`, `jira:`, `epic:`, `label:`, `host:`) with its open-item
-  count. For a repo it also lists `related` workstreams, those with open
+  (`repo:`, `ws:`, `jira:`, `linear:`, `epic:`, `label:`, `host:`) with its
+  open-item count. For a repo it also lists `related` workstreams, those with open
   members in the repo whatever their name, counting only open members. A session or worktree knows its repo only
   by directory name, so it counts under every owner's repo of that name.
   **Show `related` to the owner and pass the
   ones they confirm as `--scope ws:<id>`; never add them yourself.** Say what
-  the word matched.
+  the word matched. `linear:<TEAM>` is a Linear team's mirrored tickets; a Linear project is
+  the `ws:linear:<id>` workstream, which holds the project's tickets as well
+  as the PRs and issues naming them, in `items` and `scopes` alike.
 - `DASH items --scope <id or word>` (repeatable, a union) prints one record
   per open item, every source in one shape: its state, prio, age, labels,
   workstreams, linked `pr` readiness, live `activity` (sessions and worktrees
   on its branch), blockers, the owner's `overlay` marks, Now's `now` placing,
   and `size` (`{bucket, est_min, from}`, null when unsized — **never treat
   an unsized item as small**; a bot PR is `bot_pr` by its author, whatever
-  its size). `--state todo,started,done` filters the status
+  its size). A ticket is a Jira or a Linear issue, in one shape; a Linear
+  estimate sizes it as `est:N` when no `est:` label does. A ticket's `mine`
+  is `false` when it is unassigned or someone else's — say so before
+  treating it as the owner's — and absent when the mirror cannot tell.
+  `--state todo,started,done` filters the status
   category (default open); `--only blocked,waiting,stale` filters derived
   facts, so "started and blocked" is both flags. `--fields` takes `brief`
-  (the default) or `full` (adds repo, branch, host, path, parent, created,
-  updated, evidence, risks, action) — both leave out null and empty fields —
+  (the default) or `full` (adds repo, branch, host, path, parent, assignee,
+  cycle, created, updated, evidence, risks, action) — both leave out null and empty fields —
   or exact names, which print every named field plus identity.
   `--limit`/`--offset` page it; `total` and `returned` say when a list was
   cut. `--jsonl` prints the header on line one, then one item a line. `--scope all` is no filter and is never matched as a word.

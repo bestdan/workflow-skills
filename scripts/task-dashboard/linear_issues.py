@@ -30,7 +30,8 @@ score.score() reads it as it reads a ticket:
                              reads its end as Jira's sprint end
 
 `raw_json` is linear_api.assigned_issues's dict, which adds `url`, `team`,
-`project`, `blocked_by` and `blocks` (the open issues on each side of a
+`project` and `project_id`, `estimate`, `assignee`, `assignee_email` and
+`assignee_is_me`, `blocked_by` and `blocks` (the open issues on each side of a
 `blocks` relation). fleet_now.linear_tickets turns the rows into candidates.
 """
 
