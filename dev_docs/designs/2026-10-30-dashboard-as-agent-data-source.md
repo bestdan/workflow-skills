@@ -602,6 +602,13 @@ assigned `unstarted` and `started` issues.
 > and shipped as Now's source, scoped to the owner's assigned issues. The
 > backlog read (#1282) widens the mirror without changing what Now ranks.
 
+> **2026-10-31, as shipped (#1282).** The backlog read leaves out `triage`:
+> it is Linear's intake queue, issues nobody has accepted yet, so not yet
+> backlog. The assigned read still runs beside it, so that the owner's issues
+> in a team with no open project stay on Now. Rows the assigned read returned
+> carry `scope = 'assigned'` and the rest `scope = 'team'`, and Now ranks only
+> the first.
+
 repo-pr task files are a local read of `dev_docs/tasks/` in the configured
 repos and are cheaper still. That source is #1289, on hold until it is
 refined.

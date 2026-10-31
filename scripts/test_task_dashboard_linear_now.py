@@ -24,6 +24,7 @@ time.tzset()
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "task-dashboard"))
 
+import agent_query  # type: ignore[import-not-found]  # noqa: E402
 import agent_view  # type: ignore[import-not-found]  # noqa: E402
 import config  # type: ignore[import-not-found]  # noqa: E402
 import db  # type: ignore[import-not-found]  # noqa: E402
@@ -82,12 +83,19 @@ def blocking(key, state_type="unstarted"):
 
 class FakeLinear:
     """Answers the issue queries, `per_page` nodes a page, and the user lookup
-    for the emails in `users`."""
+    for the emails in `users`. `nodes` are my assigned issues; `team` the
+    backlog read's, from the teams of `projects` (team key lists)."""
 
-    def __init__(self, nodes=(), fail=None, per_page=50, users=("me@example.com",)):
+    def __init__(self, nodes=(), fail=None, per_page=50, users=("me@example.com",),
+                 team=(), projects=()):  # fmt: skip
         self.nodes, self.fail, self.per_page = list(nodes), fail, per_page
+        self.team, self.projects = list(team), list(projects)
         self.users = {u.lower() for u in users}
         self.calls = []
+
+    def queries(self, word):
+        """The bodies of the calls whose query names `word`."""
+        return [b for b, _ in self.calls if word in b["query"]]
 
     def __call__(self, body, key, timeout):
         self.calls.append((body, key))
@@ -96,13 +104,29 @@ class FakeLinear:
         if "users(" in body["query"]:
             hit = body["variables"]["email"].lower() in self.users
             return {"data": {"users": {"nodes": [{"id": "u1"}] if hit else []}}}
-        if "  projects(" in body["query"]:  # Workstreams' read: none
+        if "  projects(" in body["query"]:
             done = {"hasNextPage": False, "endCursor": None}
-            return {"data": {"projects": {"pageInfo": done, "nodes": []}}}
+            nodes = [
+                {"id": f"p-{n}", "name": f"P{n}", "status": {"type": "started"},
+                 "teams": {"nodes": [{"key": t} for t in teams]}}
+                for n, teams in enumerate(self.projects)
+            ]  # fmt: skip
+            return {"data": {"projects": {"pageInfo": done, "nodes": nodes}}}
+        teams = body["variables"].get("teams")
+        source = self.nodes
+        if teams is not None:
+            types = body["variables"]["types"]
+            source = [
+                n for n in self.team
+                if n["team"]["key"] in teams and n["state"]["type"] in types
+            ]  # fmt: skip
         start = int(body["variables"]["after"] or 0)
         end = start + self.per_page
-        page = {"hasNextPage": end < len(self.nodes), "endCursor": str(end)}
-        conn = {"pageInfo": page, "nodes": self.nodes[start:end]}
+        page = {"hasNextPage": end < len(source), "endCursor": str(end)}
+        conn = {"pageInfo": page, "nodes": source[start:end]}
+        if teams is not None:
+            assert "team: {key: {in: $teams}}" in body["query"], body
+            return {"data": {"issues": conn}}
         if "email" in body["variables"]:
             assert "  issues(" in body["query"], body
             return {"data": {"issues": conn}}
@@ -197,9 +221,12 @@ class ReadTests(Case):
         fake = FakeLinear([node("PRE-1")])
         cfg = config.deep_merge(CFG, {"linear": {"me": " me@example.com "}})
         self.assertEqual(self.step(fake, cfg=cfg)["outcome"], "ok")
-        self.assertEqual(fake.calls[-1][0]["variables"]["email"], "me@example.com")
+        (read,) = fake.queries("eqIgnoreCase: $email")
+        self.assertEqual(read["variables"]["email"], "me@example.com")
+        fake.calls.clear()
         self.step(fake)
-        self.assertNotIn("email", fake.calls[-1][0]["variables"])
+        (read,) = fake.queries("assignedIssues(")
+        self.assertNotIn("email", read["variables"])
 
     def test_linear_me_must_be_a_string(self):
         path = Path(self._td.name) / "config.toml"
@@ -215,7 +242,11 @@ class ReadTests(Case):
 
     def test_both_queries_cap_the_nested_lists_and_ask_if_they_were_cut(self):
         # Linear refuses the query as too complex without the caps.
-        for query in (linear_api.ASSIGNED_QUERY, linear_api.ASSIGNEE_QUERY):
+        for query in (
+            linear_api.ASSIGNED_QUERY,
+            linear_api.ASSIGNEE_QUERY,
+            linear_api.TEAM_QUERY,
+        ):
             for field in ("labels", "relations", "inverseRelations"):
                 self.assertRegex(
                     query, rf"\b{field}\(first: 10\) \{{\s*pageInfo \{{ hasNextPage \}}"
@@ -259,6 +290,150 @@ class ReadTests(Case):
         (issue,) = linear_api.assigned_issues("k", FakeLinear([n]))
         self.assertEqual(issue["blocked_by"], ["PRE-8"])
         self.assertEqual(issue["blocks"], ["PRE-5"])
+
+
+class TeamReadTests(Case):
+    def test_it_asks_for_the_teams_open_states_assigned_or_not(self):
+        team = [node(f"PRE-{n}", "backlog", "Backlog") for n in range(1, 6)]
+        fake = FakeLinear(team=team, per_page=2)
+        issues = linear_api.team_issues("k", ["PRE", "PRE"], fake)
+        self.assertEqual([i["key"] for i in issues], [f"PRE-{n}" for n in range(1, 6)])
+        self.assertEqual(len(fake.calls), 3)
+        body, _ = fake.calls[0]
+        self.assertEqual(body["variables"]["teams"], ["PRE"])
+        self.assertEqual(
+            body["variables"]["types"], ["backlog", "unstarted", "started"]
+        )
+        self.assertNotIn("assignee", body["query"].split("nodes {")[0])
+        self.assertIn("team: {key: {in: $teams}}", body["query"])
+
+    def test_no_team_makes_no_call(self):
+        fake = FakeLinear()
+        self.assertEqual(linear_api.team_issues("k", [], fake), [])
+        self.assertEqual(fake.calls, [])
+
+
+ME = {"name": "Me", "email": "me@example.com", "isMe": True}
+ANA = {"name": "Ana", "email": "ana@example.com", "isMe": False}
+
+
+def backlog_fake(**kw):
+    """My two issues, and the PRE backlog around them: one of mine again,
+    someone else's started issue, an unassigned todo, an unassigned backlog
+    issue, and a triage issue the read leaves out. PAY owns no project."""
+    mine = [node("PRE-1", assignee=ME),
+            node("PAY-7", "unstarted", "Todo", assignee=ME)]  # fmt: skip
+    team = [
+        node("PRE-1", assignee=ME),
+        node("PRE-2", assignee=ANA),
+        node("PRE-3", "unstarted", "Todo"),
+        node("PRE-4", "backlog", "Backlog"),
+        node("PRE-5", "triage", "Triage"),
+        node("PAY-8", "unstarted", "Todo"),
+    ]
+    return FakeLinear(mine, team=team, projects=[["PRE"], ["PRE"]], **kw)
+
+
+class BacklogStepTests(Case):
+    def scopes(self):
+        return dict(
+            self.conn.execute("SELECT key, scope FROM issues WHERE source = ?", (LIN,))
+        )
+
+    def test_it_mirrors_the_project_teams_backlog_beside_mine(self):
+        run = self.step(backlog_fake())
+        self.assertEqual(run["outcome"], "ok", run["error"])
+        self.assertEqual(
+            self.scopes(),
+            {"PAY-7": "assigned", "PRE-1": "assigned", "PRE-2": "team",
+             "PRE-3": "team", "PRE-4": "team"},
+        )  # fmt: skip
+        counts = json.loads(run["counts"])
+        self.assertEqual(
+            {k: counts[k] for k in ("issues", "mine", "unassigned", "backlog",
+                                    "teams", "calls")},
+            {"issues": 5, "mine": 2, "unassigned": 2, "backlog": 1, "teams": "PRE",
+             "calls": 3},
+        )  # fmt: skip
+
+    def test_the_backlog_read_pages_and_counts_every_call(self):
+        team = [node(f"PRE-{n}", "backlog", "Backlog") for n in range(1, 121)]
+        fake = FakeLinear([node("PRE-500", assignee=ME)], team=team,
+                          projects=[["PRE"]])  # fmt: skip
+        counts = json.loads(self.step(fake)["counts"])
+        self.assertEqual((counts["issues"], counts["calls"]), (121, 5))
+        self.assertEqual(len(fake.queries("$teams")), 3)
+
+    def test_the_raw_row_keeps_the_assignee_and_state_type(self):
+        self.step(backlog_fake())
+        raw = {
+            k: json.loads(r)
+            for k, r in self.conn.execute(
+                "SELECT key, raw_json FROM issues WHERE source = ?", (LIN,)
+            )
+        }
+        self.assertEqual(
+            (raw["PRE-2"]["assignee"], raw["PRE-2"]["assignee_is_me"]), ("Ana", False)
+        )
+        self.assertIsNone(raw["PRE-3"]["assignee"])
+        self.assertEqual(raw["PRE-4"]["state_type"], "backlog")
+
+    def test_a_finished_or_moved_out_issue_leaves_the_mirror(self):
+        self.step(backlog_fake())
+        fake = backlog_fake()
+        # PRE-2 finished, PRE-3 moved to PAY, which owns no project.
+        fake.team = [n for n in fake.team if n["identifier"] not in ("PRE-2", "PRE-3")]
+        counts = json.loads(self.step(fake)["counts"])
+        self.assertEqual(sorted(self.scopes()), ["PAY-7", "PRE-1", "PRE-4"])
+        self.assertEqual(counts["dropped"], 2)
+
+    def test_an_issue_reassigned_away_turns_team_and_leaves_now(self):
+        self.step(backlog_fake())
+        self.assertEqual(self.scopes()["PRE-1"], linear_issues.MINE)
+        fake = backlog_fake()
+        # Reassigned to Ana: gone from my read, still in the team backlog.
+        fake.nodes = [n for n in fake.nodes if n["identifier"] != "PRE-1"]
+        fake.team = [
+            node("PRE-1", assignee=ANA) if n["identifier"] == "PRE-1" else n
+            for n in fake.team
+        ]
+        self.step(fake)
+        self.assertEqual(self.scopes()["PRE-1"], linear_issues.TEAM)
+        self.assertNotIn("PRE-1", self.by_key())
+
+    def test_a_failed_backlog_read_keeps_the_last_good_rows(self):
+        self.step(backlog_fake())
+        before = self.scopes()
+
+        def fail_teams(body, key, timeout):
+            if "$teams" in body["query"]:
+                raise linear_api.LinearError("HTTP 502")
+            return backlog_fake()(body, key, timeout)
+
+        run = self.step(fail_teams)
+        self.assertEqual(run["outcome"], "failed")
+        self.assertEqual(self.scopes(), before)
+
+    def test_now_ranks_only_my_issues_and_the_same_as_mine_alone(self):
+        self.step(backlog_fake())
+        wide = {k: (r.category, r.tier) for k, r in self.by_key().items()}
+        self.assertEqual(sorted(wide), ["PAY-7", "PRE-1"])
+        self.conn.execute("DELETE FROM issues WHERE source = ?", (LIN,))
+        self.conn.commit()
+        self.mirror(node("PRE-1", assignee=ME),
+                    node("PAY-7", "unstarted", "Todo", assignee=ME))  # fmt: skip
+        alone = {k: (r.category, r.tier) for k, r in self.by_key().items()}
+        self.assertEqual(wide, alone)
+
+    def test_items_lists_the_whole_backlog_and_mine_tells_them_apart(self):
+        self.step(backlog_fake())
+        doc = agent_query.items_doc(self.conn, CFG, NOW, kind="ticket",
+                                    fields="key,mine")  # fmt: skip
+        self.assertEqual(
+            {i["key"]: i["mine"] for i in doc["items"]},
+            {"PAY-7": True, "PRE-1": True, "PRE-2": False, "PRE-3": False,
+             "PRE-4": False},
+        )  # fmt: skip
 
 
 class WriteTests(Case):

@@ -287,7 +287,13 @@ instance, the `linear_issues` step mirrors the open issues (state type
 to the key's own user. Set `me` when the key was made on a different Linear
 account from the one the issues are assigned to: otherwise it reads the key's
 own account's issues instead, with no error. A `me` that names no Linear user
-fails the step and keeps the last good rows. Now ranks them as it ranks Jira
+fails the step and keeps the last good rows. The same step also mirrors the
+whole open backlog (state type `backlog`, `unstarted` or `started`, assigned
+or not) of the teams the open Linear projects belong to, for `items` and
+`scopes`; those rows carry `scope = 'team'` and Now never ranks them. Its run
+counts how many rows are mine, unassigned and in the backlog, and how many
+Linear requests it made: about one per 50 open issues, plus the projects
+read. Now ranks only the `assigned` rows, as it ranks Jira
 tickets: started is the `started` tier, unstarted lands in the rest, an open
 blocker or the `blocked` label sends one to the blocked tier, and a PR whose
 title or branch carries the key folds into its card. `linear_issues.py` and
