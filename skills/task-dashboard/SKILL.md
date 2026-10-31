@@ -1,7 +1,7 @@
 ---
 name: task-dashboard
-description: Install, check, sync, open, back up, read, clean up, or remove the local task dashboard — the always-on, localhost-only page that mirrors your Jira work (through acli) and GitHub PRs (through gh) into SQLite and ranks what to do next. Subcommands install | status | sync-now | open | export | import | tune | view | refresh | overlay | clean | uninstall. Use when the user wants that dashboard set up as a login agent on their Mac, asks whether it is running or how stale it is, wants it refreshed now, wants its link, wants to back up or restore their pins, order, snoozes and notes, wants the fleet Now's ranking tuned from their "why not now" answers, asks what a tab shows ("what's on Stale?"), asks to clean a tab up ("look at the Stale tab and clean it up"), wants an item ignored or snoozed, or wants it taken off the machine.
-argument-hint: "install | status | sync-now [--reconcile] | open | export <file> | import <file> | tune [--days N] | view <name> [--json] [--all] [--mode M] | refresh <owner/repo#N> [--json] | overlay <action> | clean <view> | uninstall"
+description: Install, check, sync, open, back up, read, clean up, or remove the local task dashboard — the always-on, localhost-only page that mirrors your Jira work (through acli) and GitHub PRs (through gh) into SQLite and ranks what to do next. Subcommands install | status | sync-now | open | export | import | tune | view | scopes | items | refresh | overlay | clean | uninstall. Use when the user wants that dashboard set up as a login agent on their Mac, asks whether it is running or how stale it is, wants it refreshed now, wants its link, wants to back up or restore their pins, order, snoozes and notes, wants the fleet Now's ranking tuned from their "why not now" answers, asks what a tab shows ("what's on Stale?"), wants the open work in one repo, workstream, Jira project or label as compact records ("what's open on FinPlan?", "small tasks I could do in half an hour"), asks to clean a tab up ("look at the Stale tab and clean it up"), wants an item ignored or snoozed, or wants it taken off the machine.
+argument-hint: "install | status | sync-now [--reconcile] | open | export <file> | import <file> | tune [--days N] | view <name> [--json] [--all] [--mode M] | scopes [query] | items [--scope X] [--kind K] [--state S] [--only F] [--fields F] [--limit N] [--offset N] [--jsonl] | refresh <owner/repo#N> [--json] | overlay <action> | clean <view> | uninstall"
 ---
 
 # task-dashboard
@@ -195,7 +195,7 @@ dashboard itself never calls a model.**
 
 With few answers `tune` suggests nothing; say so rather than guessing.
 
-## view, overlay
+## view, scopes, items, overlay
 
 `DASH view <name> --json` prints one tab's lanes and items as its page shows
 them, read from the DB with no server: the include filter, ignores and snoozes
@@ -216,6 +216,35 @@ none is), so you see what they see; `notes.mode` names it, outside Ship
 `notes.closed_today` is the day's count. `freshness` says when each sync last
 succeeded and when each host last snapshotted. Without `--json` it prints one
 line per item.
+
+`view` is a whole tab; for a question about a slice of the work, use `scopes`
+and `items`, unsandboxed (inside the sandbox SQLite cannot open the WAL file
+beside the DB). Both print compact JSON and never write, except to migrate
+a DB that is behind the current schema, once, as `view` does.
+
+- `DASH scopes <word>` says what a word can mean: each matching scope id
+  (`repo:`, `ws:`, `jira:`, `epic:`, `label:`, `host:`) with its open-item
+  count. For a repo it also lists `related` workstreams, those with open
+  members in the repo whatever their name, counting only open members. A session or worktree knows its repo only
+  by directory name, so it counts under every owner's repo of that name.
+  **Show `related` to the owner and pass the
+  ones they confirm as `--scope ws:<id>`; never add them yourself.** Say what
+  the word matched.
+- `DASH items --scope <id or word>` (repeatable, a union) prints one record
+  per open item, every source in one shape: its state, prio, age, labels,
+  workstreams, linked `pr` readiness, live `activity` (sessions and worktrees
+  on its branch), blockers, the owner's `overlay` marks, Now's `now` placing,
+  and `size` (`{bucket, est_min, from}`, null when unsized — **never treat
+  an unsized item as small**; a bot PR is `bot_pr` by its author, whatever
+  its size). `--state todo,started,done` filters the status
+  category (default open); `--only blocked,waiting,stale` filters derived
+  facts, so "started and blocked" is both flags. `--fields` takes `brief`
+  (the default) or `full` (adds repo, branch, host, path, parent, created,
+  updated, evidence, risks, action) — both leave out null and empty fields —
+  or exact names, which print every named field plus identity.
+  `--limit`/`--offset` page it; `total` and `returned` say when a list was
+  cut. `--jsonl` prints the header on line one, then one item a line. `--scope all` is no filter and is never matched as a word.
+  The order is newest activity first, not a priority.
 
 After acting on a PR or issue (merging, closing, labelling, pushing a fix), run
 `DASH refresh <owner/repo#N>`, unsandboxed, rather than `sync-now`: it re-reads

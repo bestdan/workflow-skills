@@ -540,3 +540,31 @@ def connect(path: "str | os.PathLike[str] | None" = None) -> sqlite3.Connection:
         conn.close()
         raise
     return conn
+
+
+def connect_read_only(
+    path: "str | os.PathLike[str] | None" = None,
+) -> sqlite3.Connection:
+    """Open the DB for a read: `mode=ro` and `query_only`, so the read itself
+    never writes. The one exception comes first: a DB behind the current
+    schema is migrated once through connect(), as `view` and every other CLI
+    open would, since the readers assume the latest tables.
+
+    The `sqlite3` CLI's `-readonly` fails to open the WAL-mode DB (error 14)
+    where this URI form works.
+    """
+    p = db_path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"no dashboard DB at {p}")
+    conn = sqlite3.connect(f"{p.resolve().as_uri()}?mode=ro", uri=True)
+    try:
+        conn.execute("PRAGMA query_only=ON")
+        behind = _stored_version(conn) < max(v for v, _ in MIGRATIONS)
+    except BaseException:
+        conn.close()
+        raise
+    if behind:
+        conn.close()
+        connect(p).close()
+        return connect_read_only(p)
+    return conn

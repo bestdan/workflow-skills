@@ -128,6 +128,17 @@ None of these needs the server running:
 - **`view <name> [--json] [--all] [--mode M]`** prints one tab's lanes as the
   page shows them. `--all` adds the hidden items, each with the reason it was
   hidden.
+- **`scopes [query]`** and **`items --scope X`**
+  ([`agent_query.py`](../scripts/task-dashboard/agent_query.py)) are the
+  query-shaped read from
+  [`designs/2026-10-30-dashboard-as-agent-data-source.md`](designs/2026-10-30-dashboard-as-agent-data-source.md):
+  what a word can mean as a scope, and one compact record per item in it,
+  joined across tracker, GitHub and the fleet. Each field comes from the code
+  a view already uses, so `items` adds no ranking rule. They open the DB with
+  `db.connect_read_only` (`mode=ro`, `query_only`), which writes only to
+  migrate a DB that is behind the current schema, once, as `view` does. An item's `size` reads its
+  bucket (Little's PR categories by size alone, else `large_pr`, or an
+  `est:N` label) through `[size.minutes]`.
 - **`overlay <action> --source S --key K`** makes the same write a card button
   makes, and goes through the same validation (`overlay.apply`).
 - **`refresh <owner/repo#N>`** re-reads one PR or issue from GitHub in a

@@ -643,6 +643,16 @@ def title_of(conn: sqlite3.Connection, ws: str) -> "str | None":
     return row[0] if row else None
 
 
+def memberships(conn: sqlite3.Connection) -> dict[tuple[str, str], list[str]]:
+    """(source, key) -> the id of every workstream the item is in, by id."""
+    out: dict[tuple[str, str], list[str]] = {}
+    for ws, s, k in conn.execute(
+        "SELECT ws_id, item_source, item_key FROM workstream_members ORDER BY ws_id"
+    ):
+        out.setdefault((s, k), []).append(ws)
+    return out
+
+
 def membership(conn: sqlite3.Connection) -> dict[tuple[str, str], str]:
     """(source, key) -> the title of one workstream the item is in (the first
     by id), for Now's features (whynot.features)."""
