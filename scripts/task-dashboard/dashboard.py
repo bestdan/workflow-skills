@@ -241,7 +241,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     plan_set.add_argument(
         "--scope",
-        help="one scope id or a word that matches exactly one (default: all)",
+        required=True,
+        help="one scope id, a word that matches exactly one, or `all`",
     )
     plan_set.add_argument(
         "--kind",
@@ -249,7 +250,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="standing (default) or session; --minutes makes it a session plan",
     )
     plan_set.add_argument(
-        "--minutes", type=int, help="the time the plan was made for; a session plan"
+        "--minutes",
+        type=int,
+        help="the time box in minutes (a positive integer); makes a session plan",
     )
     plan_set.add_argument(
         "--mode", help="the Now mode it was made for: " + ", ".join(overlay.NOW_MODES)

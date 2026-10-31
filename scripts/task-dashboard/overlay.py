@@ -935,6 +935,16 @@ def _check_plans(value: Any) -> list[tuple[Any, ...]]:
                 at is not None and (not isinstance(at, str) or not _STAMP.fullmatch(at))
             ):
                 raise OverlayError(f"{where}: {col} must be YYYY-MM-DDTHH:MM:SSZ")
+        # What set_plan writes: only a session plan expires, after it was made,
+        # and only a session plan carries minutes.
+        if (row["kind"] == "standing") != (row["expires_at"] is None):
+            raise OverlayError(
+                f"{where}: a standing plan has no expires_at and a session plan has one"
+            )
+        if row["expires_at"] is not None and row["expires_at"] <= row["created_at"]:
+            raise OverlayError(f"{where}: expires_at must be after created_at")
+        if row["kind"] == "standing" and row["minutes"] is not None:
+            raise OverlayError(f"{where}: minutes belongs to a session plan")
         out.append(
             (
                 scope,

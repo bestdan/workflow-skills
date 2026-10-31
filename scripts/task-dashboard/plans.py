@@ -90,10 +90,7 @@ def set_plan(
     clean = overlay.check_plan_entries(entries)
     who = overlay.check_plan_author(author)
     mins = overlay.check_plan_minutes(minutes)
-    if kind is not None and kind not in overlay.PLAN_KINDS:
-        raise overlay.OverlayError(
-            f"kind must be one of {', '.join(overlay.PLAN_KINDS)}, got {kind!r}"
-        )
+    _check_kind(kind)
     if mins is not None and kind == "standing":
         raise overlay.OverlayError(
             "--minutes sets a session plan; drop --kind standing"

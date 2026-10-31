@@ -516,6 +516,28 @@ class ExportImportTests(OverlayCase):
         with self.assertRaises(overlay.OverlayError):
             overlay.import_(self.conn, doc)
 
+    def test_a_plan_whose_lifetime_contradicts_its_kind_is_refused(self):
+        populate(self.conn)
+        good = overlay.export(self.conn)
+        standing: dict = next(p for p in good["plans"] if p["kind"] == "standing")
+        session: dict = next(p for p in good["plans"] if p["kind"] == "session")
+        cases: list[tuple[str, dict, dict]] = [
+            ("standing with an expiry", standing, {"expires_at": "2026-10-24T11:00:00Z"}),
+            ("standing with minutes", standing, {"minutes": 30}),
+            ("session with no expiry", session, {"expires_at": None}),
+            ("session expiring at creation", session,
+             {"expires_at": session["created_at"]}),
+        ]  # fmt: skip
+        before = dump(self.conn)
+        for name, plan, change in cases:
+            with self.subTest(name):
+                doc = overlay.export(self.conn)
+                i = doc["plans"].index(plan)
+                doc["plans"][i] = {**plan, **change}
+                with self.assertRaises(overlay.OverlayError):
+                    overlay.import_(self.conn, doc)
+                self.assertEqual(dump(self.conn), before)
+
     def test_a_null_now_mode_imports_as_none_saved(self):
         populate(self.conn)
         doc = overlay.export(self.conn)

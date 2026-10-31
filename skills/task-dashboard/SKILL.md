@@ -266,18 +266,19 @@ means it was refused and nothing changed; the message is the server's.
 `DASH plan` keeps the ordered answer to "what next": a list of items for one
 scope, a reason each. The overlay carries it, so export and import do too.
 
-- `DASH plan set --by <author> --file <list.json|-> [--scope X] [--kind
+- `DASH plan set --scope X --by <author> --file <list.json|-> [--kind
   standing|session] [--minutes N] [--mode M]`. The file is a JSON list, in
   order, of `{"source","key","reason"}` objects (reason: one line, 500
   characters at most), each optionally with `action` (`do`, `finish`,
   `unblock`, `review`, `defer`, `drop`) and `est_min`. `source` and `key` are
   as `items` prints them. Every entry must be in the mirror, open or done;
   the refusal names each key that is not.
-- A plan belongs to exactly **one** scope id, or to `all` (the default). A
+- A plan belongs to exactly **one** scope id, or to `all`, and `--scope` is
+  required, so a plan never lands on `all` by omission. A
   word that matches several scopes is refused, naming them; pass one id from
   `scopes`. There is one plan per scope and kind, so `set` replaces.
-- `standing` (the default) stays until cleared. `--minutes`, or `--kind
-  session`, makes a session plan, which expires at the next 04:00 host local
+- `standing` (the default) stays until cleared. `--minutes N` (the time box,
+  in minutes), or `--kind session`, makes a session plan, which expires at the next 04:00 host local
   time (a plan set between midnight and 04:00 expires that morning). `show`
   still lists an expired plan, with `expired: true`.
 - `--by` names the author, free text (`claude-finplan`, `owner`).

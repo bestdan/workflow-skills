@@ -5,7 +5,8 @@ sync's: any row may be overwritten or deleted on the next run. OVERLAY tables
 (pins, order, snoozes, notes, kind tags, ignores, last visit, view filters,
 "why not now" answers, plans) are
 the user's, keyed by (source, item key) apart from the one-row last visit and
-the per-view filters, and a sync never touches them; they are the only state
+Now mode, the per-view filters, and plans, keyed by (scope, kind), and a sync
+never touches them; they are the only state
 here that cannot be rebuilt. `now_shown`, the base rate Now's "why not now"
 answers are compared with, is neither: nothing rebuilds it, but losing it costs
 only the comparison, so it is not exported either.

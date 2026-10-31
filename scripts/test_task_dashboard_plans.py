@@ -364,7 +364,8 @@ class CliTests(Case):
 
     def test_minutes_sets_a_session_plan_and_stdin_is_read(self):
         code, out, _ = self.run_cli(
-            "plan", "set", "--minutes", "60", "--by", "me", "--file", "-",
+            "plan", "set", "--scope", "all", "--minutes", "60", "--by", "me",
+            "--file", "-",
             stdin=json.dumps([entry(A)]),
         )  # fmt: skip
         self.assertEqual(code, 0)
@@ -374,7 +375,9 @@ class CliTests(Case):
 
     def test_a_refused_plan_exits_2_and_names_the_key(self):
         f = self.file([entry(("github", "nope/1"))])
-        code, out, err = self.run_cli("plan", "set", "--by", "me", "--file", f)
+        code, out, err = self.run_cli(
+            "plan", "set", "--scope", "all", "--by", "me", "--file", f
+        )
         self.assertEqual((code, out), (2, ""))
         self.assertIn("github:nope/1", err)
         code, _, err = self.run_cli(
@@ -385,15 +388,25 @@ class CliTests(Case):
         self.assertIn("pass one scope id", err)
 
     def test_an_unreadable_or_invalid_file_exits_1(self):
-        code, _, err = self.run_cli("plan", "set", "--by", "me", "--file", "/no/such")
+        code, _, err = self.run_cli(
+            "plan", "set", "--scope", "all", "--by", "me", "--file", "/no/such"
+        )
         self.assertEqual(code, 1)
         self.assertIn("cannot read", err)
-        code, _, _ = self.run_cli("plan", "set", "--by", "me", "--file", "-", stdin="{")
+        code, _, _ = self.run_cli(
+            "plan", "set", "--scope", "all", "--by", "me", "--file", "-",
+            stdin="{",
+        )  # fmt: skip
         self.assertEqual(code, 1)
 
-    def test_by_and_file_are_required(self):
-        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
-            dashboard.main(["plan", "set", "--file", "x"])
+    def test_by_file_and_scope_are_required(self):
+        for argv in (
+            ["plan", "set", "--scope", "all", "--file", "x"],
+            ["plan", "set", "--by", "me", "--file", "x"],
+        ):
+            with self.subTest(argv), contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    dashboard.main(argv)
 
 
 if __name__ == "__main__":
