@@ -4,7 +4,7 @@
 // Usage: node test_task_dashboard_whynot_dom.js <jsdom dir> <case.json>
 //
 // The case names the page, the card to act on (`key`), the `steps` to take
-// in order ("snooze", "undo", or "reason:<code>"), optional `text` typed into
+// in order ("snooze", "undo", "for:<days>" or "reason:<code>"), optional `text` typed into
 // the line before a reason, and the `status` every POST answers (200 when
 // absent). fetch is stubbed and records each POST's path and body, for the
 // test to replay against a real server. Prints, as JSON, the calls and the
@@ -56,6 +56,9 @@ function state() {
     title_shown: card.isConnected && window.getComputedStyle(title).display !== "none",
     line_shown: card.isConnected && !line.hidden,
     line_text: line.textContent,
+    pressed: Array.from(line.querySelectorAll("[aria-pressed=\"true\"]")).map(
+      (b) => b.textContent,
+    ),
     cards: doc.querySelectorAll(".card[data-key]").length,
   };
 }
@@ -71,7 +74,14 @@ const settle = () => new Promise((r) => window.setTimeout(r, 30));
   for (const step of spec.steps) {
     if (step === "snooze") click(card.querySelector(".ov [data-ov=\"snooze\"]"));
     else if (step === "undo") click(line.querySelector("[data-ov=\"undo\"]"));
-    else {
+    else if (step.startsWith("for:")) {
+      const days = `${step.split(":")[1]}d`;
+      click(
+        Array.from(line.querySelectorAll("[data-ov=\"snooze-for\"]")).find(
+          (b) => b.textContent === days,
+        ),
+      );
+    } else {
       line.querySelector("input").value = spec.text || "";
       click(line.querySelector(`[data-reason="${step.split(":")[1]}"]`));
     }

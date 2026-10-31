@@ -63,6 +63,8 @@ V3_TABLES = (*V2_TABLES, "ignores")
 KIND_TAGS = ("side-quest", "substantial")
 # The Snooze button hides a card for this many days; Unsnooze clears it.
 SNOOZE_DAYS = 7
+# The lengths Now's snoozed line offers instead, in days; SNOOZE_DAYS among them.
+SNOOZE_CHOICES = (1, 3, 7, 14, 30)
 
 # The "why not now" picker's reasons, (code, label), in the order it shows
 # them. A code is what is stored, so a label may change and a code may not.
@@ -1016,8 +1018,21 @@ JS = """
       post('snooze', it.concat([['until', b.dataset.until]]), line && function () {
         line.querySelector('.whynot-until').textContent = b.dataset.until;
         line.querySelector('input').value = '';
+        line.querySelectorAll('[data-ov="snooze-for"]').forEach(function (x) {
+          x.setAttribute('aria-pressed', x.dataset.until === b.dataset.until ? 'true' : 'false');
+        });
         card.classList.add('just-snoozed');
         line.hidden = false;
+      });
+    }
+    else if (act === 'snooze-for') {
+      // The snoozed line's 1d … 30d: the same snooze, for that long.
+      var row = b.closest('.whynot');
+      post('snooze', it.concat([['until', b.dataset.until]]), function () {
+        row.querySelector('.whynot-until').textContent = b.dataset.until;
+        row.querySelectorAll('[data-ov="snooze-for"]').forEach(function (x) {
+          x.setAttribute('aria-pressed', x === b ? 'true' : 'false');
+        });
       });
     }
     else if (act === 'whynot') {
@@ -1054,9 +1069,10 @@ def card_attrs(item: Item, ov: Overlay, now: datetime) -> str:
     return f'class="{cls}" data-source="{_e(item[0])}" data-key="{_e(item[1])}"'
 
 
-def snooze_until(now: datetime) -> str:
-    """The date the Snooze button snoozes until: SNOOZE_DAYS local days on."""
-    return (now.astimezone() + timedelta(days=SNOOZE_DAYS)).date().isoformat()
+def snooze_until(now: datetime, days: int = SNOOZE_DAYS) -> str:
+    """The date a snooze of `days` local days ends: the Snooze button's, by
+    default."""
+    return (now.astimezone() + timedelta(days=days)).date().isoformat()
 
 
 # A GitHub PR or issue, as its card's key: what the Refresh button re-reads.

@@ -1305,10 +1305,11 @@ def card(r: Ranked, now: datetime, ov: overlay.Overlay) -> str:
     act = " · ".join(x for x in (link, needs.pr_link(n), view_model.code(n.hint)) if x)
     act_html = f'<div class="act">→ {act}</div>' if act else ""
     why = f'<div class="why" data-terms="{terms}">{_e(why_line(r))}</div>'
-    if terms and n.kind != "session":
-        # A Ship score's breakdown runs to three lines on a phone; it is
-        # there for when the order looks wrong, so it waits behind a "?" at
-        # the end of the meta line and pops over on hover, focus or tap.
+    if n.kind != "session":
+        # Why a card ranks where it does (a Ship score's breakdown, or
+        # another mode's reason) is there for when the order looks wrong, so
+        # in every mode it waits behind a "?" at the end of the meta line and
+        # pops over on hover, focus or tap.
         # A screen reader hears the label, then the breakdown it describes:
         # the role makes the label count, and describedby reads the hidden
         # breakdown, which role=button alone would flatten away.
@@ -1340,7 +1341,7 @@ def card(r: Ranked, now: datetime, ov: overlay.Overlay) -> str:
         f"{act_html}{needs._title(n, n.url)}{needs.ask_html(n)}"
         f'<div class="meta">{meta}</div>{steps}{folded}{why}'
         f"{overlay.card_controls(n.item, ov, now, reorder=False, why_not=True)}"
-        f"{whynot.picker(overlay.snooze_until(now))}</div>"
+        f"{whynot.picker(now)}</div>"
     )
 
 

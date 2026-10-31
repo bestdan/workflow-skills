@@ -955,6 +955,16 @@ class LittleTests(Case):
         later = NOW + timedelta(days=1)
         self.assertIsNone(fleet_now.closed_today(self.conn, later))
 
+    def test_a_little_card_folds_its_why_behind_the_question_mark_too(self):
+        page = fleet_now.render(self.conn, self.cfg, NOW, mode=fleet_now.LITTLE)
+        card = page.split('<div class="card"', 2)[1]
+        meta = re.search(r'<div class="meta">.*?</span></div>', card)
+        assert meta is not None
+        self.assertIn('<span class="why-more"', meta.group(0))
+        self.assertIn('<div class="why" data-terms="" ', meta.group(0))
+        # Little ranks by size, not a score: no number beside the "?".
+        self.assertNotIn('class="score"', card)
+
     def test_no_count_no_header(self):
         self.assertIsNone(self.little().closed_today)
         page = fleet_now.render(self.conn, self.cfg, NOW, mode=fleet_now.LITTLE)
