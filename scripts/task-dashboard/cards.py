@@ -9,14 +9,15 @@ tab cannot drift back into a card of its own (test_task_dashboard_cards.py
 checks every tab).
 
 Every field holds HTML a caller has already escaped, except `title`, `url`,
-`ref` and `Age.tip`, which are plain text and escaped here.
+`ref`, `Age.tip`, `Score.total`, and the values of `Card.data` and
+`Score.data`, which are plain text and escaped here.
 """
 
 import hashlib
 import html
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 
 import icons
 import overlay
@@ -157,7 +158,10 @@ class Card:
 
 
 def _age(a: Age, now: datetime) -> str:
-    tip = f"{a.tip} {a.since.astimezone().date().isoformat()}" if a.since else a.tip
+    # The date is UTC's, so a page (and the Now golden) reads the same on
+    # every host.
+    day = a.since.astimezone(timezone.utc).date().isoformat() if a.since else ""
+    tip = f"{a.tip} {day}" if day else a.tip
     return f'<span class="age" title="{_e(tip)}">{_e(age_text(a.since, now))}</span>'
 
 
