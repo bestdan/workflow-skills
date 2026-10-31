@@ -507,7 +507,12 @@ them. These are:
 - the switch rate;
 - the share of prompts with three or more sessions active;
 - permission prompts per 100 prompts;
-- the two waits (owner on agent, and agent on owner), as median and p90.
+- the two waits (owner on agent, and agent on owner), as median and p90;
+- issues opened : closed, from counts the fleet sync takes for each 7-, 14-
+  and 30-day window ending at the sync (`github_fleet.issue_flow`). It has a
+  value only for one of those windows ending near the last sync; any other
+  window says "no source yet". The coverage rule is in `health.py`'s
+  docstring.
 
 The waits are paired per session from hook events, and read "baseline" until
 `BASELINE_DAYS` of hook data exist. Nothing is estimated: a figure with no data

@@ -10,6 +10,7 @@ import base64
 import copy
 import importlib.util
 import json
+import re
 import sqlite3
 import sys
 import tempfile
@@ -777,6 +778,22 @@ def closed_today(merged=2, closed=1, owners=1):
     return {"data": data}
 
 
+def issue_flow(scale=1):
+    """One owner's issue flow answer: each count a distinct multiple of
+    `scale`, so a sum or a swapped field shows."""
+    data = {}
+    for n, d in enumerate(fleet.ISSUE_FLOW_WINDOWS):
+        for m, key in enumerate(
+            ("opened", "closed", "previous_opened", "previous_closed")
+        ):
+            data[f"{key}_{d}"] = {"issueCount": scale * (10 * n + m + 1)}
+    return {"data": data}
+
+
+def is_flow(argv):
+    return "created:" in (arg(argv, "query") or "")
+
+
 def designs_router(listing=None, extra=()):
     listing = fixture("fleet_designs_list.json") if listing is None else listing
     by_path = {
@@ -802,6 +819,7 @@ def designs_router(listing=None, extra=()):
     return Router(
         list(extra)
         + [
+            (is_flow, ok(issue_flow())),
             (lambda a: "issueCount" in (arg(a, "query") or ""), ok(closed_today())),
             (lambda a: a[2].endswith("/contents/dev_docs/designs"), ok(listing)),
             (lambda a: "/contents/dev_docs/designs/" in a[2], file_response),
@@ -946,7 +964,8 @@ class ClosedTests(unittest.TestCase):
             runner,
             now=NOW,
         )
-        urls = [r["url"] for r in plan["rows"] if r["kind"] != fleet.CLOSED_TODAY]
+        counts = (fleet.CLOSED_TODAY, fleet.ISSUE_FLOW)
+        urls = [r["url"] for r in plan["rows"] if r["kind"] not in counts]
         self.assertEqual(len(urls), len(set(urls)))
         self.assertEqual(sum(1 for r in plan["rows"] if r["kind"] == "closed_pr"), 2)
 
@@ -1003,7 +1022,14 @@ class WriteTests(unittest.TestCase):
         )
         self.assertEqual(
             kinds,
-            {"pr": 4, "issue": 3, "design": 1, "closed_pr": 3, "closed_today": 1},
+            {
+                "pr": 4,
+                "issue": 3,
+                "design": 1,
+                "closed_pr": 3,
+                "closed_today": 1,
+                "issue_flow": 1,
+            },  # fmt: skip
         )
         raw = json.loads(
             self.conn.execute(
@@ -1073,6 +1099,10 @@ class WriteTests(unittest.TestCase):
         self.assertIn("is:pr is:merged", counts)
         self.assertIn("author:@me", counts)
         self.assertIn("assignee:@me", counts)
+        # Scope "me" counts no issue flow: the fleet's figure is the owner's.
+        self.assertFalse([a for a in runner.calls if is_flow(a)])
+        self.assertFalse([r for r in plan["rows"] if r["kind"] == fleet.ISSUE_FLOW])
+        self.assertNotIn(fleet.ISSUE_FLOW, plan["failed"])
 
     def test_owner_scope_issue_searches_name_no_one(self):
         org = fleet.github_gh.owner_qualifier("bestdan")
@@ -1247,6 +1277,110 @@ class ClosedTodayTests(unittest.TestCase):
         self.assertIn(fleet.CLOSED_TODAY, plan["failed"])
         self.assertFalse([r for r in plan["rows"] if r["kind"] == fleet.CLOSED_TODAY])
         self.assertTrue([r for r in plan["rows"] if r["kind"] == "pr"])
+
+
+class IssueFlowTests(unittest.TestCase):
+    OWNERS = ["acme", "example-org"]
+
+    def run_flow(self, owners=None):
+        runner = Router([(lambda a: True, ok(issue_flow()))])
+        row = fleet.issue_flow(self.OWNERS if owners is None else owners, NOW, runner)
+        return row, runner
+
+    def test_one_call_per_owner_of_twelve_issue_counts(self):
+        _, runner = self.run_flow()
+        self.assertEqual(len(runner.calls), 2)
+        for call, owner in zip(runner.calls, self.OWNERS):
+            query = arg(call, "query")
+            org = fleet.github_gh.owner_qualifier(owner)
+            searches = re.findall(r'(\w+): search\(query: "([^"]*)"', query)
+            self.assertEqual(len(searches), 12)
+            self.assertEqual(query.count("first: 0"), 12)
+            self.assertNotIn("is:pr", query)
+            for _, q in searches:
+                self.assertTrue(q.startswith("is:issue "), q)
+                self.assertTrue(q.endswith(f" {org}"), q)
+
+    def test_windows_end_at_now_and_do_not_overlap(self):
+        _, runner = self.run_flow(["acme"])
+        searches = dict(
+            re.findall(
+                r'(\w+): search\(query: "([^"]*)"', arg(runner.calls[0], "query")
+            )
+        )
+        self.assertEqual(
+            searches["opened_7"],
+            "is:issue created:2026-10-16T21:00:00+00:00..2026-10-23T20:59:59+00:00"
+            " org:acme",
+        )
+        self.assertEqual(
+            searches["closed_7"],
+            "is:issue closed:2026-10-16T21:00:00+00:00..2026-10-23T20:59:59+00:00"
+            " org:acme",
+        )
+        self.assertEqual(
+            searches["previous_closed_30"],
+            "is:issue closed:2026-08-24T21:00:00+00:00..2026-09-23T20:59:59+00:00"
+            " org:acme",
+        )
+        self.assertEqual(
+            {k for k in searches},
+            {
+                f"{p}{f}_{d}"
+                for p in ("", "previous_")
+                for f in ("opened", "closed")
+                for d in (7, 14, 30)
+            },
+        )
+
+    def test_row_sums_the_owners(self):
+        row, _ = self.run_flow()
+        self.assertEqual(
+            (row["kind"], row["key"], row["taken_at"]),
+            (fleet.ISSUE_FLOW, fleet.ISSUE_FLOW, "2026-10-23T21:00:00Z"),
+        )
+        self.assertEqual(set(row["windows"]), {"7", "14", "30"})
+        self.assertEqual(
+            row["windows"]["14"],
+            {"opened": 22, "closed": 24, "previous_opened": 26, "previous_closed": 28},
+        )
+        self.assertEqual(row["windows"]["7"]["opened"], 2)
+
+    def test_no_owner_makes_no_call(self):
+        row, runner = self.run_flow([])
+        self.assertIsNone(row)
+        self.assertEqual(runner.calls, [])
+
+    def test_a_malformed_answer_is_a_gh_error(self):
+        runner = Router([(lambda a: True, ok({"data": {"opened_7": {}}}))])
+        with self.assertRaises(fleet.GhError):
+            fleet.issue_flow(["acme"], NOW, runner)
+
+    def fetch(self, runner):
+        return fleet.fetch(
+            {"github": {"orgs": self.OWNERS, "scope": "owner", "design_repos": []}},
+            runner,
+            now=NOW,
+        )
+
+    def test_one_failed_owner_stores_no_row(self):
+        runner = WriteTests().full_runner()
+        runner.rules.insert(
+            0,
+            (lambda a: is_flow(a) and "org:example-org" in arg(a, "query"),
+             (1, "", "HTTP 502")),
+        )  # fmt: skip
+        plan = self.fetch(runner)
+        self.assertEqual(sum(1 for a in runner.calls if is_flow(a)), 2)
+        self.assertIn(fleet.ISSUE_FLOW, plan["failed"])
+        self.assertFalse([r for r in plan["rows"] if r["kind"] == fleet.ISSUE_FLOW])
+        self.assertTrue([r for r in plan["rows"] if r["kind"] == "pr"])
+
+    def test_an_auth_failure_raises(self):
+        runner = WriteTests().full_runner()
+        runner.rules.insert(0, (is_flow, (1, "", "HTTP 401: Bad credentials")))
+        with self.assertRaises(fleet.github_gh.AuthError):
+            self.fetch(runner)
 
 
 class SizeTests(unittest.TestCase):

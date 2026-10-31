@@ -74,6 +74,14 @@ and a closed-today count of my merged PRs and the issues assigned to me. My
 closed PRs and the design repos are the same in both. The sync runs fetch()
 only with "owner" (sync.fleet_enabled).
 
+ISSUE FLOW is the Health panel's "Issues opened : closed": one `issue_flow`
+row holding, for each window in ISSUE_FLOW_WINDOWS (health.WINDOWS) ending at
+the sync, how many issues were opened and closed in it and in the window
+before it (issue_flow()). Only the counts and when they were taken are kept,
+never the issues: one `issueCount` call per owner. fetch() reads them with
+scope "owner" only, and when any owner's call fails it stores no row and
+lists ISSUE_FLOW in `failed`, since a partial sum is a wrong number.
+
 Run `python github_fleet.py review-queue <owner>...` (under uv, Python 3.11+)
 to print the counts and the searches behind them, and
 `python github_fleet.py issues <owner>...` to print how many open issues the
@@ -186,6 +194,14 @@ CLOSED_WINDOW_DAYS = 14
 # The one `closed_today` row (closed_today()): what the fleet closed since
 # local midnight, for Little mode's header (fleet_now.py).
 CLOSED_TODAY = "closed_today"
+
+# The one `issue_flow` row (issue_flow()): issues opened and closed in each
+# Health window ending at the sync, and in the window before each, for the
+# Health panel's "Issues opened : closed" (health.issue_flow). health.WINDOWS
+# must equal this, and health asserts it: health imports this module, so the
+# windows are named here to keep the import one-way.
+ISSUE_FLOW = "issue_flow"
+ISSUE_FLOW_WINDOWS = (7, 14, 30)
 
 COMMENTS_QUERY = """
 query($owner: String!, $name: String!, $number: Int!) {
@@ -786,6 +802,74 @@ def closed_today(
     }
 
 
+def _search_stamp(dt: datetime) -> str:
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+
+
+def issue_flow(
+    owners: Iterable[str],
+    now: datetime,
+    runner: Runner = run,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> "dict | None":
+    """Issues opened and closed in the owners' repos per ISSUE_FLOW_WINDOWS
+    window: the `issue_flow` row, or None with no owner.
+
+    Window `d` is the `d` days up to `now` (to the second), and its previous
+    window the `d` days before that. GitHub's `lo..hi` range includes both
+    ends, so each range stops a second short of the next window's start and
+    no issue is counted in both. Issues only, by anyone: PRs never count.
+
+    One GraphQL call per owner, every count an `issueCount` alias, so it
+    costs no page of nodes; the counts are summed over the owners. A failed
+    call or a malformed answer raises GhError, as any search here.
+    """
+    owners = list(owners)
+    if not owners:
+        return None
+    end = now.replace(microsecond=0)
+    second = timedelta(seconds=1)
+    totals = {
+        str(d): {
+            "opened": 0, "closed": 0, "previous_opened": 0, "previous_closed": 0
+        }
+        for d in ISSUE_FLOW_WINDOWS
+    }  # fmt: skip
+    for owner in owners:
+        org = github_gh.owner_qualifier(owner)  # validated: safe to inline
+        parts = []
+        for d in ISSUE_FLOW_WINDOWS:
+            span = timedelta(days=d)
+            for prefix, hi in (("", end), ("previous_", end - span)):
+                rng = f"{_search_stamp(hi - span)}..{_search_stamp(hi - second)}"
+                for field, qualifier in (("opened", "created"), ("closed", "closed")):
+                    q = f"is:issue {qualifier}:{rng} {org}"
+                    parts.append(
+                        f'{prefix}{field}_{d}: search(query: "{q}",'
+                        " type: ISSUE, first: 0) { issueCount }"
+                    )
+        query = "query { " + " ".join(parts) + " }"
+        data = github_gh._call(
+            ["gh", "api", "graphql", "-f", f"query={query}"], runner, timeout
+        )
+        try:
+            got = data["data"]
+            for d in ISSUE_FLOW_WINDOWS:
+                for key in totals[str(d)]:
+                    totals[str(d)][key] += int(got[f"{key}_{d}"]["issueCount"])
+        except (KeyError, TypeError, ValueError):
+            raise GhError(
+                f"unexpected GraphQL response for the issue flow counts of {owner}"
+            ) from None
+    return {
+        "kind": ISSUE_FLOW,
+        "key": ISSUE_FLOW,
+        "title": "issues opened and closed",
+        "taken_at": end.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "windows": totals,
+    }
+
+
 def queue_counts(rows: Iterable[dict]) -> dict[str, int]:
     """`queue` (the gauge: all four rules), `awaiting` (rule 1 only) and
     `others` (PRs from others)."""
@@ -1133,6 +1217,17 @@ def fetch(
         failed.append(CLOSED_TODAY)
     if today is not None:
         rows.append(today)
+    # All or nothing: a sum missing an owner would be a wrong number.
+    if scope == "owner":
+        try:
+            flow = issue_flow(owners, now, runner, timeout)
+        except github_gh.AuthError:
+            raise
+        except GhError:
+            flow = None
+            failed.append(ISSUE_FLOW)
+        if flow is not None:
+            rows.append(flow)
     return {
         "rows": rows,
         "failed": failed,

@@ -676,6 +676,11 @@ class FleetGh:
             counts = {a: {"issueCount": 0} for a in aliases}
             counts["c0"] = {"issueCount": self.issues_changed}
             return 0, json.dumps({"data": counts}), ""
+        if any("created:" in a for a in argv):
+            # The Health issue flow counts (github_fleet.issue_flow): all 0.
+            query = next(a for a in argv if a.startswith("query="))
+            aliases = re.findall(r"(\w+): search", query)
+            return 0, json.dumps({"data": {a: {"issueCount": 0} for a in aliases}}), ""
         if any("issueCount" in a for a in argv):
             counts = {"m0": {"issueCount": 0}, "i0": {"issueCount": 0}}
             return 0, json.dumps({"data": counts}), ""
@@ -759,11 +764,12 @@ class FleetTests(FleetCase):
                 "https://github.com/acme/app/pull/2": "awaiting",
                 "https://github.com/acme/app/issues/5": None,
                 "closed_today": None,
+                "issue_flow": None,
             },
         )
         counts = json.loads(rows[1]["counts"])
         self.assertEqual(
-            (counts["queue"], counts["awaiting"], counts["rows"]), (1, 2, 4)
+            (counts["queue"], counts["awaiting"], counts["rows"]), (1, 2, 5)
         )
         self.assertEqual(self.keys(), ["DEMO-1"])
 
@@ -808,7 +814,7 @@ class FleetTests(FleetCase):
         acli.auth = True
         rows = self.run_all(make_config(enabled=True, scope="owner"), FleetGh(), acli)
         self.assertEqual([r["outcome"] for r in rows], ["auth_failed", "ok", "ok"])
-        self.assertEqual(len(self.github_rows()), 4)  # with closed_today
+        self.assertEqual(len(self.github_rows()), 5)  # with the two counts rows
 
     def test_fleet_run_is_not_a_jira_cursor(self):
         # The fleet run starts after the Jira run, as it does in production, so
