@@ -81,16 +81,21 @@ def blocking(key, state_type="unstarted"):
 
 
 class FakeLinear:
-    """Answers the assignedIssues query, `per_page` nodes a page."""
+    """Answers the issue queries, `per_page` nodes a page, and the user lookup
+    for the emails in `users`."""
 
-    def __init__(self, nodes=(), fail=None, per_page=50):
+    def __init__(self, nodes=(), fail=None, per_page=50, users=("me@example.com",)):
         self.nodes, self.fail, self.per_page = list(nodes), fail, per_page
+        self.users = {u.lower() for u in users}
         self.calls = []
 
     def __call__(self, body, key, timeout):
         self.calls.append((body, key))
         if self.fail:
             raise self.fail
+        if "users(" in body["query"]:
+            hit = body["variables"]["email"].lower() in self.users
+            return {"data": {"users": {"nodes": [{"id": "u1"}] if hit else []}}}
         start = int(body["variables"]["after"] or 0)
         end = start + self.per_page
         page = {"hasNextPage": end < len(self.nodes), "endCursor": str(end)}
@@ -163,15 +168,23 @@ class ReadTests(Case):
         fake = FakeLinear([node("PRE-1")])
         (issue,) = linear_api.assigned_issues("k", fake, assignee="me@example.com")
         self.assertEqual(issue["key"], "PRE-1")
-        body, _ = fake.calls[0]
+        body, _ = fake.calls[-1]
         self.assertEqual(body["variables"]["email"], "me@example.com")
         self.assertNotIn("viewer", body["query"])
+
+    def test_linear_me_naming_no_user_fails_and_keeps_the_rows(self):
+        self.mirror(node("PRE-1"))
+        cfg = config.deep_merge(CFG, {"linear": {"me": "typo@example.com"}})
+        run = self.step(FakeLinear([node("PRE-2")]), cfg=cfg)
+        self.assertEqual(run["outcome"], "failed")
+        self.assertIn("linear.me names no Linear user", run["error"])
+        self.assertEqual(self.keys(), ["PRE-1"])
 
     def test_the_step_passes_linear_me(self):
         fake = FakeLinear([node("PRE-1")])
         cfg = config.deep_merge(CFG, {"linear": {"me": " me@example.com "}})
         self.assertEqual(self.step(fake, cfg=cfg)["outcome"], "ok")
-        self.assertEqual(fake.calls[0][0]["variables"]["email"], "me@example.com")
+        self.assertEqual(fake.calls[-1][0]["variables"]["email"], "me@example.com")
         self.step(fake)
         self.assertNotIn("email", fake.calls[-1][0]["variables"])
 
@@ -183,6 +196,14 @@ class ReadTests(Case):
         path.write_text(jira_off + "[linear]\nenabled = true\nme = 7\n")
         with self.assertRaisesRegex(config.ConfigError, "linear.me must be a string"):
             config.load(path)
+
+    def test_a_list_cut_short_at_the_cap_is_counted_as_truncated(self):
+        more = {"hasNextPage": True}
+        cut = node("PRE-2", inverseRelations={"pageInfo": more, "nodes": []})
+        counts = self.mirror(node("PRE-1"), cut)
+        self.assertEqual(counts["truncated"], 1)
+        rows = linear_api.assigned_issues("k", FakeLinear([node("PRE-1"), cut]))
+        self.assertEqual([i["truncated"] for i in rows], [False, True])
 
     def test_only_open_issues_on_the_other_end_of_blocks_count(self):
         n = node(
@@ -265,21 +286,45 @@ class StepTests(Case):
         self.assertEqual(self.keys(), ["PRE-1"])
 
     def test_run_all_runs_it_only_when_linear_is_on_on_any_instance(self):
+        # GitHub off too, so run_all builds no real gh adapter.
+        no_gh = {"github": {"enabled": False}}
+        on, off_cfg = config.deep_merge(CFG, no_gh), config.deep_merge(OFF, no_gh)
         fake = FakeLinear([node("PRE-1")])
         kinds = [
             r["kind"]
             for r in sync.run_all(
-                "incremental", CFG, self.conn, NOW, linear_runner=fake,
+                "incremental", on, self.conn, NOW, linear_runner=fake,
                 resolve_key=lambda: "k", clock=lambda: NOW,
             )
         ]  # fmt: skip
         self.assertIn(linear_issues.RUN_KIND, kinds)
-        self.assertFalse(sync.fleet_enabled(CFG))
+        self.assertFalse(sync.fleet_enabled(on))
         off = sync.run_all(
-            "incremental", OFF, self.conn, NOW, linear_runner=fake,
+            "incremental", off_cfg, self.conn, NOW, linear_runner=fake,
             resolve_key=lambda: "k", clock=lambda: NOW,
         )  # fmt: skip
         self.assertNotIn(linear_issues.RUN_KIND, [r["kind"] for r in off])
+
+    def test_run_all_resolves_the_key_once_for_both_linear_steps(self):
+        calls = []
+
+        def resolve():
+            calls.append(1)
+            return "k"
+
+        memo = sync.once(resolve)
+        self.assertEqual((memo(), memo()), ("k", "k"))
+        self.assertEqual(len(calls), 1)
+
+        def missing():
+            calls.append(1)
+            no_key()
+
+        memo = sync.once(missing)
+        for _ in range(2):
+            with self.assertRaises(linear_api.NoKey):
+                memo()
+        self.assertEqual(len(calls), 2)
 
     def test_the_freshness_panel_names_the_step(self):
         self.assertIn(

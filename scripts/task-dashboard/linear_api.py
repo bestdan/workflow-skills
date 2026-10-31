@@ -24,9 +24,10 @@ records as "linear: no key". Any other failure keeps its category (`no-session`,
 the key nor a reference is ever put in a message.
 
 Projects are every project the key can see whose status type is not
-`completed` or `canceled`, filtered here rather than in the query. The key
-lookup is ONE `issues` query per sync (paged at 250), filtered to the keys'
-team and number, and only for keys whose team owns an open project.
+`completed` or `canceled`, filtered here rather than in the query. The
+Workstreams key lookup is ONE `issues` query per sync (paged at 250), filtered
+to the keys' team and number, and only for keys whose team owns an open
+project. Now's read (assigned_issues) is its own paged query.
 """
 
 import importlib.util
@@ -315,7 +316,9 @@ OPEN_STATE_TYPES = ("unstarted", "started")
 # Linear refuses a query whose page size times its nested connections' sizes
 # is "too complex": with the nested ones at their default of 50, a page of 50
 # issues was refused (2026-10-31). An issue rarely carries more than 10
-# labels or relations; one that does loses the rest.
+# labels or relations; one that does loses the rest, which can hide a
+# `blocked` label or an open blocker. assigned_issues marks it `truncated`, and
+# the sync step counts those, so a miss that stops being rare shows up.
 _ISSUE_NODES = """
       pageInfo { hasNextPage endCursor }
       nodes {
@@ -323,13 +326,15 @@ _ISSUE_NODES = """
         createdAt updatedAt startedAt
         state { name type }
         team { key }
-        labels(first: 10) { nodes { name } }
+        labels(first: 10) { pageInfo { hasNextPage } nodes { name } }
         cycle { name endsAt isActive }
         project { id name }
         relations(first: 10) {
+          pageInfo { hasNextPage }
           nodes { type relatedIssue { identifier state { type } } }
         }
         inverseRelations(first: 10) {
+          pageInfo { hasNextPage }
           nodes { type issue { identifier state { type } } }
         }
       }"""
@@ -356,6 +361,14 @@ query($after: String, $types: [String!], $email: String!) {{
 }}
 """
 
+# Whether `linear.me` names a user: the issues filter matches nothing for an
+# email no user has, which would read as "no open issues".
+USER_QUERY = """
+query($email: String!) {
+  users(first: 1, filter: {email: {eqIgnoreCase: $email}}) { nodes { id } }
+}
+"""
+
 
 def _open_blocks(relations: Any, side: str) -> list[str]:
     """The keys of the open issues on `side` of each `blocks` relation."""
@@ -380,9 +393,17 @@ def assigned_issues(
     url, state, state_type, priority (0 none, 1 urgent .. 4 low),
     priority_label, due, created, updated, started, team, labels, cycle,
     cycle_end, cycle_active, project, blocked_by, blocks}. `blocked_by` and
-    `blocks` are the open issues on the other end of a `blocks` relation."""
+    `blocks` are the open issues on the other end of a `blocks` relation.
+    Raises LinearError when `assignee` names no Linear user."""
     variables: dict[str, Any] = {"types": list(OPEN_STATE_TYPES)}
     if assignee:
+        found = _data(
+            runner(
+                {"query": USER_QUERY, "variables": {"email": assignee}}, key, timeout
+            )
+        )
+        if not ((found.get("users") or {}).get("nodes")):
+            raise LinearError(f"linear.me names no Linear user: {assignee}")
         query, field = ASSIGNEE_QUERY, "issues"
         variables["email"] = assignee
     else:
@@ -418,6 +439,10 @@ def assigned_issues(
                 "project": (node.get("project") or {}).get("name"),
                 "blocked_by": _open_blocks(node.get("inverseRelations"), "issue"),
                 "blocks": _open_blocks(node.get("relations"), "relatedIssue"),
+                "truncated": any(
+                    ((node.get(f) or {}).get("pageInfo") or {}).get("hasNextPage")
+                    for f in ("labels", "relations", "inverseRelations")
+                ),
             }
         )
     return out

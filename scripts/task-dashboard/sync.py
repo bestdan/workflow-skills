@@ -868,6 +868,25 @@ def run_workstreams(
     return _run_row(db, run_id)
 
 
+def once(resolve_key: "Callable[[], str]") -> "Callable[[], str]":
+    """`resolve_key`, called at most once: later calls return its key, or
+    raise the linear_api.NoKey it raised. run_all hands one to both Linear
+    steps, so a sync whose key comes from `op read` reads it once."""
+    memo: "list[Any]" = []
+
+    def call() -> str:
+        if not memo:
+            try:
+                memo.append(resolve_key())
+            except linear_api.NoKey as exc:
+                memo.append(exc)
+        if isinstance(memo[0], linear_api.NoKey):
+            raise memo[0]
+        return memo[0]
+
+    return call
+
+
 def run_all(
     mode: str,
     config: dict[str, Any],
@@ -892,6 +911,7 @@ def run_all(
     """
     clock = clock or _wall
     step = on_step or (lambda _kind: None)
+    resolve_key = once(resolve_key)
     step(mode)
     rows = [run(mode, config, db, now, jira=jira, github=github, clock=clock)]
     if fleet_enabled(config):

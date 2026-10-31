@@ -40,8 +40,8 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import claude_remote
-import linear_issues
 import collector_install
+import linear_issues
 import score
 import sessions
 import sync

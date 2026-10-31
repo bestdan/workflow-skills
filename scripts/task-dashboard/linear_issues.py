@@ -13,7 +13,8 @@ each read is a full snapshot, and write() replaces the source's rows with it:
 an issue that was finished, canceled, moved to the backlog or reassigned
 leaves the mirror on the next good run. Set `me` when the key was made on a
 different account from the one the issues are assigned to: without it the
-read comes back empty rather than failing.
+read returns the key's own account's issues instead, with no error. A `me`
+that names no Linear user is `failed` (linear_api.assigned_issues checks).
 
 THE ROW, under `source = 'linear'`, `kind = 'ticket'` (include's `tasks`
 group), keyed by the identifier (`PRE-123`). It fills the Jira columns so
@@ -74,7 +75,7 @@ def to_row(issue: dict[str, Any]) -> dict[str, Any]:
 
 def write(conn: sqlite3.Connection, issues: list[dict], now: datetime) -> dict:
     """Replace the source's rows with `issues`, in one transaction. Returns
-    {issues, started, blocked, dropped}."""
+    {issues, started, blocked, truncated, dropped}."""
     stamp = now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     rows = [to_row(i) for i in issues]
     cols = list(rows[0]) if rows else []
@@ -105,6 +106,9 @@ def write(conn: sqlite3.Connection, issues: list[dict], now: datetime) -> dict:
         "issues": len(issues),
         "started": sum(1 for i in issues if i.get("state_type") == "started"),
         "blocked": sum(1 for i in issues if i.get("blocked_by")),
+        # Labels or relations cut short at linear_api's cap of 10: a blocker
+        # past the cap is missed.
+        "truncated": sum(1 for i in issues if i.get("truncated")),
         "dropped": dropped,
     }
 

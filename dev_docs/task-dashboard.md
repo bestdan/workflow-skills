@@ -263,8 +263,9 @@ Jira views with no Jira.
 instance, the `linear_issues` step mirrors the open issues (state type
 `unstarted` or `started`) assigned to `linear.me`, an email, or with it unset
 to the key's own user. Set `me` when the key was made on a different Linear
-account from the one the issues are assigned to: otherwise the read finds
-none. Now ranks them as it ranks Jira
+account from the one the issues are assigned to: otherwise it reads the key's
+own account's issues instead, with no error. A `me` that names no Linear user
+fails the step and keeps the last good rows. Now ranks them as it ranks Jira
 tickets: started is the `started` tier, unstarted lands in the rest, an open
 blocker or the `blocked` label sends one to the blocked tier, and a PR whose
 title or branch carries the key folds into its card. `linear_issues.py` and
