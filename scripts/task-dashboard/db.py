@@ -3,9 +3,10 @@
 Two kinds of table share one file and must stay apart. MIRROR tables are the
 sync's: any row may be overwritten or deleted on the next run. OVERLAY tables
 (pins, order, snoozes, notes, kind tags, ignores, last visit, view filters,
-"why not now" answers) are
+"why not now" answers, plans) are
 the user's, keyed by (source, item key) apart from the one-row last visit and
-the per-view filters, and a sync never touches them; they are the only state
+Now mode, the per-view filters, and plans, keyed by (scope, kind), and a sync
+never touches them; they are the only state
 here that cannot be rebuilt. `now_shown`, the base rate Now's "why not now"
 answers are compared with, is neither: nothing rebuilds it, but losing it costs
 only the comparison, so it is not exported either.
@@ -53,6 +54,8 @@ OVERLAY_SINGLETONS = ("last_visit", "now_mode")
 OVERLAY_VIEW_TABLES = ("view_includes",)
 # Append-only answers, many per item: Now's "why not now" (whynot.py).
 OVERLAY_LOG_TABLES = ("why_not",)
+# Keyed by (scope, kind) rather than by item: the plans agents and the owner set.
+OVERLAY_PLAN_TABLES = ("plans",)
 
 _V1 = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -434,6 +437,28 @@ CREATE TABLE now_mode (
 );
 """
 
+# Version 12: `plans` (plans.py), an ordered list of items for a scope with a
+# reason each. Overlay state: export and import carry it.
+#
+# - `scope`: one scope id (agent_query) or `all`; `kind`: `standing`, or
+#   `session`, which expires. One plan per (scope, kind).
+# - `entries`: a JSON list of {source, key, reason[, action, est_min]}, in order.
+# - `author`: free text, who wrote it. `mode` and `minutes`: what it was set for.
+# - `expires_at`: NULL for a standing plan.
+_V12 = """
+CREATE TABLE plans (
+    scope TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('standing', 'session')),
+    entries TEXT NOT NULL,
+    author TEXT NOT NULL,
+    mode TEXT,
+    minutes INTEGER,
+    created_at TEXT NOT NULL,
+    expires_at TEXT,
+    PRIMARY KEY (scope, kind)
+);
+"""
+
 # Ordered, ascending, append-only: never edit a shipped entry.
 #
 # migrate() runs a script one statement at a time through _statements, which
@@ -456,6 +481,7 @@ MIGRATIONS: list[tuple[int, str]] = [
     (9, _V9),
     (10, _V10),
     (11, _V11),
+    (12, _V12),
 ]
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 
