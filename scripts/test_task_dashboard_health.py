@@ -221,8 +221,6 @@ class FigureTest(DbCase):
                 tuple(map(sorted, got)),
                 tuple(map(sorted, two_pass_waits(self.conn, lo, hi))),
             )
-            # The reference's [lo, end) read keeps every wait closing at or
-            # after lo, so for the earlier window drop those closing past hi.
         return one_pass
 
     def test_one_pass_waits_match_two_pass_reference(self):
@@ -247,6 +245,20 @@ class FigureTest(DbCase):
         self.assertEqual(f["owner_wait_median"]["previous"], 17.5)
         self.assertEqual(f["agent_wait_median"]["previous"], 250.0)
         self.assertEqual(f["owner_wait_median"]["value"], 10.0)
+
+    def test_a_wait_closing_on_a_window_edge_belongs_to_the_later_window(self):
+        prev = START - (END - START)
+        seed_events(
+            self.conn,
+            [
+                (at(18, 23, 0), "e1", P, None),
+                (prev, "e1", S, None),  # closes exactly at the previous start
+                (at(19, 23, 0), "e2", P, None),
+                (START, "e2", S, None),  # closes exactly at the current start
+            ],
+        )
+        (prev_owner, _), (owner, _) = self.assert_waits_match_two_pass()
+        self.assertEqual((prev_owner, owner), ([3600.0], [3600.0]))
 
     def test_waits_scan_session_events_once_per_compute(self):
         seed(self.conn)
