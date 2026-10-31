@@ -432,6 +432,25 @@ of deep work goes to one item, and the brief gives that item's `item` dossier
 (§3) inline, so the agent can open the session with what's needed to
 resume it.
 
+> **2026-10-31, as shipped (#1285).** The sections are named `freshness`,
+> `in_flight`, `blocked`, `candidates`, `signals` and `gaps`, for
+> `--sections`. The budget is 8,000 tokens measured as the printed JSON's
+> bytes over 4, the measure of the table in "What is true today". Freshness,
+> gaps and the Deep dossier always print; the lists fill in two passes, up to
+> three items each and then the rest, in a fixed order that cuts the unsized
+> candidates first, then draft and other PRs, blocking and blocked items,
+> worktrees with no PR, the mode's candidates, the owner's signals, and last
+> the PRs and sessions the owner can act on now (ready to merge, in the
+> queue, CI failing, waiting). PR readiness is the first that holds of draft, CI
+> failing, ready to merge (CI green and approved, or a bot's PR), in the
+> review queue, else `other`. `candidates` is the mode's collector and order
+> unmodified, so an item the in-flight section already printed appears there
+> only as a stub. `--minutes` keeps each sized candidate, in order, that
+> holds the sum within twice the box, rather than stopping at the first that
+> would not. `est:3` and up have no default minutes on purpose, so they are
+> listed as unsized. `gaps` is per instance, not per scope. The "waiting"
+> and "stale" that #1285 listed are `in_flight.waiting` and `--mode tidy`.
+
 ### 5. `plan`: where the answer goes
 
 A new overlay table, `plans`, keyed by scope and kind (`standing` or

@@ -162,6 +162,16 @@ None of these needs the server running:
   `counts` (a GitHub issue, whose mirror row holds only open-blocker counts).
   `source:key` is unique; a bare key or ref is accepted only when it names one
   item, and otherwise the command exits 2 with the matches as JSON on stdout.
+- **`brief [--scope X] [--mode M] [--minutes N] [--sections S]`**
+  ([`brief.py`](../scripts/task-dashboard/brief.py)) is the one call behind
+  "prioritize X": sections `freshness` (`freshness.sources`), `in_flight`
+  (open PRs by `brief.PR_READINESS`, waiting sessions, worktrees with no
+  PR), `blocked`, `candidates` (the Now mode's collector and order, uncapped
+  and scoped), `signals` and `gaps`, all from one `collect` pass. The budget,
+  about 8k tokens as printed bytes over 4, and which list gives way first
+  (`brief.FILL`) are in the module docstring. Deep inlines the top
+  candidate's `item_doc`. The skill's procedure for it is
+  [`references/prioritize.md`](../skills/task-dashboard/references/prioritize.md).
 - **`overlay <action> --source S --key K`** makes the same write a card button
   makes, and goes through the same validation (`overlay.apply`).
 - **`refresh <owner/repo#N>`** re-reads one PR or issue from GitHub in a

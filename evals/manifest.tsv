@@ -21,3 +21,4 @@ local-review	prompts/local-review.txt	6
 task-dashboard	prompts/task-dashboard.txt	6
 task-dashboard	prompts/task-dashboard-clean.txt	6
 task-dashboard	prompts/task-dashboard-items.txt	6
+task-dashboard	prompts/task-dashboard-prioritize.txt	6
