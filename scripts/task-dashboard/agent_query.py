@@ -231,9 +231,10 @@ def resolve(scopes: list[Scope], words: "list[str] | None") -> "list[Scope] | No
 def related(
     conn: sqlite3.Connection, matched: list[Scope], items: list[Item]
 ) -> list[dict[str, Any]]:
-    """Every workstream with a member in a matched repo scope, with how many
-    of its member items are in that repo, most first. Never applied: the
-    agent confirms each one and passes its `ws:` id."""
+    """Every workstream with an open member in a matched repo scope, with how
+    many of its open member items are in that repo, most first, counted as a
+    scope's `open` is. A workstream whose members there are all done is left
+    out. Never applied: the agent confirms each one and passes its `ws:` id."""
     repos = [s for s in matched if s.kind == "repo"]
     if not repos:
         return []
@@ -241,7 +242,7 @@ def related(
     titles = dict(conn.execute("SELECT id, title FROM workstreams"))
     counts: dict[str, int] = {}
     for i in items:
-        if any(s.match(i) for s in repos):
+        if _is_open(i) and any(s.match(i) for s in repos):
             for ws in i["workstreams"]:
                 counts[ws] = counts.get(ws, 0) + 1
     out = [

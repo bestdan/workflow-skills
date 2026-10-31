@@ -219,8 +219,8 @@ a DB that is behind the current schema, once, as `view` does.
 
 - `DASH scopes <word>` says what a word can mean: each matching scope id
   (`repo:`, `ws:`, `jira:`, `epic:`, `label:`, `host:`) with its open-item
-  count. For a repo it also lists `related` workstreams, those with members
-  in the repo whatever their name. A session or worktree knows its repo only
+  count. For a repo it also lists `related` workstreams, those with open
+  members in the repo whatever their name, counting only open members. A session or worktree knows its repo only
   by directory name, so it counts under every owner's repo of that name.
   **Show `related` to the owner and pass the
   ones they confirm as `--scope ws:<id>`; never add them yourself.** Say what

@@ -192,6 +192,7 @@ OTHER_HOST = {
 
 WS = "linear:p-1"
 WS_OTHER = "linear:p-2"
+WS_DONE = "linear:p-3"  # its only finplan member is done
 WS_ALL = "design:bestdan/dotfiles/dev_docs/designs/allow.md"
 
 
@@ -221,6 +222,16 @@ def seed(conn):
         [(WS, issue_url(2), "issue"), (WS_OTHER, pr_url(12), "pr"),
          (WS_OTHER, issue_url(3), "issue"), (WS_ALL, issue_url(40, OTHER), "issue")],
     )  # fmt: skip
+    conn.execute(
+        "INSERT INTO workstreams (id, source, title) VALUES (?, 'linear', ?)",
+        (WS_DONE, "Finished Thing"),
+    )
+    conn.execute(
+        "INSERT INTO workstream_members (ws_id, item_source, item_key, kind, via,"
+        " is_open, started, waiting) VALUES (?, 'machine:mini', ?, 'worktree',"
+        " 'test', 0, 0, 0)",
+        (WS_DONE, f"worktree:{WT}/old"),
+    )
     # A Jira ticket under an epic, blocked by an open one, and a PR naming it.
     conn.executemany(
         "INSERT INTO issues (source, kind, key, summary, status_name,"
@@ -302,6 +313,10 @@ class ScopeTests(Case):
             [{"id": f"ws:{WS_OTHER}", "kind": "workstream",
               "title": "Decumulation", "members_in_scope": 2}],
         )  # fmt: skip
+
+    def test_related_leaves_out_a_workstream_with_only_done_members(self):
+        ids = [r["id"] for r in self.scopes("finplan")["related"]]
+        self.assertNotIn(f"ws:{WS_DONE}", ids)
 
     def test_no_query_lists_every_kind_and_no_related(self):
         doc = self.scopes()
