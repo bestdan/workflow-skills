@@ -314,7 +314,7 @@ class OrderTests(NeedsCase):
         self.assertNotIn('class="brief"', first)
         self.assertEqual(first.count("feat: thing 1201"), 1)
         self.assertEqual(first.count(">3d</span>"), 1)
-        self.assertEqual(first.count('title="CI success">CI</span>'), 1)
+        self.assertEqual(first.count(views.cards.ci("success")), 1)
         # The title links to the PR, so, as on Now, there is no "open the PR";
         # the controls stay.
         self.assertNotIn("open the PR", first)
@@ -338,10 +338,11 @@ class OrderTests(NeedsCase):
             f' <span class="ref">{REPO}#1201</span>',
             main,
         )
-        self.assertIn(
-            '<summary><span class="title">needs a human</span>'
-            f' <span class="ref">{REPO}#950</span>',
+        self.assertRegex(
             main,
+            r'<summary><span class="lead"><span class="kind k-open"[^>]*><svg .*?</svg>'
+            r'</span></span><span class="title">needs a human</span>'
+            rf' <span class="ref">{re.escape(REPO)}#950</span>',
         )
         self.assertNotIn(f"{REPO}#1201 feat", main)
 
@@ -918,7 +919,8 @@ class EndedTests(NeedsCase):
         row = card(section(self.page(), "finished"), "s-turn")
         self.assertRegex(
             row,
-            r'<summary><span class="title">notes</span> <span class="meta">'
+            r'<summary><span class="lead"><span class="kind k-session"[^>]*><svg .*?</svg>'
+            r'</span></span><span class="title">notes</span> <span class="meta">'
             r'<span class="age" title="last active [0-9-]+">6h</span> · on mini'
             r'</span></summary><div class="act">→ ended · resume with <code>'
             rf"claude --resume s-turn</code> in {re.escape(TURN_CWD)} on mini</div>"

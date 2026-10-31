@@ -54,21 +54,44 @@ class RenderTests(unittest.TestCase):
         self.assertIn('fix it</a> <span class="ref">o/r#7</span>', html)
         self.assertIn(
             '<div class="meta"><span class="age" title="opened 2026-06-16">130d</span>'
-            ' · your PR · <span class="ci ci-bad" title="CI failure">CI</span></div>',
+            ' · your PR · <span class="ci ci-bad" role="img" aria-label="CI failure"'
+            ' title="CI failure"><svg ',
             html,
         )
 
-    def test_ci_is_the_word_alone(self):
+    def test_ci_is_githubs_mark_named_by_its_state(self):
+        cases = [
+            ("success", "ci ci-ok", "CI success", "check"),
+            ("failure", "ci ci-bad", "CI failure", "x"),
+            ("pending", "ci ci-pending", "CI pending", "dot-fill"),
+            (None, "ci", "CI unknown", "circle-dashed"),
+        ]
+        for state, cls, word, glyph in cases:
+            self.assertEqual(
+                cards.ci(state),
+                f'<span class="{cls}" role="img" aria-label="{word}"'
+                f' title="{word}">{cards.icons.svg(glyph)}</span>',
+            )
         self.assertEqual(
-            cards.ci("success"), '<span class="ci" title="CI success">CI</span>'
+            cards.ci_words("draft · CI failure"), "draft · " + cards.ci("failure")
         )
-        self.assertEqual(
-            cards.ci(None), '<span class="ci" title="CI unknown">CI</span>'
+
+    def test_the_kind_icon_leads_the_title(self):
+        html = cards.render(card(kind="pr-draft"), None, NOW)
+        self.assertTrue(html.startswith('<div class="card" data-source="github"'))
+        self.assertIn(
+            '<span class="lead"><span class="kind k-draft" role="img"'
+            ' aria-label="Draft pull request" title="Draft pull request"><svg ',
+            html,
         )
-        self.assertEqual(
-            cards.ci_words("draft · CI failure"),
-            'draft · <span class="ci ci-bad" title="CI failure">CI</span>',
-        )
+        self.assertLess(html.index('class="lead"'), html.index('class="title"'))
+
+    def test_a_status_icon_replaces_the_kind_icon_and_no_kind_draws_none(self):
+        html = cards.render(card(kind="pr", icon="<i>s</i>"), None, NOW)
+        self.assertIn('<span class="lead"><i>s</i></span>', html)
+        self.assertNotIn('class="kind', html)
+        self.assertNotIn('class="lead"', cards.render(card(), None, NOW))
+        self.assertNotIn('class="lead"', cards.render(card(kind="?"), None, NOW))
 
     def test_the_score_sits_behind_a_question_mark(self):
         html = cards.render(

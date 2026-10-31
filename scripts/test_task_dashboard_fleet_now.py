@@ -330,7 +330,8 @@ class RenderTests(Case):
         # The act comes before the title, with no "open it": the title links there.
         self.assertLess(card.index('<div class="act">'), card.index('class="title"'))
         self.assertNotIn(">open it<", card)
-        self.assertIn('<span class="ci ci-bad" title="CI failure">CI</span>', card)
+        self.assertIn(views.cards.ci("failure"), card)
+        self.assertIn('aria-label="Open pull request"', card)
         # The score's breakdown pops over from a "?" at the end of the meta line.
         meta = re.search(r'<div class="meta">.*?</span></div>', card)
         assert meta is not None
@@ -1234,6 +1235,13 @@ class TidyTests(Case):
         self.assertEqual(cats[issue_url(14)], "untriaged")
         self.assertEqual(cats[issue_url(10)], "human_issue")
         self.assertEqual(cats[pr_url(5)], "stale_pr")
+
+    def test_a_stale_draft_leads_with_the_draft_icon(self):
+        page = fleet_now.render(self.conn, self.cfg, NOW,
+                                include.everything("now"), "tidy")  # fmt: skip
+        draft = needs_fx.card(page, pr_url(5))
+        self.assertIn('aria-label="Draft pull request"', draft)
+        self.assertNotIn('aria-label="Open pull request"', draft)
 
     def test_the_first_matching_label_names_the_category(self):
         self.conn.execute("DELETE FROM issues")

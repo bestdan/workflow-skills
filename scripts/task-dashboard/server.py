@@ -463,10 +463,11 @@ _e = html.escape
 
 CSS = """
 :root { --fg:#1f2328; --muted:#59636e; --bg:#fff; --card:#f6f8fa; --line:#d1d9e0;
-  --bad:#cf222e; --badbg:#ffebe9; --accent:#0969da; }
+  --bad:#cf222e; --badbg:#ffebe9; --accent:#0969da; --ok:#1a7f37; --warn:#9a6700;
+  --done:#8250df; }
 @media (prefers-color-scheme: dark) { :root { --fg:#e6edf3; --muted:#9198a1;
   --bg:#0d1117; --card:#161b22; --line:#3d444d; --bad:#ff7b72; --badbg:#3c1618;
-  --accent:#4493f8; } }
+  --accent:#4493f8; --ok:#3fb950; --warn:#d29922; --done:#ab7df8; } }
 * { box-sizing: border-box; }
 body { margin:0; font:14px/1.45 -apple-system,system-ui,sans-serif; color:var(--fg);
   background:var(--bg); }

@@ -243,6 +243,7 @@ def _pr_card(p: dict, why: str, ov: overlay.Overlay, now: datetime) -> str:
         p.get("title") or "",
         p["url"],
         f"{p.get('repo') or ''}#{p.get('number')}",
+        kind="pr-draft" if p.get("is_draft") else "pr",
         tag=' <span class="badge">bot</span>' if row.get("author_is_bot") else "",
         age=cards.Age(score.parse_ts(p.get("created")), "opened"),
         meta=by + [cards.ci(p.get("ci_state"))] + ([_e(why)] if why else []),
@@ -374,8 +375,9 @@ def _issue_card(row: dict, ov: overlay.Overlay, now: datetime) -> str:
         row.get("title") or "",
         str(row.get("url") or ""),
         f"{row.get('repo') or ''}#{row.get('number')}",
+        kind="issue",
         age=cards.Age(score.parse_ts(row.get("created")), "opened"),
-        meta=[_e(lb) for lb in labels if lb.startswith(("prio:", "est:"))],
+        meta=[cards.label(lb) for lb in labels if lb.startswith(("prio:", "est:"))],
     )
     return _card(c, ov, now)
 

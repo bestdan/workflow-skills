@@ -118,8 +118,7 @@ ENDED = "ended"
 RESUME_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 
 CSS = """
-.needs .need { padding:6px 10px; }
-.needs .need.first { border-width:2px; }
+.needs .need.first { box-shadow:inset 3px 0 var(--accent); }
 .needs .visit { display:flex; flex-wrap:wrap; gap:8px; align-items:center;
   margin:4px 0 8px; color:var(--muted); font-size:12px; }
 .needs .visit button { font:inherit; padding:2px 10px; border-radius:6px;
@@ -556,6 +555,7 @@ def card(n: Need, folded: bool = False) -> cards.Card:
         None if folded else n.url,
         n.ref,
         act=act(n, folded),
+        kind="pr-draft" if n.kind == "pr" and (n.row or {}).get("is_draft") else n.kind,
         tag=tag,
         age=cards.Age(n.since, "waiting since"),
         meta=[state_html(n)],

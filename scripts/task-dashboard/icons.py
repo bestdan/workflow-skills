@@ -1,5 +1,5 @@
-"""The header's and the card controls' icons, as inline SVG drawn in the text
-colour.
+"""The header's icons, and the cards' kind, status, CI and control icons, as
+inline SVG drawn in the text colour.
 
 The shapes are Lucide's (lucide-static 0.454.0, https://lucide.dev), ISC
 licence, Copyright (c) Lucide Contributors; portions MIT, Copyright (c) Cole
@@ -80,13 +80,92 @@ PATHS = {
         "m2 2 20 20",
         "M4 4 2 6",
     ),
+    # The card's leading icons and CI marks below. Lucide draws them with
+    # <circle>, <line>, <polyline> and <rect>; each is written as a path.
+    "git-pull-request": (
+        "M21 18a3 3 0 1 1-6 0a3 3 0 1 1 6 0",
+        "M9 6a3 3 0 1 1-6 0a3 3 0 1 1 6 0",
+        "M13 6h3a2 2 0 0 1 2 2v7",
+        "M6 9v12",
+    ),
+    "git-pull-request-draft": (
+        "M21 18a3 3 0 1 1-6 0a3 3 0 1 1 6 0",
+        "M9 6a3 3 0 1 1-6 0a3 3 0 1 1 6 0",
+        "M18 6V5",
+        "M18 11v-1",
+        "M6 9v12",
+    ),
+    "circle": ("M22 12a10 10 0 1 1-20 0a10 10 0 1 1 20 0",),
+    "circle-dot": (
+        "M22 12a10 10 0 1 1-20 0a10 10 0 1 1 20 0",
+        "M13 12a1 1 0 1 1-2 0a1 1 0 1 1 2 0",
+    ),
+    # Not Lucide's: its circle with the right half filled, for in progress.
+    "circle-half": (
+        "M22 12a10 10 0 1 1-20 0a10 10 0 1 1 20 0",
+        "fill:M12 2a10 10 0 0 1 0 20z",
+    ),
+    "circle-check": (
+        "M22 12a10 10 0 1 1-20 0a10 10 0 1 1 20 0",
+        "m9 12 2 2 4-4",
+    ),
+    "circle-slash": (
+        "M22 12a10 10 0 1 1-20 0a10 10 0 1 1 20 0",
+        "M9 15 15 9",
+    ),
+    "circle-dashed": (
+        "M10.1 2.182a10 10 0 0 1 3.8 0",
+        "M13.9 21.818a10 10 0 0 1-3.8 0",
+        "M17.609 3.721a10 10 0 0 1 2.69 2.7",
+        "M2.182 13.9a10 10 0 0 1 0-3.8",
+        "M20.279 17.609a10 10 0 0 1-2.7 2.69",
+        "M21.818 10.1a10 10 0 0 1 0 3.8",
+        "M3.721 6.391a10 10 0 0 1 2.7-2.69",
+        "M6.391 20.279a10 10 0 0 1-2.69-2.7",
+    ),
+    "terminal": ("M4 17 10 11 4 5", "M12 19h8"),
+    "git-branch": (
+        "M6 3v12",
+        "M21 6a3 3 0 1 1-6 0a3 3 0 1 1 6 0",
+        "M9 18a3 3 0 1 1-6 0a3 3 0 1 1 6 0",
+        "M18 9a9 9 0 0 1-9 9",
+    ),
+    "file-text": (
+        "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z",
+        "M14 2v4a2 2 0 0 0 2 2h4",
+        "M10 9H8",
+        "M16 13H8",
+        "M16 17H8",
+    ),
+    "layers": (
+        "m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z",
+        "m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65",
+        "m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65",
+    ),
+    "pen-tool": (
+        "M15.707 21.293a1 1 0 0 1-1.414 0l-1.586-1.586a1 1 0 0 1 0-1.414l5.586-5.586a1 1 0 0 1 1.414 0l1.586 1.586a1 1 0 0 1 0 1.414z",
+        "m18 13-1.375-6.874a1 1 0 0 0-.746-.776L3.235 2.028a1 1 0 0 0-1.207 1.207L5.35 15.879a1 1 0 0 0 .776.746L13 18",
+        "m2.3 2.3 7.286 7.286",
+        "M13 11a2 2 0 1 1-4 0a2 2 0 1 1 4 0",
+    ),
+    "check": ("M20 6 9 17l-5-5",),
+    "x": ("M18 6 6 18", "m6 6 12 12"),
+    # Not Lucide's: a filled dot, GitHub's mark for a check still running.
+    "dot-fill": ("fill:M17 12a5 5 0 1 1-10 0a5 5 0 1 1 10 0",),
 }
+
+
+def _path(d: str) -> str:
+    # "fill:" marks a shape drawn solid in the text colour, not stroked.
+    if d.startswith("fill:"):
+        return f'<path d="{d[5:]}" fill="currentColor" stroke="none"/>'
+    return f'<path d="{d}"/>'
 
 
 def svg(name: str, cls: str = "glyph") -> str:
     """Icon `name`, 16px, hidden from screen readers: the control around it
     carries the name."""
-    paths = "".join(f'<path d="{d}"/>' for d in PATHS[name])
+    paths = "".join(_path(d) for d in PATHS[name])
     return (
         f'<svg class="{cls}" viewBox="0 0 24 24" width="16" height="16" fill="none"'
         ' stroke="currentColor" stroke-width="2" stroke-linecap="round"'
