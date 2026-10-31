@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.161.1] - 2026-10-31
+
+### Fixes
+
+- pair Health waits for both windows in one pass [#1145] (#1272) (0f526d9)
+
 ## [2.161.0] - 2026-10-31
 
 ### Features
