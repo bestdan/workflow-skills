@@ -33,9 +33,16 @@ the switch rate or the active-session share.
 CURRENT FIGURES have no window: open PRs awaiting the owner and the review
 queue (``gauges.review_queue``, the one reader both the header and /status
 use), designs at ``proposed`` (github_fleet's rows, unknown under the same
-rule). Issues opened : closed has
-no source yet, since github_fleet mirrors only issues needing a human, and
-shows as such.
+rule).
+
+ISSUES OPENED : CLOSED is windowed, but from counts the fleet sync takes
+rather than from mirrored issues (github_fleet.issue_flow, one ``issue_flow``
+row): opened over closed for each of WINDOWS ending at the sync, and for the
+window before each. So it has a value only when ``[start, end)`` is exactly
+one of WINDOWS long and ``end`` is within ``ISSUE_FLOW_TOLERANCE`` of when
+the counts were taken; any other window (a ``dashboard.py health --since``
+range ending in the past, say) says "no source yet" and why. The ratio is
+None when nothing closed; the note always carries the raw counts.
 
 TARGETS come from config ``[health.targets]``: ``"observed"`` (shown, never
 coloured) or a comparison such as ``"<= 5"``.
@@ -63,6 +70,13 @@ DEFAULT_WINDOW = 7
 SWITCH_GAP = timedelta(minutes=30)
 ACTIVE_MIN = 3
 BASELINE_DAYS = 14
+# github_fleet names the windows it counts issues for; it cannot import them
+# from here, since this module imports it.
+assert github_fleet.ISSUE_FLOW_WINDOWS == WINDOWS
+# How far a window's end may be from when the issue counts were taken and the
+# counts still stand for it: the panel's window ends at the request, not at
+# the last sync, and a sync runs well within the hour.
+ISSUE_FLOW_TOLERANCE = timedelta(hours=1)
 
 # id, label, source, unit, kind ("window" | "wait" | "now")
 FIGURES: tuple[tuple[str, str, str, str, str], ...] = (
@@ -83,7 +97,7 @@ FIGURES: tuple[tuple[str, str, str, str, str], ...] = (
     ("agent_wait_p90", "Agents waiting on owner, p90",
      "session-state hook", "min", "wait"),
     ("open_prs", "Open PRs awaiting the owner", "GitHub", "PRs", "now"),
-    ("issues_opened_closed", "Issues opened : closed", "GitHub", "ratio", "now"),
+    ("issues_opened_closed", "Issues opened : closed", "GitHub", "ratio", "window"),
     ("designs_proposed", "Designs at proposed", "GitHub (design front matter)",
      "designs", "now"),
     ("review_queue", "Human-review queue length", "GitHub", "PRs", "now"),
@@ -299,18 +313,78 @@ def current_figures(
     return {
         # A PR someone else opened on the owner's repos awaits the owner too.
         "open_prs": None if counts is None else counts["awaiting"] + counts["others"],
-        "issues_opened_closed": None,
         "designs_proposed": designs,
         "review_queue": None if counts is None else counts["queue"],
     }
 
 
+def _ratio(opened: int, closed: int) -> "float | None":
+    return None if closed == 0 else round(opened / closed, 2)
+
+
+def _unsourced(why: str) -> "tuple[None, None, str]":
+    return None, None, f"no source yet: {why}"
+
+
+def issue_flow(
+    conn: sqlite3.Connection, start: datetime, end: datetime, *, fleet: bool
+) -> "tuple[float | None, float | None, str]":
+    """Issues opened : closed for ``[start, end)``: ``(value, previous, note)``.
+
+    Read from the fleet sync's ``issue_flow`` row, which covers the window only
+    when it is one of WINDOWS long and ends within ISSUE_FLOW_TOLERANCE of when
+    the counts were taken. Otherwise both values are None and the note begins
+    "no source yet:" with the reason.
+    """
+    if not fleet:
+        return _unsourced(
+            'the fleet sync is off (it needs github.enabled and github.scope "owner")'
+        )
+    span = end - start
+    days = span / timedelta(days=1)
+    if span not in {timedelta(days=d) for d in WINDOWS}:
+        return _unsourced(
+            "issues are counted only for windows of"
+            f" {', '.join(map(str, WINDOWS))} days ending at the last sync;"
+            f" this one is {days:g} day{'' if days == 1 else 's'}"
+        )
+    found = conn.execute(
+        "SELECT raw_json FROM issues WHERE source = ? AND kind = ?",
+        (github_fleet.SOURCE, github_fleet.ISSUE_FLOW),
+    ).fetchone()
+    try:
+        row = json.loads(found[0])
+        taken = score.parse_ts(row["taken_at"])
+        counts = row["windows"][str(round(days))]
+        opened, closed = int(counts["opened"]), int(counts["closed"])
+        p_opened = int(counts["previous_opened"])
+        p_closed = int(counts["previous_closed"])
+    except (TypeError, KeyError, ValueError):
+        taken = None
+    if taken is None:
+        return _unsourced(
+            "the last fleet sync stored no issue counts"
+            " (none has run, or its count failed)"
+        )
+    if abs(end - taken) > ISSUE_FLOW_TOLERANCE:
+        hours = ISSUE_FLOW_TOLERANCE / timedelta(hours=1)
+        return _unsourced(
+            f"the issue counts were taken at {row['taken_at']}, more than"
+            f" {hours:g} hour{'' if hours == 1 else 's'} from this window's end"
+        )
+    note = (
+        f"{opened} opened : {closed} closed; previous {days:g} days"
+        f" {p_opened} : {p_closed}; counted {row['taken_at']}"
+    )
+    return _ratio(opened, closed), _ratio(p_opened, p_closed), note
+
+
 # --- the one computation both outputs read ------------------------------------
 
 
-def _note(fid: str, kind: str, baseline: bool) -> "str | None":
+def _note(fid: str, kind: str, baseline: bool, flow: str) -> "str | None":
     if fid == "issues_opened_closed":
-        return "no source yet: the GitHub sync mirrors only issues needing a human"
+        return flow
     if kind == "wait" and baseline:
         return f"baseline: under {BASELINE_DAYS} days of hook data"
     return None
@@ -336,6 +410,9 @@ def compute(
         **history_figures(conn, prev, start),
         **hook_figures(conn, prev, start, old_owner, old_agent),
     }
+    flow_now, flow_old, flow_note = issue_flow(conn, start, end, fleet=fleet)
+    cur["issues_opened_closed"] = flow_now
+    old["issues_opened_closed"] = flow_old
     days = hook_days(conn, end)
     baseline = days is None or days < BASELINE_DAYS
     rows = []
@@ -360,7 +437,7 @@ def compute(
                 "target": target,
                 "met": None if is_baseline else met(value, target),
                 "baseline": is_baseline,
-                "note": _note(fid, kind, baseline),
+                "note": _note(fid, kind, baseline, flow_note),
             }
         )
     return {

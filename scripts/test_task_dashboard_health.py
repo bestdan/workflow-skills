@@ -178,6 +178,29 @@ def seed_fleet(conn):
     server_harness.add_run(conn, "ok", END, kind=github_fleet.RUN_KIND)
 
 
+def flow_row(taken_at=END, closed_7=9, previous_closed_7=8):
+    """An issue_flow row as github_fleet.issue_flow writes it."""
+    windows = {
+        str(d): {"opened": 3 * d, "closed": 2 * d,
+                 "previous_opened": d, "previous_closed": d}
+        for d in health.WINDOWS
+    }  # fmt: skip
+    windows["7"] = {"opened": 12, "closed": closed_7,
+                    "previous_opened": 10, "previous_closed": previous_closed_7}  # fmt: skip
+    return {
+        "kind": github_fleet.ISSUE_FLOW,
+        "key": github_fleet.ISSUE_FLOW,
+        "title": "issues opened and closed",
+        "taken_at": taken_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "windows": windows,
+    }
+
+
+def seed_flow(conn, row):
+    github_fleet.write(conn, [row], END)
+    server_harness.add_run(conn, "ok", END, kind=github_fleet.RUN_KIND)
+
+
 def by_id(result):
     return {f["id"]: f for f in result["figures"]}
 
@@ -324,7 +347,65 @@ class FigureTest(DbCase):
         self.assertEqual(on["designs_proposed"]["value"], 1)
         self.assertNotIn("side_quests", on)
         self.assertIsNone(on["issues_opened_closed"]["value"])
-        self.assertIn("no source", on["issues_opened_closed"]["note"])
+        self.assertTrue(on["issues_opened_closed"]["note"].startswith("no source yet:"))
+
+    def flow(self, start, end, fleet=True):
+        f = by_id(health.compute(self.conn, {}, start, end, fleet=fleet))
+        return f["issues_opened_closed"]
+
+    def test_issue_flow_covers_each_window_ending_at_the_sync(self):
+        seed_flow(self.conn, flow_row())
+        f = self.flow(END - timedelta(days=7), END)
+        self.assertEqual((f["value"], f["previous"], f["trend"]), (1.33, 1.25, 0.1))
+        self.assertTrue(f["window"])
+        self.assertEqual(
+            f["note"],
+            "12 opened : 9 closed; previous 7 days 10 : 8;"
+            " counted 2026-10-21T00:00:00Z",
+        )
+        for d in (14, 30):
+            f = self.flow(END - timedelta(days=d), END)
+            self.assertEqual((f["value"], f["previous"], f["trend"]), (1.5, 1.0, 0.5))
+            self.assertIn(
+                f"{3 * d} opened : {2 * d} closed; previous {d} days", f["note"]
+            )
+        # Within the tolerance of the count: the panel's window ends at the request.
+        late = END + health.ISSUE_FLOW_TOLERANCE
+        self.assertEqual(self.flow(late - timedelta(days=7), late)["value"], 1.33)
+
+    def test_issue_flow_outside_its_windows_has_no_source(self):
+        seed_flow(self.conn, flow_row())
+        late = END + health.ISSUE_FLOW_TOLERANCE + timedelta(seconds=1)
+        for start, end, why in (
+            (START, END, "this one is 1 day"),
+            (END - timedelta(days=8), END, "this one is 8 days"),
+            (late - timedelta(days=7), late, "more than 1 hour"),
+            (START - timedelta(days=7), START, "more than 1 hour"),
+        ):
+            with self.subTest(why=why, end=end):
+                f = self.flow(start, end)
+                self.assertIsNone(f["value"])
+                self.assertIsNone(f["trend"])
+                self.assertTrue(f["note"].startswith("no source yet:"), f["note"])
+                self.assertIn(why, f["note"])
+
+    def test_issue_flow_with_nothing_closed_has_no_ratio(self):
+        seed_flow(self.conn, flow_row(closed_7=0, previous_closed_7=0))
+        f = self.flow(END - timedelta(days=7), END)
+        self.assertEqual((f["value"], f["previous"], f["trend"]), (None, None, None))
+        self.assertTrue(
+            f["note"].startswith("12 opened : 0 closed; previous 7 days 10 : 0")
+        )
+
+    def test_issue_flow_needs_a_count_and_the_fleet_sync(self):
+        window = (END - timedelta(days=7), END)
+        f = self.flow(*window)
+        self.assertIsNone(f["value"])
+        self.assertIn("stored no issue counts", f["note"])
+        seed_flow(self.conn, flow_row())
+        f = self.flow(*window, fleet=False)
+        self.assertIsNone(f["value"])
+        self.assertTrue(f["note"].startswith("no source yet: the fleet sync is off"))
 
     def test_observed_target_is_never_coloured(self):
         seed(self.conn)
@@ -363,8 +444,9 @@ class FigureTest(DbCase):
             "  Agents waiting on owner, p90 [baseline]: 28 min"
             " (target observed; trend —)" + why,
             "  Open PRs awaiting the owner: 4 PRs (target observed; current)",
-            "  Issues opened : closed: — (target observed; current)"
-            " — no source yet: the GitHub sync mirrors only issues needing a human",
+            "  Issues opened : closed: — (target observed; trend —)"
+            " — no source yet: issues are counted only for windows of 7, 14, 30"
+            " days ending at the last sync; this one is 1 day",
             "  Designs at proposed: 1 designs (target observed; current)",
             "  Human-review queue length: 2 PRs"
             f" (target <= {health.gauges.REVIEW_QUEUE_CAP}, met; current)",
