@@ -145,14 +145,14 @@ an agent that doesn't yet know what it needs.
 Lists the scopes this instance can filter by, each with a stable id and a
 count of open items:
 
-| Scope kind | Id form                                 | From                                          |
-| ---------- | --------------------------------------- | --------------------------------------------- |
-| repo       | `repo:bestdan/finplan`, `repo:dotfiles` | PR and issue repos; worktree and session dirs |
-| workstream | `ws:<id>`                               | `workstreams` (milestone, Linear, design)     |
-| jira       | `jira:PROJ`                             | Jira ticket keys                              |
-| epic       | `epic:PROJ-12`                          | Jira tickets' `parent_key`                    |
-| label      | `label:prio:1`                          | issue and ticket labels                       |
-| host       | `host:lindev`                           | sessions, worktrees                           |
+| Scope kind | Id form                                 | From                                                  |
+| ---------- | --------------------------------------- | ----------------------------------------------------- |
+| repo       | `repo:bestdan/finplan`, `repo:dotfiles` | PR, issue and design repos; worktree and session dirs |
+| workstream | `ws:<id>`                               | `workstreams` (milestone, Linear, design)             |
+| jira       | `jira:PROJ`                             | Jira ticket keys                                      |
+| epic       | `epic:PROJ-12`                          | Jira tickets' `parent_key`                            |
+| label      | `label:prio:1`                          | issue and ticket labels                               |
+| host       | `host:lindev`                           | sessions, worktrees                                   |
 
 So the id prefixes are `repo:`, `ws:`, `jira:`, `epic:`, `label:` and
 `host:`. A repo that only a worktree or session names gets a bare id
@@ -214,15 +214,17 @@ Linear projects, and 10 of them have names that don't mention FinPlan:
 Decumulation, Cashflow Modeling, Funding Sources Framework and others. A
 match on the bare word `fin` is no better: it also hits a Linear project about
 `find-candidates`. So a repo scope lists, under `related`, every workstream
-with an open member in that repo, with the count of those open members, most
-first. The agent shows that list to the owner and adds the ones it confirms
+with an open member in that repo, other than those already matched, with the
+count of those open members, most first. The agent shows that list to the owner and adds the ones it confirms
 as explicit `ws:` ids. They are never included automatically, because
 membership changes with each sync, and a stored plan must keep meaning what
 the agent chose.
 
 > **2026-10-31, as shipped (#1266).** `related` counts only open members, the
 > same way a scope's `open` does, and leaves out a workstream whose members
-> in that repo are all done. The proposal counted every member.
+> in that repo are all done. The proposal counted every member. The proposal
+> also had `related` appear only for a repo scope; shipped, any query other
+> than `all` prints it, empty when no repo scope matched.
 
 **`all` is reserved.** `--scope all` means no filter on every command, and is
 never fuzzy-matched. Without the reservation, `all` would match a design doc
@@ -249,7 +251,9 @@ doc at `status: proposed`), `session` (a live Claude Code session) and
 
 `--state` filters the tracker's status category, the `state` field below.
 `--only` filters on facts the dashboard derives, which hold independently of
-status: `blocked` (a non-empty or non-zero `blocked_by`), `waiting` (a session on the item
+status: `blocked` (blocked as Now judges it: for a GitHub issue the `blocked`
+label or an open blocker, for a Jira ticket a label, the flag, a blocked
+status or an open blocking link; other kinds are never blocked), `waiting` (a session on the item
 is waiting on the owner, as Needs you decides it) and `stale` (the item is on
 the Stale tab by its evidence rule). Keeping them on two flags is what lets an
 agent ask for "started and blocked".
@@ -266,17 +270,19 @@ prioritizer reads:
 | `age_d`, `idle_d`              | days since created, and since last updated                                                 |
 | `labels`                       |                                                                                            |
 | `workstreams`                  | ids of the workstreams it belongs to                                                       |
-| `pr`                           | the linked PR's `{ref, ci, review, draft, co_reviewed}` or null                            |
+| `pr`                           | the linked PR's `{ref, ci, review, draft, co_reviewed}`; absent when there is none         |
 | `activity`                     | a list of the live sessions and worktrees on it: `{kind, host, state, waiting_since}` each |
 | `blocks`, `blocked_by`         | refs where the mirror holds links (Jira), else counts (GitHub)                             |
 | `overlay`                      | pinned, snoozed until, ignored, note, last why-not reason                                  |
 | `now`                          | its Now tier and score terms, when Now ranks it                                            |
-| `size`                         | `{bucket, est_min, from}`, or null when unsized (see below)                                |
+| `size`                         | `{bucket, est_min, from}`; absent when unsized (see below)                                 |
 
-**Brief and full records are sparse.** They leave out every field that is
-null or empty, and a `url` that only repeats the `key`, and the output's
-header says `"sparse": true`. A named `--fields` list prints every field it
-names, empty or not. Measured on the mini's mirror, a brief record averages
+**Brief and full records are sparse.** They leave out every non-identity
+field that is null or empty, and a `url` that only repeats the `key`, and the
+output's header says `"sparse": true`. Only top-level fields are dropped, so
+a nested null such as `size.est_min` stays. A named `--fields` list prints
+every field it names, null or not, so an unsized item shows `size: null`
+there. Measured on the mini's mirror, a brief record averages
 about 550 bytes, around 140 tokens. Most of that is the `now` terms and the
 labels, and `--fields` is how an agent trims it.
 
@@ -305,10 +311,11 @@ into a rough estimate and says where it came from:
   calibration (§5) both read `est_min`. With no numbers, the agent would
   convert `est:1` to minutes inside the model, differently each session and
   out of sight.
-- `from` names the evidence, for example `label est:1` or
-  `PR 2 files +14/-3`.
+- `from` names the evidence, for example `label est:1`,
+  `PR, 2 files, +14/−3` or `bot PR from dependabot[bot]`.
 
-An unsized item has `size: null`. As in Little mode, an unknown size never
+An unsized item has no `size` (null under a named `--fields` list). A bot PR
+is `bot_pr` whatever its size data says. As in Little mode, an unknown size never
 counts as small, and the agent says so rather than guessing one.
 
 > **2026-10-31, as shipped (#1266).** The proposal described the buckets in
@@ -331,9 +338,15 @@ list names exact fields (`--fields key,title,size,pr`), and identity is always
 included. The output always states `total` and `returned`, so a truncated list
 says so.
 
-The fields come from the same code the views use: `candidate.py` builds the
-Now terms, `needs.py` the session match, `workstreams.py` the membership.
-`items` adds no ranking rule of its own; it lists newest activity first.
+The fields come from the same code the views use: `fleet_now.candidates`
+builds the Now terms, `needs.py` the session match, `workstreams.py` the
+membership. `items` adds no ranking rule of its own; it lists newest activity
+first.
+
+> **2026-10-31, as shipped (#1266).** The proposal said `full` adds only the
+> evidence, risks and action; shipped, it also adds the location and time
+> fields listed above. The proposal named no order for `items`; shipped, it is
+> newest `updated` first, which is recency, not priority.
 
 ### 3. `item <ref>`: the dossier
 
