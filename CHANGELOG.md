@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.168.0] - 2026-10-31
+
+### Features
+
+- item <source:key> prints one item's dossier [#1284] (#1299) (9666e8f)
+
 ## [2.167.0] - 2026-10-31
 
 ### Features
