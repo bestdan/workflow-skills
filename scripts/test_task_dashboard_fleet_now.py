@@ -336,6 +336,11 @@ class RenderTests(Case):
         assert meta is not None
         self.assertIn('<span class="why-more" tabindex="0"', meta.group(0))
         self.assertIn('<div class="why" data-terms=', meta.group(0))
+        # Named and described for a screen reader, by an id unique to the card.
+        wid = re.search(r'aria-describedby="(why-[0-9a-f]{10})"', meta.group(0))
+        assert wid is not None
+        self.assertIn(f'id="{wid.group(1)}" role="tooltip"', meta.group(0))
+        self.assertIn('role="button"', meta.group(0))
 
     def test_jira_off_now_lists_the_queue_with_a_why_line_on_every_card(self):
         seed(self.conn)
@@ -347,7 +352,7 @@ class RenderTests(Case):
         self.assertEqual(item_keys(page), EXPECTED[: fleet_now.LIMIT])
         for c in cards:
             m = re.search(
-                r'<div class="why" data-terms="([^"]+)">ship: [a-z ]+ · score ([0-9.]+): ',
+                r'<div class="why" data-terms="([^"]+)"[^>]*>ship: [a-z ]+ · score ([0-9.]+): ',
                 c,
             )
             assert m is not None, c[:300]
@@ -450,6 +455,11 @@ class SessionCardTests(unittest.TestCase):
         self.assertIn('>edit the notes</a> <span class="stag">src-32</span>', turn)
         self.assertIn(f'<div class="ask">› {fleet_now._e(needs_fx.ASK)}</div>', turn)
         self.assertIn("notes: bestdan/n", turn)
+        # A session's score is its state, which the meta line already reads:
+        # no "?", and its why stays a direct child of the card, which the CSS
+        # hides.
+        self.assertNotIn("why-more", turn)
+        self.assertIn('</div><div class="why" data-terms="asked">', turn)
         pr_card = needs_fx.card(page, "s-pr")
         self.assertIn(
             f'<a href="{needs_fx.pr_url(1201)}" target="_blank" rel="noopener">'

@@ -482,6 +482,7 @@ header #filter { margin-left:auto; }
   /* Two lines: what is fresh, then the filter with the buttons after it,
      so the mode and sync buttons never fall off the edge. */
   header .bar { gap:8px; }
+  header .sync-note { margin-left:0; }
   header h1, header .lbl { display:none; }
   header #filter { flex:1 1 8em; min-width:0; margin-left:0; }
 }

@@ -113,6 +113,7 @@ controls are the ordinary ones, except that Snooze first asks "why not
 now?" (whynot.py, which also notes each day's shown items as its base rate).
 """
 
+import hashlib
 import html
 import math
 import sqlite3
@@ -1300,8 +1301,15 @@ def card(r: Ranked, now: datetime, ov: overlay.Overlay) -> str:
         # A Ship score's breakdown runs to three lines on a phone; it is
         # there for when the order looks wrong, so it waits behind a "?" at
         # the end of the meta line and pops over on hover, focus or tap.
+        # A screen reader hears the label, then the breakdown it describes:
+        # the role makes the label count, and describedby reads the hidden
+        # breakdown, which role=button alone would flatten away.
+        key = f"{n.item[0]}\0{n.item[1]}".encode()
+        wid = "why-" + hashlib.sha1(key).hexdigest()[:10]
+        why = why.replace('">', f'" id="{wid}" role="tooltip">', 1)
         meta += (
-            ' <span class="why-more" tabindex="0" aria-label="Why it ranks here">'
+            ' <span class="why-more" tabindex="0" aria-label="Why it ranks here"'
+            f' role="button" aria-describedby="{wid}">'
             f"{icons.svg('circle-help')}{why}</span>"
         )
         why = ""
