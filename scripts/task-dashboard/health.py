@@ -90,6 +90,10 @@ FIGURES: tuple[tuple[str, str, str, str, str], ...] = (
 )  # fmt: skip
 FIGURE_IDS = tuple(f[0] for f in FIGURES)
 
+# The counted units, singular for a value of exactly 1. Render-time only: the
+# result dict keeps the plural unit.
+SINGULAR_UNITS = {"PRs": "PR", "designs": "design"}
+
 # The mirror kind each figure is about, for the include filter (include.py
 # maps the kind onto its group).
 FIGURE_KINDS: dict[str, "str | None"] = {
@@ -416,6 +420,14 @@ def _trend(value: "float | None") -> str:
     return ("+" if value > 0 else "−") + f"{abs(value):g}"
 
 
+def _unit(f: dict[str, Any]) -> str:
+    """The figure's unit, singular when its value is exactly 1."""
+    if f["value"] is None:
+        return ""
+    unit = SINGULAR_UNITS.get(f["unit"], f["unit"]) if f["value"] == 1 else f["unit"]
+    return " " + unit
+
+
 def render(
     result: dict[str, Any], days: int, inc: "include.Include | None" = None
 ) -> str:
@@ -438,7 +450,7 @@ def render(
         cls = {True: "met", False: "miss", None: ""}[f["met"]]
         tag = ' <span class="baseline">baseline</span>' if f["baseline"] else ""
         note = f'<div class="why">{_e(f["note"])}</div>' if f["note"] else ""
-        unit = "" if f["value"] is None else f" {_e(f['unit'])}"
+        unit = _e(_unit(f))
         body.append(
             f'<tr class="{cls}" data-figure="{_e(f["id"])}"'
             f' data-value="{_e(json.dumps(f["value"]))}"'
@@ -497,7 +509,7 @@ def text_table(result: dict[str, Any]) -> str:
         verdict = {True: "met", False: "MISSED", None: ""}[f["met"]]
         extra = " [baseline]" if f["baseline"] else ""
         trend = f"trend {_trend(f['trend'])}" if f["window"] else "current"
-        unit = "" if f["value"] is None else f" {f['unit']}"
+        unit = _unit(f)
         note = f" — {f['note']}" if f["note"] else ""
         lines.append(
             f"  {f['label']}{extra}: {_num(f['value'])}{unit}"
