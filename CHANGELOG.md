@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.157.0] - 2026-10-31
+
+### Features
+
+- tighten Now's cards [N/A] (#1259) (c8fd657)
+
 ## [2.156.0] - 2026-10-30
 
 ### Features
