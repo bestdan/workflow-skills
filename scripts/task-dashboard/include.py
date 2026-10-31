@@ -55,7 +55,7 @@ LABELS = {"tasks": "Tasks", "prs": "PRs", "sessions": "Sessions", "other": "Othe
 
 # The one kind -> group mapping. A kind missing here is `other`.
 KIND_GROUPS = {
-    "ticket": "tasks",  # Jira
+    "ticket": "tasks",  # Jira, and Linear (linear_issues.py)
     "issue": "tasks",  # GitHub, github_fleet
     "drain": "tasks",  # needs.drain_items
     "workstream": "tasks",  # workstreams.py: a theme of tasks and PRs

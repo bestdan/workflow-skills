@@ -69,6 +69,7 @@ source's rows or outcome:
 | Jira and my PRs    | `incremental` / `reconcile` / `full` | [`sync.py`](../scripts/task-dashboard/sync.py), [`jira_acli.py`](../scripts/task-dashboard/jira_acli.py), [`github_gh.py`](../scripts/task-dashboard/github_gh.py) | always (each half when enabled) |
 | GitHub fleet read  | `github_fleet`                       | [`github_fleet.py`](../scripts/task-dashboard/github_fleet.py)                                                                                                     | fleet instance                  |
 | Workstreams        | `workstreams`                        | [`workstreams.py`](../scripts/task-dashboard/workstreams.py), [`linear_api.py`](../scripts/task-dashboard/linear_api.py)                                           | fleet instance                  |
+| Linear issues      | `linear_issues`                      | [`linear_issues.py`](../scripts/task-dashboard/linear_issues.py), [`linear_api.py`](../scripts/task-dashboard/linear_api.py)                                       | `linear.enabled = true`         |
 | Hook session rows  | `sessions`                           | [`sessions.py`](../scripts/task-dashboard/sessions.py)                                                                                                             | the instance ingests snapshots  |
 | Cloud session list | `claude_remote`                      | [`claude_remote.py`](../scripts/task-dashboard/claude_remote.py)                                                                                                   | `claude_remote.enabled = true`  |
 
@@ -256,10 +257,21 @@ the YAML and writes the TOML, and after that the two files are independent.
 Point `jira.acli_path` at `scripts/task-dashboard/dev/fake-acli` to try the
 Jira views with no Jira.
 
-### Linear (Workstreams)
+### Linear (Now and Workstreams)
 
-Linear projects join the Workstreams tab only when `[linear] enabled = true`
-and a key resolves. `linear_api.resolve_key` takes the first hit of:
+`[linear] enabled = true` does two things once a key resolves. On every
+instance, the `linear_issues` step mirrors the open issues (state type
+`unstarted` or `started`) assigned to `linear.me`, an email, or with it unset
+to the key's own user. Set `me` when the key was made on a different Linear
+account from the one the issues are assigned to: otherwise it reads the key's
+own account's issues instead, with no error. A `me` that names no Linear user
+fails the step and keeps the last good rows. Now ranks them as it ranks Jira
+tickets: started is the `started` tier, unstarted lands in the rest, an open
+blocker or the `blocked` label sends one to the blocked tier, and a PR whose
+title or branch carries the key folds into its card. `linear_issues.py` and
+`fleet_now.py`'s module docstrings have the row and the rules. On a fleet
+instance, Linear projects also join the Workstreams tab.
+`linear_api.resolve_key` takes the first hit of:
 
 1. `$LINEAR_API_KEY`, the raw key;
 2. the key file `~/.config/workflow-skills/linear_api_key`, mode 600;
@@ -267,8 +279,9 @@ and a key resolves. `linear_api.resolve_key` takes the first hit of:
    [`_secret_resolve.py`](../commands/handlers/assets/_secret_resolve.py) per
    [`auth_key_access.md`](auth_key_access.md).
 
-With no key, the step records `linear: no key` and the tab shows the other
-sources. The freshness panel's Workstreams row names what happened to Linear.
+With no key, the Linear issues step fails as `auth_failed` with the reason
+and keeps its last rows, and Workstreams records `linear: no key` and shows
+the other sources. The freshness panel has a row for each.
 
 The key file is the simplest shape for the LaunchAgent, because install writes
 no secret into the plist. To use a 1Password reference instead, the agent's

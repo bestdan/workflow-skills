@@ -22,8 +22,11 @@ from typing import Any
 
 # Jira priority names onto the urgent/high/medium/low domain kanban-classify
 # uses. Both the current scheme (Highest..Lowest) and the older one
-# (Blocker..Trivial) are mapped; an unknown name maps to None.
+# (Blocker..Trivial) are mapped, and Linear's labels (Urgent, High, Medium,
+# Low), which linear_issues.py stores in the same column; an unknown name maps
+# to None.
 JIRA_PRIORITY = {
+    "urgent": "urgent",
     "highest": "urgent",
     "blocker": "urgent",
     "critical": "urgent",

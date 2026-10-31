@@ -29,6 +29,11 @@ score.FLEET_CATEGORIES category:
   progress is `started`, and to do is `ready` in the active sprint. Each
   brings score.score's priority, deadline, unblocks and stuck terms
   (`[score.terms]`), its priority in place of the prio: label's;
+- with `[linear] enabled = true`, my open assigned Linear issues
+  (linear_tickets, from linear_issues.py's rows): started is `started`, and
+  unstarted is `ready`. Each brings the same score.score terms a Jira ticket
+  does, and is blocked when an open issue blocks it or it carries the
+  `blocked` label;
 - close-outs (close_out.py, `close_out`): a finished session, on evidence
   that its work is done (its PR merged, its branch landed, or it ended), and a
   workstream in the Complete lane. Each card carries its checklist, ticked
@@ -38,7 +43,8 @@ An item already collected keeps its first category: a session that asked is
 `asked`, never a close-out.
 
 FOLDING (fold). A Ship PR whose `links` (pr_links: the Jira key in its title
-or branch, and each GitHub issue it closes) name an item Ship also ranks has
+or branch, and each GitHub issue it closes; link_linear: a ranked Linear
+issue's key in its title or branch, case aside) name an item Ship also ranks has
 no card of its own: it folds into that item, the first such link winning, and
 shows on its card as a `↳` line with its why. The parent takes the PR's tier
 when that is ready to merge or the review queue and beats its own, blocked
@@ -115,6 +121,7 @@ now?" (whynot.py, which also notes each day's shown items as its base rate).
 """
 
 import html
+import json
 import math
 import sqlite3
 from dataclasses import dataclass, field
@@ -130,6 +137,8 @@ import gauges
 import github_fleet
 import icons
 import include
+import linear_api
+import linear_issues
 import needs
 import overlay
 import score
@@ -621,6 +630,112 @@ def _jira_tickets(
     return out
 
 
+_LINEAR_CATEGORY = {"started": "started", "unstarted": "ready"}
+
+
+def linear_tickets(
+    conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime
+) -> list[candidate.Candidate]:
+    """My open assigned Linear issues (linear_issues.py): started is
+    `started`, unstarted is `ready`. Each brings score.score's priority,
+    deadline (its due date, else its active cycle's end), unblocks and stuck
+    terms, as a Jira ticket does. Blocked is an open issue blocking it, or the
+    `blocked` label."""
+    if not linear_issues.enabled(cfg):
+        return []
+    weights = cfg["score"]["terms"]
+    stuck_days = cfg["score"].get("stuck_days") or {}
+    factory = conn.row_factory
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = [
+            dict(r)
+            for r in conn.execute(
+                "SELECT * FROM issues WHERE source = ? AND kind = ? ORDER BY key",
+                (linear_issues.SOURCE, linear_issues.KIND),
+            )
+        ]
+    finally:
+        conn.row_factory = factory
+    out = []
+    for issue in rows:
+        raw = json.loads(issue.get("raw_json") or "{}")
+        category = _LINEAR_CATEGORY.get(raw.get("state_type") or "")
+        if category is None:
+            continue
+        key = issue["key"]
+        why = f"your Linear issue, {issue.get('status_name') or raw.get('state_type')}"
+        if category == "ready" and raw.get("cycle_active") and raw.get("cycle"):
+            why += f" in {raw['cycle']}"
+        signals = []
+        if any(lb.lower() == "blocked" for lb in score.labels_of(issue)):
+            signals.append("label")
+        if raw.get("blocked_by"):
+            signals.append("by " + ", ".join(raw["blocked_by"]))
+        if signals:
+            why += f"; blocked: {', '.join(signals)}"
+        ctx = {"now": now, "unblocks": len(raw.get("blocks") or []),
+               "stuck_days": stuck_days}  # fmt: skip
+        _, terms = score.score(issue, ctx, weights)
+        need = needs.Need(
+            item=(linear_issues.SOURCE, key),
+            kind=linear_issues.KIND,
+            title=issue.get("summary") or "",
+            ref=key,
+            since=score.parse_ts(issue.get("status_category_changed")),
+            url=raw.get("url"),
+            state=" · ".join(views.issue_meta(issue)),
+            hint="carry on with it" if category == "started" else "start it",
+            row=issue,
+        )
+        out.append(
+            candidate.Candidate(
+                need,
+                category,
+                why,
+                terms={candidate.SCORED: terms},
+                blocked=bool(signals),
+                features={
+                    "project": raw.get("team"),
+                    "priority": issue.get("priority"),
+                    "status": issue.get("status_name"),
+                    "blocked": ",".join(
+                        "link" if s.startswith("by ") else s for s in signals
+                    )
+                    or None,
+                    "own": "yes",
+                },
+            )
+        )
+    return out
+
+
+def link_linear(cands: list[candidate.Candidate]) -> None:
+    """Add to each PR candidate's `links` every Linear issue among `cands`
+    that its title or branch names. A branch carries the key lowercased
+    (Linear's `bestdan/pre-123-...`), so the match ignores case."""
+    known = {c.item[1].upper() for c in cands if c.item[0] == linear_issues.SOURCE}
+    if not known:
+        return
+    teams = {k.rpartition("-")[0] for k in known}
+    for c in cands:
+        if c.kind != "pr":
+            continue
+        row = c.need.row or {}
+        text = " ".join(
+            str(t or "")
+            for t in (
+                c.need.title,
+                c.need.branch,
+                row.get("title"),
+                row.get("head_ref"),
+            )
+        )
+        found = [k for k in linear_api.keys_in(text.upper(), teams) if k in known]
+        extra = tuple((linear_issues.SOURCE, k) for k in found)
+        c.links = tuple(dict.fromkeys(tuple(c.links) + extra))
+
+
 def joined_pr(p: dict[str, Any]) -> dict[str, Any]:
     """A `prs` row joined to a ticket, as a related line: `{url, ref, why}`,
     the why reading `draft · CI failure · review required`."""
@@ -651,14 +766,17 @@ def ship_sources(
     conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime
 ) -> list[candidate.Candidate]:
     """Every candidate Ship ranks, Needs you's first."""
-    return (
+    cands = (
         _needs_you(conn, cfg, now)
         + _own_prs(conn, cfg)
         + _review_requests(conn, cfg)
         + _own_issues(conn, cfg)
         + _jira_tickets(conn, cfg, now)
+        + linear_tickets(conn, cfg, now)
         + _close_outs(conn, cfg, now)
     )
+    link_linear(cands)
+    return cands
 
 
 def rank(
