@@ -240,6 +240,9 @@ def load(path: "str | os.PathLike[str] | None" = None) -> dict[str, Any]:
         raise ConfigError("linear.timeout_seconds must be a positive number")
     if not isinstance(lin.get("me"), str):
         raise ConfigError("linear.me must be a string: an email, or empty")
+    if lin["me"] and not lin["me"].strip():
+        # Stripped to empty, it would read the key's own account's issues.
+        raise ConfigError("linear.me must be an email, or empty, not blank")
     ws = cfg["workstreams"]
     days = ws.get("stalled_days") if isinstance(ws, dict) else None
     if not isinstance(days, int) or isinstance(days, bool) or days < 1:

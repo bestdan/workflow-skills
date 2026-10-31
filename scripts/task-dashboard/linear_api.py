@@ -1,6 +1,6 @@
 """Linear reads: for the Workstreams tab, open projects and which project each
-Linear key the mirror mentions belongs to; for Now (linear_issues.py), the
-key owner's open assigned issues.
+Linear key the mirror mentions belongs to; for Now (linear_issues.py), my open
+assigned issues: the key owner's, or `linear.me`'s when it is set.
 
 Off by default (`[linear] enabled = false`). Every call goes through one
 runner seam, `Runner(body, key, timeout) -> payload`, where `body` is the
@@ -361,8 +361,9 @@ query($after: String, $types: [String!], $email: String!) {{
 }}
 """
 
-# Whether `linear.me` names a user: the issues filter matches nothing for an
-# email no user has, which would read as "no open issues".
+# Whether `linear.me` names a user, asked only when its issue read is empty:
+# the filter matches nothing for an email no user has, which would otherwise
+# read as "no open issues". A read that returns issues already proves it.
 USER_QUERY = """
 query($email: String!) {
   users(first: 1, filter: {email: {eqIgnoreCase: $email}}) { nodes { id } }
@@ -374,7 +375,8 @@ def _open_blocks(relations: Any, side: str) -> list[str]:
     """The keys of the open issues on `side` of each `blocks` relation."""
     out = []
     for rel in (relations or {}).get("nodes") or []:
-        other = (rel or {}).get(side) or {}
+        rel = rel or {}
+        other = rel.get(side) or {}
         state = str((other.get("state") or {}).get("type") or "").lower()
         if rel.get("type") == "blocks" and other.get("identifier"):
             if state not in CLOSED_TYPES:
@@ -397,19 +399,18 @@ def assigned_issues(
     Raises LinearError when `assignee` names no Linear user."""
     variables: dict[str, Any] = {"types": list(OPEN_STATE_TYPES)}
     if assignee:
-        found = _data(
-            runner(
-                {"query": USER_QUERY, "variables": {"email": assignee}}, key, timeout
-            )
-        )
-        if not ((found.get("users") or {}).get("nodes")):
-            raise LinearError(f"linear.me names no Linear user: {assignee}")
         query, field = ASSIGNEE_QUERY, "issues"
         variables["email"] = assignee
     else:
         query, field = ASSIGNED_QUERY, "viewer.assignedIssues"
+    nodes = _pages(runner, key, timeout, query, variables, field)
+    if assignee and not nodes:
+        body = {"query": USER_QUERY, "variables": {"email": assignee}}
+        found = _data(runner(body, key, timeout))
+        if not ((found.get("users") or {}).get("nodes")):
+            raise LinearError(f"linear.me names no Linear user: {assignee}")
     out = []
-    for node in _pages(runner, key, timeout, query, variables, field):
+    for node in nodes:
         if not (node or {}).get("identifier"):
             continue
         state = node.get("state") or {}

@@ -96,6 +96,9 @@ class FakeLinear:
         if "users(" in body["query"]:
             hit = body["variables"]["email"].lower() in self.users
             return {"data": {"users": {"nodes": [{"id": "u1"}] if hit else []}}}
+        if "  projects(" in body["query"]:  # Workstreams' read: none
+            done = {"hasNextPage": False, "endCursor": None}
+            return {"data": {"projects": {"pageInfo": done, "nodes": []}}}
         start = int(body["variables"]["after"] or 0)
         end = start + self.per_page
         page = {"hasNextPage": end < len(self.nodes), "endCursor": str(end)}
@@ -175,10 +178,20 @@ class ReadTests(Case):
     def test_linear_me_naming_no_user_fails_and_keeps_the_rows(self):
         self.mirror(node("PRE-1"))
         cfg = config.deep_merge(CFG, {"linear": {"me": "typo@example.com"}})
-        run = self.step(FakeLinear([node("PRE-2")]), cfg=cfg)
+        run = self.step(FakeLinear(), cfg=cfg)
         self.assertEqual(run["outcome"], "failed")
         self.assertIn("linear.me names no Linear user", run["error"])
         self.assertEqual(self.keys(), ["PRE-1"])
+
+    def test_the_user_lookup_runs_only_when_the_read_is_empty(self):
+        fake = FakeLinear([node("PRE-1")])
+        linear_api.assigned_issues("k", fake, assignee="me@example.com")
+        self.assertNotIn("users(", "".join(b["query"] for b, _ in fake.calls))
+        fake = FakeLinear()
+        self.assertEqual(
+            linear_api.assigned_issues("k", fake, assignee="me@example.com"), []
+        )
+        self.assertIn("users(", fake.calls[-1][0]["query"])
 
     def test_the_step_passes_linear_me(self):
         fake = FakeLinear([node("PRE-1")])
@@ -196,6 +209,17 @@ class ReadTests(Case):
         path.write_text(jira_off + "[linear]\nenabled = true\nme = 7\n")
         with self.assertRaisesRegex(config.ConfigError, "linear.me must be a string"):
             config.load(path)
+        path.write_text(jira_off + '[linear]\nenabled = true\nme = "  "\n')
+        with self.assertRaisesRegex(config.ConfigError, "not blank"):
+            config.load(path)
+
+    def test_both_queries_cap_the_nested_lists_and_ask_if_they_were_cut(self):
+        # Linear refuses the query as too complex without the caps.
+        for query in (linear_api.ASSIGNED_QUERY, linear_api.ASSIGNEE_QUERY):
+            for field in ("labels", "relations", "inverseRelations"):
+                self.assertRegex(
+                    query, rf"\b{field}\(first: 10\) \{{\s*pageInfo \{{ hasNextPage \}}"
+                )
 
     def test_a_list_cut_short_at_the_cap_is_counted_as_truncated(self):
         more = {"hasNextPage": True}
@@ -306,25 +330,33 @@ class StepTests(Case):
         self.assertNotIn(linear_issues.RUN_KIND, [r["kind"] for r in off])
 
     def test_run_all_resolves_the_key_once_for_both_linear_steps(self):
-        calls = []
+        # Fleet on, so Workstreams and Now both want the key. No orgs, so the
+        # fleet reads make no GitHub call.
+        cfg = config.deep_merge(
+            CFG, {"github": {"enabled": True, "scope": "owner", "orgs": []}}
+        )
+        self.assertTrue(sync.fleet_enabled(cfg))
 
-        def resolve():
-            calls.append(1)
-            return "k"
+        def no_gh(argv, timeout):
+            raise AssertionError(argv)
 
-        memo = sync.once(resolve)
-        self.assertEqual((memo(), memo()), ("k", "k"))
-        self.assertEqual(len(calls), 1)
+        for resolver, outcome in (("k", "ok"), (None, "auth_failed")):
+            calls = []
 
-        def missing():
-            calls.append(1)
-            no_key()
+            def resolve(resolver=resolver):
+                calls.append(1)
+                return resolver if resolver else no_key()
 
-        memo = sync.once(missing)
-        for _ in range(2):
-            with self.assertRaises(linear_api.NoKey):
-                memo()
-        self.assertEqual(len(calls), 2)
+            rows = sync.run_all(
+                "incremental", cfg, self.conn, NOW, jira=sync.NoJiraSource(),
+                github=None, fleet_runner=no_gh, linear_runner=FakeLinear(),
+                resolve_key=resolve, clock=lambda: NOW,
+            )  # fmt: skip
+            kinds = [r["kind"] for r in rows]
+            self.assertIn(sync.WORKSTREAMS_KIND, kinds)
+            now_run = rows[kinds.index(linear_issues.RUN_KIND)]
+            self.assertEqual(now_run["outcome"], outcome)
+            self.assertEqual(len(calls), 1)
 
     def test_the_freshness_panel_names_the_step(self):
         self.assertIn(
