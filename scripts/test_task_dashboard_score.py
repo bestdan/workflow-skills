@@ -480,7 +480,8 @@ class ViewsTest(unittest.TestCase):
         self.assertEqual(
             views.status_icon("done", "Shipped"),
             '<span class="icon s-done" role="img" aria-label="Done: Shipped"'
-            ' data-tip="Done: Shipped">●</span>',
+            ' data-tip="Done: Shipped">'
+            f"{views.icons.svg('circle-check')}</span>",
         )
         self.assertIn('aria-label="Unknown status"', views.status_icon(None, None))
 

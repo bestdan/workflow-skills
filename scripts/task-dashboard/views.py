@@ -74,10 +74,14 @@ NOT_ON_FLEET = {"/waiting-on-me", "/waiting-on"}
 CSS = """
 nav { display:flex; flex-wrap:wrap; gap:4px; padding:8px 16px 0;
   border-bottom:1px solid var(--line); }
-nav a { padding:4px 10px; border-radius:6px 6px 0 0; color:var(--muted);
+/* GitHub's underline nav: the current tab is underlined in orange. */
+nav a { position:relative; z-index:0; padding:4px 10px 10px; color:var(--muted);
   text-decoration:none; }
-nav a[aria-current=page] { color:var(--fg); font-weight:600; background:var(--card);
-  border:1px solid var(--line); border-bottom:none; }
+nav a:hover::before { content:""; position:absolute; inset:0 0 6px; z-index:-1;
+  border-radius:6px; background:var(--card); }
+nav a[aria-current=page] { color:var(--fg); font-weight:600; }
+nav a[aria-current=page]::after { content:""; position:absolute; left:8px; right:8px;
+  bottom:-1px; height:2px; border-radius:2px; background:#fd8c73; }
 .card .terms { list-style:none; margin:4px 0 0; padding:0; display:flex;
   flex-wrap:wrap; gap:2px 10px; font-size:12px; color:var(--muted); }
 .card .terms b { color:var(--fg); }
@@ -93,8 +97,10 @@ nav a[aria-current=page] { color:var(--fg); font-weight:600; background:var(--ca
 .icon:hover::after { content:attr(data-tip); position:absolute; left:0; top:1.5em;
   z-index:10; white-space:nowrap; padding:2px 8px; border-radius:4px;
   font-size:12px; font-weight:400; background:var(--fg); color:var(--bg); }
-.icon.s-indeterminate { color:var(--accent); }
-.icon.s-done { color:#1a7f37; }
+.icon .glyph { display:block; width:16px; height:16px; }
+.icon.s-new { color:var(--ok); }
+.icon.s-indeterminate { color:var(--warn); }
+.icon.s-done { color:var(--done); }
 .icon.blocked { color:var(--bad); }
 #filter { width:240px; max-width:100%; padding:4px 10px;
   font:inherit; color:var(--fg); background:var(--card);
@@ -410,13 +416,14 @@ def _touches(m: Mirror, issue: dict[str, Any]) -> bool:
 
 
 # Icons go by status category, not status name: a site has a dozen names but
-# only these three categories. The hover text carries the exact name.
+# only these three categories. The hover text carries the exact name. They
+# are GitHub Projects' shapes: an open circle, a half-filled one, a check.
 STATUS_ICONS = {
-    "new": ("○", "To do"),
-    "indeterminate": ("◐", "In progress"),
-    "done": ("●", "Done"),
+    "new": ("circle", "To do"),
+    "indeterminate": ("circle-half", "In progress"),
+    "done": ("circle-check", "Done"),
 }
-BLOCKED_ICON = ("⊘", "Blocked")
+BLOCKED_ICON = ("circle-slash", "Blocked")
 
 
 def status_icon(
@@ -425,11 +432,13 @@ def status_icon(
     icon, label = (
         BLOCKED_ICON
         if blocked
-        else STATUS_ICONS.get((category or "").lower(), ("·", "Unknown status"))
+        else STATUS_ICONS.get(
+            (category or "").lower(), ("circle-dashed", "Unknown status")
+        )
     )
     title = f"{label}: {name}" if name else label
     cls = "icon blocked" if blocked else f"icon s-{_e((category or 'unknown').lower())}"
-    return f'<span class="{cls}" role="img" aria-label="{_e(title)}" data-tip="{_e(title)}">{icon}</span>'
+    return f'<span class="{cls}" role="img" aria-label="{_e(title)}" data-tip="{_e(title)}">{icons.svg(icon)}</span>'
 
 
 def card_title(href: str, title: "str | None", ref: str) -> str:
@@ -548,6 +557,7 @@ def pr_card(m: Mirror, p: dict[str, Any], why: str = "") -> str:
         p["title"] or "",
         p["url"],
         f"{p['repo'] or ''}#{p['number']}",
+        kind="pr-draft" if p["is_draft"] else "pr",
         meta=[_e(b) for b in bits]
         + ([cards.ci(p["ci_state"])] if p["ci_state"] else [])
         + ([_e(p["issue_key"])] if p["issue_key"] else []),
@@ -733,6 +743,7 @@ def _epic_card(m: Mirror, g: dict[str, Any]) -> str:
         g["summary"] or "",
         href,
         g["key"],
+        kind="epic",
         meta=[f"{g['done']}/{g['total']} done{blocked}"],
         controls=controls,
     )

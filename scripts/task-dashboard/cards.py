@@ -1,9 +1,10 @@
 """The one card every tab draws, so a change to how a card looks lands on all.
 
 A tab builds a `Card` from its own rows and calls `render()`. The layout is
-fixed here: the next act as a chip, then the title and its muted ref, then
-one meta line led by the item's bare age (`130d`), its state and a CI that
-is the word alone. Now adds its ranking as an enrichment (`Score`): a number
+fixed here: the next act as a chip, then the title and its muted ref behind
+an icon for what the item is (an open PR, a draft, an issue, a session), then
+one meta line led by the item's bare age (`130d`), its state and its CI as
+GitHub's check, cross or dot. Now adds its ranking as an enrichment (`Score`): a number
 beside a "?" that pops over the breakdown. Nothing else differs by tab, so a
 tab cannot drift back into a card of its own (test_task_dashboard_cards.py
 checks every tab).
@@ -26,7 +27,28 @@ import view_model
 _e = html.escape
 
 CSS = """
-.card { display:flow-root; }
+.card { display:flow-root; position:relative; }
+/* A lane's run of cards reads as one bordered list, as GitHub's do: square
+   rows that share their borders, rounded only at the run's two ends. */
+.lane > .card { margin:0; border-radius:0; background:var(--bg); }
+.lane > .card + .card { border-top:0; }
+.lane > .card:first-child, .lane > :not(.card) + .card { border-top-left-radius:6px;
+  border-top-right-radius:6px; }
+.lane > .card:last-child, .lane > .card:has(+ :not(.card)) {
+  border-bottom-left-radius:6px; border-bottom-right-radius:6px; }
+.lane > .card:has(+ :not(.card)) { margin-bottom:8px; }
+.lane > .card:hover { background:var(--card); }
+.card .title { color:var(--fg); font-size:15px; font-weight:600; }
+.card a.title:hover { color:var(--accent); text-decoration:underline; }
+/* The kind or status icon sits in a gutter left of the title. */
+.card:has(.lead) { padding-left:34px; }
+.card .lead { position:absolute; left:11px; top:9px; line-height:0; }
+.card .lead .glyph { width:16px; height:16px; }
+.card .lead .icon { width:auto; margin:0; }
+.kind.k-open { color:var(--ok); }
+.kind.k-draft, .kind.k-muted { color:var(--muted); }
+.kind.k-session, .kind.k-ticket { color:var(--accent); }
+.kind.k-design, .kind.k-epic { color:var(--done); }
 .card > .act { float:right; margin:0 0 4px 12px; padding:1px 8px; border-radius:10px;
   border:1px solid var(--line); background:var(--bg); font-size:12px; font-weight:600; }
 .card .act code { white-space:pre-wrap; word-break:break-all; }
@@ -37,13 +59,18 @@ details.card > summary { cursor:pointer; list-style-position:inside; }
 .card .ref { color:var(--muted); font-size:12px; font-weight:400; }
 .card .meta { color:var(--muted); font-size:12px; }
 .card .age { color:var(--fg); font-weight:600; }
-.card .ci { color:var(--muted); }
-.card .ci.ci-bad { color:var(--bad); font-weight:600; }
+.ci { display:inline-flex; vertical-align:-0.2em; color:var(--muted); }
+.ci .glyph { width:14px; height:14px; }
+.ci.ci-ok { color:var(--ok); }
+.ci.ci-bad { color:var(--bad); }
+.ci.ci-pending { color:var(--warn); }
 .card .pin { color:var(--accent); font-weight:600; }
 .card .new { font-size:11px; font-weight:600; color:var(--accent);
   border:1px solid var(--accent); border-radius:999px; padding:0 6px; }
 .card .stag { font-size:11px; color:var(--muted); border:1px solid var(--line);
   border-radius:999px; padding:0 6px; }
+.card .label { font-size:11px; font-weight:500; color:var(--fg); border:1px solid var(--line);
+  border-radius:999px; padding:0 7px; background:var(--card); }
 .card .ask { margin:4px 0; color:var(--fg); overflow-wrap:anywhere; }
 .card .brief { white-space:pre-line; margin:6px 0; }
 .card .checklist { margin:4px 0; font-size:12px; color:var(--fg); }
@@ -87,16 +114,58 @@ class Age:
     tip: str
 
 
-# "CI <state>" in a state line: shown as the word CI alone, red when it
-# failed and muted otherwise, with the state in its tooltip.
+# "CI <state>" in a state line: shown as GitHub's mark for it, a green check,
+# a red cross or an amber dot, with the state as its name and tooltip. A
+# state with no mark (unknown, none) is a muted dashed circle.
 _CI = re.compile(r"\bCI (\w+)")
+_CI_MARKS = {
+    "success": ("check", "ci ci-ok"),
+    "failure": ("x", "ci ci-bad"),
+    "error": ("x", "ci ci-bad"),
+    "pending": ("dot-fill", "ci ci-pending"),
+}
 
 
 def ci(state: "str | None") -> str:
     """A CI state as the card shows it (_CI)."""
-    word = f"CI {state or 'unknown'}"
-    cls = "ci ci-bad" if state == "failure" else "ci"
-    return f'<span class="{cls}" title="{_e(word)}">CI</span>'
+    word = _e(f"CI {state or 'unknown'}")
+    glyph, cls = _CI_MARKS.get(state or "", ("circle-dashed", "ci"))
+    return (
+        f'<span class="{cls}" role="img" aria-label="{word}" title="{word}">'
+        f"{icons.svg(glyph)}</span>"
+    )
+
+
+# A card's kind -> its leading icon, the icon's colour class, and its name.
+# A kind not listed here draws no icon.
+KINDS = {
+    "pr": ("git-pull-request", "k-open", "Open pull request"),
+    "pr-draft": ("git-pull-request-draft", "k-draft", "Draft pull request"),
+    "issue": ("circle-dot", "k-open", "Open issue"),
+    "drain": ("circle-dot", "k-open", "Drain item"),
+    "session": ("terminal", "k-session", "Session"),
+    "ticket": ("circle-dot", "k-ticket", "Jira ticket"),
+    "design": ("pen-tool", "k-design", "Design"),
+    "worktree": ("git-branch", "k-muted", "Worktree"),
+    "handoff": ("file-text", "k-muted", "Handoff"),
+    "epic": ("layers", "k-epic", "Epic"),
+}
+
+
+def label(name: str) -> str:
+    """A GitHub label (`prio:2`) as a pill, as GitHub draws one."""
+    return f'<span class="label">{_e(name)}</span>'
+
+
+def kind_icon(kind: str) -> str:
+    """The leading icon for a card of `kind` (KINDS), or "" for none."""
+    if kind not in KINDS:
+        return ""
+    glyph, cls, name = KINDS[kind]
+    return (
+        f'<span class="kind {cls}" role="img" aria-label="{name}" title="{name}">'
+        f"{icons.svg(glyph)}</span>"
+    )
 
 
 def ci_words(text: str) -> str:
@@ -142,7 +211,8 @@ class Card:
     url: "str | None" = None
     ref: "str | None" = None
     act: str = ""  # the next act, after "→ "
-    icon: str = ""  # before the title: a Jira status
+    kind: str = ""  # what it is (KINDS): picks the leading icon
+    icon: str = ""  # the leading icon in place of the kind's: a Jira status
     tag: str = ""  # after the title: a bot badge, a session's tag
     age: "Age | None" = None
     flags: list[str] = field(default_factory=list)  # before the age: "new"
@@ -204,8 +274,9 @@ def render(c: Card, ov: "overlay.Overlay | None", now: datetime) -> str:
     line = " · ".join(b for b in bits + c.meta if b)
     if c.score is not None:
         line += _score(c)
+    lead = c.icon or kind_icon(c.kind)
     head = (
-        c.icon
+        (f'<span class="lead">{lead}</span>' if lead else "")
         + (
             title_ref(c.url, c.title, c.ref)
             if c.ref is not None

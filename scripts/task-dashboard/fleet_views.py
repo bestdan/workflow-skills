@@ -328,6 +328,7 @@ class StaleItem:
             self.url,
             self.ref,
             act=self.action.html(),
+            kind=self.kind,
             age=cards.Age(self.at, self.aged) if self.aged else None,
             meta=[_e(self.meta)] if self.meta else [],
             below=[f'<div class="why">{_e(self.why)}</div>'] if self.why else [],

@@ -493,6 +493,7 @@ class FleetViewTests(unittest.TestCase):
             return set(
                 re.findall(
                     r'<div class="card"[^>]*>(?:<div class="act">.*?</div>)?'
+                    r'(?:<span class="lead">.*?</svg></span></span>)?'
                     r'<span class="title">(worktree|handoff|session) ',
                     page,
                 )

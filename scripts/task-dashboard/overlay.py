@@ -967,6 +967,15 @@ CSS = """
 .card .ov .ov-icon:hover { border-color:var(--muted); }
 .card .ov .ov-icon .glyph { display:block; width:14px; height:14px; }
 @media (pointer:coarse) { .card .ov .ov-icon { padding:7px; } }
+/* With a mouse, the controls wait at the card's bottom right until it is
+   hovered or holds focus, as a GitHub row's actions do, so they cost no line.
+   A touch screen cannot hover, so there they stay a line of their own; and a
+   snoozed card's controls stay put, since they carry its "snoozed until". */
+@media (hover:hover) and (pointer:fine) {
+  .card .ov:not(:has(.badge)) { position:absolute; right:8px; bottom:6px; margin:0;
+    padding-left:8px; background:inherit; opacity:0; }
+  .card:hover .ov, .card:focus-within .ov { opacity:1; }
+}
 .card.snoozed { opacity:.6; }
 .card .badge { color:var(--muted); }
 """

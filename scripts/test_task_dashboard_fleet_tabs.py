@@ -233,15 +233,17 @@ class PullRequestTests(Case):
 
     def test_cards_are_title_first_then_the_age_and_ci(self):
         # The shared card (cards.py): the repo is in the ref, so the meta
-        # line leads with the bare age and shows CI as the word alone.
+        # line leads with the bare age and shows CI as GitHub's mark, after
+        # the open-PR icon.
         seed(self.conn)
         ready = section(self.page(), "ready")
         self.assertRegex(ready, r'<a class="title" href="[^"]+/pull/1"[^>]*>pr 1</a>')
         self.assertIn(f'<span class="ref">{REPO}#1</span>', ready)
+        self.assertIn('aria-label="Open pull request"', ready)
         self.assertRegex(
             ready,
             r'<div class="meta"><span class="age" title="opened [0-9-]+">\d+d</span>'
-            r' · <span class="ci" title="CI success">CI</span></div>',
+            r" · " + re.escape(fleet_tabs.cards.ci("success")) + "</div>",
         )
         self.assertNotIn(f"· {REPO}", ready)
 
@@ -301,7 +303,10 @@ class IssueTests(Case):
     def test_cards_carry_prio_and_est(self):
         seed(self.conn)
         needs_you = section(self.page(), "needs-you")
-        self.assertIn("prio:1 · est:3", needs_you)
+        self.assertIn(
+            '<span class="label">prio:1</span> · <span class="label">est:3</span>',
+            needs_you,
+        )
         self.assertIn(f'<span class="ref">{REPO}#10</span>', needs_you)
 
     def test_the_cap_is_surfaced(self):
