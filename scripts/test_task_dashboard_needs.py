@@ -538,6 +538,28 @@ class NewTests(NeedsCase):
         overlay.set_last_visit(self.conn, NOW)
         self.assertNotIn('data-section="finished"', self.page())
 
+    def test_an_ignored_finished_session_leaves_the_group_and_can_be_undone(self):
+        # Since you were away folded into this page (#1173); #1162 asked that
+        # its ignore hold there, so the Finished group is where it is pinned.
+        seed(self.conn)
+        overlay.set_last_visit(self.conn, VISIT)
+        item = ("claude-hook", "s-done")
+        overlay.ignore(self.conn, item, NOW)
+        page = self.page()
+        self.assertNotIn("s-done", finished_keys(page))
+        self.assertIn("Finished since you looked (3)", page)
+        overlay.unignore(self.conn, item)
+        self.assertIn("s-done", finished_keys(self.page()))
+
+    def test_an_ignored_issue_leaves_the_page_and_can_be_undone(self):
+        seed(self.conn)
+        overlay.set_last_visit(self.conn, VISIT)
+        item = ("github", issue_url(950))
+        overlay.ignore(self.conn, item, NOW)
+        self.assertNotIn(issue_url(950), keys(self.page()))
+        overlay.unignore(self.conn, item)
+        self.assertIn(issue_url(950), keys(self.page()))
+
 
 class GateTests(NeedsCase):
     def test_fleet_off_shows_no_github_rows(self):
@@ -807,6 +829,16 @@ class EndedTests(NeedsCase):
         # The live sessions keep their places.
         self.assertIn("s-perm", keys(section(page, "approvals")))
         self.assertIn("s-done", finished_keys(page))
+
+    def test_an_ignored_ended_session_leaves_the_finished_group(self):
+        self.end_turn()
+        item = ("claude-hook", "s-turn")
+        overlay.ignore(self.conn, item, NOW)
+        page = self.page()
+        self.assertNotIn("s-turn", keys(listed(page)))
+        self.assertNotIn("s-turn", finished_keys(page))
+        overlay.unignore(self.conn, item)
+        self.assertIn("s-turn", finished_keys(self.page()))
 
     def test_a_waiting_session_is_listed_ended_even_before_the_last_visit(self):
         overlay.set_last_visit(self.conn, NOW)
