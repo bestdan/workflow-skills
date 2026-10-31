@@ -1094,6 +1094,7 @@ def refreshable(item: Item) -> bool:
 
 
 PIN_TIP = "Pin: keep it at the top of Now, the Board and Epics"
+UNPIN_TIP = "Unpin: rank it like any other item"
 
 
 def card_controls(
@@ -1117,7 +1118,7 @@ def card_controls(
     if pin:
         if pinned:
             act, label, glyph = "unpin", "Unpin", "pin-off"
-            tip = "Unpin: rank it like any other item"
+            tip = UNPIN_TIP
         else:
             act, label, glyph = "pin", "Pin", "pin"
             tip = pin_tip
