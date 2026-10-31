@@ -330,7 +330,10 @@ _duration expectation_, and it makes the test a coin flip.
 
 So: keep success-path budgets far above any plausible runtime, and keep them
 bounded so a genuine regression fails rather than hangs. Reserve _small_ budgets
-for assertions whose expected outcome is itself a timeout. Before adding
+for assertions whose expected outcome is itself a timeout. Better still, remove
+the dependence entirely: `test/claude-auto-resume.bats` stubs `date` and
+`sleep` with a file-backed fake clock, so its waits end at once instead of
+racing a real one. Before adding
 concurrency anywhere in the gate, grep for `sleep`, `SECONDS`, `--timeout`, and
 polling loops in the suites it touches — and read
 [`gate-performance.md`](gate-performance.md), which covers where the gate's wall
