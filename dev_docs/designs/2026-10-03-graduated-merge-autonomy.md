@@ -39,7 +39,7 @@ before co-review finished produced 10 follow-up fixes.
 **Goals.** Fewer owner turns spent on ritual ("merged, tidy up", bare "yes");
 no merge before review completes; agent landing for a slice that grows only on
 evidence; the owner's time spent on setup, design, naming and topology — where
-the history shows his judgement changes outcomes — rather than on reading
+the history shows that judgement changes outcomes — rather than on reading
 diffs.
 
 **Non-goals.** A model deciding the tier. Agents widening their own
@@ -63,8 +63,8 @@ Taken from the field survey; every component below serves one.
    by configuration is not a failure.
 5. **The policy that grants autonomy is itself human-tier.** So are
    `.github/workflows/`, the ruleset, and the tier script.
-6. **Every agent landing is labelled and auditable** on GitHub, which owns that
-   state — not in a file here.
+6. **Every agent landing carries an audit record in its squash commit** and is
+   auditable on GitHub, which owns that state — not in a file here.
 
 ## Components
 
@@ -157,7 +157,7 @@ SHA and the evidence pointers — so it lands atomically with the merge. The
 record ends in two trailers, `Landed-by: land-pr.sh` and
 `Co-review-head: <sha>`. The `landed-by-agent` label and a PR comment repeating
 the record follow as best effort; the landing audits key on the `Landed-by` trailer,
-and lists any trailer-carrying merge that lacks the label. `/deliver-task` calls it as a new final step
+and list any trailer-carrying merge that lacks the label. `/deliver-task` calls it as a new final step
 instead of stopping at hand-off when the tier is `auto`; `/auto-pilot`'s
 "nothing is merged unattended" invariant becomes "nothing outside the `auto`
 tier is merged unattended".
@@ -212,7 +212,7 @@ calls today. The agent
 makes a provisional call, records it as such in the PR body and in
 `QUESTIONS.md`, and keeps building the PRs above it on that call. Building is
 reversible; landing is not. Nothing at or above that PR lands until the owner
-confirms. If he overturns the call, the stack is restacked from that point, and
+confirms. If the owner overturns the call, the stack is restacked from that point, and
 each PR above it is re-verified, as `/auto-pilot`'s restack already does. The
 PRs below it are unaffected and can land, following pstack's rule of landing
 only the contiguous verified run from the bottom. A call that touches only its
@@ -379,7 +379,8 @@ Each gate converts a class of B PRs; build them in this order, by B volume:
 
 ## Decisions
 
-Each checked with a blind `/consult`, with its confidence and crux:
+Each checked with a blind `/consult`, with its confidence, and its crux where
+it named one:
 
 - Enforce review-complete as a required status, not in script or prose (85%):
   "whether the merges that outran review were human UI merges" — they were.

@@ -7,7 +7,7 @@ created: 2026-10-03
 _Research record, 2026-10-03. Question: of the PRs merged in workflow-skills,
 finplan, agent-guidance and dotfiles between 2026-08-04 and 2026-10-03, how
 many could an agent have merged safely without the owner, and what marks the
-ones that needed him? The field survey is
+ones that needed the owner? The field survey is
 [`2026-10-03-agent-merge-autonomy-field.md`](2026-10-03-agent-merge-autonomy-field.md);
 the proposal built on both is
 [`../designs/2026-10-03-graduated-merge-autonomy.md`](../designs/2026-10-03-graduated-merge-autonomy.md)._
@@ -23,15 +23,15 @@ and silence is weak evidence.
 Two findings matter more than the split:
 
 1. **The owner's merge caught no defect that shipped.** Every fix-within-7-days
-   (about 40 across the four repos) got past him too. They were found by
+   (about 40 across the four repos) got past the owner too. They were found by
    co-review finishing late, by Copilot, by real use, or by an agent
    re-checking. **Twelve PRs merged while co-review was still running or
    before its fixes were pushed, and ten of them needed a follow-up fix.**
-2. **What he actually supplied was direction, not defect-catching** — scope
-   corrections, premise errors, model semantics, conventions, policy about his
-   own workflow, and checks on physical machines. Most of that arrived _during
-   the session, before the PR existed_, not at merge. At merge, his typical
-   turn was a one-line "merged, tidy up" minutes after co-review reported.
+2. **What the owner actually supplied was direction, not defect-catching** —
+   scope corrections, premise errors, model semantics, conventions, policy
+   about the owner's own workflow, and checks on physical machines. Most of
+   that arrived _during the session, before the PR existed_, not at merge. At
+   merge, the owner's typical turn was a one-line "merged, tidy up" minutes after co-review reported.
 
 So the merge click is mostly a ritual today, while the real gate (finish the
 review, then merge) is enforced by nobody. The cheapest safety gain is
@@ -56,17 +56,17 @@ the remaining ~16% is not broken out. That subsample is dominated by the Jev
 research workstream ([typed model calls](../typed-model-calls.md)), whose
 research and decision PRs drew 9 of 15 corrections while its code and skill PRs
 drew 3 of 18. A reasonable central estimate for workflow-skills is **65–75%**
-mergeable without him.
+mergeable without the owner.
 
 ## What needed the owner, by repo
 
 The C class is different in each repo, which is the main input to the design.
 
-- **workflow-skills.** Not the code. The PRs that drew him were (a) records of
-  a judgement — research verdicts, methodology, adopt/don't-adopt calls; (b)
-  policy about his own workflow, e.g. #785, where he overruled a gate as too
-  onerous for attended sessions and kept it only for unattended runs; (c)
-  live-host checks only he could run (#497, #800); (d) the agent drifting off
+- **workflow-skills.** Not the code. The PRs that drew the owner were (a) records
+  of a judgement — research verdicts, methodology, adopt/don't-adopt calls; (b)
+  policy about the owner's own workflow, e.g. #785, where the owner overruled a
+  gate as too onerous for attended sessions and kept it only for unattended
+  runs; (c) live-host checks only the owner could run (#497, #800); (d) the agent drifting off
   the task or using terms loosely (#787, #802, #847). Skill and command prose
   was redirected on only 4% of PRs. **`docs:` PRs drew the most corrections
   (21%)**, because here `docs:` marks decision content, not low risk.
@@ -88,7 +88,7 @@ The C class is different in each repo, which is the main input to the design.
   widening, global guidance changes, irreversible or network-exposing
   automation, and guard loosening. The owner left **no review comment on any of the 41 PRs touching
   `settings.json`**. Those that widen permissions stay C by rule, not because
-  he demonstrably caught something; narrowing ones were classed B.
+  the owner demonstrably caught something; narrowing ones were classed B.
 
 ## How the owner's attention was actually spent
 
@@ -110,7 +110,7 @@ visible here):
 - **Real interventions** were direction and precision: the agent sidetracked
   onto unrelated tracker work (#787); a design that was too onerous for
   attended use (#785); terminology confused between two 1Password features
-  (#802); a UX the owner said he would never type (#802); a verdict that ignored
+  (#802); a UX the owner said they would never type (#802); a verdict that ignored
   a 10× latency advantage (#866); asking whether the method was biased (#869);
   the wrong repo's backlog; a premise built around a PR number when the action
   was generic.
@@ -118,7 +118,7 @@ visible here):
   written as a history of the change rather than for the reader (#560, #755,
   #830, #871 here; about 20 comments in dotfiles). It is the single most
   repeated owner correction, and it is mechanical enough to detect.
-- **The owner as relay.** He carried messages between agents on different
+- **The owner as relay.** The owner carried messages between agents on different
   machines. That is task-tracking work, not review.
 - **Unattended output piled up.** In one private repo, an unattended routine
   opened PRs faster than they were reviewed.
@@ -172,8 +172,8 @@ A\*, folded into A above.
 - **Silence is weak evidence.** "Merged without comment" never made a PR A by
   itself; A also required a low-risk change type and no follow-up. The owner
   may still have read silently or steered in a session we cannot see — August
-  in workflow-skills has zero verified C precisely because no record of his
-  words exists for it.
+  in workflow-skills has zero verified C precisely because no record of the
+  owner's words exists for it.
 - **Transcript coverage is thin.** 207 of 240 workflow-skills merges, most
   finplan merges before Sep 27, and nearly all of the Mac-authored dotfiles and
   agent-guidance work have no local transcript. That undercounts C.
