@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.163.2] - 2026-10-31
+
+### Fixes
+
+- Needs Pin and epic Unpin tooltips [#1275] (#1278) (92e4112)
+
 ## [2.163.1] - 2026-10-31
 
 ### Fixes
