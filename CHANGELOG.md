@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.163.0] - 2026-10-31
+
+### Features
+
+- add a favicon [N/A] (#1274) (8be1393)
+
 ## [2.162.0] - 2026-10-31
 
 ### Features
