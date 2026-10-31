@@ -22,7 +22,7 @@ It runs as one of two kinds of instance from the same code:
   [Fleet instance](#fleet-instance).
 
 An instance is a fleet instance when `github.scope = "owner"` and GitHub is
-enabled (`sync.fleet_enabled`). Jira can be on or off in either kind
+enabled (`sync.fleet_enabled()`). Jira can be on or off in either kind
 (`jira.enabled`).
 
 ## Architecture
@@ -300,7 +300,8 @@ mechanics.
   `com.bestdan.task-dashboard` and the stable launcher
   `~/.local/bin/task-dashboard-launch`. The launcher resolves the plugin's
   current `installPath` at every start, so the plist never names the
-  versioned directory. Install then runs `init-db` and a `full` sync in the
+  versioned directory, which moves on every plugin update and would break a
+  hard-coded path. Install then runs `init-db` and a `full` sync in the
   foreground, which also warms uv's interpreter cache, and only after that
   bootstraps the agent. If any step fails, install undoes what it wrote.
 - **After a plugin update**, run
@@ -337,8 +338,8 @@ whether acli's refresh token expires over days.
 past what one serial retry covers), the fallback is Jira's REST
 `/rest/api/3/search/jql`. It returns any field in one paginated call, but needs
 its own API token, because acli's OAuth token is stored for acli alone. Nothing
-is built for it. The swap would sit behind `sync.JiraSource`, whose `search` and
-`view` are the only Jira calls the sync makes.
+is built for it. The swap would sit behind `sync.JiraSource`, whose
+`active_sprints`, `search` and `view` are the only Jira calls the sync makes.
 
 ## Fleet instance
 
