@@ -11,9 +11,9 @@ empty to the key's own user, whose state type is in
 linear_api.OPEN_STATE_TYPES (`unstarted`, `started`), every page of them. So
 each read is a full snapshot, and write() replaces the source's rows with it:
 an issue that was finished, canceled, moved to the backlog or reassigned
-leaves the mirror on the next good run. Set `me` when the key belongs to an
-agent account: its own user is assigned nothing, so the read comes back empty
-rather than failing.
+leaves the mirror on the next good run. Set `me` when the key was made on a
+different account from the one the issues are assigned to: without it the
+read comes back empty rather than failing.
 
 THE ROW, under `source = 'linear'`, `kind = 'ticket'` (include's `tasks`
 group), keyed by the identifier (`PRE-123`). It fills the Jira columns so

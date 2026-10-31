@@ -345,8 +345,8 @@ query($after: String, $types: [String!]) {{
 }}
 """
 
-# With an assignee named by email (`linear.me`): for a key that belongs to an
-# agent account, whose own user is assigned nothing.
+# With an assignee named by email (`linear.me`): for a key made on a different
+# account from the one the issues are assigned to.
 ASSIGNEE_QUERY = f"""
 query($after: String, $types: [String!], $email: String!) {{
   issues(first: 50, after: $after,

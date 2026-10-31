@@ -262,8 +262,9 @@ Jira views with no Jira.
 `[linear] enabled = true` does two things once a key resolves. On every
 instance, the `linear_issues` step mirrors the open issues (state type
 `unstarted` or `started`) assigned to `linear.me`, an email, or with it unset
-to the key's own user. A key made for an agent account needs `me`, because its
-own user is assigned nothing. Now ranks them as it ranks Jira
+to the key's own user. Set `me` when the key was made on a different Linear
+account from the one the issues are assigned to: otherwise the read finds
+none. Now ranks them as it ranks Jira
 tickets: started is the `started` tier, unstarted lands in the rest, an open
 blocker or the `blocked` label sends one to the blocked tier, and a PR whose
 title or branch carries the key folds into its card. `linear_issues.py` and

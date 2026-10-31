@@ -76,7 +76,8 @@ DEFAULTS: dict[str, Any] = {
     # every instance (linear_issues.py). Off by default. The key is never set
     # here: linear_api.resolve_key says where it is read from. `me` is the
     # email whose assigned issues Now ranks; empty means the key's own user,
-    # which is wrong when the key belongs to an agent account.
+    # which is wrong when the key was made on a different account from the
+    # one the issues are assigned to.
     "linear": {"enabled": False, "timeout_seconds": 30, "me": ""},
     # The Workstreams tab (workstreams.py): an in-progress or planned
     # workstream with no member activity for this many days is Stalled.

@@ -86,9 +86,10 @@ flag again, and a reinstall keeps them too.
    - `enabled = true` under `[linear]`, with a key, puts the owner's open
      assigned Linear issues on Now on every instance, and on a fleet instance
      adds Linear projects to the Workstreams tab, which otherwise shows
-     milestones and proposed designs. If the key belongs to an agent account,
-     set `me = "<the owner's Linear email>"` under `[linear]` too: without it
-     Now reads the key's own user's issues, which is none. The key never goes in config.toml: it
+     milestones and proposed designs. If the key was made on a different
+     Linear account from the one the owner's issues are assigned to, set
+     `me = "<that account's email>"` under `[linear]` too: without it Now
+     reads only the key's own account's issues. The key never goes in config.toml: it
      goes in `~/.config/workflow-skills/linear_api_key`, mode 600, or in
      `$LINEAR_API_KEY` (`linear_api.py` has the full ladder). Without one the
      Linear issues step fails with `no Linear key` and Workstreams records
