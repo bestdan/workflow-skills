@@ -1553,6 +1553,13 @@ def render(
             f'<p class="note plan-head" data-plan-scope="{_e(p.plan["scope"])}"'
             f' data-plan-kind="{p.plan["kind"]}">{_e(line)}</p>'
         )
+    elif p.mode == PLAN and p.shown:
+        # Pins lead in every mode, so with no plan live a pin fills the lane
+        # and its empty line would never show: say it above the list instead.
+        import plan_mode
+
+        line = plan_mode.empty(p.lapsed) + "."
+        parts.append(f'<p class="note plan-none">{_e(line)}</p>')
     for lane in lanes(p, inc):
         body = "".join(card(r, now, ov) for r in lane.items)
         body = body or f'<p class="empty">{_e(lane.empty)}</p>'

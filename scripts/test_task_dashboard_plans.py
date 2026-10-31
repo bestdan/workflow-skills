@@ -488,6 +488,14 @@ class PlanModeTests(Case):
         self.assertIn("plan set --scope", doc["notes"]["no_plan"])
         self.assertEqual(doc["lanes"][0]["items"], [])
 
+    def test_no_plan_with_a_pin_still_says_so_above_the_pin(self):
+        overlay.pin(self.conn, A, NOW)
+        page = self.page()
+        self.assertIn(f'data-key="{A[1]}"', page)
+        self.assertIn('<p class="note plan-none">No plan is live', page)
+        self.assertLess(page.index("plan-none"), page.index(f'data-key="{A[1]}"'))
+        self.assertIn("plan set --scope", self.doc()["notes"]["no_plan"])
+
     def test_an_expired_session_plan_is_named_in_the_empty_state(self):
         self.set(kind="session")
         later = NOW + timedelta(days=2)
@@ -504,6 +512,8 @@ class PlanModeTests(Case):
         self.assertEqual(order, sorted(order))
         self.assertIn('<div class="plan-reason">1. unblocks the rest</div>', page)
         self.assertIn('<div class="plan-reason">3. small</div>', page)
+        # The card's meta line: action, estimate, then its state's evidence.
+        self.assertIn("finish · ~30 min · status:2_ready", self.card(page, B[1]))
         self.assertIn("plan-head", page)
         self.assertIn("by claude-test", page)
         self.assertIn("2026-10-24 · estimated 30 min · 1/3 done", page)

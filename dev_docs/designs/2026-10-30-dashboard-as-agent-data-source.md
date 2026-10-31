@@ -489,9 +489,10 @@ the close-out checklist's rule too (`close_out.py`). The signals are:
 > `close_out.py` already ticks "task closed" from. An entry with no closed
 > signal that has left the mirror (and a PR closed without merging) is
 > `gone`: it keeps its place in the plan, muted and flagged `gone`, titled by
-> its ref, never ticked. Pins lead, and snoozes, ignores and the include
-> filter apply, as in every Now mode. The whole plan is shown, with no list
-> limit.
+> its closed PR's title or else its ref, never ticked. Pins lead, and
+> snoozes, ignores and the include filter apply, as in every Now mode; with
+> no plan live, a pin still shows and the no-plan line moves above the list.
+> The whole plan is shown, with no list limit.
 
 Ticks are drawn from mirror rows only. The plan's items are refreshed at each
 sync while the plan is live and once at expiry, never on page load, so Plan

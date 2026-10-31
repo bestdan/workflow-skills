@@ -19,9 +19,10 @@ the page never calls GitHub:
   when a repo is archived, an issue is transferred, or a search returns less.
   A PR closed without merging is `gone` too, its evidence saying so. A gone
   entry keeps its place in the plan; its card is muted, flagged `gone`,
-  titled by the entry's ref (`owner/repo#N` for a GitHub URL) or key, and
-  says why it is not ticked. Until a sync refreshes planned items (#1288), a
-  GitHub issue closed by hand, with no merged PR naming it, reads `gone`.
+  titled by its closed PR's title when there is one, else by the entry's ref
+  (`owner/repo#N` for a GitHub URL) or key, and says why it is not ticked.
+  Until a sync refreshes planned items, a GitHub issue closed by hand, with
+  no merged PR naming it, reads `gone`.
 """
 
 import re
