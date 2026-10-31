@@ -142,10 +142,11 @@ None of these needs the server running:
   A `ticket` is a Jira issue or, with `[linear] enabled`, a mirrored Linear
   one, in the same shape; its `mine` is false for an unassigned or someone
   else's issue (Jira: `views.Mirror.is_mine`; Linear: `linear.me` when set,
-  else the key's user) and null for a Linear row synced before the read
+  else the key's user) and absent for a Linear row synced before the read
   carried its assignee. Scopes: `jira:<PROJECT>` holds Jira tickets only;
   `linear:<TEAM>` a Linear team's tickets. A Linear project has no scope
-  kind of its own: it is the `ws:linear:<id>` workstream, whose members are
+  kind of its own: it is the `ws:linear:<id>` workstream, whose members, in
+  `items` and `scopes` alike, are
   the project's tickets (joined by the row's project id, else its project
   name) plus the PRs and issues naming them. A completed or canceled project
   is no open workstream, so its tickets fall under their team alone.

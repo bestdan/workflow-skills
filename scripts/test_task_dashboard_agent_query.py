@@ -476,6 +476,8 @@ class LinearTests(Case):
         self.cfg["linear"]["me"] = "ANA@example.com"
         keys = self.by_key(kind="ticket")
         self.assertEqual((keys["PRE-1"]["mine"], keys["PRE-4"]["mine"]), (False, True))
+        # A row synced before the read carried its assignee still cannot tell.
+        self.assertNotIn("mine", keys["PRE-3"])
 
     def test_a_team_scope_lists_its_open_count_and_resolves(self):
         doc = agent_query.scopes_doc(self.conn, self.cfg, NOW, "linear:PRE")
@@ -490,6 +492,13 @@ class LinearTests(Case):
             self.conn, self.cfg, NOW)["matched"]}  # fmt: skip
         self.assertNotIn("jira:PRE", every)
         self.assertNotIn("PRE-1", self.by_key(scope=["jira:PAY"]))
+
+    def test_a_linear_team_sharing_a_jira_project_key_stays_linear(self):
+        rw = db.connect(self.db_path)
+        linear_issues.write(rw, [*LINEAR, LEGACY, linear("PAY-100", team="PAY")], NOW)
+        rw.close()
+        self.assertEqual(sorted(self.by_key(scope=["linear:PAY"])), ["PAY-100"])
+        self.assertNotIn("PAY-100", self.by_key(scope=["jira:PAY"]))
 
     def test_a_project_ticket_joins_its_workstream(self):
         keys = self.by_key(kind="ticket")

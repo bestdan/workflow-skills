@@ -225,14 +225,14 @@ a DB that is behind the current schema, once, as `view` does.
 
 - `DASH scopes <word>` says what a word can mean: each matching scope id
   (`repo:`, `ws:`, `jira:`, `linear:`, `epic:`, `label:`, `host:`) with its
-  open-item count. `linear:<TEAM>` is a Linear team's mirrored tickets; a
-  Linear project is the `ws:linear:<id>` workstream, which holds the project's
-  tickets as well as the PRs and issues naming them. For a repo it also lists `related` workstreams, those with open
+  open-item count. For a repo it also lists `related` workstreams, those with open
   members in the repo whatever their name, counting only open members. A session or worktree knows its repo only
   by directory name, so it counts under every owner's repo of that name.
   **Show `related` to the owner and pass the
   ones they confirm as `--scope ws:<id>`; never add them yourself.** Say what
-  the word matched.
+  the word matched. `linear:<TEAM>` is a Linear team's mirrored tickets; a Linear project is
+  the `ws:linear:<id>` workstream, which holds the project's tickets as well
+  as the PRs and issues naming them, in `items` and `scopes` alike.
 - `DASH items --scope <id or word>` (repeatable, a union) prints one record
   per open item, every source in one shape: its state, prio, age, labels,
   workstreams, linked `pr` readiness, live `activity` (sessions and worktrees
