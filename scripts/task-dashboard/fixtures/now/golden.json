@@ -155,6 +155,54 @@
         ]
       ]
     },
+    "plan": {
+      "agent": {
+        "all": false,
+        "freshness": {
+          "scanned": {
+            "mini": {
+              "received_at": "2026-10-25T12:00:00Z",
+              "scan_errors": 0,
+              "snapshot_at": "2026-10-25T11:00:00.000Z"
+            }
+          },
+          "synced": {
+            "github_fleet": "2026-10-25T11:01:00Z",
+            "workstreams": "2026-10-25T12:00:00Z"
+          }
+        },
+        "generated_at": "2026-10-25T12:00:00Z",
+        "ignored": [],
+        "include": [
+          "tasks",
+          "prs",
+          "sessions",
+          "other"
+        ],
+        "include_origin": "default",
+        "lanes": [
+          {
+            "count": 0,
+            "id": "next",
+            "items": [],
+            "off": false,
+            "title": "Next"
+          }
+        ],
+        "notes": {
+          "mode": "plan",
+          "more_in_mode": 0,
+          "more_on_needs": 0,
+          "no_plan": "No plan is live. An agent makes one with `dashboard.py plan set --scope <scope id|all> --by <name> --file plan.json` (the task-dashboard skill's `plan`), an ordered list with a reason for each item.",
+          "plan": null,
+          "snoozed": 0
+        },
+        "schema": 1,
+        "view": "now"
+      },
+      "page": "<div class=\"fleet now\" data-mode=\"plan\"><section class=\"lane\" data-section=\"next\"><h2>Next (0)</h2><p class=\"empty\">No plan is live. An agent makes one with `dashboard.py plan set --scope &lt;scope id|all&gt; --by &lt;name&gt; --file plan.json` (the task-dashboard skill&#x27;s `plan`), an ordered list with a reason for each item.</p></section></div>",
+      "snapshots": []
+    },
     "ship": {
       "agent": {
         "all": false,
@@ -1772,6 +1820,93 @@
           }
         ]
       ]
+    },
+    "plan": {
+      "agent": {
+        "all": false,
+        "freshness": {
+          "scanned": {},
+          "synced": {
+            "github_fleet": "2026-10-25T11:01:00Z"
+          }
+        },
+        "generated_at": "2026-10-25T12:00:00Z",
+        "ignored": [],
+        "include": [
+          "tasks",
+          "prs",
+          "sessions",
+          "other"
+        ],
+        "include_origin": "default",
+        "lanes": [
+          {
+            "count": 1,
+            "id": "next",
+            "items": [
+              {
+                "action": {
+                  "review": "review and merge it on GitHub",
+                  "url": "https://github.com/bestdan/workflow-skills/pull/21"
+                },
+                "at": "2026-10-02T00:00:00Z",
+                "branch": null,
+                "bridge_session_id": null,
+                "brief": null,
+                "category": "others_pr",
+                "checklist": [],
+                "evidence": "bot PR from dependabot[bot], CI pending",
+                "first_prompt": null,
+                "folded": [],
+                "hidden": null,
+                "host": null,
+                "key": "https://github.com/bestdan/workflow-skills/pull/21",
+                "kind": "pr",
+                "lane": "next",
+                "last_ask": null,
+                "linked": [],
+                "path": null,
+                "pr": null,
+                "ref": "bestdan/workflow-skills#21",
+                "risks": [],
+                "score": 4.34,
+                "source": "github",
+                "terms": [
+                  [
+                    "others_pr",
+                    4.0,
+                    "bot PR from dependabot[bot], CI pending"
+                  ],
+                  [
+                    "age",
+                    0.34,
+                    "waiting 24d"
+                  ]
+                ],
+                "tier": "the rest",
+                "title": "awaiting 21",
+                "url": "https://github.com/bestdan/workflow-skills/pull/21",
+                "waited": "waiting 24d",
+                "why": "ship: the rest \u00b7 score 4.34: others_pr +4 (bot PR from dependabot[bot], CI pending) \u00b7 age +0.34 (waiting 24d)"
+              }
+            ],
+            "off": false,
+            "title": "Next"
+          }
+        ],
+        "notes": {
+          "mode": "plan",
+          "more_in_mode": 0,
+          "more_on_needs": 0,
+          "no_plan": "No plan is live. An agent makes one with `dashboard.py plan set --scope <scope id|all> --by <name> --file plan.json` (the task-dashboard skill's `plan`), an ordered list with a reason for each item.",
+          "plan": null,
+          "snoozed": 0
+        },
+        "schema": 1,
+        "view": "now"
+      },
+      "page": "<div class=\"fleet now\" data-mode=\"plan\"><section class=\"lane\" data-section=\"next\"><h2>Next (1)</h2><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/pull/21\" data-kind=\"pr\" data-category=\"others_pr\" data-tier=\"the rest\" data-total=\"4.34\" data-mode=\"ship\"><div class=\"act\">\u2192 review and merge it on GitHub</div><span class=\"lead\"><span class=\"kind k-open\" role=\"img\" aria-label=\"Open pull request\" title=\"Open pull request\"><svg class=\"glyph\" viewBox=\"0 0 24 24\" width=\"16\" height=\"16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M21 18a3 3 0 1 1-6 0a3 3 0 1 1 6 0\"/><path d=\"M9 6a3 3 0 1 1-6 0a3 3 0 1 1 6 0\"/><path d=\"M13 6h3a2 2 0 0 1 2 2v7\"/><path d=\"M6 9v12\"/></svg></span></span><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/pull/21\" target=\"_blank\" rel=\"noopener\">awaiting 21</a> <span class=\"ref\">bestdan/workflow-skills#21</span><div class=\"meta\"><span class=\"pin\">pinned</span> \u00b7 <span class=\"age\" title=\"waiting since 2026-10-02\">24d</span> \u00b7 PR from dependabot[bot] \u00b7 bot \u00b7 <span class=\"ci ci-pending\" role=\"img\" aria-label=\"CI pending\" title=\"CI pending\"><svg class=\"glyph\" viewBox=\"0 0 24 24\" width=\"16\" height=\"16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M17 12a5 5 0 1 1-10 0a5 5 0 1 1 10 0\" fill=\"currentColor\" stroke=\"none\"/></svg></span> <span class=\"why-more\" tabindex=\"0\" aria-label=\"Score 4.34: why it ranks here\" role=\"button\" aria-describedby=\"why-788ecff5b9\"><span class=\"score\">4.34</span><svg class=\"glyph\" viewBox=\"0 0 24 24\" width=\"16\" height=\"16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M22 12a10 10 0 1 1-20 0a10 10 0 1 1 20 0\"/><path d=\"M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3\"/><path d=\"M12 17h.01\"/></svg><div class=\"why\" data-terms=\"others_pr,age\" id=\"why-788ecff5b9\" role=\"tooltip\">ship: the rest \u00b7 score 4.34: others_pr +4 (bot PR from dependabot[bot], CI pending) \u00b7 age +0.34 (waiting 24d)</div></span></div><div class=\"ov\"><button type=\"button\" class=\"ov-icon\" data-ov=\"unpin\" aria-label=\"Unpin\" title=\"Unpin: rank it like any other item\"><svg class=\"glyph\" viewBox=\"0 0 24 24\" width=\"16\" height=\"16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M12 17v5\"/><path d=\"M15 9.34V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H7.89\"/><path d=\"m2 2 20 20\"/><path d=\"M9 9v1.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h11\"/></svg></button><button type=\"button\" class=\"ov-icon\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" aria-label=\"Snooze 7d\" title=\"Snooze 7d, until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\"><svg class=\"glyph\" viewBox=\"0 0 24 24\" width=\"16\" height=\"16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M20 13a8 8 0 1 1-16 0a8 8 0 1 1 16 0\"/><path d=\"M12 9v4l2 2\"/><path d=\"M5 3 2 6\"/><path d=\"m22 6-3-3\"/><path d=\"M6.38 18.7 4 21\"/><path d=\"M17.64 18.67 20 21\"/></svg></button><button type=\"button\" class=\"ov-icon\" data-ov=\"ignore\" aria-label=\"Ignore\" title=\"Ignore: not mine, hide it\"><svg class=\"glyph\" viewBox=\"0 0 24 24\" width=\"16\" height=\"16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49\"/><path d=\"M14.084 14.158a3 3 0 0 1-4.242-4.242\"/><path d=\"M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143\"/><path d=\"m2 2 20 20\"/></svg></button><button type=\"button\" class=\"ov-icon\" data-refresh=\"\" aria-label=\"Refresh\" title=\"Refresh: re-read this item from GitHub, without a full sync\"><svg class=\"glyph\" viewBox=\"0 0 24 24\" width=\"16\" height=\"16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8\"/><path d=\"M21 3v5h-5\"/><path d=\"M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16\"/><path d=\"M8 16H3v5\"/></svg></button></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 for</span><button type=\"button\" data-ov=\"snooze-for\" data-until=\"2026-10-26\" aria-pressed=\"false\">1d</button><button type=\"button\" data-ov=\"snooze-for\" data-until=\"2026-10-28\" aria-pressed=\"false\">3d</button><button type=\"button\" data-ov=\"snooze-for\" data-until=\"2026-11-01\" aria-pressed=\"true\">7d</button><button type=\"button\" data-ov=\"snooze-for\" data-until=\"2026-11-08\" aria-pressed=\"false\">14d</button><button type=\"button\" data-ov=\"snooze-for\" data-until=\"2026-11-24\" aria-pressed=\"false\">30d</button><span>\u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div></section></div>",
+      "snapshots": []
     },
     "ship": {
       "agent": {
@@ -4062,6 +4197,99 @@
           }
         ]
       ]
+    },
+    "plan": {
+      "agent": {
+        "all": false,
+        "freshness": {
+          "scanned": {
+            "mini": {
+              "received_at": "2026-10-25T12:00:00Z",
+              "scan_errors": 0,
+              "snapshot_at": "2026-10-24T11:59:00.000Z"
+            }
+          },
+          "synced": {
+            "github_fleet": "2026-10-25T11:01:00Z"
+          }
+        },
+        "generated_at": "2026-10-25T12:00:00Z",
+        "ignored": [],
+        "include": [
+          "tasks",
+          "prs",
+          "sessions",
+          "other"
+        ],
+        "include_origin": "default",
+        "lanes": [
+          {
+            "count": 1,
+            "id": "next",
+            "items": [
+              {
+                "action": {
+                  "review": "start it, or leave it to `/do-tasks`",
+                  "url": "https://github.com/bestdan/workflow-skills/issues/13"
+                },
+                "at": "2026-10-20T00:00:00Z",
+                "branch": null,
+                "bridge_session_id": null,
+                "brief": null,
+                "category": "ready",
+                "checklist": [],
+                "evidence": "your issue, ready",
+                "first_prompt": null,
+                "folded": [],
+                "hidden": null,
+                "host": null,
+                "key": "https://github.com/bestdan/workflow-skills/issues/13",
+                "kind": "issue",
+                "lane": "next",
+                "last_ask": null,
+                "linked": [],
+                "path": null,
+                "pr": null,
+                "ref": "bestdan/workflow-skills#13",
+                "risks": [],
+                "score": 1.58,
+                "source": "github",
+                "terms": [
+                  [
+                    "ready",
+                    1.5,
+                    "your issue, ready"
+                  ],
+                  [
+                    "age",
+                    0.08,
+                    "waiting 6d"
+                  ]
+                ],
+                "tier": "the rest",
+                "title": "issue 13",
+                "url": "https://github.com/bestdan/workflow-skills/issues/13",
+                "waited": "waiting 6d",
+                "why": "ship: the rest \u00b7 score 1.58: ready +1.5 (your issue, ready) \u00b7 age +0.08 (waiting 6d)"
+              }
+            ],
+            "off": false,
+            "title": "Next"
+          }
+        ],
+        "notes": {
+          "mode": "plan",
+          "more_in_mode": 0,
+          "more_on_needs": 0,
+          "no_plan": "No plan is live. An agent makes one with `dashboard.py plan set --scope <scope id|all> --by <name> --file plan.json` (the task-dashboard skill's `plan`), an ordered list with a reason for each item.",
+          "plan": null,
+          "snoozed": 0
+        },
+        "schema": 1,
+        "view": "now"
+      },
+      "page": "<div class=\"fleet now\" data-mode=\"plan\"><section class=\"lane\" data-section=\"next\"><h2>Next (1)</h2><div class=\"card\" data-source=\"github\" data-key=\"https://github.com/bestdan/workflow-skills/issues/13\" data-kind=\"issue\" data-category=\"ready\" data-tier=\"the rest\" data-total=\"1.58\" data-mode=\"ship\"><div class=\"act\">\u2192 start it, or leave it to <code>/do-tasks</code></div><span class=\"lead\"><span class=\"kind k-open\" role=\"img\" aria-label=\"Open issue\" title=\"Open issue\"><svg class=\"glyph\" viewBox=\"0 0 24 24\" width=\"16\" height=\"16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M22 12a10 10 0 1 1-20 0a10 10 0 1 1 20 0\"/><path d=\"M13 12a1 1 0 1 1-2 0a1 1 0 1 1 2 0\"/></svg></span></span><a class=\"title\" href=\"https://github.com/bestdan/workflow-skills/issues/13\" target=\"_blank\" rel=\"noopener\">issue 13</a> <span class=\"ref\">bestdan/workflow-skills#13</span><div class=\"meta\"><span class=\"pin\">pinned</span> \u00b7 <span class=\"age\" title=\"waiting since 2026-10-20\">6d</span> \u00b7 status:2_ready <span class=\"why-more\" tabindex=\"0\" aria-label=\"Score 1.58: why it ranks here\" role=\"button\" aria-describedby=\"why-bf3a01731a\"><span class=\"score\">1.58</span><svg class=\"glyph\" viewBox=\"0 0 24 24\" width=\"16\" height=\"16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M22 12a10 10 0 1 1-20 0a10 10 0 1 1 20 0\"/><path d=\"M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3\"/><path d=\"M12 17h.01\"/></svg><div class=\"why\" data-terms=\"ready,age\" id=\"why-bf3a01731a\" role=\"tooltip\">ship: the rest \u00b7 score 1.58: ready +1.5 (your issue, ready) \u00b7 age +0.08 (waiting 6d)</div></span></div><div class=\"ov\"><button type=\"button\" class=\"ov-icon\" data-ov=\"unpin\" aria-label=\"Unpin\" title=\"Unpin: rank it like any other item\"><svg class=\"glyph\" viewBox=\"0 0 24 24\" width=\"16\" height=\"16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M12 17v5\"/><path d=\"M15 9.34V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H7.89\"/><path d=\"m2 2 20 20\"/><path d=\"M9 9v1.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h11\"/></svg></button><button type=\"button\" class=\"ov-icon\" data-ov=\"snooze\" data-until=\"2026-11-01\" data-why=\"1\" aria-label=\"Snooze 7d\" title=\"Snooze 7d, until 2026-11-01: hidden from Now and Needs, dimmed elsewhere\"><svg class=\"glyph\" viewBox=\"0 0 24 24\" width=\"16\" height=\"16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M20 13a8 8 0 1 1-16 0a8 8 0 1 1 16 0\"/><path d=\"M12 9v4l2 2\"/><path d=\"M5 3 2 6\"/><path d=\"m22 6-3-3\"/><path d=\"M6.38 18.7 4 21\"/><path d=\"M17.64 18.67 20 21\"/></svg></button><button type=\"button\" class=\"ov-icon\" data-ov=\"ignore\" aria-label=\"Ignore\" title=\"Ignore: not mine, hide it\"><svg class=\"glyph\" viewBox=\"0 0 24 24\" width=\"16\" height=\"16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49\"/><path d=\"M14.084 14.158a3 3 0 0 1-4.242-4.242\"/><path d=\"M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143\"/><path d=\"m2 2 20 20\"/></svg></button><button type=\"button\" class=\"ov-icon\" data-refresh=\"\" aria-label=\"Refresh\" title=\"Refresh: re-read this item from GitHub, without a full sync\"><svg class=\"glyph\" viewBox=\"0 0 24 24\" width=\"16\" height=\"16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8\"/><path d=\"M21 3v5h-5\"/><path d=\"M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16\"/><path d=\"M8 16H3v5\"/></svg></button></div><div class=\"whynot\" hidden><span>Snoozed until <b class=\"whynot-until\">2026-11-01</b> \u00b7 for</span><button type=\"button\" data-ov=\"snooze-for\" data-until=\"2026-10-26\" aria-pressed=\"false\">1d</button><button type=\"button\" data-ov=\"snooze-for\" data-until=\"2026-10-28\" aria-pressed=\"false\">3d</button><button type=\"button\" data-ov=\"snooze-for\" data-until=\"2026-11-01\" aria-pressed=\"true\">7d</button><button type=\"button\" data-ov=\"snooze-for\" data-until=\"2026-11-08\" aria-pressed=\"false\">14d</button><button type=\"button\" data-ov=\"snooze-for\" data-until=\"2026-11-24\" aria-pressed=\"false\">30d</button><span>\u00b7 why not now?</span><button type=\"button\" data-ov=\"whynot\" data-reason=\"not_urgent\">not urgent</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"blocked\">blocked / waiting on someone</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"wrong_priority\">wrong priority (too high)</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"elsewhere\">doing it elsewhere</button><button type=\"button\" data-ov=\"whynot\" data-reason=\"other\">other</button><input type=\"text\" maxlength=\"500\" placeholder=\"optional: say more\" aria-label=\"Why not now, in your words\"><button type=\"button\" data-ov=\"undo\" title=\"Remove the snooze\">Undo</button></div></div></section></div>",
+      "snapshots": []
     },
     "ship": {
       "agent": {

@@ -210,11 +210,15 @@ and `path`, its `evidence` and `risks`, and its `action` as
 `{"review": ..., "command": [...]}`; a Now item adds its `tier` and, for
 a close-out, its `checklist` of steps ticked from evidence. Now is one
 ranked list on every instance, Jira tickets included, built in a mode:
-`--mode ship|little|deep|tidy` picks one, and without
+`--mode ship|little|deep|tidy|plan` picks one, and without
 it the mode the owner last saved with Now's mode button is used (ship when
 none is), so you see what they see; `notes.mode` names it, outside Ship
 `notes.more_in_mode` counts what the list left out, and in Little
-`notes.closed_today` is the day's count. `freshness` says when each sync last
+`notes.closed_today` is the day's count. `plan` lists the live plan (below)
+in its order: each item's `plan` carries its `reason` and `state`, `done`
+(ticked on a closed signal), `open`, or `gone` (left the mirror with nothing
+saying it closed, so **not** done); `notes.plan` is the plan with `counts`
+per state, or null with `notes.no_plan` when none is live. `freshness` says when each sync last
 succeeded and when each host last snapshotted. Without `--json` it prints one
 line per item.
 

@@ -84,16 +84,16 @@ HTML. That is what lets `dashboard.py view <name> --json`
 ([`agent_view.py`](../scripts/task-dashboard/agent_view.py)) hand an agent
 exactly the lanes the page shows.
 
-| Tab                                  | Module                                                                                                             | Instance                            |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------- |
-| Now (modes Ship, Little, Deep, Tidy) | [`fleet_now.py`](../scripts/task-dashboard/fleet_now.py), [`close_out.py`](../scripts/task-dashboard/close_out.py) | every instance; home on a fleet one |
-| Needs you                            | [`needs.py`](../scripts/task-dashboard/needs.py)                                                                   | fleet                               |
-| Pull requests, Issues                | [`fleet_tabs.py`](../scripts/task-dashboard/fleet_tabs.py)                                                         | fleet                               |
-| Workstreams                          | [`workstreams.py`](../scripts/task-dashboard/workstreams.py)                                                       | fleet                               |
-| Stale                                | [`views.py`](../scripts/task-dashboard/views.py), [`fleet_views.py`](../scripts/task-dashboard/fleet_views.py)     | every instance                      |
-| Board, Epics                         | [`views.py`](../scripts/task-dashboard/views.py)                                                                   | Jira on                             |
-| Waiting on me, I'm waiting on        | [`views.py`](../scripts/task-dashboard/views.py)                                                                   | Jira on, not fleet                  |
-| Health                               | [`health.py`](../scripts/task-dashboard/health.py), [`whynot.py`](../scripts/task-dashboard/whynot.py)             | every instance                      |
+| Tab                                        | Module                                                                                                                                                                       | Instance                            |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| Now (modes Ship, Little, Deep, Tidy, Plan) | [`fleet_now.py`](../scripts/task-dashboard/fleet_now.py), [`close_out.py`](../scripts/task-dashboard/close_out.py), [`plan_mode.py`](../scripts/task-dashboard/plan_mode.py) | every instance; home on a fleet one |
+| Needs you                                  | [`needs.py`](../scripts/task-dashboard/needs.py)                                                                                                                             | fleet                               |
+| Pull requests, Issues                      | [`fleet_tabs.py`](../scripts/task-dashboard/fleet_tabs.py)                                                                                                                   | fleet                               |
+| Workstreams                                | [`workstreams.py`](../scripts/task-dashboard/workstreams.py)                                                                                                                 | fleet                               |
+| Stale                                      | [`views.py`](../scripts/task-dashboard/views.py), [`fleet_views.py`](../scripts/task-dashboard/fleet_views.py)                                                               | every instance                      |
+| Board, Epics                               | [`views.py`](../scripts/task-dashboard/views.py)                                                                                                                             | Jira on                             |
+| Waiting on me, I'm waiting on              | [`views.py`](../scripts/task-dashboard/views.py)                                                                                                                             | Jira on, not fleet                  |
+| Health                                     | [`health.py`](../scripts/task-dashboard/health.py), [`whynot.py`](../scripts/task-dashboard/whynot.py)                                                                       | every instance                      |
 
 Now is one ranker on every instance, over every source the instance has. Each
 source turns its rows into `Candidate`s

@@ -196,6 +196,26 @@ def show(
     }
 
 
+def current(
+    conn: sqlite3.Connection, now: datetime
+) -> "tuple[dict[str, Any] | None, dict[str, Any] | None]":
+    """(the plan Now's Plan mode shows, the newest lapsed session plan). The
+    first is the newest unexpired plan of any scope, a session plan winning
+    over a standing one while it lasts; None when no plan is live. The second
+    is None unless the first is, so the page can say a plan lapsed."""
+    every = _plans(conn, now, None, None)
+    live = [p for p in every if not p["expired"]]
+    best = max(
+        live,
+        key=lambda p: (p["kind"] == "session", p["created_at"], p["scope"]),
+        default=None,
+    )
+    if best is not None:
+        return best, None
+    lapsed = [p for p in every if p["expired"]]
+    return None, max(lapsed, key=lambda p: (p["expires_at"], p["scope"]), default=None)
+
+
 def clear(
     conn: sqlite3.Connection,
     cfg: dict[str, Any],

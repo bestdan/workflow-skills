@@ -49,6 +49,9 @@ class Candidate:
     # A close-out's steps that have evidence (close_out.Step); empty otherwise.
     checklist: list = field(default_factory=list)
     mode: str = "ship"  # the mode whose collector found it
+    # A Plan-mode entry (plan_mode.py): {position, action, reason, est_min,
+    # state, evidence}; None in every other mode.
+    plan: "dict[str, Any] | None" = None
 
     @property
     def item(self) -> "tuple[str, str]":

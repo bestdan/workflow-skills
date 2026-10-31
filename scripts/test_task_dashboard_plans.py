@@ -22,8 +22,10 @@ sys.path.insert(0, str(ROOT / "scripts" / "task-dashboard"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import agent_query  # type: ignore[import-not-found]  # noqa: E402
+import agent_view  # type: ignore[import-not-found]  # noqa: E402
 import dashboard  # type: ignore[import-not-found]  # noqa: E402
 import db  # type: ignore[import-not-found]  # noqa: E402
+import fleet_now  # type: ignore[import-not-found]  # noqa: E402
 import overlay  # type: ignore[import-not-found]  # noqa: E402
 import plans  # type: ignore[import-not-found]  # noqa: E402
 import test_task_dashboard_agent_query as aq  # noqa: E402
@@ -407,6 +409,180 @@ class CliTests(Case):
             with self.subTest(argv), contextlib.redirect_stderr(io.StringIO()):
                 with self.assertRaises(SystemExit):
                     dashboard.main(argv)
+
+    def test_view_now_mode_plan_json_lists_the_plan(self):
+        f = self.file([entry(B, "second first"), entry(A, "then this")])
+        self.run_cli("plan", "set", "--scope", "all", "--by", "me", "--file", f)
+        code, out, _ = self.run_cli("view", "now", "--mode", "plan", "--json")
+        self.assertEqual(code, 0)
+        doc = json.loads(out)
+        self.assertEqual(doc["notes"]["mode"], "plan")
+        items = doc["lanes"][0]["items"]
+        self.assertEqual([i["key"] for i in items], [B[1], A[1]])
+        self.assertEqual(
+            [i["plan"]["reason"] for i in items], ["second first", "then this"]
+        )
+
+
+# --- Now's Plan mode (plan_mode.py) ------------------------------------------
+
+PR10 = ("github", aq.pr_url(10))
+PR11 = ("github", aq.pr_url(11))
+DONE_TICKET = ("jira", "PAY-9")
+
+
+class PlanModeTests(Case):
+    def page(self, now=NOW):
+        return fleet_now.render(self.conn, self.cfg, now, mode=fleet_now.PLAN)
+
+    def doc(self, now=NOW):
+        return agent_view.build(self.conn, self.cfg, "now", now, mode="plan")
+
+    def plan_items(self, now=NOW):
+        return {i["key"]: i["plan"] for i in self.doc(now)["lanes"][0]["items"]}
+
+    def card(self, page, key):
+        cards = page.split('<div class="card')[1:]
+        return next(c for c in cards if f'data-key="{key}"' in c)
+
+    def leave_mirror(self, item):
+        self.conn.execute(
+            "DELETE FROM issues WHERE source = ? AND key = ?", (item[0], item[1])
+        )
+        self.conn.commit()
+
+    def closed_pr(self, n, merged, closes=()):
+        url = aq.pr_url(n)
+        row = {
+            "kind": "closed_pr", "key": url, "url": url, "repo": aq.REPO,
+            "number": n, "title": f"PR {n}", "merged": merged,
+            "status": "merged" if merged else "closed",
+            "closed_at": "2026-10-24T09:00:00Z",
+            "merged_at": "2026-10-24T09:00:00Z" if merged else None,
+            "closes": [{"repo": aq.REPO, "number": c, "state": "CLOSED"}
+                       for c in closes],
+        }  # fmt: skip
+        self.conn.execute(
+            "INSERT INTO issues (source, kind, key, summary, raw_json)"
+            " VALUES ('github', 'closed_pr', ?, ?, ?)",
+            (url, row["title"], json.dumps(row)),
+        )
+        self.conn.commit()
+
+    def test_plan_is_a_now_mode_with_its_own_button(self):
+        self.assertIn("plan", overlay.NOW_MODES)
+        self.assertIn(fleet_now.PLAN, fleet_now.MODES)
+        button = fleet_now.mode_button(fleet_now.PLAN)
+        self.assertIn('data-now="plan"', button)
+        self.assertIn(fleet_now.icons.svg("list-checks"), button)
+        overlay.set_now_mode(self.conn, "plan", NOW)
+        self.assertEqual(self.doc()["notes"]["mode"], "plan")
+
+    def test_no_plan_says_so_and_how_to_make_one(self):
+        page = self.page()
+        self.assertIn("No plan is live", page)
+        self.assertIn("plan set --scope", page)
+        self.assertNotIn("plan-head", page)
+        doc = self.doc()
+        self.assertIsNone(doc["notes"]["plan"])
+        self.assertIn("plan set --scope", doc["notes"]["no_plan"])
+        self.assertEqual(doc["lanes"][0]["items"], [])
+
+    def test_an_expired_session_plan_is_named_in_the_empty_state(self):
+        self.set(kind="session")
+        later = NOW + timedelta(days=2)
+        page = self.page(later)
+        self.assertIn("The session plan for repo:bestdan/finplan has expired", page)
+        self.assertIn("No plan is live", page)
+
+    def test_items_are_listed_in_plan_order_with_reasons(self):
+        self.set([entry(B, "unblocks the rest", action="finish", est_min=30),
+                  entry(DONE_TICKET, "already shipped"),
+                  entry(A, "small")])  # fmt: skip
+        page = self.page()
+        order = [page.index(f'data-key="{k}"') for k in (B[1], "PAY-9", A[1])]
+        self.assertEqual(order, sorted(order))
+        self.assertIn('<div class="plan-reason">1. unblocks the rest</div>', page)
+        self.assertIn('<div class="plan-reason">3. small</div>', page)
+        self.assertIn("plan-head", page)
+        self.assertIn("by claude-test", page)
+        self.assertIn("2026-10-24 · estimated 30 min · 1/3 done", page)
+        doc = self.doc()
+        items = doc["lanes"][0]["items"]
+        self.assertEqual([i["key"] for i in items], [B[1], "PAY-9", A[1]])
+        self.assertEqual(
+            items[0]["plan"],
+            {"position": 1, "action": "finish", "reason": "unblocks the rest",
+             "est_min": 30, "state": "open", "evidence": "status:2_ready"},
+        )  # fmt: skip
+        plan = doc["notes"]["plan"]
+        self.assertEqual((plan["scope"], plan["kind"]), (REPO_SCOPE, "standing"))
+        self.assertNotIn("entries", plan)
+        self.assertEqual(plan["counts"], {"done": 1, "open": 2, "gone": 0})
+
+    def test_a_done_item_is_ticked(self):
+        self.set([entry(DONE_TICKET), entry(PR10), entry(A), entry(B)])
+        # PR 10 merges, closing issue 1; both leave the mirror.
+        self.leave_mirror(PR10)
+        self.leave_mirror(A)
+        self.closed_pr(10, merged=True, closes=(1,))
+        got = self.plan_items()
+        self.assertEqual(
+            {k: (p["state"], p["evidence"]) for k, p in got.items()},
+            {"PAY-9": ("done", "Done"),
+             PR10[1]: ("done", "merged 2026-10-24"),
+             A[1]: ("done", f"closed by {aq.REPO}#10, merged 2026-10-24"),
+             B[1]: ("open", "status:2_ready")},
+        )  # fmt: skip
+        card = self.card(self.page(), PR10[1])
+        self.assertIn('class="done-tick"', card)
+        self.assertIn("plan-done", card)
+        self.assertNotIn('class="gone"', card)
+
+    def test_an_item_that_left_the_mirror_is_gone_not_ticked(self):
+        self.set([entry(A, "small"), entry(PR11, "docs"), entry(B)])
+        self.leave_mirror(A)  # closed by hand, or transferred: no signal
+        self.leave_mirror(PR11)
+        self.closed_pr(11, merged=False)
+        got = self.plan_items()
+        self.assertEqual(got[A[1]]["state"], "gone")
+        self.assertEqual(
+            got[A[1]]["evidence"], "not in the mirror, and nothing says it closed"
+        )
+        self.assertEqual(got[PR11[1]]["state"], "gone")
+        self.assertIn("closed without merging", got[PR11[1]]["evidence"])
+        page = self.page()
+        card = self.card(page, A[1])
+        self.assertIn('class="gone"', card)
+        self.assertIn("plan-gone", card)
+        self.assertNotIn("done-tick", card)
+        # Still in its place, titled by its ref, linked to its URL.
+        self.assertIn(f"{aq.REPO}#1", card)
+        self.assertIn('<div class="plan-reason">1. small</div>', card)
+        self.assertIn("0/3 done", page)
+
+    def test_a_session_plan_wins_over_a_standing_one_while_it_lasts(self):
+        self.set([entry(A, "standing")])
+        self.set([entry(B, "session")], kind="session")
+        self.assertEqual(list(self.plan_items()), [B[1]])
+        later = NOW + timedelta(days=2)
+        self.assertEqual(list(self.plan_items(later)), [A[1]])
+
+    def test_the_newest_plan_of_a_kind_wins_across_scopes(self):
+        self.set([entry(A, "repo plan")])
+        plans.set_plan(
+            self.conn, self.cfg, NOW + timedelta(minutes=5), scope="all",
+            kind=None, entries=[entry(B, "all plan")], author="me",
+        )  # fmt: skip
+        self.assertEqual(list(self.plan_items()), [B[1]])
+
+    def test_a_snoozed_item_is_hidden_and_counted(self):
+        self.set([entry(A), entry(B)])
+        overlay.snooze(self.conn, A, "2999-01-01")
+        page = self.page()
+        self.assertNotIn(f'data-key="{A[1]}"', page)
+        self.assertIn('data-snoozed="1"', page)
+        self.assertIn("0/2 done", page)
 
 
 if __name__ == "__main__":

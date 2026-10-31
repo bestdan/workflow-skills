@@ -87,7 +87,7 @@ WHY_NOT_COLUMNS = (
 
 # The fleet Now's modes (fleet_now.py), in the order its button cycles them.
 # The first is the default: what Now shows with no saved mode.
-NOW_MODES = ("ship", "little", "deep", "tidy")
+NOW_MODES = ("ship", "little", "deep", "tidy", "plan")
 
 # Plans (plans.py). `standing` stays until cleared; `session` expires.
 PLAN_KINDS = ("standing", "session")

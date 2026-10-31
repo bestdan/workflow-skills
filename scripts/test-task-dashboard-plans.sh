@@ -3,7 +3,9 @@
 # set|show|clear` (scripts/task-dashboard/plans.py): a plan round-trips in
 # order, belongs to one scope or `all`, a session plan expires at the next 04:00
 # local, an entry outside the mirror is refused with its key, and export then
-# import keeps plans.
+# import keeps plans. Also Now's Plan mode (plan_mode.py): the live plan in
+# its order with reasons, on the page and in `view now --mode plan --json`, a
+# done item ticked, one that left the mirror marked gone, and the empty state.
 #
 # Wraps scripts/test_task_dashboard_plans.py (stdlib unittest). It reuses the
 # agent-query suite's fixture mirror, written through the real writers into a
