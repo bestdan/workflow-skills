@@ -1245,6 +1245,18 @@ assert_exit "an undecodable destination fails open" "$exit_l9f" 0
 assert_not_contains "an undecodable destination reports no contradiction" \
   "$out_l9f" "is still open"
 
+# A ` #` inside quotes is part of the value, not a comment. Stripping the
+# comment before the quotes read `"done # deferred"` as `done` (#1052).
+DIR_L9G="$BASE/dest-quoted-hash"
+obligation_fixture "$DIR_L9G" "dev_docs/tasks/real_task.md"
+write_file "$DIR_L9G/dev_docs/tasks/real_task.md" '---
+status: "done # deferred"
+---'
+out_l9g="$(python3 "$SCRIPT" --root "$DIR_L9G" validate 2>&1)"
+exit_l9g=$?
+assert_exit "a quoted status containing ' #' is not read as terminal" "$exit_l9g" 0
+assert_not_contains "a quoted ' #' reports no contradiction" "$out_l9g" "is still open"
+
 # --- Fixture (l2): ids are kebab-case and unique once qualified ----------
 # Across two files, because two files each internally consistent is exactly how
 # the reference implementation ended up with an ambiguous reference.
