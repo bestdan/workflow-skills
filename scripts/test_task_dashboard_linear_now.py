@@ -229,6 +229,24 @@ class ReadTests(Case):
         rows = linear_api.assigned_issues("k", FakeLinear([node("PRE-1"), cut]))
         self.assertEqual([i["truncated"] for i in rows], [False, True])
 
+    def test_it_keeps_the_estimate_assignee_and_project_id(self):
+        n = node("PRE-1", estimate=3, project={"id": "p-1", "name": "Tax"},
+                 assignee={"name": "Ana", "email": "ana@example.com",
+                           "isMe": False})  # fmt: skip
+        (issue,) = linear_api.assigned_issues("k", FakeLinear([n]))
+        self.assertEqual(
+            {k: issue[k] for k in ("estimate", "project", "project_id", "assignee",
+                                   "assignee_email", "assignee_is_me")},
+            {"estimate": 3, "project": "Tax", "project_id": "p-1", "assignee": "Ana",
+             "assignee_email": "ana@example.com", "assignee_is_me": False},
+        )  # fmt: skip
+        (bare,) = linear_api.assigned_issues("k", FakeLinear([node("PRE-2")]))
+        self.assertEqual(
+            (bare["estimate"], bare["assignee"], bare["assignee_is_me"]),
+            (None, None, False),
+        )
+        self.assertIn("assignee { name email isMe }", linear_api.ASSIGNED_QUERY)
+
     def test_only_open_issues_on_the_other_end_of_blocks_count(self):
         n = node(
             "PRE-1",
