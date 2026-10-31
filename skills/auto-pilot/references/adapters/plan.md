@@ -53,10 +53,11 @@ This is why the `claim` / `set_needs_review` rows above delegate to
 `repo-pr-execute.md` for the **status vocabulary** but **not** its on-`main`,
 deleted-in-PR file model.
 
-**`flag_for_human` has no rung or priority to move.** A plan file carries
-neither, so the [shared park contract](../adapters.md#flag_for_human-the-shared-park-contract)
-is met by the `needs_refinement` column (the plan store's human-approval column)
-and the reason appended to the task file.
+**`flag_for_human` diverges from the
+[tracker park contract](../adapters.md#flag_for_human-the-shared-park-contract).**
+A plan source has no Bail, no started column to keep, no rung, and no priority.
+It parks by setting `status: needs_refinement` (the plan store's human-approval
+column) on the run-state branch and appending the reason to the task file.
 
 **No reservation PR.** `repo-pr-execute.md`'s **Claim protocol** normally opens
 a draft `task-claim` PR as a first-writer-wins reservation against claim

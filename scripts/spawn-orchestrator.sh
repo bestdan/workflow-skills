@@ -6619,7 +6619,7 @@ doctor() {
 
     # Invariant 4, gh-issue: the review signal is the ISSUE on
     # `status:4_needs_review` with a ready (non-draft) PR that closes it. The
-    # run keeps the PR a draft until hand-off (adapters/gh-issue.md),
+    # run keeps the PR a draft until hand-off (skills/auto-pilot/references/adapters/gh-issue.md),
     # so the repair readies the PR FIRST and writes the rung only once that
     # succeeded — the same remote-before-tracker order set_needs_review uses; a
     # rung on a draft PR is the state that order forbids. The rung goes through
@@ -6712,7 +6712,7 @@ doctor() {
         report_bullets+=("- **I4 repaired — $task** (PR #$pr_num): $fixes — a G6/G7 crash gap left the gh-issue review signal stale.")
         _doctor_questions_entry "$questions" "$task — PR #$pr_num missing its gh-issue review signal" \
           "apply the missing ready/rung write | leave it as-is" "applied ($fixes)" \
-          "adapters/gh-issue.md set_needs_review: a ready PR plus the issue on status:4_needs_review IS the review signal; a G6/G7 crash can leave the PR a draft or the issue on status:3_started" \
+          "skills/auto-pilot/references/adapters/gh-issue.md set_needs_review: a ready PR plus the issue on status:4_needs_review IS the review signal; a G6/G7 crash can leave the PR a draft or the issue on status:3_started" \
           "yes — re-draft the PR or move the rung back with gh-issue-state.py if this was wrong"
       fi
     fi

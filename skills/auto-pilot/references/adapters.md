@@ -23,7 +23,7 @@ adapter; read this file plus that adapter's file for the full contract:
 
 > **Compose, never duplicate.** Every verb row cites the handler file + section
 > it delegates to, or is marked an explicit **no-op**. If a verb ever grows its
-> own copy of claim/promote/WIP logic here, that is the bug — the logic lives in
+> own copy of claim/promote/WIP logic in an adapter file, that is the bug — the logic lives in
 > the handler, and the adapter only wires this run's inputs into it.
 
 ## The interface
@@ -71,11 +71,12 @@ before it can be offered. Do not add an escape hatch here.
 
 Each tracker handler has a **Bail** that releases the task back to the backlog —
 reverting its state and clearing the assignee. A parked task must instead stay
-**visible and in flight**, so every adapter's `flag_for_human` reuses only its
-handler's Bail _label + comment_ mechanics and diverges on the rest:
+**visible and in flight**, so each tracker adapter's (`linear`, `gh-issue`)
+`flag_for_human` reuses only its handler's Bail _label + comment_ mechanics and
+diverges on the rest:
 
-- **Keep** the task in its started state — its run-state phase is `parked`,
-  which the phases table pins to tracker `started`.
+- **Keep** the task in its tracker's started state — its run-state phase is
+  `parked`, which the phases table pins to tracker `started`.
 - Swap the "automation may take this" marker for the "a human must look" one,
   exactly as Bail does.
 - **Raise its priority** so the parked task surfaces at the top of the board — a
@@ -83,7 +84,9 @@ handler's Bail _label + comment_ mechanics and diverges on the rest:
 - Post the reason (what was tried, what tripped the park) where a human watching
   the source will see it.
 
-Each adapter file names the exact labels, priority value, and write it uses.
+Each tracker adapter file names the exact labels, priority value, and write it
+uses. The plan adapter has no Bail and diverges from this contract; its file
+says how.
 
 ## Explicit no-ops
 

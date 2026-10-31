@@ -77,7 +77,8 @@ nothing left to mark it ready. So **G5** (PR open, still `started`) and **G6** (
 `started` → set `needs_review`) reconcile exactly as written; for G6, "set
 `needs_review`" is this verb, mark-ready included.
 
-**A parked issue still counts toward the WIP gate** — it stays
+**A parked issue still counts toward the
+[WIP gate](../adapters.md#rules-every-adapter-shares)** — it stays
 `status:3_started` — so enough parks stop further claims. That is deliberate: a
 parked issue is in flight, waiting on a human.
 
