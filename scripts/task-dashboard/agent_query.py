@@ -16,13 +16,15 @@ Items (`kind`, the dashboard's own word for each):
 
 - `issue`: a mirrored GitHub issue (the mirror holds open ones only).
 - `pr`: an open PR, mine, one asking for my review, or another's on my repos.
-- `ticket`: a Jira issue, done ones in the done window included.
+- `ticket`: a Jira issue, done ones in the done window included, or a Linear
+  issue the Linear read mirrored (linear_issues.py). `mine` is false for one
+  that is unassigned or someone else's, null where the mirror cannot tell.
 - `design`: a design doc at `status: proposed`.
 - `session`: a Claude Code session the hooks report, not ended.
 - `worktree`: a worktree a machine snapshot reported; a landed one is `done`.
 
-A scope is an id (`repo:`, `ws:`, `jira:`, `epic:`, `label:`, `host:`) or a
-bare word, which matches ids and titles case-insensitively. `all` is reserved:
+A scope is an id (`repo:`, `ws:`, `jira:`, `linear:`, `epic:`, `label:`,
+`host:`) or a bare word, which matches ids and titles case-insensitively. `all` is reserved:
 it means no filter and is never matched as a word.
 """
 
@@ -38,6 +40,7 @@ import fleet_tabs
 import fleet_views
 import gauges
 import github_fleet
+import linear_issues
 import needs
 import overlay
 import score
@@ -53,11 +56,12 @@ KINDS = ("issue", "pr", "ticket", "design", "session", "worktree")
 STATES = ("todo", "started", "done")
 OPEN_STATES = ("todo", "started")
 ONLY = ("blocked", "waiting", "stale")
-SCOPE_KINDS = ("repo", "workstream", "jira", "epic", "label", "host")
+SCOPE_KINDS = ("repo", "workstream", "jira", "linear", "epic", "label", "host")
 _PREFIX = {
     "repo": "repo",
     "ws": "workstream",
     "jira": "jira",
+    "linear": "linear",
     "epic": "epic",
     "label": "label",
     "host": "host",
@@ -67,17 +71,21 @@ IDENTITY = ("source", "key", "ref", "kind")
 BRIEF = IDENTITY + (
     "title", "url", "state", "prio", "due", "age_d", "idle_d", "labels",
     "workstreams", "pr", "activity", "blocks", "blocked_by", "overlay", "now",
-    "size",
+    "size", "mine",
 )  # fmt: skip
 FULL = BRIEF + (
-    "repo", "branch", "host", "path", "parent", "created", "updated",
-    "evidence", "risks", "action",
+    "repo", "branch", "host", "path", "parent", "assignee", "cycle", "created",
+    "updated", "evidence", "risks", "action",
 )  # fmt: skip
 # The fields that cost a whole Now or Stale build; skipped when not asked for.
 _NOW_FIELDS = {"now", "evidence", "action"}
 _STALE_FIELDS = {"evidence", "risks", "action"}
 
 _JIRA_STATE = {"new": "todo", "indeterminate": "started", "done": "done"}
+_LINEAR_STATE = {
+    "started": "started", "unstarted": "todo", "backlog": "todo", "triage": "todo",
+    "completed": "done", "canceled": "done",
+}  # fmt: skip
 
 Item = dict[str, Any]
 
@@ -125,7 +133,14 @@ def _in_ws(ws: str) -> Match:
 
 
 def _in_project(proj: str) -> Match:
-    return lambda i: i["kind"] == "ticket" and i["key"].split("-", 1)[0] == proj
+    return lambda i: (
+        i["kind"] == "ticket" and i["source"] == "jira"
+        and i["key"].split("-", 1)[0] == proj
+    )  # fmt: skip
+
+
+def _in_team(team: str) -> Match:
+    return lambda i: i["source"] == linear_issues.SOURCE and i["_team"] == team
 
 
 def _in_epic(epic: str) -> Match:
@@ -158,11 +173,18 @@ def _scopes(conn: sqlite3.Connection, items: list[Item]) -> list[Scope]:
             add(f"repo:{bare}", "repo", bare, _in_repo(bare))
     for ws_id, title in conn.execute("SELECT id, title FROM workstreams ORDER BY id"):
         add(f"ws:{ws_id}", "workstream", title or ws_id, _in_ws(ws_id))
-    titles = {i["key"]: i["title"] for i in items if i["kind"] == "ticket"}
+    titles = {
+        i["key"]: i["title"]
+        for i in items
+        if i["kind"] == "ticket" and i["source"] == "jira"
+    }
     for i in items:
-        if i["kind"] == "ticket":
+        if i["kind"] == "ticket" and i["source"] == "jira":
             proj = i["key"].split("-", 1)[0]
             add(f"jira:{proj}", "jira", proj, _in_project(proj))
+        if i["source"] == linear_issues.SOURCE and i["_team"]:
+            add(f"linear:{i['_team']}", "linear", i["_team"], _in_team(i["_team"]))
+        if i["kind"] == "ticket":
             parent = i["parent"]
             if parent:
                 add(f"epic:{parent}", "epic", titles.get(parent) or parent,
@@ -272,6 +294,7 @@ def _item(source: str, key: str, kind: str, **fields: Any) -> Item:
         "url": None, "state": None, "prio": None, "due": None, "labels": [],
         "repo": None, "branch": None, "host": None, "path": None, "parent": None,
         "created": None, "updated": None, "blocks": None, "blocked_by": None,
+        "assignee": None, "cycle": None, "mine": None, "_team": None,
         "_blocked": False, "_waiting": False, "_size": None, "_pr_row": None,
     }  # fmt: skip
     base.update(fields)
@@ -408,6 +431,18 @@ def _worktrees(conn: sqlite3.Connection) -> list[Item]:
     return out
 
 
+def _est_size(labels: list[str], estimate: Any = None) -> "tuple[str, str] | None":
+    """An `est:N` label's bucket, else a Linear estimate's (`est:N`, the
+    points as written), else None."""
+    est = fleet_now.est_of(labels)
+    if est:
+        return f"est:{est}", f"label est:{est}"
+    if isinstance(estimate, (int, float)) and estimate > 0:
+        n = int(estimate) if float(estimate).is_integer() else estimate
+        return f"est:{n}", f"linear estimate {n}"
+    return None
+
+
 def _tickets(m: "views.Mirror | None") -> list[Item]:
     if m is None:
         return []
@@ -416,19 +451,69 @@ def _tickets(m: "views.Mirror | None") -> list[Item]:
         links = m.links.get(key, [])
         labels = score.labels_of(issue)
         category = (issue.get("status_category") or "").lower()
-        est = fleet_now.est_of(labels)
         out.append(_item(
             "jira", key, "ticket", ref=key, title=issue.get("summary") or "",
             url=f"https://{m.cfg['jira']['site']}/browse/{key}",
             state={"name": issue.get("status_name"),
                    "category": _JIRA_STATE.get(category, "todo")},
             prio=issue.get("priority"), due=issue.get("due_date"), labels=labels,
-            parent=issue.get("parent_key"),
+            parent=issue.get("parent_key"), assignee=issue.get("assignee"),
+            cycle=issue.get("sprint_name"), mine=m.is_mine(issue),
             created=issue.get("created"), updated=issue.get("updated"),
             blocks=score.open_blocked(links),
             blocked_by=score.unresolved_blockers(links),
             _blocked=score.is_blocked(issue, links, m.cfg)[0],
-            _size=(f"est:{est}", f"label est:{est}") if est else None,
+            _size=_est_size(labels),
+        ))  # fmt: skip
+    return out
+
+
+def _linear_mine(raw: dict[str, Any], me: str) -> "bool | None":
+    """Whether a Linear issue is assigned to me: to `linear.me` when it is
+    set, else to the key's own user. None for a row synced before the read
+    carried its assignee."""
+    if "assignee_is_me" not in raw:
+        return None
+    if me:
+        return (raw.get("assignee_email") or "").casefold() == me.casefold()
+    return bool(raw["assignee_is_me"])
+
+
+def _linear_tickets(conn: sqlite3.Connection, cfg: dict[str, Any]) -> list[Item]:
+    """The Linear issues linear_issues.py mirrored, shaped as a Jira ticket.
+    Blocked as fleet_now.linear_tickets has it: the `blocked` label, or an
+    open issue blocking it."""
+    if not linear_issues.enabled(cfg):
+        return []
+    me = str(cfg["linear"].get("me") or "").strip()
+    out = []
+    cols = ("key", "summary", "status_name", "priority", "due_date", "labels",
+            "sprint_name", "created", "updated", "raw_json")  # fmt: skip
+    rows = conn.execute(
+        f"SELECT {', '.join(cols)} FROM issues WHERE source = ? AND kind = ?"
+        " ORDER BY key",
+        (linear_issues.SOURCE, linear_issues.KIND),
+    )
+    for row in (dict(zip(cols, r)) for r in rows):
+        raw = fleet_views._raw(row["raw_json"])
+        labels = score.labels_of(row)
+        key = str(row["key"])
+        blocked = any(lb.lower() == "blocked" for lb in labels)
+        out.append(_item(
+            linear_issues.SOURCE, key, "ticket", ref=key,
+            title=row.get("summary") or "", url=raw.get("url"),
+            state={"name": row.get("status_name"),
+                   "category": _LINEAR_STATE.get(raw.get("state_type") or "", "todo")},
+            prio=row.get("priority"), due=row.get("due_date"), labels=labels,
+            assignee=raw.get("assignee"),
+            cycle=raw.get("cycle") or row.get("sprint_name"),
+            mine=_linear_mine(raw, me),
+            created=row.get("created"), updated=row.get("updated"),
+            blocks=raw.get("blocks") or None, blocked_by=raw.get("blocked_by") or None,
+            _team=raw.get("team") or key.split("-", 1)[0],
+            _project_id=raw.get("project_id"), _project=raw.get("project"),
+            _blocked=blocked or bool(raw.get("blocked_by")),
+            _size=_est_size(labels, raw.get("estimate")),
         ))  # fmt: skip
     return out
 
@@ -626,6 +711,29 @@ def _stale(
     return out
 
 
+def _join_projects(conn: sqlite3.Connection, items: list[Item]) -> None:
+    """A Linear ticket joins the workstream of its project: the `linear:<id>`
+    row by the project's id, else, for a row synced before the read carried
+    the id, the Linear workstream titled with the project's name. A project
+    that is not an open workstream (completed, canceled) adds none."""
+    ids: set[str] = set()
+    by_title: dict[str, str] = {}
+    for ws_id, title in conn.execute(
+        "SELECT id, title FROM workstreams WHERE source = 'linear' ORDER BY id"
+    ):
+        ids.add(ws_id)
+        by_title.setdefault(title, ws_id)
+    for i in items:
+        if i["source"] != linear_issues.SOURCE:
+            continue
+        pid = i.get("_project_id")
+        ws = workstreams.linear_id(pid) if pid else None
+        if ws not in ids:
+            ws = None if pid else by_title.get(i.get("_project") or "")
+        if ws and ws not in i["workstreams"]:
+            i["workstreams"] = [*i["workstreams"], ws]
+
+
 def mirror(
     conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime
 ) -> "views.Mirror | None":
@@ -643,12 +751,14 @@ def collect(
     `m` is mirror()'s, passed in when the caller needs it too."""
     m = m if m is not None else mirror(conn, cfg, now)
     items = (
-        _issues(conn, cfg) + _prs(conn, cfg) + _tickets(m) + _designs(conn, cfg)
+        _issues(conn, cfg) + _prs(conn, cfg) + _tickets(m)
+        + _linear_tickets(conn, cfg) + _designs(conn, cfg)
         + _sessions(conn, cfg, now) + _worktrees(conn)
     )  # fmt: skip
     ws = workstreams.memberships(conn)
     for i in items:
         i["workstreams"] = ws.get((i["source"], i["key"]), [])
+    _join_projects(conn, items)
     _link_prs(items)
     _activity(items)
     ov = overlay.load(conn)

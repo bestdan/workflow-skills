@@ -3,7 +3,7 @@
 `scopes` and `items` commands.
 
 The fixture DB is written through the real writers (github_fleet.write, the
-snapshot adapter, sessions.write), plus the few mirror rows no writer here
+snapshot adapter, sessions.write, linear_issues.write), plus the few mirror rows no writer here
 takes (a Jira ticket, a workstream), so no acli, gh, git or network runs.
 Needs Python 3.11: run via scripts/test-task-dashboard-agent-query.sh.
 """
@@ -28,6 +28,7 @@ import dashboard  # type: ignore[import-not-found]  # noqa: E402
 import db  # type: ignore[import-not-found]  # noqa: E402
 import fleet_now  # type: ignore[import-not-found]  # noqa: E402
 import github_fleet  # type: ignore[import-not-found]  # noqa: E402
+import linear_issues  # type: ignore[import-not-found]  # noqa: E402
 import overlay  # type: ignore[import-not-found]  # noqa: E402
 import sessions  # type: ignore[import-not-found]  # noqa: E402
 import snapshot_adapter  # type: ignore[import-not-found]  # noqa: E402
@@ -52,6 +53,8 @@ flagged = "customfield_10007"
 [github]
 enabled = true
 scope = "owner"
+[linear]
+enabled = true
 [ingest.machines]
 mini = "sha256:{"0" * 64}"
 """
@@ -196,7 +199,45 @@ WS_DONE = "linear:p-3"  # its only finplan member is done
 WS_ALL = "design:bestdan/dotfiles/dev_docs/designs/allow.md"
 
 
+def linear(key, state_type="started", state="In Progress", **kw):
+    """An assigned_issues dict, as linear_issues.write takes it."""
+    out = {
+        "key": key, "title": f"title {key}",
+        "url": f"https://linear.app/acme/issue/{key.lower()}", "state": state,
+        "state_type": state_type, "priority": 2, "priority_label": "High",
+        "due": None, "estimate": None, "created": "2026-10-05T00:00:00Z",
+        "updated": "2026-10-22T12:00:00Z", "started": None, "team": "PRE",
+        "labels": [], "cycle": None, "cycle_end": None, "cycle_active": False,
+        "project": None, "project_id": None, "assignee": "Me",
+        "assignee_email": "me@example.com", "assignee_is_me": True,
+        "blocked_by": [], "blocks": [], "truncated": False,
+    }  # fmt: skip
+    out.update(kw)
+    return out
+
+
+LINEAR = [
+    # Mine, in workstream WS's project, estimated, in a cycle, blocked.
+    linear("PRE-1", estimate=3, cycle="Cycle 12", cycle_active=True,
+           due="2026-11-04", project="FinPlan Tax Engine", project_id="p-1",
+           blocked_by=["PRE-9"], blocks=["PRE-4"]),
+    # Unassigned; its est: label wins over the estimate.
+    linear("PRE-2", "unstarted", "Todo", estimate=2, labels=["est:1"],
+           assignee=None, assignee_email=None, assignee_is_me=False),
+    # Someone else's, in a project that is no open workstream.
+    linear("PRE-4", "backlog", "Backlog", assignee="Ana",
+           assignee_email="ana@example.com", assignee_is_me=False,
+           project="Shipped Thing", project_id="p-9", estimate=0.5),
+]  # fmt: skip
+# Synced before the read carried the assignee and the project id.
+LEGACY = {
+    k: v for k, v in linear("PRE-3", project="FinPlan Tax Engine").items()
+    if k not in ("assignee", "assignee_email", "assignee_is_me", "project_id")
+}  # fmt: skip
+
+
 def seed(conn):
+    linear_issues.write(conn, [*LINEAR, LEGACY], NOW)
     snap = copy.deepcopy(SNAPSHOT)
     for line in snap["sessions"]:
         if line["session_id"] == "s-10":
@@ -270,7 +311,9 @@ def seed(conn):
 
 
 def cfg():
-    return needs_fx.fleet_cfg()
+    out = needs_fx.fleet_cfg()
+    out["linear"]["enabled"] = True
+    return out
 
 
 class Case(unittest.TestCase):
@@ -388,6 +431,79 @@ class ScopeTests(Case):
         self.assertEqual(sorted(epic), ["PAY-1", "PAY-7", "PAY-9"])
         host = self.by_key(scope=["host:mini"])
         self.assertEqual({i["kind"] for i in host.values()}, {"session", "worktree"})
+
+
+class LinearTests(Case):
+    def test_a_linear_ticket_is_shaped_as_a_jira_one(self):
+        pre = self.by_key(kind="ticket")["PRE-1"]
+        self.assertEqual(
+            {k: pre.get(k) for k in ("source", "ref", "title", "url", "state", "prio",
+                                     "due", "cycle", "assignee", "mine", "blocked_by",
+                                     "blocks", "size")},
+            {"source": "linear", "ref": "PRE-1", "title": "title PRE-1",
+             "url": "https://linear.app/acme/issue/pre-1",
+             "state": {"name": "In Progress", "category": "started"},
+             "prio": "High", "due": "2026-11-04", "cycle": "Cycle 12",
+             "assignee": "Me", "mine": True, "blocked_by": ["PRE-9"],
+             "blocks": ["PRE-4"],
+             "size": {"bucket": "est:3", "est_min": None,
+                      "from": "linear estimate 3"}},
+        )  # fmt: skip
+        self.assertIs(self.by_key(kind="ticket")["PAY-7"]["mine"], True)
+
+    def test_listed_beside_jira_tickets(self):
+        keys = sorted(self.by_key(kind="ticket"))
+        self.assertEqual(keys, ["PAY-1", "PAY-7", "PRE-1", "PRE-2", "PRE-3", "PRE-4"])
+
+    def test_state_and_size_of_the_rest(self):
+        keys = self.by_key(kind="ticket")
+        self.assertEqual(keys["PRE-2"]["state"], {"name": "Todo", "category": "todo"})
+        self.assertEqual(keys["PRE-4"]["state"]["category"], "todo")
+        # An est: label wins over the estimate, as it does on a Jira ticket.
+        self.assertEqual(keys["PRE-2"]["size"]["from"], "label est:1")
+        self.assertEqual(keys["PRE-4"]["size"]["bucket"], "est:0.5")
+
+    def test_not_mine_is_marked_and_survives_brief(self):
+        brief = {i["key"]: i for i in self.items(fields=None, kind="ticket")["items"]}
+        self.assertIs(brief["PRE-2"]["mine"], False)  # unassigned
+        self.assertIs(brief["PRE-4"]["mine"], False)  # someone else's
+        self.assertIs(brief["PRE-1"]["mine"], True)
+        # A row synced before the read carried its assignee cannot tell.
+        self.assertNotIn("mine", brief["PRE-3"])
+        self.assertNotIn("assignee", brief["PRE-1"])  # full only
+
+    def test_linear_me_decides_mine_when_set(self):
+        self.cfg["linear"]["me"] = "ANA@example.com"
+        keys = self.by_key(kind="ticket")
+        self.assertEqual((keys["PRE-1"]["mine"], keys["PRE-4"]["mine"]), (False, True))
+
+    def test_a_team_scope_lists_its_open_count_and_resolves(self):
+        doc = agent_query.scopes_doc(self.conn, self.cfg, NOW, "linear:PRE")
+        self.assertEqual(
+            doc["matched"],
+            [{"id": "linear:PRE", "kind": "linear", "title": "PRE", "open": 4}],
+        )
+        keys = self.by_key(scope=["linear:PRE"])
+        self.assertEqual(sorted(keys), ["PRE-1", "PRE-2", "PRE-3", "PRE-4"])
+        # A Linear key mints no jira: scope, and is in none.
+        every = {s["id"] for s in agent_query.scopes_doc(
+            self.conn, self.cfg, NOW)["matched"]}  # fmt: skip
+        self.assertNotIn("jira:PRE", every)
+        self.assertNotIn("PRE-1", self.by_key(scope=["jira:PAY"]))
+
+    def test_a_project_ticket_joins_its_workstream(self):
+        keys = self.by_key(kind="ticket")
+        self.assertEqual(keys["PRE-1"]["workstreams"], [WS])  # by project id
+        self.assertEqual(keys["PRE-3"]["workstreams"], [WS])  # by project name
+        self.assertNotIn("workstreams", keys["PRE-4"])  # a project no ws names
+        ws = self.by_key(scope=[f"ws:{WS}"])
+        self.assertLessEqual({"PRE-1", "PRE-3", issue_url(2)}, set(ws))
+
+    def test_off_lists_none(self):
+        self.cfg["linear"]["enabled"] = False
+        self.assertFalse([k for k in self.by_key() if k.startswith("PRE-")])
+        self.assertNotIn("linear:PRE", {s["id"] for s in agent_query.scopes_doc(
+            self.conn, self.cfg, NOW)["matched"]})  # fmt: skip
 
 
 class ItemTests(Case):
@@ -533,9 +649,9 @@ class ItemTests(Case):
 
     def test_only_blocked_and_state_combine(self):
         keys = self.by_key(only="blocked")
-        self.assertEqual(sorted(keys), ["PAY-7", issue_url(4), issue_url(5)])
+        self.assertEqual(sorted(keys), ["PAY-7", "PRE-1", issue_url(4), issue_url(5)])
         self.assertEqual(sorted(self.by_key(only="blocked", state="started")),
-                         ["PAY-7"])  # fmt: skip
+                         ["PAY-7", "PRE-1"])  # fmt: skip
         pay = self.by_key()["PAY-7"]
         self.assertEqual((pay["blocked_by"], pay.get("blocks")), (["PAY-1"], None))
         self.assertEqual(self.by_key()[issue_url(4)]["blocked_by"], 1)
