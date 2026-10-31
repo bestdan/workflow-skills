@@ -686,6 +686,8 @@ class FreshnessTest(HeaderCase):
         self.assertEqual(rows["machine:mini"], ("mini", "45m", "ok", "overdue", True))
         # The oldest source sets the age; a failed or stale one warns.
         self.assertEqual(indicator(header), "⚠ 45m ago")
+        # A screen reader hears the whole line the button shortens.
+        self.assertIn('aria-label="⚠ Updated 45m ago"', header)
         self.assertIn('class="fresh warn"', header)
         # The old split lines are gone.
         self.assertNotIn("synced ", header)

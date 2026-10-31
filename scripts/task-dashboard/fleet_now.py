@@ -206,7 +206,8 @@ CSS = """
 /* A session's score is its state, which the meta line already reads. */
 .now .card[data-kind="session"] > .why { display:none; }
 .now .card .why-more { position:relative; display:inline-block; vertical-align:-3px; cursor:help; }
-.now .card .why-more .glyph { display:block; width:14px; height:14px; }
+.now .card .why-more .glyph { display:inline-block; vertical-align:-2px; width:14px; height:14px; }
+.now .card .why-more .score { margin-right:3px; font-variant-numeric:tabular-nums; }
 .now .card .why-more:hover, .now .card .why-more:focus { color:var(--fg); outline:none; }
 .now .card .why-more .why { display:none; position:absolute; z-index:5; top:calc(100% + 4px); left:-8px;
   width:max-content; max-width:min(420px, 80vw); margin:0; padding:6px 8px; border:1px solid var(--line);
@@ -1278,11 +1279,18 @@ def _linked_html(x: dict[str, Any]) -> str:
     )
 
 
+def _age(since: "datetime | None", now: datetime) -> str:
+    """`needs.waited` without its "waiting": the card's `3d` says it alone."""
+    if since is None:
+        return "age unknown"
+    return needs.waited(since, now).removeprefix("waiting ")
+
+
 def card(r: Ranked, now: datetime, ov: overlay.Overlay) -> str:
     n = r.need
     pin = '<span class="pin">pinned</span> · ' if ov.is_pinned(n.item) else ""
     meta = (
-        f'{pin}<span class="wait">{_e(needs.waited(n.since, now))}</span> · '
+        f'{pin}<span class="wait">{_e(_age(n.since, now))}</span> · '
         + needs.state_html(n)
     )
     terms = ",".join(name for name, value, _ in r.terms if value)
@@ -1307,10 +1315,14 @@ def card(r: Ranked, now: datetime, ov: overlay.Overlay) -> str:
         key = f"{n.item[0]}\0{n.item[1]}".encode()
         wid = "why-" + hashlib.sha1(key).hexdigest()[:10]
         why = why.replace('">', f'" id="{wid}" role="tooltip">', 1)
+        # A Ship card shows its score beside the "?"; another mode has none.
+        total = f"{r.total:g}".replace("-", "−")
+        score = f'<span class="score">{total}</span>' if r.mode == SHIP else ""
+        label = f"Score {total}: why it ranks here" if score else "Why it ranks here"
         meta += (
-            ' <span class="why-more" tabindex="0" aria-label="Why it ranks here"'
+            f' <span class="why-more" tabindex="0" aria-label="{label}"'
             f' role="button" aria-describedby="{wid}">'
-            f"{icons.svg('circle-help')}{why}</span>"
+            f"{score}{icons.svg('circle-help')}{why}</span>"
         )
         why = ""
     steps = (

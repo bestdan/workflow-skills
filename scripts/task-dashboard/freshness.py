@@ -342,6 +342,7 @@ def render(found: list[Source], stale: bool = False) -> str:
     return (
         f'<span class="fresh{" warn" if warn else ""}" data-age="{age}">'
         '<button type="button" class="fresh-btn" aria-expanded="false"'
+        f' aria-label="{mark}{_e(s.text)}"'
         f' aria-controls="fresh-panel" title="{_e(s.text)}: where each part of this'
         f' page comes from">{mark}{text}</button>'
         '<div class="fresh-panel" id="fresh-panel" role="dialog"'

@@ -341,6 +341,12 @@ class RenderTests(Case):
         assert wid is not None
         self.assertIn(f'id="{wid.group(1)}" role="tooltip"', meta.group(0))
         self.assertIn('role="button"', meta.group(0))
+        # The bare age, and the score beside the "?", equal to the card's total.
+        self.assertRegex(meta.group(0), r'<span class="wait">\d+[mhd]</span>')
+        score = re.search(r'<span class="score">([0-9.]+)</span>', meta.group(0))
+        total = re.search(r'data-total="([^"]+)"', card)
+        assert score is not None and total is not None
+        self.assertEqual(float(score.group(1)), float(total.group(1)))
 
     def test_jira_off_now_lists_the_queue_with_a_why_line_on_every_card(self):
         seed(self.conn)
