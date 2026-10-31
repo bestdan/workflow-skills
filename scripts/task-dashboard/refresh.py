@@ -565,7 +565,7 @@ JS = """
       if (!mine) return;
       mine.dataset.count = t.dataset.count;
       if (mine.dataset.off === undefined) {
-        mine.querySelector('.count').textContent = '(' + t.dataset.count + ')';
+        mine.querySelector('.count').textContent = t.dataset.count;
       }
     });
     // A tab whose lane the new page left out (an optional lane, now empty)
@@ -576,7 +576,7 @@ JS = """
       if (doc.querySelector('.lane-tabs a[data-lane="' + id + '"]')) return;
       var n = lane.querySelectorAll('.card').length;
       mine.dataset.count = n;
-      mine.querySelector('.count').textContent = '(' + n + ')';
+      mine.querySelector('.count').textContent = n;
     });
     var box = document.getElementById('filter');
     var q = box ? box.value.trim() : '';

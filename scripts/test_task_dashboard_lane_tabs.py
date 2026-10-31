@@ -52,7 +52,9 @@ def tabs(page):
         r'<span class="name">([^<]*)</span> <span class="count[^"]*">([^<]*)</span>',
         bar.group(1),
     ):
-        out.append((m[2], f"{m[3]} {m[4]}", m[1] == "true"))
+        # The pill holds the bare count ("2", "off"); the label reads it in
+        # parentheses, as a tab's text did before the pill.
+        out.append((m[2], f"{m[3]} ({m[4]})", m[1] == "true"))
     return out
 
 
@@ -134,7 +136,7 @@ class TabifyTests(unittest.TestCase):
         self.assertEqual(
             tabs(page), [("a", "Alpha (off)", False), ("b", "Beta (0)", True)]
         )
-        self.assertIn('<span class="count off">(off)</span>', page)
+        self.assertIn('<span class="count off">off</span>', page)
         self.assertIn('data-lane="a" data-count="0" data-off=""', page)
 
     def test_all_empty_shows_the_first_lane(self):
