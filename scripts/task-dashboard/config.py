@@ -78,6 +78,19 @@ DEFAULTS: dict[str, Any] = {
     # The Workstreams tab (workstreams.py): an in-progress or planned
     # workstream with no member activity for this many days is Stalled.
     "workstreams": {"stalled_days": 14},
+    # `items`' size estimate (agent_query.py): a size bucket -> minutes. The
+    # buckets are bot_pr, docs_pr, small_pr, large_pr and `est:N`. These are
+    # guesses for the owner to tune, not a measurement; a bucket with no entry
+    # has no estimate, and an unsized item is never treated as small.
+    "size": {
+        "minutes": {
+            "bot_pr": 5,
+            "docs_pr": 10,
+            "small_pr": 15,
+            "est:1": 20,
+            "est:2": 45,
+        }
+    },
     # View name -> {"include": [group, ...]}: what a view shows when neither its
     # URL nor a remembered switch choice says (include.py has the names).
     "views": {},
@@ -273,6 +286,7 @@ def load(path: "str | os.PathLike[str] | None" = None) -> dict[str, Any]:
             )
     _validate_weights(cfg["score"]["categories"], "categories", score.FLEET_CATEGORIES)
     _validate_weights(cfg["score"]["terms"], "terms", score.TERMS)
+    _validate_size_minutes(cfg["size"])
     problem = include.validate_config(cfg["views"])
     if problem is not None:
         raise ConfigError(problem)
@@ -291,6 +305,25 @@ def _validate_weights(weights: Any, table: str, names: tuple[str, ...]) -> None:
             raise ConfigError(f"score.{table}.{name} is not one of {', '.join(names)}")
         if not isinstance(value, (int, float)) or isinstance(value, bool):
             raise ConfigError(f"score.{table}.{name} must be a number")
+
+
+SIZE_BUCKETS = ("bot_pr", "docs_pr", "small_pr", "large_pr")
+_EST_BUCKET = re.compile(r"est:[1-9][0-9]*")
+
+
+def _validate_size_minutes(size: Any) -> None:
+    """`[size.minutes]` maps a size bucket to a positive number of minutes."""
+    minutes = size.get("minutes") if isinstance(size, dict) else None
+    if not isinstance(minutes, dict):
+        raise ConfigError("size.minutes must be a table of bucket = minutes")
+    for name, value in minutes.items():
+        if name not in SIZE_BUCKETS and not _EST_BUCKET.fullmatch(name):
+            raise ConfigError(
+                f"size.minutes.{name} is not a bucket: one of"
+                f" {', '.join(SIZE_BUCKETS)}, or est:N"
+            )
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
+            raise ConfigError(f"size.minutes.{name} must be a positive number")
 
 
 def _validate_jira(cfg: dict[str, Any]) -> None:

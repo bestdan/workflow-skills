@@ -29,11 +29,13 @@ import secrets  # noqa: E402
 import sqlite3  # noqa: E402
 from datetime import date, datetime, timezone  # noqa: E402
 from pathlib import Path  # noqa: E402
+from typing import Any  # noqa: E402
 
 # The directory name has a hyphen, so it is not importable as a package; put it
 # on sys.path and import the siblings as top-level modules.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import agent_query  # noqa: E402
 import agent_view  # noqa: E402
 import collector  # noqa: E402
 import collector_install  # noqa: E402
@@ -178,6 +180,55 @@ def build_parser() -> argparse.ArgumentParser:
         " mode, else ship)",
     )
     _paths(view_p)
+    scopes_p = sub.add_parser(
+        "scopes",
+        help="list the scopes `items --scope` takes (repo, workstream, jira, epic,"
+        " label, host) with open-item counts; with a query, what it matches",
+    )
+    scopes_p.add_argument(
+        "query",
+        nargs="?",
+        help="match scope ids and titles, case aside; `all` lists every scope",
+    )
+    _paths(scopes_p)
+    items_p = sub.add_parser(
+        "items",
+        help="one compact JSON record per item in scope, joined across tracker,"
+        " GitHub and the fleet; reads the DB, no server needed",
+    )
+    items_p.add_argument(
+        "--scope",
+        action="append",
+        help="a scope id or a word `scopes` matches; repeat for a union;"
+        " `all` (the default) is no filter",
+    )
+    items_p.add_argument(
+        "--kind", help="comma list of: " + ", ".join(agent_query.KINDS)
+    )
+    items_p.add_argument(
+        "--state",
+        help="comma list of the status category: "
+        + ", ".join(agent_query.STATES)
+        + " (default: todo,started)",
+    )
+    items_p.add_argument(
+        "--only",
+        help="comma list of derived facts, all must hold: "
+        + ", ".join(agent_query.ONLY),
+    )
+    items_p.add_argument(
+        "--fields",
+        help="brief (default), full, or a comma list of field names;"
+        " source, key, ref and kind are always included",
+    )
+    items_p.add_argument("--limit", type=int, help="at most this many items")
+    items_p.add_argument("--offset", type=int, default=0, help="skip this many first")
+    items_p.add_argument(
+        "--jsonl",
+        action="store_true",
+        help="the header on line one, then one item a line",
+    )
+    _paths(items_p)
     refresh_p = sub.add_parser(
         "refresh",
         help="re-read one GitHub PR or issue and rewrite its rows, as the card's"
@@ -452,6 +503,50 @@ def cmd_view(args: argparse.Namespace) -> int:
         conn.close()
     sys.stdout.write(agent_view.dumps(doc) if args.json else agent_view.text(doc))
     return 0
+
+
+def _query(args: argparse.Namespace, build: Any) -> int:
+    """Run one agent_query read against the DB, read-only. Exit 0, 1 when the
+    DB cannot be opened, 2 on a config error or a flag value it refuses."""
+    cfg_path, db_arg = _agent_paths(args)
+    try:
+        cfg = config.load(cfg_path)
+    except config.ConfigError as exc:
+        print(f"task-dashboard: {exc}", file=sys.stderr)
+        return 2
+    try:
+        conn = db.connect_read_only(db_arg)
+    except (OSError, sqlite3.Error) as exc:
+        print(f"task-dashboard: {exc}", file=sys.stderr)
+        return 1
+    try:
+        out = build(conn, cfg, _now())
+    except agent_query.QueryError as exc:
+        print(f"task-dashboard: {exc}", file=sys.stderr)
+        return 2
+    finally:
+        conn.close()
+    sys.stdout.write(out)
+    return 0
+
+
+def cmd_scopes(args: argparse.Namespace) -> int:
+    def build(conn: sqlite3.Connection, cfg: dict, now: datetime) -> str:
+        return agent_query.dumps(agent_query.scopes_doc(conn, cfg, now, args.query))
+
+    return _query(args, build)
+
+
+def cmd_items(args: argparse.Namespace) -> int:
+    def build(conn: sqlite3.Connection, cfg: dict, now: datetime) -> str:
+        doc = agent_query.items_doc(
+            conn, cfg, now,
+            scope=args.scope, kind=args.kind, state=args.state, only=args.only,
+            fields=args.fields, limit=args.limit, offset=args.offset,
+        )  # fmt: skip
+        return agent_query.jsonl(doc) if args.jsonl else agent_query.dumps(doc)
+
+    return _query(args, build)
 
 
 def cmd_refresh(args: argparse.Namespace) -> int:
@@ -817,6 +912,10 @@ def main(argv: "list[str] | None" = None) -> int:
         return cmd_tune(args)
     if args.command == "view":
         return cmd_view(args)
+    if args.command == "scopes":
+        return cmd_scopes(args)
+    if args.command == "items":
+        return cmd_items(args)
     if args.command == "overlay":
         return cmd_overlay(args)
     if args.command == "refresh":

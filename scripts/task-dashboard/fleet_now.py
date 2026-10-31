@@ -741,13 +741,15 @@ def _lines(size: dict[str, Any]) -> str:
     return f"{files} {plural}, +{size['additions']}/−{size['deletions']}"
 
 
-def little_pr(p: dict[str, Any]) -> "tuple[str, str] | None":
-    """(category, why) for a PR that passes the small test, else None.
+LARGE_PR = "large_pr"  # a sized PR that is none of Little's PR buckets
+
+
+def pr_bucket(p: dict[str, Any]) -> "tuple[str, str] | None":
+    """(bucket, why) by size alone, whatever the PR's CI or draft state: one
+    of Little's PR categories, else LARGE_PR; None when the PR is unsized.
 
     `p` is a fleet_tabs.pull_requests() row.
     """
-    if p.get("is_draft") or p.get("ci_state") not in _LITTLE_CI:
-        return None
     awaiting = p.get("awaiting") or {}
     size = p.get("size")
     if awaiting.get("author_is_bot"):
@@ -761,7 +763,18 @@ def little_pr(p: dict[str, Any]) -> "tuple[str, str] | None":
         and size["additions"] + size["deletions"] <= LITTLE_LINES
     ):
         return "small_pr", f"PR, {_lines(size)}"
-    return None
+    return LARGE_PR, f"PR, {_lines(size)}"
+
+
+def little_pr(p: dict[str, Any]) -> "tuple[str, str] | None":
+    """(category, why) for a PR that passes the small test, else None.
+
+    `p` is a fleet_tabs.pull_requests() row.
+    """
+    if p.get("is_draft") or p.get("ci_state") not in _LITTLE_CI:
+        return None
+    found = pr_bucket(p)
+    return None if found is None or found[0] == LARGE_PR else found
 
 
 _LITTLE_HINT = {
