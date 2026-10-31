@@ -41,12 +41,14 @@ TARGETS come from config ``[health.targets]``: ``"observed"`` (shown, never
 coloured) or a comparison such as ``"<= 5"``.
 """
 
+import bisect
 import html
 import json
 import math
 import sqlite3
 import statistics
 from collections import Counter
+from collections.abc import Sequence
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
@@ -217,43 +219,54 @@ def _minutes(values: list[float], q: "float | None") -> "float | None":
 
 
 def waits(
-    conn: sqlite3.Connection, start: datetime, end: datetime
-) -> tuple[list[float], list[float]]:
-    """(owner waits, agent waits) in seconds, closing in ``[start, end)``.
+    conn: sqlite3.Connection, edges: Sequence[datetime]
+) -> list[tuple[list[float], list[float]]]:
+    """One ``(owner waits, agent waits)`` pair, in seconds, per window.
 
-    Pairs are made per session from every event before ``end``, so a wait that
-    opened before the window but closed in it is counted whole.
+    ``edges`` ascend; window ``i`` is ``[edges[i], edges[i + 1])`` and a wait
+    belongs to the window its closing event falls in. Waits closing before
+    ``edges[0]`` are dropped. One pass pairs per session from every event before
+    ``edges[-1]``, so a wait that opened before a window but closed in it is
+    counted whole.
     """
+    windows: list[tuple[list[float], list[float]]] = [([], []) for _ in edges[1:]]
+
+    def close(t: datetime, opened: datetime, which: int) -> None:
+        i = bisect.bisect_right(edges, t) - 1
+        if 0 <= i < len(windows):
+            windows[i][which].append((t - opened).total_seconds())
+
     pending_prompt: dict[tuple, datetime] = {}
     pending_stop: dict[tuple, datetime] = {}
-    owner: list[float] = []
-    agent: list[float] = []
-    for t, (host, sid, event, _) in _rows(conn, _EVENTS, _EPOCH, end):
+    for t, (host, sid, event, _) in _rows(conn, _EVENTS, _EPOCH, edges[-1]):
         if sid is None:
             continue
         key = (host, sid)
         if event == "UserPromptSubmit":
             opened = pending_stop.pop(key, None)
-            if opened is not None and t >= start:
-                agent.append((t - opened).total_seconds())
+            if opened is not None:
+                close(t, opened, 1)
             pending_prompt.setdefault(key, t)
         elif event == "Stop":
             opened = pending_prompt.pop(key, None)
-            if opened is not None and t >= start:
-                owner.append((t - opened).total_seconds())
+            if opened is not None:
+                close(t, opened, 0)
             pending_stop[key] = t
-    return owner, agent
+    return windows
 
 
 def hook_figures(
-    conn: sqlite3.Connection, start: datetime, end: datetime
+    conn: sqlite3.Connection,
+    start: datetime,
+    end: datetime,
+    owner: list[float],
+    agent: list[float],
 ) -> dict[str, "float | None"]:
     events = _rows(conn, _EVENTS, start, end)
     prompts = sum(1 for _, r in events if r[2] == "UserPromptSubmit")
     permission = sum(
         1 for _, r in events if r[2] == "Notification" and r[3] == "permission_prompt"
     )
-    owner, agent = waits(conn, start, end)
     return {
         "permission_per_100": _per_100(permission, prompts),
         "owner_wait_median": _minutes(owner, None),
@@ -314,8 +327,15 @@ def compute(
     """Every figure for ``[start, end)``, its trend, target and verdict."""
     prev = start - (end - start)
     now_vals = current_figures(conn, fleet=fleet)
-    cur = {**history_figures(conn, start, end), **hook_figures(conn, start, end)}
-    old = {**history_figures(conn, prev, start), **hook_figures(conn, prev, start)}
+    (old_owner, old_agent), (owner, agent) = waits(conn, (prev, start, end))
+    cur = {
+        **history_figures(conn, start, end),
+        **hook_figures(conn, start, end, owner, agent),
+    }
+    old = {
+        **history_figures(conn, prev, start),
+        **hook_figures(conn, prev, start, old_owner, old_agent),
+    }
     days = hook_days(conn, end)
     baseline = days is None or days < BASELINE_DAYS
     rows = []

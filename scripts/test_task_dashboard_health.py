@@ -106,6 +106,55 @@ def seed(conn, *, first_event=None):
     conn.commit()
 
 
+def two_pass_waits(conn, start, end):
+    """The pre-#1145 reference: ``waits(conn, start, end)`` as it was, one full
+    scan of session_events per window. The one-pass code must match it."""
+    pending_prompt: dict[tuple, datetime] = {}
+    pending_stop: dict[tuple, datetime] = {}
+    owner: list[float] = []
+    agent: list[float] = []
+    for t, (host, sid, event, _) in health._rows(
+        conn, health._EVENTS, health._EPOCH, end
+    ):
+        if sid is None:
+            continue
+        key = (host, sid)
+        if event == P:
+            opened = pending_stop.pop(key, None)
+            if opened is not None and t >= start:
+                agent.append((t - opened).total_seconds())
+            pending_prompt.setdefault(key, t)
+        elif event == S:
+            opened = pending_prompt.pop(key, None)
+            if opened is not None and t >= start:
+                owner.append((t - opened).total_seconds())
+            pending_stop[key] = t
+    return owner, agent
+
+
+# Waits that close in the previous day, [END - 2d, START): s4 opens before it
+# and closes inside it, s5 opens inside it and closes in the current window.
+PREVIOUS_EVENTS = [
+    (at(18, 23, 50), "s4", P, None),
+    (at(19, 0, 10), "s4", S, None),  # owner wait 20 min, opened before the window
+    (at(19, 8, 0), "s4", P, None),  # agent wait 470 min
+    (at(19, 23, 55), "s5", P, None),
+    (at(20, 0, 5), "s5", S, None),  # owner wait 10 min, closes in the current window
+    (at(19, 10, 0), "s6", S, None),
+    (at(19, 10, 30), "s6", P, None),  # agent wait 30 min
+    (at(19, 10, 45), "s6", S, None),  # owner wait 15 min
+]
+
+
+def seed_events(conn, events):
+    conn.executemany(
+        "INSERT INTO session_events (host, ts, event, session_id, notification,"
+        " received_at) VALUES ('mini', ?, ?, ?, ?, 'r')",
+        [(ts(t), e, s, n) for t, s, e, n in events],
+    )
+    conn.commit()
+
+
 def seed_fleet(conn):
     rows = [
         {"kind": "pr", "key": f"https://g/pull/{n}", "title": "t", "in_queue": n < 2}
@@ -163,6 +212,65 @@ class FigureTest(DbCase):
         self.assertIsNone(f["switch_rate"]["previous"])
         self.assertIsNone(f["switch_rate"]["trend"])
         self.assertIsNone(f["permission_per_100"]["previous"])
+
+    def assert_waits_match_two_pass(self):
+        prev = START - (END - START)
+        one_pass = health.waits(self.conn, (prev, START, END))
+        for got, (lo, hi) in zip(one_pass, [(prev, START), (START, END)]):
+            self.assertEqual(
+                tuple(map(sorted, got)),
+                tuple(map(sorted, two_pass_waits(self.conn, lo, hi))),
+            )
+        return one_pass
+
+    def test_one_pass_waits_match_two_pass_reference(self):
+        seed(self.conn)
+        (prev_owner, prev_agent), (owner, agent) = self.assert_waits_match_two_pass()
+        self.assertEqual((prev_owner, prev_agent), ([], []))
+        self.assertEqual(sorted(owner), [120.0, 240.0, 600.0, 600.0])
+        self.assertEqual(sorted(agent), [360.0, 1200.0, 1680.0])
+        self.assertEqual([health._minutes(owner, q) for q in (None, 0.9)], [7.0, 10.0])
+        self.assertEqual([health._minutes(agent, q) for q in (None, 0.9)], [20.0, 28.0])
+
+    def test_one_pass_waits_match_with_waits_closing_in_previous_window(self):
+        seed(self.conn)
+        seed_events(self.conn, PREVIOUS_EVENTS)
+        (prev_owner, prev_agent), (owner, agent) = self.assert_waits_match_two_pass()
+        self.assertEqual(sorted(prev_owner), [900.0, 1200.0])
+        self.assertEqual(sorted(prev_agent), [1800.0, 28200.0])
+        self.assertIn(600.0, owner)  # s5, opened in the previous window
+        self.assertEqual(len(owner), 5)
+        self.assertEqual(len(agent), 3)
+        f = by_id(health.compute(self.conn, {}, START, END, fleet=False))
+        self.assertEqual(f["owner_wait_median"]["previous"], 17.5)
+        self.assertEqual(f["agent_wait_median"]["previous"], 250.0)
+        self.assertEqual(f["owner_wait_median"]["value"], 10.0)
+
+    def test_a_wait_closing_on_a_window_edge_belongs_to_the_later_window(self):
+        prev = START - (END - START)
+        seed_events(
+            self.conn,
+            [
+                (at(18, 23, 0), "e1", P, None),
+                (prev, "e1", S, None),  # closes exactly at the previous start
+                (at(19, 23, 0), "e2", P, None),
+                (START, "e2", S, None),  # closes exactly at the current start
+            ],
+        )
+        (prev_owner, _), (owner, _) = self.assert_waits_match_two_pass()
+        self.assertEqual((prev_owner, owner), ([3600.0], [3600.0]))
+
+    def test_waits_scan_session_events_once_per_compute(self):
+        seed(self.conn)
+        statements: list[str] = []
+        self.conn.set_trace_callback(statements.append)
+        health.compute(self.conn, {}, START, END, fleet=False)
+        self.conn.set_trace_callback(None)
+        # The waits scan is the only epoch-bounded session_events read.
+        scans = [
+            q for q in statements if "FROM session_events" in q and "1969-12-31" in q
+        ]
+        self.assertEqual(len(scans), 1, scans)
 
     def test_waits_are_baseline_under_14_days_of_hook_data(self):
         seed(self.conn)
