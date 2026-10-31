@@ -156,7 +156,7 @@ squash commit body carries the audit record — the tier reasons, the verdict
 SHA and the evidence pointers — so it lands atomically with the merge. The
 record ends in two trailers, `Landed-by: land-pr.sh` and
 `Co-review-head: <sha>`. The `landed-by-agent` label and a PR comment repeating
-the record follow as best effort; every audit keys on the `Landed-by` trailer,
+the record follow as best effort; the landing audits key on the `Landed-by` trailer,
 and lists any trailer-carrying merge that lacks the label. `/deliver-task` calls it as a new final step
 instead of stopping at hand-off when the tier is `auto`; `/auto-pilot`'s
 "nothing is merged unattended" invariant becomes "nothing outside the `auto`
@@ -178,9 +178,12 @@ checks carry no tier signal. So when shadow mode ends, the one new allow rule
 names the installed plugin's `land-pr.sh` by its absolute path, globbed over
 the version directory, and raw merges stay `ask`. A repo-relative or
 working-tree copy is never allowed: the authoring agent can edit those before
-running them, and finplan and dotfiles have no such script. The guard hook is a
+running them, and finplan and dotfiles have no such script. The installed copy
+sits outside the sandboxed write set, which makes it tamper-resistant, not
+tamper-proof (see Risks). The guard hook is a
 precondition of that allow rule, not a convenience: the `ask` rules cover only
-the named merge commands, so if the hook is removed, so is the rule.
+the named merge commands, so if the hook is removed, the allow rule must be
+removed with it.
 
 ### 5. Judgement calls and `/consult`
 
@@ -337,13 +340,19 @@ Each gate converts a class of B PRs; build them in this order, by B volume:
   while co-review runs in the session that holds the App's credential too.
   This is accepted residual risk: the weekly audit in component 1 catches a
   missing status, not a forged one, and the PR stamp is posted with the same
-  token, so it adds no independence.
+  token, so it adds no independence. The `Landed-by` trailer is self-attested
+  the same way: any squash body can carry it, so the trailer-keyed audits list
+  what claims to be a lander merge, not what is one.
 - **A merge the guard cannot read.** The guard hook in component 4 reads only
   the Bash command text, so a merge inside a script or interpreter the agent
   wrote is invisible to it. Author ≠ lander holds against direct calls, not
   against a determined agent. Such a merge still needs the required checks,
   and component 1's audit catches one without a `co-review` `success`; one
-  that skipped only `merge-tier` leaves no trailer and nothing flags it.
+  that skipped only `merge-tier` leaves no trailer and nothing flags it. The
+  same holds for the installed `land-pr.sh`: an unsandboxed command or an
+  Edit/Write tool call can modify it, or create a version directory the allow
+  rule's glob matches. A hash check inside the lander would not help, because
+  the same edit can remove it.
 - **Consult correlation.** If resolved technical calls are later overturned,
   raise the bar or drop component 5.
 - **Install base.** If many users other than the owner pull workflow-skills
@@ -361,7 +370,12 @@ Each gate converts a class of B PRs; build them in this order, by B volume:
 2. **The workflow-skills release bypass.** Moving it off the admin role touches
    `release.yml`'s token. Acceptable?
 3. **Starting thresholds**: size cap 300 lines, human-tier WIP limit 5, consult
-   bar 85%.
+   bar 85%. The consult bar is unresolved: a consult-decided technical call
+   keeps the PR `auto` only at ≥85%, and below that it still applies but the
+   PR demotes. The only blind consult on it ran on a different mechanism, in
+   which 85% was the bar for the call to apply at all, and agreed at 60%:
+   "whether 'calls for you' items are genuinely reversible and confined to the
+   technical class".
 
 ## Decisions
 
@@ -372,8 +386,3 @@ Each checked with a blind `/consult`, with its confidence and crux:
 - Lander as plugin scripts run by the session (75%): "if the D1 status could
   not be read from the session … B or C wins".
 - No `dev_docs` in the first slice (75%).
-- A consult-decided technical call keeps the PR `auto` only at ≥85%; below
-  that it still applies, but the PR demotes to human (60% — weak agreement,
-  from a consult on an earlier framing in which consult resolved calls only at
-  85%): "whether 'calls for you' items are genuinely reversible and confined to
-  the technical class".
