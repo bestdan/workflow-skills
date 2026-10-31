@@ -183,13 +183,21 @@ def _count(scope: Scope, items: list[Item]) -> int:
 
 def match(scopes: list[Scope], word: str) -> list[Scope]:
     """The scopes `word` names: the one whose id it is, else every scope whose
-    id or title contains it, case aside. Callers treat `all` as no filter
-    before calling this (resolve(), scopes_doc()); match itself does not
-    reserve it."""
+    id or title contains it, case aside. `repo:<name>` with no owner also
+    names each `repo:<owner>/<name>`, since worktree and session paths show
+    only the bare name. Callers treat `all` as no filter before calling this
+    (resolve(), scopes_doc()); match itself does not reserve it."""
     exact = [s for s in scopes if s.id == word]
     if exact:
         return exact
     w = word.lower()
+    if w.startswith("repo:") and "/" not in w:
+        bare = w[len("repo:") :]
+        return [
+            s
+            for s in scopes
+            if s.kind == "repo" and (fleet_views._name(s.title) or "").lower() == bare
+        ]
     return [s for s in scopes if w in s.id.lower() or w in s.title.lower()]
 
 

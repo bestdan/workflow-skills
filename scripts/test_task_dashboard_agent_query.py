@@ -299,6 +299,14 @@ class ScopeTests(Case):
         with self.assertRaisesRegex(agent_query.QueryError, "no repo scope"):
             self.items(scope=["repo:acme/none"])
 
+    def test_repo_with_a_bare_name_names_every_owner_of_it(self):
+        doc = self.items(scope=["repo:finplan"])
+        self.assertEqual([s["id"] for s in doc["scope"]], [f"repo:{REPO}"])
+        both = sorted(s["id"] for s in self.items(scope=["repo:dotfiles"])["scope"])
+        self.assertEqual(both, ["repo:acme/dotfiles", f"repo:{OTHER}"])
+        with self.assertRaisesRegex(agent_query.QueryError, "no repo scope"):
+            self.items(scope=["repo:fin"])  # whole names only, no substring
+
     def test_a_full_repo_scope_keeps_out_another_owners_repo(self):
         keys = self.by_key(scope=[f"repo:{OTHER}"])
         self.assertIn(issue_url(40, OTHER), keys)
