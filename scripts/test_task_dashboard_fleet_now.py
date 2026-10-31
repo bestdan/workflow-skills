@@ -1275,7 +1275,7 @@ class TidyTests(Case):
         card = needs_fx.card(text, issue_url(14))
         self.assertIn("tidy · untriaged", card)
         self.assertIn("close it, supersede it, or decide it", card)
-        self.assertIn('data-mode="ship"', fleet_now.mode_button("tidy"))  # wraps
+        self.assertIn('data-mode="ship"', fleet_now.mode_button("plan"))  # wraps
 
 
 # --- the source seam ---------------------------------------------------------

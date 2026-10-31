@@ -66,8 +66,8 @@ mode button at the end of the page header bar, after the filter (mode_button,
 which the server puts there on Now only). It reads the mode's name, cycles
 overlay.NOW_MODES and saves the pick in the overlay; `?mode=` shows one mode
 once and saves nothing. With none saved the
-mode is Ship. Everything below this paragraph is Ship, except LITTLE, DEEP
-and TIDY.
+mode is Ship. Everything below this paragraph is Ship, except LITTLE, DEEP,
+TIDY and PLAN.
 
 ORDER is Ship's (the design's "Ship"). Pinned items first, in the overlay's order
 (overlay.Overlay.pin_rank). Then the fixed TIERS, in order: a session that
@@ -110,6 +110,12 @@ auto:human-review-needed, `status:0_untriaged` or `status:1_needs_refinement`,
 and my own PR open longer than fleet_views.OPEN_ITEM_DAYS, drafts and pending
 CI included. Strictly oldest first, with no score; age is the point. The
 action is to close it, supersede it, or decide it.
+
+PLAN shows the live plan (plan_mode.py: the newest unexpired one, a session
+plan over a standing one) in the plan's own order, every entry, with no
+score: each card carries the plan's reason, a `done` entry is ticked, and one
+that has left the mirror with no closed signal is marked `gone`, never
+ticked. With no live plan the list says so, and how to make one.
 
 SHARED BEHAVIOUR, as on every view and in every mode: pinned items lead,
 the include filter, ignores and snoozes apply, and a snoozed item is left out
@@ -172,17 +178,19 @@ BLOCKED = "blocked"
 RAISES = ("quick_win", "own_approved", "review_queue")
 
 MODES = overlay.NOW_MODES
-SHIP, LITTLE, DEEP, TIDY = "ship", "little", "deep", "tidy"
+SHIP, LITTLE, DEEP, TIDY, PLAN = "ship", "little", "deep", "tidy", "plan"
 # What each mode answers: the mode button's title, and the line beside it.
 QUESTIONS = {
     SHIP: "What is closest to done?",
     LITTLE: "What can I knock out fast?",
     DEEP: "Which decision unblocks the most?",
     TIDY: "What is rotting?",
+    PLAN: "What did the plan say to do?",
 }
 assert set(QUESTIONS) == set(MODES)
 # Each mode's icon on the mode button (icons.PATHS).
-MODE_ICONS = {SHIP: "rocket", LITTLE: "zap", DEEP: "brain", TIDY: "sparkles"}
+MODE_ICONS = {SHIP: "rocket", LITTLE: "zap", DEEP: "brain", TIDY: "sparkles",
+              PLAN: "list-checks"}  # fmt: skip
 assert set(MODE_ICONS) == set(MODES)
 # Below a mode's list: "<N> <what>", the items it ranks that it did not show.
 MORE_IN_MODE = {LITTLE: "more small items", DEEP: "more to think about",
@@ -216,6 +224,10 @@ CSS = """
 /* A session's score is its state, which the meta line already reads. */
 .now .card[data-kind="session"] > .why { display:none; }
 .now .more { margin-top:8px; font-size:12px; }
+.now .plan-reason { margin-top:2px; }
+.now .card .done-tick { font-size:11px; font-weight:600; color:var(--ok); }
+.now .card .gone { font-size:11px; font-weight:600; color:var(--muted); }
+.now .card.plan-done .plan-reason, .now .card.plan-gone { opacity:.65; }
 """
 
 # Status label -> the own-work category it puts an issue in.
@@ -272,7 +284,7 @@ class Ranked:
     def tier(self) -> "tuple[int, str]":
         if self.mode == LITTLE:
             return little_tier(self.category)
-        if self.mode in (DEEP, TIDY):
+        if self.mode in (DEEP, TIDY, PLAN):
             return 0, self.mode  # one tier: the mode's own order
         raised = self.raised_by
         if raised is not None:
@@ -1144,7 +1156,19 @@ def mode_candidates(
         return rank(deep_sources(conn, cfg, now), conn, cfg, now)
     if mode == TIDY:
         return rank(tidy_sources(conn, cfg, now), conn, cfg, now)
+    if mode == PLAN:
+        return rank(plan_sources(conn, cfg, now)[2], conn, cfg, now)
     return candidates(conn, cfg, now)
+
+
+def plan_sources(
+    conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime
+) -> "tuple[dict[str, Any] | None, dict[str, Any] | None, list[candidate.Candidate]]":
+    """plan_mode.collect: (the live plan, the lapsed one, its candidates)."""
+    # Imported here: plan_mode -> agent_query -> fleet_now is a cycle.
+    import plan_mode
+
+    return plan_mode.collect(conn, cfg, now)
 
 
 def snapshot_of(
@@ -1246,7 +1270,14 @@ def tidy_order(ranked: list[Ranked], ov: overlay.Overlay) -> list[Ranked]:
     return _pins_then(ranked, ov, _wait_key)
 
 
-MODE_ORDER = {LITTLE: little_order, DEEP: deep_order, TIDY: tidy_order}
+def plan_order(ranked: list[Ranked], ov: overlay.Overlay) -> list[Ranked]:
+    """Pinned first in the overlay's order, then the plan's own order."""
+    return _pins_then(ranked, ov, lambda r: (r.candidate.plan or {}).get("position", 0))
+
+
+MODE_ORDER = {
+    LITTLE: little_order, DEEP: deep_order, TIDY: tidy_order, PLAN: plan_order,
+}  # fmt: skip
 
 
 def closed_today(conn: sqlite3.Connection, now: datetime) -> "int | None":
@@ -1273,6 +1304,11 @@ class Page:
     mode: str = SHIP
     more_in_mode: int = 0  # outside Ship: its items the list did not reach
     closed_today: "int | None" = None  # Little's, for the agent view
+    # Plan mode's: the live plan (plans.current), else the lapsed one, and
+    # every entry's state (plan_mode.STATES), shown or not, in plan order.
+    plan: "dict[str, Any] | None" = None
+    lapsed: "dict[str, Any] | None" = None
+    plan_states: list[str] = field(default_factory=list)
 
 
 def _visible(
@@ -1326,7 +1362,14 @@ def _build_mode(
     mode: str,
 ) -> Page:
     """A mode other than Ship: its own collector's items, in its own order."""
-    own = mode_candidates(conn, cfg, now, mode)
+    plan = lapsed = None
+    states: list[str] = []
+    if mode == PLAN:
+        plan, lapsed, cands = plan_sources(conn, cfg, now)
+        states = [c.plan["state"] for c in cands if c.plan]
+        own = rank(cands, conn, cfg, now)
+    else:
+        own = mode_candidates(conn, cfg, now, mode)
     seen = {r.need.item for r in own}
     if ov.pinned_at:
         # Pins lead in every mode: a pinned item this mode does not rank
@@ -1339,13 +1382,20 @@ def _build_mode(
     ranked, snoozed = _visible(own, ov, now, inc)
     ranked = MODE_ORDER[mode](ranked, ov)
     pins = sum(ov.is_pinned(r.need.item) for r in ranked)
-    # Deep's limit counts only the unpinned; the others' counts pins too.
-    shown = ranked[: pins + DEEP_LIMIT if mode == DEEP else max(LIMIT, pins)]
+    # Deep's limit counts only the unpinned; Plan shows the whole plan; the
+    # others' counts pins too.
+    if mode == DEEP:
+        shown = ranked[: pins + DEEP_LIMIT]
+    elif mode == PLAN:
+        shown = ranked
+    else:
+        shown = ranked[: max(LIMIT, pins)]
     return Page(
         shown, 0, snoozed,
         mode=mode,
         more_in_mode=len(ranked) - len(shown),
         closed_today=closed_today(conn, now) if mode == LITTLE else None,
+        plan=plan, lapsed=lapsed, plan_states=states,
     )  # fmt: skip
 
 
@@ -1393,6 +1443,23 @@ def _linked_html(x: dict[str, Any]) -> str:
     )
 
 
+def _plan_card(c: cards.Card, entry: dict[str, Any]) -> None:
+    """A Plan-mode card's tick or gone flag, and the plan's reason below."""
+    state = entry["state"]
+    if state == "done":
+        c.flags.append('<span class="done-tick">✓ done</span>')
+    elif state == "gone":
+        c.flags.append(
+            '<span class="gone" title="Left the mirror with no closed signal,'
+            ' so it is not ticked">gone</span>'
+        )
+    c.cls = f"{c.cls} plan-{state}".strip()
+    c.data["plan"] = state
+    c.below.append(
+        f'<div class="plan-reason">{entry["position"]}. {_e(entry["reason"])}</div>'
+    )
+
+
 def card(r: Ranked, now: datetime, ov: overlay.Overlay) -> str:
     """The Need's card (needs.card) with Now's ranking added: why it ranks
     here, and in Ship mode its score."""
@@ -1401,6 +1468,8 @@ def card(r: Ranked, now: datetime, ov: overlay.Overlay) -> str:
     c.data.update(category=r.category, tier=r.tier[1], total=str(r.total), mode=r.mode)
     terms = ",".join(name for name, value, _ in r.terms if value)
     why = _e(why_line(r))
+    if r.candidate.plan:
+        _plan_card(c, r.candidate.plan)
     if r.checklist:
         c.below.append(
             f'<div class="checklist">{_e(close_out.checklist_text(r.checklist))}</div>'
@@ -1423,7 +1492,15 @@ def card(r: Ranked, now: datetime, ov: overlay.Overlay) -> str:
 def lanes(p: Page, inc: "include.Include | None" = None) -> list[view_model.Lane]:
     """The page's one lane, Next."""
     filtered = inc is not None and not inc.everything
-    if p.mode != SHIP:
+    if p.mode == PLAN and p.plan is None:
+        import plan_mode
+
+        empty = plan_mode.empty(p.lapsed) + "."
+    elif p.mode == PLAN:
+        empty = "Nothing in the plan is shown" + (
+            " in the filter." if filtered else "; its items are snoozed or ignored."
+        )
+    elif p.mode != SHIP:
         empty = EMPTY[p.mode] + (" in the filter." if filtered else ".")
     elif filtered:
         empty = "Nothing included by the filter is waiting."
@@ -1468,6 +1545,21 @@ def render(
             '<p class="note">github.scope is not "owner", so GitHub issues are'
             " not ranked here; your PRs and review requests are.</p>"
         )
+    if p.plan is not None:
+        import plan_mode
+
+        line = plan_mode.head(p.plan, p.plan_states.count("done"), len(p.plan_states))
+        parts.append(
+            f'<p class="note plan-head" data-plan-scope="{_e(p.plan["scope"])}"'
+            f' data-plan-kind="{p.plan["kind"]}">{_e(line)}</p>'
+        )
+    elif p.mode == PLAN and p.shown:
+        # Pins lead in every mode, so with no plan live a pin fills the lane
+        # and its empty line would never show: say it above the list instead.
+        import plan_mode
+
+        line = plan_mode.empty(p.lapsed) + "."
+        parts.append(f'<p class="note plan-none">{_e(line)}</p>')
     for lane in lanes(p, inc):
         body = "".join(card(r, now, ov) for r in lane.items)
         body = body or f'<p class="empty">{_e(lane.empty)}</p>'

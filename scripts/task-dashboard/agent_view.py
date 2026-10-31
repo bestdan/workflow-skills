@@ -26,12 +26,17 @@ fleet_now.TIERS, `the rest` or `blocked`, LITTLE_TIERS, or `deep` or
 empty for anything else, and `folded`, the linked PRs folded into it as
 [{source, key, kind, ref, url, category, evidence}], empty when none are,
 and `linked`, a Jira ticket's other joined PRs as [{url, ref, why}]: shown
-on its card as evidence, never ranked.
+on its card as evidence, never ranked. In Plan mode an item also carries
+`plan`, {position, action, reason, est_min, state, evidence}, its `state`
+one of `done` (ticked), `open` or `gone` (left the mirror with no closed
+signal, so not ticked; plan_mode.py); no other item carries `plan`.
 
 A Now document's `notes` carry `mode`, the mode it was built in (the
 `--mode` asked for, else the saved one, else ship); outside Ship,
-`more_in_mode`; and in Little `closed_today` (null when the fleet step has no
-count from today).
+`more_in_mode`; in Little `closed_today` (null when the fleet step has no
+count from today); and in Plan `plan`, the live plan less its entries, with
+`counts` of its entries per state, or null when none is live, and then
+`no_plan`, the page's line saying so and how to make one.
 """
 
 import json
@@ -166,6 +171,8 @@ def ranked_item(r: fleet_now.Ranked, lane: str, now: datetime) -> Item:
         ],
         linked=[dict(x) for x in r.linked],
     )  # fmt: skip
+    if r.candidate.plan:
+        out["plan"] = dict(r.candidate.plan)
     return out
 
 
@@ -365,6 +372,13 @@ def _now(ctx: "Ctx") -> list[dict[str, Any]]:
         ctx.notes["more_in_mode"] = page.more_in_mode
     if mode == fleet_now.LITTLE:
         ctx.notes["closed_today"] = page.closed_today
+    if mode == fleet_now.PLAN:
+        import plan_mode
+
+        plan = page.plan
+        ctx.notes["plan"] = plan and plan_mode.summary(plan, page.plan_states)
+        if plan is None:
+            ctx.notes["no_plan"] = fleet_now.lanes(page, ctx.inc)[0].empty
     if ctx.show_all:
         every = fleet_now.mode_candidates(ctx.conn, ctx.cfg, ctx.now, mode)
         _hidden(out, [ranked_item(r, "next", ctx.now) for r in every], ctx.reason)
