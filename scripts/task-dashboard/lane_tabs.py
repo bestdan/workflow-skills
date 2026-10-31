@@ -4,11 +4,13 @@ Every lane is a `section.lane[data-section]` whose first child is an `h2`
 reading "Title (N)". tabify() reads those back out of a rendered page body and
 draws one tab per lane under the include switches, so a view has only to give
 each lane a counted heading, and a tab's count is that heading's. A lane with
-none is named by its capitalized id and counts (0).
+none is named by its capitalized id and counts 0.
 
-A tab reads "Label (N)". The label is the lane's `data-tab`, a short name for
-a long title (tab_attr() writes it), else the title itself; the full title is
-always the tab's tooltip, and stays the lane's heading.
+A tab reads its label, then its count in a pill. The label is the lane's
+`data-tab`, a short name for a long title (tab_attr() writes it), else the
+title itself; the full title is always the tab's tooltip. The lane's heading
+stays in the page but is not shown beside a tab bar, which already names and
+counts the lane.
 
 WHICH LANE SHOWS, first match wins:
 
@@ -25,7 +27,7 @@ right, a tab switch needs no reload, and with no script `?lane=` still works:
 each tab is a plain link to it.
 
 A lane whose group the include filter switched off (it carries
-`data-filtered`) keeps its tab, with a muted "(off)" for its count.
+`data-filtered`) keeps its tab, with a muted "off" for its count.
 
 The page's text filter (server.JS) recounts each lane and leaves the count in
 the lane's `data-shown`; JS below reads that to recount the tabs, dim the ones
@@ -116,9 +118,9 @@ def bar(
     for lane in found:
         selected = lane.id == current.id
         count = (
-            '<span class="count off">(off)</span>'
+            '<span class="count off">off</span>'
             if lane.off
-            else f'<span class="count">({lane.count})</span>'
+            else f'<span class="count">{lane.count}</span>'
         )
         off = ' data-off=""' if lane.off else ""
         tabs.append(
@@ -158,14 +160,23 @@ def tabify(body: str, view: str, path: str, query: "dict[str, list[str]]") -> st
 
 
 CSS = """
+/* GitHub's underline tabs, each count in a grey counter pill. */
 .lane-tabs { display:flex; flex-wrap:wrap; gap:4px; margin:8px 0 12px;
   border-bottom:1px solid var(--line); }
-.lane-tabs a { padding:4px 10px; margin-bottom:-1px; color:var(--muted);
-  text-decoration:none; border:1px solid transparent;
-  border-radius:6px 6px 0 0; }
-.lane-tabs a[aria-selected=true] { color:var(--fg); font-weight:600;
-  background:var(--card); border-color:var(--line); border-bottom-color:var(--card); }
+.lane-tabs a { position:relative; display:inline-flex; align-items:center; gap:6px;
+  padding:4px 10px 8px; color:var(--muted); text-decoration:none; }
+.lane-tabs a:hover { color:var(--fg); }
+.lane-tabs a[aria-selected=true] { color:var(--fg); font-weight:600; }
+.lane-tabs a[aria-selected=true]::after { content:""; position:absolute; left:8px;
+  right:8px; bottom:-1px; height:2px; border-radius:2px; background:var(--fg); }
+.lane-tabs .count { min-width:20px; padding:0 6px; border-radius:999px; font-size:12px;
+  font-weight:500; line-height:18px; text-align:center; color:var(--fg);
+  background:rgba(129,139,152,.2); }
 .lane-tabs .count.off { font-style:italic; opacity:.7; }
+/* The tab already names its lane and counts it, so the lane's own heading
+   would say it twice. It stays in the page, where lanes() and the scripts
+   read it, and its full title is the tab's tooltip. */
+body:has(.lane-tabs[data-view]) .lane > h2 { display:none; }
 .lane-tabs a.dim { opacity:.45; }
 .lane[hidden] { display:none !important; }
 """
@@ -222,7 +233,7 @@ JS = """
     tabs.forEach(function (t) {
       if (t.dataset.off !== undefined) return;
       var n = q ? hits(t) : +t.dataset.count;
-      t.querySelector('.count').textContent = '(' + n + ')';
+      t.querySelector('.count').textContent = n;
       t.classList.toggle('dim', !!q && n === 0);
     });
     var cur = current();
