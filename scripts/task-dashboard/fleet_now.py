@@ -30,7 +30,8 @@ score.FLEET_CATEGORIES category:
   brings score.score's priority, deadline, unblocks and stuck terms
   (`[score.terms]`), its priority in place of the prio: label's;
 - with `[linear] enabled = true`, my open assigned Linear issues
-  (linear_tickets, from linear_issues.py's rows): started is `started`, and
+  (linear_tickets, from linear_issues.py's `assigned` rows; the unassigned and
+  other people's backlog it also mirrors is never ranked): started is `started`, and
   unstarted is `ready`. Each brings the same score.score terms a Jira ticket
   does, and is blocked when an open issue blocks it or it carries the
   `blocked` label;
@@ -636,10 +637,11 @@ _LINEAR_CATEGORY = {"started": "started", "unstarted": "ready"}
 def linear_tickets(
     conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime
 ) -> list[candidate.Candidate]:
-    """My open assigned Linear issues (linear_issues.py): started is
-    `started`, unstarted is `ready`. Each brings score.score's priority,
-    deadline (its due date, else its active cycle's end), unblocks and stuck
-    terms, as a Jira ticket does. Blocked is an open issue blocking it, or the
+    """My open assigned Linear issues (linear_issues.py's `assigned` rows,
+    never the rest of the team backlog it mirrors): started is `started`,
+    unstarted is `ready`, and backlog is not ranked. Each brings
+    score.score's priority, deadline (its due date, else its active cycle's
+    end), unblocks and stuck terms, as a Jira ticket does. Blocked is an open issue blocking it, or the
     `blocked` label."""
     if not linear_issues.enabled(cfg):
         return []
@@ -651,8 +653,9 @@ def linear_tickets(
         rows = [
             dict(r)
             for r in conn.execute(
-                "SELECT * FROM issues WHERE source = ? AND kind = ? ORDER BY key",
-                (linear_issues.SOURCE, linear_issues.KIND),
+                "SELECT * FROM issues WHERE source = ? AND kind = ? AND scope = ?"
+                " ORDER BY key",
+                (linear_issues.SOURCE, linear_issues.KIND, linear_issues.MINE),
             )
         ]
     finally:

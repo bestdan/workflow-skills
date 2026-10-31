@@ -34,7 +34,8 @@ the Workstreams tables from GitHub milestones, the fleet rows and, when
 
 With `linear.enabled` on, on any instance, `run_linear_issues()` (kind
 `linear_issues`, linear_issues.py) mirrors my open assigned Linear issues for
-Now under `source = 'linear'`.
+Now, and the open backlog of the projects' teams for the agent queries, under
+`source = 'linear'`.
 
 The fleet view's session rows are two more steps of the same shape, each with
 its own `sync_runs` row: `run_sessions()` (kind `sessions`) folds the ingested
@@ -807,8 +808,8 @@ def run_linear_issues(
     resolve_key: "Callable[[], str]" = linear_api.resolve_key,
     clock: "Callable[[], datetime] | None" = None,
 ) -> dict[str, Any]:
-    """Mirror my open assigned Linear issues (linear_issues.py) for Now. The
-    caller checks `linear.enabled` first."""
+    """Mirror my open assigned Linear issues and the teams' open backlog
+    (linear_issues.py). The caller checks `linear.enabled` first."""
 
     def body() -> "tuple[dict[str, Any], str | None]":
         return linear_issues.step_body(config, db, now, runner, resolve_key)

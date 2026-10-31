@@ -236,8 +236,13 @@ LEGACY = {
 }  # fmt: skip
 
 
+# The keys the assigned read returned: mine, and the legacy row, which only
+# that read wrote.
+MINE = ["PRE-1", "PRE-3"]
+
+
 def seed(conn):
-    linear_issues.write(conn, [*LINEAR, LEGACY], NOW)
+    linear_issues.write(conn, [*LINEAR, LEGACY], NOW, mine=MINE)
     snap = copy.deepcopy(SNAPSHOT)
     for line in snap["sessions"]:
         if line["session_id"] == "s-10":
@@ -495,7 +500,10 @@ class LinearTests(Case):
 
     def test_a_linear_team_sharing_a_jira_project_key_stays_linear(self):
         rw = db.connect(self.db_path)
-        linear_issues.write(rw, [*LINEAR, LEGACY, linear("PAY-100", team="PAY")], NOW)
+        linear_issues.write(
+            rw, [*LINEAR, LEGACY, linear("PAY-100", team="PAY")], NOW,
+            mine=[*MINE, "PAY-100"],
+        )  # fmt: skip
         rw.close()
         self.assertEqual(sorted(self.by_key(scope=["linear:PAY"])), ["PAY-100"])
         self.assertNotIn("PAY-100", self.by_key(scope=["jira:PAY"]))

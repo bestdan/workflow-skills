@@ -72,8 +72,9 @@ DEFAULTS: dict[str, Any] = {
     # it relies on a request Claude Code marks internal.
     "claude_remote": {"enabled": False, "claude_path": "claude", "timeout_seconds": 45},
     # Linear, read with the GraphQL API (linear_api.py): projects as
-    # workstreams on a fleet instance, and my open assigned issues on Now on
-    # every instance (linear_issues.py). Off by default. The key is never set
+    # workstreams on a fleet instance, and on every instance the projects'
+    # teams' open backlog, of which Now ranks my assigned issues
+    # (linear_issues.py). Off by default. The key is never set
     # here: linear_api.resolve_key says where it is read from. `me` is the
     # email whose assigned issues Now ranks; empty means the key's own user,
     # which is wrong when the key was made on a different account from the

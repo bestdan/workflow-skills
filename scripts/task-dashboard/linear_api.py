@@ -1,6 +1,7 @@
 """Linear reads: for the Workstreams tab, open projects and which project each
-Linear key the mirror mentions belongs to; for Now (linear_issues.py), my open
-assigned issues: the key owner's, or `linear.me`'s when it is set.
+Linear key the mirror mentions belongs to; for the issues mirror
+(linear_issues.py), my open assigned issues (the key owner's, or `linear.me`'s
+when it is set) and the open backlog of the teams the projects belong to.
 
 Off by default (`[linear] enabled = false`). Every call goes through one
 runner seam, `Runner(body, key, timeout) -> payload`, where `body` is the
@@ -27,7 +28,9 @@ Projects are every project the key can see whose status type is not
 `completed` or `canceled`, filtered here rather than in the query. The
 Workstreams key lookup is ONE `issues` query per sync (paged at 250), filtered
 to the keys' team and number, and only for keys whose team owns an open
-project. Now's read (assigned_issues) is its own paged query.
+project. The issues step (linear_issues.py) makes two more paged queries:
+my open assigned issues (assigned_issues) and the open backlog of the teams
+the open projects belong to (team_issues).
 """
 
 import importlib.util
@@ -307,11 +310,17 @@ def project_of_keys(
     return out
 
 
-# --- my issues ---------------------------------------------------------------
+# --- issues ------------------------------------------------------------------
 
 # The issue states Now ranks: Todo-like (`unstarted`) and In Progress-like
 # (`started`). Triage, backlog, done and canceled are not the owner's to do now.
 OPEN_STATE_TYPES = ("unstarted", "started")
+
+# The states the backlog read (team_issues) mirrors: Now's, plus `backlog`.
+# Not `triage`: it is Linear's intake queue of issues nobody has accepted yet
+# (many raised by an integration), which a team either accepts into the
+# backlog or declines, so it is not yet backlog to prioritize.
+BACKLOG_STATE_TYPES = ("backlog", *OPEN_STATE_TYPES)
 
 # Linear refuses a query whose page size times its nested connections' sizes
 # is "too complex": with the nested ones at their default of 50, a page of 50
@@ -339,6 +348,17 @@ _ISSUE_NODES = """
           nodes { type issue { identifier state { type } } }
         }
       }"""
+
+# A team's whole open backlog, assigned or not. 50 a page, as above: about
+# four pages for a team of 200 open issues.
+TEAM_QUERY = f"""
+query($after: String, $types: [String!], $teams: [String!]) {{
+  issues(first: 50, after: $after,
+         filter: {{state: {{type: {{in: $types}}}},
+                  team: {{key: {{in: $teams}}}}}}) {{{_ISSUE_NODES}
+  }}
+}}
+"""
 
 # With no assignee named: the key's own user's issues.
 ASSIGNED_QUERY = f"""
@@ -413,48 +433,63 @@ def assigned_issues(
         found = _data(runner(body, key, timeout))
         if not ((found.get("users") or {}).get("nodes")):
             raise LinearError(f"linear.me names no Linear user: {assignee}")
-    out = []
-    for node in nodes:
-        if not (node or {}).get("identifier"):
-            continue
-        state = node.get("state") or {}
-        cycle = node.get("cycle") or {}
-        project = node.get("project") or {}
-        who = node.get("assignee") or {}
-        out.append(
-            {
-                "key": node["identifier"],
-                "title": node.get("title") or "",
-                "url": node.get("url"),
-                "state": state.get("name"),
-                "state_type": str(state.get("type") or "").lower(),
-                "priority": int(node.get("priority") or 0),
-                "priority_label": node.get("priorityLabel"),
-                "due": node.get("dueDate"),
-                "estimate": node.get("estimate"),
-                "created": node.get("createdAt"),
-                "updated": node.get("updatedAt"),
-                "started": node.get("startedAt"),
-                "team": (node.get("team") or {}).get("key"),
-                "labels": [
-                    str(n["name"])
-                    for n in (node.get("labels") or {}).get("nodes") or []
-                    if n and n.get("name")
-                ],
-                "cycle": cycle.get("name"),
-                "cycle_end": cycle.get("endsAt"),
-                "cycle_active": bool(cycle.get("isActive")),
-                "project": project.get("name"),
-                "project_id": project.get("id"),
-                "assignee": who.get("name"),
-                "assignee_email": who.get("email"),
-                "assignee_is_me": bool(who.get("isMe")),
-                "blocked_by": _open_blocks(node.get("inverseRelations"), "issue"),
-                "blocks": _open_blocks(node.get("relations"), "relatedIssue"),
-                "truncated": any(
-                    ((node.get(f) or {}).get("pageInfo") or {}).get("hasNextPage")
-                    for f in ("labels", "relations", "inverseRelations")
-                ),
-            }
-        )
-    return out
+    return [_issue(n) for n in nodes if (n or {}).get("identifier")]
+
+
+def _issue(node: dict) -> dict:
+    """One issue node as the dict assigned_issues and team_issues return."""
+    state = node.get("state") or {}
+    cycle = node.get("cycle") or {}
+    project = node.get("project") or {}
+    who = node.get("assignee") or {}
+    return {
+        "key": node["identifier"],
+        "title": node.get("title") or "",
+        "url": node.get("url"),
+        "state": state.get("name"),
+        "state_type": str(state.get("type") or "").lower(),
+        "priority": int(node.get("priority") or 0),
+        "priority_label": node.get("priorityLabel"),
+        "due": node.get("dueDate"),
+        "estimate": node.get("estimate"),
+        "created": node.get("createdAt"),
+        "updated": node.get("updatedAt"),
+        "started": node.get("startedAt"),
+        "team": (node.get("team") or {}).get("key"),
+        "labels": [
+            str(n["name"])
+            for n in (node.get("labels") or {}).get("nodes") or []
+            if n and n.get("name")
+        ],
+        "cycle": cycle.get("name"),
+        "cycle_end": cycle.get("endsAt"),
+        "cycle_active": bool(cycle.get("isActive")),
+        "project": project.get("name"),
+        "project_id": project.get("id"),
+        "assignee": who.get("name"),
+        "assignee_email": who.get("email"),
+        "assignee_is_me": bool(who.get("isMe")),
+        "blocked_by": _open_blocks(node.get("inverseRelations"), "issue"),
+        "blocks": _open_blocks(node.get("relations"), "relatedIssue"),
+        "truncated": any(
+            ((node.get(f) or {}).get("pageInfo") or {}).get("hasNextPage")
+            for f in ("labels", "relations", "inverseRelations")
+        ),
+    }
+
+
+def team_issues(
+    key: str,
+    teams: Iterable[str],
+    runner: Runner = post,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> list[dict]:
+    """Every issue in BACKLOG_STATE_TYPES of the teams keyed `teams`,
+    whoever is assigned, as assigned_issues's dicts. No query when `teams` is
+    empty."""
+    teams = sorted(set(teams))
+    if not teams:
+        return []
+    variables = {"types": list(BACKLOG_STATE_TYPES), "teams": teams}
+    nodes = _pages(runner, key, timeout, TEAM_QUERY, variables, "issues")
+    return [_issue(n) for n in nodes if (n or {}).get("identifier")]
