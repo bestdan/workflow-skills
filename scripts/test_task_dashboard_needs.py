@@ -385,7 +385,8 @@ class OrderTests(NeedsCase):
 
     def test_a_pinned_need_also_tops_now_in_every_mode(self):
         # What the Pin tooltip promises: Now ranks what Needs collects, pins
-        # first. The last item on Ship's list is pinned, so it has to move.
+        # first. The last item Needs collects is pinned, so it has to lead
+        # every mode.
         seed(self.conn)
         cfg = fleet_cfg()
         last = needs.collect(self.conn, cfg, NOW)[-1].item
