@@ -637,7 +637,7 @@ class PageScriptTests(Case):
         assert m, f"no lane {lane}"
         return m.group(1)
 
-    def test_an_open_or_unsaved_note_in_a_sibling_card_survives(self):
+    def test_an_open_or_unsaved_why_not_line_in_a_sibling_card_survives(self):
         before, after, result = self.go_green()
         self.assertIn(pr_url(3), tabs_fx.keys(tabs_fx.section(before, "waiting")))
         self.assertIn(pr_url(1), tabs_fx.keys(tabs_fx.section(before, "ready")))

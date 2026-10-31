@@ -63,6 +63,8 @@ V3_TABLES = (*V2_TABLES, "ignores")
 KIND_TAGS = ("side-quest", "substantial")
 # The Snooze button hides a card for this many days; Unsnooze clears it.
 SNOOZE_DAYS = 7
+# The lengths Now's snoozed line offers instead, in days; SNOOZE_DAYS among them.
+SNOOZE_CHOICES = (1, 3, 7, 14, 30)
 
 # The "why not now" picker's reasons, (code, label), in the order it shows
 # them. A code is what is stored, so a label may change and a code may not.
@@ -960,13 +962,11 @@ CSS = """
   font-size:12px; }
 .card .ov button, .card .ov input { font:inherit; padding:1px 6px; border-radius:4px;
   border:1px solid var(--line); background:var(--bg); color:var(--fg); }
-.card .ov button.ov-icon { display:inline-flex; align-items:center; padding:2px 4px; cursor:pointer; }
-.card .ov button.ov-icon .glyph { display:block; width:14px; height:14px; }
-@media (pointer:coarse) { .card .ov button.ov-icon { padding:7px; } }
-.card .ov details { width:100%; }
-.card .ov textarea { width:100%; min-height:4em; font:inherit; color:var(--fg);
-  background:var(--bg); border:1px solid var(--line); border-radius:4px; }
-.card .note { white-space:pre-wrap; color:var(--muted); font-size:12px; margin-top:4px; }
+.card .ov .ov-icon { display:inline-flex; align-items:center; padding:2px 4px; cursor:pointer;
+  border:1px solid var(--line); border-radius:4px; background:var(--bg); color:var(--fg); }
+.card .ov .ov-icon:hover { border-color:var(--muted); }
+.card .ov .ov-icon .glyph { display:block; width:14px; height:14px; }
+@media (pointer:coarse) { .card .ov .ov-icon { padding:7px; } }
 .card.snoozed { opacity:.6; }
 .card .badge { color:var(--muted); }
 """
@@ -1018,8 +1018,21 @@ JS = """
       post('snooze', it.concat([['until', b.dataset.until]]), line && function () {
         line.querySelector('.whynot-until').textContent = b.dataset.until;
         line.querySelector('input').value = '';
+        line.querySelectorAll('[data-ov="snooze-for"]').forEach(function (x) {
+          x.setAttribute('aria-pressed', x.dataset.until === b.dataset.until ? 'true' : 'false');
+        });
         card.classList.add('just-snoozed');
         line.hidden = false;
+      });
+    }
+    else if (act === 'snooze-for') {
+      // The snoozed line's 1d … 30d: the same snooze, for that long.
+      var row = b.closest('.whynot');
+      post('snooze', it.concat([['until', b.dataset.until]]), function () {
+        row.querySelector('.whynot-until').textContent = b.dataset.until;
+        row.querySelectorAll('[data-ov="snooze-for"]').forEach(function (x) {
+          x.setAttribute('aria-pressed', x === b ? 'true' : 'false');
+        });
       });
     }
     else if (act === 'whynot') {
@@ -1036,9 +1049,7 @@ JS = """
         undone.closest('.card').classList.remove('just-snoozed');
       });
     }
-    else if (act === 'note') {
-      post('note', it.concat([['text', b.closest('details').querySelector('textarea').value]]));
-    } else if (act === 'up' || act === 'down') {
+    else if (act === 'up' || act === 'down') {
       var lane = b.closest('[data-pinned]');
       var cards = Array.prototype.slice.call(lane.querySelectorAll('.card'));
       var i = cards.indexOf(b.closest('.card')), j = act === 'up' ? i - 1 : i + 1;
@@ -1058,9 +1069,10 @@ def card_attrs(item: Item, ov: Overlay, now: datetime) -> str:
     return f'class="{cls}" data-source="{_e(item[0])}" data-key="{_e(item[1])}"'
 
 
-def snooze_until(now: datetime) -> str:
-    """The date the Snooze button snoozes until: SNOOZE_DAYS local days on."""
-    return (now.astimezone() + timedelta(days=SNOOZE_DAYS)).date().isoformat()
+def snooze_until(now: datetime, days: int = SNOOZE_DAYS) -> str:
+    """The date a snooze of `days` local days ends: the Snooze button's, by
+    default."""
+    return (now.astimezone() + timedelta(days=days)).date().isoformat()
 
 
 # A GitHub PR or issue, as its card's key: what the Refresh button re-reads.
@@ -1081,7 +1093,7 @@ def card_controls(
     pin: bool = True,
     why_not: bool = False,
 ) -> str:
-    """The pin toggle, snooze button, note editor, and
+    """The pin toggle, snooze, ignore and refresh buttons, and
     (pinned lane) up/down. `pin=False` drops Pin where nothing ranks by it.
     `why_not=True` makes Snooze hide the card in place and show its "why
     not now" line (whynot.picker, which the caller puts in the card) instead
@@ -1122,20 +1134,14 @@ def card_controls(
             f' Needs, dimmed elsewhere">{icons.svg("alarm-clock")}</button>'
         )
     parts.append(
-        '<button type="button" data-ov="ignore" title="Not mine: hide it">Ignore</button>'
+        '<button type="button" class="ov-icon" data-ov="ignore" aria-label="Ignore"'
+        f' title="Ignore: not mine, hide it">{icons.svg("eye-off")}</button>'
     )
     if refreshable(item):
         # refresh.JS handles it: POST /refresh, then the card follows the item.
         parts.append(
-            '<button type="button" data-refresh=""'
-            ' title="Re-read this item from GitHub, without a full sync">'
-            "Refresh</button>"
+            '<button type="button" class="ov-icon" data-refresh="" aria-label="Refresh"'
+            ' title="Refresh: re-read this item from GitHub, without a full sync">'
+            f"{icons.svg('refresh-cw')}</button>"
         )
-    body = ov.notes.get(item, "")
-    parts.append(
-        f"<details><summary>{'Edit note' if body else 'Add note'}</summary>"
-        f'<textarea maxlength="{MAX_NOTE}">{_e(body)}</textarea>'
-        '<button type="button" data-ov="note">Save note</button></details>'
-    )
-    shown = f'<div class="note">{_e(body)}</div>' if body else ""
-    return f'{shown}<div class="ov">{"".join(parts)}</div>'
+    return f'<div class="ov">{"".join(parts)}</div>'

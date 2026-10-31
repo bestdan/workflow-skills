@@ -685,7 +685,9 @@ class FreshnessTest(HeaderCase):
         )
         self.assertEqual(rows["machine:mini"], ("mini", "45m", "ok", "overdue", True))
         # The oldest source sets the age; a failed or stale one warns.
-        self.assertEqual(indicator(header), "⚠ Updated 45m ago")
+        self.assertEqual(indicator(header), "⚠ 45m ago")
+        # A screen reader hears the whole line the button shortens.
+        self.assertIn('aria-label="⚠ Updated 45m ago"', header)
         self.assertIn('class="fresh warn"', header)
         # The old split lines are gone.
         self.assertNotIn("synced ", header)
@@ -707,7 +709,7 @@ class FreshnessTest(HeaderCase):
     def test_all_fresh_is_no_warning(self):
         self.seed(mini_minutes=6)
         header = self.header()
-        self.assertEqual(indicator(header), "Updated 9m ago")
+        self.assertEqual(indicator(header), "9m ago")
         self.assertNotIn("warn", header.split('<div class="fresh-panel"', 1)[0])
         self.assertNotIn('role="alert"', header)
 
@@ -715,7 +717,7 @@ class FreshnessTest(HeaderCase):
         self.seed(mini_minutes=3 * 24 * 60)  # lindev fresh, mini 3 days quiet
         header = self.header()
         # The headline follows the sync (its oldest step, 9m), not mini's 3d.
-        self.assertEqual(indicator(header), "Updated 9m ago")
+        self.assertEqual(indicator(header), "9m ago")
         self.assertNotIn('class="fresh warn"', header)
         rows = panel_rows(header)
         self.assertEqual(
@@ -745,7 +747,7 @@ class FreshnessTest(HeaderCase):
             panel_rows(header)["workstreams"],
             ("Workstreams", "8m", "failed: GhError: 502", "in 5m", True),
         )
-        self.assertEqual(indicator(header), "\u26a0 Updated 9m ago")
+        self.assertEqual(indicator(header), "\u26a0 9m ago")
 
     def test_linear_on_shows_its_outcome_and_warns_with_no_key(self):
         self.httpd.app.cfg["linear"]["enabled"] = True
@@ -755,7 +757,7 @@ class FreshnessTest(HeaderCase):
             panel_rows(header)["workstreams"],
             ("Workstreams", "8m", "ok; Linear: no key", "in 5m", True),
         )
-        self.assertEqual(indicator(header), "\u26a0 Updated 9m ago")
+        self.assertEqual(indicator(header), "\u26a0 9m ago")
         fresh = json.loads(self.request("GET", "/status")[1])["freshness"]
         self.assertTrue(fresh["warn"])
 
@@ -767,19 +769,20 @@ class FreshnessTest(HeaderCase):
             panel_rows(header)["workstreams"],
             ("Workstreams", "8m", "ok; Linear: ok", "in 5m", False),
         )
-        self.assertEqual(indicator(header), "Updated 9m ago")
+        self.assertEqual(indicator(header), "9m ago")
 
     def test_a_failed_linear_read_warns_and_names_why(self):
         self.httpd.app.cfg["linear"]["enabled"] = True
         self.seed(mini_minutes=6)
         conn = self.conn()
-        add_run(conn, "ok", self.now() - timedelta(minutes=1),
+        # Two minutes, not one: a slow runner read 60s as 61s.
+        add_run(conn, "ok", self.now() - timedelta(minutes=2),
                 "LinearAuthError: 401", kind="workstreams",
                 counts={"linear": "auth failed"})  # fmt: skip
         conn.close()
         self.assertEqual(
             panel_rows(self.header())["workstreams"],
-            ("Workstreams", "60s", "ok; Linear: auth failed: LinearAuthError: 401",
+            ("Workstreams", "2m","ok; Linear: auth failed: LinearAuthError: 401",
              "in 5m", True),
         )  # fmt: skip
 
@@ -791,12 +794,12 @@ class FreshnessTest(HeaderCase):
             panel_rows(header)["workstreams"],
             ("Workstreams", "8m", "ok", "in 5m", False),
         )
-        self.assertEqual(indicator(header), "Updated 9m ago")
+        self.assertEqual(indicator(header), "9m ago")
 
     def test_a_host_quiet_under_a_day_still_warns(self):
         self.seed(mini_minutes=23 * 60)
         header = self.header()
-        self.assertEqual(indicator(header), "\u26a0 Updated 23h ago")
+        self.assertEqual(indicator(header), "\u26a0 23h ago")
         self.assertTrue(panel_rows(header)["machine:mini"][4])
 
 
@@ -844,7 +847,7 @@ class SyncNoteTest(HeaderCase):
             f' title="Sync now (shift-click for a full reconcile)">{server.SYNC_ICON}'
             "</button>",
         )
-        self.assertRegex(self.note(header), r"^syncing Jira \+ GitHub sync… \d+s$")
+        self.assertRegex(self.note(header), r"^syncing Jira \+ GitHub \d+s$")
         # The sync function reports the next step; the panel follows it.
         self.syncer.step("github_fleet")
         state = json.loads(self.request("GET", "/status")[1])
@@ -852,7 +855,7 @@ class SyncNoteTest(HeaderCase):
             (state["step"], state["step_label"]), ("github_fleet", "GitHub fleet")
         )
         header = self.header()
-        self.assertRegex(self.note(header), r"^syncing GitHub fleet… \d+s$")
+        self.assertRegex(self.note(header), r"^syncing GitHub fleet \d+s$")
         rows = panel_rows(header)
         self.assertEqual(rows["github_fleet"][3], "running now")
         self.assertEqual(rows["sync"][3], "after this run")
@@ -936,7 +939,7 @@ class HeaderScriptTest(HeaderCase):
         self.assertEqual(
             busy,
             {"button": "Sync now", "disabled": False,
-             "note": "syncing GitHub fleet… 12s", "new_data": False},
+             "note": "syncing GitHub fleet 12s", "new_data": False},
         )  # fmt: skip
         self.assertEqual(
             state["final"],
@@ -1003,7 +1006,7 @@ class BoardTest(ServerCase):
             )
         )
         found = {
-            s: re.findall(r"class=\"ref\">\((ABC-\d+)\)<", body)
+            s: re.findall(r"class=\"ref\">(ABC-\d+)<", body)
             for s, body in lanes.items()
         }
         self.assertEqual(found["new"], ["ABC-1"])
@@ -1079,10 +1082,10 @@ class BoardTest(ServerCase):
                 r'data-section="[a-z_]+"(?: hidden)?>(.*?)</section>', page, re.S
             )
         )
-        self.assertNotIn("(ABC-60)", lanes)  # a child of the ignored epic
-        self.assertNotIn("(ABC-61)", lanes)  # ignored itself
-        self.assertNotIn("(ABC-63)", lanes)  # under the ignored epic, two down
-        self.assertIn("(ABC-62)", lanes)
+        self.assertNotIn('ref">ABC-60<', lanes)  # a child of the ignored epic
+        self.assertNotIn('ref">ABC-61<', lanes)  # ignored itself
+        self.assertNotIn('ref">ABC-63<', lanes)  # under the ignored epic, two down
+        self.assertIn('ref">ABC-62<', lanes)
         self.assertIn("Ignored (2)", page)
         self.assertEqual(page.count('data-ov="unignore"'), 2)
 
@@ -1095,7 +1098,7 @@ class BoardTest(ServerCase):
         )
         assert lane is not None
         self.assertIn("Unclassified (1)", lane.group(1))
-        self.assertIn("(ABC-50)</span>", lane.group(1))
+        self.assertIn('ref">ABC-50</span>', lane.group(1))
 
     def test_summary_is_escaped(self):
         conn = self.conn()

@@ -83,9 +83,10 @@ or `dev_docs/`), or when it changes at most LITTLE_FILES files and
 LITTLE_LINES lines; a draft, and one whose CI is anything but green or
 absent (no checks at all), are left out. An issue is small when it carries `est:1` or `est:2` and is
 not `status:3_started`; an unsized one is not small. They go by LITTLE_TIERS,
-smallest first, then `prio`, then the longer wait, with no score. The header
-reads "closed today: N" from the fleet step's `closed_today` row, and only
-when that row counts from today's local midnight.
+smallest first, then `prio`, then the longer wait, with no score. The agent
+view's notes carry "closed today" from the fleet step's `closed_today` row,
+and only when that row counts from today's local midnight; the page does not
+show it.
 
 DEEP ranks the questions that need thinking, not doing (deep_sources): a
 proposed design (workstreams.mirrored_designs), an issue that blocks open
@@ -113,6 +114,7 @@ controls are the ordinary ones, except that Snooze first asks "why not
 now?" (whynot.py, which also notes each day's shown items as its base rate).
 """
 
+import hashlib
 import html
 import math
 import sqlite3
@@ -200,7 +202,28 @@ _DOCS_DIRS = ("docs/", "dev_docs/")
 _LITTLE_CI = ("success", "none")
 
 CSS = """
+.now .card { display:flow-root; }
 .now .card .why { margin-top:2px; }
+/* A session's score is its state, which the meta line already reads. */
+.now .card[data-kind="session"] > .why { display:none; }
+/* The score and "?" sit on the meta line's baseline, the icon sized to its text. */
+.now .card .why-more { position:relative; display:inline-block; cursor:help; }
+.now .card .why-more .glyph { display:inline-block; vertical-align:-0.15em; width:1.1em; height:1.1em; }
+.now .card .why-more .score { margin-right:3px; font-variant-numeric:tabular-nums; }
+.now .card .why-more:hover, .now .card .why-more:focus { color:var(--fg); outline:none; }
+.now .card .why-more .why { display:none; position:absolute; z-index:5; top:calc(100% + 4px); left:-8px;
+  width:max-content; max-width:min(420px, 80vw); margin:0; padding:6px 8px; border:1px solid var(--line);
+  border-radius:6px; background:var(--card); color:var(--fg); box-shadow:0 2px 8px rgba(0,0,0,.25); }
+.now .card .why-more:hover .why, .now .card .why-more:focus .why { display:block; }
+@media (max-width:600px) {
+  .now .card .why-more { position:static; }
+  .now .card .why-more .why { top:auto; left:8px; right:8px; width:auto; max-width:none; margin-top:4px; }
+}
+.now .card > .act { float:right; margin:0 0 4px 12px; padding:1px 8px; border-radius:10px;
+  border:1px solid var(--line); background:var(--bg); font-weight:600; }
+@media (max-width:600px) {
+  .now .card > .act { float:none; width:max-content; max-width:100%; margin:0 0 4px; }
+}
 .now .wait { color:var(--fg); font-weight:600; }
 .now .more { margin-top:8px; font-size:12px; }
 .now .checklist { margin:4px 0; font-size:12px; color:var(--fg); }
@@ -1137,7 +1160,7 @@ class Page:
     more_close_outs: int = 0  # close-outs past CLOSE_OUT_CAP
     mode: str = SHIP
     more_in_mode: int = 0  # outside Ship: its items the list did not reach
-    closed_today: "int | None" = None  # Little's header figure
+    closed_today: "int | None" = None  # Little's, for the agent view
 
 
 def _visible(
@@ -1258,22 +1281,53 @@ def _linked_html(x: dict[str, Any]) -> str:
     )
 
 
+def _age(since: "datetime | None", now: datetime) -> str:
+    """`needs.waited` without its "waiting": the card's `3d` says it alone."""
+    if since is None:
+        return "age unknown"
+    return needs.waited(since, now).removeprefix("waiting ")
+
+
 def card(r: Ranked, now: datetime, ov: overlay.Overlay) -> str:
     n = r.need
     pin = '<span class="pin">pinned</span> · ' if ov.is_pinned(n.item) else ""
-    bits = [_e(n.state)] + ([_e(n.where)] if n.where else [])
     meta = (
-        f'{pin}<span class="wait">{_e(needs.waited(n.since, now))}</span> · '
-        + " · ".join(bits)
+        f'{pin}<span class="wait">{_e(_age(n.since, now))}</span> · '
+        + needs.state_html(n)
     )
     terms = ",".join(name for name, value, _ in r.terms if value)
+    # The title already links to n.url, so an "open it" link only earns its
+    # place when it says something the title does not (claude.ai/code is
+    # not the session).
     link = (
         view_model.link(n.url, needs.open_label(n, "open it"))
-        if n.url and n.url.startswith("https://")
+        if n.url == needs.CODE_URL
         else ""
     )
     act = " · ".join(x for x in (link, needs.pr_link(n), view_model.code(n.hint)) if x)
     act_html = f'<div class="act">→ {act}</div>' if act else ""
+    why = f'<div class="why" data-terms="{terms}">{_e(why_line(r))}</div>'
+    if n.kind != "session":
+        # Why a card ranks where it does (a Ship score's breakdown, or
+        # another mode's reason) is there for when the order looks wrong, so
+        # in every mode it waits behind a "?" at the end of the meta line and
+        # pops over on hover, focus or tap.
+        # A screen reader hears the label, then the breakdown it describes:
+        # the role makes the label count, and describedby reads the hidden
+        # breakdown, which role=button alone would flatten away.
+        key = f"{n.item[0]}\0{n.item[1]}".encode()
+        wid = "why-" + hashlib.sha1(key).hexdigest()[:10]
+        why = why.replace('">', f'" id="{wid}" role="tooltip">', 1)
+        # A Ship card shows its score beside the "?"; another mode has none.
+        total = f"{r.total:g}".replace("-", "−")
+        score = f'<span class="score">{total}</span>' if r.mode == SHIP else ""
+        label = f"Score {total}: why it ranks here" if score else "Why it ranks here"
+        meta += (
+            f' <span class="why-more" tabindex="0" aria-label="{label}"'
+            f' role="button" aria-describedby="{wid}">'
+            f"{score}{icons.svg('circle-help')}{why}</span>"
+        )
+        why = ""
     steps = (
         f'<div class="checklist">{_e(close_out.checklist_text(r.checklist))}</div>'
         if r.checklist
@@ -1286,11 +1340,10 @@ def card(r: Ranked, now: datetime, ov: overlay.Overlay) -> str:
         f'<div {overlay.card_attrs(n.item, ov, now)} data-kind="{_e(n.kind)}"'
         f' data-category="{r.category}" data-tier="{_e(r.tier[1])}"'
         f' data-total="{r.total}" data-mode="{r.mode}">'
-        f"{needs._title(n, n.url)}{needs.ask_html(n)}"
-        f'<div class="meta">{meta}</div>{steps}{folded}'
-        f'<div class="why" data-terms="{terms}">{_e(why_line(r))}</div>'
-        f"{act_html}{overlay.card_controls(n.item, ov, now, reorder=False, why_not=True)}"
-        f"{whynot.picker(overlay.snooze_until(now))}</div>"
+        f"{act_html}{needs._title(n, n.url)}{needs.ask_html(n)}"
+        f'<div class="meta">{meta}</div>{steps}{folded}{why}'
+        f"{overlay.card_controls(n.item, ov, now, reorder=False, why_not=True)}"
+        f"{whynot.picker(now)}</div>"
     )
 
 
@@ -1332,11 +1385,6 @@ def render(
     p = build(conn, cfg, now, ov, inc, mode)
     whynot.record_shown(conn, p.shown, now)
     parts = []
-    if p.closed_today is not None:
-        parts.append(
-            f'<p class="note" data-closed-today="{p.closed_today}">'
-            f"closed today: {p.closed_today}</p>"
-        )
     if not cfg["github"]["enabled"]:
         parts.append(
             '<p class="note">github.enabled is false, so no PRs or issues are'

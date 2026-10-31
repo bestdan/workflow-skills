@@ -4,10 +4,11 @@
 // Usage: node test_task_dashboard_refresh_dom.js <jsdom dir> <case.json>
 //
 // The case names the page before and after the refresh, the POST /refresh
-// answer, the card to click, and edits to make first: `open` cards get their
-// note editor opened and text typed, `dirty` cards get text typed with the
-// editor closed. fetch is stubbed: the POST answers `result`, the page fetch
-// answers `after`. Prints the page's state afterwards as JSON.
+// answer, the card to click, and edits to make first. Cards have no editor
+// of their own any more, so each edited card is given a "why not" line like
+// Now's: `open` cards get it shown with text typed, `dirty` cards get text
+// typed with it hidden. fetch is stubbed: the POST answers `result`, the page
+// fetch answers `after`. Prints the page's state afterwards as JSON.
 "use strict";
 
 const fs = require("fs");
@@ -54,8 +55,12 @@ const edited = {};
 for (const [mode, keys] of [["open", spec.open || []], ["dirty", spec.dirty || []]]) {
   for (const key of keys) {
     const c = card(key);
-    const area = c.querySelector("details textarea");
-    if (mode === "open") c.querySelector("details").open = true;
+    const line = doc.createElement("div");
+    line.className = "whynot";
+    line.hidden = mode !== "open";
+    const area = doc.createElement("input");
+    line.appendChild(area);
+    c.appendChild(line);
     area.value = `unsaved ${mode} ${key}`;
     edited[key] = { card: c, area, text: area.value };
   }
@@ -84,7 +89,7 @@ const settle = () => new Promise((r) => window.setTimeout(r, 50));
       same_card: e.card.isConnected,
       text: e.area.isConnected ? e.area.value : null,
       kept: e.area.isConnected && e.area.value === e.text,
-      open: e.card.querySelector("details").open,
+      open: !e.card.querySelector(".whynot").hidden,
     };
   }
   const failed = doc.querySelector(".refresh-error");

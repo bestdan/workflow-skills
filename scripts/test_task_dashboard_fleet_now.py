@@ -324,6 +324,30 @@ class RenderTests(Case):
     def page(self, inc=None):
         return views.render("/now", self.conn, self.cfg, NOW, inc)
 
+    def test_the_card_leads_with_its_act_and_folds_its_score_away(self):
+        seed(self.conn, rows=[], prs=[PRS[3]], with_sessions=False)
+        card = needs_fx.card(self.page(), pr_url(4))  # own_ci_failing
+        # The act comes before the title, with no "open it": the title links there.
+        self.assertLess(card.index('<div class="act">'), card.index('class="title"'))
+        self.assertNotIn(">open it<", card)
+        self.assertIn('<span class="ci ci-bad" title="CI failure">CI</span>', card)
+        # The score's breakdown pops over from a "?" at the end of the meta line.
+        meta = re.search(r'<div class="meta">.*?</span></div>', card)
+        assert meta is not None
+        self.assertIn('<span class="why-more" tabindex="0"', meta.group(0))
+        self.assertIn('<div class="why" data-terms=', meta.group(0))
+        # Named and described for a screen reader, by an id unique to the card.
+        wid = re.search(r'aria-describedby="(why-[0-9a-f]{10})"', meta.group(0))
+        assert wid is not None
+        self.assertIn(f'id="{wid.group(1)}" role="tooltip"', meta.group(0))
+        self.assertIn('role="button"', meta.group(0))
+        # The bare age, and the score beside the "?", equal to the card's total.
+        self.assertRegex(meta.group(0), r'<span class="wait">\d+[mhd]</span>')
+        score = re.search(r'<span class="score">([0-9.]+)</span>', meta.group(0))
+        total = re.search(r'data-total="([^"]+)"', card)
+        assert score is not None and total is not None
+        self.assertEqual(float(score.group(1)), float(total.group(1)))
+
     def test_jira_off_now_lists_the_queue_with_a_why_line_on_every_card(self):
         seed(self.conn)
         page = self.page()
@@ -334,7 +358,7 @@ class RenderTests(Case):
         self.assertEqual(item_keys(page), EXPECTED[: fleet_now.LIMIT])
         for c in cards:
             m = re.search(
-                r'<div class="why" data-terms="([^"]+)">ship: [a-z ]+ · score ([0-9.]+): ',
+                r'<div class="why" data-terms="([^"]+)"[^>]*>ship: [a-z ]+ · score ([0-9.]+): ',
                 c,
             )
             assert m is not None, c[:300]
@@ -437,6 +461,11 @@ class SessionCardTests(unittest.TestCase):
         self.assertIn('>edit the notes</a> <span class="stag">src-32</span>', turn)
         self.assertIn(f'<div class="ask">› {fleet_now._e(needs_fx.ASK)}</div>', turn)
         self.assertIn("notes: bestdan/n", turn)
+        # A session's score is its state, which the meta line already reads:
+        # no "?", and its why stays a direct child of the card, which the CSS
+        # hides.
+        self.assertNotIn("why-more", turn)
+        self.assertIn('</div><div class="why" data-terms="asked">', turn)
         pr_card = needs_fx.card(page, "s-pr")
         self.assertIn(
             f'<a href="{needs_fx.pr_url(1201)}" target="_blank" rel="noopener">'
@@ -919,17 +948,24 @@ class LittleTests(Case):
         midnight = NOW.astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
         self.closed_row(midnight.isoformat(timespec="seconds"))
         self.assertEqual(self.little().closed_today, 5)
+        # The agent view's figure only: the page shows no count.
         page = fleet_now.render(self.conn, self.cfg, NOW, mode=fleet_now.LITTLE)
-        self.assertIn('data-closed-today="5">closed today: 5</p>', page)
-        # Ship has no such header.
-        self.assertNotIn("closed today", fleet_now.render(self.conn, self.cfg, NOW))
+        self.assertNotIn("closed today", page)
         later = NOW + timedelta(days=1)
         self.assertIsNone(fleet_now.closed_today(self.conn, later))
 
-    def test_no_count_no_header(self):
-        self.assertIsNone(self.little().closed_today)
+    def test_a_little_card_folds_its_why_behind_the_question_mark_too(self):
         page = fleet_now.render(self.conn, self.cfg, NOW, mode=fleet_now.LITTLE)
-        self.assertNotIn("closed today", page)
+        card = page.split('<div class="card"', 2)[1]
+        meta = re.search(r'<div class="meta">.*?</span></div>', card)
+        assert meta is not None
+        self.assertIn('<span class="why-more"', meta.group(0))
+        self.assertIn('<div class="why" data-terms="" ', meta.group(0))
+        # Little ranks by size, not a score: no number beside the "?".
+        self.assertNotIn('class="score"', card)
+
+    def test_no_count_is_none(self):
+        self.assertIsNone(self.little().closed_today)
 
     def test_the_snapshot_records_the_mode(self):
         item = ("github", pr_url(31))

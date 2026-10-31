@@ -327,12 +327,12 @@ class OrderTests(NeedsCase):
         main = section(self.page(), "needs")
         self.assertIn(
             f'<a class="title" href="{pr_url(1201)}" target="_blank" rel="noopener">feat: thing 1201 [#1101]</a>'
-            f' <span class="ref">({REPO}#1201)</span>',
+            f' <span class="ref">{REPO}#1201</span>',
             main,
         )
         self.assertIn(
             '<summary><span class="title">needs a human</span>'
-            f' <span class="ref">({REPO}#950)</span>',
+            f' <span class="ref">{REPO}#950</span>',
             main,
         )
         self.assertNotIn(f"{REPO}#1201 feat", main)

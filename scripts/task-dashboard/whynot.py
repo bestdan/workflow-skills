@@ -2,9 +2,10 @@
 `dashboard.py tune` makes of it. Both work on every instance.
 
 ASKING. On Now (fleet_now.py), Snooze snoozes on the first click
-and the card gives way, in place, to one line: "Snoozed until <date> · why not
-now?", the reasons (overlay.WHY_NOT_REASONS), an optional line of free text,
-and Undo, which removes the snooze and brings the card back. A reason is
+and the card gives way, in place, to one line: "Snoozed until <date> · for 1d
+3d 7d 14d 30d" (overlay.SNOOZE_CHOICES; one re-snoozes for that long), "why
+not now?", the reasons (overlay.WHY_NOT_REASONS), an optional line of free
+text, and Undo, which removes the snooze and brings the card back. A reason is
 never required: the line goes away after one, or on the next page load.
 
 STORING. A reason posts the overlay's `whynot` action, which writes one
@@ -433,6 +434,7 @@ CSS = """
 .card .whynot button, .card .whynot input { font:inherit; padding:1px 6px; border-radius:4px;
   border:1px solid var(--line); background:var(--bg); color:var(--fg); }
 .card .whynot input { flex:1 1 12em; }
+.card .whynot [aria-pressed="true"] { border-color:var(--fg); font-weight:600; }
 .card.just-snoozed > :not(.whynot) { display:none; }
 .whynot-health table { border-collapse:collapse; margin-bottom:8px; }
 .whynot-health th, .whynot-health td { text-align:left; padding:2px 8px;
@@ -442,17 +444,25 @@ CSS = """
 """
 
 
-def picker(until: str) -> str:
+def picker(now: datetime) -> str:
     """The card's hidden "why not now" line, shown in the card's place once
-    Snooze (data-why) has snoozed it; the script sets the date it shows."""
+    Snooze (data-why) has snoozed it for SNOOZE_DAYS: how long instead, then
+    why. The script sets the date it shows."""
+    until = overlay.snooze_until(now)
+    lengths = "".join(
+        f'<button type="button" data-ov="snooze-for"'
+        f' data-until="{overlay.snooze_until(now, d)}"'
+        f' aria-pressed="{"true" if d == overlay.SNOOZE_DAYS else "false"}">{d}d</button>'
+        for d in overlay.SNOOZE_CHOICES
+    )
     reasons = "".join(
         f'<button type="button" data-ov="whynot" data-reason="{code}">{_e(label)}</button>'
         for code, label in overlay.WHY_NOT_REASONS
     )
     return (
         '<div class="whynot" hidden>'
-        f'<span>Snoozed until <b class="whynot-until">{_e(until)}</b> · why not now?</span>'
-        f"{reasons}"
+        f'<span>Snoozed until <b class="whynot-until">{_e(until)}</b> · for</span>'
+        f"{lengths}<span>· why not now?</span>{reasons}"
         f'<input type="text" maxlength="{overlay.MAX_WHY_TEXT}"'
         ' placeholder="optional: say more" aria-label="Why not now, in your words">'
         '<button type="button" data-ov="undo" title="Remove the snooze">'

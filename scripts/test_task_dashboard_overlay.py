@@ -823,7 +823,7 @@ class LocalDateTests(unittest.TestCase):
         self.assertIn("snoozed until 2026-10-24", html)
         self.assertIn('data-ov="snooze" data-until="" aria-label="Unsnooze"', html)
 
-    def test_pin_and_snooze_are_labelled_icons_and_there_is_no_tag_picker(self):
+    def test_the_controls_are_labelled_icons_with_no_tag_picker_or_note(self):
         self.in_zone("UTC")
         item = ("jira", "A-1")
         html = overlay.card_controls(
@@ -833,6 +833,8 @@ class LocalDateTests(unittest.TestCase):
         self.assertNotIn(">Pin<", html)
         self.assertNotIn("Snooze 7d<", html)
         self.assertNotIn('data-ov="tag"', html)
+        self.assertIn('data-ov="ignore" aria-label="Ignore"', html)
+        self.assertNotIn("textarea", html)
         pinned = overlay.Overlay(pinned_at={item: "2026-10-24"})
         html = overlay.card_controls(item, pinned, self.INSTANT, reorder=False)
         self.assertIn('data-ov="unpin" aria-label="Unpin"', html)
@@ -1025,8 +1027,7 @@ class RouteTests(server_harness.ServerCase):
         self.assertEqual(
             re.findall(r'data-key="([^"]+)"', pinned.group(0)), ["ABC-1", "ABC-4"]
         )
-        self.assertIn("&lt;b&gt;me&lt;/b&gt;", page)
-        self.assertNotIn("<b>me</b>", page)
+        self.assertNotIn("<b>me</b>", page)  # notes are kept, not shown
         self.assertIn("snoozed until 2999-01-01", page)
         self.assertIn('class="card snoozed" data-source="jira" data-key="ABC-6"', page)
 
@@ -1049,15 +1050,16 @@ class RouteTests(server_harness.ServerCase):
             self.assertEqual(self.post(action, fields)[0], 400, action)
         self.assertEqual(self.overlay_rows(), empty())
 
-    def test_note_for_an_absent_issue_is_hidden_and_comes_back(self):
+    def test_a_note_for_an_absent_issue_is_kept_and_never_shown(self):
         self.assertEqual(
             self.post("note", [("key", "ABC-2"), ("text", "for later")])[0], 200
         )
-        self.assertNotIn("for later", self.request("GET", "/board")[1])
         conn = self.conn()
         server_harness.seed(conn)
         conn.close()
-        self.assertIn("for later", self.request("GET", "/board")[1])
+        # The page has no note editor or note line; the overlay keeps the note.
+        self.assertNotIn("for later", self.request("GET", "/board")[1])
+        self.assertIn("for later", str(self.overlay_rows()["notes"]))
 
     def test_a_database_error_is_503_with_a_json_body(self):
         real = overlay.apply

@@ -337,14 +337,14 @@ def render(found: list[Source], stale: bool = False) -> str:
             f"<td>{_e(x.detail)}</td><td>{_e(x.next_text)}</td></tr>"
         )
     age = "" if s.age_s is None else s.age_s
-    text = s.text
-    if text.startswith("Updated "):
-        text = f'<span class="lbl">Updated </span>{_e(text[len("Updated ") :])}'
+    # The button says "7m ago"; its tooltip keeps the whole "Updated 7m ago".
+    text = _e(s.text.removeprefix("Updated "))
     return (
         f'<span class="fresh{" warn" if warn else ""}" data-age="{age}">'
         '<button type="button" class="fresh-btn" aria-expanded="false"'
-        ' aria-controls="fresh-panel" title="Where each part of this page comes'
-        f' from">{mark}{text}</button>'
+        f' aria-label="{mark}{_e(s.text)}"'
+        f' aria-controls="fresh-panel" title="{_e(s.text)}: where each part of this'
+        f' page comes from">{mark}{text}</button>'
         '<div class="fresh-panel" id="fresh-panel" role="dialog"'
         ' aria-label="Sources"><table><thead><tr><th>Source</th><th>Age</th>'
         f"<th>Last run</th><th>Next run</th></tr></thead><tbody>{''.join(rows)}</tbody>"

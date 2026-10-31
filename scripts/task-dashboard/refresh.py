@@ -430,10 +430,9 @@ def refresh(
 CSS = """
 .card [data-refresh] { cursor:pointer; }
 .card.refreshing { opacity:.65; }
-.card.refreshing [data-refresh]::after { content:""; display:inline-block;
-  width:.75em; height:.75em; margin-left:4px; vertical-align:-1px;
-  border:2px solid currentColor; border-right-color:transparent; border-radius:50%;
-  animation:refresh-spin .8s linear infinite; }
+@media (prefers-reduced-motion: no-preference) {
+  .card.refreshing [data-refresh] .glyph { animation:refresh-spin .8s linear infinite; }
+}
 @keyframes refresh-spin { to { transform:rotate(360deg); } }
 .card .refresh-error { color:var(--bad); font-size:12px; margin-top:4px; }
 .refresh-note { color:var(--muted); font-size:12px; font-style:italic;
@@ -444,8 +443,8 @@ CSS = """
 # The card's Refresh button posts to /refresh. On success it fetches the page
 # again, as the server now builds it, and moves the item's cards to match:
 # every lane the item was in or is now in takes the new lane's contents, each
-# heading and tab its new count. A lane where another card has a note editor
-# open or unsaved text is not swapped: only the item's own cards change there,
+# heading and tab its new count. A lane where another card has its "why not"
+# line open or unsaved text is not swapped: only the item's own cards change there,
 # and a hint says the lane may be out of date. Where the clicked card left its lane, a short
 # note stands in its place. A failure leaves the card as it was, with the
 # error on it. The page is never reloaded, except when the item lands in a
@@ -460,8 +459,8 @@ JS = """
     return Array.prototype.filter.call(root.querySelectorAll('.card[data-key]'),
       function (c) { return c.dataset.source === source && keys.indexOf(c.dataset.key) !== -1; });
   }
-  // Whether a card other than the item's own has an open note editor or
-  // "why not" picker, or a field holding text not yet saved.
+  // Whether a card other than the item's own has an open <details> or
+  // "why not" line, or a field holding text not yet saved.
   function busy(lane, source, keys) {
     return Array.prototype.some.call(lane.querySelectorAll('.card'), function (c) {
       if (c.dataset.source === source && keys.indexOf(c.dataset.key) !== -1) return false;

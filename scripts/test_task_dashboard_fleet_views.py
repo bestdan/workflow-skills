@@ -402,7 +402,7 @@ class StaleTests(FleetCase):
         _, _, check = self.stale()
         self.assertIn(
             f'<a class="title" href="{pr_url(900)}" target="_blank" rel="noopener">open 900</a>'
-            f' <span class="ref">({REPO}#900)</span>',
+            f' <span class="ref">{REPO}#900</span>',
             check,
         )
 

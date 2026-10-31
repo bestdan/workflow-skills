@@ -841,7 +841,7 @@ def render_ignored(conn: sqlite3.Connection) -> str:
         name = _ignored_name(conn, source, key)
         ref = hides = ""
         if source == "jira":
-            ref = f' <span class="ref">({_e(key)})</span>'
+            ref = f' <span class="ref">{_e(key)}</span>'
             (n,) = conn.execute(_DESCENDANTS, {"key": key}).fetchone()
             if n:
                 hides = f" · hides {n} child issue{'s' if n != 1 else ''}"

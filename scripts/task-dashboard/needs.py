@@ -556,12 +556,27 @@ def is_new(n: Need, ov: overlay.Overlay) -> bool:
     return last is not None and n.since is not None and n.since > last
 
 
+# "CI <state>" in a card's state: shown as the word CI alone, red when it
+# failed and muted otherwise, with the state in its tooltip.
+_CI = re.compile(r"\bCI (\w+)")
+
+
+def _ci(m: "re.Match[str]") -> str:
+    cls = "ci ci-bad" if m.group(1) == "failure" else "ci"
+    return f'<span class="{cls}" title="{m.group(0)}">CI</span>'
+
+
+def state_html(n: Need) -> str:
+    """The card's state and where, escaped, its CI the word alone (_CI)."""
+    bits = [_e(n.state)] + ([_e(n.where)] if n.where else [])
+    return _CI.sub(_ci, " · ".join(bits))
+
+
 def _meta(n: Need, now: datetime, ov: overlay.Overlay) -> str:
     new = '<span class="new">new</span> · ' if is_new(n, ov) else ""
     pin = '<span class="pin">pinned</span> · ' if ov.is_pinned(n.item) else ""
-    bits = [_e(n.state)] + ([_e(n.where)] if n.where else [])
     wait = f'<span class="wait">{_e(waited(n.since, now))}</span>'
-    return f"{new}{pin}{wait} · " + " · ".join(bits)
+    return f"{new}{pin}{wait} · " + state_html(n)
 
 
 def _attrs(n: Need, cls: str) -> str:

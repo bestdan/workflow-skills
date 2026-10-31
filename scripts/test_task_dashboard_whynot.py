@@ -83,7 +83,20 @@ class PickerTests(now_fx.Case):
             re.findall(r'data-reason="([^"]+)"', line.group(1)),
             list(overlay.WHY_NOT_CODES),
         )
-        # No second snooze in the line: only Undo, which posts an empty date.
+        # How long instead: 1d to 30d, each its own date, 7d (the snooze it
+        # just made) pressed.
+        lengths = re.findall(
+            r'data-ov="snooze-for" data-until="([^"]+)" aria-pressed="(\w+)">(\d+)d<',
+            line.group(1),
+        )
+        self.assertEqual(
+            lengths,
+            [
+                (overlay.snooze_until(NOW, d), str(d == 7).lower(), str(d))
+                for d in (1, 3, 7, 14, 30)
+            ],
+        )
+        # No second plain snooze in the line: only Undo, which posts an empty date.
         self.assertNotIn('data-ov="snooze"', line.group(1))
         self.assertIn('data-ov="undo"', line.group(1))
         self.assertIn('maxlength="500"', line.group(1))
@@ -328,7 +341,9 @@ class PageScriptTests(RouteCase):
         self.assertFalse(after["title_shown"])
         self.assertTrue(after["connected"] and after["line_shown"])
         until = overlay.snooze_until(NOW)
-        self.assertIn(f"Snoozed until {until} · why not now?", after["line_text"])
+        self.assertIn(f"Snoozed until {until} · for", after["line_text"])
+        self.assertIn("why not now?", after["line_text"])
+        self.assertEqual(after["pressed"], ["7d"])
         [call] = state["calls"]
         self.assertEqual(call["url"], "/overlay/snooze")
         self.assertEqual(self.replay(state["calls"]), [200])
@@ -350,6 +365,21 @@ class PageScriptTests(RouteCase):
         )
         self.assertIsNotNone(total)
         self.assertEqual(json.loads(terms)[0][0], "quick_win")
+
+    def test_a_length_re_snoozes_for_that_long_and_keeps_the_line(self):
+        state = self.drive(["snooze", "for:30"])
+        after = state["states"][-1]
+        until = overlay.snooze_until(NOW, 30)
+        self.assertTrue(after["connected"] and after["line_shown"])
+        self.assertIn(f"Snoozed until {until} · for", after["line_text"])
+        self.assertEqual(after["pressed"], ["30d"])
+        self.assertEqual(
+            [dict(parse_qsl(c["body"]))["until"] for c in state["calls"]],
+            [overlay.snooze_until(NOW), until],
+        )
+        self.assertEqual(self.replay(state["calls"]), [200, 200])
+        self.assertEqual(self.snoozes(), [(self.KEY, until)])
+        self.assertEqual(self.rows(), [])
 
     def test_undo_removes_the_snooze_and_brings_the_card_back(self):
         state = self.drive(["snooze", "undo"])
