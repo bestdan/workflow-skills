@@ -624,6 +624,25 @@ class ViewsTest(unittest.TestCase):
         self.assertNotIn(long, unmirrored)
         self.assertIn('title="Keep it on Epics"', unmirrored)
 
+    def test_an_epic_card_has_the_shared_icon_controls(self):
+        # Epics render through cards.render: a pin shows as the "pinned"
+        # flag, and Pin and Ignore are icon buttons like every other card's.
+        self.add_issue("ABC-23", THEM, "EPIC-5", scope="linked")
+        self.conn.execute(
+            "INSERT INTO pins (source, item_key) VALUES ('jira', 'EPIC-5')"
+        )
+        self.conn.commit()
+        page = views.render("/epics", self.conn, CFG, NOW)
+        pinned = self.card(page, "EPIC-5")
+        self.assertIn('<span class="pin">pinned</span>', pinned)
+        self.assertRegex(pinned, r'class="ov-icon" data-ov="unpin" aria-label="Unpin"')
+        self.assertRegex(
+            pinned, r'class="ov-icon" data-ov="ignore" aria-label="Ignore epic"'
+        )
+        unpinned = self.card(page, "EPIC-1")
+        self.assertNotIn('class="pin"', unpinned)
+        self.assertIn('class="ov-icon" data-ov="pin" aria-label="Pin"', unpinned)
+
     def test_epic_name_falls_back_to_a_childs_copy(self):
         self.set_parent_summary("ABC-4", "Named by the child")
         (g,) = views.epics(self.mirror())

@@ -93,6 +93,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
+import cards
 import claude_remote
 import fleet_views
 import gauges
@@ -118,19 +119,11 @@ RESUME_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 
 CSS = """
 .needs .need { padding:6px 10px; }
-.needs details.need > summary { cursor:pointer; list-style-position:inside; }
 .needs .need.first { border-width:2px; }
-.needs .brief { white-space:pre-line; margin:6px 0; }
-.needs .wait { color:var(--fg); font-weight:600; }
-.needs .new { font-size:11px; font-weight:600; color:var(--accent);
-  border:1px solid var(--accent); border-radius:999px; padding:0 6px; }
 .needs .visit { display:flex; flex-wrap:wrap; gap:8px; align-items:center;
   margin:4px 0 8px; color:var(--muted); font-size:12px; }
 .needs .visit button { font:inherit; padding:2px 10px; border-radius:6px;
   border:1px solid var(--line); background:var(--card); color:var(--fg); }
-.fleet .ask { margin:4px 0; color:var(--fg); overflow-wrap:anywhere; }
-.fleet .stag { font-size:11px; color:var(--muted); border:1px solid var(--line);
-  border-radius:999px; padding:0 6px; }
 """
 
 
@@ -512,15 +505,6 @@ def waited(since: "datetime | None", now: datetime) -> str:
     return f"waiting {round(s / 86400)}d"
 
 
-def _title(n: Need, url: "str | None") -> str:
-    """The `.title`, linked to `url` when given, then the muted `.ref`, or a
-    session's tag (its old title, when its first prompt is the title)."""
-    if n.ref is not None:
-        return fleet_views.title_ref(url, n.title, n.ref)
-    tag = f' <span class="stag">{_e(n.tag)}</span>' if n.tag else ""
-    return fleet_views._link(url, n.title) + tag
-
-
 # The leading word of a cut ask, with the space after it: the cut fell
 # somewhere in that word, or just before it, which the text cannot tell apart.
 _PARTIAL_WORD = re.compile(r"\S*\s+(?=\S)")
@@ -556,57 +540,53 @@ def is_new(n: Need, ov: overlay.Overlay) -> bool:
     return last is not None and n.since is not None and n.since > last
 
 
-# "CI <state>" in a card's state: shown as the word CI alone, red when it
-# failed and muted otherwise, with the state in its tooltip.
-_CI = re.compile(r"\bCI (\w+)")
-
-
-def _ci(m: "re.Match[str]") -> str:
-    cls = "ci ci-bad" if m.group(1) == "failure" else "ci"
-    return f'<span class="{cls}" title="{m.group(0)}">CI</span>'
-
-
 def state_html(n: Need) -> str:
-    """The card's state and where, escaped, its CI the word alone (_CI)."""
-    bits = [_e(n.state)] + ([_e(n.where)] if n.where else [])
-    return _CI.sub(_ci, " · ".join(bits))
+    """The card's state and where, escaped, its CI the word alone."""
+    return cards.ci_words(" · ".join([n.state] + ([n.where] if n.where else [])))
 
 
-def _meta(n: Need, now: datetime, ov: overlay.Overlay) -> str:
-    new = '<span class="new">new</span> · ' if is_new(n, ov) else ""
-    pin = '<span class="pin">pinned</span> · ' if ov.is_pinned(n.item) else ""
-    wait = f'<span class="wait">{_e(waited(n.since, now))}</span>'
-    return f"{new}{pin}{wait} · " + state_html(n)
-
-
-def _attrs(n: Need, cls: str) -> str:
-    since = n.since.strftime("%Y-%m-%dT%H:%M:%SZ") if n.since else ""
-    return (
-        f'class="card need{cls}" data-source="{_e(n.item[0])}"'
-        f' data-key="{_e(n.item[1])}" data-kind="{_e(n.kind)}" data-since="{since}"'
+def card(n: Need, folded: bool = False) -> cards.Card:
+    """The card a Need starts from, on Now and Needs alike: its title, age,
+    state, last ask and where to act. A folded card's title is not a link,
+    since a tap opens the fold, so its act links to the item instead."""
+    tag = f' <span class="stag">{_e(n.tag)}</span>' if n.tag and n.ref is None else ""
+    return cards.Card(
+        n.item,
+        n.title,
+        None if folded else n.url,
+        n.ref,
+        act=act(n, folded),
+        tag=tag,
+        age=cards.Age(n.since, "waiting since"),
+        meta=[state_html(n)],
+        above=[ask_html(n)] if n.last_ask else [],
+        data={"kind": n.kind},
+        folded=folded,
     )
 
 
-def _body(n: Need, now: datetime, ov: overlay.Overlay) -> str:
-    """The brief when there is one, then where to act.
+def act(n: Need, folded: bool = False) -> str:
+    """Where to act: the PR on a session's branch and any command. An "open"
+    link joins them only where the title does not already link there: the
+    card folds, or its link is the bare claude.ai/code, which is not the
+    session."""
+    link = ""
+    if n.url and n.url.startswith("https://") and (folded or n.url == CODE_URL):
+        link = view_model.link(n.url, open_label(n, None if folded else "open it"))
+    return " · ".join(x for x in (link, pr_link(n), view_model.code(n.hint)) if x)
 
-    With no brief there is no brief block: the header already shows the
-    title, the wait and the state.
-    """
-    brief = f'<div class="brief">{_e(n.brief)}</div>' if n.brief else ""
-    link = (
-        view_model.link(n.url, open_label(n))
-        if n.url and n.url.startswith("https://")
-        else ""
-    )
-    act = " · ".join(x for x in (link, pr_link(n), view_model.code(n.hint)) if x)
-    act = f'<div class="act">→ {act}</div>' if act else ""
-    return (
-        ask_html(n)
-        + brief
-        + act
-        + overlay.card_controls(n.item, ov, now, reorder=False)
-    )
+
+def _need_html(
+    n: Need, now: datetime, ov: overlay.Overlay, cls: str, folded: bool
+) -> str:
+    c = card(n, folded)
+    c.cls = cls
+    if is_new(n, ov):
+        c.flags.append('<span class="new">new</span>')
+    if n.brief:
+        c.below.append(f'<div class="brief">{_e(n.brief)}</div>')
+    c.controls = overlay.card_controls(n.item, ov, now, reorder=False)
+    return cards.render(c, ov, now)
 
 
 def open_label(n: Need, other: "str | None" = None) -> str:
@@ -622,40 +602,29 @@ def open_label(n: Need, other: "str | None" = None) -> str:
 
 
 def expanded(n: Need, now: datetime, ov: overlay.Overlay) -> str:
-    return (
-        f"<div {_attrs(n, ' first')}>{_title(n, n.url)}"
-        f'<div class="meta">{_meta(n, now, ov)}</div>{_body(n, now, ov)}</div>'
-    )
+    return _need_html(n, now, ov, "need first", folded=False)
 
 
 def collapsed(n: Need, now: datetime, ov: overlay.Overlay) -> str:
-    return (
-        f"<details {_attrs(n, '')}><summary>{_title(n, None)}"
-        f' <span class="meta">{_meta(n, now, ov)}</span></summary>'
-        f"{_body(n, now, ov)}</details>"
-    )
+    return _need_html(n, now, ov, "need", folded=True)
 
 
 def finished_row(n: Need, now: datetime, ov: overlay.Overlay) -> str:
     """One line in the Finished lane: title or branch, host, the turn's end.
     An ended session says so and how to resume it, with no link."""
-    ago = _e(fleet_views.ago(n.since, now))
-    controls = overlay.card_controls(n.item, ov, now, reorder=False, pin=False)
+    c = card(n, folded=True)
+    c.cls = "need done"
+    c.meta = [_e(n.where)] if n.where else []
     if n.state == ENDED:
-        meta = f"{_e(n.where)} · last active {ago}"
+        c.age = cards.Age(n.since, "last active")
         resume = view_model.code(n.hint) if n.hint else ""
-        bits = [ENDED, pr_link(n), resume]
+        c.act = " · ".join(x for x in (ENDED, pr_link(n), resume) if x)
     else:
-        meta = f"{_e(n.where)} · turn ended {ago}"
+        c.age = cards.Age(n.since, "turn ended")
         link = view_model.link(n.url, open_label(n)) if n.url else ""
-        bits = [link, pr_link(n)]
-    act = " · ".join(x for x in bits if x)
-    act = f'<div class="act">→ {act}</div>' if act else ""
-    return (
-        f"<details {_attrs(n, ' done')}><summary>{_title(n, None)}"
-        f' <span class="meta">{meta}</span></summary>{ask_html(n)}{act}{controls}'
-        "</details>"
-    )
+        c.act = " · ".join(x for x in (link, pr_link(n)) if x)
+    c.controls = overlay.card_controls(n.item, ov, now, reorder=False, pin=False)
+    return cards.render(c, ov, now)
 
 
 def finished(
@@ -826,11 +795,11 @@ def render(
         )
     for lane in lanes(p, inc):
         if lane.id == "needs":
-            cards = [
+            needs_rows = [
                 expanded(n, now, ov) if i == 0 else collapsed(n, now, ov)
                 for i, n in enumerate(lane.items)
             ]
-            body = "".join(cards) or f'<p class="empty">{_e(lane.empty)}</p>'
+            body = "".join(needs_rows) or f'<p class="empty">{_e(lane.empty)}</p>'
             # Beside the heading, not in it: the page's text filter rewrites
             # the h2.
             mark_all = (

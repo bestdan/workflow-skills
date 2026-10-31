@@ -47,6 +47,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+import cards
 import fleet_views
 import gauges
 import github_fleet
@@ -56,7 +57,7 @@ import overlay
 import score
 import sync
 import view_model
-import views  # card_title and _lane, read at call time: views imports this
+import views  # _lane, read at call time: views imports this
 import workstreams
 
 _e = html.escape
@@ -120,14 +121,10 @@ def _gate_note(cfg: dict[str, Any], synced: bool) -> str:
     return ""
 
 
-def _card(
-    item: overlay.Item, ov: overlay.Overlay, now: datetime, head: str, meta: str
-) -> str:
-    return (
-        f"<div {overlay.card_attrs(item, ov, now)}>{head}"
-        f'<div class="meta">{meta}</div>'
-        f"{overlay.card_controls(item, ov, now, reorder=False, pin=False)}</div>"
-    )
+def _card(c: cards.Card, ov: overlay.Overlay, now: datetime) -> str:
+    assert c.item is not None
+    c.controls = overlay.card_controls(c.item, ov, now, reorder=False, pin=False)
+    return cards.render(c, ov, now)
 
 
 def _snoozed_note(n: int) -> str:
@@ -233,14 +230,24 @@ def pr_meta(p: dict, why: str, now: datetime) -> list[str]:
 
 
 def _pr_card(p: dict, why: str, ov: overlay.Overlay, now: datetime) -> str:
-    ref = f"{p.get('repo') or ''}#{p.get('number')}"
+    """pr_meta's parts on the shared card: the age leads, CI is the word,
+    and the repo is left to the ref."""
     row = p.get("awaiting") or {}
-    meta = " · ".join(_e(b) for b in pr_meta(p, why, now))
-    head = views.card_title(p["url"], p.get("title"), ref)
-    if row.get("author_is_bot"):
-        head += ' <span class="badge">bot</span>'
-    item = (github_fleet.SOURCE, str(p["url"]))
-    return _card(item, ov, now, head, meta)
+    by = (
+        [_e(f"by {row['author']}")]
+        if p.get("role") != "author" and row.get("author")
+        else []
+    )
+    c = cards.Card(
+        (github_fleet.SOURCE, str(p["url"])),
+        p.get("title") or "",
+        p["url"],
+        f"{p.get('repo') or ''}#{p.get('number')}",
+        tag=' <span class="badge">bot</span>' if row.get("author_is_bot") else "",
+        age=cards.Age(score.parse_ts(p.get("created")), "opened"),
+        meta=by + [cards.ci(p.get("ci_state"))] + ([_e(why)] if why else []),
+    )
+    return _card(c, ov, now)
 
 
 def _lane_order(name: str, p: dict) -> tuple:
@@ -359,11 +366,18 @@ def issue_meta(row: dict, now: datetime) -> list[str]:
 
 
 def _issue_card(row: dict, ov: overlay.Overlay, now: datetime) -> str:
-    ref = f"{row.get('repo') or ''}#{row.get('number')}"
-    meta = " · ".join(_e(b) for b in issue_meta(row, now))
-    item = (github_fleet.SOURCE, str(row.get("key") or row.get("url")))
-    head = views.card_title(str(row.get("url") or ""), row.get("title"), ref)
-    return _card(item, ov, now, head, meta)
+    """issue_meta's parts on the shared card: the age leads, and the repo is
+    left to the ref."""
+    labels = row.get("labels") or []
+    c = cards.Card(
+        (github_fleet.SOURCE, str(row.get("key") or row.get("url"))),
+        row.get("title") or "",
+        str(row.get("url") or ""),
+        f"{row.get('repo') or ''}#{row.get('number')}",
+        age=cards.Age(score.parse_ts(row.get("created")), "opened"),
+        meta=[_e(lb) for lb in labels if lb.startswith(("prio:", "est:"))],
+    )
+    return _card(c, ov, now)
 
 
 def _issues_truncated(conn: sqlite3.Connection) -> int:

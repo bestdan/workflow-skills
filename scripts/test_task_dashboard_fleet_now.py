@@ -342,7 +342,10 @@ class RenderTests(Case):
         self.assertIn(f'id="{wid.group(1)}" role="tooltip"', meta.group(0))
         self.assertIn('role="button"', meta.group(0))
         # The bare age, and the score beside the "?", equal to the card's total.
-        self.assertRegex(meta.group(0), r'<span class="wait">\d+[mhd]</span>')
+        self.assertRegex(
+            meta.group(0),
+            r'<span class="age" title="waiting since [0-9-]+">\d+[mhd]</span>',
+        )
         score = re.search(r'<span class="score">([0-9.]+)</span>', meta.group(0))
         total = re.search(r'data-total="([^"]+)"', card)
         assert score is not None and total is not None
