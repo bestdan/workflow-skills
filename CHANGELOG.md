@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.162.0] - 2026-10-31
+
+### Features
+
+- items and scopes for agents [N/A] (#1266) (b0e7ca8)
+
 ## [2.161.1] - 2026-10-31
 
 ### Fixes
