@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.166.0] - 2026-10-31
+
+### Features
+
+- list Linear tickets in items and scopes [#1283] (#1293) (65aa1ea)
+
 ## [2.165.0] - 2026-10-31
 
 ### Features
