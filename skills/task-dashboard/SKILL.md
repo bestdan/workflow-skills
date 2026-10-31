@@ -1,7 +1,7 @@
 ---
 name: task-dashboard
-description: Install, check, sync, open, back up, read, clean up, or remove the local task dashboard — the always-on, localhost-only page that mirrors your Jira work (through acli) and GitHub PRs (through gh) into SQLite and ranks what to do next. Subcommands install | status | sync-now | open | export | import | tune | view | scopes | items | refresh | overlay | plan | clean | uninstall. Use when the user wants that dashboard set up as a login agent on their Mac, asks whether it is running or how stale it is, wants it refreshed now, wants its link, wants to back up or restore their pins, order, snoozes and notes, wants the fleet Now's ranking tuned from their "why not now" answers, asks what a tab shows ("what's on Stale?"), wants the open work in one repo, workstream, Jira project or label as compact records ("what's open on FinPlan?", "small tasks I could do in half an hour"), asks to clean a tab up ("look at the Stale tab and clean it up"), wants an item ignored or snoozed, or wants it taken off the machine.
-argument-hint: "install | status | sync-now [--reconcile] | open | export <file> | import <file> | tune [--days N] | view <name> [--json] [--all] [--mode M] | scopes [query] | items [--scope X] [--kind K] [--state S] [--only F] [--fields F] [--limit N] [--offset N] [--jsonl] | refresh <owner/repo#N> [--json] | overlay <action> | plan set|show|clear | clean <view> | uninstall"
+description: Install, check, sync, open, back up, read, clean up, or remove the local task dashboard — the always-on, localhost-only page that mirrors your Jira work (through acli) and GitHub PRs (through gh) into SQLite and ranks what to do next. Subcommands install | status | sync-now | open | export | import | tune | view | scopes | items | item | refresh | overlay | plan | clean | uninstall. Use when the user wants that dashboard set up as a login agent on their Mac, asks whether it is running or how stale it is, wants it refreshed now, wants its link, wants to back up or restore their pins, order, snoozes and notes, wants the fleet Now's ranking tuned from their "why not now" answers, asks what a tab shows ("what's on Stale?"), wants the open work in one repo, workstream, Jira project or label as compact records ("what's open on FinPlan?", "small tasks I could do in half an hour"), asks to clean a tab up ("look at the Stale tab and clean it up"), wants an item ignored or snoozed, or wants it taken off the machine.
+argument-hint: "install | status | sync-now [--reconcile] | open | export <file> | import <file> | tune [--days N] | view <name> [--json] [--all] [--mode M] | scopes [query] | items [--scope X] [--kind K] [--state S] [--only F] [--fields F] [--limit N] [--offset N] [--jsonl] | item <source:key> [--sections S] | refresh <owner/repo#N> [--json] | overlay <action> | plan set|show|clear | clean <view> | uninstall"
 ---
 
 # task-dashboard
@@ -196,7 +196,7 @@ dashboard itself never calls a model.**
 
 With few answers `tune` suggests nothing; say so rather than guessing.
 
-## view, scopes, items, overlay
+## view, scopes, items, item, overlay
 
 `DASH view <name> --json` prints one tab's lanes and items as its page shows
 them, read from the DB with no server: the include filter, ignores and snoozes
@@ -218,9 +218,9 @@ none is), so you see what they see; `notes.mode` names it, outside Ship
 succeeded and when each host last snapshotted. Without `--json` it prints one
 line per item.
 
-`view` is a whole tab; for a question about a slice of the work, use `scopes`
-and `items`, unsandboxed (inside the sandbox SQLite cannot open the WAL file
-beside the DB). Both print compact JSON and never write, except to migrate
+`view` is a whole tab; for a question about a slice of the work, use `scopes`,
+`items` and `item`, unsandboxed (inside the sandbox SQLite cannot open the WAL file
+beside the DB). All print compact JSON and never write, except to migrate
 a DB that is behind the current schema, once, as `view` does.
 
 - `DASH scopes <word>` says what a word can mean: each matching scope id
@@ -252,6 +252,21 @@ a DB that is behind the current schema, once, as `view` does.
   `--limit`/`--offset` page it; `total` and `returned` say when a list was
   cut. `--jsonl` prints the header on line one, then one item a line. `--scope all` is no filter and is never matched as a word.
   The order is newest activity first, not a priority.
+- `DASH item <source:key>` prints one item's dossier, open or done: read it
+  before saying "close this" or "this one first". Pass `source:key` as
+  `items` prints them (`github:<url>`, `jira:PAY-7`, `claude-hook:<id>`);
+  a bare key or ref works only when it names one item, and otherwise it
+  exits 2 with every match as JSON on stdout — pick one and pass its
+  `source:key`. Its sections, in this order and spelling for `--sections`:
+  `tracker` (the `full` record plus `detail`, what the mirrored row holds
+  beyond it), `prs` (every linked PR, newest first, with CI, review,
+  co-review misses and how it links), `sessions` (on its branch, with the
+  capped first prompt and last ask), `worktrees` (with `dirty` and
+  `unpushed`), `workstreams` (with why it is in each), `links` and
+  `overlay` (pin, snooze, note, tag and every why-not answer). `links.form`
+  is `refs` for Jira (both directions), Linear and PRs, but `counts` for a
+  GitHub issue: the mirror holds only how many open issues block it, so say
+  so rather than naming blockers.
 
 After acting on a PR or issue (merging, closing, labelling, pushing a fix), run
 `DASH refresh <owner/repo#N>`, unsandboxed, rather than `sync-now`: it re-reads

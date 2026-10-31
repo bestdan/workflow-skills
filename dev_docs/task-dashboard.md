@@ -150,6 +150,18 @@ None of these needs the server running:
   the project's tickets (joined by the row's project id, else its project
   name) plus the PRs and issues naming them. A completed or canceled project
   is no open workstream, so its tickets fall under their team alone.
+- **`item <source:key> [--sections S]`** (`agent_query.item_doc`) is one
+  item's dossier, built from the same `collect` pass as `items`, so the joins
+  are not repeated: `_link_prs` keeps every PR it matched (`_prs`) besides
+  the newest, and `_activity` keeps the session and worktree items
+  themselves (`_on`). The sections, which `--sections` names in this
+  spelling, are `tracker`, `prs`, `sessions`, `worktrees`, `workstreams`,
+  `links` and `overlay`. `tracker.detail` is the mirrored row less what the
+  record already carries. `links.form` is `refs` (Jira's `links` table in
+  both directions, Linear relations, a PR's closing issues and Jira key) or
+  `counts` (a GitHub issue, whose mirror row holds only open-blocker counts).
+  `source:key` is unique; a bare key or ref is accepted only when it names one
+  item, and otherwise the command exits 2 with the matches as JSON on stdout.
 - **`overlay <action> --source S --key K`** makes the same write a card button
   makes, and goes through the same validation (`overlay.apply`).
 - **`refresh <owner/repo#N>`** re-reads one PR or issue from GitHub in a
