@@ -38,7 +38,7 @@ session-state hook events into rows whenever the instance ingests snapshots,
 and `run_claude_remote()` (kind `claude_remote`) reads the optional cloud
 session list when `claude_remote.enabled` is on.
 
-The spec is the Sync section of dev_docs/designs/2026-10-23-task-dashboard.md.
+dev_docs/task-dashboard.md ("Sync modes and the cursor rule") says why.
 """
 
 import json

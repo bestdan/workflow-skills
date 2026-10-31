@@ -1,6 +1,7 @@
 """The Health panel: the work-in-progress reset design's figures, live.
 
-From the fleet view design ("Views", item 4). The reset design planned to
+Part of the fleet instance (dev_docs/task-dashboard.md, "Health"). The reset
+design planned to
 re-measure its figures by hand on a fixed date; this module computes them from
 the mirror instead, for any window, so the `/health` route and
 `dashboard.py health --json` read the same numbers from the same function,
@@ -105,7 +106,7 @@ FIGURE_KINDS: dict[str, "str | None"] = {
 }
 assert set(FIGURE_KINDS) == set(FIGURE_IDS)
 
-# The caps the fleet view design names; every other target is the owner's to
+# The caps the fleet instance shows; every other target is the owner's to
 # copy in from the reset design's table, and is "observed" until then.
 DEFAULT_TARGETS: dict[str, str] = {fid: "observed" for fid in FIGURE_IDS}
 DEFAULT_TARGETS["review_queue"] = f"<= {gauges.REVIEW_QUEUE_CAP}"

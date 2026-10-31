@@ -97,8 +97,8 @@ DEFAULTS: dict[str, Any] = {
         },
         # Days in a status category before the Stuck term starts counting.
         # Stale uses the `indeterminate` one. v1 measures time in category, not
-        # in status: acli cannot read the changelog (Fields, under Sync, in
-        # dev_docs/designs/2026-10-23-task-dashboard.md).
+        # in status: acli cannot read the changelog (dev_docs/task-dashboard.md,
+        # "Jira: the two-step acli fetch").
         "stuck_days": {"new": 14, "indeterminate": 5},
         # Now's categories (score.fleet_score), one weight each, highest
         # first. Now's Ship tiers (fleet_now.TIERS) come first; these order

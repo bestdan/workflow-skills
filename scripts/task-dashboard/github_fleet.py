@@ -1,6 +1,6 @@
 """GitHub reads for the fleet view: issues, design docs, the review queue.
 
-The fleet view (dev_docs/designs/2026-10-23-fleet-view.md, "Sources") needs
+The fleet instance (dev_docs/task-dashboard.md, "Fleet instance") needs
 more from the configured owners than github_gh.py's PR rows. This module adds
 it on the same `gh` runner seam, and reuses that module's search pagination,
 error mapping and CI reduction rather than copying them.

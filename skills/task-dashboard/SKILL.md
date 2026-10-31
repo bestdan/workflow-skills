@@ -11,9 +11,9 @@ sync thread that mirrors Jira and GitHub into
 `~/.local/state/task-dashboard/dashboard.db`. On macOS it runs as the
 gui-domain LaunchAgent `com.bestdan.task-dashboard`, through a stable launcher
 at `~/.local/bin/task-dashboard-launch` that finds the current plugin install
-at every start. The design, including why the plist never names the plugin's
-versioned directory, is
-[`dev_docs/designs/2026-10-23-task-dashboard.md`](../../dev_docs/designs/2026-10-23-task-dashboard.md).
+at every start. How it is built, including why the plist never names the
+plugin's versioned directory, is
+[`dev_docs/task-dashboard.md`](../../dev_docs/task-dashboard.md).
 
 Every subcommand below except `clean` is one `dashboard.py` call (`open` is an
 alias of `url`); `clean` is the procedure in
@@ -53,7 +53,8 @@ flag again, and a reinstall keeps them too.
    `~/.config/task-dashboard/config.toml` by default; `install --config <path>`
    (or `TASK_DASHBOARD_CONFIG`) records another path in the LaunchAgent, which
    later commands read back. Read that file if it exists. Its schema
-   and every default are in the design's **Config** section; the required
+   and every default are `DEFAULTS` in
+   `${CLAUDE_PLUGIN_ROOT}/scripts/task-dashboard/config.py`; the required
    keys are `jira.site`, `jira.board_ids`, `jira.fields.sprint` and
    `jira.fields.flagged`, unless `jira.enabled = false`. Never overwrite a
    key the file already sets.

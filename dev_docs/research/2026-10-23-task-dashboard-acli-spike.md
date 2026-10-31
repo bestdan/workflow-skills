@@ -5,8 +5,8 @@ created: 2026-10-23
 # Can `acli` feed the task dashboard?
 
 **Measured 2026-10-23** on the work laptop. This is a dated snapshot that tests
-the unverified claims in
-[`../designs/2026-10-23-task-dashboard.md`](../designs/2026-10-23-task-dashboard.md).
+the unverified claims in the task dashboard's design, which the live doc
+[`../task-dashboard.md`](../task-dashboard.md) has since replaced.
 Setup: macOS (Darwin 27.0.0), acli 1.3.19-stable, gh 2.102.0, a Jira Cloud site
 with OAuth login. The site, the GitHub org, the board id and project keys are
 withheld, because this repo is public. Counts, timings and shapes are as

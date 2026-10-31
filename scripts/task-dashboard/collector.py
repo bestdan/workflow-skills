@@ -1,8 +1,8 @@
 """The fleet view's collector: snapshot this machine and push it to ingest.
 
 `dashboard.py collect` runs this once; a LaunchAgent or a `systemd --user`
-timer runs that every five minutes (collector_install.py). The design is
-``dev_docs/designs/2026-10-23-fleet-view.md`` ("Deployment").
+timer runs that every five minutes (collector_install.py). Why it pushes is
+in ``dev_docs/task-dashboard.md`` ("The push model").
 
 ONE RUN. Build a snapshot (snapshot.py), add it to the spool, then send the
 spool oldest first. A snapshot the server answers for is deleted, and the

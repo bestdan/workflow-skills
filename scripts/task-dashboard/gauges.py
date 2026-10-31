@@ -1,7 +1,7 @@
 """The header's review gauge: "Review: 2 ready · 9 waiting".
 
-From the fleet view design ("Views", item 5), which caps the human-review
-queue at 5. The cap is not enforced; the gauge only shows it.
+The fleet instance (dev_docs/task-dashboard.md, "Health") caps the
+human-review queue at 5. The cap is not enforced; the gauge only shows it.
 
 - **Ready** is github_fleet's `queue` count over the mirrored
   `source = 'github'` PR rows that are not ignored. `review_queue()` counts

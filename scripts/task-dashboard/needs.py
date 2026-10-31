@@ -4,8 +4,8 @@ Needs you is the full list. The fleet instance's home page is Now
 (fleet_now.py), the short ranked queue drawn from this collection plus the
 owner's own work.
 
-From dev_docs/designs/2026-10-23-fleet-view.md, "Principles" 1 and "Views"
-item 1: one decision first, the rest collapsed, plain approvals batched. It
+Part of the fleet instance (dev_docs/task-dashboard.md, "Fleet views"): one
+decision first, the rest collapsed, plain approvals batched. It
 reads SQLite only, and links to where each item is acted on, never acting
 itself.
 

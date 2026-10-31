@@ -95,9 +95,9 @@ carries:
 | `links`        | keys of items it folds into (see Decisions)                                                    |
 | `why`          | its evidence line                                                                              |
 
-The sync-side seam that
-[`2026-10-23-task-dashboard.md`](2026-10-23-task-dashboard.md) defines
-("Adapter seam": `fetch(since)`, `scope_keys()`) stays. This is the ranking-side half that seam never had.
+The sync-side seam
+([`../task-dashboard.md`](../task-dashboard.md#sync-steps), "Sync steps")
+stays. This is the ranking-side half that seam never had.
 
 Each source supplies what its data supports:
 
