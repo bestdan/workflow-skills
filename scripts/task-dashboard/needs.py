@@ -116,6 +116,9 @@ NO_RC_LABEL = "open claude.ai/code (no Remote Control link)"
 # resume command may carry.
 ENDED = "ended"
 RESUME_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
+# Now ranks everything Needs collects and leads with pins in every mode
+# (fleet_now.py), so a pin here also tops Now.
+PIN_TIP = "Pin: keep it at the top of Needs and Now"
 
 CSS = """
 .needs .need.first { box-shadow:inset 3px 0 var(--accent); }
@@ -585,9 +588,7 @@ def _need_html(
         c.flags.append('<span class="new">new</span>')
     if n.brief:
         c.below.append(f'<div class="brief">{_e(n.brief)}</div>')
-    c.controls = overlay.card_controls(
-        n.item, ov, now, reorder=False, pin_tip="Pin: keep it at the top of Needs"
-    )
+    c.controls = overlay.card_controls(n.item, ov, now, reorder=False, pin_tip=PIN_TIP)
     return cards.render(c, ov, now)
 
 

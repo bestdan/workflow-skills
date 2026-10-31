@@ -25,6 +25,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import claude_remote  # type: ignore[import-not-found]  # noqa: E402
 import config  # type: ignore[import-not-found]  # noqa: E402
 import db  # type: ignore[import-not-found]  # noqa: E402
+import fleet_now  # type: ignore[import-not-found]  # noqa: E402
 import gauges  # type: ignore[import-not-found]  # noqa: E402
 import github_fleet  # type: ignore[import-not-found]  # noqa: E402
 import include  # type: ignore[import-not-found]  # noqa: E402
@@ -372,15 +373,27 @@ class OrderTests(NeedsCase):
         overlay.pin(self.conn, ("claude-hook", "s-turn"), NOW)
         self.assertEqual(keys(section(self.page(), "needs"))[0], "s-turn")
 
-    def test_pin_says_it_keeps_a_card_at_the_top_of_needs(self):
-        # Needs items never appear on Now, the Board or Epics.
+    def test_pin_says_it_keeps_a_card_at_the_top_of_needs_and_now(self):
         seed(self.conn)
         main = section(self.page(), "needs")
         self.assertIn(
-            'data-ov="pin" aria-label="Pin" title="Pin: keep it at the top of Needs"',
+            'data-ov="pin" aria-label="Pin"'
+            ' title="Pin: keep it at the top of Needs and Now"',
             main,
         )
         self.assertNotIn("the Board", main)
+
+    def test_a_pinned_need_also_tops_now_in_every_mode(self):
+        # What the Pin tooltip promises: Now ranks what Needs collects, pins
+        # first. The last item on Ship's list is pinned, so it has to move.
+        seed(self.conn)
+        cfg = fleet_cfg()
+        last = needs.collect(self.conn, cfg, NOW)[-1].item
+        overlay.pin(self.conn, last, NOW)
+        ov = overlay.load(self.conn)
+        for mode in overlay.NOW_MODES:
+            shown = fleet_now.build(self.conn, cfg, NOW, ov, mode=mode).shown
+            self.assertEqual(shown[0].need.item, last, mode)
 
     def test_left_out(self):
         seed(self.conn)
