@@ -839,6 +839,17 @@ FILTER = (
 )
 
 
+# The tab icon: a yellow target on navy, one bold shape that reads at 16px.
+# Inline as a data URI so the server needs no route for it.
+FAVICON = (
+    "data:image/svg+xml,"
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>"
+    "<rect width='32' height='32' rx='8' fill='%230f172a'/>"
+    "<circle cx='16' cy='16' r='10' fill='none' stroke='%23facc15' stroke-width='3.5'/>"
+    "<circle cx='16' cy='16' r='4' fill='%23facc15'/></svg>"
+)
+
+
 def render_page(
     title: str, header: str, body: str, token: str, busy: bool, synced: str = ""
 ) -> str:
@@ -849,6 +860,7 @@ def render_page(
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
         f'<meta name="dashboard-token" content="{_e(token)}">'
         f"<title>{_e(title)}</title>"
+        f'<link rel="icon" type="image/svg+xml" href="{FAVICON}">'
         f"<style>{CSS}{cards.CSS}{views.CSS}{fleet_views.CSS}{needs.CSS}{fleet_now.CSS}{overlay.CSS}{gauges.CSS}{freshness.CSS}{include.CSS}{lane_tabs.CSS}{whynot.CSS}{refresh.CSS}</style></head>"
         f'<body data-busy="{1 if busy else 0}" data-synced="{_e(synced)}">'
         f"{header}<main>{body}</main>"

@@ -1215,5 +1215,24 @@ class ConfigTest(unittest.TestCase):
             self.assertIn("not found", str(ctx.exception))
 
 
+class FaviconTest(unittest.TestCase):
+    def test_page_links_a_well_formed_svg_icon(self) -> None:
+        import xml.etree.ElementTree as ET
+        from urllib.parse import unquote
+
+        page = server.render_page("t", "", "", "x", False)
+        self.assertIn(
+            f'<link rel="icon" type="image/svg+xml" href="{server.FAVICON}">', page
+        )
+        # The href sits in a double-quoted attribute, and a raw `#` would end
+        # the data URI at a fragment.
+        self.assertNotIn('"', server.FAVICON)
+        self.assertNotIn("#", server.FAVICON)
+        prefix = "data:image/svg+xml,"
+        self.assertTrue(server.FAVICON.startswith(prefix))
+        svg = ET.fromstring(unquote(server.FAVICON[len(prefix) :]))
+        self.assertEqual(svg.tag, "{http://www.w3.org/2000/svg}svg")
+
+
 if __name__ == "__main__":
     unittest.main()
