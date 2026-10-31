@@ -620,9 +620,13 @@ class ViewsTest(unittest.TestCase):
         self.add_issue("EPIC-6", THEM, None, scope="linked")  # other, mirrored
         self.add_issue("ABC-22", THEM, "EPIC-6", scope="linked")
         self.add_issue("ABC-23", THEM, "EPIC-7", scope="linked")  # other, not
+        self.add_issue("EPIC-8", THEM, None)  # involved, and mirrored
+        self.add_issue("ABC-24", ME, "EPIC-8")
         page = views.render("/epics", self.conn, CFG, NOW)
+        top = "a pin keeps it at the top of Now while open"
         tips = {
-            "EPIC-2": "Already in Mine; a pin also shows it on Now while it is open",
+            "EPIC-2": f"Already in Mine; {top}",
+            "EPIC-8": f"Already in Involved; {top}",
             "EPIC-9": "Already in Involved, so a pin changes nothing here",
             "EPIC-6": "Keep it on Epics; while it is open it also shows on Now",
             "EPIC-7": "Keep it on Epics",

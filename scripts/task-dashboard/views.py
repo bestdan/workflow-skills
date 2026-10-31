@@ -714,7 +714,7 @@ def epic_pin_tip(role: str, mirrored: bool) -> str:
     if role in ("mine", "involved"):
         lane = {r: t for r, t, _ in EPIC_LANES}[role]
         if mirrored:
-            return f"Already in {lane}; a pin also shows it on Now while it is open"
+            return f"Already in {lane}; a pin keeps it at the top of Now while open"
         return f"Already in {lane}, so a pin changes nothing here"
     if mirrored:
         return "Keep it on Epics; while it is open it also shows on Now"
