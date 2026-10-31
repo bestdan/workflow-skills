@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.163.1] - 2026-10-31
+
+### Fixes
+
+- singular Health units for a value of 1 [#1276] (#1277) (01bdac5)
+
 ## [2.163.0] - 2026-10-31
 
 ### Features
