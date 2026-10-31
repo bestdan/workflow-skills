@@ -305,7 +305,7 @@ class OrderTests(NeedsCase):
         self.assertEqual(main.count("need first"), 1)
         # Everything after the first is collapsed to one line.
         self.assertEqual(main.count("<details "), 4)
-        self.assertIn("waiting 3d", main)
+        self.assertRegex(main, r'title="waiting since [0-9-]+">3d</span>')
 
     def test_a_pr_without_a_brief_shows_its_header_once_and_no_brief(self):
         seed(self.conn)
@@ -313,14 +313,22 @@ class OrderTests(NeedsCase):
         first = main[: main.index("<details ")]
         self.assertNotIn('class="brief"', first)
         self.assertEqual(first.count("feat: thing 1201"), 1)
-        self.assertEqual(first.count("waiting 3d"), 1)
-        self.assertEqual(first.count("CI success"), 1)
-        # The act line and the controls stay.
-        self.assertIn(
-            f'→ <a href="{pr_url(1201)}" target="_blank" rel="noopener">open the PR</a>',
-            first,
-        )
+        self.assertEqual(first.count(">3d</span>"), 1)
+        self.assertEqual(first.count('title="CI success">CI</span>'), 1)
+        # The title links to the PR, so, as on Now, there is no "open the PR";
+        # the controls stay.
+        self.assertNotIn("open the PR", first)
         self.assertIn("data-ov=", first)
+
+    def test_a_folded_card_links_its_item_from_its_act(self):
+        # A folded card's title opens the fold, so its act carries the link.
+        seed(self.conn)
+        main = section(self.page(), "needs")
+        folded = main[main.index("<details ") :]
+        self.assertIn(
+            f'→ <a href="{issue_url(950)}" target="_blank" rel="noopener">open the issue</a>',
+            folded,
+        )
 
     def test_a_card_puts_its_title_first_and_its_ref_after(self):
         seed(self.conn)
@@ -794,7 +802,7 @@ class EndedTests(NeedsCase):
             f"</code> in {TURN_CWD} on mini</div>",
             row,
         )
-        self.assertIn("on mini · last active 6h ago", row)
+        self.assertRegex(row, r'title="last active [0-9-]+">6h</span> · on mini<')
         self.assertNotIn("<a ", row.split('<div class="ov">')[0])
         # The live sessions keep their places.
         self.assertIn("s-perm", keys(section(page, "approvals")))
@@ -908,12 +916,13 @@ class EndedTests(NeedsCase):
     def test_an_ended_session_without_a_summary_renders_as_before(self):
         self.end_turn()
         row = card(section(self.page(), "finished"), "s-turn")
-        self.assertIn(
-            '<summary><span class="title">notes</span> <span class="meta">on mini'
-            ' · last active 6h ago</span></summary><div class="act">→ ended ·'
-            f" resume with <code>claude --resume s-turn</code> in {TURN_CWD} on"
-            ' mini</div><div class="ov">',
+        self.assertRegex(
             row,
+            r'<summary><span class="title">notes</span> <span class="meta">'
+            r'<span class="age" title="last active [0-9-]+">6h</span> · on mini'
+            r'</span></summary><div class="act">→ ended · resume with <code>'
+            rf"claude --resume s-turn</code> in {re.escape(TURN_CWD)} on mini</div>"
+            r'<div class="ov">',
         )
 
     def test_a_finished_turn_links_the_pr_on_its_branch(self):
@@ -927,7 +936,7 @@ class EndedTests(NeedsCase):
         post_registry(self.conn, "2026-10-24T11:59:40.000Z", [*REGISTRY, live],
                       events=events)  # fmt: skip
         row = card(section(self.page(), "finished"), "s-fin")
-        self.assertIn("on mini · turn ended", row)
+        self.assertRegex(row, r'title="turn ended [0-9-]+">\d+m</span> · on mini<')
         self.assertIn(
             f'<div class="act">→ <a href="{pr_url(1201)}" target="_blank"'
             ' rel="noopener">PR #1201</a></div>',

@@ -231,14 +231,19 @@ class PullRequestTests(Case):
         self.assertIn("misses: CI pending, milestone not approved", cards[pr_url(3)])
         self.assertIn("approved", cards[pr_url(6)])
 
-    def test_cards_are_title_first_with_ci_age_and_repo(self):
+    def test_cards_are_title_first_then_the_age_and_ci(self):
+        # The shared card (cards.py): the repo is in the ref, so the meta
+        # line leads with the bare age and shows CI as the word alone.
         seed(self.conn)
         ready = section(self.page(), "ready")
         self.assertRegex(ready, r'<a class="title" href="[^"]+/pull/1"[^>]*>pr 1</a>')
         self.assertIn(f'<span class="ref">{REPO}#1</span>', ready)
-        self.assertIn("CI success", ready)
-        self.assertIn("opened ", ready)
-        self.assertIn(f"· {REPO}", ready)
+        self.assertRegex(
+            ready,
+            r'<div class="meta"><span class="age" title="opened [0-9-]+">\d+d</span>'
+            r' · <span class="ci" title="CI success">CI</span></div>',
+        )
+        self.assertNotIn(f"· {REPO}", ready)
 
     def test_the_review_and_others_lanes_appear_only_with_rows(self):
         seed(

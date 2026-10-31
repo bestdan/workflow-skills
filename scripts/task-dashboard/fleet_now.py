@@ -114,7 +114,6 @@ controls are the ordinary ones, except that Snooze first asks "why not
 now?" (whynot.py, which also notes each day's shown items as its base rate).
 """
 
-import hashlib
 import html
 import math
 import sqlite3
@@ -123,6 +122,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import candidate
+import cards
 import close_out
 import fleet_tabs
 import fleet_views
@@ -202,32 +202,10 @@ _DOCS_DIRS = ("docs/", "dev_docs/")
 _LITTLE_CI = ("success", "none")
 
 CSS = """
-.now .card { display:flow-root; }
 .now .card .why { margin-top:2px; }
 /* A session's score is its state, which the meta line already reads. */
 .now .card[data-kind="session"] > .why { display:none; }
-/* The score and "?" sit on the meta line's baseline, the icon sized to its text. */
-.now .card .why-more { position:relative; display:inline-block; cursor:help; }
-.now .card .why-more .glyph { display:inline-block; vertical-align:-0.15em; width:1.1em; height:1.1em; }
-.now .card .why-more .score { margin-right:3px; font-variant-numeric:tabular-nums; }
-.now .card .why-more:hover, .now .card .why-more:focus { color:var(--fg); outline:none; }
-.now .card .why-more .why { display:none; position:absolute; z-index:5; top:calc(100% + 4px); left:-8px;
-  width:max-content; max-width:min(420px, 80vw); margin:0; padding:6px 8px; border:1px solid var(--line);
-  border-radius:6px; background:var(--card); color:var(--fg); box-shadow:0 2px 8px rgba(0,0,0,.25); }
-.now .card .why-more:hover .why, .now .card .why-more:focus .why { display:block; }
-@media (max-width:600px) {
-  .now .card .why-more { position:static; }
-  .now .card .why-more .why { top:auto; left:8px; right:8px; width:auto; max-width:none; margin-top:4px; }
-}
-.now .card > .act { float:right; margin:0 0 4px 12px; padding:1px 8px; border-radius:10px;
-  border:1px solid var(--line); background:var(--bg); font-weight:600; }
-@media (max-width:600px) {
-  .now .card > .act { float:none; width:max-content; max-width:100%; margin:0 0 4px; }
-}
-.now .wait { color:var(--fg); font-weight:600; }
 .now .more { margin-top:8px; font-size:12px; }
-.now .checklist { margin:4px 0; font-size:12px; color:var(--fg); }
-.now .folded { margin:2px 0; font-size:12px; color:var(--muted); }
 """
 
 # Status label -> the own-work category it puts an issue in.
@@ -1281,70 +1259,31 @@ def _linked_html(x: dict[str, Any]) -> str:
     )
 
 
-def _age(since: "datetime | None", now: datetime) -> str:
-    """`needs.waited` without its "waiting": the card's `3d` says it alone."""
-    if since is None:
-        return "age unknown"
-    return needs.waited(since, now).removeprefix("waiting ")
-
-
 def card(r: Ranked, now: datetime, ov: overlay.Overlay) -> str:
+    """The Need's card (needs.card) with Now's ranking added: why it ranks
+    here, and in Ship mode its score."""
     n = r.need
-    pin = '<span class="pin">pinned</span> · ' if ov.is_pinned(n.item) else ""
-    meta = (
-        f'{pin}<span class="wait">{_e(_age(n.since, now))}</span> · '
-        + needs.state_html(n)
-    )
+    c = needs.card(n)
+    c.data.update(category=r.category, tier=r.tier[1], total=str(r.total), mode=r.mode)
     terms = ",".join(name for name, value, _ in r.terms if value)
-    # The title already links to n.url, so an "open it" link only earns its
-    # place when it says something the title does not (claude.ai/code is
-    # not the session).
-    link = (
-        view_model.link(n.url, needs.open_label(n, "open it"))
-        if n.url == needs.CODE_URL
-        else ""
-    )
-    act = " · ".join(x for x in (link, needs.pr_link(n), view_model.code(n.hint)) if x)
-    act_html = f'<div class="act">→ {act}</div>' if act else ""
-    why = f'<div class="why" data-terms="{terms}">{_e(why_line(r))}</div>'
-    if n.kind != "session":
+    why = _e(why_line(r))
+    if r.checklist:
+        c.below.append(
+            f'<div class="checklist">{_e(close_out.checklist_text(r.checklist))}</div>'
+        )
+    c.below += [_folded_html(f) for f in r.folded] + [_linked_html(x) for x in r.linked]
+    if n.kind == "session":
+        # A session's score is its state, which the meta line already reads.
+        c.below.append(f'<div class="why" data-terms="{terms}">{why}</div>')
+    else:
         # Why a card ranks where it does (a Ship score's breakdown, or
         # another mode's reason) is there for when the order looks wrong, so
-        # in every mode it waits behind a "?" at the end of the meta line and
-        # pops over on hover, focus or tap.
-        # A screen reader hears the label, then the breakdown it describes:
-        # the role makes the label count, and describedby reads the hidden
-        # breakdown, which role=button alone would flatten away.
-        key = f"{n.item[0]}\0{n.item[1]}".encode()
-        wid = "why-" + hashlib.sha1(key).hexdigest()[:10]
-        why = why.replace('">', f'" id="{wid}" role="tooltip">', 1)
-        # A Ship card shows its score beside the "?"; another mode has none.
-        total = f"{r.total:g}".replace("-", "−")
-        score = f'<span class="score">{total}</span>' if r.mode == SHIP else ""
-        label = f"Score {total}: why it ranks here" if score else "Why it ranks here"
-        meta += (
-            f' <span class="why-more" tabindex="0" aria-label="{label}"'
-            f' role="button" aria-describedby="{wid}">'
-            f"{score}{icons.svg('circle-help')}{why}</span>"
-        )
-        why = ""
-    steps = (
-        f'<div class="checklist">{_e(close_out.checklist_text(r.checklist))}</div>'
-        if r.checklist
-        else ""
-    )
-    folded = "".join(_folded_html(f) for f in r.folded) + "".join(
-        _linked_html(x) for x in r.linked
-    )
-    return (
-        f'<div {overlay.card_attrs(n.item, ov, now)} data-kind="{_e(n.kind)}"'
-        f' data-category="{r.category}" data-tier="{_e(r.tier[1])}"'
-        f' data-total="{r.total}" data-mode="{r.mode}">'
-        f"{act_html}{needs._title(n, n.url)}{needs.ask_html(n)}"
-        f'<div class="meta">{meta}</div>{steps}{folded}{why}'
-        f"{overlay.card_controls(n.item, ov, now, reorder=False, why_not=True)}"
-        f"{whynot.picker(now)}</div>"
-    )
+        # in every mode it waits behind the "?"; only Ship has a number.
+        total = cards.total(r.total) if r.mode == SHIP else ""
+        c.score = cards.Score(why, total, {"terms": terms})
+    c.controls = overlay.card_controls(n.item, ov, now, reorder=False, why_not=True)
+    c.tail = whynot.picker(now)
+    return cards.render(c, ov, now)
 
 
 def lanes(p: Page, inc: "include.Include | None" = None) -> list[view_model.Lane]:

@@ -33,9 +33,11 @@ import sqlite3
 from datetime import datetime
 from typing import Any
 
+import cards
 import fleet_now
 import fleet_tabs
 import fleet_views
+import icons
 import include
 import lane_tabs
 import needs
@@ -85,7 +87,6 @@ nav a[aria-current=page] { color:var(--fg); font-weight:600; background:var(--ca
 .card .why { color:var(--muted); font-size:12px; }
 .pin { font-size:12px; color:var(--accent); font-weight:600; }
 .note { color:var(--muted); font-size:12px; }
-.card .ref { color:var(--muted); font-size:12px; font-weight:400; }
 .card .epic { color:var(--muted); font-size:12px; }
 .icon { display:inline-block; width:1.1em; text-align:center; margin-right:4px;
   color:var(--muted); position:relative; cursor:help; }
@@ -436,8 +437,7 @@ def card_title(href: str, title: "str | None", ref: str) -> str:
 
     With no title the ref is the link text, so the suffix is left off.
     """
-    link = view_model.link(href, title or ref, "title")
-    return link + fleet_views.ref_suffix(ref) if title else link
+    return cards.title_ref(href, title, ref)
 
 
 def epic_name(issue: dict[str, Any]) -> "str | None":
@@ -495,7 +495,7 @@ def _pr_line(p: dict[str, Any]) -> str:
         bits.append(str(p["review_decision"]).lower().replace("_", " "))
     if p["ci_state"]:
         bits.append(f"CI {p['ci_state']}")
-    meta = f" · {_e(' · '.join(bits))}" if bits else ""
+    meta = f" · {cards.ci_words(' · '.join(bits))}" if bits else ""
     ref = f"{p['repo'] or ''}#{p['number']}"
     return card_title(p["url"], p["title"], ref) + meta
 
@@ -507,42 +507,55 @@ def issue_meta(issue: dict[str, Any]) -> list[str]:
 
 
 def issue_card(m: Mirror, issue: dict[str, Any], why: str = "") -> str:
+    """A Jira issue on the shared card, its score's breakdown behind the "?"."""
     key = issue["key"]
-    href = f"https://{m.cfg['jira']['site']}/browse/{key}"
-    meta = " · ".join(_e(v) for v in issue_meta(issue))
-    pin = '<span class="pin">pinned</span> ' if key in m.pins else ""
-    why_html = f'<div class="why">{_e(why)}</div>' if why else ""
-    prs = m.prs_by_issue.get(key, [])
-    prs_html = (
-        '<ul class="prs">' + "".join(f"<li>{_pr_line(p)}</li>" for p in prs) + "</ul>"
-        if prs
-        else ""
-    )
-    total, terms = m.scores[key]
-    icon = status_icon(
-        issue.get("status_category"),
-        issue.get("status_name"),
-        bool(m.blocked[key][0]) or bool(issue.get("flagged")),
-    )
     item = ("jira", key)
-    return (
-        f"<div {overlay.card_attrs(item, m.ov, m.now)}>{pin}{icon}"
-        f"{card_title(href, issue.get('summary'), key)}"
-        f'{epic_line(epic_name(issue))}<div class="meta">{meta}</div>'
-        f"{why_html}{_terms(total, terms)}{prs_html}"
-        f"{overlay.card_controls(item, m.ov, m.now, reorder=False)}</div>"
+    total, terms = m.scores[key]
+    prs = m.prs_by_issue.get(key, [])
+    c = cards.Card(
+        item,
+        issue.get("summary") or "",
+        f"https://{m.cfg['jira']['site']}/browse/{key}",
+        key,
+        icon=status_icon(
+            issue.get("status_category"),
+            issue.get("status_name"),
+            bool(m.blocked[key][0]) or bool(issue.get("flagged")),
+        ),
+        meta=[_e(v) for v in issue_meta(issue)],
+        score=cards.Score(_terms(total, terms), cards.total(total)),
+        above=[epic_line(epic_name(issue))] if epic_name(issue) else [],
+        controls=overlay.card_controls(item, m.ov, m.now, reorder=False),
     )
+    if why:
+        c.below.append(f'<div class="why">{_e(why)}</div>')
+    if prs:
+        lines = "".join(f"<li>{_pr_line(p)}</li>" for p in prs)
+        c.below.append(f'<ul class="prs">{lines}</ul>')
+    return cards.render(c, m.ov, m.now)
 
 
 def pr_card(m: Mirror, p: dict[str, Any], why: str = "") -> str:
-    why_html = f'<div class="why">{_e(why)}</div>' if why else ""
-    joined = f'<div class="meta">{_e(p["issue_key"])}</div>' if p["issue_key"] else ""
+    """A PR on the Jira pages, on the shared card: draft, review and CI."""
     item = ("github", p["url"])
-    return (
-        f"<div {overlay.card_attrs(item, m.ov, m.now)}>"
-        f"{_pr_line(p)}{joined}{why_html}"
-        f"{overlay.card_controls(item, m.ov, m.now, reorder=False, pin=False)}</div>"
+    bits = (["draft"] if p["is_draft"] else []) + (
+        [str(p["review_decision"]).lower().replace("_", " ")]
+        if p["review_decision"]
+        else []
     )
+    c = cards.Card(
+        item,
+        p["title"] or "",
+        p["url"],
+        f"{p['repo'] or ''}#{p['number']}",
+        meta=[_e(b) for b in bits]
+        + ([cards.ci(p["ci_state"])] if p["ci_state"] else [])
+        + ([_e(p["issue_key"])] if p["issue_key"] else []),
+        controls=overlay.card_controls(item, m.ov, m.now, reorder=False, pin=False),
+    )
+    if why:
+        c.below.append(f'<div class="why">{_e(why)}</div>')
+    return cards.render(c, m.ov, m.now)
 
 
 def _lane(
@@ -705,17 +718,25 @@ def _epic_card(m: Mirror, g: dict[str, Any]) -> str:
         if g["key"] in m.issues
         else "Keep it on Epics"
     )
-    return (
-        f'<div class="card" data-source="jira" data-key="{_e(g["key"])}">'
-        f'{card_title(href, g["summary"], g["key"])}<div class="meta">'
-        f"{g['done']}/{g['total']} done{blocked}</div>"
-        f'<div class="ov"><button type="button" data-ov="{"unpin" if pinned else "pin"}"'
-        f' title="{pin_tip}">'
-        f"{'Unpin' if pinned else 'Pin'}</button>"
-        '<button type="button" data-ov="ignore"'
-        ' title="Hide this epic and everything under it">Ignore epic</button>'
-        "</div></div>"
+    act, label, glyph = (
+        ("unpin", "Unpin", "pin-off") if pinned else ("pin", "Pin", "pin")
     )
+    controls = (
+        f'<div class="ov"><button type="button" class="ov-icon" data-ov="{act}"'
+        f' aria-label="{label}" title="{pin_tip}">{icons.svg(glyph)}</button>'
+        '<button type="button" class="ov-icon" data-ov="ignore" aria-label="Ignore epic"'
+        ' title="Hide this epic and everything under it">'
+        f"{icons.svg('eye-off')}</button></div>"
+    )
+    c = cards.Card(
+        ("jira", g["key"]),
+        g["summary"] or "",
+        href,
+        g["key"],
+        meta=[f"{g['done']}/{g['total']} done{blocked}"],
+        controls=controls,
+    )
+    return cards.render(c, m.ov, m.now)
 
 
 def epic_lanes(m: Mirror) -> list[view_model.Lane]:

@@ -45,6 +45,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import PurePosixPath
 from typing import Any
 
+import cards
 import github_fleet
 import include
 import lane_tabs
@@ -65,8 +66,6 @@ _e = html.escape
 
 CSS = """
 .fleet .card .why { color:var(--fg); font-size:12px; }
-.fleet .card .act { font-size:12px; }
-.fleet .card .act code { white-space:pre-wrap; word-break:break-all; }
 """
 
 
@@ -246,41 +245,12 @@ def ago(then: "datetime | None", now: datetime) -> str:
     return f"{round(s / 86400)}d ago"
 
 
-def _link(url: "str | None", text: str) -> str:
-    """A card's title, as a `.title` the page's filter box searches."""
-    if url and url.startswith("https://"):
-        return view_model.link(url, text, "title")
-    return f'<span class="title">{_e(text)}</span>'
-
-
-def ref_suffix(ref: str) -> str:
-    """The muted ` ref` that follows a card's title, as views.card_title's."""
-    return f' <span class="ref">{_e(ref)}</span>'
-
-
-def title_ref(url: "str | None", title: "str | None", ref: str) -> str:
-    """The title, linked, then the muted ref; the ref alone when untitled."""
-    return _link(url, title or ref) + (ref_suffix(ref) if title else "")
-
-
 def _pr_merged(pr: dict[str, Any], at: "datetime | None", now: datetime) -> str:
     """`title (#N) merged <ago>`, or `PR #N merged <ago>` when untitled."""
     n = pr.get("number")
     title = pr.get("title")
     head = f"{title} (#{n})" if title else f"PR #{n}"
     return f"{head} merged {ago(at, now)}"
-
-
-def _card(head: str, meta: str = "", why: str = "", act: str = "", **data: str) -> str:
-    attrs = "".join(f' data-{k}="{_e(v)}"' for k, v in data.items())
-    parts = [head]
-    if meta:
-        parts.append(f'<div class="meta">{meta}</div>')
-    if why:
-        parts.append(f'<div class="why">{why}</div>')
-    if act:
-        parts.append(f'<div class="act">→ {act}</div>')
-    return f'<div class="card"{attrs}>{"".join(parts)}</div>'
 
 
 def _section(
@@ -349,15 +319,20 @@ class StaleItem:
     host: "str | None" = None
     path: "str | None" = None
     branch: "str | None" = None
+    aged: str = ""  # what `at` counts from, where the card shows it as an age
 
-    @property
-    def html(self) -> str:
-        head = (
-            title_ref(self.url, self.title, self.ref)
-            if self.ref is not None
-            else _link(self.url, self.title)
+    def html(self, now: datetime) -> str:
+        c = cards.Card(
+            self.item,
+            self.title,
+            self.url,
+            self.ref,
+            act=self.action.html(),
+            age=cards.Age(self.at, self.aged) if self.aged else None,
+            meta=[_e(self.meta)] if self.meta else [],
+            below=[f'<div class="why">{_e(self.why)}</div>'] if self.why else [],
         )
-        return _card(head, _e(self.meta), _e(self.why), self.action.html())
+        return cards.render(c, None, now)
 
 
 # "when #N merges" is a merge condition only when it names exactly one #N. A
@@ -581,7 +556,8 @@ def stale_items(
             StaleItem(
                 lane, s.last, "session", (sessions.SOURCE, s.session_id),
                 title=f"session {s.session_id}",
-                meta=f"{_session_where(s)} · last event {ago(s.last, now)}",
+                meta=_session_where(s),
+                aged="last event",
                 why=why,
                 action=view_model.Action(review),
                 evidence=why,
@@ -608,7 +584,8 @@ def stale_items(
                     title=row.get("title") or "",
                     ref=f"{row.get('repo') or ''}#{row.get('number')}",
                     url=url,
-                    meta=f"opened {ago(at, now)}",
+                    meta="",
+                    aged="opened",
                     why="no evidence: nothing mirrored says it can close",
                     action=view_model.Action(review, url=url),
                 )
@@ -680,7 +657,7 @@ def render_stale(
         _section(
             lane.id,
             lane.title or "",
-            [i.html for i in lane.items],
+            [i.html(now) for i in lane.items],
             lane.empty,
             lane.tab,
         )

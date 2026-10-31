@@ -1032,7 +1032,7 @@ class ArchivedRepoTests(SyncCase):
         prs = {u for (u,) in self.conn.execute("SELECT url FROM prs")}
         mirrored = {k for (k,) in self.conn.execute("SELECT key FROM issues")}
         checks = [
-            i.html
+            i.html(NOW)
             for i in fleet_views.stale_items(fleet_views.load(self.conn, cfg), NOW)
             if i.lane == "check"
         ]

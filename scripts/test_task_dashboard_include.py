@@ -492,7 +492,8 @@ class FleetViewTests(unittest.TestCase):
         def heads(page):
             return set(
                 re.findall(
-                    r'<div class="card"><span class="title">(worktree|handoff|session) ',
+                    r'<div class="card"[^>]*>(?:<div class="act">.*?</div>)?'
+                    r'<span class="title">(worktree|handoff|session) ',
                     page,
                 )
             )

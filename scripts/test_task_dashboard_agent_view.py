@@ -400,10 +400,11 @@ class EscapeOnceTests(Case):
         (item,) = [
             i for lane in doc["lanes"] for i in lane["items"] if i["key"] == "s-idle"
         ]
-        self.assertTrue(item["meta"].startswith("on r&d · dotfiles: fix&go · "))
+        self.assertEqual(item["meta"], "on r&d · dotfiles: fix&go")
         self.assertEqual(item["host"], "r&d")
         page = fleet_views.render_stale(self.conn, cfg, stale_fx.NOW)
-        self.assertIn("on r&amp;d · dotfiles: fix&amp;go · last event", page)
+        self.assertIn('title="last event 20', page)
+        self.assertIn("</span> · on r&amp;d · dotfiles: fix&amp;go</div>", page)
         self.assertNotIn("&amp;amp;", page)
 
 

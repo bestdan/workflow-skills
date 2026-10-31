@@ -72,6 +72,7 @@ from pathlib import PurePosixPath
 from typing import Any, Callable
 from urllib.parse import quote
 
+import cards as shared_card
 import fleet_views
 import github_fleet
 import github_gh
@@ -80,7 +81,7 @@ import linear_api
 import score
 import sync
 import view_model
-import views  # card_title and _lane, read at call time: views imports this
+import views  # _lane, read at call time: views imports this
 
 _e = html.escape
 
@@ -767,15 +768,19 @@ def progress_text(c: Card) -> str:
     return "no members yet" if c.ws["source"] == "design" else "0/0 done"
 
 
-def meta_parts(c: Card, now: datetime) -> list[str]:
-    """The card's meta line, as plain-text parts."""
+def _status_parts(c: Card) -> list[str]:
     bits = [c.ws.get("status") or "", progress_text(c)]
     if c.open_prs:
         bits.append(f"{_plural(c.open_prs, 'open PR')} ({c.waiting} waiting on you)")
     if c.ws.get("due"):
         bits.append(f"due {str(c.ws['due'])[:10]}")
-    bits.append(f"last activity {fleet_views.ago(c.last_activity, now)}")
     return [b for b in bits if b]
+
+
+def meta_parts(c: Card, now: datetime) -> list[str]:
+    """The card's meta line, as plain-text parts, its last activity last."""
+    ago = fleet_views.ago(c.last_activity, now)
+    return _status_parts(c) + [f"last activity {ago}"]
 
 
 def ref(ws: dict[str, Any]) -> str:
@@ -789,8 +794,7 @@ def filter_href(path: str, ws: str) -> str:
 
 
 def _card_html(c: Card, now: datetime) -> str:
-    head = views.card_title(str(c.ws.get("url") or ""), c.ws.get("title"), ref(c.ws))
-    meta = " · ".join(_e(b) for b in meta_parts(c, now))
+    """The workstream on the shared card: its age is its last activity."""
     links = (
         view_model.link(filter_href("/prs", c.id), f"Pull requests ({c.prs})")
         + " · "
@@ -799,16 +803,20 @@ def _card_html(c: Card, now: datetime) -> str:
     for d in c.ws.get("designs") or []:
         name = f"design: {d['name']}"
         links += " · " + (view_model.link(d["url"], name) if d.get("url") else _e(name))
-    if c.todo:
-        act = f'<div class="act">→ {view_model.code(c.next)}</div>'
-    else:
-        act = f'<div class="why">{_e(c.next)}</div>' if c.next else ""
-    return (
-        f'<div class="card" data-source="{KIND}" data-key="{_e(c.id)}"'
-        f' data-ws-source="{_e(c.ws["source"])}">{head}'
-        f'<div class="meta">{meta}</div>{act}'
-        f'<div class="meta members">{links}</div></div>'
+    card = shared_card.Card(
+        (KIND, c.id),
+        c.ws.get("title") or "",
+        str(c.ws.get("url") or ""),
+        ref(c.ws),
+        act=view_model.code(c.next) if c.todo else "",
+        age=shared_card.Age(c.last_activity, "last activity"),
+        meta=[_e(b) for b in _status_parts(c)],
+        data={"ws-source": c.ws["source"]},
     )
+    if c.next and not c.todo:
+        card.below.append(f'<div class="why">{_e(c.next)}</div>')
+    card.below.append(f'<div class="meta members">{links}</div>')
+    return shared_card.render(card, None, now)
 
 
 # --- lanes -------------------------------------------------------------------

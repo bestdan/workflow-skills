@@ -259,7 +259,7 @@ class FleetCase(unittest.TestCase):
         self.addCleanup(self.conn.close)
 
     def card(self, lane, text):
-        cards = re.findall(r'<div class="card">(.*?)</div></div>', lane, re.S)
+        cards = re.findall(r'<div class="card"[^>]*>(.*?)</div></div>', lane, re.S)
         found = [c for c in cards if text in c]
         self.assertEqual(len(found), 1, text)
         return found[0]
@@ -284,7 +284,7 @@ class FinishedTests(FleetCase):
         group = section(self.page(), "finished")
         self.assertEqual(keys(group), ["s-done"])
         self.assertIn("<h2>Finished since you looked (1)</h2>", group)
-        self.assertIn("on mini · turn ended 12h ago", group)
+        self.assertRegex(group, r'title="turn ended [0-9-]+">12h</span> · on mini<')
         self.assertIn('<span class="title">dotfiles</span>', group)
 
     def test_the_lane_marks_as_read_at_render_time(self):

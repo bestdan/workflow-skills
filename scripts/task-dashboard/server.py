@@ -45,6 +45,7 @@ from types import ModuleType
 from typing import Any, Callable
 from urllib.parse import parse_qs, urlsplit
 
+import cards
 import db
 import fleet_now
 import fleet_tabs
@@ -502,9 +503,6 @@ main { padding:12px 16px; }
 .card { background:var(--card); border:1px solid var(--line); border-radius:6px;
   padding:6px 10px; margin-bottom:6px; }
 .card a { color:var(--accent); font-weight:600; text-decoration:none; }
-.card .meta { color:var(--muted); font-size:12px; }
-.card .ci { color:var(--muted); }
-.card .ci.ci-bad { color:var(--bad); font-weight:600; }
 .empty { color:var(--muted); }
 """
 
@@ -734,26 +732,33 @@ def _card(
     *,
     reorder: bool = False,
 ) -> str:
+    """A Board row on the shared card; without `ov` it carries no controls."""
     key = str(row["id"])
-    href = f"https://{site}/browse/{key}"
-    icon = views.status_icon(
-        row.get("category"), row.get("status_name"), bool(row.get("flagged"))
+    on = ov is not None and now is not None
+    item = ("jira", key)
+    c = cards.Card(
+        item if on else None,
+        row.get("summary") or "",
+        f"https://{site}/browse/{key}",
+        key,
+        icon=views.status_icon(
+            row.get("category"), row.get("status_name"), bool(row.get("flagged"))
+        ),
+        meta=[
+            _e(str(v))
+            for v in (
+                row.get("status_name"),
+                row.get("assignee"),
+                row.get("priority_name"),
+            )
+            if v
+        ],
+        above=[views.epic_line(row.get("epic"))] if row.get("epic") else [],
     )
-    meta = " · ".join(
-        _e(str(v))
-        for v in (row.get("status_name"), row.get("assignee"), row.get("priority_name"))
-        if v
-    )
-    attrs, controls = 'class="card"', ""
     if ov is not None and now is not None:
-        item = ("jira", str(row["id"]))
-        attrs = overlay.card_attrs(item, ov, now)
-        controls = overlay.card_controls(item, ov, now, reorder=reorder)
-    return (
-        f"<div {attrs}>{icon}{views.card_title(href, row.get('summary'), key)}"
-        f"{views.epic_line(row.get('epic'))}"
-        f'<div class="meta">{meta}</div>{controls}</div>'
-    )
+        c.controls = overlay.card_controls(item, ov, now, reorder=reorder)
+        return cards.render(c, ov, now)
+    return cards.render(c, None, datetime.now(timezone.utc))
 
 
 def board_lanes(
@@ -843,7 +848,7 @@ def render_page(
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
         f'<meta name="dashboard-token" content="{_e(token)}">'
         f"<title>{_e(title)}</title>"
-        f"<style>{CSS}{views.CSS}{fleet_views.CSS}{needs.CSS}{fleet_now.CSS}{overlay.CSS}{gauges.CSS}{freshness.CSS}{include.CSS}{lane_tabs.CSS}{whynot.CSS}{refresh.CSS}</style></head>"
+        f"<style>{CSS}{cards.CSS}{views.CSS}{fleet_views.CSS}{needs.CSS}{fleet_now.CSS}{overlay.CSS}{gauges.CSS}{freshness.CSS}{include.CSS}{lane_tabs.CSS}{whynot.CSS}{refresh.CSS}</style></head>"
         f'<body data-busy="{1 if busy else 0}" data-synced="{_e(synced)}">'
         f"{header}<main>{body}</main>"
         f"<script>{JS}{overlay.JS}{include.JS}{lane_tabs.JS}{refresh.JS}</script></body></html>"
