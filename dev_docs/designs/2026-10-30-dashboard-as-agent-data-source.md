@@ -1,6 +1,7 @@
 ---
 created: 2026-10-30
 status: proposed
+tracks: https://github.com/bestdan/workflow-skills/issues/1281
 ---
 
 # The task dashboard as a data source an agent can query
@@ -19,6 +20,14 @@ model; the agent is always outside it.
 "X" is any scope the mirror can name: a repo, a Jira project or epic, a GitHub
 milestone, a Linear project, a label. FinPlan is the worked example below
 only because it exposes the most gaps.
+
+**Updated 2026-10-31.** Slice 1 (`scopes` and `items`) shipped in #1266, and
+Linear issues as a Now source shipped in #1264. Both differ from what this
+document first proposed. Where a section covers something that shipped (§1,
+§2 and §7), it now describes what shipped, and each change carries a dated
+note giving what the proposal said and why it moved. The rest is still the
+proposal; the note in §5 records the owner's decisions for the plans slice.
+#1281 tracks the re-cut rollout (see Rollout).
 
 ## What is true today
 
@@ -59,7 +68,8 @@ of the work. The mirror holds four Linear projects named for FinPlan, 49 open
 owner would prioritize lives in Linear team PRE and isn't there. repo-pr task
 files aren't mirrored either. The shared-ranker design
 ([`2026-10-27-shared-now-ranker.md`](2026-10-27-shared-now-ranker.md)) names
-both as future sources behind its seam.
+both as future sources behind its seam. (Since then, #1264 mirrors the
+owner's assigned Linear issues; §7 has what it covers.)
 
 **The tables are not a contract.** They are private to the sync and change
 with each migration (`db.py`). Reading them directly works, but it breaks
@@ -136,13 +146,29 @@ an agent that doesn't yet know what it needs.
 Lists the scopes this instance can filter by, each with a stable id and a
 count of open items:
 
-| Scope kind | Id form                     | From                                      |
-| ---------- | --------------------------- | ----------------------------------------- |
-| repo       | `repo:bestdan/finplan`      | PR and issue keys                         |
-| workstream | `ws:<id>`                   | `workstreams` (milestone, Linear, design) |
-| jira       | `jira:PROJ`, `epic:PROJ-12` | issue keys, `parent_key`                  |
-| label      | `label:prio:1`              | issue labels                              |
-| host       | `host:lindev`               | sessions, worktrees                       |
+| Scope kind | Id form                                 | From                                                  |
+| ---------- | --------------------------------------- | ----------------------------------------------------- |
+| repo       | `repo:bestdan/finplan`, `repo:dotfiles` | PR, issue and design repos; worktree and session dirs |
+| workstream | `ws:<id>`                               | `workstreams` (milestone, Linear, design)             |
+| jira       | `jira:PROJ`                             | Jira ticket keys                                      |
+| epic       | `epic:PROJ-12`                          | Jira tickets' `parent_key`                            |
+| label      | `label:prio:1`                          | issue and ticket labels                               |
+| host       | `host:lindev`                           | sessions, worktrees                                   |
+
+So the id prefixes are `repo:`, `ws:`, `jira:`, `epic:`, `label:` and
+`host:`. A repo that only a worktree or session names gets a bare id
+(`repo:dotfiles`), because a checkout's path names no owner. **`repo:<bare>`
+matches by bare name**: typed with no owner, it names every
+`repo:<owner>/<bare>` too. A session or worktree in a `dotfiles` checkout is
+a member of `repo:bestdan/dotfiles` and of every other owner's `dotfiles`
+scope, and counts in each one's `open`. `repo:dotfiles` is listed as a scope
+of its own only when no `<owner>/dotfiles` repo is mirrored.
+
+> **2026-10-31, as shipped (#1266).** The proposal folded `epic:` into the
+> `jira` row and gave repos only an `owner/name` id. Shipped, `epic` is a
+> scope kind of its own, and repos also have the bare-name id and match,
+> because worktree and session paths carry only a directory name. A Linear
+> team scope is #1283's.
 
 With a query, it matches ids and titles case-insensitively and prints what
 matched. `finplan` matches the repo and four Linear projects. Every other
@@ -181,9 +207,10 @@ The output shape, for `scopes finplan` (ids, titles and counts illustrative):
 }
 ```
 
-`open` counts open items of every kind. `related` appears only for a repo
-scope, as the next paragraph explains. With no query, `matched` lists every
-scope and `related` is absent.
+`open` counts open items of every kind. `related` is printed for any query
+other than `all`, and is empty unless a repo scope matched, as the next
+paragraph explains. With no query, or `all`, `matched` lists every scope and
+`related` is absent.
 
 **Names miss most of the work, so a repo scope also reports `related`
 workstreams.** On the mini's mirror, `bestdan/finplan` PRs belong to 14
@@ -191,10 +218,17 @@ Linear projects, and 10 of them have names that don't mention FinPlan:
 Decumulation, Cashflow Modeling, Funding Sources Framework and others. A
 match on the bare word `fin` is no better: it also hits a Linear project about
 `find-candidates`. So a repo scope lists, under `related`, every workstream
-with a member in that repo, with the member count. The agent shows that list
-to the owner and adds the ones it confirms as explicit `ws:` ids. They are
-never included automatically, because membership changes with each sync, and
-a stored plan must keep meaning what the agent chose.
+with an open member in that repo, other than those already matched, with the
+count of those open members, most first. The agent shows that list to the owner and adds the ones it confirms
+as explicit `ws:` ids. They are never included automatically, because
+membership changes with each sync, and a stored plan must keep meaning what
+the agent chose.
+
+> **2026-10-31, as shipped (#1266).** `related` counts only open members, the
+> same way a scope's `open` does, and leaves out a workstream whose members
+> in that repo are all done. The proposal counted every member. The proposal
+> also had `related` appear only for a repo scope; shipped, any query other
+> than `all` prints it, empty when no repo scope matched.
 
 **`all` is reserved.** `--scope all` means no filter on every command, and is
 never fuzzy-matched. Without the reservation, `all` would match a design doc
@@ -203,57 +237,98 @@ titled "Allow-listed `gh api` writes".
 ### 2. `items`: one compact record per item
 
 ```
-dashboard.py items --scope finplan [--kind issue,pr,session,worktree]
+dashboard.py items --scope finplan
+    [--kind issue,pr,ticket,design,session,worktree]
     [--state todo,started,done] [--only blocked,waiting,stale]
     [--fields brief|full|<name,...>] [--limit N] [--offset N] [--jsonl]
 ```
 
+`--kind` takes the dashboard's own word for each item: `issue` (a mirrored
+GitHub issue), `pr` (an open PR), `ticket` (a Jira issue; Linear tickets join it with #1283), `design` (a design
+doc at `status: proposed`), `session` (a live Claude Code session) and
+`worktree` (a worktree a machine snapshot reported).
+
+> **2026-10-31, as shipped (#1266).** The proposal listed four kinds:
+> `issue`, `pr`, `session` and `worktree`. Shipped, Jira tickets are `ticket`
+> and design docs are `design`, the words the rest of the dashboard already
+> uses.
+
 `--state` filters the tracker's status category, the `state` field below.
 `--only` filters on facts the dashboard derives, which hold independently of
-status: `blocked` (a non-empty or non-zero `blocked_by`), `waiting` (a session on the item
+status: `blocked` (blocked as Now judges it: for a GitHub issue the `blocked`
+label or an open blocker, for a Jira ticket a label, the flag, a blocked
+status or an open blocking link; other kinds are never blocked), `waiting` (a session on the item
 is waiting on the owner, as Needs you decides it) and `stale` (the item is on
 the Stale tab by its evidence rule). Keeping them on two flags is what lets an
 agent ask for "started and blocked".
 
 Every source's items, in one record shape. The `brief` record is the fields a
-prioritizer reads, around 60 to 100 tokens each:
+prioritizer reads:
 
-| Field                          | Meaning                                                         |
-| ------------------------------ | --------------------------------------------------------------- |
-| `source`, `key`, `ref`, `kind` | identity, as the overlay keys it                                |
-| `title`, `url`                 |                                                                 |
-| `state`                        | the tracker's status, verbatim, plus its category               |
-| `prio`, `due`                  | the tracker's priority and due date, verbatim                   |
-| `age_d`, `idle_d`              | days since created, and since last updated                      |
-| `labels`                       |                                                                 |
-| `workstreams`                  | ids of the workstreams it belongs to                            |
-| `pr`                           | the linked PR's `{ref, ci, review, draft, co_reviewed}` or null |
-| `activity`                     | live session or worktree on it: `{host, state, waiting_since}`  |
-| `blocks`, `blocked_by`         | refs where the mirror holds links (Jira), else counts (GitHub)  |
-| `overlay`                      | pinned, snoozed until, ignored, note, last why-not reason       |
-| `now`                          | its Now tier and score terms, when Now ranks it                 |
-| `size`                         | `{bucket, est_min, from}`, or null when unsized (see below)     |
+| Field                          | Meaning                                                                                    |
+| ------------------------------ | ------------------------------------------------------------------------------------------ |
+| `source`, `key`, `ref`, `kind` | identity, as the overlay keys it                                                           |
+| `title`, `url`                 |                                                                                            |
+| `state`                        | the tracker's status, verbatim, plus its category                                          |
+| `prio`, `due`                  | the tracker's priority and due date, verbatim                                              |
+| `age_d`, `idle_d`              | days since created, and since last updated                                                 |
+| `labels`                       |                                                                                            |
+| `workstreams`                  | ids of the workstreams it belongs to                                                       |
+| `pr`                           | the linked PR's `{ref, ci, review, draft, co_reviewed}`; absent when there is none         |
+| `activity`                     | a list of the live sessions and worktrees on it: `{kind, host, state, waiting_since}` each |
+| `blocks`, `blocked_by`         | refs where the mirror holds links (Jira), else counts (GitHub)                             |
+| `overlay`                      | pinned, snoozed until, ignored, note, last why-not reason                                  |
+| `now`                          | its Now tier and score terms, when Now ranks it                                            |
+| `size`                         | `{bucket, est_min, from}`; absent when unsized (see below)                                 |
+
+**Brief and full records are sparse.** They leave out every non-identity
+field that is null or empty, and a `url` that only repeats the `key`, and the
+output's header says `"sparse": true`. Only top-level fields are dropped, so
+a nested null such as `size.est_min` stays. A named `--fields` list prints
+every field it names, null or not, so an unsized item shows `size: null`
+there. Measured on the mini's mirror, a brief record averages
+about 550 bytes, around 140 tokens. Most of that is the `now` terms and the
+labels, and `--fields` is how an agent trims it.
+
+> **2026-10-31, as shipped (#1266).** The proposal made `activity` one
+> object, `{host, state, waiting_since}`. Shipped, it is a list, each entry
+> carrying its `kind`, because one branch can hold a session and a worktree
+> at once. The proposal estimated 60 to 100 tokens a brief record, and did not
+> say records were sparse; sparse records still measured about 140.
 
 **Size, in minutes.** A time-boxed request ("I've got half an hour") needs a
 duration per item, and the mirror has only signals of size. `size` turns those
 into a rough estimate and says where it came from:
 
-- `bucket` is Little mode's size bucket
-  ([`2026-10-26-now-modes.md`](2026-10-26-now-modes.md#little)): bot PR,
-  docs-only PR, `est:1`, small PR (at most 3 files and 50 lines), `est:2`, and
-  above those, `est:3`, `est:5`, `est:8`. Jira story points and Linear
-  estimates map to the same `est:` ladder.
-- `est_min` reads the bucket through a config table, `[size.minutes]`, with
-  defaults such as bot PR 5, docs PR 10, small PR 15, `est:1` 20, `est:2` 45.
-  These are the owner's numbers to tune, not a measurement. They ship as
-  defaults because `--minutes` and the session-plan calibration (§5)
-  both read `est_min`. With no numbers, the agent would convert `est:1` to
-  minutes inside the model, differently each session and out of sight.
-- `from` names the evidence, for example `label est:1` or
-  `PR 2 files +14/-3`.
+- `bucket` is one of `bot_pr`, `docs_pr`, `small_pr`, `large_pr` or `est:N`.
+  The first three are Little mode's PR buckets
+  ([`2026-10-26-now-modes.md`](2026-10-26-now-modes.md#little)), a small PR
+  being at most 3 files and 50 lines; `large_pr` is a sized PR that is none
+  of them. `est:N` reads an issue's or ticket's `est:` label. One function,
+  `fleet_now.pr_bucket`, sorts PRs for both `items` and Little, so the two
+  cannot drift apart.
+- `est_min` reads the bucket through a config table, `[size.minutes]`. Five
+  buckets have defaults: `bot_pr` 5, `docs_pr` 10, `small_pr` 15, `est:1` 20
+  and `est:2` 45. A bucket with no entry, `large_pr` or `est:3` and up by
+  default, has `est_min: null`. These are the owner's numbers to tune, not a
+  measurement. They ship as defaults because `--minutes` and the session-plan
+  calibration (§5) both read `est_min`. With no numbers, the agent would
+  convert `est:1` to minutes inside the model, differently each session and
+  out of sight.
+- `from` names the evidence, for example `label est:1`,
+  `PR, 2 files, +14/−3` or `bot PR from dependabot[bot]`.
 
-An unsized item has `size: null`. As in Little mode, an unknown size never
+An unsized item has no `size` (null under a named `--fields` list). A bot PR
+is `bot_pr` whatever its size data says. As in Little mode, an unknown size never
 counts as small, and the agent says so rather than guessing one.
+
+> **2026-10-31, as shipped (#1266).** The proposal described the buckets in
+> words, as one ladder with `est:1` between the docs and small PR buckets and
+> `est:2` after small PR. Shipped, the
+> buckets have the names above, `large_pr` is added so a big PR is sized
+> rather than null, and only the five listed have default minutes. Size reads
+> `est:` labels only: Jira story points are not mapped onto the ladder, and
+> Linear estimates wait on Linear tickets reaching `items` (#1283).
 
 The signals already exist. On the mini's mirror (2026-10-30), 349 of 558
 GitHub issues carry an `est:` label, and every open PR row carries
@@ -262,14 +337,21 @@ GitHub issues carry an `est:` label, and every open PR row carries
 (`fleet_now.LITTLE_FILES`, `LITTLE_LINES`). Most open issues in the owner's
 Linear team carry a 1, 2, 3 or 5-point estimate.
 
-`full` adds the evidence, risks and action that `view` items carry. A comma
+`full` adds `repo`, `branch`, `host`, `path`, `parent`, `created` and
+`updated`, and the evidence, risks and action that `view` items carry. A comma
 list names exact fields (`--fields key,title,size,pr`), and identity is always
 included. The output always states `total` and `returned`, so a truncated list
 says so.
 
-The fields come from the same code the views use: `candidate.py` builds the
-Now terms, `needs.py` the session match, `workstreams.py` the membership.
-`items` adds no ranking rule of its own.
+The fields come from the same code the views use: `fleet_now.candidates`
+builds the Now terms, `needs.py` the session match, `workstreams.py` the
+membership. `items` adds no ranking rule of its own; it lists newest
+`updated` first.
+
+> **2026-10-31, as shipped (#1266).** The proposal said `full` adds only the
+> evidence, risks and action; shipped, it also adds the location and time
+> fields listed above. The proposal named no order for `items`; shipped, it is
+> newest `updated` first, which is recency, not priority.
 
 ### 3. `item <ref>`: the dossier
 
@@ -343,25 +425,37 @@ resume it.
 ### 5. `plan`: where the answer goes
 
 A new overlay table, `plans`, keyed by scope and kind (`standing` or
-`session`), so both kinds can exist for one scope at once. The scope is a
-resolved scope id, or `all` for a plan across every scope:
+`session`), so both kinds can exist for one scope at once. **A plan belongs
+to exactly one scope**: one resolved scope id, or `all` for a plan across
+every scope. `plan set` takes a single `--scope`, unlike the reads, where
+`--scope` repeats:
 
 ```
-dashboard.py plan set [--scope <scope-id> | --scope all] [--minutes N] --file plan.json
+dashboard.py plan set (--scope <scope-id> | --scope all) [--minutes N]
+    --by <author> --file plan.json
 dashboard.py plan show|clear [--scope …]
 ```
 
 `plan.json` is an ordered list of `{source, key, action, reason, est_min}`.
 `action` is one of `do`, `finish`, `unblock`, `review`, `defer`, `drop`. Each
-`reason` is one line. A plan carries its `created_at`, the agent that wrote
-it, the mode it was made in, and when it expires. There are two kinds:
+`reason` is one line. A plan carries its `created_at`, its author, the mode
+it was made in, and when it expires. The author is whatever `--by` says, free
+text: a session name, an agent, or the owner. There are two kinds:
 
 - **A standing plan** for a scope or for `all`: "this is the order for
   FinPlan". It shows as stale after `[plan] stale_days` (default 7), and
   stays until it is replaced or cleared.
 - **A session plan**, made with `--minutes`: "these three, in the next 30
-  minutes". It expires at the end of the day, because by then it is either
-  done or wrong. It shows the time box and the sum of its `est_min`.
+  minutes". It expires at the next 04:00, host local time, because by then it
+  is either done or wrong. A plan set between midnight and 04:00 expires at
+  04:00 that morning. It shows the time box and the sum of its `est_min`.
+
+> **2026-10-31, the owner's decisions for #1286.** The proposal let the scope
+> be "a resolved scope id", which left open whether one plan could span
+> several; it spans exactly one, or `all`. It said a session plan expires "at
+> the end of the day"; that is now the next 04:00, host local time. It said a
+> plan records "the agent that wrote it" without saying how; that is the
+> free-text `--by` flag.
 
 The page shows the newest unexpired plan as a Plan mode on Now, with the
 reason on each card and a ticked state for each item whose PR merged or whose
@@ -483,24 +577,34 @@ Without this, "prioritize FinPlan" sees PRs and sessions, but not the
 backlog. A Linear issues step writes `source = 'linear'` items, and a
 candidate builder puts them behind the shared ranker's seam.
 
-Linear ingestion is being worked separately. This section states what the
-agent read needs from it; where that work decides differently, it wins, and
-this section follows.
+**What shipped (#1264) is assigned-only.** `linear_issues.py` mirrors the
+open issues assigned to `linear.me` (else the key's own user) whose state
+type is `unstarted` or `started`, as `source = 'linear'`, `kind = 'ticket'`
+rows that fill the Jira columns, and Now ranks them. `items` and `scopes` do
+not read those rows yet; #1283 adds them, with a Linear team scope.
 
-It mirrors every open issue (backlog, unstarted, started) of the teams that
-the Workstreams step's projects belong to. `workstreams.py` already derives
+What the agent read needs is wider, and #1282 widens the mirror to it: every
+open issue (backlog, unstarted, started) of the teams that the Workstreams
+step's projects belong to, assigned or not. `workstreams.py` already derives
 that team set, and the `linear` handler's `linear-scan.py` query is
 team-scoped in the same way, so neither needs new config. On the owner's key
 that is one team, PRE, with about 200 open issues, of which about 20 have no
 project. Project scope would drop exactly those unfiled issues, which a
 prioritizer most needs to surface. Assignee scope would drop every unassigned
-issue, and it answers "what's mine", not "what's in this backlog". If a key ever
-sees other people's teams, a `[linear] teams` allowlist is the fix, added
-then. repo-pr task files are a local read of
-`dev_docs/tasks/` in the configured repos and are cheaper still. Both are
-sources that ranking and every view gain, not only the agent, so each one
-should be its own PR, after the shared Now ranker (issue #1225,
-[design](2026-10-27-shared-now-ranker.md)) lands.
+issue, and it answers "what's mine", not "what's in this backlog". If a key
+ever sees other people's teams, a `[linear] teams` allowlist is the fix,
+added then. **Now's ranking stays assigned-only**: the wider rows are for the
+agent queries and the Workstreams tab, and Now still ranks only the owner's
+assigned `unstarted` and `started` issues.
+
+> **2026-10-31, as shipped (#1264).** The proposal had one Linear source
+> serving both Now and the agent read. Linear ingestion was built separately
+> and shipped as Now's source, scoped to the owner's assigned issues. The
+> backlog read (#1282) widens the mirror without changing what Now ranks.
+
+repo-pr task files are a local read of `dev_docs/tasks/` in the configured
+repos and are cheaper still. That source is #1289, on hold until it is
+refined.
 
 ## Decisions
 
@@ -576,19 +680,24 @@ changes what a saved plan means.
 
 ## Rollout
 
-Each slice is one PR and is useful without the next:
+#1281 tracks the rollout. Each sub-issue is one PR and is useful without the
+next; only real dependencies are linked.
 
-1. `items` and `scopes`, over the sources that exist today, with `size` and
-   `[size.minutes]`.
-2. `item <ref>`.
-3. `brief` with `--mode` and `--minutes`, and `references/prioritize.md`
-   without steps 6 and 7 (the plan steps), which slice 4 adds.
-4. `plans` table (standing and session plans), `plan` command, Plan mode on
-   Now, and the `tune` join.
-5. The session-plan calibration of `[size.minutes]`.
-6. Linear issues as a source (after the shared Now ranker, issue #1225).
-7. repo-pr tasks as a source.
-8. `sql` and the `agent_*` views, if an agent turns out to need them.
+| Slice as proposed                                 | Where it went                                                                                                                                  |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1. `items` and `scopes`, `size`, `[size.minutes]` | shipped, #1266                                                                                                                                 |
+| 2. `item <ref>`                                   | #1284                                                                                                                                          |
+| 3. `brief` and `references/prioritize.md`         | #1285, after #1284                                                                                                                             |
+| 4. plans, Plan mode, the `tune` join              | split in three: #1286 (`plans` table and `plan set\|show\|clear`), #1287 (Plan mode on Now), #1288 (ticks, and the plan's reason in `why_not`) |
+| 5. session-plan calibration of `[size.minutes]`   | deferred until the plan slices have produced a few weeks of records; not filed                                                                 |
+| 6. Linear issues as a source                      | shipped assigned-only as #1264; #1282 mirrors the whole open backlog, #1283 lists Linear tickets in `items` and `scopes`                       |
+| 7. repo-pr tasks as a source                      | #1289, on hold until refined                                                                                                                   |
+| 8. `sql` and the `agent_*` views                  | not filed: it waits on an agent that needs it                                                                                                  |
+
+> **2026-10-31, re-cut (#1281).** The proposal's eight slices, in order,
+> became the issues above once #1264 and #1266 had shipped: slice 4 was over
+> size 5 and split, slice 6 was split into the backlog read and the agent
+> read, slice 5 was deferred and slice 8 was left unfiled.
 
 ## Open questions
 
