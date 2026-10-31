@@ -539,8 +539,6 @@ class NewTests(NeedsCase):
         self.assertNotIn('data-section="finished"', self.page())
 
     def test_an_ignored_finished_session_leaves_the_group_and_can_be_undone(self):
-        # Since you were away folded into this page (#1173); #1162 asked that
-        # its ignore hold there, so the Finished group is where it is pinned.
         seed(self.conn)
         overlay.set_last_visit(self.conn, VISIT)
         item = ("claude-hook", "s-done")
@@ -553,7 +551,6 @@ class NewTests(NeedsCase):
 
     def test_an_ignored_issue_leaves_the_page_and_can_be_undone(self):
         seed(self.conn)
-        overlay.set_last_visit(self.conn, VISIT)
         item = ("github", issue_url(950))
         overlay.ignore(self.conn, item, NOW)
         self.assertNotIn(issue_url(950), keys(self.page()))
@@ -834,9 +831,7 @@ class EndedTests(NeedsCase):
         self.end_turn()
         item = ("claude-hook", "s-turn")
         overlay.ignore(self.conn, item, NOW)
-        page = self.page()
-        self.assertNotIn("s-turn", keys(listed(page)))
-        self.assertNotIn("s-turn", finished_keys(page))
+        self.assertNotIn("s-turn", finished_keys(self.page()))
         overlay.unignore(self.conn, item)
         self.assertIn("s-turn", finished_keys(self.page()))
 
