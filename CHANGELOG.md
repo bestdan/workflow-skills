@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.169.0] - 2026-10-31
+
+### Features
+
+- Plan mode on Now, a reason and a tick per item [#1287] (#1298) (f0f76d0)
+
 ## [2.168.0] - 2026-10-31
 
 ### Features
