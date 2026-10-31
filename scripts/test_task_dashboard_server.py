@@ -1006,7 +1006,7 @@ class BoardTest(ServerCase):
             )
         )
         found = {
-            s: re.findall(r"class=\"ref\">\((ABC-\d+)\)<", body)
+            s: re.findall(r"class=\"ref\">(ABC-\d+)<", body)
             for s, body in lanes.items()
         }
         self.assertEqual(found["new"], ["ABC-1"])
@@ -1082,10 +1082,10 @@ class BoardTest(ServerCase):
                 r'data-section="[a-z_]+"(?: hidden)?>(.*?)</section>', page, re.S
             )
         )
-        self.assertNotIn("(ABC-60)", lanes)  # a child of the ignored epic
-        self.assertNotIn("(ABC-61)", lanes)  # ignored itself
-        self.assertNotIn("(ABC-63)", lanes)  # under the ignored epic, two down
-        self.assertIn("(ABC-62)", lanes)
+        self.assertNotIn('ref">ABC-60<', lanes)  # a child of the ignored epic
+        self.assertNotIn('ref">ABC-61<', lanes)  # ignored itself
+        self.assertNotIn('ref">ABC-63<', lanes)  # under the ignored epic, two down
+        self.assertIn('ref">ABC-62<', lanes)
         self.assertIn("Ignored (2)", page)
         self.assertEqual(page.count('data-ov="unignore"'), 2)
 
@@ -1098,7 +1098,7 @@ class BoardTest(ServerCase):
         )
         assert lane is not None
         self.assertIn("Unclassified (1)", lane.group(1))
-        self.assertIn("(ABC-50)</span>", lane.group(1))
+        self.assertIn('ref">ABC-50</span>', lane.group(1))
 
     def test_summary_is_escaped(self):
         conn = self.conn()

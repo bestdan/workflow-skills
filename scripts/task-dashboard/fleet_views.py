@@ -254,8 +254,8 @@ def _link(url: "str | None", text: str) -> str:
 
 
 def ref_suffix(ref: str) -> str:
-    """The muted ` (ref)` that follows a card's title, as views.card_title's."""
-    return f' <span class="ref">({_e(ref)})</span>'
+    """The muted ` ref` that follows a card's title, as views.card_title's."""
+    return f' <span class="ref">{_e(ref)}</span>'
 
 
 def title_ref(url: "str | None", title: "str | None", ref: str) -> str:

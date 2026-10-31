@@ -458,7 +458,7 @@ class ViewsTest(unittest.TestCase):
         self.assertRegex(
             one, r'<a class="title" href="[^"]*/browse/ABC-1" target="_blank" '
             r'rel="noopener">summary ABC-1</a> '
-            r'<span class="ref">\(ABC-1\)</span>',
+            r'<span class="ref">ABC-1</span>',
         )  # fmt: skip
         self.assertIn('<div class="epic">◆ Checkout &lt;rewrite&gt;</div>', one)
         self.assertNotIn('class="epic"', self.card(page, "ABC-2"))
@@ -467,9 +467,7 @@ class ViewsTest(unittest.TestCase):
         html = views.card_title("https://x.invalid/browse/E-9", None, "E-9")
         self.assertEqual(html.count("E-9</"), 1)
         self.assertNotIn('class="ref"', html)
-        self.assertIn(
-            '<span class="ref">(E-9)</span>', views.card_title("u", "t", "E-9")
-        )
+        self.assertIn('<span class="ref">E-9</span>', views.card_title("u", "t", "E-9"))
 
     def test_status_icon_by_category_and_blocked(self):
         m = self.mirror()
@@ -602,7 +600,7 @@ class ViewsTest(unittest.TestCase):
         )
         self.conn.commit()
         footer = views.render_ignored(self.conn)
-        self.assertIn("(CYC-1)</span> · hides 1 child issue <button", footer)
+        self.assertIn("CYC-1</span> · hides 1 child issue <button", footer)
 
     def test_an_untitled_ignored_pr_is_named_by_its_url(self):
         url = "https://github.com/o/r/pull/2"

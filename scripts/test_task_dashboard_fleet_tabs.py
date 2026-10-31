@@ -235,7 +235,7 @@ class PullRequestTests(Case):
         seed(self.conn)
         ready = section(self.page(), "ready")
         self.assertRegex(ready, r'<a class="title" href="[^"]+/pull/1"[^>]*>pr 1</a>')
-        self.assertIn(f'<span class="ref">({REPO}#1)</span>', ready)
+        self.assertIn(f'<span class="ref">{REPO}#1</span>', ready)
         self.assertIn("CI success", ready)
         self.assertIn("opened ", ready)
         self.assertIn(f"· {REPO}", ready)
@@ -297,7 +297,7 @@ class IssueTests(Case):
         seed(self.conn)
         needs_you = section(self.page(), "needs-you")
         self.assertIn("prio:1 · est:3", needs_you)
-        self.assertIn(f'<span class="ref">({REPO}#10)</span>', needs_you)
+        self.assertIn(f'<span class="ref">{REPO}#10</span>', needs_you)
 
     def test_the_cap_is_surfaced(self):
         seed(self.conn, counts={"issues_truncated": 1})
