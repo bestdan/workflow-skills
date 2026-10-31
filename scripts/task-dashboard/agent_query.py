@@ -552,15 +552,16 @@ def _link_prs(items: list[Item]) -> None:
     by_issue: dict[str, Item] = {}
     by_jira: dict[str, Item] = {}
     by_branch: dict[tuple, Item] = {}
-    every: dict[tuple, list[Item]] = {}
+    # Every PR matched, by (index name, key): the index keeps only the newest.
+    every: dict[tuple[str, Any], list[Item]] = {}
 
     def recency(x: Item) -> tuple:
         at = score.parse_ts(x["updated"]) or score.parse_ts(x["created"])
         return (at is not None, at.timestamp() if at else 0.0,
                 x["_pr_row"].get("number") or 0)  # fmt: skip
 
-    def newer(index: dict, k: Any, pr: Item) -> None:
-        found = every.setdefault((id(index), k), [])
+    def newer(name: str, index: dict, k: Any, pr: Item) -> None:
+        found = every.setdefault((name, k), [])
         if not any(f is pr for f in found):
             found.append(pr)
         if k not in index or recency(pr) > recency(index[k]):
@@ -573,25 +574,26 @@ def _link_prs(items: list[Item]) -> None:
         for c in (p.get("awaiting") or {}).get("closes") or []:
             if c.get("repo") and c.get("number") is not None:
                 url = f"https://github.com/{c['repo']}/issues/{c['number']}"
-                newer(by_issue, url, i)
+                newer("issue", by_issue, url, i)
         if p.get("issue_key"):
-            newer(by_jira, p["issue_key"], i)
+            newer("jira", by_jira, p["issue_key"], i)
         if i["branch"] and i["branch"] not in close_out.DEFAULT_BRANCHES:
-            newer(by_branch, (i["_repo_bare"], i["branch"]), i)
+            newer("branch", by_branch, (i["_repo_bare"], i["branch"]), i)
     for i in items:
         found: "Item | None"
         if i["_pr_row"] is not None:
             found, i["_prs"] = i, [i]
         else:
+            name: str
             index: dict[Any, Item]
             k: Any
-            index, k = (
-                (by_issue, i["key"]) if i["kind"] == "issue"
-                else (by_jira, i["key"]) if i["kind"] == "ticket"
-                else (by_branch, (i["_repo_bare"], i["branch"]))
+            name, index, k = (
+                ("issue", by_issue, i["key"]) if i["kind"] == "issue"
+                else ("jira", by_jira, i["key"]) if i["kind"] == "ticket"
+                else ("branch", by_branch, (i["_repo_bare"], i["branch"]))
             )  # fmt: skip
             found = index.get(k)
-            i["_prs"] = sorted(every.get((id(index), k), []), key=recency, reverse=True)
+            i["_prs"] = sorted(every.get((name, k), []), key=recency, reverse=True)
         i["pr"] = _pr_brief(found["_pr_row"]) if found else None
         # Sessions and worktrees are found on the PR's branch, in its repo;
         # never on a PR's default-branch head, for the reason above.
