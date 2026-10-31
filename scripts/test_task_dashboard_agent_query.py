@@ -100,12 +100,15 @@ ROWS = [
     pr(13, "dependabot/x", bot=True, role="others", misses=()),  # bot
     pr(14, "bestdan/unsized-14"),  # no size read yet
     pr(30, "bestdan/other-30", repo=OTHER, size=(1, 1, 1, None)),
+    # A fork's PR from its `main`: never linked to the owner's `main` checkout.
+    pr(50, "main", role="others", misses=()),
     issue(1, "est:1", "status:3_started", "prio:1"),
     issue(2, "est:2", "status:2_ready"),
     issue(3, "status:2_ready"),  # unsized
     issue(4, "est:5", "status:2_ready", blocked_by=1),  # natively blocked
     issue(5, "blocked", "status:1_needs_refinement", HUMAN),
     issue(40, "est:1", repo=OTHER),
+    issue(41, repo="acme/dotfiles"),  # another owner, the same bare name
 ]
 
 SNAPSHOT = {
@@ -122,6 +125,11 @@ SNAPSHOT = {
             **stale_fx.worktree("old", "bestdan/old", "landed", "merged"),
             "repo": "finplan",
             "path": f"{WT}/old",
+        },
+        {
+            **stale_fx.worktree("main", "main", "open"),
+            "repo": "finplan",
+            "path": "/h/src/finplan",
         },
     ],  # fmt: skip
     "handoffs": [],
@@ -191,6 +199,15 @@ def seed(conn):
         " 'success', 'author', 'PAY-7', '{}')",
         ("https://github.com/acme/pay/pull/77",),
     )
+    conn.execute("UPDATE prs SET updated = '2026-10-23T00:00:00Z' WHERE number = 77")
+    # An older PR in another repo naming the same key, with a higher number.
+    conn.execute(
+        "INSERT INTO prs (url, repo, number, title, head_ref, is_draft,"
+        " review_decision, ci_state, role, issue_key, updated, raw_json) VALUES"
+        " (?, 'acme/old', 900, 'PAY-7 old', 'bestdan/PAY-7-old', 0, NULL,"
+        " 'failure', 'author', 'PAY-7', '2026-09-01T00:00:00Z', '{}')",
+        ("https://github.com/acme/old/pull/900",),
+    )
     conn.execute("INSERT INTO meta (key, value) VALUES ('server_token', ?)", (TOKEN,))
     conn.commit()
 
@@ -228,9 +245,9 @@ class ScopeTests(Case):
         ids = [s["id"] for s in doc["matched"]]
         self.assertEqual(ids, [f"repo:{REPO}", f"ws:{WS}"])
         repo = doc["matched"][0]
-        # Open items of every kind: 5 PRs, 5 issues, the open worktree and
-        # the session in it. The landed worktree is done.
-        self.assertEqual(repo["open"], 12)
+        # Open items of every kind: 6 PRs, 5 issues, two open worktrees and
+        # the session in one. The landed worktree is done.
+        self.assertEqual(repo["open"], 14)
 
     def test_a_repo_scope_lists_related_workstreams_it_did_not_match(self):
         related = self.scopes("finplan")["related"]
@@ -281,6 +298,13 @@ class ScopeTests(Case):
             self.items(scope=["zzz"])
         with self.assertRaisesRegex(agent_query.QueryError, "no repo scope"):
             self.items(scope=["repo:acme/none"])
+
+    def test_a_full_repo_scope_keeps_out_another_owners_repo(self):
+        keys = self.by_key(scope=[f"repo:{OTHER}"])
+        self.assertIn(issue_url(40, OTHER), keys)
+        self.assertNotIn(issue_url(41, "acme/dotfiles"), keys)
+        # A session knows only its directory, so it matches by bare name.
+        self.assertIn("s-work", keys)
 
     def test_epic_and_host_scopes(self):
         epic = self.by_key(scope=["epic:PAY-1"], state="todo,started,done")
@@ -371,6 +395,18 @@ class ItemTests(Case):
         self.assertEqual(keys[f"worktree:{WT}/fix-10"]["pr"]["ref"], f"{REPO}#10")
         self.assertEqual(keys["s-10"]["pr"]["ref"], f"{REPO}#10")
         self.assertNotIn("pr", keys[issue_url(2)])
+
+    def test_a_fork_pr_on_main_is_not_linked_by_branch(self):
+        keys = self.by_key()
+        self.assertNotIn("pr", keys["worktree:/h/src/finplan"])
+        self.assertNotIn("activity", keys[pr_url(50)])
+
+    def test_the_newest_pr_wins_across_repos(self):
+        # PR 900 has the higher number but is older, in another repo.
+        self.assertEqual(self.by_key()["PAY-7"]["pr"]["ref"], "acme/pay#77")
+
+    def test_dumps_with_items_only_is_valid_json(self):
+        self.assertEqual(json.loads(agent_query.dumps({"items": []})), {"items": []})
 
     def test_activity_follows_the_pr_branch(self):
         keys = self.by_key()

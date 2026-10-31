@@ -134,8 +134,10 @@ None of these needs the server running:
   what a word can mean as a scope, and one compact record per item in it,
   joined across tracker, GitHub and the fleet. Each field comes from the code
   a view already uses, so `items` adds no ranking rule. They open the DB with
-  `db.connect_read_only` (`mode=ro`, `query_only`). An item's `size` reads its
-  bucket (Little's PR test, or an `est:N` label) through `[size.minutes]`.
+  `db.connect_read_only` (`mode=ro`, `query_only`), which writes only to
+  migrate a DB that is behind the current schema, once, as `view` does. An item's `size` reads its
+  bucket (Little's PR categories by size alone, else `large_pr`, or an
+  `est:N` label) through `[size.minutes]`.
 - **`overlay <action> --source S --key K`** makes the same write a card button
   makes, and goes through the same validation (`overlay.apply`).
 - **`refresh <owner/repo#N>`** re-reads one PR or issue from GitHub in a

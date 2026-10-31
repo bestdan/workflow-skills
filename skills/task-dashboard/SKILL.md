@@ -1,7 +1,7 @@
 ---
 name: task-dashboard
 description: Install, check, sync, open, back up, read, clean up, or remove the local task dashboard — the always-on, localhost-only page that mirrors your Jira work (through acli) and GitHub PRs (through gh) into SQLite and ranks what to do next. Subcommands install | status | sync-now | open | export | import | tune | view | scopes | items | refresh | overlay | clean | uninstall. Use when the user wants that dashboard set up as a login agent on their Mac, asks whether it is running or how stale it is, wants it refreshed now, wants its link, wants to back up or restore their pins, order, snoozes and notes, wants the fleet Now's ranking tuned from their "why not now" answers, asks what a tab shows ("what's on Stale?"), wants the open work in one repo, workstream, Jira project or label as compact records ("what's open on FinPlan?", "small tasks I could do in half an hour"), asks to clean a tab up ("look at the Stale tab and clean it up"), wants an item ignored or snoozed, or wants it taken off the machine.
-argument-hint: "install | status | sync-now [--reconcile] | open | export <file> | import <file> | tune [--days N] | view <name> [--json] [--all] [--mode M] | scopes [query] | items [--scope X] [--kind K] [--state S] [--only F] [--fields F] [--limit N] | refresh <owner/repo#N> [--json] | overlay <action> | clean <view> | uninstall"
+argument-hint: "install | status | sync-now [--reconcile] | open | export <file> | import <file> | tune [--days N] | view <name> [--json] [--all] [--mode M] | scopes [query] | items [--scope X] [--kind K] [--state S] [--only F] [--fields F] [--limit N] [--offset N] [--jsonl] | refresh <owner/repo#N> [--json] | overlay <action> | clean <view> | uninstall"
 ---
 
 # task-dashboard
@@ -214,7 +214,8 @@ line per item.
 
 `view` is a whole tab; for a question about a slice of the work, use `scopes`
 and `items`, unsandboxed (inside the sandbox SQLite cannot open the WAL file
-beside the DB). Both print compact JSON and read the DB read-only.
+beside the DB). Both print compact JSON and never write, except to migrate
+a DB that is behind the current schema, once, as `view` does.
 
 - `DASH scopes <word>` says what a word can mean: each matching scope id
   (`repo:`, `ws:`, `jira:`, `epic:`, `label:`, `host:`) with its open-item
@@ -230,10 +231,11 @@ beside the DB). Both print compact JSON and read the DB read-only.
   an unsized item as small**). `--state todo,started,done` filters the status
   category (default open); `--only blocked,waiting,stale` filters derived
   facts, so "started and blocked" is both flags. `--fields` takes `brief`
-  (default; null and empty fields left out), `full` (adds evidence, risks,
-  action, branch, host, path) or exact names, which print only those plus
-  identity. `--limit`/`--offset` page it; `total` and `returned` say when a
-  list was cut. `--scope all` is no filter and is never matched as a word.
+  (the default) or `full` (adds repo, branch, host, path, parent, created,
+  updated, evidence, risks, action) — both leave out null and empty fields —
+  or exact names, which print every named field plus identity.
+  `--limit`/`--offset` page it; `total` and `returned` say when a list was
+  cut. `--jsonl` prints the header on line one, then one item a line. `--scope all` is no filter and is never matched as a word.
   The order is newest activity first, not a priority.
 
 After acting on a PR or issue (merging, closing, labelling, pushing a fix), run

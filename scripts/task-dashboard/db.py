@@ -545,12 +545,13 @@ def connect(path: "str | os.PathLike[str] | None" = None) -> sqlite3.Connection:
 def connect_read_only(
     path: "str | os.PathLike[str] | None" = None,
 ) -> sqlite3.Connection:
-    """Open the DB for a read that must not write: `mode=ro`, `query_only`.
+    """Open the DB for a read: `mode=ro` and `query_only`, so the read itself
+    never writes. The one exception comes first: a DB behind the current
+    schema is migrated once through connect(), as `view` and every other CLI
+    open would, since the readers assume the latest tables.
 
     The `sqlite3` CLI's `-readonly` fails to open the WAL-mode DB (error 14)
-    where this URI form works. A DB behind the current schema is migrated
-    first through connect(), as any other open would, since the readers
-    assume the latest tables.
+    where this URI form works.
     """
     p = db_path(path)
     if not p.exists():

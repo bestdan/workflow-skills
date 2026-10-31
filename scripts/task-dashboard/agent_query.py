@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Iterable
 
+import close_out
 import fleet_now
 import fleet_tabs
 import fleet_views
@@ -102,8 +103,19 @@ class Scope:
 Match = Callable[[Item], bool]
 
 
-def _in_repo(bare: "str | None") -> Match:
-    return lambda i: i["_repo_bare"] == bare
+def _in_repo(name: str) -> Match:
+    """An item in repo `name` (`owner/name`, or a bare directory name): an
+    item that knows its owner compares the full name; a worktree or session,
+    which knows only its directory, compares the bare one."""
+    bare = fleet_views._name(name)
+    full = name if "/" in name else None
+
+    def test(i: Item) -> bool:
+        if full and i["repo"] and "/" in i["repo"]:
+            return bool(i["repo"] == full)
+        return bool(i["_repo_bare"] == bare)
+
+    return test
 
 
 def _in_ws(ws: str) -> Match:
@@ -126,10 +138,6 @@ def _on_host(host: str) -> Match:
     return lambda i: i["host"] == host
 
 
-def _repo_scope(full: str) -> Scope:
-    return Scope(f"repo:{full}", "repo", full, _in_repo(fleet_views._name(full)))
-
-
 def _scopes(conn: sqlite3.Connection, items: list[Item]) -> list[Scope]:
     """Every scope the items and the workstreams table can name, by kind then id."""
     out: dict[str, Scope] = {}
@@ -139,7 +147,7 @@ def _scopes(conn: sqlite3.Connection, items: list[Item]) -> list[Scope]:
 
     full = {i["repo"] for i in items if i["repo"] and "/" in i["repo"]}
     for name in full:
-        add(f"repo:{name}", "repo", name, _in_repo(fleet_views._name(name)))
+        add(f"repo:{name}", "repo", name, _in_repo(name))
     # A repo only a worktree or session names, by its bare directory name.
     bare_full = {fleet_views._name(r) for r in full}
     for i in items:
@@ -175,7 +183,9 @@ def _count(scope: Scope, items: list[Item]) -> int:
 
 def match(scopes: list[Scope], word: str) -> list[Scope]:
     """The scopes `word` names: the one whose id it is, else every scope whose
-    id or title contains it, case aside. `all` is not a word: see resolve()."""
+    id or title contains it, case aside. Callers treat `all` as no filter
+    before calling this (resolve(), scopes_doc()); match itself does not
+    reserve it."""
     exact = [s for s in scopes if s.id == word]
     if exact:
         return exact
@@ -427,16 +437,22 @@ def _pr_brief(p: dict[str, Any]) -> dict[str, Any]:
 def _link_prs(items: list[Item]) -> None:
     """Each item's `pr`: a PR its own readiness; a GitHub issue the newest
     open PR that closes it; a Jira ticket the newest that names its key; a
-    session or worktree the newest on its repo and branch."""
+    session or worktree the newest on its repo and branch. Newest is the last
+    updated (else created), the number breaking a tie: one Jira key can be
+    named by PRs in several repos, whose numbers do not compare. A PR whose
+    head is a default branch is never matched by branch: a fork's `main` would
+    otherwise claim every session and checkout on the owner's `main`."""
     by_issue: dict[str, Item] = {}
     by_jira: dict[str, Item] = {}
     by_branch: dict[tuple, Item] = {}
 
-    def newer(index: dict, k: Any, pr: Item) -> None:
-        def number(x: Item) -> int:
-            return x["_pr_row"].get("number") or 0
+    def recency(x: Item) -> tuple:
+        at = score.parse_ts(x["updated"]) or score.parse_ts(x["created"])
+        return (at is not None, at.timestamp() if at else 0.0,
+                x["_pr_row"].get("number") or 0)  # fmt: skip
 
-        if k not in index or number(pr) > number(index[k]):
+    def newer(index: dict, k: Any, pr: Item) -> None:
+        if k not in index or recency(pr) > recency(index[k]):
             index[k] = pr
 
     for i in items:
@@ -449,7 +465,7 @@ def _link_prs(items: list[Item]) -> None:
                 newer(by_issue, url, i)
         if p.get("issue_key"):
             newer(by_jira, p["issue_key"], i)
-        if i["branch"]:
+        if i["branch"] and i["branch"] not in close_out.DEFAULT_BRANCHES:
             newer(by_branch, (i["_repo_bare"], i["branch"]), i)
     for i in items:
         found: "Item | None"
@@ -462,12 +478,14 @@ def _link_prs(items: list[Item]) -> None:
         else:
             found = by_branch.get((i["_repo_bare"], i["branch"]))
         i["pr"] = _pr_brief(found["_pr_row"]) if found else None
-        # Sessions and worktrees are found on the PR's branch, in its repo.
-        i["_linked"] = (
-            (found["_repo_bare"], found["branch"])
-            if found and found["branch"]
-            else (i["_repo_bare"], i["branch"])
-        )
+        # Sessions and worktrees are found on the PR's branch, in its repo;
+        # never on a PR's default-branch head, for the reason above.
+        if found is None:
+            i["_linked"] = (i["_repo_bare"], i["branch"])
+        elif found["branch"] in close_out.DEFAULT_BRANCHES:
+            i["_linked"] = (found["_repo_bare"], None)
+        else:
+            i["_linked"] = (found["_repo_bare"], found["branch"])
 
 
 def _activity(items: list[Item]) -> None:
@@ -731,7 +749,8 @@ def dumps(doc: dict[str, Any]) -> str:
         json.dumps(i, separators=(",", ":"), ensure_ascii=False) for i in items
     )
     text = json.dumps(head, separators=(",", ":"), ensure_ascii=False)[:-1]
-    return text + ',"items":[\n' + body + ("\n" if body else "") + "]}\n"
+    text += "," if head else ""
+    return text + '"items":[\n' + body + ("\n" if body else "") + "]}\n"
 
 
 def jsonl(doc: dict[str, Any]) -> str:
