@@ -638,6 +638,26 @@ class ViewsTest(unittest.TestCase):
         # An owned epic's tooltip promises nothing on Epics.
         self.assertNotIn("Keep it on Epics", self.card(page, "EPIC-2"))
 
+    def test_a_pinned_epics_button_carries_the_unpin_tooltip(self):
+        self.add_issue("EPIC-2", ME, None)  # mine, and mirrored: Pin says "Already in"
+        self.add_issue("ABC-20", THEM, "EPIC-2")
+        self.add_issue("ABC-23", THEM, "EPIC-7", scope="linked")  # other, not
+        for key in ("EPIC-2", "EPIC-7"):
+            self.conn.execute(
+                "INSERT INTO pins (source, item_key) VALUES ('jira', ?)", (key,)
+            )
+        self.conn.commit()
+        page = views.render("/epics", self.conn, CFG, NOW)
+        unpin = (
+            'data-ov="unpin" aria-label="Unpin"'
+            ' title="Unpin: rank it like any other item"'
+        )
+        for key in ("EPIC-2", "EPIC-7"):
+            card = self.card(page, key)
+            self.assertIn(unpin, card, key)
+            self.assertNotIn("Already in", card, key)
+            self.assertNotIn("Keep it on Epics", card, key)
+
     def test_a_draft_pr_card_leads_with_the_draft_icon(self):
         m = self.mirror()
         prs = {p["number"]: p for p in m.prs}

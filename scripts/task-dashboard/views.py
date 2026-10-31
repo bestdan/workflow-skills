@@ -735,13 +735,14 @@ def _epic_card(m: Mirror, g: dict[str, Any]) -> str:
     href = f"https://{m.cfg['jira']['site']}/browse/{g['key']}"
     blocked = f" · {g['blocked']} blocked" if g["blocked"] else ""
     pinned = g["key"] in m.pins
-    pin_tip = epic_pin_tip(g["role"], g["key"] in m.issues)
-    act, label, glyph = (
-        ("unpin", "Unpin", "pin-off") if pinned else ("pin", "Pin", "pin")
-    )
+    if pinned:
+        act, label, glyph, tip = "unpin", "Unpin", "pin-off", overlay.UNPIN_TIP
+    else:
+        act, label, glyph = "pin", "Pin", "pin"
+        tip = epic_pin_tip(g["role"], g["key"] in m.issues)
     controls = (
         f'<div class="ov"><button type="button" class="ov-icon" data-ov="{act}"'
-        f' aria-label="{label}" title="{pin_tip}">{icons.svg(glyph)}</button>'
+        f' aria-label="{label}" title="{tip}">{icons.svg(glyph)}</button>'
         '<button type="button" class="ov-icon" data-ov="ignore" aria-label="Ignore epic"'
         ' title="Hide this epic and everything under it">'
         f"{icons.svg('eye-off')}</button></div>"
