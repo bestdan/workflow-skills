@@ -224,6 +224,45 @@ class FigureTest(DbCase):
         self.assertEqual(f["switch_rate"]["target"], "observed")
         self.assertIsNone(f["switch_rate"]["met"])
 
+    def test_text_table(self):
+        # `dashboard.py health` without --json. Compared whole, so a dropped or
+        # reordered column (or row) fails; the values are the fixture's
+        # hand-computed answers above.
+        seed(self.conn)
+        seed_fleet(self.conn)
+        targets = {
+            "approval_per_100": "<= 40",
+            "switch_rate": "<= 50",
+            "owner_wait_median": "<= 5",  # baseline, so never judged
+        }
+        result = health.compute(self.conn, targets, START, END, fleet=True)
+        why = " — baseline: under 14 days of hook data"
+        expected = [
+            "health 2026-10-20T00:00:00.000Z -> 2026-10-21T00:00:00.000Z",
+            '  Approval-shaped and bare "y"/"yes" prompts: 37.5 per 100 prompts'
+            " (target <= 40, met; trend −62.5)",
+            "  Switch rate (prompts < 30 min apart): 75 %"
+            " (target <= 50, MISSED; trend —)",
+            "  Prompts with 3+ sessions active: 28.6 % (target observed; trend +28.6)",
+            "  Harness permission prompts: 16.7 per 100 prompts"
+            " (target observed; trend —)",
+            "  Owner waiting on agents, median [baseline]: 7 min"
+            " (target <= 5; trend —)" + why,
+            "  Owner waiting on agents, p90 [baseline]: 10 min"
+            " (target observed; trend —)" + why,
+            "  Agents waiting on owner, median [baseline]: 20 min"
+            " (target observed; trend —)" + why,
+            "  Agents waiting on owner, p90 [baseline]: 28 min"
+            " (target observed; trend —)" + why,
+            "  Open PRs awaiting the owner: 4 PRs (target observed; current)",
+            "  Issues opened : closed: — (target observed; current)"
+            " — no source yet: the GitHub sync mirrors only issues needing a human",
+            "  Designs at proposed: 1 designs (target observed; current)",
+            "  Human-review queue length: 2 PRs"
+            f" (target <= {health.gauges.REVIEW_QUEUE_CAP}, met; current)",
+        ]
+        self.assertEqual(health.text_table(result).split("\n"), expected + [""])
+
     def test_target_comparisons(self):
         self.assertIs(health.met(5, "<= 5"), True)
         self.assertIs(health.met(5, "< 5"), False)
