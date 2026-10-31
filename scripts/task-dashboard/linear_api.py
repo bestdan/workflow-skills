@@ -322,9 +322,10 @@ OPEN_STATE_TYPES = ("unstarted", "started")
 _ISSUE_NODES = """
       pageInfo { hasNextPage endCursor }
       nodes {
-        identifier title url priority priorityLabel dueDate
+        identifier title url priority priorityLabel dueDate estimate
         createdAt updatedAt startedAt
         state { name type }
+        assignee { name email isMe }
         team { key }
         labels(first: 10) { pageInfo { hasNextPage } nodes { name } }
         cycle { name endsAt isActive }
@@ -393,9 +394,12 @@ def assigned_issues(
     """The issues in OPEN_STATE_TYPES assigned to `assignee` (an email), or
     with none named to the key's own user, each: {key, title,
     url, state, state_type, priority (0 none, 1 urgent .. 4 low),
-    priority_label, due, created, updated, started, team, labels, cycle,
-    cycle_end, cycle_active, project, blocked_by, blocks}. `blocked_by` and
-    `blocks` are the open issues on the other end of a `blocks` relation.
+    priority_label, due, estimate, created, updated, started, team, labels,
+    cycle, cycle_end, cycle_active, project, project_id, assignee,
+    assignee_email, assignee_is_me, blocked_by, blocks}. `estimate` is the
+    issue's points, None when unset; `assignee` the assignee's name, None when
+    unassigned. `blocked_by` and `blocks` are the open issues on the other end
+    of a `blocks` relation.
     Raises LinearError when `assignee` names no Linear user."""
     variables: dict[str, Any] = {"types": list(OPEN_STATE_TYPES)}
     if assignee:
@@ -415,6 +419,8 @@ def assigned_issues(
             continue
         state = node.get("state") or {}
         cycle = node.get("cycle") or {}
+        project = node.get("project") or {}
+        who = node.get("assignee") or {}
         out.append(
             {
                 "key": node["identifier"],
@@ -425,6 +431,7 @@ def assigned_issues(
                 "priority": int(node.get("priority") or 0),
                 "priority_label": node.get("priorityLabel"),
                 "due": node.get("dueDate"),
+                "estimate": node.get("estimate"),
                 "created": node.get("createdAt"),
                 "updated": node.get("updatedAt"),
                 "started": node.get("startedAt"),
@@ -437,7 +444,11 @@ def assigned_issues(
                 "cycle": cycle.get("name"),
                 "cycle_end": cycle.get("endsAt"),
                 "cycle_active": bool(cycle.get("isActive")),
-                "project": (node.get("project") or {}).get("name"),
+                "project": project.get("name"),
+                "project_id": project.get("id"),
+                "assignee": who.get("name"),
+                "assignee_email": who.get("email"),
+                "assignee_is_me": bool(who.get("isMe")),
                 "blocked_by": _open_blocks(node.get("inverseRelations"), "issue"),
                 "blocks": _open_blocks(node.get("relations"), "relatedIssue"),
                 "truncated": any(

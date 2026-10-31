@@ -138,7 +138,17 @@ None of these needs the server running:
   `db.connect_read_only` (`mode=ro`, `query_only`), which writes only to
   migrate a DB that is behind the current schema, once, as `view` does. An item's `size` reads its
   bucket (Little's PR categories by size alone, else `large_pr`, or an
-  `est:N` label) through `[size.minutes]`.
+  `est:N` label, else a Linear estimate as `est:N`) through `[size.minutes]`.
+  A `ticket` is a Jira issue or, with `[linear] enabled`, a mirrored Linear
+  one, in the same shape; its `mine` is false for an unassigned or someone
+  else's issue (Jira: `views.Mirror.is_mine`; Linear: `linear.me` when set,
+  else the key's user) and null for a Linear row synced before the read
+  carried its assignee. Scopes: `jira:<PROJECT>` holds Jira tickets only;
+  `linear:<TEAM>` a Linear team's tickets. A Linear project has no scope
+  kind of its own: it is the `ws:linear:<id>` workstream, whose members are
+  the project's tickets (joined by the row's project id, else its project
+  name) plus the PRs and issues naming them. A completed or canceled project
+  is no open workstream, so its tickets fall under their team alone.
 - **`overlay <action> --source S --key K`** makes the same write a card button
   makes, and goes through the same validation (`overlay.apply`).
 - **`refresh <owner/repo#N>`** re-reads one PR or issue from GitHub in a
