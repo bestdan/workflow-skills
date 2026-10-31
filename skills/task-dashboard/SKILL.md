@@ -1,7 +1,7 @@
 ---
 name: task-dashboard
-description: Install, check, sync, open, back up, read, clean up, or remove the local task dashboard — the always-on, localhost-only page that mirrors your Jira work (through acli) and GitHub PRs (through gh) into SQLite and ranks what to do next. Subcommands install | status | sync-now | open | export | import | tune | view | scopes | items | refresh | overlay | clean | uninstall. Use when the user wants that dashboard set up as a login agent on their Mac, asks whether it is running or how stale it is, wants it refreshed now, wants its link, wants to back up or restore their pins, order, snoozes and notes, wants the fleet Now's ranking tuned from their "why not now" answers, asks what a tab shows ("what's on Stale?"), wants the open work in one repo, workstream, Jira project or label as compact records ("what's open on FinPlan?", "small tasks I could do in half an hour"), asks to clean a tab up ("look at the Stale tab and clean it up"), wants an item ignored or snoozed, or wants it taken off the machine.
-argument-hint: "install | status | sync-now [--reconcile] | open | export <file> | import <file> | tune [--days N] | view <name> [--json] [--all] [--mode M] | scopes [query] | items [--scope X] [--kind K] [--state S] [--only F] [--fields F] [--limit N] [--offset N] [--jsonl] | refresh <owner/repo#N> [--json] | overlay <action> | clean <view> | uninstall"
+description: Install, check, sync, open, back up, read, clean up, or remove the local task dashboard — the always-on, localhost-only page that mirrors your Jira work (through acli) and GitHub PRs (through gh) into SQLite and ranks what to do next. Subcommands install | status | sync-now | open | export | import | tune | view | scopes | items | refresh | overlay | plan | clean | uninstall. Use when the user wants that dashboard set up as a login agent on their Mac, asks whether it is running or how stale it is, wants it refreshed now, wants its link, wants to back up or restore their pins, order, snoozes and notes, wants the fleet Now's ranking tuned from their "why not now" answers, asks what a tab shows ("what's on Stale?"), wants the open work in one repo, workstream, Jira project or label as compact records ("what's open on FinPlan?", "small tasks I could do in half an hour"), asks to clean a tab up ("look at the Stale tab and clean it up"), wants an item ignored or snoozed, or wants it taken off the machine.
+argument-hint: "install | status | sync-now [--reconcile] | open | export <file> | import <file> | tune [--days N] | view <name> [--json] [--all] [--mode M] | scopes [query] | items [--scope X] [--kind K] [--state S] [--only F] [--fields F] [--limit N] [--offset N] [--jsonl] | refresh <owner/repo#N> [--json] | overlay <action> | plan set|show|clear | clean <view> | uninstall"
 ---
 
 # task-dashboard
@@ -36,7 +36,7 @@ the server on `127.0.0.1`, which the sandbox's network filter may refuse.
 `refresh` makes one `gh` call, plus the `review-requested:@me` search (one
 call per page) for someone else's PR with a team review request, and one
 `gh pr view` for a PR with more than 100 checks.
-`open`, `export`, `import`, `tune`, `view` and `overlay` touch only local files.
+`open`, `export`, `import`, `tune`, `view`, `overlay` and `plan` touch only local files.
 
 `status`, `sync-now`, `open` and `uninstall` use the config and DB paths that
 `install` recorded in the plist, unless a flag or a `TASK_DASHBOARD_*` variable
@@ -148,7 +148,8 @@ LAN address.
 ## export, import
 
 The overlay (pins, order, snoozes, notes, kind tags, ignores, each view's
-include filter, the fleet Now's "why not now" answers and its saved mode) is the one thing on this machine that cannot be
+include filter, the fleet Now's "why not now" answers and its saved mode, and
+the plans) is the one thing on this machine that cannot be
 rebuilt from Jira or GitHub.
 
 - `DASH export <file>` writes it as JSON. With no file it prints to stdout.
@@ -261,6 +262,29 @@ makes (`ignore`, `unignore`, `snooze --until YYYY-MM-DD`, `pin`, `unpin`,
 `note --text`, `mode --mode little`, ...), through the same validation,
 straight to the DB. Exit 1
 means it was refused and nothing changed; the message is the server's.
+
+`DASH plan` keeps the ordered answer to "what next": a list of items for one
+scope, a reason each. The overlay carries it, so export and import do too.
+
+- `DASH plan set --by <author> --file <list.json|-> [--scope X] [--kind
+  standing|session] [--minutes N] [--mode M]`. The file is a JSON list, in
+  order, of `{"source","key","reason"}` objects (reason: one line, 500
+  characters at most), each optionally with `action` (`do`, `finish`,
+  `unblock`, `review`, `defer`, `drop`) and `est_min`. `source` and `key` are
+  as `items` prints them. Every entry must be in the mirror, open or done;
+  the refusal names each key that is not.
+- A plan belongs to exactly **one** scope id, or to `all` (the default). A
+  word that matches several scopes is refused, naming them; pass one id from
+  `scopes`. There is one plan per scope and kind, so `set` replaces.
+- `standing` (the default) stays until cleared. `--minutes`, or `--kind
+  session`, makes a session plan, which expires at the next 04:00 host local
+  time (a plan set between midnight and 04:00 expires that morning). `show`
+  still lists an expired plan, with `expired: true`.
+- `--by` names the author, free text (`claude-finplan`, `owner`).
+- `DASH plan show [--scope X] [--kind K]` prints the plans, with each one's
+  `est_min_sum`; `DASH plan clear --scope X [--kind K]` removes it (`--scope
+  all` for the all-scope plan; both kinds without `--kind`).
+- Exit 2 for a refused value, 1 for an unreadable file or DB.
 
 ## clean
 

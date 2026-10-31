@@ -77,7 +77,13 @@ class DbTests(TmpCase):
     def test_fresh_db_has_all_tables_and_wal(self):
         conn = db.connect(self.tmp / "d.db")
         self.assertTrue(
-            set(db.MIRROR_TABLES + db.OVERLAY_TABLES + ("meta",)) <= self.tables(conn)
+            set(
+                db.MIRROR_TABLES
+                + db.OVERLAY_TABLES
+                + db.OVERLAY_PLAN_TABLES
+                + ("meta",)
+            )
+            <= self.tables(conn)
         )
         self.assertEqual(conn.execute("PRAGMA journal_mode").fetchone()[0], "wal")
         ver = conn.execute(

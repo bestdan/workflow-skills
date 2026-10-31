@@ -1,11 +1,12 @@
 """The overlay: the user's pins, pinned order, snoozes, notes, kind tags,
 ignores, last visit, each view's remembered include filter, the answers to
-Now's "why not now" picker, and the fleet Now's mode.
+Now's "why not now" picker, the fleet Now's mode, and the plans agents set.
 
 Every row is keyed by (source, item_key), the same pair as `issues`, except
 `last_visit` and `now_mode`, one row each for the whole overlay, and
 `view_includes`, which is keyed by view name (include.py), and `why_not`,
-which holds any number of answers per item (whynot.py reads them). The sync
+which holds any number of answers per item (whynot.py reads them), and
+`plans`, keyed by (scope, kind) (plans.py writes them). The sync
 never writes these tables, and nothing here reads `issues`: a row for an item
 that has left the mirror is kept as is, and the views simply have no card to
 show it on. It is the only state on the machine that cannot be rebuilt from
@@ -36,10 +37,11 @@ import score
 EXPORT_FORMAT = "task-dashboard-overlay"
 # 2 added kind_tags, focus and last_visit; 3 added ignores; 4 added
 # view_includes; 5 dropped focus, a feature since removed; 6 added why_not; 7
-# added now_mode. An older file still imports, with what it lacks empty and its
-# focus rows dropped, so a backup taken before an upgrade can be restored.
-EXPORT_VERSION = 7
-IMPORT_VERSIONS = (1, 2, 3, 4, 5, 6, 7)
+# added now_mode; 8 added plans. An older file still imports, with what it lacks
+# empty and its focus rows dropped, so a backup taken before an upgrade can be
+# restored.
+EXPORT_VERSION = 8
+IMPORT_VERSIONS = (1, 2, 3, 4, 5, 6, 7, 8)
 MAX_KEY = 512
 MAX_BODY = 256 * 1024  # a POST body; room for a long note, percent-encoded
 MAX_NOTE = 20_000
@@ -87,6 +89,19 @@ WHY_NOT_COLUMNS = (
 # The first is the default: what Now shows with no saved mode.
 NOW_MODES = ("ship", "little", "deep", "tidy")
 
+# Plans (plans.py). `standing` stays until cleared; `session` expires.
+PLAN_KINDS = ("standing", "session")
+PLAN_ACTIONS = ("do", "finish", "unblock", "review", "defer", "drop")
+MAX_PLAN_ENTRIES = 200
+MAX_PLAN_REASON = 500
+MAX_PLAN_AUTHOR = 200
+PLAN_ENTRY_FIELDS = {"source", "key", "reason", "action", "est_min"}
+# A `plans` row as export writes it.
+PLAN_COLUMNS = (
+    "scope", "kind", "entries", "author", "mode", "minutes", "created_at",
+    "expires_at",
+)  # fmt: skip
+
 ACTIONS = (
     "pin", "unpin", "order", "snooze", "note", "tag", "visit", "ignore",
     "unignore", "include", "whynot", "mode",
@@ -112,6 +127,82 @@ def _ident(value: Any, what: str) -> str:
         raise OverlayError(f"{what} must be a non-empty string")
     if len(value) > MAX_KEY or _CONTROL.search(value):
         raise OverlayError(f"{what} is too long or has control characters")
+    return value
+
+
+def check_plan_entries(value: Any, what: str = "entries") -> "list[dict[str, Any]]":
+    """A plan's entries, validated and normalised (field order fixed); else
+    OverlayError naming the entry. Whether each item is in the mirror is the
+    caller's to check: import does not, so a backup restores whole."""
+    if not isinstance(value, list) or not value:
+        raise OverlayError(f"{what} must be a non-empty JSON list")
+    if len(value) > MAX_PLAN_ENTRIES:
+        raise OverlayError(f"{what} has more than {MAX_PLAN_ENTRIES} entries")
+    out: list[dict[str, Any]] = []
+    seen: set[Item] = set()
+    for i, e in enumerate(value):
+        where = f"{what}[{i}]"
+        if not isinstance(e, dict):
+            raise OverlayError(f"{where} must be an object")
+        extra = sorted(set(e) - PLAN_ENTRY_FIELDS)
+        if extra:
+            raise OverlayError(f"{where}: unknown field(s): {', '.join(extra)}")
+        for need in ("source", "key", "reason"):
+            if need not in e:
+                raise OverlayError(f"{where}: {need} is required")
+        item = (
+            _ident(e["source"], f"{where}: source"),
+            _ident(e["key"], f"{where}: key"),
+        )
+        reason = e["reason"]
+        if (
+            not isinstance(reason, str)
+            or not reason.strip()
+            or len(reason) > MAX_PLAN_REASON
+            or _CONTROL.search(reason)
+        ):
+            raise OverlayError(
+                f"{where}: reason must be one non-empty line of at most"
+                f" {MAX_PLAN_REASON} characters"
+            )
+        if item in seen:
+            raise OverlayError(f"{where}: duplicate {item[0]}:{item[1]}")
+        seen.add(item)
+        entry: dict[str, Any] = {"source": item[0], "key": item[1], "reason": reason}
+        if e.get("action") is not None:
+            if e["action"] not in PLAN_ACTIONS:
+                raise OverlayError(
+                    f"{where}: action must be one of {', '.join(PLAN_ACTIONS)},"
+                    f" got {e['action']!r}"
+                )
+            entry["action"] = e["action"]
+        if e.get("est_min") is not None:
+            est = e["est_min"]
+            if type(est) is not int or est < 0:
+                raise OverlayError(f"{where}: est_min must be a non-negative integer")
+            entry["est_min"] = est
+        out.append(entry)
+    return out
+
+
+def check_plan_author(value: Any, what: str = "author") -> str:
+    if (
+        not isinstance(value, str)
+        or not value.strip()
+        or len(value) > MAX_PLAN_AUTHOR
+        or _CONTROL.search(value)
+    ):
+        raise OverlayError(
+            f"{what} must be a non-empty line of at most {MAX_PLAN_AUTHOR} characters"
+        )
+    return value
+
+
+def check_plan_minutes(value: Any, what: str = "minutes") -> "int | None":
+    if value is None:
+        return None
+    if type(value) is not int or value <= 0:
+        raise OverlayError(f"{what} must be a positive integer, got {value!r}")
     return value
 
 
@@ -608,6 +699,7 @@ def export(conn: sqlite3.Connection, now: "datetime | None" = None) -> dict[str,
     views: list[dict[str, Any]] = []
     answers: list[dict[str, Any]] = []
     mode: "dict[str, Any] | None" = None
+    plans: list[dict[str, Any]] = []
     # One read transaction, so every table comes from the same snapshot: a pin
     # committed between two SELECTs would otherwise give a file import refuses.
     conn.execute("BEGIN")
@@ -638,6 +730,12 @@ def export(conn: sqlite3.Connection, now: "datetime | None" = None) -> dict[str,
         row = conn.execute("SELECT mode, set_at FROM now_mode WHERE id = 1").fetchone()
         if row and row[0] in NOW_MODES:
             mode = {"mode": row[0], "set_at": row[1]}
+        for row in conn.execute(
+            f"SELECT {', '.join(PLAN_COLUMNS)} FROM plans ORDER BY scope, kind"
+        ):
+            plan = dict(zip(PLAN_COLUMNS, row))
+            plan["entries"] = _json_or(plan["entries"], [])
+            plans.append(plan)
     finally:
         conn.rollback()
     return {
@@ -648,6 +746,7 @@ def export(conn: sqlite3.Connection, now: "datetime | None" = None) -> dict[str,
         "view_includes": views,
         "why_not": answers,
         "now_mode": mode,
+        "plans": plans,
         "tables": tables,
     }
 
@@ -808,6 +907,49 @@ def _check_now_mode(value: Any) -> list[tuple[Any, ...]]:
     return [(now_mode_of(value["mode"], "now_mode: mode"), at)]
 
 
+def _check_plans(value: Any) -> list[tuple[Any, ...]]:
+    """A version 8 file's `plans`, as rows in PLAN_COLUMNS order. The entries
+    are checked for shape only, never against the mirror: a backup must
+    restore even when an item has since left it."""
+    if not isinstance(value, list):
+        raise OverlayError("plans is not a list")
+    out: list[tuple[Any, ...]] = []
+    seen: set[tuple[str, str]] = set()
+    for i, row in enumerate(value):
+        where = f"plans[{i}]"
+        if not isinstance(row, dict) or set(row) != set(PLAN_COLUMNS):
+            raise OverlayError(f"{where} must have exactly: {', '.join(PLAN_COLUMNS)}")
+        scope = _ident(row["scope"], f"{where}: scope")
+        if row["kind"] not in PLAN_KINDS:
+            raise OverlayError(f"{where}: kind must be one of {', '.join(PLAN_KINDS)}")
+        if (scope, row["kind"]) in seen:
+            raise OverlayError(f"{where}: duplicate plan {scope} {row['kind']}")
+        seen.add((scope, row["kind"]))
+        entries = check_plan_entries(row["entries"], f"{where}: entries")
+        mode = row["mode"]
+        if mode is not None:
+            now_mode_of(mode, f"{where}: mode")
+        for col in ("created_at", "expires_at"):
+            at = row[col]
+            if (at is None and col == "created_at") or (
+                at is not None and (not isinstance(at, str) or not _STAMP.fullmatch(at))
+            ):
+                raise OverlayError(f"{where}: {col} must be YYYY-MM-DDTHH:MM:SSZ")
+        out.append(
+            (
+                scope,
+                row["kind"],
+                json.dumps(entries, separators=(",", ":"), ensure_ascii=False),
+                check_plan_author(row["author"], f"{where}: author"),
+                mode,
+                check_plan_minutes(row["minutes"], f"{where}: minutes"),
+                row["created_at"],
+                row["expires_at"],
+            )
+        )
+    return out
+
+
 def validate(
     doc: Any,
 ) -> "tuple[dict[str, list[tuple[Any, ...]]], str | None]":
@@ -819,7 +961,8 @@ def validate(
     version 1 to 3 file has no `view_includes`, which comes back empty. A
     version 2 to 4 file's `focus` rows are dropped unread. A version 1 to 5
     file has no `why_not`, which comes back empty. A version 1 to 6 file has
-    no `now_mode`, which comes back empty: Now reads that as its first mode.
+    no `now_mode`, which comes back empty: Now reads that as its first mode. A
+    version 1 to 7 file has no `plans`, which comes back empty.
     """
     if not isinstance(doc, dict):
         raise OverlayError("import file is not a JSON object")
@@ -869,6 +1012,14 @@ def validate(
         if "now_mode" not in doc:
             raise OverlayError("now_mode is missing (null when none is saved)")
         mode = _check_now_mode(doc["now_mode"])
+    if version < 8:
+        if "plans" in doc:
+            raise OverlayError(f"a version {version} file has no plans")
+        plans: list[tuple[Any, ...]] = []
+    else:
+        if "plans" not in doc:
+            raise OverlayError("plans is missing (an empty list when none)")
+        plans = _check_plans(doc["plans"])
     out: dict[str, list[tuple[Any, ...]]] = {}
     for table, cols in COLUMNS.items():
         rows = tables.get(table, [])
@@ -909,6 +1060,7 @@ def validate(
     out["view_includes"] = views
     out["why_not"] = answers
     out["now_mode"] = mode
+    out["plans"] = plans
     return out, last_visit
 
 
@@ -922,8 +1074,14 @@ def import_(conn: sqlite3.Connection, doc: Any) -> dict[str, int]:
             *db.OVERLAY_SINGLETONS,
             *db.OVERLAY_VIEW_TABLES,
             *db.OVERLAY_LOG_TABLES,
+            *db.OVERLAY_PLAN_TABLES,
         ):
             conn.execute(f'DELETE FROM "{table}"')
+        conn.executemany(
+            f"INSERT INTO plans ({', '.join(PLAN_COLUMNS)})"
+            f" VALUES ({', '.join('?' * len(PLAN_COLUMNS))})",
+            rows["plans"],
+        )
         conn.executemany(
             f"INSERT INTO why_not ({', '.join(WHY_NOT_COLUMNS)})"
             f" VALUES ({', '.join('?' * len(WHY_NOT_COLUMNS))})",
