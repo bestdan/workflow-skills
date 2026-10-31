@@ -109,8 +109,10 @@ def seed(conn, *, first_event=None):
 def two_pass_waits(conn, start, end):
     """The pre-#1145 reference: ``waits(conn, start, end)`` as it was, one full
     scan of session_events per window. The one-pass code must match it."""
-    pending_prompt, pending_stop = {}, {}
-    owner, agent = [], []
+    pending_prompt: dict[tuple, datetime] = {}
+    pending_stop: dict[tuple, datetime] = {}
+    owner: list[float] = []
+    agent: list[float] = []
     for t, (host, sid, event, _) in health._rows(
         conn, health._EVENTS, health._EPOCH, end
     ):
@@ -248,7 +250,7 @@ class FigureTest(DbCase):
 
     def test_waits_scan_session_events_once_per_compute(self):
         seed(self.conn)
-        statements = []
+        statements: list[str] = []
         self.conn.set_trace_callback(statements.append)
         health.compute(self.conn, {}, START, END, fleet=False)
         self.conn.set_trace_callback(None)
