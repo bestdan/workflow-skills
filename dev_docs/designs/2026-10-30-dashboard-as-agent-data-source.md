@@ -114,7 +114,9 @@ consequence for this design:
 - **Rankings are argued with, not trusted.** Now shows its score terms, Now
   modes exist because one ranking was wrong for the owner's session, and
   `tune` learns from "why not now". An agent's prioritization should be just
-  as inspectable: a reason per item, shown on the card.
+  as inspectable: a reason per item, shown on the card. And the owner's
+  changes to it should be a learning loop, not a correction that's lost:
+  each one is a labelled disagreement the next plan should learn from (§5).
 
 ## Proposal
 
@@ -122,6 +124,12 @@ Five additions to `dashboard.py`, a skill procedure, and two sources, plus an
 optional `sql` escape hatch (see Decisions). Each
 read needs no server, reads the DB in `mode=ro`, and prints JSON with a
 `schema` version, like `view` does.
+
+**Every read lets the agent ask for less.** An agent that knows what it wants
+should get only that, because every unneeded field is context spent. So each
+read takes flags that narrow its output: `--fields` on `items`, `--sections` on
+`item` and `brief`, and `--limit` wherever there is a list. The defaults suit
+an agent that doesn't yet know what it needs.
 
 ### 1. `scopes [query]`: name what X can mean
 
@@ -141,6 +149,41 @@ matched. `finplan` matches the repo and four Linear projects. Every other
 command takes `--scope`, repeatable; a bare word goes through the same match,
 and the output's `scope` field names what it resolved to. The agent reports
 that back rather than guessing.
+
+The output shape, for `scopes finplan` (ids, titles and counts illustrative):
+
+```json
+{
+  "schema": 1,
+  "query": "finplan",
+  "matched": [
+    {
+      "id": "repo:bestdan/finplan",
+      "kind": "repo",
+      "title": "bestdan/finplan",
+      "open": 51
+    },
+    {
+      "id": "ws:lin-3f2a",
+      "kind": "workstream",
+      "title": "FinPlan Tax Engine",
+      "open": 9
+    }
+  ],
+  "related": [
+    {
+      "id": "ws:lin-77c1",
+      "kind": "workstream",
+      "title": "Decumulation",
+      "members_in_scope": 6
+    }
+  ]
+}
+```
+
+`open` counts open items of every kind. `related` appears only for a repo
+scope, as the next paragraph explains. With no query, `matched` lists every
+scope and `related` is absent.
 
 **Names miss most of the work, so a repo scope also reports `related`
 workstreams.** On the mini's mirror, `bestdan/finplan` PRs belong to 14
@@ -162,7 +205,7 @@ titled "Allow-listed `gh api` writes".
 ```
 dashboard.py items --scope finplan [--kind issue,pr,session,worktree]
     [--state todo,started,done] [--only blocked,waiting,stale]
-    [--fields brief|full] [--limit N] [--offset N] [--jsonl]
+    [--fields brief|full|<name,...>] [--limit N] [--offset N] [--jsonl]
 ```
 
 `--state` filters the tracker's status category, the `state` field below.
@@ -219,8 +262,10 @@ GitHub issues carry an `est:` label, and every open PR row carries
 (`fleet_now.LITTLE_FILES`, `LITTLE_LINES`). Most open issues in the owner's
 Linear team carry a 1, 2, 3 or 5-point estimate.
 
-`full` adds the evidence, risks and action that `view` items carry. The
-output always states `total` and `returned`, so a truncated list says so.
+`full` adds the evidence, risks and action that `view` items carry. A comma
+list names exact fields (`--fields key,title,size,pr`), and identity is always
+included. The output always states `total` and `returned`, so a truncated list
+says so.
 
 The fields come from the same code the views use: `candidate.py` builds the
 Now terms, `needs.py` the session match, `workstreams.py` the membership.
@@ -237,6 +282,10 @@ have unpushed commits, its workstreams, its links both ways (refs for Jira's
 full history for it, including every why-not answer. This is what an agent
 reads before it says "close this" or "this one first".
 
+`--sections tracker,prs,sessions,worktrees,links,overlay` prints only the
+parts named, so "is the PR on PRE-938 green?" costs one section, not the
+whole dossier.
+
 The session text is the mirror's capped summary and nothing more: a first
 prompt of at most 200 characters and a last ask of at most 400
 (`snapshot.py`). `view --json` already prints both for every session item, so
@@ -249,6 +298,7 @@ off the machine.
 
 ```
 dashboard.py brief [--scope X ...] [--mode ship|little|deep|tidy] [--minutes N]
+    [--sections 1,2,...]
 ```
 
 With no `--scope`, the brief covers every scope the instance has, which is
@@ -341,6 +391,22 @@ with their `est_min` is how `[size.minutes]` gets tuned, the same way `tune`
 proposes weights: a suggestion with its evidence, applied only when the owner
 approves it.
 
+**Estimating duration is a development area, not a solved input.** Agents are
+poor at saying how long a task will take, and a bucket-to-minutes table is
+only a starting point. The calibration above is the cheap first step. Two
+richer measurements are available from data the mirror already holds, and
+each gets its own design once session plans have produced a few weeks of
+records to test against:
+
+- **Actual time per item.** Session snapshots carry start and last-activity
+  times, and a session matches an item through its branch. Summing active
+  session time per item gives a measured duration to set against `est_min`,
+  per bucket and per repo.
+- **Better predictors than the bucket.** With measured durations, the
+  question becomes which signals predict them: PR size, labels, repo, the
+  kind of change, whether a design exists. The answer stays a visible
+  formula the owner can read, like Now's weights, not a model call.
+
 Rejected: writing the order into the existing `order` table and the reasons
 into `notes`. `order` is one global hand-ordering, and a notes field the agent
 overwrites would lose what the owner wrote there. A plan is a separate thing
@@ -393,6 +459,20 @@ comments on its PR, the last ask of the session that was writing it, and the
 decision that's still open. The plan has one item, which is Deep's WIP of
 one.
 
+#### Other asks the procedure should recognize
+
+Each maps onto the same commands; none needs a new one.
+
+| Ask                                          | Mode and flags                  | What the agent reads first                                |
+| -------------------------------------------- | ------------------------------- | --------------------------------------------------------- |
+| "What can I merge right now?"                | Ship                            | brief section 2, PRs ready to merge                       |
+| "What's waiting on me?" / "before I log off" | Ship, `items --only waiting`    | sessions waiting on the owner, PRs in the review queue    |
+| "What's blocking FinPlan?"                   | Ship, `--scope`                 | brief section 3, then `item` on the top blockers          |
+| "Clean up" / "what's rotting?"               | Tidy                            | brief section 4 under Tidy; hands off to `clean`          |
+| "Plan my week on X"                          | Ship, `--scope`, no `--minutes` | the whole brief; writes a standing plan                   |
+| "Where was I on X?"                          | none, `--scope`                 | brief section 2, then `item` on the newest active session |
+| "What's next after this?" (mid-session)      | the session plan's mode         | the live session plan; its next unticked item             |
+
 The procedure never writes to a tracker. Moving a ticket, closing an issue or merging a
 PR goes through the tracker's own handler or command, which the card's
 `action` already names.
@@ -402,6 +482,10 @@ PR goes through the tracker's own handler or command, which the card's
 Without this, "prioritize FinPlan" sees PRs and sessions, but not the
 backlog. A Linear issues step writes `source = 'linear'` items, and a
 candidate builder puts them behind the shared ranker's seam.
+
+Linear ingestion is being worked separately. This section states what the
+agent read needs from it; where that work decides differently, it wins, and
+this section follows.
 
 It mirrors every open issue (backlog, unstarted, started) of the teams that
 the Workstreams step's projects belong to. `workstreams.py` already derives
@@ -440,12 +524,18 @@ dashboard's value is, and they live in Python. An agent writing its own SQL
 would re-derive them and get them subtly wrong, and break on the next
 migration.
 
+Fixed commands are also bounded. Each one is a known query with known
+indexes, so it can be tested, timed and optimized like the views are. An
+agent's ad hoc SQL can scan every table or join without limit, and nothing
+catches that until a call is slow.
+
 Kept as an escape hatch: `dashboard.py sql "<select>"`, which opens the DB
 `mode=ro` with `PRAGMA query_only`, against a small set of documented
 `agent_*` views (`agent_items`, `agent_links`) that are the only stable
 names. The tables stay private, and that is a security property, not only a
 stability one: `meta` holds the page's server token in plain text, so `sql`
-refuses any query that names something other than an `agent_*` view.
+refuses any query that names something other than an `agent_*` view. It also
+caps rows returned and run time, for the reason above.
 
 ### The brief is deterministic; the judgment is the agent's
 
@@ -475,6 +565,12 @@ changes what a saved plan means.
 - **Both instances in one question.** "Prioritize everything" across the work
   laptop and the mini means two DBs. Out of scope: the instances share no
   data on purpose.
+- **An agent chat inside the dashboard.** A pane on the page where the owner
+  works with an agent over the cards on screen. It keeps the rule that the
+  dashboard never calls a model if the pane starts or attaches to a Claude
+  session on the host, as Remote Control does, and that session uses these
+  same commands. The scope could be large (auth, streaming, a session per
+  page), so it gets its own design once the CLI exists.
 - **Scheduled briefs.** A morning `brief` per active workstream, sent to the
   phone, is one `/schedule` routine once the commands exist.
 
