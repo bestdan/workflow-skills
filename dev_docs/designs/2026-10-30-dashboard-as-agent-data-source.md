@@ -54,7 +54,7 @@ reasons:
 **Some trackers are only half mirrored.** Linear is a grouping: the
 Workstreams step reads Linear _projects_, and a PR carrying a Linear key joins
 its project, but Linear _issues_ never become items. For FinPlan that is most
-of the work. The mirror holds five FinPlan Linear projects, 49 open
+of the work. The mirror holds four Linear projects named for FinPlan, 49 open
 `bestdan/finplan` PRs and 14 worktrees, and two GitHub issues. The backlog an
 owner would prioritize lives in Linear team PRE and isn't there. repo-pr task
 files aren't mirrored either. The shared-ranker design
@@ -118,7 +118,8 @@ consequence for this design:
 
 ## Proposal
 
-Five additions to `dashboard.py`, a skill procedure, and one source. Each
+Five additions to `dashboard.py`, a skill procedure, and two sources, plus an
+optional `sql` escape hatch (see Decisions). Each
 read needs no server, reads the DB in `mode=ro`, and prints JSON with a
 `schema` version, like `view` does.
 
@@ -136,18 +137,40 @@ count of open items:
 | host       | `host:lindev`               | sessions, worktrees                       |
 
 With a query, it matches ids and titles case-insensitively and prints what
-matched. `finplan` matches the repo and the five Linear projects. Every
-other command takes `--scope`, repeatable; a bare word goes through the same
-match, and the output's `scope` field names what it resolved to. The agent
-reports that back rather than guessing.
+matched. `finplan` matches the repo and four Linear projects. Every other
+command takes `--scope`, repeatable; a bare word goes through the same match,
+and the output's `scope` field names what it resolved to. The agent reports
+that back rather than guessing.
+
+**Names miss most of the work, so a repo scope also reports `related`
+workstreams.** On the mini's mirror, `bestdan/finplan` PRs belong to 14
+Linear projects, and 10 of them have names that don't mention FinPlan:
+Decumulation, Cashflow Modeling, Funding Sources Framework and others. A
+match on the bare word `fin` is no better: it also hits a Linear project about
+`find-candidates`. So a repo scope lists, under `related`, every workstream
+with a member in that repo, with the member count. The agent shows that list
+to the owner and adds the ones it confirms as explicit `ws:` ids. They are
+never included automatically, because membership changes with each sync, and
+a stored plan must keep meaning what the agent chose.
+
+**`all` is reserved.** `--scope all` means no filter on every command, and is
+never fuzzy-matched. Without the reservation, `all` would match a design doc
+titled "Allow-listed `gh api` writes".
 
 ### 2. `items`: one compact record per item
 
 ```
 dashboard.py items --scope finplan [--kind issue,pr,session,worktree]
-    [--state open|started|blocked|waiting|stale] [--fields brief|full]
-    [--limit N] [--offset N] [--jsonl]
+    [--state todo,started,done] [--only blocked,waiting,stale]
+    [--fields brief|full] [--limit N] [--offset N] [--jsonl]
 ```
+
+`--state` filters the tracker's status category, the `state` field below.
+`--only` filters on facts the dashboard derives, which hold independently of
+status: `blocked` (a non-empty or non-zero `blocked_by`), `waiting` (a session on the item
+is waiting on the owner, as Needs you decides it) and `stale` (the item is on
+the Stale tab by its evidence rule). Keeping them on two flags is what lets an
+agent ask for "started and blocked".
 
 Every source's items, in one record shape. The `brief` record is the fields a
 prioritizer reads, around 60 to 100 tokens each:
@@ -163,7 +186,7 @@ prioritizer reads, around 60 to 100 tokens each:
 | `workstreams`                  | ids of the workstreams it belongs to                            |
 | `pr`                           | the linked PR's `{ref, ci, review, draft, co_reviewed}` or null |
 | `activity`                     | live session or worktree on it: `{host, state, waiting_since}`  |
-| `blocks`, `blocked_by`         | refs, where the source has links                                |
+| `blocks`, `blocked_by`         | refs where the mirror holds links (Jira), else counts (GitHub)  |
 | `overlay`                      | pinned, snoozed until, ignored, note, last why-not reason       |
 | `now`                          | its Now tier and score terms, when Now ranks it                 |
 | `size`                         | `{bucket, est_min, from}`, or null when unsized (see below)     |
@@ -180,7 +203,7 @@ into a rough estimate and says where it came from:
 - `est_min` reads the bucket through a config table, `[size.minutes]`, with
   defaults such as bot PR 5, docs PR 10, small PR 15, `est:1` 20, `est:2` 45.
   These are the owner's numbers to tune, not a measurement. They ship as
-  defaults because `--minutes` and the session-plan calibration (section 5)
+  defaults because `--minutes` and the session-plan calibration (§5)
   both read `est_min`. With no numbers, the agent would convert `est:1` to
   minutes inside the model, differently each session and out of sight.
 - `from` names the evidence, for example `label est:1` or
@@ -208,7 +231,9 @@ Now terms, `needs.py` the session match, `workstreams.py` the membership.
 Everything the mirror holds about one item, joined: the tracker record, every
 linked PR with its checks, the sessions on its branch with their first prompt
 and last ask (when transcripts are collected), the worktrees and whether they
-have unpushed commits, its workstreams, its links both ways, and the overlay's
+have unpushed commits, its workstreams, its links both ways (refs for Jira's
+`links` table; for GitHub issues the mirror holds only counts of open blockers,
+`github_fleet._blocks`), and the overlay's
 full history for it, including every why-not answer. This is what an agent
 reads before it says "close this" or "this one first".
 
@@ -249,10 +274,11 @@ deterministic projection of the mirror, testable like the views are.
 **`--mode` uses Now's modes rather than a new vocabulary.** The modes already
 answer the questions a time-boxed request asks: Little is "what can I knock
 out fast", Deep is "which decision unblocks the most", Tidy is "what is
-rotting". With `--mode`, section 4 is that mode's collector and order, exactly
+rotting". With `--mode`, brief section 4 is that mode's collector and order, exactly
 as `view now --mode` would build it, but over the scope and not capped at the
-page's list length. Sections 1, 2 and 5 stay, because in-flight work and the
-owner's snoozes matter in every mode.
+page's list length. Only brief section 4 changes; the others stay, because
+in-flight work, blockers, the owner's signals and the gaps matter in every
+mode.
 
 **`--minutes` budgets the candidates, it doesn't pick them.** The brief keeps
 taking candidates in the mode's order until their `est_min` sum reaches about
@@ -260,17 +286,18 @@ twice the budget, so the agent has room to choose and swap. It then lists the
 unsized candidates separately, since they could fit or not. Packing the box is
 the agent's job, because only the agent can weigh "this one is 20 minutes but
 it unblocks three PRs". Deep ignores the sum and keeps its WIP of one: an hour
-of deep work goes to one item, and the brief gives that item's dossier
-(section 3) inline, so the agent can open the session with what's needed to
+of deep work goes to one item, and the brief gives that item's `item` dossier
+(§3) inline, so the agent can open the session with what's needed to
 resume it.
 
 ### 5. `plan`: where the answer goes
 
-A new overlay table, `plans`, keyed by scope. The scope is a resolved scope id,
-or `all` for a plan across every scope:
+A new overlay table, `plans`, keyed by scope and kind (`standing` or
+`session`), so both kinds can exist for one scope at once. The scope is a
+resolved scope id, or `all` for a plan across every scope:
 
 ```
-dashboard.py plan set [--scope ws:<id> | --scope all] [--minutes N] --file plan.json
+dashboard.py plan set [--scope <scope-id> | --scope all] [--minutes N] --file plan.json
 dashboard.py plan show|clear [--scope …]
 ```
 
@@ -292,8 +319,24 @@ issue closed since the plan was made. A session plan wins over a standing
 plan while it lasts. A plan is overlay, so `export` and `import` back it up
 like pins and notes are.
 
+**A tick needs a positive closed signal; leaving the mirror is not one.** The
+GitHub issue mirror holds only open issues, and a row also disappears when a
+repo is archived, an issue is transferred, or a search returns less. This is
+the close-out checklist's rule too (`close_out.py`). The signals are:
+
+- for the owner's PRs, a merged `closed_pr` row;
+- for Jira, the done window's `resolution_date`;
+- for everything else (GitHub issues and other people's PRs), the
+  single-item `refresh`, which reports `merged`, `closed`, `archived` or
+  `not_found`.
+
+Ticks are drawn from mirror rows only. The plan's items are refreshed at each
+sync while the plan is live and once at expiry, never on page load, so Plan
+mode never calls GitHub to draw a page.
+
 **A finished session plan is a calibration record.** When a session plan
-expires, the dashboard records which items closed and when. Comparing that
+expires, the dashboard records which items closed and when, by the signals
+above. Comparing that
 with their `est_min` is how `[size.minutes]` gets tuned, the same way `tune`
 proposes weights: a suggestion with its evidence, applied only when the owner
 approves it.
@@ -350,7 +393,7 @@ comments on its PR, the last ask of the session that was writing it, and the
 decision that's still open. The plan has one item, which is Deep's WIP of
 one.
 
-It never writes to a tracker. Moving a ticket, closing an issue or merging a
+The procedure never writes to a tracker. Moving a ticket, closing an issue or merging a
 PR goes through the tracker's own handler or command, which the card's
 `action` already names.
 
@@ -372,7 +415,8 @@ sees other people's teams, a `[linear] teams` allowlist is the fix, added
 then. repo-pr task files are a local read of
 `dev_docs/tasks/` in the configured repos and are cheaper still. Both are
 sources that ranking and every view gain, not only the agent, so each one
-should be its own PR, after #1225 lands.
+should be its own PR, after the shared Now ranker (issue #1225,
+[design](2026-10-27-shared-now-ranker.md)) lands.
 
 ## Decisions
 
@@ -399,7 +443,9 @@ migration.
 Kept as an escape hatch: `dashboard.py sql "<select>"`, which opens the DB
 `mode=ro` with `PRAGMA query_only`, against a small set of documented
 `agent_*` views (`agent_items`, `agent_links`) that are the only stable
-names. The tables stay private.
+names. The tables stay private, and that is a security property, not only a
+stability one: `meta` holds the page's server token in plain text, so `sql`
+refuses any query that names something other than an `agent_*` view.
 
 ### The brief is deterministic; the judgment is the agent's
 
@@ -412,7 +458,8 @@ can always tell which order came from the weights and which from an agent.
 ### Scope resolution is fuzzy only at the edge
 
 A bare word goes through `scopes` matching, and the output names the ids it
-used. Everything stored (a plan, an include filter) keys on resolved ids, so a
+used. Everything stored (a plan, an include filter) keys on resolved ids or
+the literal `all`, so a
 renamed Linear project or a new repo that happens to match "fin" never
 changes what a saved plan means.
 
@@ -439,11 +486,11 @@ Each slice is one PR and is useful without the next:
    `[size.minutes]`.
 2. `item <ref>`.
 3. `brief` with `--mode` and `--minutes`, and `references/prioritize.md`
-   without the plan step.
+   without steps 6 and 7 (the plan steps), which slice 4 adds.
 4. `plans` table (standing and session plans), `plan` command, Plan mode on
    Now, and the `tune` join.
 5. The session-plan calibration of `[size.minutes]`.
-6. Linear issues as a source (after #1225).
+6. Linear issues as a source (after the shared Now ranker, issue #1225).
 7. repo-pr tasks as a source.
 8. `sql` and the `agent_*` views, if an agent turns out to need them.
 
