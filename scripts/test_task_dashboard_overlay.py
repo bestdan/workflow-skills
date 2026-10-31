@@ -55,6 +55,8 @@ def dump(conn):
     out["why_not"] = conn.execute(
         f"SELECT {cols} FROM why_not ORDER BY recorded_at, id"
     ).fetchall()
+    for t in db.OVERLAY_PLAN_TABLES:
+        out[t] = conn.execute(f'SELECT * FROM "{t}" ORDER BY scope, kind').fetchall()
     return out
 
 
@@ -70,7 +72,8 @@ def legacy(doc, version):
         for k, v in copy.deepcopy(doc).items()
         if (version >= 4 or k != "view_includes")
         and (version >= 6 or k != "why_not")
-        and k != "now_mode"
+        and (version >= 8 or k != "plans")
+        and (version >= 7 or k != "now_mode")
     }
     old["version"] = version
     if version >= 5:
@@ -88,6 +91,7 @@ def empty():
         + db.OVERLAY_SINGLETONS
         + db.OVERLAY_VIEW_TABLES
         + db.OVERLAY_LOG_TABLES
+        + db.OVERLAY_PLAN_TABLES
     }
 
 
@@ -118,6 +122,18 @@ def populate(conn):
     overlay.snooze(conn, ("github", url), "2026-10-30")
     overlay.why_not(conn, ("github", url), "wrong_priority", "later", WHY_SNAP, NOW)
     overlay.why_not(conn, ("github", url), "other", "", None, NOW)
+    conn.executemany(
+        "INSERT INTO plans (scope, kind, entries, author, mode, minutes, created_at,"
+        " expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+            ("all", "standing", '[{"source":"jira","key":"ABC-1","reason":"r"}]',
+             "me", None, None, "2026-10-23T12:00:00Z", None),
+            ("repo:acme/app", "session",
+             '[{"source":"github","key":"k","reason":"x","action":"do","est_min":5}]',
+             "bot", "little", 30, "2026-10-23T12:00:00Z", "2026-10-24T11:00:00Z"),
+        ],
+    )  # fmt: skip
+    conn.commit()
     overlay.set_now_mode(conn, "little", NOW)
 
 
@@ -360,7 +376,7 @@ class ExportImportTests(OverlayCase):
         before = dump(self.conn)
         doc = json.loads(overlay.dumps(overlay.export(self.conn, NOW)))
         self.assertFalse(self.conn.in_transaction)  # the read snapshot is closed
-        self.assertEqual((doc["format"], doc["version"]), ("task-dashboard-overlay", 7))
+        self.assertEqual((doc["format"], doc["version"]), ("task-dashboard-overlay", 8))
         self.assertEqual(
             doc["now_mode"], {"mode": "little", "set_at": "2026-10-23T12:00:00Z"}
         )
@@ -399,6 +415,7 @@ class ExportImportTests(OverlayCase):
                 "view_includes": 2,
                 "why_not": 2,
                 "now_mode": 1,
+                "plans": 2,
             },
         )
         self.assertEqual(
@@ -471,6 +488,34 @@ class ExportImportTests(OverlayCase):
         for t in db.OVERLAY_TABLES + db.OVERLAY_VIEW_TABLES + db.OVERLAY_LOG_TABLES:
             self.assertEqual(after[t], before[t], t)
 
+    def test_a_version_7_file_imports_with_no_plans(self):
+        populate(self.conn)
+        doc = overlay.export(self.conn)
+        before = dump(self.conn)
+        self.assertTrue(before["plans"])
+        counts = overlay.import_(self.conn, legacy(doc, 7))
+        after = dump(self.conn)
+        self.assertEqual(after["plans"], [])
+        self.assertEqual(counts["plans"], 0)
+        for t in db.OVERLAY_TABLES + db.OVERLAY_SINGLETONS:
+            self.assertEqual(after[t], before[t], t)
+
+    def test_a_version_7_file_carrying_plans_is_refused(self):
+        populate(self.conn)
+        doc = legacy(overlay.export(self.conn), 7)
+        doc["plans"] = []
+        before = dump(self.conn)
+        with self.assertRaises(overlay.OverlayError):
+            overlay.import_(self.conn, doc)
+        self.assertEqual(dump(self.conn), before)
+
+    def test_a_version_8_file_must_carry_plans(self):
+        populate(self.conn)
+        doc = overlay.export(self.conn)
+        del doc["plans"]
+        with self.assertRaises(overlay.OverlayError):
+            overlay.import_(self.conn, doc)
+
     def test_a_null_now_mode_imports_as_none_saved(self):
         populate(self.conn)
         doc = overlay.export(self.conn)
@@ -497,6 +542,7 @@ class ExportImportTests(OverlayCase):
         counts = overlay.import_(self.conn, legacy(doc, 4))
         before["why_not"] = []  # a version 4 file has none
         before["now_mode"] = []
+        before["plans"] = []
         self.assertEqual(dump(self.conn), before)
         self.assertNotIn("focus", counts)
         # Even rows the old schema refused (two focus items) are not read.
@@ -531,7 +577,7 @@ class ExportImportTests(OverlayCase):
         cases = {
             "not an object": [],
             "wrong format": bad(lambda d: d.update(format="other")),
-            "wrong version": bad(lambda d: d.update(version=8)),
+            "wrong version": bad(lambda d: d.update(version=9)),
             "v6 with now_mode": bad(lambda d: d.update(version=6)),
             "missing now_mode": bad(lambda d: d.pop("now_mode")),
             "now_mode unknown mode": bad(lambda d: d["now_mode"].update(mode="nap")),

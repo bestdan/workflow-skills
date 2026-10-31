@@ -47,6 +47,7 @@ import health  # noqa: E402
 import include  # noqa: E402
 import ingest  # noqa: E402
 import overlay  # noqa: E402
+import plans  # noqa: E402
 import refresh  # noqa: E402
 import server  # noqa: E402
 import server_install  # noqa: E402
@@ -229,6 +230,50 @@ def build_parser() -> argparse.ArgumentParser:
         help="the header on line one, then one item a line",
     )
     _paths(items_p)
+    plan_p = sub.add_parser(
+        "plan",
+        help="set, show or clear a plan: an ordered list of items for one scope"
+        " (or `all`), a reason each; a session plan expires at 04:00 local",
+    )
+    plan_sub = plan_p.add_subparsers(dest="plan_command", required=True)
+    plan_set = plan_sub.add_parser(
+        "set", help="store a plan from a JSON file, replacing the one for that scope"
+    )
+    plan_set.add_argument(
+        "--scope",
+        help="one scope id or a word that matches exactly one (default: all)",
+    )
+    plan_set.add_argument(
+        "--kind",
+        choices=overlay.PLAN_KINDS,
+        help="standing (default) or session; --minutes makes it a session plan",
+    )
+    plan_set.add_argument(
+        "--minutes", type=int, help="the time the plan was made for; a session plan"
+    )
+    plan_set.add_argument(
+        "--mode", help="the Now mode it was made for: " + ", ".join(overlay.NOW_MODES)
+    )
+    plan_set.add_argument("--by", required=True, help="who wrote it (free text)")
+    plan_set.add_argument(
+        "--file",
+        required=True,
+        help="a JSON list of {source, key, reason[, action, est_min]}, in order;"
+        " - reads stdin",
+    )
+    _paths(plan_set)
+    plan_show = plan_sub.add_parser("show", help="print the stored plans")
+    plan_show.add_argument("--scope", help="only this scope's plans")
+    plan_show.add_argument("--kind", choices=overlay.PLAN_KINDS)
+    _paths(plan_show)
+    plan_clear = plan_sub.add_parser("clear", help="remove a scope's plan")
+    plan_clear.add_argument(
+        "--scope", required=True, help="the scope id, or `all` for the all-scope plan"
+    )
+    plan_clear.add_argument(
+        "--kind", choices=overlay.PLAN_KINDS, help="only this kind (default: both)"
+    )
+    _paths(plan_clear)
     refresh_p = sub.add_parser(
         "refresh",
         help="re-read one GitHub PR or issue and rewrite its rows, as the card's"
@@ -547,6 +592,50 @@ def cmd_items(args: argparse.Namespace) -> int:
         return agent_query.jsonl(doc) if args.jsonl else agent_query.dumps(doc)
 
     return _query(args, build)
+
+
+def cmd_plan(args: argparse.Namespace) -> int:
+    """Exit 0, 1 when the DB cannot be opened or the file read, 2 on a config
+    error or a plan, scope or value that is refused."""
+    cfg_path, db_arg = _agent_paths(args)
+    try:
+        cfg = config.load(cfg_path)
+    except config.ConfigError as exc:
+        print(f"task-dashboard: {exc}", file=sys.stderr)
+        return 2
+    entries = None
+    if args.plan_command == "set":
+        try:
+            text = sys.stdin.read() if args.file == "-" else Path(args.file).read_text()
+            entries = json.loads(text)
+        except (OSError, ValueError, RecursionError) as exc:
+            print(f"task-dashboard: cannot read {args.file}: {exc}", file=sys.stderr)
+            return 1
+    try:
+        conn = db.connect(db_arg)
+    except (OSError, sqlite3.Error) as exc:
+        print(f"task-dashboard: {exc}", file=sys.stderr)
+        return 1
+    now = _now()
+    try:
+        if args.plan_command == "set":
+            plan = plans.set_plan(
+                conn, cfg, now, scope=args.scope, kind=args.kind, entries=entries,
+                author=args.by, mode=args.mode, minutes=args.minutes,
+            )  # fmt: skip
+            doc = {"schema": plans.SCHEMA_VERSION, "plans": [plan]}
+        elif args.plan_command == "show":
+            doc = plans.show(conn, cfg, now, args.scope, args.kind)
+        else:
+            gone = plans.clear(conn, cfg, now, args.scope, args.kind)
+            doc = {"schema": plans.SCHEMA_VERSION, "cleared": gone}
+    except (agent_query.QueryError, overlay.OverlayError) as exc:
+        print(f"task-dashboard: {exc}", file=sys.stderr)
+        return 2
+    finally:
+        conn.close()
+    sys.stdout.write(plans.dumps(doc))
+    return 0
 
 
 def cmd_refresh(args: argparse.Namespace) -> int:
@@ -918,6 +1007,8 @@ def main(argv: "list[str] | None" = None) -> int:
         return cmd_items(args)
     if args.command == "overlay":
         return cmd_overlay(args)
+    if args.command == "plan":
+        return cmd_plan(args)
     if args.command == "refresh":
         return cmd_refresh(args)
     parser.print_help()
