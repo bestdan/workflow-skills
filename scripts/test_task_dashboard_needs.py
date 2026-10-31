@@ -314,7 +314,7 @@ class OrderTests(NeedsCase):
         self.assertNotIn('class="brief"', first)
         self.assertEqual(first.count("feat: thing 1201"), 1)
         self.assertEqual(first.count(">3d</span>"), 1)
-        self.assertEqual(first.count('title="CI success">'), 1)
+        self.assertEqual(first.count(views.cards.ci("success")), 1)
         # The title links to the PR, so, as on Now, there is no "open the PR";
         # the controls stay.
         self.assertNotIn("open the PR", first)

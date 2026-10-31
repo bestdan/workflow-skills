@@ -625,6 +625,12 @@ class ViewsTest(unittest.TestCase):
         self.assertNotIn(long, unmirrored)
         self.assertIn('title="Keep it on Epics"', unmirrored)
 
+    def test_a_draft_pr_card_leads_with_the_draft_icon(self):
+        m = self.mirror()
+        prs = {p["number"]: p for p in m.prs}
+        self.assertIn('aria-label="Draft pull request"', views.pr_card(m, prs[5]))
+        self.assertIn('aria-label="Open pull request"', views.pr_card(m, prs[1]))
+
     def test_an_epic_card_has_the_shared_icon_controls(self):
         # Epics render through cards.render: a pin shows as the "pinned"
         # flag, and Pin and Ignore are icon buttons like every other card's.

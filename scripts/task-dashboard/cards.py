@@ -1,9 +1,9 @@
 """The one card every tab draws, so a change to how a card looks lands on all.
 
 A tab builds a `Card` from its own rows and calls `render()`. The layout is
-fixed here: the next act as a chip, then the title and its muted ref behind
-an icon for what the item is (an open PR, a draft, an issue, a session), then
-one meta line led by the item's bare age (`130d`), its state and its CI as
+fixed here: the next act as a chip, then an icon for what the item is (an
+open PR, a draft, an issue, a session) leading the title and its muted ref,
+then one meta line led by the item's bare age (`130d`), its state and its CI as
 GitHub's check, cross or dot. Now adds its ranking as an enrichment (`Score`): a number
 beside a "?" that pops over the breakdown. Nothing else differs by tab, so a
 tab cannot drift back into a card of its own (test_task_dashboard_cards.py
@@ -38,8 +38,12 @@ CSS = """
   border-bottom-left-radius:6px; border-bottom-right-radius:6px; }
 .lane > .card:has(+ :not(.card)) { margin-bottom:8px; }
 .lane > .card:hover { background:var(--card); }
-.card .title { color:var(--fg); font-size:15px; font-weight:600; }
-.card a.title:hover { color:var(--accent); text-decoration:underline; }
+/* The card's own title only: a joined PR's line inside it (views._pr_line)
+   carries .title too, and keeps its small link style. */
+.card > .title, .card > summary > .title { color:var(--fg); font-size:15px;
+  font-weight:600; }
+.card > a.title:hover, .card > summary > a.title:hover { color:var(--accent);
+  text-decoration:underline; }
 /* The kind or status icon sits in a gutter left of the title. */
 .card:has(.lead) { padding-left:34px; }
 .card .lead { position:absolute; left:11px; top:9px; line-height:0; }

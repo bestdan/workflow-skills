@@ -247,6 +247,12 @@ class PullRequestTests(Case):
         )
         self.assertNotIn(f"· {REPO}", ready)
 
+    def test_a_draft_leads_with_the_draft_icon(self):
+        seed(self.conn)
+        drafts = section(self.page(), "drafts")
+        self.assertIn('aria-label="Draft pull request"', drafts)
+        self.assertNotIn('aria-label="Open pull request"', drafts)
+
     def test_the_review_and_others_lanes_appear_only_with_rows(self):
         seed(
             self.conn,
