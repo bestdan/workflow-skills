@@ -948,10 +948,9 @@ class LittleTests(Case):
         midnight = NOW.astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
         self.closed_row(midnight.isoformat(timespec="seconds"))
         self.assertEqual(self.little().closed_today, 5)
+        # The agent view's figure only: the page shows no count.
         page = fleet_now.render(self.conn, self.cfg, NOW, mode=fleet_now.LITTLE)
-        self.assertIn('data-closed-today="5">closed today: 5</p>', page)
-        # Ship has no such header.
-        self.assertNotIn("closed today", fleet_now.render(self.conn, self.cfg, NOW))
+        self.assertNotIn("closed today", page)
         later = NOW + timedelta(days=1)
         self.assertIsNone(fleet_now.closed_today(self.conn, later))
 
@@ -965,10 +964,8 @@ class LittleTests(Case):
         # Little ranks by size, not a score: no number beside the "?".
         self.assertNotIn('class="score"', card)
 
-    def test_no_count_no_header(self):
+    def test_no_count_is_none(self):
         self.assertIsNone(self.little().closed_today)
-        page = fleet_now.render(self.conn, self.cfg, NOW, mode=fleet_now.LITTLE)
-        self.assertNotIn("closed today", page)
 
     def test_the_snapshot_records_the_mode(self):
         item = ("github", pr_url(31))

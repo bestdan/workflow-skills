@@ -83,9 +83,10 @@ or `dev_docs/`), or when it changes at most LITTLE_FILES files and
 LITTLE_LINES lines; a draft, and one whose CI is anything but green or
 absent (no checks at all), are left out. An issue is small when it carries `est:1` or `est:2` and is
 not `status:3_started`; an unsized one is not small. They go by LITTLE_TIERS,
-smallest first, then `prio`, then the longer wait, with no score. The header
-reads "closed today: N" from the fleet step's `closed_today` row, and only
-when that row counts from today's local midnight.
+smallest first, then `prio`, then the longer wait, with no score. The agent
+view's notes carry "closed today" from the fleet step's `closed_today` row,
+and only when that row counts from today's local midnight; the page does not
+show it.
 
 DEEP ranks the questions that need thinking, not doing (deep_sources): a
 proposed design (workstreams.mirrored_designs), an issue that blocks open
@@ -1158,7 +1159,7 @@ class Page:
     more_close_outs: int = 0  # close-outs past CLOSE_OUT_CAP
     mode: str = SHIP
     more_in_mode: int = 0  # outside Ship: its items the list did not reach
-    closed_today: "int | None" = None  # Little's header figure
+    closed_today: "int | None" = None  # Little's, for the agent view
 
 
 def _visible(
@@ -1383,11 +1384,6 @@ def render(
     p = build(conn, cfg, now, ov, inc, mode)
     whynot.record_shown(conn, p.shown, now)
     parts = []
-    if p.closed_today is not None:
-        parts.append(
-            f'<p class="note" data-closed-today="{p.closed_today}">'
-            f"closed today: {p.closed_today}</p>"
-        )
     if not cfg["github"]["enabled"]:
         parts.append(
             '<p class="note">github.enabled is false, so no PRs or issues are'
