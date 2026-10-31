@@ -365,11 +365,21 @@ class FigureTest(DbCase):
             "  Open PRs awaiting the owner: 4 PRs (target observed; current)",
             "  Issues opened : closed: — (target observed; current)"
             " — no source yet: the GitHub sync mirrors only issues needing a human",
-            "  Designs at proposed: 1 designs (target observed; current)",
+            "  Designs at proposed: 1 design (target observed; current)",
             "  Human-review queue length: 2 PRs"
             f" (target <= {health.gauges.REVIEW_QUEUE_CAP}, met; current)",
         ]
         self.assertEqual(health.text_table(result).split("\n"), expected + [""])
+
+    def test_the_computed_result_keeps_the_plural_unit(self):
+        # Singular is render-time only: compute(), which `health --json`
+        # prints, still carries the plural unit when the value is 1.
+        seed(self.conn)
+        seed_fleet(self.conn)
+        f = by_id(health.compute(self.conn, {}, START, END, fleet=True))
+        self.assertEqual(f["designs_proposed"]["value"], 1)
+        self.assertEqual(f["designs_proposed"]["unit"], "designs")
+        self.assertEqual(f["open_prs"]["unit"], "PRs")
 
     def test_target_comparisons(self):
         self.assertIs(health.met(5, "<= 5"), True)
@@ -377,6 +387,38 @@ class FigureTest(DbCase):
         self.assertIs(health.met(0.5, ">= 0.25"), True)
         self.assertIsNone(health.met(None, "<= 5"))
         self.assertIsNone(health.met(4, "observed"))
+
+
+def unit_figure(fid, value, unit):
+    return {
+        "id": fid, "label": fid, "note": "", "value": value, "unit": unit,
+        "met": None, "baseline": False, "trend": None, "window": False,
+        "target": "observed", "source": "GitHub",
+    }  # fmt: skip
+
+
+def unit_result(*figures):
+    return {
+        "since": "S", "until": "U", "hook_days": None, "unknown_targets": [],
+        "figures": list(figures),
+    }  # fmt: skip
+
+
+class SingularUnitTest(unittest.TestCase):
+    def test_a_value_of_one_takes_the_singular_unit_in_both_renderers(self):
+        # (value, PR unit, design unit): singular at 1, plural otherwise.
+        cases = ((1, "PR", "design"), (2, "PRs", "designs"))
+        for value, pr, design in cases:
+            result = unit_result(
+                unit_figure("open_prs", value, "PRs"),
+                unit_figure("designs_proposed", value, "designs"),
+            )
+            text = health.text_table(result)
+            self.assertIn(f"  open_prs: {value} {pr} (", text)
+            self.assertIn(f"  designs_proposed: {value} {design} (", text)
+            html = health.render(result, 7)
+            self.assertIn(f"<b>{value}</b> {pr}</td>", html)
+            self.assertIn(f"<b>{value}</b> {design}</td>", html)
 
 
 class ConfigTest(unittest.TestCase):
