@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.165.0] - 2026-10-31
+
+### Features
+
+- plans table and plan set|show|clear [#1286] (#1294) (cc42e71)
+
 ## [2.164.0] - 2026-10-31
 
 ### Features
