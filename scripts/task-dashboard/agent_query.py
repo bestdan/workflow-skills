@@ -106,7 +106,9 @@ Match = Callable[[Item], bool]
 def _in_repo(name: str) -> Match:
     """An item in repo `name` (`owner/name`, or a bare directory name): an
     item that knows its owner compares the full name; a worktree or session,
-    which knows only its directory, compares the bare one."""
+    which knows only its directory, compares the bare one. So a session in a
+    `dotfiles` checkout belongs to every owner's `dotfiles` scope, and counts
+    in each one's `open`: its path names no owner to choose between them."""
     bare = fleet_views._name(name)
     full = name if "/" in name else None
 
@@ -191,6 +193,10 @@ def match(scopes: list[Scope], word: str) -> list[Scope]:
     if exact:
         return exact
     w = word.lower()
+    # An id typed in another case is still that id, not a substring of more.
+    exact = [s for s in scopes if s.id.lower() == w]
+    if exact:
+        return exact
     if w.startswith("repo:") and "/" not in w:
         bare = w[len("repo:") :]
         return [
@@ -496,19 +502,58 @@ def _link_prs(items: list[Item]) -> None:
             i["_linked"] = (found["_repo_bare"], found["branch"])
 
 
+def _entry(i: Item) -> dict[str, Any]:
+    return {
+        "kind": i["kind"], "host": i["host"], "state": i["state"]["name"],
+        "waiting_since": i.get("_waiting_since") if i["_waiting"] else None,
+    }  # fmt: skip
+
+
+def _checkouts(items: list[Item]) -> dict[int, int]:
+    """id(item) -> id of the checkout it is in, for open sessions and
+    worktrees: a worktree is its own, and a session belongs to the deepest
+    worktree on its host holding its cwd (close_out._worktree_at), else to
+    itself."""
+    worktrees: dict[str, list[dict[str, Any]]] = {}
+    for i in items:
+        if i["kind"] == "worktree" and _is_open(i) and i["path"]:
+            worktrees.setdefault(i["host"], []).append({"path": i["path"], "id": id(i)})
+    out: dict[int, int] = {}
+    for i in items:
+        if i["kind"] == "worktree" and _is_open(i):
+            out[id(i)] = id(i)
+        elif i["kind"] == "session" and _is_open(i):
+            wt = close_out._worktree_at(worktrees.get(i["host"], []), i["path"] or "")
+            out[id(i)] = wt["id"] if wt else id(i)
+    return out
+
+
 def _activity(items: list[Item]) -> None:
     """Each item's live sessions and open worktrees, matched by repo and
     branch: on its own branch, or on its linked PR's. A session or worktree
-    lists itself."""
+    lists itself. A session or worktree on a default branch with no PR is
+    matched by checkout instead (same host, the deepest worktree holding the
+    session's cwd): every machine's `main` of a repo shares the key, and a
+    checkout must not show another host's session as its own."""
     on: dict[tuple, list[dict[str, Any]]] = {}
     for i in items:
         if i["kind"] in ("session", "worktree") and _is_open(i) and i["branch"]:
-            on.setdefault((i["_repo_bare"], i["branch"]), []).append({
-                "kind": i["kind"], "host": i["host"], "state": i["state"]["name"],
-                "waiting_since": i.get("_waiting_since") if i["_waiting"] else None,
-            })  # fmt: skip
+            on.setdefault((i["_repo_bare"], i["branch"]), []).append(_entry(i))
+    checkout = _checkouts(items)
+    held: dict[int, list[dict[str, Any]]] = {}
     for i in items:
-        i["activity"] = list(on.get(i["_linked"], [])) if i["_linked"][1] else []
+        if id(i) in checkout:
+            held.setdefault(checkout[id(i)], []).append(_entry(i))
+    for i in items:
+        branch = i["_linked"][1]
+        if (
+            i["kind"] in ("session", "worktree")
+            and branch in close_out.DEFAULT_BRANCHES
+            and id(i) in checkout
+        ):
+            i["activity"] = list(held[checkout[id(i)]])
+        else:
+            i["activity"] = list(on.get(i["_linked"], [])) if branch else []
         if i["kind"] != "session":
             i["_waiting"] = any(a["state"] == "waiting" for a in i["activity"])
 

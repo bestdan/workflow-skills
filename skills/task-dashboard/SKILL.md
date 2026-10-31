@@ -220,7 +220,9 @@ a DB that is behind the current schema, once, as `view` does.
 - `DASH scopes <word>` says what a word can mean: each matching scope id
   (`repo:`, `ws:`, `jira:`, `epic:`, `label:`, `host:`) with its open-item
   count. For a repo it also lists `related` workstreams, those with members
-  in the repo whatever their name. **Show `related` to the owner and pass the
+  in the repo whatever their name. A session or worktree knows its repo only
+  by directory name, so it counts under every owner's repo of that name.
+  **Show `related` to the owner and pass the
   ones they confirm as `--scope ws:<id>`; never add them yourself.** Say what
   the word matched.
 - `DASH items --scope <id or word>` (repeatable, a union) prints one record
@@ -228,7 +230,8 @@ a DB that is behind the current schema, once, as `view` does.
   workstreams, linked `pr` readiness, live `activity` (sessions and worktrees
   on its branch), blockers, the owner's `overlay` marks, Now's `now` placing,
   and `size` (`{bucket, est_min, from}`, null when unsized — **never treat
-  an unsized item as small**). `--state todo,started,done` filters the status
+  an unsized item as small**; a bot PR is `bot_pr` by its author, whatever
+  its size). `--state todo,started,done` filters the status
   category (default open); `--only blocked,waiting,stale` filters derived
   facts, so "started and blocked" is both flags. `--fields` takes `brief`
   (the default) or `full` (adds repo, branch, host, path, parent, created,

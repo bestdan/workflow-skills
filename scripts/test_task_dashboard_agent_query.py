@@ -93,6 +93,8 @@ def issue(n, *labels, repo=REPO, blocked_by=0, updated="2026-10-22T00:00:00Z"):
     }  # fmt: skip
 
 
+DESIGN_URL = f"https://github.com/{REPO}/blob/main/dev_docs/designs/2026-10-20-x.md"
+
 ROWS = [
     pr(10, "bestdan/fix-10", size=(2, 10, 4, None), closes=(1,)),  # small
     pr(11, "bestdan/docs-11", size=(1, 30, 0, ["README.md"])),  # docs-only
@@ -105,10 +107,20 @@ ROWS = [
     issue(1, "est:1", "status:3_started", "prio:1"),
     issue(2, "est:2", "status:2_ready"),
     issue(3, "status:2_ready"),  # unsized
-    issue(4, "est:5", "status:2_ready", blocked_by=1),  # natively blocked
-    issue(5, "blocked", "status:1_needs_refinement", HUMAN),
+    issue(4, "est:5", "status:2_ready", "Topics", blocked_by=1),  # natively blocked
+    issue(5, "blocked", "status:1_needs_refinement", HUMAN, "Topic"),
     issue(40, "est:1", repo=OTHER),
     issue(41, repo="acme/dotfiles"),  # another owner, the same bare name
+    {
+        "kind": "design",
+        "key": DESIGN_URL,
+        "url": DESIGN_URL,
+        "repo": REPO,
+        "path": "dev_docs/designs/2026-10-20-x.md",
+        "title": "x design",
+        "status": "proposed",
+        "created": "2026-10-20",
+    },  # fmt: skip
 ]
 
 SNAPSHOT = {
@@ -146,9 +158,37 @@ SNAPSHOT = {
         needs_fx.ev(
             "s-work", "2026-10-24T11:30:00.000Z", "UserPromptSubmit", "/h/src/dotfiles"
         ),
+        # Working in a subdirectory of the `main` checkout.
+        needs_fx.ev(
+            "s-main",
+            "2026-10-24T11:40:00.000Z",
+            "UserPromptSubmit",
+            "/h/src/finplan/scripts",
+        ),
     ],  # fmt: skip
     "history": [],
 }
+
+# Another machine's `main` checkout of the same repo, at the same path, with a
+# session waiting on me in it: none of it is the mini checkout's activity.
+OTHER_HOST = {
+    "schema": 1,
+    "host": "lin",
+    "taken_at": "2026-10-24T11:59:00.000Z",
+    "worktrees": [
+        {**stale_fx.worktree("main", "main", "open"), "repo": "finplan",
+         "path": "/h/src/finplan"},
+    ],
+    "handoffs": [],
+    "tmux": [],
+    "sessions": [
+        needs_fx.ev("s-lin", "2026-10-24T10:00:00.000Z", "UserPromptSubmit",
+                    "/h/src/finplan"),
+        needs_fx.ev("s-lin", "2026-10-24T11:00:00.000Z", "Stop", "/h/src/finplan",
+                    asked=True),
+    ],
+    "history": [],
+}  # fmt: skip
 
 WS = "linear:p-1"
 WS_OTHER = "linear:p-2"
@@ -160,7 +200,13 @@ def seed(conn):
     for line in snap["sessions"]:
         if line["session_id"] == "s-10":
             line["branch"] = "bestdan/fix-10"
+        if line["session_id"] == "s-main":
+            line["branch"] = "main"
     snapshot_adapter.ingest(conn, snap, NOW)
+    other = copy.deepcopy(OTHER_HOST)
+    for line in other["sessions"]:
+        line["branch"] = "main"
+    snapshot_adapter.ingest(conn, other, NOW)
     sessions.write(conn, sessions.derive(conn, NOW), NOW)
     github_fleet.write(conn, ROWS, NOW)
     server_harness.add_run(conn, "ok", NOW, kind=github_fleet.RUN_KIND)
@@ -245,9 +291,9 @@ class ScopeTests(Case):
         ids = [s["id"] for s in doc["matched"]]
         self.assertEqual(ids, [f"repo:{REPO}", f"ws:{WS}"])
         repo = doc["matched"][0]
-        # Open items of every kind: 6 PRs, 5 issues, two open worktrees and
-        # the session in one. The landed worktree is done.
-        self.assertEqual(repo["open"], 14)
+        # Open items of every kind: 6 PRs, 5 issues, the design, three open
+        # worktrees (two hosts) and three sessions. The landed one is done.
+        self.assertEqual(repo["open"], 18)
 
     def test_a_repo_scope_lists_related_workstreams_it_did_not_match(self):
         related = self.scopes("finplan")["related"]
@@ -306,6 +352,14 @@ class ScopeTests(Case):
         self.assertEqual(both, ["repo:acme/dotfiles", f"repo:{OTHER}"])
         with self.assertRaisesRegex(agent_query.QueryError, "no repo scope"):
             self.items(scope=["repo:fin"])  # whole names only, no substring
+
+    def test_an_id_in_another_case_is_that_id_not_a_substring(self):
+        doc = self.items(scope=["label:topic"])
+        self.assertEqual([s["id"] for s in doc["scope"]], ["label:Topic"])
+
+    def test_a_bare_named_session_counts_under_every_owner(self):
+        for scope in (f"repo:{OTHER}", "repo:acme/dotfiles"):
+            self.assertIn("s-work", self.by_key(scope=[scope]), scope)
 
     def test_a_full_repo_scope_keeps_out_another_owners_repo(self):
         keys = self.by_key(scope=[f"repo:{OTHER}"])
@@ -404,6 +458,31 @@ class ItemTests(Case):
         self.assertEqual(keys["s-10"]["pr"]["ref"], f"{REPO}#10")
         self.assertNotIn("pr", keys[issue_url(2)])
 
+    def test_a_design(self):
+        d = self.by_key(kind="design")[DESIGN_URL]
+        self.assertEqual(
+            (d["ref"], d["state"], d["repo"]),
+            ("dev_docs/designs/2026-10-20-x.md",
+             {"name": "proposed", "category": "todo"}, REPO),
+        )  # fmt: skip
+
+    def test_a_main_checkout_lists_only_its_own_host_and_sessions(self):
+        # Both hosts' checkouts share the key; the source tells them apart.
+        main = {i["source"]: i for i in self.items()["items"]
+                if i["key"] == "worktree:/h/src/finplan"}  # fmt: skip
+        mini, lin = main["machine:mini"], main["machine:lin"]
+        self.assertEqual(
+            sorted((a["kind"], a["host"]) for a in mini["activity"]),
+            [("session", "mini"), ("worktree", "mini")],
+        )
+        waiting = {(i["source"], i["key"]) for i in self.items(only="waiting")["items"]}
+        self.assertNotIn(("machine:mini", "worktree:/h/src/finplan"), waiting)
+        self.assertIn(("machine:lin", "worktree:/h/src/finplan"), waiting)
+        self.assertEqual(
+            sorted((a["kind"], a["state"]) for a in lin["activity"]),
+            [("session", "waiting"), ("worktree", "clean")],
+        )
+
     def test_a_fork_pr_on_main_is_not_linked_by_branch(self):
         keys = self.by_key()
         self.assertNotIn("pr", keys["worktree:/h/src/finplan"])
@@ -430,9 +509,11 @@ class ItemTests(Case):
 
     def test_only_waiting(self):
         keys = self.by_key(only="waiting")
+        # s-lin waits in lin's `main` checkout, which waits with it.
         self.assertEqual(
             sorted(keys), sorted([issue_url(1), pr_url(10), "s-10",
-                                  f"worktree:{WT}/fix-10"]),
+                                  f"worktree:{WT}/fix-10", "s-lin",
+                                  "worktree:/h/src/finplan"]),
         )  # fmt: skip
 
     def test_only_blocked_and_state_combine(self):
@@ -535,7 +616,9 @@ class CliTests(Case):
         return code, out.getvalue(), err.getvalue()
 
     def test_items_prints_one_compact_line_per_item(self):
-        code, out, _ = self.run_cli("items", "--scope", "finplan", "--limit", "2")
+        code, out, _ = self.run_cli(
+            "items", "--scope", "finplan", "--kind", "pr", "--limit", "2"
+        )
         self.assertEqual(code, 0)
         doc = json.loads(out)
         self.assertEqual(doc["returned"], 2)
