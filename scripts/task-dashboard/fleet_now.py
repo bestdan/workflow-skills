@@ -206,8 +206,9 @@ CSS = """
 .now .card .why { margin-top:2px; }
 /* A session's score is its state, which the meta line already reads. */
 .now .card[data-kind="session"] > .why { display:none; }
-.now .card .why-more { position:relative; display:inline-block; vertical-align:-3px; cursor:help; }
-.now .card .why-more .glyph { display:inline-block; vertical-align:-2px; width:14px; height:14px; }
+/* The score and "?" sit on the meta line's baseline, the icon sized to its text. */
+.now .card .why-more { position:relative; display:inline-block; cursor:help; }
+.now .card .why-more .glyph { display:inline-block; vertical-align:-0.15em; width:1.1em; height:1.1em; }
 .now .card .why-more .score { margin-right:3px; font-variant-numeric:tabular-nums; }
 .now .card .why-more:hover, .now .card .why-more:focus { color:var(--fg); outline:none; }
 .now .card .why-more .why { display:none; position:absolute; z-index:5; top:calc(100% + 4px); left:-8px;
