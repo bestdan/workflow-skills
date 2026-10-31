@@ -641,8 +641,8 @@ def linear_tickets(
     never the rest of the team backlog it mirrors): started is `started`,
     unstarted is `ready`, and backlog is not ranked. Each brings
     score.score's priority, deadline (its due date, else its active cycle's
-    end), unblocks and stuck terms, as a Jira ticket does. Blocked is an open issue blocking it, or the
-    `blocked` label."""
+    end), unblocks and stuck terms, as a Jira ticket does. Blocked is an
+    open issue blocking it, or the `blocked` label."""
     if not linear_issues.enabled(cfg):
         return []
     weights = cfg["score"]["terms"]

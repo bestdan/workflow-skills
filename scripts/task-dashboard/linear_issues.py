@@ -47,8 +47,10 @@ it as it reads a ticket:
 
 `raw_json` is linear_api's issue dict, which adds `url`, `team`, `state_type`
 (so a reader tells backlog from queued), `project` and `project_id`,
-`estimate`, `assignee`, `assignee_email` and `assignee_is_me` (so a reader
-tells mine from someone else's or unassigned), `blocked_by` and `blocks` (the
+`estimate`, `assignee`, `assignee_email` and `assignee_is_me` (Linear's
+`isMe`, relative to the key's own user, not to `linear.me`: with `me` set, a
+reader tells mine by `assignee_email`, as agent_query does, or by the row's
+`scope`), `blocked_by` and `blocks` (the
 open issues on each side of a `blocks` relation). fleet_now.linear_tickets
 turns the `assigned` rows into candidates; agent_query lists every row.
 """

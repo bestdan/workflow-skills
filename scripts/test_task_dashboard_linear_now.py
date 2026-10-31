@@ -305,6 +305,7 @@ class TeamReadTests(Case):
             body["variables"]["types"], ["backlog", "unstarted", "started"]
         )
         self.assertNotIn("assignee", body["query"].split("nodes {")[0])
+        self.assertIn("team: {key: {in: $teams}}", body["query"])
 
     def test_no_team_makes_no_call(self):
         fake = FakeLinear()
@@ -385,6 +386,20 @@ class BacklogStepTests(Case):
         counts = json.loads(self.step(fake)["counts"])
         self.assertEqual(sorted(self.scopes()), ["PAY-7", "PRE-1", "PRE-4"])
         self.assertEqual(counts["dropped"], 2)
+
+    def test_an_issue_reassigned_away_turns_team_and_leaves_now(self):
+        self.step(backlog_fake())
+        self.assertEqual(self.scopes()["PRE-1"], linear_issues.MINE)
+        fake = backlog_fake()
+        # Reassigned to Ana: gone from my read, still in the team backlog.
+        fake.nodes = [n for n in fake.nodes if n["identifier"] != "PRE-1"]
+        fake.team = [
+            node("PRE-1", assignee=ANA) if n["identifier"] == "PRE-1" else n
+            for n in fake.team
+        ]
+        self.step(fake)
+        self.assertEqual(self.scopes()["PRE-1"], linear_issues.TEAM)
+        self.assertNotIn("PRE-1", self.by_key())
 
     def test_a_failed_backlog_read_keeps_the_last_good_rows(self):
         self.step(backlog_fake())
