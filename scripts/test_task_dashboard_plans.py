@@ -680,6 +680,24 @@ class TickTests(Case):
         self.sync(gh)
         self.assertEqual(gh.calls, [1])
 
+    def test_an_issue_reopened_after_its_tick_reads_open_again(self):
+        self.set([entry(A, "small")])
+        row = self.conn.execute(
+            "SELECT * FROM issues WHERE source = ? AND key = ?", A
+        ).fetchone()
+        cols = [d[0] for d in self.conn.execute("SELECT * FROM issues").description]
+        self.leave_mirror(A)
+        self.sync(FakeGh({1: closed_issue(1)}))
+        self.assertEqual(self.items()[A[1]]["state"], "done")
+        # Reopened: the next issue search returns it, while its check says closed.
+        self.conn.execute(
+            f"INSERT INTO issues ({', '.join(cols)})"
+            f" VALUES ({', '.join('?' for _ in cols)})",
+            tuple(row),
+        )
+        self.conn.commit()
+        self.assertEqual(self.items()[A[1]]["state"], "open")
+
     def test_a_merge_ticks_and_a_vanished_item_stays_gone_with_githubs_word(self):
         self.set([entry(PR11), entry(B)])
         self.leave_mirror(PR11)
@@ -762,6 +780,20 @@ class TickTests(Case):
         )  # fmt: skip
         [o] = plan_ticks.outcomes(self.conn)
         self.assertEqual(o["entries"][0]["state"], "done")
+
+    def test_a_logged_out_gh_holds_the_outcome_and_says_how_to_fix_it(self):
+        self.set([entry(A)], kind="session")
+        self.leave_mirror(A)
+
+        def logged_out(argv, timeout):
+            return 1, "", "HTTP 401: Bad credentials"
+
+        row = sync.run_plans(
+            self.cfg, self.conn, LATER, runner=logged_out, clock=lambda: LATER
+        )
+        self.assertEqual(self.counts(row)["deferred"], 1)
+        self.assertIn("gh auth login", json.dumps(row))
+        self.assertEqual(plan_ticks.outcomes(self.conn), [])
 
     def test_replacing_or_clearing_a_session_plan_records_it_first(self):
         self.set([entry(A)], kind="session")

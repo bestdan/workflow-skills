@@ -23,8 +23,8 @@ is what a later calibration of `[size.minutes]` compares with `est_min`. The
 first sync after its 04:00 expiry re-reads its gone entries, then records it
 (`expired`); a plan whose re-read failed waits for the next sync. `plan set`
 replacing a session plan and `plan clear` removing one record it first, from
-the mirror as it stands (`replaced` or `cleared`, or `expired` when it already
-had), so no plan ends unrecorded. A standing plan never ends, so it leaves
+the mirror as it stands (`replaced` or `cleared`, or `expired` when it had
+already expired), so no plan ends unrecorded. A standing plan never ends, so it leaves
 none. `plan outcomes` lists them.
 
 WHY NOT NOW. A "why not now" answer on an item that a live plan lists carries
