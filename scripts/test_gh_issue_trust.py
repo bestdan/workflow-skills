@@ -248,6 +248,16 @@ class BoardTests(unittest.TestCase):
         reads = [a for a in repo.calls if a[0] == "api" and "/issues/" in a[1]]
         self.assertEqual(len(reads), 1)
 
+    def test_a_deleted_author_is_untrusted_without_a_read(self):
+        """`gh` reports a deleted account's author as an empty login."""
+        repo = FakeBoard({1: ("o", "OWNER"), 2: ("", "OWNER")})
+        rows = json.loads(run_board(repo))["issues"]
+
+        self.assertEqual((rows[1]["trusted"], rows[1]["association"]), (False, "NONE"))
+        self.assertNotIn("title", rows[1])
+        reads = [a[1] for a in repo.calls if a[0] == "api" and "/issues/" in a[1]]
+        self.assertNotIn("repos/o/r/issues/2", reads)
+
     def test_member_follows_the_owner_type(self):
         user = json.loads(run_board(FakeBoard({1: ("m", "MEMBER")}, owner_type="User")))
         org = json.loads(run_board(FakeBoard({1: ("m", "MEMBER")})))

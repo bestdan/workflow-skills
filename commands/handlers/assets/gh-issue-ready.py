@@ -56,8 +56,8 @@ needs: it has already selected and ranked its candidates through its own
 board query, and re-deriving them here through a second bounded list query
 could silently drop one — `--limit` is applied by the API before anything
 local runs, so a missing verdict is indistinguishable from a ready one.
-Passing the numbers removes that window. There is no title in this mode (no
-list call was made), so each issue reports an empty title. Nor is the
+Passing the numbers removes that window. Neither mode reads a title (a
+stranger may have written it), so each issue reports an empty title. Nor is the
 `status:2_ready` label checked, which is what lets the promote hold ask about
 un-scored issues: in this mode `ready` means only "no open blocker".
 """
@@ -314,7 +314,7 @@ def compute(
 
 
 def label_for(issue):
-    """`#<n> <title>`, or bare `#<n>` when no title was fetched (candidate-scoped mode)."""
+    """`#<n> <title>`, or bare `#<n>` when the row has no title (neither mode reads one)."""
     return (
         f"#{issue['number']} {issue['title']}"
         if issue["title"]

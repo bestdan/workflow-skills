@@ -208,7 +208,8 @@ keep text out of the model's context. `/list-tasks` reads its board through
 node's title and body and drops the footer and prose references parsed from it,
 keeping its labels, state and edges. Both read association once per distinct author,
 since it is the author's relation to the repo rather than a property of one issue,
-so a 500-issue graph costs a few calls rather than 500. Neither may then fetch a
+so the cost is one read per distinct author rather than one per issue: a few calls
+for a 500-issue graph with a handful of authors. Neither may then fetch a
 withheld title or body another way.
 
 Everywhere else, the helpers and handlers that list issues read numbers and labels
