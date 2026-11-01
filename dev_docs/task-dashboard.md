@@ -138,7 +138,8 @@ None of these needs the server running:
   a view already uses, so `items` adds no ranking rule. They open the DB with
   `db.connect_read_only` (`mode=ro`, `query_only`), which writes only to
   migrate a DB that is behind the current schema, once, as `view` does. An item's `size` reads its
-  bucket (Little's PR categories by size alone, else `large_pr`, or an
+  bucket (Little's PR categories by size alone, else `deep_doc` for a
+  docs-only PR writing a research, design or plan doc, else `large_pr`, or an
   `est:N` label, else a Linear estimate as `est:N`) through `[size.minutes]`.
   A `ticket` is a Jira issue or, with `[linear] enabled`, a mirrored Linear
   one, in the same shape; its `mine` is false for an unassigned or someone

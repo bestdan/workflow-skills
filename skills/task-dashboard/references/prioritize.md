@@ -59,7 +59,9 @@ command that lists them (`more`). Run that only when the plan needs them.
 **With `--minutes`**, `candidates.items` holds the sized candidates, in order,
 whose `est_min` sum stays within twice the box (`minutes.cap`), so you have
 room to choose and swap. `candidates.unsized` lists the rest: a PR too big for
-Little's buckets (`large_pr`), an `est:3` issue or larger, or no size at all.
+Little's buckets (`large_pr`), a PR writing a research, design or plan doc
+(`deep_doc`: deep work, which Deep mode ranks), an `est:3` issue or larger,
+or no size at all.
 They have no minutes by design (`[size.minutes]` has no default for them), so
 **never call an unsized item small**; name the ones you left out. Packing the
 box is your call, weighing what each item unblocks.

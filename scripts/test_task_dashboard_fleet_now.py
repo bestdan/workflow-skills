@@ -1200,6 +1200,67 @@ class DeepTests(Case):
         self.assertEqual(keys, [DESIGN_URL])
 
 
+def titled(row, title):
+    row["title"] = title
+    return row
+
+
+DOC_PATH = "dev_docs/designs/2026-10-31-framed-money.md"
+DOC_ROWS = [
+    sized(tabs_fx.awaiting(60), 1, 306, 0, [DOC_PATH]),  # a design, by its path
+    titled(sized(tabs_fx.awaiting(61), 1, 283, 0, ["dev_docs/annual-data.md"]),
+           "docs: ADR for handling annual data updates"),  # by its title
+    sized(tabs_fx.awaiting(62), 1, 12, 3, [DOC_PATH]),  # a small edit to one
+    sized(tabs_fx.awaiting(63), 1, 200, 0, ["dev_docs/finplan-notes.md"]),
+]  # fmt: skip
+
+
+class DeepDocTests(Case):
+    """A docs-only PR writing a research, design or plan doc is deep work:
+    Deep ranks it, and Little, which sizes a docs PR at minutes, does not."""
+
+    def setUp(self):
+        super().setUp()
+        tabs_fx.seed(self.conn, rows=DEEP_ROWS + DOC_ROWS, prs=[])
+
+    def keys(self, mode):
+        return [r.need.item[1]
+                for r in fleet_now.mode_candidates(self.conn, self.cfg, NOW, mode)]  # fmt: skip
+
+    def test_deep_doc(self):
+        deep_doc = fleet_now.deep_doc
+        self.assertTrue(deep_doc([DOC_PATH], "docs: add a doc", 306))
+        self.assertTrue(deep_doc(["dev_docs/tasks/sites_plan/README.md"], "", 600))
+        self.assertTrue(deep_doc(["notes.md"], "Spike: dashboard rendering", 655))
+        self.assertTrue(deep_doc(["notes.md"], "Add research on local syncing", 331))
+        self.assertTrue(deep_doc(["fit.md"], "Add product-fit assessment", 250))
+        self.assertFalse(
+            deep_doc([DOC_PATH], "docs: fix a typo", fleet_now.LITTLE_LINES)
+        )
+        self.assertFalse(deep_doc(["dev_docs/finplan-notes.md"], "docs: notes", 200))
+        self.assertFalse(deep_doc([DOC_PATH, "a.py"], "design", 306))  # not docs-only
+        self.assertFalse(deep_doc(None, "design", 306))  # the list was cut short
+
+    def test_deep_ranks_them_and_little_does_not(self):
+        deep, little = self.keys("deep"), self.keys("little")
+        for n in (60, 61):
+            self.assertIn(pr_url(n), deep)
+            self.assertNotIn(pr_url(n), little)
+        for n in (62, 63):
+            self.assertIn(pr_url(n), little)
+            self.assertNotIn(pr_url(n), deep)
+
+    def test_the_bucket_and_why_line(self):
+        by = {r.need.item[1]: r for r in
+              fleet_now.mode_candidates(self.conn, self.cfg, NOW, "deep")}  # fmt: skip
+        self.assertEqual(by[pr_url(60)].category, fleet_now.DEEP_DOC)
+        self.assertEqual(fleet_now.why_line(by[pr_url(60)]),
+                         "deep · research, design or plan doc, 1 file, +306/−0")  # fmt: skip
+        self.assertEqual(
+            by[pr_url(60)].need.hint, "finish the thinking, then decide it"
+        )
+
+
 # Tidy over the main fixture: the human-review issues, the untriaged one, and
 # my own PRs, all past fleet_views.OPEN_ITEM_DAYS, drafts and pending CI
 # included. PRs 5 and 6 are only in `prs` (opened 10-01); 1-4 carry their
