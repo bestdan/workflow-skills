@@ -248,7 +248,7 @@ lowest-id-wins ordering is deterministic.
    comments yourself:
 
    ```bash
-   python3 commands/handlers/assets/gh-issue-claim.py elect --repo <repo> --issue <n> \
+   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-claim.py" elect --repo <repo> --issue <n> \
      --since <T_unclaimed, ISO 8601 with a zone> --comment-id <your comment id>
    ```
 
@@ -257,12 +257,18 @@ lowest-id-wins ordering is deterministic.
    comments carrying the `do-tasks-claim:` marker it keeps only those (a) created at
    or after `T_unclaimed`, (b) written by a **trusted author**, by `gh-issue-trust.py`'s
    per-owner-type rule, and (c) **state-backed**: the issue currently carries this
-   handler's claim markers (assignee set, and the `status:3_started` label), proving
-   the poster's issue write landed. The winner is the **lowest comment id**. Each
-   filter is load-bearing: without (a) a stale orphan from a dead session is elected
-   and the issue deadlocks with no owner; without (b) a stranger's hand-typed marker
-   wins and leaves the issue claimed by nobody; without (c) a session that crashed
-   between the comment and the issue write wins forever.
+   handler's claim markers (assignee set, and the `status:3_started` label). That
+   check is on the issue, not per poster: it shows some racer's issue write landed,
+   not that the winner's did. The winner is the **lowest comment id**. Each filter is
+   load-bearing: without (a) a stale orphan from a dead session is elected and the
+   issue deadlocks with no owner; without (b) a stranger's hand-typed marker wins and
+   leaves the issue claimed by nobody; without (c) a session that crashed between the
+   comment and the issue write wins even when no racer's write ever landed.
+
+   **Known residual:** a racer that posted its comment and then crashed before its
+   issue write is still elected once another racer's write lands. The issue is then
+   assigned and started with nobody working on it. Every session assigns the same
+   account, so the assignee cannot tell racers apart.
 
    | exit | meaning                                                   | do                                     |
    | ---- | --------------------------------------------------------- | -------------------------------------- |
