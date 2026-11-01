@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.171.1] - 2026-11-01
+
+### Fixes
+
+- stop sizing design doc PRs as quick reads [N/A] (#1304) (7a0fa5b)
+
 ## [2.171.0] - 2026-11-01
 
 ### Features
