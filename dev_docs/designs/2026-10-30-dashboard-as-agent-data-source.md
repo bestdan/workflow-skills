@@ -524,6 +524,20 @@ with their `est_min` is how `[size.minutes]` gets tuned, the same way `tune`
 proposes weights: a suggestion with its evidence, applied only when the owner
 approves it.
 
+> **2026-10-31, as built in #1288.** The sync's last step, `plans`
+> (`plan_ticks.py`), runs only while a plan is live or a session plan has
+> expired unrecorded. It re-reads with `refresh` only the GitHub entries that
+> left the mirror with no closed signal, at most 10 per sync, an expired
+> plan's first, and keeps GitHub's answer in a `plan_checks` mirror table that
+> Plan mode reads as a signal: an issue's close or a merge ticks, anything
+> else stays `gone` with GitHub's answer as its evidence. Entries still in
+> the mirror are not re-read, since the sync just read them. "Once at expiry"
+> is the first sync after 04:00. The record is a `plan_outcomes` row, each
+> entry with its state and evidence then (`plan outcomes` lists them); a
+> session plan replaced by `plan set` or removed by `plan clear` is recorded
+> first, as `replaced` or `cleared`. The records are not exported, like
+> `now_shown`.
+
 **Estimating duration is a development area, not a solved input.** Agents are
 poor at saying how long a task will take, and a bucket-to-minutes table is
 only a starting point. The calibration above is the cheap first step. Two
@@ -549,6 +563,12 @@ the owner can take or leave.
 reorders a planned item, that is a labelled disagreement with a stated reason,
 which is what `tune` learns from. `whynot` records it with the plan's reason
 alongside.
+
+> **2026-10-31, as built in #1288.** Only a snooze's "why not now" answer is
+> captured; a drop or reorder records nothing yet. The answer's `features`
+> carry `plan_reason`, `plan_action`, `plan_scope` and `plan_kind` from the
+> live plan that lists the item (a session plan before a standing one), so
+> `tune --json` prints them; tune compares nothing on them yet.
 
 ### 6. The procedure: `/task-dashboard prioritize [scope]`
 

@@ -48,6 +48,7 @@ import health  # noqa: E402
 import include  # noqa: E402
 import ingest  # noqa: E402
 import overlay  # noqa: E402
+import plan_ticks  # noqa: E402
 import plans  # noqa: E402
 import refresh  # noqa: E402
 import server  # noqa: E402
@@ -278,7 +279,8 @@ def build_parser() -> argparse.ArgumentParser:
     plan_p = sub.add_parser(
         "plan",
         help="set, show or clear a plan: an ordered list of items for one scope"
-        " (or `all`), a reason each; a session plan expires at 04:00 local",
+        " (or `all`), a reason each; a session plan expires at 04:00 local;"
+        " outcomes lists what ended session plans left",
     )
     plan_sub = plan_p.add_subparsers(dest="plan_command", required=True)
     plan_set = plan_sub.add_parser(
@@ -322,6 +324,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--kind", choices=overlay.PLAN_KINDS, help="only this kind (default: both)"
     )
     _paths(plan_clear)
+    plan_outcomes = plan_sub.add_parser(
+        "outcomes",
+        help="print the records ended session plans left: each entry's state then",
+    )
+    plan_outcomes.add_argument("--scope", help="only this scope id's records")
+    _paths(plan_outcomes)
     refresh_p = sub.add_parser(
         "refresh",
         help="re-read one GitHub PR or issue and rewrite its rows, as the card's"
@@ -701,6 +709,11 @@ def cmd_plan(args: argparse.Namespace) -> int:
             doc = {"schema": plans.SCHEMA_VERSION, "plans": [plan]}
         elif args.plan_command == "show":
             doc = plans.show(conn, cfg, now, args.scope, args.kind)
+        elif args.plan_command == "outcomes":
+            doc = {
+                "schema": plans.SCHEMA_VERSION,
+                "outcomes": plan_ticks.outcomes(conn, args.scope),
+            }
         else:
             gone = plans.clear(conn, cfg, now, args.scope, args.kind)
             doc = {"schema": plans.SCHEMA_VERSION, "cleared": gone}

@@ -1,7 +1,7 @@
 ---
 name: task-dashboard
 description: Install, check, sync, open, back up, read, prioritize, clean up, or remove the local task dashboard — the always-on localhost page that mirrors Jira and GitHub into SQLite and ranks what to do next. Subcommands install | status | sync-now | open | export | import | tune | view | scopes | items | item | brief | prioritize | refresh | overlay | plan | clean | uninstall. Use when the user wants that dashboard set up as a login agent on their Mac, asks if it is running or how stale it is, wants it refreshed now, wants its link, wants to back up or restore its pins, snoozes and notes, wants Now's ranking tuned from their "why not now" answers, asks what a tab shows ("what's on Stale?"), wants the open work in one repo, workstream, project or label as compact records ("what's open on FinPlan?"), asks what to work on next ("help me prioritize my FinPlan tasks", "half an hour, what small tasks should I bang out?"), asks to clean a tab up, wants an item ignored or snoozed, or wants it taken off the machine.
-argument-hint: "install | status | sync-now [--reconcile] | open | export <file> | import <file> | tune [--days N] | view <name> [--json] [--all] [--mode M] | scopes [query] | items [--scope X] [--kind K] [--state S] [--only F] [--fields F] [--limit N] [--offset N] [--jsonl] | item <source:key> [--sections S] | brief [--scope X] [--mode M] [--minutes N] [--sections S] | prioritize [scope] | refresh <owner/repo#N> [--json] | overlay <action> | plan set|show|clear | clean <view> | uninstall"
+argument-hint: "install | status | sync-now [--reconcile] | open | export <file> | import <file> | tune [--days N] | view <name> [--json] [--all] [--mode M] | scopes [query] | items [--scope X] [--kind K] [--state S] [--only F] [--fields F] [--limit N] [--offset N] [--jsonl] | item <source:key> [--sections S] | brief [--scope X] [--mode M] [--minutes N] [--sections S] | prioritize [scope] | refresh <owner/repo#N> [--json] | overlay <action> | plan set|show|clear|outcomes | clean <view> | uninstall"
 ---
 
 # task-dashboard
@@ -218,7 +218,8 @@ none is), so you see what they see; `notes.mode` names it, outside Ship
 `notes.closed_today` is the day's count. `plan` lists the live plan (below)
 in its order: each item's `plan` carries its `reason` and `state`, `done`
 (ticked on a closed signal), `open`, or `gone` (left the mirror with nothing
-saying it closed, so **not** done); `notes.plan` is the plan with `counts`
+saying it closed, so **not** done; with `github.scope` "owner", syncs re-read
+gone GitHub items, up to 10 a sync, and tick those GitHub says closed); `notes.plan` is the plan with `counts`
 per state, or null with `notes.no_plan` when none is live. `freshness` says when each sync last
 succeeded and when each host last snapshotted. Without `--json` it prints one
 line per item.
@@ -318,6 +319,9 @@ scope, a reason each. The overlay carries it, so export and import do too.
 - `DASH plan show [--scope X] [--kind K]` prints the plans, with each one's
   `est_min_sum`; `DASH plan clear --scope X [--kind K]` removes it (`--scope
   all` for the all-scope plan; both kinds without `--kind`).
+- A session plan that ends (expired, replaced or cleared) leaves a record of
+  each entry's state then; `DASH plan outcomes [--scope X]` lists them. A
+  "why not now" answer on a planned item records the plan's reason too.
 - Exit 2 for a refused value, 1 for an unreadable file or DB.
 
 ## prioritize
@@ -325,8 +329,9 @@ scope, a reason each. The overlay carries it, so export and import do too.
 `prioritize [scope]` ("help me prioritize my FinPlan tasks", "I've got half
 an hour, what should I bang out?") reads the ask for a scope, a Now mode and a
 time box, then `DASH brief` and the `item` dossiers, and proposes an ordered
-plan in chat, a reason and `est_min` per item. **It never writes to a
-tracker, and never calls an unsized item small.** The procedure is
+plan in chat, a reason and `est_min` per item; on the owner's yes it saves it
+with `plan set`. **It never writes to a tracker, and never calls an unsized
+item small.** The procedure is
 [`references/prioritize.md`](references/prioritize.md); read it before
 starting.
 

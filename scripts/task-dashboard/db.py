@@ -9,7 +9,9 @@ Now mode, the per-view filters, and plans, keyed by (scope, kind), and a sync
 never touches them; they are the only state
 here that cannot be rebuilt. `now_shown`, the base rate Now's "why not now"
 answers are compared with, is neither: nothing rebuilds it, but losing it costs
-only the comparison, so it is not exported either.
+only the comparison, so it is not exported either. `plan_outcomes`, the record a
+finished session plan leaves (plan_ticks.py), is the same: it is not exported,
+and losing it costs only the calibration it would feed.
 
 The DB lives under ~/.local/state, outside every checkout and plugin directory,
 so a plugin update never wipes the overlay. WAL mode lets the HTTP thread read a
@@ -38,6 +40,7 @@ MIRROR_TABLES = (
     "history_entries",
     "workstreams",
     "workstream_members",
+    "plan_checks",
 )
 # Keyed by (source, item_key). `last_visit` and `now_mode` are overlay state
 # too, but one row each with no item key, so they are named apart.
@@ -459,6 +462,41 @@ CREATE TABLE plans (
 );
 """
 
+# Version 13: plan ticks and outcomes (plan_ticks.py).
+#
+# - `plan_checks`: a mirror table. What the sync's plans step learned by
+#   re-reading (refresh.py) a planned GitHub item that had left the mirror:
+#   `outcome` is refresh's (merged, closed, archived, not_found, out_of_scope),
+#   `kind` pr or issue (NULL when GitHub found nothing), `closed_at` GitHub's.
+#   Plan mode reads it as a closed signal; rows for items in no plan are pruned.
+# - `plan_outcomes`: one row per session plan that ended, written once: the
+#   plan as it was set, how it ended (`expired`, `replaced` or `cleared`), and
+#   `entries`, a JSON list of each entry with its state and evidence then.
+_V13 = """
+CREATE TABLE plan_checks (
+    source TEXT NOT NULL,
+    item_key TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    kind TEXT,
+    closed_at TEXT,
+    checked_at TEXT NOT NULL,
+    PRIMARY KEY (source, item_key)
+);
+CREATE TABLE plan_outcomes (
+    scope TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT,
+    author TEXT NOT NULL,
+    mode TEXT,
+    minutes INTEGER,
+    ended TEXT NOT NULL,
+    recorded_at TEXT NOT NULL,
+    entries TEXT NOT NULL,
+    PRIMARY KEY (scope, kind, created_at)
+);
+"""
+
 # Ordered, ascending, append-only: never edit a shipped entry.
 #
 # migrate() runs a script one statement at a time through _statements, which
@@ -482,6 +520,7 @@ MIGRATIONS: list[tuple[int, str]] = [
     (10, _V10),
     (11, _V11),
     (12, _V12),
+    (13, _V13),
 ]
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 

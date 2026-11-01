@@ -27,7 +27,10 @@ import dashboard  # type: ignore[import-not-found]  # noqa: E402
 import db  # type: ignore[import-not-found]  # noqa: E402
 import fleet_now  # type: ignore[import-not-found]  # noqa: E402
 import overlay  # type: ignore[import-not-found]  # noqa: E402
+import plan_ticks  # type: ignore[import-not-found]  # noqa: E402
 import plans  # type: ignore[import-not-found]  # noqa: E402
+import server  # type: ignore[import-not-found]  # noqa: E402
+import sync  # type: ignore[import-not-found]  # noqa: E402
 import test_task_dashboard_agent_query as aq  # noqa: E402
 
 NOW = aq.NOW
@@ -593,6 +596,266 @@ class PlanModeTests(Case):
         self.assertNotIn(f'data-key="{A[1]}"', page)
         self.assertIn('data-snoozed="1"', page)
         self.assertIn("0/2 done", page)
+
+
+# --- ticks at sync, outcomes, why not now (plan_ticks.py) --------------------
+
+LATER = NOW + timedelta(days=2)  # past a session plan's 04:00 expiry
+
+
+def gh_answer(node):
+    repo = {"nameWithOwner": aq.REPO, "isArchived": False, "issueOrPullRequest": node}
+    return json.dumps({"data": {"viewer": {"login": "bestdan"}, "repository": repo}})
+
+
+def closed_issue(n):
+    return {
+        "__typename": "Issue", "url": aq.issue_url(n), "number": n,
+        "title": f"issue {n}", "state": "CLOSED",
+        "createdAt": "2026-10-01T00:00:00Z", "updatedAt": "2026-10-24T13:00:00Z",
+        "closedAt": "2026-10-24T13:00:00Z", "labels": {"nodes": []},
+    }  # fmt: skip
+
+
+def merged_pr(n, author="ana"):
+    return {
+        "__typename": "PullRequest", "url": aq.pr_url(n), "number": n,
+        "title": f"pr {n}", "state": "MERGED", "author": {"login": author},
+        "closedAt": "2026-10-24T14:00:00Z", "mergedAt": "2026-10-24T14:00:00Z",
+    }  # fmt: skip
+
+
+class FakeGh:
+    """Answers refresh.py's GraphQL read by item number; a number it has no
+    node for is one GitHub cannot resolve. Records each call's number."""
+
+    def __init__(self, nodes=None):
+        self.nodes = dict(nodes or {})
+        self.calls = []
+
+    def __call__(self, argv, timeout):
+        n = int(next(a.split("=", 1)[1] for a in argv if a.startswith("number=")))
+        self.calls.append(n)
+        if n not in self.nodes:
+            return 1, "", f"Could not resolve to an issue or pull request ({n})"
+        return 0, gh_answer(self.nodes[n]), ""
+
+
+class TickTests(Case):
+    def setUp(self):
+        super().setUp()
+        self.cfg["github"]["orgs"] = ["bestdan"]
+
+    def leave_mirror(self, item):
+        self.conn.execute(
+            "DELETE FROM issues WHERE source = ? AND key = ?", (item[0], item[1])
+        )
+        self.conn.commit()
+
+    def items(self, now=NOW):
+        doc = agent_view.build(self.conn, self.cfg, "now", now, mode="plan")
+        return {i["key"]: i["plan"] for i in doc["lanes"][0]["items"]}
+
+    def sync(self, gh, now=NOW + timedelta(hours=1)):
+        return sync.run_plans(self.cfg, self.conn, now, runner=gh, clock=lambda: now)
+
+    def counts(self, row):
+        return json.loads(row["counts"])
+
+    def test_an_issue_closed_by_hand_is_ticked_by_the_next_sync(self):
+        self.set([entry(A, "small"), entry(B)])
+        self.leave_mirror(A)  # the sync's issue search no longer returns it
+        self.assertEqual(self.items()[A[1]]["state"], "gone")
+        gh = FakeGh({1: closed_issue(1)})
+        row = self.sync(gh)
+        self.assertEqual((row["kind"], row["outcome"]), ("plans", "ok"))
+        self.assertEqual(gh.calls, [1])  # B is in the mirror: not read
+        got = self.items()
+        self.assertEqual(
+            (got[A[1]]["state"], got[A[1]]["evidence"]), ("done", "closed 2026-10-24")
+        )
+        self.assertEqual(got[B[1]]["state"], "open")
+        self.assertEqual(self.counts(row)["ticked"], 1)
+        # Settled: the next sync does not read it again.
+        self.sync(gh)
+        self.assertEqual(gh.calls, [1])
+
+    def test_an_issue_reopened_after_its_tick_reads_open_again(self):
+        self.set([entry(A, "small")])
+        row = self.conn.execute(
+            "SELECT * FROM issues WHERE source = ? AND key = ?", A
+        ).fetchone()
+        cols = [d[0] for d in self.conn.execute("SELECT * FROM issues").description]
+        self.leave_mirror(A)
+        self.sync(FakeGh({1: closed_issue(1)}))
+        self.assertEqual(self.items()[A[1]]["state"], "done")
+        # Reopened: the next issue search returns it, while its check says closed.
+        self.conn.execute(
+            f"INSERT INTO issues ({', '.join(cols)})"
+            f" VALUES ({', '.join('?' for _ in cols)})",
+            tuple(row),
+        )
+        self.conn.commit()
+        self.assertEqual(self.items()[A[1]]["state"], "open")
+
+    def test_a_merge_ticks_and_a_vanished_item_stays_gone_with_githubs_word(self):
+        self.set([entry(PR11), entry(B)])
+        self.leave_mirror(PR11)
+        self.leave_mirror(B)
+        gh = FakeGh({11: merged_pr(11)})  # issue 2: GitHub cannot find it
+        self.sync(gh)
+        got = self.items()
+        self.assertEqual(
+            (got[PR11[1]]["state"], got[PR11[1]]["evidence"]),
+            ("done", "merged 2026-10-24"),
+        )
+        self.assertEqual(
+            (got[B[1]]["state"], got[B[1]]["evidence"]),
+            ("gone", "not found on GitHub (checked 2026-10-24)"),
+        )
+
+    def test_reads_are_bounded_per_sync_and_the_rest_wait(self):
+        self.set([entry(A), entry(B)])
+        self.leave_mirror(A)
+        self.leave_mirror(B)
+        gh = FakeGh({1: closed_issue(1), 2: closed_issue(2)})
+        row = sync.run_plans(
+            self.cfg, self.conn, NOW, runner=gh, clock=lambda: NOW
+        )  # one sync at the default bound reads both
+        self.assertEqual(self.counts(row)["read"], 2)
+        self.conn.execute("DELETE FROM plan_checks")
+        self.conn.commit()
+        gh.calls.clear()
+        counts, err = plan_ticks.step_body(self.cfg, self.conn, NOW, gh, limit=1)
+        self.assertIsNone(err)
+        self.assertEqual((counts["read"], counts["deferred"]), (1, 1))
+        self.assertEqual(gh.calls, [1])
+
+    def test_nothing_is_read_without_the_github_fleet(self):
+        self.set([entry(A)])
+        self.leave_mirror(A)
+        self.cfg["github"]["scope"] = "me"
+        gh = FakeGh({1: closed_issue(1)})
+        self.sync(gh)
+        self.assertEqual(gh.calls, [])
+        self.assertEqual(self.items()[A[1]]["state"], "gone")
+
+    def test_an_expired_session_plan_leaves_an_outcome_record(self):
+        self.set([entry(A, "small", est_min=15), entry(B, est_min=30)], kind="session")
+        self.assertTrue(plan_ticks.pending(self.conn, NOW))
+        self.leave_mirror(A)
+        gh = FakeGh({1: closed_issue(1)})
+        row = sync.run_plans(self.cfg, self.conn, LATER, runner=gh, clock=lambda: LATER)
+        self.assertEqual(self.counts(row)["outcomes"], 1)
+        [o] = plan_ticks.outcomes(self.conn)
+        self.assertEqual(
+            (o["scope"], o["kind"], o["ended"], o["minutes"], o["counts"]),
+            (REPO_SCOPE, "session", "expired", None,
+             {"done": 1, "open": 1, "gone": 0}),
+        )  # fmt: skip
+        self.assertEqual(
+            [(e["key"], e["state"], e["est_min"]) for e in o["entries"]],
+            [(A[1], "done", 15), (B[1], "open", 30)],
+        )
+        self.assertEqual(o["entries"][0]["evidence"], "closed 2026-10-24")
+        # Recorded once, and nothing left for the step to do.
+        self.assertEqual(plan_ticks.pending(self.conn, LATER), [])
+        self.assertEqual(len(plan_ticks.outcomes(self.conn)), 1)
+
+    def test_a_failed_read_holds_the_outcome_for_the_next_sync(self):
+        self.set([entry(A)], kind="session")
+        self.leave_mirror(A)
+
+        def broken(argv, timeout):
+            return 1, "", "HTTP 502: bad gateway"
+
+        row = sync.run_plans(
+            self.cfg, self.conn, LATER, runner=broken, clock=lambda: LATER
+        )
+        self.assertEqual(self.counts(row)["read_failed"], 1)
+        self.assertEqual(plan_ticks.outcomes(self.conn), [])
+        sync.run_plans(
+            self.cfg, self.conn, LATER, runner=FakeGh({1: closed_issue(1)}),
+            clock=lambda: LATER,
+        )  # fmt: skip
+        [o] = plan_ticks.outcomes(self.conn)
+        self.assertEqual(o["entries"][0]["state"], "done")
+
+    def test_a_logged_out_gh_holds_the_outcome_and_says_how_to_fix_it(self):
+        self.set([entry(A)], kind="session")
+        self.leave_mirror(A)
+
+        def logged_out(argv, timeout):
+            return 1, "", "HTTP 401: Bad credentials"
+
+        row = sync.run_plans(
+            self.cfg, self.conn, LATER, runner=logged_out, clock=lambda: LATER
+        )
+        self.assertEqual(self.counts(row)["deferred"], 1)
+        self.assertIn("gh auth login", json.dumps(row))
+        self.assertEqual(plan_ticks.outcomes(self.conn), [])
+
+    def test_replacing_or_clearing_a_session_plan_records_it_first(self):
+        self.set([entry(A)], kind="session")
+        plans.set_plan(
+            self.conn, self.cfg, NOW + timedelta(minutes=1), scope=REPO_SCOPE,
+            kind="session", entries=[entry(B)], author="me", tz=MINUS7,
+        )  # fmt: skip
+        self.assertEqual(
+            [
+                (o["ended"], o["entries"][0]["key"])
+                for o in plan_ticks.outcomes(self.conn)
+            ],
+            [("replaced", A[1])],
+        )
+        plans.clear(self.conn, self.cfg, NOW + timedelta(minutes=2), REPO_SCOPE)
+        self.assertEqual(
+            [o["ended"] for o in plan_ticks.outcomes(self.conn)],
+            ["replaced", "cleared"],
+        )
+        # A standing plan never ends, so it leaves none.
+        self.set([entry(A)])
+        plans.clear(self.conn, self.cfg, NOW, REPO_SCOPE)
+        self.assertEqual(len(plan_ticks.outcomes(self.conn)), 2)
+
+    def test_the_cli_lists_outcomes(self):
+        self.set([entry(A)], kind="session")
+        plans.clear(self.conn, self.cfg, NOW, REPO_SCOPE)
+        cfg_path = Path(self.db_path.parent) / "config.toml"
+        cfg_path.write_text(aq.CONFIG_TOML)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = dashboard.main(
+                ["plan", "outcomes", "--db", str(self.db_path),
+                 "--config", str(cfg_path)]
+            )  # fmt: skip
+        self.assertEqual(code, 0)
+        [o] = json.loads(out.getvalue())["outcomes"]
+        self.assertEqual((o["ended"], o["scope"]), ("cleared", REPO_SCOPE))
+
+    def test_no_plan_means_no_plans_step(self):
+        self.assertEqual(plan_ticks.pending(self.conn, NOW), [])
+        self.set([entry(A)])
+        self.assertTrue(plan_ticks.pending(self.conn, NOW))
+
+    def why_not_features(self, item):
+        overlay.snooze(self.conn, item, "2999-01-01")
+        form = {"source": [item[0]], "key": [item[1]], "reason": ["not_urgent"]}
+        server.write_overlay(self.conn, self.cfg, "whynot", form, NOW)
+        (raw,) = self.conn.execute(
+            "SELECT features FROM why_not WHERE item_key = ?", (item[1],)
+        ).fetchone()
+        return json.loads(raw)
+
+    def test_a_why_not_answer_on_a_planned_item_carries_the_plans_reason(self):
+        self.set([entry(A, "standing reason", action="do")])
+        self.set([entry(A, "session reason", action="finish")], kind="session")
+        f = self.why_not_features(A)
+        self.assertEqual(
+            (f["plan_reason"], f["plan_action"], f["plan_scope"], f["plan_kind"]),
+            ("session reason", "finish", REPO_SCOPE, "session"),
+        )
+        self.assertNotIn("plan_reason", self.why_not_features(B))
 
 
 if __name__ == "__main__":

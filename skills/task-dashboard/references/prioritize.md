@@ -80,3 +80,22 @@ An ordered list, each line naming the item, what to do (`do`, `finish`,
 `unblock`, `review`, `defer` or `drop`), a one-line reason, and its `est_min`
 (or "unsized"). With a time box, give the total against it. Say which
 candidates you left out and why, and which gaps limit the answer.
+
+## 6. On the owner's yes, keep the plan
+
+Save the plan they agreed to, as agreed, with `DASH plan set` (SKILL.md's
+`plan` section has the file's shape): the scope from step 1, `--by` naming
+you, and the items in order, each with its reason, `action` and `est_min`. A
+time box makes it a session plan (`--minutes N`), which lapses at the next
+04:00; without one it is standing. Now's Plan mode then shows it, ticking
+items as they close.
+
+Any snooze, ignore or pin the plan implies (a `defer` or `drop` line) goes
+through `DASH overlay`, one item at a time, each one the owner approved.
+Never batch them, and never set a plan the owner did not say yes to.
+
+## 7. Offer to start the first item
+
+For a session plan, offer to start its first item. The `action` in its
+`item` dossier names how: resume its session, open its worktree, or review
+its PR. Wait for the owner to say go.

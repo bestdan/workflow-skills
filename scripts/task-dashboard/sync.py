@@ -43,6 +43,10 @@ session-state hook events into rows whenever the instance ingests snapshots,
 and `run_claude_remote()` (kind `claude_remote`) reads the optional cloud
 session list when `claude_remote.enabled` is on.
 
+Last, while a plan is live or a session plan has expired unrecorded,
+`run_plans()` (kind `plans`, plan_ticks.py) re-reads planned GitHub items that
+left the mirror and records the outcome of each session plan that expired.
+
 dev_docs/task-dashboard.md ("Sync modes and the cursor rule") says why.
 """
 
@@ -869,6 +873,28 @@ def run_workstreams(
     return _run_row(db, run_id)
 
 
+def run_plans(
+    config: dict[str, Any],
+    db: sqlite3.Connection,
+    now: datetime,
+    *,
+    runner: github_gh.Runner = github_gh.run,
+    clock: "Callable[[], datetime] | None" = None,
+) -> dict[str, Any]:
+    """Tick the plans and record the session plans that expired
+    (plan_ticks.py). It reads every mirror step's rows, so it runs last."""
+    # Imported here: plan_ticks reads plans through refresh, which imports this
+    # module.
+    import plan_ticks
+
+    def body() -> "tuple[dict[str, int], str | None]":
+        return plan_ticks.step_body(
+            config, db, now, runner, can_read=fleet_enabled(config)
+        )
+
+    return _run_step(db, plan_ticks.RUN_KIND, now, clock or _wall, body)
+
+
 def once(resolve_key: "Callable[[], str]") -> "Callable[[], str]":
     """`resolve_key`, called at most once: later calls return its key, or
     raise the linear_api.NoKey it raised. run_all hands one to both Linear
@@ -941,4 +967,9 @@ def run_all(
         rows.append(
             run_claude_remote(config, db, clock(), runner=claude_runner, clock=clock)
         )
+    import plan_ticks  # see run_plans
+
+    if plan_ticks.pending(db, now):
+        step(plan_ticks.RUN_KIND)
+        rows.append(run_plans(config, db, clock(), runner=fleet_runner, clock=clock))
     return rows

@@ -21,8 +21,10 @@ the page never calls GitHub:
   entry keeps its place in the plan; its card is muted, flagged `gone`,
   titled by its closed PR's title when there is one, else by the entry's ref
   (`owner/repo#N` for a GitHub URL) or key, and says why it is not ticked.
-  Until a sync refreshes planned items, a GitHub issue closed by hand, with
-  no merged PR naming it, reads `gone`.
+  The sync's plans step (plan_ticks.py) re-reads such a GitHub entry and keeps
+  what GitHub said in `plan_checks`: an issue's close or a merge ticks it, and
+  anything else leaves it `gone` with GitHub's answer as its evidence. So a
+  GitHub issue closed by hand reads `gone` only until the next sync.
 """
 
 import re
@@ -83,14 +85,48 @@ def _ref(pr: dict[str, Any]) -> str:
     return f"{pr.get('repo') or ''}#{pr.get('number')}"
 
 
+def _checks(conn: sqlite3.Connection) -> dict[tuple[str, str], dict[str, Any]]:
+    """(source, key) -> its `plan_checks` row: what the plans step's re-read of
+    a planned item that left the mirror found."""
+    cols = ("source", "item_key", "outcome", "kind", "closed_at", "checked_at")
+    return {
+        (r[0], r[1]): dict(zip(cols, r))
+        for r in conn.execute(f"SELECT {', '.join(cols)} FROM plan_checks")
+    }
+
+
+_CHECKED = {
+    "archived": "its repo is archived",
+    "not_found": "not found on GitHub",
+    "out_of_scope": "moved outside github.orgs",
+}
+
+
+def check_state(check: dict[str, Any]) -> "tuple[str, str]":
+    """(state, evidence) from a `plan_checks` row. A merge, or an issue's
+    close, is a tick; a PR closed without merging, and anything else, is not."""
+    outcome, day = check["outcome"], _day(check.get("closed_at"))
+    if outcome == "merged":
+        return DONE, f"merged {day}".strip()
+    if outcome == "closed" and check.get("kind") == "issue":
+        return DONE, f"closed {day}".strip()
+    if outcome == "closed":
+        return GONE, f"closed without merging {day}".strip()
+    why = _CHECKED.get(outcome, outcome)
+    return GONE, f"{why} (checked {_day(check.get('checked_at'))})"
+
+
 def state_of(
     source: str,
     key: str,
     item: "agent_query.Item | None",
     prs: dict[str, dict[str, Any]],
     issues: dict[str, dict[str, Any]],
+    check: "dict[str, Any] | None" = None,
 ) -> "tuple[str, str]":
-    """(state, evidence) for one plan entry."""
+    """(state, evidence) for one plan entry. `check` is its `plan_checks` row,
+    read only when the entry is not in the mirror: an issue reopened since is
+    back in the mirror, and open."""
     pr = prs.get(key) if source == github_fleet.SOURCE else None
     if pr is not None and pr.get("merged"):
         return DONE, f"merged {_day(pr.get('merged_at') or pr.get('closed_at'))}"
@@ -102,6 +138,8 @@ def state_of(
         if state.get("category") == "done":
             return DONE, str(state.get("name") or "done")
         return OPEN, str(state.get("name") or "open")
+    if check is not None:
+        return check_state(check)
     if pr is not None:
         return GONE, f"closed without merging {_day(pr.get('closed_at'))}"
     return GONE, "not in the mirror, and nothing says it closed"
@@ -137,6 +175,30 @@ def state_line(entry: dict[str, Any], state: str, evidence: str) -> str:
     return " · ".join(bits)
 
 
+EntryState = tuple[
+    dict[str, Any], "agent_query.Item | None", "dict[str, Any] | None", str, str
+]
+
+
+def entry_states(
+    conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime, plan: dict[str, Any]
+) -> list[EntryState]:
+    """The plan's entries in order, each as (entry, its mirror item or None,
+    its closed_pr row or None, state, evidence)."""
+    by_item = {(i["source"], i["key"]): i for i in agent_query.collect(conn, cfg, now)}
+    prs, issues = _closed_signals(_closed_prs(conn))
+    checks = _checks(conn)
+    out: list[EntryState] = []
+    for e in plan["entries"]:
+        source, key = e["source"], e["key"]
+        item = by_item.get((source, key))
+        state, evidence = state_of(
+            source, key, item, prs, issues, checks.get((source, key))
+        )
+        out.append((e, item, prs.get(key), state, evidence))
+    return out
+
+
 def collect(
     conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime
 ) -> "tuple[dict[str, Any] | None, dict[str, Any] | None, list[candidate.Candidate]]":
@@ -146,18 +208,13 @@ def collect(
     plan, lapsed = plans.current(conn, now)
     if plan is None:
         return None, lapsed, []
-    by_item = {(i["source"], i["key"]): i for i in agent_query.collect(conn, cfg, now)}
-    closed = _closed_prs(conn)
-    prs, issues = _closed_signals(closed)
     out = []
-    for pos, e in enumerate(plan["entries"], 1):
-        source, key = e["source"], e["key"]
-        item = by_item.get((source, key))
-        state, evidence = state_of(source, key, item, prs, issues)
+    rows = entry_states(conn, cfg, now, plan)
+    for pos, (e, item, pr, state, evidence) in enumerate(rows, 1):
         if item is not None:
             need = _need(item)
         else:
-            need = _gone_need(source, key, prs.get(key))
+            need = _gone_need(e["source"], e["key"], pr)
         need.state = state_line(e, state, evidence)
         out.append(
             candidate.Candidate(
