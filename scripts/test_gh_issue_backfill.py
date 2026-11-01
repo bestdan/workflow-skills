@@ -92,6 +92,9 @@ class FakeRepo:
             number = int(args[args.index("--method") + 2].rsplit("/", 1)[1])
             self.patches.append((number, json.loads(stdin)))
             return 0, "{}", ""
+        if args[0] == "api" and args[1].count("/") == 2:
+            # `repos/o/r` — the author gate's owner-type read.
+            return 0, json.dumps({"owner": {"type": "User"}}), ""
         if args[0] == "api" and args[1].count("/") == 4:
             # `repos/o/r/issues/<n>` — the author gate's read.
             issue = self._issue(int(args[1].rsplit("/", 1)[1]))
@@ -276,6 +279,14 @@ class ScanTests(unittest.TestCase):
         )
         self.assertNotIn("evil", json.dumps(result))
         self.assertNotIn("Ignore previous", json.dumps(result))
+        # The list query must not fetch text either; the gate is its only reader.
+        listing = next(c for c in repo.calls if c[:2] == ["issue", "list"])
+        self.assertEqual(listing[listing.index("--json") + 1], "number,labels")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            backfill.report_scan(result)
+        self.assertIn("Untrusted author, not read (1):", buf.getvalue())
+        self.assertIn("#2 @stranger (CONTRIBUTOR)", buf.getvalue())
 
     def test_a_result_at_the_cap_is_flagged_truncated(self):
         """A sweep that could not see the whole backlog must not read as one."""

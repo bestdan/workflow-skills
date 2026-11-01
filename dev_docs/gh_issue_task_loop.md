@@ -160,9 +160,19 @@ turns one missing rung into a total outage.
 On a public repo anyone can open an issue, and the loop turns an issue body into an
 agent's instructions, run unattended on the owner's machine with the owner's
 credentials. So the author of an issue is the author of a prompt. The gate is
-`commands/handlers/assets/gh-issue-trust.py`: an issue is trusted only when GitHub's
-`author_association` is `OWNER`, `MEMBER` or `COLLABORATOR`. `CONTRIBUTOR` is not
-trusted, because it means only that the author once had a PR merged.
+`commands/handlers/assets/gh-issue-trust.py`. Which `author_association` values it
+trusts depends on who owns the repo:
+
+| Repo owner   | Trusted                           | Why                                                                                                                                   |
+| ------------ | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| User         | `OWNER`, `COLLABORATOR`           | the owner and the people they invited                                                                                                 |
+| Organization | `OWNER`, `COLLABORATOR`, `MEMBER` | GitHub reports access through the org, team grants included, as `MEMBER`, so without it the owner's colleagues would all be untrusted |
+
+The org row means every member of the org can direct the agent on that org's repos.
+That is the org's own trust boundary, and the price of the loop working there at all.
+An owner type other than `Organization` gets the user row, the narrower set.
+`CONTRIBUTOR` is never trusted, because it means only that the author once had a PR
+merged.
 
 **The gate keeps the text out of the model's context, not just out of the work.**
 Candidate queries select numbers and labels and never `title` or `body`. Labels are
@@ -172,8 +182,9 @@ association, nothing the author wrote. A screen that read the body first and the
 judged it would already have handed the injection to the model it meant to protect.
 
 It runs at every point an issue's text enters the loop: `/promote-tasks`' candidate
-step and backfill scan, and `/do-tasks`' ranked candidates and direct pick, which is
-also how each batch session reads its pinned issue. An untrusted issue gets no write
+step and backfill scan, `/do-tasks`' ranked candidates and direct pick, and each batch
+session's first read of its pinned issue (`commands/do-tasks.md` §4 step 5), since a
+batch session skips the section the direct pick lives in. An untrusted issue gets no write
 and is reported by number. On a direct pick it stops the run even with a person
 present, since showing them the text would put it in context. The helper fails
 closed: a failed read exits non-zero and the caller writes nothing.

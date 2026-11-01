@@ -5,10 +5,19 @@ On a public repo anyone can open an issue, and the gh-issue loop turns an issue
 body into an agent's instructions: `/promote-tasks` scores it and `/do-tasks`
 builds it, unattended, on the owner's machine with the owner's credentials. So
 whoever wrote the issue gets to prompt that agent. This script is the gate: an
-issue is trusted only when GitHub reports its author as the repo's `OWNER`, an
-org `MEMBER`, or an invited `COLLABORATOR`. `CONTRIBUTOR` is deliberately not
-trusted — it means only that the author once had a PR merged, which a stranger
-can arrange.
+issue is trusted only when GitHub reports its author's `author_association` as
+one the repo's owner type allows:
+
+- **User-owned repo:** `OWNER` or `COLLABORATOR`, the owner and the people they
+  invited.
+- **Organization-owned repo:** those, plus `MEMBER`. GitHub reports anyone whose
+  access comes through the org, team grants included, as `MEMBER`, so leaving it
+  out would make the owner's own colleagues, and usually the owner too, untrusted
+  there. The cost is that every org member can direct the agent on that org's
+  repos, which is the org's own trust boundary.
+
+`CONTRIBUTOR` is never trusted: it means only that the author once had a PR
+merged, which a stranger can arrange.
 
 **This script is the only reader of issue text.** Callers list candidates by
 number and labels alone (labels are safe: only collaborators can set them), pass
@@ -35,13 +44,27 @@ import json
 import subprocess
 import sys
 
-TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+USER_REPO_TRUSTED = frozenset({"OWNER", "COLLABORATOR"})
+ORG_REPO_TRUSTED = USER_REPO_TRUSTED | {"MEMBER"}
 
 
 def run_gh(args):
     """Run `gh` and return (returncode, stdout, stderr). The seam the tests stub."""
     proc = subprocess.run(["gh", *args], capture_output=True, text=True)
     return proc.returncode, proc.stdout, proc.stderr
+
+
+def trusted_associations(repo):
+    """The associations trusted on `repo`, decided by who owns it.
+
+    An owner type other than `Organization` gets the narrower user-repo set, so
+    an unexpected value fails toward trusting fewer authors.
+    """
+    code, out, err = run_gh(["api", f"repos/{repo}"])
+    if code != 0:
+        raise SystemExit(f"gh api failed for {repo}: {err.strip() or out.strip()}")
+    owner_type = (json.loads(out or "{}").get("owner") or {}).get("type")
+    return ORG_REPO_TRUSTED if owner_type == "Organization" else USER_REPO_TRUSTED
 
 
 def fetch_issue(repo, number):
@@ -53,13 +76,20 @@ def fetch_issue(repo, number):
     return json.loads(out or "{}")
 
 
-def classify(repo, numbers):
+def classify(repo, numbers, allowed=None):
+    """Split `numbers` into trusted and untrusted.
+
+    A caller that classifies one issue at a time passes `allowed` from one
+    `trusted_associations()` call, so the owner type is read once per run.
+    """
+    if allowed is None:
+        allowed = trusted_associations(repo)
     trusted, untrusted = [], []
     for number in numbers:
         issue = fetch_issue(repo, number)
         association = issue.get("author_association") or "NONE"
         author = (issue.get("user") or {}).get("login") or ""
-        if association in TRUSTED_ASSOCIATIONS:
+        if association in allowed:
             trusted.append(
                 {
                     "number": number,

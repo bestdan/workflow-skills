@@ -253,6 +253,7 @@ def scan(repo, labels_file, limit, milestone=None):
     """
     load_vocabulary(labels_file)
     candidates, held, complete, untrusted = [], [], [], []
+    allowed = None  # read once, and only if an issue reaches the gate
     issues = list_open_issues(repo, limit, milestone)
     for issue in issues:
         labels = label_names(issue)
@@ -260,7 +261,9 @@ def scan(repo, labels_file, limit, milestone=None):
         if not missing:
             complete.append(issue["number"])
             continue
-        gate = gh_issue_trust.classify(repo, [issue["number"]])
+        if allowed is None:
+            allowed = gh_issue_trust.trusted_associations(repo)
+        gate = gh_issue_trust.classify(repo, [issue["number"]], allowed)
         if gate["untrusted"]:
             untrusted.extend(gate["untrusted"])
             continue

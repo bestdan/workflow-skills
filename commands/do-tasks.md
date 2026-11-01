@@ -892,13 +892,23 @@ step 5's self-check stops each session loudly on its own issue.
      single-operator scale, and the same acceptance section 3 already makes for
      concurrent batch runs; a repo that needs a hard bound should be claiming from
      one session.
+   - **Run in the session, before it reads any issue text: the author gate.** The
+     dispatcher stops at ranking, so it never reaches the gate in "Find
+     candidates", and the session discharges that whole section, direct pick
+     included. The gate is therefore the session's own first read of its issue.
+     It runs `python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-trust.py"
+     --repo <repo> --issue <n>`. On `untrusted` it **stops without claiming** and
+     reports `#<n> — untrusted author @<login> (<association>), not read`.
+     Otherwise it takes `title` and `body` from the `trusted` entry, and those are
+     what feasibility reads. Do not inline the issue's text into the prompt
+     either: the number is all the session is handed.
    - **Also run in the session** — pre-flight (plain `git ls-remote` and
      `gh pr list`, plus the `find-task-refs` cross-prefix probe), the claim
      election (plain `gh` comment calls), execute, `gh pr create`, and the two
      label writes.
 
    Everything the session runs before the claim is **verification-only**: a stale
-   dependency, a pre-flight trip, a feasibility reject, or a lost claim **stops
+   dependency, an untrusted author, a pre-flight trip, a feasibility reject, or a lost claim **stops
    that session and reports it**. It must never advance to another candidate, which would put two
    dispatched sessions on one issue.
 
