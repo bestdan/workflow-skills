@@ -894,8 +894,9 @@ step 5's self-check stops each session loudly on its own issue.
      one session.
    - **Run in the session, before it reads any issue text: the author gate.** The
      dispatcher stops at ranking, so it never reaches the gate in "Find
-     candidates", and the session discharges that whole section, direct pick
-     included. The gate is therefore the session's own first read of its issue.
+     candidates", and the session skips that whole section, direct pick included,
+     so the gate runs here or not at all. It is the session's own first read of
+     its issue.
      It runs `python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-trust.py"
      --repo <repo> --issue <n>`. On `untrusted` it **stops without claiming** and
      reports `#<n> — untrusted author @<login> (<association>), not read`.
@@ -1174,8 +1175,10 @@ step 5's self-check stops each session loudly on its own issue.
    each observe the same slack, dispatch to disjoint issues, and together overshoot
    `wip_limit`. Accepted at single-operator scale, as in section 3 — don't run two
    batch dispatches concurrently.
-8. **Report** the dispatched issues (number, title, "remote session started"), then
+8. **Report** the dispatched issues (number, "remote session started"), then
    separately those `held` by the WIP / `-n N` bound and those `waiting on #<b>`.
+   No titles: the dispatcher runs no author gate, so it holds none and must not
+   fetch any.
    Note a truncated candidate page if step 1 returned exactly 50. Point the user at
    `/tasks` to monitor.
 
@@ -1230,7 +1233,7 @@ For the **gh-issue path** in **single** mode, report per `gh-issue-claim.md`
 "Report": on success print the issue number, the PR URL, and a one-line summary; on
 bail print the issue number, why it bailed, and the issue-comment URL. In **batch**
 mode (`--all` / `-n N`), report per section 4 "gh-issue batch" step 8: the
-dispatched issues (number, title, "remote session started"), then separately those
+dispatched issues (number, "remote session started"), then separately those
 held by the WIP / `-n N` bound and those waiting on a blocker; point the user at
 `/tasks` to monitor.
 

@@ -182,15 +182,22 @@ association, nothing the author wrote. A screen that read the body first and the
 judged it would already have handed the injection to the model it meant to protect.
 
 It runs at every point an issue's text enters the loop: `/promote-tasks`' candidate
-step and backfill scan, `/do-tasks`' ranked candidates and direct pick, and each batch
-session's first read of its pinned issue (`commands/do-tasks.md` §4 step 5), since a
-batch session skips the section the direct pick lives in. An untrusted issue gets no write
-and is reported by number. On a direct pick it stops the run even with a person
-present, since showing them the text would put it in context. The helper fails
-closed: a failed read exits non-zero and the caller writes nothing.
+step and backfill scan, `/do-tasks`' ranked candidates and direct pick, `--no-claim
+<#n>` after its assignee guard, and each batch session's first read of its pinned
+issue (`commands/do-tasks.md` §4 step 5), since a batch session skips the section the
+direct pick lives in. An untrusted issue gets no write and is reported by number. On a
+direct pick or `--no-claim` it stops the run even with a person present: an
+assignment says who holds the issue, not who wrote it, and showing the person the text
+would put it in context. The helper fails closed: a failed read exits non-zero and the
+caller writes nothing.
 
-What it does not cover: comments, which no gh-issue verb reads today, and the
-attended verbs that show titles (`/list-tasks`, `/reoptimize-tasks`).
+What it does not cover:
+
+- **Issue comments.** Anyone can post one, and a batch session's claim election
+  re-lists an issue's comments to find claim tokens (`commands/handlers/claim-lock.md`
+  step 5).
+- **PR titles**, which the claim pre-flight searches to find an open PR for the issue.
+- **The attended verbs that show titles**: `/list-tasks` and `/reoptimize-tasks`.
 
 ## 7. What Linear keeps
 
