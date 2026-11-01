@@ -155,7 +155,51 @@ inheriting a silent cap.
 member provisioned; only an entirely empty group voids it. Guarding on "every label exists"
 turns one missing rung into a total outage.
 
-## 6. What Linear keeps
+## 6. Only a trusted author's text is read
+
+On a public repo anyone can open an issue, and the loop turns an issue body into an
+agent's instructions, run unattended on the owner's machine with the owner's
+credentials. So the author of an issue is the author of a prompt. The gate is
+`commands/handlers/assets/gh-issue-trust.py`. Which `author_association` values it
+trusts depends on who owns the repo:
+
+| Repo owner   | Trusted                           | Why                                                                                                                                   |
+| ------------ | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| User         | `OWNER`, `COLLABORATOR`           | the owner and the people they invited                                                                                                 |
+| Organization | `OWNER`, `COLLABORATOR`, `MEMBER` | GitHub reports access through the org, team grants included, as `MEMBER`, so without it the owner's colleagues would all be untrusted |
+
+The org row means every member of the org can direct the agent on that org's repos.
+That is the org's own trust boundary, and the price of the loop working there at all.
+An owner type other than `Organization` gets the user row, the narrower set.
+`CONTRIBUTOR` is never trusted, because it means only that the author once had a PR
+merged.
+
+**The gate keeps the text out of the model's context, not just out of the work.**
+Candidate queries select numbers and labels and never `title` or `body`. Labels are
+safe to read because only collaborators can set them. The text comes from the
+helper's `trusted` entries alone, and an `untrusted` entry carries number, login and
+association, nothing the author wrote. A screen that read the body first and then
+judged it would already have handed the injection to the model it meant to protect.
+
+It runs at every point an issue's text enters the loop: `/promote-tasks`' candidate
+step and backfill scan, `/do-tasks`' ranked candidates and direct pick, `--no-claim
+<#n>` after its assignee guard, and each batch session's first read of its pinned
+issue (`commands/do-tasks.md` §4 step 5), since a batch session skips the section the
+direct pick lives in. An untrusted issue gets no write and is reported by number. On a
+direct pick or `--no-claim` it stops the run even with a person present: an
+assignment says who holds the issue, not who wrote it, and showing the person the text
+would put it in context. The helper fails closed: a failed read exits non-zero and the
+caller writes nothing.
+
+What it does not cover:
+
+- **Issue comments.** Anyone can post one, and a batch session's claim election
+  re-lists an issue's comments to find claim tokens (`commands/handlers/claim-lock.md`
+  step 5).
+- **PR titles**, which the claim pre-flight searches to find an open PR for the issue.
+- **The attended verbs that show titles**: `/list-tasks` and `/reoptimize-tasks`.
+
+## 7. What Linear keeps
 
 **Nothing was retired.** The `linear` handler and every command dispatching to it stay, and
 the rule is _no Linear command is deleted while any repo's `.task-config.yml` says

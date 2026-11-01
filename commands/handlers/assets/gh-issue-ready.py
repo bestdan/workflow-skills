@@ -104,7 +104,7 @@ def parse_issue_arg(raw):
 
     The optional estimate is how a caller that ALREADY has the issue's labels
     avoids making this script re-read them. The claim flow's board query selects
-    on `--json number,title,body,labels`, so it holds every candidate's `est:`
+    on `--json number,labels,assignees,createdAt`, so it holds every candidate's `est:`
     before it calls here; without this form it would pay one `gh issue view` per
     candidate — up to 50 on a full window, before a single blocker read.
 
