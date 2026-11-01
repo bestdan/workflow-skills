@@ -62,6 +62,13 @@ line. The terminator requirement is what keeps the prompt payloads in
 `repo-pr-execute.md` and `repo-pr.md` — English wearing a `bash` fence — from
 being flagged; English does not write a bare `done`.
 
+It also fires on a block with no control flow at all whose pipeline is doing
+the work: **three or more** pipes, or a pipe plus an `|| exit`/`|| return`
+guard. That is the shape that shipped four defects in a row in #805. Only
+shell-level syntax counts — a `|` inside a quoted `jq` or regex string, a
+`<a|b|c>` placeholder, or a comment is not a pipe, and a `|| true` fallback is
+not exit-status handling.
+
 **The allowlist is not an escape hatch.** `SHELL_LOGIC_ALLOWLIST` in
 `scripts/validate.py` names the blocks that predate the check and the count each
 may keep, and validate.py fails if an entry has more headroom than its file

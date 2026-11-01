@@ -106,6 +106,21 @@ SHELL_OPENER_RE = re.compile(r"^\s*(if|for|while|until|case)\s")
 SHELL_TERMINATOR_RE = re.compile(r"^\s*(fi|done|esac)\s*(;|&&|\|\||#.*)?\s*$")
 # One multi-line construct still reads inline; two openers is a program.
 SHELL_OPENER_MAX = 1
+# The second shape: no control flow at all, but a pipeline doing the work. A
+# block like `refs=$(git ls-remote ...) || exit 1` followed by
+# `grep | cut | sed` shipped four defects in a row in #805 (a greedy sed, a
+# masked exit status, grep exiting 1 on no match, a raw-line comparison) while
+# the opener count above saw nothing. Only shell-level syntax counts — see
+# shell_code(): measured 2026-11-01, a raw `|` count flags eleven blocks in this
+# tree, and every one is a pipe inside a quoted jq/regex string, a
+# `<a|b|c>` placeholder, or a plain `|| true` fallback, none of them a pipeline.
+SHELL_PIPE_MAX = 2
+SHELL_PIPE_RE = re.compile(r"(?<!\|)\|(?!\|)")
+# Exit-status handling: a guard that ends the script. `|| true` and `|| echo`
+# fallbacks are deliberately absent — CONTRIBUTING.md names a one-liner with a
+# `||` fallback as fine inline, and the tree has seven of them.
+SHELL_EXIT_GUARD_RE = re.compile(r"\|\|\s*(exit|return)\b")
+SHELL_PLACEHOLDER_RE = re.compile(r"<[A-Za-z][^<>\n]*>")
 # Blocks that predate the check, with the count they are allowed to keep. A new
 # offending block anywhere — including a third one here — fails. Shrink an entry
 # when you extract one; never raise one to make a new block pass.
@@ -356,8 +371,39 @@ for f in plugin_root_ref_files:
 # --- shell logic in runtime markdown ---
 # Reuses plugin_root_ref_files: the same skills/commands/agents bodies, which is
 # exactly the set an agent executes at runtime.
+def shell_code(block: str) -> str:
+    """Return the block with quoted strings, comments and <placeholders> removed.
+
+    What is left is the shell-level syntax, so a `|` that survives is a pipe.
+    Quote state carries across lines, which is what drops a multi-line
+    `claude --remote "..."` prompt payload whole.
+    """
+    block = SHELL_PLACEHOLDER_RE.sub("", block)
+    out = []
+    i, n = 0, len(block)
+    while i < n:
+        c = block[i]
+        if c == "\\":
+            i += 2
+        elif c == "'":
+            end = block.find("'", i + 1)
+            i = n if end < 0 else end + 1
+        elif c == '"':
+            i += 1
+            while i < n and block[i] != '"':
+                i += 2 if block[i] == "\\" else 1
+            i += 1
+        elif c == "#" and (i == 0 or block[i - 1] in " \t\n;"):
+            end = block.find("\n", i)
+            i = n if end < 0 else end
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
 def shell_logic_blocks(text: str):
-    """Yield (start_line, opener_count) for each fenced shell block with logic."""
+    """Yield (start_line, reason) for each fenced shell block with logic."""
     lines = text.splitlines()
     i = 0
     while i < len(lines):
@@ -372,8 +418,22 @@ def shell_logic_blocks(text: str):
                 if SHELL_TERMINATOR_RE.match(lines[i]):
                     terminators += 1
                 i += 1
+            code = shell_code("\n".join(lines[start:i]))
+            pipes = len(SHELL_PIPE_RE.findall(code))
             if openers > SHELL_OPENER_MAX and terminators:
-                yield start, openers
+                yield (
+                    start,
+                    (
+                        f"carries {openers} control-flow statements (max {SHELL_OPENER_MAX})"
+                    ),
+                )
+            elif pipes > SHELL_PIPE_MAX:
+                yield start, f"carries a {pipes}-pipe pipeline (max {SHELL_PIPE_MAX})"
+            elif pipes and SHELL_EXIT_GUARD_RE.search(code):
+                yield (
+                    start,
+                    "pipes a result and handles an exit status with `|| exit`/`|| return`",
+                )
         i += 1
 
 
@@ -381,12 +441,11 @@ for f in plugin_root_ref_files:
     offenders = list(shell_logic_blocks(f.read_text()))
     allowed = SHELL_LOGIC_ALLOWLIST.get(str(rel(f)), 0)
     if len(offenders) > allowed:
-        for line_no, openers in offenders[allowed:]:
+        for line_no, reason in offenders[allowed:]:
             err(
                 rel(f),
-                f"line {line_no}: fenced shell block carries {openers} control-flow "
-                f"statements (max {SHELL_OPENER_MAX}). Nothing in the gate can lint or "
-                f"run shell inside markdown — move the logic to a typed file "
+                f"line {line_no}: fenced shell block {reason}. Nothing in the gate can "
+                f"lint or run shell inside markdown — move the logic to a typed file "
                 f"(commands/handlers/assets/<name>.py or scripts/<name>.sh) and call it "
                 f"from here. See CONTRIBUTING.md, 'Logic goes in a typed file'.",
             )

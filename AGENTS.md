@@ -98,7 +98,8 @@ whether it belongs one level down instead. The answer is usually yes.
   code in `commands/handlers/assets/<name>.py` (or `scripts/<name>.sh`), give it
   a test pair, and call it from the prose. `validate.py` fails a fenced block
   that carries two or more control-flow statements and closes one on its own
-  line. Full rule, including what stays inline:
+  line, or whose pipeline carries three or more pipes. Full rule, including
+  what stays inline:
   [CONTRIBUTING.md](CONTRIBUTING.md#logic-goes-in-a-typed-file).
 - **Adding a skill or command means editing `README.md` in the same PR.**
   `validate.py` fails the build if the "N skills, M commands, and K subagent"

@@ -364,6 +364,61 @@ assert_not_contains "prose prompt payload is not flagged" "$out_g" "cmd.md: line
 # (verified by mutation).
 assert_not_contains "a single multi-line construct is not flagged" "$out_g" "cmd.md: line 35"
 
+# --- Fixture (g2): a pipeline with no control flow is flagged ---------------
+# The #805 shape (issue #936): no if/for/while, so fixture (g)'s opener count
+# sees nothing, yet the block shipped four defects. Each benign block below is
+# one of the shapes a raw `|` count flags in the real tree — pipes inside a
+# quoted jq or regex string, a `<a|b|c>` placeholder, a `|| true` fallback — and
+# the 2-pipe block is the threshold's own boundary.
+DIR_G2="$BASE/shell-pipeline-fail"
+make_plugin_fixture "$DIR_G2"
+cat >"$DIR_G2/commands/cmd.md" <<'MD'
+---
+description: fixture command
+---
+
+```bash
+refs=$(git ls-remote --heads origin) || exit 1
+echo "$refs" | grep "task-<n>$" | cut -f2 | sed 's|refs/heads/||'
+```
+
+```bash
+gh pr list --json headRefName --jq '[.[] | .headRefName | select(. != "") | ascii_downcase]'
+python3 helper.py encode --priority <urgent|high|medium|low|none> --exclude 'hold|block|wait'
+gh label create task-claim 2>/dev/null || true # a | b | c in a comment
+```
+
+```bash
+gh issue list --json number | jq -r '.[].number' | sort -n
+```
+
+```bash
+n=$(gh issue view 1 --json number | jq .number) || exit 1
+```
+
+```bash
+claude --remote "Pipe the list | filter it | sort it | and report.
+|| exit is prose here too."
+```
+MD
+
+out_g2="$(uv run "$DIR_G2/scripts/validate.py" 2>&1)"
+rc_g2=$?
+assert_contains "a 3-pipe pipeline is flagged by line, with its count" "$out_g2" \
+  "cmd.md: line 5: fenced shell block carries a 3-pipe pipeline (max 2)"
+assert_contains "a pipe plus an exit guard is flagged" "$out_g2" \
+  "cmd.md: line 20: fenced shell block pipes a result and handles an exit status"
+if [ "$rc_g2" -eq 1 ]; then
+  ok "fenced shell pipeline: exits 1"
+else
+  bad "fenced shell pipeline: should exit 1, got $rc_g2"
+fi
+assert_not_contains "quoted, placeholder and fallback pipes are not flagged" "$out_g2" \
+  "cmd.md: line 10"
+assert_not_contains "a 2-pipe pipeline is not flagged" "$out_g2" "cmd.md: line 16"
+assert_not_contains "pipes inside a prompt payload are not flagged" "$out_g2" \
+  "cmd.md: line 24"
+
 # --- Fixture (h): a plugin with no fenced logic is clean -------------------
 DIR_H="$BASE/shell-logic-pass"
 make_plugin_fixture "$DIR_H"
