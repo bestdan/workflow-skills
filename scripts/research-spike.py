@@ -68,6 +68,7 @@ an explicit not-implemented-yet error here rather than a silent success.
 from __future__ import annotations
 
 import argparse
+import errno
 import io
 import re
 import sys
@@ -1051,11 +1052,14 @@ def check_contained_file(
     try:
         # Strict, because from Python 3.13 a non-strict resolve() no longer
         # raises on a symlink loop: it returns the path, which then reads as
-        # merely missing. A path that is only missing raises FileNotFoundError
-        # here and resolves non-strictly, for the existence check below.
+        # merely missing. Any other OSError (a missing file, a file where a
+        # directory should be, no permission) resolves non-strictly, as
+        # before, for the existence check below to report.
         try:
             resolved = (tree.root / raw).resolve(strict=True)
-        except FileNotFoundError:
+        except OSError as e:
+            if e.errno == errno.ELOOP:
+                raise
             resolved = (tree.root / raw).resolve()
     except (OSError, RuntimeError) as e:
         # A symlink loop is the realistic case: pathlib raises RuntimeError
