@@ -135,6 +135,7 @@ class CandidateTests(Case):
         cands = self.brief(scope=["repo:bestdan/finplan"])["candidates"]
         items = cands["items"]["items"]
         self.assertTrue(items)
+        self.assertTrue(any(r.get("in_flight") for r in items))
         for rec in items:
             self.assertIn("tier", rec["now"])
             if rec.get("in_flight"):
@@ -216,6 +217,21 @@ class BudgetTests(Case):
         # The first list in FILL keeps its items; the last gives way first.
         self.assertFalse(doc["in_flight"]["ready_to_merge"].get("omitted"))
         self.assertTrue(doc["candidates"]["unsized"].get("omitted"))
+        # The cut lists' `omitted` and `more` and the budget block fit too,
+        # whatever the budget.
+        for tokens in range(900, 3001, 25):
+            brief.BUDGET_TOKENS = tokens
+            b = self.brief(minutes=30)["budget"]
+            self.assertLessEqual(b["used"], tokens, tokens)
+            self.assertFalse(b["over"])
+
+    def test_candidates_over_the_box_say_how_to_list_them(self):
+        cands = self.brief(mode="little", minutes=5)["candidates"]
+        over = cands["minutes"]["over_cap"]
+        self.assertGreater(over, 0)
+        more = cands["minutes"]["over_cap_more"]
+        self.assertNotIn("--minutes", more)
+        self.assertIn("--mode little", more)
 
 
 class CliTests(Case):

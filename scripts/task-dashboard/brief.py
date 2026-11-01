@@ -23,14 +23,19 @@ collectors and orders). The judgment is the agent's.
 **The budget.** About BUDGET_TOKENS tokens, measured as the printed JSON's
 UTF-8 bytes over BYTES_PER_TOKEN, the measure the design's table of `view`
 sizes used; a brief record is about 550 bytes, so about 50 records fill it.
-Freshness, gaps, the Deep dossier and each list's header are always printed.
+Freshness, gaps, the Deep dossier and each list's header are always printed,
+so they alone can take it past the budget, which `budget.over` then says.
 The lists then fill in two passes, each in FILL order: first up to FLOOR
 items each, so every section shows something, then the rest of each while it
-fits. So the end of FILL truncates first: the unsized candidates, then the
+fits (a list stops at its first item that does not fit, and a later list's
+smaller item may still fit). So the end of FILL truncates first: the
+unsized candidates, then the
 `other` and draft PRs, blocking and blocked, worktrees with no PR, the
 candidates, the owner's signals, and last the PRs and sessions the owner can
-act on now. A list cut
-short says how many it left out, and the command that lists them all.
+act on now. A list cut short says how many it left out (`omitted`), and a
+`more` command whose output holds them: for a PR readiness bucket,
+`blocking` and the signals that is the whole kind they were drawn from, a
+superset to filter by the same rule, since `items` has no filter for them.
 """
 
 import sqlite3
@@ -52,6 +57,10 @@ SCHEMA_VERSION = 1
 BUDGET_TOKENS = 8000
 BYTES_PER_TOKEN = 4
 FLOOR = 3
+# Bytes held back from the fill for the budget block; each list also holds
+# back its own `omitted` count (up to OMITTED_DIGITS) and `more` command.
+RESERVE = 130
+OMITTED_DIGITS = 5
 # A why-not answer this recent is one of the owner's signals.
 SIGNAL_DAYS = 14
 
@@ -106,7 +115,7 @@ def pr_readiness(p: dict[str, Any]) -> str:
 
 def gaps(cfg: dict[str, Any]) -> list[dict[str, str]]:
     """What this instance does not mirror, so the agent knows what it cannot
-    see. repo-pr task files are never mirrored yet (#1289)."""
+    see. repo-pr task files are not mirrored by any instance yet."""
     out = []
     if not sync.jira_enabled(cfg):
         out.append({"source": "jira", "what": "Jira tickets",
@@ -207,6 +216,8 @@ def _signals(items: list[Item], ov: overlay.Overlay, now: datetime) -> list[Item
             del mark["why_not"]
         if mark:
             out.append((i, mark))
+    # Newest first, then (a stable sort) the pins ahead in the owner's order.
+    out.sort(key=lambda x: x[0]["updated"] or "", reverse=True)
     out.sort(key=lambda x: (
         not x[1].get("pinned"),
         ov.pin_rank((x[0]["source"], x[0]["key"])) if x[1].get("pinned") else (),
@@ -312,8 +323,10 @@ def _candidates(
     resolved: "list[agent_query.Scope] | None", printed: set, where: str,
 ) -> dict[str, Any]:  # fmt: skip
     """The mode's ranked items in scope, each its brief record with the
-    mode's placing as `now`. One already printed under in_flight is only a
-    stub: identity, title, size and placing. With `--minutes` (not Deep):
+    mode's placing as `now`. One in flight is only a stub: identity, title,
+    size, placing and `in_flight: true`, which says it is in flight, not
+    that its record printed: when the budget cut it from in_flight, that
+    list's `more`, or `item <source:key>`, gives it. With `--minutes` (not Deep):
     the sized ones, in order, each kept while the sum of `est_min` stays
     within twice the box; then the unsized, apart."""
     by_key = {(i["source"], i["key"]): i for i in every}
@@ -355,6 +368,9 @@ def _candidates(
             else:
                 over += 1
         out["minutes"] = {"box": minutes, "cap": cap, "sum": total, "over_cap": over}
+        if over:
+            # They are cut by the box, not the budget: list them without it.
+            out["minutes"]["over_cap_more"] = f"{_CMD} {more}"
         out["items"] = _list(sized, more + f" --minutes {minutes}")
         out["unsized"] = _list(unsized, more + f" --minutes {minutes}")
     if mode == fleet_now.DEEP and rows:
@@ -372,8 +388,14 @@ def _size(value: Any) -> int:
 def _fit(doc: dict[str, Any]) -> dict[str, Any]:
     """Cut each list to the budget, FILL order deciding who gives way, and
     note in each cut list what it left out and how to list it."""
-    budget = BUDGET_TOKENS * BYTES_PER_TOKEN
     lists = [doc[s][k] for s, k in FILL if s in doc and k in doc[s]]
+    # Room for what is added after the fill: the budget block, and each
+    # list's `omitted` and `more` should the budget cut it.
+    reserve = RESERVE + sum(
+        len(f',"omitted":,"more":"{_CMD} {lst["_more"]}"'.encode()) + OMITTED_DIGITS
+        for lst in lists
+    )
+    budget = BUDGET_TOKENS * BYTES_PER_TOKEN - reserve
     full = [lst["items"] for lst in lists]
     for lst in lists:
         lst["items"] = []
@@ -400,8 +422,12 @@ def _fit(doc: dict[str, Any]) -> dict[str, Any]:
         "measure": f"UTF-8 bytes of the printed JSON / {BYTES_PER_TOKEN}",
         "truncated": any(lst.get("omitted") for lst in lists),
     }
-    # `used` counts its own digits too, so settle it in a few rounds.
-    doc["budget"]["used"] = 0
-    for _ in range(3):
-        doc["budget"]["used"] = -(-_size(doc) // BYTES_PER_TOKEN)
+    # `used` counts its own digits too, so settle it in a few rounds. `over`
+    # (only the parts never cut can make it true: freshness, gaps, Deep's
+    # dossier) is set in each round, as its own length counts.
+    b = doc["budget"]
+    b["used"], b["over"] = 0, False
+    for _ in range(4):
+        b["used"] = -(-_size(doc) // BYTES_PER_TOKEN)
+        b["over"] = b["used"] > BUDGET_TOKENS
     return doc

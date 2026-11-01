@@ -272,7 +272,7 @@ a DB that is behind the current schema, once, as `view` does.
   is `refs` for Jira (both directions), Linear and PRs, but `counts` for a
   GitHub issue: the mirror holds only how many open issues block it, so say
   so rather than naming blockers.
-- `DASH brief [--scope X ...] [--mode ship|little|deep|tidy] [--minutes N]
+- `DASH brief [--scope X ...] [--mode ship|little|deep|tidy|plan] [--minutes N]
   [--sections S]` is one scope's state for a prioritization, within about 8k
   tokens: `freshness`, `in_flight` (PRs by readiness, waiting sessions,
   worktrees with no PR), `blocked`, `candidates` (the Now mode's items in its

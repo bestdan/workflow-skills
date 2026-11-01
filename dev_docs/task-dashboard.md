@@ -167,7 +167,8 @@ None of these needs the server running:
   "prioritize X": sections `freshness` (`freshness.sources`), `in_flight`
   (open PRs by `brief.PR_READINESS`, waiting sessions, worktrees with no
   PR), `blocked`, `candidates` (the Now mode's collector and order, uncapped
-  and scoped), `signals` and `gaps`, all from one `collect` pass. The budget,
+  and scoped), `signals` and `gaps`. Records come from one `collect` pass;
+  the candidates' order is the Now mode's own collect and rank. The budget,
   about 8k tokens as printed bytes over 4, and which list gives way first
   (`brief.FILL`) are in the module docstring. Deep inlines the top
   candidate's `item_doc`. The skill's procedure for it is
