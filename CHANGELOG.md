@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.174.0] - 2026-11-01
+
+### Features
+
+- keep comment and PR-title text out of claims [#1327] (#1328) (2e3e349)
+
 ## [2.173.1] - 2026-11-01
 
 ### Fixes
