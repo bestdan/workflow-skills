@@ -87,7 +87,10 @@ LITTLE ranks its own collector's items (little_candidates), not the ones
 above: a PR or an issue that passes the small test. A PR is small when a bot
 opened it, when it is docs-only (every changed path `*.md` or under `docs/`
 or `dev_docs/`), or when it changes at most LITTLE_FILES files and
-LITTLE_LINES lines; a draft, and one whose CI is anything but green or
+LITTLE_LINES lines. A docs-only PR not opened by a bot that writes a
+research, design or plan doc, adding more than LITTLE_LINES lines (deep_doc),
+is none of these: it is the heaviest work there is, not a quick read, and
+goes to DEEP instead. A draft, and one whose CI is anything but green or
 absent (no checks at all), are left out. An issue is small when it carries `est:1` or `est:2` and is
 not `status:3_started`; an unsized one is not small. They go by LITTLE_TIERS,
 smallest first, then `prio`, then the longer wait, with no score. The agent
@@ -96,12 +99,15 @@ and only when that row counts from today's local midnight; the page does not
 show it.
 
 DEEP ranks the questions that need thinking, not doing (deep_sources): a
-proposed design (workstreams.mirrored_designs), an issue that blocks open
+proposed design (workstreams.mirrored_designs), an open PR that writes a
+research, design or plan doc (deep_doc), drafts included (a PR revising a
+proposed design shows beside the design: one is the decision, the other the
+revision under review), an issue that blocks open
 issues (`blocks`, from GitHub's native dependencies), one at
 `status:1_needs_refinement`, and a `status:2_ready` one estimated at
 `est:DEEP_EST` or more. They go by the open issues each blocks, most first,
 then `prio`, then the larger estimate, then the longer wait, with no score.
-An item with no `blocks` evidence (a design, or an issue synced before the
+An item with no `blocks` evidence (a design, a doc PR, or an issue synced before the
 field) shows no blocks term and sorts as blocking none. DEEP_LIMIT are shown,
 pins aside: one to take up and two alternates.
 
@@ -130,6 +136,7 @@ now?" (whynot.py, which also notes each day's shown items as its base rate).
 import html
 import json
 import math
+import re
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -216,6 +223,19 @@ LITTLE_TIERS = (
 )
 _EST = {"est:1": "est1_issue", "est:2": "est2_issue"}
 _DOCS_DIRS = ("docs/", "dev_docs/")
+# A docs-only PR is a research, design or plan doc (deep_doc) when one of
+# these words names a path segment or a word of the title, and it adds more
+# than LITTLE_LINES lines: writing one is deep work, while a small edit to
+# one stays a docs PR. Directory names count on purpose: a large edit under
+# a designs/ or plans/ directory is a design or plan doc.
+_DEEP_DOC_WORDS = frozenset(
+    (
+        "adr", "adrs", "analysis", "assessment", "decision", "decisions",
+        "design", "designs", "evaluation", "exploration", "investigation",
+        "plan", "plans", "proposal", "proposals", "research", "rfc", "rfcs",
+        "spike", "spikes",
+    )
+)  # fmt: skip
 # CI states a small PR may have: green, or no checks at all.
 _LITTLE_CI = ("success", "none")
 
@@ -875,11 +895,28 @@ def _lines(size: dict[str, Any]) -> str:
 
 
 LARGE_PR = "large_pr"  # a sized PR that is none of Little's PR buckets
+DEEP_DOC = "deep_doc"  # a docs-only PR writing a research, design or plan doc
+
+
+def _words(text: str) -> set[str]:
+    return set(re.split(r"[^a-z0-9]+", text.lower())) - {""}
+
+
+def deep_doc(paths: "list[str] | None", title: "str | None", additions: int) -> bool:
+    """A docs-only PR that writes a research, design or plan doc: a
+    _DEEP_DOC_WORDS word names one of its path segments or a word of its
+    title, and it adds more than LITTLE_LINES lines."""
+    if not docs_only(paths) or additions <= LITTLE_LINES:
+        return False
+    named = set().union(*(_words(p) for p in paths or []), _words(title or ""))
+    return bool(named & _DEEP_DOC_WORDS)
 
 
 def pr_bucket(p: dict[str, Any]) -> "tuple[str, str] | None":
-    """(bucket, why) by size alone, whatever the PR's CI or draft state: one
-    of Little's PR categories, else LARGE_PR; None when the PR is unsized.
+    """(bucket, why) by size and, for a docs-only PR, its paths and title,
+    whatever the PR's CI or draft state: one
+    of Little's PR categories, else DEEP_DOC or LARGE_PR; None when the PR is
+    unsized.
 
     `p` is a fleet_tabs.pull_requests() row.
     """
@@ -889,6 +926,8 @@ def pr_bucket(p: dict[str, Any]) -> "tuple[str, str] | None":
         return "bot_pr", f"bot PR from {awaiting.get('author') or 'a bot'}"
     if size is None:
         return None  # synced before the size fields: unknown is not little
+    if deep_doc(size["paths"], p.get("title"), size["additions"]):
+        return DEEP_DOC, f"research, design or plan doc, {_lines(size)}"
     if docs_only(size["paths"]):
         return "docs_pr", f"docs-only PR, {_lines(size)}"
     if (
@@ -907,7 +946,7 @@ def little_pr(p: dict[str, Any]) -> "tuple[str, str] | None":
     if p.get("is_draft") or p.get("ci_state") not in _LITTLE_CI:
         return None
     found = pr_bucket(p)
-    return None if found is None or found[0] == LARGE_PR else found
+    return None if found is None or found[0] in (LARGE_PR, DEEP_DOC) else found
 
 
 _LITTLE_HINT = {
@@ -1077,11 +1116,47 @@ def _deep_designs(conn: sqlite3.Connection) -> list[candidate.Candidate]:
     return out
 
 
+_DEEP_DOC_HINT = {
+    "author": "finish the thinking, then decide it",
+    "reviewer": "review it and decide",
+    "others": "read it and decide",
+}
+
+
+def _deep_doc_prs(
+    conn: sqlite3.Connection, cfg: dict[str, Any]
+) -> list[candidate.Candidate]:
+    """Open PRs writing a research, design or plan doc, drafts included: a
+    draft design is the thinking in progress, not a PR waiting to merge."""
+    out = []
+    for p in fleet_tabs.pull_requests(conn, cfg):
+        found = pr_bucket(p)
+        if found is None or found[0] != DEEP_DOC:
+            continue
+        role = p.get("role") or "others"
+        draft = "draft · " if p.get("is_draft") else ""
+        need = needs.Need(
+            item=(github_fleet.SOURCE, str(p["url"])),
+            kind="pr",
+            title=p.get("title") or "",
+            ref=f"{p.get('repo') or ''}#{p.get('number')}",
+            since=score.parse_ts(p.get("created")),
+            url=p.get("url"),
+            state=f"{'your ' if role == 'author' else ''}PR · {draft}CI {p.get('ci_state')}",
+            repo=fleet_views._name(p.get("repo")),
+            number=p.get("number"),
+            hint=_DEEP_DOC_HINT.get(role, _DEEP_DOC_HINT["others"]),
+            row={**(p.get("awaiting") or {}), **p},
+        )
+        out.append(_candidate(need, DEEP_DOC, found[1], mode=DEEP))
+    return out
+
+
 def deep_sources(
     conn: sqlite3.Connection, cfg: dict[str, Any], now: datetime
 ) -> list[candidate.Candidate]:
     """Every candidate Deep ranks."""
-    return _deep_designs(conn) + _deep_issues(conn, cfg)
+    return _deep_designs(conn) + _deep_doc_prs(conn, cfg) + _deep_issues(conn, cfg)
 
 
 # Tidy's issue labels, first match wins: label -> (category, why).

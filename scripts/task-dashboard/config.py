@@ -84,7 +84,9 @@ DEFAULTS: dict[str, Any] = {
     # workstream with no member activity for this many days is Stalled.
     "workstreams": {"stalled_days": 14},
     # `items`' size estimate (agent_query.py): a size bucket -> minutes. The
-    # buckets are bot_pr, docs_pr, small_pr, large_pr and `est:N`. These are
+    # buckets are bot_pr, docs_pr, small_pr, large_pr, deep_doc and `est:N`;
+    # deep_doc (a research, design or plan doc) has no default on purpose:
+    # deep work has no honest minutes estimate, so it lists unsized. These are
     # guesses for the owner to tune, not a measurement; a bucket with no entry
     # has no estimate, and an unsized item is never treated as small.
     "size": {
@@ -318,7 +320,7 @@ def _validate_weights(weights: Any, table: str, names: tuple[str, ...]) -> None:
             raise ConfigError(f"score.{table}.{name} must be a number")
 
 
-SIZE_BUCKETS = ("bot_pr", "docs_pr", "small_pr", "large_pr")
+SIZE_BUCKETS = ("bot_pr", "docs_pr", "small_pr", "large_pr", "deep_doc")
 _EST_BUCKET = re.compile(r"est:[1-9][0-9]*")
 
 

@@ -104,6 +104,9 @@ ROWS = [
     pr(12, "bestdan/big-12", size=(9, 400, 20, None)),  # large
     pr(13, "dependabot/x", bot=True, role="others", misses=()),  # bot
     pr(14, "bestdan/unsized-14"),  # no size read yet
+    pr(
+        15, "bestdan/design-15", size=(1, 300, 0, ["dev_docs/designs/2026-10-31-x.md"])
+    ),  # a design doc
     pr(30, "bestdan/other-30", repo=OTHER, size=(1, 1, 1, None)),
     # A fork's PR from its `main`: never linked to the owner's `main` checkout.
     pr(50, "main", role="others", misses=()),
@@ -350,9 +353,9 @@ class ScopeTests(Case):
         ids = [s["id"] for s in doc["matched"]]
         self.assertEqual(ids, [f"repo:{REPO}", f"ws:{WS}"])
         repo = doc["matched"][0]
-        # Open items of every kind: 6 PRs, 5 issues, the design, three open
+        # Open items of every kind: 7 PRs, 5 issues, the design, three open
         # worktrees (two hosts) and three sessions. The landed one is done.
-        self.assertEqual(repo["open"], 18)
+        self.assertEqual(repo["open"], 19)
 
     def test_a_repo_scope_lists_related_workstreams_it_did_not_match(self):
         related = self.scopes("finplan")["related"]
@@ -562,6 +565,9 @@ class ItemTests(Case):
         # Sized but large: a bucket and no default minutes.
         self.assertEqual(size(pr_url(12))["bucket"], "large_pr")
         self.assertNotIn("est_min", {k for k, v in size(pr_url(12)).items() if v})
+        # A design doc: deep work, so no default minutes either.
+        self.assertEqual(size(pr_url(15))["bucket"], "deep_doc")
+        self.assertIsNone(size(pr_url(15))["est_min"])
         self.assertEqual(
             size(issue_url(1)),
             {"bucket": "est:1", "est_min": 20, "from": "label est:1"},
@@ -1056,6 +1062,8 @@ class ConfigTests(unittest.TestCase):
             "minutes"
         ]
         self.assertEqual((mins["est:3"], mins["bot_pr"], mins["est:1"]), (90, 2, 20))
+        deep = self.load("\n[size.minutes]\ndeep_doc = 60\n")["size"]["minutes"]
+        self.assertEqual(deep["deep_doc"], 60)
 
     def test_refused(self):
         for extra in ('\n[size.minutes]\nhuge = 9\n', '\n[size.minutes]\n"est:0" = 9\n',
