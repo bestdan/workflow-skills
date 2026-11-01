@@ -12,6 +12,8 @@ it), so a sync never touches it.
   true, so a reader can say the plan has lapsed rather than that none exists.
 - `set` refuses an entry that is not in the mirror, so a plan never names an
   item the dashboard cannot show. Import does not (overlay.import_).
+- A session plan leaves an outcome record when it ends (plan_ticks.py): `set`
+  replacing it and `clear` removing it write that record first.
 
 The scope words and the mirror's items come from agent_query: there is one
 resolver, so `plan set --scope x` and `items --scope x` cannot disagree.
@@ -111,6 +113,11 @@ def set_plan(
         )
     sid = resolve_scope(conn, cfg, now, scope, items)
     expires = _stamp(session_expiry(now, tz)) if kind == "session" else None
+    if kind == "session":
+        # Imported here: plan_ticks imports this module.
+        import plan_ticks
+
+        plan_ticks.end_session(conn, cfg, now, sid, "replaced")
     with conn:
         conn.execute(
             "INSERT OR REPLACE INTO plans"
@@ -227,6 +234,10 @@ def clear(
     `all` names the all-scope plan."""
     _check_kind(kind)
     sid = _stored_scope(conn, cfg, now, scope)
+    if kind in (None, "session"):
+        import plan_ticks  # see set_plan
+
+        plan_ticks.end_session(conn, cfg, now, sid, "cleared")
     with conn:
         if kind is None:
             cur = conn.execute("DELETE FROM plans WHERE scope = ?", (sid,))

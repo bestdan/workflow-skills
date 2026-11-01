@@ -59,7 +59,7 @@ query($owner: String!, $name: String!, $number: Int!) {
     issueOrPullRequest(number: $number) {
       __typename
       ... on Issue {
-        url number title state createdAt updatedAt
+        url number title state createdAt updatedAt closedAt
         labels(first: 20) { nodes { name } }
         milestone { number title }
         blocking(first: 50) { nodes { state } }
@@ -120,6 +120,7 @@ class Result:
     kind: "str | None"  # pr, issue, or None when GitHub found nothing
     outcome: str  # updated | merged | closed | archived | not_found
     url: str  # the item's URL (a PR's when the kind is unknown)
+    closed_at: "str | None" = None  # GitHub's closedAt, for a merged or closed item
 
     @property
     def ref(self) -> str:
@@ -422,7 +423,8 @@ def refresh(
     # Every row is deleted and rewritten in one transaction, and no sync_runs
     # row is touched: a refresh is not a sync.
     _write(conn, (asked, repo), number, prs_row, rows, now)
-    return Result(repo, number, kind, outcome, url)
+    closed_at = node.get("closedAt") if outcome in (MERGED, CLOSED) else None
+    return Result(repo, number, kind, outcome, url, closed_at)
 
 
 # --- the page ----------------------------------------------------------------

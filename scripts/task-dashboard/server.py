@@ -60,6 +60,7 @@ import ingest
 import lane_tabs
 import needs
 import overlay
+import plan_ticks
 import refresh
 import score
 import sync
@@ -887,7 +888,9 @@ def write_overlay(
     mode = (form.get("mode") or [""])[0].strip() or None
 
     def snapshot(item: overlay.Item) -> "dict[str, Any] | None":
-        return fleet_now.snapshot_of(conn, cfg, item, now, mode)
+        # A planned item's answer carries the plan's reason (plan_ticks.py).
+        snap = fleet_now.snapshot_of(conn, cfg, item, now, mode)
+        return plan_ticks.annotate(conn, item, now, snap)
 
     overlay.apply(conn, action, form, now, snapshot)
 

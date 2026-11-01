@@ -14,7 +14,10 @@ STORING. A reason posts the overlay's `whynot` action, which writes one
 item as Now ranked it at that moment (snapshot()): its fleet score, every
 score term, and its features
 (features()), scored or not, so that a pattern nothing scores today can still
-show up. Export and import carry these rows; they are overlay state.
+show up. An item a live plan lists also carries that plan's reason, action,
+scope and kind (`plan_reason`, `plan_action`, `plan_scope`, `plan_kind`;
+plan_ticks.annotate), outside FEATURES, so tune compares nothing on them yet.
+Export and import carry these rows; they are overlay state.
 
 THE BASE RATE. Whether snoozes lean towards some feature means nothing
 without what Now showed. Each render records the items it showed, once per

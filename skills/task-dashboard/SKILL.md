@@ -218,7 +218,8 @@ none is), so you see what they see; `notes.mode` names it, outside Ship
 `notes.closed_today` is the day's count. `plan` lists the live plan (below)
 in its order: each item's `plan` carries its `reason` and `state`, `done`
 (ticked on a closed signal), `open`, or `gone` (left the mirror with nothing
-saying it closed, so **not** done); `notes.plan` is the plan with `counts`
+saying it closed, so **not** done; each sync re-reads a gone GitHub item and
+ticks it if GitHub says it closed); `notes.plan` is the plan with `counts`
 per state, or null with `notes.no_plan` when none is live. `freshness` says when each sync last
 succeeded and when each host last snapshotted. Without `--json` it prints one
 line per item.
@@ -318,6 +319,9 @@ scope, a reason each. The overlay carries it, so export and import do too.
 - `DASH plan show [--scope X] [--kind K]` prints the plans, with each one's
   `est_min_sum`; `DASH plan clear --scope X [--kind K]` removes it (`--scope
   all` for the all-scope plan; both kinds without `--kind`).
+- A session plan that ends (expired, replaced or cleared) leaves a record of
+  each entry's state then; `DASH plan outcomes [--scope X]` lists them. A
+  "why not now" answer on a planned item records the plan's reason too.
 - Exit 2 for a refused value, 1 for an unreadable file or DB.
 
 ## prioritize

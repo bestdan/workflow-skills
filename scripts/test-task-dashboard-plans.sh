@@ -6,6 +6,9 @@
 # import keeps plans. Also Now's Plan mode (plan_mode.py): the live plan in
 # its order with reasons, on the page and in `view now --mode plan --json`, a
 # done item ticked, one that left the mirror marked gone, and the empty state.
+# And plan_ticks.py: the sync's plans step re-reading gone GitHub entries
+# through a fake gh, a session plan's outcome record, and a "why not now"
+# answer carrying the plan's reason.
 #
 # Wraps scripts/test_task_dashboard_plans.py (stdlib unittest). It reuses the
 # agent-query suite's fixture mirror, written through the real writers into a
