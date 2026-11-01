@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.173.0] - 2026-11-01
+
+### Features
+
+- name every item as a web link [N/A] (#1330) (d06f235)
+
 ## [2.172.0] - 2026-11-01
 
 ### Features
