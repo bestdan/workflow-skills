@@ -78,8 +78,8 @@ before saying "close this", "merge this" or "this one first".
 
 ## 5. Propose the plan in chat
 
-An ordered list, each line naming the item as a web link (SKILL.md's link
-rule), what to do (`do`, `finish`,
+An ordered list, each line naming the item as a web link (SKILL.md's "Every
+item with a URL ... is a web link" rule), what to do (`do`, `finish`,
 `unblock`, `review`, `defer` or `drop`), a one-line reason, and its `est_min`
 (or "unsized"). With a time box, give the total against it. Say which
 candidates you left out and why, and which gaps limit the answer.
