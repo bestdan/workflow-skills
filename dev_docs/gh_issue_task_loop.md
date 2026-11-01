@@ -155,7 +155,33 @@ inheriting a silent cap.
 member provisioned; only an entirely empty group voids it. Guarding on "every label exists"
 turns one missing rung into a total outage.
 
-## 6. What Linear keeps
+## 6. Only a trusted author's text is read
+
+On a public repo anyone can open an issue, and the loop turns an issue body into an
+agent's instructions, run unattended on the owner's machine with the owner's
+credentials. So the author of an issue is the author of a prompt. The gate is
+`commands/handlers/assets/gh-issue-trust.py`: an issue is trusted only when GitHub's
+`author_association` is `OWNER`, `MEMBER` or `COLLABORATOR`. `CONTRIBUTOR` is not
+trusted, because it means only that the author once had a PR merged.
+
+**The gate keeps the text out of the model's context, not just out of the work.**
+Candidate queries select numbers and labels and never `title` or `body`. Labels are
+safe to read because only collaborators can set them. The text comes from the
+helper's `trusted` entries alone, and an `untrusted` entry carries number, login and
+association, nothing the author wrote. A screen that read the body first and then
+judged it would already have handed the injection to the model it meant to protect.
+
+It runs at every point an issue's text enters the loop: `/promote-tasks`' candidate
+step and backfill scan, and `/do-tasks`' ranked candidates and direct pick, which is
+also how each batch session reads its pinned issue. An untrusted issue gets no write
+and is reported by number. On a direct pick it stops the run even with a person
+present, since showing them the text would put it in context. The helper fails
+closed: a failed read exits non-zero and the caller writes nothing.
+
+What it does not cover: comments, which no gh-issue verb reads today, and the
+attended verbs that show titles (`/list-tasks`, `/reoptimize-tasks`).
+
+## 7. What Linear keeps
 
 **Nothing was retired.** The `linear` handler and every command dispatching to it stay, and
 the rule is _no Linear command is deleted while any repo's `.task-config.yml` says

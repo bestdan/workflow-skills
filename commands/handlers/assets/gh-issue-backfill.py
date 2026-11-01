@@ -99,6 +99,7 @@ def _load(filename, name):
 
 gh_issue_state = _load("gh-issue-state.py", "gh_issue_state")
 gh_issue_ready = _load("gh-issue-ready.py", "gh_issue_ready")
+gh_issue_trust = _load("gh-issue-trust.py", "gh_issue_trust")
 
 BLOCKED_LABEL = "blocked"
 
@@ -201,7 +202,9 @@ def list_open_issues(repo, limit, milestone=None):
     args = ["issue", "list", "--repo", repo, "--state", "open"]
     if milestone:
         args += ["--milestone", milestone]
-    args += ["--json", "number,title,body,labels", "--limit", str(limit)]
+    # No title or body: issue text reaches the caller only through the author
+    # gate in scan(), so an untrusted author's words never leave this script.
+    args += ["--json", "number,labels", "--limit", str(limit)]
     code, out, err = run_gh(args)
     if code != 0:
         raise SystemExit(
@@ -249,7 +252,7 @@ def scan(repo, labels_file, limit, milestone=None):
     (`gh-issue-promote.md` step 6), so this does too.
     """
     load_vocabulary(labels_file)
-    candidates, held, complete = [], [], []
+    candidates, held, complete, untrusted = [], [], [], []
     issues = list_open_issues(repo, limit, milestone)
     for issue in issues:
         labels = label_names(issue)
@@ -257,17 +260,22 @@ def scan(repo, labels_file, limit, milestone=None):
         if not missing:
             complete.append(issue["number"])
             continue
+        gate = gh_issue_trust.classify(repo, [issue["number"]])
+        if gate["untrusted"]:
+            untrusted.extend(gate["untrusted"])
+            continue
+        text = gate["trusted"][0]
         reason = hold_reason(repo, issue["number"], labels)
         entry = {
             "number": issue["number"],
-            "title": issue["title"],
+            "title": text["title"],
             "labels": labels,
             "missing": missing,
         }
         if reason:
             held.append({**entry, "reason": reason})
         else:
-            candidates.append({**entry, "body": issue.get("body") or ""})
+            candidates.append({**entry, "body": text["body"]})
     return {
         "repo": repo,
         "checked": len(issues),
@@ -276,6 +284,7 @@ def scan(repo, labels_file, limit, milestone=None):
         "candidates": candidates,
         "held": held,
         "complete": complete,
+        "untrusted": untrusted,
     }
 
 
@@ -511,6 +520,9 @@ def report_scan(result):
     print(f"\nHeld ({len(result['held'])}):")
     for issue in result["held"]:
         print(f"  #{issue['number']} {issue['title']} — {issue['reason']}")
+    print(f"\nUntrusted author, not read ({len(result['untrusted'])}):")
+    for issue in result["untrusted"]:
+        print(f"  #{issue['number']} @{issue['author']} ({issue['association']})")
     print(f"\nAlready complete: {len(result['complete'])}")
 
 
