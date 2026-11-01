@@ -191,13 +191,18 @@ assignment says who holds the issue, not who wrote it, and showing the person th
 would put it in context. The helper fails closed: a failed read exits non-zero and the
 caller writes nothing.
 
-What it does not cover:
+Two other channels anyone can write to reach the claim, and each goes through a
+`gh-issue-claim.py` subcommand that reads the text and prints none of it. The
+comment-token election (`claim-lock.md` step 5) runs as `elect`, which prints ids
+and booleans. A token counts only if a trusted author, by the same rule as above,
+posted it. Otherwise a stranger's hand-typed marker could win and leave the issue
+claimed by nobody. Pre-flight's open-PR-by-title check runs as `title-prs`, which
+prints PR numbers and URLs. A stranger can still title a PR `[#<n>]` and make
+`/do-tasks` skip that issue. That is a nuisance the owner can see on the board, not
+an injection.
 
-- **Issue comments.** Anyone can post one, and a batch session's claim election
-  re-lists an issue's comments to find claim tokens (`commands/handlers/claim-lock.md`
-  step 5).
-- **PR titles**, which the claim pre-flight searches to find an open PR for the issue.
-- **The attended verbs that show titles**: `/list-tasks` and `/reoptimize-tasks`.
+What it does not cover: **the attended verbs that show titles**, `/list-tasks` and
+`/reoptimize-tasks`.
 
 ## 7. What Linear keeps
 

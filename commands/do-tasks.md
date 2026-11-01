@@ -903,10 +903,13 @@ step 5's self-check stops each session loudly on its own issue.
      Otherwise it takes `title` and `body` from the `trusted` entry, and those are
      what feasibility reads. Do not inline the issue's text into the prompt
      either: the number is all the session is handed.
-   - **Also run in the session** — pre-flight (plain `git ls-remote` and
-     `gh pr list`, plus the `find-task-refs` cross-prefix probe), the claim
-     election (plain `gh` comment calls), execute, `gh pr create`, and the two
-     label writes.
+   - **Also run in the session** — pre-flight (plain `git ls-remote` and the
+     `--head` `gh pr list`, plus the `find-task-refs` cross-prefix probe and the
+     `title-prs` open-PR check), the claim election (a plain `gh issue comment` to
+     post, `gh-issue-claim.py elect` to decide), execute, `gh pr create`, and the
+     two label writes. The two helpers are how PR titles and comment bodies stay
+     out of the session: anyone can write either on a public repo, and the session
+     runs unattended.
 
    Everything the session runs before the claim is **verification-only**: a stale
    dependency, an untrusted author, a pre-flight trip, a feasibility reject, or a lost claim **stops
@@ -1030,12 +1033,14 @@ step 5's self-check stops each session loudly on its own issue.
    with everything else in step 5 — the dispatcher **inlines the election's steps
    into the prompt** rather than naming `claim-lock.md`, which the VM cannot read.
    Copy them from `claim-lock.md` → "Fallback: comment-token election": record
-   `T_unclaimed`, mint a token, post the claim comment, write the board markers,
-   sleep a jittered ~2–3 s, re-list and elect on the lowest comment id among
-   markers that are both at-or-after `T_unclaimed` and state-backed, and retract
-   your own comment if it loses. Carry **step 7** across too — if the re-list
-   returns only your own marker, treat it as inconclusive and re-poll once or
-   twice before declaring a win. No server-side CAS backs this path, and a batch
+   `T_unclaimed` in UTC, mint a token, post the claim comment and capture its id,
+   write the board markers, sleep a jittered ~2–3 s, then decide with
+   `python3 "$CLAUDE_PLUGIN_ROOT/commands/handlers/assets/gh-issue-claim.py" elect
+   --repo <repo> --issue <n> --since <T_unclaimed> --comment-id <id>` — never by
+   listing the comments, whose bodies anyone can write — and inline its exit
+   table (`0` won, `3` lost, `5` inconclusive, `4`/`2` no verdict: retract and
+   stop). Retract your own comment if it loses. Carry **step 7** across too — on
+   exit `5`, re-poll once or twice before declaring a win. No server-side CAS backs this path, and a batch
    runs it N times unattended, so the one step that guards read lag is the last
    one to drop. The prompt must **omit** `gh-issue-claim.py
    acquire` entirely — there is no ref to create on this path.
