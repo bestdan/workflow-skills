@@ -37,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import agent_query  # noqa: E402
 import agent_view  # noqa: E402
+import brief  # noqa: E402
 import collector  # noqa: E402
 import collector_install  # noqa: E402
 import config  # noqa: E402
@@ -245,6 +246,35 @@ def build_parser() -> argparse.ArgumentParser:
         help="comma list of: " + ", ".join(agent_query.SECTIONS) + " (default: all)",
     )
     _paths(item_p)
+    brief_p = sub.add_parser(
+        "brief",
+        help="one call behind a prioritization: a scope's freshness, in-flight"
+        " work, blockers, the Now mode's candidates, the owner's signals and"
+        f" the gaps, as JSON within about {brief.BUDGET_TOKENS} tokens",
+    )
+    brief_p.add_argument(
+        "--scope",
+        action="append",
+        help="a scope id or a word `scopes` matches; repeat for a union;"
+        " `all` (the default) is no filter",
+    )
+    brief_p.add_argument(
+        "--mode",
+        help="the Now mode whose candidates it lists: "
+        + ", ".join(fleet_now.MODES)
+        + " (default: ship)",
+    )
+    brief_p.add_argument(
+        "--minutes",
+        type=int,
+        help="a time box: sized candidates up to twice it, then the unsized"
+        " apart (Deep ignores it)",
+    )
+    brief_p.add_argument(
+        "--sections",
+        help="comma list of: " + ", ".join(brief.SECTIONS) + " (default: all)",
+    )
+    _paths(brief_p)
     plan_p = sub.add_parser(
         "plan",
         help="set, show or clear a plan: an ordered list of items for one scope"
@@ -623,6 +653,17 @@ def cmd_items(args: argparse.Namespace) -> int:
 def cmd_item(args: argparse.Namespace) -> int:
     def build(conn: sqlite3.Connection, cfg: dict, now: datetime) -> str:
         doc = agent_query.item_doc(conn, cfg, now, args.ref, args.sections)
+        return agent_query.dumps(doc)
+
+    return _query(args, build)
+
+
+def cmd_brief(args: argparse.Namespace) -> int:
+    def build(conn: sqlite3.Connection, cfg: dict, now: datetime) -> str:
+        doc = brief.brief_doc(
+            conn, cfg, now, scope=args.scope, mode=args.mode,
+            minutes=args.minutes, sections=args.sections,
+        )  # fmt: skip
         return agent_query.dumps(doc)
 
     return _query(args, build)
@@ -1041,6 +1082,8 @@ def main(argv: "list[str] | None" = None) -> int:
         return cmd_items(args)
     if args.command == "item":
         return cmd_item(args)
+    if args.command == "brief":
+        return cmd_brief(args)
     if args.command == "overlay":
         return cmd_overlay(args)
     if args.command == "plan":

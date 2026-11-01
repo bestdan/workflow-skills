@@ -1,7 +1,7 @@
 ---
 name: task-dashboard
-description: Install, check, sync, open, back up, read, clean up, or remove the local task dashboard — the always-on, localhost-only page that mirrors your Jira work (through acli) and GitHub PRs (through gh) into SQLite and ranks what to do next. Subcommands install | status | sync-now | open | export | import | tune | view | scopes | items | item | refresh | overlay | plan | clean | uninstall. Use when the user wants that dashboard set up as a login agent on their Mac, asks whether it is running or how stale it is, wants it refreshed now, wants its link, wants to back up or restore their pins, order, snoozes and notes, wants the fleet Now's ranking tuned from their "why not now" answers, asks what a tab shows ("what's on Stale?"), wants the open work in one repo, workstream, Jira project or label as compact records ("what's open on FinPlan?", "small tasks I could do in half an hour"), asks to clean a tab up ("look at the Stale tab and clean it up"), wants an item ignored or snoozed, or wants it taken off the machine.
-argument-hint: "install | status | sync-now [--reconcile] | open | export <file> | import <file> | tune [--days N] | view <name> [--json] [--all] [--mode M] | scopes [query] | items [--scope X] [--kind K] [--state S] [--only F] [--fields F] [--limit N] [--offset N] [--jsonl] | item <source:key> [--sections S] | refresh <owner/repo#N> [--json] | overlay <action> | plan set|show|clear | clean <view> | uninstall"
+description: Install, check, sync, open, back up, read, prioritize, clean up, or remove the local task dashboard — the always-on localhost page that mirrors Jira and GitHub into SQLite and ranks what to do next. Subcommands install | status | sync-now | open | export | import | tune | view | scopes | items | item | brief | prioritize | refresh | overlay | plan | clean | uninstall. Use when the user wants that dashboard set up as a login agent on their Mac, asks if it is running or how stale it is, wants it refreshed now, wants its link, wants to back up or restore its pins, snoozes and notes, wants Now's ranking tuned from their "why not now" answers, asks what a tab shows ("what's on Stale?"), wants the open work in one repo, workstream, project or label as compact records ("what's open on FinPlan?"), asks what to work on next ("help me prioritize my FinPlan tasks", "half an hour, what small tasks should I bang out?"), asks to clean a tab up, wants an item ignored or snoozed, or wants it taken off the machine.
+argument-hint: "install | status | sync-now [--reconcile] | open | export <file> | import <file> | tune [--days N] | view <name> [--json] [--all] [--mode M] | scopes [query] | items [--scope X] [--kind K] [--state S] [--only F] [--fields F] [--limit N] [--offset N] [--jsonl] | item <source:key> [--sections S] | brief [--scope X] [--mode M] [--minutes N] [--sections S] | prioritize [scope] | refresh <owner/repo#N> [--json] | overlay <action> | plan set|show|clear | clean <view> | uninstall"
 ---
 
 # task-dashboard
@@ -15,9 +15,10 @@ at every start. How it is built, including why the plist never names the
 plugin's versioned directory, is
 [`dev_docs/task-dashboard.md`](../../dev_docs/task-dashboard.md).
 
-Every subcommand below except `clean` is one `dashboard.py` call (`open` is an
-alias of `url`); `clean` is the procedure in
-[`references/clean.md`](references/clean.md). Spell the call as:
+Every subcommand below except `clean` and `prioritize` is one `dashboard.py`
+call (`open` is an alias of `url`); `clean` is the procedure in
+[`references/clean.md`](references/clean.md) and `prioritize` the one in
+[`references/prioritize.md`](references/prioritize.md). Spell the call as:
 
 ```bash
 uv run --no-project --python ">=3.11" "${CLAUDE_PLUGIN_ROOT}/scripts/task-dashboard/dashboard.py" <subcommand> [args]
@@ -196,7 +197,7 @@ dashboard itself never calls a model.**
 
 With few answers `tune` suggests nothing; say so rather than guessing.
 
-## view, scopes, items, item, overlay
+## view, scopes, items, item, brief, overlay
 
 `DASH view <name> --json` prints one tab's lanes and items as its page shows
 them, read from the DB with no server: the include filter, ignores and snoozes
@@ -271,6 +272,13 @@ a DB that is behind the current schema, once, as `view` does.
   is `refs` for Jira (both directions), Linear and PRs, but `counts` for a
   GitHub issue: the mirror holds only how many open issues block it, so say
   so rather than naming blockers.
+- `DASH brief [--scope X ...] [--mode ship|little|deep|tidy|plan] [--minutes N]
+  [--sections S]` is one scope's state for a prioritization, within about 8k
+  tokens: `freshness`, `in_flight` (PRs by readiness, waiting sessions,
+  worktrees with no PR), `blocked`, `candidates` (the Now mode's items in its
+  order, uncapped), `signals` (the owner's pins, snoozes, notes, why-nots)
+  and `gaps` (sources not mirrored). A list the budget cut gives `omitted`
+  and the `more` command that lists it. Read it through `prioritize`.
 
 After acting on a PR or issue (merging, closing, labelling, pushing a fix), run
 `DASH refresh <owner/repo#N>`, unsandboxed, rather than `sync-now`: it re-reads
@@ -311,6 +319,16 @@ scope, a reason each. The overlay carries it, so export and import do too.
   `est_min_sum`; `DASH plan clear --scope X [--kind K]` removes it (`--scope
   all` for the all-scope plan; both kinds without `--kind`).
 - Exit 2 for a refused value, 1 for an unreadable file or DB.
+
+## prioritize
+
+`prioritize [scope]` ("help me prioritize my FinPlan tasks", "I've got half
+an hour, what should I bang out?") reads the ask for a scope, a Now mode and a
+time box, then `DASH brief` and the `item` dossiers, and proposes an ordered
+plan in chat, a reason and `est_min` per item. **It never writes to a
+tracker, and never calls an unsized item small.** The procedure is
+[`references/prioritize.md`](references/prioritize.md); read it before
+starting.
 
 ## clean
 
