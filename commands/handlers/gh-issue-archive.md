@@ -46,7 +46,7 @@ things, neither of which changes completion state:
    ```bash
    gh issue list --repo <repo> --state closed --limit 200 \
      --label "<label1>" --label "<label2>" \
-     --json number,title,closedAt,labels
+     --json number,closedAt,labels
    ```
 
    When `gh-issue.labels` is **empty/unset**, there is no durable task-loop marker
@@ -63,7 +63,7 @@ things, neither of which changes completion state:
 
    ```bash
    gh issue list --repo <repo> --state closed --limit 200 \
-     --json number,title,closedAt,labels
+     --json number,closedAt,labels
    ```
 
    `--limit 200` is a window over the 200 most recently **created** issues, not
@@ -79,7 +79,9 @@ things, neither of which changes completion state:
    that do **not** already carry the `archived` label are candidates. Never
    touch open issues.
 
-3. **Always print the candidate list first** (number + title + closed date). If
+3. **Always print the candidate list first** (number + closed date). The query
+   above reads no titles on purpose: on a public repo a stranger may have
+   written any of them (`dev_docs/gh_issue_task_loop.md` §6). If
    `dry-run`, stop here and report "nothing archived (dry-run)".
 
 4. **Retire (label only).** For each candidate, add the `archived` label

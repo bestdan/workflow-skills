@@ -230,7 +230,7 @@ def count_wip(repo, labels_file, limit):
             "--limit",
             str(limit),
             "--json",
-            "number,title,labels",
+            "number,labels",
         ]
     )
     if code != 0:
@@ -238,7 +238,7 @@ def count_wip(repo, labels_file, limit):
             f"gh issue list failed for {repo}: {err.strip() or out.strip()}"
         )
     issues = json.loads(out or "[]")
-    return [{"number": i["number"], "title": i["title"]} for i in issues]
+    return [{"number": i["number"]} for i in issues]
 
 
 def cmd_branch_name(args):
@@ -305,7 +305,7 @@ def cmd_wip(args):
     else:
         print(f"{args.repo}: {count} in flight (limit {args.wip_limit}, slack {slack})")
         for issue in issues:
-            print(f"  #{issue['number']} {issue['title']}")
+            print(f"  #{issue['number']}")
     return 0
 
 

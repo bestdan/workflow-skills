@@ -26,7 +26,7 @@ Overlay the local override on the committed config — mappings merge recursivel
 
 - File absent, or no `handler:` key → `repo-pr` (default). Continue to step 2 below (file-based path).
 - `handler: repo-pr` → continue to step 2 below (file-based path).
-- `handler: gh-issue | jira` → **dispatch to the handler.** Read `commands/handlers/<handler>.md` and follow its `## List` section, passing `$ARGUMENTS` (the optional status filter) through. Both handlers ship a `## List` section (gh-issue via `gh issue list`, jira via a JQL query). The handler owns all tracker-specific querying and renders the same vertical-section kanban layout described in step 4. Skip steps 2–4 of this file.
+- `handler: gh-issue | jira` → **dispatch to the handler.** Read `commands/handlers/<handler>.md` and follow its `## List` section, passing `$ARGUMENTS` (the optional status filter) through. Both handlers ship a `## List` section (gh-issue via the `gh-issue-trust.py --board` read, jira via a JQL query). The handler owns all tracker-specific querying and renders the same vertical-section kanban layout described in step 4. Skip steps 2–4 of this file.
 
 - `handler: linear` → **dispatch to the Linear handler.** Read `commands/handlers/linear-common.md` (shared config/preflight/kanban mapping) and `commands/handlers/linear-list.md` (the list flow), passing `$ARGUMENTS` through. Skip steps 2–4 of this file.
 
