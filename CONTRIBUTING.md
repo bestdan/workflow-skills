@@ -85,7 +85,8 @@ Five deterministic, blocking checks, plus the shell lint and Bats suites:
    - `plugin.json` and `marketplace.json` versions are present and **equal**;
    - the README "N skills, M commands, K subagent" sentence matches reality;
    - no fenced shell block in a runtime `.md` carries more than one control-flow
-     statement — see **Logic goes in a typed file** below.
+     statement, or a pipeline doing the same work — see **Logic goes in a typed
+     file** below.
 4. **`scripts/typecheck.sh`** — mypy over the repo's Python, at a version pinned
    in the script (fetched by `uvx`, so it needs network on the first run of a
    given pin). Four tiers, split by **who runs the file**, each with
@@ -218,6 +219,13 @@ block with **two or more** control-flow statements plus a bare `fi`/`done`/`esac
 line. The terminator requirement is what keeps the prompt payloads in
 `repo-pr-execute.md` and `repo-pr.md` — English wearing a `bash` fence — from
 being flagged; English does not write a bare `done`.
+
+It also fires on a block with no control flow at all whose pipeline is doing
+the work: **three or more** pipes, or a pipe plus an `|| exit`/`|| return`
+guard. That is the shape that shipped four defects in a row in #805. Only
+shell-level syntax counts — a `|` inside a quoted `jq` or regex string, a
+`<a|b|c>` placeholder, or a comment is not a pipe, and a `|| true` fallback is
+not exit-status handling.
 
 **The allowlist is not an escape hatch.** `SHELL_LOGIC_ALLOWLIST` in
 `scripts/validate.py` names the blocks that predate the check and the count each
