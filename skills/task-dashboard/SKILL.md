@@ -27,6 +27,14 @@ uv run --no-project --python ">=3.11" "${CLAUDE_PLUGIN_ROOT}/scripts/task-dashbo
 Call that `DASH <subcommand>` below. Relay its output; it already names the
 fix for each failure it knows.
 
+**Every item you name to the owner is a web link**: a markdown link whose text
+is its ref (`[retail#63475](https://github.com/...)`, `[IP-942](https://...)`).
+This holds wherever an item appears: a plan, a table, a cleanup proposal, a
+left-out or deferred list. A Jira or Linear record carries the URL as `url`; a
+GitHub record carries none, because its `key` is the URL. Never build a URL
+from a ref by hand. An item with neither (a session, a worktree) is named by
+its path instead.
+
 **Run `install`, `uninstall`, `status`, `sync-now` and `refresh` unsandboxed**,
 each for its own reason. `install` runs a full sync, and **every `acli` and `gh` call
 needs the sandbox escape** because they reach Atlassian and GitHub hosts.
