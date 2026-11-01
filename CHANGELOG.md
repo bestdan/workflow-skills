@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.175.0] - 2026-11-01
+
+### Features
+
+- gate issue text in /list-tasks and /reoptimize-tasks [#1333] (#1334) (13368ef)
+
 ## [2.174.0] - 2026-11-01
 
 ### Features
