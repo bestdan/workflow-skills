@@ -156,13 +156,16 @@ def list_ready_issues(repo, label, limit, scope_labels=()):
     ]
     for scope in scope_labels:
         args += ["--label", scope]
-    args += ["--json", "number,title,labels", "--limit", str(limit)]
+    # No `title`: anyone can open an issue on a public repo, and this output
+    # reaches the model. Callers that need a title take it from
+    # `gh-issue-trust.py`, which prints only trusted authors' text.
+    args += ["--json", "number,labels", "--limit", str(limit)]
     code, out, err = run_gh(args)
     if code != 0:
         raise SystemExit(
             f"gh issue list failed for {repo}: {err.strip() or out.strip()}"
         )
-    return json.loads(out or "[]")
+    return [{**issue, "title": ""} for issue in json.loads(out or "[]")]
 
 
 def label_names(labels):

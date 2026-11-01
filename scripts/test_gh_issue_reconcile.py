@@ -502,9 +502,26 @@ class RuleFourTests(ReconcileTestCase):
             gh_issue_reconcile.report(result)
         output = printed.getvalue()
 
-        self.assertIn("#1 issue 1 — stripped auto:eligible", output)
-        self.assertIn("#2 issue 2 — NOT stripped — ", output)
+        self.assertIn("#1 — stripped auto:eligible", output)
+        self.assertIn("#2 — NOT stripped — ", output)
         self.assertNotIn("would strip", output)
+
+    def test_no_title_is_requested_or_printed(self):
+        """A stranger can write any title, and this can run with nobody watching."""
+        repo = FakeRepo(
+            open_issues={1: []},
+            closed_issues={2: ["auto:eligible"]},
+            events={2: [REVIEW]},
+        )
+        result = self._compute(repo)
+        printed = io.StringIO()
+        with redirect_stdout(printed):
+            gh_issue_reconcile.report(result)
+
+        for call in repo.calls:
+            if "--json" in call:
+                self.assertNotIn("title", call[call.index("--json") + 1])
+        self.assertNotIn("issue 1", printed.getvalue() + json.dumps(result))
 
 
 class ProvisioningTests(ReconcileTestCase):

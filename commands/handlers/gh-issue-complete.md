@@ -64,7 +64,7 @@ This phase takes, in addition to the identifier:
    token turns the rest of the shell line into a comment. Then call:
 
    ```bash
-   gh issue view "<n>" --json number,title,state,stateReason,labels [--repo <repo>]
+   gh issue view "<n>" --json number,state,stateReason,labels [--repo <repo>]
    ```
 
    `labels` rides along on the same read because step 5 needs the issue's

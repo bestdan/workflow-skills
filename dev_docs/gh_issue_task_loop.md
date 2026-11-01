@@ -201,8 +201,21 @@ prints PR numbers and URLs. A stranger can still title a PR `[#<n>]` and make
 `/do-tasks` skip that issue. That is a nuisance the owner can see on the board, not
 an injection.
 
-What it does not cover: **the attended verbs that show titles**, `/list-tasks` and
-`/reoptimize-tasks`.
+The attended verbs read the same way, though a person is present: presence does not
+keep text out of the model's context. `/list-tasks` reads its board through
+`gh-issue-trust.py --board`, which prints a title only for a trusted author.
+`/reoptimize-tasks` reads through `gh-issue-graph.py`, which blanks an untrusted
+node's title and body and drops the footer and prose references parsed from it,
+keeping its labels, state and edges. Both read association once per distinct author,
+since it is the author's relation to the repo rather than a property of one issue,
+so a 500-issue graph costs a few calls rather than 500. Neither may then fetch a
+withheld title or body another way.
+
+Everywhere else, the helpers and handlers that list issues read numbers and labels
+and never `title`: the WIP count (`gh-issue-claim.py wip`), `gh-issue-ready.py`'s
+list mode, `/reconcile-tasks` (which can run on a schedule), `/archive-tasks` and
+`/complete-task`. `gh-issue-pr-sync.py` reads a merged PR's title and body to find
+the issues it mentions, and prints only numbers.
 
 ## 7. What Linear keeps
 

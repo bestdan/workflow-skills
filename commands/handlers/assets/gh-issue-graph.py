@@ -42,8 +42,16 @@ Findings, all over the native graph:
   above already reports it for the human decision `find_cycles` exists to
   defer.
 
-Reads only. Every call is a GET: `gh issue list`, `gh issue view`, and
-`gh api .../dependencies/blocked_by`. Writes belong to `gh-issue-deps.py`
+**A stranger's text never leaves this script.** On a public repo anyone can
+open an issue, and this output goes into the model's context. So a node whose
+author `gh-issue-trust.py` does not trust is printed with an empty title and
+body, no footer and no prose references, and is listed in `untrusted`. Its
+labels, state and edges stay, because GitHub supplies those rather than the
+author.
+
+Reads only. Every call is a GET: `gh issue list`, `gh issue view`,
+`gh api .../dependencies/blocked_by`, and the trust helper's `gh api` reads of
+the repo and of one issue per distinct author. Writes belong to `gh-issue-deps.py`
 (edges) and `gh-issue-state.py` (labels); this script never calls either.
 
 `blocked_by` is read with `--paginate --slurp` for the reason
@@ -79,6 +87,7 @@ Usage:
 
 import argparse
 import functools
+import importlib.util
 import json
 import os
 import re
@@ -93,10 +102,23 @@ from _labels import (  # noqa: E402
     load_vocabulary,
 )
 
+
+def _load(filename, name):
+    """Import a sibling asset whose filename is not a legal module name."""
+    path = Path(__file__).resolve().parent / filename
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None, filename
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+gh_issue_trust = _load("gh-issue-trust.py", "gh_issue_trust")
+
 # The fields every finding below is derived from. `stateReason` is what separates
 # a stale edge from a satisfied one, so a caller that drops it gets a graph that
 # cannot tell "blocks forever" from "already done".
-ISSUE_FIELDS = "number,title,body,state,stateReason,labels,milestone,createdAt"
+ISSUE_FIELDS = "number,author,title,body,state,stateReason,labels,milestone,createdAt"
 
 # `_body_refs.parse()`'s `id_pattern` for this handler: a bare `#<n>` mention,
 # never a repo-qualified `owner/repo#<n>` one — the negative lookbehind refuses
@@ -225,6 +247,7 @@ def build_node(issue, vocabulary, in_scope, repo):
     milestone = issue.get("milestone") or {}
     return {
         "number": issue["number"],
+        "author": (issue.get("author") or {}).get("login") or "",
         "title": issue.get("title", ""),
         # Carried rather than dropped: Dimensions 1, 2 and 4 all parse bodies for
         # dependency prose, so the caller needs every one of these. Dropping the
@@ -254,6 +277,27 @@ def build_node(issue, vocabulary, in_scope, repo):
             issue.get("body") or "", str(issue["number"]), BODY_REF_ID_PATTERN
         ),
     }
+
+
+def withhold_untrusted_text(repo, nodes):
+    """Blank the title and body of every node whose author is not trusted.
+
+    The rule is `gh-issue-trust.py`'s. This script's JSON is what
+    `/reoptimize-tasks` reads into the model's context, so a stranger's body
+    would otherwise reach it whole, and so would any phrase `_body_refs` quoted
+    from it. An untrusted node keeps its labels, state and edges, which come
+    from GitHub rather than from the author, so the graph findings still cover
+    it. A failed read exits non-zero, as everything else here does.
+    """
+    allowed = gh_issue_trust.trusted_associations(repo)
+    associations = gh_issue_trust.author_associations(
+        repo, [(n, nodes[n]["author"]) for n in sorted(nodes)]
+    )
+    for node in nodes.values():
+        node["association"] = associations[node["author"]]
+        node["trusted"] = node["association"] in allowed
+        if not node["trusted"]:
+            node.update(title="", body="", footer_blockers=[], body_references=[])
 
 
 def footer_blockers(body, self_number, repo):
@@ -473,6 +517,8 @@ def analyse(
                 )
                 pending.append(blocker)
 
+    withhold_untrusted_text(repo, nodes)
+
     flat = [
         {"blocked": blocked, "blocker": blocker}
         for blocked in sorted(edges)
@@ -523,9 +569,12 @@ def analyse(
             if (number, blocker) not in native:
                 footer_only.append({"blocked": number, "blocker": blocker})
     for edge in flat:
-        if not nodes[edge["blocked"]]["in_scope"]:
+        dependent = nodes[edge["blocked"]]
+        # An untrusted body was never read, so whether it echoes the edge is
+        # unknown, and repairing the echo would mean reading it.
+        if not dependent["in_scope"] or not dependent["trusted"]:
             continue
-        if edge["blocker"] not in nodes[edge["blocked"]]["footer_blockers"]:
+        if edge["blocker"] not in dependent["footer_blockers"]:
             edge_only.append(edge)
 
     # `body_references` with no matching native relation yet — Dimension 1-2's
@@ -556,6 +605,7 @@ def analyse(
         },
         "checked": sum(1 for node in nodes.values() if node["in_scope"]),
         "backfilled": sorted(n for n, node in nodes.items() if not node["in_scope"]),
+        "untrusted": sorted(n for n, node in nodes.items() if not node["trusted"]),
         "truncated": truncated,
         "nodes": [nodes[n] for n in sorted(nodes)],
         "edges": flat,

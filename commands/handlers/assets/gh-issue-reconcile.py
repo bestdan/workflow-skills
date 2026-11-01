@@ -292,7 +292,10 @@ def compute(repo, labels_file, limit, scope_labels=(), apply=False):
 
     double_status = []
     missing_rung = []
-    open_issues = list_issues(repo, "open", limit, scope_labels, "number,title,labels")
+    # Numbers and labels only, never `title`: a stranger can open an issue on a
+    # public repo, this output reaches the model, and the run can be scheduled
+    # with nobody watching (`dev_docs/gh_issue_task_loop.md` §6).
+    open_issues = list_issues(repo, "open", limit, scope_labels, "number,labels")
     for issue in open_issues:
         current = label_names(issue)
         rungs = status_rungs(current, vocabulary)
@@ -301,7 +304,6 @@ def compute(repo, labels_file, limit, scope_labels=(), apply=False):
             keep = rungs[-1]
             finding = {
                 "number": issue["number"],
-                "title": issue["title"],
                 "rungs": rungs,
                 "keep": keep,
                 "drop": [label for label in rungs if label != keep],
@@ -362,7 +364,6 @@ def compute(repo, labels_file, limit, scope_labels=(), apply=False):
             missing_rung.append(
                 {
                     "number": issue["number"],
-                    "title": issue["title"],
                     "missing": missing,
                     # Named so the report does not say "no status: label" about
                     # an issue that visibly carries one.
@@ -373,7 +374,7 @@ def compute(repo, labels_file, limit, scope_labels=(), apply=False):
     closed_unreviewed = []
     closed_with_rungs = []
     closed_issues = list_issues(
-        repo, "closed", limit, scope_labels, "number,title,labels,stateReason"
+        repo, "closed", limit, scope_labels, "number,labels,stateReason"
     )
 
     # Rule 4, on the same list rule 3 reads and at no extra API cost. It runs
@@ -386,7 +387,6 @@ def compute(repo, labels_file, limit, scope_labels=(), apply=False):
             continue
         finding = {
             "number": issue["number"],
-            "title": issue["title"],
             "rungs": rungs,
             # Seeded on every path for the same reason rule 1's are: `--json` is
             # an interface, and a key that appears only when the repair worked is
@@ -433,7 +433,6 @@ def compute(repo, labels_file, limit, scope_labels=(), apply=False):
         closed_unreviewed.append(
             {
                 "number": issue["number"],
-                "title": issue["title"],
                 # Never a filter, always context. `state_reason` is not written
                 # by anything in this handler, so `not_planned` here means a
                 # human deliberately abandoned the issue and the finding can be
@@ -534,7 +533,7 @@ def report(result):
             outcome = f"repaired — kept {finding['keep']}, dropped {dropped}"
         else:
             outcome = f"would keep {finding['keep']}, drop {dropped}"
-        print(f"  #{finding['number']} {finding['title']} — {outcome}")
+        print(f"  #{finding['number']} — {outcome}")
         # Named on its own line: these are deletions the repair makes beyond the
         # rung it exists to drop, so folding them into `outcome` would read as
         # part of the ordinary transition.
@@ -556,7 +555,7 @@ def report(result):
         )
     for finding in findings:
         missing = ", ".join(f"{group}:" for group in finding["missing"])
-        line = f"  #{finding['number']} {finding['title']} — no {missing} label"
+        line = f"  #{finding['number']} — no {missing} label"
         if finding["unrecognized"]:
             names = ", ".join(finding["unrecognized"])
             line += f" (carries {names}, not in labels.yml)"
@@ -580,7 +579,7 @@ def report(result):
     for finding in findings:
         reason = finding["state_reason"] or "unset"
         print(
-            f"  #{finding['number']} {finding['title']} — "
+            f"  #{finding['number']} — "
             f"possible stray closing keyword (state_reason: {reason})"
         )
 
@@ -597,7 +596,7 @@ def report(result):
             outcome = f"stripped {rungs}"
         else:
             outcome = f"would strip {rungs}"
-        print(f"  #{finding['number']} {finding['title']} — {outcome}")
+        print(f"  #{finding['number']} — {outcome}")
         if finding.get("dropped"):
             names = ", ".join(finding["dropped"])
             print(f"      also dropped (not in labels.yml): {names}")

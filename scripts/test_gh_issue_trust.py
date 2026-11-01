@@ -189,5 +189,98 @@ class TrustTests(unittest.TestCase):
             self.assertNotIn("-X", call)
 
 
+class FakeBoard(FakeRepo):
+    """FakeRepo plus the `gh issue list` the `--board` mode runs."""
+
+    def __init__(self, issues, list_fails=False, **kwargs):
+        super().__init__(issues, **kwargs)
+        self.list_fails = list_fails
+
+    def run_gh(self, args):
+        if args[:2] != ["issue", "list"]:
+            return super().run_gh(args)
+        self.calls.append(args)
+        if self.list_fails:
+            return 1, "", "HTTP 502"
+        rows = [
+            {
+                "number": n,
+                "author": {"login": login},
+                "title": f"title {n} {INJECTION}",
+                "labels": [{"name": "status:2_ready"}],
+                "assignees": [],
+                "state": "OPEN",
+                "createdAt": "2026-10-01T00:00:00Z",
+            }
+            for n, (login, _association) in sorted(self.issues.items())
+        ]
+        return 0, json.dumps(rows), ""
+
+
+def run_board(repo, *extra):
+    original = trust.run_gh
+    trust.run_gh = repo.run_gh
+    out = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out):
+            trust.main(["--repo", "o/r", "--board", *extra])
+    finally:
+        trust.run_gh = original
+    return out.getvalue()
+
+
+class BoardTests(unittest.TestCase):
+    def test_untrusted_rows_keep_their_labels_and_lose_their_title(self):
+        repo = FakeBoard({1: ("o", "OWNER"), 2: ("s", "NONE")}, owner_type="User")
+        raw = run_board(repo)
+        rows = json.loads(raw)["issues"]
+
+        self.assertIn("title 1", rows[0]["title"])
+        self.assertTrue(rows[0]["trusted"])
+        self.assertNotIn("title", rows[1])
+        self.assertEqual((rows[1]["trusted"], rows[1]["association"]), (False, "NONE"))
+        self.assertEqual(rows[1]["labels"], [{"name": "status:2_ready"}])
+        self.assertEqual(raw.count(INJECTION), 1)
+
+    def test_association_is_read_once_per_author(self):
+        repo = FakeBoard({n: ("o", "OWNER") for n in range(1, 6)})
+        run_board(repo)
+        reads = [a for a in repo.calls if a[0] == "api" and "/issues/" in a[1]]
+        self.assertEqual(len(reads), 1)
+
+    def test_member_follows_the_owner_type(self):
+        user = json.loads(run_board(FakeBoard({1: ("m", "MEMBER")}, owner_type="User")))
+        org = json.loads(run_board(FakeBoard({1: ("m", "MEMBER")})))
+        self.assertFalse(user["issues"][0]["trusted"])
+        self.assertTrue(org["issues"][0]["trusted"])
+
+    def test_labels_and_limit_reach_the_list_query(self):
+        repo = FakeBoard({1: ("o", "OWNER")})
+        run_board(repo, "--label", "follow-up", "--label", "x", "--limit", "7")
+        query = repo.calls[0]
+        self.assertEqual(query.count("--label"), 2)
+        self.assertEqual(query[query.index("--limit") + 1], "7")
+        self.assertIn("all", query)
+
+    def test_a_failed_list_or_trust_read_prints_nothing(self):
+        for repo in (
+            FakeBoard({1: ("o", "OWNER")}, list_fails=True),
+            FakeBoard({1: ("o", "OWNER")}, repo_fails=True),
+            FakeBoard({1: ("o", "OWNER")}, fail=[1]),
+        ):
+            original, trust.run_gh = trust.run_gh, repo.run_gh
+            out = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(out), self.assertRaises(SystemExit):
+                    trust.main(["--repo", "o/r", "--board"])
+            finally:
+                trust.run_gh = original
+            self.assertEqual(out.getvalue(), "")
+
+    def test_board_and_issue_are_exclusive(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            trust.main(["--repo", "o/r", "--board", "--issue", "1"])
+
+
 if __name__ == "__main__":
     unittest.main()
