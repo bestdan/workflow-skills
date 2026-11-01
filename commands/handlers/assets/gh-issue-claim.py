@@ -34,6 +34,11 @@ sessions could each interpret slightly differently:
   missing a label spelling, over-cost by issuing two calls, or hand a batch
   dispatch a negative ceiling by doing the subtraction in prose.
 - `release` deletes a lock ref this session created, on bail.
+- `elect` decides the comment-token election (`claim-lock.md` "Fallback"), and
+  `title-prs` is pre-flight's open-PR-by-title check. Both read text anyone can
+  write on a public repo — comment bodies and PR titles — so they do the reading
+  here and print only ids, numbers and URLs. A stranger's comment or title never
+  reaches the model that runs the claim.
 
 Usage:
   python3 gh-issue-claim.py branch-name --issue 142
@@ -45,14 +50,19 @@ Usage:
   python3 gh-issue-claim.py acquire --repo owner/name --issue 142 --base-sha <sha>
   python3 gh-issue-claim.py acquire-ref --repo owner/name --branch task/PLAT-142 --base-sha <sha>
   python3 gh-issue-claim.py release --repo owner/name --issue 142
+  python3 gh-issue-claim.py elect --repo owner/name --issue 142 \\
+      --since 2026-11-01T12:00:00Z --comment-id 123456789
+  python3 gh-issue-claim.py title-prs --issue 142 [--repo owner/name]
 """
 
 import argparse
+import importlib.util
 import json
 import os
 import re
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -61,6 +71,19 @@ from _labels import (  # noqa: E402
     VocabularyError,
     load_vocabulary,
 )
+
+
+def _load(filename, name):
+    """Import a sibling asset whose filename is not a legal module name."""
+    path = Path(__file__).resolve().parent / filename
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None, filename
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+gh_issue_trust = _load("gh-issue-trust.py", "gh_issue_trust")
 
 STARTED_STATUS_VALUE = "3_started"
 NEEDS_REVIEW_STATUS_VALUE = "4_needs_review"
@@ -363,6 +386,163 @@ def cmd_release(args):
     return 0
 
 
+CLAIM_TOKEN_RE = re.compile(r"<!--\s*do-tasks-claim:[0-9A-Za-z]+\s*-->")
+STARTED_LABEL = f"status:{STARTED_STATUS_VALUE}"
+
+
+def iso_time(value):
+    """argparse type for `--since`: an ISO 8601 time with a zone, or exit 2.
+
+    GitHub stamps comments in UTC with a `Z`. A naive time cannot be compared
+    with that without guessing the caller's zone, and a wrong guess moves
+    `T_unclaimed` by hours, which either elects a stale orphan or drops a live
+    competitor.
+    """
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not an ISO 8601 time: {value!r}")
+    if parsed.tzinfo is None:
+        raise argparse.ArgumentTypeError(f"--since needs a zone, e.g. Z: {value!r}")
+    return parsed
+
+
+def _gh_json(args, what):
+    code, out, err = run_gh(args)
+    if code != 0:
+        raise ProbeFailed(f"{what}: {err.strip() or out.strip() or 'gh failed'}")
+    return json.loads(out or "null")
+
+
+def elect(repo, issue, since, own_id):
+    """Decide `claim-lock.md`'s comment-token election for this session.
+
+    Returns a dict of ids and booleans only. Comment bodies are read here to
+    find the claim marker and are never returned, because anyone can comment
+    on a public repo's issue and this runs inside an unattended session.
+
+    A token counts only if its comment was created at or after `since`
+    (`T_unclaimed`) and written by a trusted author, by the same per-owner-type
+    rule `gh-issue-trust.py` applies to issues. The trust filter is what stops
+    a stranger's hand-typed marker from winning an election and leaving the
+    issue claimed by nobody. The issue must also carry the claim markers
+    (an assignee and `status:3_started`); without them no token is
+    state-backed, including this session's own.
+
+    `own_id` is the id of the comment this session posted. It is counted even
+    if the re-list does not show it yet: this session knows it posted it, and
+    only a lower id can beat it.
+    """
+    try:
+        allowed = gh_issue_trust.trusted_associations(repo)
+    except SystemExit as exc:  # its failed-read exit, which must stay a 4 here
+        raise ProbeFailed(str(exc)) from None
+    state = _gh_json(["api", f"repos/{repo}/issues/{issue}"], "issue read")
+    labels = {label.get("name") for label in state.get("labels") or []}
+    state_backed = bool(state.get("assignees")) and STARTED_LABEL in labels
+
+    pages = _gh_json(
+        ["api", "--paginate", "--slurp", f"repos/{repo}/issues/{issue}/comments"],
+        "comment list",
+    )
+    competing = []
+    for page in pages or []:
+        for comment in page:
+            if comment.get("id") == own_id:
+                continue
+            if not CLAIM_TOKEN_RE.search(comment.get("body") or ""):
+                continue
+            if comment.get("author_association") not in allowed:
+                continue
+            created = datetime.fromisoformat(
+                comment["created_at"].replace("Z", "+00:00")
+            )
+            if created < since:
+                continue
+            competing.append(comment["id"])
+    competing.sort()
+    winner = min([own_id, *competing])
+    return {
+        "state_backed": state_backed,
+        "own_comment_id": own_id,
+        "winner_comment_id": winner,
+        "competing_comment_ids": competing,
+        "won": state_backed and winner == own_id,
+    }
+
+
+def cmd_elect(args):
+    """Exit code is the contract: 0 won, 3 lost, 5 inconclusive, 4 no verdict.
+
+    5 is `claim-lock.md` step 7's read-lag residual: no other trusted token is
+    visible, which is what a win looks like and also what a racer's
+    not-yet-listed comment looks like. The caller re-polls; a 5 that survives
+    the re-polls is a win. 4 covers a failed read and an issue that does not
+    carry the claim markers, since then no token is state-backed.
+    """
+    try:
+        result = elect(args.repo, args.issue, args.since, args.comment_id)
+    except ProbeFailed as exc:
+        print(f"election could not read the issue: {exc}", file=sys.stderr)
+        return 4
+    print(json.dumps(result))
+    if not result["state_backed"]:
+        print(
+            f"#{args.issue} carries no claim markers (assignee and {STARTED_LABEL})",
+            file=sys.stderr,
+        )
+        return 4
+    if not result["won"]:
+        return 3
+    if not result["competing_comment_ids"]:
+        return 5
+    return 0
+
+
+def title_prs(issue, repo=None):
+    """Open PRs whose title carries the literal `[#<issue>]` token.
+
+    GitHub search tokenizes on punctuation, so `[#12]` also returns `[#120]`;
+    the literal check is the post-filter. Titles are matched here and never
+    returned: anyone can open a PR on a public repo, with any title.
+    """
+    args = [
+        "pr",
+        "list",
+        "--state",
+        "open",
+        "--search",
+        f"[#{issue}] in:title",
+        "--json",
+        "number,url,title",
+        "--limit",
+        "100",
+    ]
+    if repo:
+        args += ["--repo", repo]
+    prs = _gh_json(args, "gh pr list") or []
+    token = f"[#{issue}]"
+    return [
+        {"number": pr["number"], "url": pr["url"]}
+        for pr in prs
+        if token in (pr.get("title") or "")
+    ]
+
+
+def cmd_title_prs(args):
+    """Exit code is the contract: 0 found (one `<number> <url>` per line), 1 none, 4 no answer."""
+    try:
+        prs = title_prs(args.issue, args.repo)
+    except ProbeFailed as exc:
+        print(f"probe failed: {exc}", file=sys.stderr)
+        return 4
+    if not prs:
+        return 1
+    for pr in prs:
+        print(f"{pr['number']} {pr['url']}")
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -421,6 +601,30 @@ def main(argv=None):
     p.add_argument("--issue", required=True, type=int)
     p.add_argument("--prefix", default="")
     p.set_defaults(func=cmd_release)
+
+    p = subparsers.add_parser(
+        "elect",
+        help="decide the comment-token election (0 won / 3 lost / 5 inconclusive / 4 no verdict)",
+    )
+    p.add_argument("--repo", required=True, help="owner/name")
+    p.add_argument("--issue", required=True, type=int)
+    p.add_argument("--since", required=True, type=iso_time, help="T_unclaimed")
+    p.add_argument(
+        "--comment-id",
+        required=True,
+        type=int,
+        dest="comment_id",
+        help="id of this session's claim comment",
+    )
+    p.set_defaults(func=cmd_elect)
+
+    p = subparsers.add_parser(
+        "title-prs",
+        help="open PRs titled with [#<n>] (0 found / 1 none / 4 no answer)",
+    )
+    p.add_argument("--issue", required=True, type=int)
+    p.add_argument("--repo", default=None, help="owner/name")
+    p.set_defaults(func=cmd_title_prs)
 
     args = parser.parse_args(argv)
     return args.func(args)

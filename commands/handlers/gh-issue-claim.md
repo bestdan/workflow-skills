@@ -293,10 +293,10 @@ Runs on the candidate **before "Judge feasibility" and "Claim the issue"**, on e
 2. **Open PR by issue number.** The execute path titles PRs `<type>(scope): <description> [#<n>]`, so also catch a PR opened from an unlinked branch:
 
    ```bash
-   gh pr list --state open --search "[#<n>] in:title" --json number,url,title [--repo <repo>]
+   python3 commands/handlers/assets/gh-issue-claim.py title-prs --issue <n> [--repo <repo>]
    ```
 
-   GitHub search tokenizes on punctuation, so `[#12]` searches the bare token `12` and over-matches (`[#120]`, `[#212]`, …). Before skipping, confirm a returned PR's `title` actually contains the literal `[#<n>]` token — only then **skip** with `Skipped #<n>: open PR already exists (<url>)`. (The linked-branch check in step 1 is exact and needs no post-filter.)
+   Anyone can open a PR on a public repo, with any title, so the helper reads the titles and prints only `<number> <url>` per match; do not run the `gh pr list` search yourself. It applies the literal `[#<n>]` post-filter that GitHub's punctuation-blind search needs (`[#12]` otherwise matches `[#120]`). Exit `0` → **skip** with `Skipped #<n>: open PR already exists (<url>)`. Exit `1` → no such PR, continue. Exit `4` → the search failed, which is **not** a free issue: stop and report the probe as unusable. Exit `2` → the installed helper predates `title-prs`: stop and report the plugin as too old. (The linked-branch check in step 1 is exact and reads no title.)
 
 In single/direct mode an in-flight result **stops**; in ranked mode it moves to the next candidate and re-runs pre-flight on it.
 
