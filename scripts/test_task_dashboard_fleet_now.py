@@ -1212,7 +1212,9 @@ DOC_ROWS = [
            "docs: ADR for handling annual data updates"),  # by its title
     sized(tabs_fx.awaiting(62), 1, 12, 3, [DOC_PATH]),  # a small edit to one
     sized(tabs_fx.awaiting(63), 1, 200, 0, ["dev_docs/finplan-notes.md"]),
+    sized(tabs_fx.awaiting(64), 1, 306, 0, [DOC_PATH]),  # a draft: `prs` below
 ]  # fmt: skip
+DOC_DRAFT = [(64, True, None, "success", "author")]
 
 
 class DeepDocTests(Case):
@@ -1221,7 +1223,7 @@ class DeepDocTests(Case):
 
     def setUp(self):
         super().setUp()
-        tabs_fx.seed(self.conn, rows=DEEP_ROWS + DOC_ROWS, prs=[])
+        tabs_fx.seed(self.conn, rows=DEEP_ROWS + DOC_ROWS, prs=DOC_DRAFT)
 
     def keys(self, mode):
         return [r.need.item[1]
@@ -1249,6 +1251,13 @@ class DeepDocTests(Case):
         for n in (62, 63):
             self.assertIn(pr_url(n), little)
             self.assertNotIn(pr_url(n), deep)
+
+    def test_a_draft_stays_in_deep(self):
+        self.assertIn(pr_url(64), self.keys("deep"))
+        self.assertNotIn(pr_url(64), self.keys("little"))
+        by = {r.need.item[1]: r for r in
+              fleet_now.mode_candidates(self.conn, self.cfg, NOW, "deep")}  # fmt: skip
+        self.assertIn("draft · ", by[pr_url(64)].need.state)
 
     def test_the_bucket_and_why_line(self):
         by = {r.need.item[1]: r for r in

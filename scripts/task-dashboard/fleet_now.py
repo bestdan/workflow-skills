@@ -87,9 +87,10 @@ LITTLE ranks its own collector's items (little_candidates), not the ones
 above: a PR or an issue that passes the small test. A PR is small when a bot
 opened it, when it is docs-only (every changed path `*.md` or under `docs/`
 or `dev_docs/`), or when it changes at most LITTLE_FILES files and
-LITTLE_LINES lines. A docs-only PR that writes a research, design or plan
-doc (deep_doc) is none of these: it is the heaviest work there is, not a
-quick read, and goes to DEEP instead. A draft, and one whose CI is anything but green or
+LITTLE_LINES lines. A docs-only PR not opened by a bot that writes a
+research, design or plan doc, adding more than LITTLE_LINES lines (deep_doc),
+is none of these: it is the heaviest work there is, not a quick read, and
+goes to DEEP instead. A draft, and one whose CI is anything but green or
 absent (no checks at all), are left out. An issue is small when it carries `est:1` or `est:2` and is
 not `status:3_started`; an unsized one is not small. They go by LITTLE_TIERS,
 smallest first, then `prio`, then the longer wait, with no score. The agent
@@ -99,7 +100,9 @@ show it.
 
 DEEP ranks the questions that need thinking, not doing (deep_sources): a
 proposed design (workstreams.mirrored_designs), an open PR that writes a
-research, design or plan doc (deep_doc), drafts included, an issue that blocks open
+research, design or plan doc (deep_doc), drafts included (a PR revising a
+proposed design shows beside the design: one is the decision, the other the
+revision under review), an issue that blocks open
 issues (`blocks`, from GitHub's native dependencies), one at
 `status:1_needs_refinement`, and a `status:2_ready` one estimated at
 `est:DEEP_EST` or more. They go by the open issues each blocks, most first,
@@ -223,7 +226,8 @@ _DOCS_DIRS = ("docs/", "dev_docs/")
 # A docs-only PR is a research, design or plan doc (deep_doc) when one of
 # these words names a path segment or a word of the title, and it adds more
 # than LITTLE_LINES lines: writing one is deep work, while a small edit to
-# one stays a docs PR.
+# one stays a docs PR. Directory names count on purpose: a large edit under
+# a designs/ or plans/ directory is a design or plan doc.
 _DEEP_DOC_WORDS = frozenset(
     (
         "adr", "adrs", "analysis", "assessment", "decision", "decisions",
@@ -909,7 +913,8 @@ def deep_doc(paths: "list[str] | None", title: "str | None", additions: int) -> 
 
 
 def pr_bucket(p: dict[str, Any]) -> "tuple[str, str] | None":
-    """(bucket, why) by size alone, whatever the PR's CI or draft state: one
+    """(bucket, why) by size and, for a docs-only PR, its paths and title,
+    whatever the PR's CI or draft state: one
     of Little's PR categories, else DEEP_DOC or LARGE_PR; None when the PR is
     unsized.
 

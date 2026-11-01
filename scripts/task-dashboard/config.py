@@ -85,7 +85,8 @@ DEFAULTS: dict[str, Any] = {
     "workstreams": {"stalled_days": 14},
     # `items`' size estimate (agent_query.py): a size bucket -> minutes. The
     # buckets are bot_pr, docs_pr, small_pr, large_pr, deep_doc and `est:N`;
-    # deep_doc (a research, design or plan doc) has no default on purpose. These are
+    # deep_doc (a research, design or plan doc) has no default on purpose:
+    # deep work has no honest minutes estimate, so it lists unsized. These are
     # guesses for the owner to tune, not a measurement; a bucket with no entry
     # has no estimate, and an unsized item is never treated as small.
     "size": {
