@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.173.1] - 2026-11-01
+
+### Fixes
+
+- rank Jira tickets in Deep and Tidy [N/A] (#1256) (8befe31)
+
 ## [2.173.0] - 2026-11-01
 
 ### Features
