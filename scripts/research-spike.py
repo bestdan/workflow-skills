@@ -1049,14 +1049,22 @@ def check_contained_file(
         return None
 
     try:
-        resolved = (tree.root / raw).resolve()
+        # Strict, because from Python 3.13 a non-strict resolve() no longer
+        # raises on a symlink loop: it returns the path, which then reads as
+        # merely missing. A path that is only missing raises FileNotFoundError
+        # here and resolves non-strictly, for the existence check below.
+        try:
+            resolved = (tree.root / raw).resolve(strict=True)
+        except FileNotFoundError:
+            resolved = (tree.root / raw).resolve()
     except (OSError, RuntimeError) as e:
-        # A symlink loop is the realistic case, and pathlib's own error for it
-        # is a **RuntimeError**, not an OSError — catching only OSError left
-        # this line raising out of the middle of the walk. A traceback exits 1,
-        # which this script's contract reserves for tree-content violations, so
-        # the crash would be indistinguishable from a real finding while hiding
-        # every record the scan never reached.
+        # A symlink loop is the realistic case: pathlib raises RuntimeError
+        # for it up to Python 3.12 and OSError (ELOOP) from 3.13. Catching
+        # only OSError left this line raising out of the middle of the walk. A
+        # traceback exits 1, which this script's contract reserves for
+        # tree-content violations, so the crash would be indistinguishable
+        # from a real finding while hiding every record the scan never
+        # reached.
         report.error(
             rel,
             line,
