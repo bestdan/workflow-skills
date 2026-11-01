@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.171.0] - 2026-11-01
+
+### Features
+
+- plan ticks at sync and session plan outcomes [#1288] (#1301) (7606077)
+
 ## [2.170.1] - 2026-11-01
 
 ### Fixes
