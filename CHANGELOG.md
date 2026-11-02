@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.176.0] - 2026-11-02
+
+### Features
+
+- run agent commands on a remote dashboard [N/A] (#1336) (3c96001)
+
 ## [2.175.0] - 2026-11-01
 
 ### Features
