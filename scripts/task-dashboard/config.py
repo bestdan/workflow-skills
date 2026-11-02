@@ -63,6 +63,10 @@ DEFAULTS: dict[str, Any] = {
     # Host name -> "sha256:<hex>" of that machine's ingest token. Empty means
     # the server has no /ingest route at all (the work-laptop instance).
     "ingest": {"machines": {}},
+    # Host name -> "sha256:<hex>" of that machine's agent token, for
+    # `POST /agent` (agent_remote.py): the agent commands run here on another
+    # machine's behalf. Empty means no /agent route.
+    "agent": {"machines": {}},
     # Figure id -> "observed" or a comparison such as "<= 5", for the fleet
     # view's Health panel (health.py holds the figure ids, and the default for
     # any id left out).
@@ -263,28 +267,8 @@ def load(path: "str | os.PathLike[str] | None" = None) -> dict[str, Any]:
     days = ws.get("stalled_days") if isinstance(ws, dict) else None
     if not isinstance(days, int) or isinstance(days, bool) or days < 1:
         raise ConfigError("workstreams.stalled_days must be a positive integer")
-    if not isinstance(cfg["ingest"], dict):
-        raise ConfigError("ingest must be a table")
-    machines = cfg["ingest"]["machines"]
-    if not isinstance(machines, dict):
-        raise ConfigError("ingest.machines must be a table of host = token digest")
-    # One token per machine: the server maps a token to the machine it belongs
-    # to, so a shared digest would let only one of them ever ingest.
-    seen: dict[str, str] = {}
-    for host, digest in machines.items():
-        if not HOST_RE.fullmatch(host):
-            raise ConfigError(f"ingest.machines: {host!r} is not a plain host name")
-        if not isinstance(digest, str) or not DIGEST_RE.fullmatch(digest):
-            raise ConfigError(
-                f'ingest.machines.{host} must be the "sha256:<hex>" value'
-                " that `dashboard.py ingest-token add` prints"
-            )
-        if digest in seen:
-            raise ConfigError(
-                f"ingest.machines.{host} has the same token digest as"
-                f" ingest.machines.{seen[digest]}; give each machine its own token"
-            )
-        seen[digest] = host
+    for table, tool in (("ingest", "ingest-token"), ("agent", "agent-token")):
+        _validate_machines(cfg, table, tool)
     # The value's shape only: the figure ids live in health.py, which this
     # module does not import, and its unknown_targets() names an unknown one.
     targets = cfg["health"]["targets"]
@@ -352,6 +336,32 @@ def _validate_jira(cfg: dict[str, Any]) -> None:
         isinstance(i, int) and not isinstance(i, bool) for i in ids
     ):
         raise ConfigError("jira.board_ids must be a list of integer board ids")
+
+
+def _validate_machines(cfg: dict[str, Any], table: str, tool: str) -> None:
+    """`[<table>.machines]`: plain host names, each with its own token digest."""
+    if not isinstance(cfg[table], dict):
+        raise ConfigError(f"{table} must be a table")
+    machines = cfg[table]["machines"]
+    if not isinstance(machines, dict):
+        raise ConfigError(f"{table}.machines must be a table of host = token digest")
+    # One token per machine: the server maps a token to the machine it belongs
+    # to, so a shared digest would let only one of them ever authenticate.
+    seen: dict[str, str] = {}
+    for host, digest in machines.items():
+        if not HOST_RE.fullmatch(host):
+            raise ConfigError(f"{table}.machines: {host!r} is not a plain host name")
+        if not isinstance(digest, str) or not DIGEST_RE.fullmatch(digest):
+            raise ConfigError(
+                f'{table}.machines.{host} must be the "sha256:<hex>" value'
+                f" that `dashboard.py {tool} add` prints"
+            )
+        if digest in seen:
+            raise ConfigError(
+                f"{table}.machines.{host} has the same token digest as"
+                f" {table}.machines.{seen[digest]}; give each machine its own token"
+            )
+        seen[digest] = host
 
 
 # The collector's table. A collector-only machine (lindev) has no Jira at all,
@@ -424,6 +434,51 @@ def load_collector(path: "str | os.PathLike[str] | None" = None) -> dict[str, An
         raise ConfigError("collector.retention_days must be a positive integer")
     cfg["config_path"] = p
     return cfg
+
+
+def load_remote(
+    path: "str | os.PathLike[str] | None" = None,
+) -> "dict[str, Any] | None":
+    """The validated `[remote]` table, or None when the config has none.
+
+    `url` is the aggregator's `/agent` endpoint and `token` this machine's
+    agent token (agent_remote.py). A missing config file is None, not an
+    error: most machines run the agent commands against their own DB. The
+    file must be mode 0600 for the same reason load_collector's must.
+    """
+    p = config_path(path)
+    try:
+        st = p.stat()
+        with open(p, "rb") as fh:
+            user = tomllib.load(fh)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise ConfigError(f"cannot read {p}: {exc}") from None
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(f"invalid TOML in {p}: {exc}") from None
+    table = user.get("remote")
+    if table is None:
+        return None
+    if not isinstance(table, dict) or set(table) != {"url", "token"}:
+        raise ConfigError("remote must be a table holding exactly url and token")
+    if st.st_mode & 0o077:
+        raise ConfigError(
+            f"{p} holds the remote agent token but is mode"
+            f" {st.st_mode & 0o777:o}; run: chmod 600 {p}"
+        )
+    url, token = table["url"], table["token"]
+    if not isinstance(url, str) or not _valid_url(url):
+        raise ConfigError(
+            "remote.url must be an http(s) URL with the agent path,"
+            " e.g. https://mini.example.ts.net:8765/agent"
+        )
+    if not isinstance(token, str) or not token or token != token.strip():
+        raise ConfigError(
+            "remote.token must be the token `dashboard.py agent-token add <host>`"
+            " printed on the server for this machine"
+        )
+    return {"url": url, "token": token, "config_path": p}
 
 
 def _valid_url(url: str) -> bool:

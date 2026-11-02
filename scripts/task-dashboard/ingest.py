@@ -50,21 +50,14 @@ def digest(token: str) -> str:
     return "sha256:" + hashlib.sha256(token.encode()).hexdigest()
 
 
-class Ingest:
-    """The route's state: each machine's token digest, and where to write."""
+class Tokens:
+    """Each machine's token digest. agent_remote's route uses it too."""
 
-    def __init__(
-        self,
-        machines: Mapping[str, str],
-        db_path: Path,
-        now: Callable[[], datetime],
-    ) -> None:
+    def __init__(self, machines: Mapping[str, str]) -> None:
         self.machines = {
             host: bytes.fromhex(d.removeprefix("sha256:"))
             for host, d in machines.items()
         }
-        self.db_path = db_path
-        self.now = now
 
     @property
     def enabled(self) -> bool:
@@ -79,31 +72,60 @@ class Ingest:
                 found = host
         return found
 
+    def machine_for_header(self, headers: Message) -> "str | None":
+        """The machine a `Bearer` Authorization header's token belongs to."""
+        scheme, _, token = (headers.get("Authorization") or "").strip().partition(" ")
+        return self.machine_for(token.strip()) if scheme.lower() == "bearer" else None
+
+
+def length_problem(headers: Message, limit: int) -> "Result | None":
+    """The refusal for a missing, bad or oversized Content-Length, else None."""
+    if headers.get("Transfer-Encoding"):
+        return 411, {"error": "Content-Length required"}, None
+    raw_length = headers.get("Content-Length")
+    if raw_length is None:
+        return 411, {"error": "Content-Length required"}, None
+    try:
+        length = int(raw_length)
+    except ValueError:
+        length = -1
+    if length < 0:
+        return 400, {"error": "bad Content-Length"}, None
+    if length > limit:
+        return 413, {"error": f"body over {limit} bytes"}, f"{length} bytes"
+    return None
+
+
+class Ingest:
+    """The route's state: each machine's token digest, and where to write."""
+
+    def __init__(
+        self,
+        machines: Mapping[str, str],
+        db_path: Path,
+        now: Callable[[], datetime],
+    ) -> None:
+        self.tokens = Tokens(machines)
+        self.db_path = db_path
+        self.now = now
+
+    @property
+    def enabled(self) -> bool:
+        return self.tokens.enabled
+
+    def machine_for(self, token: str) -> "str | None":
+        return self.tokens.machine_for(token)
+
     def handle(self, headers: Message, rfile: BufferedIOBase) -> Result:
         """(status, JSON body, reason to log or None). Writes only on 200."""
-        scheme, _, token = (headers.get("Authorization") or "").strip().partition(" ")
-        machine = (
-            self.machine_for(token.strip()) if scheme.lower() == "bearer" else None
-        )
+        machine = self.tokens.machine_for_header(headers)
         if machine is None:
             return 401, {"error": "unauthorized"}, "missing or unknown ingest token"
-        if headers.get("Transfer-Encoding"):
-            return 411, {"error": "Content-Length required"}, None
-        raw_length = headers.get("Content-Length")
-        if raw_length is None:
-            return 411, {"error": "Content-Length required"}, None
-        try:
-            length = int(raw_length)
-        except ValueError:
-            length = -1
-        if length < 0:
-            return 400, {"error": "bad Content-Length"}, None
-        if length > MAX_BODY:
-            return (
-                413,
-                {"error": f"body over {MAX_BODY} bytes"},
-                f"{machine}: {length} bytes",
-            )
+        bad = length_problem(headers, MAX_BODY)
+        if bad is not None:
+            code, body, why = bad
+            return code, body, f"{machine}: {why}" if why else None
+        length = int(headers["Content-Length"])
         try:
             doc = json.loads(rfile.read(length))
         except ValueError:

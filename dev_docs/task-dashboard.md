@@ -274,6 +274,9 @@ The access rules are in `server.py`'s module docstring, and ingest's in
   passes the same Host check, then takes a per-machine bearer token instead of
   the Origin check and the page token. See
   [Fleet instance](#ingest-security).
+- **Agent.** `POST /agent` exists only when `[agent.machines]` is set, and is
+  checked the same way with its own tokens. See
+  [Remote agent commands](#remote-agent-commands).
 
 ## Per-site config
 
@@ -464,6 +467,39 @@ docstring.
   server's clock, and staleness (409).
 - **One transaction.** A snapshot is written whole or not at all
   ([`snapshot_adapter.py`](../scripts/task-dashboard/snapshot_adapter.py)).
+
+### Remote agent commands
+
+The agent commands open the SQLite file, so on a collector-only machine there
+is nothing for them to read. `POST /agent` runs them on the aggregator instead
+([`agent_remote.py`](../scripts/task-dashboard/agent_remote.py) has the full
+check order):
+
+- **Its own per-machine token.** On the aggregator,
+  `dashboard.py agent-token add <host> --url https://<aggregator>:<port>/agent`
+  prints the token once, as a `[remote]` table for that machine's config and a
+  digest line for the aggregator's `[agent.machines]`. These tokens are separate
+  from ingest's, so a machine can push snapshots without being able to write the
+  overlay, and either token can be revoked on its own. The route exists only
+  when `[agent.machines]` is set, and it passes the same Host check as every
+  other route.
+- **A fixed set of commands, parsed before anything runs.** The body is
+  `{"argv": [...], "stdin": ...}`. The server parses `argv` with the CLI's own
+  parser, then refuses it (400) unless it names one of `view`, `scopes`,
+  `items`, `item`, `brief`, `plan`, `overlay`, `refresh`, `tune`, `health`,
+  `status` or `sync-now`. It also refuses an `argv` that sets `--db` or
+  `--config`, or that names a file to read (`plan set --file` must be `-`).
+- **A child process.** `dashboard.py` runs with the aggregator's DB and config.
+  The answer carries its exit code, stdout and stderr, so the caller prints
+  what a local run would have printed.
+- **The client.** With `[remote]` in its config (mode 0600, as the collector's
+  must be), a machine forwards those commands rather than opening a DB. `--db`
+  keeps a run local. The child the server starts never forwards, so an
+  aggregator configured with a `[remote]` table cannot call itself in a loop.
+
+Every forwarded command runs on the aggregator, so it needs the aggregator's
+updated plugin and a restart before the route exists. Until then the client
+reports a 404 and names that fix.
 
 ### The session-state hook
 

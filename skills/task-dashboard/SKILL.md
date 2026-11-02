@@ -48,6 +48,16 @@ call per page) for someone else's PR with a team review request, and one
 `gh pr view` for a PR with more than 100 checks.
 `open`, `export`, `import`, `tune`, `view`, `overlay` and `plan` touch only local files.
 
+**On a machine with no dashboard of its own** (a collector-only one, such as
+lindev), a `[remote]` table in its config sends `view`, `scopes`, `items`,
+`item`, `brief`, `plan`, `overlay`, `refresh`, `tune`, `health`, `status` and
+`sync-now` to the aggregator's `POST /agent`, and prints what they printed
+there. Spell them as usual, but **run them unsandboxed**, since each one is an
+HTTPS request over the tailnet. `--db` keeps a run local. If the error says the
+server has no `/agent` route or does not know the token, relay its fix: the
+setup is in
+[`dev_docs/task-dashboard.md`](../../dev_docs/task-dashboard.md#remote-agent-commands).
+
 `status`, `sync-now`, `open` and `uninstall` use the config and DB paths that
 `install` recorded in the plist, unless a flag or a `TASK_DASHBOARD_*` variable
 names others. So after an install with `--config` or `--db`, they need neither
