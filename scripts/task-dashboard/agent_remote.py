@@ -124,7 +124,8 @@ class AgentRoute:
             return 401, {"error": "unauthorized"}, "missing or unknown agent token"
         bad = ingest.length_problem(headers, MAX_BODY)
         if bad is not None:
-            return bad
+            code, body, why = bad
+            return code, body, f"{machine}: {why}" if why else None
         length = int(headers["Content-Length"])
         try:
             doc = json.loads(rfile.read(length))

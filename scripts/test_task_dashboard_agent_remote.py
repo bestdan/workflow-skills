@@ -15,6 +15,7 @@ import io
 import json
 import os
 import re
+import sqlite3
 import sys
 import tempfile
 import threading
@@ -194,8 +195,10 @@ class ClientTest(ServerCase):
         )
         self.assertEqual(rc, 0, err)
         self.assertIn("overlay pin: done", out)
-        rc, out, err = run_cli("overlay", "pin", "--db", str(self.db_path))
-        self.assertEqual(rc, 1)  # --db ran it locally: no --key, refused
+        with contextlib.closing(sqlite3.connect(self.db_path)) as conn:
+            rows = conn.execute("SELECT item_key FROM pins").fetchall()
+        self.assertEqual(len(rows), 1, rows)
+        self.assertIn("k1", rows[0][0])
 
     def test_plan_set_sends_the_file_as_stdin(self):
         plan = Path(self.tmp.name) / "plan.json"
@@ -237,8 +240,11 @@ class ClientTest(ServerCase):
     def test_no_remote_env_keeps_it_local(self):
         p = self.client_config()
         with mock.patch.object(agent_remote, "forward") as fwd:
-            run_cli("items", "--config", str(p), "--db", str(self.db_path),
-                    env={agent_remote.NO_REMOTE_ENV: "1"})  # fmt: skip
+            # The DB comes from the environment, not --db, so the env guard
+            # is the only thing keeping this run local.
+            run_cli("items", "--config", str(p), env={
+                agent_remote.NO_REMOTE_ENV: "1", "TASK_DASHBOARD_DB": str(self.db_path),
+            })  # fmt: skip
         fwd.assert_not_called()
 
 
