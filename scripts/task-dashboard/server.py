@@ -20,6 +20,8 @@ Access control (dev_docs/task-dashboard.md, "Security model"):
 - `POST /ingest` (fleet view) exists only when `[ingest.machines]` is set. It
   passes the same Host check, then a per-machine bearer token instead of the
   Origin and page token; ingest.py has the rest.
+- `POST /agent` exists only when `[agent.machines]` is set, and is checked the
+  same way with its own per-machine tokens; agent_remote.py has the rest.
 
 `extra_allowed_hosts` entries match the `Host` header exactly (case aside), port
 included. Tailscale Serve on port P proxies to 127.0.0.1:P; a refused `Host` is
@@ -45,6 +47,7 @@ from types import ModuleType
 from typing import Any, Callable
 from urllib.parse import parse_qs, urlsplit
 
+import agent_remote
 import cards
 import db
 import fleet_now
@@ -76,6 +79,8 @@ SYNC_MODES = ("incremental", "reconcile")
 # Pages folded into another, kept as 302s to `/` so old bookmarks still land:
 # Since you were away is now Needs you's new badges and Finished group.
 RETIRED_ROUTES = ("/away",)
+# What `POST /agent` runs, as a child process (agent_remote.py).
+DASHBOARD_SCRIPT = Path(__file__).resolve().parent / "dashboard.py"
 
 # scripts/task-dashboard/server.py -> the plugin root, two directories up.
 KANBAN_PATH = (
@@ -906,6 +911,8 @@ class App:
         syncer: Syncer,
         now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
         gh_runner: github_gh.Runner = github_gh.run,
+        config_path: "Path | None" = None,
+        build_parser: "Callable[..., Any] | None" = None,
     ) -> None:
         self.cfg = cfg
         self.gh_runner = gh_runner
@@ -918,6 +925,13 @@ class App:
         self.fleet = sync.fleet_enabled(cfg)
         machines = cfg.get("ingest", {}).get("machines", {})
         self.ingest = ingest.Ingest(machines, db_path, lambda: self.now())
+        self.agent = agent_remote.AgentRoute(
+            cfg.get("agent", {}).get("machines", {}),
+            DASHBOARD_SCRIPT,
+            config_path,
+            db_path,
+            build_parser,
+        )
 
     def allowed_hosts(self) -> set[str]:
         hosts = {f"127.0.0.1:{self.port}", f"localhost:{self.port}"}
@@ -1183,6 +1197,13 @@ class Handler(BaseHTTPRequestHandler):
                 sys.stderr.write(f"task-dashboard: {code} POST /ingest: {why}\n")
             self._json(code, body)
             return
+        if urlsplit(self.path).path == "/agent" and self.server.app.agent.enabled:
+            # Another machine's agent: its own token, as /ingest has.
+            code, body, why = self.server.app.agent.handle(self.headers, self.rfile)
+            if why:
+                sys.stderr.write(f"task-dashboard: {code} POST /agent: {why}\n")
+            self._json(code, body)
+            return
         path = urlsplit(self.path).path
         action = path[len("/overlay/") :] if path.startswith("/overlay/") else None
         if path not in ("/sync", "/refresh") and action not in overlay.ACTIONS:
@@ -1260,6 +1281,8 @@ def build(
     sync_fn: "Callable[[str], None] | None" = None,
     *,
     run_at_start: bool = True,
+    config_path: "Path | None" = None,
+    build_parser: "Callable[..., Any] | None" = None,
 ) -> "tuple[DashboardServer, Syncer]":
     """Migrate the DB, mint the token, and bind; nothing runs until started."""
     conn = db.connect(db_path)
@@ -1274,12 +1297,23 @@ def build(
         float(cfg["sync"]["reconcile_minutes"]) * 60,
         run_at_start=run_at_start,
     )
-    app = App(cfg, db_path, token, syncer)
+    app = App(
+        cfg, db_path, token, syncer, config_path=config_path, build_parser=build_parser
+    )
     return DashboardServer(app, port), syncer
 
 
-def serve(cfg: dict[str, Any], db_path: Path, port: int) -> None:
-    httpd, syncer = build(cfg, db_path, port)
+def serve(
+    cfg: dict[str, Any],
+    db_path: Path,
+    port: int,
+    *,
+    config_path: "Path | None" = None,
+    build_parser: "Callable[..., Any] | None" = None,
+) -> None:
+    httpd, syncer = build(
+        cfg, db_path, port, config_path=config_path, build_parser=build_parser
+    )
     syncer.start()
     print(f"task-dashboard: serving http://{BIND}:{httpd.app.port}/", file=sys.stderr)
     try:

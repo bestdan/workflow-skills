@@ -36,6 +36,7 @@ from typing import Any  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import agent_query  # noqa: E402
+import agent_remote  # noqa: E402
 import agent_view  # noqa: E402
 import brief  # noqa: E402
 import collector  # noqa: E402
@@ -57,8 +58,12 @@ import sync  # noqa: E402
 import whynot  # noqa: E402
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="dashboard", description="Task dashboard.")
+def build_parser(
+    cls: "type[argparse.ArgumentParser]" = argparse.ArgumentParser,
+) -> argparse.ArgumentParser:
+    """`cls` is the parser class, which every subparser inherits: the server
+    passes one that raises instead of exiting (agent_remote.check_argv)."""
+    parser = cls(prog="dashboard", description="Task dashboard.")
     sub = parser.add_subparsers(dest="command")
     init = sub.add_parser(
         "init-db", help="create/migrate the SQLite DB and print its path"
@@ -102,6 +107,21 @@ def build_parser() -> argparse.ArgumentParser:
         "add", help="generate a machine's ingest token and print it once"
     )
     add_p.add_argument("host", help="the machine's short host name, as it snapshots")
+    agent_token_p = sub.add_parser(
+        "agent-token",
+        help="per-machine tokens for POST /agent: another machine's agent runs"
+        " the agent commands against this server's DB",
+    )
+    agent_token_sub = agent_token_p.add_subparsers(dest="token_command", required=True)
+    agent_add_p = agent_token_sub.add_parser(
+        "add", help="generate a machine's agent token and print it once"
+    )
+    agent_add_p.add_argument("host", help="the machine's short host name")
+    agent_add_p.add_argument(
+        "--url",
+        help="this server's /agent URL as that machine reaches it, for the"
+        " printed [remote] table (default: a placeholder)",
+    )
     export_p = sub.add_parser(
         "export", help="write the overlay (pins, order, snoozes, notes) as JSON"
     )
@@ -441,6 +461,29 @@ def cmd_ingest_token_add(args: argparse.Namespace) -> int:
     print(f"\n1. On {args.host}, put it in the collector's config:\n\n  {token}")
     print(
         "\n2. On the aggregator, add this under [ingest.machines] in"
+        f" {config.config_path()} and restart the server:"
+        f'\n\n  {args.host} = "{ingest.digest(token)}"'
+    )
+    return 0
+
+
+def cmd_agent_token_add(args: argparse.Namespace) -> int:
+    """Print a new agent token, the client's [remote] table and the server's
+    digest line; writes nothing."""
+    if not config.HOST_RE.fullmatch(args.host):
+        print(
+            f"task-dashboard: {args.host!r} is not a plain host name", file=sys.stderr
+        )
+        return 2
+    token = secrets.token_urlsafe(32)
+    url = args.url or "https://<this-server>:<port>/agent"
+    print(f"Agent token for {args.host}. It is shown once and stored nowhere.")
+    print(
+        f"\n1. On {args.host}, add this to {config.DEFAULT_PATH} (mode 600):"
+        f'\n\n  [remote]\n  url = "{url}"\n  token = "{token}"'
+    )
+    print(
+        "\n2. On this server, add this under [agent.machines] in"
         f" {config.config_path()} and restart the server:"
         f'\n\n  {args.host} = "{ingest.digest(token)}"'
     )
@@ -845,8 +888,59 @@ def cmd_serve(args: argparse.Namespace) -> int:
         print(f"task-dashboard: {exc}", file=sys.stderr)
         return 2
     port = args.port if args.port is not None else cfg["server"]["port"]
-    server.serve(cfg, db.db_path(args.db), port)
+    server.serve(
+        cfg,
+        db.db_path(args.db),
+        port,
+        config_path=config.config_path(args.config).resolve(),
+        build_parser=build_parser,
+    )
     return 0
+
+
+def _remote(args: argparse.Namespace) -> "dict[str, Any] | None":
+    """The `[remote]` table when this command should run on another machine.
+
+    Only the agent commands forward, and only when no `--db` names a local DB
+    and the caller is not a child the server itself started.
+    """
+    if args.command not in agent_remote.COMMANDS:
+        return None
+    if getattr(args, "db", None) is not None or os.environ.get(
+        agent_remote.NO_REMOTE_ENV
+    ):
+        return None
+    cfg_path, _ = _agent_paths(args)
+    return config.load_remote(cfg_path)
+
+
+def cmd_remote(
+    remote: "dict[str, Any]", args: argparse.Namespace, argv: "list[str]"
+) -> int:
+    """Exit with the remote command's own exit, 1 when it could not run there."""
+    try:
+        extra, stdin = agent_remote.plan_file_stdin(args)
+    except OSError as exc:
+        print(f"task-dashboard: cannot read {args.file}: {exc}", file=sys.stderr)
+        return 1
+    # --config chose which [remote] to use; it is this machine's path, never
+    # the server's, so it does not travel.
+    sent = _drop_flag(argv, "--config")
+    return agent_remote.forward(remote, sent + extra, stdin)
+
+
+def _drop_flag(argv: "list[str]", flag: str) -> "list[str]":
+    """argv without `flag VALUE` or `flag=VALUE`."""
+    out: list[str] = []
+    skip = False
+    for a in argv:
+        if skip:
+            skip = False
+        elif a == flag:
+            skip = True
+        elif not a.startswith(flag + "="):
+            out.append(a)
+    return out
 
 
 def cmd_sync(args: argparse.Namespace) -> int:
@@ -1055,7 +1149,15 @@ def cmd_url(args: argparse.Namespace) -> int:
 
 def main(argv: "list[str] | None" = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    raw = list(sys.argv[1:] if argv is None else argv)
+    args = parser.parse_args(raw)
+    try:
+        remote = _remote(args)
+    except config.ConfigError as exc:
+        print(f"task-dashboard: {exc}", file=sys.stderr)
+        return 2
+    if remote is not None:
+        return cmd_remote(remote, args, raw)
     if args.command == "init-db":
         conn = db.connect(args.db)
         conn.close()
@@ -1067,6 +1169,8 @@ def main(argv: "list[str] | None" = None) -> int:
         return cmd_serve(args)
     if args.command == "ingest-token":
         return cmd_ingest_token_add(args)
+    if args.command == "agent-token":
+        return cmd_agent_token_add(args)
     if args.command == "export":
         return cmd_export(args)
     if args.command == "import":
