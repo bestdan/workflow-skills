@@ -1075,7 +1075,7 @@ LCFEOF
       STUB_EXIT_CODE=0 bash "$PEL_DIR/launch.sh" >/dev/null 2>&1
   }
   # The ledger lives outside the run worktree, keyed by the label (supervisor-state).
-  pel_ledger() { printf '%s\n' "$AUTO_PILOT_STATE_HOME/com.autopilot.pel.$PEL_NAME/supervisor-state"; }
+  pel_ledger() { sed -n 's/.*--state \([^ ]*\).*/\1/p' "$PEL_DIR/launch.sh" 2>/dev/null | head -1; }
   pel_state() { cat "$(pel_ledger)" 2>/dev/null; }
   pel_exempt_since() { sed -n 's/^exempt_since: *//p' "$(pel_ledger)" 2>/dev/null | tail -1; }
   pel_seed_exempt_since() { # <old-epoch> -> overwrite the ledger directly (never sleeping).

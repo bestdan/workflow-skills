@@ -431,14 +431,22 @@ _supervisor_state_root() {
   case "$root" in /*) printf '%s\n' "$root" ;; *) return 1 ;; esac
 }
 
-# The supervisor-state file for a run label, under _supervisor_state_root. The
-# label is validated by every caller's own argument check ([A-Za-z0-9._-]);
-# re-checked here because it becomes a path segment.
+# The supervisor-state file for one run: <root>/<label>/<worktree key>/. The
+# worktree key is the `cksum` of the run worktree path exactly as the wrapper
+# passes it (write-launch's --workdir is the same string it bakes into the
+# scan's --dir), so a resume (same worktree) keeps its ledger while a fresh run
+# that reuses a label (new worktree) starts clean. Neither input is something
+# the jailed agent can change; RUN.md's run_id is, so it is deliberately not
+# the key. The label is validated by every caller's own argument check
+# ([A-Za-z0-9._-]); re-checked here because it becomes a path segment.
 _supervisor_state_path() {
-  local label="$1" root
+  local label="$1" workdir="$2" root key
   case "$label" in '' | . | .. | *[!A-Za-z0-9._-]*) return 1 ;; esac
+  case "$workdir" in /*) ;; *) return 1 ;; esac
   root="$(_supervisor_state_root)" || return 1
-  printf '%s/%s/%s\n' "$root" "$label" "$SUPERVISOR_STATE_NAME"
+  key="$(printf '%s' "$workdir" | cksum | cut -d' ' -f1)" || return 1
+  [ -n "$key" ] || return 1
+  printf '%s/%s/%s/%s\n' "$root" "$label" "$key" "$SUPERVISOR_STATE_NAME"
 }
 # The heartbeat the orchestrator touches per loop iteration / per /deliver-task
 # sub-step, and the launch wrapper touches at the top of each wake. Like
@@ -1491,14 +1499,26 @@ write_launch() {
   local state_root state_file
   state_root="$(_supervisor_state_root)" \
     || die "the supervisor-state root must be an absolute path (AUTO_PILOT_STATE_HOME, XDG_STATE_HOME or HOME): ${AUTO_PILOT_STATE_HOME:-${XDG_STATE_HOME:-${HOME:-<unset>}}}"
-  state_file="$(_supervisor_state_path "$label")" || die "cannot derive the supervisor-state path from --label: $label"
+  state_file="$(_supervisor_state_path "$label" "$workdir")" \
+    || die "cannot derive the supervisor-state path from --label/--workdir: $label $workdir"
   # A run launched before the ledger left the run worktree (a --resume of one)
-  # carries it at the legacy path: move it once, so the pause-exempt clock and the
-  # no-progress counter survive the move instead of silently restarting.
-  if [ -f "$workdir/$SUPERVISOR_STATE_LEGACY_REL" ] && [ ! -e "$state_file" ]; then
-    mkdir -p "$(dirname "$state_file")" \
-      && mv "$workdir/$SUPERVISOR_STATE_LEGACY_REL" "$state_file" \
-      || die "cannot migrate the legacy supervisor-state into $state_file"
+  # carries it at the legacy path, in a directory the agent could write. So its
+  # content is not trusted wholesale: a symlink is never followed, only the
+  # no-progress counter and head carry over (validated), and the pause-exempt
+  # clock restarts — a forged `exempt_since` could otherwise disable the cap.
+  # The legacy file is removed whatever happens, so nothing is left to adopt
+  # later.
+  local legacy="$workdir/$SUPERVISOR_STATE_LEGACY_REL"
+  if [ -f "$legacy" ] && [ ! -L "$legacy" ] && [ ! -e "$state_file" ]; then
+    local legacy_count legacy_head
+    legacy_count="$(_supervisor_state_field "$legacy" count)"
+    case "$legacy_count" in '' | *[!0-9]*) legacy_count=0 ;; esac
+    legacy_head="$(_supervisor_state_field "$legacy" head)"
+    case "$legacy_head" in *[!0-9a-f]*) legacy_head="" ;; esac
+    _write_supervisor_state "$state_file" "$legacy_count" "$legacy_head" ""
+  fi
+  if [ -e "$legacy" ] || [ -L "$legacy" ]; then
+    rm -f "$legacy" || die "cannot remove the legacy supervisor-state: $legacy"
   fi
   local tmp
   tmp="$(mktemp "${TMPDIR:-/tmp}/orchestrator-launch.XXXXXX")" || die "mktemp failed"
@@ -3387,7 +3407,7 @@ _supervisor_halt() {
 _supervisor_pause_exempt_ledger() {
   local dir="$1" label="$2" cap="$3"
   local state
-  state="$(_supervisor_state_path "$label")" || {
+  state="$(_supervisor_state_path "$label" "$dir")" || {
     echo "spawn-orchestrator: supervisor-scan: no supervisor-state path for label '$label' — the pause-exempt cap is skipped this wake" >&2
     return 0
   }
@@ -3494,6 +3514,10 @@ supervisor_scan() {
     esac
   done
   [ -n "$dir" ] && [ -n "$label" ] || die "supervisor-scan requires --dir and --label"
+  # The label becomes a path segment of the supervisor-state ledger; an unusable
+  # one would silently skip the pause-exempt cap, so refuse it here, loudly.
+  case "$label" in . | .. | *[!A-Za-z0-9._-]*) die "--label must be [A-Za-z0-9._-] (fail-closed): $label" ;; esac
+  case "$dir" in /*) ;; *) die "--dir must be absolute (fail-closed): $dir" ;; esac
   [ -d "$dir" ] || die "supervisor-scan --dir not found: $dir"
   case "$park_limit" in *[!0-9]* | "") die "--park-limit must be a positive integer: $park_limit" ;; esac
   [ "$park_limit" -ge 1 ] || die "--park-limit must be a positive integer: $park_limit"

@@ -545,15 +545,19 @@ LGROOT="$BASE/ledger-wt"
 mkdir -p "$LGROOT/.auto-pilot"
 printf 'run the graph\n' >"$BASE/prompt.txt"
 "$SCRIPT" render-settings --source plan --coder codex --out "$BASE/wl.json" >/dev/null 2>&1
-lg_launch() { # <label>
-  "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$LGROOT" \
+lg_launch() { # <label> [workdir]
+  "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "${2:-$LGROOT}" \
     --log "$LGROOT/.auto-pilot/orchestrator.log" --prompt-file "$BASE/prompt.txt" --label "$1" \
     --claude-bin "$BIN" --path "/usr/bin:/bin" --out-script "$BASE/lg-$1.sh" --out-plist "$BASE/lg-$1.plist" >/dev/null 2>&1
 }
+# The ledger path a generated wrapper hands supervisor-check.
+lg_state() { sed -n 's/.*--state \([^ ]*\).*/\1/p' "$BASE/lg-$1.sh" 2>/dev/null | head -1; }
 lg_launch com.autopilot.ledger
-lg_want="$AUTO_PILOT_STATE_HOME/com.autopilot.ledger/supervisor-state"
-have "ledger: write-launch passes the label-keyed --state path" \
-  "--state $lg_want" "$(cat "$BASE/lg-com.autopilot.ledger.sh" 2>/dev/null)"
+lg_want="$(lg_state com.autopilot.ledger)"
+case "$lg_want" in
+  "$AUTO_PILOT_STATE_HOME/com.autopilot.ledger/"*/supervisor-state) ok "ledger: write-launch passes a label-keyed --state path under the state root" ;;
+  *) bad "ledger: write-launch passes a label-keyed --state path under the state root" "got: $lg_want" ;;
+esac
 have "ledger: the wrapper pins the resolved state root" \
   "export AUTO_PILOT_STATE_HOME=$AUTO_PILOT_STATE_HOME" "$(cat "$BASE/lg-com.autopilot.ledger.sh" 2>/dev/null)"
 # A relative root would resolve inside the run worktree once the wrapper cds
@@ -568,22 +572,69 @@ else
 fi
 lack "ledger: the --state path is not inside the run worktree" \
   "--state $LGROOT" "$(cat "$BASE/lg-com.autopilot.ledger.sh" 2>/dev/null)"
+# Keyed by label AND run worktree: a resume (same worktree) keeps its ledger,
+# while a fresh run reusing the label (a new worktree) starts clean.
+lg_launch com.autopilot.ledger
+[ "$(lg_state com.autopilot.ledger)" = "$lg_want" ] \
+  && ok "ledger: the same label and worktree give the same ledger (resume)" \
+  || bad "ledger: the same label and worktree give the same ledger (resume)" "$(lg_state com.autopilot.ledger) vs $lg_want"
+mkdir -p "$BASE/ledger-wt2/.auto-pilot"
+lg_launch com.autopilot.ledger "$BASE/ledger-wt2"
+lg_other="$(lg_state com.autopilot.ledger)"
+if [ -n "$lg_other" ] && [ "$lg_other" != "$lg_want" ]; then
+  ok "ledger: a reused label with a new worktree gets a fresh ledger"
+else
+  bad "ledger: a reused label with a new worktree gets a fresh ledger" "both: $lg_other"
+fi
 # A run launched before the move (a --resume of one) carries the ledger at the
-# legacy path: write-launch moves it once, so the clock and counter survive.
+# legacy path, in a directory the agent could write. write-launch carries the
+# counter and head over, restarts the pause-exempt clock (a forged exempt_since
+# could otherwise disable the cap), and removes the legacy file.
 printf 'count: 2\nhead: abc\nexempt_since: 1700000000\n' >"$LGROOT/.auto-pilot/supervisor-state"
 lg_launch com.autopilot.ledger.mig
-lg_mig="$AUTO_PILOT_STATE_HOME/com.autopilot.ledger.mig/supervisor-state"
-have "ledger: a legacy ledger is migrated with its clock" 'exempt_since: 1700000000' "$(cat "$lg_mig" 2>/dev/null)"
+lg_mig="$(lg_state com.autopilot.ledger.mig)"
+have "ledger: a legacy ledger's counter carries over" 'count: 2' "$(cat "$lg_mig" 2>/dev/null)"
+have "ledger: a legacy ledger's head carries over" 'head: abc' "$(cat "$lg_mig" 2>/dev/null)"
+lack "ledger: a legacy ledger's pause-exempt clock is NOT carried over" '1700000000' "$(cat "$lg_mig" 2>/dev/null)"
 if [ ! -e "$LGROOT/.auto-pilot/supervisor-state" ]; then
   ok "ledger: the legacy file is gone from the run worktree"
 else
   bad "ledger: the legacy file is gone from the run worktree"
 fi
-# An existing new-path ledger is never overwritten by a stale legacy one.
-printf 'count: 9\nhead: old\nexempt_since: 1\n' >"$LGROOT/.auto-pilot/supervisor-state"
+# An existing ledger is never overwritten by a legacy one, and the legacy file
+# is still removed.
+printf 'count: 9\nhead: 0ld\nexempt_since: 1\n' >"$LGROOT/.auto-pilot/supervisor-state"
 lg_launch com.autopilot.ledger.mig
-have "ledger: an existing ledger wins over a legacy one" 'exempt_since: 1700000000' "$(cat "$lg_mig" 2>/dev/null)"
-rm -f "$LGROOT/.auto-pilot/supervisor-state"
+have "ledger: an existing ledger wins over a legacy one" 'count: 2' "$(cat "$lg_mig" 2>/dev/null)"
+if [ ! -e "$LGROOT/.auto-pilot/supervisor-state" ]; then
+  ok "ledger: a legacy file beside an existing ledger is removed"
+else
+  bad "ledger: a legacy file beside an existing ledger is removed"
+fi
+# A legacy path that is a symlink is never followed, and the link is removed.
+printf 'count: 7\nhead: abc\nexempt_since: 1\n' >"$BASE/ledger-target"
+ln -sf "$BASE/ledger-target" "$LGROOT/.auto-pilot/supervisor-state"
+lg_launch com.autopilot.ledger.sym
+lg_sym="$(lg_state com.autopilot.ledger.sym)"
+if [ ! -e "$lg_sym" ]; then
+  ok "ledger: a symlinked legacy ledger is not adopted"
+else
+  bad "ledger: a symlinked legacy ledger is not adopted" "$(cat "$lg_sym")"
+fi
+if [ ! -L "$LGROOT/.auto-pilot/supervisor-state" ] && [ -f "$BASE/ledger-target" ]; then
+  ok "ledger: the symlink is removed, its target untouched"
+else
+  bad "ledger: the symlink is removed, its target untouched"
+fi
+# supervisor-scan refuses a label that cannot key a ledger, rather than silently
+# skipping the pause-exempt cap.
+o="$("$SCRIPT" supervisor-scan --dir "$LGROOT" --label 'bad/label' 2>&1)"
+c=$?
+if [ "$c" = 2 ] && grep -qF 'must be [A-Za-z0-9._-]' <<<"$o"; then
+  ok "ledger: supervisor-scan refuses an unusable label"
+else
+  bad "ledger: supervisor-scan refuses an unusable label" "exit=$c $o"
+fi
 
 # allowLocalBinding flag flips to true (task 3, Fable #6)
 "$SCRIPT" render-settings --source plan --coder codex --allow-local-binding --out "$BASE/lb.json" >/dev/null 2>&1

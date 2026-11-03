@@ -273,7 +273,7 @@ as exempt:
 - Not exempt → clear `exempt_since` (the streak ends).
 
 The ledger lives in `supervisor-state`, **outside the run worktree**: in
-`${XDG_STATE_HOME:-~/.local/state}/auto-pilot/<label>/`, a supervisor-owned
+`${XDG_STATE_HOME:-~/.local/state}/auto-pilot/<label>/<worktree key>/`, a supervisor-owned
 directory that no jail profile grants. Its location, not a deny rule, keeps the
 **jailed agent** out, because Landlock (the Linux jail) cannot deny one file
 inside a writable grant. That is what makes the cap a real authority rather
