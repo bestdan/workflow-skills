@@ -104,6 +104,7 @@ gh-issue:
   labels: [follow-up]
   assignees: []
   # branch_prefix: bestdan/   # optional — prepended to the /do-tasks claim branch, which is `<branch_prefix>task-<issue number>`; must end in `/` (the claim parser reads the segment after the last `/`), empty by default, giving `task-142`
+  # stale_claim_hours: 24    # optional — age past which `gh-issue-claim.py stale-claims --hours` treats a PR-less, commit-less claim as dead; default 24
 # archive_after: 30          # optional, top-level — default /archive-tasks age threshold (days)
 ```
 

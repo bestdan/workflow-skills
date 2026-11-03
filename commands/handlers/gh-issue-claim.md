@@ -417,6 +417,18 @@ token comment instead (`gh api --method DELETE repos/<repo>/issues/comments/<id>
 
 Stop — do not auto-pick another candidate after a bail; a human should look before more work is auto-claimed.
 
+### Sweep stale claims (a session that died before opening a PR)
+
+A session that dies after claiming leaves the issue assigned and `status:3_started` with the lock ref held, and nothing runs Bail for it. `stale-claims` finds those and, with `--apply`, releases them: the lock ref (or, on the comment-election path, the claim-token comments), then the assignees, then the rung back to `status:2_ready`, then a comment. Clearing the assignees before the rung is deliberate: a release that fails part-way leaves the issue on `status:3_started`, which the next sweep picks up and finishes.
+
+```bash
+python3 commands/handlers/assets/gh-issue-claim.py stale-claims --repo <repo> [--prefix "<branch_prefix>"] [--hours 24] [--apply]
+```
+
+A claim is **dead** only when the issue is open and on `status:3_started` (assigned or not — an unassigned one is a half-finished release); no open PR exists by head ref or by `[#<n>]` title; the lock ref, if present, has no commits ahead of the default branch; and the latest `status:3_started` label event is older than `--hours` (`gh-issue.stale_claim_hours`, default 24, read by the caller). A ref with commits ahead and no PR is `stranded-with-work`: reported, **never released**, because releasing it invites a second session to redo pushed work. Dry run is the default; a `gh` failure gives that issue no verdict and a non-zero exit, never a release. Exit codes are in the script's header.
+
+Run it locally: a cloud routine cannot delete refs (`dev_docs/research/2026-08-24-routine-claim-channel.md`).
+
 ## Report
 
 `/do-tasks` prints the outcome:
