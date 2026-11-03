@@ -992,6 +992,15 @@ class StaleClaimsTests(unittest.TestCase):
         _, out, _ = self.sweep(fake, "--hours", "4")
         self.assertTrue(out.startswith("dead #7 "), out)
 
+    def test_hours_must_be_finite_and_positive(self):
+        for bad in ("0", "-1", "nan", "inf"):
+            fake = FakeSweep()
+            with self.assertRaises(SystemExit) as cm:
+                self.sweep(fake, "--apply", "--hours", bad)
+            self.assertEqual(cm.exception.code, 2, bad)
+            self.assertEqual(fake.calls, [], f"--hours {bad} must make no gh call")
+            self.assertEqual(fake.state_calls, [], bad)
+
     def test_open_pr_by_head_is_live(self):
         fake = FakeSweep(head_prs=[9])
         code, out, _ = self.sweep(fake, "--apply")

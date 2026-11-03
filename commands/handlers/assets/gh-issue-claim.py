@@ -68,6 +68,7 @@ verdict, and 4 wins over 1.
 import argparse
 import importlib.util
 import json
+import math
 import os
 import re
 import subprocess
@@ -572,6 +573,21 @@ def run_state(args):
     return proc.returncode, proc.stdout, proc.stderr
 
 
+def positive_hours(value):
+    """argparse type for `--hours`: a finite number above zero, or exit 2.
+
+    Zero or less would judge a minutes-old claim dead and `--apply` would release
+    it; nan and inf make `timedelta` raise outside the 0/1/4 exit contract.
+    """
+    try:
+        hours = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a number: {value}") from None
+    if not math.isfinite(hours) or hours <= 0:
+        raise argparse.ArgumentTypeError(f"must be a finite number above 0: {value}")
+    return hours
+
+
 def now():
     """The clock `stale-claims` ages claims against. Tests patch this."""
     return datetime.now(timezone.utc)
@@ -856,7 +872,7 @@ def main(argv=None):
     )
     p.add_argument("--repo", required=True, help="owner/name")
     p.add_argument("--prefix", default="")
-    p.add_argument("--hours", type=float, default=24)
+    p.add_argument("--hours", type=positive_hours, default=24)
     p.add_argument("--apply", action="store_true")
     p.add_argument("--json", action="store_true", dest="as_json")
     p.set_defaults(func=cmd_stale_claims)
