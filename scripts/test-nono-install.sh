@@ -118,6 +118,9 @@ else
   if [ -z "$(find "$BASE/h1" -name '.install.*' 2>/dev/null)" ]; then ok "install: leaves no staging dir"; else bad "install: leaves no staging dir"; fi
   o="$(inst "$BASE/h1" AUTO_PILOT_NONO_TARBALL_SHA256="$TS" AUTO_PILOT_NONO_SHA256="$BS")"
   have "install: a second run is a no-op" "already installed" "$o"
+  chmod 644 "$BASE/h1/0.81.0/nono"
+  inst "$BASE/h1" AUTO_PILOT_NONO_TARBALL_SHA256="$TS" AUTO_PILOT_NONO_SHA256="$BS" >/dev/null
+  if [ -x "$BASE/h1/0.81.0/nono" ]; then ok "install: a verified binary that lost its mode is reinstalled"; else bad "install: a verified binary that lost its mode is reinstalled"; fi
 
   o="$(inst "$BASE/h2" AUTO_PILOT_NONO_SHA256="$BS")"
   have "install: a tarball that is not the pinned one is refused" "tarball SHA-256 mismatch" "$o"

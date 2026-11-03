@@ -186,6 +186,8 @@ if [ -f "$NO/p.json" ]; then
   }
   "$SCRIPT" render-settings --source plan --out "$NO/seatbelt-settings.json" >/dev/null 2>&1
   nlrefuse "write-launch nono: refuses settings that turn the harness sandbox on" "harness sandbox off" --settings "$NO/seatbelt-settings.json"
+  printf '{ "sandbox": { "enabled": true } }\n' >"$NO/spaced-settings.json"
+  nlrefuse "write-launch nono: refuses them however the JSON is spaced" "harness sandbox off" --settings "$NO/spaced-settings.json"
   printf ';; not a nono profile\n' >"$NO/not-nono.json"
   nlrefuse "write-launch nono: refuses a profile that is not a rendered nono profile" "not a render-nono-profile profile" --profile "$NO/not-nono.json"
   nlrefuse "write-launch nono: refuses a relative --nono-bin" "absolute --nono-bin" --nono-bin bin/nono

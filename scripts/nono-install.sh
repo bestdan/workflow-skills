@@ -128,7 +128,9 @@ cmd_install() {
     exit 1
   }
   bin="$home/$NONO_VERSION/nono"
-  if [ -f "$bin" ] && [ "$(_sha256 "$bin")" = "$bin_sum" ]; then
+  # -x as well: a verified binary that lost its mode would fail `check`, whose fix
+  # text points back here, so the no-op must not accept it.
+  if [ -f "$bin" ] && [ -x "$bin" ] && [ "$(_sha256 "$bin")" = "$bin_sum" ]; then
     echo "nono-install: nono $NONO_VERSION already installed at $bin"
     return 0
   fi

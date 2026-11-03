@@ -1797,7 +1797,7 @@ write_launch() {
       [ -x "$nono_bin" ] || die "--nono-bin is not executable (fail-closed): $nono_bin"
       # nono is the only enforcing layer. A settings file that turns the
       # harness sandbox on would fail open inside it (render-settings --jail nono).
-      grep -q '"enabled":true' "$settings" 2>/dev/null \
+      grep -Eq '"enabled"[[:space:]]*:[[:space:]]*true' "$settings" 2>/dev/null \
         && die "--jail nono needs settings with the harness sandbox off (fail-closed): render them with render-settings --jail nono"
       ;;
     *) die "--jail must be seatbelt or nono (fail-closed): $jail" ;;
