@@ -71,6 +71,14 @@ before the PAT expires, or releases start failing. Note PAT pushes **do**
 re-trigger workflows — that's why the release commit carries `[skip ci]` and the
 job's `if:` guard exists; both are load-bearing here.
 
+**`co-review` is a required status check on `protect-main`.** A PR merges only
+once `co-review` reports `success` on its exact head
+(`skills/co-review/references/status.md`). The admin bypass above skips that
+check as well as the release push. So does any merge made with an admin's
+token, including `dli gh merge` run by an agent. The weekly audit (#1322) lists
+merged PRs that have no `co-review` `success`, so a skip shows up afterwards
+rather than being blocked.
+
 ### One-time: the first run seeds a baseline
 
 With no `v*` tag yet, the **first Release workflow run** only creates a
