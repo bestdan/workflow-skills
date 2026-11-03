@@ -69,11 +69,12 @@ things deliberately _not_ built.
   withholds an issue from a run exactly as from `/do-tasks`. A milestone is
   recorded by number, not title, so renaming it does not break a resume.
 - **The gh-issue claim is the ref lock, not the comment election.** `/do-tasks`'s
-  batch dispatch uses the comment election because nothing releases a ref that a
-  crashed unattended session acquired. An auto-pilot run differs in both respects:
-  one serialized orchestrator claims, so there is no race to elect over, and a
-  crashed run's claim is reconciled by `--resume`'s G1 row. A crashed run that
-  nobody resumes still strands the ref, which `/sweep-stale-claims` clears.
+  batch dispatch uses the comment election because a crashed unattended session
+  has no release it can be relied on to reach. An auto-pilot run differs: one
+  serialized orchestrator claims, so there is no race to elect over, and a crashed
+  run that is resumed reconciles its own claim through `--resume`'s G1 row. A
+  crashed run nobody resumes still strands the ref. `/sweep-stale-claims` releases
+  it if no commits were pushed to it, and reports it for a human if there were.
 - **On gh-issue, the PR stays a draft until hand-off.** `gh-issue-pr-sync.yml`
   writes `status:4_needs_review` when a non-draft PR opens, so a PR opened ready
   would show the issue as needing review before co-review ran, which the write
