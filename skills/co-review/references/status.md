@@ -19,8 +19,10 @@ else's and a status from this account would gate their merge. Record it as
   straight after the metadata read means a run that stops on a stale or
   conflicting branch leaves no status at all, which is accurate: nothing was
   reviewed.
-- **`success`** at step 8's stamp point, when every planned reviewer class ran
-  or was skipped by configuration.
+- **`success`** at step 8's stamp point, when **at least two reviewers ran**
+  and every other planned reviewer was skipped by configuration. Your own
+  review counts as one, so a run that skips down to Claude alone is a
+  `failure`, however clean that one review was.
 - **`failure`** at the same point otherwise, and also when the run stops for
   any reason after `pending` was posted, whenever the run can still act. A
   crash, a user interrupt or a lost session can still leave `pending` on the
@@ -30,12 +32,19 @@ else's and a status from this account would gate their merge. Record it as
 **Skipped by configuration** means the run never meant to use that reviewer
 here: `--remote` (no local agents), `--reviewer-set cheap-single` (the others),
 a reviewer not configured or not installed, a failed auth probe or version
-gate, an untrusted custom command, or a bot that was not requested
-(`AWAIT_REVIEW: not-requested`). **A failure** is a reviewer that was
-dispatched and did not finish: it errored, timed out (a CLI reviewer at its
+gate, an auth, policy or entitlement error caught from a reviewer's output
+(copilot's login or `Access denied by policy` line, devin's `/upgrade to
+access this model`), an untrusted custom command, or a bot that was not
+requested (`AWAIT_REVIEW: not-requested`). A skip costs nothing by itself, but
+it does not count towards the two. **A failure** is a reviewer that was
+dispatched and did not finish: it crashed, timed out (a CLI reviewer at its
 15-minute bound, a bot at its 20-minute one), or exited with no findings and
 no `REVIEW_COMPLETE` line. A reviewer that emitted findings but no sentinel
-ran.
+ran. Any failure makes the status `failure`, even when two others ran.
+
+This is a status rule only. The ledger still records an output-caught auth
+error as `failed` ([`recording.md`](recording.md)), because there the question
+is how the reviewer behaved, not whether this head was reviewed enough.
 
 ## Which head
 
