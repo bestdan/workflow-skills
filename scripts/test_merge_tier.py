@@ -413,5 +413,34 @@ class TierTests(unittest.TestCase):
         self.assertEqual(cm.exception.code, 2)
 
 
+class RepoPolicyTests(unittest.TestCase):
+    """This repo's own .github/merge-policy.yml parses and tiers as designed."""
+
+    def setUp(self):
+        self.policy = tier_mod.load_policy(ROOT / ".github" / "merge-policy.yml")
+
+    def tier(self, path, title="fix(scripts): handle the empty case"):
+        return tier_mod.classify(pr([(path, 10, 2)], title=title), self.policy, "on")[0]
+
+    def test_scripts_and_tests_are_auto(self):
+        self.assertEqual(self.tier("scripts/research-spike.py"), "auto")
+        self.assertEqual(self.tier("test/branch-remove.bats", "test: cover it"), "auto")
+
+    def test_prompt_text_docs_and_gate_are_human(self):
+        for path in (
+            "skills/co-review/SKILL.md",
+            "commands/handlers/assets/gh-issue-claim.py",
+            "dev_docs/releasing.md",
+            ".github/workflows/ci.yml",
+            ".claude-plugin/plugin.json",
+            "scripts/land-pr.py",
+            "scripts/check.sh",
+            "scripts/lint-shell.sh",
+            "README.md",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(self.tier(path), "human")
+
+
 if __name__ == "__main__":
     unittest.main()

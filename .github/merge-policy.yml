@@ -1,0 +1,51 @@
+# Which PRs an agent may land without the owner (graduated merge autonomy,
+# Phase 1). The lander (scripts/land-pr.py) reads this file from the PR's base
+# branch, never its head, and hands it to scripts/merge-tier.py, which fails
+# closed to `human` on anything outside the YAML subset it parses: flat
+# `key: value`, `key: [a, b]`, and `key:` followed by `  - item` lines.
+# Design: dev_docs/designs/2026-10-03-graduated-merge-autonomy.md,
+# "Initial per-repo policy".
+
+# scripts/** is auto only when its test pair passes on the head SHA. That is
+# not a rule here: the lander already holds any PR whose checks on the head are
+# not all green, and `just check` runs every test pair.
+# test/** is the bats suites, so a test-only change matches it.
+auto:
+  - scripts/**
+  - test/**
+
+# Runtime prompt text, plugin metadata, CI and every doc stay with the owner.
+# The landing-gate files are always human in merge-tier.py whatever this list
+# says; they are repeated here so the file reads complete.
+always_human:
+  - skills/**
+  - commands/**
+  - agents/**
+  - hooks/**
+  - .claude-plugin/plugin.json
+  - .claude-plugin/marketplace.json
+  - .github/**
+  - dev_docs/**
+  - scripts/merge-tier.py
+  - scripts/land-pr.py
+  - scripts/land-pr.sh
+  - scripts/co-review-evidence.py
+  - scripts/co-review-stamp.py
+  # The gate scripts/** relies on: a PR that edits them could make "checks
+  # green" vacuous, so they are human even though they sit under scripts/**.
+  - scripts/check.sh
+  - scripts/ci-docs-only.sh
+  - scripts/typecheck.sh
+  - scripts/lint-*.sh
+  - scripts/validate.py
+  - scripts/validate.py.lock
+
+size_cap: 300
+
+# Releasing types land too, so a bad landing can ship a release;
+# `/revert-landing` (#1323) is the undo. The owner chose this, option B of the
+# design's open question 1, on 2026-10-31.
+allowed_types: [feat, fix, perf, refactor, test, chore, ci, build, style, docs]
+
+repo_rules:
+  - prompt-paths-need-releasing-type
