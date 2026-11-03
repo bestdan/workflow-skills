@@ -20,3 +20,10 @@
 - **Call:** deferred to the human. No co-review round ran: `reach-pr-branch.sh` returned `ROUTE: none reason=config-failed` because `worktree-config.sh`'s `/usr/bin/env` shebang is execve-denied in the jail, so `/co-review --non-interactive` cannot reach the PR branch's tree from the run worktree.
 - **Why:** review is advisory in `/deliver-task`, so the run proceeded to hand-off. The diff is two short doc passages; a human read of PR #1357 is the review.
 - **Reversible:** yes. Run `/co-review 1357` attended from `task-1063`.
+
+## Q4 — #1064 — hand off despite a red local `just check`, with co-review unreachable
+
+- **Options:** park #1064 | hand off and let PR CI decide
+- **Call:** hand off. PR #1359's CI passed (Deterministic gate, Host-sensitive suites (macOS)), and `validate.py` was OK in the broker run.
+- **Why:** the broker failed only in the host-flaky suites from Q2 (local-review server races, `test_session_state_hook.py` timing, `test-task-dashboard-agent-remote.sh` broken pipe, eval-tree-guard bats 201). Co-review was unreachable for the reason in Q3, so the next-round call (another round | no further round) is deferred to the human.
+- **Reversible:** yes. The PR is unmerged; run `/co-review 1359` attended.
