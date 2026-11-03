@@ -398,8 +398,10 @@ else
 fi
 
 # --- Case 5: no launchctl — a logged skip, not a blocker -------------------
+# PREFLIGHT_OS pins the non-Linux branch: on a Linux host 3b checks nono instead
+# (case 10), and this case is about a host with no launcher at all.
 out5="$(CONSENT_FAKE_MODE=clean CAPTURE="$CAPTURE" PATH="$FIXTURE_PATH" \
-  PREFLIGHT_LAUNCHCTL="$BASE/no-such-launchctl" \
+  PREFLIGHT_OS=Darwin PREFLIGHT_LAUNCHCTL="$BASE/no-such-launchctl" \
   PREFLIGHT_TCC_LOCATIONS="$PROTECTED" \
   bash "$SCRIPT" --source plan --base main --run-root "$ROOT" 2>&1)"
 if [ "$have_sandbox" = 0 ]; then
@@ -416,9 +418,9 @@ esac
 # The skips above are about the probe; the launch itself has no way to spawn
 # on this host, so the verdict must be no-go (#1348), never `go` with skip notes.
 assert_contains "no launcher: reports none" "PREFLIGHT LAUNCHER: none (" "$out5"
-assert_contains "no launcher: verdict is no-go naming #956" \
+assert_contains "no launcher: verdict is no-go" \
   "PREFLIGHT VERDICT: no-go — no supported launcher on this host" "$out5"
-assert_contains "no launcher: reason names the tracking issue" "tracked in #956" "$out5"
+assert_contains "no launcher: reason names both supported launchers" "or nono on Linux" "$out5"
 case "$out5" in
   *"PREFLIGHT VERDICT: go"*) bad "no launcher: must not print VERDICT: go" ;;
   *) ok "no launcher: no go verdict" ;;
@@ -535,6 +537,79 @@ else
   assert_contains "glob metacharacter in a protected location is not expanded" \
     "PREFLIGHT CONSENT_PROTECTED: $globbed" "$out9b"
 fi
+
+# --- Case 10: Linux — 3b checks the pinned nono, 4 runs the nono smoke --------
+# The real nono-install.sh runs against a stub binary whose checksum the test
+# pins, so each no-go is the installer's own text. The smoke is a stub that
+# prints the real smoke's line shape and records its arguments.
+cp "$REPO/scripts/nono-install.sh" "$ROOT/scripts/nono-install.sh"
+NH="$BASE/nono-home"
+mkdir -p "$NH/0.81.0"
+cat >"$NH/0.81.0/nono" <<'STUB'
+#!/bin/sh
+case "$1" in
+  --version) echo "nono ${STUB_VERSION:-0.81.0}" ;;
+  setup) echo "  * Landlock V${STUB_ABI:-8}" ;;
+esac
+exit 0
+STUB
+chmod 755 "$NH/0.81.0/nono"
+if command -v sha256sum >/dev/null 2>&1; then
+  NSUM="$(sha256sum "$NH/0.81.0/nono" | cut -d' ' -f1)"
+else
+  NSUM="$(shasum -a 256 "$NH/0.81.0/nono" | cut -d' ' -f1)"
+fi
+printf 'landlock\n' >"$BASE/lsm-ok"
+printf 'yama\n' >"$BASE/lsm-none"
+cat >"$FIXBIN/smoke-nono" <<'SMOKE'
+#!/bin/bash
+printf '%s\n' "$*" >"$SMOKE_ARGS"
+echo "SMOKE WRITE_HOME: pass (a write to \$HOME is denied)"
+echo "SMOKE CRED_READ: ${SMOKE_CRED:-pass} (the credential file)"
+[ "${SMOKE_CRED:-pass}" = pass ]
+SMOKE
+chmod +x "$FIXBIN/smoke-nono"
+linux_preflight() { # [VAR=value ...] [-- preflight args...]
+  local -a e=() a=()
+  while [ $# -gt 0 ] && [ "$1" != -- ]; do
+    e+=("$1")
+    shift
+  done
+  [ "${1:-}" = -- ] && shift
+  a=("$@")
+  env CONSENT_FAKE_MODE=clean CAPTURE="$CAPTURE" PATH="$FIXTURE_PATH" PREFLIGHT_OS=Linux \
+    PREFLIGHT_LAUNCHCTL="$FIXBIN/fake-launchctl" PREFLIGHT_TCC_LOCATIONS="$PROTECTED" \
+    AUTO_PILOT_NONO_HOME="$NH" AUTO_PILOT_NONO_TARGET=x86_64-unknown-linux-gnu \
+    AUTO_PILOT_LSM_FILE="$BASE/lsm-ok" PREFLIGHT_NONO_SMOKE="$FIXBIN/smoke-nono" \
+    SMOKE_ARGS="$BASE/smoke-args" ${e[@]+"${e[@]}"} \
+    bash "$SCRIPT" --source plan --base main --run-root "$ROOT" ${a[@]+"${a[@]}"} 2>&1
+}
+out10="$(linux_preflight AUTO_PILOT_NONO_HOME="$BASE/no-nono-here")"
+assert_contains "linux: a missing nono reports no launcher" "PREFLIGHT LAUNCHER: none (Linux: nono not ready)" "$out10"
+assert_contains "linux: a missing nono is a no-go" \
+  "PREFLIGHT VERDICT: no-go — nono jail not ready: nono 0.81.0 is not installed" "$out10"
+assert_contains "linux: the no-go names the install command" "fix: bash $ROOT/scripts/nono-install.sh install" "$out10"
+assert_contains "linux: no smoke without a ready nono" "PREFLIGHT SMOKE: skip (nono is not ready" "$out10"
+out10="$(linux_preflight)"
+assert_contains "linux: a wrong checksum is a no-go" "does not match the pinned SHA-256" "$out10"
+out10="$(linux_preflight AUTO_PILOT_NONO_SHA256="$NSUM" STUB_VERSION=0.79.0)"
+assert_contains "linux: a wrong version is a no-go" "--version printed 'nono 0.79.0'" "$out10"
+out10="$(linux_preflight AUTO_PILOT_NONO_SHA256="$NSUM" AUTO_PILOT_LSM_FILE="$BASE/lsm-none")"
+assert_contains "linux: no Landlock is a no-go" "nono jail not ready: Landlock is not an active LSM" "$out10"
+out10="$(linux_preflight AUTO_PILOT_NONO_SHA256="$NSUM" STUB_ABI=3)"
+assert_contains "linux: Landlock ABI 3 is a no-go" "Landlock ABI 3 is below 4" "$out10"
+
+out10="$(linux_preflight AUTO_PILOT_NONO_SHA256="$NSUM" -- --claude-token-cmd 'op read op://v/claude/token')"
+assert_contains "linux: a ready nono is reported" "PREFLIGHT NONO: ok $NH/0.81.0/nono (nono 0.81.0, Landlock ABI 8)" "$out10"
+assert_contains "linux: the launcher is nono" "PREFLIGHT LAUNCHER: nono (Linux)" "$out10"
+assert_contains "linux: every smoke assertion is listed" "PREFLIGHT SMOKE_WRITE_HOME: pass" "$out10"
+assert_contains "linux: the smoke runs the pinned nono with the token command" \
+  "--nono-bin $NH/0.81.0/nono --claude-token-cmd op read op://v/claude/token" "$(cat "$BASE/smoke-args" 2>/dev/null)"
+assert_contains "linux: until #1350 there is no supervisor, so still no-go" \
+  "PREFLIGHT VERDICT: no-go — no Linux supervisor yet" "$out10"
+out10="$(linux_preflight AUTO_PILOT_NONO_SHA256="$NSUM" SMOKE_CRED=FAIL)"
+assert_contains "linux: a failed smoke assertion is printed" "PREFLIGHT SMOKE_CRED_READ: FAIL" "$out10"
+assert_contains "linux: a failed smoke assertion is a blocker" "confinement smoke: CRED_READ failed" "$out10"
 
 echo
 echo "test-preflight-consent: $pass_count passed, $fail_count failed, $skip_count skipped"

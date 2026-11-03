@@ -33,6 +33,7 @@ parts=(
   alarm
   reserve
   handoff
+  nono
 )
 
 # Same two-arm fallback as the prelude's BASE, and for the same reason: a

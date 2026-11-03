@@ -271,6 +271,45 @@ can't stage a replacement — the deny is complete for these vectors. So while t
 exec wall is deliberately coarse for _confidentiality_, it is not a hole in
 _integrity_: the jail still can't spawn an unconfined process.
 
+### Linux: the nono profile
+
+On Linux the jail is a pinned nono (`scripts/nono-install.sh`), and it is the
+**only** enforcing layer: `render-settings --jail nono` turns Claude Code's own
+sandbox off, because under Landlock it cannot start and would fail open. The
+decision and its evidence are in
+[`2026-11-03-orchestrator-jail.md`](../../../dev_docs/designs/2026-11-03-orchestrator-jail.md).
+`spawn-orchestrator.sh render-nono-profile` writes §1's table as a nono JSON
+profile, and its header comment is the one home of the details. Three rules
+differ from the Seatbelt profile:
+
+- **No deny inside a grant.** Landlock cannot keep one path out of a granted
+  directory; nono refuses to start on that overlap. So nothing secret may sit
+  under a grant. With a token command (below), `~/.claude` is granted entry by
+  entry, read-only, with `.credentials.json` left out. Without one, `~/.claude`
+  is writable: the documented fallback, which the renderer warns about.
+- **The socket rule.** A binary staged in a writable directory runs under
+  Landlock, so the integrity claim rests on sockets instead: the profile sets
+  `linux.af_unix_mediation: "pathname"` and grants no socket, so neither a
+  staged nor the real `systemctl` can reach the user service manager to start
+  an unconfined unit. There is no `command_policies` deny list: activating
+  nono's command mediation refuses exec from read-granted toolchain dirs
+  (`~/.local/bin/claude` exits 126), so it would break the run.
+- **`/tmp` is not writable.** nono's default `system_write_linux` group is
+  excluded; the run's own `--tmpdir` is granted and pinned as the jail's
+  `TMPDIR`, where Claude Code also puts its `claude-<uid>/` scratch tree.
+
+**Credential: the token command.** `write-launch --claude-token-cmd '<cmd>'`
+runs `<cmd>` unjailed on each wake (`spawn-orchestrator.sh claude-token`) and
+hands its output, a `claude setup-token` token, to the jailed `claude -p` alone
+as `CLAUDE_CODE_OAUTH_TOKEN`. A host with a 1Password service account passes an
+`op read …`. A failing command halts the run with the `claude-token` alarm
+rather than relaunching into it. Pre-flight's `--claude-token-cmd` runs the same
+command in the smoke, which proves `.credentials.json` is neither readable nor
+writable and that `claude -p` answers on the token alone.
+
+Egress is open (`network.block: false`) for parity with macOS; the host
+allowlist in §2 becomes the profile's `allow_domain` list in a follow-up.
+
 ### 2. Network egress allowlist
 
 Default-deny; the launch pre-flight **narrows the allowlist to the tools this
