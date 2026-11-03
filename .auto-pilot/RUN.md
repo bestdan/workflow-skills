@@ -24,4 +24,4 @@ usage_deltas: []
 | task  | phase   | branch | base | base_sha | pr  | notes                                                      | coder |
 | ----- | ------- | ------ | ---- | -------- | --- | ---------------------------------------------------------- | ----- |
 | #1063 | handed-off | bestdan/task-1063 | main | beb74224 | #1357 | est:1, doc-only (commands/doctor.md Check 5)               | codex |
-| #1064 | claimed | bestdan/task-1064 | main | d74c6b2c | —   | est:1, doc-only (skills/co-review/SKILL.md validator rule) | codex |
+| #1064 | implementing | bestdan/task-1064 | main | d74c6b2c | —   | est:1, doc-only (skills/co-review/SKILL.md validator rule) | codex |
