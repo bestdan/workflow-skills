@@ -242,6 +242,35 @@ class TierTests(unittest.TestCase):
         facts["files"][0]["additions"] = "5"
         self.assert_human(self.run_tier(facts), "input invalid")
 
+    def test_a_rename_out_of_always_human_is_human(self):
+        facts = pr(files=[("scripts/land.sh", 0, 0)])
+        facts["files"][0].update(status="renamed", previous_path="scripts/land-pr.sh")
+        self.assert_human(
+            self.run_tier(facts), "scripts/land-pr.sh matches always_human"
+        )
+
+    def test_a_rename_of_the_tier_script_is_human(self):
+        facts = pr(files=[("scripts/tier.py", 0, 0)])
+        facts["files"][0].update(
+            status="renamed", previous_path="scripts/merge-tier.py"
+        )
+        self.assert_human(
+            self.run_tier(facts),
+            "scripts/merge-tier.py is the merge policy or tier script",
+        )
+
+    def test_a_rename_without_previous_path_is_human(self):
+        facts = pr(files=[("scripts/land.sh", 0, 0)])
+        facts["files"][0]["status"] = "renamed"
+        self.assert_human(
+            self.run_tier(facts), "scripts/land.sh is renamed with no previous_path"
+        )
+
+    def test_a_rename_within_auto_globs_stays_auto(self):
+        facts = pr(files=[("scripts/new.py", 0, 0)])
+        facts["files"][0].update(status="renamed", previous_path="scripts/old.py")
+        self.assertEqual(self.run_tier(facts)["tier"], "auto")
+
     def test_negative_or_bool_line_counts_are_human(self):
         for bad in (-900, True):
             with self.subTest(bad=bad):

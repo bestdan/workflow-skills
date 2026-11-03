@@ -15,8 +15,13 @@ Usage:
     [--agent-land on|off]
 
 `--pr-json` holds one object:
-  {"files": [{"path": "...", "additions": N, "deletions": N}, ...],
+  {"files": [{"path": "...", "additions": N, "deletions": N,
+               "status": "...", "previous_path": "..."}, ...],
    "title": "...", "body": "...", "labels": ["...", ...]}
+`status` and `previous_path` are optional; they are GitHub REST's `status` and
+`previous_filename` from `pulls/<n>/files`. The path rules check a renamed or
+copied file under both its paths, so a move out of an always-human path stays
+human, and a `renamed` or `copied` file without `previous_path` is human.
 
 `--policy` is the repo's `.github/merge-policy.yml`, read by the caller from
 the PR's base branch, never from its head. It must use the YAML subset
@@ -55,6 +60,7 @@ LIST_KEYS = ("auto", "always_human", "allowed_types", "repo_rules")
 TITLE_RE = re.compile(r"^(?P<type>[a-z]+)(?:\([^)]*\))?(?P<bang>!)?: \S")
 BREAKING_RE = re.compile(r"^BREAKING[ -]CHANGE: ", re.MULTILINE)
 HOLD_LABEL = "merge:hold"
+MOVE_STATUSES = ("renamed", "copied")
 
 
 class PolicyError(Exception):
@@ -176,7 +182,10 @@ def prompt_paths_need_releasing_type(pr, title_type):
     """skills/ and commands/ are runtime prompt text: a change there reaches
     every installed user only when its title cuts a release."""
     prompt = [
-        f["path"] for f in pr["files"] if f["path"].startswith(("skills/", "commands/"))
+        p
+        for f in pr["files"]
+        for p in file_paths(f)
+        if p.startswith(("skills/", "commands/"))
     ]
     if prompt and title_type not in RELEASING_TYPES:
         return [
@@ -190,6 +199,12 @@ REPO_RULES = {"prompt-paths-need-releasing-type": prompt_paths_need_releasing_ty
 
 
 # --- tiering ----------------------------------------------------------------
+
+
+def file_paths(f):
+    """A file's path, and its previous path when it was renamed or copied."""
+    previous = f.get("previous_path")
+    return [f["path"], previous] if previous and previous != f["path"] else [f["path"]]
 
 
 def _count(value):
@@ -214,6 +229,8 @@ def load_pr(source):
             and isinstance(f.get("path"), str)
             and _count(f.get("additions"))
             and _count(f.get("deletions"))
+            and isinstance(f.get("status", ""), str)
+            and isinstance(f.get("previous_path", ""), str)
         ):
             raise ValueError(
                 "each file needs a string `path` and non-negative integer `additions`/`deletions`"
@@ -254,13 +271,17 @@ def classify(pr, policy, agent_land):
     if not pr["files"]:
         reasons.append("no changed files")
     for f in pr["files"]:
-        path = f["path"]
-        if path in SELF_PATHS:
-            reasons.append(f"{path} is the merge policy or tier script, always human")
-        elif matches(path, policy["always_human"]):
-            reasons.append(f"{path} matches always_human")
-        elif not matches(path, policy["auto"]):
-            reasons.append(f"{path} matches no auto glob")
+        if f.get("status") in MOVE_STATUSES and not f.get("previous_path"):
+            reasons.append(f"{f['path']} is {f['status']} with no previous_path")
+        for path in file_paths(f):
+            if path in SELF_PATHS:
+                reasons.append(
+                    f"{path} is the merge policy or tier script, always human"
+                )
+            elif matches(path, policy["always_human"]):
+                reasons.append(f"{path} matches always_human")
+            elif not matches(path, policy["auto"]):
+                reasons.append(f"{path} matches no auto glob")
 
     size = sum(f["additions"] + f["deletions"] for f in pr["files"])
     if size > policy["size_cap"]:
