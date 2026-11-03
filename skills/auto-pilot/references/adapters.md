@@ -46,7 +46,8 @@ behavior (what the adapter does when the underlying handler step fails).
 **blocked** one. Both leave the task in flight (never `completed`/`canceled`) —
 completion (reaching `done`) is out of the run's scope, verified later by the
 source's own completion path (`/sweep-for-complete` for `linear`; repo-pr's
-native merge-derived signal for a plan source), exactly as the run-state
+native merge-derived signal for a plan source; the merged PR's `Closes #<n>`
+for `gh-issue`), exactly as the run-state
 reference requires.
 
 > **Why `link_pr` and `set_needs_review` are separate verbs, not one.** The
