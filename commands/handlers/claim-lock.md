@@ -158,17 +158,17 @@ symmetric:
 > same — expected, not measured. Do not route real label writes here on the strength of
 > this note alone.
 
-|                  | left behind     | cost                                                                                                     |
-| ---------------- | --------------- | -------------------------------------------------------------------------------------------------------- |
-| `create_branch`  | a lock ref      | **permanent** — every later session reads it as a live claim and skips the issue forever                 |
-| comment election | a claim comment | **self-healing** — the `T_unclaimed` filter and the state-backed check in step 5 already discard orphans |
+|                  | left behind     | cost                                                                                                                                       |
+| ---------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `create_branch`  | a lock ref      | **until swept** — every later session reads it as a live claim and skips the issue until a local `/sweep-stale-claims --apply` releases it |
+| comment election | a claim comment | **self-healing** — the `T_unclaimed` filter and the state-backed check in step 5 already discard orphans                                   |
 
 "Acquire only when you intend to run to completion" is **not** a mitigation: a crash or a
-timeout is precisely the case where intent does not apply, and there is **no stale-ref
-sweep in this repo** — `scripts/claim-scan.sh` and `/doctor` both operate on `repo-pr`
-claim PRs, not refs. Flipping the default is a one-paragraph change once a sweep exists;
-until then a routine that somehow does hold a ref must be cleared from a **local**
-session (`git push origin --delete <branch>`).
+timeout is precisely the case where intent does not apply. `/sweep-stale-claims`
+releases a stranded ref, but only from a **local** session, because a routine cannot
+delete refs (`gh-issue-claim.md` → **Sweep stale claims**). So the routine default
+stays the election, and a routine that somehow does hold a ref is cleared locally:
+`/sweep-stale-claims --apply`, or `git push origin --delete <branch>`.
 
 One caveat if the default ever flips: `create_branch` takes `from_branch`, **not a sha**,
 so it cannot pin an exact base. That does not weaken the election — the lock is the
@@ -187,7 +187,7 @@ not as a degrade from a failed acquire. The reason is the same asymmetry
 the routine section gives, arriving by a different route: an unattended session
 that crashes or times out after acquiring strands its ref, every later session
 reads that ref as a live claim, and only a local `/sweep-stale-claims --apply`
-releases it — past a threshold, and never with commits pushed. A batch fans out
+releases it, after an age threshold. A batch fans out
 N such sessions at once. `commands/do-tasks.md` §4 step 6 owns the reasoning and
 the report string (`claim: comment election (batch dispatch)`, **not** the degrade
 line below — no API error happened). Such a session must **not** attempt the

@@ -1119,10 +1119,9 @@ step 5's self-check stops each session loudly on its own issue.
    Why: the ref lock has no release an unattended session can be relied on to reach.
    A dispatched session that crashes or times out after acquiring strands `<branch>`
    on origin; every later session then reads that ref as a live claim and skips the
-   issue until someone runs `/sweep-stale-claims --apply` locally, which releases it
-   only past a threshold and never when commits were pushed to the ref
-   (`gh-issue-claim.md` → **Sweep stale claims**). The comment election's orphans are self-healing by
-   contrast — its `T_unclaimed` filter and state-backed check discard them. A batch
+   issue until someone runs `/sweep-stale-claims --apply` locally, after its age
+   threshold (`gh-issue-claim.md` → **Sweep stale claims**). The comment
+   election's orphans are self-healing by contrast — its `T_unclaimed` filter and state-backed check discard them. A batch
    fans out N unattended sessions at once, so it multiplies exactly the failure the
    election is immune to. This is **not** a claim that a dispatched session lacks
    the credential to release: one that passed the `gh auth status` self-check could
@@ -1131,9 +1130,9 @@ step 5's self-check stops each session loudly on its own issue.
    What the election removes is the **window**, not the ref: the session pushes
    `<branch>` to open its PR, so the ref exists again from that moment. The
    difference is what a strand then means — an hour of unattended execution can no
-   longer end in an empty ref that makes the issue skipped forever, and a ref left
-   after the push is accompanied by finished work and an open PR that pre-flight
-   reports rather than a silent forever-skip.
+   longer end in an empty ref that keeps the issue skipped until someone sweeps it,
+   and a ref left after the push is accompanied by finished work and an open PR
+   that pre-flight reports rather than a silent skip.
 
    **What neither lock fixes: the board markers.** A session that claims and then
    dies before opening a PR leaves the issue assigned and on `status:3_started`
@@ -1141,12 +1140,14 @@ step 5's self-check stops each session loudly on its own issue.
    (`no:assignee` and `status:2_ready`), so no later run picks it up. That is the
    handler's own failure mode, identical on the ref path and the election path — a
    crashed **local** claim strands an issue exactly the same way — so it argues for
-   neither lock and is **not** repaired here. Do not read "the election's orphans
+   neither lock and is **not** repaired by either. Do not read "the election's orphans
    are self-healing" as covering it: `claim-lock.md`'s self-healing is about stale
    claim **comments** losing later elections, not about the board. Batch multiplies
    the exposure by dispatching N unattended sessions, which is worth knowing before
-   turning `remote_batch` on; recovering such an issue is a human `gh issue edit`
-   today, and a sweep for it has no owner.
+   turning `remote_batch` on. `/sweep-stale-claims --apply`, run locally, recovers
+   such an issue once its claim passes the age threshold: it clears the assignees
+   and moves the rung back to `status:2_ready` (`gh-issue-claim.md` → **Sweep
+   stale claims**).
 7. **What guards the race — and what does not.** Two dispatched sessions never
    contend: step 5 pins each to a distinct issue number and none falls back to
    another issue, which is why the batch needs no equivalent of repo-pr's draft
