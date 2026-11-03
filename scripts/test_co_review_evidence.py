@@ -151,6 +151,64 @@ class EvidenceTests(unittest.TestCase):
                 self.assertEqual(cm.exception.code, 2)
         self.assertEqual(self.fake.calls, [])
 
+    def test_a_valid_json_but_malformed_record_is_exit_1(self):
+        for block in ("{}", "[]"):
+            with self.subTest(block=block):
+                self.fake.comments = [
+                    {
+                        "id": 7,
+                        "login": "me",
+                        "body": stamp_mod.stamp_body(HEAD_A, "x")
+                        + f"\n<!-- co-review-evidence v1\n{block}\n-->",
+                    }
+                ]
+                code, _, err = self.read()
+                self.assertEqual(code, 1)
+                self.assertIn("unreadable evidence record", err)
+
+    def test_a_record_under_another_heads_marker_reads_as_absent(self):
+        # The marker names HEAD_B, while the record claims HEAD_A.
+        body = (
+            stamp_mod.stamp_body(HEAD_B, "x")
+            + "\n<!-- co-review-evidence v1\n"
+            + json.dumps(record())
+            + "\n-->"
+        )
+        self.fake.comments.append({"id": 7, "login": "me", "body": body})
+        self.assertEqual(self.read()[0], 3)
+
+    def test_the_reader_uses_the_oldest_stamp_as_the_writer_does(self):
+        self.fake.comments = [
+            {"id": 5, "login": "me", "body": stamp_mod.stamp_body(HEAD_A, "x")},
+            {
+                "id": 9,
+                "login": "me",
+                "body": stamp_mod.stamp_body(HEAD_A, "x", record()),
+            },
+        ]
+        self.assertEqual(self.read()[0], 3)
+
+    def test_a_missing_or_non_json_evidence_file_is_a_usage_error(self):
+        bad = self.tmp / "bad.json"
+        bad.write_text("not json")
+        for path in (self.tmp / "missing.json", bad):
+            with self.subTest(path=path.name):
+                argv = [
+                    "--repo",
+                    REPO,
+                    "--pr",
+                    str(PR),
+                    "--head",
+                    HEAD_A,
+                    "--summary",
+                    "s",
+                ]
+                with contextlib.redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit) as cm:
+                        stamp_mod.main([*argv, "--evidence", str(path)])
+                self.assertEqual(cm.exception.code, 2)
+        self.assertEqual(self.fake.calls, [])
+
     def test_a_gh_failure_is_exit_1(self):
         self.fake.fail_on = "GET"
         code, _, err = self.read()

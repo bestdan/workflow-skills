@@ -44,10 +44,17 @@ def read_evidence(repo, pr, head):
     stamps = stamp.own_stamps(repo, pr, stamp.viewer_login())
     if not stamps:
         return None
-    record = stamp.parse_evidence(stamps[0].get("body"))
-    if record is None or not isinstance(record, dict) or record.get("head") != head:
+    body = stamps[0].get("body") or ""
+    record = stamp.parse_evidence(body)
+    if record is None:
         return None
-    return stamp.validate_evidence(record, head)
+    # Validate against the record's own head first, so a malformed record is an
+    # error (exit 1) rather than reading as a record for some other head.
+    own_head = record.get("head") if isinstance(record, dict) else None
+    stamp.validate_evidence(record, own_head)
+    if own_head != head or not body.lstrip().startswith(stamp.marker(head)):
+        return None
+    return record
 
 
 def main(argv=None):
