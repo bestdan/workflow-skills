@@ -210,6 +210,12 @@ done
 # from loading a fixture plist into the developer's real launchd.
 printf '#!/bin/sh\nprintf "launchctl: %%s\\n" "$*" >>"${NOTIFY_GUARD_LOG:-/dev/null}"\n[ "$1" = print ] && exit 1\nexit 0\n' >"$GUARD/launchctl"
 chmod +x "$GUARD/launchctl"
+# gh: the alarm's GitHub channel posts a REAL issue comment on any fixture whose
+# RUN.md names a gh-issue source, so `gh` is shadowed too. It records and fails
+# with a permanent-looking error (no retry queue). Tests that drive gh on purpose
+# (restack's --gh, the alarm suite's $GHSTUB) put their own stub first.
+printf '#!/bin/sh\nprintf "gh: %%s\\n" "$*" >>"${NOTIFY_GUARD_LOG:-/dev/null}"\necho "HTTP 403: notifier guard (no real gh in tests)" >&2\nexit 1\n' >"$GUARD/gh"
+chmod +x "$GUARD/gh"
 export PATH="$GUARD:$PATH"
 
 pass=0

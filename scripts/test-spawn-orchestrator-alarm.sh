@@ -469,6 +469,174 @@ if command -v git >/dev/null 2>&1; then
   afc "missing --reason" "requires --dir" alarm --dir "$A1" --condition x
   afc "request newline reason" "must not contain a newline" \
     alarm-request --dir "$A1" --condition x --reason "$(printf 'a\ncondition: forged')"
+
+  # --- the headless channel: a GitHub comment when no desktop notifier exists ---
+  # A headless Linux host has neither osascript nor terminal-notifier, so the
+  # alarm comments on the run's gh-issue task instead. The PATH here must hold NO
+  # desktop notifier — and /usr/bin on macOS holds a real osascript — so it is a
+  # dir of symlinks to just the tools the script needs, plus a recording `gh`.
+  GHA="$AL/gh-channel"
+  GHTOOLS="$GHA/tools"
+  GHSTUB="$GHA/stub"
+  GH_CALLS="$GHA/gh.calls"
+  mkdir -p "$GHTOOLS" "$GHSTUB"
+  for _t in bash env sh dirname basename mkdir grep date mktemp cat mv rm awk sed \
+    hostname timeout tr head tail wc cut sort ls id uname git readlink sleep touch \
+    chmod expr find cp ln python3; do
+    _p="$(command -v "$_t" 2>/dev/null)" || continue
+    case "$_p" in /*) ln -sf "$_p" "$GHTOOLS/$_t" ;; esac
+  done
+  # gh stub: records its argv (one line) and the --body, prints $GH_ERR on
+  # stderr, exits $GH_RC.
+  cat >"$GHSTUB/gh" <<'GHSTUB'
+#!/bin/sh
+printf 'argv: %s\n' "$*" >>"$GH_CALLS"
+while [ $# -gt 0 ]; do
+  [ "$1" = --body ] && printf 'body: %s\n' "$2" >>"$GH_CALLS"
+  shift
+done
+[ -n "${GH_ERR:-}" ] && printf '%s\n' "$GH_ERR" >&2
+exit "${GH_RC:-0}"
+GHSTUB
+  chmod +x "$GHSTUB/gh"
+  GHPATH="$GHSTUB:$GHTOOLS"
+  # <dir> <work_source> <rows…>: a RUN.md with the given source and task rows.
+  mkghrun() {
+    local d="$1" src="$2"
+    shift 2
+    mkdir -p "$d/.auto-pilot"
+    {
+      printf -- '---\nwork_source: %s\nstatus: active\n---\n\n' "$src"
+      printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+      printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+      for _r in "$@"; do printf '%s\n' "$_r"; done
+    } >"$d/.auto-pilot/RUN.md"
+    printf '# report\n' >"$d/.auto-pilot/REPORT.md"
+  }
+  ghalarm() { # <dir> <condition> [GH_RC] [GH_ERR] [PATH]
+    GH_CALLS="$GH_CALLS" GH_RC="${3:-0}" GH_ERR="${4:-}" PATH="${5:-$GHPATH}" "$SCRIPT" alarm --dir "$1" \
+      --label com.autopilot.test.gh --condition "$2" --reason 'gh channel test' 2>&1
+  }
+  ghscan() { # <dir> [GH_RC] [GH_ERR] — one supervisor wake's alarm scan
+    GH_CALLS="$GH_CALLS" GH_RC="${2:-0}" GH_ERR="${3:-}" PATH="$GHPATH" "$SCRIPT" supervisor-scan \
+      --dir "$1" --label com.autopilot.test.gh 2>&1
+  }
+  if [ -x "$GHTOOLS/bash" ] && [ ! -e "$GHTOOLS/osascript" ]; then
+    # 1. gh-issue source, a task in flight: one comment on THAT issue, in the
+    #    source's repo, carrying the condition and the action.
+    G1="$GHA/r1"
+    mkghrun "$G1" 'gh-issue:acme/widgets#milestone/7' \
+      '| #41 | handed-off | b41 | main | - | #9 | x |' \
+      '| #42 | implementing | b42 | main | - | - | x |' \
+      '| #43 | pending | b43 | main | - | - | x |'
+    : >"$GH_CALLS"
+    o="$(ghalarm "$G1" fatal-auth)"
+    c=$?
+    if [ "$c" = 0 ]; then ok "alarm/gh: exits 0"; else bad "alarm/gh: exits 0" "exit=$c $o"; fi
+    have "alarm/gh: comments on the in-flight task, in the source's repo" \
+      'argv: issue comment 42 --repo acme/widgets --body' "$(cat "$GH_CALLS")"
+    have "alarm/gh: the comment names the condition" 'fatal-auth: gh channel test' "$(cat "$GH_CALLS")"
+    have "alarm/gh: the comment tells the human what to DO" 'ACTION: re-authenticate' "$(cat "$GH_CALLS")"
+    have "alarm/gh: the durable sentinel is still written" 'condition: fatal-auth' \
+      "$(cat "$G1/.auto-pilot/ALARM" 2>/dev/null)"
+    lack "alarm/gh: a delivered comment is not reported as a notify failure" 'NOTIFY FAILED' "$o"
+    # 2. idempotent: the same condition again posts nothing.
+    ghalarm "$G1" fatal-auth >/dev/null
+    count_is "alarm/gh: one comment per (run, condition)" 1 'argv:' "$(cat "$GH_CALLS")"
+    # 3. no task in flight: the last task the run touched.
+    G3="$GHA/r3"
+    mkghrun "$G3" 'gh-issue:acme/widgets?label:auto' \
+      '| 50 | handed-off | b50 | main | - | #1 | x |' \
+      '| 51 | parked | b51 | main | - | - | x |' \
+      '| 52 | pending | b52 | main | - | - | x |'
+    : >"$GH_CALLS"
+    ghalarm "$G3" systemic >/dev/null
+    have "alarm/gh: with nothing in flight, the last touched task (label source)" \
+      'argv: issue comment 51 --repo acme/widgets' "$(cat "$GH_CALLS")"
+    # 4. only pending tasks: no issue to comment on, so no call — file-only.
+    G4="$GHA/r4"
+    mkghrun "$G4" 'gh-issue:acme/widgets#milestone/7' '| #60 | pending | b60 | main | - | - | x |'
+    : >"$GH_CALLS"
+    o="$(ghalarm "$G4" systemic)"
+    count_is "alarm/gh: no touched task → gh never invoked" 0 'argv:' "$(cat "$GH_CALLS")"
+    have "alarm/gh: no touched task → reports the notify failure" 'NOTIFY FAILED' "$o"
+    # 5. a non-gh-issue source never comments, and stays file-only.
+    G5="$GHA/r5"
+    mkghrun "$G5" 'linear:d0598803' '| PRE-1 | implementing | b1 | main | - | - | x |'
+    : >"$GH_CALLS"
+    o="$(ghalarm "$G5" systemic)"
+    count_is "alarm/gh: a linear source posts no comment" 0 'argv:' "$(cat "$GH_CALLS")"
+    have "alarm/gh: a linear source still writes the sentinel" 'condition: systemic' \
+      "$(cat "$G5/.auto-pilot/ALARM" 2>/dev/null)"
+    # 6. gh fails: the durable record survives and the caller still gets 0.
+    G6="$GHA/r6"
+    mkghrun "$G6" 'gh-issue:acme/widgets#milestone/7' '| #70 | iterating | b70 | main | - | #3 | x |'
+    : >"$GH_CALLS"
+    o="$(ghalarm "$G6" no-progress 1)"
+    c=$?
+    if [ "$c" = 0 ]; then ok "alarm/gh: a failing gh still exits 0"; else bad "alarm/gh: a failing gh still exits 0" "exit=$c"; fi
+    have "alarm/gh: a failing gh still leaves the sentinel" 'condition: no-progress' \
+      "$(cat "$G6/.auto-pilot/ALARM" 2>/dev/null)"
+    have "alarm/gh: a failing gh still leaves REPORT.md's first line" '**ALARM' \
+      "$(head -1 "$G6/.auto-pilot/REPORT.md" 2>/dev/null)"
+    have "alarm/gh: a failing gh is reported as a notify failure" 'NOTIFY FAILED' "$o"
+    # 7. a transient failure (exit, no recognised stderr) is QUEUED, and the next
+    #    wake's scan posts it and clears the queue.
+    q6="$G6/.auto-pilot/alarm-github-retry/no-progress"
+    have "alarm/gh: a transient failure is queued for the next wake" 'queued' "$o"
+    if [ -d "$q6" ]; then ok "alarm/gh: the retry queue entry exists"; else bad "alarm/gh: the retry queue entry exists"; fi
+    : >"$GH_CALLS"
+    o="$(ghscan "$G6" 0)"
+    have "alarm/gh: the next wake re-posts the queued comment on the same issue" \
+      'argv: issue comment 70 --repo acme/widgets' "$(cat "$GH_CALLS")"
+    have "alarm/gh: the re-post carries the original alarm" 'no-progress: gh channel test' "$(cat "$GH_CALLS")"
+    if [ ! -e "$q6" ]; then ok "alarm/gh: a posted retry leaves the queue"; else bad "alarm/gh: a posted retry leaves the queue"; fi
+    # 8. a 5xx and a timeout are transient; a 404 and dead auth are permanent.
+    G8="$GHA/r8"
+    mkghrun "$G8" 'gh-issue:acme/widgets#milestone/7' '| #80 | claimed | b80 | main | - | - | x |'
+    ghalarm "$G8" c5xx 1 'HTTP 502: Bad Gateway' >/dev/null
+    if [ -d "$G8/.auto-pilot/alarm-github-retry/c5xx" ]; then ok "alarm/gh: HTTP 5xx is retried"; else bad "alarm/gh: HTTP 5xx is retried"; fi
+    ghalarm "$G8" c429 1 'HTTP 429: rate limited' >/dev/null
+    if [ -d "$G8/.auto-pilot/alarm-github-retry/c429" ]; then ok "alarm/gh: HTTP 429 is retried"; else bad "alarm/gh: HTTP 429 is retried"; fi
+    ghalarm "$G8" ctimeout 124 '' >/dev/null
+    if [ -d "$G8/.auto-pilot/alarm-github-retry/ctimeout" ]; then ok "alarm/gh: a timeout (124) is retried"; else bad "alarm/gh: a timeout (124) is retried"; fi
+    o="$(ghalarm "$G8" c404 1 'GraphQL: Could not resolve to an issue or pull request with the number of 80.')"
+    if [ ! -e "$G8/.auto-pilot/alarm-github-retry/c404" ]; then ok "alarm/gh: a missing issue is not retried"; else bad "alarm/gh: a missing issue is not retried"; fi
+    have "alarm/gh: a permanent failure says so" 'failed permanently' "$o"
+    ghalarm "$G8" cauth 1 'HTTP 401: Bad credentials' >/dev/null
+    if [ ! -e "$G8/.auto-pilot/alarm-github-retry/cauth" ]; then ok "alarm/gh: dead auth is not retried"; else bad "alarm/gh: dead auth is not retried"; fi
+    # 9. the retry is capped: an entry on its last attempt that fails again is dropped.
+    printf '11\n' >"$G8/.auto-pilot/alarm-github-retry/c5xx/attempts"
+    : >"$GH_CALLS"
+    o="$(ghscan "$G8" 1 'HTTP 503: Service Unavailable')"
+    if [ ! -e "$G8/.auto-pilot/alarm-github-retry/c5xx" ]; then ok "alarm/gh: the retry cap drops the entry"; else bad "alarm/gh: the retry cap drops the entry"; fi
+    have "alarm/gh: hitting the cap says it gave up" 'giving up' "$o"
+    if [ -d "$G8/.auto-pilot/alarm-github-retry/c429" ]; then ok "alarm/gh: an entry under the cap stays queued"; else bad "alarm/gh: an entry under the cap stays queued"; fi
+    have "alarm/gh: an entry under the cap counts the attempt" '2' \
+      "$(cat "$G8/.auto-pilot/alarm-github-retry/c429/attempts" 2>/dev/null)"
+    # 10. alarm-clear retires the retry queue with the sentinel.
+    PATH="$GHPATH" "$SCRIPT" alarm-clear --dir "$G8" >/dev/null 2>&1
+    if [ ! -e "$G8/.auto-pilot/alarm-github-retry" ]; then ok "alarm/gh: alarm-clear removes the retry queue"; else bad "alarm/gh: alarm-clear removes the retry queue"; fi
+    # 11. the comment is the primary channel: it posts EVEN WHEN a desktop
+    #     notifier delivered.
+    G11="$GHA/r11"
+    mkghrun "$G11" 'gh-issue:acme/widgets#milestone/7' '| #90 | pr-open | b90 | main | - | #5 | x |'
+    : >"$GH_CALLS"
+    : >"$OSA_CALLS"
+    ghalarm "$G11" systemic 0 '' "$GHSTUB:$ALSTUB:$GHTOOLS" >/dev/null
+    have "alarm/gh: posts even when a desktop notifier delivered" \
+      'argv: issue comment 90 --repo acme/widgets' "$(cat "$GH_CALLS")"
+    have "alarm/gh: …and the desktop notification still fires" \
+      'display notification' "$(cat "$OSA_CALLS" 2>/dev/null)"
+    # 12. a source repo that is not exactly <owner>/<name> is never posted to.
+    G12="$GHA/r12"
+    mkghrun "$G12" 'gh-issue:widgets#milestone/7' '| #95 | claimed | b95 | main | - | - | x |'
+    : >"$GH_CALLS"
+    ghalarm "$G12" systemic >/dev/null
+    count_is "alarm/gh: a slashless repo is never posted to" 0 'argv:' "$(cat "$GH_CALLS")"
+  else
+    echo "skip - alarm/gh: could not build a notifier-free tool PATH"
+  fi
 else
   echo "skip - alarm: git not available"
 fi
