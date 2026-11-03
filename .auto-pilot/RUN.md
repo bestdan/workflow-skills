@@ -14,7 +14,7 @@ exit_reason_at:
 exit_reason_detail:
 orchestrator_pid:
 orchestrator_started_at:
-until: 2026-11-03T05:44:30Z
+until: 2026-11-03T13:33:12Z
 min_task_budget: 24m
 reserve: 15
 usage_delta_baseline:
