@@ -15,6 +15,7 @@ import io
 import json
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -825,6 +826,229 @@ class TitlePrsTests(unittest.TestCase):
         rc, out, err, _ = self.run_title_prs([], code=1)
         self.assertEqual((rc, out), (4, ""))
         self.assertIn("probe failed", err)
+
+
+NOW = datetime(2026, 11, 2, 12, 0, tzinfo=timezone.utc)
+LOCK = "repos/o/n/git/refs/heads/bestdan/task-7"
+
+
+class FakeSweep:
+    """Serves the reads and records the writes `stale-claims` makes for issue 7."""
+
+    def __init__(
+        self,
+        started_hours_ago=30,
+        head_prs=(),
+        title_prs=(),
+        ref_ahead=0,
+        comments=(),
+        fail=None,
+    ):
+        self.started = (NOW - timedelta(hours=started_hours_ago)).isoformat()
+        self.head_prs = list(head_prs)
+        self.title_prs = list(title_prs)
+        self.ref_ahead = ref_ahead  # None = no lock ref
+        self.comments = list(comments)
+        self.fail = fail
+        self.calls = []
+        self.state_calls = []
+
+    def writes(self):
+        return [
+            a
+            for a in self.calls
+            if "--method" in a or a[:2] in (["issue", "edit"], ["issue", "comment"])
+        ]
+
+    def run_state(self, args):
+        self.state_calls.append(args)
+        return 0, "", ""
+
+    def run_gh(self, args, stdin=None):
+        self.calls.append(args)
+        if self.fail and self.fail in " ".join(args):
+            return 1, "", "HTTP 502"
+        if args[:2] in (["issue", "edit"], ["issue", "comment"]):
+            return 0, "", ""
+        if args[:3] == ["api", "--method", "DELETE"]:
+            return 0, "", ""
+        if args[:2] == ["pr", "list"]:
+            if "--head" in args:
+                return 0, json.dumps([{"number": n} for n in self.head_prs]), ""
+            prs = [
+                {"number": n, "url": f"u/{n}", "title": "x [#7] y"}
+                for n in self.title_prs
+            ]
+            return 0, json.dumps(prs), ""
+        path = args[-1]
+        if path == "repos/o/n":
+            body = {"owner": {"type": "User"}, "default_branch": "main"}
+            return 0, json.dumps(body), ""
+        if path.startswith("repos/o/n/issues?"):
+            labels = ("status:3_started", "auto:eligible", "prio:1", "est:3")
+            issue = {
+                "number": 7,
+                "assignees": [{"login": "a"}, {"login": "b"}],
+                "labels": [{"name": n} for n in labels],
+            }
+            pr = {"number": 8, "assignees": [{"login": "a"}], "pull_request": {}}
+            return 0, json.dumps([[issue, pr]]), ""
+        if path.startswith("repos/o/n/issues/7/timeline"):
+            started = {"name": "status:3_started"}
+            events = [
+                {
+                    "event": "labeled",
+                    "created_at": "2026-01-01T00:00:00Z",
+                    "label": started,
+                },
+                {"event": "labeled", "created_at": self.started, "label": started},
+                {
+                    "event": "labeled",
+                    "created_at": "2026-11-02T11:00:00Z",
+                    "label": {"name": "prio:1"},
+                },
+            ]
+            return 0, json.dumps([events]), ""
+        if path == "repos/o/n/git/ref/heads/bestdan/task-7":
+            if self.ref_ahead is None:
+                return 1, "", "gh: Not Found (HTTP 404)"
+            return 0, "{}", ""
+        if path == "repos/o/n/compare/main...bestdan/task-7":
+            return 0, json.dumps({"ahead_by": self.ref_ahead}), ""
+        if path.startswith("repos/o/n/issues/7/comments"):
+            return 0, json.dumps([self.comments]), ""
+        raise AssertionError(f"unexpected gh call: {args}")
+
+
+class StaleClaimsTests(unittest.TestCase):
+    def setUp(self):
+        self._orig = (
+            gh_issue_claim.run_gh,
+            gh_issue_claim.gh_issue_trust.run_gh,
+            gh_issue_claim.run_state,
+            gh_issue_claim.now,
+        )
+        gh_issue_claim.now = lambda: NOW
+
+    def tearDown(self):
+        (
+            gh_issue_claim.run_gh,
+            gh_issue_claim.gh_issue_trust.run_gh,
+            gh_issue_claim.run_state,
+            gh_issue_claim.now,
+        ) = self._orig
+
+    def sweep(self, fake, *extra):
+        gh_issue_claim.run_gh = fake.run_gh
+        gh_issue_claim.gh_issue_trust.run_gh = lambda args: fake.run_gh(args)
+        gh_issue_claim.run_state = fake.run_state
+        out, err = io.StringIO(), io.StringIO()
+        argv = ["stale-claims", "--repo", "o/n", "--prefix", "bestdan/", *extra]
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = gh_issue_claim.main(argv)
+        return code, out.getvalue(), err.getvalue()
+
+    def test_dead_claim_is_released_under_apply(self):
+        fake = FakeSweep()
+        code, out, _ = self.sweep(fake, "--apply")
+        self.assertEqual(code, 0)
+        self.assertTrue(out.startswith("dead #7 "), out)
+        self.assertEqual(out.count("\n"), 1, "the PR in the list is not a candidate")
+        calls = fake.calls
+        delete = ["api", "--method", "DELETE", LOCK]
+        self.assertIn(delete, calls)
+        labels = "status:2_ready,auto:eligible,prio:1,est:3"
+        self.assertEqual(
+            fake.state_calls,
+            [["--repo", "o/n", "--issue", "7", "--labels", labels, "--apply"]],
+        )
+        for login in ("a", "b"):
+            edit = ["issue", "edit", "7", "--repo", "o/n", "--remove-assignee", login]
+            self.assertIn(edit, calls)
+        comment = [c for c in calls if c[:2] == ["issue", "comment"]]
+        self.assertEqual(len(comment), 1)
+        self.assertIn("30h", comment[0][-1])
+        self.assertIn("24h", comment[0][-1])
+        # Bail order: the ref goes first, the comment is last.
+        self.assertLess(calls.index(delete), calls.index(comment[0]))
+
+    def test_dry_run_writes_nothing_and_exits_1(self):
+        fake = FakeSweep()
+        code, out, _ = self.sweep(fake)
+        self.assertEqual(code, 1)
+        self.assertTrue(out.startswith("dead #7 "), out)
+        self.assertEqual(fake.writes(), [])
+        self.assertEqual(fake.state_calls, [])
+
+    def test_inside_threshold_is_live(self):
+        fake = FakeSweep(started_hours_ago=5)
+        code, out, _ = self.sweep(fake, "--apply")
+        self.assertEqual(code, 0)
+        self.assertTrue(out.startswith("live #7 "), out)
+        self.assertEqual(fake.writes(), [])
+
+    def test_hours_flag_moves_the_threshold(self):
+        fake = FakeSweep(started_hours_ago=5)
+        _, out, _ = self.sweep(fake, "--hours", "4")
+        self.assertTrue(out.startswith("dead #7 "), out)
+
+    def test_open_pr_by_head_is_live(self):
+        fake = FakeSweep(head_prs=[9])
+        code, out, _ = self.sweep(fake, "--apply")
+        self.assertEqual(code, 0)
+        self.assertTrue(out.startswith("live #7 "), out)
+        self.assertEqual(fake.writes(), [])
+
+    def test_open_pr_by_title_is_live(self):
+        fake = FakeSweep(title_prs=[9])
+        code, out, _ = self.sweep(fake, "--apply")
+        self.assertEqual(code, 0)
+        self.assertTrue(out.startswith("live #7 "), out)
+        self.assertEqual(fake.writes(), [])
+
+    def test_commits_ahead_is_stranded_and_never_released(self):
+        fake = FakeSweep(ref_ahead=2)
+        code, out, _ = self.sweep(fake, "--apply")
+        self.assertEqual(code, 1)
+        self.assertTrue(out.startswith("stranded-with-work #7 "), out)
+        self.assertEqual(fake.writes(), [])
+        self.assertEqual(fake.state_calls, [])
+
+    def test_comment_election_claim_deletes_its_token_comment(self):
+        comments = [
+            token_comment(301),
+            {"id": 302, "author_association": "MEMBER", "body": "unrelated"},
+            token_comment(303, association="NONE"),
+        ]
+        fake = FakeSweep(ref_ahead=None, comments=comments)
+        code, out, _ = self.sweep(fake, "--apply")
+        self.assertEqual(code, 0)
+        self.assertTrue(out.startswith("dead #7 "), out)
+        deletes = [c for c in fake.calls if c[:3] == ["api", "--method", "DELETE"]]
+        self.assertEqual(
+            deletes, [["api", "--method", "DELETE", "repos/o/n/issues/comments/301"]]
+        )
+        self.assertEqual(len(fake.state_calls), 1)
+
+    def test_gh_failure_is_no_verdict_and_writes_nothing(self):
+        for broken in ("timeline", "compare", "--head", "git/ref"):
+            fake = FakeSweep(fail=broken)
+            code, out, err = self.sweep(fake, "--apply")
+            self.assertEqual(code, 4, broken)
+            self.assertNotIn("dead", out, broken)
+            self.assertIn("probe failed for #7", err, broken)
+            self.assertEqual(fake.writes(), [], broken)
+            self.assertEqual(fake.state_calls, [], broken)
+
+    def test_failed_candidate_list_exits_4(self):
+        fake = FakeSweep(fail="issues?state=open")
+        code, out, _ = self.sweep(fake, "--apply")
+        self.assertEqual((code, out), (4, ""))
+
+    def test_json_output(self):
+        code, out, _ = self.sweep(FakeSweep(started_hours_ago=1), "--json")
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)[0]["verdict"], "live")
 
 
 if __name__ == "__main__":

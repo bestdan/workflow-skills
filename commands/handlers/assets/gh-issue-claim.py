@@ -53,6 +53,16 @@ Usage:
   python3 gh-issue-claim.py elect --repo owner/name --issue 142 \\
       --since 2026-11-01T12:00:00Z --comment-id 123456789
   python3 gh-issue-claim.py title-prs --issue 142 [--repo owner/name]
+  python3 gh-issue-claim.py stale-claims --repo owner/name [--prefix bestdan/] \\
+      [--hours 24] [--apply] [--json]
+
+`stale-claims` sweeps claims a dead session stranded (assigned, `status:3_started`,
+no PR). Dry run by default; `--apply` releases each dead claim in the handler's Bail
+order. Pushed work is never released. Exit code is the contract: 0 ran and nothing is
+stuck (every claim live, or every dead one released under `--apply`), 1 dead claims
+found on a dry run or `stranded-with-work` claims exist (reported, never touched),
+4 a `gh` read or write failed. A failure is never read as dead: that candidate gets no
+verdict, and 4 wins over 1.
 """
 
 import argparse
@@ -62,7 +72,7 @@ import os
 import re
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -373,15 +383,21 @@ def cmd_acquire_ref(args):
     return acquire_ref(args.repo, args.branch, args.base_sha)
 
 
-def cmd_release(args):
-    branch = branch_name(args.issue, args.prefix)
+def delete_ref(repo, branch):
+    """Delete a claim-lock ref. Returns (ok, message)."""
     code, out, err = run_gh(
-        ["api", "--method", "DELETE", f"repos/{args.repo}/git/refs/heads/{branch}"]
+        ["api", "--method", "DELETE", f"repos/{repo}/git/refs/heads/{branch}"]
     )
     if code != 0:
-        print(
-            f"could not release {branch}: {err.strip() or out.strip()}", file=sys.stderr
-        )
+        return False, f"could not release {branch}: {err.strip() or out.strip()}"
+    return True, ""
+
+
+def cmd_release(args):
+    branch = branch_name(args.issue, args.prefix)
+    ok, message = delete_ref(args.repo, branch)
+    if not ok:
+        print(message, file=sys.stderr)
         return 1
     return 0
 
@@ -543,6 +559,214 @@ def cmd_title_prs(args):
     return 0
 
 
+STATE_SCRIPT = Path(__file__).resolve().parent / "gh-issue-state.py"
+READY_LABEL = "status:2_ready"
+KEPT_RUNG_PREFIXES = ("auto:", "prio:", "est:")
+
+
+def run_state(args):
+    """Run gh-issue-state.py; (returncode, stdout, stderr). The seam the tests stub."""
+    proc = subprocess.run(
+        [sys.executable, str(STATE_SCRIPT), *args], capture_output=True, text=True
+    )
+    return proc.returncode, proc.stdout, proc.stderr
+
+
+def now():
+    """The clock `stale-claims` ages claims against. Tests patch this."""
+    return datetime.now(timezone.utc)
+
+
+def _parse_time(value):
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _pages(args, what):
+    """Flatten a `--paginate --slurp` read into one list of items."""
+    pages = _gh_json(["api", "--paginate", "--slurp", *args], what) or []
+    return [item for page in pages for item in page]
+
+
+def open_pr_by_head(repo, branch):
+    prs = _gh_json(
+        ["pr", "list", "--repo", repo, "--state", "open", "--head", branch]
+        + ["--json", "number", "--limit", "100"],
+        "gh pr list --head",
+    )
+    return [pr["number"] for pr in prs or []]
+
+
+def claim_started_at(repo, issue):
+    """When `status:3_started` was most recently applied, or None if no event shows it."""
+    events = _pages([f"repos/{repo}/issues/{issue}/timeline?per_page=100"], "timeline")
+    times = [
+        _parse_time(e["created_at"])
+        for e in events
+        if e.get("event") == "labeled"
+        and (e.get("label") or {}).get("name") == STARTED_LABEL
+    ]
+    return max(times) if times else None
+
+
+def commits_ahead(repo, branch):
+    """Commits the lock ref has beyond the default branch; None when the ref is absent."""
+    code, out, err = run_gh(["api", f"repos/{repo}/git/ref/heads/{branch}"])
+    if code != 0:
+        text = f"{out}\n{err}"
+        if "404" in text or "not found" in text.lower():
+            return None
+        raise ProbeFailed(f"ref read: {err.strip() or out.strip() or 'gh failed'}")
+    default = _gh_json(["api", f"repos/{repo}"], "repo read")["default_branch"]
+    compare = _gh_json(
+        ["api", f"repos/{repo}/compare/{default}...{branch}"], "compare read"
+    )
+    return int(compare["ahead_by"])
+
+
+def token_comment_ids(repo, issue):
+    """Ids of trusted-author claim-token comments (the comment-election path's lock)."""
+    try:
+        allowed = gh_issue_trust.trusted_associations(repo)
+    except SystemExit as exc:
+        raise ProbeFailed(str(exc)) from None
+    comments = _pages(
+        [f"repos/{repo}/issues/{issue}/comments?per_page=100"], "comments"
+    )
+    return [
+        c["id"]
+        for c in comments
+        if CLAIM_TOKEN_RE.search(c.get("body") or "")
+        and c.get("author_association") in allowed
+    ]
+
+
+def judge_claim(repo, issue, prefix, hours, current):
+    """Verdict dict for one candidate. Raises ProbeFailed: a failed read is no verdict."""
+    n = issue["number"]
+    branch = branch_name(n, prefix)
+    base = {"issue": n, "branch": branch}
+    prs = open_pr_by_head(repo, branch)
+    if not prs:
+        prs = [pr["number"] for pr in title_prs(n, repo)]
+    if prs:
+        return {**base, "verdict": "live", "reason": f"open PR #{prs[0]}"}
+    started = claim_started_at(repo, n)
+    if started is None:
+        return {**base, "verdict": "live", "reason": "no labeled event; age unknown"}
+    age = current - started
+    if age < timedelta(hours=hours):
+        age_h = age.total_seconds() / 3600
+        reason = f"claimed {age_h:.1f}h ago, inside the {hours:g}h threshold"
+        return {**base, "verdict": "live", "reason": reason}
+    age_h = int(age.total_seconds() // 3600)
+    ahead = commits_ahead(repo, branch)
+    if ahead:
+        reason = f"{branch} has {ahead} commit(s) ahead, no PR; claimed {age_h}h ago"
+        return {**base, "verdict": "stranded-with-work", "reason": reason}
+    where = "no lock ref (comment election)" if ahead is None else "no commits ahead"
+    return {
+        **base,
+        "verdict": "dead",
+        "reason": f"claimed {age_h}h ago, no open PR, {where}",
+        "age_hours": age_h,
+        "has_ref": ahead is not None,
+    }
+
+
+def _check(result, what):
+    code, out, err = result
+    if code != 0:
+        raise ProbeFailed(f"{what}: {err.strip() or out.strip() or 'failed'}")
+
+
+def release_claim(repo, issue, verdict, hours):
+    """Bail-order release of one dead claim; returns the steps taken. Raises ProbeFailed."""
+    n, steps = issue["number"], []
+    if verdict["has_ref"]:
+        ok, message = delete_ref(repo, verdict["branch"])
+        if not ok:
+            raise ProbeFailed(message)
+        steps.append(f"deleted {verdict['branch']}")
+    else:
+        for cid in token_comment_ids(repo, n):
+            _check(
+                run_gh(
+                    ["api", "--method", "DELETE", f"repos/{repo}/issues/comments/{cid}"]
+                ),
+                f"delete token comment {cid}",
+            )
+            steps.append(f"deleted token comment {cid}")
+    kept = [
+        label["name"]
+        for label in issue.get("labels") or []
+        if label["name"].startswith(KEPT_RUNG_PREFIXES)
+    ]
+    labels = ",".join([READY_LABEL, *kept])
+    _check(
+        run_state(["--repo", repo, "--issue", str(n), "--labels", labels, "--apply"]),
+        "gh-issue-state",
+    )
+    steps.append(f"returned to {READY_LABEL}")
+    for assignee in issue.get("assignees") or []:
+        edit = ["issue", "edit", str(n), "--repo", repo]
+        _check(
+            run_gh(edit + ["--remove-assignee", assignee["login"]]),
+            "remove assignee",
+        )
+    steps.append("cleared assignees")
+    body = (
+        f"Released by stale-claims: claimed {verdict['age_hours']}h ago "
+        f"(threshold {hours:g}h), no open PR, and no commits on the lock ref. "
+        f"Returned to `{READY_LABEL}` so another session can take it."
+    )
+    _check(
+        run_gh(["issue", "comment", str(n), "--repo", repo, "--body", body]),
+        "comment",
+    )
+    steps.append("commented")
+    return steps
+
+
+def cmd_stale_claims(args):
+    """Exit code is the contract: 0 nothing stuck, 1 dead (dry run) or stranded, 4 gh failed."""
+    path = f"repos/{args.repo}/issues?state=open&labels=status%3A{STARTED_STATUS_VALUE}"
+    try:
+        issues = _pages([path + "&per_page=100"], "issue list")
+    except ProbeFailed as exc:
+        print(f"probe failed: {exc}", file=sys.stderr)
+        return 4
+    candidates = [i for i in issues if i.get("assignees") and "pull_request" not in i]
+    current = now()
+    results, failed, stuck = [], False, False
+    for issue in candidates:
+        try:
+            verdict = judge_claim(args.repo, issue, args.prefix, args.hours, current)
+            if verdict["verdict"] == "dead" and args.apply:
+                verdict["released"] = release_claim(
+                    args.repo, issue, verdict, args.hours
+                )
+        except ProbeFailed as exc:
+            failed = True
+            print(f"probe failed for #{issue['number']}: {exc}", file=sys.stderr)
+            continue
+        if verdict["verdict"] == "stranded-with-work" or (
+            verdict["verdict"] == "dead" and not args.apply
+        ):
+            stuck = True
+        results.append(verdict)
+    if args.as_json:
+        print(json.dumps(results, indent=2))
+    else:
+        for v in results:
+            line = f"{v['verdict']} #{v['issue']} {v['reason']}"
+            if v.get("released"):
+                line += "; released: " + ", ".join(v["released"])
+            print(line)
+    if failed:
+        return 4
+    return 1 if stuck else 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -625,6 +849,17 @@ def main(argv=None):
     p.add_argument("--issue", required=True, type=int)
     p.add_argument("--repo", default=None, help="owner/name")
     p.set_defaults(func=cmd_title_prs)
+
+    p = subparsers.add_parser(
+        "stale-claims",
+        help="find (--apply: release) claims a dead session stranded (0 clean / 1 stuck / 4 gh failed)",
+    )
+    p.add_argument("--repo", required=True, help="owner/name")
+    p.add_argument("--prefix", default="")
+    p.add_argument("--hours", type=float, default=24)
+    p.add_argument("--apply", action="store_true")
+    p.add_argument("--json", action="store_true", dest="as_json")
+    p.set_defaults(func=cmd_stale_claims)
 
     args = parser.parse_args(argv)
     return args.func(args)
