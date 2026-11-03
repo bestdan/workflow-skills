@@ -13,6 +13,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "merge-tier.py"
@@ -40,7 +41,10 @@ def pr(files=None, title="chore(scripts): tidy the helper", body="", labels=()):
     if files is None:
         files = [("scripts/helper.py", 5, 2)]
     return {
-        "files": [{"path": p, "additions": a, "deletions": d} for p, a, d in files],
+        "files": [
+            {"path": p, "additions": a, "deletions": d, "status": "modified"}
+            for p, a, d in files
+        ],
         "title": title,
         "body": body,
         "labels": list(labels),
@@ -266,10 +270,82 @@ class TierTests(unittest.TestCase):
             self.run_tier(facts), "scripts/land.sh is renamed with no previous_path"
         )
 
+    def test_a_file_without_a_known_status_is_human(self):
+        for status in (None, "moved"):
+            with self.subTest(status=status):
+                facts = pr()
+                if status is None:
+                    del facts["files"][0]["status"]
+                else:
+                    facts["files"][0]["status"] = status
+                self.assert_human(
+                    self.run_tier(facts),
+                    "input invalid: scripts/helper.py: `status` must be one of",
+                )
+
+    def test_graphql_upper_case_status_is_understood(self):
+        facts = pr(files=[("scripts/ok.py", 0, 0)])
+        facts["files"][0]["status"] = "RENAMED"
+        self.assert_human(
+            self.run_tier(facts), "scripts/ok.py is renamed with no previous_path"
+        )
+
     def test_a_rename_within_auto_globs_stays_auto(self):
         facts = pr(files=[("scripts/new.py", 0, 0)])
         facts["files"][0].update(status="renamed", previous_path="scripts/old.py")
         self.assertEqual(self.run_tier(facts)["tier"], "auto")
+
+    def test_glob_forms(self):
+        table = [
+            ("scripts/*.py", "scripts/a.py", True),
+            ("scripts/*.py", "scripts/x/a.py", False),
+            ("a?.md", "ab.md", True),
+            ("a?.md", "a/.md", False),
+            ("docs/**", "docs/x/y/z.md", True),
+            ("**/README.md", "README.md", True),
+            ("**/README.md", "x/y/README.md", True),
+            ("**/README.md", "xREADME.md", False),
+        ]
+        for glob, path, expected in table:
+            with self.subTest(glob=glob, path=path):
+                self.assertEqual(bool(tier_mod.glob_regex(glob).match(path)), expected)
+
+    def test_inline_comment_is_stripped(self):
+        policy = POLICY.replace("  - tests/*.py", "  - tests/*.py  # unit tests")
+        self.assertEqual(
+            self.run_tier(pr(files=[("tests/a.py", 1, 0)]), policy=policy)["tier"],
+            "auto",
+        )
+
+    def test_a_copy_of_an_always_human_path_is_human(self):
+        facts = pr(files=[("scripts/land-copy.sh", 1, 0)])
+        facts["files"][0].update(status="copied", previous_path="scripts/land-pr.sh")
+        self.assert_human(
+            self.run_tier(facts), "scripts/land-pr.sh matches always_human"
+        )
+
+    def test_unconventional_title_on_a_prompt_path_gives_one_title_reason(self):
+        policy = POLICY.replace('  - "scripts/**"', '  - "skills/**"')
+        result = self.run_tier(
+            pr(files=[("skills/x.md", 1, 0)], title="bad"), policy=policy
+        )
+        self.assert_human(result, "title is not a Conventional Commit")
+        self.assertFalse(
+            any("`None`" in r for r in result["reasons"]), result["reasons"]
+        )
+
+    def test_pr_json_from_stdin(self):
+        policy_file = self.tmp / "p.yml"
+        policy_file.write_text(POLICY)
+        out = io.StringIO()
+        with (
+            mock.patch("sys.stdin", io.StringIO(json.dumps(pr()))),
+            contextlib.redirect_stdout(out),
+        ):
+            self.assertEqual(
+                tier_mod.main(["--pr-json", "-", "--policy", str(policy_file)]), 0
+            )
+        self.assertEqual(out.getvalue().splitlines()[-1], "TIER: auto")
 
     def test_negative_or_bool_line_counts_are_human(self):
         for bad in (-900, True):

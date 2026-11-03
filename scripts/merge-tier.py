@@ -5,7 +5,7 @@ Rules decide the tier and nothing else does: the inputs are the PR's changed
 paths and line counts, its title, body and labels, the repo's merge policy,
 and the AGENT_LAND kill switch. No model output and no co-review evidence is
 read here; review evidence can only demote a PR further, and the lander
-(land-pr.sh) applies those demotions after this script.
+(land-pr.sh, not yet written) is to apply those demotions after this script.
 
 The default is `human`. A PR is `auto` only when no rule below demotes it.
 Every rule that fires is reported, so a human tier always says why.
@@ -18,10 +18,12 @@ Usage:
   {"files": [{"path": "...", "additions": N, "deletions": N,
                "status": "...", "previous_path": "..."}, ...],
    "title": "...", "body": "...", "labels": ["...", ...]}
-`status` and `previous_path` are optional; they are GitHub REST's `status` and
-`previous_filename` from `pulls/<n>/files`. The path rules check a renamed or
-copied file under both its paths, so a move out of an always-human path stays
-human, and a `renamed` or `copied` file without `previous_path` is human.
+`status` is required and `previous_path` optional; they are GitHub REST's
+`status` and `previous_filename` from `pulls/<n>/files`. A missing or unknown
+`status` makes the input invalid, because a file the caller did not describe
+could be a rename. The path rules check a renamed or copied file under both its
+paths, so a move out of an always-human path stays human, and a `renamed` or
+`copied` file without `previous_path` is human.
 
 `--policy` is the repo's `.github/merge-policy.yml`, read by the caller from
 the PR's base branch, never from its head. It must use the YAML subset
@@ -61,6 +63,8 @@ TITLE_RE = re.compile(r"^(?P<type>[a-z]+)(?:\([^)]*\))?(?P<bang>!)?: \S")
 BREAKING_RE = re.compile(r"^BREAKING[ -]CHANGE: ", re.MULTILINE)
 HOLD_LABEL = "merge:hold"
 MOVE_STATUSES = ("renamed", "copied")
+# GitHub's file statuses, REST spelling; GraphQL's upper-case ones are accepted.
+FILE_STATUSES = ("added", "removed", "modified", "changed", "unchanged", *MOVE_STATUSES)
 
 
 class PolicyError(Exception):
@@ -187,7 +191,8 @@ def prompt_paths_need_releasing_type(pr, title_type):
         for p in file_paths(f)
         if p.startswith(("skills/", "commands/"))
     ]
-    if prompt and title_type not in RELEASING_TYPES:
+    # No type at all is already reported as an unconventional title.
+    if prompt and title_type is not None and title_type not in RELEASING_TYPES:
         return [
             f"repo rule prompt-paths-need-releasing-type: {prompt[0]} changes with "
             f"non-releasing type `{title_type}`"
@@ -229,12 +234,17 @@ def load_pr(source):
             and isinstance(f.get("path"), str)
             and _count(f.get("additions"))
             and _count(f.get("deletions"))
-            and isinstance(f.get("status", ""), str)
             and isinstance(f.get("previous_path", ""), str)
         ):
             raise ValueError(
                 "each file needs a string `path` and non-negative integer `additions`/`deletions`"
             )
+        status = f.get("status")
+        if not (isinstance(status, str) and status.lower() in FILE_STATUSES):
+            raise ValueError(
+                f"{f['path']}: `status` must be one of {', '.join(FILE_STATUSES)}"
+            )
+        f["status"] = status.lower()
     for key in ("title", "body"):
         if not isinstance(pr.get(key, ""), str):
             raise ValueError(f"`{key}` must be a string")
@@ -271,7 +281,7 @@ def classify(pr, policy, agent_land):
     if not pr["files"]:
         reasons.append("no changed files")
     for f in pr["files"]:
-        if f.get("status") in MOVE_STATUSES and not f.get("previous_path"):
+        if f["status"] in MOVE_STATUSES and not f.get("previous_path"):
             reasons.append(f"{f['path']} is {f['status']} with no previous_path")
         for path in file_paths(f):
             if path in SELF_PATHS:
