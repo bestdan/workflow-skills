@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.186.1] - 2026-11-03
+
+### Fixes
+
+- describe task-scan.py output shape in Check 5 [#1063] (#1357) (7e40e33)
+
 ## [2.186.0] - 2026-11-03
 
 ### Features
