@@ -290,6 +290,32 @@ drew the most owner corrections (21%), because they carry research verdicts
 and decisions; and the runbooks are agent-instruction files that agents act
 on. Graduate a `dev_docs` subset only on shadow data.
 
+### Tuning the policy
+
+The paths split PRs well enough to start with. Carve-outs come later, from the
+reasons each shadow "would land: no" comment lists. In order of cost:
+
+1. **Edit `.github/merge-policy.yml`:** path globs, `size_cap`,
+   `allowed_types`, `consult_bar`. `always_human` is checked before `auto`, and
+   a glob cannot exclude a sub-path. So to carve a sub-path out of a broad
+   entry such as `commands/**`, replace the entry with narrower globs.
+2. **Add a repo rule** for a judgment the paths cannot express, such as "a
+   script changed without its test pair": a function in `merge-tier.py`'s
+   `REPO_RULES`, switched on by name under `repo_rules`.
+3. **Add a policy key** for a new kind of condition, such as a `generated:`
+   list left out of the size count. Add it to `POLICY_KEYS` and validate it in
+   `_validate`. An unknown key fails the parse, so a misspelt key cannot widen
+   a tier by accident.
+
+These three properties hold however the policy is tuned:
+
+- `merge-tier.py` reads the policy from the base branch.
+- Changes to the gate files are always human.
+- Anything the parser cannot read makes the PR human.
+
+A change to the policy or to `merge-tier.py` therefore lands only by the
+owner's hand, and applies to PRs evaluated after it lands.
+
 ## Phase 2 gate backlog (B → A)
 
 Each gate converts a class of B PRs; build them in this order, by B volume:
