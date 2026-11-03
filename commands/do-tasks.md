@@ -1119,8 +1119,9 @@ step 5's self-check stops each session loudly on its own issue.
    Why: the ref lock has no release an unattended session can be relied on to reach.
    A dispatched session that crashes or times out after acquiring strands `<branch>`
    on origin; every later session then reads that ref as a live claim and skips the
-   issue **forever**, and this repo has **no stale-ref sweep** (`claim-lock.md` →
-   "Why it is not the default"). The comment election's orphans are self-healing by
+   issue until someone runs `/sweep-stale-claims --apply` locally, which releases it
+   only past a threshold and never when commits were pushed to the ref
+   (`gh-issue-claim.md` → **Sweep stale claims**). The comment election's orphans are self-healing by
    contrast — its `T_unclaimed` filter and state-backed check discard them. A batch
    fans out N unattended sessions at once, so it multiplies exactly the failure the
    election is immune to. This is **not** a claim that a dispatched session lacks

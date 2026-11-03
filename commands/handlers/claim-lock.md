@@ -186,7 +186,8 @@ A session dispatched by `/do-tasks --all` takes the election below **by choice**
 not as a degrade from a failed acquire. The reason is the same asymmetry
 the routine section gives, arriving by a different route: an unattended session
 that crashes or times out after acquiring strands its ref, every later session
-reads that ref as a live claim, and there is no stale-ref sweep. A batch fans out
+reads that ref as a live claim, and only a local `/sweep-stale-claims --apply`
+releases it — past a threshold, and never with commits pushed. A batch fans out
 N such sessions at once. `commands/do-tasks.md` §4 step 6 owns the reasoning and
 the report string (`claim: comment election (batch dispatch)`, **not** the degrade
 line below — no API error happened). Such a session must **not** attempt the
