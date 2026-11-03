@@ -109,8 +109,10 @@
 #   alarm      Task 16 — the run must ACTIVELY tell a human. Emits an OS-level
 #              notification (osascript, falling back to terminal-notifier; on a
 #              headless host with neither, a GitHub comment on the run's
-#              gh-issue task — other sources stay file-only), writes the `.auto-pilot/ALARM` sentinel, and prepends a one-line
-#              reason + REQUIRED ACTION to the very top of REPORT.md. Idempotent
+#              in-flight gh-issue task, else the last task it touched — other
+#              sources stay file-only), writes the `.auto-pilot/ALARM`
+#              sentinel, and prepends a one-line reason + REQUIRED ACTION to
+#              the very top of REPORT.md. Idempotent
 #              per <id> per run (the sentinel is the key), so a 300s relaunch
 #              cadence can't turn the alarm into the new noise. Pure shell — a
 #              rate-limited or auth-dead run cannot make a model call to alert
