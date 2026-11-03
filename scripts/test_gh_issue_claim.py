@@ -843,7 +843,11 @@ class FakeSweep:
         ref_ahead=0,
         comments=(),
         fail=None,
+        assignees=("a", "b"),
+        state_fails=False,
     ):
+        self.assignees = list(assignees)
+        self.state_fails = state_fails
         self.started = (NOW - timedelta(hours=started_hours_ago)).isoformat()
         self.head_prs = list(head_prs)
         self.title_prs = list(title_prs)
@@ -862,6 +866,8 @@ class FakeSweep:
 
     def run_state(self, args):
         self.state_calls.append(args)
+        if self.state_fails:
+            return 1, "", "HTTP 502"
         return 0, "", ""
 
     def run_gh(self, args, stdin=None):
@@ -888,7 +894,7 @@ class FakeSweep:
             labels = ("status:3_started", "auto:eligible", "prio:1", "est:3")
             issue = {
                 "number": 7,
-                "assignees": [{"login": "a"}, {"login": "b"}],
+                "assignees": [{"login": a} for a in self.assignees],
                 "labels": [{"name": n} for n in labels],
             }
             pr = {"number": 8, "assignees": [{"login": "a"}], "pull_request": {}}
@@ -991,6 +997,57 @@ class StaleClaimsTests(unittest.TestCase):
         fake = FakeSweep(started_hours_ago=5)
         _, out, _ = self.sweep(fake, "--hours", "4")
         self.assertTrue(out.startswith("dead #7 "), out)
+
+    def test_failed_unassign_leaves_it_started_and_names_what_landed(self):
+        fake = FakeSweep(fail="--remove-assignee b")
+        code, _, err = self.sweep(fake, "--apply")
+        self.assertEqual(code, 4)
+        self.assertIn("probe failed for #7", err)
+        self.assertIn("landed before it: deleted bestdan/task-7, unassigned a", err)
+        # The label write never ran, so the issue is still status:3_started.
+        self.assertEqual(fake.state_calls, [])
+        self.assertEqual([c for c in fake.calls if c[:2] == ["issue", "comment"]], [])
+
+    def test_half_released_unassigned_claim_is_still_swept(self):
+        # What the failure above leaves: started, no assignee, ref gone.
+        fake = FakeSweep(assignees=(), ref_ahead=None)
+        code, out, _ = self.sweep(fake, "--apply")
+        self.assertEqual(code, 0)
+        self.assertTrue(out.startswith("dead #7 "), out)
+        self.assertEqual(len(fake.state_calls), 1)
+
+    def test_failed_state_write_posts_no_comment(self):
+        fake = FakeSweep(state_fails=True)
+        code, _, err = self.sweep(fake, "--apply")
+        self.assertEqual(code, 4)
+        self.assertIn("unassigned a, unassigned b", err)
+        self.assertEqual([c for c in fake.calls if c[:2] == ["issue", "comment"]], [])
+
+    def test_failed_ref_delete_writes_nothing_else(self):
+        fake = FakeSweep(fail="DELETE repos/o/n/git/refs/heads/bestdan/task-7")
+        code, _, err = self.sweep(fake, "--apply")
+        self.assertEqual(code, 4)
+        self.assertIn("landed before it: nothing", err)
+        self.assertEqual(fake.state_calls, [])
+        self.assertEqual(
+            [c for c in fake.writes() if c[:3] != ["api", "--method", "DELETE"]], []
+        )
+
+    def test_only_gh_404_marker_reads_as_no_ref(self):
+        # A non-404 failure that happens to say "not found" must not read as
+        # "no ref" — that would skip the stranded-with-work guard.
+        class NotFoundButNot404(FakeSweep):
+            def run_gh(self, args, stdin=None):
+                if args[-1] == "repos/o/n/git/ref/heads/bestdan/task-7":
+                    self.calls.append(args)
+                    return 1, "", "upstream not found: HTTP 502"
+                return super().run_gh(args, stdin)
+
+        fake = NotFoundButNot404()
+        code, out, _ = self.sweep(fake, "--apply")
+        self.assertEqual(code, 4)
+        self.assertEqual(out, "")
+        self.assertEqual(fake.state_calls, [])
 
     def test_hours_must_be_finite_and_positive(self):
         for bad in ("0", "-1", "nan", "inf"):

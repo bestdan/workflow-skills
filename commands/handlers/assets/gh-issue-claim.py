@@ -628,8 +628,10 @@ def commits_ahead(repo, branch):
     """Commits the lock ref has beyond the default branch; None when the ref is absent."""
     code, out, err = run_gh(["api", f"repos/{repo}/git/ref/heads/{branch}"])
     if code != 0:
-        text = f"{out}\n{err}"
-        if "404" in text or "not found" in text.lower():
+        # Only gh's own 404 marker means "no ref". A looser match would send a ref
+        # holding commits down the no-ref release path, past the stranded-with-work
+        # guard.
+        if "HTTP 404" in err:
             return None
         raise ProbeFailed(f"ref read: {err.strip() or out.strip() or 'gh failed'}")
     default = _gh_json(["api", f"repos/{repo}"], "repo read")["default_branch"]
@@ -696,8 +698,24 @@ def _check(result, what):
 
 
 def release_claim(repo, issue, verdict, hours):
-    """Bail-order release of one dead claim; returns the steps taken. Raises ProbeFailed."""
-    n, steps = issue["number"], []
+    """Release one dead claim; returns the steps taken. Raises ProbeFailed.
+
+    The assignees go before the label, so a failure part-way leaves the issue on
+    `status:3_started` — still a candidate — and the next sweep finishes the job.
+    The reverse order would strand it ready-but-assigned, outside both this sweep
+    and the `/do-tasks` candidate query. The error names the steps that landed.
+    """
+    steps: list[str] = []
+    try:
+        _release_steps(repo, issue, verdict, hours, steps)
+    except ProbeFailed as exc:
+        landed = ", ".join(steps) or "nothing"
+        raise ProbeFailed(f"{exc} (landed before it: {landed})") from None
+    return steps
+
+
+def _release_steps(repo, issue, verdict, hours, steps):
+    n = issue["number"]
     if verdict["has_ref"]:
         ok, message = delete_ref(repo, verdict["branch"])
         if not ok:
@@ -712,6 +730,13 @@ def release_claim(repo, issue, verdict, hours):
                 f"delete token comment {cid}",
             )
             steps.append(f"deleted token comment {cid}")
+    for assignee in issue.get("assignees") or []:
+        edit = ["issue", "edit", str(n), "--repo", repo]
+        _check(
+            run_gh(edit + ["--remove-assignee", assignee["login"]]),
+            "remove assignee",
+        )
+        steps.append(f"unassigned {assignee['login']}")
     kept = [
         label["name"]
         for label in issue.get("labels") or []
@@ -723,13 +748,6 @@ def release_claim(repo, issue, verdict, hours):
         "gh-issue-state",
     )
     steps.append(f"returned to {READY_LABEL}")
-    for assignee in issue.get("assignees") or []:
-        edit = ["issue", "edit", str(n), "--repo", repo]
-        _check(
-            run_gh(edit + ["--remove-assignee", assignee["login"]]),
-            "remove assignee",
-        )
-    steps.append("cleared assignees")
     body = (
         f"Released by stale-claims: claimed {verdict['age_hours']}h ago "
         f"(threshold {hours:g}h), no open PR, and no commits on the lock ref. "
@@ -740,7 +758,6 @@ def release_claim(repo, issue, verdict, hours):
         "comment",
     )
     steps.append("commented")
-    return steps
 
 
 def cmd_stale_claims(args):
@@ -751,7 +768,9 @@ def cmd_stale_claims(args):
     except ProbeFailed as exc:
         print(f"probe failed: {exc}", file=sys.stderr)
         return 4
-    candidates = [i for i in issues if i.get("assignees") and "pull_request" not in i]
+    # Unassigned `status:3_started` issues are candidates too: that is what a
+    # release that failed after clearing the assignees leaves behind.
+    candidates = [i for i in issues if "pull_request" not in i]
     current = now()
     results, failed, stuck = [], False, False
     for issue in candidates:
