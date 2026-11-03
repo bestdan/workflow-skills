@@ -470,7 +470,7 @@ The remaining steps depend on disposition.
       - **Round-over-round yield.** Falling yield, findings that are mostly refutations, and findings arriving only from internal reviewers all point at convergence — and a review that has converged is a legitimate reason to recommend **against** another round. Say so plainly; "no further round" is an answer, not the absence of one.
       - **A new test was never mutation-checked.** A test written alongside a fix and never shown to fail against the unfixed code is not evidence the fix works.
 
-      A bare yes/no is not a recommendation. Interactively, put it to the user; if they overturn a decided item at this point, undo or apply just that item with Edit and push it as a follow-up commit on the same branch, as step 9 describes; under `--non-interactive`, record it in the run summary (see **Non-interactive mode**). Never launch the next round yourself — running it is the user's call, or the orchestrator's.
+      A bare yes/no is not a recommendation. Interactively, put it to the user; if they overturn a decided item at this point, undo or apply just that item with Edit and push it as a follow-up commit on the same branch, as step 9 describes; under `--non-interactive`, record it in the run summary (see **Non-interactive mode**). Never launch the next round yourself — running it is the user's call, or the orchestrator's. **Last, re-stamp the PR with the round's evidence record**: the same `co-review-stamp.py` call as step 8 (same head, same summary), plus `--evidence`. Never fatal. How each field is counted is in [`references/stamping.md`](references/stamping.md#the-evidence-record).
 
 **`--post` disposition (someone else's PR):**
 

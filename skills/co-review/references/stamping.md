@@ -80,3 +80,50 @@ oldest and deletes the rest. It never touches another account's comment.
   <the script's error line>` on the reviewer line and carry on. Don't retry
   in a loop. A missing stamp costs the gauge one PR until the next run, and a
   failed run costs the whole review.
+
+## The evidence record
+
+The merge lander needs the round's outcome as data, not prose, and only the
+facts it demotes on. So at the end of step 12, in the default disposition
+only, co-review stamps again with `--evidence <file>`: the same call, the same
+head and summary, plus a JSON file holding one record. The script validates
+the record and keeps it in the same comment as a hidden block after the
+summary line. A commit status cannot carry it, because its description holds
+only 140 characters.
+
+Write the file with the Write tool under
+`$HOME/.claude/co-review-input/record/<run_id>.evidence.json`, beside the
+recording files, and fill it from this round's final state, after the fixes
+and the user's answers:
+
+```json
+{
+  "head": "<headRefOid>",
+  "unresolved_findings": 0,
+  "verification_open": 0,
+  "consult_calls": [{ "confidence": 85, "kind": "technical" }],
+  "next_round": "no further round"
+}
+```
+
+- `head` is step 3's `headRefOid`, the same sha as `--head`; the script
+  refuses a mismatch.
+- `unresolved_findings` counts every high or medium finding not applied by
+  the end of the round: a deferred judgment call, an open question, an item the
+  user declined. Skipped verdicts (wrong, not-applicable, out-of-scope) are not
+  unresolved.
+- `verification_open` counts verification items left for the user, not yet
+  run, or run and inconclusive.
+- `consult_calls` has one entry per item step 9's consult decided without
+  asking: `confidence` as the integer percent it reported (a low-stakes call
+  decided without a consultant is `100`), and `kind` as `technical`,
+  `preference` for a call that came down to taste, or `stack` for one that
+  reaches past this PR into stacked or downstream work.
+- `next_round` is step 12's recommendation, `another round` or
+  `no further round`.
+
+A run that never reaches the end of step 12 leaves the step-8 stamp, which
+carries no record, so the lander reads "no evidence" and holds the PR. That is
+the intended failure mode. Read it back with
+`scripts/co-review-evidence.py --repo <owner>/<name> --pr <n> --head <sha>`,
+which prints the record or exits 3 when there is none for that head.
