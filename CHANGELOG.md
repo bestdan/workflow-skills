@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.181.0] - 2026-11-03
+
+### Features
+
+- sweep stale claims a dead session stranded [#760] (#1344) (7b2e2d6)
+
 ## [2.180.0] - 2026-11-03
 
 ### Features
