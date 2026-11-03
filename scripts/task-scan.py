@@ -53,9 +53,11 @@ Usage:
     --older-than <N>      Required with --archive-candidates. Age threshold in
                            days.
 
-Emits one JSON document on stdout. Fail-closed: malformed frontmatter (YAML
-that fails to parse) exits non-zero with a clear message on stderr, rather
-than silently skipping the file.
+Emits one JSON document on stdout. In default mode, it contains `task_dir`,
+`generated_at`, `cards` (a status-keyed dict of ranked card lists with a
+per-card `expired` flag), and an `epics` list. Fail-closed: malformed
+frontmatter (YAML that fails to parse) exits non-zero with a clear message on
+stderr, rather than silently skipping the file.
 """
 
 from __future__ import annotations
