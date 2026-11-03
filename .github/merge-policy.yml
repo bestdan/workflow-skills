@@ -1,0 +1,42 @@
+# Which PRs an agent may land without the owner (graduated merge autonomy,
+# Phase 1). scripts/merge-tier.py reads this file from the PR's base branch and
+# fails closed to `human` on anything outside the YAML subset it parses: flat
+# `key: value`, `key: [a, b]`, and `key:` followed by `  - item` lines.
+# Design: dev_docs/designs/2026-10-03-graduated-merge-autonomy.md,
+# "Initial per-repo policy".
+
+# scripts/** is auto only when its test pair passes on the head SHA. That is
+# not a rule here: the lander already holds any PR whose checks on the head are
+# not all green, and `just check` runs every test pair.
+# test/** is the bats suites, so a test-only change matches it.
+auto:
+  - scripts/**
+  - test/**
+
+# Runtime prompt text, plugin metadata, CI and every doc stay with the owner.
+# The landing-gate files are always human in merge-tier.py whatever this list
+# says; they are repeated here so the file reads complete.
+always_human:
+  - skills/**
+  - commands/**
+  - agents/**
+  - hooks/**
+  - .claude-plugin/plugin.json
+  - .claude-plugin/marketplace.json
+  - .github/**
+  - dev_docs/**
+  - scripts/merge-tier.py
+  - scripts/land-pr.py
+  - scripts/land-pr.sh
+  - scripts/co-review-evidence.py
+  - scripts/co-review-stamp.py
+
+size_cap: 300
+
+# Option B of the design's open question 1 (owner, 2026-10-31): releasing
+# types land too, so a bad landing can ship a release. #1323's revert is the
+# undo.
+allowed_types: [feat, fix, perf, refactor, test, chore, ci, build, style, docs]
+
+repo_rules:
+  - prompt-paths-need-releasing-type
