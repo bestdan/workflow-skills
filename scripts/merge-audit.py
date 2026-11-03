@@ -17,7 +17,9 @@ Two modes, both read-only:
   `--since` and reports the would-land count against the 30 graduation needs.
   For each would-land PR it lists the commits pushed after the head that
   comment judged, and every fix or revert PR merged within 7 days that cites
-  it by number. Whether a later commit was a substantive owner change is the
+  it by number. A follow-up is found by its Conventional Commit title
+  (`fix:` or `revert:`) and a bare `#N`, so a revert made with GitHub's Revert
+  button needs retitling as `revert: ...` to be counted. Whether a later commit was a substantive owner change is the
   owner's call: the report lists, it does not judge.
   With `--policy <file>`, each shadowed PR is re-tiered by merge-tier.py under
   that candidate policy (with AGENT_LAND on) instead of trusting the posted
@@ -36,7 +38,9 @@ usage error. A read error on one PR is reported against that PR, never a crash.
 Run it weekly; this repo adds no scheduler of its own. From a session with
 `gh` auth, for example:
   /loop 7d python3 scripts/merge-audit.py --repo bestdan/workflow-skills \
-    --mode review --since <the date 7 days ago>
+    --mode review \
+    --since "$(python3 -c 'import datetime as d; print(d.date.today() - d.timedelta(7))')"
+The `--since` is computed on each run, so every week audits the latest 7 days.
 """
 
 from __future__ import annotations
