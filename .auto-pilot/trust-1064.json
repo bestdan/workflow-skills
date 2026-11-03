@@ -1,0 +1,11 @@
+{
+  "trusted": [
+    {
+      "number": 1064,
+      "author": "bestdan",
+      "title": "co-review: scope \"run the validator\" to fixtures in the diff",
+      "body": "`skills/co-review/SKILL.md:513` tells the main agent to execute the real validator when \"the diff adds or edits validation fixtures \u2014 or the schema/rules that validate them\". The rule says nothing about claims outside the diff, and an agent stretches it: when a reviewer disputes a factual claim about how a tool behaved (for example, what a validator accepted in an earlier version), the agent sets up and runs that tool to settle a question the diff does not raise. That spends review time, and against code other than what is under review it can produce a confident answer about the wrong thing.\n\n## Proposed change\n\n- State explicitly that the validator rule applies only to fixtures and schema/rules changed in the diff under review.\n- Add the case it does not cover: when a reviewer disputes a factual claim about behavior outside the diff (historical behavior, an unchanged tool), do not run external validation to settle it. Mark the finding unverified and surface it as a judgment call, or skip it with a coverage note.\n\n## Acceptance criteria\n\n- The validator bullet names its scope as \"changed in this diff\".\n- The skill says how to handle a disputed out-of-diff behavioral claim, and that handling does not involve running tools against code outside the diff.\n"
+    }
+  ],
+  "untrusted": []
+}
