@@ -107,8 +107,9 @@
 #   spawn-orchestrator.sh alarm-clear --dir <run-dir>
 #
 #   alarm      Task 16 — the run must ACTIVELY tell a human. Emits an OS-level
-#              notification (osascript, falling back to terminal-notifier),
-#              writes the `.auto-pilot/ALARM` sentinel, and prepends a one-line
+#              notification (osascript, falling back to terminal-notifier; on a
+#              headless host with neither, a GitHub comment on the run's
+#              gh-issue task — other sources stay file-only), writes the `.auto-pilot/ALARM` sentinel, and prepends a one-line
 #              reason + REQUIRED ACTION to the very top of REPORT.md. Idempotent
 #              per <id> per run (the sentinel is the key), so a 300s relaunch
 #              cadence can't turn the alarm into the new noise. Pure shell — a
@@ -2183,12 +2184,67 @@ _applescript_escape() {
   printf '%s' "$s"
 }
 
-# Emit an OS-level notification. BEST-EFFORT BY CONTRACT: a missing, failing, or
-# (in-jail) exec-DENIED notifier must never abort the halt that is calling us —
-# the durable ALARM marker + REPORT.md line are written BEFORE this runs, so the
-# alarm survives a dead notifier. Always returns 0.
+# The issue a GitHub-comment alarm lands on: the run's in-flight task (the last
+# RUN.md row in a claimed..iterating phase), else the last task the run has
+# touched at all (any phase but pending/skipped). Prints the bare number; fails
+# when the table names no gh-issue task. A task id is `#<n>` or `<n>`.
+_alarm_target_issue() {
+  local run_md="$1/.auto-pilot/RUN.md"
+  [ -f "$run_md" ] || return 1
+  awk -F'|' '
+    /^---$/ { fm++; next }
+    fm < 2 || !/^\|/ { next }
+    {
+      id = $2; phase = $3
+      gsub(/^[ \t]+|[ \t]+$/, "", id); gsub(/^[ \t]+|[ \t]+$/, "", phase)
+      sub(/^#/, "", id)
+      if (id !~ /^[0-9]+$/) next
+      if (phase ~ /^(claimed|implementing|pr-open|in-review|iterating)$/) live = id
+      else if (phase != "pending" && phase != "skipped") touched = id
+    }
+    END {
+      if (live != "") print live
+      else if (touched != "") print touched
+      else exit 1
+    }
+  ' "$run_md"
+}
+
+# The headless channel: a comment on the run's gh-issue task, which reaches the
+# owner through GitHub's own notifications. Only a gh-issue source has an issue
+# to comment on; every other source returns 1 and the alarm stays file-only.
+# Runs from the UN-jailed supervisor (the jail cannot reach gh's credentials).
+_alarm_github() {
+  local dir="$1" title="$2" msg="$3" source repo issue
+  [ -n "$dir" ] || return 1
+  source="$(_run_front_field "$dir" work_source | sed -e 's/[[:space:]]#.*$//')"
+  case "$source" in gh-issue:*) ;; *) return 1 ;; esac
+  repo="${source#gh-issue:}"
+  repo="${repo%%[#?]*}"
+  case "$repo" in */*/* | /* | */ | "") return 1 ;; esac
+  case "$repo" in *[!A-Za-z0-9._/-]*) return 1 ;; esac
+  issue="$(_alarm_target_issue "$dir")" || return 1
+  command -v gh >/dev/null 2>&1 || return 1
+  local body
+  body="$(printf '**%s**\n\n%s\n\n<sub>Posted by the auto-pilot supervisor on %s; the full record is the run'\''s `.auto-pilot/REPORT.md`.</sub>' \
+    "$title" "$msg" "$(hostname 2>/dev/null || echo unknown-host)")"
+  # A hung network call must not wedge the halt calling us: bound it where the
+  # host has `timeout` (Linux, the host this channel exists for).
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 60 gh issue comment "$issue" --repo "$repo" --body "$body" >/dev/null 2>&1
+  else
+    gh issue comment "$issue" --repo "$repo" --body "$body" >/dev/null 2>&1
+  fi
+}
+
+# Emit the active notification: a desktop notification where the host has one
+# (osascript, then terminal-notifier), else a GitHub comment on the run's
+# gh-issue task (a headless host). BEST-EFFORT BY CONTRACT: a missing, failing,
+# or (in-jail) exec-DENIED notifier must never abort the halt that is calling us
+# — the durable ALARM marker + REPORT.md line are written BEFORE this runs, so
+# the alarm survives a dead notifier. Always returns 0.
 _alarm_notify() {
-  local title="$1" msg="$2"
+  local title="$1" msg="$2" dir="${3:-}"
   if command -v osascript >/dev/null 2>&1; then
     if osascript -e "display notification \"$(_applescript_escape "$msg")\" with title \"$(_applescript_escape "$title")\"" >/dev/null 2>&1; then
       return 0
@@ -2199,7 +2255,10 @@ _alarm_notify() {
       return 0
     fi
   fi
-  echo "spawn-orchestrator: alarm NOTIFY FAILED (no osascript/terminal-notifier, or it was denied) — the ALARM marker and REPORT.md line are still written" >&2
+  if _alarm_github "$dir" "$title" "$msg"; then
+    return 0
+  fi
+  echo "spawn-orchestrator: alarm NOTIFY FAILED (no desktop notifier, and no GitHub comment: the source is not gh-issue, no task is claimed, or gh failed) — the ALARM marker and REPORT.md line are still written" >&2
   return 0
 }
 
@@ -2301,7 +2360,7 @@ alarm() {
 
   # 3. The active notification — LAST, so a dead/denied notifier can never cost
   #    us the durable record above.
-  _alarm_notify "auto-pilot ALARM — ${label:-run}" "$condition: $reason ACTION: $action"
+  _alarm_notify "auto-pilot ALARM — ${label:-run}" "$condition: $reason ACTION: $action" "$dir"
 
   echo "spawn-orchestrator: ALARM $condition — $reason"
 }
