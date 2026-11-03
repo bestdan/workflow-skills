@@ -1,6 +1,7 @@
 # Which PRs an agent may land without the owner (graduated merge autonomy,
-# Phase 1). scripts/merge-tier.py reads this file from the PR's base branch and
-# fails closed to `human` on anything outside the YAML subset it parses: flat
+# Phase 1). The lander (scripts/land-pr.py) reads this file from the PR's base
+# branch, never its head, and hands it to scripts/merge-tier.py, which fails
+# closed to `human` on anything outside the YAML subset it parses: flat
 # `key: value`, `key: [a, b]`, and `key:` followed by `  - item` lines.
 # Design: dev_docs/designs/2026-10-03-graduated-merge-autonomy.md,
 # "Initial per-repo policy".
@@ -30,12 +31,20 @@ always_human:
   - scripts/land-pr.sh
   - scripts/co-review-evidence.py
   - scripts/co-review-stamp.py
+  # The gate scripts/** relies on: a PR that edits them could make "checks
+  # green" vacuous, so they are human even though they sit under scripts/**.
+  - scripts/check.sh
+  - scripts/ci-docs-only.sh
+  - scripts/typecheck.sh
+  - scripts/lint-*.sh
+  - scripts/validate.py
+  - scripts/validate.py.lock
 
 size_cap: 300
 
-# Option B of the design's open question 1 (owner, 2026-10-31): releasing
-# types land too, so a bad landing can ship a release. #1323's revert is the
-# undo.
+# Releasing types land too, so a bad landing can ship a release;
+# `/revert-landing` (#1323) is the undo. The owner chose this, option B of the
+# design's open question 1, on 2026-10-31.
 allowed_types: [feat, fix, perf, refactor, test, chore, ci, build, style, docs]
 
 repo_rules:

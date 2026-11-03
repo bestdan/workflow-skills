@@ -434,6 +434,8 @@ class RepoPolicyTests(unittest.TestCase):
             ".github/workflows/ci.yml",
             ".claude-plugin/plugin.json",
             "scripts/land-pr.py",
+            "scripts/check.sh",
+            "scripts/lint-shell.sh",
             "README.md",
         ):
             with self.subTest(path=path):

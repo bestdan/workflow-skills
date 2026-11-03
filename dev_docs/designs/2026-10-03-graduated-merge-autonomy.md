@@ -309,7 +309,8 @@ reasons each shadow "would land: no" comment lists. In order of cost:
 
 These three properties hold however the policy is tuned:
 
-- `merge-tier.py` reads the policy from the base branch.
+- The lander (`land-pr.py`) reads the policy from the PR's base branch, never
+  its head.
 - Changes to the gate files are always human.
 - Anything the parser cannot read makes the PR human.
 
