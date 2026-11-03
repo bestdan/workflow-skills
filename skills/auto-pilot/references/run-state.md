@@ -242,10 +242,10 @@ per task and would drown the run's durable record in churn. Like `supervisor-sta
 record — which is exactly why the **exit reason**, which _is_ part of the
 record, goes in `RUN.md` instead.
 `supervisor-state` differs from the heartbeat in one load-bearing way, though:
-it is never written from inside the jail, and the rendered sandbox profile
-denies the agent write access to it (`render-profile --workdir`) — the
-heartbeat is agent-writable by design, but a counter/ledger the no-progress
-guard trusts cannot be.
+it is never written from inside the jail, and it lives outside the run
+worktree (`${XDG_STATE_HOME:-~/.local/state}/auto-pilot/<label>/`), where no
+jail grants the agent access — the heartbeat is agent-writable by design, but a
+counter/ledger the no-progress guard trusts cannot be.
 
 ### Restack (post-merge stacked-PR repair)
 
@@ -774,8 +774,8 @@ easy to conflate): `supervisor-check`'s no-progress guard owns no-progress
 between launchd relaunches (the agent process itself died or hung). Doctor's
 invariant 7 owns no-progress **across iterations within one live agent
 process** — the agent is alive and looping, but nothing advances. Different
-scopes, different state files (`supervisor-state` vs. `doctor-state`, both
-under `.auto-pilot/`, neither committed to the run-state branch — wake/
+scopes, different state files (`supervisor-state`, outside the run worktree,
+vs. `doctor-state` under `.auto-pilot/`, neither committed to the run-state branch — wake/
 iteration-scratch, not durable record) — the two can never both halt the same
 run for the same reason.
 

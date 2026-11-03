@@ -1045,6 +1045,7 @@ LCFEOF
   # directly (never sleeping) is what makes that deterministic.
   pel_setup() { # <name> <pause_exempt_max> -> leaves $PEL_DIR, real write-launch with the cap.
     PEL_DIR="$EC/pel-$1"
+    PEL_NAME="$1"
     mkdir -p "$PEL_DIR/.auto-pilot"
     pel_write_runmd active ''
     printf '# report\n' >"$PEL_DIR/.auto-pilot/REPORT.md"
@@ -1073,14 +1074,17 @@ LCFEOF
     STUB_LAUNCHCTL_LOG="$PEL_DIR/launchctl.log" STUB_CLAUDE_MARKER="$PEL_DIR/claude-ran" \
       STUB_EXIT_CODE=0 bash "$PEL_DIR/launch.sh" >/dev/null 2>&1
   }
-  pel_state() { cat "$PEL_DIR/.auto-pilot/supervisor-state" 2>/dev/null; }
-  pel_exempt_since() { sed -n 's/^exempt_since: *//p' "$PEL_DIR/.auto-pilot/supervisor-state" 2>/dev/null | tail -1; }
+  # The ledger lives outside the run worktree, keyed by the label (supervisor-state).
+  pel_ledger() { printf '%s\n' "$AUTO_PILOT_STATE_HOME/com.autopilot.pel.$PEL_NAME/supervisor-state"; }
+  pel_state() { cat "$(pel_ledger)" 2>/dev/null; }
+  pel_exempt_since() { sed -n 's/^exempt_since: *//p' "$(pel_ledger)" 2>/dev/null | tail -1; }
   pel_seed_exempt_since() { # <old-epoch> -> overwrite the ledger directly (never sleeping).
+    mkdir -p "$(dirname "$(pel_ledger)")"
     {
       printf 'count: 0\n'
       printf 'head: \n'
       printf 'exempt_since: %s\n' "$1"
-    } >"$PEL_DIR/.auto-pilot/supervisor-state"
+    } >"$(pel_ledger)"
   }
 
   # (A) FORGED REFRESH: the agent rewrites `paused_until` to a few seconds ago on

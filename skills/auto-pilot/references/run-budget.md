@@ -272,11 +272,11 @@ as exempt:
   `now - exempt_since` exceeds the cap, regardless of what RUN.md claims.
 - Not exempt → clear `exempt_since` (the streak ends).
 
-The ledger lives in `supervisor-state`, a file the rendered sandbox profile
-denies the **jailed agent** write access to (`render-profile --workdir` emits
-the deny; see [`launch-runtime.md`](launch-runtime.md) §3 for the mechanism —
-the same last-match-wins trick that keeps a credential file read-only inside
-its writable state dir). That is what makes the cap a real authority rather
+The ledger lives in `supervisor-state`, **outside the run worktree**: in
+`${XDG_STATE_HOME:-~/.local/state}/auto-pilot/<label>/`, a supervisor-owned
+directory that no jail profile grants. Its location, not a deny rule, keeps the
+**jailed agent** out, because Landlock (the Linux jail) cannot deny one file
+inside a writable grant. That is what makes the cap a real authority rather
 than one more agent-writable file: the agent can rewrite `RUN.md` however it
 likes, but it cannot touch the file the cap is measured against, and it cannot
 disable the check by closing the gate — `supervisor-scan` runs whether the
