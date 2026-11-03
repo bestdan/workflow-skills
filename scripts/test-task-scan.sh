@@ -12,6 +12,7 @@
 #   - epic rollup (parent: + plan-directory membership)
 #   - expired detection (expires < today AND status non-terminal)
 #   - malformed frontmatter fails closed (non-zero exit)
+#   - --expired: one slug-tab-path line per expired card, and fails closed
 #   - --archive-candidates: three-way completion-date fallback (completed
 #     field -> git-commit date -> today), older-than-N selection, non-done
 #     statuses never selected
@@ -311,6 +312,30 @@ if [ -s "$BASE/malformed.stderr" ]; then
   ok "malformed frontmatter: stderr has a message"
 else
   bad "malformed frontmatter: stderr was empty"
+fi
+
+# --- Fixture 6a: --expired, the mode /doctor Check 5 runs -------------------
+# Check 5 reads this mode's output as the expired list, so the two ways it can
+# lie are pinned: an expired card missing from the lines, and a failed scan
+# exiting 0 with no lines, which reads as "nothing expired".
+out6a="$("$SCRIPT" "$DIR5" --expired)" || bad "--expired: script exited non-zero on the expired fixture"
+assert_eq "--expired: one line, slug then tab then path, for the open expired card only" \
+  "$(printf 'expired-open\t%s' "$DIR5/expired-open.md")" "$out6a"
+
+if "$SCRIPT" "$DIR6" --expired >"$BASE/malformed-expired.stdout" 2>/dev/null; then
+  bad "--expired: malformed frontmatter should exit non-zero, exited 0"
+else
+  ok "--expired: malformed frontmatter exits non-zero"
+fi
+assert_eq "--expired: malformed frontmatter prints no lines" "" "$(cat "$BASE/malformed-expired.stdout")"
+
+out6a_missing="$("$SCRIPT" "$BASE/no-such-dir" --expired)" || bad "--expired: missing dir exited non-zero"
+assert_eq "--expired: missing dir prints no lines" "" "$out6a_missing"
+
+if "$SCRIPT" "$DIR5" --expired --archive-candidates --older-than 1 >/dev/null 2>&1; then
+  bad "--expired with --archive-candidates should exit non-zero, exited 0"
+else
+  ok "--expired with --archive-candidates exits non-zero"
 fi
 
 # --- Fixture 6b: a non-string status fails closed, and says which file ------

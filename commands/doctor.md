@@ -222,18 +222,22 @@ separate authorities, so `/doctor` calls both.)
 
 **Check 5 — Hygiene.** Lower-stakes cruft:
 
-- **Expired tasks** — the scanner's per-card `expired: true` field. `cards` is a
-  dict keyed by status, and each value is a ranked list; the `scripts/task-scan.py`
-  module docstring is the schema source of truth. It computes expiry per card
-  (`expires` < today while `status` is non-terminal, not `done`), so read the flag
-  rather than recomputing the date arithmetic here:
+- **Expired tasks** — the cards the scanner marks `expired`. It computes expiry
+  per card (`expires` < today while `status` is non-terminal, not `done`), so use
+  its answer rather than recomputing the date arithmetic here. `--expired` prints
+  one tab-separated `<slug> <path>` line per expired card, and nothing when there
+  are none:
 
   ```bash
-  "${CLAUDE_PLUGIN_ROOT}/scripts/task-scan.py" "$(git rev-parse --show-toplevel)/dev_docs/tasks" |
-    jq -r '.cards[][] | select(.expired) | .slug'
+  "${CLAUDE_PLUGIN_ROOT}/scripts/task-scan.py" "$(git rev-parse --show-toplevel)/dev_docs/tasks" --expired
   ```
 
-  These are pruning candidates (see the lifecycle note in `skills/task/SKILL.md`).
+  A non-zero exit means the scan failed (malformed frontmatter, with the file
+  named on stderr): report that as `WARN` with the scanner's message, never as no
+  expired tasks. The default-mode JSON shape (`cards` is a dict keyed by status,
+  each value a ranked list) is documented in the `scripts/task-scan.py` module
+  docstring. Expired cards are pruning candidates (see the lifecycle note in
+  `skills/task/SKILL.md`).
   `FAIL`, prunable under `--fix`.
 - **Orphan branches / PRs** — cruft from aborted/crashed sessions. **Do not** use
   "open PR with no matching task file" as the signal: by design the task file is
