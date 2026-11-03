@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.177.0] - 2026-11-03
+
+### Features
+
+- accept a GitHub milestone or label query as a source [#1020] (#1338) (b83d8f7)
+
 ## [2.176.0] - 2026-11-02
 
 ### Features
