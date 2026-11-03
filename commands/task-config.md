@@ -16,19 +16,20 @@ This command is a thin dispatcher. The per-handler setup logic (preflight checks
 
 Handler feature parity is jagged — `linear` now supports every verb in the table, `repo-pr` supports all but `reoptimize`, and the CLI-backed `gh-issue`/`jira` are thinner still (`gh-issue` less so since it gained native reoptimize). This table is the **single source of truth** for which verbs each handler supports; step 5 reads it to warn the user about what they're opting out of. Keep it in sync as handlers gain verbs (see "Adding a handler" in `CONTRIBUTING.md`).
 
-| Verb (command)                      | `repo-pr` | `gh-issue` | `jira`  | `linear` |
-| ----------------------------------- | --------- | ---------- | ------- | -------- |
-| capture (`/add-task`)               | yes       | yes        | yes     | yes      |
-| list (`/list-tasks`)                | yes       | yes        | yes     | yes      |
-| promote (`/promote-tasks`)          | yes       | yes        | yes     | yes      |
-| ↳ backfills priority/estimate       | both      | both       | neither | both     |
-| ↳ backfill-only (any rung)          | no        | yes        | no      | no       |
-| do — single (`/do-tasks`)           | yes       | yes        | yes     | yes      |
-| process — batch (`/do-tasks --all`) | yes       | opt        | no      | yes      |
-| archive (`/archive-tasks`)          | yes       | hygiene    | opt     | yes      |
-| reoptimize (`/reoptimize-tasks`)    | no        | yes        | no      | yes      |
-| reconcile (`/reconcile-tasks`)      | no        | audit      | no      | yes      |
-| auto-pilot (`/auto-pilot`)          | plan      | yes        | no      | yes      |
+| Verb (command)                             | `repo-pr` | `gh-issue` | `jira`  | `linear` |
+| ------------------------------------------ | --------- | ---------- | ------- | -------- |
+| capture (`/add-task`)                      | yes       | yes        | yes     | yes      |
+| list (`/list-tasks`)                       | yes       | yes        | yes     | yes      |
+| promote (`/promote-tasks`)                 | yes       | yes        | yes     | yes      |
+| ↳ backfills priority/estimate              | both      | both       | neither | both     |
+| ↳ backfill-only (any rung)                 | no        | yes        | no      | no       |
+| do — single (`/do-tasks`)                  | yes       | yes        | yes     | yes      |
+| process — batch (`/do-tasks --all`)        | yes       | opt        | no      | yes      |
+| archive (`/archive-tasks`)                 | yes       | hygiene    | opt     | yes      |
+| reoptimize (`/reoptimize-tasks`)           | no        | yes        | no      | yes      |
+| reconcile (`/reconcile-tasks`)             | no        | audit      | no      | yes      |
+| sweep stale claims (`/sweep-stale-claims`) | no        | yes        | no      | no       |
+| auto-pilot (`/auto-pilot`)                 | plan      | yes        | no      | yes      |
 
 `auto-pilot` on `repo-pr` is **`plan`**: its source is a `/plan-with-docs` directory (`dev_docs/tasks/<name>_plan/`) rather than the whole task list.
 
@@ -237,7 +238,7 @@ Tell the user:
 - **The handler's supported and unsupported verbs**, read from the capability matrix above. Name them explicitly so the user knows what they've opted into. For example:
   - `repo-pr`: "`repo-pr` runs the full loop: /add-task, /list-tasks, /promote-tasks, /do-tasks, /archive-tasks (moves stale done files to dev_docs/tasks/_archive/)."
   - `jira`: "`jira` supports: /add-task (lands a complete, unblocked task in `ready_status` when that key is set — otherwise it stays in the project's initial status), /list-tasks, /promote-tasks (uses `ready_status`/`refinement_status` if set, else prompts; unlike the other three handlers it backfills neither priority nor estimate — Jira has no estimate field, and its priority scheme is site-configured), /do-tasks (single — needs `ready_status` set), /archive-tasks (only when `archive_status` is set — native Jira archival is Premium). Not supported: batch /do-tasks --all. You can still manage these in Jira directly."
-  - `gh-issue`: "`gh-issue` supports: /add-task, /list-tasks, /promote-tasks (including `/promote-tasks backfill-only`, the one handler that can fill priority/estimate on an already-scored issue without moving it between rungs), /do-tasks (single; batch /do-tasks --all is opt-in via `gh-issue.remote_batch: true`, and leave it off unless your cloud environment installs this plugin itself and gives sessions a working gh credential — probed 2026-09-05, a committed .claude/settings.json did not install the plugin, and the session's gh was uncredentialed on reads as well as writes), /archive-tasks (hygiene only — GitHub has no issue cap; it just labels long-closed issues). You can still manage these in GitHub directly."
+  - `gh-issue`: "`gh-issue` supports: /add-task, /list-tasks, /promote-tasks (including `/promote-tasks backfill-only`, the one handler that can fill priority/estimate on an already-scored issue without moving it between rungs), /do-tasks (single; batch /do-tasks --all is opt-in via `gh-issue.remote_batch: true`, and leave it off unless your cloud environment installs this plugin itself and gives sessions a working gh credential — probed 2026-09-05, a committed .claude/settings.json did not install the plugin, and the session's gh was uncredentialed on reads as well as writes), /archive-tasks (hygiene only — GitHub has no issue cap; it just labels long-closed issues), /sweep-stale-claims (releases claims a dead session stranded). You can still manage these in GitHub directly."
   - `linear`: "`linear` supports: /add-task, /list-tasks, /promote-tasks, /do-tasks (single and batch /do-tasks --all — one remote session per dependency-ready issue, bounded by the WIP limit), /archive-tasks (native auto-archive + a GraphQL backstop to stay under Linear's non-archived-issue cap). You can still manage issues in Linear directly."
 - **For `repo-pr`:** that the config (and the task files under `dev_docs/tasks/`) are meant to be **committed and shared** — no exclude was added — so they should commit `.task-config.yml` for teammates to pick up the same destination.
 - **For `gh-issue` / `jira` / `linear`:** that `dev_docs/tasks/` was added to the repo's local git exclude, so the config stays local and out of `git status` (rerun the guarded `git check-ignore … || echo …` command above on any other clone). If they instead want teammates to share this destination, they can **commit** `.task-config.yml` rather than excluding it.

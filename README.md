@@ -13,7 +13,7 @@ A Claude Code plugin bundling Daniel's general engineering workflow skills: coll
 
 ## What's in the box
 
-20 skills, 23 commands, and 2 subagents, organized into eight workflows. Each
+20 skills, 24 commands, and 2 subagents, organized into eight workflows. Each
 entry links to its own doc — that's where the flags, edge cases, and handler
 support live.
 
@@ -88,6 +88,7 @@ capability matrix.
 | [**`/archive-tasks`**](commands/archive-tasks.md)             | `/archive-tasks [--older-than <N>d] [--issues <refs>] [--all] [dry-run]`  | Retire terminal-state work past an age threshold. A sweep refuses to mutate without a threshold.                                 |
 | [**`/sweep-for-complete`**](commands/sweep-for-complete.md)   | `/sweep-for-complete [--apply] [--all] [--project <id\|name>]`            | Find started-state issues whose linked PR merged and complete exactly those. **linear-only (v1)**.                               |
 | [**`/reconcile-tasks`**](commands/reconcile-tasks.md)         | `/reconcile-tasks [--apply] [--all] [--project <id\|name>]`               | Fix issues sitting in the wrong state, against a fixed rule table. **linear** and **gh-issue**, each with its own table.         |
+| [**`/sweep-stale-claims`**](commands/sweep-stale-claims.md)   | `/sweep-stale-claims [--apply] [--hours <n>]`                             | Release claims a dead session stranded (no PR, no pushed commits, past a threshold) back to ready. **gh-issue-only**.            |
 | [**`/find-false-closures`**](commands/find-false-closures.md) | `/find-false-closures [--apply] [--project <uuid>] [--repo <owner/name>]` | Detect completed issues no merged PR owns (the bare-id over-close bug) and restore them. **linear-only**.                        |
 | [**`/sweep-for-archive`**](commands/sweep-for-archive.md)     | `/sweep-for-archive [--since 24h] [--apply] [...]`                        | Close-out sweep: verify the window's closures, complete what merged, archive exactly what was proved delivered. **linear-only**. |
 | [**`/doctor`**](commands/doctor.md)                           | `/doctor [--fix]`                                                         | Diagnose the setup — config, prerequisites, legacy dirs, schema drift, allow-rules, worktree config — as `PASS`/`WARN`/`FAIL`.   |
@@ -95,7 +96,8 @@ capability matrix.
 
 `/sweep-for-complete`, `/reconcile-tasks`, `/find-false-closures`, and
 `/sweep-for-archive` are dry-run-by-default and safe to schedule via `/loop` or
-`/schedule`.
+`/schedule`. `/sweep-stale-claims` is too, but on `/loop` only: a cloud routine
+cannot delete the refs it releases.
 
 ### Coder orchestration
 
