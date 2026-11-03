@@ -61,10 +61,29 @@ things deliberately _not_ built.
   third caller might not fit — the rule of three: don't extract a shared
   abstraction until a third consumer shows up. A future shared claim skill, once
   a third claim-referencing verb exists, is tracked as PRE-467.
+- **A gh-issue source is a milestone or a label query, and it only narrows.**
+  A milestone is the gh-issue handler's grouping container, the one `/push-plan`
+  pushes a plan into, so it is the natural run boundary. A label query covers
+  work no milestone groups. Either one is ANDed into the handler's own candidate
+  query, never replacing its `status:2_ready` + `auto:eligible` terms, so a human
+  withholds an issue from a run exactly as from `/do-tasks`. A milestone is
+  recorded by number, not title, so renaming it does not break a resume.
+- **The gh-issue claim is the ref lock, not the comment election.** `/do-tasks`'s
+  batch dispatch uses the comment election because nothing releases a ref that a
+  crashed unattended session acquired. An auto-pilot run differs in both respects:
+  one serialized orchestrator claims, so there is no race to elect over, and a
+  crashed run's claim is reconciled by `--resume`'s G1 row. A crashed run that
+  nobody resumes still strands the ref, which `/sweep-stale-claims` clears.
+- **On gh-issue, the PR stays a draft until hand-off.** `gh-issue-pr-sync.yml`
+  writes `status:4_needs_review` when a non-draft PR opens, so a PR opened ready
+  would show the issue as needing review before co-review ran, which the write
+  order forbids. The run opens a draft and marks it ready at hand-off, then writes
+  the rung itself. Linear has no such Action, and on repo-pr the ready `task-loop`
+  PR is the review signal, so neither pays the draft's cost in skipped bot reviews.
 
 ## Out of scope (v1)
 
 Merging or tracker-completing anything unattended; `--budget` dollar/token caps
-(rate-window discipline + per-task bounds only); jira/gh-issue adapters (linear +
-plan only); reopening a frozen PR in-run; continuation across multiple `--until` windows beyond
-`--resume`.
+(rate-window discipline + per-task bounds only); a jira adapter (linear, plan and
+gh-issue only); reopening a frozen PR in-run; continuation across multiple
+`--until` windows beyond `--resume`.
