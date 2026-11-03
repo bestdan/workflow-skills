@@ -53,11 +53,11 @@ Usage:
                            prose.
     --older-than <N>      Required with --archive-candidates. Age threshold in
                            days.
-    --expired             Selection mode for /doctor Check 5: print one
-                           tab-separated `<slug> <path>` line per expired
-                           card, in status then rank order, and no JSON. No
-                           lines means no expired cards. Mutually exclusive
-                           with --archive-candidates.
+    --expired             Selection mode for /doctor Check 5: print one line
+                           per expired card, `<slug>`, a tab, then `<path>`,
+                           grouped by status and in rank order within each
+                           status, and no JSON. No lines means no expired
+                           cards. Mutually exclusive with --archive-candidates.
 
 Default mode emits one JSON document on stdout: `task_dir`, `generated_at`,
 `cards` and `epics`. `cards` is a dict keyed by status; each value is a list of

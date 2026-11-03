@@ -225,8 +225,8 @@ separate authorities, so `/doctor` calls both.)
 - **Expired tasks** — the cards the scanner marks `expired`. It computes expiry
   per card (`expires` < today while `status` is non-terminal, not `done`), so use
   its answer rather than recomputing the date arithmetic here. `--expired` prints
-  one tab-separated `<slug> <path>` line per expired card, and nothing when there
-  are none:
+  one line per expired card, `<slug>`, a tab, then `<path>` (split on the first
+  tab only, since a path can contain spaces), and nothing when there are none:
 
   ```bash
   "${CLAUDE_PLUGIN_ROOT}/scripts/task-scan.py" "$(git rev-parse --show-toplevel)/dev_docs/tasks" --expired
