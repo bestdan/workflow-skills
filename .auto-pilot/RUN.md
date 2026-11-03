@@ -9,9 +9,9 @@ paused_until:
 pause_observed_at:
 pause_source:
 pause_reason:
-exit_reason: continuing
-exit_reason_at:
-exit_reason_detail:
+exit_reason: 
+exit_reason_at: 
+exit_reason_detail: 
 orchestrator_pid:
 orchestrator_started_at:
 until: 2026-11-03T13:33:12Z
