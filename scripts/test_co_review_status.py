@@ -130,6 +130,42 @@ class StatusTests(unittest.TestCase):
                 self.assertEqual(cm.exception.code, 2)
         self.assertEqual(fake.calls, [])
 
+    def test_a_repo_without_a_slash_exits_2_without_calling_gh(self):
+        fake = self.use(FakeGh())
+        argv = [
+            "--repo",
+            "noslash",
+            "--sha",
+            SHA,
+            "--state",
+            "success",
+            "--description",
+            "d",
+        ]
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as cm:
+                status_mod.main(argv)
+        self.assertEqual(cm.exception.code, 2)
+        self.assertEqual(fake.calls, [])
+
+    def test_a_blank_description_exits_2_without_calling_gh(self):
+        fake = self.use(FakeGh())
+        argv = [
+            "--repo",
+            REPO,
+            "--sha",
+            SHA,
+            "--state",
+            "success",
+            "--description",
+            "   ",
+        ]
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as cm:
+                status_mod.main(argv)
+        self.assertEqual(cm.exception.code, 2)
+        self.assertEqual(fake.calls, [])
+
     def test_an_unknown_state_exits_2_without_calling_gh(self):
         fake = self.use(FakeGh())
         with contextlib.redirect_stderr(io.StringIO()):

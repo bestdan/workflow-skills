@@ -22,8 +22,10 @@ else's and a status from this account would gate their merge. Record it as
 - **`success`** at step 8's stamp point, when every planned reviewer class ran
   or was skipped by configuration.
 - **`failure`** at the same point otherwise, and also when the run stops for
-  any reason after `pending` was posted, so a run never leaves `pending`
-  behind.
+  any reason after `pending` was posted, whenever the run can still act. A
+  crash, a user interrupt or a lost session can still leave `pending` on the
+  head. The next run on that head replaces it, because a later status with
+  the same context overwrites the earlier one.
 
 **Skipped by configuration** means the run never meant to use that reviewer
 here: `--remote` (no local agents), `--reviewer-set cheap-single` (the others),
