@@ -413,6 +413,16 @@ case "$out5" in
   *"BLOCKER: interactive consent gate"*) bad "no launchctl: must not synthesize a consent blocker" ;;
   *) ok "no launchctl: no consent blocker" ;;
 esac
+# The skips above are about the probe; the launch itself has no way to spawn
+# on this host, so the verdict must be no-go (#1348), never `go` with skip notes.
+assert_contains "no launcher: reports none" "PREFLIGHT LAUNCHER: none (" "$out5"
+assert_contains "no launcher: verdict is no-go naming #956" \
+  "PREFLIGHT VERDICT: no-go — no supported launcher on this host" "$out5"
+assert_contains "no launcher: reason names the tracking issue" "tracked in #956" "$out5"
+case "$out5" in
+  *"PREFLIGHT VERDICT: go"*) bad "no launcher: must not print VERDICT: go" ;;
+  *) ok "no launcher: no go verdict" ;;
+esac
 
 # --- Case 6: a run outside every protected location needs no grant ---------
 mkdir -p "$BASE/elsewhere"

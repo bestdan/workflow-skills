@@ -495,6 +495,23 @@ echo "PREFLIGHT DEST_HOST: $dest_host"
 echo "PREFLIGHT HANDLER: $handler"
 echo "PREFLIGHT HANDLER_SOURCE: $handler_source"
 
+# --- 3b. Launcher -------------------------------------------------------------
+# The detached run spawns only through launchd + a Seatbelt jail
+# (spawn-orchestrator.sh `write-launch` / `launch`), so a host missing either
+# cannot carry out launch step 7. Section 5 then logs a skip, and so does
+# section 4 when sandbox-exec is absent — truthfully, as "this probe could not
+# run" — but a skip there is not a launch
+# that can happen, so the missing launcher is a blocker of its own: the
+# pre-flight fails closed instead of printing `go` for a launch with no way to
+# spawn. The Linux launcher is tracked in #956.
+if command -v sandbox-exec >/dev/null 2>&1 && command -v "$LAUNCHCTL_BIN" >/dev/null 2>&1; then
+  echo "PREFLIGHT LAUNCHER: launchd + sandbox-exec"
+else
+  launcher_os="$(uname -s 2>/dev/null || echo unknown)"
+  echo "PREFLIGHT LAUNCHER: none ($launcher_os)"
+  blockers+=("no supported launcher on this host ($launcher_os): the orchestrator spawns only through launchd + sandbox-exec, and this host lacks $(command -v sandbox-exec >/dev/null 2>&1 && echo launchctl || echo sandbox-exec) — Linux support is tracked in #956")
+fi
+
 # --- 4. Confinement smoke ---------------------------------------------------
 # Layer 1 (filesystem/exec) is the rendered Seatbelt profile; layer 2 (network
 # egress) is the settings.json render-settings emits — see
