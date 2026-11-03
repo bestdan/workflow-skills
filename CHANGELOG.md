@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.180.0] - 2026-11-03
+
+### Features
+
+- publish a structured evidence record for the lander [#1307] (#1343) (b7621f9)
+
 ## [2.179.0] - 2026-11-03
 
 ### Features
