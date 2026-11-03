@@ -418,15 +418,26 @@ SUPERVISOR_STATE_NAME="supervisor-state"
 # A run launched before the move kept the ledger here; write-launch migrates it.
 SUPERVISOR_STATE_LEGACY_REL=".auto-pilot/$SUPERVISOR_STATE_NAME"
 
-# The supervisor-state file for a run label:
-#   ${AUTO_PILOT_STATE_HOME:-${XDG_STATE_HOME:-$HOME/.local/state}/auto-pilot}/<label>/supervisor-state
-# AUTO_PILOT_STATE_HOME exists for tests. The label is validated by every
-# caller's own argument check ([A-Za-z0-9._-]); re-checked here because it
-# becomes a path segment.
+# The directory every run's supervisor-state lives under:
+#   ${AUTO_PILOT_STATE_HOME:-${XDG_STATE_HOME:-$HOME/.local/state}/auto-pilot}
+# It must be absolute: the wrapper `cd`s into the run worktree, so a relative
+# root would land the ledger in the agent-writable tree it was moved out of.
+# write-launch exports the resolved value as AUTO_PILOT_STATE_HOME in the
+# generated wrapper, so the path it bakes into supervisor-check's --state and
+# the path supervisor-scan derives on each wake come from ONE value, whatever
+# the launchd/systemd job's own environment holds.
+_supervisor_state_root() {
+  local root="${AUTO_PILOT_STATE_HOME:-${XDG_STATE_HOME:-${HOME:-}/.local/state}/auto-pilot}"
+  case "$root" in /*) printf '%s\n' "$root" ;; *) return 1 ;; esac
+}
+
+# The supervisor-state file for a run label, under _supervisor_state_root. The
+# label is validated by every caller's own argument check ([A-Za-z0-9._-]);
+# re-checked here because it becomes a path segment.
 _supervisor_state_path() {
   local label="$1" root
   case "$label" in '' | . | .. | *[!A-Za-z0-9._-]*) return 1 ;; esac
-  root="${AUTO_PILOT_STATE_HOME:-${XDG_STATE_HOME:-$HOME/.local/state}/auto-pilot}"
+  root="$(_supervisor_state_root)" || return 1
   printf '%s/%s/%s\n' "$root" "$label" "$SUPERVISOR_STATE_NAME"
 }
 # The heartbeat the orchestrator touches per loop iteration / per /deliver-task
@@ -1477,7 +1488,9 @@ write_launch() {
   [ -n "$claude_bin" ] || die "claude not found (fail-closed): pass --claude-bin or put claude on PATH"
   case "$claude_bin" in /*) ;; *) die "--claude-bin must be absolute (fail-closed): $claude_bin" ;; esac
 
-  local state_file
+  local state_root state_file
+  state_root="$(_supervisor_state_root)" \
+    || die "the supervisor-state root must be an absolute path (AUTO_PILOT_STATE_HOME, XDG_STATE_HOME or HOME): ${AUTO_PILOT_STATE_HOME:-${XDG_STATE_HOME:-${HOME:-<unset>}}}"
   state_file="$(_supervisor_state_path "$label")" || die "cannot derive the supervisor-state path from --label: $label"
   # A run launched before the ledger left the run worktree (a --resume of one)
   # carries it at the legacy path: move it once, so the pause-exempt clock and the
@@ -1506,6 +1519,9 @@ write_launch() {
     # here, by the launcher, and never read from RUN.md: the un-jailed supervisor
     # must not write to a path the jailed agent could choose.
     [ -n "$handoff_dir" ] && printf 'export AUTO_PILOT_HANDOFF_DIR=%q\n' "$handoff_dir"
+    # Pin the supervisor-state root resolved here, so supervisor-scan derives the
+    # same ledger path the --state below names, whatever this job's environment.
+    printf 'export AUTO_PILOT_STATE_HOME=%q\n' "$state_root"
     printf 'mkdir -p %q\n' "$tmpdir"
     printf 'cd %q\n' "$workdir"
     # The supervisor's own bookkeeping — ABOVE the gate, so it runs on EVERY wake
@@ -3727,8 +3743,8 @@ supervisor_check() {
       # `paused_until` to the recent past every wake satisfies this check forever.
       # The actual, unforgeable backstop is the pause-exempt LEDGER
       # (`_supervisor_pause_exempt_ledger`, run from `supervisor-scan` on every
-      # wake, gate or no gate) — it lives in supervisor-state, which the rendered
-      # sandbox profile denies the jailed agent write access to. This corroboration
+      # wake, gate or no gate) — it lives in supervisor-state, outside the run
+      # worktree in a directory no jail grants. This corroboration
       # check and that ledger are deliberately two different mechanisms answering
       # two different questions: this one asks "did the agent's OWN records agree
       # with itself this wake" (cheap, but forgeable); the ledger asks "regardless

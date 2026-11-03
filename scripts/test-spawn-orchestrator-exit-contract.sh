@@ -1179,6 +1179,23 @@ LCFEOF
     && ok "pause-exempt ledger [clears]: a non-exempt wake clears exempt_since" \
     || bad "pause-exempt ledger [clears]: a non-exempt wake clears exempt_since" "$(pel_state)"
 
+  # (E) The wrapper PINS the state root it was generated with. A wake whose own
+  # environment names a different root (a launchd/systemd job's XDG_STATE_HOME
+  # differs from the launching shell's) must still write the ledger the wrapper's
+  # baked --state names, never a second file elsewhere.
+  pel_setup envpin 3600
+  pel_write_runmd paused "$(_gate_iso $(($(date +%s) - 10)))"
+  AUTO_PILOT_STATE_HOME="$EC/elsewhere" XDG_STATE_HOME="$EC/xdg-elsewhere" pel_wake
+  [ -n "$(pel_exempt_since)" ] \
+    && ok "pause-exempt ledger [env pin]: a wake in a different env writes the wrapper's own ledger" \
+    || bad "pause-exempt ledger [env pin]: a wake in a different env writes the wrapper's own ledger" "$(pel_state)"
+  if [ ! -e "$EC/elsewhere" ] && [ ! -e "$EC/xdg-elsewhere" ]; then
+    ok "pause-exempt ledger [env pin]: no second ledger appears under the wake's own root"
+  else
+    bad "pause-exempt ledger [env pin]: no second ledger appears under the wake's own root" \
+      "$(find "$EC/elsewhere" "$EC/xdg-elsewhere" -type f 2>/dev/null)"
+  fi
+
   # fail-closed: an unknown reason is never written, and a RELAUNCHABLE reason can
   # never be smuggled into the terminal sentinel.
   o="$("$SCRIPT" exit-reason --dir "$EC/continuing" --reason bogus 2>&1)"

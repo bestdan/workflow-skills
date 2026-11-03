@@ -554,6 +554,18 @@ lg_launch com.autopilot.ledger
 lg_want="$AUTO_PILOT_STATE_HOME/com.autopilot.ledger/supervisor-state"
 have "ledger: write-launch passes the label-keyed --state path" \
   "--state $lg_want" "$(cat "$BASE/lg-com.autopilot.ledger.sh" 2>/dev/null)"
+have "ledger: the wrapper pins the resolved state root" \
+  "export AUTO_PILOT_STATE_HOME=$AUTO_PILOT_STATE_HOME" "$(cat "$BASE/lg-com.autopilot.ledger.sh" 2>/dev/null)"
+# A relative root would resolve inside the run worktree once the wrapper cds
+# there: write-launch refuses it.
+if o="$(AUTO_PILOT_STATE_HOME=rel/state "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" \
+  --workdir "$LGROOT" --log "$LGROOT/.auto-pilot/orchestrator.log" --prompt-file "$BASE/prompt.txt" \
+  --label com.autopilot.ledger.rel --claude-bin "$BIN" --path "/usr/bin:/bin" \
+  --out-script "$BASE/lg-rel.sh" --out-plist "$BASE/lg-rel.plist" 2>&1)"; then
+  bad "ledger: a relative state root is refused" "write-launch succeeded"
+else
+  have "ledger: a relative state root is refused" "must be an absolute path" "$o"
+fi
 lack "ledger: the --state path is not inside the run worktree" \
   "--state $LGROOT" "$(cat "$BASE/lg-com.autopilot.ledger.sh" 2>/dev/null)"
 # A run launched before the move (a --resume of one) carries the ledger at the
