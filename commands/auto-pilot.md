@@ -1,7 +1,7 @@
 ---
-description: Launch an unattended auto-pilot run — an interactive pre-flight, then spawn a detached orchestrator that advances a whole task graph (a Linear project or a plan-with-docs directory) by taking each task through /deliver-task, with durable crash-resumable run state. Nothing is merged or tracker-completed unattended.
+description: Launch an unattended auto-pilot run — an interactive pre-flight, then spawn a detached orchestrator that advances a whole task graph (a Linear project, a GitHub milestone or label query, or a plan-with-docs directory) by taking each task through /deliver-task, with durable crash-resumable run state. Nothing is merged or tracker-completed unattended.
 allowed-tools: Bash, Glob, Grep, Read, Write, Edit, Agent, AskUserQuestion, Skill, mcp__linear, mcp__claude_ai_Linear
-argument-hint: "<linear-project | plan-dir> [--until <time>] [--reserve <pct>] [--profile less-claude] [--resume]"
+argument-hint: "<linear-project | gh-milestone | label:<name>[,label:<name>…] | plan-dir> [--until <time>] [--reserve <pct>] [--profile less-claude] [--resume]"
 ---
 
 # Auto-pilot
@@ -16,10 +16,13 @@ steps here. If the relative path doesn't resolve, find it with **Glob**
 
 ## Arguments
 
-- `<linear-project | plan-dir>` — the work source. **Required.** Either a Linear
-  project (id, name, or slug) **or** a `dev_docs/tasks/<name>_plan/` directory (a
-  `/plan-with-docs` output). Detect which: an existing directory path → plan
-  source; otherwise → resolve as a Linear project. The chosen adapter
+- `<linear-project | gh-milestone | label-query | plan-dir>` — the work source.
+  **Required.** A `dev_docs/tasks/<name>_plan/` directory (a `/plan-with-docs`
+  output); under `handler: gh-issue`, a GitHub milestone (number or title) or a
+  label query `label:<name>[,label:<name>…]` on `gh-issue.repo`; otherwise a
+  Linear project (id, name, or slug). An existing plan directory always wins;
+  the detection order is the SKILL's ("Launch phase", "Preamble — parse +
+  resolve"). The chosen adapter
   (`skills/auto-pilot/references/adapters.md`) normalizes it to the run-state
   representation.
 - `--until <time>` — wall-clock bound for the run; the orchestrator stops itself
@@ -43,9 +46,9 @@ steps here. If the relative path doesn't resolve, find it with **Glob**
 ## Dispatch
 
 Resolve the task handler from `dev_docs/tasks/.task-config.yml` (the launch
-pre-flight and the linear/plan adapters read it), then run the SKILL's Launch
-phase against the resolved source. Only `linear` and `plan` (repo-pr) sources
-are supported in v1; any other handler → stop and say so.
+pre-flight and the adapters read it), then run the SKILL's Launch
+phase against the resolved source. Supported sources are `plan` (repo-pr),
+`gh-issue`, and `linear`; any other handler (`jira`) → stop and say so.
 
 The run **ends at hand-off, never done**: the orchestrator takes each task to
 `needs_review` and stops. Nothing is merged and no tracker issue is completed

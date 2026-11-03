@@ -1,6 +1,6 @@
 ---
 name: auto-pilot
-description: Unattended autonomous mode — "pick up this Project and advance it with no human attached." Runs a task graph (a Linear project or a plan-with-docs directory) task-by-task in an isolated worktree, taking each through /deliver-task (claim → implement → PR → co-review → hand-off) with durable, crash-resumable state and no human in the loop. Use when the user wants a body of work advanced autonomously and unattended. NOTE - v1 is under construction; this entry establishes the skill home and the run-state reference. Launch, run, and resume are implemented.
+description: Unattended autonomous mode — "pick up this Project and advance it with no human attached." Runs a task graph (a Linear project, a GitHub milestone or label query, or a plan-with-docs directory) task-by-task in an isolated worktree, taking each through /deliver-task (claim → implement → PR → co-review → hand-off) with durable, crash-resumable state and no human in the loop. Use when the user wants a body of work advanced autonomously and unattended. NOTE - v1 is under construction; this entry establishes the skill home and the run-state reference. Launch, run, and resume are implemented.
 ---
 
 # auto-pilot — unattended autonomous runs
@@ -53,7 +53,8 @@ The one physical constraint is power: the machine must stay awake
 - [`references/adapters.md`](references/adapters.md) — the work-source adapter
   interface: the eight verbs (`list_ready`, `dependency_graph`, `claim`,
   `link_pr`, `set_needs_review`, `flag_for_human`, `comment_progress`,
-  `wip_limit`) that normalize a Linear project or a plan-with-docs directory to
+  `wip_limit`) that normalize a Linear project, a GitHub milestone or label
+  query, or a plan-with-docs directory to
   the run-state representation, each delegating to an existing handler section.
 - [`references/launch-runtime.md`](references/launch-runtime.md) — the two launch
   runtime decisions: how the detached orchestrator is spawned (detached
@@ -127,7 +128,7 @@ only axis that explains it.
 
 ## Launch phase (interactive)
 
-Invoked by `/auto-pilot <linear-project | plan-dir> [--until <time>]
+Invoked by `/auto-pilot <linear-project | gh-milestone | label-query | plan-dir> [--until <time>]
 [--reserve <pct>] [--profile less-claude] [--resume]`
 (`commands/auto-pilot.md`). Launch runs **interactively, while a human is attached
 and can still fix failures** — so it is **fail-closed**: any hard pre-flight failure
@@ -149,15 +150,38 @@ unless an explicit, validated `--reserve` replaces it. `--until` accepts an
 absolute ISO-8601 time or a relative `now+<duration>`
 offset; launch resolves either to the absolute time recorded in `RUN.md`. If
 `--resume` is present, route to the **Resume phase** section below instead of
-running the rest of this launch pre-flight. Detect the source (existing
-`dev_docs/tasks/<name>_plan/` dir → **plan**; else → **linear** project) and
-resolve `dev_docs/tasks/.task-config.yml`'s handler for validation only; any
-handler other than `linear`/`repo-pr` → stop (v1 supports linear + plan
-only). The run's **effective handler** — what actually gets passed to
-`/deliver-task` — is source-derived, not read back off that config: a
-**plan** source ⇒ `repo-pr`, a **linear** source ⇒ `linear`, per the
-matching adapter (`references/adapters/plan.md`, `references/adapters/linear.md`) — this keeps a plan-source run
-correct even when the repo's own `.task-config.yml` default is `linear`.
+running the rest of this launch pre-flight. Resolve
+`dev_docs/tasks/.task-config.yml`'s handler, then detect the source, first
+match wins:
+
+1. An existing `dev_docs/tasks/<name>_plan/` dir → **plan**, whatever the
+   handler.
+2. Handler `gh-issue` → **gh-issue**, on `gh-issue.repo`. The argument is a
+   **label query** `label:<a>[,label:<b>…]` (it starts with `label:`; an issue must carry
+   every listed label), a bare
+   integer (a **milestone number** — a milestone whose title is itself an
+   integer is chosen by its number, never by its title), the
+   normalized form itself (`<owner>/<repo>#milestone/<n>` or
+   `<owner>/<repo>?label:…`, which is what the run handoff's resume command
+   prints; an `<owner>/<repo>` other than `gh-issue.repo` blocks), or any other
+   string (a **milestone title**, matched exactly among the repo's open
+   milestones). Either form only narrows the ready query
+   ([`references/adapters/gh-issue.md`](references/adapters/gh-issue.md)). An
+   argument that resolves to none of these **BLOCKS LAUNCH**, naming what was
+   tried — it never falls through to Linear.
+3. Handler `linear` or `repo-pr` → **linear** project.
+
+Any other handler (`jira`) → stop and say so.
+Normalize the source for `work_source` as
+[`references/run-state.md`](references/run-state.md) "`RUN.md`" defines: a
+milestone title resolves to its number, and a label query's labels are sorted,
+so the same source always normalizes the same way. The run's **effective
+handler** — what actually gets passed to `/deliver-task` — is source-derived,
+not read back off that config: a **plan** source ⇒ `repo-pr`, a **linear**
+source ⇒ `linear`, a **gh-issue** source ⇒ `gh-issue`, per the matching
+adapter (`references/adapters/plan.md`, `references/adapters/linear.md`,
+`references/adapters/gh-issue.md`) — this keeps a plan-source run correct even
+when the repo's own `.task-config.yml` default is `linear` or `gh-issue`.
 
 **Size `--until` realistically.** A single `/deliver-task` floors well above a
 naive "a few minutes" guess once the resolved reviewer set includes a cloud
@@ -195,7 +219,8 @@ The full mechanics of each step are in
    warn-only, never blocks.
 5. **Record verify tooling + exercise path** — pin `verify_command` /
    `exercise_path` into `RUN.md` and install the un-jailed verify broker.
-6. **Materialize the task graph into run state** — write `RUN.md` /
+6. **Materialize the task graph into run state** — print the candidate count
+   and ids, write `RUN.md` /
    `QUESTIONS.md` / `REPORT.md`, then the deterministic capability-join
    **scout** (`"${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh" --scout-run-md`,
    including the less-claude CAO gate; BLOCKS LAUNCH on a route-vs-environment
@@ -314,7 +339,7 @@ branch) — that distinction drives the stacked-PR handling below.
 
 where `<branch>` is the task's `base` from `RUN.md` and `<handler>` is the
 run's effective handler resolved from the run's (normalized) source (plan ⇒
-`repo-pr`, linear ⇒ `linear`), never re-derived by `/deliver-task` itself.
+`repo-pr`, linear ⇒ `linear`, gh-issue ⇒ `gh-issue`), never re-derived by `/deliver-task` itself.
 `/deliver-task` ([`commands/deliver-task.md`](../../commands/deliver-task.md))
 owns the entire per-task lifecycle — claim, implement, PR, co-review, iterate,
 hand-off — including the internal reserve boundaries enabled by `--run-state`;

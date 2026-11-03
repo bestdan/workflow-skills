@@ -51,7 +51,7 @@ Front matter records the run's fixed parameters; a table records per-task state.
 ```markdown
 ---
 run_id: 2026-07-08-auto-pilot-mode # bare id; the run-state branch is auto-pilot/<run_id>
-work_source: linear:d0598803-… # linear:<projectId> or plan:<dir>
+work_source: linear:d0598803-… # linear:<projectId>, plan:<dir>, gh-issue:<owner>/<repo>#milestone/<n>, or gh-issue:<owner>/<repo>?label:<a>,label:<b> (labels sorted)
 base_branch: main
 verify_command: dli check # the named check (design pre-flight §5); the PINNED command the un-jailed verify broker runs (launch-runtime.md §5) — resolved once at launch, never agent-composed
 exercise_path: "drive /co-review --non-interactive on a scratch PR" # end-to-end check
@@ -478,10 +478,10 @@ task's own `phase`; it is computed from the graph edges and the blockers' phases
 by the adapter's `list_ready`/`dependency_graph` verbs
 ([`adapters.md`](adapters.md)).
 
-| Phase     | Meaning                                                                                 | Tracker                                                      | Git / remote            | Worker worktree |
-| --------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------ | ----------------------- | --------------- |
-| `pending` | Materialized into the graph, not yet claimed; readiness computed separately             | new / materialized (plan `new`\|`ready`; linear `unstarted`) | no branch               | none            |
-| `skipped` | **Terminal (not claimed):** `/deliver-task` refused the claim; the reason is in `notes` | untouched by this run                                        | no branch from this run | none            |
+| Phase     | Meaning                                                                                 | Tracker                                                                                 | Git / remote            | Worker worktree |
+| --------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ----------------------- | --------------- |
+| `pending` | Materialized into the graph, not yet claimed; readiness computed separately             | new / materialized (plan `new`\|`ready`; linear `unstarted`; gh-issue `status:2_ready`) | no branch               | none            |
+| `skipped` | **Terminal (not claimed):** `/deliver-task` refused the claim; the reason is in `notes` | untouched by this run                                                                   | no branch from this run | none            |
 
 **`skipped` is how a refused claim leaves the queue.** When `/deliver-task`
 returns a claim refusal (its step 2: lost race, already in flight under another
@@ -516,19 +516,23 @@ Seven in-flight/terminal phases follow, once a task is claimed. Each names
 exactly what exists on the tracker, in git, and on disk while a task sits in
 it — which is what makes the reconciliation table below decidable.
 
-| Phase          | Meaning                                                                 | Tracker                    | Git / remote                              | Worker worktree |
-| -------------- | ----------------------------------------------------------------------- | -------------------------- | ----------------------------------------- | --------------- |
-| `claimed`      | Claim held via the handler protocol; base chosen; no code yet           | claimed / started          | task branch may exist locally, no commits | none            |
-| `implementing` | Worker dispatched; diff being integrated + verified                     | started                    | local commits possible, **not pushed**    | may exist       |
-| `pr-open`      | Code pushed and PR opened (draft or ready)                              | started                    | branch pushed, PR open                    | removed         |
-| `in-review`    | `/co-review --non-interactive` running                                  | started                    | PR open                                   | none            |
-| `iterating`    | Applying review fixes, re-pushing (≤ 2 rounds)                          | started                    | PR updated                                | may exist       |
-| `handed-off`   | **Terminal (success):** PR linked, tracker at `needs_review`, PR frozen | needs_review               | PR open, linked                           | none            |
-| `parked`       | **Terminal (blocked):** couldn't proceed or reconcile; needs a human    | started (+ reason comment) | whatever existed at the stall             | removed         |
+| Phase          | Meaning                                                                 | Tracker                                         | Git / remote                              | Worker worktree |
+| -------------- | ----------------------------------------------------------------------- | ----------------------------------------------- | ----------------------------------------- | --------------- |
+| `claimed`      | Claim held via the handler protocol; base chosen; no code yet           | claimed / started (gh-issue `status:3_started`) | task branch may exist locally, no commits | none            |
+| `implementing` | Worker dispatched; diff being integrated + verified                     | started                                         | local commits possible, **not pushed**    | may exist       |
+| `pr-open`      | Code pushed and PR opened (draft or ready)                              | started                                         | branch pushed, PR open                    | removed         |
+| `in-review`    | `/co-review --non-interactive` running                                  | started                                         | PR open                                   | none            |
+| `iterating`    | Applying review fixes, re-pushing (≤ 2 rounds)                          | started                                         | PR updated                                | may exist       |
+| `handed-off`   | **Terminal (success):** PR linked, tracker at `needs_review`, PR frozen | needs_review (gh-issue `status:4_needs_review`) | PR open, linked                           | none            |
+| `parked`       | **Terminal (blocked):** couldn't proceed or reconcile; needs a human    | started (+ reason comment)                      | whatever existed at the stall             | removed         |
+
+On a gh-issue source every `started` above is `status:3_started`.
 
 `handed-off` is the success terminal — completion itself is verified later by
 the source's own completion path (`/sweep-for-complete` for a `linear` source;
-repo-pr's native merge-derived signal — the merged code PR — for a plan source),
+repo-pr's native merge-derived signal — the merged code PR — for a plan source;
+for a gh-issue source, GitHub closing the issue when the PR's `Closes #<n>`
+merges),
 never by the run. In-run dependency readiness keys off
 `handed-off`, not tracker completion. The tracker state `needs_review` here means
 **co-review is already complete** (it ran during `/deliver-task`); the remaining

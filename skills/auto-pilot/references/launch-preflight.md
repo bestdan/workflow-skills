@@ -22,11 +22,15 @@ worktree** — an **untracked plan is a launch blocker**, since a plan that
 lives only in an uncommitted file never reaches the detached orchestrator. If
 the source is a plan directory, the plan files must be committed on the
 branch the run builds from; if Linear, the project must resolve and be
-reachable. Fail here with the specific missing artifact, not a generic error.
+reachable; if gh-issue, the milestone must resolve to one open milestone on
+`gh-issue.repo` (a title to its number), or every queried label must exist
+there, matched exactly against
+`gh label list --repo <repo> --limit 1000 --json name --jq '.[].name'` (the
+default page is 30 labels, which a provisioned repo can exceed). Fail here with the specific missing artifact, not a generic error.
 
 ## Step 2 — Non-interactive auth probes (BLOCKS LAUNCH)
 
-Run `"${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh" --source <plan|linear> --base <base branch> --run-root <the step-1 worktree>` first
+Run `"${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh" --source <plan|linear|gh-issue> --base <base branch> --run-root <the step-1 worktree>` first
 — the read-only pre-flight helper this step extracts to. Its `PREFLIGHT …`
 output and `PREFLIGHT VERDICT: go` / `no-go — <reason>` line cover the binary
 fingerprint / environment class, coder availability, base freshness, the
@@ -56,6 +60,11 @@ authenticates through CLIs, `claude-web` through **MCP**. Probe whichever applie
 
 - **GitHub** — `local-full`: `gh auth status` (PRs + git push). `claude-web`:
   confirm the **GitHub MCP** is connected (no `gh` CLI exists there).
+- **gh-issue** (gh-issue source) — `local-full` only: the GitHub probe above
+  (`gh auth status`) is the whole credential check, because every adapter verb is
+  a `gh` call or a script that runs one, so there is no second token to resolve.
+  `claude-web` has no `gh` CLI, so a gh-issue source there **BLOCKS LAUNCH**,
+  naming the missing `gh`.
 - **Linear** (linear source) — `local-full`: confirm the API key resolves with
   `python3 commands/handlers/assets/_secret_resolve.py --probe LINEAR_API_KEY`,
   which honors the configured resolver and never prints the key (contract:
@@ -174,7 +183,10 @@ termination.
 
 Run the adapter's `list_ready` and `dependency_graph`
 ([`adapters.md`](adapters.md)) to build the run's task
-graph and its blocker edges. Write `.auto-pilot/RUN.md` — front matter
+graph and its blocker edges. Print the candidate count and the task ids
+`list_ready` returned (for gh-issue, the issue numbers) before writing
+anything, so a source broader than intended — a loose label query — is
+visible while the human can still abort. Write `.auto-pilot/RUN.md` — front matter
 (`run_id`, `work_source`, `base_branch`, `verify_command`/`exercise_path` from
 step 5, `min_task_budget` from step 3) plus the per-task table, in the exact
 format defined in
