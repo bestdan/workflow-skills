@@ -89,9 +89,9 @@ STRICT_FILES=(scripts/research-spike.py)
 # co-review-ledger-sync.py the same way by commands/co-review-stats.md and
 # commands/doctor.md, co-review-stamp.py the same way by
 # skills/co-review/references/stamping.md, co-review-status.py the same way by
-# skills/co-review/references/status.md, merge-tier.py and
-# co-review-evidence.py, which the lander (land-pr.sh) will run from the
-# installed plugin,
+# skills/co-review/references/status.md, land-pr.py, the lander, which runs
+# from the installed plugin, and merge-tier.py and co-review-evidence.py, which
+# it loads from there,
 # and worktree-teardown-reminder.py, guard-foreign-worktree.py,
 # guard-pinned-branch.py and guard-enter-by-path.py are run by the harness
 # itself — hooks/hooks.json registers them on PostToolUse and PreToolUse, so
@@ -108,6 +108,7 @@ CONSUMER_FILES=(
   scripts/co-review-evidence.py
   scripts/co-review-status.py
   scripts/merge-tier.py
+  scripts/land-pr.py
   scripts/coreview-input-lock.py
   scripts/co-review-stats.py
   scripts/co-review-ledger-sync.py
