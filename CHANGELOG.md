@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.186.0] - 2026-11-03
+
+### Features
+
+- keep stack-reaching calls out of consult [#1308] (#1358) (06b098a)
+
 ## [2.185.0] - 2026-11-03
 
 ### Features
