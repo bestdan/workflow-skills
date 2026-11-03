@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.187.0] - 2026-11-03
+
+### Features
+
+- keep the supervisor-state ledger outside the run worktree [#1360] (#1374) (33b5fd4)
+
 ## [2.186.2] - 2026-11-03
 
 ### Fixes
