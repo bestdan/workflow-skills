@@ -116,9 +116,11 @@ and the user's answers:
   run, or run and inconclusive.
 - `consult_calls` has one entry per item step 9's consult decided without
   asking: `confidence` as the integer percent it reported (a low-stakes call
-  decided without a consultant is `100`), and `kind` as `technical`,
-  `preference` for a call that came down to taste, or `stack` for one that
-  reaches past this PR into stacked or downstream work.
+  decided without a consultant is `100`), and `kind` as `technical`, or
+  `preference` for a call that came down to taste. Consult never decides a
+  stack-reaching call, but one left provisional under `--non-interactive`
+  gets an entry too, with `kind: stack` and `confidence: 0`: the lander holds
+  the PR on that kind until the owner confirms.
 - `next_round` is step 12's recommendation, `another round` or
   `no further round`.
 
