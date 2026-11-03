@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.183.0] - 2026-11-03
+
+### Features
+
+- warn on stale gh-issue claims, here and at auto-pilot launch [#1340] (#1347) (255cb36)
+
 ## [2.182.0] - 2026-11-03
 
 ### Features
