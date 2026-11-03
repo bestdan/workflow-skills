@@ -94,7 +94,11 @@ Worktree + run-state-branch creation (Launch step 1) and the **task-graph
 materialization** half of Launch step 6 already exist on the run-state branch
 from the original launch, so resume does not re-create them; **source
 normalization still runs** — resume must normalize `<source>` to resolve which
-run-state branch it reads from, even though it never re-creates that branch. What
+run-state branch it reads from, even though it never re-creates that branch. It
+normalizes by the same rules as launch ([`../SKILL.md`](../SKILL.md) "Preamble
+— parse + resolve"), so the original argument and the normalized form the run
+handoff prints find the same run — for gh-issue, a milestone title or number,
+or a label query in any order. What
 can rot between launch and resume, and so is re-run: the non-interactive **auth
 probes** and the **environment fingerprint** (Launch step 2) — a run launched
 `local-full` may resume under `claude-web`, or vice versa, so step 6's _other_

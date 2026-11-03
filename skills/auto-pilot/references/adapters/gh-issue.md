@@ -5,8 +5,11 @@ are in the [adapter interface](../adapters.md). This file holds only what is
 specific to a GitHub-issues source.
 
 Source: a GitHub **milestone**, or an explicit **label query**, in the repo
-`gh-issue.repo` names (`handler: gh-issue`); the source syntax lands in
-`SKILL.md` with issue #1020.
+`gh-issue.repo` names (`handler: gh-issue`); the argument syntax and its
+normalization are in `SKILL.md`'s Launch phase, "Preamble — parse + resolve".
+`work_source` records a milestone by number, so `list_ready` reads the
+milestone's current title (`gh api repos/<repo>/milestones/<n> --jq .title`)
+for its search term.
 Either one only **narrows** the handler's candidate query: a ready issue still
 needs `status:2_ready` **and** `auto:eligible`, so a human can withhold an issue
 from the run exactly as from `/do-tasks`. Native GitHub issue dependencies
@@ -56,9 +59,7 @@ launch unattended runs you do not intend to resume until it does.
 non-draft `opened` event and from `ready_for_review` (`gh-issue-claim.md` **Move to
 review on PR open**). A PR opened ready would put the issue in needs-review before
 co-review ran — the state the [write order](../run-state.md#write-order) forbids. The
-run opens the PR as a **draft** (`/deliver-task` on the gh-issue handler; the
-draft-open lands with issue #1023, and until then `/auto-pilot` refuses this
-handler), so the
+run opens the PR as a **draft** (`/deliver-task` on the gh-issue handler), so the
 Action stays silent at pr-open and `link_pr` is the URL comment alone. At hand-off
 `set_needs_review` marks the PR ready first and then writes the rung itself —
 remote before tracker, per the write order. Only a PR that is actually ready gets
