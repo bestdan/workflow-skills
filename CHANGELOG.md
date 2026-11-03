@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.182.0] - 2026-11-03
+
+### Features
+
+- add a command to release dead gh-issue claims [#1341] (#1345) (32eeff4)
+
 ## [2.181.0] - 2026-11-03
 
 ### Features
