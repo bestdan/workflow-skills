@@ -60,9 +60,11 @@ authenticates through CLIs, `claude-web` through **MCP**. Probe whichever applie
 
 - **GitHub** — `local-full`: `gh auth status` (PRs + git push). `claude-web`:
   confirm the **GitHub MCP** is connected (no `gh` CLI exists there).
-- **gh-issue** (gh-issue source) — the GitHub probe above (`gh auth status`) is
-  the whole credential check: every adapter verb is a `gh` call or a script that runs
-  one, so there is no second token to resolve.
+- **gh-issue** (gh-issue source) — `local-full` only: the GitHub probe above
+  (`gh auth status`) is the whole credential check, because every adapter verb is
+  a `gh` call or a script that runs one, so there is no second token to resolve.
+  `claude-web` has no `gh` CLI, so a gh-issue source there **BLOCKS LAUNCH**,
+  naming the missing `gh`.
 - **Linear** (linear source) — `local-full`: confirm the API key resolves with
   `python3 commands/handlers/assets/_secret_resolve.py --probe LINEAR_API_KEY`,
   which honors the configured resolver and never prints the key (contract:
