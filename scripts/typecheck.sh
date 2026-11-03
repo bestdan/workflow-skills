@@ -88,8 +88,8 @@ STRICT_FILES=(scripts/research-spike.py)
 # skills/co-review/SKILL.md and its agy/devin/grok reviewer files,
 # co-review-ledger-sync.py the same way by commands/co-review-stats.md and
 # commands/doctor.md, co-review-stamp.py the same way by
-# skills/co-review/references/stamping.md, the tier script the lander
-# (land-pr.sh, #1315) will run from the installed plugin,
+# skills/co-review/references/stamping.md, merge-tier.py, which the lander
+# (land-pr.sh) will run from the installed plugin,
 # and worktree-teardown-reminder.py, guard-foreign-worktree.py,
 # guard-pinned-branch.py and guard-enter-by-path.py are run by the harness
 # itself — hooks/hooks.json registers them on PostToolUse and PreToolUse, so

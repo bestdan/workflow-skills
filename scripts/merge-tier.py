@@ -86,6 +86,8 @@ def load_policy(path):
         text = Path(path).read_text()
     except OSError as exc:
         raise PolicyError(f"cannot read {path}: {exc.strerror or exc}") from exc
+    except UnicodeDecodeError as exc:
+        raise PolicyError(f"cannot decode {path}: {exc}") from exc
 
     raw: dict = {}
     current = None
@@ -190,11 +192,16 @@ REPO_RULES = {"prompt-paths-need-releasing-type": prompt_paths_need_releasing_ty
 # --- tiering ----------------------------------------------------------------
 
 
+def _count(value):
+    # bool is an int subclass, and a negative count would shrink the size total.
+    return type(value) is int and value >= 0
+
+
 def load_pr(source):
     try:
         text = sys.stdin.read() if source == "-" else Path(source).read_text()
         pr = json.loads(text)
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError(f"cannot read PR input: {exc}") from exc
     if not isinstance(pr, dict):
         raise ValueError("PR input must be a JSON object")
@@ -205,11 +212,11 @@ def load_pr(source):
         if not (
             isinstance(f, dict)
             and isinstance(f.get("path"), str)
-            and isinstance(f.get("additions"), int)
-            and isinstance(f.get("deletions"), int)
+            and _count(f.get("additions"))
+            and _count(f.get("deletions"))
         ):
             raise ValueError(
-                "each file needs a string `path` and integer `additions`/`deletions`"
+                "each file needs a string `path` and non-negative integer `additions`/`deletions`"
             )
     for key in ("title", "body"):
         if not isinstance(pr.get(key, ""), str):

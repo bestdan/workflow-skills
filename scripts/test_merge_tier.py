@@ -242,6 +242,36 @@ class TierTests(unittest.TestCase):
         facts["files"][0]["additions"] = "5"
         self.assert_human(self.run_tier(facts), "input invalid")
 
+    def test_negative_or_bool_line_counts_are_human(self):
+        for bad in (-900, True):
+            with self.subTest(bad=bad):
+                facts = pr(files=[("scripts/a.py", 1000, 0)])
+                facts["files"][0]["deletions"] = bad
+                self.assert_human(self.run_tier(facts), "input invalid")
+
+    def test_non_utf8_policy_or_input_is_human(self):
+        bad = self.tmp / "bad.bin"
+        bad.write_bytes(b"auto: [\xff]\n")
+        good_pr = self.tmp / "good.json"
+        good_pr.write_text(json.dumps(pr()))
+        good_policy = self.tmp / "good.yml"
+        good_policy.write_text(POLICY)
+        for argv, reason in (
+            (
+                ["--pr-json", str(good_pr), "--policy", str(bad)],
+                "policy invalid: cannot decode",
+            ),
+            (
+                ["--pr-json", str(bad), "--policy", str(good_policy)],
+                "input invalid: cannot read PR input",
+            ),
+        ):
+            with self.subTest(reason=reason):
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    self.assertEqual(tier_mod.main(argv), 0)
+                self.assert_human(json.loads(out.getvalue().splitlines()[0]), reason)
+
     def test_missing_required_flag_is_a_usage_error(self):
         with contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit) as cm:
