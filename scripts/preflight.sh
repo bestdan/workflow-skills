@@ -498,8 +498,9 @@ echo "PREFLIGHT HANDLER_SOURCE: $handler_source"
 # --- 3b. Launcher -------------------------------------------------------------
 # The detached run spawns only through launchd + a Seatbelt jail
 # (spawn-orchestrator.sh `write-launch` / `launch`), so a host missing either
-# cannot carry out launch step 7. Sections 4 and 5 then log their own skips —
-# truthfully, as "this probe could not run" — but a skip there is not a launch
+# cannot carry out launch step 7. Section 5 then logs a skip, and so does
+# section 4 when sandbox-exec is absent — truthfully, as "this probe could not
+# run" — but a skip there is not a launch
 # that can happen, so the missing launcher is a blocker of its own: the
 # pre-flight fails closed instead of printing `go` for a launch with no way to
 # spawn. The Linux launcher is tracked in #956.
