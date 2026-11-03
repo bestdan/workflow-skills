@@ -98,7 +98,9 @@ run-state branch it reads from, even though it never re-creates that branch. It
 normalizes by the same rules as launch ([`../SKILL.md`](../SKILL.md) "Preamble
 — parse + resolve"), so the original argument and the normalized form the run
 handoff prints find the same run — for gh-issue, a milestone title or number,
-or a label query in any order. What
+or a label query in any order. A title resolves against the milestone's
+current title, so after a rename resume with its number or the handoff's
+normalized form. What
 can rot between launch and resume, and so is re-run: the non-interactive **auth
 probes** and the **environment fingerprint** (Launch step 2) — a run launched
 `local-full` may resume under `claude-web`, or vice versa, so step 6's _other_

@@ -24,7 +24,9 @@ the source is a plan directory, the plan files must be committed on the
 branch the run builds from; if Linear, the project must resolve and be
 reachable; if gh-issue, the milestone must resolve to one open milestone on
 `gh-issue.repo` (a title to its number), or every queried label must exist
-there (`gh label list --repo <repo>`). Fail here with the specific missing artifact, not a generic error.
+there, matched exactly against
+`gh label list --repo <repo> --limit 1000 --json name --jq '.[].name'` (the
+default page is 30 labels, which a provisioned repo can exceed). Fail here with the specific missing artifact, not a generic error.
 
 ## Step 2 — Non-interactive auth probes (BLOCKS LAUNCH)
 

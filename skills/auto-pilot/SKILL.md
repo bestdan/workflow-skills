@@ -157,8 +157,9 @@ match wins:
 1. An existing `dev_docs/tasks/<name>_plan/` dir → **plan**, whatever the
    handler.
 2. Handler `gh-issue` → **gh-issue**, on `gh-issue.repo`. The argument is a
-   **label query** `label:<a>[,label:<b>…]` (it starts with `label:`; every
-   label must exist on the repo), a bare integer (a **milestone number**), the
+   **label query** `label:<a>[,label:<b>…]` (it starts with `label:`), a bare
+   integer (a **milestone number** — a milestone whose title is itself an
+   integer is chosen by its number, never by its title), the
    normalized form itself (`<owner>/<repo>#milestone/<n>` or
    `<owner>/<repo>?label:…`, which is what the run handoff's resume command
    prints; an `<owner>/<repo>` other than `gh-issue.repo` blocks), or any other
