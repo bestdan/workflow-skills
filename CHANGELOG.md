@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.184.0] - 2026-11-03
+
+### Features
+
+- add land-pr.sh --dry-run, the shadow merge lander [#1315] (#1346) (d1b7fb5)
+
 ## [2.183.0] - 2026-11-03
 
 ### Features
