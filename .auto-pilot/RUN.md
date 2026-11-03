@@ -4,7 +4,7 @@ work_source: gh-issue:bestdan/workflow-skills#milestone/16
 base_branch: main
 verify_command: just check
 exercise_path: "doc-only prompt edits: re-read the changed section against the issue's acceptance criteria; just check covers validate.py and the doc gates"
-status: active
+status: done
 paused_until:
 pause_observed_at:
 pause_source:
