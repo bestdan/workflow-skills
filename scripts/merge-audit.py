@@ -8,7 +8,8 @@ Two modes, both read-only:
   from the base branch's ruleset evaluations (`rulesets/rule-suites`, matched
   on the merge commit):
     bypass   a bypass actor pushed past the rules (the admin bypass)
-    ungated  the rules passed, so `co-review` was not required at the time
+    ungated  the rules passed the merge, though its head shows no `co-review`
+             success now; usually the check was not yet required
     unknown  no evaluation found; GitHub keeps them for about a month
   The list should be empty apart from deliberate bypasses.
 
@@ -65,6 +66,8 @@ land = _load("land_pr", "land-pr.py")
 ReadError = land.ReadError
 
 GRADUATION = 30
+PR_LIMIT = 1000
+RULE_SUITE_DAYS = 30
 FOLLOW_UP_DAYS = 7
 FOLLOW_UP_TYPES = ("fix", "revert")
 # Posted hold reasons that come from the tier, which --policy recomputes.
@@ -98,13 +101,16 @@ def read_merged(repo, since):
             "--search",
             f"merged:>={since}",
             "--limit",
-            "1000",
+            str(PR_LIMIT),
             "--json",
             "number,title,body,url,mergedAt,headRefOid,baseRefName,mergeCommit,labels",
         ]
     )
     if not isinstance(prs, list):
         raise ReadError("pr list: expected a list")
+    if len(prs) >= PR_LIMIT:
+        # GitHub search stops at 1000 results, so paging cannot get past it.
+        raise ReadError(f"pr list: hit the {PR_LIMIT}-PR search limit; narrow --since")
     return sorted(
         (p for p in prs if isinstance(p, dict) and p.get("mergedAt")),
         key=lambda p: p["mergedAt"],
@@ -151,7 +157,14 @@ def read_commits(repo, pr):
 # --- review -----------------------------------------------------------------
 
 
-def review(repo, prs):
+def review(repo, prs, since):
+    if dt.date.today() - dt.date.fromisoformat(since) > dt.timedelta(
+        days=RULE_SUITE_DAYS
+    ):
+        print(
+            f"note: rule suites cover about the last {RULE_SUITE_DAYS} days; "
+            "an older PR lacking co-review reads as unknown"
+        )
     lacking, rule_cache = [], {}
     for p in prs:
         head = p.get("headRefOid") or ""
@@ -329,7 +342,7 @@ def main(argv=None):
         print(f"AUDIT: error reason={exc}")
         return 1
     if args.mode == "review":
-        review(args.repo, prs)
+        review(args.repo, prs, args.since)
     else:
         shadow(args.repo, prs, policy_text)
     return 0

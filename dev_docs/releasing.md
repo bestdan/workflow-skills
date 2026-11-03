@@ -78,7 +78,8 @@ check as well as the release push. So does any merge made with an admin's
 token, including `dli gh merge` run by an agent. A skip shows up afterwards
 rather than being blocked: `scripts/merge-audit.py --mode review` lists merged
 PRs whose final head has no `co-review` `success`, and names each a `bypass`,
-`ungated` (merged before the check was required) or `unknown`. Run it weekly;
+`ungated` (the rules passed the merge; usually the check was not yet required)
+or `unknown`. Run it weekly;
 its docstring has the command.
 
 ### One-time: the first run seeds a baseline

@@ -155,6 +155,27 @@ class ReviewTests(Base):
         self.assertIn("cannot read rule suites", lines[0])
         self.assertTrue(lines[-1].endswith("unknown=1"))
 
+    def test_unreadable_statuses_are_unknown_not_a_crash(self):
+        self.fake.prs = [pr(6, "2026-11-02T10:00:00Z")]
+        self.fake.fail = {"/status"}
+        code, lines = self.run_audit("--mode", "review")
+        self.assertEqual(code, 0)
+        self.assertIn("cannot read statuses", lines[0])
+        self.assertTrue(lines[-1].endswith("unknown=1"))
+
+    def test_a_result_at_the_search_limit_is_an_error_not_a_short_count(self):
+        self.fake.prs = [pr(n, "2026-11-02T10:00:00Z") for n in range(audit.PR_LIMIT)]
+        code, lines = self.run_audit("--mode", "review")
+        self.assertEqual(code, 1)
+        self.assertIn("search limit", lines[-1])
+
+    def test_a_window_older_than_the_rule_suites_says_so(self):
+        self.fake.prs = []
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            audit.main(["--repo", REPO, "--since", "2020-01-01", "--mode", "review"])
+        self.assertTrue(out.getvalue().startswith("note: rule suites cover"))
+
     def test_unreadable_pr_list_exits_1(self):
         self.fake.fail = {"pr list"}
         code, lines = self.run_audit("--mode", "review")
@@ -201,6 +222,14 @@ class ShadowTests(Base):
         self.assertIn("follow-up #11", text)
         self.assertNotIn("follow-up #13", text)  # past 7 days
         self.assertNotIn("follow-up #14", text)  # cites #100, not #10
+        self.assertEqual(lines[-1], "AUDIT: shadow shadowed=1 would-land=1/30")
+
+    def test_a_judged_head_missing_from_the_commits_is_said_and_still_counted(self):
+        self.fake.prs = [pr(40, "2026-11-02T10:00:00Z")]
+        self.fake.comments = {40: [lander_comment("yes", "b" * 40, ["checks green"])]}
+        self.fake.commits = {40: [{"sha": sha(40), "commit": {"message": "x"}}]}
+        _, lines = self.run_audit("--mode", "shadow")
+        self.assertTrue(any("is not among the PR's commits" in line for line in lines))
         self.assertEqual(lines[-1], "AUDIT: shadow shadowed=1 would-land=1/30")
 
     def test_hold_verdict_is_not_counted_and_unshadowed_prs_are_skipped(self):
