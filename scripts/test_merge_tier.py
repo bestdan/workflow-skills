@@ -29,7 +29,7 @@ auto:
   - "scripts/**"
   - tests/*.py
 always_human:
-  - scripts/land-pr.sh
+  - scripts/deploy.sh
 size_cap: 50
 allowed_types: [chore, test, fix]
 repo_rules:
@@ -107,8 +107,8 @@ class TierTests(unittest.TestCase):
         self.assert_human(result, "README.md matches no auto glob")
 
     def test_always_human_beats_auto(self):
-        result = self.run_tier(pr(files=[("scripts/land-pr.sh", 1, 0)]))
-        self.assert_human(result, "scripts/land-pr.sh matches always_human")
+        result = self.run_tier(pr(files=[("scripts/deploy.sh", 1, 0)]))
+        self.assert_human(result, "scripts/deploy.sh matches always_human")
 
     def test_the_policy_file_is_always_human(self):
         policy = POLICY.replace(
@@ -118,13 +118,14 @@ class TierTests(unittest.TestCase):
             pr(files=[(".github/merge-policy.yml", 1, 0)]), policy=policy
         )
         self.assert_human(
-            result, ".github/merge-policy.yml is the merge policy or tier script"
+            result,
+            ".github/merge-policy.yml is the merge policy, tier script or lander",
         )
 
     def test_the_tier_script_is_always_human(self):
         result = self.run_tier(pr(files=[("scripts/merge-tier.py", 1, 0)]))
         self.assert_human(
-            result, "scripts/merge-tier.py is the merge policy or tier script"
+            result, "scripts/merge-tier.py is the merge policy, tier script or lander"
         )
 
     def test_no_changed_files_is_human(self):
@@ -229,6 +230,31 @@ class TierTests(unittest.TestCase):
             "policy invalid: `size_cap` must be a positive integer",
         )
 
+    def test_the_lander_is_always_human(self):
+        for path in ("scripts/land-pr.sh", "scripts/land-pr.py"):
+            self.assert_human(
+                self.run_tier(pr(files=[(path, 1, 0)])),
+                f"{path} is the merge policy, tier script or lander",
+            )
+
+    def test_consult_bar_is_validated(self):
+        result = self.run_tier(pr(), policy=POLICY + "consult_bar: 90\n")
+        self.assertEqual(result["tier"], "auto")
+        for bad in ("101", "-1", "high", "85.5"):
+            self.assert_human(
+                self.run_tier(pr(), policy=POLICY + f"consult_bar: {bad}\n"),
+                "policy invalid: `consult_bar` must be an integer 0-100",
+            )
+
+    def test_evaluate_returns_the_consult_bar_default_85(self):
+        pr_file = self.tmp / "pr.json"
+        pr_file.write_text(json.dumps(pr()))
+        policy_file = self.tmp / "p.yml"
+        for text, bar in ((POLICY, 85), (POLICY + "consult_bar: 70\n", 70)):
+            policy_file.write_text(text)
+            tier, _, policy = tier_mod.evaluate(str(pr_file), str(policy_file), "on")
+            self.assertEqual((tier, policy["consult_bar"]), ("auto", bar))
+
     def test_unknown_key_is_human(self):
         result = self.run_tier(pr(), policy=POLICY + "auto_merge: yes\n")
         self.assert_human(result, "policy invalid: line 11: unknown key `auto_merge`")
@@ -248,9 +274,9 @@ class TierTests(unittest.TestCase):
 
     def test_a_rename_out_of_always_human_is_human(self):
         facts = pr(files=[("scripts/land.sh", 0, 0)])
-        facts["files"][0].update(status="renamed", previous_path="scripts/land-pr.sh")
+        facts["files"][0].update(status="renamed", previous_path="scripts/deploy.sh")
         self.assert_human(
-            self.run_tier(facts), "scripts/land-pr.sh matches always_human"
+            self.run_tier(facts), "scripts/deploy.sh matches always_human"
         )
 
     def test_a_rename_of_the_tier_script_is_human(self):
@@ -260,7 +286,7 @@ class TierTests(unittest.TestCase):
         )
         self.assert_human(
             self.run_tier(facts),
-            "scripts/merge-tier.py is the merge policy or tier script",
+            "scripts/merge-tier.py is the merge policy, tier script or lander",
         )
 
     def test_a_rename_without_previous_path_is_human(self):
@@ -319,9 +345,9 @@ class TierTests(unittest.TestCase):
 
     def test_a_copy_of_an_always_human_path_is_human(self):
         facts = pr(files=[("scripts/land-copy.sh", 1, 0)])
-        facts["files"][0].update(status="copied", previous_path="scripts/land-pr.sh")
+        facts["files"][0].update(status="copied", previous_path="scripts/deploy.sh")
         self.assert_human(
-            self.run_tier(facts), "scripts/land-pr.sh matches always_human"
+            self.run_tier(facts), "scripts/deploy.sh matches always_human"
         )
 
     def test_unconventional_title_on_a_prompt_path_gives_one_title_reason(self):

@@ -5,7 +5,7 @@ Rules decide the tier and nothing else does: the inputs are the PR's changed
 paths and line counts, its title, body and labels, the repo's merge policy,
 and the AGENT_LAND kill switch. No model output and no co-review evidence is
 read here; review evidence can only demote a PR further, and the lander
-(land-pr.sh, not yet written) is to apply those demotions after this script.
+(land-pr.py, run as land-pr.sh) applies those demotions after this script.
 
 The default is `human`. A PR is `auto` only when no rule below demotes it.
 Every rule that fires is reported, so a human tier always says why.
@@ -33,6 +33,9 @@ the PR's base branch, never from its head. It must use the YAML subset
   size_cap:      most changed lines (additions + deletions) for `auto`; default 300
   allowed_types: Conventional Commit title types allowed `auto`
   repo_rules:    ids of repo-specific lints from REPO_RULES
+  consult_bar:   least consult confidence, 0-100, that keeps a PR landable;
+                 default 85. This script validates it and never applies it:
+                 the lander reads it with `evaluate` for its evidence demotion
 
 Globs: `**` matches across directories, `*` and `?` within one path segment.
 
@@ -52,12 +55,25 @@ import sys
 from pathlib import Path
 
 DEFAULT_SIZE_CAP = 300
+DEFAULT_CONSULT_BAR = 85
 # The policy that grants autonomy, and the script that applies it, are always
 # human-tier: a PR must not be able to widen its own tier.
-SELF_PATHS = (".github/merge-policy.yml", "scripts/merge-tier.py")
+SELF_PATHS = (
+    ".github/merge-policy.yml",
+    "scripts/merge-tier.py",
+    "scripts/land-pr.py",
+    "scripts/land-pr.sh",
+)
 # Title types that cut a release in this plugin (.github/workflows/release.yml).
 RELEASING_TYPES = ("feat", "fix", "perf")
-POLICY_KEYS = ("auto", "always_human", "size_cap", "allowed_types", "repo_rules")
+POLICY_KEYS = (
+    "auto",
+    "always_human",
+    "size_cap",
+    "allowed_types",
+    "repo_rules",
+    "consult_bar",
+)
 LIST_KEYS = ("auto", "always_human", "allowed_types", "repo_rules")
 TITLE_RE = re.compile(r"^(?P<type>[a-z]+)(?:\([^)]*\))?(?P<bang>!)?: \S")
 BREAKING_RE = re.compile(r"^BREAKING[ -]CHANGE: ", re.MULTILINE)
@@ -145,6 +161,10 @@ def _validate(raw):
     if not re.fullmatch(r"[1-9][0-9]*", cap):
         raise PolicyError(f"`size_cap` must be a positive integer, got `{cap}`")
     policy["size_cap"] = int(cap)
+    bar = raw.get("consult_bar", str(DEFAULT_CONSULT_BAR))
+    if not re.fullmatch(r"[0-9]+", bar) or int(bar) > 100:
+        raise PolicyError(f"`consult_bar` must be an integer 0-100, got `{bar}`")
+    policy["consult_bar"] = int(bar)
     for rule in policy["repo_rules"]:
         if rule not in REPO_RULES:
             raise PolicyError(f"unknown repo rule `{rule}`")
@@ -286,7 +306,7 @@ def classify(pr, policy, agent_land):
         for path in file_paths(f):
             if path in SELF_PATHS:
                 reasons.append(
-                    f"{path} is the merge policy or tier script, always human"
+                    f"{path} is the merge policy, tier script or lander, always human"
                 )
             elif matches(path, policy["always_human"]):
                 reasons.append(f"{path} matches always_human")
@@ -307,6 +327,20 @@ def classify(pr, policy, agent_land):
     ]
 
 
+def evaluate(pr_source, policy_path, agent_land):
+    """(tier, reasons, policy) for one PR; policy is None when it is invalid."""
+    try:
+        pr = load_pr(pr_source)
+    except ValueError as exc:
+        return "human", [f"input invalid: {exc}"], None
+    try:
+        policy = load_policy(policy_path)
+    except PolicyError as exc:
+        return "human", [f"policy invalid: {exc}"], None
+    tier, reasons = classify(pr, policy, agent_land)
+    return tier, reasons, policy
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--pr-json", required=True, help="PR facts as JSON, or - for stdin")
@@ -319,18 +353,7 @@ def main(argv=None):
     )
     args = p.parse_args(argv)
 
-    try:
-        pr = load_pr(args.pr_json)
-    except ValueError as exc:
-        tier, reasons = "human", [f"input invalid: {exc}"]
-    else:
-        try:
-            policy = load_policy(args.policy)
-        except PolicyError as exc:
-            tier, reasons = "human", [f"policy invalid: {exc}"]
-        else:
-            tier, reasons = classify(pr, policy, args.agent_land)
-
+    tier, reasons, _ = evaluate(args.pr_json, args.policy, args.agent_land)
     print(json.dumps({"tier": tier, "reasons": reasons}))
     print(f"TIER: {tier}")
     return 0
