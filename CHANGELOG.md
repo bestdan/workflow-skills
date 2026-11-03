@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.178.0] - 2026-11-03
+
+### Features
+
+- classify a PR as auto or human merge tier [#1309] (#1342) (026a4f3)
+
 ## [2.177.0] - 2026-11-03
 
 ### Features
