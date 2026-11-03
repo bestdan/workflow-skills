@@ -114,13 +114,15 @@ and the user's answers:
   unresolved.
 - `verification_open` counts verification items left for the user, not yet
   run, or run and inconclusive.
-- `consult_calls` has one entry per item step 9's consult decided without
-  asking: `confidence` as the integer percent it reported (a low-stakes call
-  decided without a consultant is `100`), and `kind` as `technical`, or
-  `preference` for a call that came down to taste. Consult never decides a
-  stack-reaching call, but one left provisional under `--non-interactive`
-  gets an entry too, with `kind: stack` and `confidence: 0`: the lander holds
-  the PR on that kind until the owner confirms.
+- `consult_calls` has one entry per medium call settled or left provisional
+  without the owner: each item step 9's consult decided without asking, and
+  each stack-reaching call left provisional under `--non-interactive`. For a
+  consult decision, `confidence` is the integer percent it reported (a
+  low-stakes call decided without a consultant is `100`), and `kind` is
+  `technical`, or `preference` for a call that came down to taste. A
+  provisional stack call has `kind: stack` and `confidence: 0`, since no
+  consultant decided it. The lander holds the PR on that kind and never
+  reads its confidence.
 - `next_round` is step 12's recommendation, `another round` or
   `no further round`.
 
