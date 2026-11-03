@@ -33,6 +33,7 @@ canonical source; this script does not invent variants):
 Usage:
     scripts/task-scan.py [task_dir] [--prs <json>]
     scripts/task-scan.py [task_dir] --archive-candidates --older-than <N>
+    scripts/task-scan.py [task_dir] --expired
 
     task_dir              Directory to scan recursively for *.md task files.
                            Default: dev_docs/tasks (relative to cwd, NOT a
@@ -52,10 +53,19 @@ Usage:
                            prose.
     --older-than <N>      Required with --archive-candidates. Age threshold in
                            days.
+    --expired             Selection mode for /doctor Check 5: print one line
+                           per expired card, `<slug>`, a tab, then `<path>`,
+                           grouped by status and in rank order within each
+                           status, and no JSON. No lines means no expired
+                           cards. Mutually exclusive with --archive-candidates.
 
-Emits one JSON document on stdout. Fail-closed: malformed frontmatter (YAML
-that fails to parse) exits non-zero with a clear message on stderr, rather
-than silently skipping the file.
+Default mode emits one JSON document on stdout: `task_dir`, `generated_at`,
+`cards` and `epics`. `cards` is a dict keyed by status; each value is a list of
+card objects in rank order, each carrying `slug`, `path`, `title`, `status`,
+`expires`, `expired`, `rank` and the other fields built in main(). `epics` is a
+list of epic rollups. Fail-closed in every mode: malformed frontmatter (YAML
+that fails to parse) exits non-zero with a clear message on stderr, rather than
+silently skipping the file.
 """
 
 from __future__ import annotations
@@ -387,7 +397,18 @@ def main() -> None:
         default=None,
         help="Age threshold in days. Required with --archive-candidates.",
     )
+    parser.add_argument(
+        "--expired",
+        action="store_true",
+        help=(
+            "Print one `<slug>\\t<path>` line per expired card instead of "
+            "JSON (commands/doctor.md Check 5)."
+        ),
+    )
     args = parser.parse_args()
+
+    if args.expired and args.archive_candidates:
+        die("--expired and --archive-candidates are mutually exclusive")
 
     if args.archive_candidates and args.older_than is None:
         die("--archive-candidates requires --older-than <N>")
@@ -415,6 +436,8 @@ def main() -> None:
                     indent=2,
                 )
             )
+            return
+        if args.expired:
             return
         print(
             json.dumps(
@@ -578,6 +601,13 @@ def main() -> None:
         for i, entry in enumerate(group, start=1):
             entry["rank"] = i
             del entry["_rank_key"]
+
+    if args.expired:
+        for group in cards_by_status.values():
+            for entry in group:
+                if entry["expired"]:
+                    print(f"{entry['slug']}\t{entry['path']}")
+        return
 
     epic_rollups = []
     for epic in epics:
