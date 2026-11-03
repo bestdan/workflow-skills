@@ -75,9 +75,10 @@ job's `if:` guard exists; both are load-bearing here.
 once `co-review` reports `success` on its exact head
 (`skills/co-review/references/status.md`). The admin bypass above skips that
 check as well as the release push. So does any merge made with an admin's
-token, including `dli gh merge` run by an agent. The weekly audit (#1322) lists
-merged PRs that have no `co-review` `success`, so a skip shows up afterwards
-rather than being blocked.
+token, including `dli gh merge` run by an agent. The weekly audit planned in
+#1322 will list merged PRs that have no `co-review` `success`, so a skip shows
+up afterwards rather than being blocked. Until it lands, nothing reports a
+skip.
 
 ### One-time: the first run seeds a baseline
 
