@@ -21,7 +21,7 @@ or re-derive them here.
 
 - `--apply` — release each dead claim. Without it, the run is a dry run that
   writes nothing.
-- `--hours <n>` — age past which a claim with no PR and no pushed commits is
+- `--hours <n>` — age past which a claim with no open PR and no pushed commits is
   dead. Overrides `gh-issue.stale_claim_hours`; absent both, the script's
   default of 24 applies.
 
