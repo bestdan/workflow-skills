@@ -99,12 +99,17 @@ def _evidence_gh(args, stdin=None):
 setattr(evidence_mod.stamp, "run_gh", _evidence_gh)
 
 
+def _target(args):
+    """The endpoint a call names, for error text; flags like --paginate say nothing."""
+    return next((a for a in args if a.startswith("repos/")), " ".join(args[:3]))
+
+
 def gh(args, stdin=None):
     code, out, err = run_gh(args, stdin)
     if code != 0:
         detail = (err or out).strip().splitlines()
         raise ReadError(
-            f"gh {' '.join(args[:3])} failed (rc {code})"
+            f"gh {_target(args)} failed (rc {code})"
             + (f": {detail[-1]}" if detail else ""),
             not_found="HTTP 404" in (err or ""),
         )
@@ -116,7 +121,7 @@ def gh_json(args):
     try:
         return json.loads(out)
     except json.JSONDecodeError as exc:
-        raise ReadError(f"gh {' '.join(args[:3])}: unreadable JSON: {exc}") from exc
+        raise ReadError(f"gh {_target(args)}: unreadable JSON: {exc}") from exc
 
 
 def _pages(args):
@@ -202,11 +207,17 @@ def read_agent_land(repo):
 
 
 def read_statuses(repo, head):
-    data = gh_json(["api", f"repos/{repo}/commits/{head}/status"])
-    statuses = data.get("statuses") if isinstance(data, dict) else None
-    if not isinstance(statuses, list):
-        raise ReadError("commit status: no statuses list")
-    return {s.get("context"): s.get("state") for s in statuses if isinstance(s, dict)}
+    # Paginated: a status past the first page would otherwise go unseen, and a
+    # red one unseen is a would-land that should have been a hold.
+    found = {}
+    for page in _pages([f"repos/{repo}/commits/{head}/status"]):
+        statuses = page.get("statuses") if isinstance(page, dict) else None
+        if not isinstance(statuses, list):
+            raise ReadError("commit status: a page has no statuses list")
+        for s in statuses:
+            if isinstance(s, dict):
+                found[s.get("context")] = s.get("state")
+    return found
 
 
 def read_check_runs(repo, head):

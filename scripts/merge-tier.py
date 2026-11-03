@@ -56,13 +56,16 @@ from pathlib import Path
 
 DEFAULT_SIZE_CAP = 300
 DEFAULT_CONSULT_BAR = 85
-# The policy that grants autonomy, and the script that applies it, are always
-# human-tier: a PR must not be able to widen its own tier.
+# The landing gate is always human-tier: the policy that grants autonomy, this
+# script, the lander, and the evidence reader and parser it demotes on. A PR
+# must not be able to widen its own tier.
 SELF_PATHS = (
     ".github/merge-policy.yml",
     "scripts/merge-tier.py",
     "scripts/land-pr.py",
     "scripts/land-pr.sh",
+    "scripts/co-review-evidence.py",
+    "scripts/co-review-stamp.py",
 )
 # Title types that cut a release in this plugin (.github/workflows/release.yml).
 RELEASING_TYPES = ("feat", "fix", "perf")
@@ -305,9 +308,7 @@ def classify(pr, policy, agent_land):
             reasons.append(f"{f['path']} is {f['status']} with no previous_path")
         for path in file_paths(f):
             if path in SELF_PATHS:
-                reasons.append(
-                    f"{path} is the merge policy, tier script or lander, always human"
-                )
+                reasons.append(f"{path} is part of the landing gate, always human")
             elif matches(path, policy["always_human"]):
                 reasons.append(f"{path} matches always_human")
             elif not matches(path, policy["auto"]):

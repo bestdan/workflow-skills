@@ -92,6 +92,7 @@ class FakeGh:
         self.policies = {"main": POLICY, "feature": PERMISSIVE}
         self.agent_land: Optional[str] = "on"
         self.statuses = {"co-review": "success"}
+        self.status_page_2: List[dict] = []
         self.check_runs: List[dict] = [
             {"name": "check", "status": "completed", "conclusion": "success"}
         ]
@@ -151,7 +152,10 @@ class FakeGh:
             return 0, self.agent_land + "\n", ""
         if path == f"{base}/commits/{HEAD}/status":
             statuses = [{"context": k, "state": v} for k, v in self.statuses.items()]
-            return 0, json.dumps({"state": "x", "statuses": statuses}), ""
+            pages = [{"state": "x", "statuses": statuses}]
+            if self.status_page_2:
+                pages.append({"state": "x", "statuses": self.status_page_2})
+            return 0, json.dumps(pages), ""
         if path == f"{base}/commits/{HEAD}/check-runs":
             return 0, json.dumps([{"check_runs": self.check_runs}]), ""
         if path == f"{base}/rules/branches/main":
@@ -250,6 +254,10 @@ class LandTests(unittest.TestCase):
     def test_a_red_commit_status_holds(self):
         self.fake.statuses["lint"] = "error"
         self.assert_hold("check `lint` is error")
+
+    def test_a_red_status_on_a_later_page_holds(self):
+        self.fake.status_page_2 = [{"context": "legacy-ci", "state": "failure"}]
+        self.assert_hold("check `legacy-ci` is failure")
 
     def test_a_pending_check_holds(self):
         self.fake.check_runs[0] = {"name": "check", "status": "in_progress"}
@@ -393,7 +401,9 @@ class LandTests(unittest.TestCase):
 
     def test_unreadable_files_hold(self):
         self.fake.fail.add("/files")
-        self.assert_hold("tier not computed: gh api --paginate --slurp failed")
+        self.assert_hold(
+            "tier not computed: gh repos/acme/widgets/pulls/7/files failed"
+        )
 
     def test_unreadable_statuses_hold(self):
         self.fake.fail.add(f"commits/{HEAD}/status")

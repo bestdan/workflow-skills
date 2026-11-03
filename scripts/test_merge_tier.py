@@ -119,14 +119,12 @@ class TierTests(unittest.TestCase):
         )
         self.assert_human(
             result,
-            ".github/merge-policy.yml is the merge policy, tier script or lander",
+            ".github/merge-policy.yml is part of the landing gate",
         )
 
     def test_the_tier_script_is_always_human(self):
         result = self.run_tier(pr(files=[("scripts/merge-tier.py", 1, 0)]))
-        self.assert_human(
-            result, "scripts/merge-tier.py is the merge policy, tier script or lander"
-        )
+        self.assert_human(result, "scripts/merge-tier.py is part of the landing gate")
 
     def test_no_changed_files_is_human(self):
         self.assert_human(self.run_tier(pr(files=[])), "no changed files")
@@ -230,11 +228,16 @@ class TierTests(unittest.TestCase):
             "policy invalid: `size_cap` must be a positive integer",
         )
 
-    def test_the_lander_is_always_human(self):
-        for path in ("scripts/land-pr.sh", "scripts/land-pr.py"):
+    def test_the_lander_and_its_evidence_reader_are_always_human(self):
+        for path in (
+            "scripts/land-pr.sh",
+            "scripts/land-pr.py",
+            "scripts/co-review-evidence.py",
+            "scripts/co-review-stamp.py",
+        ):
             self.assert_human(
                 self.run_tier(pr(files=[(path, 1, 0)])),
-                f"{path} is the merge policy, tier script or lander",
+                f"{path} is part of the landing gate",
             )
 
     def test_consult_bar_is_validated(self):
@@ -286,7 +289,7 @@ class TierTests(unittest.TestCase):
         )
         self.assert_human(
             self.run_tier(facts),
-            "scripts/merge-tier.py is the merge policy, tier script or lander",
+            "scripts/merge-tier.py is part of the landing gate",
         )
 
     def test_a_rename_without_previous_path_is_human(self):
