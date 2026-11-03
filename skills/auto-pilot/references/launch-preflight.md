@@ -186,7 +186,13 @@ Run the adapter's `list_ready` and `dependency_graph`
 graph and its blocker edges. Print the candidate count and the task ids
 `list_ready` returned (for gh-issue, the issue numbers) before writing
 anything, so a source broader than intended — a loose label query — is
-visible while the human can still abort. Write `.auto-pilot/RUN.md` — front matter
+visible while the human can still abort. On a gh-issue source, also run
+`gh-issue-claim.py stale-claims` as a dry run, the same call `/doctor` makes
+(`commands/doctor.md`, "Stale gh-issue claims"), and **warn, never block**, on
+any `dead` line: a dead claim is outside the run's candidates, so it costs the
+run nothing, but a crash in this run would add another dead claim, and
+`/sweep-stale-claims --apply` clears them. Exit `4` means the sweep could not
+read GitHub: say the stale-claims check did not run, and still do not block. Write `.auto-pilot/RUN.md` — front matter
 (`run_id`, `work_source`, `base_branch`, `verify_command`/`exercise_path` from
 step 5, `min_task_budget` from step 3) plus the per-task table, in the exact
 format defined in

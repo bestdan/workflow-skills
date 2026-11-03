@@ -254,6 +254,20 @@ separate authorities, so `/doctor` calls both.)
     why it can't be conclusive from a fresh `main` checkout). Corroborate with the
     `updated=` timestamp on the matching `CLAIMED` line and surface ones untouched for
     a while; never auto-delete.
+  - **Stale gh-issue claims** (`handler: gh-issue` only) — a session that died
+    after claiming leaves its issue on `status:3_started` with the lock ref held.
+    Run the sweep as a dry run, never with `--apply`, passing `gh-issue.repo`,
+    `branch_prefix` and, when set, `stale_claim_hours` as `--hours`:
+
+    ```bash
+    python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-claim.py" stale-claims \
+      --repo <repo> --prefix "<branch_prefix>" [--hours <n>]
+    ```
+
+    List each `dead #<n>` and `stranded-with-work #<n>` line it prints; `live`
+    lines are fine. Name `/sweep-stale-claims --apply` as the repair for the dead
+    ones; a stranded one has pushed commits and needs a human. Exit `4` means the
+    sweep could not read GitHub, so report the check as not run rather than clean.
   - **Merged-work local branches** — local `task/<slug>` branches whose PR has already
     merged or closed (`git branch --list 'task/*'` cross-checked against
     `gh pr list --state merged|closed`), safe to delete.
