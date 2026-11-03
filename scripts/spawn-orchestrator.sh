@@ -106,13 +106,14 @@
 #       --condition <id> --reason <text> [--action <text>]
 #   spawn-orchestrator.sh alarm-clear --dir <run-dir>
 #
-#   alarm      Task 16 — the run must ACTIVELY tell a human. Emits an OS-level
-#              notification (osascript, falling back to terminal-notifier; on a
-#              headless host with neither, a GitHub comment on the run's
-#              in-flight gh-issue task, else the last task it touched — other
-#              sources stay file-only), writes the `.auto-pilot/ALARM`
-#              sentinel, and prepends a one-line reason + REQUIRED ACTION to
-#              the very top of REPORT.md. Idempotent
+#   alarm      Task 16 — the run must ACTIVELY tell a human. Writes the
+#              `.auto-pilot/ALARM` sentinel, prepends a one-line reason +
+#              REQUIRED ACTION to the very top of REPORT.md, then notifies: on a
+#              gh-issue run, a GitHub comment on the in-flight task, else the
+#              last task it touched (the primary channel; a transient `gh`
+#              failure is retried on later wakes, a permanent one is not); and
+#              a desktop notification where the host has one (osascript, else
+#              terminal-notifier). Idempotent
 #              per <id> per run (the sentinel is the key), so a 300s relaunch
 #              cadence can't turn the alarm into the new noise. Pure shell — a
 #              rate-limited or auth-dead run cannot make a model call to alert
@@ -2212,55 +2213,169 @@ _alarm_target_issue() {
   ' "$run_md"
 }
 
-# The headless channel: a comment on the run's gh-issue task, which reaches the
-# owner through GitHub's own notifications. Only a gh-issue source has an issue
-# to comment on; every other source returns 1 and the alarm stays file-only.
-# Runs from the UN-jailed supervisor (the jail cannot reach gh's credentials).
+# Where a GitHub comment that failed TRANSIENTLY waits for the next wake, one
+# directory per condition, and how many attempts it gets in all (at the 300s
+# wake cadence, 12 is about an hour of outage).
+ALARM_GH_RETRY_DIR_NAME="alarm-github-retry"
+ALARM_GH_RETRY_MAX=12
+
+# Classify a failed `gh issue comment` as `transient` (worth another attempt on
+# a later wake) or `permanent` (another attempt fails the same way). A timeout,
+# a 429 and a 5xx are transient; any other 4xx, a missing issue and dead auth
+# are permanent. Anything unrecognised counts as transient — the attempt cap
+# bounds the cost of being wrong, and dropping an alarm is the worse mistake.
+_gh_failure_kind() {
+  local rc="$1" err="$2"
+  [ "$rc" = 124 ] && {
+    echo transient
+    return 0
+  }
+  if grep -qE 'HTTP 429' <<<"$err"; then
+    echo transient
+  elif grep -qiE 'HTTP 4[0-9][0-9]|could not resolve to an issue|authentication|gh auth login|not logged in' <<<"$err"; then
+    echo permanent
+  else
+    echo transient
+  fi
+}
+
+# One `gh issue comment` attempt. Returns 0 posted, 2 transient failure, 3
+# permanent failure; the failure's first stderr line lands in _ALARM_GH_ERR.
+_ALARM_GH_ERR=""
+_alarm_github_post() {
+  local repo="$1" issue="$2" body="$3" err rc
+  _ALARM_GH_ERR=""
+  command -v gh >/dev/null 2>&1 || {
+    _ALARM_GH_ERR="gh is not on PATH"
+    return 3
+  }
+  # A hung network call must not wedge the halt calling us: bound it where the
+  # host has `timeout`.
+  if command -v timeout >/dev/null 2>&1; then
+    err="$(timeout 60 gh issue comment "$issue" --repo "$repo" --body "$body" 2>&1 >/dev/null)"
+  else
+    err="$(gh issue comment "$issue" --repo "$repo" --body "$body" 2>&1 >/dev/null)"
+  fi
+  rc=$?
+  [ "$rc" = 0 ] && return 0
+  _ALARM_GH_ERR="$(printf '%s' "$err" | head -1)"
+  [ -n "$_ALARM_GH_ERR" ] || _ALARM_GH_ERR="gh exited $rc"
+  [ "$(_gh_failure_kind "$rc" "$err")" = transient ] && return 2
+  return 3
+}
+
+# Queue a transiently failed comment for the next wake (or count one more
+# attempt on an already-queued one). Best-effort: a queue that cannot be
+# written costs the retry, never the halt.
+_alarm_github_queue() {
+  local q="$1" repo="$2" issue="$3" body="$4" attempts="$5"
+  mkdir -p "$q" 2>/dev/null || return 0
+  printf '%s\n' "$repo" >"$q/repo" 2>/dev/null
+  printf '%s\n' "$issue" >"$q/issue" 2>/dev/null
+  printf '%s' "$body" >"$q/body" 2>/dev/null
+  printf '%s\n' "$attempts" >"$q/attempts" 2>/dev/null
+  return 0
+}
+
+# The GitHub channel: a comment on the run's gh-issue task, which reaches the
+# owner through GitHub's own notifications. It is the alarm's PRIMARY active
+# channel wherever the source is gh-issue, desktop notifier or not. Every other
+# source returns 1 and the alarm stays file-only plus desktop. Runs from the
+# UN-jailed supervisor (the jail cannot reach gh's credentials).
+#   0 posted   1 not applicable   2 failed transiently, queued for a retry
+#   3 failed permanently, not retried
 _alarm_github() {
-  local dir="$1" title="$2" msg="$3" source repo issue
+  local dir="$1" title="$2" msg="$3" condition="$4" source repo issue
   [ -n "$dir" ] || return 1
   source="$(_run_front_field "$dir" work_source | sed -e 's/[[:space:]]#.*$//')"
   case "$source" in gh-issue:*) ;; *) return 1 ;; esac
   repo="${source#gh-issue:}"
   repo="${repo%%[#?]*}"
-  case "$repo" in */*/* | /* | */ | "") return 1 ;; esac
+  # Exactly <owner>/<name>: one slash, neither end, a safe charset.
+  case "$repo" in */*/* | /* | */) return 1 ;; esac
+  case "$repo" in */*) ;; *) return 1 ;; esac
   case "$repo" in *[!A-Za-z0-9._/-]*) return 1 ;; esac
   issue="$(_alarm_target_issue "$dir")" || return 1
-  command -v gh >/dev/null 2>&1 || return 1
-  local body
+  local body rc=0
   body="$(printf '**%s**\n\n%s\n\n<sub>Posted by the auto-pilot supervisor on %s; the full record is the run'\''s `.auto-pilot/REPORT.md`.</sub>' \
     "$title" "$msg" "$(hostname 2>/dev/null || echo unknown-host)")"
-  # A hung network call must not wedge the halt calling us: bound it where the
-  # host has `timeout` (Linux, the host this channel exists for).
-  if command -v timeout >/dev/null 2>&1; then
-    timeout 60 gh issue comment "$issue" --repo "$repo" --body "$body" >/dev/null 2>&1
-  else
-    gh issue comment "$issue" --repo "$repo" --body "$body" >/dev/null 2>&1
-  fi
+  _alarm_github_post "$repo" "$issue" "$body" || rc=$?
+  case "$rc" in
+    0) return 0 ;;
+    2)
+      _alarm_github_queue "$dir/.auto-pilot/$ALARM_GH_RETRY_DIR_NAME/$condition" "$repo" "$issue" "$body" 1
+      echo "spawn-orchestrator: alarm: GitHub comment on #$issue failed transiently ($_ALARM_GH_ERR) — queued, retried on the next wake" >&2
+      return 2
+      ;;
+    *)
+      echo "spawn-orchestrator: alarm: GitHub comment on #$issue failed permanently ($_ALARM_GH_ERR) — not retried" >&2
+      return 3
+      ;;
+  esac
 }
 
-# Emit the active notification: a desktop notification where the host has one
-# (osascript, then terminal-notifier), else a GitHub comment on the run's
-# gh-issue task (a headless host). BEST-EFFORT BY CONTRACT: a missing, failing,
-# or (in-jail) exec-DENIED notifier must never abort the halt that is calling us
-# — the durable ALARM marker + REPORT.md line are written BEFORE this runs, so
-# the alarm survives a dead notifier. Always returns 0.
+# (UN-JAILED side, every wake) Re-attempt each queued comment: drop it once it
+# posts, fails permanently, or reaches ALARM_GH_RETRY_MAX attempts in all.
+_alarm_github_retry_drain() {
+  local qd="$1/.auto-pilot/$ALARM_GH_RETRY_DIR_NAME"
+  [ -d "$qd" ] || return 0
+  local q
+  for q in "$qd"/*; do
+    [ -d "$q" ] || continue
+    local repo issue body attempts rc=0
+    repo="$(head -1 "$q/repo" 2>/dev/null)"
+    issue="$(head -1 "$q/issue" 2>/dev/null)"
+    body="$(cat "$q/body" 2>/dev/null)"
+    attempts="$(head -1 "$q/attempts" 2>/dev/null)"
+    case "$attempts" in '' | *[!0-9]*) attempts=1 ;; esac
+    if [ -z "$repo" ] || [ -z "$issue" ] || [ -z "$body" ]; then
+      rm -rf "$q"
+      continue
+    fi
+    _alarm_github_post "$repo" "$issue" "$body" || rc=$?
+    attempts=$((attempts + 1))
+    case "$rc" in
+      0)
+        rm -rf "$q"
+        echo "spawn-orchestrator: alarm: queued GitHub comment on #$issue posted (attempt $attempts)"
+        ;;
+      2)
+        if [ "$attempts" -ge "$ALARM_GH_RETRY_MAX" ]; then
+          rm -rf "$q"
+          echo "spawn-orchestrator: alarm: GitHub comment on #$issue still failing after $attempts attempts ($_ALARM_GH_ERR) — giving up; the ALARM sentinel and REPORT.md hold the record" >&2
+        else
+          printf '%s\n' "$attempts" >"$q/attempts" 2>/dev/null
+        fi
+        ;;
+      *)
+        rm -rf "$q"
+        echo "spawn-orchestrator: alarm: queued GitHub comment on #$issue failed permanently ($_ALARM_GH_ERR) — dropped" >&2
+        ;;
+    esac
+  done
+  return 0
+}
+
+# Emit the active notifications: the GitHub comment (the primary channel on a
+# gh-issue run), then a desktop notification where the host has one (osascript,
+# then terminal-notifier). BEST-EFFORT BY CONTRACT: a missing, failing, or
+# (in-jail) exec-DENIED notifier must never abort the halt that is calling us —
+# the durable ALARM marker + REPORT.md line are written BEFORE this runs, so the
+# alarm survives a dead notifier. Always returns 0.
 _alarm_notify() {
-  local title="$1" msg="$2" dir="${3:-}"
-  if command -v osascript >/dev/null 2>&1; then
-    if osascript -e "display notification \"$(_applescript_escape "$msg")\" with title \"$(_applescript_escape "$title")\"" >/dev/null 2>&1; then
-      return 0
-    fi
+  local title="$1" msg="$2" dir="${3:-}" condition="${4:-alarm}"
+  local gh_rc=0 desktop=0
+  _alarm_github "$dir" "$title" "$msg" "$condition" || gh_rc=$?
+  if command -v osascript >/dev/null 2>&1 \
+    && osascript -e "display notification \"$(_applescript_escape "$msg")\" with title \"$(_applescript_escape "$title")\"" >/dev/null 2>&1; then
+    desktop=1
+  elif command -v terminal-notifier >/dev/null 2>&1 \
+    && terminal-notifier -title "$title" -message "$msg" >/dev/null 2>&1; then
+    desktop=1
   fi
-  if command -v terminal-notifier >/dev/null 2>&1; then
-    if terminal-notifier -title "$title" -message "$msg" >/dev/null 2>&1; then
-      return 0
-    fi
+  if [ "$gh_rc" != 0 ] && [ "$desktop" = 0 ]; then
+    echo "spawn-orchestrator: alarm NOTIFY FAILED (no GitHub comment posted and no desktop notifier delivered) — the ALARM marker and REPORT.md line are still written" >&2
   fi
-  if _alarm_github "$dir" "$title" "$msg"; then
-    return 0
-  fi
-  echo "spawn-orchestrator: alarm NOTIFY FAILED (no desktop notifier, and no GitHub comment: the source is not gh-issue, no task is claimed, or gh failed) — the ALARM marker and REPORT.md line are still written" >&2
   return 0
 }
 
@@ -2362,7 +2477,7 @@ alarm() {
 
   # 3. The active notification — LAST, so a dead/denied notifier can never cost
   #    us the durable record above.
-  _alarm_notify "auto-pilot ALARM — ${label:-run}" "$condition: $reason ACTION: $action" "$dir"
+  _alarm_notify "auto-pilot ALARM — ${label:-run}" "$condition: $reason ACTION: $action" "$dir" "$condition"
 
   echo "spawn-orchestrator: ALARM $condition — $reason"
 }
@@ -2452,7 +2567,7 @@ alarm_clear() {
 
   local ap="$dir/.auto-pilot"
   rm -f "$ap/$ALARM_SENTINEL_NAME"
-  rm -rf "${ap:?}/$ALARM_REQUEST_DIR_NAME"
+  rm -rf "${ap:?}/$ALARM_REQUEST_DIR_NAME" "${ap:?}/$ALARM_GH_RETRY_DIR_NAME"
   # The REPORT.md alarm lines STAY: they are the history of what went wrong, which
   # is exactly what a human reads after a resume. Only the idempotency key resets.
   echo "spawn-orchestrator: alarms cleared for $dir (REPORT.md history kept)"
@@ -2567,6 +2682,7 @@ _supervisor_alarm_scan() {
   _ALARM_HALT_CONDITION=""
 
   _alarm_drain_requests "$dir" "$label"
+  _alarm_github_retry_drain "$dir"
 
   local ap="$dir/.auto-pilot" run_md="$dir/.auto-pilot/RUN.md"
   [ -f "$run_md" ] || return 0
