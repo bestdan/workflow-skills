@@ -243,8 +243,9 @@ record — which is exactly why the **exit reason**, which _is_ part of the
 record, goes in `RUN.md` instead.
 `supervisor-state` differs from the heartbeat in one load-bearing way, though:
 it is never written from inside the jail, and it lives outside the run
-worktree (`${XDG_STATE_HOME:-~/.local/state}/auto-pilot/<label>/<worktree key>/`), where no
-jail grants the agent access — the heartbeat is agent-writable by design, but a
+worktree, where no jail grants the agent access (the exact path:
+[`run-budget.md`](run-budget.md#a-third-terminal-kind--the-supervisor-halt-finding-22))
+— the heartbeat is agent-writable by design, but a
 counter/ledger the no-progress guard trusts cannot be.
 
 ### Restack (post-merge stacked-PR repair)

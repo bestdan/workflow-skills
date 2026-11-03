@@ -1507,9 +1507,14 @@ write_launch() {
   # no-progress counter and head carry over (validated), and the pause-exempt
   # clock restarts — a forged `exempt_since` could otherwise disable the cap.
   # The legacy file is removed whatever happens, so nothing is left to adopt
-  # later.
+  # later. If `.auto-pilot` itself is a symlink, the agent planted it: every
+  # test and the removal would follow it, as the host user, to a file of its
+  # choosing (its own ledger included, which would reset the cap). So a
+  # symlinked `.auto-pilot` is left entirely alone.
   local legacy="$workdir/$SUPERVISOR_STATE_LEGACY_REL"
-  if [ -f "$legacy" ] && [ ! -L "$legacy" ] && [ ! -e "$state_file" ]; then
+  if [ -L "$workdir/.auto-pilot" ]; then
+    echo "spawn-orchestrator: write-launch: $workdir/.auto-pilot is a symlink — legacy supervisor-state migration skipped" >&2
+  elif [ -f "$legacy" ] && [ ! -L "$legacy" ] && [ ! -e "$state_file" ]; then
     local legacy_count legacy_head
     legacy_count="$(_supervisor_state_field "$legacy" count)"
     case "$legacy_count" in '' | *[!0-9]*) legacy_count=0 ;; esac
@@ -1517,7 +1522,7 @@ write_launch() {
     case "$legacy_head" in *[!0-9a-f]*) legacy_head="" ;; esac
     _write_supervisor_state "$state_file" "$legacy_count" "$legacy_head" ""
   fi
-  if [ -e "$legacy" ] || [ -L "$legacy" ]; then
+  if [ ! -L "$workdir/.auto-pilot" ] && { [ -e "$legacy" ] || [ -L "$legacy" ]; }; then
     rm -f "$legacy" || die "cannot remove the legacy supervisor-state: $legacy"
   fi
   local tmp

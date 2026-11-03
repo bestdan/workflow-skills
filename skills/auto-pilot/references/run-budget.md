@@ -272,9 +272,14 @@ as exempt:
   `now - exempt_since` exceeds the cap, regardless of what RUN.md claims.
 - Not exempt → clear `exempt_since` (the streak ends).
 
-The ledger lives in `supervisor-state`, **outside the run worktree**: in
-`${XDG_STATE_HOME:-~/.local/state}/auto-pilot/<label>/<worktree key>/`, a supervisor-owned
-directory that no jail profile grants. Its location, not a deny rule, keeps the
+The ledger lives in `supervisor-state`, **outside the run worktree**, at
+`${AUTO_PILOT_STATE_HOME:-${XDG_STATE_HOME:-~/.local/state}/auto-pilot}/<label>/<worktree key>/supervisor-state`.
+The worktree key is the `cksum` of the run worktree path as `write-launch` was
+given it, so a resume keeps its ledger and a fresh run that reuses a label
+starts clean (`_supervisor_state_path` in `scripts/spawn-orchestrator.sh`). The
+generated wrapper exports the resolved root as `AUTO_PILOT_STATE_HOME`, so every
+wake finds the same file. It is a supervisor-owned directory that no jail
+profile grants. Its location, not a deny rule, keeps the
 **jailed agent** out, because Landlock (the Linux jail) cannot deny one file
 inside a writable grant. That is what makes the cap a real authority rather
 than one more agent-writable file: the agent can rewrite `RUN.md` however it

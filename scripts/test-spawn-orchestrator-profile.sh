@@ -626,6 +626,23 @@ if [ ! -L "$LGROOT/.auto-pilot/supervisor-state" ] && [ -f "$BASE/ledger-target"
 else
   bad "ledger: the symlink is removed, its target untouched"
 fi
+# A symlinked .auto-pilot is the agent's own plant: write-launch must neither
+# read through it nor delete through it (it could point at the real ledger).
+mkdir -p "$BASE/ledger-victim" "$BASE/ledger-wt3"
+printf 'count: 4\nhead: abc\nexempt_since: 1\n' >"$BASE/ledger-victim/supervisor-state"
+ln -s "$BASE/ledger-victim" "$BASE/ledger-wt3/.auto-pilot"
+lg_launch com.autopilot.ledger.parent "$BASE/ledger-wt3"
+if [ -f "$BASE/ledger-victim/supervisor-state" ]; then
+  ok "ledger: a symlinked .auto-pilot's target file survives write-launch"
+else
+  bad "ledger: a symlinked .auto-pilot's target file survives write-launch"
+fi
+lg_parent="$(lg_state com.autopilot.ledger.parent)"
+if [ -n "$lg_parent" ] && [ ! -e "$lg_parent" ]; then
+  ok "ledger: nothing is adopted through a symlinked .auto-pilot"
+else
+  bad "ledger: nothing is adopted through a symlinked .auto-pilot" "state=$lg_parent"
+fi
 # supervisor-scan refuses a label that cannot key a ledger, rather than silently
 # skipping the pause-exempt cap.
 o="$("$SCRIPT" supervisor-scan --dir "$LGROOT" --label 'bad/label' 2>&1)"
