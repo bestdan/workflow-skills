@@ -33,7 +33,6 @@
 #       --rw <path> [--rw <path> ...] \
 #       --ro <path> [--ro <path> ...] \
 #       --cred-ro <file> [--cred-ro <file> ...] \
-#       [--workdir <run worktree>] \
 #       --exec <path> [--exec <path> ...] \
 #       --exec-dir <dir> [--exec-dir <dir> ...] [--toolchain] \
 #       --out <file> [--template <file>]
@@ -271,12 +270,11 @@
 #                  `--pause-exempt-max` (default PAUSE_EXEMPT_MAX_SECONDS_DEFAULT,
 #                  6h), halt (`--condition pause-exempt`) regardless of what
 #                  RUN.md claims; if the run is NOT pause-exempt this wake, clear
-#                  `exempt_since`. The ledger lives in supervisor-state
-#                  ($SUPERVISOR_STATE_NAME under .auto-pilot/), which the rendered
-#                  sandbox profile denies the jailed agent write access to
-#                  (orchestrator.sb.tmpl's @@SUPERVISOR_STATE_DENY@@) — that
-#                  denial is what makes this cap the one thing about the pause
-#                  exemption the agent cannot forge, unlike `status`/`paused_until`
+#                  `exempt_since`. The ledger lives in supervisor-state, OUTSIDE
+#                  the run worktree (_supervisor_state_path: a supervisor-owned
+#                  directory keyed by --label that no jail grants) — that is
+#                  what makes this cap the one thing about the pause exemption
+#                  the agent cannot forge, unlike `status`/`paused_until`
 #                  themselves, which it writes freely.
 #                  Always exits 0 — bookkeeping, never a gate.
 #   spawn-orchestrator.sh restack --run-dir <dir> [--repo <path>] [--remote <name>] \
@@ -367,17 +365,6 @@
 #                state dir stays writable; only the token is denied writes, via a
 #                specific (deny file-write* (literal …)) emitted after the RW block.
 #                Must be an existing file. Repeatable.
-#     --workdir  The run worktree. Used ONLY to compute
-#                <--workdir>/.auto-pilot/$SUPERVISOR_STATE_NAME and deny it
-#                write, the same last-match-wins trick --cred-ro uses (emitted
-#                after the RW block, via @@SUPERVISOR_STATE_DENY@@ below) — so
-#                the no-progress guard's pause-exempt ledger (task: forgeable
-#                pause exemption) lives somewhere the JAILED agent cannot
-#                rewrite, even though the run worktree itself is --rw. The leaf
-#                file need not exist yet (tolerated the same way --tmpdir
-#                tolerates the harness's lazily created dirs). Optional; when
-#                omitted no such deny is emitted (an older caller's render
-#                keeps its prior, weaker shape).
 #     --exec  A binary permitted to exec (resolved coder + base toolchain).
 #             Repeatable.
 #     --exec-dir  A directory permitted to exec (subpath, coarser than --exec).
@@ -420,10 +407,47 @@ TEMPLATE_DEFAULT="$ROOT/scripts/orchestrator.sb.tmpl"
 # "Logs / observability").
 DONE_SENTINEL_NAME="orchestrator.done"
 # Local supervisor bookkeeping for the no-progress guard (task 10) — the
-# consecutive-failure counter + last-seen run-state HEAD. Lives beside RUN.md
-# but is NEVER committed to the run-state branch itself (it's wake-to-wake
-# scratch state, not part of the run's durable record).
+# consecutive-failure counter + last-seen run-state HEAD — and the pause-exempt
+# ledger's `exempt_since`. It lives OUTSIDE the run worktree, in a
+# supervisor-owned directory keyed by the run's label
+# (_supervisor_state_path), so no jail ever grants it: the jailed agent can
+# rewrite RUN.md freely but cannot reach this file. Location, not a deny rule,
+# is the protection, because Landlock (nono on Linux) cannot deny one file
+# inside a writable grant. Never committed anywhere.
 SUPERVISOR_STATE_NAME="supervisor-state"
+# A run launched before the move kept the ledger here; write-launch migrates it.
+SUPERVISOR_STATE_LEGACY_REL=".auto-pilot/$SUPERVISOR_STATE_NAME"
+
+# The directory every run's supervisor-state lives under:
+#   ${AUTO_PILOT_STATE_HOME:-${XDG_STATE_HOME:-$HOME/.local/state}/auto-pilot}
+# It must be absolute: the wrapper `cd`s into the run worktree, so a relative
+# root would land the ledger in the agent-writable tree it was moved out of.
+# write-launch exports the resolved value as AUTO_PILOT_STATE_HOME in the
+# generated wrapper, so the path it bakes into supervisor-check's --state and
+# the path supervisor-scan derives on each wake come from ONE value, whatever
+# the launchd/systemd job's own environment holds.
+_supervisor_state_root() {
+  local root="${AUTO_PILOT_STATE_HOME:-${XDG_STATE_HOME:-${HOME:-}/.local/state}/auto-pilot}"
+  case "$root" in /*) printf '%s\n' "$root" ;; *) return 1 ;; esac
+}
+
+# The supervisor-state file for one run: <root>/<label>/<worktree key>/. The
+# worktree key is the `cksum` of the run worktree path exactly as the wrapper
+# passes it (write-launch's --workdir is the same string it bakes into the
+# scan's --dir), so a resume (same worktree) keeps its ledger while a fresh run
+# that reuses a label (new worktree) starts clean. Neither input is something
+# the jailed agent can change; RUN.md's run_id is, so it is deliberately not
+# the key. The label is validated by every caller's own argument check
+# ([A-Za-z0-9._-]); re-checked here because it becomes a path segment.
+_supervisor_state_path() {
+  local label="$1" workdir="$2" root key
+  case "$label" in '' | . | .. | *[!A-Za-z0-9._-]*) return 1 ;; esac
+  case "$workdir" in /*) ;; *) return 1 ;; esac
+  root="$(_supervisor_state_root)" || return 1
+  key="$(printf '%s' "$workdir" | cksum | cut -d' ' -f1)" || return 1
+  [ -n "$key" ] || return 1
+  printf '%s/%s/%s/%s\n' "$root" "$label" "$key" "$SUPERVISOR_STATE_NAME"
+}
 # The heartbeat the orchestrator touches per loop iteration / per /deliver-task
 # sub-step, and the launch wrapper touches at the top of each wake. Like
 # supervisor-state it is NOT committed to the run-state branch (it beats far too
@@ -778,12 +802,9 @@ emit_allow() {
 # Emit a (deny file-write* (literal …)) form over the given files, or a
 # placeholder comment when the list is empty. This is emitted AFTER the RW block
 # so it overrides the state-dir write allow (Seatbelt = last matching rule wins),
-# keeping a file read-only while its enclosing state dir stays writable. Shared
-# by two callers with different files and different empty-case wording: a
-# credential token (--cred-ro) and the supervisor's own pause-exempt ledger
-# (--workdir → $SUPERVISOR_STATE_NAME) — same mechanism, different reason each
-# file must stay unwritable to the jailed agent. Args: <placeholder-comment>
-# <path>...
+# keeping a file read-only while its enclosing state dir stays writable. Used
+# for credential tokens (--cred-ro), which must stay unwritable to the jailed
+# agent. Args: <placeholder-comment> <path>...
 emit_deny_write() {
   local placeholder="$1"
   shift
@@ -824,7 +845,7 @@ emit_exec() {
 }
 
 render_profile() {
-  local out="" template="$TEMPLATE_DEFAULT" toolchain=0 tmpdir="" workdir=""
+  local out="" template="$TEMPLATE_DEFAULT" toolchain=0 tmpdir=""
   local -a rw=() ro=() cred=() ex=() exd=() confine=()
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -846,11 +867,6 @@ render_profile() {
       --tmpdir)
         [ $# -ge 2 ] || die "missing value for --tmpdir"
         tmpdir="$2"
-        shift 2
-        ;;
-      --workdir)
-        [ $# -ge 2 ] || die "missing value for --workdir"
-        workdir="$2"
         shift 2
         ;;
       --exec)
@@ -956,19 +972,6 @@ render_profile() {
     [ -f "$c" ] || die "cred-ro path is not a file (fail-closed): $c"
     cred_c+=("$c")
   done
-  # The supervisor-state ledger path (pause-exempt cap): the ONE file the
-  # no-progress guard's exemption bookkeeping lives in, and the whole point is
-  # that the JAILED agent must not be able to write it. --workdir is OPTIONAL —
-  # an older caller that doesn't pass it gets no such deny, same posture as an
-  # empty --cred-ro list. resolve_lazy (not canonicalize) because the state file
-  # — and even .auto-pilot/ itself — legitimately doesn't exist yet before a
-  # run's first wake, the same tolerance --tmpdir already needs for the
-  # harness's lazily created dirs.
-  local sup_state_path=""
-  if [ -n "$workdir" ]; then
-    case "$workdir" in /*) ;; *) die "--workdir must be absolute (fail-closed): $workdir" ;; esac
-    sup_state_path="$(resolve_lazy "$workdir/.auto-pilot/$SUPERVISOR_STATE_NAME")" || exit 2
-  fi
   for p in ${ex[@]+"${ex[@]}"}; do
     c="$(canonicalize "$p")" || exit 2
     { [ -f "$c" ] && [ -x "$c" ]; } || die "exec path is not an executable file (fail-closed): $c"
@@ -1013,18 +1016,12 @@ render_profile() {
   fi
 
   # Build the token blocks.
-  local ro_block rw_block cred_block sup_state_block ex_block harness_block
+  local ro_block rw_block cred_block ex_block harness_block
   ro_block="$(emit_allow "file-read*" ${ro_c[@]+"${ro_c[@]}"})"
   # RW scopes need both read and write.
   rw_block="$(emit_allow "file-read*" ${rw_c[@]+"${rw_c[@]}"})
 $(emit_allow "file-write*" ${rw_c[@]+"${rw_c[@]}"})"
   cred_block="$(emit_deny_write "(no isolated credential files)" ${cred_c[@]+"${cred_c[@]}"})"
-  # Same mechanism as cred_block, different file: this is what makes the
-  # pause-exempt ledger (supervisor-scan, task: forgeable pause exemption)
-  # genuinely unforgeable by the agent, rather than merely inconvenient to
-  # forge — see the --workdir doc above and orchestrator.sb.tmpl's
-  # @@SUPERVISOR_STATE_DENY@@ comment.
-  sup_state_block="$(emit_deny_write "(no supervisor-state deny — render without --workdir)" ${sup_state_path:+"$sup_state_path"})"
   ex_block="$(emit_exec ${ex_c[@]+"${ex_c[@]}"} -- ${exd_c[@]+"${exd_c[@]}"})"
   # Harness's OWN runtime surface (task 12 / finding #20) — fixed, host-resolved
   # paths, never caller-supplied (and so never subject to the caller-scope
@@ -1081,7 +1078,6 @@ $(emit_allow "file-write*" ${rw_c[@]+"${rw_c[@]}"})"
       *@@RO_PATHS@@*) printf '%s\n' "$ro_block" ;;
       *@@RW_PATHS@@*) printf '%s\n' "$rw_block" ;;
       *@@CRED_DENY@@*) printf '%s\n' "$cred_block" ;;
-      *@@SUPERVISOR_STATE_DENY@@*) printf '%s\n' "$sup_state_block" ;;
       *@@HARNESS_RUNTIME@@*) printf '%s\n' "$harness_block" ;;
       *@@EXEC_PATHS@@*) printf '%s\n' "$ex_block" ;;
       *) printf '%s\n' "$line" ;;
@@ -1500,7 +1496,35 @@ write_launch() {
   [ -n "$claude_bin" ] || die "claude not found (fail-closed): pass --claude-bin or put claude on PATH"
   case "$claude_bin" in /*) ;; *) die "--claude-bin must be absolute (fail-closed): $claude_bin" ;; esac
 
-  local state_file="$workdir/.auto-pilot/$SUPERVISOR_STATE_NAME"
+  local state_root state_file
+  state_root="$(_supervisor_state_root)" \
+    || die "the supervisor-state root must be an absolute path (AUTO_PILOT_STATE_HOME, XDG_STATE_HOME or HOME): ${AUTO_PILOT_STATE_HOME:-${XDG_STATE_HOME:-${HOME:-<unset>}}}"
+  state_file="$(_supervisor_state_path "$label" "$workdir")" \
+    || die "cannot derive the supervisor-state path from --label/--workdir: $label $workdir"
+  # A run launched before the ledger left the run worktree (a --resume of one)
+  # carries it at the legacy path, in a directory the agent could write. So its
+  # content is not trusted wholesale: a symlink is never followed, only the
+  # no-progress counter and head carry over (validated), and the pause-exempt
+  # clock restarts — a forged `exempt_since` could otherwise disable the cap.
+  # The legacy file is removed whatever happens, so nothing is left to adopt
+  # later. If `.auto-pilot` itself is a symlink, the agent planted it: every
+  # test and the removal would follow it, as the host user, to a file of its
+  # choosing (its own ledger included, which would reset the cap). So a
+  # symlinked `.auto-pilot` is left entirely alone.
+  local legacy="$workdir/$SUPERVISOR_STATE_LEGACY_REL"
+  if [ -L "$workdir/.auto-pilot" ]; then
+    echo "spawn-orchestrator: write-launch: $workdir/.auto-pilot is a symlink — legacy supervisor-state migration skipped" >&2
+  elif [ -f "$legacy" ] && [ ! -L "$legacy" ] && [ ! -e "$state_file" ]; then
+    local legacy_count legacy_head
+    legacy_count="$(_supervisor_state_field "$legacy" count)"
+    case "$legacy_count" in '' | *[!0-9]*) legacy_count=0 ;; esac
+    legacy_head="$(_supervisor_state_field "$legacy" head)"
+    case "$legacy_head" in *[!0-9a-f]*) legacy_head="" ;; esac
+    _write_supervisor_state "$state_file" "$legacy_count" "$legacy_head" ""
+  fi
+  if [ ! -L "$workdir/.auto-pilot" ] && { [ -e "$legacy" ] || [ -L "$legacy" ]; }; then
+    rm -f "$legacy" || die "cannot remove the legacy supervisor-state: $legacy"
+  fi
   local tmp
   tmp="$(mktemp "${TMPDIR:-/tmp}/orchestrator-launch.XXXXXX")" || die "mktemp failed"
   {
@@ -1520,6 +1544,9 @@ write_launch() {
     # here, by the launcher, and never read from RUN.md: the un-jailed supervisor
     # must not write to a path the jailed agent could choose.
     [ -n "$handoff_dir" ] && printf 'export AUTO_PILOT_HANDOFF_DIR=%q\n' "$handoff_dir"
+    # Pin the supervisor-state root resolved here, so supervisor-scan derives the
+    # same ledger path the --state below names, whatever this job's environment.
+    printf 'export AUTO_PILOT_STATE_HOME=%q\n' "$state_root"
     printf 'mkdir -p %q\n' "$tmpdir"
     printf 'cd %q\n' "$workdir"
     # The supervisor's own bookkeeping — ABOVE the gate, so it runs on EVERY wake
@@ -1955,28 +1982,6 @@ _supervisor_state_field() {
   grep -E "^${key}:" "$f" | head -1 | sed -e "s/^${key}: *//"
 }
 
-# Ensure `.auto-pilot/.gitignore` excludes the supervisor ledger. Idempotent, and
-# never fatal: an unwritable run dir is the halt path's problem, not this
-# bookkeeping helper's (see the `die`-is-`exit` convention above — a `die` here
-# would abort the very halt that called us).
-_ensure_supervisor_state_ignored() {
-  local d="$1" gi="$1/.gitignore"
-  [ -d "$d" ] || return 0
-  # `.auto-pilot/` is agent-writable (only the ledger LITERAL is denied), and the
-  # supervisor runs UNJAILED — so a `.gitignore` symlink planted by the agent
-  # would make us append through it, as the host user, to a path of its choosing.
-  [ -L "$gi" ] && return 0
-  if [ -f "$gi" ] && grep -qxF "$SUPERVISOR_STATE_NAME" "$gi" 2>/dev/null; then
-    return 0
-  fi
-  # An existing .gitignore with no trailing newline would splice our pattern onto
-  # its last line (`RUN.mdsupervisor-state`), ignoring nothing.
-  if [ -s "$gi" ] && [ -n "$(tail -c1 "$gi" 2>/dev/null)" ]; then
-    printf '\n' >>"$gi" 2>/dev/null || return 0
-  fi
-  printf '%s\n' "$SUPERVISOR_STATE_NAME" >>"$gi" 2>/dev/null || return 0
-}
-
 # Atomically persist the no-progress counter + last-seen run-state HEAD, plus
 # the pause-exempt ledger's `exempt_since` (the epoch of the first wake of the
 # current pause-exempt streak; empty when the run isn't currently exempt).
@@ -1997,14 +2002,6 @@ _write_supervisor_state() {
     exempt="$(_supervisor_state_field "$f" exempt_since)"
   fi
   mkdir -p "$d" || die "cannot create supervisor-state directory: $d"
-  # Keep the ledger OUT of git. The Seatbelt rule denies file-WRITE to this path,
-  # which stops the agent editing it — but `git add` only READS the file and
-  # writes the index, so an agent told to "commit run state" can happily stage the
-  # very ledger the deny exists to protect. Once it is TRACKED, a later
-  # checkout/reset tries to restore it, hits the deny, and fails the git operation
-  # in a way that is baffling to debug. The supervisor owns this file, so the
-  # supervisor — not the agent's choice of `git add` — is what keeps it untracked.
-  _ensure_supervisor_state_ignored "$d"
   local tmp
   tmp="$(mktemp "$d/.supstate.XXXXXX")" || die "mktemp failed"
   {
@@ -3392,10 +3389,9 @@ _supervisor_halt() {
 # far-future date, satisfies `_pause_exempt` forever. This function is what
 # actually bounds it, and it works because it does NOT trust either field's
 # content — only whether `_pause_exempt` currently holds — and it persists its
-# own clock (`exempt_since`) in supervisor-state, a file the rendered sandbox
-# profile denies the jailed agent write access to (orchestrator.sb.tmpl's
-# @@SUPERVISOR_STATE_DENY@@, rendered by render-profile's --workdir). An agent
-# can rewrite RUN.md however it likes; it cannot touch this ledger.
+# own clock (`exempt_since`) in supervisor-state, a file outside the run
+# worktree that no jail grants (_supervisor_state_path). An agent can rewrite
+# RUN.md however it likes; it cannot touch this ledger.
 #
 # Called from supervisor-scan, NOT supervisor-check: a far-future `paused_until`
 # closes supervisor-gate on every wake, so supervisor-check never runs at all —
@@ -3415,7 +3411,11 @@ _supervisor_halt() {
 # (the halt) running even if the write itself fails.
 _supervisor_pause_exempt_ledger() {
   local dir="$1" label="$2" cap="$3"
-  local state="$dir/.auto-pilot/$SUPERVISOR_STATE_NAME"
+  local state
+  state="$(_supervisor_state_path "$label" "$dir")" || {
+    echo "spawn-orchestrator: supervisor-scan: no supervisor-state path for label '$label' — the pause-exempt cap is skipped this wake" >&2
+    return 0
+  }
   local cur_count
   cur_count="$(_supervisor_state_field "$state" count)"
   case "$cur_count" in '' | *[!0-9]*) cur_count=0 ;; esac
@@ -3519,6 +3519,10 @@ supervisor_scan() {
     esac
   done
   [ -n "$dir" ] && [ -n "$label" ] || die "supervisor-scan requires --dir and --label"
+  # The label becomes a path segment of the supervisor-state ledger; an unusable
+  # one would silently skip the pause-exempt cap, so refuse it here, loudly.
+  case "$label" in . | .. | *[!A-Za-z0-9._-]*) die "--label must be [A-Za-z0-9._-] (fail-closed): $label" ;; esac
+  case "$dir" in /*) ;; *) die "--dir must be absolute (fail-closed): $dir" ;; esac
   [ -d "$dir" ] || die "supervisor-scan --dir not found: $dir"
   case "$park_limit" in *[!0-9]* | "") die "--park-limit must be a positive integer: $park_limit" ;; esac
   [ "$park_limit" -ge 1 ] || die "--park-limit must be a positive integer: $park_limit"
@@ -3768,8 +3772,8 @@ supervisor_check() {
       # `paused_until` to the recent past every wake satisfies this check forever.
       # The actual, unforgeable backstop is the pause-exempt LEDGER
       # (`_supervisor_pause_exempt_ledger`, run from `supervisor-scan` on every
-      # wake, gate or no gate) — it lives in supervisor-state, which the rendered
-      # sandbox profile denies the jailed agent write access to. This corroboration
+      # wake, gate or no gate) — it lives in supervisor-state, outside the run
+      # worktree in a directory no jail grants. This corroboration
       # check and that ledger are deliberately two different mechanisms answering
       # two different questions: this one asks "did the agent's OWN records agree
       # with itself this wake" (cheap, but forgeable); the ledger asks "regardless

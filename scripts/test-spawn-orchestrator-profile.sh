@@ -529,115 +529,128 @@ else
   skipped "cred-ro: the credential file is still readable (sandbox-exec not available)"
 fi
 
-# --- --workdir: the pause-exempt LEDGER's own file stays RO inside an RW workdir -
-# Same shape as --cred-ro above, different file and different reason: the
-# no-progress guard's pause exemption is bounded by a cumulative-time ledger in
-# supervisor-state, and that ledger is only an authority the agent cannot forge
-# if the agent cannot write it — even though the run worktree (where it lives)
-# is otherwise --rw.
+# --- the pause-exempt ledger lives OUTSIDE the run worktree ------------------
+# The ledger (supervisor-state) is only an authority the agent cannot forge if
+# the jail never grants it. It used to sit inside the RW run worktree behind a
+# Seatbelt deny; Landlock cannot deny inside a grant, so it moved to a
+# supervisor-owned dir keyed by the label, and render-profile lost --workdir.
 WDROOT="$BASE/wd"
 mkdir -p "$WDROOT/.auto-pilot"
-wdprof="$BASE/wd.sb"
-"$SCRIPT" render-profile --rw "$WDROOT" --workdir "$WDROOT" --exec "$BIN" --out "$wdprof" >/dev/null 2>&1
-wdbody="$(cat "$wdprof" 2>/dev/null)"
-have "--workdir: emits a deny file-write* block" '(deny file-write*' "$wdbody"
-have "--workdir: denies the supervisor-state literal" "(literal \"$WDROOT/.auto-pilot/supervisor-state\")" "$wdbody"
-lack "--workdir: no @@tokens@@ remain" '@@' "$wdbody"
-# Precise ordering, same technique as the cred-ro proof above: the RW allow for
-# $WDROOT must appear, and THEN (last-match-wins) the deny for the state file.
-wd_order_ok="$(awk -v st="(subpath \"$WDROOT\")" -v sf="(literal \"$WDROOT/.auto-pilot/supervisor-state\")" '
-  /\(allow file-write\*/ { mode="w" }
-  /\(deny file-write\*/  { mode="d" }
-  mode=="w" && index($0, st) { wl=NR }
-  mode=="d" && wl && index($0, sf) { print "yes"; exit }
-' "$wdprof")"
-if [ "$wd_order_ok" = yes ]; then
-  ok "--workdir: supervisor-state deny follows the workdir's write allow (precise)"
-else
-  bad "--workdir: supervisor-state deny follows the workdir's write allow (precise)"
-fi
-# The Seatbelt deny stops the agent WRITING the ledger — but `git add` only READS
-# it and writes the index, so an agent told to "commit run state" could stage the
-# very file the deny protects. Once TRACKED, a later checkout/reset tries to
-# restore it, hits the deny, and fails the git operation. Assert the EFFECT (git
-# genuinely refuses to stage it), not merely that a .gitignore line exists — the
-# line is the mechanism, being untracked is the property.
-if command -v git >/dev/null 2>&1; then
-  GIROOT="$BASE/gitignore-ledger"
-  mkdir -p "$GIROOT"
-  git init -q "$GIROOT" 2>/dev/null
-  git -C "$GIROOT" config user.email t@t
-  git -C "$GIROOT" config user.name t
-  git -C "$GIROOT" commit -q --allow-empty -m base 2>/dev/null
-  : >"$GIROOT/gi.log"
-  (cd "$GIROOT" && "$SCRIPT" supervisor-check --exit-code 0 --log "$GIROOT/gi.log" --dir "$GIROOT" \
-    --label com.autopilot.gi --state "$GIROOT/.auto-pilot/supervisor-state" >/dev/null 2>&1) || true
-  if [ -f "$GIROOT/.auto-pilot/supervisor-state" ]; then
-    # `git add` must SUCCEED before its result means anything: a swallowed failure
-    # (locked index, broken fixture) leaves an empty cached diff, which reads as
-    # "the ledger wasn't staged" and passes the test without ever exercising it.
-    if ! git -C "$GIROOT" add -A >/dev/null 2>&1; then
-      bad "supervisor-state: precondition — \`git add -A\` succeeds" "git add failed in $GIROOT"
-    elif grep -qxF '.auto-pilot/supervisor-state' <<<"$(git -C "$GIROOT" diff --cached --name-only)"; then
-      bad "supervisor-state: a plain \`git add -A\` STAGED the supervisor ledger" \
-        "the Seatbelt deny protects writes, not \`git add\` — once tracked, checkout/reset fails"
-    else
-      ok "supervisor-state: \`git add -A\` cannot stage the supervisor ledger"
-    fi
-    git -C "$GIROOT" reset -q >/dev/null 2>&1 || true
-  else
-    bad "supervisor-state: precondition — the ledger was written" "not found in $GIROOT/.auto-pilot"
-  fi
-else
-  echo "skip - supervisor-state: \`git add\` cannot stage the ledger (git not available)"
-fi
-
-# The leaf file need not exist yet (tolerated like --tmpdir tolerates the
-# harness's lazily created dirs) — a workdir whose .auto-pilot/supervisor-state
-# hasn't been written yet must still render, not fail closed.
-WDROOT2="$BASE/wd2"
-mkdir -p "$WDROOT2" # note: no .auto-pilot/ at all yet
-if o="$("$SCRIPT" render-profile --rw "$WDROOT2" --workdir "$WDROOT2" --exec "$BIN" --out "$BASE/wd2.sb" 2>&1)"; then
-  ok "--workdir: a not-yet-existing .auto-pilot/supervisor-state does not fail closed"
-else
-  bad "--workdir: a not-yet-existing .auto-pilot/supervisor-state does not fail closed" "$o"
-fi
-have "--workdir: still denies the (not-yet-existing) literal" \
-  "(literal \"$WDROOT2/.auto-pilot/supervisor-state\")" "$(cat "$BASE/wd2.sb" 2>/dev/null)"
-# no --workdir → placeholder comment, no stray deny form (an older caller's
-# render keeps its prior, weaker shape rather than failing).
+fc "--workdir is gone from render-profile" "unknown render-profile argument" --rw "$WDROOT" --workdir "$WDROOT" --exec "$BIN"
 "$SCRIPT" render-profile --rw "$WDROOT" --exec "$BIN" --out "$BASE/nowd.sb" >/dev/null 2>&1
-lack "--workdir: absent → no deny form" '(deny file-write*' "$(cat "$BASE/nowd.sb" 2>/dev/null)"
-# fail-closed: a relative --workdir is refused.
-fc "--workdir must be absolute" "must be absolute" --rw "$WDROOT" --workdir "wd" --exec "$BIN"
-if [ "$SEATBELT_OK" = 1 ]; then
-  if o="$("$SCRIPT" check-profile "$wdprof" 2>&1)"; then
-    ok "check-profile: --workdir profile compiles"
-  else
-    bad "check-profile: --workdir profile compiles" "$o"
-  fi
-  BASHBIN2="$(command -v bash)"
-  wdxprof="$BASE/wdx.sb"
-  "$SCRIPT" render-profile --rw "$WDROOT" --workdir "$WDROOT" --exec "$BASHBIN2" --out "$wdxprof" >/dev/null 2>&1
-  if sandbox-exec -f "$wdxprof" "$BASHBIN2" -c 'echo x > "$1/.auto-pilot/other"' _ "$WDROOT" >/dev/null 2>&1; then
-    ok "--workdir: write elsewhere in the run worktree is allowed"
-  else
-    bad "--workdir: write elsewhere in the run worktree is allowed"
-  fi
-  if sandbox-exec -f "$wdxprof" "$BASHBIN2" -c 'echo y > "$1/.auto-pilot/supervisor-state"' _ "$WDROOT" >/dev/null 2>&1; then
-    bad "--workdir: write to the supervisor-state ledger is denied"
-  else
-    ok "--workdir: write to the supervisor-state ledger is denied"
-  fi
-  rm -f "$WDROOT/.auto-pilot/other" 2>/dev/null
-elif command -v sandbox-exec >/dev/null 2>&1; then
-  skipped "check-profile: --workdir profile compiles (sandbox-exec present but cannot apply a profile here, nested sandbox)"
-  skipped "--workdir: write elsewhere in the run worktree is allowed (sandbox-exec present but cannot apply a profile here, nested sandbox)"
-  skipped "--workdir: write to the supervisor-state ledger is denied (sandbox-exec present but cannot apply a profile here, nested sandbox)"
+lack "render-profile: no supervisor-state deny is rendered" 'supervisor-state' "$(cat "$BASE/nowd.sb" 2>/dev/null)"
+lack "render-profile: an RW workdir gets no deny form" '(deny file-write*' "$(cat "$BASE/nowd.sb" 2>/dev/null)"
+# write-launch hands supervisor-check a --state path outside the run worktree.
+LGROOT="$BASE/ledger-wt"
+mkdir -p "$LGROOT/.auto-pilot"
+printf 'run the graph\n' >"$BASE/prompt.txt"
+"$SCRIPT" render-settings --source plan --coder codex --out "$BASE/wl.json" >/dev/null 2>&1
+lg_launch() { # <label> [workdir]
+  "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "${2:-$LGROOT}" \
+    --log "$LGROOT/.auto-pilot/orchestrator.log" --prompt-file "$BASE/prompt.txt" --label "$1" \
+    --claude-bin "$BIN" --path "/usr/bin:/bin" --out-script "$BASE/lg-$1.sh" --out-plist "$BASE/lg-$1.plist" >/dev/null 2>&1
+}
+# The ledger path a generated wrapper hands supervisor-check.
+lg_state() { sed -n 's/.*--state \([^ ]*\).*/\1/p' "$BASE/lg-$1.sh" 2>/dev/null | head -1; }
+lg_launch com.autopilot.ledger
+lg_want="$(lg_state com.autopilot.ledger)"
+case "$lg_want" in
+  "$AUTO_PILOT_STATE_HOME/com.autopilot.ledger/"*/supervisor-state) ok "ledger: write-launch passes a label-keyed --state path under the state root" ;;
+  *) bad "ledger: write-launch passes a label-keyed --state path under the state root" "got: $lg_want" ;;
+esac
+have "ledger: the wrapper pins the resolved state root" \
+  "export AUTO_PILOT_STATE_HOME=$AUTO_PILOT_STATE_HOME" "$(cat "$BASE/lg-com.autopilot.ledger.sh" 2>/dev/null)"
+# A relative root would resolve inside the run worktree once the wrapper cds
+# there: write-launch refuses it.
+if o="$(AUTO_PILOT_STATE_HOME=rel/state "$SCRIPT" write-launch --profile "$BASE/cf.sb" --settings "$BASE/wl.json" \
+  --workdir "$LGROOT" --log "$LGROOT/.auto-pilot/orchestrator.log" --prompt-file "$BASE/prompt.txt" \
+  --label com.autopilot.ledger.rel --claude-bin "$BIN" --path "/usr/bin:/bin" \
+  --out-script "$BASE/lg-rel.sh" --out-plist "$BASE/lg-rel.plist" 2>&1)"; then
+  bad "ledger: a relative state root is refused" "write-launch succeeded"
 else
-  skipped "check-profile: --workdir profile compiles (sandbox-exec not available)"
-  skipped "--workdir: write elsewhere in the run worktree is allowed (sandbox-exec not available)"
-  skipped "--workdir: write to the supervisor-state ledger is denied (sandbox-exec not available)"
+  have "ledger: a relative state root is refused" "must be an absolute path" "$o"
+fi
+lack "ledger: the --state path is not inside the run worktree" \
+  "--state $LGROOT" "$(cat "$BASE/lg-com.autopilot.ledger.sh" 2>/dev/null)"
+# Keyed by label AND run worktree: a resume (same worktree) keeps its ledger,
+# while a fresh run reusing the label (a new worktree) starts clean.
+lg_launch com.autopilot.ledger
+[ "$(lg_state com.autopilot.ledger)" = "$lg_want" ] \
+  && ok "ledger: the same label and worktree give the same ledger (resume)" \
+  || bad "ledger: the same label and worktree give the same ledger (resume)" "$(lg_state com.autopilot.ledger) vs $lg_want"
+mkdir -p "$BASE/ledger-wt2/.auto-pilot"
+lg_launch com.autopilot.ledger "$BASE/ledger-wt2"
+lg_other="$(lg_state com.autopilot.ledger)"
+if [ -n "$lg_other" ] && [ "$lg_other" != "$lg_want" ]; then
+  ok "ledger: a reused label with a new worktree gets a fresh ledger"
+else
+  bad "ledger: a reused label with a new worktree gets a fresh ledger" "both: $lg_other"
+fi
+# A run launched before the move (a --resume of one) carries the ledger at the
+# legacy path, in a directory the agent could write. write-launch carries the
+# counter and head over, restarts the pause-exempt clock (a forged exempt_since
+# could otherwise disable the cap), and removes the legacy file.
+printf 'count: 2\nhead: abc\nexempt_since: 1700000000\n' >"$LGROOT/.auto-pilot/supervisor-state"
+lg_launch com.autopilot.ledger.mig
+lg_mig="$(lg_state com.autopilot.ledger.mig)"
+have "ledger: a legacy ledger's counter carries over" 'count: 2' "$(cat "$lg_mig" 2>/dev/null)"
+have "ledger: a legacy ledger's head carries over" 'head: abc' "$(cat "$lg_mig" 2>/dev/null)"
+lack "ledger: a legacy ledger's pause-exempt clock is NOT carried over" '1700000000' "$(cat "$lg_mig" 2>/dev/null)"
+if [ ! -e "$LGROOT/.auto-pilot/supervisor-state" ]; then
+  ok "ledger: the legacy file is gone from the run worktree"
+else
+  bad "ledger: the legacy file is gone from the run worktree"
+fi
+# An existing ledger is never overwritten by a legacy one, and the legacy file
+# is still removed.
+printf 'count: 9\nhead: 0ld\nexempt_since: 1\n' >"$LGROOT/.auto-pilot/supervisor-state"
+lg_launch com.autopilot.ledger.mig
+have "ledger: an existing ledger wins over a legacy one" 'count: 2' "$(cat "$lg_mig" 2>/dev/null)"
+if [ ! -e "$LGROOT/.auto-pilot/supervisor-state" ]; then
+  ok "ledger: a legacy file beside an existing ledger is removed"
+else
+  bad "ledger: a legacy file beside an existing ledger is removed"
+fi
+# A legacy path that is a symlink is never followed, and the link is removed.
+printf 'count: 7\nhead: abc\nexempt_since: 1\n' >"$BASE/ledger-target"
+ln -sf "$BASE/ledger-target" "$LGROOT/.auto-pilot/supervisor-state"
+lg_launch com.autopilot.ledger.sym
+lg_sym="$(lg_state com.autopilot.ledger.sym)"
+if [ ! -e "$lg_sym" ]; then
+  ok "ledger: a symlinked legacy ledger is not adopted"
+else
+  bad "ledger: a symlinked legacy ledger is not adopted" "$(cat "$lg_sym")"
+fi
+if [ ! -L "$LGROOT/.auto-pilot/supervisor-state" ] && [ -f "$BASE/ledger-target" ]; then
+  ok "ledger: the symlink is removed, its target untouched"
+else
+  bad "ledger: the symlink is removed, its target untouched"
+fi
+# A symlinked .auto-pilot is the agent's own plant: write-launch must neither
+# read through it nor delete through it (it could point at the real ledger).
+mkdir -p "$BASE/ledger-victim" "$BASE/ledger-wt3"
+printf 'count: 4\nhead: abc\nexempt_since: 1\n' >"$BASE/ledger-victim/supervisor-state"
+ln -s "$BASE/ledger-victim" "$BASE/ledger-wt3/.auto-pilot"
+lg_launch com.autopilot.ledger.parent "$BASE/ledger-wt3"
+if [ -f "$BASE/ledger-victim/supervisor-state" ]; then
+  ok "ledger: a symlinked .auto-pilot's target file survives write-launch"
+else
+  bad "ledger: a symlinked .auto-pilot's target file survives write-launch"
+fi
+lg_parent="$(lg_state com.autopilot.ledger.parent)"
+if [ -n "$lg_parent" ] && [ ! -e "$lg_parent" ]; then
+  ok "ledger: nothing is adopted through a symlinked .auto-pilot"
+else
+  bad "ledger: nothing is adopted through a symlinked .auto-pilot" "state=$lg_parent"
+fi
+# supervisor-scan refuses a label that cannot key a ledger, rather than silently
+# skipping the pause-exempt cap.
+o="$("$SCRIPT" supervisor-scan --dir "$LGROOT" --label 'bad/label' 2>&1)"
+c=$?
+if [ "$c" = 2 ] && grep -qF 'must be [A-Za-z0-9._-]' <<<"$o"; then
+  ok "ledger: supervisor-scan refuses an unusable label"
+else
+  bad "ledger: supervisor-scan refuses an unusable label" "exit=$c $o"
 fi
 
 # allowLocalBinding flag flips to true (task 3, Fable #6)

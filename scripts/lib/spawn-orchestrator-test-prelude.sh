@@ -217,6 +217,10 @@ chmod +x "$GUARD/launchctl"
 printf '#!/bin/sh\nprintf "gh: %%s\\n" "$*" >>"${NOTIFY_GUARD_LOG:-/dev/null}"\necho "HTTP 403: notifier guard (no real gh in tests)" >&2\nexit 1\n' >"$GUARD/gh"
 chmod +x "$GUARD/gh"
 export PATH="$GUARD:$PATH"
+# The supervisor-state ledger lives outside the run worktree, under
+# ${XDG_STATE_HOME:-~/.local/state}/auto-pilot by default. Keep every write the
+# suite makes inside the test tree.
+export AUTO_PILOT_STATE_HOME="$BASE/state-home"
 
 pass=0
 fail=0
