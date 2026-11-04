@@ -120,8 +120,20 @@ class AuthTest(ServerCase):
             self.assertNotIn("stdout", body)
 
     def test_oversized_body_is_413_before_it_is_read(self):
-        status, _ = self.post(b"x" * (agent_remote.MAX_BODY + 1))
-        self.assertEqual(status, 413)
+        # Declare an oversized body and send none of it. Sending the full
+        # MAX_BODY + 1 bytes races the server, which answers 413 and closes
+        # without reading: the client's sendall then hits EPIPE. A 413
+        # with no body sent is also the direct proof that nothing was read.
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=60)
+        c.putrequest("POST", "/agent")
+        c.putheader("Content-Type", "application/json")
+        c.putheader("Authorization", f"Bearer {TOKEN}")
+        c.putheader("Content-Length", str(agent_remote.MAX_BODY + 1))
+        c.endheaders()
+        resp = c.getresponse()
+        resp.read()
+        c.close()
+        self.assertEqual(resp.status, 413)
 
 
 class RefusalTest(ServerCase):
