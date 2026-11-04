@@ -27,6 +27,9 @@ Write `{"paths": [...], "body": "<the task's markdown>"}` to a file and run:
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/tier-forecast.py" --task <file>
 ```
 
+If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
+`**/scripts/tier-forecast.py`.
+
 It reads the policy from `origin/HEAD`, never the working tree. It prints one
 JSON object, then `FORECAST: auto|human|skipped`. The fields used below are
 `forecast`, `reasons`, `intent.state`, `intent.missing` and `consult_bar`. The

@@ -146,6 +146,12 @@ class ForecastTests(unittest.TestCase):
             85,
         )
 
+    def test_a_loaded_policy_without_consult_bar_reports_85(self):
+        self.commit(POLICY)
+        self.assertEqual(
+            self.run_forecast({"paths": ["scripts/a.py"]})["consult_bar"], 85
+        )
+
     def test_a_human_forecast(self):
         self.commit(POLICY)
         result = self.run_forecast({"paths": ["scripts/a.py", "skills/x/SKILL.md"]})
