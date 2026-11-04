@@ -216,6 +216,11 @@ else
   fi
   if [ -n "$token_cmd" ] && [ -z "$token" ]; then
     say CLAUDE FAIL "the token command printed nothing, failed, or ran past 60s"
+  elif [[ "$token" =~ [[:space:][:cntrl:]] ]]; then
+    # The same rule as the wrapper's claude-token: a token never holds
+    # whitespace, and one copied across a terminal wrap often does.
+    token=""
+    say CLAUDE FAIL "the token command printed a token with whitespace inside (a copy across a terminal wrap?) — re-save it as one unbroken string"
   else
     settings="$(cat "$S/settings.json")"
     # Prefix assignment, as the wrapper does: the token reaches the jailed
@@ -228,11 +233,18 @@ else
       o="$(jail "$claude_bin" -p 'Reply with exactly: ok' --max-turns 1 \
         --permission-mode bypassPermissions --settings "$settings" --output-format json 2>"$S/claude.err")"
     fi
+    rc=$?
     token=""
     if grep -q '"is_error":false' <<<"$o" && grep -q '"result":"ok' <<<"$o"; then
       say CLAUDE pass "claude -p answered through the jail$([ -n "$token_cmd" ] && echo ', on the token command alone')"
     else
-      say CLAUDE FAIL "claude -p did not answer through the jail: $(head -c 300 "$S/claude.err" | tr '\n' ' ')"
+      # claude -p reports an auth or API failure as the JSON result on stdout,
+      # with stderr empty, so show the result too. It holds the reply, never
+      # the token.
+      why="$(head -c 300 "$S/claude.err" | tr '\n' ' ')"
+      [ -n "$why" ] || why="$(sed -n 's/.*"result":"\([^"]\{0,300\}\).*/\1/p' <<<"$o" | head -1)"
+      [ -n "$why" ] || why="exit $rc, $(printf '%s' "$o" | wc -c | tr -d ' ') bytes of output, no result field"
+      say CLAUDE FAIL "claude -p did not answer through the jail: $why"
     fi
     if [ -n "$token_cmd" ] && [ -e "$cred" ]; then
       after="$(cksum <"$cred") $(wc -c <"$cred")"
