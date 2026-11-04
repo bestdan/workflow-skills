@@ -543,7 +543,7 @@ elif [ "$host_os" = Linux ]; then
       blockers+=("no systemd-run on this host: the Linux supervisor is a systemd-run --user timer")
     elif ! grep -Eqx 'running|degraded|starting|initializing' <<<"$sd_state"; then
       echo "PREFLIGHT LAUNCHER: none (Linux: the systemd user manager is unreachable: ${sd_state:-no answer})"
-      blockers+=("the systemd user manager is unreachable (systemctl --user is-system-running: ${sd_state:-no answer}) — if this pre-flight ran inside a sandbox, re-run it unsandboxed")
+      blockers+=("the systemd user manager is unreachable (systemctl --user is-system-running: ${sd_state:-no answer}) — if this pre-flight ran inside a sandbox, re-run it unsandboxed; otherwise check that XDG_RUNTIME_DIR and DBUS_SESSION_BUS_ADDRESS are set, as a login session sets them")
     elif [ "$linger" != yes ]; then
       echo "PREFLIGHT LAUNCHER: nono + systemd-run --user (Linger=${linger:-unknown})"
       blockers+=("lingering is off for this user (Linger=${linger:-unknown}): the run's systemd units would die when the launching session logs out — fix: loginctl enable-linger $(id -un)")

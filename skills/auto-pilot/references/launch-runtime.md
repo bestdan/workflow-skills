@@ -39,8 +39,8 @@ primitive must itself be relaunchable:
   is never overlapped, as with launchd. `CollectMode=inactive-or-failed` unloads
   the service once the timer is stopped, even after a failed last wake. The
   user manager outlives logout only with `Linger=yes`, which pre-flight checks.
-  `at` was rejected: the test host does not ship it, and a one-shot job could not
-  carry the 5-minute relaunch the exit contract relies on.
+  `at` is not used: a one-shot job cannot carry the recurring relaunch the exit
+  contract relies on.
 
 A **recurring** supervisor (the `launchd`/`systemd` timer) must be **torn down
 whenever the run loop terminates** (`launchctl bootout` / `systemctl --user stop

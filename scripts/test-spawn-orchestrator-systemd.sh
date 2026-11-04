@@ -117,6 +117,13 @@ else
     have "write-launch nono: refuses a profile inside a write grant" "inside the profile's write grant" "$o"
   fi
   rm -f "$RUN_WT/profile.json"
+  cp "$SCRIPT" "$RUN_WT/so.sh"
+  if o="$(sdwl "$SD/launch/y.sh" --self "$RUN_WT/so.sh" 2>&1)"; then
+    bad "write-launch nono: refuses a supervisor script inside a write grant" "write-launch succeeded"
+  else
+    have "write-launch nono: refuses a supervisor script inside a write grant" "pass --claude-token-cmd" "$o"
+  fi
+  rm -f "$RUN_WT/so.sh"
 fi
 
 # --- check-nono-profile --------------------------------------------------------

@@ -1493,6 +1493,12 @@ render_nono_profile() {
     [ "$ggit" != "$gcommon" ] || die "--git-worktree must be a linked worktree, not a main checkout (fail-closed): $gw"
     _path_within "$ggit" "$gcommon/worktrees" \
       || die "--git-worktree's git dir is not under its common dir's worktrees/ (fail-closed): $ggit"
+    # The run's own worktrees/<name>/ is writable, and with this extension on,
+    # git reads a config.worktree there: the agent could set core.hooksPath,
+    # and the unjailed supervisor's own checkout in the run worktree
+    # (assert-run-head) would run the hook outside the jail.
+    [ "$(git -C "$gw" config --get --bool extensions.worktreeConfig 2>/dev/null)" = true ] \
+      && die "--git-worktree: the repo enables extensions.worktreeConfig, so a writable worktrees/<name>/ lets the jailed agent set hooks the unjailed supervisor runs (fail-closed): $gcommon"
     ro_dir+=("$gcommon")
     for c in "$gcommon/objects" "$gcommon/refs" "$gcommon/logs" "$ggit"; do
       [ -d "$c" ] || mkdir -p "$c" || die "cannot create $c"
@@ -1868,17 +1874,19 @@ write_launch() {
       # harness sandbox on would fail open inside it (render-settings --jail nono).
       grep -Eq '"enabled"[[:space:]]*:[[:space:]]*true' "$settings" 2>/dev/null \
         && die "--jail nono needs settings with the harness sandbox off (fail-closed): render them with render-settings --jail nono"
-      # The wrapper runs unjailed and the profile decides every later wake's
-      # jail, so neither may sit where the jailed agent can write: nono cannot
-      # deny a path inside a grant. Checked against the profile's own grants.
+      # The wrapper and this script run unjailed on every wake, and the profile
+      # decides every later wake's jail, so none may sit where the jailed agent
+      # can write: nono cannot deny a path inside a grant. Checked against the
+      # profile's own grants. An installed plugin keeps this script under
+      # ~/.claude, so the no-token fallback (~/.claude writable) is refused here.
       local grant f_c
       while IFS= read -r grant; do
         [ -n "$grant" ] || continue
-        for f in "$out_script" "$profile"; do
+        for f in "$out_script" "$profile" "$self"; do
           [ -n "$f" ] || continue
           f_c="$(resolve_lazy "$f")" || exit 2
           _path_within "$f_c" "$grant" \
-            && die "--jail nono: $f is inside the profile's write grant $grant, so the jailed agent could rewrite it (fail-closed): write it outside every --rw"
+            && die "--jail nono: $f is inside the profile's write grant $grant, so the jailed agent could rewrite it (fail-closed): put it outside every write grant (for this script under ~/.claude, pass --claude-token-cmd so ~/.claude is not writable)"
         done
       done < <(_nono_profile_write_grants "$profile")
       # The checksum the wrapper re-checks on every wake (check-nono-profile).
@@ -2358,7 +2366,7 @@ smoke_test() {
 # counterpart of launchd's StartInterval job. No unit file is written. The
 # generated wrapper, supervisor-gate/-check, the exit-reason contract and the
 # PID record are shared with macOS; only start, stop and liveness branch here.
-# Measured on systemd 255 (the Linux test host):
+# Measured on systemd 255:
 #   - `--on-active=0` fires the first wake at once; `--on-unit-inactive=<n>s`
 #     fires each later one <n>s after the previous wake ENDED, whether it exited
 #     0 or not. That is launchd's behaviour too — it never fires StartInterval

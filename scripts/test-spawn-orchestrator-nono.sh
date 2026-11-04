@@ -136,6 +136,13 @@ if command -v python3 >/dev/null 2>&1 && command -v git >/dev/null 2>&1; then
   else
     have "nono render --git-worktree: refuses a non-checkout" "is not a git checkout" "$o"
   fi
+  git -C "$GM" config extensions.worktreeConfig true
+  if o="$(nrender "$NO/p-git4.json" --git-worktree "$NO/gitwt" 2>&1)"; then
+    bad "nono render --git-worktree: refuses a repo with extensions.worktreeConfig" "render succeeded"
+  else
+    have "nono render --git-worktree: refuses a repo with extensions.worktreeConfig" "enables extensions.worktreeConfig" "$o"
+  fi
+  git -C "$GM" config --unset extensions.worktreeConfig
 else
   echo "skip - render-nono-profile --git-worktree: python3 or git not available"
 fi
