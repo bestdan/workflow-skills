@@ -386,7 +386,7 @@
 #                  /usr/bin CLT shims — git above all — cannot exec their target.
 #                  Also exec-allows ~/.claude/plugins/cache and write-denies it,
 #                  so the plugin's own scripts run in-jail; a write scope inside
-#                  the cache fails closed (#1364).
+#                  the cache fails closed.
 #     --out   Destination path for the rendered profile. Required.
 #     --template  Override the profile template (default: scripts/orchestrator.sb.tmpl).
 #     Every render ALSO emits fixed, RENDERER-OWNED (never caller-supplied) write
@@ -1083,7 +1083,7 @@ $(emit_allow "file-write*" ${rw_c[@]+"${rw_c[@]}"})"
   harness_block="$(emit_harness_runtime "$tmpdir_c" "$tmp_root" "$session_env")"
 
   # --toolchain also grants the installed PLUGIN CACHE (~/.claude/plugins/cache)
-  # exec, and denies it writes (#1364). Every plugin script — co-review's
+  # exec, and denies it writes. Every plugin script — co-review's
   # pre-flights, reach-pr-branch.sh's own sibling calls, the worktree hooks — is
   # entered by DIRECT exec, and the cache sits under ~/.claude, a --rw state dir
   # that is never exec-allowed. So without this, every plugin script is
@@ -1092,8 +1092,10 @@ $(emit_allow "file-write*" ${rw_c[@]+"${rw_c[@]}"})"
   # The write-deny is what keeps the template's integrity wall ("no exec-allowed
   # dir is writable") true: it is emitted in the credential-deny slot, after the
   # RW and harness-runtime blocks, so it wins over the enclosing ~/.claude write
-  # allow (last match). Seatbelt checks paths, and a deny on the subpath also
-  # refuses copy, rename, hard links in either direction, and recreating the dir.
+  # allow (last match). Seatbelt checks paths, so the subpath deny also refuses
+  # copying or hard-linking into the cache, hard-linking out of it, renaming it
+  # away, and recreating it (probed by hand; the profile suite checks the write
+  # and the link out).
   # The whole cache, not one version: the harness, not this script, picks which
   # installed version the jailed session loads, and auto-update adds versions
   # between relaunches of a stamped profile. The cost is that the jailed agent

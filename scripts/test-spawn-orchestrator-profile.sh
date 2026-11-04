@@ -226,7 +226,7 @@ else
   echo "skip - toolchain: grants Homebrew's Cellar (no /opt/homebrew/Cellar on this host)"
 fi
 
-# --- toolchain: the installed plugin cache (#1364) ----------------------------
+# --- toolchain: the installed plugin cache ------------------------------------
 # Every plugin script is entered by direct exec, and the cache sits under
 # ~/.claude, a --rw state dir. --toolchain must exec-allow the cache and
 # write-deny it, or co-review's reach-pr-branch.sh routes to `none`. A fake HOME
@@ -287,6 +287,13 @@ if [ "$SEATBELT_OK" = 1 ] && [ -n "$pcbody" ]; then
     ok "plugin cache: the rest of ~/.claude stays writable in-jail"
   else
     bad "plugin cache: the rest of ~/.claude stays writable in-jail"
+  fi
+  # Control for the hard-link check above: an ordinary link inside a write scope
+  # must work, so that check's denial is the cache deny and not ln being refused.
+  if sandbox-exec -f "$pcprof" /bin/ln "$PC_HOME/.claude/state/ok" "$PC_HOME/.claude/state/ok-link" 2>/dev/null; then
+    ok "plugin cache: control: a hard link inside a write scope works in-jail"
+  else
+    bad "plugin cache: control: a hard link inside a write scope works in-jail"
   fi
 else
   skipped "plugin cache: in-jail checks (sandbox-exec cannot apply a profile here)"
