@@ -122,7 +122,7 @@ class AuthTest(ServerCase):
     def test_oversized_body_is_413_before_it_is_read(self):
         # Declare an oversized body and send none of it. Sending the full
         # MAX_BODY + 1 bytes races the server, which answers 413 and closes
-        # without reading: the client's sendall then hits EPIPE (#1378). A 413
+        # without reading: the client's sendall then hits EPIPE. A 413
         # with no body sent is also the direct proof that nothing was read.
         c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=60)
         c.putrequest("POST", "/agent")
