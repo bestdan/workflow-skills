@@ -44,7 +44,8 @@ Globs: `**` matches across directories, `*` and `?` within one path segment.
 paths the task is expected to change. A task has no line counts, no Conventional
 Commit title and no labels, so only the path rules run: SELF_PATHS,
 `always_human`, `auto`. Size, title type, breaking change, the hold label,
-AGENT_LAND and `repo_rules` are skipped. Every reason starts `forecast:`, and an
+AGENT_LAND and `repo_rules` are skipped. Each path is normalized first
+(`scripts/../skills/x` is `skills/x`). Every reason starts `forecast:`, and an
 empty path list is `human`. The lander re-tiers the real PR at merge, so a
 forecast only says where the owner's review would be needed.
 
@@ -59,6 +60,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import posixpath
 import re
 import sys
 from pathlib import Path
@@ -318,9 +320,16 @@ def load_forecast(source):
 
 
 def forecast(paths, policy):
-    """The tier a task's expected paths would get: the path rules only."""
+    """The tier a task's expected paths would get: the path rules only.
+
+    A model writes these paths, so each is normalized first: `scripts/../skills/x`
+    is tiered as `skills/x`, and `./scripts/x.py` as `scripts/x.py`, which is the
+    canonical path the lander will see at merge. An absolute, escaping or empty
+    path matches no auto glob after normalizing, so it stays human.
+    """
     if not paths:
         return "human", [f"{FORECAST} no paths identified"]
+    paths = [posixpath.normpath(p) for p in paths]
     reasons = [
         f"{FORECAST} {reason}"
         for reason in (_path_reason(p, policy) for p in paths)
@@ -413,7 +422,7 @@ def main(argv=None):
         "--agent-land",
         choices=("on", "off"),
         default="on",
-        help="the repo's AGENT_LAND variable; off forces human",
+        help="the repo's AGENT_LAND variable; off forces human (ignored with --forecast)",
     )
     args = p.parse_args(argv)
 

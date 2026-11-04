@@ -472,10 +472,39 @@ class ForecastTests(unittest.TestCase):
             ["scripts/merge-tier.py"], "human", "part of the landing gate, always human"
         )
 
-    def test_size_and_title_rules_do_not_run(self):
-        # The fixture policy caps size at 50 and runs the prompt-path repo rule;
-        # neither has anything to read in a forecast, so neither fires.
-        result = self.run_forecast({"paths": ["scripts/helper.py"] * 60})
+    def test_paths_are_normalized_before_tiering(self):
+        for path, tier, reason in (
+            (
+                "scripts/../skills/x/SKILL.md",
+                "human",
+                "skills/x/SKILL.md matches no auto glob",
+            ),
+            (
+                "scripts/./merge-tier.py",
+                "human",
+                "scripts/merge-tier.py is part of the landing gate",
+            ),
+            ("scripts//deploy.sh", "human", "scripts/deploy.sh matches always_human"),
+            ("./scripts/helper.py", "auto", "all 1 paths match auto"),
+            (
+                "../scripts/helper.py",
+                "human",
+                "../scripts/helper.py matches no auto glob",
+            ),
+            ("/scripts/helper.py", "human", "/scripts/helper.py matches no auto glob"),
+            ("", "human", ". matches no auto glob"),
+        ):
+            with self.subTest(path=path):
+                self.assert_forecast([path], tier, reason)
+
+    def test_repo_rules_do_not_run(self):
+        # A policy that makes skills/ auto and enables the prompt-path rule still
+        # forecasts auto: the rule needs a title type, which a task does not have.
+        policy = self.tmp / "skills-auto.yml"
+        policy.write_text(
+            "auto:\n  - skills/**\nrepo_rules:\n  - prompt-paths-need-releasing-type\n"
+        )
+        result = self.run_forecast({"paths": ["skills/x/SKILL.md"]}, policy)
         self.assertEqual(result["tier"], "auto")
 
     def test_bad_input_and_policy_are_human(self):
