@@ -104,14 +104,15 @@ nothing is written.
 
 ## Where things are recorded
 
-| Handler          | Forecast, Intent block and verdict go in            |
-| ---------------- | --------------------------------------------------- |
-| `repo-pr`        | `commands/promote-tasks.md` steps 2–4               |
-| tracker handlers | each `*-promote.md`, in the existing reason comment |
+| Handler          | Forecast, Intent block and verdict go in                   |
+| ---------------- | ---------------------------------------------------------- |
+| `repo-pr`        | `commands/promote-tasks.md` steps 2–4                      |
+| tracker handlers | each `*-promote.md`, in one comment per forecast candidate |
 
 A tracker handler writes labels, states and comments, never the issue body, so
-everything goes in the one comment the handler already writes for a candidate.
-Every candidate that reached the forecast gets that comment, a HIGH `auto` one
+everything goes in the one comment the handler writes for a candidate, which
+also carries any failed check and backfill note. Every candidate that reached
+the forecast gets that comment, a HIGH `auto` one with nothing else to say
 included:
 
 - `tier: <forecast>`, and for `human` its first reason;
