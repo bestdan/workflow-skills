@@ -243,6 +243,19 @@ class ForecastTests(unittest.TestCase):
         body = "Body\n\n```markdown\n## Intent\nChange: x\nPremise: y\nFinish: z\n```\n"
         self.assertEqual(fc.parse_intent(body)["state"], "absent")
 
+    def test_a_fence_closes_only_on_its_own_marker(self):
+        example = "## Intent\nChange: x\nPremise: y\nFinish: z\n"
+        for inner in ("~~~", "```"):
+            with self.subTest(inner=inner):
+                body = f"````\n{inner}\n{example}{inner}\n````\n"
+                self.assertEqual(fc.parse_intent(body)["state"], "absent")
+        # A real block after a nested fence still counts.
+        body = "````\n```\n````\n" + example
+        self.assertEqual(fc.parse_intent(body)["state"], "present")
+        # An opener-like line with an info string does not close the fence.
+        body = "```\n```sh\n" + example + "```\n"
+        self.assertEqual(fc.parse_intent(body)["state"], "absent")
+
     def test_a_fenced_comment_does_not_end_the_block(self):
         body = "## Intent\nChange: x\n```sh\n# run this\n```\nPremise: y\nFinish: z\n"
         self.assertEqual(fc.parse_intent(body)["state"], "present")

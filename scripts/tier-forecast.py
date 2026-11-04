@@ -34,13 +34,17 @@ The verdicts:
   auto     every path matches an `auto` glob.
 
 The Intent block is a `## Intent` heading (any case, optional trailing colon,
-level 2 only) followed by three labelled lines,
-`Change:`, `Premise:` and `Finish:`, each with a value. A leading list marker and
-bold labels (`- **Change:** ...` or `- **Change**: ...`) are accepted. The block
-ends at the next heading. Lines inside a ``` or ~~~ fence are ignored. `state` is `present` when all three have values, `partial` when the
-heading is there but some are missing (named in `missing`), and `absent` when
-there is no heading. It is reported whatever the forecast, and deciding what a
-missing block means is the promoter's job: skills/task/references/intent-confirmation.md.
+level 2 only) followed by three labelled lines, `Change:`, `Premise:` and
+`Finish:`, each with a value. A leading list marker and bold labels
+(`- **Change:** ...` or `- **Change**: ...`) are accepted. The block ends at the
+next heading. Fenced code is ignored: a fence closes only on the character that
+opened it, at least as many times, so a nested example stays inside.
+
+`state` is `present` when all three have values, `partial` when the heading is
+there but some are missing (named in `missing`), and `absent` when there is no
+heading. It is reported whatever the forecast. Deciding what a missing block
+means is the promoter's job: skills/task/references/intent-confirmation.md
+(added in #1382).
 """
 
 from __future__ import annotations
@@ -59,6 +63,7 @@ POLICY_PATH = ".github/merge-policy.yml"
 INTENT_LABELS = ("Change", "Premise", "Finish")
 INTENT_HEADING_RE = re.compile(r"^##\s+Intent:?\s*$", re.IGNORECASE)
 HEADING_RE = re.compile(r"^#{1,6}\s")
+FENCE_RE = re.compile(r"^(`{3,}|~{3,})")
 LABEL_RE = re.compile(
     r"^(?:[-*]\s+)?(?:\*\*)?(?P<label>[A-Za-z]+)(?:\*\*)?:(?:\*\*)?\s*(?P<value>.*)$"
 )
@@ -133,13 +138,19 @@ def parse_intent(body):
     """{"state": present|partial|absent, "missing": [labels]} for a task body."""
     # Fenced code is quoted text, not the document: an example Intent block in a
     # fence must not count, and a `# comment` in one must not end the real block.
-    lines, fenced = [], False
+    lines: list = []
+    fence = None  # the open fence's marker run, e.g. "````"
     for line in body.splitlines():
-        if line.lstrip().startswith(("```", "~~~")):
-            fenced = not fenced
-            continue
-        if not fenced:
+        stripped = line.strip()
+        run = FENCE_RE.match(stripped)
+        if fence is None:
+            if run:
+                fence = run.group(0)
+                continue
             lines.append(line)
+        elif run and run.group(0)[0] == fence[0] and len(run.group(0)) >= len(fence):
+            if stripped == run.group(0):
+                fence = None
     start = next(
         (i for i, line in enumerate(lines) if INTENT_HEADING_RE.match(line)), None
     )
@@ -195,7 +206,7 @@ def evaluate(task_source, repo_dir, ref):
         return {"forecast": "skipped", "reasons": ["no merge policy"], "intent": intent}
     with tempfile.TemporaryDirectory() as tmp:
         policy_file = Path(tmp) / "merge-policy.yml"
-        policy_file.write_text(text)
+        policy_file.write_text(text, encoding="utf-8")
         try:
             policy = tier_mod.load_policy(policy_file)
         except tier_mod.PolicyError as exc:
