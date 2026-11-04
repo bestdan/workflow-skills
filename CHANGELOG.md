@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.188.0] - 2026-11-04
+
+### Features
+
+- add merge-audit.py, the review and shadow audits [#1322] (#1368) (63f2a7a)
+
 ## [2.187.0] - 2026-11-03
 
 ### Features
