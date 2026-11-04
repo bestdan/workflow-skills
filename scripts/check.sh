@@ -251,6 +251,7 @@ if [[ "$with_evals" == 1 ]]; then
 fi
 
 fail=0
+failed=""
 for i in "${!checks[@]}"; do
   wait "${pids[$i]}"
   rc=$?
@@ -259,11 +260,12 @@ for i in "${!checks[@]}"; do
   if [[ "$rc" != 0 ]]; then
     echo "  ✘ failed: ${checks[$i]}" >&2
     fail=1
+    failed="${failed:+$failed, }${checks[$i]}"
   fi
 done
 
 if [[ "$fail" != 0 ]]; then
-  echo "check.sh: FAIL" >&2
+  echo "check.sh: FAIL ($failed)" >&2
   exit 1
 fi
 if [[ "$docs_only" == 1 ]]; then
