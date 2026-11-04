@@ -40,7 +40,18 @@
 #       --source <linear|plan|gh-issue> \
 #       [--coder <codex|devin|agy> ...] [--agy-host <host>] \
 #       [--mcp-host <host> ...] [--add-task-host <host> ...] [--npm] \
-#       --out <file>
+#       [--jail <seatbelt|nono>] --out <file>
+#   spawn-orchestrator.sh render-nono-profile --tmpdir <dir> \
+#       [--rw <dir> ...] [--ro <path> ...] [--cred-ro <path> ...] \
+#       [--confine-under <dir> ...] [--toolchain] [--claude-token] --out <file>
+#   spawn-orchestrator.sh claude-token --dir <run-dir> [--label <label>] --cmd <cmd>
+#
+#   render-nono-profile  The Linux jail (#1349): a nono JSON profile from
+#           launch-runtime.md §1. Its own comment block below is the one home
+#           of what it grants and why. write-launch takes it with --jail nono
+#           --nono-bin <pinned nono> [--claude-token-cmd <cmd>].
+#   claude-token  Run a --claude-token-cmd unjailed and print the token; on
+#           failure, halt the run with an alarm (exit 3).
 #   spawn-orchestrator.sh check-profile <file>
 #   spawn-orchestrator.sh status --label <label> [--dir <run-dir>] [--task-ceiling <s>]
 #   spawn-orchestrator.sh teardown --label <label> [--done-sentinel <path>] [--reason <r>]
@@ -1211,13 +1222,22 @@ hosts_to_json_array() {
 }
 
 render_settings() {
-  local out="" localbind=false
+  local out="" localbind=false jail="seatbelt"
   local -a passthru=()
   while [ $# -gt 0 ]; do
     case "$1" in
       --out)
         [ $# -ge 2 ] || die "missing value for --out"
         out="$2"
+        shift 2
+        ;;
+      # Which jail the run starts under. `nono` turns Claude Code's own sandbox
+      # OFF: under nono's Landlock domain its bwrap cannot mount and its proxy
+      # cannot listen, and a sandbox that fails to start fails OPEN. nono is the
+      # only enforcing layer there (dev_docs/designs/2026-11-03-orchestrator-jail.md).
+      --jail)
+        [ $# -ge 2 ] || die "missing value for --jail"
+        jail="$2"
         shift 2
         ;;
       # Default OFF: a listen socket lets the inside process reach host-local
@@ -1235,12 +1255,25 @@ render_settings() {
   done
   [ -n "$out" ] || die "render-settings requires --out <file>"
   case "$out" in /*) ;; *) die "--out must be absolute (fail-closed): $out" ;; esac
+  case "$jail" in seatbelt | nono) ;; *) die "--jail must be seatbelt or nono (fail-closed): $jail" ;; esac
 
   # render_network_allowlist runs in a $() — its die() exits only the subshell,
   # so capture the status and abort here (fail-closed: no settings on any error).
+  # It runs for nono too: the arguments are still validated, and the host set is
+  # what the nono profile's allow_domain list takes once egress closes.
   local hosts array
   hosts="$(render_network_allowlist ${passthru[@]+"${passthru[@]}"})" || exit 2
   array="$(printf '%s\n' "$hosts" | hosts_to_json_array)"
+  if [ "$jail" = nono ]; then
+    local tmpn
+    tmpn="$(mktemp "${TMPDIR:-/tmp}/orchestrator-settings.XXXXXX")" || die "mktemp failed"
+    printf '{"sandbox":{"enabled":false}}\n' >"$tmpn" && mv "$tmpn" "$out" || {
+      rm -f "$tmpn"
+      die "failed to write settings: $out"
+    }
+    echo "spawn-orchestrator: settings OK $out (nono: the harness sandbox is off; nono enforces)"
+    return 0
+  fi
 
   # Ephemeral run settings for `claude -p --settings '<json>'`: deny-by-default
   # egress narrowed to $array, plus loopback for the enforcement proxy + local
@@ -1258,6 +1291,270 @@ render_settings() {
     die "failed to write settings: $out"
   }
   echo "spawn-orchestrator: settings OK $out"
+}
+
+# ---------------------------------------------------------------------------
+# render-nono-profile (#1349) — the Linux jail: a nono JSON profile rendered
+# from launch-runtime.md §1's table. nono is the ONLY enforcing layer
+# (render-settings --jail nono turns the harness sandbox off), so this file is
+# the whole boundary. Rendered and vendored, never pulled: no `extends`, no
+# registry profile. Design: dev_docs/designs/2026-11-03-orchestrator-jail.md.
+#
+# Three Linux facts shape it, each measured on the Linux test host:
+#   - Landlock cannot deny a path inside a granted directory: nono refuses to
+#     start on that overlap (research E10). So nothing secret may sit under a
+#     grant. With --claude-token, ~/.claude is granted child by child, read-only,
+#     with .credentials.json left out; without it, the fallback is ~/.claude
+#     writable, which the owner accepted and the renderer warns about.
+#   - Landlock's read right includes exec, and a write grant includes read, so a
+#     binary staged in a writable dir runs (E6). What must not run is anything
+#     that reaches the user's service manager, so pathname AF_UNIX mediation is
+#     on and no socket is granted: a staged systemctl cannot reach the bus (E7),
+#     and neither can the canonical one. There is NO command_policies block, on
+#     purpose: a non-empty one turns on nono's command mediation, which refuses
+#     exec from read-granted dirs outside its system paths — ~/.local/bin/claude
+#     and a global git hooks path both exit 126 under it (measured, nono 0.81.0),
+#     so the jail could not run its own toolchain. The socket rule holds without
+#     it.
+#   - nono's default system_write_linux group grants all of /tmp. It is
+#     excluded and its device paths re-granted, so the only temp dir writable is
+#     the run's --tmpdir, which the profile also pins as the jail's TMPDIR.
+#     Claude Code puts its scratch tree (claude-<uid>/) under TMPDIR, so that
+#     grant covers it.
+# Egress parity first: network.block is false, the allowlist is a follow-up.
+# ---------------------------------------------------------------------------
+NONO_PROFILE_NAME="auto-pilot-orchestrator"
+
+# A path for a JSON string: refuse what would need escaping rather than escape
+# it. No legitimate grant path carries a quote, a backslash or a control char.
+_nono_json_path() {
+  case "$1" in
+    *[\"\\]* | *[[:cntrl:]]*)
+      echo "spawn-orchestrator: path has a quote, backslash or control character (fail-closed): $1" >&2
+      return 1
+      ;;
+  esac
+  printf '"%s"' "$1"
+}
+
+# <path> <ancestor> — true when <path> is <ancestor> or lies beneath it.
+_path_within() {
+  [ "$1" = "$2" ] && return 0
+  [ "$2" = / ] && return 0
+  case "$1" in "$2"/*) return 0 ;; esac
+  return 1
+}
+
+# Print a JSON array of paths, one per line, indented. Args: indent, paths...
+_nono_json_list() {
+  local ind="$1" first=1 p q
+  shift
+  printf '['
+  for p in "$@"; do
+    q="$(_nono_json_path "$p")" || return 1
+    [ "$first" = 1 ] && first=0 || printf ','
+    printf '\n%s  %s' "$ind" "$q"
+  done
+  [ "$first" = 1 ] || printf '\n%s' "$ind"
+  printf ']'
+}
+
+render_nono_profile() {
+  local out="" tmpdir="" token=0 toolchain=0
+  local -a rw=() ro=() cred=() confine=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --rw | --ro | --cred-ro | --confine-under | --tmpdir | --out)
+        [ $# -ge 2 ] || die "missing value for $1"
+        case "$1" in
+          --rw) rw+=("$2") ;;
+          --ro) ro+=("$2") ;;
+          --cred-ro) cred+=("$2") ;;
+          --confine-under) confine+=("$2") ;;
+          --tmpdir) tmpdir="$2" ;;
+          --out) out="$2" ;;
+        esac
+        shift 2
+        ;;
+      # A token command supplies CLAUDE_CODE_OAUTH_TOKEN, so the jail needs no
+      # access to ~/.claude/.credentials.json at all.
+      --claude-token)
+        token=1
+        shift
+        ;;
+      --toolchain)
+        toolchain=1
+        shift
+        ;;
+      *) die "unknown render-nono-profile argument: $1" ;;
+    esac
+  done
+  [ -n "$out" ] || die "render-nono-profile requires --out <file>"
+  case "$out" in /*) ;; *) die "--out must be absolute (fail-closed): $out" ;; esac
+  [ -n "$tmpdir" ] || die "render-nono-profile requires --tmpdir <dir> (the run's own TMPDIR)"
+  [ -n "${HOME:-}" ] || die "HOME is unset (fail-closed)"
+
+  local home claude_dir cred_file="" p c
+  home="$(canonicalize "$HOME")" || exit 2
+  claude_dir="$home/.claude"
+  [ -e "$claude_dir/.credentials.json" ] && cred_file="$(canonicalize "$claude_dir/.credentials.json")"
+
+  local tmp_c
+  tmp_c="$(canonicalize "$tmpdir")" || exit 2
+  [ -d "$tmp_c" ] || die "--tmpdir is not a directory (fail-closed): $tmp_c"
+
+  local -a rw_c=() ro_dir=() ro_file=() confine_c=()
+  for p in ${confine[@]+"${confine[@]}"}; do
+    c="$(canonicalize "$p")" || exit 2
+    confine_c+=("$c")
+  done
+  for p in ${rw[@]+"${rw[@]}"}; do
+    c="$(canonicalize "$p")" || exit 2
+    [ -d "$c" ] || die "--rw is not a directory (fail-closed): $c"
+    rw_c+=("$c")
+  done
+  # Read grants: repo paths and credential stores alike. A dir gets `read`, a
+  # file `read_file`.
+  for p in ${ro[@]+"${ro[@]}"} ${cred[@]+"${cred[@]}"}; do
+    c="$(canonicalize "$p")" || exit 2
+    if [ -d "$c" ]; then ro_dir+=("$c"); else ro_file+=("$c"); fi
+  done
+  if [ "$toolchain" = 1 ]; then
+    # Where this host's toolchain lives outside the system dirs nono's own
+    # system_read group already covers. Read includes exec under Landlock.
+    for p in "$home/.local/bin" "$home/.local/share/claude" "$home/.local/share/mise" \
+      "$home/.config/mise" "$home/.cargo/bin" "$home/.nvm"; do
+      [ -d "$p" ] || continue
+      c="$(canonicalize "$p")" || exit 2
+      ro_dir+=("$c")
+    done
+  fi
+  # git reads its global config for the commit identity, and runs the global
+  # hooks it names: a hooks path outside every grant fails each commit with
+  # "cannot exec …/pre-commit" (measured). Read-only, so the jail can run them
+  # but not rewrite them.
+  [ -f "$home/.gitconfig" ] && ro_file+=("$home/.gitconfig")
+  [ -d "$home/.config/git" ] && ro_dir+=("$home/.config/git")
+  local hooks
+  hooks="$(git config --global --get core.hooksPath 2>/dev/null || true)"
+  case "$hooks" in \~/*) hooks="$home/${hooks#\~/}" ;; esac
+  if [ -n "$hooks" ] && [ -d "$hooks" ]; then
+    c="$(canonicalize "$hooks")" || exit 2
+    ro_dir+=("$c")
+  fi
+
+  # Write floors, applied whatever the caller asked for. No write grant may be
+  # /, $HOME, or any ancestor of $HOME: each would put every dotfile and
+  # credential in reach.
+  local w
+  for w in ${rw_c[@]+"${rw_c[@]}"} "$tmp_c"; do
+    _path_within "$home" "$w" && die "refusing a write grant that covers \$HOME (fail-closed): $w"
+  done
+  if [ "${#confine_c[@]}" -gt 0 ]; then
+    local under ok
+    for w in ${rw_c[@]+"${rw_c[@]}"}; do
+      ok=0
+      for under in "${confine_c[@]}"; do _path_within "$w" "$under" && ok=1; done
+      [ "$ok" = 1 ] || die "--rw $w is outside every --confine-under root (fail-closed)"
+    done
+  fi
+
+  # ~/.claude. With a token command the credential file is outside every grant,
+  # so ~/.claude is granted entry by entry, read-only, minus that one file —
+  # measured (2026-11-03): `claude -p`, Bash tool included, writes nothing under
+  # ~/.claude it needs, and its scratch goes to $TMPDIR. Without one, the
+  # credential must refresh in place, so ~/.claude is writable (the documented
+  # Linux fallback).
+  local -a claude_rw=()
+  if [ -d "$claude_dir" ]; then
+    if [ "$token" = 1 ]; then
+      local entry
+      for entry in "$claude_dir"/* "$claude_dir"/.[!.]* "$claude_dir"/..?*; do
+        [ -e "$entry" ] || continue
+        c="$(canonicalize "$entry")" || continue
+        # A link to the credential file is the credential file.
+        [ -n "$cred_file" ] && [ "$c" = "$cred_file" ] && continue
+        if [ -d "$c" ]; then
+          [ -n "$cred_file" ] && _path_within "$cred_file" "$c" && continue
+          ro_dir+=("$c")
+        else
+          ro_file+=("$c")
+        fi
+      done
+    else
+      c="$(canonicalize "$claude_dir")" || exit 2
+      claude_rw+=("$c")
+      echo "spawn-orchestrator: render-nono-profile: no --claude-token, so ~/.claude is WRITABLE in the jail (the documented Linux fallback): the jailed agent can rewrite .credentials.json and plant hooks, plugins or CLAUDE.md that your next unjailed session runs — pass a token command to close it" >&2
+    fi
+  fi
+  [ -f "$home/.claude.json" ] && ro_file+=("$home/.claude.json")
+
+  # With a token, no grant of any kind may reach the credential file.
+  if [ "$token" = 1 ] && [ -n "$cred_file" ]; then
+    for w in ${rw_c[@]+"${rw_c[@]}"} "$tmp_c" ${ro_dir[@]+"${ro_dir[@]}"}; do
+      _path_within "$cred_file" "$w" && die "--claude-token is set but a grant covers $cred_file (fail-closed): $w"
+    done
+    for w in ${ro_file[@]+"${ro_file[@]}"}; do
+      [ "$w" = "$cred_file" ] && die "--claude-token is set but a grant names $cred_file (fail-closed)"
+    done
+  fi
+
+  # Device paths nono's system_write_linux group would have granted, kept
+  # without its /tmp. Literal, never canonicalized: /dev/fd resolves to the
+  # renderer's own /proc/<pid>/fd.
+  local -a dev_dirs=() dev_files=()
+  for p in /dev/pts /dev/fd /proc/self/fd; do [ -e "$p" ] && dev_dirs+=("$p"); done
+  for p in /dev/null /dev/zero /dev/full /dev/tty /dev/stdout /dev/stderr; do [ -e "$p" ] && dev_files+=("$p"); done
+
+  local tmpq
+  tmpq="$(_nono_json_path "$tmp_c")" || exit 2
+
+  local tmp lists
+  tmp="$(mktemp "${TMPDIR:-/tmp}/orchestrator-nono.XXXXXX")" || die "mktemp failed"
+  if ! lists="$(
+    printf '    "allow": '
+    _nono_json_list '    ' ${rw_c[@]+"${rw_c[@]}"} "$tmp_c" ${claude_rw[@]+"${claude_rw[@]}"} ${dev_dirs[@]+"${dev_dirs[@]}"} || exit 1
+    printf ',\n    "allow_file": '
+    _nono_json_list '    ' ${dev_files[@]+"${dev_files[@]}"} || exit 1
+    printf ',\n    "read": '
+    _nono_json_list '    ' ${ro_dir[@]+"${ro_dir[@]}"} || exit 1
+    printf ',\n    "read_file": '
+    _nono_json_list '    ' ${ro_file[@]+"${ro_file[@]}"} || exit 1
+  )"; then
+    rm -f "$tmp"
+    die "render-nono-profile: a grant path could not be written as JSON (fail-closed)"
+  fi
+  {
+    printf '{\n'
+    printf '  "meta": {\n'
+    printf '    "name": "%s",\n' "$NONO_PROFILE_NAME"
+    printf '    "version": "1",\n'
+    printf '    "description": "Rendered by spawn-orchestrator.sh render-nono-profile; do not edit. nono is the only enforcing layer: Claude Code'"'"'s own sandbox is off (render-settings --jail nono) because it cannot start under Landlock."\n'
+    printf '  },\n'
+    printf '  "groups": { "exclude": ["system_write_linux"] },\n'
+    printf '  "filesystem": {\n%s\n  },\n' "$lists"
+    printf '  "linux": { "af_unix_mediation": "pathname" },\n'
+    printf '  "network": { "block": false },\n'
+    # One key per line, last in the file: write-launch reads it back with sed to
+    # export the same TMPDIR, so render and launch cannot drift.
+    printf '  "environment": {\n    "set_vars": {\n      "TMPDIR": %s\n    }\n  }\n' "$tmpq"
+    printf '}\n'
+  } >"$tmp" || {
+    rm -f "$tmp"
+    die "failed to write nono profile"
+  }
+  mv "$tmp" "$out" || {
+    rm -f "$tmp"
+    die "failed to write nono profile: $out"
+  }
+  echo "spawn-orchestrator: nono profile OK $out"
+}
+
+# The TMPDIR a rendered nono profile pins (the last `"TMPDIR": "<dir>"` line, which
+# the renderer writes last). Empty when the file is not a rendered profile.
+_nono_profile_tmpdir() {
+  grep -q "\"name\": \"$NONO_PROFILE_NAME\"" "$1" 2>/dev/null || return 0
+  sed -n 's/^      "TMPDIR": "\(.*\)"$/\1/p' "$1" | tail -1
 }
 
 # ---------------------------------------------------------------------------
@@ -1320,11 +1617,32 @@ write_launch() {
     park_limit="$PARK_STORM_LIMIT_DEFAULT" \
     pause_exempt_max="$PAUSE_EXEMPT_MAX_SECONDS_DEFAULT" \
     report_every="$DEFAULT_REPORT_INTERVAL" report_gh="" report_usage_bin="" \
-    handoff_dir=""
+    handoff_dir="" jail="seatbelt" nono_bin="" token_cmd=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --profile)
         profile="$2"
+        shift 2
+        ;;
+      # seatbelt (macOS, sandbox-exec) or nono (Linux, #1349). With nono,
+      # --profile is a render-nono-profile JSON and --nono-bin the pinned binary.
+      --jail)
+        [ $# -ge 2 ] || die "missing value for --jail"
+        jail="$2"
+        shift 2
+        ;;
+      --nono-bin)
+        [ $# -ge 2 ] || die "missing value for --nono-bin"
+        nono_bin="$2"
+        shift 2
+        ;;
+      # A command whose stdout is a Claude OAuth token (`claude setup-token`),
+      # e.g. an `op read …`. The wrapper runs it UNJAILED on each wake and hands
+      # the token to the jailed claude only, so the credential file stays outside
+      # the jail. See claude_token.
+      --claude-token-cmd)
+        [ $# -ge 2 ] || die "missing value for --claude-token-cmd"
+        token_cmd="$2"
         shift 2
         ;;
       --settings)
@@ -1461,12 +1779,30 @@ write_launch() {
   # cross-check: it must resolve to the stamped dir, else the caller rendered and
   # launched with different dirs and the inner sandbox would silently degrade.
   local stamped
-  # tail -1, NOT head -1: render_profile appends the real stamp LAST (after all
-  # template substitution), and nothing user-controlled can land after it — so
-  # the last match is authoritative. head -1 would let an earlier `;; @spawn-tmpdir:`
-  # line (e.g. one smuggled through a scope path) override the real one.
-  stamped="$(sed -n 's/^;; @spawn-tmpdir: //p' "$profile" | tail -1)"
-  [ -n "$stamped" ] || die "profile has no @spawn-tmpdir stamp (fail-closed): re-render it with the current render-profile: $profile"
+  case "$jail" in
+    seatbelt)
+      # tail -1, NOT head -1: render_profile appends the real stamp LAST (after all
+      # template substitution), and nothing user-controlled can land after it — so
+      # the last match is authoritative. head -1 would let an earlier `;; @spawn-tmpdir:`
+      # line (e.g. one smuggled through a scope path) override the real one.
+      stamped="$(sed -n 's/^;; @spawn-tmpdir: //p' "$profile" | tail -1)"
+      [ -n "$stamped" ] || die "profile has no @spawn-tmpdir stamp (fail-closed): re-render it with the current render-profile: $profile"
+      [ -z "$nono_bin" ] || die "--nono-bin is only meaningful with --jail nono"
+      ;;
+    nono)
+      # The profile pins the jail's TMPDIR; the wrapper exports the same value.
+      stamped="$(_nono_profile_tmpdir "$profile")"
+      [ -n "$stamped" ] || die "--profile is not a render-nono-profile profile (fail-closed): $profile"
+      case "$nono_bin" in /*) ;; *) die "--jail nono requires an absolute --nono-bin (fail-closed): ${nono_bin:-<unset>}" ;; esac
+      [ -x "$nono_bin" ] || die "--nono-bin is not executable (fail-closed): $nono_bin"
+      # nono is the only enforcing layer. A settings file that turns the
+      # harness sandbox on would fail open inside it (render-settings --jail nono).
+      grep -Eq '"enabled"[[:space:]]*:[[:space:]]*true' "$settings" 2>/dev/null \
+        && die "--jail nono needs settings with the harness sandbox off (fail-closed): render them with render-settings --jail nono"
+      ;;
+    *) die "--jail must be seatbelt or nono (fail-closed): $jail" ;;
+  esac
+  case "$token_cmd" in *$'\n'*) die "--claude-token-cmd must be one line (fail-closed)" ;; esac
   if [ -n "$tmpdir" ]; then
     case "$tmpdir" in /*) ;; *) die "--tmpdir must be absolute (fail-closed): $tmpdir" ;; esac
     local tmpdir_check
@@ -1547,6 +1883,9 @@ write_launch() {
     # Pin the supervisor-state root resolved here, so supervisor-scan derives the
     # same ledger path the --state below names, whatever this job's environment.
     printf 'export AUTO_PILOT_STATE_HOME=%q\n' "$state_root"
+    # nono's update check phones home and stores a UUID; its migration rewrites
+    # ~/.config/nono. Neither belongs in an unattended run with a pinned binary.
+    [ "$jail" = nono ] && printf 'export NONO_NO_UPDATE_CHECK=1 NONO_NO_MIGRATE=1\n'
     printf 'mkdir -p %q\n' "$tmpdir"
     printf 'cd %q\n' "$workdir"
     # The supervisor's own bookkeeping — ABOVE the gate, so it runs on EVERY wake
@@ -1631,11 +1970,27 @@ write_launch() {
       printf 'trap %s EXIT INT TERM HUP\n' \
         "$(printf '%q' 'kill -TERM -"$rpt" 2>/dev/null || true; wait "$rpt" 2>/dev/null || true')"
     fi
+    # The Claude token, resolved UNJAILED, here, on every wake: below the gate,
+    # because a gate-closed wake runs no agent and needs none. claude-token
+    # prints only the token; on failure it has already halted the run with an
+    # alarm, so the wrapper stops instead of relaunching into the same failure.
+    # The token is passed as a prefix assignment on the jail line below, never
+    # exported, so supervisor-check and the reporter never carry it.
+    local token_env=""
+    if [ -n "$token_cmd" ]; then
+      printf 'tok="$(%q claude-token --dir %q --label %q --cmd %q 2>>%q)" || exit 1\n' \
+        "$self" "$workdir" "$label" "$token_cmd" "$log"
+      token_env='CLAUDE_CODE_OAUTH_TOKEN="$tok" '
+    fi
     # NOT `exec`'d (task 10): the wrapper must observe claude's exit to
     # classify it, so the launchd-tracked PID is this wrapper, not claude
     # itself. `set +e`/`set -e` bracket the one command allowed to fail.
     printf 'set +e\n'
-    printf 'sandbox-exec -f %q \\\n' "$profile"
+    if [ "$jail" = nono ]; then
+      printf '%s%q run --silent --profile %q -- \\\n' "$token_env" "$nono_bin" "$profile"
+    else
+      printf '%ssandbox-exec -f %q \\\n' "$token_env" "$profile"
+    fi
     printf '  %q -p "$(cat %q)" \\\n' "$claude_bin" "$prompt"
     printf '  --permission-mode bypassPermissions \\\n'
     printf '  --settings %q \\\n' "$settings_json"
@@ -1643,6 +1998,7 @@ write_launch() {
     printf '  --output-format stream-json \\\n'
     printf '  >>%q 2>&1\n' "$log"
     printf 'code=$?\n'
+    [ -n "$token_cmd" ] && printf 'unset tok\n'
     # Reap the in-wake reporter the moment claude exits: the supervisor-scan
     # emission on the NEXT wake owns the cadence from here. Process-group
     # kill, so an in-flight report-tick (and any gh it spawned) dies with the
@@ -1683,6 +2039,59 @@ write_launch() {
     die "failed to write plist: $out_plist"
   }
   echo "spawn-orchestrator: launch written $out_script $out_plist"
+}
+
+# claude-token (#1349) — run the launch's --claude-token-cmd UNJAILED and print
+# the token on stdout, for the wrapper to hand to the jailed claude alone. The
+# command's own stderr goes to the caller's (the run log); the token never
+# does. A failure is a SUPERVISOR HALT with an alarm, not an exit for launchd or
+# systemd to relaunch into: a token command that failed once (a revoked token,
+# a missing `op` session) fails the same way every 300s, and burns nothing but
+# the human's night. Exit 0 with the token, 3 after halting, 2 on bad usage.
+CLAUDE_TOKEN_TIMEOUT_SECS=60
+claude_token() {
+  local dir="" label="" cmd=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dir | --label | --cmd)
+        [ $# -ge 2 ] || die "missing value for $1"
+        case "$1" in
+          --dir) dir="$2" ;;
+          --label) label="$2" ;;
+          --cmd) cmd="$2" ;;
+        esac
+        shift 2
+        ;;
+      *) die "unknown claude-token argument: $1" ;;
+    esac
+  done
+  [ -n "$dir" ] && [ -n "$cmd" ] || die "claude-token requires --dir and --cmd"
+  case "$dir" in /*) ;; *) die "--dir must be absolute: $dir" ;; esac
+
+  # Captured in memory, never through a file: the wrapper's TMPDIR is the jail's.
+  local rc=0 why="" token="" lines
+  token="$(_run_bounded "$CLAUDE_TOKEN_TIMEOUT_SECS" bash -c "$cmd" </dev/null)" || rc=$?
+  lines="$(printf '%s' "$token" | awk 'END { print NR }')"
+  if [ "$rc" = 124 ]; then
+    why="timed out after ${CLAUDE_TOKEN_TIMEOUT_SECS}s"
+  elif [ "$rc" != 0 ]; then
+    why="exited $rc"
+  elif [ -z "$token" ]; then
+    why="printed nothing"
+  elif [ "$lines" != 1 ] || [[ "$token" =~ [[:space:][:cntrl:]] ]]; then
+    why="printed something other than one token (whitespace or more than one line)"
+  fi
+  if [ -n "$why" ]; then
+    token=""
+    echo "spawn-orchestrator: claude-token: the Claude token command $why — halting" >&2
+    local -a lab=()
+    [ -n "$label" ] && lab=(--label "$label")
+    (_supervisor_halt --dir "$dir" ${lab[@]+"${lab[@]}"} --condition claude-token \
+      --reason "the Claude token command $why") \
+      || echo "spawn-orchestrator: claude-token: the halt itself failed" >&2
+    exit 3
+  fi
+  printf '%s\n' "$token"
 }
 
 # Record the orchestrator's identity for stale/recycled-PID detection: the PID,
@@ -2151,6 +2560,9 @@ _alarm_action() {
   case "$1" in
     fatal-auth)
       printf 're-authenticate: run `claude /login`, then `/auto-pilot <source> --resume`'
+      ;;
+    claude-token)
+      printf 'the Claude token command failed, so the run is halted: run the launch'"'"'s --claude-token-cmd by hand to see why (a revoked `claude setup-token` token, a missing `op` service-account token), fix it, then `/auto-pilot <source> --resume`'
       ;;
     no-progress)
       printf 'the run is STALLED (no forward progress, supervisor torn down): check `.auto-pilot/REPORT.md`, fix the cause (usually re-authenticate: `claude /login`), then `/auto-pilot <source> --resume`'
@@ -7248,6 +7660,8 @@ sub="$1"
 shift
 case "$sub" in
   render-profile) render_profile "$@" ;;
+  render-nono-profile) render_nono_profile "$@" ;;
+  claude-token) claude_token "$@" ;;
   render-settings) render_settings "$@" ;;
   write-launch) write_launch "$@" ;;
   record-handle) record_handle "$@" ;;

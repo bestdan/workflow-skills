@@ -35,10 +35,14 @@ Run `"${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh" --source <plan|linear|gh-issue
 output and `PREFLIGHT VERDICT: go` / `no-go — <reason>` line cover the binary
 fingerprint / environment class, coder availability, base freshness, the
 resolved PATH/exec dirs, the add-task host, the launcher, the confinement
-smoke, and the consent-gate probe (below). A host with no supported launcher
-(today anything without `launchd` + `sandbox-exec`, i.e. not macOS) is a
-`no-go`: the smoke and consent probes there log skips, but a skipped probe is
-not a launch that can happen. A
+smoke, and the consent-gate probe (below). A host with no supported launcher is
+a `no-go`: the smoke and consent probes there log skips, but a skipped probe is
+not a launch that can happen. On Linux the launcher check is the pinned nono
+(`scripts/nono-install.sh check`: checksum, version, Landlock ABI 4+), and the
+smoke is `scripts/smoke-nono.sh`, one `PREFLIGHT SMOKE_<CHECK>` line per
+assertion. Pass the token command the launch will use as `--claude-token-cmd`,
+so the smoke proves the credential file stays outside the jail. Linux stays
+`no-go` until its supervisor (#1350) lands. A
 `no-go` **BLOCKS LAUNCH** with the reason it names; treat its output as the
 source of truth rather than re-deriving these facts by hand.
 

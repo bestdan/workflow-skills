@@ -15,12 +15,18 @@
 #
 # Usage:
 #   scripts/preflight.sh --source <plan|linear|gh-issue> --run-root <path>
-#                        [--base <branch>]
+#                        [--base <branch>] [--claude-token-cmd '<cmd>']
 #   scripts/preflight.sh --scout-run-md <path to RUN.md>
 #
 #   --source        Task-graph source the run reads from. Required unless
 #                    --scout-run-md is given.
 #   --base          Base branch to check for staleness. Default: main.
+#   --claude-token-cmd
+#                    Linux only: the command the launch will hand to
+#                    write-launch to supply CLAUDE_CODE_OAUTH_TOKEN. The nono
+#                    smoke runs it the same way and proves the credential file
+#                    stays outside the jail. Omitted, the smoke runs the
+#                    documented fallback (~/.claude writable in the jail).
 #   --run-root      The checkout the detached run will work in — the run
 #                    worktree launch step 1 created. REQUIRED: the consent-gate
 #                    probe tests THIS path and its --git-common-dir, and a
@@ -75,6 +81,8 @@
 #   PREFLIGHT_TCC_LOCATIONS colon-separated protected-location list the
 #                            consent-gate probe checks the run's paths against.
 #   PREFLIGHT_CONSENT_TICKS how many 0.25s ticks to wait for the probe job.
+#   PREFLIGHT_OS            the host OS (uname -s) the launcher check branches on.
+#   PREFLIGHT_NONO_SMOKE    path to a smoke-nono.sh-compatible executable.
 set -uo pipefail
 # xml_escape's replacements emit a literal `&`, which patsub_replacement (on by
 # default in bash 5.2+) would expand to the matched text — rendering `&amp;` as
@@ -250,8 +258,14 @@ source_arg=""
 base="main"
 scout_run_md=""
 run_root_arg=""
+token_cmd=""
 while [ $# -gt 0 ]; do
   case "$1" in
+    --claude-token-cmd)
+      [ $# -ge 2 ] || die "missing value for --claude-token-cmd"
+      token_cmd="$2"
+      shift 2
+      ;;
     --run-root)
       [ $# -ge 2 ] || die "missing value for --run-root"
       run_root_arg="$2"
@@ -273,7 +287,7 @@ while [ $# -gt 0 ]; do
       shift 2
       ;;
     -h | --help)
-      sed -n '2,77p' "$0"
+      sed -n '2,85p' "$0"
       exit 0
       ;;
     *) die "unknown argument: $1" ;;
@@ -496,20 +510,38 @@ echo "PREFLIGHT HANDLER: $handler"
 echo "PREFLIGHT HANDLER_SOURCE: $handler_source"
 
 # --- 3b. Launcher -------------------------------------------------------------
-# The detached run spawns only through launchd + a Seatbelt jail
-# (spawn-orchestrator.sh `write-launch` / `launch`), so a host missing either
-# cannot carry out launch step 7. Section 5 then logs a skip, and so does
-# section 4 when sandbox-exec is absent — truthfully, as "this probe could not
-# run" — but a skip there is not a launch
-# that can happen, so the missing launcher is a blocker of its own: the
-# pre-flight fails closed instead of printing `go` for a launch with no way to
-# spawn. The Linux launcher is tracked in #956.
-if command -v sandbox-exec >/dev/null 2>&1 && command -v "$LAUNCHCTL_BIN" >/dev/null 2>&1; then
+# macOS spawns through launchd + a Seatbelt jail (spawn-orchestrator.sh
+# `write-launch` / `launch`). Linux jails the run under a pinned nono (#1349),
+# checked here by scripts/nono-install.sh: the binary's checksum first, then its
+# version, then Landlock with ABI 4 or later. A host with neither cannot carry
+# out launch step 7. Sections 4 and 5 log a skip there — truthfully, as "this
+# probe could not run" — but a skip is not a launch that can happen, so the
+# missing launcher is a blocker of its own: the pre-flight fails closed instead
+# of printing `go` for a launch with no way to spawn.
+host_os="${PREFLIGHT_OS:-$(uname -s 2>/dev/null || echo unknown)}"
+nono_bin=""
+if [ "$host_os" != Linux ] && command -v sandbox-exec >/dev/null 2>&1 && command -v "$LAUNCHCTL_BIN" >/dev/null 2>&1; then
   echo "PREFLIGHT LAUNCHER: launchd + sandbox-exec"
+elif [ "$host_os" = Linux ]; then
+  nono_out="$(bash "$ROOT/scripts/nono-install.sh" check 2>&1)"
+  nono_ok=$?
+  nono_problem="$(sed -n 's/^NONO: //p' <<<"$nono_out" | head -1)"
+  nono_fix="$(sed -n 's/^NONO FIX: //p' <<<"$nono_out" | head -1)"
+  if [ "$nono_ok" = 0 ]; then
+    nono_bin="$(sed -n 's/^ok \(.*\) (nono .*$/\1/p' <<<"$nono_problem")"
+    echo "PREFLIGHT NONO: $nono_problem"
+    echo "PREFLIGHT LAUNCHER: nono (Linux) — no supervisor yet (#1350)"
+    # The jail is ready; what starts and relaunches the run on Linux is not.
+    # Until #1350 lands there is nothing to detach, so this stays a blocker.
+    blockers+=("no Linux supervisor yet: the nono jail is ready, but nothing can start and relaunch the run on Linux until #1350 lands")
+  else
+    echo "PREFLIGHT NONO: ${nono_problem:-the check failed: $nono_out}"
+    echo "PREFLIGHT LAUNCHER: none (Linux: nono not ready)"
+    blockers+=("nono jail not ready: ${nono_problem:-nono-install.sh check failed} — fix: ${nono_fix:-see PREFLIGHT NONO}")
+  fi
 else
-  launcher_os="$(uname -s 2>/dev/null || echo unknown)"
-  echo "PREFLIGHT LAUNCHER: none ($launcher_os)"
-  blockers+=("no supported launcher on this host ($launcher_os): the orchestrator spawns only through launchd + sandbox-exec, and this host lacks $(command -v sandbox-exec >/dev/null 2>&1 && echo launchctl || echo sandbox-exec) — Linux support is tracked in #956")
+  echo "PREFLIGHT LAUNCHER: none ($host_os)"
+  blockers+=("no supported launcher on this host ($host_os): the orchestrator spawns through launchd + sandbox-exec on macOS, or nono on Linux, and this host has neither")
 fi
 
 # --- 4. Confinement smoke ---------------------------------------------------
@@ -518,8 +550,41 @@ fi
 # skills/auto-pilot/references/launch-runtime.md "Sandbox profile". Nested
 # sandbox-exec is itself denied in some sandboxed dev environments, so probe
 # that capability first and degrade to a logged SKIP rather than a blocker.
+#
+# On Linux the smoke is scripts/smoke-nono.sh, run through the pinned nono 3b
+# just verified: one `SMOKE <CHECK>:` line per assertion, each reprinted here
+# as `PREFLIGHT SMOKE_<CHECK>:`, and every FAIL is a blocker.
 
-if ! command -v sandbox-exec >/dev/null 2>&1; then
+if [ "$host_os" = Linux ]; then
+  if [ -z "$nono_bin" ]; then
+    echo "PREFLIGHT SMOKE: skip (nono is not ready — see PREFLIGHT NONO)"
+  else
+    smoke_args=(--nono-bin "$nono_bin")
+    [ -n "$token_cmd" ] && smoke_args+=(--claude-token-cmd "$token_cmd")
+    smoke_out="$(bash "${PREFLIGHT_NONO_SMOKE:-$ROOT/scripts/smoke-nono.sh}" "${smoke_args[@]}" 2>&1)"
+    smoke_rc=$?
+    smoke_fails=0
+    while IFS= read -r line; do
+      case "$line" in
+        "SMOKE "*)
+          echo "PREFLIGHT SMOKE_${line#SMOKE }"
+          case "$line" in
+            *": FAIL "*)
+              smoke_fails=$((smoke_fails + 1))
+              check="${line#SMOKE }"
+              blockers+=("confinement smoke: ${check%%:*} failed — ${check#*: FAIL }")
+              ;;
+          esac
+          ;;
+      esac
+    done <<<"$smoke_out"
+    if [ "$smoke_rc" != 0 ] && [ "$smoke_fails" = 0 ]; then
+      echo "PREFLIGHT SMOKE: FAIL (the nono smoke could not run: $(tail -1 <<<"$smoke_out"))"
+      blockers+=("confinement smoke: the nono smoke could not run — $(tail -1 <<<"$smoke_out")")
+    fi
+    [ -n "$token_cmd" ] || skip_notes+=("no --claude-token-cmd: the jail runs the documented fallback, ~/.claude writable")
+  fi
+elif ! command -v sandbox-exec >/dev/null 2>&1; then
   echo "PREFLIGHT SMOKE: skip (sandbox-exec not available — non-macOS host)"
   skip_notes+=("confinement smoke skipped: sandbox-exec absent (non-macOS host)")
 elif ! sandbox-exec -p '(version 1)(allow default)' /usr/bin/true >/dev/null 2>&1; then
