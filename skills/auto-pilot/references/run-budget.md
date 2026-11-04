@@ -155,7 +155,7 @@ When the proxy crosses its near-cap threshold, or the error backstop fires:
 2. A relaunch past `paused_until` starts a **fresh** process. Per
    [`launch-runtime.md`](launch-runtime.md) "Spawn mechanics" ("Relaunchable,
    not one-shot"), a relaunchable supervisor (macOS `launchd` timer/`KeepAlive`,
-   Linux `systemd` timer/`at`) wakes the job past the reset rather than the
+   Linux `systemd-run --user` timer) wakes the job past the reset rather than the
    process itself sleeping through it.
 3. **Guard the wake.** Before resuming work, re-check the current time
    against the recorded `--until` deadline (don't wake at 6:00 into a 6:05

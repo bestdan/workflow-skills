@@ -32,6 +32,7 @@ parts=(
   restack
   alarm
   reserve
+  systemd
   handoff
   nono
 )

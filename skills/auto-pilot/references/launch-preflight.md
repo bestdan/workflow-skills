@@ -41,8 +41,9 @@ not a launch that can happen. On Linux the launcher check is the pinned nono
 (`scripts/nono-install.sh check`: checksum, version, Landlock ABI 4+), and the
 smoke is `scripts/smoke-nono.sh`, one `PREFLIGHT SMOKE_<CHECK>` line per
 assertion. Pass the token command the launch will use as `--claude-token-cmd`,
-so the smoke proves the credential file stays outside the jail. Linux stays
-`no-go` until its supervisor (#1350) lands. A
+so the smoke proves the credential file stays outside the jail. The Linux
+launcher also needs `systemd-run`, a reachable systemd user manager, and
+`Linger=yes`. Linux stays `no-go` until its verify broker (#1351) lands. A
 `no-go` **BLOCKS LAUNCH** with the reason it names; treat its output as the
 source of truth rather than re-deriving these facts by hand.
 
@@ -243,18 +244,21 @@ the require/prefer bit on the task route.
 Per [`launch-runtime.md`](launch-runtime.md):
 
 1. Write the self-contained **launch script** — env, the sandbox wrapper (the
-   two-layer profile: seatbelt/bwrap for filesystem+process, the harness network
+   two-layer profile: seatbelt/nono for filesystem+process, the harness network
    allowlist narrowed to this run's tools for host egress), and log redirection
    to `.auto-pilot/orchestrator.log`. The egress allowlist also gets the
    pre-flight's resolved `/add-task` destination host via `render-settings
    --add-task-host`, so the run's own settings never deny its own follow-up
-   filing regardless of work source.
+   filing regardless of work source. On Linux, render the nono profile with
+   `--git-worktree <run worktree>`, and write it and the launch script outside
+   every write grant (`write-launch` refuses otherwise): see
+   [`launch-runtime.md`](launch-runtime.md) "Linux: the nono profile".
 2. Run the **auth smoke test through that exact sandbox wrapper + env** (not
    bare) — a failure here is a launch blocker (ties to step 2). Machine-stays-
    awake was already confirmed in the pre-flight (step 2).
 3. **Detach** via the OS-appropriate primitive (`launchd`/`launchctl` on macOS,
-   `setsid` on Linux) so the orchestrator outlives this session; record its
-   **PID + process start-time + `--until` deadline** on the run-state branch for
+   a `systemd-run --user` timer on Linux) so the orchestrator outlives this
+   session; record its **PID + process start-time + `--until` deadline** on the run-state branch for
    later stale-run detection (the start-time guards against a recycled PID being
    mistaken for a live run).
 4. Print **where state lives** — the run-state branch name, the `.auto-pilot/`

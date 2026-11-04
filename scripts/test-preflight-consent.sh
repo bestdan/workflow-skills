@@ -80,6 +80,14 @@ assert_contains() {
   esac
 }
 
+assert_not_contains() {
+  # assert_not_contains <description> <needle> <haystack>
+  case "$3" in
+    *"$2"*) bad "$1 (present: $2)" ;;
+    *) ok "$1" ;;
+  esac
+}
+
 # --- Fixture root ----------------------------------------------------------
 # PROTECTED stands in for a TCC-protected location (~/Documents and friends);
 # the fixture repo lives INSIDE it, which is what makes the run "need" it.
@@ -569,6 +577,11 @@ echo "SMOKE CRED_READ: ${SMOKE_CRED:-pass} (the credential file)"
 [ "${SMOKE_CRED:-pass}" = pass ]
 SMOKE
 chmod +x "$FIXBIN/smoke-nono"
+# The systemd user manager, stubbed (#1350): its state and Linger come from env.
+printf '#!/bin/sh\necho "${STUB_SD_STATE-degraded}"\n' >"$FIXBIN/fake-systemctl"
+printf '#!/bin/sh\necho "${STUB_LINGER-yes}"\n' >"$FIXBIN/fake-loginctl"
+printf '#!/bin/sh\nexit 0\n' >"$FIXBIN/fake-systemd-run"
+chmod +x "$FIXBIN/fake-systemctl" "$FIXBIN/fake-loginctl" "$FIXBIN/fake-systemd-run"
 linux_preflight() { # [VAR=value ...] [-- preflight args...]
   local -a e=() a=()
   while [ $# -gt 0 ] && [ "$1" != -- ]; do
@@ -579,6 +592,8 @@ linux_preflight() { # [VAR=value ...] [-- preflight args...]
   a=("$@")
   env CONSENT_FAKE_MODE=clean CAPTURE="$CAPTURE" PATH="$FIXTURE_PATH" PREFLIGHT_OS=Linux \
     PREFLIGHT_LAUNCHCTL="$FIXBIN/fake-launchctl" PREFLIGHT_TCC_LOCATIONS="$PROTECTED" \
+    PREFLIGHT_SYSTEMCTL="$FIXBIN/fake-systemctl" PREFLIGHT_LOGINCTL="$FIXBIN/fake-loginctl" \
+    PREFLIGHT_SYSTEMD_RUN="$FIXBIN/fake-systemd-run" \
     AUTO_PILOT_NONO_HOME="$NH" AUTO_PILOT_NONO_TARGET=x86_64-unknown-linux-gnu \
     AUTO_PILOT_LSM_FILE="$BASE/lsm-ok" PREFLIGHT_NONO_SMOKE="$FIXBIN/smoke-nono" \
     SMOKE_ARGS="$BASE/smoke-args" ${e[@]+"${e[@]}"} \
@@ -601,12 +616,20 @@ assert_contains "linux: Landlock ABI 3 is a no-go" "Landlock ABI 3 is below 4" "
 
 out10="$(linux_preflight AUTO_PILOT_NONO_SHA256="$NSUM" -- --claude-token-cmd 'op read op://v/claude/token')"
 assert_contains "linux: a ready nono is reported" "PREFLIGHT NONO: ok $NH/0.81.0/nono (nono 0.81.0, Landlock ABI 8)" "$out10"
-assert_contains "linux: the launcher is nono" "PREFLIGHT LAUNCHER: nono (Linux)" "$out10"
+assert_contains "linux: the launcher is nono + systemd-run" \
+  "PREFLIGHT LAUNCHER: nono + systemd-run --user (user manager: degraded, Linger=yes)" "$out10"
+assert_not_contains "linux: the supervisor is no longer a blocker" "no Linux supervisor yet" "$out10"
 assert_contains "linux: every smoke assertion is listed" "PREFLIGHT SMOKE_WRITE_HOME: pass" "$out10"
 assert_contains "linux: the smoke runs the pinned nono with the token command" \
   "--nono-bin $NH/0.81.0/nono --claude-token-cmd op read op://v/claude/token" "$(cat "$BASE/smoke-args" 2>/dev/null)"
-assert_contains "linux: until #1350 there is no supervisor, so still no-go" \
-  "PREFLIGHT VERDICT: no-go — no Linux supervisor yet" "$out10"
+assert_contains "linux: until #1351 there is no verify broker, so still no-go" \
+  "PREFLIGHT VERDICT: no-go — no Linux verify broker yet" "$out10"
+out10="$(linux_preflight AUTO_PILOT_NONO_SHA256="$NSUM" STUB_LINGER=no)"
+assert_contains "linux: Linger=no is a blocker naming the fix" "fix: loginctl enable-linger" "$out10"
+out10="$(linux_preflight AUTO_PILOT_NONO_SHA256="$NSUM" STUB_SD_STATE=)"
+assert_contains "linux: an unreachable user manager is a blocker" "the systemd user manager is unreachable" "$out10"
+out10="$(linux_preflight AUTO_PILOT_NONO_SHA256="$NSUM" PREFLIGHT_SYSTEMD_RUN="$BASE/no-such-systemd-run")"
+assert_contains "linux: no systemd-run is a blocker" "no systemd-run on this host" "$out10"
 out10="$(linux_preflight AUTO_PILOT_NONO_SHA256="$NSUM" SMOKE_CRED=FAIL)"
 assert_contains "linux: a failed smoke assertion is printed" "PREFLIGHT SMOKE_CRED_READ: FAIL" "$out10"
 assert_contains "linux: a failed smoke assertion is a blocker" "confinement smoke: CRED_READ failed" "$out10"

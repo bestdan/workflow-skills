@@ -43,7 +43,8 @@ esac
 #      binary. Each name is optional because each part builds only its own: the
 #      supervisor part has GT_PATH, the alarm part ALPATH/ALFAIL_PATH, the
 #      exit-contract part STUB_PATH/STUBF_PATH, doctor PSSTUB_PATH,
-#      status-report SRW_PATH/SRL_PATH. A part that builds none checks none.
+#      status-report SRW_PATH/SRL_PATH, systemd SD_PATH. A part that builds
+#      none checks none.
 #
 #      Every name here must be the composite PATH a fixture RUNS UNDER, stored
 #      whole at its own call site. Do not reconstruct one here: the guard dir
@@ -67,7 +68,7 @@ esac
 #      BEFORE they were defined); the epilogue runs last in every part, so it
 #      can. Keep it exhaustive:
 #        grep -n 'PATH="\$' scripts/test-spawn-orchestrator-*.sh
-for _pv in GT_PATH ALPATH ALFAIL_PATH STUB_PATH STUBF_PATH PSSTUB_PATH SRW_PATH SRL_PATH; do
+for _pv in GT_PATH ALPATH ALFAIL_PATH STUB_PATH STUBF_PATH PSSTUB_PATH SRW_PATH SRL_PATH SD_PATH; do
   eval "_pval=\"\${$_pv:-}\""
   [ -n "$_pval" ] || continue
   _osa="$(PATH="$_pval" command -v osascript 2>/dev/null || true)"

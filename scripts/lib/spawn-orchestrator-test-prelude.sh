@@ -210,6 +210,17 @@ done
 # from loading a fixture plist into the developer's real launchd.
 printf '#!/bin/sh\nprintf "launchctl: %%s\\n" "$*" >>"${NOTIFY_GUARD_LOG:-/dev/null}"\n[ "$1" = print ] && exit 1\nexit 0\n' >"$GUARD/launchctl"
 chmod +x "$GUARD/launchctl"
+# systemctl / systemd-run: the Linux counterparts (#1350). On a Linux host every
+# teardown reaches `systemctl --user`, which would otherwise stop units on the
+# developer's real user manager. `is-active` says inactive (the truth for every
+# fixture label), `show` prints nothing, everything else no-ops 0.
+printf '#!/bin/sh\nprintf "systemctl: %%s\\n" "$*" >>"${NOTIFY_GUARD_LOG:-/dev/null}"\n[ "$2" = is-active ] && exit 3\nexit 0\n' >"$GUARD/systemctl"
+printf '#!/bin/sh\nprintf "systemd-run: %%s\\n" "$*" >>"${NOTIFY_GUARD_LOG:-/dev/null}"\nexit 0\n' >"$GUARD/systemd-run"
+chmod +x "$GUARD/systemctl" "$GUARD/systemd-run"
+# Pin the service-manager branch so a part means the same thing on every host.
+# The parts observe teardown through a launchctl stub, so they run the launchd
+# branch; the systemd part sets AUTO_PILOT_HOST_OS=Linux on each call instead.
+export AUTO_PILOT_HOST_OS=Darwin
 # gh: the alarm's GitHub channel posts a REAL issue comment on any fixture whose
 # RUN.md names a gh-issue source, so `gh` is shadowed too. It records and fails
 # with a permanent-looking error (no retry queue). Tests that drive gh on purpose
