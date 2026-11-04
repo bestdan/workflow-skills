@@ -259,6 +259,7 @@ Why this exists. What you saw. Written for someone who has never seen this code.
 | `expires`                  | yes      | ISO date. Default: 30 days from creation.                                                                                                                                                                                                  |
 | `tags`                     | no       | Freeform tags for filtering (e.g., `cleanup`, `tests`)                                                                                                                                                                                     |
 | `human_approval_requested` | no       | Forces card into `needs_refinement` until a human flips it back                                                                                                                                                                            |
+| `tier_forecast`            | no       | `auto` / `human` / `skipped`. Written by `/promote-tasks`: the merge tier the card's PR is forecast to need. See **Confidence check** → **Tier forecast and Intent**                                                                       |
 
 ### Body sections
 
