@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.193.1] - 2026-11-04
+
+### Fixes
+
+- name the failed checks on the final FAIL line [#943] (#1393) (7ce87f5)
+
 ## [2.193.0] - 2026-11-04
 
 ### Features
