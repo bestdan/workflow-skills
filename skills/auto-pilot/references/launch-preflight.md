@@ -43,7 +43,8 @@ smoke is `scripts/smoke-nono.sh`, one `PREFLIGHT SMOKE_<CHECK>` line per
 assertion. Pass the token command the launch will use as `--claude-token-cmd`,
 so the smoke proves the credential file stays outside the jail. The Linux
 launcher also needs `systemd-run`, a reachable systemd user manager, and
-`Linger=yes`. Linux stays `no-go` until its verify broker (#1351) lands. A
+`Linger=yes`. Linux stays `no-go` until a jailed run can create worker
+worktrees (#1390). A
 `no-go` **BLOCKS LAUNCH** with the reason it names; treat its output as the
 source of truth rather than re-deriving these facts by hand.
 
@@ -180,12 +181,14 @@ task's `/deliver-task` verifies the same way.
 Because the orchestrator runs **jailed** and `verify_command` can't pass
 inside the jail (execve-deny, exit 126), install the **verify broker** here
 so verify runs **outside** the jail: `"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh"
-write-verify-broker` registers a second, un-jailed launchd job that runs the
+write-verify-broker` registers a second, un-jailed job (launchd on macOS) that runs the
 **pinned** `verify_command` in a run-root-confined worktree, and each task's
 verify becomes a `verify-request` → `verify-await` handshake
-([`launch-runtime.md`](launch-runtime.md) §5). Tear
-the broker job down alongside the orchestrator supervisor at loop
-termination.
+([`launch-runtime.md`](launch-runtime.md) §5). On Linux, pass the run's
+nono profile as `--nono-profile` and start the broker with `detach --label
+<broker label> --script <broker script>`. Pass the broker's label to the
+orchestrator's `launch` as `--broker-label`: every supervisor teardown then
+stops the broker too.
 
 ## Step 6 — Materialize the task graph into run state
 

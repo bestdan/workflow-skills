@@ -285,5 +285,100 @@ if command -v git >/dev/null 2>&1 && [ -f "$SDP" ]; then
   count_is "supervisor linux [stop fails]: the stop is retried once" 2 "stop com.autopilot.test.sf.timer" "$(cat "$STUB_SYSTEMCTL_LOG")"
 fi
 
+# --- the verify broker on Linux (#1351) ----------------------------------------
+# write-verify-broker writes only the script; detach starts it as its own
+# transient pair; every supervisor teardown stops it too.
+VBL="$SD/broker"
+mkdir -p "$VBL/sent"
+sdvb() { # [args...]
+  AUTO_PILOT_HOST_OS=Linux PATH="$SD_PATH" "$SCRIPT" write-verify-broker --sentinel-dir "$VBL/sent" \
+    --verify-cmd 'bash scripts/check.sh' --confine-under "$RUN_WT" --label com.autopilot.test.vb \
+    --workdir "$RUN_WT" --log "$VBL/broker.log" --path "/usr/bin:/bin" "$@"
+}
+if [ -f "$SDP" ]; then
+  out="$(sdvb --nono-profile "$SDP" --out-script "$VBL/broker.sh" 2>&1)"
+  have "write-verify-broker linux: needs no --out-plist" "verify-broker written $VBL/broker.sh (pin" "$out"
+  have "write-verify-broker linux: the script runs the pinned broker" "verify-broker" "$(cat "$VBL/broker.sh" 2>/dev/null)"
+  lack "write-verify-broker linux: the broker is unjailed (no nono)" " run --silent --profile " "$(cat "$VBL/broker.sh" 2>/dev/null)"
+  if o="$(sdvb --out-script "$VBL/b2.sh" 2>&1)"; then
+    bad "write-verify-broker linux: requires --nono-profile" "write-verify-broker succeeded"
+  else
+    have "write-verify-broker linux: requires --nono-profile" "requires --nono-profile" "$o"
+  fi
+  if o="$(sdvb --nono-profile "$SDP" --out-script "$RUN_WT/broker.sh" 2>&1)"; then
+    bad "write-verify-broker linux: refuses a broker script inside a write grant" "write-verify-broker succeeded"
+  else
+    have "write-verify-broker linux: refuses a broker script inside a write grant" "inside the profile's write grant" "$o"
+  fi
+  rm -f "$RUN_WT/broker.sh"
+
+  : >"$STUB_SYSTEMCTL_LOG"
+  : >"$STUB_SYSTEMD_RUN_LOG"
+  out="$(AUTO_PILOT_HOST_OS=Linux PATH="$SD_PATH" "$SCRIPT" detach --label com.autopilot.test.vb \
+    --script "$VBL/broker.sh" --interval 10 2>&1)"
+  have "detach linux: the broker is its own transient timer + service pair" \
+    "--user --unit=com.autopilot.test.vb --description=auto-pilot orchestrator com.autopilot.test.vb --on-active=0 --on-unit-inactive=10s --property=CollectMode=inactive-or-failed /bin/bash $VBL/broker.sh" \
+    "$(cat "$STUB_SYSTEMD_RUN_LOG")"
+  have "detach linux: clears a stale broker pair first" "--user stop com.autopilot.test.vb.timer" "$(cat "$STUB_SYSTEMCTL_LOG")"
+  if o="$(AUTO_PILOT_HOST_OS=Linux PATH="$SD_PATH" "$SCRIPT" detach --script "$VBL/broker.sh" 2>&1)"; then
+    bad "detach linux: requires --label" "detach succeeded"
+  else
+    have "detach linux: requires --label" "requires --label" "$o"
+  fi
+
+  # teardown stops the broker beside the supervisor.
+  : >"$STUB_SYSTEMCTL_LOG"
+  AUTO_PILOT_HOST_OS=Linux PATH="$SD_PATH" AUTO_PILOT_BROKER_LABEL=com.autopilot.test.vb \
+    "$SCRIPT" teardown --label com.autopilot.test.td >/dev/null 2>&1
+  td="$(cat "$STUB_SYSTEMCTL_LOG")"
+  have "teardown linux: stops the supervisor's timer" "--user stop com.autopilot.test.td.timer" "$td"
+  have "teardown linux: stops the broker's timer alongside" "--user stop com.autopilot.test.vb.timer" "$td"
+  have "teardown linux: stops the broker's service too" "--user stop com.autopilot.test.vb.service" "$td"
+  : >"$STUB_SYSTEMCTL_LOG"
+  AUTO_PILOT_HOST_OS=Linux PATH="$SD_PATH" AUTO_PILOT_BROKER_LABEL='bad label;x' \
+    "$SCRIPT" teardown --label com.autopilot.test.td >/dev/null 2>&1
+  lack "teardown linux: ignores a broker label outside the label charset" "bad label" "$(cat "$STUB_SYSTEMCTL_LOG")"
+
+  # macOS: the same teardown boots both jobs out, the broker FIRST. A bootout
+  # of the job teardown runs inside may end it before a second bootout runs.
+  # The prelude's launchctl guard stub records every call to NOTIFY_GUARD_LOG.
+  : >"$SD/launchctl.log"
+  NOTIFY_GUARD_LOG="$SD/launchctl.log" AUTO_PILOT_HOST_OS=Darwin AUTO_PILOT_BROKER_LABEL=com.autopilot.test.vb \
+    "$SCRIPT" teardown --label com.autopilot.test.td >/dev/null 2>&1
+  lc="$(grep '^launchctl: bootout' "$SD/launchctl.log")"
+  if [ "$(sed -n 1p <<<"$lc")" = "launchctl: bootout gui/$(id -u)/com.autopilot.test.vb" ] \
+    && [ "$(sed -n 2p <<<"$lc")" = "launchctl: bootout gui/$(id -u)/com.autopilot.test.td" ]; then
+    ok "teardown macOS: boots the broker out first, then the supervisor"
+  else
+    bad "teardown macOS: boots the broker out first, then the supervisor" "${lc:-<no bootout>}"
+  fi
+
+  # write-launch bakes the broker label into the wrapper, and a real wake that
+  # declares done stops both.
+  sdwl "$SD/launch/bl.sh" --broker-label com.autopilot.test.vb >/dev/null 2>&1
+  have "write-launch: bakes the broker label into the wrapper" "export AUTO_PILOT_BROKER_LABEL=com.autopilot.test.vb" \
+    "$(cat "$SD/launch/bl.sh" 2>/dev/null)"
+  if o="$(sdwl "$SD/launch/bl2.sh" --broker-label com.autopilot.test.sd 2>&1)"; then
+    bad "write-launch: refuses a broker label equal to the supervisor's" "write-launch succeeded"
+  else
+    have "write-launch: refuses a broker label equal to the supervisor's" "must differ from --label" "$o"
+  fi
+  if command -v git >/dev/null 2>&1; then
+    d="$SD/wake-broker"
+    sdrun "$d"
+    : >"$d/.auto-pilot/orchestrator.log"
+    "$SCRIPT" render-nono-profile --rw "$d" --tmpdir "$SD/tmp" --out "$SD/launch/p-broker.json" >/dev/null 2>&1
+    AUTO_PILOT_HOST_OS=Linux PATH="$SD_PATH" "$SCRIPT" write-launch --jail nono --nono-bin "$NBIN" \
+      --profile "$SD/launch/p-broker.json" --settings "$SD/launch/settings.json" --workdir "$d" \
+      --log "$d/.auto-pilot/orchestrator.log" --prompt-file "$SD/launch/prompt.txt" \
+      --label com.autopilot.test.wbroker --claude-bin "$SDSTUB/claude-declare" --path "$SD_PATH" \
+      --report-every off --broker-label com.autopilot.test.vb --out-script "$SD/launch/w-broker.sh" >/dev/null 2>&1
+    : >"$STUB_SYSTEMCTL_LOG"
+    AUTO_PILOT_HOST_OS=Linux STUB_SELF="$SCRIPT" STUB_RUN_DIR="$d" STUB_DECLARE="done" \
+      bash "$SD/launch/w-broker.sh" >/dev/null 2>&1
+    have "supervisor linux [done]: the wake stops the broker's timer too" "--user stop com.autopilot.test.vb.timer" "$(cat "$STUB_SYSTEMCTL_LOG")"
+  fi
+fi
+
 # shellcheck source=scripts/lib/spawn-orchestrator-test-epilogue.sh
 . "$SO_LIB/spawn-orchestrator-test-epilogue.sh"

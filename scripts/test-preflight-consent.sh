@@ -622,8 +622,9 @@ assert_not_contains "linux: the supervisor is no longer a blocker" "no Linux sup
 assert_contains "linux: every smoke assertion is listed" "PREFLIGHT SMOKE_WRITE_HOME: pass" "$out10"
 assert_contains "linux: the smoke runs the pinned nono with the token command" \
   "--nono-bin $NH/0.81.0/nono --claude-token-cmd op read op://v/claude/token" "$(cat "$BASE/smoke-args" 2>/dev/null)"
-assert_contains "linux: until #1351 there is no verify broker, so still no-go" \
-  "PREFLIGHT VERDICT: no-go — no Linux verify broker yet" "$out10"
+assert_contains "linux: until #1390 a jailed run has no worker worktrees, so still no-go" \
+  "PREFLIGHT VERDICT: no-go — no worker worktrees in the Linux jail yet" "$out10"
+assert_not_contains "linux: the verify broker is no longer a blocker" "no Linux verify broker yet" "$out10"
 out10="$(linux_preflight AUTO_PILOT_NONO_SHA256="$NSUM" STUB_LINGER=no)"
 assert_contains "linux: Linger=no is a blocker naming the fix" "fix: loginctl enable-linger" "$out10"
 out10="$(linux_preflight AUTO_PILOT_NONO_SHA256="$NSUM" STUB_SD_STATE=)"

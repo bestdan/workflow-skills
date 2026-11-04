@@ -60,8 +60,10 @@
 #
 # On Linux (#1350) `launch` starts the wrapper as a transient systemd user
 # timer + service pair named <label> (systemd-run --user), where macOS
-# bootstraps a launchd plist; teardown stops the pair. AUTO_PILOT_HOST_OS
-# overrides `uname -s` for the suite.
+# bootstraps a launchd plist; teardown stops the pair. The verify broker
+# (#1351) is a second pair, started with `detach --label <l> --script <s>`;
+# `write-launch --broker-label <l>` makes every supervisor teardown stop it
+# too. AUTO_PILOT_HOST_OS overrides `uname -s` for the suite.
 #   spawn-orchestrator.sh check-profile <file>
 #   spawn-orchestrator.sh status --label <label> [--dir <run-dir>] [--task-ceiling <s>]
 #   spawn-orchestrator.sh teardown --label <label> [--done-sentinel <path>] [--reason <r>]
@@ -1655,6 +1657,25 @@ _nono_profile_write_grants() {
     f { sub(/^ *"/, ""); sub(/",?$/, ""); print }' "$1"
 }
 
+# Die if any <path> lies inside a write grant of the rendered nono <profile>.
+# Everything the unjailed side runs or trusts (a wrapper, the broker script,
+# this script, the profile itself) must sit outside them: nono cannot deny a
+# path inside a grant, so the jailed agent could rewrite it.
+_refuse_in_nono_grants() { # <profile> <path>...
+  local profile="$1" grant f f_c
+  shift
+  while IFS= read -r grant; do
+    [ -n "$grant" ] || continue
+    for f in "$@"; do
+      [ -n "$f" ] || continue
+      f_c="$(resolve_lazy "$f")" || exit 2
+      _path_within "$f_c" "$grant" \
+        && die "nono grant check: $f is inside the profile's write grant $grant, so the jailed agent could rewrite it (fail-closed): put it outside every write grant (for this script under ~/.claude, pass --claude-token-cmd so ~/.claude is not writable)"
+    done
+  done < <(_nono_profile_write_grants "$profile")
+  return 0
+}
+
 # sha256 hex of a file: sha256sum (Linux) or shasum (macOS).
 _sha256_file() {
   if command -v sha256sum >/dev/null 2>&1; then
@@ -1726,7 +1747,7 @@ write_launch() {
     park_limit="$PARK_STORM_LIMIT_DEFAULT" \
     pause_exempt_max="$PAUSE_EXEMPT_MAX_SECONDS_DEFAULT" \
     report_every="$DEFAULT_REPORT_INTERVAL" report_gh="" report_usage_bin="" \
-    handoff_dir="" jail="seatbelt" nono_bin="" token_cmd="" nono_sha=""
+    handoff_dir="" jail="seatbelt" nono_bin="" token_cmd="" nono_sha="" broker_label=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --profile)
@@ -1843,6 +1864,13 @@ write_launch() {
         handoff_dir="$2"
         shift 2
         ;;
+      # The verify broker's label (write-verify-broker). Every supervisor
+      # teardown stops it too, so a finished run leaves no broker polling.
+      --broker-label)
+        [ $# -ge 2 ] || die "missing value for --broker-label"
+        broker_label="$2"
+        shift 2
+        ;;
       *) die "unknown write-launch argument: $1" ;;
     esac
   done
@@ -1881,6 +1909,8 @@ write_launch() {
   # Pin the label to a launchd reverse-DNS charset — belt-and-suspenders against
   # plist injection on top of xml_escape, and it's what launchd expects anyway.
   case "$label" in *[!A-Za-z0-9._-]*) die "--label must be [A-Za-z0-9._-] (fail-closed): $label" ;; esac
+  case "$broker_label" in *[!A-Za-z0-9._-]*) die "--broker-label must be [A-Za-z0-9._-] (fail-closed): $broker_label" ;; esac
+  [ "$broker_label" != "$label" ] || [ -z "$broker_label" ] || die "--broker-label must differ from --label"
   local f
   for f in "$profile" "$settings" "$prompt"; do
     [ -n "$f" ] || die "write-launch requires --profile, --settings, and --prompt-file"
@@ -1919,16 +1949,7 @@ write_launch() {
       # can write: nono cannot deny a path inside a grant. Checked against the
       # profile's own grants. An installed plugin keeps this script under
       # ~/.claude, so the no-token fallback (~/.claude writable) is refused here.
-      local grant f_c
-      while IFS= read -r grant; do
-        [ -n "$grant" ] || continue
-        for f in "$out_script" "$profile" "$self"; do
-          [ -n "$f" ] || continue
-          f_c="$(resolve_lazy "$f")" || exit 2
-          _path_within "$f_c" "$grant" \
-            && die "--jail nono: $f is inside the profile's write grant $grant, so the jailed agent could rewrite it (fail-closed): put it outside every write grant (for this script under ~/.claude, pass --claude-token-cmd so ~/.claude is not writable)"
-        done
-      done < <(_nono_profile_write_grants "$profile")
+      _refuse_in_nono_grants "$profile" "$out_script" "$profile" "$self"
       # The checksum the wrapper re-checks on every wake (check-nono-profile).
       nono_sha="$(_sha256_file "$profile")" && [ -n "$nono_sha" ] \
         || die "--jail nono: cannot checksum the profile (needs sha256sum or shasum): $profile"
@@ -2016,6 +2037,8 @@ write_launch() {
     # Pin the supervisor-state root resolved here, so supervisor-scan derives the
     # same ledger path the --state below names, whatever this job's environment.
     printf 'export AUTO_PILOT_STATE_HOME=%q\n' "$state_root"
+    # Read by teardown: the broker goes down with the supervisor.
+    [ -n "$broker_label" ] && printf 'export AUTO_PILOT_BROKER_LABEL=%q\n' "$broker_label"
     # nono's update check phones home and stores a UUID; its migration rewrites
     # ~/.config/nono. Neither belongs in an unattended run with a pinned binary.
     [ "$jail" = nono ] && printf 'export NONO_NO_UPDATE_CHECK=1 NONO_NO_MIGRATE=1\n'
@@ -2463,15 +2486,36 @@ _systemd_main_pid() {
   printf '%s' "$pid"
 }
 
+# Start a rendered job unjailed. macOS: `--plist <file>`, bootstrapped into
+# launchd. Linux: `--label <label> --script <file> [--interval <s>]`, started
+# as a systemd-run --user timer + service pair (_systemd_start). The verify
+# broker is started this way; the orchestrator supervisor goes through launch.
 detach() {
-  local plist=""
+  local plist="" label="" script="" interval="10"
   while [ $# -gt 0 ]; do
-    case "$1" in --plist)
-      plist="$2"
-      shift 2
-      ;;
-    *) die "unknown detach argument: $1" ;; esac
+    case "$1" in
+      --plist | --label | --script | --interval)
+        [ $# -ge 2 ] || die "missing value for $1"
+        case "$1" in
+          --plist) plist="$2" ;;
+          --label) label="$2" ;;
+          --script) script="$2" ;;
+          --interval) interval="$2" ;;
+        esac
+        shift 2
+        ;;
+      *) die "unknown detach argument: $1" ;;
+    esac
   done
+  if _is_linux; then
+    [ -n "$label" ] || die "detach on Linux requires --label"
+    case "$label" in *[!A-Za-z0-9._-]*) die "--label must be [A-Za-z0-9._-] (fail-closed): $label" ;; esac
+    [ -f "$script" ] || die "detach on Linux requires an existing --script"
+    case "$interval" in '' | *[!0-9]*) die "--interval must be an integer (seconds): $interval" ;; esac
+    _systemd_stop "$label" # clear a stale pair first, as launch does
+    _systemd_start "$label" "$script" "$interval"
+    return 0
+  fi
   [ -f "$plist" ] || die "detach requires an existing --plist"
   command -v launchctl >/dev/null 2>&1 || die "launchctl not available (macOS only)"
   launchctl bootstrap "gui/$(id -u)" "$plist" || die "launchctl bootstrap failed for $plist"
@@ -2522,12 +2566,22 @@ teardown() {
   # launchctl may genuinely be absent (non-macOS, or the in-jail test harness) —
   # that must not skip the sentinel write above; the sentinel is authoritative.
   # The same goes for systemctl on Linux.
-  if _is_linux; then
-    _systemd_stop "$label"
-  elif command -v launchctl >/dev/null 2>&1; then
-    launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
-  fi
-  echo "spawn-orchestrator: torn down $label"
+  # The verify broker (AUTO_PILOT_BROKER_LABEL, baked into the wrapper by
+  # write-launch --broker-label) goes down with the supervisor: the jailed agent
+  # cannot reach the service manager to stop it, and a finished run must leave
+  # nothing polling. Best-effort, like the supervisor's own stop.
+  local broker="${AUTO_PILOT_BROKER_LABEL:-}" l
+  case "$broker" in *[!A-Za-z0-9._-]* | "$label") broker="" ;; esac
+  # The broker first: on macOS a bootout of the job teardown runs inside may
+  # end it before a second bootout runs. The sentinel above is already written.
+  for l in ${broker:+"$broker"} "$label"; do
+    if _is_linux; then
+      _systemd_stop "$l"
+    elif command -v launchctl >/dev/null 2>&1; then
+      launchctl bootout "gui/$(id -u)/$l" 2>/dev/null || true
+    fi
+  done
+  echo "spawn-orchestrator: torn down $label${broker:+ (and broker $broker)}"
 }
 
 # VERIFY a teardown actually took, and make a still-loaded job LOUD.
@@ -6199,7 +6253,7 @@ launch() {
         workdir="$2"
         shift 2
         ;;
-      --log | --prompt-file | --throttle | --plist-template | --claude-bin | --path | --tmpdir | --park-limit | --no-progress-limit | --pause-exempt-max | --report-every)
+      --log | --prompt-file | --throttle | --broker-label | --plist-template | --claude-bin | --path | --tmpdir | --park-limit | --no-progress-limit | --pause-exempt-max | --report-every)
         wl+=("$1" "$2")
         shift 2
         ;;
@@ -6339,8 +6393,13 @@ launch() {
 # Pin hash of a verify command string (sha256 hex). Request and broker compute it
 # identically, so a stale request or a re-pinned broker is caught before any run.
 verify_hash() {
-  command -v shasum >/dev/null 2>&1 || die "shasum not available (needed for verify pin)"
-  printf '%s' "$1" | shasum -a 256 | awk '{print $1}'
+  if command -v sha256sum >/dev/null 2>&1; then
+    printf '%s' "$1" | sha256sum | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    printf '%s' "$1" | shasum -a 256 | awk '{print $1}'
+  else
+    die "neither sha256sum nor shasum is available (needed for the verify pin)"
+  fi
 }
 
 # Atomically write a result file: `code:` on line 1, then the raw output after a
@@ -6559,9 +6618,16 @@ verify_await() {
 write_verify_broker() {
   local sentinel="" verify_cmd="" root="" label="" workdir="" log="" path="" \
     self="$ROOT/scripts/spawn-orchestrator.sh" interval="10" throttle="10" \
-    out_script="" out_plist="" plist_template="$PLIST_TEMPLATE_DEFAULT"
+    out_script="" out_plist="" plist_template="$PLIST_TEMPLATE_DEFAULT" nono_profile=""
   while [ $# -gt 0 ]; do
     case "$1" in
+      # The run's rendered nono profile (Linux): the broker script and this
+      # script run unjailed, so both must sit outside its write grants.
+      --nono-profile)
+        [ $# -ge 2 ] || die "missing value for --nono-profile"
+        nono_profile="$2"
+        shift 2
+        ;;
       --sentinel-dir)
         [ $# -ge 2 ] || die "missing value for --sentinel-dir"
         sentinel="$2"
@@ -6630,7 +6696,13 @@ write_verify_broker() {
       *) die "unknown write-verify-broker argument: $1" ;;
     esac
   done
-  [ -n "$out_script" ] && [ -n "$out_plist" ] || die "write-verify-broker requires --out-script and --out-plist"
+  # Linux starts the broker with systemd-run (detach --label), so no plist.
+  if _is_linux; then
+    [ -n "$out_script" ] || die "write-verify-broker requires --out-script"
+    [ -n "$nono_profile" ] || die "write-verify-broker on Linux requires --nono-profile <the run's rendered profile> (fail-closed): the broker runs unjailed, so its script must be checked against the jail's write grants"
+  else
+    [ -n "$out_script" ] && [ -n "$out_plist" ] || die "write-verify-broker requires --out-script and --out-plist"
+  fi
   [ -n "$sentinel" ] && [ -n "$verify_cmd" ] && [ -n "$root" ] \
     || die "write-verify-broker requires --sentinel-dir, --verify-cmd, and --confine-under"
   [ -n "$label" ] || die "write-verify-broker requires --label"
@@ -6639,8 +6711,13 @@ write_verify_broker() {
   [ -n "$workdir" ] && [ -d "$workdir" ] || die "write-verify-broker requires an existing --workdir"
   [ -n "$log" ] || die "write-verify-broker requires --log"
   [ -f "$self" ] || die "spawn-orchestrator.sh not found (fail-closed): $self"
-  [ -f "$plist_template" ] || die "plist template not found: $plist_template"
+  [ -z "$out_plist" ] || [ -f "$plist_template" ] || die "plist template not found: $plist_template"
   case "$interval$throttle" in *[!0-9]*) die "--interval/--throttle must be integers" ;; esac
+  if [ -n "$nono_profile" ]; then
+    [ -n "$(_nono_profile_tmpdir "$nono_profile")" ] \
+      || die "--nono-profile is not a render-nono-profile profile (fail-closed): $nono_profile"
+    _refuse_in_nono_grants "$nono_profile" "$out_script" "$self"
+  fi
 
   local pin
   pin="$(verify_hash "$verify_cmd")"
@@ -6671,6 +6748,10 @@ write_verify_broker() {
   }
   chmod +x "$out_script"
 
+  if [ -z "$out_plist" ]; then
+    echo "spawn-orchestrator: verify-broker written $out_script (pin $pin)"
+    return 0
+  fi
   tmp="$(mktemp "${TMPDIR:-/tmp}/verify-broker-plist.XXXXXX")" || die "mktemp failed"
   render_plist "$label" "$out_script" "$workdir" "$log" "$interval" "$throttle" "$plist_template" >"$tmp" \
     || {
