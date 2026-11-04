@@ -51,8 +51,10 @@ so this reading is gh-issue's alone.
 
 What `--resume` does not cover is a crashed
 run **nobody resumes**: its `<branch_prefix>task-<n>` ref stays on origin and every
-later session skips the issue, until the crashed-claim sweep in issue #760 exists. Do not
-launch unattended runs you do not intend to resume until it does.
+later session skips the issue until someone runs `/sweep-stale-claims --apply`
+locally. That releases the claim once it is older than the sweep's threshold, and only
+if no commits were pushed to the ref; a ref with commits ahead is reported for a human,
+never released.
 
 **The PR is a draft until hand-off, and that is what keeps G5 and G6 true.**
 `.github/workflows/gh-issue-pr-sync.yml` writes `status:4_needs_review` from a PR's
