@@ -4,6 +4,13 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.193.0] - 2026-11-04
+
+### Features
+
+- define the tier forecast and Intent confirmation [#1382] (#1392) (c043256)
+- run the Linux verify broker as a systemd timer [#1351] (#1394) (d876412)
+
 ## [2.192.0] - 2026-11-04
 
 ### Features
