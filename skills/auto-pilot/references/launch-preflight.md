@@ -265,11 +265,11 @@ Per [`launch-runtime.md`](launch-runtime.md):
    to `.auto-pilot/orchestrator.log`. The egress allowlist also gets the
    pre-flight's resolved `/add-task` destination host via `render-settings
    --add-task-host`, so the run's own settings never deny its own follow-up
-   filing regardless of work source. Grant the run root `--rw`, which
-   covers the run clone, the run worktree and `workers/`. On Linux, also pass
-   the nono profile `--git-worktree <run worktree>`, and write it and the launch script outside
-   every write grant (`write-launch` refuses otherwise): see
-   [`launch-runtime.md`](launch-runtime.md) "Linux: the nono profile".
+   filing regardless of work source. Grant the run root `--rw`, which covers
+   the run clone, the run worktree and `workers/`. On Linux, also render the
+   nono profile with `--git-worktree <run worktree>`, and write it and the
+   launch script outside every write grant (`write-launch` refuses otherwise):
+   see [`launch-runtime.md`](launch-runtime.md) "Linux: the nono profile".
 2. Run the **auth smoke test through that exact sandbox wrapper + env** (not
    bare) — a failure here is a launch blocker (ties to step 2). Machine-stays-
    awake was already confirmed in the pre-flight (step 2).

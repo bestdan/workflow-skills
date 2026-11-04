@@ -1420,15 +1420,18 @@ run_clone() {
     || die "--base '$base' is not a local branch of --repo (fail-closed)"
 
   local clone="$run_root/$name.git" wt="$run_root/$run_id"
+  # Past this point a failure leaves the run root partly built, and a retry
+  # refuses it as not empty, so every message says so.
+  local left="$run_root is left partly built; remove it before retrying"
   git clone -q --bare --no-hardlinks --single-branch --branch "$base" -- "$common" "$clone" \
-    || die "run-clone: git clone of $common failed"
+    || die "run-clone: git clone of $common failed — $left"
   git -C "$clone" remote set-url origin "$url" \
     && git -C "$clone" config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*' \
-    || die "run-clone: could not point origin at $url"
-  git -C "$clone" fetch -q origin || die "run-clone: git fetch origin failed (the run pushes through it): $url"
+    || die "run-clone: could not point origin at $url — $left"
+  git -C "$clone" fetch -q origin || die "run-clone: git fetch origin failed (the run pushes through it): $url — $left"
   git -C "$clone" worktree add -q -b "auto-pilot/$run_id" "$wt" "refs/heads/$base" \
-    || die "run-clone: could not add the run worktree $wt"
-  mkdir -p "$run_root/workers" || die "cannot create $run_root/workers"
+    || die "run-clone: could not add the run worktree $wt — $left"
+  mkdir -p "$run_root/workers" || die "cannot create $run_root/workers — $left"
   echo "RUN_CLONE $clone"
   echo "RUN_WORKTREE $wt"
 }
