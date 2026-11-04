@@ -44,8 +44,8 @@ primitive must itself be relaunchable:
 
 A **recurring** supervisor (the `launchd`/`systemd` timer) must be **torn down
 whenever the run loop terminates** (`launchctl bootout` / `systemctl --user stop
-<label>.timer <label>.service`) so
-no run is re-woken by a timer — this fires on **both** loop-termination branches:
+<label>.timer <label>.service`) so no run is re-woken by a timer — this fires on
+**both** loop-termination branches:
 the clean end-of-run (`status: done`, no ready tasks or a budget hard-stop) **and**
 the pre-dispatch deadline-guard stop (`status: paused` with ready tasks left).
 The `paused` deadline-stop still tears the supervisor down because it must not be
@@ -55,8 +55,8 @@ step does this ([`../SKILL.md`](../SKILL.md) "Run phase (unattended)", "Loop
 termination"). On Linux the teardown stops the timer first, then the service,
 but only from outside it. A wake that stops its own service is killed at once
 (measured on systemd 255), before the rest of its teardown runs; from inside,
-the wake simply exits. If a relaunchable supervisor genuinely isn't available in an environment,
-the documented fallback is a bounded in-process sleep guarded by `--until` — stated
+the wake simply exits. If a relaunchable supervisor genuinely isn't available in
+an environment, the documented fallback is a bounded in-process sleep guarded by `--until` — stated
 here as the **fallback**, not the default.
 
 This same supervisor is also where the **rate-limit backstop** lives: with no model

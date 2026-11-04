@@ -257,8 +257,8 @@ Per [`launch-runtime.md`](launch-runtime.md):
    bare) — a failure here is a launch blocker (ties to step 2). Machine-stays-
    awake was already confirmed in the pre-flight (step 2).
 3. **Detach** via the OS-appropriate primitive (`launchd`/`launchctl` on macOS,
-   a `systemd-run --user` timer on Linux) so the orchestrator outlives this session; record its
-   **PID + process start-time + `--until` deadline** on the run-state branch for
+   a `systemd-run --user` timer on Linux) so the orchestrator outlives this
+   session; record its **PID + process start-time + `--until` deadline** on the run-state branch for
    later stale-run detection (the start-time guards against a recycled PID being
    mistaken for a live run).
 4. Print **where state lives** — the run-state branch name, the `.auto-pilot/`
