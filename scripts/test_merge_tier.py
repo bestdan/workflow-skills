@@ -486,16 +486,35 @@ class ForecastTests(unittest.TestCase):
             ),
             ("scripts//deploy.sh", "human", "scripts/deploy.sh matches always_human"),
             ("./scripts/helper.py", "auto", "all 1 paths match auto"),
-            (
-                "../scripts/helper.py",
-                "human",
-                "../scripts/helper.py matches no auto glob",
-            ),
-            ("/scripts/helper.py", "human", "/scripts/helper.py matches no auto glob"),
-            ("", "human", ". matches no auto glob"),
         ):
             with self.subTest(path=path):
                 self.assert_forecast([path], tier, reason)
+
+    def test_paths_outside_the_repo_are_human_under_a_catch_all_policy(self):
+        policy = self.tmp / "catch-all.yml"
+        policy.write_text('auto:\n  - "**"\n')
+        for path, shown in (
+            ("../scripts/helper.py", "../scripts/helper.py"),
+            ("/scripts/helper.py", "/scripts/helper.py"),
+            ("scripts/../..", ".."),
+            ("", "."),
+        ):
+            with self.subTest(path=path):
+                result = self.run_forecast({"paths": [path]}, policy)
+                self.assertEqual(result["tier"], "human")
+                self.assertEqual(
+                    result["reasons"],
+                    [f"forecast: {shown} is not a repo-relative path"],
+                )
+
+    def test_forecast_from_stdin(self):
+        out = io.StringIO()
+        stdin = io.StringIO(json.dumps({"paths": ["scripts/helper.py"]}))
+        with mock.patch("sys.stdin", stdin), contextlib.redirect_stdout(out):
+            self.assertEqual(
+                tier_mod.main(["--forecast", "-", "--policy", str(self.policy)]), 0
+            )
+        self.assertEqual(out.getvalue().splitlines()[-1], "TIER: auto")
 
     def test_repo_rules_do_not_run(self):
         # A policy that makes skills/ auto and enables the prompt-path rule still

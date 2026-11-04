@@ -325,16 +325,19 @@ def forecast(paths, policy):
     A model writes these paths, so each is normalized first: `scripts/../skills/x`
     is tiered as `skills/x`, and `./scripts/x.py` as `scripts/x.py`, which is the
     canonical path the lander will see at merge. An absolute, escaping or empty
-    path matches no auto glob after normalizing, so it stays human.
+    path is human whatever the policy, because a catch-all glob like `**` would
+    otherwise match it.
     """
     if not paths:
         return "human", [f"{FORECAST} no paths identified"]
-    paths = [posixpath.normpath(p) for p in paths]
-    reasons = [
-        f"{FORECAST} {reason}"
-        for reason in (_path_reason(p, policy) for p in paths)
-        if reason
-    ]
+    reasons = []
+    for p in (posixpath.normpath(p) for p in paths):
+        if p in (".", "..") or p.startswith(("/", "../")):
+            reasons.append(f"{FORECAST} {p} is not a repo-relative path")
+            continue
+        reason = _path_reason(p, policy)
+        if reason:
+            reasons.append(f"{FORECAST} {reason}")
     if reasons:
         return "human", reasons
     return "auto", [f"{FORECAST} all {len(paths)} paths match auto"]
