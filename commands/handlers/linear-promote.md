@@ -114,7 +114,7 @@ Linear's free plan caps a workspace at a fixed number of **non-archived issues o
 
 ### 8. Apply
 
-If `$ARGUMENTS` contains `dry-run`, print the proposed transitions **and the intended backfills** (per the report shape below) and exit **without** calling `save_issue`. Include step 7's quota reading in the dry-run output too — it is a fact about the workspace worth surfacing whether or not anything is applied.
+If `$ARGUMENTS` contains `dry-run`, print the proposed transitions **and the intended backfills** (per the report shape below), with each forecast and any drafted Intent block, and exit **without** calling `save_issue`. Include step 7's quota reading in the dry-run output too — it is a fact about the workspace worth surfacing whether or not anything is applied.
 
 **Batch writes — never fire them all in parallel.** The Linear MCP transport has limited concurrency headroom; issuing `save_issue`/`save_comment` for every scored candidate at once (a "dozens of tool calls in one turn" pattern) has caused cascading timeouts and partial-state corruption in practice — some candidates land transitioned while their siblings silently fail mid-batch. Apply writes serially, or in small concurrent groups — 2–5 candidates at a time is a judgment call, not a measured limit, and what matters is that the fan-out is bounded (the incident behind this rule fired ~36 `save_issue` calls in a single turn). Wait for each group to finish before starting the next.
 

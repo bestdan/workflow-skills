@@ -98,6 +98,10 @@ back to `ready` is what clears it. The promoter never re-scores a card past
 A failed dispatch (the consultant can't be spawned, or returns nothing) is
 not a confirmation. Treat it as below the bar and say so in the reason.
 
+Under `dry-run`, forecast and draft but do not dispatch the confirmer. A
+`human` card reports as `ready if confirmed`, with its drafted block, and
+nothing is written.
+
 ## Where things are recorded
 
 | Handler          | Forecast, Intent block and verdict go in            |
@@ -115,7 +119,3 @@ included:
   `(drafted)`), then `intent confirmed by <model> at <confidence>%` or
   `intent not confirmed (<confidence>%): <crux>`. For an unconfirmed card that
   verdict is the failed check, so it is not written twice.
-
-Under `dry-run` nothing is written. The report shows the forecast, the drafted
-block, and `ready if confirmed` for a `human` card, and the confirmer is not
-dispatched.

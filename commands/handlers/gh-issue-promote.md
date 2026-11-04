@@ -177,7 +177,7 @@ Any scored candidate in the result's `blocked` array is **held**, exactly as ste
 
 ### 5. Apply
 
-If `$ARGUMENTS` contains `dry-run`, print the proposed transitions (per the report shape below) and exit **without** any write and **without** any `gh issue comment`.
+If `$ARGUMENTS` contains `dry-run`, print the proposed transitions (per the report shape below), with each forecast and any drafted Intent block, and exit **without** any write and **without** any `gh issue comment`.
 
 Every transition goes through `commands/handlers/assets/gh-issue-state.py`, never `gh issue edit --add-label` / `--remove-label`. That helper validates the requested names against `labels.yml` and then issues **one** full-set PATCH; the incremental `gh issue edit` form is not atomic (measured: 8 HTTP requests), so a crash mid-way strands an issue carrying two `status:` rungs or none. The helper's own docstring carries the measurements.
 
@@ -193,7 +193,7 @@ Keep that issue's `prio:` and `est:` labels — **or, where step 4 backfilled on
 
 A backfilled label carries no marker distinguishing it from a human's, by design — `task-fill.md`'s "trusted downstream" rule. The provenance is the issue comment below, not the label.
 
-**Batch writes — never fire them all in parallel.** Each candidate costs a `gh issue view` read, a `gh-issue-state.py` PATCH, and — for LOW, or for a HIGH that was backfilled — a `gh issue comment`. Firing those for every scored candidate at once can saturate the GitHub API transport, causing cascading timeouts and partial-state corruption: some candidates end up relabeled while their siblings silently fail mid-batch. Apply writes serially, or in small concurrent groups — 2–5 candidates at a time is a judgment call, not a measured limit, and what matters is that the fan-out is bounded (the incident behind this rule fired ~36 writes in a single turn). Wait for each group to finish before starting the next.
+**Batch writes — never fire them all in parallel.** Each candidate costs a `gh issue view` read, a `gh-issue-state.py` PATCH, and — for LOW, a backfilled HIGH, or any candidate that reached the forecast — a `gh issue comment`. Firing those for every scored candidate at once can saturate the GitHub API transport, causing cascading timeouts and partial-state corruption: some candidates end up relabeled while their siblings silently fail mid-batch. Apply writes serially, or in small concurrent groups — 2–5 candidates at a time is a judgment call, not a measured limit, and what matters is that the fan-out is bounded (the incident behind this rule fired ~36 writes in a single turn). Wait for each group to finish before starting the next.
 
 Then, for each scored candidate (`<managed>` is the set just assembled):
 
