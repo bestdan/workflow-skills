@@ -226,6 +226,72 @@ else
   echo "skip - toolchain: grants Homebrew's Cellar (no /opt/homebrew/Cellar on this host)"
 fi
 
+# --- toolchain: the installed plugin cache (#1364) ----------------------------
+# Every plugin script is entered by direct exec, and the cache sits under
+# ~/.claude, a --rw state dir. --toolchain must exec-allow the cache and
+# write-deny it, or co-review's reach-pr-branch.sh routes to `none`. A fake HOME
+# keeps the real cache out of it; the scripts copied in are the repo's own.
+PC_HOME="$BASE/pc-home"
+PC_CACHE="$PC_HOME/.claude/plugins/cache/ws/ws/1.0.0"
+mkdir -p "$PC_CACHE/scripts" "$PC_HOME/.claude/state"
+PC_SRC="$(cd "$SO_LIB/.." && pwd)"
+for f in reach-pr-branch.sh worktree-config.sh worktree-name-for.sh; do
+  cp "$PC_SRC/$f" "$PC_CACHE/scripts/$f"
+done
+mkdir -p "$PC_CACHE/scripts/lib"
+cp "$PC_SRC/lib/worktree-name.sh" "$PC_CACHE/scripts/lib/worktree-name.sh"
+pcprof="$BASE/plugin-cache.sb"
+PC_REPO="$BASE/pc-repo"
+GIT_CONFIG_GLOBAL=/dev/null git -c init.defaultBranch=main init -q "$PC_REPO"
+GIT_CONFIG_GLOBAL=/dev/null git -C "$PC_REPO" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
+GIT_CONFIG_GLOBAL=/dev/null git -C "$PC_REPO" branch bestdan/pc-topic
+if HOME="$PC_HOME" "$SCRIPT" render-profile --rw "$PC_HOME/.claude" --rw "$PC_REPO" --ro "$PC_SRC" \
+  --toolchain --out "$pcprof" >/dev/null 2>&1; then
+  ok "toolchain: renders with the plugin cache grant"
+else
+  bad "toolchain: renders with the plugin cache grant"
+fi
+pcbody="$(cat "$pcprof" 2>/dev/null)"
+PC_CACHE_ROOT="$(cd "$PC_HOME/.claude/plugins/cache" && pwd -P)"
+have "toolchain: exec-allows the plugin cache" "(subpath \"$PC_CACHE_ROOT\")" \
+  "$(sed -n '/(allow process-exec/,/^)/p' "$pcprof")"
+have "toolchain: write-denies the plugin cache" "(subpath \"$PC_CACHE_ROOT\")" \
+  "$(sed -n '/(deny file-write\*/,/^)/p' "$pcprof")"
+if HOME="$PC_HOME" "$SCRIPT" render-profile --rw "$PC_HOME/.claude/plugins/cache/ws" \
+  --toolchain --out "$BASE/plugin-cache-bad.sb" >/dev/null 2>&1; then
+  bad "toolchain: a write scope inside the plugin cache fails closed"
+else
+  ok "toolchain: a write scope inside the plugin cache fails closed"
+fi
+
+if [ "$SEATBELT_OK" = 1 ] && [ -n "$pcbody" ]; then
+  pcout="$(cd "$PC_REPO" && HOME="$PC_HOME" GIT_CONFIG_GLOBAL=/dev/null \
+    sandbox-exec -f "$pcprof" "$PC_CACHE/scripts/reach-pr-branch.sh" --ref bestdan/pc-topic --no-add 2>&1)"
+  case "$pcout" in
+    *"ROUTE: none"* | *"Operation not permitted"*) bad "plugin cache: reach-pr-branch.sh gives a usable ROUTE in-jail" "$pcout" ;;
+    *"ROUTE: "*) ok "plugin cache: reach-pr-branch.sh gives a usable ROUTE in-jail" ;;
+    *) bad "plugin cache: reach-pr-branch.sh gives a usable ROUTE in-jail" "$pcout" ;;
+  esac
+  if sandbox-exec -f "$pcprof" /bin/bash -c 'echo x > "$1"' _ "$PC_CACHE/scripts/planted.sh" 2>/dev/null \
+    || [ -e "$PC_CACHE/scripts/planted.sh" ]; then
+    bad "plugin cache: a write into the cache is denied in-jail"
+  else
+    ok "plugin cache: a write into the cache is denied in-jail"
+  fi
+  if sandbox-exec -f "$pcprof" /bin/ln "$PC_CACHE/scripts/worktree-config.sh" "$PC_HOME/.claude/state/alias.sh" 2>/dev/null; then
+    bad "plugin cache: a hard link out of the cache is denied in-jail"
+  else
+    ok "plugin cache: a hard link out of the cache is denied in-jail"
+  fi
+  if sandbox-exec -f "$pcprof" /bin/bash -c 'echo x > "$1"' _ "$PC_HOME/.claude/state/ok" 2>/dev/null; then
+    ok "plugin cache: the rest of ~/.claude stays writable in-jail"
+  else
+    bad "plugin cache: the rest of ~/.claude stays writable in-jail"
+  fi
+else
+  skipped "plugin cache: in-jail checks (sandbox-exec cannot apply a profile here)"
+fi
+
 if [ "$SEATBELT_OK" = 1 ]; then
   EDBIN=""
   # Prefer no-arg zero-exit binaries so the success check is portable — BSD/macOS

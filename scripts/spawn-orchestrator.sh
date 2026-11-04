@@ -384,6 +384,9 @@
 #                  exist on this host) to the exec-dir set, plus the active
 #                  developer-tools dir (xcode-select -p), without which the
 #                  /usr/bin CLT shims — git above all — cannot exec their target.
+#                  Also exec-allows ~/.claude/plugins/cache and write-denies it,
+#                  so the plugin's own scripts run in-jail; a write scope inside
+#                  the cache fails closed (#1364).
 #     --out   Destination path for the rendered profile. Required.
 #     --template  Override the profile template (default: scripts/orchestrator.sb.tmpl).
 #     Every render ALSO emits fixed, RENDERER-OWNED (never caller-supplied) write
@@ -1078,6 +1081,41 @@ $(emit_allow "file-write*" ${rw_c[@]+"${rw_c[@]}"})"
   tmp_root="$(canonicalize "/tmp")" || exit 2
   session_env="$(resolve_lazy "$HOME/.claude/session-env")" || exit 2
   harness_block="$(emit_harness_runtime "$tmpdir_c" "$tmp_root" "$session_env")"
+
+  # --toolchain also grants the installed PLUGIN CACHE (~/.claude/plugins/cache)
+  # exec, and denies it writes (#1364). Every plugin script — co-review's
+  # pre-flights, reach-pr-branch.sh's own sibling calls, the worktree hooks — is
+  # entered by DIRECT exec, and the cache sits under ~/.claude, a --rw state dir
+  # that is never exec-allowed. So without this, every plugin script is
+  # execve-denied in-jail and co-review routes to `ROUTE: none`.
+  #
+  # The write-deny is what keeps the template's integrity wall ("no exec-allowed
+  # dir is writable") true: it is emitted in the credential-deny slot, after the
+  # RW and harness-runtime blocks, so it wins over the enclosing ~/.claude write
+  # allow (last match). Seatbelt checks paths, and a deny on the subpath also
+  # refuses copy, rename, hard links in either direction, and recreating the dir.
+  # The whole cache, not one version: the harness, not this script, picks which
+  # installed version the jailed session loads, and auto-update adds versions
+  # between relaunches of a stamped profile. The cost is that the jailed agent
+  # cannot install or update plugins, which it had no business doing.
+  #
+  # Fail closed if the cache contains a write scope: the deny would silently make
+  # that scope read-only, and the run would die on a mkdir instead of at render.
+  if [ "$toolchain" = 1 ] && [ -d "$HOME/.claude/plugins/cache" ]; then
+    local pcache
+    pcache="$(canonicalize "$HOME/.claude/plugins/cache")" || exit 2
+    [ "$pcache" = "/" ] && die "refusing plugin cache / (fail-closed)"
+    for w in ${rw_c[@]+"${rw_c[@]}"} "$tmpdir_c" "$session_env"; do
+      { [ "$w" = "$pcache" ] || [ "${w#"$pcache"/}" != "$w" ]; } \
+        && die "write scope lies inside the plugin cache, which the jail write-denies (fail-closed): $w"
+    done
+    case " ${exd_c[@]+"${exd_c[@]}"} " in *" $pcache "*) ;; *) exd_c+=("$pcache") ;; esac
+    ex_block="$(emit_exec ${ex_c[@]+"${ex_c[@]}"} -- ${exd_c[@]+"${exd_c[@]}"})"
+    cred_block="$cred_block
+(deny file-write*
+  (subpath \"$(sbpl_escape "$pcache")\")
+)"
+  fi
 
   # Substitute tokens line-by-line into a temp file, then move into place so a
   # failure mid-render leaves no partial --out.

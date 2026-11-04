@@ -377,9 +377,22 @@ runs `/co-review --non-interactive` exactly as before. Its
 never-prompt guarantee and bounded per-class timeouts are what make it safe in an
 unattended run. **Record which reviewer classes ran / timed-out / skipped** — that
 line goes into the hand-off summary (step 7). If `/co-review` can't run **at all**
-(every reviewer unavailable, MCP/auth failure), don't bail — the work is already
-verified; note `co-review unavailable` and proceed to hand-off (review is
-advisory).
+(every reviewer unavailable, MCP/auth failure, or a pre-flight hard error that
+ends the run before any reviewer is dispatched), don't bail — the work is already
+verified. What happens next depends on who is waiting:
+
+- **Under `--run-state` with `co_review_mode` other than `off`: park, don't hand
+  off.** Zero reviewer classes ran, so `needs_review` would tell the morning
+  reader the PR was reviewed when it wasn't. Set the task's phase to `parked`
+  and flag it for a human through the adapter's `flag_for_human` contract
+  ([`../auto-pilot/references/adapters.md`](../auto-pilot/references/adapters.md)
+  "`flag_for_human`: the shared park contract"), with the reason
+  `co-review unavailable: <why>`. Skip step 7: on gh-issue, the draft PR stays a
+  draft and the issue stays `status:3_started`. A run where co-review broke
+  everywhere then trips the park-storm breaker rather than handing off a batch
+  of unreviewed PRs.
+- **Otherwise** (standalone, or `co_review_mode: off`, which skips co-review on
+  purpose): note `co-review unavailable` and proceed to hand-off.
 
 This plugin grants co-review's own scripts when this delivery was started as the
 `/deliver-task` command, and `bypassPermissions` skips the check. Reached through

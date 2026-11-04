@@ -271,6 +271,23 @@ can't stage a replacement — the deny is complete for these vectors. So while t
 exec wall is deliberately coarse for _confidentiality_, it is not a hole in
 _integrity_: the jail still can't spawn an unconfined process.
 
+**The plugin cache is exec-allowed and write-denied.** Every plugin script is
+entered by direct exec: co-review's pre-flights, `reach-pr-branch.sh` calling its
+helpers, the worktree hooks. The cache (`~/.claude/plugins/cache`) sits under
+`~/.claude`, a write-granted state dir (§3), and no write scope is ever
+exec-allowed. So without a grant, every plugin script was execve-denied in-jail,
+and co-review handed off nothing (#1364). `render-profile --toolchain` therefore
+exec-allows the whole cache and denies it writes. The deny is emitted after the
+write and harness-runtime grants, so it wins over the enclosing `~/.claude`
+allow, and the rule above still holds: nothing exec-allowed is writable. A
+write-denied subpath also refuses copy, rename, a hard link in either direction,
+and recreating the directory; the profile suite checks the write and hard-link
+cases in-jail. It grants the whole cache rather than one version because the
+harness, not the launcher, picks which installed version the jailed session
+loads, and auto-update adds versions between relaunches. The cost is that a
+jailed run cannot install or update plugins. A plugin loaded with `--plugin-dir`
+from a checkout stays exec-denied, as before.
+
 ### Linux: the nono profile
 
 On Linux the jail is a pinned nono (`scripts/nono-install.sh`), and it is the
