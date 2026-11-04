@@ -2572,7 +2572,9 @@ teardown() {
   # nothing polling. Best-effort, like the supervisor's own stop.
   local broker="${AUTO_PILOT_BROKER_LABEL:-}" l
   case "$broker" in *[!A-Za-z0-9._-]* | "$label") broker="" ;; esac
-  for l in "$label" ${broker:+"$broker"}; do
+  # The broker first: on macOS a bootout of the job teardown runs inside may
+  # end it before a second bootout runs. The sentinel above is already written.
+  for l in ${broker:+"$broker"} "$label"; do
     if _is_linux; then
       _systemd_stop "$l"
     elif command -v launchctl >/dev/null 2>&1; then

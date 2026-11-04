@@ -339,6 +339,20 @@ if [ -f "$SDP" ]; then
     "$SCRIPT" teardown --label com.autopilot.test.td >/dev/null 2>&1
   lack "teardown linux: ignores a broker label outside the label charset" "bad label" "$(cat "$STUB_SYSTEMCTL_LOG")"
 
+  # macOS: the same teardown boots both jobs out, the broker FIRST. A bootout
+  # of the job teardown runs inside may end it before a second bootout runs.
+  # The prelude's launchctl guard stub records every call to NOTIFY_GUARD_LOG.
+  : >"$SD/launchctl.log"
+  NOTIFY_GUARD_LOG="$SD/launchctl.log" AUTO_PILOT_HOST_OS=Darwin AUTO_PILOT_BROKER_LABEL=com.autopilot.test.vb \
+    "$SCRIPT" teardown --label com.autopilot.test.td >/dev/null 2>&1
+  lc="$(grep '^launchctl: bootout' "$SD/launchctl.log")"
+  if [ "$(sed -n 1p <<<"$lc")" = "launchctl: bootout gui/$(id -u)/com.autopilot.test.vb" ] \
+    && [ "$(sed -n 2p <<<"$lc")" = "launchctl: bootout gui/$(id -u)/com.autopilot.test.td" ]; then
+    ok "teardown macOS: boots the broker out first, then the supervisor"
+  else
+    bad "teardown macOS: boots the broker out first, then the supervisor" "${lc:-<no bootout>}"
+  fi
+
   # write-launch bakes the broker label into the wrapper, and a real wake that
   # declares done stops both.
   sdwl "$SD/launch/bl.sh" --broker-label com.autopilot.test.vb >/dev/null 2>&1

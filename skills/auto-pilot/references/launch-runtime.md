@@ -558,7 +558,7 @@ runs unjailed. The jail cannot start or stop the broker's unit: the profile's
 
 **Teardown with the supervisor.** `write-launch --broker-label <label>` bakes
 the broker's label into the wrapper, and every supervisor teardown (`done`,
-`deadline`, any halt, a gate-closed terminal wake) stops the broker after the
+`deadline`, any halt, a gate-closed terminal wake) stops the broker before the
 supervisor, on both OSes. The jailed agent cannot do it: on Linux it cannot
 reach the service manager at all.
 
