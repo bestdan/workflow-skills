@@ -103,6 +103,8 @@ For each candidate, run the **confidence check** from `skills/task/SKILL.md` —
 
 **LOW** if any HIGH condition fails. Record the first failed check as the reason (e.g. `description missing acceptance criteria`, `unresolved open questions`).
 
+**Forecast the tier, then confirm the Intent,** for each candidate still HIGH, as `skills/task/references/intent-confirmation.md` says. The paths come from the description; an issue has no `related_files`. A `human` issue the confirmer does not confirm at or above `consult_bar` turns LOW, with reason `intent not confirmed: <crux>`. What the step 5 comment records is the reference's "Where things are recorded". If a relative path doesn't resolve, Glob `**/skills/task/references/intent-confirmation.md`.
+
 As on the file path, the scope gate is **model judgment, not a deterministic rule** — acceptable because `/promote-tasks` is not a blocking CI gate: a misjudged issue lands in `refinement_status` for a human to confirm, never silently lost.
 
 ### 5. Apply
@@ -157,11 +159,13 @@ Then transition:
 
   The comment names the failed check so the human can fix it quickly — the jira analogue of the file path's `# promoter:` frontmatter comment and `linear-promote.md`'s LOW comment.
 
+- **Forecast** — a candidate that reached step 4's forecast always gets the `addCommentToJiraIssue` call, HIGH included, and the comment also carries the forecast and, for `human`, the Intent block and verdict (see the reference). Still one comment per issue.
+
 The configured value names the **target status**; the transition id is resolved per-issue from `getTransitionsForJiraIssue` (transitions are issue- and workflow-specific, so resolve for each candidate rather than caching one id across the batch). Never transition an issue to a `Done`/`completed`-category status here — promotion only moves an issue to `ready_status` or `refinement_status`.
 
 ### 6. Report
 
-Print the same summary shape as the file path (`commands/promote-tasks.md` step 4), keyed by issue key. Lead with the resolved scope from step 2a (`scope: epic <KEY>` / `scope: whole backlog (all)` / `scope: whole backlog (no epics)`) so it's clear what the run covered:
+Print the same summary shape as the file path (`commands/promote-tasks.md` step 4), keyed by issue key, annotating every issue that reached the forecast with its tier. Lead with the resolved scope from step 2a (`scope: epic <KEY>` / `scope: whole backlog (all)` / `scope: whole backlog (no epics)`) so it's clear what the run covered:
 
 ```
 scope: epic PLAT-100

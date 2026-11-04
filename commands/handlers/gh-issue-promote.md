@@ -156,6 +156,8 @@ The backfilled `est:` is **recorded for claim-time selection**, not read by any 
 
 **LOW** if any HIGH condition fails. Record the first failed check as the reason (e.g. `body missing acceptance criteria`, `unresolved open questions`).
 
+**Forecast the tier, then confirm the Intent,** for each candidate still HIGH, as `skills/task/references/intent-confirmation.md` says. The paths come from the body's `## Task` and `## Context`; an issue has no `related_files`. A `human` issue the confirmer does not confirm at or above `consult_bar` turns LOW, with reason `intent not confirmed: <crux>`. What the step 5 comment records is the reference's "Where things are recorded". If a relative path doesn't resolve, Glob `**/skills/task/references/intent-confirmation.md`.
+
 As on the file path, the scope gate is **model judgment, not a deterministic rule** — acceptable because `/promote-tasks` is not a blocking CI gate: a misjudged issue lands labeled `auto:human-review-needed` for a human to confirm, never silently lost.
 
 ### 4b. Re-read the dependency graph before writing
@@ -222,13 +224,15 @@ Then, for each scored candidate (`<managed>` is the set just assembled):
 
   The comment names the failed check so the human can fix it quickly — the gh analogue of the file path's `# promoter:` frontmatter comment and `linear-promote.md`'s LOW comment — and names the auto-set fields in the same comment rather than a second one, exactly as the Linear path does. `<the labels backfilled>` is the same actual-fields-only rule as the HIGH path above; drop the parenthetical entirely when nothing was backfilled.
 
+- **Forecast** — a candidate that reached step 4's forecast always gets the comment, HIGH with no backfill included, and the comment also carries the forecast and, for `human`, the Intent block and verdict (see the reference). Still one comment per issue.
+
 If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/gh-issue-state.py`. `--repo` is required by the helper, so resolve the current repo with `gh repo view --json nameWithOwner --jq .nameWithOwner` when `gh-issue.repo` is unset; drop `--apply` to see the resulting set without writing it. No `gh label create` step is needed here — the raw PATCH creates a missing label rather than rejecting it, and `/task-config` provisions the vocabulary with its intended colors (`commands/handlers/gh-issue-config.md` step 3).
 
 **Never close an issue here**, and never reach for `--done`/`--reopen`: promotion only moves an open issue between rungs.
 
 ### 6. Report
 
-Print the same summary shape as the file path (`commands/promote-tasks.md` step 4), keyed by issue number and annotating any issue that got a backfill. Lead with the resolved scope from step 2a (`scope: milestone <title>` / `scope: whole backlog (all)` / `scope: whole backlog (no milestones)`), and — if step 3's query hit the 500-issue cap — a prominent warning line **before** the summary (not a trailing footnote). The `Promoted N of M candidates` line directly below carries the true count: under a cap hit `M` **is** the cap, so the warning states the truncation and the summary states the number. Neither repeats the other:
+Print the same summary shape as the file path (`commands/promote-tasks.md` step 4), keyed by issue number and annotating any issue that got a backfill, and every issue that reached the forecast with its tier, as the file path does. Lead with the resolved scope from step 2a (`scope: milestone <title>` / `scope: whole backlog (all)` / `scope: whole backlog (no milestones)`), and — if step 3's query hit the 500-issue cap — a prominent warning line **before** the summary (not a trailing footnote). The `Promoted N of M candidates` line directly below carries the true count: under a cap hit `M` **is** the cap, so the warning states the truncation and the summary states the number. Neither repeats the other:
 
 ```
 parent rollup detection skipped (subIssues field unavailable)

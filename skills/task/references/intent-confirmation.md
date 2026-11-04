@@ -104,3 +104,18 @@ not a confirmation. Treat it as below the bar and say so in the reason.
 | ---------------- | --------------------------------------------------- |
 | `repo-pr`        | `commands/promote-tasks.md` steps 2–4               |
 | tracker handlers | each `*-promote.md`, in the existing reason comment |
+
+A tracker handler writes labels, states and comments, never the issue body, so
+everything goes in the one comment the handler already writes for a candidate.
+Every candidate that reached the forecast gets that comment, a HIGH `auto` one
+included:
+
+- `tier: <forecast>`, and for `human` its first reason;
+- for `human`, the Intent block as the confirmer saw it (drafted lines marked
+  `(drafted)`), then `intent confirmed by <model> at <confidence>%` or
+  `intent not confirmed (<confidence>%): <crux>`. For an unconfirmed card that
+  verdict is the failed check, so it is not written twice.
+
+Under `dry-run` nothing is written. The report shows the forecast, the drafted
+block, and `ready if confirmed` for a `human` card, and the confirmer is not
+dispatched.

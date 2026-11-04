@@ -81,6 +81,8 @@ Then, for each candidate, run the **confidence check** from `skills/task/SKILL.m
 
 > **`max_estimate` is deliberately absent from the list above.** It is a claim-time bound on this handler (`linear-ready.py` / `_linear_rank.py`), not a promote-time one, and since v2.59 `gh-issue` matches — see `commands/handlers/task-fill.md` → "Where the estimate gate lives", which owns the rule for both. The scale check above is a different thing: it asks whether the estimate is a legal Fibonacci value, not whether it is under an operator's bound.
 
+**Forecast the tier, then confirm the Intent,** for each candidate still HIGH, as `skills/task/references/intent-confirmation.md` says. The paths come from the description; an issue has no `related_files`. A `human` issue the confirmer does not confirm at or above `consult_bar` turns LOW, with reason `intent not confirmed: <crux>`. What the step 8 comment records is the reference's "Where things are recorded". If a relative path doesn't resolve, Glob `**/skills/task/references/intent-confirmation.md`.
+
 As on the file path, this scope gate is **model judgment, not a deterministic rule** — acceptable because `/promote-tasks` is not a blocking CI gate: a misjudged issue lands tagged `human-approval-requested` for a human to confirm, never silently lost.
 
 ### 7. Report workspace issue-quota headroom (advisory — never holds a promotion)
@@ -126,11 +128,13 @@ Otherwise, for each scored candidate call `<linear-mcp>__save_issue` with `id` =
 
 If a candidate had no other failed check but **did** get a backfill, still call `save_comment` to note what was auto-set (there is no failed-check reason in that case, just the backfill note) — mirrors the file path's provenance comment being appended even when the card is otherwise HIGH.
 
+A candidate that reached step 6's forecast likewise always gets the `save_comment`, HIGH with no backfill included, and the comment also carries the forecast and, for `human`, the Intent block and verdict (see the reference). Still one comment per issue.
+
 Never move an issue to a `completed`- or `canceled`-type state, and never touch a non-`backlog` issue.
 
 ### 9. Report
 
-Print the same summary shape as the file path (`commands/promote-tasks.md` step 4), keyed by Linear identifier, annotating any issue that got a backfill. Lead with the resolved scope from step 4 (`scope: project <name>` / `scope: all configured projects (<names>)` / `scope: whole backlog (no projects)`), and — if step 5's collection phase hit the shared 500-candidate budget — a prominent warning line **before** the summary (not a trailing footnote), naming the resolved scope and, for the all-configured union, which project the budget ran out on (candidates from later projects in the fixed query order were never collected). Because the budget is shared across the whole collection phase — never 500 per project — the `Promoted N of M candidates` line directly below always carries the true count: on a hit `M` **is** the budget, whatever the scope, so the warning states the truncation and the summary states the number. Neither repeats the other:
+Print the same summary shape as the file path (`commands/promote-tasks.md` step 4), keyed by Linear identifier, annotating any issue that got a backfill, and every issue that reached the forecast with its tier, as the file path does. Lead with the resolved scope from step 4 (`scope: project <name>` / `scope: all configured projects (<names>)` / `scope: whole backlog (no projects)`), and — if step 5's collection phase hit the shared 500-candidate budget — a prominent warning line **before** the summary (not a trailing footnote), naming the resolved scope and, for the all-configured union, which project the budget ran out on (candidates from later projects in the fixed query order were never collected). Because the budget is shared across the whole collection phase — never 500 per project — the `Promoted N of M candidates` line directly below always carries the true count: on a hit `M` **is** the budget, whatever the scope, so the warning states the truncation and the summary states the number. Neither repeats the other:
 
 ```
 scope: project Payments revamp
