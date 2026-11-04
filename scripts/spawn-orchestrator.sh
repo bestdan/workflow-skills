@@ -758,7 +758,7 @@ resolve_lazy() {
 # covering every caller scope while the harness still gets exactly what it needs.
 # See orchestrator.sb.tmpl's @@HARNESS_RUNTIME@@ comment for why denying any of
 # these poisons the harness itself (task 12 / finding #20).
-# Args: <tmpdir-canonical> <tmp-root-canonical> <session-env-dir>.
+# Args: <tmpdir-canonical> <tmp-root-canonical> <session-env-dir> <var-tmp-canonical>.
 emit_harness_runtime() {
   local tmpdir_c="$1" tmp_root="$2" session_env="$3" var_tmp="$4"
   local sock_pattern claude_tmp_pattern heredoc_bash_pattern heredoc_zsh_pattern
@@ -798,9 +798,12 @@ emit_harness_runtime() {
   # it checks access(W_OK) on it first and falls through to no usable dir
   # without it. That literal grants nothing in practice — the dir is root-owned,
   # so it cannot be removed or chmod'ed, and an entry inside it is checked on its
-  # own path.
+  # own path. zsh's name is its mkstemp template, exactly six alphanumerics after
+  # `zsh` (40 of 40 jailed here-strings fit it), spelled out as six classes so
+  # the grant does not cover every zsh* file in the shared /tmp.
+  local c='[A-Za-z0-9]'
   heredoc_bash_pattern="^$(sbpl_regex_escape "$var_tmp")"'/sh-thd-[0-9]+$'
-  heredoc_zsh_pattern="^$(sbpl_regex_escape "$tmp_root")"'/zsh[A-Za-z0-9]+$'
+  heredoc_zsh_pattern="^$(sbpl_regex_escape "$tmp_root")/zsh$c$c$c$c$c$c\$"
   printf '(allow file-write*\n'
   printf '  (regex #"%s")\n' "$sock_pattern"
   printf '  (regex #"%s")\n' "$claude_tmp_pattern"

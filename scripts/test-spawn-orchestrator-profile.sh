@@ -85,8 +85,9 @@ lack "profile: harness grant does not widen to a blanket /tmp subpath" \
 vartmp_c="$(cd /var/tmp && pwd -P)"
 have "profile: bash here-doc temp files granted by name" \
   "(regex #\"^$vartmp_c/sh-thd-[0-9]+\$\")" "$body"
-have "profile: zsh here-doc temp files granted by name" \
-  "(regex #\"^$tmp_c/zsh[A-Za-z0-9]+\$\")" "$body"
+hd_c='[A-Za-z0-9]'
+have "profile: zsh here-doc temp files granted by name (exactly six characters)" \
+  "(regex #\"^$tmp_c/zsh$hd_c$hd_c$hd_c$hd_c$hd_c$hd_c\$\")" "$body"
 have "profile: /var/tmp itself granted as a literal (bash's access(W_OK) check)" \
   "(literal \"$vartmp_c\")" "$body"
 lack "profile: here-doc grant does not widen to a blanket /var/tmp subpath" \
@@ -122,14 +123,19 @@ if [ "$SEATBELT_OK" = 1 ] && [ -f "$hdprof" ]; then
   fi
   rm -f "$vartmp_c/$hd_probe"
   # A granted name must not let the jail rewrite a read-only file through a
-  # hard link: Seatbelt refuses the link itself.
+  # hard link: Seatbelt refuses the link itself. Only a permission denial
+  # counts, so a missing source or an exec refusal cannot pass this.
   echo original >"$REPO_RO/hd-ro.txt"
-  if sandbox-exec -f "$hdprof" /bin/ln "$REPO_RO/hd-ro.txt" "$tmp_c/zshSOPROBE$$" 2>/dev/null; then
+  hd_link="$tmp_c/zshS$(printf '%05d' $(($$ % 100000)))"
+  if hd_err="$(sandbox-exec -f "$hdprof" /bin/ln "$REPO_RO/hd-ro.txt" "$hd_link" 2>&1)"; then
     bad "here-doc: a hard link from a read-only file into a granted name is denied in-jail"
   else
-    ok "here-doc: a hard link from a read-only file into a granted name is denied in-jail"
+    case "$hd_err" in
+      *"Operation not permitted"*) ok "here-doc: a hard link from a read-only file into a granted name is denied in-jail" ;;
+      *) bad "here-doc: a hard link from a read-only file into a granted name is denied in-jail" "$hd_err" ;;
+    esac
   fi
-  rm -f "$tmp_c/zshSOPROBE$$" "$REPO_RO/hd-ro.txt"
+  rm -f "$hd_link" "$REPO_RO/hd-ro.txt"
 else
   skipped "here-doc: in-jail checks (sandbox-exec cannot apply a profile here)"
 fi

@@ -99,9 +99,10 @@
 ;;     by render-profile, NOT caller-supplied --rw scopes, because two of the
 ;;     three legitimately live OUTSIDE the run root and would otherwise trip (or
 ;;     force a caller to weaken) the --confine-under containment guard.
-;;     Three paths, and the jail is BROKEN without each (finding #20 / task 12) —
-;;     distinct from the execve-of-repo-scripts finding (#4, fixed separately),
-;;     though both land as a jail that silently lies about verify:
+;;     Three harness paths, and the jail is BROKEN without each (finding #20 /
+;;     task 12) — distinct from the execve-of-repo-scripts finding (#4, fixed
+;;     separately), though both land as a jail that silently lies about verify.
+;;     A fourth grant, the here-doc temp files, fails differently (last bullet):
 ;;       - $TMPDIR/srt-mux-*.sock: the unix socket the harness's OWN inner
 ;;         sandbox binds/listens on to mediate its own permission checks. A denied
 ;;         bind/listen makes the inner sandbox silently DISABLE itself for the
@@ -123,7 +124,8 @@
 ;;         these every here-doc in the jail fails, the worktree hooks included.
 ;;         Granted by name, plus the root-owned /var/tmp dir itself as a literal
 ;;         (bash checks access(W_OK) on it first); other files there stay denied.
-;;     Deny ANY of the first three and EVERY Bash tool call reports exit 1
+;;     Deny the srt-mux socket, the /tmp/claude-<uid> tree or session-env and
+;;     EVERY Bash tool call reports exit 1
 ;;     regardless of the command's real outcome — an agent verifying by `$?` is
 ;;     reading pure noise.
 ;;     smoke-confinement.sh guards this: run `true`/`false` in-jail, assert 0/1.
