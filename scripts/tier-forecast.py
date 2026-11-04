@@ -22,7 +22,11 @@ Output: one JSON object on stdout, then a final `FORECAST: auto|human|skipped`
 line. Exit 0 for any verdict; a usage error exits 2.
   {"forecast": "auto" | "human" | "skipped",
    "reasons": ["..."],
-   "intent": {"state": "present" | "partial" | "absent", "missing": ["Finish", ...]}}
+   "intent": {"state": "present" | "partial" | "absent", "missing": ["Finish", ...]},
+   "consult_bar": 85}
+`consult_bar` is the policy's key of that name (default 85): the least
+confidence at which the Intent confirmer's verdict lets a human-forecast task
+promote. It is the default whenever no policy was loaded.
 
 The verdicts:
   skipped  `--ref` resolves but carries no policy file. The repo has not opted in
@@ -216,7 +220,12 @@ def evaluate(task_source, repo_dir, ref):
                 "intent": intent,
             }
     tier, reasons = tier_mod.forecast(paths, policy)
-    return {"forecast": tier, "reasons": reasons, "intent": intent}
+    return {
+        "forecast": tier,
+        "reasons": reasons,
+        "intent": intent,
+        "consult_bar": policy["consult_bar"],
+    }
 
 
 def main(argv=None):
@@ -233,6 +242,10 @@ def main(argv=None):
     args = p.parse_args(argv)
 
     result = evaluate(args.task, args.repo_dir, args.ref)
+    # The bar the Intent confirmer must reach. Only a loaded policy can set
+    # it; on every other path the forecast is human or skipped and the
+    # default stands.
+    result.setdefault("consult_bar", tier_mod.DEFAULT_CONSULT_BAR)
     print(json.dumps(result))
     print(f"FORECAST: {result['forecast']}")
     return 0
