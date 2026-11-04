@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.190.0] - 2026-11-04
+
+### Features
+
+- add a --forecast mode for task paths [#1379] (#1386) (9febbd4)
+
 ## [2.189.1] - 2026-11-04
 
 ### Fixes
