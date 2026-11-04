@@ -13,6 +13,7 @@ Every rule that fires is reported, so a human tier always says why.
 Usage:
   python3 scripts/merge-tier.py --pr-json <file|-> --policy <file> \
     [--agent-land on|off]
+  python3 scripts/merge-tier.py --forecast <file|-> --policy <file>
 
 `--pr-json` holds one object:
   {"files": [{"path": "...", "additions": N, "deletions": N,
@@ -39,6 +40,15 @@ the PR's base branch, never from its head. It must use the YAML subset
 
 Globs: `**` matches across directories, `*` and `?` within one path segment.
 
+`--forecast` tiers a task before any PR exists, from `{"paths": ["..."]}`: the
+paths the task is expected to change. A task has no line counts, no Conventional
+Commit title and no labels, so only the path rules run: SELF_PATHS,
+`always_human`, `auto`. Size, title type, breaking change, the hold label,
+AGENT_LAND and `repo_rules` are skipped. Each path is normalized first
+(`scripts/../skills/x` is `skills/x`). Every reason starts `forecast:`, and an
+empty path list is `human`. The lander re-tiers the real PR at merge, so a
+forecast only says where the owner's review would be needed.
+
 Output: one JSON object `{"tier": ..., "reasons": [...]}` on stdout, then a
 final `TIER: auto|human` line. Exit 0 for any verdict, `human` included. Any
 input or policy error is a `human` verdict, never a crash: a missing,
@@ -50,6 +60,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import posixpath
 import re
 import sys
 from pathlib import Path
@@ -81,6 +92,7 @@ LIST_KEYS = ("auto", "always_human", "allowed_types", "repo_rules")
 TITLE_RE = re.compile(r"^(?P<type>[a-z]+)(?:\([^)]*\))?(?P<bang>!)?: \S")
 BREAKING_RE = re.compile(r"^BREAKING[ -]CHANGE: ", re.MULTILINE)
 HOLD_LABEL = "merge:hold"
+FORECAST = "forecast:"
 MOVE_STATUSES = ("renamed", "copied")
 # GitHub's file statuses, REST spelling; GraphQL's upper-case ones are accepted.
 FILE_STATUSES = ("added", "removed", "modified", "changed", "unchanged", *MOVE_STATUSES)
@@ -282,6 +294,55 @@ def load_pr(source):
     }
 
 
+def _path_reason(path, policy):
+    """Why one path makes the tier human, or None when it may stay auto."""
+    if path in SELF_PATHS:
+        return f"{path} is part of the landing gate, always human"
+    if matches(path, policy["always_human"]):
+        return f"{path} matches always_human"
+    if not matches(path, policy["auto"]):
+        return f"{path} matches no auto glob"
+    return None
+
+
+def load_forecast(source):
+    try:
+        text = sys.stdin.read() if source == "-" else Path(source).read_text()
+        task = json.loads(text)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"cannot read forecast input: {exc}") from exc
+    paths = task.get("paths") if isinstance(task, dict) else None
+    if not (isinstance(paths, list) and all(isinstance(p, str) for p in paths)):
+        raise ValueError(
+            "forecast input must be an object with a `paths` list of strings"
+        )
+    return paths
+
+
+def forecast(paths, policy):
+    """The tier a task's expected paths would get: the path rules only.
+
+    A model writes these paths, so each is normalized first: `scripts/../skills/x`
+    is tiered as `skills/x`, and `./scripts/x.py` as `scripts/x.py`, which is the
+    canonical path the lander will see at merge. An absolute, escaping or empty
+    path is human whatever the policy, because a catch-all glob like `**` would
+    otherwise match it.
+    """
+    if not paths:
+        return "human", [f"{FORECAST} no paths identified"]
+    reasons = []
+    for p in (posixpath.normpath(p) for p in paths):
+        if p in (".", "..") or p.startswith(("/", "../")):
+            reasons.append(f"{FORECAST} {p} is not a repo-relative path")
+            continue
+        reason = _path_reason(p, policy)
+        if reason:
+            reasons.append(f"{FORECAST} {reason}")
+    if reasons:
+        return "human", reasons
+    return "auto", [f"{FORECAST} all {len(paths)} paths match auto"]
+
+
 def classify(pr, policy, agent_land):
     reasons = []
     if agent_land == "off":
@@ -307,12 +368,9 @@ def classify(pr, policy, agent_land):
         if f["status"] in MOVE_STATUSES and not f.get("previous_path"):
             reasons.append(f"{f['path']} is {f['status']} with no previous_path")
         for path in file_paths(f):
-            if path in SELF_PATHS:
-                reasons.append(f"{path} is part of the landing gate, always human")
-            elif matches(path, policy["always_human"]):
-                reasons.append(f"{path} matches always_human")
-            elif not matches(path, policy["auto"]):
-                reasons.append(f"{path} matches no auto glob")
+            reason = _path_reason(path, policy)
+            if reason:
+                reasons.append(reason)
 
     size = sum(f["additions"] + f["deletions"] for f in pr["files"])
     if size > policy["size_cap"]:
@@ -342,19 +400,39 @@ def evaluate(pr_source, policy_path, agent_land):
     return tier, reasons, policy
 
 
+def evaluate_forecast(source, policy_path):
+    """(tier, reasons) for a task's expected paths; every reason says forecast."""
+    try:
+        paths = load_forecast(source)
+    except ValueError as exc:
+        return "human", [f"{FORECAST} input invalid: {exc}"]
+    try:
+        policy = load_policy(policy_path)
+    except PolicyError as exc:
+        return "human", [f"{FORECAST} policy invalid: {exc}"]
+    return forecast(paths, policy)
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--pr-json", required=True, help="PR facts as JSON, or - for stdin")
+    source = p.add_mutually_exclusive_group(required=True)
+    source.add_argument("--pr-json", help="PR facts as JSON, or - for stdin")
+    source.add_argument(
+        "--forecast", help="a task's expected paths as JSON, or - for stdin"
+    )
     p.add_argument("--policy", required=True, help="the repo's merge policy file")
     p.add_argument(
         "--agent-land",
         choices=("on", "off"),
         default="on",
-        help="the repo's AGENT_LAND variable; off forces human",
+        help="the repo's AGENT_LAND variable; off forces human (ignored with --forecast)",
     )
     args = p.parse_args(argv)
 
-    tier, reasons, _ = evaluate(args.pr_json, args.policy, args.agent_land)
+    if args.forecast is not None:
+        tier, reasons = evaluate_forecast(args.forecast, args.policy)
+    else:
+        tier, reasons, _ = evaluate(args.pr_json, args.policy, args.agent_land)
     print(json.dumps({"tier": tier, "reasons": reasons}))
     print(f"TIER: {tier}")
     return 0

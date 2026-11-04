@@ -413,6 +413,146 @@ class TierTests(unittest.TestCase):
         self.assertEqual(cm.exception.code, 2)
 
 
+class ForecastTests(unittest.TestCase):
+    """--forecast tiers a task's expected paths with the path rules alone."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = Path(tmp.name)
+        self.policy = self.tmp / "merge-policy.yml"
+        self.policy.write_text(POLICY)
+
+    def run_forecast(self, task, policy=None):
+        task_file = self.tmp / "task.json"
+        task_file.write_text(task if isinstance(task, str) else json.dumps(task))
+        argv = ["--forecast", str(task_file), "--policy", str(policy or self.policy)]
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(tier_mod.main(argv), 0)
+        lines = out.getvalue().splitlines()
+        result = json.loads(lines[0])
+        self.assertEqual(lines[-1], f"TIER: {result['tier']}")
+        for reason in result["reasons"]:
+            self.assertTrue(reason.startswith("forecast: "), reason)
+        return result
+
+    def assert_forecast(self, paths, tier, reason):
+        result = self.run_forecast({"paths": paths})
+        self.assertEqual(result["tier"], tier)
+        self.assertTrue(
+            any(reason in r for r in result["reasons"]),
+            f"no reason containing {reason!r} in {result['reasons']}",
+        )
+
+    def test_an_auto_path_is_auto(self):
+        self.assert_forecast(["scripts/helper.py"], "auto", "all 1 paths match auto")
+
+    def test_a_prompt_path_is_human(self):
+        self.assert_forecast(
+            ["skills/task/SKILL.md"],
+            "human",
+            "skills/task/SKILL.md matches no auto glob",
+        )
+
+    def test_a_mix_is_human(self):
+        result = self.run_forecast(
+            {"paths": ["scripts/helper.py", "scripts/deploy.sh"]}
+        )
+        self.assertEqual(result["tier"], "human")
+        self.assertEqual(
+            result["reasons"], ["forecast: scripts/deploy.sh matches always_human"]
+        )
+
+    def test_an_empty_path_list_is_human(self):
+        self.assert_forecast([], "human", "no paths identified")
+
+    def test_a_landing_gate_path_is_human(self):
+        self.assert_forecast(
+            ["scripts/merge-tier.py"], "human", "part of the landing gate, always human"
+        )
+
+    def test_paths_are_normalized_before_tiering(self):
+        for path, tier, reason in (
+            (
+                "scripts/../skills/x/SKILL.md",
+                "human",
+                "skills/x/SKILL.md matches no auto glob",
+            ),
+            (
+                "scripts/./merge-tier.py",
+                "human",
+                "scripts/merge-tier.py is part of the landing gate",
+            ),
+            ("scripts//deploy.sh", "human", "scripts/deploy.sh matches always_human"),
+            ("./scripts/helper.py", "auto", "all 1 paths match auto"),
+        ):
+            with self.subTest(path=path):
+                self.assert_forecast([path], tier, reason)
+
+    def test_paths_outside_the_repo_are_human_under_a_catch_all_policy(self):
+        policy = self.tmp / "catch-all.yml"
+        policy.write_text('auto:\n  - "**"\n')
+        for path, shown in (
+            ("../scripts/helper.py", "../scripts/helper.py"),
+            ("/scripts/helper.py", "/scripts/helper.py"),
+            ("scripts/../..", ".."),
+            ("", "."),
+        ):
+            with self.subTest(path=path):
+                result = self.run_forecast({"paths": [path]}, policy)
+                self.assertEqual(result["tier"], "human")
+                self.assertEqual(
+                    result["reasons"],
+                    [f"forecast: {shown} is not a repo-relative path"],
+                )
+
+    def test_forecast_from_stdin(self):
+        out = io.StringIO()
+        stdin = io.StringIO(json.dumps({"paths": ["scripts/helper.py"]}))
+        with mock.patch("sys.stdin", stdin), contextlib.redirect_stdout(out):
+            self.assertEqual(
+                tier_mod.main(["--forecast", "-", "--policy", str(self.policy)]), 0
+            )
+        self.assertEqual(out.getvalue().splitlines()[-1], "TIER: auto")
+
+    def test_repo_rules_do_not_run(self):
+        # A policy that makes skills/ auto and enables the prompt-path rule still
+        # forecasts auto: the rule needs a title type, which a task does not have.
+        policy = self.tmp / "skills-auto.yml"
+        policy.write_text(
+            "auto:\n  - skills/**\nrepo_rules:\n  - prompt-paths-need-releasing-type\n"
+        )
+        result = self.run_forecast({"paths": ["skills/x/SKILL.md"]}, policy)
+        self.assertEqual(result["tier"], "auto")
+
+    def test_bad_input_and_policy_are_human(self):
+        for task, policy, reason in (
+            ("not json", None, "forecast: input invalid"),
+            ({"paths": "scripts/a.py"}, None, "forecast: input invalid"),
+            ({"paths": [1]}, None, "forecast: input invalid"),
+            (
+                {"paths": ["scripts/a.py"]},
+                self.tmp / "absent.yml",
+                "forecast: policy invalid",
+            ),
+        ):
+            with self.subTest(task=task, policy=policy):
+                result = self.run_forecast(task, policy)
+                self.assertEqual(result["tier"], "human")
+                self.assertTrue(
+                    result["reasons"][0].startswith(reason), result["reasons"]
+                )
+
+    def test_forecast_and_pr_json_are_exclusive(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as cm:
+                tier_mod.main(
+                    ["--forecast", "-", "--pr-json", "-", "--policy", str(self.policy)]
+                )
+        self.assertEqual(cm.exception.code, 2)
+
+
 class RepoPolicyTests(unittest.TestCase):
     """This repo's own .github/merge-policy.yml parses and tiers as designed."""
 
@@ -440,6 +580,14 @@ class RepoPolicyTests(unittest.TestCase):
         ):
             with self.subTest(path=path):
                 self.assertEqual(self.tier(path), "human")
+
+    def test_forecast_splits_a_skills_task_from_a_scripts_task(self):
+        self.assertEqual(
+            tier_mod.forecast(["skills/task/SKILL.md"], self.policy)[0], "human"
+        )
+        self.assertEqual(
+            tier_mod.forecast(["scripts/task-scan.py"], self.policy)[0], "auto"
+        )
 
 
 if __name__ == "__main__":
