@@ -181,7 +181,7 @@ task's `/deliver-task` verifies the same way.
 Because the orchestrator runs **jailed** and `verify_command` can't pass
 inside the jail (execve-deny, exit 126), install the **verify broker** here
 so verify runs **outside** the jail: `"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh"
-write-verify-broker` registers a second, un-jailed launchd job that runs the
+write-verify-broker` registers a second, un-jailed job (launchd on macOS) that runs the
 **pinned** `verify_command` in a run-root-confined worktree, and each task's
 verify becomes a `verify-request` → `verify-await` handshake
 ([`launch-runtime.md`](launch-runtime.md) §5). On Linux, pass the run's
