@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.194.0] - 2026-11-04
+
+### Features
+
+- forecast the tier and confirm Intent on the file path [#1383] (#1398) (1778717)
+
 ## [2.193.1] - 2026-11-04
 
 ### Fixes
