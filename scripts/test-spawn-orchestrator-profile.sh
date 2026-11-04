@@ -265,11 +265,14 @@ else
 fi
 
 if [ "$SEATBELT_OK" = 1 ] && [ -n "$pcbody" ]; then
+  # Pin the worktree root and branch prefix: the developer's own environment
+  # sets them, and CI's does not, which changes the route the helper picks.
   pcout="$(cd "$PC_REPO" && HOME="$PC_HOME" GIT_CONFIG_GLOBAL=/dev/null \
+    WORKFLOW_SKILLS_WORKTREE_ROOT="$PC_HOME/src/worktrees" WORKFLOW_SKILLS_BRANCH_PREFIX=bestdan/ \
     sandbox-exec -f "$pcprof" "$PC_CACHE/scripts/reach-pr-branch.sh" --ref bestdan/pc-topic --no-add 2>&1)"
   case "$pcout" in
-    *"ROUTE: none"* | *"Operation not permitted"*) bad "plugin cache: reach-pr-branch.sh gives a usable ROUTE in-jail" "$pcout" ;;
-    *"ROUTE: "*) ok "plugin cache: reach-pr-branch.sh gives a usable ROUTE in-jail" ;;
+    *"Operation not permitted"*) bad "plugin cache: reach-pr-branch.sh gives a usable ROUTE in-jail" "$pcout" ;;
+    *"ROUTE: enter-name name=pc-topic "*) ok "plugin cache: reach-pr-branch.sh gives a usable ROUTE in-jail" ;;
     *) bad "plugin cache: reach-pr-branch.sh gives a usable ROUTE in-jail" "$pcout" ;;
   esac
   if sandbox-exec -f "$pcprof" /bin/bash -c 'echo x > "$1"' _ "$PC_CACHE/scripts/planted.sh" 2>/dev/null \
