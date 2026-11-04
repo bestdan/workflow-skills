@@ -103,7 +103,7 @@ else
   have "nono render: without a token, the renderer warns" "/.claude is WRITABLE" "$out"
 fi
 
-# --- run-clone + render-nono-profile --git-worktree (#1390) --------------------
+# --- run-clone + render-nono-profile --git-worktree ---------------------------
 # The run's own git repo: a bare clone inside the run root, the run worktree and
 # workers/ beside it. --git-worktree grants that clone's whole git dir and
 # refuses a linked worktree of a main checkout.
@@ -162,6 +162,15 @@ if command -v python3 >/dev/null 2>&1 && command -v git >/dev/null 2>&1; then
   else
     have "run-clone: refuses a run root inside a linked worktree of the repo" "inside a checkout of the repo" "$o"
   fi
+  # Reached through a symlink: refused before anything is created inside.
+  ln -s "$GM" "$NO/to-main"
+  if o="$("$SCRIPT" run-clone --repo "$GM" --run-root "$NO/to-main/via-link/rr" --run-id r-5 2>&1)"; then
+    bad "run-clone: refuses a run root reached through a symlink into the repo" "succeeded"
+  else
+    have "run-clone: refuses a run root reached through a symlink into the repo" "inside a checkout of the repo" "$o"
+  fi
+  [ -e "$GM/via-link" ] && bad "run-clone: a symlinked in-repo run root is refused before it is created" \
+    || ok "run-clone: a symlinked in-repo run root is refused before it is created"
   [ "$(git --git-dir="$NR/gitmain.git" config --get auto-pilot.mainCheckout 2>/dev/null)" = "$(cd "$GM" && pwd -P)" ] \
     && ok "run-clone: records the main checkout for pre-flight" \
     || bad "run-clone: records the main checkout for pre-flight" "$(git --git-dir="$NR/gitmain.git" config --get auto-pilot.mainCheckout 2>&1)"

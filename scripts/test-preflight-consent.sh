@@ -124,7 +124,7 @@ cat >"$ROOT/scripts/spawn-orchestrator.sh" <<'SPAWN'
 #!/bin/bash
 sub="$1"
 shift
-# The run-clone check (#1390) is the real one: it only reads git.
+# The run-clone check is the real one: it only reads git.
 [ "$sub" = check-run-clone ] && exec bash "$REAL_SPAWN" check-run-clone "$@"
 out=""
 while [ $# -gt 0 ]; do
@@ -630,7 +630,7 @@ assert_contains "linux: a run root that is not from a run clone is reported" \
 assert_contains "linux: a run root that is not from a run clone is a no-go naming run-clone" \
   "PREFLIGHT VERDICT: no-go — the run worktree is not from a run clone" "$out10"
 assert_not_contains "linux: worker worktrees are no longer a blocker" "no worker worktrees in the Linux jail yet" "$out10"
-# A run built by run-clone (#1390) passes that check.
+# A run built by run-clone passes that check.
 RC="$BASE/rc"
 mkdir -p "$RC"
 (

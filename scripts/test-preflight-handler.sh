@@ -229,7 +229,7 @@ else
     "PREFLIGHT HANDLER_SOURCE: $LINKED/dev_docs/tasks/.task-config.yml" "$out5"
 fi
 
-# --- Case 5b: a run clone (#1390) finds the main checkout's config too ----------
+# --- Case 5b: a run clone finds the main checkout's config too -----------------
 # The clone's common dir is <run root>/<repo>.git, which does not lead back to
 # the main checkout; run-clone records the path and pre-flight reads it.
 GIT_CONFIG_GLOBAL=/dev/null git init -q --bare "$BASE/rc-origin.git"

@@ -82,6 +82,15 @@ mkdir -p "$S/tmp"
 # an origin, and `run-clone` makes the run root from it — the bare clone, the
 # run worktree and workers/. The scratch repos never read the owner's global
 # config or hooks.
+# Contents and modes of every file under the main checkout's .git: Landlock
+# does not mediate chmod, so a mode change counts as a change too.
+main_sum() {
+  (
+    cd "$S/repo/.git" || exit 1
+    find . -type f -exec cksum {} +
+    find . -exec stat -c "%F %a %n" {} +
+  ) | sort | cksum
+}
 have_git=0
 R="$S/root"
 W="$R/run"
@@ -93,7 +102,7 @@ if command -v git >/dev/null 2>&1 \
   && GIT_CONFIG_GLOBAL=/dev/null git -C "$S/repo" push -q origin main 2>/dev/null \
   && GIT_CONFIG_GLOBAL=/dev/null bash "$SO" run-clone --repo "$S/repo" --run-root "$R" --run-id run >"$S/clone.log" 2>&1; then
   have_git=1
-  main_before="$(cd "$S/repo/.git" && find . -type f -exec cksum {} + | sort | cksum)"
+  main_before="$(main_sum)"
 else
   mkdir -p "$W"
 fi
@@ -184,7 +193,7 @@ else
   else
     say GIT_CONFIG pass "the main checkout's .git/config is not writable"
   fi
-  if [ "$(cd "$S/repo/.git" && find . -type f -exec cksum {} + | sort | cksum)" = "$main_before" ]; then
+  if [ "$(main_sum)" = "$main_before" ]; then
     say GIT_MAIN pass "the main checkout's .git is unchanged"
   else
     say GIT_MAIN FAIL "the jailed git work changed the main checkout's .git"

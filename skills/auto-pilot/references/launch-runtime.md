@@ -196,7 +196,7 @@ Writes are worktree-confined by construction: bookkeeping lands on the run-state
 branch, task code on task branches, worker edits in their own worktrees — the
 seams [`run-state.md`](run-state.md) already relies on.
 
-**The run's own git repo (#1390).** A jailed run never writes the main
+**The run's own git repo.** A jailed run never writes the main
 checkout's `.git`. `spawn-orchestrator.sh run-clone` lays out the run root, the
 same way on both OSes:
 
@@ -212,7 +212,7 @@ The launch grants the run root read-write, so a commit, `git worktree add` and
 hardlinked: a hardlinked object file is also the main checkout's file, and the
 jail can rewrite a file it reaches. The copy costs the repo's object size once
 per run. Put the run root outside every checkout (`run-clone` refuses one inside
-the repo). Only Linux enforces the layout so far, through pre-flight's
+any checkout of the repo, linked worktrees included). Only Linux enforces the layout so far, through pre-flight's
 `PREFLIGHT RUN_CLONE` and `render-nono-profile --git-worktree`; the macOS
 Seatbelt launch follows it by convention until it is checked on a Mac.
 
@@ -373,9 +373,9 @@ allowlist in §2 becomes the profile's `allow_domain` list in a follow-up.
 **Git: `--rw <run root> --git-worktree <run worktree>`.** `--git-worktree`
 refuses a run worktree that does not come from `run-clone` (§1 "The run's own
 git repo"). That includes any linked worktree of the main checkout. There, a
-writable common dir would put `hooks/` and `config` in the agent's reach. The
-narrow grant PR #1387 tried instead (`objects/`, `refs/`, `logs/`) refused
-`git worktree add` and `git branch -D` in the jail. The smoke asserts a commit
+writable common dir would put `hooks/` and `config` in the agent's reach,
+and a narrower grant of `objects/`, `refs/` and `logs/` refuses
+`git worktree add` and `git branch -D` in the jail (measured under nono 0.81.0). The smoke asserts a commit
 and a worker worktree's whole lifecycle in the jail. It also asserts that the
 main checkout's `.git` is unwritable and comes out unchanged.
 
@@ -612,7 +612,7 @@ supervisor's own git there is `rev-parse HEAD`, which runs no hook or fsmonitor.
 What it does add is your own git in the run worktree or a worker worktree after
 the run. Treat the run root as untrusted. Recover branches by fetching them from
 the main checkout ("Recovering a run's branch" in §1), not by running git
-inside the run root. Hardening is #1400.
+inside the run root. Hardening is tracked in #1400.
 
 **What the broker does _not_ defend: result authority.** The sentinel dir lives in
 the run worktree, which the jailed orchestrator can write — so it could forge its

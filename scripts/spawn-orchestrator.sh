@@ -1418,8 +1418,19 @@ run_clone() {
   while IFS= read -r l; do
     case "$l" in "worktree "*) t="$(canonicalize "${l#worktree }" 2>/dev/null)" && trees+=("$t") ;; esac
   done < <(git -C "$repo" worktree list --porcelain 2>/dev/null)
+  # Checked on the resolved path BEFORE the mkdir, so a run root reached through
+  # a symlink into a checkout is refused without leaving a directory inside it:
+  # resolve the deepest ancestor that exists and put the missing parts back.
+  local probe="$run_root" rest=""
+  while [ ! -e "$probe" ]; do
+    rest="/$(basename "$probe")$rest"
+    probe="$(dirname "$probe")"
+  done
+  probe="$(canonicalize "$probe")" || exit 2
+  [ "$probe" = / ] && probe=""
+  probe="$probe$rest"
   for t in "${trees[@]}"; do
-    _path_within "$run_root" "$t" && die "--run-root is inside a checkout of the repo (fail-closed): $run_root is under $t"
+    _path_within "$probe" "$t" && die "--run-root is inside a checkout of the repo (fail-closed): $run_root is under $t"
   done
   mkdir -p "$run_root" || die "cannot create --run-root: $run_root"
   run_root="$(canonicalize "$run_root")" || exit 2

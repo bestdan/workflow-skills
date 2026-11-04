@@ -484,7 +484,9 @@ EOF
 # inheriting anything from the plugin dir. A run clone's common dir is the
 # bare `<run root>/<repo>.git`, which does not lead back to the main checkout,
 # so `run-clone` records that path in the clone's config and it is read here.
-# Pre-flight runs before the jail ever has, so the value is still run-clone's.
+# On resume the jail may have rewritten it. That grants nothing new: the run
+# worktree's own task config wins over the main checkout's, and the jail can
+# already write that.
 main_root="$run_toplevel"
 if [ -n "$run_gitdir" ]; then
   main_root="$(git --git-dir="$run_gitdir" config --get auto-pilot.mainCheckout 2>/dev/null)" \
