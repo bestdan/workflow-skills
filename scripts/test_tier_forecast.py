@@ -134,6 +134,18 @@ class ForecastTests(unittest.TestCase):
         self.assertEqual(result["forecast"], "auto")
         self.assertEqual(result["reasons"], ["forecast: all 1 paths match auto"])
 
+    def test_consult_bar_comes_from_the_policy_or_defaults_to_85(self):
+        self.commit(POLICY + "consult_bar: 90\n")
+        self.assertEqual(
+            self.run_forecast({"paths": ["scripts/a.py"]})["consult_bar"], 90
+        )
+        self.assertEqual(
+            self.run_forecast({"paths": ["scripts/a.py"]}, ref="origin/HEAD")[
+                "consult_bar"
+            ],
+            85,
+        )
+
     def test_a_human_forecast(self):
         self.commit(POLICY)
         result = self.run_forecast({"paths": ["scripts/a.py", "skills/x/SKILL.md"]})
