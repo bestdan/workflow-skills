@@ -188,7 +188,7 @@ Four dimensions across those two layers.
 | ------------------------------------------------------------------------------------- | ---------------------- |
 | The run root: the run's own git repo, the run worktree, and `workers/` (below)        | **read-write**         |
 | `$TMPDIR` / the scratchpad dir                                                        | **read-write**         |
-| The rest of the repo and other worktrees                                              | **read-only**          |
+| The main checkout and its other worktrees                                             | **read-only**          |
 | Credential stores (`~/.claude`, `~/.config/gh`, `~/.config/op`, coder-CLI cred files) | **read-only** (see §3) |
 | Everything else (system, other home dirs)                                             | **no access**          |
 
@@ -212,7 +212,9 @@ The launch grants the run root read-write, so a commit, `git worktree add` and
 hardlinked: a hardlinked object file is also the main checkout's file, and the
 jail can rewrite a file it reaches. The copy costs the repo's object size once
 per run. Put the run root outside every checkout (`run-clone` refuses one inside
-the repo).
+the repo). Only Linux enforces the layout so far, through pre-flight's
+`PREFLIGHT RUN_CLONE` and `render-nono-profile --git-worktree`; the macOS
+Seatbelt launch follows it by convention until it is checked on a Mac.
 
 **Recovering a run's branch from the main checkout.** Run branches live only in
 the clone and on `origin`, so the main checkout does not see them until it

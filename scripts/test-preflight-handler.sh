@@ -229,6 +229,24 @@ else
     "PREFLIGHT HANDLER_SOURCE: $LINKED/dev_docs/tasks/.task-config.yml" "$out5"
 fi
 
+# --- Case 5b: a run clone (#1390) finds the main checkout's config too ----------
+# The clone's common dir is <run root>/<repo>.git, which does not lead back to
+# the main checkout; run-clone records the path and pre-flight reads it.
+GIT_CONFIG_GLOBAL=/dev/null git init -q --bare "$BASE/rc-origin.git"
+GIT_CONFIG_GLOBAL=/dev/null git -C "$MAIN_WT" remote add origin "$BASE/rc-origin.git"
+GIT_CONFIG_GLOBAL=/dev/null git -C "$MAIN_WT" push -q origin HEAD 2>/dev/null
+rc_base="$(GIT_CONFIG_GLOBAL=/dev/null git -C "$MAIN_WT" rev-parse --abbrev-ref HEAD)"
+if GIT_CONFIG_GLOBAL=/dev/null bash "$REPO/scripts/spawn-orchestrator.sh" run-clone --repo "$MAIN_WT" \
+  --run-root "$BASE/rc-root" --run-id r --base "$rc_base" >"$BASE/rc.log" 2>&1; then
+  out5b="$(run_preflight "$BASE/rc-root/r")"
+  assert_contains "run clone: HANDLER comes from the main checkout" \
+    "PREFLIGHT HANDLER: linear" "$out5b"
+  assert_contains "run clone: HANDLER_SOURCE names the main checkout's file" \
+    "PREFLIGHT HANDLER_SOURCE: $MAIN_WT/dev_docs/tasks/.task-config.yml" "$out5b"
+else
+  bad "run clone fixture: run-clone failed ($(tail -1 "$BASE/rc.log"))"
+fi
+
 # --- Case 6: --source accepts gh-issue, and still fails closed on the unknown -
 src_run() { # src_run <source>
   PATH="$FIXTURE_PATH" \

@@ -152,13 +152,36 @@ if command -v python3 >/dev/null 2>&1 && command -v git >/dev/null 2>&1; then
   if o="$("$SCRIPT" run-clone --repo "$GM" --run-root "$GM/inner" --run-id r-3 2>&1)"; then
     bad "run-clone: refuses a run root inside the repo" "succeeded"
   else
-    have "run-clone: refuses a run root inside the repo" "inside the repo's own tree" "$o"
+    have "run-clone: refuses a run root inside the repo" "inside a checkout of the repo" "$o"
   fi
+  # A linked worktree of the repo is a checkout too: a run root there would go
+  # with the worktree when it is torn down.
+  git -C "$GM" worktree add -q "$NO/linked" -b linked 2>/dev/null
+  if o="$("$SCRIPT" run-clone --repo "$GM" --run-root "$NO/linked/rr" --run-id r-4 2>&1)"; then
+    bad "run-clone: refuses a run root inside a linked worktree of the repo" "succeeded"
+  else
+    have "run-clone: refuses a run root inside a linked worktree of the repo" "inside a checkout of the repo" "$o"
+  fi
+  [ "$(git --git-dir="$NR/gitmain.git" config --get auto-pilot.mainCheckout 2>/dev/null)" = "$(cd "$GM" && pwd -P)" ] \
+    && ok "run-clone: records the main checkout for pre-flight" \
+    || bad "run-clone: records the main checkout for pre-flight" "$(git --git-dir="$NR/gitmain.git" config --get auto-pilot.mainCheckout 2>&1)"
   [ -e "$GM/inner" ] && bad "run-clone: a refused in-repo run root is not created" || ok "run-clone: a refused in-repo run root is not created"
   if o="$("$SCRIPT" run-clone --repo "$GM" --run-root "$NO/rr-bad" --run-id 'a/b' 2>&1)"; then
     bad "run-clone: refuses a run id that is not bare" "succeeded"
   else
     have "run-clone: refuses a run id that is not bare" "must be a bare id" "$o"
+  fi
+  if o="$("$SCRIPT" run-clone --repo "$GM" --run-root "$NO/rr-base" --run-id r --base nosuch 2>&1)"; then
+    bad "run-clone: refuses a --base that is not a local branch" "succeeded"
+  else
+    have "run-clone: refuses a --base that is not a local branch" "is not a local branch" "$o"
+  fi
+  [ -z "$(ls -A "$NO/rr-base" 2>/dev/null)" ] && ok "run-clone: a refused --base leaves the run root empty" \
+    || bad "run-clone: a refused --base leaves the run root empty" "$(ls -A "$NO/rr-base")"
+  if o="$("$SCRIPT" run-clone --repo "$GM" --run-root "$NO/rr-remote" --run-id r --remote nosuch 2>&1)"; then
+    bad "run-clone: refuses a --remote the repo does not have" "succeeded"
+  else
+    have "run-clone: refuses a --remote the repo does not have" "has no remote 'nosuch'" "$o"
   fi
 
   out="$(nrender "$NO/p-git.json" --claude-token --git-worktree "$NR/r-1" 2>&1)"

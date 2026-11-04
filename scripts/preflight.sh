@@ -481,9 +481,15 @@ EOF
 # there. On a main checkout the two roots are the same directory, so the
 # fallback changes nothing. A run with no config in either place falls to the
 # documented `repo-pr` default and says so in HANDLER_SOURCE rather than
-# inheriting anything from the plugin dir.
+# inheriting anything from the plugin dir. A run clone's common dir is the
+# bare `<run root>/<repo>.git`, which does not lead back to the main checkout,
+# so `run-clone` records that path in the clone's config and it is read here.
+# Pre-flight runs before the jail ever has, so the value is still run-clone's.
 main_root="$run_toplevel"
-[ -n "$run_gitdir" ] && main_root="$(dirname "$run_gitdir")"
+if [ -n "$run_gitdir" ]; then
+  main_root="$(git --git-dir="$run_gitdir" config --get auto-pilot.mainCheckout 2>/dev/null)" \
+    || main_root="$(dirname "$run_gitdir")"
+fi
 task_cfg="$run_toplevel/dev_docs/tasks/.task-config.yml"
 [ -f "$task_cfg" ] || task_cfg="$main_root/dev_docs/tasks/.task-config.yml"
 task_cfg_local="$run_toplevel/dev_docs/tasks/.task-config.local.yml"
@@ -550,7 +556,7 @@ elif [ "$host_os" = Linux ]; then
     else
       echo "PREFLIGHT LAUNCHER: nono + systemd-run --user (user manager: $sd_state, Linger=yes)"
     fi
-    # The jail writes only the run's own git repo (#1390): the run worktree
+    # The jail writes only the run's own git repo: the run worktree
     # must come from `spawn-orchestrator.sh run-clone`, or render-nono-profile
     # --git-worktree refuses it at launch — so say so here, before the launch.
     if rc_out="$(bash "$SPAWN" check-run-clone --worktree "$run_toplevel" 2>&1)"; then

@@ -56,7 +56,7 @@
 #           launch-runtime.md §1. Its own comment block below is the one home
 #           of what it grants and why. write-launch takes it with --jail nono
 #           --nono-bin <pinned nono> [--claude-token-cmd <cmd>].
-#   run-clone  The run's own git repo (#1390): a bare clone inside the run root
+#   run-clone  The run's own git repo: a bare clone inside the run root
 #           and the run worktree from it, so the jail never writes the main
 #           checkout's .git. Its comment block below is the one home of the layout.
 #   claude-token  Run a --claude-token-cmd unjailed and print the token; on
@@ -1352,7 +1352,7 @@ render_settings() {
 }
 
 # ---------------------------------------------------------------------------
-# run-clone (#1390) — the run's own git repo. A jailed run never writes the
+# run-clone — the run's own git repo. A jailed run never writes the
 # owner's main checkout's git dir: the run worktree and every /deliver-task
 # worker worktree are linked worktrees of a bare clone that lives inside the
 # run root, beside them. So `git worktree add`, `git branch -D` and a commit all
@@ -1409,12 +1409,23 @@ run_clone() {
       ;;
     *.git) name="${name%.git}" ;;
   esac
-  # The run root must not be inside the repo's own tree: the jail writes all of
-  # it, and the main checkout's .git is what this layout keeps out of reach.
-  _path_within "$run_root" "$tree" && die "--run-root is inside the repo's own tree (fail-closed): $run_root"
+  # The run root must sit outside every checkout of the repo: the main one and
+  # each linked worktree. The jail writes all of it, and a run root nested in a
+  # worktree goes with that worktree when it is torn down, unpushed run
+  # branches included.
+  local -a trees=("$tree")
+  local l t
+  while IFS= read -r l; do
+    case "$l" in "worktree "*) t="$(canonicalize "${l#worktree }" 2>/dev/null)" && trees+=("$t") ;; esac
+  done < <(git -C "$repo" worktree list --porcelain 2>/dev/null)
+  for t in "${trees[@]}"; do
+    _path_within "$run_root" "$t" && die "--run-root is inside a checkout of the repo (fail-closed): $run_root is under $t"
+  done
   mkdir -p "$run_root" || die "cannot create --run-root: $run_root"
   run_root="$(canonicalize "$run_root")" || exit 2
-  _path_within "$run_root" "$tree" && die "--run-root is inside the repo's own tree (fail-closed): $run_root"
+  for t in "${trees[@]}"; do
+    _path_within "$run_root" "$t" && die "--run-root is inside a checkout of the repo (fail-closed): $run_root is under $t"
+  done
   [ -z "$(ls -A "$run_root" 2>/dev/null)" ] || die "--run-root is not empty (fail-closed): $run_root"
   git -C "$repo" rev-parse --verify -q "refs/heads/$base" >/dev/null \
     || die "--base '$base' is not a local branch of --repo (fail-closed)"
@@ -1428,6 +1439,9 @@ run_clone() {
   git -C "$clone" remote set-url origin "$url" \
     && git -C "$clone" config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*' \
     || die "run-clone: could not point origin at $url — $left"
+  # Pre-flight reads the main checkout's untracked task config through this
+  # (preflight.sh's handler lookup); the clone no longer leads back to it.
+  git -C "$clone" config auto-pilot.mainCheckout "$tree" || die "run-clone: could not record the main checkout — $left"
   git -C "$clone" fetch -q origin || die "run-clone: git fetch origin failed (the run pushes through it): $url — $left"
   git -C "$clone" worktree add -q -b "auto-pilot/$run_id" "$wt" "refs/heads/$base" \
     || die "run-clone: could not add the run worktree $wt — $left"
@@ -1436,7 +1450,7 @@ run_clone() {
   echo "RUN_WORKTREE $wt"
 }
 
-# Is <worktree> a run worktree of a run clone (#1390)? A linked worktree whose
+# Is <worktree> a run worktree of a run clone? A linked worktree whose
 # common dir is a BARE repo beside it, in the worktree's own parent (the run
 # root, which the launch grants whole). On
 # failure, prints why on stderr and returns 1. The owner's main checkout is
@@ -1636,7 +1650,7 @@ render_nono_profile() {
     done
   fi
 
-  # --git-worktree <run worktree> (#1350, #1390): a commit in a linked worktree
+  # --git-worktree <run worktree>: a commit in a linked worktree
   # writes into its common dir, which may sit outside every --rw. The run
   # worktree must belong to a run clone (`run-clone`): a bare repo inside the
   # run root, used by this run alone. Its whole git dir is granted writable, so
@@ -1645,7 +1659,7 @@ render_nono_profile() {
   # writable common dir puts `hooks/` and `config`, which the owner's own git
   # runs unjailed, in the agent's reach, and a narrow grant of `objects/`,
   # `refs/` and `logs/` refuses `git worktree add` and `git branch -D` (measured
-  # under nono 0.81.0, PR #1387).
+  # under nono 0.81.0).
   local -a git_rw=()
   local gw gcommon
   for gw in ${gitwt[@]+"${gitwt[@]}"}; do
@@ -3928,7 +3942,7 @@ _run_front_field() {
 # The handoff dir for a run worktree: <worktree root>/<repo>/.handoffs, the
 # shared handoff convention's location. <repo> is the repo's name, never the
 # run's: the main checkout's directory for a <checkout>/.git common dir, or
-# <repo> for a run clone's <run root>/<repo>.git (#1390).
+# <repo> for a run clone's <run root>/<repo>.git.
 _resolve_handoff_dir() {
   local workdir="$1" root common name
   root="$(cd "$workdir" && "$ROOT/scripts/worktree-config.sh" root 2>/dev/null)" || return 1

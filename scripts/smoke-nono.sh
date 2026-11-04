@@ -78,7 +78,7 @@ tmp_probe="/tmp/auto-pilot-smoke-$$"
 trap 'rm -rf "$S"; rm -f "$home_probe" "$tmp_probe"' EXIT
 mkdir -p "$S/tmp"
 
-# The run is laid out as a real one is (#1390): a scratch "main checkout" with
+# The run is laid out as a real one is: a scratch "main checkout" with
 # an origin, and `run-clone` makes the run root from it — the bare clone, the
 # run worktree and workers/. The scratch repos never read the owner's global
 # config or hooks.

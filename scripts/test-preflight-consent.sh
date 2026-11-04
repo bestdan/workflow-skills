@@ -640,8 +640,8 @@ mkdir -p "$RC"
   git -C "$RC/main" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
   git -C "$RC/main" remote add origin "$RC/origin.git"
   git -C "$RC/main" push -q origin main 2>/dev/null
-  bash "$REAL_SPAWN" run-clone --repo "$RC/main" --run-root "$RC/root" --run-id r >/dev/null 2>&1
-)
+  bash "$REAL_SPAWN" run-clone --repo "$RC/main" --run-root "$RC/root" --run-id r >"$RC/clone.log" 2>&1
+) || bad "linux: the run-clone fixture builds ($(tail -1 "$RC/clone.log" 2>/dev/null))"
 out10="$(linux_preflight AUTO_PILOT_NONO_SHA256="$NSUM" -- --run-root "$RC/root/r")"
 assert_contains "linux: a run worktree from run-clone is reported with its clone" \
   "PREFLIGHT RUN_CLONE: $(cd "$RC/root" && pwd -P)/main.git" "$out10"
