@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.192.0] - 2026-11-04
+
+### Features
+
+- add tier-forecast.py for the promoter's tier forecast [#1381] (#1389) (581fc02)
+
 ## [2.191.0] - 2026-11-04
 
 ### Features
