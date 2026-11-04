@@ -33,10 +33,11 @@ The verdicts:
            cannot be read. Every failure is human, never a crash.
   auto     every path matches an `auto` glob.
 
-The Intent block is a `## Intent` heading followed by three labelled lines,
+The Intent block is a `## Intent` heading (any case, optional trailing colon,
+level 2 only) followed by three labelled lines,
 `Change:`, `Premise:` and `Finish:`, each with a value. A leading list marker and
-bold labels (`- **Change:** ...`) are accepted. The block ends at the next
-heading. `state` is `present` when all three have values, `partial` when the
+bold labels (`- **Change:** ...` or `- **Change**: ...`) are accepted. The block
+ends at the next heading. Lines inside a ``` or ~~~ fence are ignored. `state` is `present` when all three have values, `partial` when the
 heading is there but some are missing (named in `missing`), and `absent` when
 there is no heading. It is reported whatever the forecast, and deciding what a
 missing block means is the promoter's job: skills/task/references/intent-confirmation.md.
@@ -56,10 +57,10 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 POLICY_PATH = ".github/merge-policy.yml"
 INTENT_LABELS = ("Change", "Premise", "Finish")
-INTENT_HEADING_RE = re.compile(r"^##\s+Intent\s*$")
+INTENT_HEADING_RE = re.compile(r"^##\s+Intent:?\s*$", re.IGNORECASE)
 HEADING_RE = re.compile(r"^#{1,6}\s")
 LABEL_RE = re.compile(
-    r"^(?:[-*]\s+)?(?:\*\*)?(?P<label>[A-Za-z]+):(?:\*\*)?\s*(?P<value>.*)$"
+    r"^(?:[-*]\s+)?(?:\*\*)?(?P<label>[A-Za-z]+)(?:\*\*)?:(?:\*\*)?\s*(?P<value>.*)$"
 )
 
 
@@ -103,12 +104,25 @@ def read_policy(repo_dir, ref):
             else ""
         )
         raise ReadError(f"`{ref}` does not resolve to a commit{hint}")
+    # `git show` exits 128 both for a missing path and for an unreadable object,
+    # so ask the tree whether the path exists. Only a clean "absent" is no
+    # policy; any other failure is an error, which the caller makes human.
+    listed = subprocess.run(
+        ["git", "-C", str(repo_dir), "ls-tree", "--full-tree", ref, "--", POLICY_PATH],
+        capture_output=True,
+        text=True,
+    )
+    if listed.returncode != 0:
+        raise ReadError(f"cannot list `{ref}`: {listed.stderr.strip()}")
+    if not listed.stdout.strip():
+        return None
     shown = subprocess.run(
         ["git", "-C", str(repo_dir), "show", f"{ref}:{POLICY_PATH}"],
         capture_output=True,
     )
     if shown.returncode != 0:
-        return None
+        detail = shown.stderr.decode(errors="replace").strip()
+        raise ReadError(f"cannot read {POLICY_PATH} at `{ref}`: {detail}")
     try:
         return shown.stdout.decode()
     except UnicodeDecodeError as exc:
@@ -117,7 +131,15 @@ def read_policy(repo_dir, ref):
 
 def parse_intent(body):
     """{"state": present|partial|absent, "missing": [labels]} for a task body."""
-    lines = body.splitlines()
+    # Fenced code is quoted text, not the document: an example Intent block in a
+    # fence must not count, and a `# comment` in one must not end the real block.
+    lines, fenced = [], False
+    for line in body.splitlines():
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+            continue
+        if not fenced:
+            lines.append(line)
     start = next(
         (i for i, line in enumerate(lines) if INTENT_HEADING_RE.match(line)), None
     )

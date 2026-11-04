@@ -142,6 +142,34 @@ class ForecastTests(unittest.TestCase):
             result["reasons"], ["forecast: skills/x/SKILL.md matches always_human"]
         )
 
+    def test_an_empty_path_list_is_human(self):
+        self.commit(POLICY)
+        result = self.run_forecast({"paths": [], "body": ""})
+        self.assertEqual(result["forecast"], "human")
+        self.assertEqual(result["reasons"], ["forecast: no paths identified"])
+
+    def test_a_policy_that_is_not_utf8_is_human(self):
+        self.commit("auto: [scripts/**]\n")
+        (self.repo / ".github" / "merge-policy.yml").write_bytes(b"auto: [\xff]\n")
+        self.git("commit", "-q", "-am", "binary policy")
+        result = self.run_forecast({"paths": ["scripts/a.py"]})
+        self.assertEqual(result["forecast"], "human")
+        self.assertIn("cannot decode", result["reasons"][0])
+
+    def test_an_unreadable_policy_is_human_not_skipped(self):
+        self.commit(POLICY)
+        blob = subprocess.run(
+            ["git", "-C", str(self.repo), "rev-parse", "main:.github/merge-policy.yml"],
+            capture_output=True,
+            text=True,
+            check=True,
+            env=GIT_ENV,
+        ).stdout.strip()
+        (self.repo / ".git" / "objects" / blob[:2] / blob[2:]).unlink()
+        result = self.run_forecast({"paths": ["scripts/a.py"]})
+        self.assertEqual(result["forecast"], "human")
+        self.assertIn("cannot read", result["reasons"][0])
+
     def test_bad_input_is_human(self):
         self.commit(POLICY)
         task: object
@@ -196,6 +224,31 @@ class ForecastTests(unittest.TestCase):
 
     def test_intent_accepts_plain_labels(self):
         body = "## Intent\nChange: a\nPremise: b\nFinish: c\n"
+        self.assertEqual(fc.parse_intent(body)["state"], "present")
+
+    def test_heading_variants(self):
+        rest = "\nChange: a\nPremise: b\nFinish: c\n"
+        for heading, state in (
+            ("## Intent", "present"),
+            ("## Intent:", "present"),
+            ("## intent", "present"),
+            ("### Intent", "absent"),
+            ("# Intent", "absent"),
+            ("## Intent block", "absent"),
+        ):
+            with self.subTest(heading=heading):
+                self.assertEqual(fc.parse_intent(heading + rest)["state"], state)
+
+    def test_a_fenced_example_is_not_an_intent_block(self):
+        body = "Body\n\n```markdown\n## Intent\nChange: x\nPremise: y\nFinish: z\n```\n"
+        self.assertEqual(fc.parse_intent(body)["state"], "absent")
+
+    def test_a_fenced_comment_does_not_end_the_block(self):
+        body = "## Intent\nChange: x\n```sh\n# run this\n```\nPremise: y\nFinish: z\n"
+        self.assertEqual(fc.parse_intent(body)["state"], "present")
+
+    def test_intent_accepts_the_colon_outside_the_bold(self):
+        body = "## Intent\n- **Change**: a\n- **Premise**: b\n- **Finish**: c\n"
         self.assertEqual(fc.parse_intent(body)["state"], "present")
 
     def test_intent_is_reported_when_the_policy_is_missing(self):
