@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.191.0] - 2026-11-04
+
+### Features
+
+- start and stop the Linux run with a systemd timer [#1350] (#1387) (9bbc65c)
+
 ## [2.190.1] - 2026-11-04
 
 ### Fixes
