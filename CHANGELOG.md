@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.189.0] - 2026-11-04
+
+### Features
+
+- nono jail renderer and confinement smoke on Linux [#1349] (#1376) (5ec1575)
+
 ## [2.188.0] - 2026-11-04
 
 ### Features
