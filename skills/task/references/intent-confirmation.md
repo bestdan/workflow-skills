@@ -69,9 +69,10 @@ criterion that shows the work is done; it is not a second copy of the list.
 ## 3. Confirm with a different agent
 
 The promoter never confirms the block, whether it drafted the block or the
-task's author wrote it. Dispatch a fresh-context `agent-guidance:consultant`
-(model: the same tier as yours or higher). A fresh agent did not write the task
-and is not running the promotion. Give it:
+task's author wrote it. Dispatch a fresh-context `agent-guidance:consultant`.
+Pick its model the way the `agent-guidance:consult` skill's step 3 does: the
+next tier above yours, or your own at the top tier, never lower. A fresh agent
+did not write the task and is not running the promotion. Give it:
 
 - the task's full body, and the Intent block as one decision: "D1: does this
   Intent block hold for this repo? Confirm or reject; you may reject all of it";
