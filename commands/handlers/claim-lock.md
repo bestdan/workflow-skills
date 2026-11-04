@@ -165,9 +165,10 @@ symmetric:
 
 "Acquire only when you intend to run to completion" is **not** a mitigation: a crash or a
 timeout is precisely the case where intent does not apply. `/sweep-stale-claims`
-releases a stranded ref, but only from a **local** session, because a routine cannot
-delete refs (`gh-issue-claim.md` → **Sweep stale claims**). So the routine default
-stays the election, and a routine that somehow does hold a ref is cleared locally:
+releases a stranded ref that carries no pushed commits (one that does is reported for a
+human), but only from a **local** session, because a routine cannot delete refs
+(`gh-issue-claim.md` → **Sweep stale claims**). So the routine default stays the
+election, and a routine that somehow does hold a ref is cleared locally:
 `/sweep-stale-claims --apply`, or `git push origin --delete <branch>`.
 
 One caveat if the default ever flips: `create_branch` takes `from_branch`, **not a sha**,
