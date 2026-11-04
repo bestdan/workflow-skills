@@ -88,9 +88,13 @@ This scope gate is **model judgment, not a deterministic rule** — acceptable h
 
 **Hold blocked cards.** Independently of the HIGH/LOW score, **hold** any card with an unresolved blocker — an `is_blocked_by` entry whose target card is still present and not `done`. A blocker whose target is **absent or `done`** counts as satisfied (the same readiness rule `/do-tasks` applies at runtime; see `commands/do-tasks.md` and the Field reference in `skills/task/SKILL.md`). A held card is **left in `status: new`** — not promoted to `ready`, not demoted to `needs_refinement` — so it stays in the scanned pool and is re-evaluated next run, promoting automatically once every blocker resolves. Resolve each blocker slug against the scanned card set (the scan reports every `dev_docs/tasks/**` card): a blocker is satisfied when no present card carries that slug, or the present card's `status` is `done`. Holding in `new` rather than `needs_refinement` is deliberate — the promoter only scans `status: new`, so a demoted card would never be re-checked when its blocker clears. Report held cards under `held (N, blocked)`.
 
+**Forecast the tier, then confirm the Intent.** For each candidate still HIGH and not held, follow `skills/task/references/intent-confirmation.md`: list the paths the card will change (its `## Task` and `## Context`, plus `related_files`), run `tier-forecast.py`, and on `human` draft any missing Intent lines and dispatch the confirmer. A `human` card the confirmer does not confirm at or above `consult_bar` turns LOW, with reason `intent not confirmed: <crux>`. `skipped` and `auto` leave the score as it is. Record for step 3 the forecast, its first reason when `human`, the Intent block when you drafted any of it, and the verdict. Under `dry-run`, forecast and draft but do not dispatch the confirmer; a `human` card reports as `ready if confirmed`.
+
+If a relative path doesn't resolve, find the reference with **Glob** (`**/skills/task/references/intent-confirmation.md`) and Read it.
+
 ### 3. Apply
 
-If `$ARGUMENTS` contains `dry-run`, print the proposed transitions **and the intended backfills** and exit without writing. (`all` has no effect on this file path — there is no sub-project scope to widen. Neither does `backfill-only`: it is a tracker-handler mode, and on this path a card past `new` is a file a human can edit directly.)
+If `$ARGUMENTS` contains `dry-run`, print the proposed transitions, **the intended backfills, and each forecast with any drafted Intent block**, and exit without writing. (`all` has no effect on this file path — there is no sub-project scope to widen. Neither does `backfill-only`: it is a tracker-handler mode, and on this path a card past `new` is a file a human can edit directly.)
 
 Otherwise, for each scored candidate, use `Edit` to update the YAML frontmatter in place:
 
@@ -98,21 +102,23 @@ Otherwise, for each scored candidate, use `Edit` to update the YAML frontmatter 
 - HIGH: set `status: ready`
 - LOW: set `status: needs_refinement`, set `human_approval_requested: true` (add the field if missing). Append a one-line `# promoter:` comment to the frontmatter naming which check failed (e.g., `# promoter: missing acceptance_criteria`) so the human can fix quickly — in addition to, not instead of, any backfill provenance comment already appended above.
 - Held (blocked): no write at all. Leave the card untouched in `status: new`, including any backfill it would otherwise have gotten — held cards are re-evaluated next run once their blocker clears.
+- Forecast (every card that reached it, HIGH or LOW): set `tier_forecast: auto|human|skipped`. For `human`, append `# promoter: tier human — <first reason>`, write any drafted lines into the body's `## Intent` section (adding the section after `## Context` if it is missing), and append the verdict as `# promoter: intent confirmed by <model> at <confidence>%` or `# promoter: intent not confirmed (<confidence>%): <crux>`. For an unconfirmed card that verdict line is its LOW reason, so the LOW bullet writes no separate `# promoter:` comment for it.
 
-Do not touch any other fields. Do not move the file. Do not stage or commit — the next git operation (manual or `/do-tasks`) will pick up the changes.
+Do not touch any other fields, and no other part of the body. Do not move the file. Do not stage or commit — the next git operation (manual or `/do-tasks`) will pick up the changes.
 
 ### 4. Report
 
-Print a summary table, annotating any card that got a backfill:
+Print a summary table, annotating any card that got a backfill, and every card that reached the forecast with its tier:
 
 ```
-Promoted 4 of 7 candidates:
+Promoted 5 of 8 candidates:
   ready (3):
-    - remove-stale-foobar-alias
-    - fix-broken-import  (backfilled: size)
-    - bump-eslint-config  (backfilled: priority, size)
-  needs_refinement (1):
+    - remove-stale-foobar-alias  (tier: auto)
+    - fix-broken-import  (tier: auto; backfilled: size)
+    - bump-eslint-config  (tier: human, intent confirmed 90%; backfilled: priority, size)
+  needs_refinement (2):
     - restructure-auth-module  (scope exceeds size 5 — split into sub-tasks)
+    - reword-claim-skill  (tier: human; intent not confirmed: <crux>)
   held (1, blocked):
     - some-slug  (blocked by other-slug)
   skipped (2, already past new):
