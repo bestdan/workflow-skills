@@ -45,6 +45,9 @@
 #       [--rw <dir> ...] [--ro <path> ...] [--cred-ro <path> ...] \
 #       [--confine-under <dir> ...] [--git-worktree <dir>] [--toolchain] \
 #       [--claude-token] --out <file>
+#   spawn-orchestrator.sh run-clone --repo <checkout> --run-root <dir> --run-id <id> \
+#       [--base <branch>] [--remote <name>]
+#   spawn-orchestrator.sh check-run-clone --worktree <dir>
 #   spawn-orchestrator.sh claude-token --dir <run-dir> [--label <label>] --cmd <cmd>
 #   spawn-orchestrator.sh check-nono-profile --dir <run-dir> [--label <label>] \
 #       --profile <file> --sha256 <hex>
@@ -53,6 +56,9 @@
 #           launch-runtime.md §1. Its own comment block below is the one home
 #           of what it grants and why. write-launch takes it with --jail nono
 #           --nono-bin <pinned nono> [--claude-token-cmd <cmd>].
+#   run-clone  The run's own git repo (#1390): a bare clone inside the run root
+#           and the run worktree from it, so the jail never writes the main
+#           checkout's .git. Its comment block below is the one home of the layout.
 #   claude-token  Run a --claude-token-cmd unjailed and print the token; on
 #           failure, halt the run with an alarm (exit 3).
 #   check-nono-profile  The wrapper's per-wake pin (#1350): the profile still
@@ -1346,6 +1352,121 @@ render_settings() {
 }
 
 # ---------------------------------------------------------------------------
+# run-clone (#1390) — the run's own git repo. A jailed run never writes the
+# owner's main checkout's git dir: the run worktree and every /deliver-task
+# worker worktree are linked worktrees of a bare clone that lives inside the
+# run root, beside them. So `git worktree add`, `git branch -D` and a commit all
+# write only under the run root, which the jail grants whole, on both OSes:
+#
+#   <run root>/<repo>.git    the clone (bare; origin = the main checkout's origin)
+#   <run root>/<run_id>/     the run worktree, on auto-pilot/<run_id>
+#   <run root>/workers/      the worker worktrees /deliver-task creates
+#
+# Objects are COPIED (--no-hardlinks), not hardlinked: a hardlinked object file
+# is the main checkout's object file too, and the jail can chmod and rewrite a
+# file it can reach. The clone takes the base branch only; everything else
+# comes from origin. Run branches exist only here and on origin — launch-
+# runtime.md "The run's own git repo" has the recovery path from the main
+# checkout.
+#
+# Usage: run-clone --repo <checkout> --run-root <dir> --run-id <id>
+#            [--base <branch>] [--remote <name>]
+# Prints `RUN_CLONE <dir>` and `RUN_WORKTREE <dir>`.
+run_clone() {
+  local repo="" run_root="" run_id="" base="main" remote="origin"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --repo | --run-root | --run-id | --base | --remote)
+        [ $# -ge 2 ] || die "missing value for $1"
+        case "$1" in
+          --repo) repo="$2" ;;
+          --run-root) run_root="$2" ;;
+          --run-id) run_id="$2" ;;
+          --base) base="$2" ;;
+          --remote) remote="$2" ;;
+        esac
+        shift 2
+        ;;
+      *) die "unknown run-clone argument: $1" ;;
+    esac
+  done
+  [ -n "$repo" ] && [ -n "$run_root" ] && [ -n "$run_id" ] \
+    || die "run-clone requires --repo <checkout> --run-root <dir> --run-id <id>"
+  case "$run_root" in /*) ;; *) die "--run-root must be absolute (fail-closed): $run_root" ;; esac
+  case "$run_id" in "" | . | .. | *[!A-Za-z0-9._-]*) die "--run-id must be a bare id of [A-Za-z0-9._-] (fail-closed): $run_id" ;; esac
+  local common url name
+  common="$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
+    || die "--repo is not a git checkout (fail-closed): $repo"
+  common="$(canonicalize "$common")" || exit 2
+  url="$(git -C "$repo" remote get-url "$remote" 2>/dev/null)" \
+    || die "--repo has no remote '$remote' (fail-closed): the run pushes through it"
+  local tree="$common"
+  name="$(basename "$common")"
+  case "$name" in
+    .git)
+      tree="$(dirname "$common")"
+      name="$(basename "$tree")"
+      ;;
+    *.git) name="${name%.git}" ;;
+  esac
+  # The run root must not be inside the repo's own tree: the jail writes all of
+  # it, and the main checkout's .git is what this layout keeps out of reach.
+  _path_within "$run_root" "$tree" && die "--run-root is inside the repo's own tree (fail-closed): $run_root"
+  mkdir -p "$run_root" || die "cannot create --run-root: $run_root"
+  run_root="$(canonicalize "$run_root")" || exit 2
+  _path_within "$run_root" "$tree" && die "--run-root is inside the repo's own tree (fail-closed): $run_root"
+  [ -z "$(ls -A "$run_root" 2>/dev/null)" ] || die "--run-root is not empty (fail-closed): $run_root"
+  git -C "$repo" rev-parse --verify -q "refs/heads/$base" >/dev/null \
+    || die "--base '$base' is not a local branch of --repo (fail-closed)"
+
+  local clone="$run_root/$name.git" wt="$run_root/$run_id"
+  git clone -q --bare --no-hardlinks --single-branch --branch "$base" -- "$common" "$clone" \
+    || die "run-clone: git clone of $common failed"
+  git -C "$clone" remote set-url origin "$url" \
+    && git -C "$clone" config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*' \
+    || die "run-clone: could not point origin at $url"
+  git -C "$clone" fetch -q origin || die "run-clone: git fetch origin failed (the run pushes through it): $url"
+  git -C "$clone" worktree add -q -b "auto-pilot/$run_id" "$wt" "refs/heads/$base" \
+    || die "run-clone: could not add the run worktree $wt"
+  mkdir -p "$run_root/workers" || die "cannot create $run_root/workers"
+  echo "RUN_CLONE $clone"
+  echo "RUN_WORKTREE $wt"
+}
+
+# Is <worktree> a run worktree of a run clone (#1390)? A linked worktree whose
+# common dir is a BARE repo beside it, in the worktree's own parent (the run
+# root, which the launch grants whole). On
+# failure, prints why on stderr and returns 1. The owner's main checkout is
+# never bare, so this is what keeps a jail grant off its git dir.
+_check_run_clone() {
+  local wt="$1" common gdir root
+  common="$(git -C "$wt" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
+    && gdir="$(git -C "$wt" rev-parse --path-format=absolute --git-dir 2>/dev/null)" || {
+    echo "not a git checkout: $wt" >&2
+    return 1
+  }
+  common="$(canonicalize "$common")" && gdir="$(canonicalize "$gdir")" \
+    && root="$(canonicalize "$(dirname "$wt")")" || return 1
+  if [ "$gdir" = "$common" ]; then
+    echo "$wt is a main checkout, not a run worktree" >&2
+    return 1
+  fi
+  if [ "$(git --git-dir="$common" config --get --bool core.bare 2>/dev/null)" != true ] \
+    || [ "$(dirname "$common")" != "$root" ]; then
+    echo "$wt is a linked worktree of $common, not of a run clone in its own run root — create the run with \`spawn-orchestrator.sh run-clone\`" >&2
+    return 1
+  fi
+  printf '%s\n' "$common"
+}
+
+# check-run-clone --worktree <dir>: print the run clone's git dir and exit 0
+# when <dir> is a run worktree of a run clone; else say why and exit 1.
+check_run_clone() {
+  [ $# -eq 2 ] && [ "$1" = --worktree ] || die "usage: check-run-clone --worktree <dir>"
+  _check_run_clone "$2"
+}
+
+# ---------------------------------------------------------------------------
 # render-nono-profile (#1349) — the Linux jail: a nono JSON profile rendered
 # from launch-runtime.md §1's table. nono is the ONLY enforcing layer
 # (render-settings --jail nono turns the harness sandbox off), so this file is
@@ -1512,40 +1633,22 @@ render_nono_profile() {
     done
   fi
 
-  # --git-worktree <dir> (#1350): a commit in a linked worktree writes into the
-  # main checkout's git common dir, which no --rw covers. The whole common dir
-  # is NOT granted writable: `hooks/` and `config` there run outside the jail on
-  # the owner's next git command in the main checkout, so a writable common dir
-  # is a jail escape. Only what a commit needs is writable — `objects/`, `refs/`,
-  # `logs/` and this worktree's own `worktrees/<name>/` — and the rest is
-  # read-only. Measured under nono 0.81.0: a commit and a branch switch succeed;
-  # a write to `hooks/` or `config` is refused, and so are `git branch -D` (it
-  # locks `packed-refs` in the common dir's root) and `git worktree add` (it
-  # creates a sibling under `worktrees/`).
+  # --git-worktree <run worktree> (#1350, #1390): a commit in a linked worktree
+  # writes into its common dir, which may sit outside every --rw. The run
+  # worktree must belong to a run clone (`run-clone`): a bare repo inside the
+  # run root, used by this run alone. Its whole git dir is granted writable, so
+  # a commit, `git worktree add`/`remove` and `git branch -D` all work in the
+  # jail. A linked worktree of the owner's main checkout is refused: there a
+  # writable common dir puts `hooks/` and `config`, which the owner's own git
+  # runs unjailed, in the agent's reach, and a narrow grant of `objects/`,
+  # `refs/` and `logs/` refuses `git worktree add` and `git branch -D` (measured
+  # under nono 0.81.0, PR #1387).
   local -a git_rw=()
-  local gw gcommon ggit
+  local gw gcommon
   for gw in ${gitwt[@]+"${gitwt[@]}"}; do
-    gcommon="$(git -C "$gw" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
-      || die "--git-worktree is not a git checkout (fail-closed): $gw"
-    ggit="$(git -C "$gw" rev-parse --path-format=absolute --git-dir 2>/dev/null)" \
-      || die "--git-worktree is not a git checkout (fail-closed): $gw"
-    gcommon="$(canonicalize "$gcommon")" || exit 2
-    ggit="$(canonicalize "$ggit")" || exit 2
-    # A main checkout's git dir IS the common dir: granting it is granting hooks/.
-    [ "$ggit" != "$gcommon" ] || die "--git-worktree must be a linked worktree, not a main checkout (fail-closed): $gw"
-    _path_within "$ggit" "$gcommon/worktrees" \
-      || die "--git-worktree's git dir is not under its common dir's worktrees/ (fail-closed): $ggit"
-    # The run's own worktrees/<name>/ is writable, and with this extension on,
-    # git reads a config.worktree there: the agent could set core.hooksPath,
-    # and the unjailed supervisor's own checkout in the run worktree
-    # (assert-run-head) would run the hook outside the jail.
-    [ "$(git -C "$gw" config --get --bool extensions.worktreeConfig 2>/dev/null)" = true ] \
-      && die "--git-worktree: the repo enables extensions.worktreeConfig, so a writable worktrees/<name>/ lets the jailed agent set hooks the unjailed supervisor runs (fail-closed): $gcommon"
-    ro_dir+=("$gcommon")
-    for c in "$gcommon/objects" "$gcommon/refs" "$gcommon/logs" "$ggit"; do
-      [ -d "$c" ] || mkdir -p "$c" || die "cannot create $c"
-      git_rw+=("$c")
-    done
+    gcommon="$(_check_run_clone "$gw" 2>&1)" \
+      || die "--git-worktree must be a run worktree of a run clone (fail-closed): $gcommon"
+    git_rw+=("$gcommon")
   done
   for w in ${git_rw[@]+"${git_rw[@]}"}; do
     _path_within "$home" "$w" && die "refusing a write grant that covers \$HOME (fail-closed): $w"
@@ -3820,14 +3923,20 @@ _run_front_field() {
 }
 
 # The handoff dir for a run worktree: <worktree root>/<repo>/.handoffs, the
-# shared handoff convention's location. <repo> is the MAIN checkout's directory
-# name (the run worktree is a linked worktree, so its own name is the run's).
+# shared handoff convention's location. <repo> is the repo's name, never the
+# run's: the main checkout's directory for a <checkout>/.git common dir, or
+# <repo> for a run clone's <run root>/<repo>.git (#1390).
 _resolve_handoff_dir() {
-  local workdir="$1" root common
+  local workdir="$1" root common name
   root="$(cd "$workdir" && "$ROOT/scripts/worktree-config.sh" root 2>/dev/null)" || return 1
   common="$(git -C "$workdir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1
   [ -n "$root" ] && [ -n "$common" ] || return 1
-  printf '%s/%s/.handoffs\n' "$root" "$(basename "$(dirname "$common")")"
+  name="$(basename "$common")"
+  case "$name" in
+    .git) name="$(basename "$(dirname "$common")")" ;;
+    *.git) name="${name%.git}" ;;
+  esac
+  printf '%s/%s/.handoffs\n' "$root" "$name"
 }
 
 # Shift every markdown heading outside a fenced block down two levels, so an
@@ -8079,6 +8188,8 @@ shift
 case "$sub" in
   render-profile) render_profile "$@" ;;
   render-nono-profile) render_nono_profile "$@" ;;
+  run-clone) run_clone "$@" ;;
+  check-run-clone) check_run_clone "$@" ;;
   claude-token) claude_token "$@" ;;
   check-nono-profile) check_nono_profile "$@" ;;
   render-settings) render_settings "$@" ;;

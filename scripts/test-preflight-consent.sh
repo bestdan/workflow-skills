@@ -96,6 +96,7 @@ ROOT="$PROTECTED/fixture"
 mkdir -p "$ROOT/scripts" "$ROOT/dev_docs/tasks"
 cp "$REPO/scripts/preflight.sh" "$ROOT/scripts/preflight.sh"
 SCRIPT="$ROOT/scripts/preflight.sh"
+export REAL_SPAWN="$REPO/scripts/spawn-orchestrator.sh"
 
 cat >"$ROOT/scripts/preflight-freshness.sh" <<'FRESH'
 #!/bin/bash
@@ -123,6 +124,8 @@ cat >"$ROOT/scripts/spawn-orchestrator.sh" <<'SPAWN'
 #!/bin/bash
 sub="$1"
 shift
+# The run-clone check (#1390) is the real one: it only reads git.
+[ "$sub" = check-run-clone ] && exec bash "$REAL_SPAWN" check-run-clone "$@"
 out=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -622,8 +625,27 @@ assert_not_contains "linux: the supervisor is no longer a blocker" "no Linux sup
 assert_contains "linux: every smoke assertion is listed" "PREFLIGHT SMOKE_WRITE_HOME: pass" "$out10"
 assert_contains "linux: the smoke runs the pinned nono with the token command" \
   "--nono-bin $NH/0.81.0/nono --claude-token-cmd op read op://v/claude/token" "$(cat "$BASE/smoke-args" 2>/dev/null)"
-assert_contains "linux: until #1390 a jailed run has no worker worktrees, so still no-go" \
-  "PREFLIGHT VERDICT: no-go — no worker worktrees in the Linux jail yet" "$out10"
+assert_contains "linux: a run root that is not from a run clone is reported" \
+  "PREFLIGHT RUN_CLONE: none (" "$out10"
+assert_contains "linux: a run root that is not from a run clone is a no-go naming run-clone" \
+  "PREFLIGHT VERDICT: no-go — the run worktree is not from a run clone" "$out10"
+assert_not_contains "linux: worker worktrees are no longer a blocker" "no worker worktrees in the Linux jail yet" "$out10"
+# A run built by run-clone (#1390) passes that check.
+RC="$BASE/rc"
+mkdir -p "$RC"
+(
+  export GIT_CONFIG_GLOBAL=/dev/null
+  git init -q --bare "$RC/origin.git"
+  git init -q -b main "$RC/main"
+  git -C "$RC/main" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
+  git -C "$RC/main" remote add origin "$RC/origin.git"
+  git -C "$RC/main" push -q origin main 2>/dev/null
+  bash "$REAL_SPAWN" run-clone --repo "$RC/main" --run-root "$RC/root" --run-id r >/dev/null 2>&1
+)
+out10="$(linux_preflight AUTO_PILOT_NONO_SHA256="$NSUM" -- --run-root "$RC/root/r")"
+assert_contains "linux: a run worktree from run-clone is reported with its clone" \
+  "PREFLIGHT RUN_CLONE: $(cd "$RC/root" && pwd -P)/main.git" "$out10"
+assert_not_contains "linux: a run worktree from run-clone is not a blocker" "not from a run clone" "$out10"
 assert_not_contains "linux: the verify broker is no longer a blocker" "no Linux verify broker yet" "$out10"
 out10="$(linux_preflight AUTO_PILOT_NONO_SHA256="$NSUM" STUB_LINGER=no)"
 assert_contains "linux: Linger=no is a blocker naming the fix" "fix: loginctl enable-linger" "$out10"

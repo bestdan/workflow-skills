@@ -103,48 +103,95 @@ else
   have "nono render: without a token, the renderer warns" "/.claude is WRITABLE" "$out"
 fi
 
-# --- render-nono-profile --git-worktree (#1350) --------------------------------
-# A commit in a linked worktree writes into the main checkout's common dir. Only
-# what a commit needs is writable; hooks/ and config stay read-only.
+# --- run-clone + render-nono-profile --git-worktree (#1390) --------------------
+# The run's own git repo: a bare clone inside the run root, the run worktree and
+# workers/ beside it. --git-worktree grants that clone's whole git dir and
+# refuses a linked worktree of a main checkout.
 if command -v python3 >/dev/null 2>&1 && command -v git >/dev/null 2>&1; then
   GM="$NO/gitmain"
+  git init -q --bare "$NO/origin.git"
   git init -q -b main "$GM"
   git -C "$GM" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
-  git -C "$GM" worktree add -q "$NO/gitwt" -b run 2>/dev/null
-  GC="$(cd "$GM/.git" && pwd -P)"
-  out="$(nrender "$NO/p-git.json" --claude-token --git-worktree "$NO/gitwt" 2>&1)"
-  have "nono render --git-worktree: succeeds" "nono profile OK" "$out"
-  gflat="$(nflat "$NO/p-git.json" 2>&1)"
-  for sub in objects refs logs worktrees/gitwt; do
-    have "nono render --git-worktree: $sub is writable" "$(printf 'allow\t%s/%s' "$GC" "$sub")" "$gflat"
-  done
-  have "nono render --git-worktree: the common dir is read-only" "$(printf 'read\t%s' "$GC")" "$gflat"
-  if awk -F'\t' -v c="$GC" '$1 == "allow" && $2 == c { found = 1 } END { exit !found }' <<<"$gflat"; then
-    bad "nono render --git-worktree: the common dir itself is not writable"
+  git -C "$GM" remote add origin "$NO/origin.git"
+  git -C "$GM" push -q origin main 2>/dev/null
+  git -C "$GM" branch -q side
+  main_sum() { (cd "$GM/.git" && find . -type f -exec cksum {} + | sort | cksum); }
+  before="$(main_sum)"
+  NR="$NO/runroot"
+  out="$("$SCRIPT" run-clone --repo "$GM" --run-root "$NR" --run-id r-1 2>&1)"
+  NR="$(cd "$NR" 2>/dev/null && pwd -P)"
+  have "run-clone: prints the clone" "RUN_CLONE $NR/gitmain.git" "$out"
+  have "run-clone: prints the run worktree" "RUN_WORKTREE $NR/r-1" "$out"
+  [ "$(git -C "$NR/r-1" rev-parse --abbrev-ref HEAD 2>/dev/null)" = auto-pilot/r-1 ] \
+    && ok "run-clone: the run worktree is on auto-pilot/<run_id>" \
+    || bad "run-clone: the run worktree is on auto-pilot/<run_id>" "$(git -C "$NR/r-1" rev-parse --abbrev-ref HEAD 2>&1)"
+  [ "$(git --git-dir="$NR/gitmain.git" config --bool core.bare 2>/dev/null)" = true ] \
+    && ok "run-clone: the clone is bare" || bad "run-clone: the clone is bare"
+  [ "$(git -C "$NR/r-1" remote get-url origin 2>/dev/null)" = "$NO/origin.git" ] \
+    && ok "run-clone: origin is the main checkout's origin, not the main checkout" \
+    || bad "run-clone: origin is the main checkout's origin, not the main checkout" "$(git -C "$NR/r-1" remote get-url origin 2>&1)"
+  git -C "$NR/r-1" rev-parse -q --verify refs/remotes/origin/main >/dev/null \
+    && ok "run-clone: origin's branches are fetched" || bad "run-clone: origin's branches are fetched"
+  git --git-dir="$NR/gitmain.git" rev-parse -q --verify refs/heads/side >/dev/null \
+    && bad "run-clone: only the base branch is cloned" "the main checkout's side branch came along" \
+    || ok "run-clone: only the base branch is cloned"
+  [ -d "$NR/workers" ] && ok "run-clone: creates workers/" || bad "run-clone: creates workers/"
+  obj="$(cd "$NR/gitmain.git/objects" && find . -type f -path './??/*' | head -1)"
+  if [ -n "$obj" ] && [ "$(stat -c %h "$NR/gitmain.git/objects/$obj" 2>/dev/null || stat -f %l "$NR/gitmain.git/objects/$obj")" = 1 ]; then
+    ok "run-clone: objects are copied, not hardlinked to the main checkout's"
   else
-    ok "nono render --git-worktree: the common dir itself is not writable"
+    bad "run-clone: objects are copied, not hardlinked to the main checkout's" "${obj:-no loose object}"
   fi
-  lack "nono render --git-worktree: hooks/ is not writable" "$(printf 'allow\t%s/hooks' "$GC")" "$gflat"
-  lack "nono render --git-worktree: config is not writable" "$(printf 'allow_file\t%s/config' "$GC")" "$gflat"
+  [ "$(main_sum)" = "$before" ] && ok "run-clone: the main checkout's .git is unchanged" \
+    || bad "run-clone: the main checkout's .git is unchanged"
+  if o="$("$SCRIPT" run-clone --repo "$GM" --run-root "$NR" --run-id r-2 2>&1)"; then
+    bad "run-clone: refuses a non-empty run root" "succeeded"
+  else
+    have "run-clone: refuses a non-empty run root" "is not empty" "$o"
+  fi
+  if o="$("$SCRIPT" run-clone --repo "$GM" --run-root "$GM/inner" --run-id r-3 2>&1)"; then
+    bad "run-clone: refuses a run root inside the repo" "succeeded"
+  else
+    have "run-clone: refuses a run root inside the repo" "inside the repo's own tree" "$o"
+  fi
+  [ -e "$GM/inner" ] && bad "run-clone: a refused in-repo run root is not created" || ok "run-clone: a refused in-repo run root is not created"
+  if o="$("$SCRIPT" run-clone --repo "$GM" --run-root "$NO/rr-bad" --run-id 'a/b' 2>&1)"; then
+    bad "run-clone: refuses a run id that is not bare" "succeeded"
+  else
+    have "run-clone: refuses a run id that is not bare" "must be a bare id" "$o"
+  fi
+
+  out="$(nrender "$NO/p-git.json" --claude-token --git-worktree "$NR/r-1" 2>&1)"
+  have "nono render --git-worktree: succeeds on a run clone" "nono profile OK" "$out"
+  gflat="$(nflat "$NO/p-git.json" 2>&1)"
+  have "nono render --git-worktree: the run clone's git dir is writable" "$(printf 'allow\t%s/gitmain.git' "$NR")" "$gflat"
+  lack "nono render --git-worktree: nothing of the main checkout's .git is granted" "$GM/.git" "$gflat"
+  git -C "$GM" worktree add -q "$NO/gitwt" -b run 2>/dev/null
+  if o="$(nrender "$NO/p-git1.json" --git-worktree "$NO/gitwt" 2>&1)"; then
+    bad "nono render --git-worktree: refuses a linked worktree of a main checkout" "render succeeded"
+  else
+    have "nono render --git-worktree: refuses a linked worktree of a main checkout" "not of a run clone" "$o"
+  fi
   if o="$(nrender "$NO/p-git2.json" --git-worktree "$GM" 2>&1)"; then
     bad "nono render --git-worktree: refuses a main checkout" "render succeeded"
   else
-    have "nono render --git-worktree: refuses a main checkout" "must be a linked worktree" "$o"
+    have "nono render --git-worktree: refuses a main checkout" "is a main checkout" "$o"
   fi
   if o="$(nrender "$NO/p-git3.json" --git-worktree "$NO/tmp" 2>&1)"; then
     bad "nono render --git-worktree: refuses a non-checkout" "render succeeded"
   else
-    have "nono render --git-worktree: refuses a non-checkout" "is not a git checkout" "$o"
+    have "nono render --git-worktree: refuses a non-checkout" "not a git checkout" "$o"
   fi
-  git -C "$GM" config extensions.worktreeConfig true
-  if o="$(nrender "$NO/p-git4.json" --git-worktree "$NO/gitwt" 2>&1)"; then
-    bad "nono render --git-worktree: refuses a repo with extensions.worktreeConfig" "render succeeded"
+  # A bare repo elsewhere is not this run's clone: the clone must sit in the
+  # worktree's own run root, under the run's write grant.
+  git -C "$NR/gitmain.git" worktree add -q "$NO/elsewhere" -b stray 2>/dev/null
+  if o="$(nrender "$NO/p-git4.json" --git-worktree "$NO/elsewhere" 2>&1)"; then
+    bad "nono render --git-worktree: refuses a clone outside the worktree's run root" "render succeeded"
   else
-    have "nono render --git-worktree: refuses a repo with extensions.worktreeConfig" "enables extensions.worktreeConfig" "$o"
+    have "nono render --git-worktree: refuses a clone outside the worktree's run root" "not of a run clone" "$o"
   fi
-  git -C "$GM" config --unset extensions.worktreeConfig
 else
-  echo "skip - render-nono-profile --git-worktree: python3 or git not available"
+  echo "skip - run-clone / render-nono-profile --git-worktree: python3 or git not available"
 fi
 
 # --- render-nono-profile: refusals --------------------------------------------

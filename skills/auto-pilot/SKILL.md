@@ -203,8 +203,9 @@ attached gets caught at launch.
 The full mechanics of each step are in
 [`references/launch-preflight.md`](references/launch-preflight.md); in brief:
 
-1. **Worktree + run-state branch** (BLOCKS LAUNCH) — create the run worktree
-   and the `auto-pilot/<run_id>` branch; an untracked plan is a blocker.
+1. **Worktree + run-state branch** (BLOCKS LAUNCH) — `spawn-orchestrator.sh
+   run-clone` makes the run's own git repo, the run worktree and the
+   `auto-pilot/<run_id>` branch; an untracked plan is a blocker.
 2. **Non-interactive auth probes** (BLOCKS LAUNCH) — `"${CLAUDE_PLUGIN_ROOT}/scripts/preflight.sh"`
    plus per-credential probes (GitHub, Linear, coder CLIs, MCP), each through
    the run's sandbox wrapper; capture the environment fingerprint / class; a

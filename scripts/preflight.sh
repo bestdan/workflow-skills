@@ -550,9 +550,15 @@ elif [ "$host_os" = Linux ]; then
     else
       echo "PREFLIGHT LAUNCHER: nono + systemd-run --user (user manager: $sd_state, Linger=yes)"
     fi
-    # The jail refuses `git worktree add` under its narrow git grant, so a
-    # jailed run cannot create /deliver-task's worker worktrees until #1390.
-    blockers+=("no worker worktrees in the Linux jail yet: the jail, supervisor and verify broker are ready, but /deliver-task cannot create its worker worktree inside the jail until #1390 lands")
+    # The jail writes only the run's own git repo (#1390): the run worktree
+    # must come from `spawn-orchestrator.sh run-clone`, or render-nono-profile
+    # --git-worktree refuses it at launch — so say so here, before the launch.
+    if rc_out="$(bash "$SPAWN" check-run-clone --worktree "$run_toplevel" 2>&1)"; then
+      echo "PREFLIGHT RUN_CLONE: $rc_out"
+    else
+      echo "PREFLIGHT RUN_CLONE: none (${rc_out#spawn-orchestrator: })"
+      blockers+=("the run worktree is not from a run clone: $run_toplevel — create the run with spawn-orchestrator.sh run-clone (launch-preflight.md step 1)")
+    fi
   else
     echo "PREFLIGHT NONO: ${nono_problem:-the check failed: $nono_out}"
     echo "PREFLIGHT LAUNCHER: none (Linux: nono not ready)"
