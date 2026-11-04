@@ -103,6 +103,43 @@ else
   have "nono render: without a token, the renderer warns" "/.claude is WRITABLE" "$out"
 fi
 
+# --- render-nono-profile --git-worktree (#1350) --------------------------------
+# A commit in a linked worktree writes into the main checkout's common dir. Only
+# what a commit needs is writable; hooks/ and config stay read-only.
+if command -v python3 >/dev/null 2>&1 && command -v git >/dev/null 2>&1; then
+  GM="$NO/gitmain"
+  git init -q -b main "$GM"
+  git -C "$GM" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
+  git -C "$GM" worktree add -q "$NO/gitwt" -b run 2>/dev/null
+  GC="$(cd "$GM/.git" && pwd -P)"
+  out="$(nrender "$NO/p-git.json" --claude-token --git-worktree "$NO/gitwt" 2>&1)"
+  have "nono render --git-worktree: succeeds" "nono profile OK" "$out"
+  gflat="$(nflat "$NO/p-git.json" 2>&1)"
+  for sub in objects refs logs worktrees/gitwt; do
+    have "nono render --git-worktree: $sub is writable" "$(printf 'allow\t%s/%s' "$GC" "$sub")" "$gflat"
+  done
+  have "nono render --git-worktree: the common dir is read-only" "$(printf 'read\t%s' "$GC")" "$gflat"
+  if awk -F'\t' -v c="$GC" '$1 == "allow" && $2 == c { found = 1 } END { exit !found }' <<<"$gflat"; then
+    bad "nono render --git-worktree: the common dir itself is not writable"
+  else
+    ok "nono render --git-worktree: the common dir itself is not writable"
+  fi
+  lack "nono render --git-worktree: hooks/ is not writable" "$(printf 'allow\t%s/hooks' "$GC")" "$gflat"
+  lack "nono render --git-worktree: config is not writable" "$(printf 'allow_file\t%s/config' "$GC")" "$gflat"
+  if o="$(nrender "$NO/p-git2.json" --git-worktree "$GM" 2>&1)"; then
+    bad "nono render --git-worktree: refuses a main checkout" "render succeeded"
+  else
+    have "nono render --git-worktree: refuses a main checkout" "must be a linked worktree" "$o"
+  fi
+  if o="$(nrender "$NO/p-git3.json" --git-worktree "$NO/tmp" 2>&1)"; then
+    bad "nono render --git-worktree: refuses a non-checkout" "render succeeded"
+  else
+    have "nono render --git-worktree: refuses a non-checkout" "is not a git checkout" "$o"
+  fi
+else
+  echo "skip - render-nono-profile --git-worktree: python3 or git not available"
+fi
+
 # --- render-nono-profile: refusals --------------------------------------------
 nrefuse() { # <name> <expected text> <args...>
   local name="$1" want="$2" o

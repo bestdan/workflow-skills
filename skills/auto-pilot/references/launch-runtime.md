@@ -11,10 +11,9 @@ and rationale only — the ordered launch steps live in
 **Decision.** The launch phase writes a self-contained **launch script** (env +
 sandbox wrapper + log redirection) and starts it **detached** — a background
 `claude -p` process fully off the controlling TTY, not an in-session Agent/Task.
-The detach primitive is **OS-specific**: on **macOS** use `launchd`/`launchctl`
-(or a small daemonizing wrapper) — `setsid` is not shipped and `nohup &` detaches
-from the terminal but does **not** create a new session; on **Linux** `setsid`
-is the primitive. The launch step picks the right one for the host.
+The detach primitive is **OS-specific**: on **macOS** a `launchd` job loaded with
+`launchctl`; on **Linux** a transient `systemd-run --user` timer + service pair.
+`spawn-orchestrator.sh launch` picks the one for the host.
 
 **Rejected alternative.** A backgrounded Agent/Task spawned from the interactive
 launch session.
@@ -33,11 +32,19 @@ primitive must itself be relaunchable:
   sentinel file, never by comparing `paused_until` directly. Load it with
   `launchctl bootstrap` (the modern replacement for the deprecated
   `launchctl submit`).
-- **Linux** — the `setsid` spawn needs a companion wake: a `systemd` timer, or a
-  single `at` job scheduled for `paused_until`.
+- **Linux** — `systemd-run --user --unit=<label> --on-active=0
+  --on-unit-inactive=<interval>s`, a transient timer + service pair in the user
+  manager, with no unit file written (#1350). The first wake fires at once; each
+  later one fires `<interval>` after the previous wake **ended**, so a long wake
+  is never overlapped, as with launchd. `CollectMode=inactive-or-failed` unloads
+  the service once the timer is stopped, even after a failed last wake. The
+  user manager outlives logout only with `Linger=yes`, which pre-flight checks.
+  `at` was rejected: the test host does not ship it, and a one-shot job could not
+  carry the 5-minute relaunch the exit contract relies on.
 
 A **recurring** supervisor (the `launchd`/`systemd` timer) must be **torn down
-whenever the run loop terminates** (`launchctl bootout` / disable the timer) so
+whenever the run loop terminates** (`launchctl bootout` / `systemctl --user stop
+<label>.timer <label>.service`) so
 no run is re-woken by a timer — this fires on **both** loop-termination branches:
 the clean end-of-run (`status: done`, no ready tasks or a budget hard-stop) **and**
 the pre-dispatch deadline-guard stop (`status: paused` with ready tasks left).
@@ -45,9 +52,10 @@ The `paused` deadline-stop still tears the supervisor down because it must not b
 timer-woken past its `--until`; it resumes only by an explicit `--resume` (which
 re-spawns a supervisor), never by the recurring timer. The run loop's termination
 step does this ([`../SKILL.md`](../SKILL.md) "Run phase (unattended)", "Loop
-termination"). A
-**one-shot** `at` job fired once at `paused_until` is self-terminating and needs no
-teardown. If a relaunchable supervisor genuinely isn't available in an environment,
+termination"). On Linux the teardown stops the timer first, then the service,
+but only from outside it. A wake that stops its own service is killed at once
+(measured on systemd 255), before the rest of its teardown runs; from inside,
+the wake simply exits. If a relaunchable supervisor genuinely isn't available in an environment,
 the documented fallback is a bounded in-process sleep guarded by `--until` — stated
 here as the **fallback**, not the default.
 
@@ -163,7 +171,7 @@ prompts, but the jail — not a human — is what bounds it. Enforcement is **tw
 layers**, because no single one covers everything:
 
 - **Filesystem + process scope** → the OS sandbox (`sandbox-exec` seatbelt
-  profile on macOS / bwrap on Linux). This is what confines writes and gates
+  profile on macOS / nono on Linux). This is what confines writes and gates
   `exec`. Seatbelt does **not** filter network by hostname (it only gates
   network by class/socket), so it is **not** the layer that enforces the egress
   allowlist below.
@@ -312,6 +320,28 @@ writable and that `claude -p` answers on the token alone.
 
 Egress is open (`network.block: false`) for parity with macOS; the host
 allowlist in §2 becomes the profile's `allow_domain` list in a follow-up.
+
+**The run's git common dir: `--git-worktree <run worktree>`.** A commit in a
+linked worktree writes into the main checkout's `.git`, which no `--rw` covers.
+Only `objects/`, `refs/`, `logs/` and the run's own `worktrees/<name>/` are
+granted writable; the rest of the common dir is read-only. A writable `hooks/`
+or `config` would run code outside the jail on the owner's next git command in
+the main checkout. The smoke asserts that a commit succeeds and that both writes
+are refused. The narrow grant has a measured cost: `git branch -D` (it locks
+`packed-refs` in the common dir's root) and `git worktree add` (it creates a
+sibling under `worktrees/`) are refused inside the jail.
+
+**The wrapper and the profile live outside every write grant, and the profile
+is pinned.** The generated wrapper runs unjailed, and the profile decides every
+later wake's jail. nono cannot deny a path inside a grant, so `write-launch
+--jail nono` refuses an `--out-script` or `--profile` under any of the profile's
+write grants. Put both outside the run worktree, beside the supervisor-state
+ledger. `write-launch` also checksums the profile, and every wake re-checks it
+(`check-nono-profile`) before the token is fetched or the jail starts. A
+mismatch halts the run with the `nono-profile` alarm. Pinning was chosen over
+re-rendering on each wake: a re-render needs every render input baked into the
+wrapper, and its output would no longer be the profile pre-flight's smoke
+proved.
 
 ### 2. Network egress allowlist
 

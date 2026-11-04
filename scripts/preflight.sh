@@ -98,6 +98,9 @@ FINGERPRINT_BINS="claude git gh codex uv node op"
 NC_BIN="${PREFLIGHT_NC:-nc}"
 CAO_FLEET="codex agy"
 LAUNCHCTL_BIN="${PREFLIGHT_LAUNCHCTL:-launchctl}"
+SYSTEMD_RUN_BIN="${PREFLIGHT_SYSTEMD_RUN:-systemd-run}"
+SYSTEMCTL_BIN="${PREFLIGHT_SYSTEMCTL:-systemctl}"
+LOGINCTL_BIN="${PREFLIGHT_LOGINCTL:-loginctl}"
 CONSENT_TIMEOUT_TICKS="${PREFLIGHT_CONSENT_TICKS:-120}" # 120 × 0.25s = 30s
 # The macOS TCC-protected home locations. Removable and network volumes are the
 # other gated class, but they are named by the run's own paths, not by a list.
@@ -530,10 +533,25 @@ elif [ "$host_os" = Linux ]; then
   if [ "$nono_ok" = 0 ]; then
     nono_bin="$(sed -n 's/^ok \(.*\) (nono .*$/\1/p' <<<"$nono_problem")"
     echo "PREFLIGHT NONO: $nono_problem"
-    echo "PREFLIGHT LAUNCHER: nono (Linux) — no supervisor yet (#1350)"
-    # The jail is ready; what starts and relaunches the run on Linux is not.
-    # Until #1350 lands there is nothing to detach, so this stays a blocker.
-    blockers+=("no Linux supervisor yet: the nono jail is ready, but nothing can start and relaunch the run on Linux until #1350 lands")
+    # The supervisor (#1350) is a transient `systemd-run --user` timer +
+    # service pair, so the user manager must be reachable and must outlive the
+    # launching session: Linger=yes, or the units die at logout.
+    sd_state="$("$SYSTEMCTL_BIN" --user is-system-running 2>/dev/null)"
+    linger="$("$LOGINCTL_BIN" show-user "$(id -un)" -p Linger --value 2>/dev/null)"
+    if ! command -v "$SYSTEMD_RUN_BIN" >/dev/null 2>&1; then
+      echo "PREFLIGHT LAUNCHER: none (Linux: no systemd-run)"
+      blockers+=("no systemd-run on this host: the Linux supervisor is a systemd-run --user timer")
+    elif ! grep -Eqx 'running|degraded|starting|initializing' <<<"$sd_state"; then
+      echo "PREFLIGHT LAUNCHER: none (Linux: the systemd user manager is unreachable: ${sd_state:-no answer})"
+      blockers+=("the systemd user manager is unreachable (systemctl --user is-system-running: ${sd_state:-no answer}) — if this pre-flight ran inside a sandbox, re-run it unsandboxed")
+    elif [ "$linger" != yes ]; then
+      echo "PREFLIGHT LAUNCHER: nono + systemd-run --user (Linger=${linger:-unknown})"
+      blockers+=("lingering is off for this user (Linger=${linger:-unknown}): the run's systemd units would die when the launching session logs out — fix: loginctl enable-linger $(id -un)")
+    else
+      echo "PREFLIGHT LAUNCHER: nono + systemd-run --user (user manager: $sd_state, Linger=yes)"
+    fi
+    # Verify runs in a broker outside the jail, and Linux has none until #1351.
+    blockers+=("no Linux verify broker yet: the jail and supervisor are ready, but /deliver-task's verify has nowhere to run outside the jail until #1351 lands")
   else
     echo "PREFLIGHT NONO: ${nono_problem:-the check failed: $nono_out}"
     echo "PREFLIGHT LAUNCHER: none (Linux: nono not ready)"

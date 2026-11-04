@@ -19,6 +19,9 @@
 #   CRED_WRITE    ~/.claude/.credentials.json is not writable  (token command only)
 #   BUS_STAGED    a copy of systemctl staged in the run dir cannot reach the user bus
 #   BUS_DIRECT    /usr/bin/systemctl cannot reach it either
+#   GIT_COMMIT    a commit in the run worktree (a linked worktree) succeeds
+#   GIT_HOOKS     a write to the main checkout's .git/hooks is denied
+#   GIT_CONFIG    a write to the main checkout's .git/config is denied
 #   CLAUDE        `claude -p 'ok' --max-turns 1` answers through the jail
 #   CRED_UNTOUCHED  that run left .credentials.json byte-for-byte unchanged
 #
@@ -69,11 +72,25 @@ S="$(cd "$S" && pwd -P)" || exit 2
 home_probe="$HOME/.auto-pilot-smoke-$$"
 tmp_probe="/tmp/auto-pilot-smoke-$$"
 trap 'rm -rf "$S"; rm -f "$home_probe" "$tmp_probe"' EXIT
-mkdir -p "$S/run" "$S/tmp"
+mkdir -p "$S/tmp"
+
+# The run dir is a linked worktree of a scratch repo, as a real run's is, so
+# the git grants (--git-worktree) are tested on the shape they exist for. The
+# scratch repo never reads the owner's global config or hooks.
+have_git=0
+if command -v git >/dev/null 2>&1 \
+  && GIT_CONFIG_GLOBAL=/dev/null git init -q -b main "$S/repo" \
+  && GIT_CONFIG_GLOBAL=/dev/null git -C "$S/repo" -c user.name=smoke -c user.email=smoke@invalid commit -q --allow-empty -m init \
+  && GIT_CONFIG_GLOBAL=/dev/null git -C "$S/repo" worktree add -q "$S/run" -b smoke-run 2>/dev/null; then
+  have_git=1
+else
+  mkdir -p "$S/run"
+fi
 
 # The same renderers the launch uses, with this run's shape: the run dir
 # read-write, gh's config read-only, the host toolchain readable.
 render=(--rw "$S/run" --tmpdir "$S/tmp" --toolchain --out "$S/profile.json")
+[ "$have_git" = 1 ] && render+=(--git-worktree "$S/run")
 [ -d "$HOME/.config/gh" ] && render+=(--cred-ro "$HOME/.config/gh")
 [ -n "$token_cmd" ] && render+=(--claude-token)
 if ! bash "$SO" render-nono-profile "${render[@]}" >"$S/render.log" 2>&1; then
@@ -116,6 +133,34 @@ if [ -e "$tmp_probe" ]; then
   say WRITE_TMP FAIL "a write to /tmp outside the run's TMPDIR succeeded"
 else
   say WRITE_TMP pass "/tmp outside the run's TMPDIR is denied"
+fi
+
+if [ "$have_git" = 0 ]; then
+  say GIT_COMMIT skip "no git, or the scratch repo could not be built"
+  say GIT_HOOKS skip "no scratch repo"
+  say GIT_CONFIG skip "no scratch repo"
+else
+  # --no-verify and a null global config: this proves the grants, not the
+  # owner's hooks.
+  if jail /bin/sh -c 'echo x > f && git add f && GIT_CONFIG_GLOBAL=/dev/null git -c user.name=smoke -c user.email=smoke@invalid commit -q --no-verify -m smoke' >/dev/null 2>&1 \
+    && [ "$(GIT_CONFIG_GLOBAL=/dev/null git -C "$S/run" log -1 --format=%s 2>/dev/null)" = smoke ]; then
+    say GIT_COMMIT pass "a commit in the run worktree succeeds"
+  else
+    say GIT_COMMIT FAIL "a commit in the run worktree failed — the run cannot record its state"
+  fi
+  jail /bin/sh -c ': > "$1"' _ "$S/repo/.git/hooks/post-checkout" >/dev/null 2>&1
+  if [ -e "$S/repo/.git/hooks/post-checkout" ]; then
+    say GIT_HOOKS FAIL "a write to the main checkout's .git/hooks succeeded — a hook there runs outside the jail"
+  else
+    say GIT_HOOKS pass "the main checkout's .git/hooks is not writable"
+  fi
+  before_cfg="$(cksum <"$S/repo/.git/config")"
+  jail /bin/sh -c 'printf "[core]\\n" >> "$1"' _ "$S/repo/.git/config" >/dev/null 2>&1
+  if [ "$(cksum <"$S/repo/.git/config")" != "$before_cfg" ]; then
+    say GIT_CONFIG FAIL "a write to the main checkout's .git/config succeeded"
+  else
+    say GIT_CONFIG pass "the main checkout's .git/config is not writable"
+  fi
 fi
 
 cred="$HOME/.claude/.credentials.json"

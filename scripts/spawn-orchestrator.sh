@@ -43,8 +43,11 @@
 #       [--jail <seatbelt|nono>] --out <file>
 #   spawn-orchestrator.sh render-nono-profile --tmpdir <dir> \
 #       [--rw <dir> ...] [--ro <path> ...] [--cred-ro <path> ...] \
-#       [--confine-under <dir> ...] [--toolchain] [--claude-token] --out <file>
+#       [--confine-under <dir> ...] [--git-worktree <dir>] [--toolchain] \
+#       [--claude-token] --out <file>
 #   spawn-orchestrator.sh claude-token --dir <run-dir> [--label <label>] --cmd <cmd>
+#   spawn-orchestrator.sh check-nono-profile --dir <run-dir> [--label <label>] \
+#       --profile <file> --sha256 <hex>
 #
 #   render-nono-profile  The Linux jail (#1349): a nono JSON profile from
 #           launch-runtime.md §1. Its own comment block below is the one home
@@ -52,6 +55,13 @@
 #           --nono-bin <pinned nono> [--claude-token-cmd <cmd>].
 #   claude-token  Run a --claude-token-cmd unjailed and print the token; on
 #           failure, halt the run with an alarm (exit 3).
+#   check-nono-profile  The wrapper's per-wake pin (#1350): the profile still
+#           has the checksum write-launch baked in; else halt with an alarm.
+#
+# On Linux (#1350) `launch` starts the wrapper as a transient systemd user
+# timer + service pair named <label> (systemd-run --user), where macOS
+# bootstraps a launchd plist; teardown stops the pair. AUTO_PILOT_HOST_OS
+# overrides `uname -s` for the suite.
 #   spawn-orchestrator.sh check-profile <file>
 #   spawn-orchestrator.sh status --label <label> [--dir <run-dir>] [--task-ceiling <s>]
 #   spawn-orchestrator.sh teardown --label <label> [--done-sentinel <path>] [--reason <r>]
@@ -1361,16 +1371,17 @@ _nono_json_list() {
 
 render_nono_profile() {
   local out="" tmpdir="" token=0 toolchain=0
-  local -a rw=() ro=() cred=() confine=()
+  local -a rw=() ro=() cred=() confine=() gitwt=()
   while [ $# -gt 0 ]; do
     case "$1" in
-      --rw | --ro | --cred-ro | --confine-under | --tmpdir | --out)
+      --rw | --ro | --cred-ro | --confine-under | --git-worktree | --tmpdir | --out)
         [ $# -ge 2 ] || die "missing value for $1"
         case "$1" in
           --rw) rw+=("$2") ;;
           --ro) ro+=("$2") ;;
           --cred-ro) cred+=("$2") ;;
           --confine-under) confine+=("$2") ;;
+          --git-worktree) gitwt+=("$2") ;;
           --tmpdir) tmpdir="$2" ;;
           --out) out="$2" ;;
         esac
@@ -1459,6 +1470,39 @@ render_nono_profile() {
     done
   fi
 
+  # --git-worktree <dir> (#1350): a commit in a linked worktree writes into the
+  # main checkout's git common dir, which no --rw covers. The whole common dir
+  # is NOT granted writable: `hooks/` and `config` there run outside the jail on
+  # the owner's next git command in the main checkout, so a writable common dir
+  # is a jail escape. Only what a commit needs is writable — `objects/`, `refs/`,
+  # `logs/` and this worktree's own `worktrees/<name>/` — and the rest is
+  # read-only. Measured under nono 0.81.0: a commit and a branch switch succeed;
+  # a write to `hooks/` or `config` is refused, and so are `git branch -D` (it
+  # locks `packed-refs` in the common dir's root) and `git worktree add` (it
+  # creates a sibling under `worktrees/`).
+  local -a git_rw=()
+  local gw gcommon ggit
+  for gw in ${gitwt[@]+"${gitwt[@]}"}; do
+    gcommon="$(git -C "$gw" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
+      || die "--git-worktree is not a git checkout (fail-closed): $gw"
+    ggit="$(git -C "$gw" rev-parse --path-format=absolute --git-dir 2>/dev/null)" \
+      || die "--git-worktree is not a git checkout (fail-closed): $gw"
+    gcommon="$(canonicalize "$gcommon")" || exit 2
+    ggit="$(canonicalize "$ggit")" || exit 2
+    # A main checkout's git dir IS the common dir: granting it is granting hooks/.
+    [ "$ggit" != "$gcommon" ] || die "--git-worktree must be a linked worktree, not a main checkout (fail-closed): $gw"
+    _path_within "$ggit" "$gcommon/worktrees" \
+      || die "--git-worktree's git dir is not under its common dir's worktrees/ (fail-closed): $ggit"
+    ro_dir+=("$gcommon")
+    for c in "$gcommon/objects" "$gcommon/refs" "$gcommon/logs" "$ggit"; do
+      [ -d "$c" ] || mkdir -p "$c" || die "cannot create $c"
+      git_rw+=("$c")
+    done
+  done
+  for w in ${git_rw[@]+"${git_rw[@]}"}; do
+    _path_within "$home" "$w" && die "refusing a write grant that covers \$HOME (fail-closed): $w"
+  done
+
   # ~/.claude. With a token command the credential file is outside every grant,
   # so ~/.claude is granted entry by entry, read-only, minus that one file —
   # measured (2026-11-03): `claude -p`, Bash tool included, writes nothing under
@@ -1491,7 +1535,7 @@ render_nono_profile() {
 
   # With a token, no grant of any kind may reach the credential file.
   if [ "$token" = 1 ] && [ -n "$cred_file" ]; then
-    for w in ${rw_c[@]+"${rw_c[@]}"} "$tmp_c" ${ro_dir[@]+"${ro_dir[@]}"}; do
+    for w in ${rw_c[@]+"${rw_c[@]}"} ${git_rw[@]+"${git_rw[@]}"} "$tmp_c" ${ro_dir[@]+"${ro_dir[@]}"}; do
       _path_within "$cred_file" "$w" && die "--claude-token is set but a grant covers $cred_file (fail-closed): $w"
     done
     for w in ${ro_file[@]+"${ro_file[@]}"}; do
@@ -1513,7 +1557,7 @@ render_nono_profile() {
   tmp="$(mktemp "${TMPDIR:-/tmp}/orchestrator-nono.XXXXXX")" || die "mktemp failed"
   if ! lists="$(
     printf '    "allow": '
-    _nono_json_list '    ' ${rw_c[@]+"${rw_c[@]}"} "$tmp_c" ${claude_rw[@]+"${claude_rw[@]}"} ${dev_dirs[@]+"${dev_dirs[@]}"} || exit 1
+    _nono_json_list '    ' ${rw_c[@]+"${rw_c[@]}"} ${git_rw[@]+"${git_rw[@]}"} "$tmp_c" ${claude_rw[@]+"${claude_rw[@]}"} ${dev_dirs[@]+"${dev_dirs[@]}"} || exit 1
     printf ',\n    "allow_file": '
     _nono_json_list '    ' ${dev_files[@]+"${dev_files[@]}"} || exit 1
     printf ',\n    "read": '
@@ -1555,6 +1599,25 @@ render_nono_profile() {
 _nono_profile_tmpdir() {
   grep -q "\"name\": \"$NONO_PROFILE_NAME\"" "$1" 2>/dev/null || return 0
   sed -n 's/^      "TMPDIR": "\(.*\)"$/\1/p' "$1" | tail -1
+}
+
+# The write grants of a rendered nono profile, one per line: the "allow" array,
+# which the renderer writes one path per line (so no JSON parser is needed).
+_nono_profile_write_grants() {
+  awk '/^    "allow": \[$/ { f = 1; next }
+    f && /^    \]/ { exit }
+    f { sub(/^ *"/, ""); sub(/",?$/, ""); print }' "$1"
+}
+
+# sha256 hex of a file: sha256sum (Linux) or shasum (macOS).
+_sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum <"$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 <"$1" | awk '{print $1}'
+  else
+    return 1
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -1617,7 +1680,7 @@ write_launch() {
     park_limit="$PARK_STORM_LIMIT_DEFAULT" \
     pause_exempt_max="$PAUSE_EXEMPT_MAX_SECONDS_DEFAULT" \
     report_every="$DEFAULT_REPORT_INTERVAL" report_gh="" report_usage_bin="" \
-    handoff_dir="" jail="seatbelt" nono_bin="" token_cmd=""
+    handoff_dir="" jail="seatbelt" nono_bin="" token_cmd="" nono_sha=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --profile)
@@ -1757,7 +1820,13 @@ write_launch() {
   # --report-usage-bin is the identical story for the rate-window query
   # (scripts/claude-usage.sh — a real network call + Keychain read): explicit-
   # only, absent means the report just shows "unavailable".
-  [ -n "$out_script" ] && [ -n "$out_plist" ] || die "write-launch requires --out-script and --out-plist"
+  # Linux starts the wrapper with systemd-run (launch), so it has no plist to
+  # write; macOS needs one for launchctl bootstrap.
+  if _is_linux; then
+    [ -n "$out_script" ] || die "write-launch requires --out-script"
+  else
+    [ -n "$out_script" ] && [ -n "$out_plist" ] || die "write-launch requires --out-script and --out-plist"
+  fi
   [ -n "$path" ] || die "write-launch requires --path <PATH> (fail-closed): a launchd job has a minimal PATH; pass the fingerprint-resolved toolchain dirs"
   [ -n "$label" ] || die "write-launch requires --label"
   # Explicit-only, like --report-gh: absent means no handoff, so the suite's
@@ -1799,6 +1868,22 @@ write_launch() {
       # harness sandbox on would fail open inside it (render-settings --jail nono).
       grep -Eq '"enabled"[[:space:]]*:[[:space:]]*true' "$settings" 2>/dev/null \
         && die "--jail nono needs settings with the harness sandbox off (fail-closed): render them with render-settings --jail nono"
+      # The wrapper runs unjailed and the profile decides every later wake's
+      # jail, so neither may sit where the jailed agent can write: nono cannot
+      # deny a path inside a grant. Checked against the profile's own grants.
+      local grant f_c
+      while IFS= read -r grant; do
+        [ -n "$grant" ] || continue
+        for f in "$out_script" "$profile"; do
+          [ -n "$f" ] || continue
+          f_c="$(resolve_lazy "$f")" || exit 2
+          _path_within "$f_c" "$grant" \
+            && die "--jail nono: $f is inside the profile's write grant $grant, so the jailed agent could rewrite it (fail-closed): write it outside every --rw"
+        done
+      done < <(_nono_profile_write_grants "$profile")
+      # The checksum the wrapper re-checks on every wake (check-nono-profile).
+      nono_sha="$(_sha256_file "$profile")" && [ -n "$nono_sha" ] \
+        || die "--jail nono: cannot checksum the profile (needs sha256sum or shasum): $profile"
       ;;
     *) die "--jail must be seatbelt or nono (fail-closed): $jail" ;;
   esac
@@ -1976,6 +2061,14 @@ write_launch() {
     # alarm, so the wrapper stops instead of relaunching into the same failure.
     # The token is passed as a prefix assignment on the jail line below, never
     # exported, so supervisor-check and the reporter never carry it.
+    # The profile pin (#1350): every wake re-checks the profile against the
+    # checksum taken here, before it hands the token out or starts the jail. A
+    # profile that changed since launch halts the run instead of jailing the
+    # agent under rules nobody rendered.
+    if [ -n "$nono_sha" ]; then
+      printf '%q check-nono-profile --dir %q --label %q --profile %q --sha256 %q >>%q 2>&1 || exit 1\n' \
+        "$self" "$workdir" "$label" "$profile" "$nono_sha" "$log"
+    fi
     local token_env=""
     if [ -n "$token_cmd" ]; then
       printf 'tok="$(%q claude-token --dir %q --label %q --cmd %q 2>>%q)" || exit 1\n' \
@@ -2027,6 +2120,10 @@ write_launch() {
   }
   chmod +x "$out_script"
 
+  if [ -z "$out_plist" ]; then
+    echo "spawn-orchestrator: launch written $out_script"
+    return 0
+  fi
   [ -f "$plist_template" ] || die "plist template not found: $plist_template"
   tmp="$(mktemp "${TMPDIR:-/tmp}/orchestrator-plist.XXXXXX")" || die "mktemp failed"
   render_plist "$label" "$out_script" "$workdir" "$log" "$interval" "$throttle" "$plist_template" >"$tmp" \
@@ -2094,6 +2191,51 @@ claude_token() {
   printf '%s\n' "$token"
 }
 
+# check-nono-profile (#1350) — the wrapper's per-wake pin on its nono profile.
+# write-launch checksums the profile and bakes the sum into the wrapper; each
+# wake re-checks it here, unjailed, before the jail starts. A mismatch, or a
+# profile that is gone, is a SUPERVISOR HALT with an alarm: it means something
+# rewrote the rules every later wake would run under. Pinning was chosen over
+# re-rendering each wake because a re-render needs every render input baked in
+# too, and its output would still differ from what pre-flight's smoke proved.
+# Exit 0 when the profile matches, 3 after halting, 2 on bad usage.
+check_nono_profile() {
+  local dir="" label="" profile="" want=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dir | --label | --profile | --sha256)
+        [ $# -ge 2 ] || die "missing value for $1"
+        case "$1" in
+          --dir) dir="$2" ;;
+          --label) label="$2" ;;
+          --profile) profile="$2" ;;
+          --sha256) want="$2" ;;
+        esac
+        shift 2
+        ;;
+      *) die "unknown check-nono-profile argument: $1" ;;
+    esac
+  done
+  [ -n "$dir" ] && [ -n "$profile" ] && [ -n "$want" ] || die "check-nono-profile requires --dir, --profile and --sha256"
+  case "$dir" in /*) ;; *) die "--dir must be absolute: $dir" ;; esac
+  local got="" why=""
+  if [ ! -f "$profile" ] || [ -L "$profile" ]; then
+    why="is missing or is no longer a regular file"
+  elif ! got="$(_sha256_file "$profile")" || [ -z "$got" ]; then
+    why="could not be checksummed"
+  elif [ "$got" != "$want" ]; then
+    why="changed since launch (sha256 $got, launched with $want)"
+  fi
+  [ -z "$why" ] && return 0
+  echo "spawn-orchestrator: check-nono-profile: the nono profile $profile $why — halting" >&2
+  local -a lab=()
+  [ -n "$label" ] && lab=(--label "$label")
+  (_supervisor_halt --dir "$dir" ${lab[@]+"${lab[@]}"} --condition nono-profile \
+    --reason "the nono profile $profile $why") \
+    || echo "spawn-orchestrator: check-nono-profile: the halt itself failed" >&2
+  exit 3
+}
+
 # Record the orchestrator's identity for stale/recycled-PID detection: the PID,
 # its process start-time (guards against a recycled PID being mistaken for a live
 # run), and the run's --until deadline.
@@ -2132,22 +2274,47 @@ record_handle() {
 # Auth smoke-test THROUGH the exact wrapper + settings, before detaching, so a
 # dead credential fails loudly now rather than silently at 3am. Executes claude.
 smoke_test() {
-  local profile="" settings=""
+  local profile="" settings="" jail="seatbelt" nono_bin="" token_cmd="" workdir=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --profile)
-        profile="$2"
-        shift 2
-        ;;
-      --settings)
-        settings="$2"
+      --profile | --settings | --jail | --nono-bin | --claude-token-cmd | --workdir)
+        [ $# -ge 2 ] || die "missing value for $1"
+        case "$1" in
+          --profile) profile="$2" ;;
+          --settings) settings="$2" ;;
+          --jail) jail="$2" ;;
+          --nono-bin) nono_bin="$2" ;;
+          --claude-token-cmd) token_cmd="$2" ;;
+          --workdir) workdir="$2" ;;
+        esac
         shift 2
         ;;
       *) die "unknown smoke-test argument: $1" ;;
     esac
   done
   [ -f "$profile" ] && [ -f "$settings" ] || die "smoke-test requires --profile and --settings files"
-  command -v sandbox-exec >/dev/null 2>&1 || die "sandbox-exec not available (macOS only)"
+  local -a jail_cmd=()
+  local jail_tmp="" tok=""
+  case "$jail" in
+    seatbelt)
+      command -v sandbox-exec >/dev/null 2>&1 || die "sandbox-exec not available (macOS only)"
+      jail_cmd=(sandbox-exec -f "$profile")
+      ;;
+    nono)
+      # The wrapper's own jail line (write-launch --jail nono): the pinned nono,
+      # the profile's TMPDIR, the run dir as cwd, and the token handed to the
+      # jailed claude alone.
+      [ -x "$nono_bin" ] || die "smoke-test --jail nono requires an executable --nono-bin"
+      jail_tmp="$(_nono_profile_tmpdir "$profile")"
+      [ -n "$jail_tmp" ] || die "smoke-test: --profile is not a render-nono-profile profile: $profile"
+      if [ -n "$token_cmd" ]; then
+        tok="$(_run_bounded "$CLAUDE_TOKEN_TIMEOUT_SECS" bash -c "$token_cmd" </dev/null 2>/dev/null)" && [ -n "$tok" ] \
+          || die "auth smoke-test: the --claude-token-cmd failed or printed nothing; not detaching"
+      fi
+      jail_cmd=("$nono_bin" run --silent --profile "$profile" --)
+      ;;
+    *) die "smoke-test --jail must be seatbelt or nono: $jail" ;;
+  esac
   local json
   json="$(cat "$settings")"
   local claude_bin
@@ -2157,10 +2324,20 @@ smoke_test() {
   # observable output, not just $?, so a degraded claude that exits 0 without a live
   # credential can't false-pass the auth gate.
   local out
-  out="$(sandbox-exec -f "$profile" "$claude_bin" -p 'ok' --max-turns 1 \
-    --permission-mode bypassPermissions --settings "$json" \
-    --verbose --output-format stream-json 2>/dev/null)" \
-    || die "auth smoke-test failed THROUGH the wrapper — a credential or the jail is wrong; not detaching"
+  # Exported inside the subshell, never passed as `env` arguments: argv is
+  # world-readable through `ps`, the environment only to this user.
+  out="$(
+    cd "${workdir:-$PWD}" || exit 1
+    if [ -n "$jail_tmp" ]; then export NONO_NO_UPDATE_CHECK=1 NONO_NO_MIGRATE=1 TMPDIR="$jail_tmp"; fi
+    if [ -n "$tok" ]; then export CLAUDE_CODE_OAUTH_TOKEN="$tok"; fi
+    "${jail_cmd[@]}" "$claude_bin" -p 'ok' --max-turns 1 \
+      --permission-mode bypassPermissions --settings "$json" \
+      --verbose --output-format stream-json 2>/dev/null
+  )" || {
+    tok=""
+    die "auth smoke-test failed THROUGH the wrapper — a credential or the jail is wrong; not detaching"
+  }
+  tok=""
   [ -n "$out" ] || die "auth smoke-test produced no output THROUGH the wrapper — credential/jail suspect; not detaching"
   # Assert the output is actually parseable stream-json (a line beginning with
   # `{` and containing "type"), not just non-empty: a degraded claude could print
@@ -2174,6 +2351,68 @@ smoke_test() {
   grep -Eq '^\{.*"type"' <<<"$out" \
     || die "auth smoke-test produced non-stream-json output THROUGH the wrapper — flag/jail suspect; not detaching"
   echo "spawn-orchestrator: smoke-test OK"
+}
+
+# --- Linux: the systemd user manager carries the run (#1350) ------------------
+# A transient `systemd-run --user` timer + service pair named <label>, the
+# counterpart of launchd's StartInterval job. No unit file is written. The
+# generated wrapper, supervisor-gate/-check, the exit-reason contract and the
+# PID record are shared with macOS; only start, stop and liveness branch here.
+# Measured on systemd 255 (the Linux test host):
+#   - `--on-active=0` fires the first wake at once; `--on-unit-inactive=<n>s`
+#     fires each later one <n>s after the previous wake ENDED, whether it exited
+#     0 or not. That is launchd's behaviour too — it never fires StartInterval
+#     while the job still runs — so a long wake is never overlapped.
+#     `--on-unit-active` would count from the wake's START instead.
+#   - `CollectMode=inactive-or-failed` unloads the service once the timer is
+#     gone, even after a failed last wake, so a finished run leaves no unit.
+#   - A wake that stops its OWN service is killed on the spot, before the line
+#     after `systemctl` runs. See _systemd_stop.
+#   - With `Linger=yes` the user manager, and so the run, outlives logout.
+#     Pre-flight checks it.
+
+# Which OS's service manager carries the run. AUTO_PILOT_HOST_OS stands in for
+# `uname -s` so the suite can drive the Linux branch against stubs anywhere.
+_host_os() { printf '%s' "${AUTO_PILOT_HOST_OS:-$(uname -s 2>/dev/null)}"; }
+_is_linux() { [ "$(_host_os)" = Linux ]; }
+
+# Start <label>.timer + <label>.service, which runs `/bin/bash <script>`.
+_systemd_start() { # <label> <script> <interval-seconds>
+  command -v systemd-run >/dev/null 2>&1 || die "systemd-run not available (Linux launch needs the systemd user manager)"
+  systemd-run --user --unit="$1" --description="auto-pilot orchestrator $1" \
+    --on-active=0 --on-unit-inactive="${3}s" \
+    --property=CollectMode=inactive-or-failed \
+    /bin/bash "$2" || die "systemd-run --user failed for $1"
+  echo "spawn-orchestrator: detached (systemd-run --user) $1.timer"
+}
+
+# Stop the pair, best-effort. The timer goes first: it is what re-wakes the
+# run. The service is stopped only from OUTSIDE it — a wake tearing itself down
+# (supervisor-check, supervisor-gate) would otherwise be killed mid-teardown,
+# before _verify_bootout and the rest of its own path run. From inside, the
+# wake ends by itself, and CollectMode unloads it once the timer is gone.
+_systemd_stop() { # <label>
+  local label="$1" own=""
+  command -v systemctl >/dev/null 2>&1 || return 0
+  systemctl --user stop "$label.timer" 2>/dev/null || true
+  [ -n "${INVOCATION_ID:-}" ] \
+    && own="$(systemctl --user show -p InvocationID --value "$label.service" 2>/dev/null || true)"
+  if [ -z "$own" ] || [ "$own" != "${INVOCATION_ID:-}" ]; then
+    systemctl --user stop "$label.service" 2>/dev/null || true
+    # Clears a failed unit that is still loaded, so a relaunch under the same
+    # label starts from nothing. It errors on a unit that is already gone.
+    systemctl --user reset-failed "$label.timer" "$label.service" 2>/dev/null || true
+  fi
+}
+
+_systemd_timer_active() { systemctl --user is-active --quiet "$1.timer" 2>/dev/null; }
+
+# The wake's PID while it runs (the wrapper shell), else nothing.
+_systemd_main_pid() {
+  local pid
+  pid="$(systemctl --user show -p MainPID --value "$1.service" 2>/dev/null)"
+  case "$pid" in '' | 0 | *[!0-9]*) return 1 ;; esac
+  printf '%s' "$pid"
 }
 
 detach() {
@@ -2234,7 +2473,10 @@ teardown() {
 
   # launchctl may genuinely be absent (non-macOS, or the in-jail test harness) —
   # that must not skip the sentinel write above; the sentinel is authoritative.
-  if command -v launchctl >/dev/null 2>&1; then
+  # The same goes for systemctl on Linux.
+  if _is_linux; then
+    _systemd_stop "$label"
+  elif command -v launchctl >/dev/null 2>&1; then
     launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
   fi
   echo "spawn-orchestrator: torn down $label"
@@ -2253,6 +2495,19 @@ teardown() {
 # Returns non-zero iff the job is still loaded afterwards.
 _verify_bootout() {
   local label="$1"
+  # Linux: the timer is what re-wakes a run, so it is what must be gone. The
+  # service is not checked — a supervisor-check verifying from inside a wake
+  # IS that service, still running, and would always read as a failure.
+  if _is_linux; then
+    command -v systemctl >/dev/null 2>&1 || return 0
+    _systemd_timer_active "$label" || return 0
+    (teardown --label "$label" >/dev/null) || true
+    if _systemd_timer_active "$label"; then
+      echo "spawn-orchestrator: teardown ($label): WARNING — systemctl --user stop FAILED, the timer is STILL ACTIVE and will keep waking a finished run (zero work, zero alarm); remove it by hand: systemctl --user stop $label.timer $label.service" >&2
+      return 1
+    fi
+    return 0
+  fi
   command -v launchctl >/dev/null 2>&1 || return 0
   launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1 || return 0 # gone: bootout took
   # Subshelled, not just `|| true`: `teardown` `die`s (an `exit`) if a future edit
@@ -2563,6 +2818,9 @@ _alarm_action() {
       ;;
     claude-token)
       printf 'the Claude token command failed, so the run is halted: run the launch'"'"'s --claude-token-cmd by hand to see why (a revoked `claude setup-token` token, a missing `op` service-account token), fix it, then `/auto-pilot <source> --resume`'
+      ;;
+    nono-profile)
+      printf 'the run'"'"'s nono profile changed or vanished after launch, so the run is halted rather than jailed under rules nobody rendered: find what rewrote it (it must sit outside every write grant), then re-launch with `/auto-pilot <source> --resume`, which renders it again'
       ;;
     no-progress)
       printf 'the run is STALLED (no forward progress, supervisor torn down): check `.auto-pilot/REPORT.md`, fix the cause (usually re-authenticate: `claude /login`), then `/auto-pilot <source> --resume`'
@@ -5839,13 +6097,27 @@ report_tick() {
 launch() {
   local dry=0
   local -a wl=() sm=() dt=() rh=()
-  local plist="" out_script="" out_plist="" handle="" until="" label=""
+  local plist="" out_script="" out_plist="" handle="" until="" label="" interval="300"
   local report_gh_set=0 report_usage_set=0 handoff_set=0 workdir="" handoff_dir=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --dry-run)
         dry=1
         shift
+        ;;
+      # The jail, passed to both the launch script and the smoke so the smoke
+      # runs the exact jail line the wrapper will (#1349, #1350).
+      --jail | --nono-bin | --claude-token-cmd)
+        [ $# -ge 2 ] || die "missing value for $1"
+        wl+=("$1" "$2")
+        sm+=("$1" "$2")
+        shift 2
+        ;;
+      --interval)
+        [ $# -ge 2 ] || die "missing value for --interval"
+        interval="$2"
+        wl+=("$1" "$2")
+        shift 2
         ;;
       --profile)
         wl+=(--profile "$2")
@@ -5875,10 +6147,11 @@ launch() {
         ;;
       --workdir)
         wl+=(--workdir "$2")
+        sm+=(--workdir "$2")
         workdir="$2"
         shift 2
         ;;
-      --log | --prompt-file | --interval | --throttle | --plist-template | --claude-bin | --path | --tmpdir | --park-limit | --no-progress-limit | --pause-exempt-max | --report-every)
+      --log | --prompt-file | --throttle | --plist-template | --claude-bin | --path | --tmpdir | --park-limit | --no-progress-limit | --pause-exempt-max | --report-every)
         wl+=("$1" "$2")
         shift 2
         ;;
@@ -5910,7 +6183,11 @@ launch() {
       *) die "unknown launch argument: $1" ;;
     esac
   done
-  [ -n "$out_plist" ] && [ -n "$label" ] && [ -n "$handle" ] || die "launch requires --out-plist, --label, and --handle"
+  [ -n "$label" ] && [ -n "$handle" ] || die "launch requires --label and --handle"
+  local linux=0
+  _is_linux && linux=1
+  [ "$linux" = 1 ] || [ -n "$out_plist" ] || die "launch requires --out-plist on macOS"
+  case "$interval" in '' | *[!0-9]*) die "--interval must be an integer (seconds): $interval" ;; esac
 
   # `status-report`'s --gh / --usage-bin are EXPLICIT-ONLY down in status_report
   # and supervisor_scan, so the test suite can never reach a real `gh` (a network
@@ -5942,10 +6219,14 @@ launch() {
 
   if [ "$dry" = 1 ]; then
     printf 'launch plan (order is load-bearing — auth is verified BEFORE we spawn):\n'
-    printf '  1. write-launch  -> %s %s\n' "$out_script" "$out_plist"
+    printf '  1. write-launch  -> %s %s\n' "$out_script" "${out_plist:-(no plist on Linux)}"
     printf '     handoff dir   -> %s\n' "${handoff_dir:-none}"
     printf '  2. smoke-test    (claude -p through the sandbox wrapper + settings)\n'
-    printf '  3. detach        (launchctl bootstrap %s)\n' "$plist"
+    if [ "$linux" = 1 ]; then
+      printf '  3. detach        (systemd-run --user --unit=%s --on-active=0 --on-unit-inactive=%ss)\n' "$label" "$interval"
+    else
+      printf '  3. detach        (launchctl bootstrap %s)\n' "$plist"
+    fi
     printf '  4. record-handle -> %s\n' "$handle"
     return 0
   fi
@@ -5953,18 +6234,26 @@ launch() {
   write_launch "${wl[@]}"
   smoke_test "${sm[@]}"                     # BEFORE detach — a dead credential stops here.
   teardown --label "$label" >/dev/null 2>&1 # clear any stale registration; bootstrap fails on a dup label.
-  detach --plist "$plist"
-  # `launchctl bootstrap` is asynchronous — the pid may not be reported for a beat,
-  # so poll briefly rather than reading once (a single read fails closed spuriously).
+  if [ "$linux" = 1 ]; then
+    _systemd_start "$label" "$out_script" "$interval"
+  else
+    detach --plist "$plist"
+  fi
+  # Both starts are asynchronous — the pid may not be reported for a beat, so
+  # poll briefly rather than reading once (a single read fails closed spuriously).
   local pid="" i
   for i in 1 2 3 4 5 6 7 8 9 10; do
-    pid="$(launchctl print "gui/$(id -u)/$label" 2>/dev/null | awk -F'= ' '/[^a-z]pid = /{print $2; exit}')"
+    if [ "$linux" = 1 ]; then
+      pid="$(_systemd_main_pid "$label")" || pid=""
+    else
+      pid="$(launchctl print "gui/$(id -u)/$label" 2>/dev/null | awk -F'= ' '/[^a-z]pid = /{print $2; exit}')"
+    fi
     case "$pid" in '' | *[!0-9]*) pid="" ;; *) break ;; esac
     sleep 0.2
   done
   if [ -z "$pid" ]; then
     teardown --label "$label" >/dev/null 2>&1 # don't leave an orphaned job loaded
-    die "detached but could not read the orchestrator PID from launchctl (job booted out)"
+    die "detached but could not read the orchestrator PID from $([ "$linux" = 1 ] && echo 'systemctl --user show' || echo launchctl) (job torn down)"
   fi
   record_handle --pid "$pid" --until "$until" --out "$handle"
   echo "spawn-orchestrator: launched pid=$pid label=$label"
@@ -7662,6 +7951,7 @@ case "$sub" in
   render-profile) render_profile "$@" ;;
   render-nono-profile) render_nono_profile "$@" ;;
   claude-token) claude_token "$@" ;;
+  check-nono-profile) check_nono_profile "$@" ;;
   render-settings) render_settings "$@" ;;
   write-launch) write_launch "$@" ;;
   record-handle) record_handle "$@" ;;
