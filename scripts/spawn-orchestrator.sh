@@ -1484,7 +1484,7 @@ render_nono_profile() {
     else
       c="$(canonicalize "$claude_dir")" || exit 2
       claude_rw+=("$c")
-      echo "spawn-orchestrator: render-nono-profile: no --claude-token, so ~/.claude is WRITABLE in the jail (the documented Linux fallback) — pass a token command to close it" >&2
+      echo "spawn-orchestrator: render-nono-profile: no --claude-token, so ~/.claude is WRITABLE in the jail (the documented Linux fallback): the jailed agent can rewrite .credentials.json and plant hooks, plugins or CLAUDE.md that your next unjailed session runs — pass a token command to close it" >&2
     fi
   fi
   [ -f "$home/.claude.json" ] && ro_file+=("$home/.claude.json")

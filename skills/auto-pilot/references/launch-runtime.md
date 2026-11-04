@@ -286,7 +286,10 @@ differ from the Seatbelt profile:
   directory; nono refuses to start on that overlap. So nothing secret may sit
   under a grant. With a token command (below), `~/.claude` is granted entry by
   entry, read-only, with `.credentials.json` left out. Without one, `~/.claude`
-  is writable: the documented fallback, which the renderer warns about.
+  is writable: the documented fallback, which the renderer warns about. That
+  exposes more than the credential: a jailed agent can add a hook to
+  `settings.json`, a plugin or a `CLAUDE.md`, and the next interactive session
+  runs it outside the jail.
 - **The socket rule.** A binary staged in a writable directory runs under
   Landlock, so the integrity claim rests on sockets instead: the profile sets
   `linux.af_unix_mediation: "pathname"` and grants no socket, so neither a

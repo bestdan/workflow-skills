@@ -167,10 +167,10 @@ else
   token="" before="" after=""
   [ -e "$cred" ] && before="$(cksum <"$cred") $(wc -c <"$cred")"
   if [ -n "$token_cmd" ]; then
-    token="$(bash -c "$token_cmd" </dev/null 2>/dev/null)" || token=""
+    token="$(timeout 60 bash -c "$token_cmd" </dev/null 2>/dev/null)" || token=""
   fi
   if [ -n "$token_cmd" ] && [ -z "$token" ]; then
-    say CLAUDE FAIL "the token command printed nothing"
+    say CLAUDE FAIL "the token command printed nothing, failed, or ran past 60s"
   else
     settings="$(cat "$S/settings.json")"
     # Prefix assignment, as the wrapper does: the token reaches the jailed
