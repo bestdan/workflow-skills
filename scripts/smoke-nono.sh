@@ -19,6 +19,7 @@
 #   CRED_WRITE    ~/.claude/.credentials.json is not writable  (token command only)
 #   BUS_STAGED    a copy of systemctl staged in the run dir cannot reach the user bus
 #   BUS_DIRECT    /usr/bin/systemctl cannot reach it either
+#   BUS_BROKER    the jail cannot stop a verify-broker unit by name
 #   GIT_COMMIT    a commit in the run worktree (a linked worktree) succeeds
 #   GIT_HOOKS     a write to the main checkout's .git/hooks is denied
 #   GIT_CONFIG    a write to the main checkout's .git/config is denied
@@ -199,11 +200,21 @@ sysctl="$(command -v systemctl 2>/dev/null || true)"
 if [ -z "$sysctl" ]; then
   say BUS_STAGED skip "no systemctl on this host"
   say BUS_DIRECT skip "no systemctl on this host"
+  say BUS_BROKER skip "no systemctl on this host"
 else
   bus_check BUS_STAGED /bin/sh -c 'cp "$1" ./sc && ./sc --user is-system-running; rm -f ./sc' _ "$sysctl"
   # From a child shell, as the agent would: nono's own startup-command block
   # stops a top-level systemctl, which would pass this without testing the socket.
   bus_check BUS_DIRECT /bin/sh -c '"$1" --user is-system-running' _ "$sysctl"
+  # The verify broker (#1351) runs unjailed under the same user manager. A
+  # stop that reaches the bus answers even for an unknown unit ("not loaded"),
+  # so only a refused socket passes.
+  o="$(jail /bin/sh -c '"$1" --user stop auto-pilot-smoke-broker.timer auto-pilot-smoke-broker.service' _ "$sysctl" 2>&1)"
+  if grep -q 'Failed to connect to bus' <<<"$o"; then
+    say BUS_BROKER pass "$(head -1 <<<"$o")"
+  else
+    say BUS_BROKER FAIL "a stop of the broker's units reached the user service manager: $(head -1 <<<"$o")"
+  fi
 fi
 
 if [ -z "$claude_bin" ]; then

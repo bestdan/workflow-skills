@@ -546,6 +546,22 @@ un-jailed verifier. So verify runs in a **separate, un-jailed launchd job** — 
    authoritative gate; the in-jail content gates (`dprint`, `validate.py`, `bash
    -n`) become a fast pre-check, not the definition of done.
 
+**On Linux** (#1351) the broker is a second transient `systemd-run --user`
+timer + service pair, started with `detach --label <broker label> --script
+<broker script>`. It wakes 10 s after each scan ends, the same mechanism as the
+orchestrator supervisor (§ "Spawn mechanics"). The request and result protocol
+is unchanged. `write-verify-broker` on Linux requires the run's `--nono-profile`
+and refuses a broker script inside any of its write grants, since the script
+runs unjailed. The jail cannot start or stop the broker's unit: the profile's
+`af_unix_mediation` refuses the user bus socket, and the nono smoke's
+`BUS_BROKER` check asserts it.
+
+**Teardown with the supervisor.** `write-launch --broker-label <label>` bakes
+the broker's label into the wrapper, and every supervisor teardown (`done`,
+`deadline`, any halt, a gate-closed terminal wake) stops the broker after the
+supervisor, on both OSes. The jailed agent cannot do it: on Linux it cannot
+reach the service manager at all.
+
 **Trust boundary (stated, not hidden).** Verify runs **un-jailed**, so it executes
 the diff-under-test with **full privilege + network** — the _same_ trust the human
 already extends re-running `check.sh` before merge, moved earlier in time. Two

@@ -550,8 +550,9 @@ elif [ "$host_os" = Linux ]; then
     else
       echo "PREFLIGHT LAUNCHER: nono + systemd-run --user (user manager: $sd_state, Linger=yes)"
     fi
-    # Verify runs in a broker outside the jail, and Linux has none until #1351.
-    blockers+=("no Linux verify broker yet: the jail and supervisor are ready, but /deliver-task's verify has nowhere to run outside the jail until #1351 lands")
+    # The jail refuses `git worktree add` under its narrow git grant, so a
+    # jailed run cannot create /deliver-task's worker worktrees until #1390.
+    blockers+=("no worker worktrees in the Linux jail yet: the jail, supervisor and verify broker are ready, but /deliver-task cannot create its worker worktree inside the jail until #1390 lands")
   else
     echo "PREFLIGHT NONO: ${nono_problem:-the check failed: $nono_out}"
     echo "PREFLIGHT LAUNCHER: none (Linux: nono not ready)"
