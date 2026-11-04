@@ -9,9 +9,9 @@ follows this file. Each handler file says only where its writes go.
 The point is checks and balances, not owner sign-off. A task that will change
 prompt text, docs or the landing gate is promoted only once an agent that
 neither wrote the task nor runs the promotion has confirmed its premise. The
-lander still re-tiers the real PR at merge, so the forecast never decides
-whether anything lands. It only makes the premise check happen before the work
-starts, not in review.
+lander (`scripts/land-pr.py`) still re-tiers the real PR at merge, so the
+forecast never decides whether anything lands. It only makes the premise check
+happen before the work starts, not in review.
 
 ## 1. List the paths, then forecast
 
