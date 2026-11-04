@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.190.1] - 2026-11-04
+
+### Fixes
+
+- let plugin scripts run in the jail, and park on zero co-review [#1364] (#1388) (f97930c)
+
 ## [2.190.0] - 2026-11-04
 
 ### Features
