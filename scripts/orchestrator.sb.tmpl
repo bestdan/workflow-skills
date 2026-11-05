@@ -124,9 +124,10 @@
 ;;         these every here-doc in the jail fails, the worktree hooks included.
 ;;         Granted by name, plus the root-owned /var/tmp dir itself as a literal
 ;;         (bash checks access(W_OK) on it first); other files there stay denied.
-;;     Deny the srt-mux socket, the /tmp/claude-<uid> tree or session-env and
-;;     EVERY Bash tool call reports exit 1 regardless of the command's real
-;;     outcome — an agent verifying by `$?` is reading pure noise.
+;;     Deny the /tmp/claude-<uid> tree or session-env and EVERY Bash tool call
+;;     reports exit 1 regardless of the command's real outcome — an agent
+;;     verifying by `$?` is reading pure noise. A denied socket fails silently
+;;     instead (above).
 ;;     smoke-confinement.sh guards this: run `true`/`false` in-jail, assert 0/1.
 ;;     A unix-domain socket bind/listen is gated on the socket's OWN path, not a
 ;;     free network class, so the socket needs BOTH grants: file-write* (create the

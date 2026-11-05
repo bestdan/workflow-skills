@@ -796,11 +796,12 @@ emit_harness_runtime() {
   # own zsh snapshot eval. Granted by NAME, never the directory: other files in
   # /tmp and /var/tmp stay denied. bash also needs the /var/tmp directory itself:
   # it checks access(W_OK) on it first and falls through to no usable dir
-  # without it. That literal grants nothing in practice — the dir is root-owned,
-  # so it cannot be removed or chmod'ed, and an entry inside it is checked on its
-  # own path. zsh's name is its mkstemp template, exactly six alphanumerics after
-  # `zsh` (40 of 40 jailed here-strings fit it), spelled out as six classes so
-  # the grant does not cover every zsh* file in the shared /tmp.
+  # without it. That literal covers the directory itself and no entry in it (each
+  # entry is checked on its own path). The dir is root-owned, so it cannot be
+  # removed or chmod'ed. zsh's name is
+  # its mkstemp template, `zsh` plus XXXXXX, which mkstemp fills with six
+  # characters from [A-Za-z0-9]; spelled out as six classes so the grant does not
+  # cover every zsh* file in the shared /tmp.
   #
   # ACCEPTED RELAXATION: a name match ignores who created the file, so a jailed
   # process can also write a same-uid un-jailed shell's here-doc file in the

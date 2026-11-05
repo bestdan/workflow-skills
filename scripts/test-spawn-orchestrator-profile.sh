@@ -133,11 +133,11 @@ if [ "$SEATBELT_OK" = 1 ] && [ -f "$hdprof" ]; then
   hd_link="$tmp_c/zshS$(printf '%05d' $(($$ % 100000)))"
   # Positive control: the destination must itself be a granted name, or the
   # link would be refused for being out of scope and this would pass anyway.
-  if sandbox-exec -f "$hdprof" /usr/bin/touch "$hd_link" 2>/dev/null \
-    && sandbox-exec -f "$hdprof" /bin/rm "$hd_link" 2>/dev/null; then
+  if hd_err="$(sandbox-exec -f "$hdprof" /usr/bin/touch "$hd_link" 2>&1)" \
+    && hd_err="$(sandbox-exec -f "$hdprof" /bin/rm "$hd_link" 2>&1)"; then
     ok "here-doc: the hard-link destination is a granted name"
   else
-    bad "here-doc: the hard-link destination is a granted name"
+    bad "here-doc: the hard-link destination is a granted name" "$hd_err"
   fi
   rm -f "$hd_link"
   if hd_err="$(sandbox-exec -f "$hdprof" /bin/ln "$REPO_RO/hd-ro.txt" "$hd_link" 2>&1)"; then
