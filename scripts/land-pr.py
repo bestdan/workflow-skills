@@ -34,6 +34,9 @@ Every read error is a hold with the reason, never a crash.
 The squash commit's body lists those reasons and the evidence pointers, and
 ends with the trailers `Landed-by: land-pr.sh` and `Co-review-head: <sha>`. A
 head that moved after the check makes GitHub refuse the merge, which is a hold.
+Any other failed `gh pr merge` is re-read: it is a landing only when the PR is
+merged at the judged head and the merge commit carries both trailers, and a
+hold with the original reason otherwise.
 After a landing, the `landed-by-agent` label and a PR comment repeating the
 record are best effort: their failure is reported and does not fail the run.
 
@@ -528,7 +531,8 @@ def audit_body(pr, reasons, head):
 
 
 def merge(repo, pr, head, body):
-    """Squash-merge pinned to `head`; None on success, else the hold reason."""
+    """Squash-merge pinned to `head`: (None, False) on success, else
+    (hold reason, whether GitHub refused it because the head moved)."""
     with tempfile.TemporaryDirectory() as tmp:
         body_file = Path(tmp) / "audit.md"
         body_file.write_text(body)
@@ -547,11 +551,46 @@ def merge(repo, pr, head, body):
             ]
         )
     if code == 0:
-        return None
+        return None, False
     detail = " ".join((err or out).split()) or f"rc {code}"
     if HEAD_MOVED_RE.search(detail):
-        return f"head moved since the check on {head[:7]}: {detail}"
-    return f"gh pr merge failed: {detail}"
+        return f"head moved since the check on {head[:7]}: {detail}", True
+    return f"gh pr merge failed: {detail}", False
+
+
+def landed_anyway(repo, pr, head):
+    """The merge sha when a failed `gh pr merge` merged on GitHub all the same.
+
+    A client timeout or a dropped connection can fail the call after the server
+    merged. It counts as this lander's landing only when the PR is MERGED, its
+    head is the judged head, and the merge commit's message carries both of
+    this run's trailers; a hand merge at the same head has neither. None on
+    anything else, a read error included.
+    """
+    try:
+        data = gh_json(
+            [
+                "pr",
+                "view",
+                str(pr),
+                "-R",
+                repo,
+                "--json",
+                "state,headRefOid,mergeCommit",
+            ]
+        )
+        if not isinstance(data, dict):
+            return None
+        sha = (data.get("mergeCommit") or {}).get("oid")
+        if data.get("state") != "MERGED" or data.get("headRefOid") != head or not sha:
+            return None
+        message = gh(["api", f"repos/{repo}/commits/{sha}", "--jq", ".commit.message"])
+    except ReadError:
+        return None
+    lines = [line.strip() for line in message.splitlines()]
+    if "Landed-by: land-pr.sh" in lines and f"Co-review-head: {head}" in lines:
+        return sha
+    return None
 
 
 def merge_sha(repo, pr):
@@ -568,10 +607,33 @@ def merge_sha(repo, pr):
 
 
 def add_label(repo, pr):
+    """Best effort. `gh pr edit --add-label` refuses a label the repo lacks, so
+    a missing one is created, without --force so an existing one is untouched,
+    and the add is tried once more."""
+    edit = ["pr", "edit", str(pr), "-R", repo, "--add-label", LANDED_LABEL]
     try:
-        gh(["pr", "edit", str(pr), "-R", repo, "--add-label", LANDED_LABEL])
+        gh(edit)
     except ReadError as exc:
-        return f"LABEL: error reason={exc}"
+        if "not found" not in str(exc):
+            return f"LABEL: error reason={exc}"
+        try:
+            # A create that fails because a concurrent run made it is fine:
+            # the retry below is what decides.
+            run_gh(
+                [
+                    "label",
+                    "create",
+                    LANDED_LABEL,
+                    "-R",
+                    repo,
+                    "--description",
+                    "Merged by land-pr.sh without the owner",
+                ]
+            )
+            gh(edit)
+        except ReadError as retry_exc:
+            return f"LABEL: error reason={retry_exc}"
+        return f"LABEL: created and added {LANDED_LABEL}"
     return f"LABEL: added {LANDED_LABEL}"
 
 
@@ -614,11 +676,14 @@ def land_pr(repo, pr):
         print(hold_line(reasons))
         return 0
     body = audit_body(pr, reasons, head)
-    failure = merge(repo, pr, head, body)
+    failure, head_moved = merge(repo, pr, head, body)
     if failure:
-        print(hold_line([failure]))
-        return 0
-    sha = merge_sha(repo, pr)
+        sha = None if head_moved else landed_anyway(repo, pr, head)
+        if sha is None:
+            print(hold_line([failure]))
+            return 0
+    else:
+        sha = merge_sha(repo, pr)
     print(add_label(repo, pr))
     print(post_landed_comment(repo, pr, f"Merge commit: {sha}\n\n{body}"))
     print(f"LAND: landed sha={sha}")

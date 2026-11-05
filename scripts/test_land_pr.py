@@ -105,6 +105,12 @@ class FakeGh:
         self.head_at_merge = HEAD
         self.merges: List[dict] = []
         self.labels_added: List[str] = []
+        self.repo_labels = {"landed-by-agent"}
+        self.labels_created: List[str] = []
+        # A merge call that fails on the client after GitHub merged (a timeout).
+        self.merge_fails_after_merging = False
+        # The merge commit's message; None means the body the lander sent.
+        self.merge_message: Optional[str] = None
 
     # --- fixture helpers --------------------------------------------------
 
@@ -136,13 +142,33 @@ class FakeGh:
         if any(f in " ".join(args) for f in self.fail):
             return 1, "", "gh: boom (HTTP 500)"
         if args[:2] == ["pr", "view"]:
-            if "mergeCommit" in args:
-                return 0, json.dumps({"mergeCommit": {"oid": MERGE_SHA}}), ""
+            if any("mergeCommit" in a for a in args):
+                merged = self.pr["state"] == "MERGED"
+                return (
+                    0,
+                    json.dumps(
+                        {
+                            "state": self.pr["state"],
+                            "headRefOid": self.pr["headRefOid"],
+                            "mergeCommit": {"oid": MERGE_SHA} if merged else None,
+                        }
+                    ),
+                    "",
+                )
             return 0, json.dumps(self.pr), ""
         if args[:2] == ["pr", "merge"]:
             return self.merge(args)
         if args[:2] == ["pr", "edit"]:
-            self.labels_added.append(args[args.index("--add-label") + 1])
+            label = args[args.index("--add-label") + 1]
+            if label not in self.repo_labels:
+                return 1, "", f"'{label}' not found"
+            self.labels_added.append(label)
+            return 0, "", ""
+        if args[:2] == ["label", "create"]:
+            if args[2] in self.repo_labels:
+                return 1, "", f'label with name "{args[2]}" already exists'
+            self.repo_labels.add(args[2])
+            self.labels_created.append(args[2])
             return 0, "", ""
         assert args[0] == "api", args
         path = next(a for a in args if a.startswith("repos/") or a == "user")
@@ -150,6 +176,13 @@ class FakeGh:
         if path == "user":
             return 0, ME + "\n", ""
         base = f"repos/{REPO}"
+        if path == f"{base}/commits/{MERGE_SHA}" and self.pr["state"] == "MERGED":
+            message = self.merge_message
+            if message is None:
+                message = (
+                    "chore(scripts): tidy the helper (#7)\n\n" + self.merges[-1]["body"]
+                )
+            return 0, message + "\n", ""
         if path == f"{base}/pulls/{PR}/files":
             return 0, json.dumps([self.files]), ""
         if path.startswith(f"{base}/contents/.github/merge-policy.yml?ref="):
@@ -208,6 +241,9 @@ class FakeGh:
                 "GraphQL: Head branch was modified. Review and try the merge again."
                 " (mergePullRequest)",
             )
+        self.pr["state"] = "MERGED"
+        if self.merge_fails_after_merging:
+            return 127, "", "timed out after 60 seconds"
         return 0, "", ""
 
 
@@ -257,7 +293,6 @@ class LandTests(unittest.TestCase):
         self.assertEqual(self.land_line(), "LAND: would-land")
         body = self.fake.lander_comments()[0]["body"]
         self.assertIn(f"success on {HEAD[:7]} (carried from {reviewed[:7]})", body)
-
 
     def test_a_dry_run_never_merges(self):
         self.run_land()
@@ -575,6 +610,53 @@ class RealLandingTests(unittest.TestCase):
         self.fake.fail.add("pr merge")
         self.assertIn("gh pr merge failed", self.land()[-1])
 
+    def test_a_failed_call_that_merged_with_both_trailers_is_landed(self):
+        self.fake.merge_fails_after_merging = True
+        lines = self.land()
+        self.assertEqual(lines[-1], f"LAND: landed sha={MERGE_SHA}")
+        self.assertEqual(self.fake.labels_added, ["landed-by-agent"])
+        self.assertTrue(
+            any(c["body"].startswith(land.LANDED_MARKER) for c in self.fake.comments)
+        )
+
+    def test_a_failed_call_whose_merge_lacks_the_trailers_holds(self):
+        # A hand merge at the same head in the same window: no Landed-by.
+        self.fake.merge_fails_after_merging = True
+        self.fake.merge_message = "chore(scripts): tidy the helper (#7)\n\n* tidy"
+        lines = self.land()
+        self.assertTrue(lines[-1].startswith("LAND: hold reasons="), lines)
+        self.assertIn("gh pr merge failed: timed out after 60 seconds", lines[-1])
+        self.assertEqual(self.fake.labels_added, [])
+
+    def test_a_failed_call_whose_trailer_names_another_head_holds(self):
+        self.fake.merge_fails_after_merging = True
+        self.fake.merge_message = (
+            "x (#7)\n\nLanded-by: land-pr.sh\nCo-review-head: " + OTHER_HEAD
+        )
+        self.assertIn("gh pr merge failed", self.land()[-1])
+
+    def test_a_failed_call_that_did_not_merge_holds_with_its_reason(self):
+        self.fake.fail.add("pr merge")
+        lines = self.land()
+        self.assertIn("gh pr merge failed: gh: boom (HTTP 500)", lines[-1])
+        self.assertTrue(
+            any("mergeCommit" in a for c in self.fake.calls for a in c),
+            "the lander re-reads the PR after a failed merge call",
+        )
+        self.assertEqual(self.fake.labels_added, [])
+
+    def test_a_failed_call_whose_re_read_fails_holds(self):
+        self.fake.merge_fails_after_merging = True
+        self.fake.fail.add("state,headRefOid,mergeCommit")
+        self.assertIn("gh pr merge failed", self.land()[-1])
+
+    def test_a_head_moved_refusal_is_not_re_read(self):
+        self.fake.head_at_merge = OTHER_HEAD
+        self.land()
+        self.assertFalse(
+            any("state,headRefOid,mergeCommit" in c for c in self.fake.calls)
+        )
+
     def test_the_body_ends_with_both_trailers(self):
         self.land()
         body = self.fake.merges[0]["body"]
@@ -598,6 +680,26 @@ class RealLandingTests(unittest.TestCase):
         ]
         self.assertIn(f"Merge commit: {MERGE_SHA}", comment["body"])
         self.assertIn(f"Co-review-head: {HEAD}", comment["body"])
+
+    def test_a_missing_label_is_created_then_added(self):
+        self.fake.repo_labels = set()
+        lines = self.land()
+        self.assertIn("LABEL: created and added landed-by-agent", lines)
+        self.assertEqual(self.fake.labels_created, ["landed-by-agent"])
+        self.assertEqual(self.fake.labels_added, ["landed-by-agent"])
+        create = next(c for c in self.fake.calls if c[:2] == ["label", "create"])
+        self.assertNotIn("--force", create)
+
+    def test_an_existing_label_is_never_recreated(self):
+        self.land()
+        self.assertEqual(self.fake.labels_created, [])
+
+    def test_a_label_that_cannot_be_created_is_reported_not_fatal(self):
+        self.fake.repo_labels = set()
+        self.fake.fail.add("label create")
+        lines = self.land()
+        self.assertTrue(any(line.startswith("LABEL: error") for line in lines))
+        self.assertEqual(lines[-1], f"LAND: landed sha={MERGE_SHA}")
 
     def test_label_and_comment_failures_do_not_fail_the_landing(self):
         self.fake.fail.update({"pr edit", "--method POST"})
