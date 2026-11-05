@@ -88,7 +88,7 @@ GREEN_CONCLUSIONS = ("success", "neutral", "skipped")
 LANDED_MARKER = "<!-- land-pr landed v1 -->"
 LANDED_LABEL = "landed-by-agent"
 # What GitHub says when --match-head-commit no longer names the PR's head.
-HEAD_MOVED_RE = re.compile(r"head branch was modified|expected head sha", re.I)
+HEAD_MOVED_RE = re.compile(r"head branch was modified", re.I)
 
 
 class ReadError(Exception):
