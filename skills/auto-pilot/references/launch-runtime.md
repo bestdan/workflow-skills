@@ -623,13 +623,28 @@ tracked follow-up, but the two `test-*.sh` harnesses that themselves call
 **The same holds for git in a tree the jail writes.** A jailed agent can rewrite
 a worktree's `.git` file, or the run clone's `config` and `hooks/`, so that the
 next un-jailed git command there runs a program it chose: `core.fsmonitor` on a
-`git status` is enough (measured with git 2.43.0). The verify broker already
-runs jail-written code un-jailed, so this adds nothing during the run. The
-supervisor's own git there is `rev-parse HEAD`, which runs no hook or fsmonitor.
-What it does add is your own git in the run worktree or a worker worktree after
-the run. Treat the run root as untrusted. Recover branches by fetching them from
-the main checkout ("Recovering a run's branch" in §1), not by running git
-inside the run root. Hardening is tracked in #1400.
+`git status` is enough, and so is a clean filter on `git add`, `core.sshCommand`
+on a fetch, or a signing program on a commit (measured with git 2.43.0). Pinning
+`core.fsmonitor` and `core.hooksPath` on the command line does not close it,
+because the list of keys that run a program is open-ended. The verify broker
+already runs jail-written code un-jailed, so that adds nothing during the run.
+The plugin's own un-jailed git keeps to commands that run nothing:
+
+- **The supervisor** reads refs (`rev-parse`, `log --format`, `show`), and its
+  halt commits through plumbing that runs no hook, filter or signing program
+  (`_hookless_commit` in `spawn-orchestrator.sh`). `clear-exit-state` commits
+  the same way.
+- **`--resume`** runs the doctor, which checks out, resets and removes
+  worktrees, inside the run's own jail through `spawn-orchestrator.sh
+  jail-run` ([`resume.md`](resume.md)). Pre-flight's freshness check queries the
+  remote with `--isolated-remote`, so the clone's config never reaches it.
+
+What remains is your own git in the run worktree or a worker worktree, during
+or after the run. Treat the run root as untrusted. Recover branches by fetching
+them from the main checkout ("Recovering a run's branch" in §1): a fetch reads
+the clone the way it reads any remote, and runs none of its config or hooks
+(measured). Never push into the clone, and remove a run root with `rm -rf`, not
+with git run inside it.
 
 **What the broker does _not_ defend: result authority.** The sentinel dir lives in
 the run worktree, which the jailed orchestrator can write — so it could forge its

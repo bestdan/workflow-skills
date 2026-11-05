@@ -51,6 +51,8 @@
 #   spawn-orchestrator.sh claude-token --dir <run-dir> [--label <label>] --cmd <cmd>
 #   spawn-orchestrator.sh check-nono-profile --dir <run-dir> [--label <label>] \
 #       --profile <file> --sha256 <hex>
+#   spawn-orchestrator.sh jail-run --jail <seatbelt|nono> --profile <file> \
+#       [--nono-bin <bin>] --workdir <run worktree> -- <subcommand> [args...]
 #
 #   render-nono-profile  The Linux jail (#1349): a nono JSON profile from
 #           launch-runtime.md §1. Its own comment block below is the one home
@@ -63,6 +65,8 @@
 #           failure, halt the run with an alarm (exit 3).
 #   check-nono-profile  The wrapper's per-wake pin (#1350): the profile still
 #           has the checksum write-launch baked in; else halt with an alarm.
+#   jail-run  Run one of these subcommands inside the run's jail, from an
+#           unjailed session: --resume's doctor goes through it.
 #
 # On Linux (#1350) `launch` starts the wrapper as a transient systemd user
 # timer + service pair named <label> (systemd-run --user), where macOS
@@ -2498,6 +2502,59 @@ record_handle() {
   echo "spawn-orchestrator: handle recorded $out"
 }
 
+# Run one of this script's subcommands inside the run's own jail, from an unjailed
+# session. For --resume's doctor: it runs status, checkout, reset and worktree
+# remove in the run worktree, and the jail writes that tree's `.git` file and the
+# run clone's config and hooks, so unjailed those commands would run whatever the
+# jail planted there. Inside the jail they can do no more than the run could.
+# Takes the profile (and, for nono, the pinned binary) the launch rendered; both
+# sit outside every write grant, so the jail cannot have changed them.
+jail_run() {
+  local profile="" jail="" nono_bin="" workdir=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --profile | --jail | --nono-bin | --workdir)
+        [ $# -ge 2 ] || die "missing value for $1"
+        case "$1" in
+          --profile) profile="$2" ;;
+          --jail) jail="$2" ;;
+          --nono-bin) nono_bin="$2" ;;
+          --workdir) workdir="$2" ;;
+        esac
+        shift 2
+        ;;
+      --)
+        shift
+        break
+        ;;
+      *) die "unknown jail-run argument: $1 (the subcommand goes after --)" ;;
+    esac
+  done
+  [ $# -ge 1 ] || die "jail-run requires a subcommand after --"
+  [ -f "$profile" ] || die "jail-run requires --profile <file> (the run's rendered profile)"
+  [ -d "$workdir" ] || die "jail-run requires --workdir <dir> (the run worktree)"
+  local -a jail_cmd=()
+  local jail_tmp=""
+  case "$jail" in
+    seatbelt)
+      command -v sandbox-exec >/dev/null 2>&1 || die "sandbox-exec not available (macOS only)"
+      jail_cmd=(sandbox-exec -f "$profile")
+      ;;
+    nono)
+      [ -x "$nono_bin" ] || die "jail-run --jail nono requires an executable --nono-bin"
+      jail_tmp="$(_nono_profile_tmpdir "$profile")"
+      [ -n "$jail_tmp" ] || die "jail-run: --profile is not a render-nono-profile profile: $profile"
+      jail_cmd=("$nono_bin" run --silent --profile "$profile" --)
+      ;;
+    *) die "jail-run --jail must be seatbelt or nono: ${jail:-<unset>}" ;;
+  esac
+  (
+    cd "$workdir" || exit 1
+    if [ -n "$jail_tmp" ]; then export NONO_NO_UPDATE_CHECK=1 NONO_NO_MIGRATE=1 TMPDIR="$jail_tmp"; fi
+    exec "${jail_cmd[@]}" /bin/bash "$ROOT/scripts/spawn-orchestrator.sh" "$@"
+  )
+}
+
 # Auth smoke-test THROUGH the exact wrapper + settings, before detaching, so a
 # dead credential fails loudly now rather than silently at 3am. Executes claude.
 smoke_test() {
@@ -3753,6 +3810,39 @@ _write_done_sentinel() {
   }
 }
 
+# Commit <path>... (relative to <dir>) onto <dir>'s HEAD without running any
+# program the repository names. For the unjailed callers (the supervisor's halt,
+# clear-exit-state on resume): the jail writes the run worktree's `.git` file and
+# the run clone's config and hooks, so `git add` + `git commit` there would run
+# whatever it planted (a hook, a clean filter, core.fsmonitor, gpg.program).
+# Plumbing runs none of those once hooks and fsmonitor are pinned off on the
+# command line, which outranks the repo's config: `hash-object --no-filters`
+# skips filters, `commit-tree --no-gpg-sign` skips signing, and `update-ref`'s
+# only hook is reference-transaction. Returns 0 with nothing to commit.
+_hookless_commit() {
+  local dir="$1" who="$2" msg="$3" p blob ref parent tree commit
+  shift 3
+  local -a g=(git -C "$dir" -c core.hooksPath=/dev/null -c core.fsmonitor=false
+    -c user.name="$who" -c user.email="auto-pilot@localhost")
+  "${g[@]}" rev-parse -q --git-dir >/dev/null || return 1
+  # An unborn branch (no commit yet) gets a root commit.
+  parent="$("${g[@]}" rev-parse -q --verify HEAD)" || parent=""
+  ref="$("${g[@]}" symbolic-ref -q HEAD)" || ref=HEAD
+  for p in "$@"; do
+    [ -f "$dir/$p" ] || continue
+    blob="$("${g[@]}" hash-object -w --no-filters -- "$dir/$p")" || return 1
+    "${g[@]}" update-index --add --cacheinfo "100644,$blob,$p" || return 1
+  done
+  tree="$("${g[@]}" write-tree)" || return 1
+  local -a par=()
+  if [ -n "$parent" ]; then
+    [ "$tree" != "$("${g[@]}" rev-parse "$parent^{tree}")" ] || return 0
+    par=(-p "$parent")
+  fi
+  commit="$("${g[@]}" commit-tree --no-gpg-sign ${par[@]+"${par[@]}"} -m "$msg" "$tree")" || return 1
+  "${g[@]}" update-ref -m "$msg" "$ref" "$commit" "$parent"
+}
+
 # (agent side, in-jail) Declare WHY this orchestrator is exiting, before it exits.
 # Writes `exit_reason` + `exit_reason_at` (epoch) into RUN.md's front matter and
 # commits them to the run-state branch — durable, on the branch, per the task's
@@ -3866,12 +3956,9 @@ clear_exit_state() {
   _upsert_front_field "$run_md" exit_reason_at ""
   _upsert_front_field "$run_md" exit_reason_detail ""
 
-  (
-    cd "$dir" \
-      && git add -- .auto-pilot/RUN.md 2>/dev/null \
-      && git -c user.name="auto-pilot" -c user.email="auto-pilot@localhost" \
-        commit -q -m "auto-pilot: clear exit state (resume)"
-  ) 2>/dev/null || echo "spawn-orchestrator: clear-exit-state: run-state commit failed (not a git checkout, or nothing to commit)" >&2
+  # Unjailed (resume runs it from the owner's session), so the hook-free commit.
+  _hookless_commit "$dir" auto-pilot "auto-pilot: clear exit state (resume)" .auto-pilot/RUN.md 2>/dev/null \
+    || echo "spawn-orchestrator: clear-exit-state: run-state commit failed (not a git checkout?)" >&2
 
   echo "spawn-orchestrator: exit state cleared (done-sentinel removed, exit_reason blanked) $dir"
 }
@@ -4094,7 +4181,15 @@ write_handoff() {
     printf '\n## Next steps\n\n%s\n\n' "$next"
     printf -- '- **Run worktree:** `%s`, on branch `auto-pilot/%s`%s.\n' "$dir" "$run_id" "${base:+, based on \`$base\`}"
     printf -- "- **Run state:** \`.auto-pilot/RUN.md\` there is the task graph and each task's phase; \`.auto-pilot/orchestrator.log\` is the forensic log.\n"
-    printf -- "- **Teardown:** once nothing above needs the run worktree, remove it with the plugin's \`scripts/worktree-remove.sh\`; the \`auto-pilot/%s\` branch is never merged.\n\n" "$run_id"
+    local hclone
+    if hclone="$(_check_run_clone "$dir" 2>/dev/null)"; then
+      # The jail wrote this whole run root, so git run inside it can run code the
+      # jail planted (launch-runtime.md §5). A fetch from it runs none.
+      printf -- "- **The run root \`%s\` is untrusted:** the jail could write all of it, so don't run git inside it. Fetch a branch you need from the main checkout: \`git fetch %s <branch>:<branch>\`.\n" "$(dirname "$dir")" "$hclone"
+      printf -- "- **Teardown:** once nothing above needs it, \`rm -rf %s\`; the main checkout keeps no entry for it, and the \`auto-pilot/%s\` branch is never merged.\n\n" "$(dirname "$dir")" "$run_id"
+    else
+      printf -- "- **Teardown:** once nothing above needs the run worktree, remove it with the plugin's \`scripts/worktree-remove.sh\`; the \`auto-pilot/%s\` branch is never merged.\n\n" "$run_id"
+    fi
     printf '## Report\n\n'
     if [ -s "$ap/REPORT.md" ]; then
       _demote_headings "$ap/REPORT.md"
@@ -4267,12 +4362,10 @@ _supervisor_halt() {
   fi
 
   if [ -f "$run_md" ] || [ -f "$report_md" ]; then
-    (
-      cd "$dir" \
-        && git add -- .auto-pilot/RUN.md .auto-pilot/REPORT.md 2>/dev/null \
-        && git -c user.name="auto-pilot-supervisor" -c user.email="auto-pilot@localhost" \
-          commit -q -m "auto-pilot: supervisor halt — $reason"
-    ) 2>/dev/null || echo "spawn-orchestrator: supervisor halt: run-state commit failed (not a git checkout, or nothing to commit)" >&2
+    # The supervisor is unjailed, so the hook-free commit (see _hookless_commit).
+    _hookless_commit "$dir" auto-pilot-supervisor "auto-pilot: supervisor halt — $reason" \
+      .auto-pilot/RUN.md .auto-pilot/REPORT.md 2>/dev/null \
+      || echo "spawn-orchestrator: supervisor halt: run-state commit failed (not a git checkout?)" >&2
   fi
 
   # The run handoff, before the teardown: a wedged bootout must not cost it.
@@ -8249,6 +8342,7 @@ case "$sub" in
   write-launch) write_launch "$@" ;;
   record-handle) record_handle "$@" ;;
   smoke-test) smoke_test "$@" ;;
+  jail-run) jail_run "$@" ;;
   detach) detach "$@" ;;
   teardown) teardown "$@" ;;
   launch) launch "$@" ;;

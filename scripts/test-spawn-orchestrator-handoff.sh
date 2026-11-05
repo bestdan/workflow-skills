@@ -59,6 +59,22 @@ have "handoff: a fenced # line is left alone" '# a comment, not a heading' "$bod
 lack "handoff: a fenced # line is not demoted" '## a comment, not a heading' "$body"
 have "handoff: the full decision log is carried" '#### Q1 — T-1 — which key name' "$body"
 have "handoff: ends by telling the reader to delete it" 'delete this file' "$body"
+have "handoff: a plain run worktree tears down with worktree-remove.sh" 'scripts/worktree-remove.sh' "$body"
+
+# A run clone: the run root is untrusted, so the note says fetch out and rm -rf.
+if command -v git >/dev/null 2>&1; then
+  git -c init.defaultBranch=main init -q "$HO/rcm"
+  git -C "$HO/rcm" -c user.name=t -c user.email=t@t commit -q --allow-empty -m one
+  git -C "$HO/rcm" remote add origin "$HO/rcm"
+  "$SCRIPT" run-clone --repo "$HO/rcm" --run-root "$HO/rcroot" --run-id rc >/dev/null 2>&1
+  ho_run "$HO/rcroot/rc"
+  "$SCRIPT" handoff --dir "$HO/rcroot/rc" --reason done --out-dir "$HO/rc-notes" >/dev/null 2>&1
+  rcbody="$(cat "$HO/rc-notes/"*-auto-pilot-*.md 2>/dev/null)"
+  have "handoff [run clone]: names the run root as untrusted" "The run root \`$HO/rcroot\` is untrusted" "$rcbody"
+  have "handoff [run clone]: gives the fetch-out recovery" "git fetch $HO/rcroot/rcm.git <branch>:<branch>" "$rcbody"
+  have "handoff [run clone]: tears down with rm -rf" "rm -rf $HO/rcroot" "$rcbody"
+  lack "handoff [run clone]: never sends you to git in the run root" 'worktree-remove.sh' "$rcbody"
+fi
 
 # A later terminal exit for the same run supersedes, never adds a second note.
 : >"$HO/notes/2026-01-01-auto-pilot-2026-10-15-night.md"

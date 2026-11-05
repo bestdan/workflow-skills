@@ -262,7 +262,9 @@ remember at the exact right moment: fetch, `rebase --onto <base_branch>
 <base_sha> <branch>` (dropping the parent's now-squashed commits), `push
 --force-with-lease`, `gh pr edit --base <base_branch>` — in dependency order,
 idempotent, and fail-closed on a conflict (aborts, reports, never
-force-pushes). It also flags — as a defect for `REPORT.md`, and with a **non-zero
+force-pushes). It fetches, rebases and pushes in `--repo`, so run it unjailed
+only with `--repo` a main checkout, never a tree under a run root
+([`launch-runtime.md`](launch-runtime.md) §5). It also flags — as a defect for `REPORT.md`, and with a **non-zero
 exit** so a supervisor sees it — an orphaned child (a PR whose live base is a
 merged or deleted branch), a **closed** child (LOUD-orphaned; never force-pushed,
 left for a human to reopen), and a child that was rebased and pushed but whose

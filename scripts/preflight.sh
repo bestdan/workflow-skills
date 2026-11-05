@@ -420,8 +420,10 @@ fi
 # --- 2. Base freshness ----------------------------------------------------
 
 # Run in the run worktree: its base is the one the run builds from. For a run
-# clone that is the clone's copy of <base>, not the main checkout's.
-fresh_out="$(cd "$run_toplevel" && bash "$FRESHNESS" --ref "$base" 2>&1)"
+# clone that is the clone's copy of <base>, not the main checkout's. On resume
+# the jail has written that clone's config, so the remote is queried isolated
+# from it (launch-runtime.md §5).
+fresh_out="$(cd "$run_toplevel" && bash "$FRESHNESS" --ref "$base" --isolated-remote 2>&1)"
 fresh_status=$?
 printf '%s\n' "$fresh_out"
 case $fresh_status in

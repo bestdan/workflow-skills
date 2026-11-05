@@ -222,6 +222,37 @@ if command -v python3 >/dev/null 2>&1 && command -v git >/dev/null 2>&1; then
   else
     have "nono render --git-worktree: refuses a clone outside the worktree's run root" "not of a run clone" "$o"
   fi
+
+  # --- jail-run: resume's doctor goes through the run's own jail -------------
+  # A stand-in nono records how it was called, then runs what follows `--`.
+  JR="$NO/jailrun"
+  mkdir -p "$JR"
+  printf '#!/bin/sh\n{ echo "cwd=$PWD"; echo "tmp=$TMPDIR"; echo "argv=$*"; } >%s\nwhile [ "$1" != -- ]; do shift; done\nshift\nexec "$@"\n' \
+    "$JR/called" >"$JR/nono"
+  chmod +x "$JR/nono"
+  out="$("$SCRIPT" jail-run --jail nono --profile "$NO/p-git.json" --nono-bin "$JR/nono" \
+    --workdir "$NR/r-1" -- check-run-clone --worktree "$NR/r-1" 2>&1)"
+  rc=$?
+  if [ "$rc" = 0 ]; then ok "jail-run: runs the subcommand and passes its exit status"; else bad "jail-run: runs the subcommand and passes its exit status" "rc=$rc $out"; fi
+  have "jail-run: the subcommand's output comes back" "$NR/gitmain.git" "$out"
+  jcalled="$(cat "$JR/called" 2>/dev/null)"
+  have "jail-run: nono gets the run's profile" "argv=run --silent --profile $NO/p-git.json --" "$jcalled"
+  have "jail-run: the subcommand runs in the run worktree" "cwd=$NR/r-1" "$jcalled"
+  have "jail-run: TMPDIR is the profile's" "tmp=$NTMP" "$jcalled"
+  "$SCRIPT" jail-run --jail nono --profile "$NO/p-git.json" --nono-bin "$JR/nono" \
+    --workdir "$NR/r-1" -- check-run-clone --worktree "$NO/tmp" >/dev/null 2>&1
+  rc=$?
+  if [ "$rc" != 0 ]; then ok "jail-run: a failing subcommand fails jail-run"; else bad "jail-run: a failing subcommand fails jail-run"; fi
+  for jr_bad in "--jail nono --profile $NO/p-git.json --workdir $NR/r-1" \
+    "--jail nono --nono-bin $JR/nono --workdir $NR/r-1" \
+    "--jail bogus --profile $NO/p-git.json --workdir $NR/r-1"; do
+    # shellcheck disable=SC2086 # the flag set is split on purpose
+    if "$SCRIPT" jail-run $jr_bad -- check-run-clone --worktree "$NR/r-1" >/dev/null 2>&1; then
+      bad "jail-run: refuses an incomplete jail ($jr_bad)"
+    else
+      ok "jail-run: refuses an incomplete jail ($jr_bad)"
+    fi
+  done
 else
   echo "skip - run-clone / render-nono-profile --git-worktree: python3 or git not available"
 fi

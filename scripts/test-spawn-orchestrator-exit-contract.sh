@@ -461,6 +461,46 @@ CLEOF
   lack "clear-exit-state: the stale detail is gone from the branch too" \
     'the pre-dispatch guard stopped with tasks still ready' "$cesbranch"
 
+  # --- the unjailed commits run nothing the jail planted ---------------------------
+  # The jail writes the run clone's config and hooks. Arm every program-running
+  # key a commit can reach, prove a plain commit fires it, then require
+  # clear-exit-state to commit without firing any.
+  HC="$EC/hookless"
+  HCM="$HC/fired"
+  mkdir -p "$HC/.auto-pilot" "$HC/hooks"
+  printf -- '---\nrun_id: hc\nexit_reason: deadline\nexit_reason_at: 1000\nexit_reason_detail: x\n---\n' \
+    >"$HC/.auto-pilot/RUN.md"
+  (cd "$HC" && git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -q -m init)
+  printf '#!/bin/sh\necho "$0" >>%s\ncat\n' "$HCM" >"$HC/plant"
+  for h in pre-commit commit-msg post-commit reference-transaction post-index-change pre-auto-gc; do
+    printf '#!/bin/sh\necho %s >>%s\n' "$h" "$HCM" >"$HC/hooks/$h"
+  done
+  chmod +x "$HC/plant" "$HC/hooks/"*
+  git -C "$HC" config core.hooksPath "$HC/hooks"
+  git -C "$HC" config core.fsmonitor "$HC/plant"
+  git -C "$HC" config filter.evil.clean "$HC/plant"
+  git -C "$HC" config commit.gpgSign true
+  git -C "$HC" config gpg.program "$HC/plant"
+  printf '*.md filter=evil\n' >"$HC/.git/info/attributes"
+  printf 'control\n' >"$HC/ctl"
+  (cd "$HC" && git add ctl && git -c user.name=t -c user.email=t@t commit -q -m ctl) >/dev/null 2>&1
+  if [ -s "$HCM" ]; then ok "hookless commit: precondition — a plain commit runs the planted programs"; else bad "hookless commit: precondition — a plain commit runs the planted programs"; fi
+  : >"$HCM"
+  hchead="$(git -C "$HC" rev-parse HEAD)"
+  "$SCRIPT" clear-exit-state --dir "$HC" >/dev/null 2>&1
+  if [ -s "$HCM" ]; then bad "hookless commit: clear-exit-state runs none of them (ran: $(tr '\n' ' ' <"$HCM"))"; else ok "hookless commit: clear-exit-state runs none of them"; fi
+  have "hookless commit: the commit landed on the branch" 'auto-pilot: clear exit state (resume)' \
+    "$(git -C "$HC" -c core.hooksPath=/dev/null log -1 --format=%s)"
+  have "hookless commit: it sits on the previous tip" "$hchead" \
+    "$(git -C "$HC" -c core.hooksPath=/dev/null rev-parse HEAD~1)"
+  lack "hookless commit: the branch carries the cleared reason" 'exit_reason: deadline' \
+    "$(git -C "$HC" show HEAD:.auto-pilot/RUN.md 2>&1)"
+  hcstaged="$(git -C "$HC" -c core.hooksPath=/dev/null -c core.fsmonitor=false diff --no-ext-diff --cached --name-only HEAD)"
+  if [ -z "$hcstaged" ]; then ok "hookless commit: the index matches the new commit"; else bad "hookless commit: the index matches the new commit" "staged: $hcstaged"; fi
+  hcn="$(git -C "$HC" rev-list --count HEAD)"
+  "$SCRIPT" clear-exit-state --dir "$HC" >/dev/null 2>&1
+  have "hookless commit: nothing to commit adds no empty commit" "$hcn" "$(git -C "$HC" rev-list --count HEAD)"
+
   # --- a declared NON-terminal reason removes a pre-existing done-sentinel --------
   # Driven through the REAL wrapper: a run whose earlier life left a `done` sentinel
   # (a torn-down run a human --resume'd) declares `continuing` — a live run must not
