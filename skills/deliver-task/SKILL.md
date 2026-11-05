@@ -360,9 +360,9 @@ rule below applies. Standalone
   same gate (gh-issue under `--run-state`: always draft, per the exception
   above). The title grammar is the `agent-guidance` plugin's
   `portable.md` (`Git:` bullet), not this file.
-- **PR body:** the evidence captured in step 3 (check output, screenshots,
-  artifact paths) **plus how-to-evaluate steps** for any human-judgment item —
-  exactly how to judge it and what a "no" would invalidate.
+- **PR body:** step 3's evidence (check output, screenshots, artifact paths),
+  **how-to-evaluate steps** for any human-judgment item, and the **decision
+  brief**: [`references/decision-brief.md`](references/decision-brief.md).
 - If the repo's review bots won't run on a **draft** PR, record
   `bot review skipped (draft)` rather than waiting — step 5 falls back to the
   reviewers that can run.
