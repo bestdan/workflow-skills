@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Hermetic tests for scripts/morning-digest.py.
+"""Hermetic tests for scripts/review-queue.py.
 
 `gh` is replaced by FakeGh, one in-memory repository answering the PR list,
-the lander's per-PR tier reads, and the issue reads and writes the digest
+the lander's per-PR tier reads, and the issue reads and writes the queue
 makes. Fixture PR bodies carry real `## Decision brief` sections.
 """
 
@@ -18,12 +18,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 _spec = importlib.util.spec_from_file_location(
-    "morning_digest", ROOT / "scripts" / "morning-digest.py"
+    "review_queue", ROOT / "scripts" / "review-queue.py"
 )
 assert _spec is not None and _spec.loader is not None
-digest = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(digest)
-land = digest.land
+queue = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(queue)
+land = queue.land
 
 REPO = "acme/widgets"
 TODAY = dt.date(2026, 11, 4)
@@ -102,7 +102,7 @@ class FakeGh:
                 {"number": i["number"], "body": i["body"], "html_url": i["url"]}
                 for i in self.issues
             ]
-            pr_item = {"number": 2, "body": digest.MARKER, "pull_request": {}}
+            pr_item = {"number": 2, "body": queue.MARKER, "pull_request": {}}
             return 0, json.dumps([items, [pr_item]]), ""
         if path.endswith("/files"):
             p = self.by_number(path.split("/")[4])
@@ -124,10 +124,10 @@ class Base(unittest.TestCase):
         land.run_gh = self.fake
         self.addCleanup(setattr, land, "run_gh", original)
 
-    def run_digest(self, *extra):
+    def run_queue(self, *extra):
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            code = digest.main(["--repo", REPO, *extra], today=TODAY)
+            code = queue.main(["--repo", REPO, *extra], today=TODAY)
         return code, out.getvalue(), err.getvalue()
 
     def headings(self, out):
@@ -136,7 +136,7 @@ class Base(unittest.TestCase):
 
 class BriefTests(unittest.TestCase):
     def test_a_full_brief(self):
-        fields, missing = digest.parse_brief(brief())
+        fields, missing = queue.parse_brief(brief())
         self.assertEqual(
             fields,
             {
@@ -149,16 +149,16 @@ class BriefTests(unittest.TestCase):
 
     def test_a_wrapped_line_and_crlf(self):
         body = (
-            "## Decision brief\r\n\r\n- **Changed:** the digest now\r\n"
+            "## Decision brief\r\n\r\n- **Changed:** the queue now\r\n"
             "  groups stacks\r\n- **Judge:** order\r\n- **A no invalidates:** #2\r\n"
         )
-        fields, missing = digest.parse_brief(body)
-        self.assertEqual(fields["Changed"], "the digest now groups stacks")
+        fields, missing = queue.parse_brief(body)
+        self.assertEqual(fields["Changed"], "the queue now groups stacks")
         self.assertEqual(missing, [])
 
     def test_no_section(self):
         self.assertEqual(
-            digest.parse_brief("## Summary\n\n- **Judge:** x\n")[1],
+            queue.parse_brief("## Summary\n\n- **Judge:** x\n")[1],
             [
                 "Changed",
                 "Judge",
@@ -168,14 +168,14 @@ class BriefTests(unittest.TestCase):
 
     def test_a_section_missing_one_field(self):
         body = "## Decision brief\n\n- **Changed:** a\n- **Judge:** b\n"
-        self.assertEqual(digest.parse_brief(body)[1], ["A no invalidates"])
+        self.assertEqual(queue.parse_brief(body)[1], ["A no invalidates"])
 
     def test_a_level_three_heading_does_not_end_the_section(self):
         body = "## Decision brief\n\n- **Changed:** a\n### note\n- **Judge:** b\n"
-        self.assertIn("Judge", digest.parse_brief(body)[0])
+        self.assertIn("Judge", queue.parse_brief(body)[0])
 
 
-class DigestTests(Base):
+class QueueTests(Base):
     def test_lists_human_prs_and_excludes_auto_and_draft(self):
         self.fake.prs = [
             pr(1, HUMAN_FILES, brief()),
@@ -184,11 +184,11 @@ class DigestTests(Base):
             pr(4, HUMAN_FILES, "no brief here"),
             pr(5, HUMAN_FILES, "## Decision brief\n\n- **Changed:** only this\n"),
         ]
-        code, out, err = self.run_digest()
+        code, out, err = self.run_queue()
         self.assertEqual(code, 0, err)
         lines = out.splitlines()
-        self.assertEqual(lines[0], digest.MARKER)
-        self.assertEqual(lines[1], "# Morning digest — 2026-11-04")
+        self.assertEqual(lines[0], queue.MARKER)
+        self.assertEqual(lines[1], "# Review queue — as of 2026-11-04")
         self.assertIn("3 PRs wait on the owner.", out)
         self.assertEqual(
             self.headings(out)[1:],
@@ -218,7 +218,7 @@ class DigestTests(Base):
             pr(20, AUTO_FILES, brief(), base="main", head="b20"),
             pr(21, HUMAN_FILES, brief(changed="middle"), base="b20", head="b21"),
         ]
-        code, out, _ = self.run_digest()
+        code, out, _ = self.run_queue()
         self.assertEqual(code, 0)
         self.assertEqual(
             self.headings(out)[1:],
@@ -242,7 +242,7 @@ class DigestTests(Base):
             pr(62, HUMAN_FILES, brief(), base="b60", head="b62"),
             pr(61, HUMAN_FILES, brief(), base="b60", head="b61"),
         ]
-        _, out, _ = self.run_digest()
+        _, out, _ = self.run_queue()
         self.assertIn("## Stack: #60 → #61, #62", out)
 
     def test_a_fork_pr_headed_main_is_no_stack_parent(self):
@@ -253,35 +253,35 @@ class DigestTests(Base):
             pr(41, HUMAN_FILES, brief()),
             pr(42, HUMAN_FILES, brief()),
         ]
-        _, out, _ = self.run_digest()
+        _, out, _ = self.run_queue()
         self.assertNotIn("Stack", out)
         self.assertIn("3 PRs wait on the owner.", out)
 
     def test_a_full_pr_list_warns_that_older_prs_are_left_out(self):
-        self.fake.prs = [pr(n, AUTO_FILES) for n in range(1, digest.PR_LIMIT + 1)]
-        code, _, err = self.run_digest()
+        self.fake.prs = [pr(n, AUTO_FILES) for n in range(1, queue.PR_LIMIT + 1)]
+        code, _, err = self.run_queue()
         self.assertEqual(code, 0)
-        self.assertIn(f"listed {digest.PR_LIMIT} open PRs, the limit", err)
+        self.assertIn(f"listed {queue.PR_LIMIT} open PRs, the limit", err)
 
     def test_a_stack_with_no_human_member_is_left_out(self):
         self.fake.prs = [
             pr(30, AUTO_FILES, base="main", head="b30"),
             pr(31, AUTO_FILES, base="b30", head="b31"),
         ]
-        _, out, _ = self.run_digest()
+        _, out, _ = self.run_queue()
         self.assertIn("No human-tier PRs are waiting.", out)
         self.assertNotIn("Stack", out)
 
     def test_singletons_are_ordered_by_number(self):
         self.fake.prs = [pr(9, HUMAN_FILES, brief()), pr(3, HUMAN_FILES, brief())]
-        _, out, _ = self.run_digest()
+        _, out, _ = self.run_queue()
         self.assertEqual(
             self.headings(out)[1:], ["## #3 fix(x): change 3", "## #9 fix(x): change 9"]
         )
 
     def test_a_policy_read_failure_is_unknown_with_the_reason(self):
         self.fake.prs = [pr(7, AUTO_FILES, brief(), base="release")]
-        code, out, _ = self.run_digest()
+        code, out, _ = self.run_queue()
         self.assertEqual(code, 0)
         self.assertIn(
             "Tier: unknown — tier not computed: no .github/merge-policy.yml", out
@@ -290,14 +290,14 @@ class DigestTests(Base):
 
     def test_an_unreadable_pr_list_exits_1(self):
         self.fake.fail = {"pr list"}
-        code, out, err = self.run_digest()
+        code, out, err = self.run_queue()
         self.assertEqual((code, out), (1, ""))
         self.assertIn("cannot list open PRs", err)
 
     def test_a_bad_repo_is_a_usage_error(self):
         with contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit) as cm:
-                digest.main(["--repo", "nope"])
+                queue.main(["--repo", "nope"])
         self.assertEqual(cm.exception.code, 2)
 
 
@@ -308,53 +308,53 @@ class PostTests(Base):
 
     def test_creates_and_pins_when_no_issue_exists(self):
         self.fake.issues = [
-            {"number": 4, "body": "unrelated morning-digest v1", "url": "u"}
+            {"number": 4, "body": "unrelated review-queue v1", "url": "u"}
         ]
-        code, out, err = self.run_digest("--post")
+        code, out, err = self.run_queue("--post")
         self.assertEqual(code, 0, err)
         url = f"https://github.com/{REPO}/issues/51"
-        self.assertEqual(err.splitlines()[-1], f"DIGEST: created {url}")
+        self.assertEqual(err.splitlines()[-1], f"QUEUE: created {url}")
         self.assertEqual(self.fake.bodies, [out])
         self.assertIn(["issue", "pin", "51", "--repo", REPO], self.fake.calls)
 
     def test_a_failed_pin_is_a_warning(self):
         self.fake.fail = {"issue pin"}
-        code, _, err = self.run_digest("--post")
+        code, _, err = self.run_queue("--post")
         self.assertEqual(code, 0)
         self.assertIn("warning: could not pin", err)
-        self.assertTrue(err.splitlines()[-1].startswith("DIGEST: created "))
+        self.assertTrue(err.splitlines()[-1].startswith("QUEUE: created "))
 
     def test_updates_the_marked_issue_in_place(self):
         url = f"https://github.com/{REPO}/issues/12"
         self.fake.issues = [
             # Quotes the marker mid-body: a human's issue, never overwritten.
-            {"number": 9, "body": f"see {digest.MARKER} here", "url": "u9"},
-            {"number": 15, "body": digest.MARKER + "\nnewer copy", "url": "u15"},
-            {"number": 12, "body": digest.MARKER + "\nold", "url": url},
+            {"number": 9, "body": f"see {queue.MARKER} here", "url": "u9"},
+            {"number": 15, "body": queue.MARKER + "\nnewer copy", "url": "u15"},
+            {"number": 12, "body": queue.MARKER + "\nold", "url": url},
         ]
-        code, out, err = self.run_digest("--post")
-        self.assertEqual(self.fake.issues[1]["body"], digest.MARKER + "\nnewer copy")
+        code, out, err = self.run_queue("--post")
+        self.assertEqual(self.fake.issues[1]["body"], queue.MARKER + "\nnewer copy")
         self.assertEqual(code, 0, err)
-        self.assertEqual(err.splitlines()[-1], f"DIGEST: updated {url}")
+        self.assertEqual(err.splitlines()[-1], f"QUEUE: updated {url}")
         self.assertEqual(self.fake.issues[2]["body"], out)
         self.assertFalse(any(c[:2] == ["issue", "create"] for c in self.fake.calls))
 
     def test_an_identical_body_is_unchanged(self):
-        _, out, _ = self.run_digest()
+        _, out, _ = self.run_queue()
         url = f"https://github.com/{REPO}/issues/12"
         self.fake.issues = [{"number": 12, "body": out.rstrip("\n"), "url": url}]
-        code, _, err = self.run_digest("--post")
+        code, _, err = self.run_queue("--post")
         self.assertEqual(code, 0)
-        self.assertEqual(err.splitlines()[-1], f"DIGEST: unchanged {url}")
+        self.assertEqual(err.splitlines()[-1], f"QUEUE: unchanged {url}")
         self.assertFalse(any(c[:2] == ["issue", "edit"] for c in self.fake.calls))
 
-    def test_a_failed_post_exits_1_with_the_digest_printed(self):
+    def test_a_failed_post_exits_1_with_the_queue_printed(self):
         self.fake.fail = {"issue create"}
-        code, out, err = self.run_digest("--post")
+        code, out, err = self.run_queue("--post")
         self.assertEqual(code, 1)
-        self.assertTrue(out.startswith(digest.MARKER))
+        self.assertTrue(out.startswith(queue.MARKER))
         self.assertIn("## #1 fix(x): change 1", out)
-        self.assertTrue(err.splitlines()[-1].startswith("DIGEST: error reason="))
+        self.assertTrue(err.splitlines()[-1].startswith("QUEUE: error reason="))
 
 
 if __name__ == "__main__":
