@@ -113,13 +113,17 @@ if [ "$SEATBELT_OK" = 1 ] && [ -f "$hdprof" ]; then
   else
     skipped "here-doc: a zsh here-string works in-jail (no /bin/zsh)"
   fi
-  # The grant is by name: any other file in /var/tmp or /tmp stays denied.
+  # The grant is by name: any other file in /var/tmp or /tmp stays denied. Only
+  # a permission denial counts, so a wrong path cannot pass this.
   hd_probe="so-heredoc-probe-$$"
-  if sandbox-exec -f "$hdprof" /bin/bash -c 'echo x > "$1"' _ "$vartmp_c/$hd_probe" 2>/dev/null \
+  if hd_err="$(sandbox-exec -f "$hdprof" /bin/bash -c 'echo x > "$1"' _ "$vartmp_c/$hd_probe" 2>&1)" \
     || [ -e "$vartmp_c/$hd_probe" ]; then
     bad "here-doc: another file in /var/tmp is denied in-jail"
   else
-    ok "here-doc: another file in /var/tmp is denied in-jail"
+    case "$hd_err" in
+      *"Operation not permitted"*) ok "here-doc: another file in /var/tmp is denied in-jail" ;;
+      *) bad "here-doc: another file in /var/tmp is denied in-jail" "$hd_err" ;;
+    esac
   fi
   rm -f "$vartmp_c/$hd_probe"
   # A granted name must not let the jail rewrite a read-only file through a
@@ -127,6 +131,15 @@ if [ "$SEATBELT_OK" = 1 ] && [ -f "$hdprof" ]; then
   # counts, so a missing source or an exec refusal cannot pass this.
   echo original >"$REPO_RO/hd-ro.txt"
   hd_link="$tmp_c/zshS$(printf '%05d' $(($$ % 100000)))"
+  # Positive control: the destination must itself be a granted name, or the
+  # link would be refused for being out of scope and this would pass anyway.
+  if sandbox-exec -f "$hdprof" /usr/bin/touch "$hd_link" 2>/dev/null \
+    && sandbox-exec -f "$hdprof" /bin/rm "$hd_link" 2>/dev/null; then
+    ok "here-doc: the hard-link destination is a granted name"
+  else
+    bad "here-doc: the hard-link destination is a granted name"
+  fi
+  rm -f "$hd_link"
   if hd_err="$(sandbox-exec -f "$hdprof" /bin/ln "$REPO_RO/hd-ro.txt" "$hd_link" 2>&1)"; then
     bad "here-doc: a hard link from a read-only file into a granted name is denied in-jail"
   else

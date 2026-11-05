@@ -801,6 +801,11 @@ emit_harness_runtime() {
   # own path. zsh's name is its mkstemp template, exactly six alphanumerics after
   # `zsh` (40 of 40 jailed here-strings fit it), spelled out as six classes so
   # the grant does not cover every zsh* file in the shared /tmp.
+  #
+  # ACCEPTED RELAXATION: a name match ignores who created the file, so a jailed
+  # process can also write a same-uid un-jailed shell's here-doc file in the
+  # window between that shell writing it and reopening it by name. Accepted:
+  # the window is brief, and without the grant no here-doc works in the jail.
   local c='[A-Za-z0-9]'
   heredoc_bash_pattern="^$(sbpl_regex_escape "$var_tmp")"'/sh-thd-[0-9]+$'
   heredoc_zsh_pattern="^$(sbpl_regex_escape "$tmp_root")/zsh$c$c$c$c$c$c\$"
