@@ -214,7 +214,11 @@ Denied, every `<<` and `<<<` in the jail fails with `cannot create temp file
 for here document`, which is how the `WorktreeCreate` hook failed in-jail.
 `render-profile` grants those names only, plus the root-owned `/var/tmp`
 directory itself as a literal, because bash checks `access(W_OK)` on it before
-writing. Every other file in `/tmp` and `/var/tmp` stays denied.
+writing. No other file in `/var/tmp`, and no `/tmp` file outside these names
+and the harness grants above, is writable. Because the grant matches by name,
+a jailed process could also write a same-uid un-jailed shell's here-doc file
+during its brief write-then-reopen window; that is an accepted relaxation (see
+`emit_harness_runtime` in `scripts/spawn-orchestrator.sh`).
 
 The middle and last rows are the ones that **poison verification**: the Bash
 tool dies on its own `mkdir` _before_ the command ever runs, so **every Bash
