@@ -29,7 +29,11 @@ the facts the merge lander demotes on, as a hidden block after the line:
 
 `kind` is `technical`, `preference` or `stack`; `next_round` is `another
 round` or `no further round`. The record's `head` must equal `--head`, and an
-invalid record is a usage error (exit 2) before any `gh` call. A stamp written
+invalid record is a usage error (exit 2) before any `gh` call. A record may
+also carry `carried_from`, the 40-hex head the round actually reviewed, when
+`head` is the round's own fix commit and co-review-carry.py carried the
+verdict there; the stamp line then says so rather than claiming `head` was
+reviewed. A stamp written
 without `--evidence` carries no record, so a later round on the same head that
 has not yet re-stamped reads as having none. scripts/co-review-evidence.py is
 the reader.
@@ -69,18 +73,29 @@ EVIDENCE_KEYS = (
     "consult_calls",
     "next_round",
 )
+# Present only on a record co-review-carry.py wrote for a fix commit.
+CARRIED_FROM = "carried_from"
 CALL_KINDS = ("technical", "preference", "stack")
 NEXT_ROUNDS = ("another round", "no further round")
 
 
 def validate_evidence(record, head):
     """Return the record if it is well formed for `head`, else raise ValueError."""
-    if not isinstance(record, dict) or sorted(record) != sorted(EVIDENCE_KEYS):
+    if not isinstance(record, dict) or sorted(
+        k for k in record if k != CARRIED_FROM
+    ) != sorted(EVIDENCE_KEYS):
         raise ValueError(
             f"evidence must have exactly the keys {', '.join(EVIDENCE_KEYS)}"
+            f" (and optionally {CARRIED_FROM})"
         )
     if record["head"] != head:
         raise ValueError("evidence head does not match --head")
+    if CARRIED_FROM in record:
+        origin = record[CARRIED_FROM]
+        if not (isinstance(origin, str) and SHA_RE.match(origin)) or origin == head:
+            raise ValueError(
+                f"evidence {CARRIED_FROM} must be a 40-hex sha other than head"
+            )
     for key in ("unresolved_findings", "verification_open"):
         value = record[key]
         if type(value) is not int or value < 0:
@@ -151,7 +166,12 @@ def marker(head):
 
 def stamp_body(head, summary, evidence=None):
     line = " ".join(summary.split())
-    body = f"{marker(head)}\n**co-review** reviewed `{head[:7]}` — {line}"
+    origin = (evidence or {}).get(CARRIED_FROM)
+    if origin:
+        what = f"reviewed `{origin[:7]}`; its pass was carried to `{head[:7]}`"
+    else:
+        what = f"reviewed `{head[:7]}`"
+    body = f"{marker(head)}\n**co-review** {what} — {line}"
     if evidence is not None:
         # Every string in a valid record is an enum value or a hex sha, so the
         # JSON can never contain the `-->` that would end the comment early.

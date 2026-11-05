@@ -143,6 +143,8 @@ class EvidenceTests(unittest.TestCase):
                 record(consult_calls=[{"confidence": 101, "kind": "stack"}]),
             ),
             ("bad next_round", record(next_round="maybe")),
+            ("carried from itself", record(carried_from=HEAD_A)),
+            ("carried from a short sha", record(carried_from="abc1234")),
         ]
         for name, rec in cases:
             with self.subTest(name=name):
@@ -150,6 +152,11 @@ class EvidenceTests(unittest.TestCase):
                     self.write(rec)
                 self.assertEqual(cm.exception.code, 2)
         self.assertEqual(self.fake.calls, [])
+
+    def test_a_carried_record_round_trips(self):
+        rec = record(carried_from=HEAD_B)
+        self.assertEqual(self.write(rec)[0], 0)
+        self.assertEqual(reader_mod.read_evidence(REPO, PR, HEAD_A), rec)
 
     def test_a_valid_json_but_malformed_record_is_exit_1(self):
         for block in ("{}", "[]"):
