@@ -34,7 +34,10 @@ graded findings before the fixes existed, and no step reviews them afterwards.
 So once auto-fix pushes, the stamp names the pre-fix head and the gauge reads
 the PR's new head as un-reviewed. That is correct, and it is the signal for
 the next round that step 12 recommends or declines. A later run that reviews
-the new head re-stamps the same comment with that head.
+the new head re-stamps the same comment with that head. The exception is a
+round that passed: `co-review-carry.py` re-stamps for the fix commit with a
+line saying whose pass it carries
+([`status.md`](status.md#carrying-a-pass-to-the-fix-commit)).
 
 ## The call
 
@@ -125,6 +128,9 @@ and the user's answers:
   reads its confidence.
 - `next_round` is step 12's recommendation, `another round` or
   `no further round`.
+- `carried_from` is never written by hand. `co-review-carry.py` adds it, with
+  the reviewed head, when it moves the record to the round's fix commit; a
+  record without it describes a head that was reviewed.
 
 A run that never reaches the end of step 12 leaves the step-8 stamp, which
 carries no record, so the lander reads "no evidence" and holds the PR. That is

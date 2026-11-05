@@ -6,6 +6,7 @@ allowed-tools:
   - Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/co-review-record.py":*)
   - Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/co-review-stamp.py":*)
   - Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/co-review-status.py":*)
+  - Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/co-review-carry.py":*)
   - Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/coreview-input-lock.py":*)
   - Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/coreview-rule-drift.py":*)
   - Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/diff-anchor-check.py":*)
@@ -470,7 +471,7 @@ The remaining steps depend on disposition.
       - **Round-over-round yield.** Falling yield, findings that are mostly refutations, and findings arriving only from internal reviewers all point at convergence — and a review that has converged is a legitimate reason to recommend **against** another round. Say so plainly; "no further round" is an answer, not the absence of one.
       - **A new test was never mutation-checked.** A test written alongside a fix and never shown to fail against the unfixed code is not evidence the fix works.
 
-      A bare yes/no is not a recommendation. Interactively, put it to the user; if they overturn a decided item at this point, undo or apply just that item with Edit and push it as a follow-up commit on the same branch, as step 9 describes; under `--non-interactive`, record it in the run summary (see **Non-interactive mode**). Never launch the next round yourself — running it is the user's call, or the orchestrator's. **Last, re-stamp the PR with the round's evidence record**: the same `co-review-stamp.py` call as step 8 (same head, same summary), plus `--evidence`. Never fatal. How each field is counted is in [`references/stamping.md`](references/stamping.md#the-evidence-record).
+      A bare yes/no is not a recommendation. Interactively, put it to the user; if they overturn a decided item at this point, undo or apply just that item with Edit and push it as a follow-up commit on the same branch, as step 9 describes; under `--non-interactive`, record it in the run summary (see **Non-interactive mode**). Never launch the next round yourself — running it is the user's call, or the orchestrator's. **Last, re-stamp the PR with the round's evidence record**: the same `co-review-stamp.py` call as step 8 (same head, same summary), plus `--evidence`. Never fatal. How each field is counted is in [`references/stamping.md`](references/stamping.md#the-evidence-record). **Then, if this step pushed a fix commit, run `scripts/co-review-carry.py`** with the round's verdict, its count of applied `(blocking)` fixes and the same evidence file. It carries the reviewed head's `success` and record to the fix commit only when the verdict is ✅ `pass`, nothing applied was blocking, the record says `no further round`, and the fix is the one commit on top; otherwise it refuses and writes nothing, so the new head waits for another round as before. Never fatal; the call is in [`references/status.md`](references/status.md#carrying-a-pass-to-the-fix-commit).
 
 **`--post` disposition (someone else's PR):**
 
