@@ -484,6 +484,7 @@ class LandTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("COMMENT: error", out)
         self.assertEqual(out.splitlines()[-1], "LAND: would-land")
+        self.assertEqual(out.splitlines()[-2], "TIER: auto")
 
 
 if __name__ == "__main__":

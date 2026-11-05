@@ -34,11 +34,13 @@ Usage:
 
 Prints `COMMENT: <created|updated|unchanged> <url>` (or `COMMENT: error
 reason=...`), then a `TIER:` line, then a final `LAND: would-land` or `LAND: hold
-reasons=<r1; r2>` line. `TIER: auto`, `TIER: human reasons=<r1; r2>` or `TIER:
-unknown reason=<why>` is the tier with AGENT_LAND taken as on: whether the PR is
-one that lands itself once landing is switched on, which the hand-off records in
-the tracker. While AGENT_LAND is off, the LAND line holds every PR on that alone. Exit 0 for either verdict, 1 when the comment could not be posted, and 2
-for a usage error or a run without `--dry-run`.
+reasons=<r1; r2>` line. Exit 0 for either verdict, 1 when the comment could not
+be posted, and 2 for a usage error or a run without `--dry-run`.
+
+`TIER: auto`, `TIER: human reasons=<r1; r2>` or `TIER: unknown reason=<why>` is
+the tier with AGENT_LAND taken as on: whether the PR is one that lands itself
+once landing is switched on, which the hand-off records in the tracker. While
+AGENT_LAND is off, the LAND line holds every PR on that alone.
 """
 
 from __future__ import annotations

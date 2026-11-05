@@ -33,11 +33,12 @@ make it pass; a hold is data, not a failure.
 
 - **Hand-off summary:** the `LAND:` line goes verbatim into "Review and
   evidence".
-- **Tracker:** the `TIER:` line goes on the task as one comment,
-  `/deliver-task: merge tier <auto|human|unknown> — <first reason>` (no reason
-  for `auto`). The tier is computed with `AGENT_LAND` taken as on, so it says
-  whether the PR is one that lands itself once landing is switched on, which is
-  what `/sweep-for-complete` and the morning digest read. Post it with the
+- **Tracker:** the `TIER:` line goes on the task as one comment, `/deliver-task:
+  merge tier <auto|human|unknown> — <first reason>`, where the first reason is
+  the text before the first semicolon (no reason for `auto`). The tier is computed
+  with `AGENT_LAND` taken as on, so it says whether the PR is one that lands
+  itself once landing is switched on. `/sweep-for-complete` and the morning
+  digest can then tell which PRs will land themselves. Post it with the
   handler's comment write: `gh issue comment` on gh-issue, `save_comment` on
   Linear, `addCommentToJiraIssue` on Jira. On repo-pr the PR is the tracker and
   the lander's own comment already records the tier, so write nothing more. A
