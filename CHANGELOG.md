@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.196.0] - 2026-11-05
+
+### Features
+
+- carry a passing round's status to its fix commit [#1407] (#1409) (01c904a)
+
 ## [2.195.1] - 2026-11-05
 
 ### Fixes
