@@ -501,6 +501,35 @@ CLEOF
   "$SCRIPT" clear-exit-state --dir "$HC" >/dev/null 2>&1
   have "hookless commit: nothing to commit adds no empty commit" "$hcn" "$(git -C "$HC" rev-list --count HEAD)"
 
+  # The jail writes the run worktree's .git file, so it could aim the unjailed
+  # commit at a repository outside the run root. Both hops are refused: a .git
+  # file naming the outside repo, and a git dir inside the root whose commondir
+  # names it.
+  HR="$EC/redirect"
+  mkdir -p "$HR/root/run/.auto-pilot"
+  git init -q "$HR/outside"
+  git -C "$HR/outside" -c user.name=t -c user.email=t@t commit -q --allow-empty -m outside
+  hrhead="$(git -C "$HR/outside" rev-parse HEAD)"
+  hrindex="$(cksum <"$HR/outside/.git/index" 2>/dev/null || echo none)"
+  printf -- '---\nrun_id: hr\nexit_reason: deadline\nexit_reason_at: 1\nexit_reason_detail: x\n---\n' \
+    >"$HR/root/run/.auto-pilot/RUN.md"
+  printf 'gitdir: %s/outside/.git\n' "$HR" >"$HR/root/run/.git"
+  hrout="$("$SCRIPT" clear-exit-state --dir "$HR/root/run" 2>&1)"
+  have "hookless commit [redirect]: a .git file naming an outside repo is refused" "$hrhead" \
+    "$(git -C "$HR/outside" rev-parse HEAD)"
+  have "hookless commit [redirect]: the outside index is untouched" "$hrindex" \
+    "$(cksum <"$HR/outside/.git/index" 2>/dev/null || echo none)"
+  have "hookless commit [redirect]: the refusal is reported" 'run-state commit failed' "$hrout"
+  hrhead="$(git -C "$HR/outside" rev-parse HEAD)"
+  mkdir -p "$HR/root/gd"
+  printf '%s/outside/.git\n' "$HR" >"$HR/root/gd/commondir"
+  printf 'ref: refs/heads/main\n' >"$HR/root/gd/HEAD"
+  printf '%s/root/run/.git\n' "$HR" >"$HR/root/gd/gitdir"
+  printf 'gitdir: %s/root/gd\n' "$HR" >"$HR/root/run/.git"
+  "$SCRIPT" clear-exit-state --dir "$HR/root/run" >/dev/null 2>&1
+  have "hookless commit [redirect]: a commondir naming an outside repo is refused" "$hrhead" \
+    "$(git -C "$HR/outside" rev-parse HEAD)"
+
   # --- a declared NON-terminal reason removes a pre-existing done-sentinel --------
   # Driven through the REAL wrapper: a run whose earlier life left a `done` sentinel
   # (a torn-down run a human --resume'd) declares `continuing` — a live run must not

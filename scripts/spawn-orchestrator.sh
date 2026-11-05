@@ -3825,6 +3825,22 @@ _hookless_commit() {
   local -a g=(git -C "$dir" -c core.hooksPath=/dev/null -c core.fsmonitor=false
     -c user.name="$who" -c user.email="auto-pilot@localhost")
   "${g[@]}" rev-parse -q --git-dir >/dev/null || return 1
+  # The jail writes <dir>/.git too, so it could point this commit at a repository
+  # outside the run root (the main checkout's, say). Commit only into a git dir
+  # and common dir under <dir>'s parent, which for a run worktree is the run root.
+  local root d c
+  root="$(canonicalize "$(dirname "$dir")" 2>/dev/null)" || return 1
+  for d in --git-dir --git-common-dir; do
+    c="$("${g[@]}" rev-parse --path-format=absolute "$d")" || return 1
+    c="$(canonicalize "$c" 2>/dev/null)" || return 1
+    case "$c" in
+      "$root" | "$root"/*) ;;
+      *)
+        echo "spawn-orchestrator: refusing to commit into $c, outside $root (fail-closed)" >&2
+        return 1
+        ;;
+    esac
+  done
   # An unborn branch (no commit yet) gets a root commit.
   parent="$("${g[@]}" rev-parse -q --verify HEAD)" || parent=""
   ref="$("${g[@]}" symbolic-ref -q HEAD)" || ref=HEAD

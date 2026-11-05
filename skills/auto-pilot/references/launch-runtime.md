@@ -632,8 +632,9 @@ The plugin's own un-jailed git keeps to commands that run nothing:
 
 - **The supervisor** reads refs (`rev-parse`, `log --format`, `show`), and its
   halt commits through plumbing that runs no hook, filter or signing program
-  (`_hookless_commit` in `spawn-orchestrator.sh`). `clear-exit-state` commits
-  the same way.
+  (`_hookless_commit` in `spawn-orchestrator.sh`), and only into a repository
+  inside the run root, so a rewritten `.git` file cannot aim it at your main
+  checkout. `clear-exit-state` commits the same way.
 - **`--resume`** runs the doctor, which checks out, resets and removes
   worktrees, inside the run's own jail through `spawn-orchestrator.sh
   jail-run` ([`resume.md`](resume.md)). Pre-flight's freshness check queries the
