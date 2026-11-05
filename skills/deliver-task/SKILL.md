@@ -263,10 +263,10 @@ report one as `claim refused:`.
 
 ## 3. Do (implement + verify)
 
-With the base fetched (step 1), the claim held, and the work branch checked out.
-Under `--run-state` that is its own worktree (never the run worktree), placed by
-`scripts/task-worktree.sh`, entered for steps 3–6 with absolute run-state paths,
-and left with `ExitWorktree` (`keep`): [`references/task-worktree.md`](references/task-worktree.md).
+Start with the base fetched (step 1), the claim held, and the work branch checked out.
+Under `--run-state` the branch is in its own worktree (never the run worktree), placed by
+`scripts/task-worktree.sh`, entered for steps 3–6 once the `--run-state` and `--questions`
+paths are absolute, and left with `ExitWorktree` (`keep`) when the task ends: [`references/task-worktree.md`](references/task-worktree.md).
 
 1. **Route the worker.** Read the task's **content** first — the card body
    (`repo-pr`) or the issue description (tracker) — and pass _that_ (not the bare

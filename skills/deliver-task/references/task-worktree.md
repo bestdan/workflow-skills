@@ -58,5 +58,5 @@ worktree with `cd <path> && …` or `git -C <path>`.
 When the task ends (hand-off, park or bail), return with `ExitWorktree` using
 `keep`. That puts the session back in the directory it was in before
 `EnterWorktree`, which under `/auto-pilot` is the run worktree. Do not use
-`remove`: hand-off still needs the branch. Clear the worktree at hand-off with
-`scripts/worktree-remove.sh <path>` once the branch is pushed.
+`ExitWorktree`'s `remove`: hand-off still needs the branch. Once the branch is
+pushed, clear the worktree at hand-off with `scripts/worktree-remove.sh <path>`.
