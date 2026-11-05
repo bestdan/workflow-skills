@@ -12,9 +12,9 @@ or missing any of its three lines, is still listed, as `brief missing`.
 Stacks: a PR whose base branch is another open PR's head branch sits on top of
 it. Chains are built over every open PR, drafts included, so a stack reads
 whole: a member that is not waiting appears as one line, `auto tier, lands
-itself` or `draft`. Every member is tiered against the policy on the branch the
-stack lands on, its bottom PR's base, where the lander would read its own base
-and find none. A stack is shown only when one of its members is waiting.
+itself` or `draft`. Every non-draft member is tiered against the policy on
+the branch the stack lands on, its bottom PR's base, where the lander would
+read its own base and find none. A stack is shown only when one of its members is waiting.
 Members are ordered bottom first, and stacks and single PRs by their lowest PR
 number.
 
