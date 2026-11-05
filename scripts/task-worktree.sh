@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
 # Check a task's work branch out in its own worktree AT THE WorktreeCreate
-# HOOK'S LAYOUT (<root>/<repo>/<name> on <prefix><name>), so a later
-# `/co-review --non-interactive` can reach it.
+# HOOK'S LAYOUT (<root>/<repo>/<name> on <prefix><name>), so an unattended
+# session can enter it, and `/co-review --non-interactive` can reach it.
 #
 #   scripts/task-worktree.sh --ref <branch> [--remote <name>]
 #
 # Why the layout matters. Under /auto-pilot the run worktree's HEAD must
 # stay on the run-state branch, so /deliver-task holds the work branch in a
-# second worktree. Co-review's working-directory pre-flight then reads
-# `foreign`, and scripts/reach-pr-branch.sh routes it by WHERE that worktree
-# sits: at the hook's layout it returns `enter-name`, which `EnterWorktree`
-# takes with no prompt; anywhere else it returns `enter-path`, which needs an
-# approval nobody is there to give, so the unattended review ends before any
-# reviewer runs. A worktree placed by this script always yields `enter-name`.
+# second worktree and enters it with `EnterWorktree` by name. The hook hands
+# back only a worktree at its own layout with no prompt; anywhere else the
+# entry needs `path`, which needs an approval nobody is there to give. The same
+# rule decides co-review's reach from elsewhere: scripts/reach-pr-branch.sh
+# returns `enter-name` for a holder at the layout and `enter-path` (which ends
+# an unattended review) otherwise. A worktree placed by this script always
+# yields `enter-name`.
 #
 # Run from inside the repo (any of its worktrees). Prints exactly one contract
 # line to stdout; git chatter goes to stderr. Every path value is
@@ -111,6 +112,8 @@ holder=$(printf '%s\n' "$worktrees" | awk -v want="$ref" '
 ')
 # A prunable entry still registers the branch, so `git worktree add` would
 # refuse it ("already used by worktree"). Its directory is gone, so prune.
+# Prune is repo-wide: it drops every unlocked entry whose directory is gone,
+# not only this ref's. A locked worktree is never pruned.
 stale=$(printf '%s\n' "$worktrees" | awk -v want="$ref" '
   /^worktree / { branch = "" }
   /^branch /   { branch = substr($0, 8); sub(/^refs\/heads\//, "", branch) }

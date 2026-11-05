@@ -3,7 +3,8 @@
 Under `/auto-pilot` the run worktree's `HEAD` stays on the run-state branch for
 the whole run ([`../../auto-pilot/references/run-state.md`](../../auto-pilot/references/run-state.md)
 "Run worktree HEAD invariant"), so the work branch needs a worktree of its own.
-**Where** that worktree sits decides whether step 5's co-review can reach it.
+**Where** that worktree sits decides whether an unattended session can enter
+it at all.
 
 ## Place it with the script, right after the claim
 
@@ -14,10 +15,11 @@ the whole run ([`../../auto-pilot/references/run-state.md`](../../auto-pilot/ref
 `<branch>` is the work branch the claim acquired (gh-issue: the
 `gh-issue-claim.py branch-name` value). The script checks it out at the
 `WorktreeCreate` hook's layout, `<worktree root>/<repo>/<name>` on
-`<prefix><name>`, and prints one `TASK_WORKTREE:` line. Only at that layout can
-co-review reach the branch unattended: anywhere else its router needs an
-approval no one is there to give, and the review ends before any reviewer runs
-(the script's header has the detail). Coder **worker** worktrees
+`<prefix><name>`, and prints one `TASK_WORKTREE:` line. Only at that layout
+does `EnterWorktree` by name hand the worktree back with no prompt; anywhere
+else entering it needs an approval no one is there to give. The same rule is
+what lets co-review's router reach the branch by name from another tree (the
+script's header has the detail). Coder **worker** worktrees
 (orchestrate-coders) are separate and may sit anywhere, `<run root>/workers/`
 included; only the work branch's own worktree has to be at the layout.
 
