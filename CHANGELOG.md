@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.199.0] - 2026-11-05
+
+### Features
+
+- morning digest of human-tier PRs [#1321] (#1411) (ef80bab)
+
 ## [2.198.0] - 2026-11-05
 
 ### Features
