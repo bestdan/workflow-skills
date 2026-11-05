@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.197.0] - 2026-11-05
+
+### Features
+
+- run the shadow lander at hand-off [#1318] (#1406) (5777880)
+
 ## [2.196.0] - 2026-11-05
 
 ### Features
