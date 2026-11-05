@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.197.1] - 2026-11-05
+
+### Fixes
+
+- apply #1399 round-3 review follow-ups [#1396] (#1408) (bd1bd51)
+
 ## [2.197.0] - 2026-11-05
 
 ### Features
