@@ -207,6 +207,19 @@ mode if denied (finding #20 / task 12):
 | `/tmp/claude-<N>/…` + `-cwd` file | its per-project/per-session scratch + cwd **tree**, and the cwd file | the Bash tool **EPERMs before running anything** — every call reports exit 1             |
 | `~/.claude/session-env/<session>` | the per-session env dir it `mkdir`s on startup                       | same — the Bash tool never executes the command at all                                   |
 
+A fourth grant is not the harness's own but every shell's: **here-document
+temp files** (#1396). `/bin/bash` 3.2 writes a here-doc or here-string to
+`/var/tmp/sh-thd-<n>` and zsh to `/tmp/zsh<random>`, and both ignore `TMPDIR`.
+Denied, every `<<` and `<<<` in the jail fails with `cannot create temp file
+for here document`, which is how the `WorktreeCreate` hook failed in-jail.
+`render-profile` grants those names only, plus the root-owned `/var/tmp`
+directory itself as a literal, because bash checks `access(W_OK)` on it before
+writing. No other file in `/var/tmp`, and no `/tmp` file outside these names
+and the harness grants above, is writable. Because the grant matches by name,
+a jailed process could also write a same-uid un-jailed shell's here-doc file
+during its brief write-then-reopen window; that is an accepted relaxation (see
+`emit_harness_runtime` in `scripts/spawn-orchestrator.sh`).
+
 The middle and last rows are the ones that **poison verification**: the Bash
 tool dies on its own `mkdir` _before_ the command ever runs, so **every Bash
 call reports exit 1 regardless of the command's real outcome**. An agent (or

@@ -89,7 +89,8 @@ STRICT_FILES=(scripts/research-spike.py)
 # co-review-ledger-sync.py the same way by commands/co-review-stats.md and
 # commands/doctor.md, co-review-stamp.py the same way by
 # skills/co-review/references/stamping.md, co-review-status.py the same way by
-# skills/co-review/references/status.md, land-pr.py, the lander, which runs
+# skills/co-review/references/status.md, co-review-carry.py the same way by
+# the same file, land-pr.py, the lander, which runs
 # from the installed plugin, and merge-tier.py and co-review-evidence.py, which
 # it loads from there, merge-audit.py, the weekly audit, which loads land-pr.py
 # the same way, tier-forecast.py, which /promote-tasks runs from the installed
@@ -109,6 +110,7 @@ CONSUMER_FILES=(
   scripts/co-review-stamp.py
   scripts/co-review-evidence.py
   scripts/co-review-status.py
+  scripts/co-review-carry.py
   scripts/merge-tier.py
   scripts/land-pr.py
   scripts/merge-audit.py

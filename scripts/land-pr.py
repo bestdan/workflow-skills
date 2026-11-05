@@ -22,7 +22,9 @@ not is a hold reason of its own:
    consult-decided technical call below the policy's `consult_bar` (default
    85), no preference call, no stack-reaching call, and no recommendation of
    another round. merge-tier.py reads no evidence, so these demotions live here.
-4. The `co-review` commit status on the head is `success`.
+4. The `co-review` commit status on the head is `success`. A status
+   co-review-carry.py carried from the reviewed head to the round's fix commit
+   counts, and the verdict comment names the head it was carried from.
 5. Every check on the head is green (success, neutral or skipped), at least
    one has reported, and every check the base branch's rulesets require has
    reported. `co-review` is left to step 4.
@@ -39,11 +41,16 @@ Usage:
   python3 scripts/land-pr.py <pr> --repo <owner/name> [--dry-run]
 
 `--dry-run` prints `COMMENT: <created|updated|unchanged> <url>` (or `COMMENT:
-error reason=...`), then a final `LAND: would-land` or `LAND: hold
-reasons=<r1; r2>` line; exit 0 for either verdict, 1 when the comment could
-not be posted. Without it, a landing prints `LABEL: ...` and `COMMENT: ...`
-lines, then `LAND: landed sha=<merge sha>`; a hold prints only `LAND: hold
-reasons=...`; exit 0 for either. A usage error exits 2.
+error reason=...`), then a `TIER:` line, then a final `LAND: would-land` or
+`LAND: hold reasons=<r1; r2>` line; exit 0 for either verdict, 1 when the
+comment could not be posted. Without it, a landing prints `LABEL: ...` and
+`COMMENT: ...` lines, then `LAND: landed sha=<merge sha>`; a hold prints only
+`LAND: hold reasons=...`; exit 0 for either. A usage error exits 2.
+
+`TIER: auto`, `TIER: human reasons=<r1; r2>` or `TIER: unknown reason=<why>` is
+the tier with AGENT_LAND taken as on: whether the PR is one that lands itself
+once landing is switched on, which the hand-off records in the tracker. While
+AGENT_LAND is off, the LAND line holds every PR on that alone.
 """
 
 from __future__ import annotations
@@ -341,11 +348,16 @@ def check_holds(statuses, runs, required):
 
 
 def judge(repo, pr):
-    """(would_land, reasons, head) for one PR; reasons explain either verdict."""
+    """(would_land, reasons, head, tier_line) for one PR.
+
+    reasons explain either verdict; tier_line is the `TIER:` line, the tier
+    with AGENT_LAND taken as on.
+    """
     try:
         data = read_pr(repo, pr)
     except ReadError as exc:
-        return False, [f"cannot read the PR: {exc}"], None
+        reason = f"cannot read the PR: {exc}"
+        return False, [reason], None, tier_line("unknown", [reason])
     head, base = data["headRefOid"], data.get("baseRefName") or ""
     holds = []
     if data.get("state") != "OPEN":
@@ -360,7 +372,9 @@ def judge(repo, pr):
         policy_text = read_policy(repo, base)
     except ReadError as exc:
         holds.append(f"tier not computed: {exc}")
+        line = tier_line("unknown", [f"tier not computed: {exc}"])
     else:
+        line = tier_line(*tier(data, files, policy_text, "on")[:2])
         agent_land, land_holds = read_agent_land(repo)
         holds.extend(land_holds)
         verdict, tier_reasons, policy = tier(data, files, policy_text, agent_land)
@@ -369,6 +383,7 @@ def judge(repo, pr):
         if policy is not None:
             consult_bar = policy["consult_bar"]
 
+    record = None
     evidence_note = None
     try:
         record = evidence_mod.read_evidence(repo, pr, head)
@@ -405,17 +420,32 @@ def judge(repo, pr):
             holds.extend(check_holds(statuses, runs, required))
 
     if holds:
-        return False, holds, head
+        return False, holds, head, line
+    # A carried record names the head the round actually read, so the comment
+    # can say the success on this head is the round's verdict moved one fix
+    # commit forward rather than a review of it.
+    origin = (record or {}).get(evidence_mod.stamp.CARRIED_FROM)
+    carried = f" (carried from {origin[:7]})" if origin else ""
     return (
         True,
         [
             *tier_reasons,
             evidence_note,
-            f"`co-review` success on {head[:7]}",
+            f"`co-review` success on {head[:7]}{carried}",
             "checks green",
         ],
         head,
+        line,
     )
+
+
+def tier_line(verdict, reasons):
+    flat = "; ".join(" ".join(r.split()) for r in reasons)
+    if verdict == "auto":
+        return "TIER: auto"
+    if verdict == "human":
+        return f"TIER: human reasons={flat}"
+    return f"TIER: unknown reason={flat}"
 
 
 # --- the comment ------------------------------------------------------------
@@ -579,7 +609,7 @@ def land_pr(repo, pr):
     if agent_land != "on":
         print(hold_line(land_holds or ["AGENT_LAND is off or unset"]))
         return 0
-    would_land, reasons, head = judge(repo, pr)
+    would_land, reasons, head, _ = judge(repo, pr)
     if not would_land or head is None:
         print(hold_line(reasons))
         return 0
@@ -608,7 +638,7 @@ def main(argv=None):
     if not args.dry_run:
         return land_pr(args.repo, args.pr)
 
-    would_land, reasons, head = judge(args.repo, args.pr)
+    would_land, reasons, head, line = judge(args.repo, args.pr)
     code = 0
     try:
         outcome, url = post_comment(
@@ -619,6 +649,7 @@ def main(argv=None):
         code = 1
     else:
         print(f"COMMENT: {outcome} {url}".rstrip())
+    print(line)
     if would_land:
         print("LAND: would-land")
     else:

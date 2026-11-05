@@ -34,5 +34,5 @@ Symbols: ✅ pass / ran / done · 🟡 pass with suggestions · ⛔ blocking · 
 
 ## Next round
 
-**Fix commit:** <`sha` | ➖ none — nothing was applied | ➖ not applicable — `--post` changes no files>
+**Fix commit:** <`sha` · status <✅ carried to `sha` | ➖ not carried — reason | ❌ not carried — reason> | ➖ none — nothing was applied | ➖ not applicable — `--post` changes no files>
 **Recommendation:** <🔁 **another round** | ✅ **no further round** | ➖ **not applicable**> — <the reason, grounded in what the fixes changed: an interface or contract, a reconciler-authored fix, collateral edits, a test never shown to fail, or the round-over-round yield that says the review has converged>

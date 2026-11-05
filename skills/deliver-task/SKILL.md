@@ -263,7 +263,10 @@ report one as `claim refused:`.
 
 ## 3. Do (implement + verify)
 
-With the base fetched (step 1), the claim held, and the work branch checked out:
+Start with the base fetched (step 1), the claim held, and the work branch checked out.
+Under `--run-state` the branch is in its own worktree (never the run worktree), placed by
+`scripts/task-worktree.sh`, entered for steps 3–6 once the `--run-state` and `--questions`
+paths are absolute, and left with `ExitWorktree` (`keep`) when the task ends: [`references/task-worktree.md`](references/task-worktree.md).
 
 1. **Route the worker.** Read the task's **content** first — the card body
    (`repo-pr`) or the issue description (tracker) — and pass _that_ (not the bare
@@ -373,8 +376,7 @@ For an auto-pilot invocation, run the one `reserve-gate` call immediately
 before this co-review boundary. Read `co_review_mode` from the same `--run-state` at this
 step. `off` means **skip `/co-review` entirely** and record `co-review skipped (profile)` in the hand-off summary. `cheap-single` means run `/co-review
 --non-interactive --reviewer-set cheap-single`; `default` (or no `--run-state`)
-runs `/co-review --non-interactive` exactly as before. Its
-never-prompt guarantee and bounded per-class timeouts are what make it safe in an
+runs `/co-review --non-interactive` exactly as before. Its never-prompt guarantee and bounded per-class timeouts are what make it safe in an
 unattended run. **Record which reviewer classes ran / timed-out / skipped** — that
 line goes into the hand-off summary (step 7). If `/co-review` can't run **at all**
 (every reviewer unavailable, MCP/auth failure, or a pre-flight hard error that
@@ -395,12 +397,10 @@ depends on who is waiting:
 - **Otherwise** (standalone, with no `--run-state`): the work is already
   verified, so note `co-review unavailable` and proceed to hand-off.
 
-This plugin grants co-review's own scripts when this delivery was started as the
-`/deliver-task` command, and `bypassPermissions` skips the check. Reached through
-the Skill tool in `default` mode, with no user allow rule or sandbox auto-allow
-covering them, each one is denied silently under `claude -p` (measured) and is
-expected to prompt interactively (not measured). Why, and the measurement:
-[`../co-review/references/permissions.md`](../co-review/references/permissions.md#plugin-scripts).
+This plugin grants co-review's own scripts when run as the `/deliver-task` command;
+`bypassPermissions` skips the check. Via the Skill tool in `default` mode, with no allow rule or sandbox
+auto-allow, each script is denied silently under `claude -p` (measured) and should
+prompt interactively (not measured). Why: [`../co-review/references/permissions.md`](../co-review/references/permissions.md#plugin-scripts).
 
 ## 6. Iterate (bounded)
 
@@ -472,6 +472,7 @@ remaining findings and proceed — don't loop.
   co-review, and is a no-op because the issue has already left
   `status:3_started`. A viewer without write access hands off a draft; the
   handler's needs-review write alone moves the issue.
+- **Shadow landing**, never fatal: [`references/shadow-landing.md`](references/shadow-landing.md).
 - **Hand-off summary** (structured — for a human, or the `/auto-pilot` morning
   report). It ends on what the human must act on, because the end is what a
   terminal leaves on screen. In order:
@@ -479,7 +480,7 @@ remaining findings and proceed — don't loop.
      items wait in the closing section (or "nothing needs you").
   2. **What changed** — a few lines, by behavior, not by file.
   3. **Review and evidence** — reviewer classes that ran, what the rounds
-     applied, evidence paths.
+     applied, evidence paths, and the shadow lander's `LAND:` line.
   4. **Process notes** — deviations from the normal flow, worktree left in
      place. Omit when empty.
   5. **For you**, always last, numbered, highest impact first: outstanding

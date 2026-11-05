@@ -78,6 +78,81 @@ lack "profile: harness grant does not widen to a blanket ~/.claude subpath" \
 lack "profile: harness grant does not widen to a blanket /tmp subpath" \
   "(subpath \"$tmp_c\")" "$body"
 
+# --- #1396: here-document temp files. /bin/bash 3.2 writes a here-doc or
+# here-string to /var/tmp/sh-thd-<n> and zsh to /tmp/zsh<random>, both ignoring
+# TMPDIR, so without these grants every `<<`/`<<<` in the jail fails ("cannot
+# create temp file for here document") — the worktree hooks included.
+vartmp_c="$(cd /var/tmp && pwd -P)"
+have "profile: bash here-doc temp files granted by name" \
+  "(regex #\"^$vartmp_c/sh-thd-[0-9]+\$\")" "$body"
+hd_c='[A-Za-z0-9]'
+have "profile: zsh here-doc temp files granted by name (exactly six characters)" \
+  "(regex #\"^$tmp_c/zsh$hd_c$hd_c$hd_c$hd_c$hd_c$hd_c\$\")" "$body"
+have "profile: /var/tmp itself granted as a literal (bash's access(W_OK) check)" \
+  "(literal \"$vartmp_c\")" "$body"
+lack "profile: here-doc grant does not widen to a blanket /var/tmp subpath" \
+  "(subpath \"$vartmp_c\")" "$body"
+
+hdprof="$BASE/heredoc.sb"
+"$SCRIPT" render-profile --rw "$RUN_WT" --ro "$REPO_RO" --exec-dir /bin --exec-dir /usr/bin \
+  --out "$hdprof" >/dev/null 2>&1
+if [ "$SEATBELT_OK" = 1 ] && [ -f "$hdprof" ]; then
+  hd_out="$(sandbox-exec -f "$hdprof" /bin/bash -c 'sed -n 1p <<<"bash-ok"' 2>&1)"
+  if [ "$hd_out" = bash-ok ]; then
+    ok "here-doc: a /bin/bash here-string works in-jail"
+  else
+    bad "here-doc: a /bin/bash here-string works in-jail" "$hd_out"
+  fi
+  if [ -x /bin/zsh ]; then
+    hd_out="$(sandbox-exec -f "$hdprof" /bin/zsh -fc 'sed -n 1p <<<"zsh-ok"' 2>&1)"
+    if [ "$hd_out" = zsh-ok ]; then
+      ok "here-doc: a zsh here-string works in-jail"
+    else
+      bad "here-doc: a zsh here-string works in-jail" "$hd_out"
+    fi
+  else
+    skipped "here-doc: a zsh here-string works in-jail (no /bin/zsh)"
+  fi
+  # The grant is by name: any other file in /var/tmp or /tmp stays denied. Only
+  # a permission denial counts, so a wrong path cannot pass this.
+  hd_probe="so-heredoc-probe-$$"
+  if hd_err="$(sandbox-exec -f "$hdprof" /bin/bash -c 'echo x > "$1"' _ "$vartmp_c/$hd_probe" 2>&1)" \
+    || [ -e "$vartmp_c/$hd_probe" ]; then
+    bad "here-doc: another file in /var/tmp is denied in-jail"
+  else
+    case "$hd_err" in
+      *"Operation not permitted"*) ok "here-doc: another file in /var/tmp is denied in-jail" ;;
+      *) bad "here-doc: another file in /var/tmp is denied in-jail" "$hd_err" ;;
+    esac
+  fi
+  rm -f "$vartmp_c/$hd_probe"
+  # A granted name must not let the jail rewrite a read-only file through a
+  # hard link: Seatbelt refuses the link itself. Only a permission denial
+  # counts, so a missing source or an exec refusal cannot pass this.
+  echo original >"$REPO_RO/hd-ro.txt"
+  hd_link="$tmp_c/zshS$(printf '%05d' $(($$ % 100000)))"
+  # Positive control: the destination must itself be a granted name, or the
+  # link would be refused for being out of scope and this would pass anyway.
+  if hd_err="$(sandbox-exec -f "$hdprof" /usr/bin/touch "$hd_link" 2>&1)" \
+    && hd_err="$(sandbox-exec -f "$hdprof" /bin/rm "$hd_link" 2>&1)"; then
+    ok "here-doc: the hard-link destination is a granted name"
+  else
+    bad "here-doc: the hard-link destination is a granted name" "$hd_err"
+  fi
+  rm -f "$hd_link"
+  if hd_err="$(sandbox-exec -f "$hdprof" /bin/ln "$REPO_RO/hd-ro.txt" "$hd_link" 2>&1)"; then
+    bad "here-doc: a hard link from a read-only file into a granted name is denied in-jail"
+  else
+    case "$hd_err" in
+      *"Operation not permitted"*) ok "here-doc: a hard link from a read-only file into a granted name is denied in-jail" ;;
+      *) bad "here-doc: a hard link from a read-only file into a granted name is denied in-jail" "$hd_err" ;;
+    esac
+  fi
+  rm -f "$hd_link" "$REPO_RO/hd-ro.txt"
+else
+  skipped "here-doc: in-jail checks (sandbox-exec cannot apply a profile here)"
+fi
+
 # --- A1 regression: an exec symlink must resolve to its real target -----------
 # (Seatbelt matches process-exec against the resolved vnode path, not the link;
 # `command -v` on Homebrew binaries returns the symlink, so the renderer must
