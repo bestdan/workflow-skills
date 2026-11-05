@@ -236,6 +236,15 @@ class DigestTests(Base):
         self.assertNotIn("Tier: unknown", out)
         self.assertLess(out.index("middle"), out.index("top"))
 
+    def test_siblings_on_one_parent_share_a_level(self):
+        self.fake.prs = [
+            pr(60, HUMAN_FILES, brief(), base="main", head="b60"),
+            pr(62, HUMAN_FILES, brief(), base="b60", head="b62"),
+            pr(61, HUMAN_FILES, brief(), base="b60", head="b61"),
+        ]
+        _, out, _ = self.run_digest()
+        self.assertIn("## Stack: #60 → #61, #62", out)
+
     def test_a_fork_pr_headed_main_is_no_stack_parent(self):
         fork = pr(40, HUMAN_FILES, brief(), base="main", head="main")
         fork["isCrossRepository"] = True
@@ -252,7 +261,7 @@ class DigestTests(Base):
         self.fake.prs = [pr(n, AUTO_FILES) for n in range(1, digest.PR_LIMIT + 1)]
         code, _, err = self.run_digest()
         self.assertEqual(code, 0)
-        self.assertIn(f"listed the newest {digest.PR_LIMIT} open PRs", err)
+        self.assertIn(f"listed {digest.PR_LIMIT} open PRs, the limit", err)
 
     def test_a_stack_with_no_human_member_is_left_out(self):
         self.fake.prs = [
@@ -318,13 +327,16 @@ class PostTests(Base):
     def test_updates_the_marked_issue_in_place(self):
         url = f"https://github.com/{REPO}/issues/12"
         self.fake.issues = [
-            {"number": 9, "body": "no marker here", "url": "u9"},
+            # Quotes the marker mid-body: a human's issue, never overwritten.
+            {"number": 9, "body": f"see {digest.MARKER} here", "url": "u9"},
+            {"number": 15, "body": digest.MARKER + "\nnewer copy", "url": "u15"},
             {"number": 12, "body": digest.MARKER + "\nold", "url": url},
         ]
         code, out, err = self.run_digest("--post")
+        self.assertEqual(self.fake.issues[1]["body"], digest.MARKER + "\nnewer copy")
         self.assertEqual(code, 0, err)
         self.assertEqual(err.splitlines()[-1], f"DIGEST: updated {url}")
-        self.assertEqual(self.fake.issues[1]["body"], out)
+        self.assertEqual(self.fake.issues[2]["body"], out)
         self.assertFalse(any(c[:2] == ["issue", "create"] for c in self.fake.calls))
 
     def test_an_identical_body_is_unchanged(self):

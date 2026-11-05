@@ -13,9 +13,9 @@ Stacks: a PR whose base branch is another open PR's head branch sits on top of
 it. Chains are built over every open PR, drafts included, so a stack reads
 whole: a member that is not waiting appears as one line, `auto tier, lands
 itself` or `draft`. Every non-draft member is tiered against the policy on
-the branch the stack lands on, its bottom PR's base, where the lander would
-read its own base and find none. A stack is shown only when one of its members is waiting.
-Members are ordered bottom first, and stacks and single PRs by their lowest PR
+the branch the stack lands on, its bottom PR's base: an upper PR's own base is
+another PR's branch, which may predate the policy. A stack is shown only when
+one of its members is waiting. Members are ordered bottom first, and stacks and single PRs by their lowest PR
 number.
 
 Usage:
@@ -59,7 +59,7 @@ ReadError = land.ReadError
 
 MARKER = "<!-- morning-digest v1 -->"
 ISSUE_TITLE = "Morning digest"
-PR_LIMIT = 100
+PR_LIMIT = 1000
 BRIEF_HEADING = "## Decision brief"
 FIELDS = ("Changed", "Judge", "A no invalidates")
 FIELD_RE = re.compile(r"^\s*[-*]\s+\*\*(" + "|".join(FIELDS) + r"):\*\*\s*(.*)$")
@@ -115,7 +115,7 @@ def list_open_prs(repo):
         raise ReadError("gh pr list: expected a list")
     if len(prs) >= PR_LIMIT:
         print(
-            f"warning: listed the newest {PR_LIMIT} open PRs; older ones are left out",
+            f"warning: listed {PR_LIMIT} open PRs, the limit; older ones may be left out",
             file=sys.stderr,
         )
     return [p for p in prs if isinstance(p, dict)]
@@ -126,7 +126,7 @@ def tier_of(repo, pr, base, policies):
 
     `base` is the branch whose policy applies: the base of the stack's bottom
     PR, the branch the whole stack lands on. A stack's upper PRs target branches
-    that usually carry no policy file, and the lander holds them on that.
+    that may carry no policy file, and the lander holds them on that.
     """
     try:
         data = land.read_pr(repo, pr["number"])
@@ -175,7 +175,9 @@ def stacks(prs):
             d, p = d + 1, up
         return d
 
-    out = [sorted(g, key=lambda p: (depth(p), p["number"])) for g in groups.values()]
+    for p in prs:
+        p["_depth"] = depth(p)
+    out = [sorted(g, key=lambda p: (p["_depth"], p["number"])) for g in groups.values()]
     return sorted(out, key=lambda g: min(p["number"] for p in g))
 
 
@@ -221,7 +223,11 @@ def render(prs, today):
             lines += [f"## #{pr['number']} {_flat(pr.get('title'))}", ""]
             lines += pr_lines(pr)
             continue
-        chain = " → ".join(f"#{p['number']}" for p in group)
+        # Siblings on one parent share a level: "#a → #b, #c", not a chain.
+        levels: dict = {}
+        for p in group:
+            levels.setdefault(p["_depth"], []).append(f"#{p['number']}")
+        chain = " → ".join(", ".join(v) for _, v in sorted(levels.items()))
         lines.append(f"## Stack: {chain}")
         for pr in group:
             lines += ["", f"### #{pr['number']} {_flat(pr.get('title'))}", ""]
@@ -261,7 +267,7 @@ def find_issue(repo):
         for i in page:
             if not isinstance(i, dict) or "pull_request" in i:
                 continue
-            if MARKER in (i.get("body") or ""):
+            if (i.get("body") or "").lstrip().startswith(MARKER):
                 found.append({**i, "url": i.get("html_url") or ""})
     return min(found, key=lambda i: i["number"]) if found else None
 
