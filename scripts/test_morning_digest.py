@@ -84,8 +84,6 @@ class FakeGh:
             data = {k: v for k, v in p.items() if k != "_files"}
             data.update(state="OPEN", headRefOid="a" * 40, labels=[])
             return 0, json.dumps(data), ""
-        if args[:2] == ["issue", "list"]:
-            return 0, json.dumps(self.issues), ""
         if args[:2] == ["issue", "edit"]:
             issue = next(i for i in self.issues if i["number"] == int(args[2]))
             issue["body"] = self.bodies[-1]
@@ -98,6 +96,14 @@ class FakeGh:
         if args[:2] == ["issue", "pin"]:
             return 0, "", ""
         path = next(a for a in args if a.startswith("repos/"))
+        if path == f"repos/{REPO}/issues?state=open&per_page=100":
+            # REST lists PRs as issues too; one carries the marker as a decoy.
+            items = [
+                {"number": i["number"], "body": i["body"], "html_url": i["url"]}
+                for i in self.issues
+            ]
+            pr_item = {"number": 2, "body": digest.MARKER, "pull_request": {}}
+            return 0, json.dumps([items, [pr_item]]), ""
         if path.endswith("/files"):
             p = self.by_number(path.split("/")[4])
             files = [dict(f, status="modified") for f in p["_files"]]
@@ -230,6 +236,24 @@ class DigestTests(Base):
         self.assertNotIn("Tier: unknown", out)
         self.assertLess(out.index("middle"), out.index("top"))
 
+    def test_a_fork_pr_headed_main_is_no_stack_parent(self):
+        fork = pr(40, HUMAN_FILES, brief(), base="main", head="main")
+        fork["isCrossRepository"] = True
+        self.fake.prs = [
+            fork,
+            pr(41, HUMAN_FILES, brief()),
+            pr(42, HUMAN_FILES, brief()),
+        ]
+        _, out, _ = self.run_digest()
+        self.assertNotIn("Stack", out)
+        self.assertIn("3 PRs wait on the owner.", out)
+
+    def test_a_full_pr_list_warns_that_older_prs_are_left_out(self):
+        self.fake.prs = [pr(n, AUTO_FILES) for n in range(1, digest.PR_LIMIT + 1)]
+        code, _, err = self.run_digest()
+        self.assertEqual(code, 0)
+        self.assertIn(f"listed the newest {digest.PR_LIMIT} open PRs", err)
+
     def test_a_stack_with_no_human_member_is_left_out(self):
         self.fake.prs = [
             pr(30, AUTO_FILES, base="main", head="b30"),
@@ -293,11 +317,14 @@ class PostTests(Base):
 
     def test_updates_the_marked_issue_in_place(self):
         url = f"https://github.com/{REPO}/issues/12"
-        self.fake.issues = [{"number": 12, "body": digest.MARKER + "\nold", "url": url}]
+        self.fake.issues = [
+            {"number": 9, "body": "no marker here", "url": "u9"},
+            {"number": 12, "body": digest.MARKER + "\nold", "url": url},
+        ]
         code, out, err = self.run_digest("--post")
         self.assertEqual(code, 0, err)
         self.assertEqual(err.splitlines()[-1], f"DIGEST: updated {url}")
-        self.assertEqual(self.fake.issues[0]["body"], out)
+        self.assertEqual(self.fake.issues[1]["body"], out)
         self.assertFalse(any(c[:2] == ["issue", "create"] for c in self.fake.calls))
 
     def test_an_identical_body_is_unchanged(self):

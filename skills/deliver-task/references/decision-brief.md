@@ -1,7 +1,7 @@
 # Decision brief in the PR body
 
-Step 4 of `/deliver-task` writes a three-line decision brief into every PR
-body. `scripts/morning-digest.py` collects the briefs of the open human-tier
+Step 4 of `/deliver-task` writes a three-line decision brief into the PR body
+of every PR in a repo with a merge policy (see "When"). `scripts/morning-digest.py` collects the briefs of the open human-tier
 PRs into one digest, so the owner can decide a whole stack in one pass instead
 of opening each PR. The script parses the section, so its shape is fixed.
 
@@ -33,7 +33,11 @@ onto an indented continuation line.
 
 ## When
 
-Write it with the PR body in step 4, for every PR. An `auto`-tier PR's brief is
-harmless, and the tier can change when a round adds a file. At hand-off,
+Write it with the PR body in step 4, for every PR in a repo that has
+`.github/merge-policy.yml` on the PR's base branch. That file marks a repo whose
+owner reads the digest. Where it is absent, as in a repo another team reviews,
+skip the section: its template governs the body, and the how-to-evaluate steps
+still carry the same judgment. An `auto`-tier PR's brief is harmless, and the
+tier can change when a round adds a file. At hand-off,
 refresh it if the co-review rounds changed what the PR does. A PR without a
 complete brief still appears in the digest, marked `brief missing`.

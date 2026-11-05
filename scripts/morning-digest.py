@@ -106,13 +106,18 @@ def list_open_prs(repo):
             "--state",
             "open",
             "--json",
-            "number,title,url,body,baseRefName,headRefName,isDraft",
+            "number,title,url,body,baseRefName,headRefName,isDraft,isCrossRepository",
             "--limit",
             str(PR_LIMIT),
         ]
     )
     if not isinstance(prs, list):
         raise ReadError("gh pr list: expected a list")
+    if len(prs) >= PR_LIMIT:
+        print(
+            f"warning: listed the newest {PR_LIMIT} open PRs; older ones are left out",
+            file=sys.stderr,
+        )
     return [p for p in prs if isinstance(p, dict)]
 
 
@@ -145,7 +150,8 @@ def tier_of(repo, pr, base, policies):
 
 def stacks(prs):
     """Groups of PRs chained by base onto head, bottom first, by lowest number."""
-    by_head = {p.get("headRefName"): p for p in prs}
+    # A fork PR's headRefName is a bare name too, often `main`; it is no parent.
+    by_head = {p.get("headRefName"): p for p in prs if not p.get("isCrossRepository")}
 
     def parent(p):
         up = by_head.get(p.get("baseRefName"))
@@ -243,25 +249,20 @@ def build(repo, today):
 
 
 def find_issue(repo):
-    issues = land.gh_json(
-        [
-            "issue",
-            "list",
-            "--repo",
-            repo,
-            "--state",
-            "open",
-            "--search",
-            "morning-digest v1 in:body",
-            "--json",
-            "number,body,url",
-        ]
-    )
-    if not isinstance(issues, list):
-        raise ReadError("gh issue list: expected a list")
-    found = [
-        i for i in issues if isinstance(i, dict) and MARKER in (i.get("body") or "")
-    ]
+    """The lowest-numbered open issue carrying the marker, or None.
+
+    Lists open issues through REST rather than search: the search index lags a
+    just-created issue, and a miss here creates and pins a second one.
+    """
+    found = []
+    for page in land._pages([f"repos/{repo}/issues?state=open&per_page=100"]):
+        if not isinstance(page, list):
+            raise ReadError("issues: a page is not a list")
+        for i in page:
+            if not isinstance(i, dict) or "pull_request" in i:
+                continue
+            if MARKER in (i.get("body") or ""):
+                found.append({**i, "url": i.get("html_url") or ""})
     return min(found, key=lambda i: i["number"]) if found else None
 
 

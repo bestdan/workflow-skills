@@ -361,8 +361,8 @@ rule below applies. Standalone
   above). The title grammar is the `agent-guidance` plugin's
   `portable.md` (`Git:` bullet), not this file.
 - **PR body:** step 3's evidence (check output, screenshots, artifact paths),
-  **how-to-evaluate steps** for any human-judgment item, and the **decision
-  brief**: [`references/decision-brief.md`](references/decision-brief.md).
+  **how-to-evaluate steps** for any human-judgment item, and, where a merge
+  policy exists, the **decision brief** ([`references/decision-brief.md`](references/decision-brief.md)).
 - If the repo's review bots won't run on a **draft** PR, record
   `bot review skipped (draft)` rather than waiting — step 5 falls back to the
   reviewers that can run.
