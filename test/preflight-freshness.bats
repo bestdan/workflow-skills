@@ -77,6 +77,16 @@ advance_remote() {
   [ ! -e "$TEST_TMPDIR/planted" ]
 }
 
+@test "--isolated-remote refuses a url that reads as an option" {
+  printf '#!/bin/sh\ntouch "%s/planted"\nexec git-upload-pack "$@"\n' "$TEST_TMPDIR" >"$TEST_TMPDIR/up.sh"
+  chmod +x "$TEST_TMPDIR/up.sh"
+  git -C "$TEST_TMPDIR/clone" config remote.origin.url "--upload-pack=$TEST_TMPDIR/up.sh"
+  freshness --isolated-remote
+  assert_failure 3
+  assert_output --partial 'FRESHNESS: unknown reason=unsafe-url'
+  [ ! -e "$TEST_TMPDIR/planted" ]
+}
+
 @test "--isolated-remote still sees a stale base" {
   advance_remote
   freshness --isolated-remote

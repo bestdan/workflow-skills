@@ -74,6 +74,19 @@ if command -v git >/dev/null 2>&1; then
   have "handoff [run clone]: gives the fetch-out recovery" "git fetch $HO/rcroot/rcm.git <branch>:<branch>" "$rcbody"
   have "handoff [run clone]: tears down with rm -rf" "rm -rf $HO/rcroot" "$rcbody"
   lack "handoff [run clone]: never sends you to git in the run root" 'worktree-remove.sh' "$rcbody"
+  # The jail names the clone: a name a shell would act on never reaches the
+  # paste-ready fetch command.
+  mkdir -p "$HO/rcevil"
+  # shellcheck disable=SC2016 # the $( ) is the hostile name, never expanded
+  evil="$HO/rcevil/x\$(touch pwned).git"
+  git clone -q --bare "$HO/rcm" "$evil" 2>/dev/null
+  git -C "$evil" worktree add -q "$HO/rcevil/rc" 2>/dev/null
+  ho_run "$HO/rcevil/rc"
+  "$SCRIPT" handoff --dir "$HO/rcevil/rc" --reason done --out-dir "$HO/rcevil-notes" >/dev/null 2>&1
+  evbody="$(cat "$HO/rcevil-notes/"*-auto-pilot-*.md 2>/dev/null)"
+  have "handoff [hostile clone name]: still warns the run root is untrusted" 'is untrusted' "$evbody"
+  lack "handoff [hostile clone name]: the name never reaches the fetch command" 'touch pwned' "$evbody"
+  have "handoff [hostile clone name]: a generic fetch instruction instead" 'git fetch <the bare *.git repo in the run root>' "$evbody"
 fi
 
 # A later terminal exit for the same run supersedes, never adds a second note.

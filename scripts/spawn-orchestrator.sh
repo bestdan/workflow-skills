@@ -4181,11 +4181,18 @@ write_handoff() {
     printf '\n## Next steps\n\n%s\n\n' "$next"
     printf -- '- **Run worktree:** `%s`, on branch `auto-pilot/%s`%s.\n' "$dir" "$run_id" "${base:+, based on \`$base\`}"
     printf -- "- **Run state:** \`.auto-pilot/RUN.md\` there is the task graph and each task's phase; \`.auto-pilot/orchestrator.log\` is the forensic log.\n"
-    local hclone
+    local hclone hsrc
     if hclone="$(_check_run_clone "$dir" 2>/dev/null)"; then
       # The jail wrote this whole run root, so git run inside it can run code the
-      # jail planted (launch-runtime.md §5). A fetch from it runs none.
-      printf -- "- **The run root \`%s\` is untrusted:** the jail could write all of it, so don't run git inside it. Fetch a branch you need from the main checkout: \`git fetch %s <branch>:<branch>\`.\n" "$(dirname "$dir")" "$hclone"
+      # jail planted (launch-runtime.md §5). A fetch from it runs none. The jail
+      # also names the clone, so its path goes into a command meant for pasting
+      # only when the name holds nothing a shell would act on.
+      hsrc="<the bare *.git repo in the run root>"
+      case "$(basename "$hclone")" in
+        *[!A-Za-z0-9._-]*) ;;
+        *.git) hsrc="$hclone" ;;
+      esac
+      printf -- "- **The run root \`%s\` is untrusted:** the jail could write all of it, so don't run git inside it. Fetch a branch you need from the main checkout: \`git fetch %s <branch>:<branch>\`.\n" "$(dirname "$dir")" "$hsrc"
       printf -- "- **Teardown:** once nothing above needs it, \`rm -rf %s\`; the main checkout keeps no entry for it, and the \`auto-pilot/%s\` branch is never merged.\n\n" "$(dirname "$dir")" "$run_id"
     else
       printf -- "- **Teardown:** once nothing above needs the run worktree, remove it with the plugin's \`scripts/worktree-remove.sh\`; the \`auto-pilot/%s\` branch is never merged.\n\n" "$run_id"

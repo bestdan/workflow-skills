@@ -88,9 +88,17 @@ if [ "$isolated" = 1 ]; then
   # system config apply to it.
   # The raw value: `remote get-url` would apply the repo's own insteadOf rules.
   url="$(git config --get "remote.$remote.url")" || die "remote '$remote' has no url"
+  # A url that reads as an option (--upload-pack=<cmd>) would run <cmd>.
+  case "$url" in
+    -*)
+      echo "preflight-freshness: refusing remote '$remote': its url starts with '-'" >&2
+      echo "FRESHNESS: unknown reason=unsafe-url"
+      exit 3
+      ;;
+  esac
   iso="$(mktemp -d "${TMPDIR:-/tmp}/freshness.XXXXXX")" || die "mktemp failed"
   trap 'rm -rf "$iso"' EXIT
-  ls_remote() { (cd "$iso" && GIT_CEILING_DIRECTORIES="$(dirname "$iso")" git ls-remote --heads "$url" "$@"); }
+  ls_remote() { (cd "$iso" && GIT_CEILING_DIRECTORIES="$(dirname "$iso")" git ls-remote --heads -- "$url" "$@"); }
 else
   ls_remote() { git ls-remote --heads "$remote" "$@"; }
 fi
