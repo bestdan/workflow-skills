@@ -172,6 +172,14 @@ CLEOF
   lo="$(WORKFLOW_SKILLS_WORKTREE_ROOT="$HO/lr-root" "$SCRIPT" launch --dry-run --workdir "$HO/lr-run" \
     --out-script "$HO/lr.sh" --out-plist "$HO/lr.plist" --label com.x --handle "$HO/lr-h.txt" 2>&1)"
   have "launch: resolves the handoff dir from the main checkout's name" "handoff dir   -> $HO/lr-root/lr-main/.handoffs" "$lo"
+  # A run clone: the common dir is <run root>/<repo>.git, so the repo's
+  # name is the clone's, minus .git — not the run root's.
+  git init -q --bare "$HO/lr-root/lr-run-root/lr-main.git"
+  git -C "$HO/lr-main" push -q "$HO/lr-root/lr-run-root/lr-main.git" HEAD:refs/heads/main
+  git -C "$HO/lr-root/lr-run-root/lr-main.git" worktree add -q "$HO/lr-root/lr-run-root/r" -b auto-pilot/r main
+  lo="$(WORKFLOW_SKILLS_WORKTREE_ROOT="$HO/lr-root" "$SCRIPT" launch --dry-run --workdir "$HO/lr-root/lr-run-root/r" \
+    --out-script "$HO/lr.sh" --out-plist "$HO/lr.plist" --label com.x --handle "$HO/lr-h.txt" 2>&1)"
+  have "launch: a run clone's handoff dir is named for the repo, not the run root" "handoff dir   -> $HO/lr-root/lr-main/.handoffs" "$lo"
   lo="$("$SCRIPT" launch --dry-run --workdir "$HO/lr-run" --handoff-dir "$HO/explicit" \
     --out-script "$HO/lr.sh" --out-plist "$HO/lr.plist" --label com.x --handle "$HO/lr-h.txt" 2>&1)"
   have "launch: an explicit --handoff-dir wins" "handoff dir   -> $HO/explicit" "$lo"
