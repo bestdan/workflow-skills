@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.195.1] - 2026-11-05
+
+### Fixes
+
+- grant here-doc temp files in the jail profile [#1396] (#1399) (d7d1943)
+
 ## [2.195.0] - 2026-11-04
 
 ### Features
