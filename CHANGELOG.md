@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.198.0] - 2026-11-05
+
+### Features
+
+- give each run its own repo clone so the jail can make worker worktrees [#1390] (#1401) (2a00d1d)
+
 ## [2.197.2] - 2026-11-05
 
 ### Fixes
