@@ -616,23 +616,30 @@ def add_label(repo, pr):
     except ReadError as exc:
         if "not found" not in str(exc):
             return f"LABEL: error reason={exc}"
+        # A create that fails because a concurrent run made it is fine: the
+        # retry below is what decides. The create's own error is kept so a
+        # retry that still fails names the cause, a missing permission say.
+        code, out, err = run_gh(
+            [
+                "label",
+                "create",
+                LANDED_LABEL,
+                "-R",
+                repo,
+                "--description",
+                "Merged by land-pr.sh without the owner",
+            ]
+        )
         try:
-            # A create that fails because a concurrent run made it is fine:
-            # the retry below is what decides.
-            run_gh(
-                [
-                    "label",
-                    "create",
-                    LANDED_LABEL,
-                    "-R",
-                    repo,
-                    "--description",
-                    "Merged by land-pr.sh without the owner",
-                ]
-            )
             gh(edit)
         except ReadError as retry_exc:
-            return f"LABEL: error reason={retry_exc}"
+            reason = str(retry_exc)
+            detail = (err or out).strip().splitlines()
+            if code != 0 and detail:
+                reason += f"; label create: {detail[-1]}"
+            return f"LABEL: error reason={reason}"
+        if code != 0:
+            return f"LABEL: added {LANDED_LABEL}"
         return f"LABEL: created and added {LANDED_LABEL}"
     return f"LABEL: added {LANDED_LABEL}"
 

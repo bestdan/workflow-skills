@@ -107,6 +107,7 @@ class FakeGh:
         self.labels_added: List[str] = []
         self.repo_labels = {"landed-by-agent"}
         self.labels_created: List[str] = []
+        self.label_created_concurrently = False
         # A merge call that fails on the client after GitHub merged (a timeout).
         self.merge_fails_after_merging = False
         # The merge commit's message; None means the body the lander sent.
@@ -165,6 +166,9 @@ class FakeGh:
             self.labels_added.append(label)
             return 0, "", ""
         if args[:2] == ["label", "create"]:
+            if self.label_created_concurrently:
+                # Another run made it between our failed add and this create.
+                self.repo_labels.add(args[2])
             if args[2] in self.repo_labels:
                 return 1, "", f'label with name "{args[2]}" already exists'
             self.repo_labels.add(args[2])
@@ -698,8 +702,19 @@ class RealLandingTests(unittest.TestCase):
         self.fake.repo_labels = set()
         self.fake.fail.add("label create")
         lines = self.land()
-        self.assertTrue(any(line.startswith("LABEL: error") for line in lines))
+        (label,) = [line for line in lines if line.startswith("LABEL:")]
+        self.assertTrue(label.startswith("LABEL: error"), label)
+        # The create's own failure is named, not only the retry's "not found".
+        self.assertIn("label create: gh: boom (HTTP 500)", label)
         self.assertEqual(lines[-1], f"LAND: landed sha={MERGE_SHA}")
+
+    def test_a_label_another_run_created_meanwhile_is_added(self):
+        self.fake.repo_labels = set()
+        self.fake.label_created_concurrently = True
+        lines = self.land()
+        self.assertIn("LABEL: added landed-by-agent", lines)
+        self.assertEqual(self.fake.labels_added, ["landed-by-agent"])
+        self.assertEqual(self.fake.labels_created, [])
 
     def test_label_and_comment_failures_do_not_fail_the_landing(self):
         self.fake.fail.update({"pr edit", "--method POST"})
