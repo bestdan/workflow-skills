@@ -472,6 +472,7 @@ remaining findings and proceed — don't loop.
   co-review, and is a no-op because the issue has already left
   `status:3_started`. A viewer without write access hands off a draft; the
   handler's needs-review write alone moves the issue.
+- **Shadow landing**, never fatal: [`references/shadow-landing.md`](references/shadow-landing.md).
 - **Hand-off summary** (structured — for a human, or the `/auto-pilot` morning
   report). It ends on what the human must act on, because the end is what a
   terminal leaves on screen. In order:
@@ -479,7 +480,7 @@ remaining findings and proceed — don't loop.
      items wait in the closing section (or "nothing needs you").
   2. **What changed** — a few lines, by behavior, not by file.
   3. **Review and evidence** — reviewer classes that ran, what the rounds
-     applied, evidence paths.
+     applied, evidence paths, and the shadow lander's `LAND:` line.
   4. **Process notes** — deviations from the normal flow, worktree left in
      place. Omit when empty.
   5. **For you**, always last, numbered, highest impact first: outstanding

@@ -33,8 +33,11 @@ Usage:
   python3 scripts/land-pr.py <pr> --repo <owner/name> --dry-run
 
 Prints `COMMENT: <created|updated|unchanged> <url>` (or `COMMENT: error
-reason=...`), then a final `LAND: would-land` or `LAND: hold reasons=<r1; r2>`
-line. Exit 0 for either verdict, 1 when the comment could not be posted, and 2
+reason=...`), then a `TIER:` line, then a final `LAND: would-land` or `LAND: hold
+reasons=<r1; r2>` line. `TIER: auto`, `TIER: human reasons=<r1; r2>` or `TIER:
+unknown reason=<why>` is the tier with AGENT_LAND taken as on: whether the PR is
+one that lands itself once landing is switched on, which the hand-off records in
+the tracker. While AGENT_LAND is off, the LAND line holds every PR on that alone. Exit 0 for either verdict, 1 when the comment could not be posted, and 2
 for a usage error or a run without `--dry-run`.
 """
 
@@ -328,11 +331,16 @@ def check_holds(statuses, runs, required):
 
 
 def judge(repo, pr):
-    """(would_land, reasons, head) for one PR; reasons explain either verdict."""
+    """(would_land, reasons, head, tier_line) for one PR.
+
+    reasons explain either verdict; tier_line is the `TIER:` line, the tier
+    with AGENT_LAND taken as on.
+    """
     try:
         data = read_pr(repo, pr)
     except ReadError as exc:
-        return False, [f"cannot read the PR: {exc}"], None
+        reason = f"cannot read the PR: {exc}"
+        return False, [reason], None, tier_line("unknown", [reason])
     head, base = data["headRefOid"], data.get("baseRefName") or ""
     holds = []
     if data.get("state") != "OPEN":
@@ -347,7 +355,9 @@ def judge(repo, pr):
         policy_text = read_policy(repo, base)
     except ReadError as exc:
         holds.append(f"tier not computed: {exc}")
+        line = tier_line("unknown", [f"tier not computed: {exc}"])
     else:
+        line = tier_line(*tier(data, files, policy_text, "on")[:2])
         agent_land, land_holds = read_agent_land(repo)
         holds.extend(land_holds)
         verdict, tier_reasons, policy = tier(data, files, policy_text, agent_land)
@@ -387,7 +397,7 @@ def judge(repo, pr):
             holds.extend(check_holds(statuses, runs, required))
 
     if holds:
-        return False, holds, head
+        return False, holds, head, line
     # A carried record names the head the round actually read, so the comment
     # can say the success on this head is the round's verdict moved one fix
     # commit forward rather than a review of it.
@@ -397,7 +407,17 @@ def judge(repo, pr):
         True,
         [*tier_reasons, f"`co-review` success on {head[:7]}{carried}", "checks green"],
         head,
+        line,
     )
+
+
+def tier_line(verdict, reasons):
+    flat = "; ".join(" ".join(r.split()) for r in reasons)
+    if verdict == "auto":
+        return "TIER: auto"
+    if verdict == "human":
+        return f"TIER: human reasons={flat}"
+    return f"TIER: unknown reason={flat}"
 
 
 # --- the comment ------------------------------------------------------------
@@ -473,7 +493,7 @@ def main(argv=None):
         print("land-pr: landing not enabled; pass --dry-run", file=sys.stderr)
         return 2
 
-    would_land, reasons, head = judge(args.repo, args.pr)
+    would_land, reasons, head, line = judge(args.repo, args.pr)
     code = 0
     try:
         outcome, url = post_comment(
@@ -484,6 +504,7 @@ def main(argv=None):
         code = 1
     else:
         print(f"COMMENT: {outcome} {url}".rstrip())
+    print(line)
     if would_land:
         print("LAND: would-land")
     else:

@@ -338,6 +338,43 @@ class LandTests(unittest.TestCase):
         self.fake.agent_land = "yes"
         self.assert_hold("AGENT_LAND is `yes`, neither on nor off")
 
+    # --- the TIER line ----------------------------------------------------
+
+    def tier_line(self):
+        _, out, _ = self.run_land()
+        lines = out.splitlines()
+        self.assertTrue(lines[-2].startswith("TIER: "), out)
+        return lines[-2]
+
+    def test_a_clean_pr_is_tier_auto(self):
+        self.assertEqual(self.tier_line(), "TIER: auto")
+
+    def test_the_tier_line_ignores_agent_land_off(self):
+        # Shadow mode: the LAND line holds on the kill switch, TIER does not.
+        self.fake.agent_land = "off"
+        self.assertEqual(self.tier_line(), "TIER: auto")
+        self.assertIn("AGENT_LAND=off", self.land_line())
+
+    def test_a_human_path_is_tier_human_with_its_reasons(self):
+        self.fake.files[0]["filename"] = "README.md"
+        line = self.tier_line()
+        self.assertTrue(line.startswith("TIER: human reasons="), line)
+        self.assertIn("README.md matches no auto glob", line)
+
+    def test_no_policy_is_tier_unknown(self):
+        del self.fake.policies["main"]
+        self.assertEqual(
+            self.tier_line(),
+            "TIER: unknown reason=tier not computed: "
+            "no .github/merge-policy.yml on base `main`",
+        )
+
+    def test_an_unreadable_pr_is_tier_unknown(self):
+        self.fake.fail.add("pr view")
+        self.assertTrue(
+            self.tier_line().startswith("TIER: unknown reason=cannot read the PR")
+        )
+
     # --- evidence ---------------------------------------------------------
 
     def test_evidence_missing_holds(self):
