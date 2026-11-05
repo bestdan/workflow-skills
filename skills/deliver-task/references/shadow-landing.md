@@ -40,6 +40,8 @@ make it pass; a hold is data, not a failure.
   itself once landing is switched on. `/sweep-for-complete` and the morning
   digest can then tell which PRs will land themselves. Post it with the
   handler's comment write: `gh issue comment` on gh-issue, `save_comment` on
-  Linear, `addCommentToJiraIssue` on Jira. On repo-pr the PR is the tracker and
-  the lander's own comment already records the tier, so write nothing more. A
+  Linear, `addCommentToJiraIssue` on Jira. On repo-pr the PR is the tracker, so
+  post it on the PR with `gh pr comment <pr> -R <owner/name> --body-file
+  <file>`. The lander's own comment is no substitute: while `AGENT_LAND` is off
+  it lists `tier human: AGENT_LAND=off` even for a PR whose tier is `auto`. A
   failed tracker write is noted the same way as a failed run.
