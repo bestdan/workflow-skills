@@ -798,7 +798,7 @@ emit_harness_runtime() {
   # it checks access(W_OK) on it first and falls through to no usable dir
   # without it. That literal covers the directory itself and no entry in it (each
   # entry is checked on its own path). The dir is root-owned, so it cannot be
-  # removed or chmod'ed; at most the jail can touch its timestamps. zsh's name is
+  # removed or chmod'ed. zsh's name is
   # its mkstemp template, `zsh` plus XXXXXX, which mkstemp fills with six
   # characters from [A-Za-z0-9]; spelled out as six classes so the grant does not
   # cover every zsh* file in the shared /tmp.
