@@ -4,19 +4,22 @@
 The `co-review` status binds a verdict to the head a round reviewed, and the
 round's own fix commit is unreviewed by construction. Left at that, a round
 that passes but pushes wording fixes leaves the new head without a status, and
-the PR waits for another round that tends to find more wording to fix
-(#1407). This script lets such a round reach the head that merges, under
-conditions it checks itself rather than trusting the caller:
+the PR waits for another round that tends to find more wording to fix. This
+script lets such a round reach the head that merges. The caller asserts the
+first two conditions; the script checks the other three itself, from the
+evidence file and from GitHub:
 
 1. The round's verdict was `pass`: no findings remained once the auto-fixes
-   were applied.
-2. None of the fixes it applied was `(blocking)`.
-3. Its evidence record recommends `no further round`.
+   were applied (asserted by `--verdict`).
+2. None of the fixes it applied was `(blocking)` (asserted by
+   `--applied-blocking`).
+3. Its evidence record recommends `no further round` and counts no
+   unresolved finding, which also catches a `pass` the record contradicts.
 4. The reviewed head's own `co-review` status is `success`, so at least two
    reviewers ran and none failed.
 5. The fix commit is exactly one commit on top of the reviewed head (GitHub's
-   compare reads `ahead_by` 1, `behind_by` 0), so nothing but the round's own
-   fix rides on the carried status.
+   compare reads `ahead_by` 1, `behind_by` 0), so nothing but that one commit
+   rides on the carried status.
 
 When every condition holds, it re-stamps the PR with the record moved to the
 fix commit (`head` set to it, `carried_from` naming the reviewed head), and
@@ -34,7 +37,8 @@ Usage:
 step 12 already passed to co-review-stamp.py.
 
 Exit 0 prints `CARRY: carried from=<short> to=<short> stamp=<outcome>
-status=<url>`. Exit 3 prints `CARRY: refused reason=<why>` and writes
+status=<url>`, plus a `co-review-carry: warning:` line on stderr when the
+stamp could not delete a duplicate. Exit 3 prints `CARRY: refused reason=<why>` and writes
 nothing; that is the normal answer for a round that did not pass. Exit 1
 prints `CARRY: error reason=<why>` for a `gh` failure (a stamp written before
 a failed status leaves the fix commit without `success`, which the lander
@@ -139,6 +143,8 @@ def check(args, record):
         raise Refused(f"{args.applied_blocking} applied fix(es) were blocking")
     if record["next_round"] != "no further round":
         raise Refused(f"the round recommends {record['next_round']}")
+    if record["unresolved_findings"]:
+        raise Refused(f"{record['unresolved_findings']} finding(s) unresolved")
     state = reviewed_status(args.repo, args.reviewed)
     if state != "success":
         raise Refused(
@@ -156,7 +162,7 @@ def carry(args, record):
     check(args, record)
     carried = {**record, "head": args.head, stamp_mod.CARRIED_FROM: args.reviewed}
     stamp_mod.validate_evidence(carried, args.head)
-    outcome, _url, _warning = stamp_mod.stamp(
+    outcome, _url, warning = stamp_mod.stamp(
         args.repo, args.pr, args.head, args.summary, carried
     )
     try:
@@ -168,8 +174,10 @@ def carry(args, record):
             args.target_url,
         )
     except status_mod.StatusError as exc:
-        raise stamp_mod.StampError(f"stamp {outcome}, status not posted: {exc}")
-    return outcome, url
+        raise stamp_mod.StampError(
+            f"stamp {outcome}, status not posted: {exc}"
+        ) from exc
+    return outcome, url, warning
 
 
 def parse_args(argv):
@@ -208,7 +216,7 @@ def parse_args(argv):
 def main(argv=None):
     args = parse_args(argv)
     try:
-        outcome, url = carry(args, args.record)
+        outcome, url, warning = carry(args, args.record)
     except Refused as exc:
         print(f"CARRY: refused reason={exc}")
         return REFUSED
@@ -219,6 +227,8 @@ def main(argv=None):
         f"CARRY: carried from={args.reviewed[:7]} to={args.head[:7]}"
         f" stamp={outcome} status={url}"
     )
+    if warning:
+        print(f"co-review-carry: warning: {warning}", file=sys.stderr)
     return 0
 
 

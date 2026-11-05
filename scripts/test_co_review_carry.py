@@ -62,6 +62,9 @@ class FakeGh(ThreadFake):
         self.ahead_behind = (1, 0)
         self.posted = []  # (sha, payload)
         self.fail_status_post = False
+        # When set, the statuses read returns this text as-is: one line per
+        # page, as `--paginate` with a per-page `--jq` prints it.
+        self.status_pages = None
 
     def run_gh(self, args, stdin=None):
         path = next((a for a in args if a.startswith("repos/")), "")
@@ -74,6 +77,8 @@ class FakeGh(ThreadFake):
             return 0, json.dumps({"target_url": payload.get("target_url")}), ""
         if path.endswith("/statuses"):
             self.calls.append(args)
+            if self.status_pages is not None:
+                return 0, self.status_pages, ""
             sha = path.split("/")[-2]
             states = self.statuses.get(sha, [])
             return 0, (states[0] + "\n") if states else "", ""
@@ -157,6 +162,20 @@ class CarryTests(unittest.TestCase):
 
     def test_another_round_is_refused(self):
         self.assert_refused("another round", rec=record(next_round="another round"))
+
+    def test_an_unresolved_finding_is_refused_even_on_pass(self):
+        self.assert_refused(
+            "1 finding(s) unresolved", rec=record(unresolved_findings=1)
+        )
+
+    def test_a_page_without_a_co_review_status_is_skipped(self):
+        self.fake.status_pages = "\n\nsuccess\n"
+        code, out, _ = self.run_main()
+        self.assertEqual(code, 0, out)
+
+    def test_the_newest_page_decides(self):
+        self.fake.status_pages = "\nfailure\nsuccess\n"
+        self.assert_refused("is failure, not success")
 
     def test_a_reviewed_head_without_success_is_refused(self):
         self.fake.statuses[REVIEWED] = ["failure", "success"]

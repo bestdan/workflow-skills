@@ -79,7 +79,7 @@ to GitHub, so run it unsandboxed.
 
 A round that passes but pushes wording fixes would otherwise leave the PR
 waiting on a round that reviews only those fixes, and finds more wording to
-fix (#1407). So at the very end of step 12, after the evidence re-stamp, and
+fix. So at the very end of step 12, after the evidence re-stamp, and
 only when step 12 pushed a fix commit:
 
 ```bash
@@ -91,7 +91,7 @@ applied fixes decorated `(blocking)`, and `--evidence` is the file step 12
 just stamped with. Pass the verdict as it is: the script decides, so a round
 that did not pass gets a refusal rather than a status. It carries only when
 the verdict is `pass`, no applied fix was blocking, the record says
-`no further round`, the reviewed head's own `co-review` status is `success`,
+`no further round` and counts no unresolved finding, the reviewed head's own `co-review` status is `success`,
 and the fix commit is exactly one commit on top of the reviewed head. Then it
 re-stamps the PR for the fix commit, with `carried_from` naming the reviewed
 head in the record, and posts `success` on the fix commit described as
