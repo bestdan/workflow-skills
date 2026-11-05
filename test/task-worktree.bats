@@ -1,7 +1,9 @@
 #!/usr/bin/env bats
 # scripts/task-worktree.sh — checks a task's work branch out at the
 # WorktreeCreate hook's layout, so co-review's reach-pr-branch.sh routes to it
-# by name (#1395).
+# by name.
+
+bats_require_minimum_version 1.5.0
 
 setup() {
   setup_test
@@ -45,6 +47,18 @@ tw() {
   assert_output --partial "TASK_WORKTREE: ok path=\"$(cd "$WT_ROOT/main/task-7" && pwd -P)\" name=task-7 ref=tester/task-7"
   run git -C "$WT_ROOT/main/task-7" branch --show-current
   assert_output "tester/task-7"
+}
+
+@test "stdout carries exactly the one contract line, git chatter goes to stderr" {
+  git -C "$TEST_TMPDIR/main" branch "tester/task-7" main
+  run --separate-stderr bash -c "cd '$TEST_TMPDIR/main' && '$REPO_ROOT/$SCRIPT' --ref tester/task-7"
+  assert_success
+  assert_equal "${#lines[@]}" 1
+  assert_output "TASK_WORKTREE: ok path=\"$(cd "$WT_ROOT/main/task-7" && pwd -P)\" name=task-7 ref=tester/task-7"
+  run --separate-stderr bash -c "cd '$TEST_TMPDIR/main' && '$REPO_ROOT/$SCRIPT' --ref tester/nope"
+  assert_failure 1
+  assert_equal "${#lines[@]}" 1
+  assert_output "TASK_WORKTREE: none reason=fetch-failed ref=tester/nope"
 }
 
 @test "co-review's router then reaches it by name, from the run worktree" {
@@ -100,6 +114,15 @@ tw() {
   assert_failure 1
   assert_output --partial "reason=held-elsewhere path=\"$(cd "$WT_ROOT/main/workers/task-7" && pwd -P)\""
   assert [ ! -e "$WT_ROOT/main/task-7" ]
+}
+
+@test "a branch whose only holder was deleted unpruned is pruned and added" {
+  git -C "$TEST_TMPDIR/main" branch "tester/task-7" main
+  git -C "$TEST_TMPDIR/main" worktree add -q "$TEST_TMPDIR/gone" "tester/task-7"
+  rm -rf "$TEST_TMPDIR/gone"
+  tw "$TEST_TMPDIR/main" --ref "tester/task-7"
+  assert_success
+  assert_output --partial "TASK_WORKTREE: ok path=\"$(cd "$WT_ROOT/main/task-7" && pwd -P)\" name=task-7"
 }
 
 @test "an occupied hook path is refused" {

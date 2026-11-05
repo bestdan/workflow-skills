@@ -5,7 +5,7 @@
 #
 #   scripts/task-worktree.sh --ref <branch> [--remote <name>]
 #
-# Why the layout matters (#1395). Under /auto-pilot the run worktree's HEAD must
+# Why the layout matters. Under /auto-pilot the run worktree's HEAD must
 # stay on the run-state branch, so /deliver-task holds the work branch in a
 # second worktree. Co-review's working-directory pre-flight then reads
 # `foreign`, and scripts/reach-pr-branch.sh routes it by WHERE that worktree
@@ -15,22 +15,23 @@
 # reviewer runs. A worktree placed by this script always yields `enter-name`.
 #
 # Run from inside the repo (any of its worktrees). Prints exactly one contract
-# line to stdout; git chatter goes to stderr:
+# line to stdout; git chatter goes to stderr. Every path value is
+# double-quoted, as in reach-pr-branch.sh's output:
 #
-#   TASK_WORKTREE: ok path=<p> name=<n> ref=<ref>               exit 0
+#   TASK_WORKTREE: ok path="<p>" name=<n> ref=<ref>             exit 0
 #     <ref> is checked out at <p>, the hook's path for name <n>: either it
 #     already was, or this script just added the worktree there.
 #   TASK_WORKTREE: none reason=not-hook-name ref=<ref>          exit 1
 #     <ref> does not carry the configured branch prefix followed by a valid
 #     hook name, so no worktree at the hook's layout can hold it. Nothing done.
-#   TASK_WORKTREE: none reason=held-elsewhere path=<p> ref=<ref> exit 1
+#   TASK_WORKTREE: none reason=held-elsewhere path="<p>" ref=<ref> exit 1
 #     <ref> is already checked out at <p>, which is not the hook's path.
 #     Nothing done: moving a worktree out from under its owner is not this
 #     script's call.
-#   TASK_WORKTREE: none reason=path-exists path=<p> ref=<ref>    exit 1
+#   TASK_WORKTREE: none reason=path-exists path="<p>" ref=<ref>  exit 1
 #     The hook's path is taken by something that does not hold <ref>.
 #   TASK_WORKTREE: none reason=fetch-failed ref=<ref>            exit 1
-#   TASK_WORKTREE: none reason=worktree-add-failed path=<p>      exit 1
+#   TASK_WORKTREE: none reason=worktree-add-failed path="<p>"    exit 1
 #   TASK_WORKTREE: none reason=config-failed                     exit 1
 #   2  usage or dependency error
 #
@@ -108,6 +109,13 @@ holder=$(printf '%s\n' "$worktrees" | awk -v want="$ref" '
   /^prunable/    { prunable = "1" }
   END            { if (!done) flush() }
 ')
+# A prunable entry still registers the branch, so `git worktree add` would
+# refuse it ("already used by worktree"). Its directory is gone, so prune.
+stale=$(printf '%s\n' "$worktrees" | awk -v want="$ref" '
+  /^worktree / { branch = "" }
+  /^branch /   { branch = substr($0, 8); sub(/^refs\/heads\//, "", branch) }
+  /^prunable/  { if (branch == want) print "1" }
+')
 
 if [ -n "$holder" ]; then
   holder_real=$(realpath_of "$holder")
@@ -133,6 +141,8 @@ if ! git show-ref -q --verify "refs/heads/$ref"; then
     exit 1
   fi
 fi
+
+[ -z "$stale" ] || git -C "$root" worktree prune >&2
 
 if ! mkdir -p "$(dirname "$path")" || ! git -C "$root" worktree add "$path" "$ref" >&2; then
   echo "TASK_WORKTREE: none reason=worktree-add-failed path=\"$path\""

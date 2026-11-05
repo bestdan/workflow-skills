@@ -265,7 +265,8 @@ report one as `claim refused:`.
 
 With the base fetched (step 1), the claim held, and the work branch checked out.
 Under `--run-state` that is its own worktree, placed by `scripts/task-worktree.sh`
-(never the run worktree): [`references/task-worktree.md`](references/task-worktree.md).
+and entered for steps 3–6, never the run worktree; make the `--run-state` and
+`--questions` paths absolute first: [`references/task-worktree.md`](references/task-worktree.md).
 
 1. **Route the worker.** Read the task's **content** first — the card body
    (`repo-pr`) or the issue description (tracker) — and pass _that_ (not the bare
@@ -375,9 +376,7 @@ For an auto-pilot invocation, run the one `reserve-gate` call immediately
 before this co-review boundary. Read `co_review_mode` from the same `--run-state` at this
 step. `off` means **skip `/co-review` entirely** and record `co-review skipped (profile)` in the hand-off summary. `cheap-single` means run `/co-review
 --non-interactive --reviewer-set cheap-single`; `default` (or no `--run-state`)
-runs `/co-review --non-interactive` exactly as before (under `--run-state`, then
-`ExitWorktree` with `keep`: [`references/task-worktree.md`](references/task-worktree.md)). Its
-never-prompt guarantee and bounded per-class timeouts are what make it safe in an
+runs `/co-review --non-interactive` exactly as before. Its never-prompt guarantee and bounded per-class timeouts are what make it safe in an
 unattended run. **Record which reviewer classes ran / timed-out / skipped** — that
 line goes into the hand-off summary (step 7). If `/co-review` can't run **at all**
 (every reviewer unavailable, MCP/auth failure, or a pre-flight hard error that
@@ -398,10 +397,10 @@ depends on who is waiting:
 - **Otherwise** (standalone, with no `--run-state`): the work is already
   verified, so note `co-review unavailable` and proceed to hand-off.
 
-This plugin grants co-review's own scripts when started as the `/deliver-task`
-command; `bypassPermissions` skips the check. Via the Skill tool in `default` mode with no allow rule or sandbox auto-allow, each is denied silently under
-`claude -p` (measured) and should prompt interactively (not measured):
-[`../co-review/references/permissions.md`](../co-review/references/permissions.md#plugin-scripts).
+This plugin grants co-review's own scripts when run as the `/deliver-task` command;
+`bypassPermissions` skips the check. Via the Skill tool in `default` mode, with no allow rule or sandbox
+auto-allow, each script is denied silently under `claude -p` (measured) and should
+prompt interactively (not measured). Why: [`../co-review/references/permissions.md`](../co-review/references/permissions.md#plugin-scripts).
 
 ## 6. Iterate (bounded)
 
