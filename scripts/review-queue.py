@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Collect the open human-tier PRs into one morning digest.
+"""Collect the open human-tier PRs into one review queue.
 
 Each open, non-draft PR is tiered the way the lander tiers it (land-pr.py's
 reads and `tier`, with AGENT_LAND taken as on). Every PR whose tier is not
 `auto` is waiting on the owner: `human`, or `unknown` when a read or the policy
-failed, shown with the reason. For each one the digest carries the PR body's
+failed, shown with the reason. For each one the queue carries the PR body's
 `## Decision brief` section, which `/deliver-task` writes
 (skills/deliver-task/references/decision-brief.md). A PR without the section,
 or missing any of its three lines, is still listed, as `brief missing`.
@@ -15,18 +15,18 @@ whole: a member that is not waiting appears as one line, `auto tier, lands
 itself` or `draft`. Every non-draft member is tiered against the policy on
 the branch the stack lands on, its bottom PR's base: an upper PR's own base is
 another PR's branch, which may predate the policy. A stack is shown only when
-one of its members is waiting. Members are ordered bottom first, and stacks and single PRs by their lowest PR
-number.
+one of its members is waiting. Members are ordered bottom first, and stacks
+and single PRs by their lowest PR number.
 
 Usage:
-  python3 scripts/morning-digest.py --repo <owner/name> [--post]
+  python3 scripts/review-queue.py --repo <owner/name> [--post]
 
-Prints the digest markdown on stdout, and nothing else there. With `--post`
-it also writes the digest to the one open issue whose body carries the digest
+Prints the queue markdown on stdout, and nothing else there. With `--post`
+it also writes the queue to the one open issue whose body carries the queue
 marker, editing it in place, or creates and pins that issue when there is none;
-a failed pin is a warning. It then prints a final `DIGEST: <created|updated|
-unchanged> <issue url>` line, or `DIGEST: error reason=...`, on stderr. Exit 0
-on success, 1 when the PR list cannot be read or the post failed (the digest is
+a failed pin is a warning. It then prints a final `QUEUE: <created|updated|
+unchanged> <issue url>` line, or `QUEUE: error reason=...`, on stderr. Exit 0
+on success, 1 when the PR list cannot be read or the post failed (the queue is
 still printed), 2 for a usage error. A read error on one PR is that PR's
 `unknown` tier, never a crash.
 """
@@ -57,8 +57,8 @@ def _load(name, filename):
 land = _load("land_pr", "land-pr.py")
 ReadError = land.ReadError
 
-MARKER = "<!-- morning-digest v1 -->"
-ISSUE_TITLE = "Morning digest"
+MARKER = "<!-- review-queue v1 -->"
+ISSUE_TITLE = "Review queue"
 PR_LIMIT = 1000
 BRIEF_HEADING = "## Decision brief"
 FIELDS = ("Changed", "Judge", "A no invalidates")
@@ -181,7 +181,7 @@ def stacks(prs):
     return sorted(out, key=lambda g: min(p["number"] for p in g))
 
 
-# --- the digest -------------------------------------------------------------
+# --- the queue --------------------------------------------------------------
 
 
 def _flat(text):
@@ -209,7 +209,7 @@ def waiting(pr):
 
 
 def render(prs, today):
-    lines = [MARKER, f"# Morning digest — {today.isoformat()}", ""]
+    lines = [MARKER, f"# Review queue — as of {today.isoformat()}", ""]
     groups = [g for g in stacks(prs) if any(waiting(p) for p in g)]
     count = sum(1 for g in groups for p in g if waiting(p))
     if not count:
@@ -278,7 +278,7 @@ def post(repo, body):
     if issue and (issue.get("body") or "").strip() == body.strip():
         return "unchanged", issue.get("url") or ""
     with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "digest.md"
+        path = Path(tmp) / "queue.md"
         path.write_text(body)
         if issue:
             n = str(issue["number"])
@@ -308,24 +308,24 @@ def post(repo, body):
 def main(argv=None, today=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--repo", required=True, help="owner/name")
-    p.add_argument("--post", action="store_true", help="write the digest issue")
+    p.add_argument("--post", action="store_true", help="write the queue issue")
     args = p.parse_args(argv)
     if "/" not in args.repo:
         p.error("--repo must be owner/name")
     try:
-        digest = build(args.repo, today or dt.date.today())
+        queue = build(args.repo, today or dt.date.today())
     except ReadError as exc:
-        print(f"morning-digest: cannot list open PRs: {exc}", file=sys.stderr)
+        print(f"review-queue: cannot list open PRs: {exc}", file=sys.stderr)
         return 1
-    sys.stdout.write(digest)
+    sys.stdout.write(queue)
     if not args.post:
         return 0
     try:
-        outcome, url = post(args.repo, digest)
+        outcome, url = post(args.repo, queue)
     except ReadError as exc:
-        print(f"DIGEST: error reason={_flat(exc)}", file=sys.stderr)
+        print(f"QUEUE: error reason={_flat(exc)}", file=sys.stderr)
         return 1
-    print(f"DIGEST: {outcome} {url}".rstrip(), file=sys.stderr)
+    print(f"QUEUE: {outcome} {url}".rstrip(), file=sys.stderr)
     return 0
 
 

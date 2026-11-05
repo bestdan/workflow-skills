@@ -92,8 +92,8 @@ STRICT_FILES=(scripts/research-spike.py)
 # skills/co-review/references/status.md, co-review-carry.py the same way by
 # the same file, land-pr.py, the lander, which runs
 # from the installed plugin, and merge-tier.py and co-review-evidence.py, which
-# it loads from there, merge-audit.py, the weekly audit, and morning-digest.py,
-# the owner's digest, which load land-pr.py the same way, tier-forecast.py,
+# it loads from there, merge-audit.py, the weekly audit, and review-queue.py,
+# the owner's queue, which load land-pr.py the same way, tier-forecast.py,
 # which /promote-tasks runs from the installed plugin and which loads
 # merge-tier.py from there,
 # and worktree-teardown-reminder.py, guard-foreign-worktree.py,
@@ -115,7 +115,7 @@ CONSUMER_FILES=(
   scripts/merge-tier.py
   scripts/land-pr.py
   scripts/merge-audit.py
-  scripts/morning-digest.py
+  scripts/review-queue.py
   scripts/tier-forecast.py
   scripts/coreview-input-lock.py
   scripts/co-review-stats.py
