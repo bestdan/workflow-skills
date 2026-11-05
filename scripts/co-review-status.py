@@ -5,8 +5,9 @@ The status is what binds a co-review verdict to one exact commit. It is a
 commit status with context `co-review`, posted on the head SHA the round read
 (step 3's `headRefOid`), never on co-review's own fix commit. A later push
 leaves the new head without the status, so a required `co-review` check goes
-back to waiting until a run reviews that head too. The merge lander reads it
-as "review-complete on this SHA".
+back to waiting until a run reviews that head too, unless the round passed
+and co-review-carry.py carried its `success` to the fix commit. The merge
+lander reads it as "review-complete on this SHA".
 
 Usage:
   python3 scripts/co-review-status.py --repo <owner/name> --sha <40-hex> \

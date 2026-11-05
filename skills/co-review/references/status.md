@@ -52,7 +52,10 @@ is how the reviewer behaved, not whether this head was reviewed enough.
 reviewer read and the one the stamp names. It is never the commit step 12
 pushes: that commit is unreviewed by construction. So after an auto-fix push
 the PR's new head carries no `co-review` status, and a required check waits
-for the next round, which is the point.
+for the next round.
+
+The one exception is a round that passed, below: its `success` is carried to
+the fix commit, marked as carried, rather than reposted as a review of it.
 
 ## The call
 
@@ -71,6 +74,38 @@ to GitHub, so run it unsandboxed.
   timed-out reviewer classes for `failure` (for example
   `codex ⏱️ timed out · agy ❌ failed`).
 - `--target-url` is the PR's URL, so the status links back to the review.
+
+## Carrying a pass to the fix commit
+
+A round that passes but pushes wording fixes would otherwise leave the PR
+waiting on a round that reviews only those fixes, and finds more wording to
+fix (#1407). So at the very end of step 12, after the evidence re-stamp, and
+only when step 12 pushed a fix commit:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/co-review-carry.py" --repo <owner>/<name> --pr <n> --reviewed <headRefOid> --head <fix sha> --verdict "<pass|pass with suggestions|blocking>" --applied-blocking <n> --evidence <the evidence file> --summary "<the stamp's summary>" --target-url <PR url>
+```
+
+`--verdict` is section 1's verdict word, `--applied-blocking` counts the
+applied fixes decorated `(blocking)`, and `--evidence` is the file step 12
+just stamped with. Pass the verdict as it is: the script decides, so a round
+that did not pass gets a refusal rather than a status. It carries only when
+the verdict is `pass`, no applied fix was blocking, the record says
+`no further round`, the reviewed head's own `co-review` status is `success`,
+and the fix commit is exactly one commit on top of the reviewed head. Then it
+re-stamps the PR for the fix commit, with `carried_from` naming the reviewed
+head in the record, and posts `success` on the fix commit described as
+`carried from <short sha>`. It writes to GitHub, so run it unsandboxed.
+
+- **Exit 0** prints `CARRY: carried from=<short> to=<short> …`. Put
+  `status ✅ carried to <short>` on the Next round section's fix-commit line.
+- **Exit 3** prints `CARRY: refused reason=<why>` and wrote nothing. Put
+  `status ➖ not carried — <why>` there; the fix commit waits for a round.
+- **Exit 1** is a failed GitHub call, a warning like the others:
+  `status ❌ not carried — <reason>`. Don't retry in a loop.
+
+The lander reads `carried_from` and names the reviewed head in its verdict
+comment, so a carried head is never mistaken for a reviewed one.
 
 ## Reading the outcome
 

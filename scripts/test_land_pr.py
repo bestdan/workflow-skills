@@ -225,6 +225,13 @@ class LandTests(unittest.TestCase):
         self.assertIn(f"dry run on `{HEAD[:7]}`: would land: **yes**", comment["body"])
         self.assertIn("all 1 paths match auto", comment["body"])
 
+    def test_a_carried_success_would_land_and_says_where_from(self):
+        reviewed = "c" * 40
+        self.fake.set_evidence(clean_evidence(carried_from=reviewed))
+        self.assertEqual(self.land_line(), "LAND: would-land")
+        body = self.fake.lander_comments()[0]["body"]
+        self.assertIn(f"success on {HEAD[:7]} (carried from {reviewed[:7]})", body)
+
     def test_without_dry_run_it_exits_2_and_never_calls_gh(self):
         code, out, err = self.run_land(dry_run=False)
         self.assertEqual(code, 2)

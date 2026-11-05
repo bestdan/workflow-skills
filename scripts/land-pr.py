@@ -20,7 +20,9 @@ not is a hold reason of its own:
    consult-decided technical call below the policy's `consult_bar` (default
    85), no preference call, no stack-reaching call, and no recommendation of
    another round. merge-tier.py reads no evidence, so these demotions live here.
-4. The `co-review` commit status on the head is `success`.
+4. The `co-review` commit status on the head is `success`. A status
+   co-review-carry.py carried from the reviewed head to the round's fix commit
+   counts, and the verdict comment names the head it was carried from.
 5. Every check on the head is green (success, neutral or skipped), at least
    one has reported, and every check the base branch's rulesets require has
    reported. `co-review` is left to step 4.
@@ -354,6 +356,7 @@ def judge(repo, pr):
         if policy is not None:
             consult_bar = policy["consult_bar"]
 
+    record = None
     try:
         record = evidence_mod.read_evidence(repo, pr, head)
     except (evidence_mod.stamp.StampError, ValueError) as exc:
@@ -385,9 +388,14 @@ def judge(repo, pr):
 
     if holds:
         return False, holds, head
+    # A carried record names the head the round actually read, so the comment
+    # can say the success on this head is the round's verdict moved one fix
+    # commit forward rather than a review of it.
+    origin = (record or {}).get(evidence_mod.stamp.CARRIED_FROM)
+    carried = f" (carried from {origin[:7]})" if origin else ""
     return (
         True,
-        [*tier_reasons, f"`co-review` success on {head[:7]}", "checks green"],
+        [*tier_reasons, f"`co-review` success on {head[:7]}{carried}", "checks green"],
         head,
     )
 
