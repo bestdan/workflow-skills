@@ -419,7 +419,9 @@ fi
 
 # --- 2. Base freshness ----------------------------------------------------
 
-fresh_out="$(bash "$FRESHNESS" --ref "$base" 2>&1)"
+# Run in the run worktree: its base is the one the run builds from. For a run
+# clone that is the clone's copy of <base>, not the main checkout's.
+fresh_out="$(cd "$run_toplevel" && bash "$FRESHNESS" --ref "$base" 2>&1)"
 fresh_status=$?
 printf '%s\n' "$fresh_out"
 case $fresh_status in
@@ -558,15 +560,6 @@ elif [ "$host_os" = Linux ]; then
     else
       echo "PREFLIGHT LAUNCHER: nono + systemd-run --user (user manager: $sd_state, Linger=yes)"
     fi
-    # The jail writes only the run's own git repo: the run worktree
-    # must come from `spawn-orchestrator.sh run-clone`, or render-nono-profile
-    # --git-worktree refuses it at launch — so say so here, before the launch.
-    if rc_out="$(bash "$SPAWN" check-run-clone --worktree "$run_toplevel" 2>&1)"; then
-      echo "PREFLIGHT RUN_CLONE: $rc_out"
-    else
-      echo "PREFLIGHT RUN_CLONE: none (${rc_out#spawn-orchestrator: })"
-      blockers+=("the run worktree is not from a run clone: $run_toplevel — create the run with spawn-orchestrator.sh run-clone (launch-preflight.md step 1)")
-    fi
   else
     echo "PREFLIGHT NONO: ${nono_problem:-the check failed: $nono_out}"
     echo "PREFLIGHT LAUNCHER: none (Linux: nono not ready)"
@@ -575,6 +568,19 @@ elif [ "$host_os" = Linux ]; then
 else
   echo "PREFLIGHT LAUNCHER: none ($host_os)"
   blockers+=("no supported launcher on this host ($host_os): the orchestrator spawns through launchd + sandbox-exec on macOS, or nono on Linux, and this host has neither")
+fi
+
+# --- 3c. Run clone -----------------------------------------------------------
+# Both jails write only the run's own git repo, so the run worktree must come
+# from `spawn-orchestrator.sh run-clone`. A linked worktree of the main checkout
+# keeps its index and HEAD in the main checkout's .git, which neither jail
+# grants: on macOS its first commit fails (measured on the Mac test host), and
+# on Linux render-nono-profile --git-worktree refuses it at launch.
+if rc_out="$(bash "$SPAWN" check-run-clone --worktree "$run_toplevel" 2>&1)"; then
+  echo "PREFLIGHT RUN_CLONE: $rc_out"
+else
+  echo "PREFLIGHT RUN_CLONE: none (${rc_out#spawn-orchestrator: })"
+  blockers+=("the run worktree is not from a run clone: $run_toplevel — create the run with spawn-orchestrator.sh run-clone (launch-preflight.md step 1)")
 fi
 
 # --- 4. Confinement smoke ---------------------------------------------------

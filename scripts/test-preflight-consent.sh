@@ -281,8 +281,23 @@ run_preflight() { # run_preflight <fake-mode>
     PREFLIGHT_LAUNCHCTL="$FIXBIN/fake-launchctl" \
     PREFLIGHT_TCC_LOCATIONS="$PROTECTED" \
     PREFLIGHT_CONSENT_TICKS=4 \
-    bash "$SCRIPT" --source plan --base main --run-root "$ROOT" 2>&1
+    bash "$SCRIPT" --source plan --base main --run-root "${PF_RUN_ROOT:-$ROOT}" 2>&1
 }
+
+# A run worktree made by run-clone, inside the protected location, as a real
+# run's is: pre-flight blocks on any other run worktree (both launchers).
+CR="$PROTECTED/rc"
+mkdir -p "$CR"
+(
+  export GIT_CONFIG_GLOBAL=/dev/null
+  git init -q --bare "$CR/origin.git"
+  git init -q -b main "$CR/main"
+  git -C "$CR/main" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
+  git -C "$CR/main" remote add origin "$CR/origin.git"
+  git -C "$CR/main" push -q origin main 2>/dev/null
+  bash "$REAL_SPAWN" run-clone --repo "$CR/main" --run-root "$CR/root" --run-id r >"$CR/clone.log" 2>&1
+) || bad "run-clone fixture for the clean host builds ($(tail -1 "$CR/clone.log" 2>/dev/null))"
+CRW="$CR/root/r"
 
 have_sandbox=0
 command -v sandbox-exec >/dev/null 2>&1 && have_sandbox=1
@@ -292,7 +307,7 @@ if [ "$have_sandbox" = 0 ]; then
   skipped "clean host: requires sandbox-exec (macOS)"
   skipped "submitted job runs through launchd, stdin closed, via sandbox-exec"
 else
-  out1="$(run_preflight clean)"
+  out1="$(PF_RUN_ROOT="$CRW" run_preflight clean)"
   rc1=$?
   assert_exit "clean host: exits 0" 0 "$rc1"
   assert_contains "clean host: CONSENT_GATE is pass" "PREFLIGHT CONSENT_GATE: pass" "$out1"
@@ -302,9 +317,11 @@ else
   assert_contains "clean host: fingerprint records the RESOLVED binary" \
     "PREFLIGHT ATTRIBUTION_BIN: $RESOLVED_CLAUDE" "$out1"
   assert_contains "clean host: probes the passed --run-root, not the plugin dir" \
-    "PREFLIGHT RUN_ROOT: $ROOT" "$out1"
+    "PREFLIGHT RUN_ROOT: $CRW" "$out1"
   assert_contains "clean host: probes the run root's git-common-dir too" \
-    "CONSENT resource git_common_dir: ok $ROOT/.git" "$out1"
+    "CONSENT resource git_common_dir: ok $CR/root/main.git" "$out1"
+  assert_contains "clean host: the run worktree is from a run clone" \
+    "PREFLIGHT RUN_CLONE: $CR/root/main.git" "$out1"
 
   # The job itself: launchd domain (hence detached, no controlling TTY),
   # stdin on /dev/null, and exec'd through the rendered Seatbelt profile.

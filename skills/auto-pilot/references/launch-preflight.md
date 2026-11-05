@@ -29,7 +29,9 @@ prints both paths (`RUN_WORKTREE <path>`). The jail writes that repo and never
 the main checkout's `.git`; the layout, and how to recover a run's branch from
 the main checkout, are in [`launch-runtime.md`](launch-runtime.md) §1 "The
 run's own git repo". Only `<base branch>` is cloned, so the plan must be
-committed there, not on another local branch.
+committed there, not on another local branch. Bring the main checkout's
+`<base branch>` up to date first (`git pull --ff-only`): the clone copies it as
+it stands, and step 2's freshness check reads the clone's copy.
 Confirm the plan / task instructions are **committed and present in the
 worktree** — an **untracked plan is a launch blocker**, since a plan that
 lives only in an uncommitted file never reaches the detached orchestrator. If
@@ -56,7 +58,7 @@ smoke is `scripts/smoke-nono.sh`, one `PREFLIGHT SMOKE_<CHECK>` line per
 assertion. Pass the token command the launch will use as `--claude-token-cmd`,
 so the smoke proves the credential file stays outside the jail. The Linux
 launcher also needs `systemd-run`, a reachable systemd user manager, and
-`Linger=yes`, and a run worktree made by `run-clone` (step 1;
+`Linger=yes`. On both OSes the run worktree must come from `run-clone` (step 1;
 `PREFLIGHT RUN_CLONE`), because the jail writes only the run's own git repo. A
 `no-go` **BLOCKS LAUNCH** with the reason it names; treat its output as the
 source of truth rather than re-deriving these facts by hand.

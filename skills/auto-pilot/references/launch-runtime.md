@@ -212,9 +212,13 @@ The launch grants the run root read-write, so a commit, `git worktree add` and
 hardlinked: a hardlinked object file is also the main checkout's file, and the
 jail can rewrite a file it reaches. The copy costs the repo's object size once
 per run. Put the run root outside every checkout (`run-clone` refuses one inside
-any checkout of the repo, linked worktrees included). Only Linux enforces the layout so far, through pre-flight's
-`PREFLIGHT RUN_CLONE` and `render-nono-profile --git-worktree`; the macOS
-Seatbelt launch follows it by convention until it is checked on a Mac.
+any checkout of the repo, linked worktrees included). Pre-flight blocks a run
+worktree that is not from `run-clone` on both OSes (`PREFLIGHT RUN_CLONE`), and
+on Linux `render-nono-profile --git-worktree` refuses one at launch as well.
+Measured on the Mac test host: under Seatbelt, a linked worktree of the main
+checkout cannot commit at all, because its index sits in the main checkout's
+`.git`. The run clone commits, adds and removes worker worktrees, and deletes
+branches with only `--rw <run root>`.
 
 **Recovering a run's branch from the main checkout.** Run branches live only in
 the clone and on `origin`, so the main checkout does not see them until it
