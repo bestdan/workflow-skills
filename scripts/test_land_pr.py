@@ -32,6 +32,7 @@ stamp = land.evidence_mod.stamp
 REPO, PR = "acme/widgets", 7
 HEAD = "a" * 40
 OTHER_HEAD = "b" * 40
+MERGE_SHA = "c" * 40
 ME = "lander-bot"
 POLICY = """\
 auto:
@@ -100,6 +101,10 @@ class FakeGh:
         self.comments = []
         self.next_id = 100
         self.set_evidence(clean_evidence())
+        # The PR's head on GitHub at merge time; a push after the check moves it.
+        self.head_at_merge = HEAD
+        self.merges: List[dict] = []
+        self.labels_added: List[str] = []
 
     # --- fixture helpers --------------------------------------------------
 
@@ -131,7 +136,14 @@ class FakeGh:
         if any(f in " ".join(args) for f in self.fail):
             return 1, "", "gh: boom (HTTP 500)"
         if args[:2] == ["pr", "view"]:
+            if "mergeCommit" in args:
+                return 0, json.dumps({"mergeCommit": {"oid": MERGE_SHA}}), ""
             return 0, json.dumps(self.pr), ""
+        if args[:2] == ["pr", "merge"]:
+            return self.merge(args)
+        if args[:2] == ["pr", "edit"]:
+            self.labels_added.append(args[args.index("--add-label") + 1])
+            return 0, "", ""
         assert args[0] == "api", args
         path = next(a for a in args if a.startswith("repos/") or a == "user")
         method = args[args.index("--method") + 1] if "--method" in args else "GET"
@@ -184,6 +196,20 @@ class FakeGh:
             return 0, json.dumps({"html_url": target["url"]}), ""
         raise AssertionError(f"unexpected gh call: {args}")
 
+    def merge(self, args):
+        # GitHub's own refusal when --match-head-commit is not the PR's head.
+        pinned = args[args.index("--match-head-commit") + 1]
+        body = Path(args[args.index("--body-file") + 1]).read_text()
+        self.merges.append({"args": list(args), "body": body})
+        if pinned != self.head_at_merge:
+            return (
+                1,
+                "",
+                "GraphQL: Head branch was modified. Review and try the merge again."
+                " (mergePullRequest)",
+            )
+        return 0, "", ""
+
 
 class LandTests(unittest.TestCase):
     def setUp(self):
@@ -224,12 +250,6 @@ class LandTests(unittest.TestCase):
         (comment,) = self.fake.lander_comments()
         self.assertIn(f"dry run on `{HEAD[:7]}`: would land: **yes**", comment["body"])
         self.assertIn("all 1 paths match auto", comment["body"])
-
-    def test_without_dry_run_it_exits_2_and_never_calls_gh(self):
-        code, out, err = self.run_land(dry_run=False)
-        self.assertEqual(code, 2)
-        self.assertIn("landing not enabled", err)
-        self.assertEqual(self.fake.calls, [])
 
     def test_a_dry_run_never_merges(self):
         self.run_land()
@@ -440,6 +460,109 @@ class LandTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("COMMENT: error", out)
         self.assertEqual(out.splitlines()[-1], "LAND: would-land")
+
+
+class RealLandingTests(unittest.TestCase):
+    """The path without --dry-run: AGENT_LAND, the pinned merge, the trailers."""
+
+    def setUp(self):
+        self.fake = FakeGh()
+        orig = land.run_gh
+        land.run_gh = self.fake.run_gh
+        self.addCleanup(setattr, land, "run_gh", orig)
+
+    def land(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = land.main([str(PR), "--repo", REPO])
+        self.assertEqual(code, 0, out.getvalue())
+        return out.getvalue().splitlines()
+
+    def merge_calls(self):
+        return [c for c in self.fake.calls if c[:2] == ["pr", "merge"]]
+
+    def assert_held_without_merging(self, lines, reason):
+        self.assertTrue(lines[-1].startswith("LAND: hold reasons="), lines)
+        self.assertIn(reason, lines[-1])
+        self.assertEqual(self.merge_calls(), [])
+
+    def test_a_clean_pr_lands_squashed_and_pinned_to_the_judged_head(self):
+        lines = self.land()
+        self.assertEqual(lines[-1], f"LAND: landed sha={MERGE_SHA}")
+        (call,) = self.merge_calls()
+        self.assertIn("--squash", call)
+        self.assertEqual(call[call.index("--match-head-commit") + 1], HEAD)
+
+    def test_agent_land_unset_never_merges(self):
+        self.fake.agent_land = None
+        self.assert_held_without_merging(self.land(), "AGENT_LAND is off or unset")
+
+    def test_agent_land_off_never_merges(self):
+        self.fake.agent_land = "off"
+        self.assert_held_without_merging(self.land(), "AGENT_LAND is off or unset")
+
+    def test_agent_land_garbage_never_merges(self):
+        self.fake.agent_land = "yes"
+        self.assert_held_without_merging(self.land(), "AGENT_LAND is `yes`")
+
+    def test_unreadable_agent_land_never_merges(self):
+        self.fake.fail.add("AGENT_LAND")
+        self.assert_held_without_merging(self.land(), "cannot read AGENT_LAND")
+
+    def test_a_failed_dry_run_check_holds_without_merging(self):
+        self.fake.statuses["co-review"] = "failure"
+        self.assert_held_without_merging(self.land(), "`co-review` status")
+
+    def test_a_head_moved_since_the_check_holds(self):
+        self.fake.head_at_merge = OTHER_HEAD
+        lines = self.land()
+        self.assertTrue(lines[-1].startswith("LAND: hold reasons="), lines)
+        self.assertIn(f"head moved since the check on {HEAD[:7]}", lines[-1])
+        (call,) = self.merge_calls()
+        self.assertEqual(call[call.index("--match-head-commit") + 1], HEAD)
+        self.assertEqual(self.fake.labels_added, [])
+        self.assertFalse(
+            any(c["body"].startswith(land.LANDED_MARKER) for c in self.fake.comments)
+        )
+
+    def test_another_merge_failure_holds_and_says_so(self):
+        self.fake.fail.add("pr merge")
+        self.assertIn("gh pr merge failed", self.land()[-1])
+
+    def test_the_body_ends_with_both_trailers(self):
+        self.land()
+        body = self.fake.merges[0]["body"]
+        self.assertTrue(
+            body.rstrip("\n").endswith(
+                f"\n\nLanded-by: land-pr.sh\nCo-review-head: {HEAD}"
+            ),
+            body,
+        )
+        # The record: the tier reasons, the verdict's head, the evidence pointer.
+        self.assertIn("all 1 paths match auto", body)
+        self.assertIn(f"judged on head {HEAD}", body)
+        self.assertIn(f"co-review evidence for {HEAD[:7]}", body)
+
+    def test_label_and_comment_follow_a_landing(self):
+        lines = self.land()
+        self.assertEqual(self.fake.labels_added, ["landed-by-agent"])
+        self.assertIn("LABEL: added landed-by-agent", lines)
+        (comment,) = [
+            c for c in self.fake.comments if c["body"].startswith(land.LANDED_MARKER)
+        ]
+        self.assertIn(f"Merge commit: {MERGE_SHA}", comment["body"])
+        self.assertIn(f"Co-review-head: {HEAD}", comment["body"])
+
+    def test_label_and_comment_failures_do_not_fail_the_landing(self):
+        self.fake.fail.update({"pr edit", "--method POST"})
+        lines = self.land()
+        self.assertTrue(any(line.startswith("LABEL: error") for line in lines))
+        self.assertTrue(any(line.startswith("COMMENT: error") for line in lines))
+        self.assertEqual(lines[-1], f"LAND: landed sha={MERGE_SHA}")
+
+    def test_the_landed_comment_is_not_read_as_a_dry_run_verdict(self):
+        # merge-audit.py's shadow mode reads comments starting with MARKER.
+        self.assertFalse(land.LANDED_MARKER.startswith(land.MARKER))
 
 
 if __name__ == "__main__":

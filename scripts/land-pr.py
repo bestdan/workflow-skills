@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Decide whether a pull request would land, and post the verdict on it.
+"""Decide whether a pull request would land, and land it when it may.
 
-Phase 0 of graduated merge autonomy runs the lander in shadow: this script
-computes everything a landing needs, posts one `would land: yes|no` comment,
-and never merges. `--dry-run` is required; without it the script exits 2
-before any `gh` call. Run it as `scripts/land-pr.sh`.
+With `--dry-run` (Phase 0, shadow) this script computes everything a landing
+needs, posts one `would land: yes|no` comment, and never merges. Without it
+(Phase 1) it reads the `AGENT_LAND` repo variable first and holds unless it is
+`on`, so off or unset never reaches `gh pr merge`; then it runs every dry-run
+check and, when they all pass, squash-merges with `--match-head-commit` pinned
+to the head it judged. Run it as `scripts/land-pr.sh`.
 
 A PR would land only when every one of these holds, and each one that does
 not is a hold reason of its own:
@@ -27,13 +29,21 @@ not is a hold reason of its own:
 
 Every read error is a hold with the reason, never a crash.
 
-Usage:
-  python3 scripts/land-pr.py <pr> --repo <owner/name> --dry-run
+The squash commit's body lists those reasons and the evidence pointers, and
+ends with the trailers `Landed-by: land-pr.sh` and `Co-review-head: <sha>`. A
+head that moved after the check makes GitHub refuse the merge, which is a hold.
+After a landing, the `landed-by-agent` label and a PR comment repeating the
+record are best effort: their failure is reported and does not fail the run.
 
-Prints `COMMENT: <created|updated|unchanged> <url>` (or `COMMENT: error
-reason=...`), then a final `LAND: would-land` or `LAND: hold reasons=<r1; r2>`
-line. Exit 0 for either verdict, 1 when the comment could not be posted, and 2
-for a usage error or a run without `--dry-run`.
+Usage:
+  python3 scripts/land-pr.py <pr> --repo <owner/name> [--dry-run]
+
+`--dry-run` prints `COMMENT: <created|updated|unchanged> <url>` (or `COMMENT:
+error reason=...`), then a final `LAND: would-land` or `LAND: hold
+reasons=<r1; r2>` line; exit 0 for either verdict, 1 when the comment could
+not be posted. Without it, a landing prints `LABEL: ...` and `COMMENT: ...`
+lines, then `LAND: landed sha=<merge sha>`; a hold prints only `LAND: hold
+reasons=...`; exit 0 for either. A usage error exits 2.
 """
 
 from __future__ import annotations
@@ -43,6 +53,7 @@ import base64
 import binascii
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -67,6 +78,10 @@ MARKER = "<!-- land-pr v1 -->"
 POLICY_PATH = ".github/merge-policy.yml"
 CO_REVIEW = "co-review"
 GREEN_CONCLUSIONS = ("success", "neutral", "skipped")
+LANDED_MARKER = "<!-- land-pr landed v1 -->"
+LANDED_LABEL = "landed-by-agent"
+# What GitHub says when --match-head-commit no longer names the PR's head.
+HEAD_MOVED_RE = re.compile(r"head branch was modified|expected head sha", re.I)
 
 
 class ReadError(Exception):
@@ -354,6 +369,7 @@ def judge(repo, pr):
         if policy is not None:
             consult_bar = policy["consult_bar"]
 
+    evidence_note = None
     try:
         record = evidence_mod.read_evidence(repo, pr, head)
     except (evidence_mod.stamp.StampError, ValueError) as exc:
@@ -363,6 +379,11 @@ def judge(repo, pr):
             holds.append(f"no co-review evidence for head {head[:7]}")
         else:
             holds.extend(evidence_holds(record, consult_bar))
+            evidence_note = (
+                f"co-review evidence for {head[:7]}: no unresolved finding, no open"
+                f" verification item, {len(record['consult_calls'])} consult call(s),"
+                f" none below the {consult_bar}% bar"
+            )
 
     try:
         statuses = read_statuses(repo, head)
@@ -387,7 +408,12 @@ def judge(repo, pr):
         return False, holds, head
     return (
         True,
-        [*tier_reasons, f"`co-review` success on {head[:7]}", "checks green"],
+        [
+            *tier_reasons,
+            evidence_note,
+            f"`co-review` success on {head[:7]}",
+            "checks green",
+        ],
         head,
     )
 
@@ -453,17 +479,134 @@ def post_comment(repo, pr, body):
     return outcome, url
 
 
+# --- the landing ------------------------------------------------------------
+
+
+def audit_body(pr, reasons, head):
+    """The squash commit's body: the record, then the two trailers last."""
+    lines = [f"Landed by land-pr.sh: #{pr} judged on head {head}.", ""]
+    lines += [f"- {r}" for r in reasons]
+    lines += [
+        "",
+        f"Evidence: the co-review stamp comment on #{pr} and the `co-review`"
+        f" commit status, both for {head}.",
+        "",
+        "Landed-by: land-pr.sh",
+        f"Co-review-head: {head}",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def merge(repo, pr, head, body):
+    """Squash-merge pinned to `head`; None on success, else the hold reason."""
+    with tempfile.TemporaryDirectory() as tmp:
+        body_file = Path(tmp) / "audit.md"
+        body_file.write_text(body)
+        code, out, err = run_gh(
+            [
+                "pr",
+                "merge",
+                str(pr),
+                "-R",
+                repo,
+                "--squash",
+                "--match-head-commit",
+                head,
+                "--body-file",
+                str(body_file),
+            ]
+        )
+    if code == 0:
+        return None
+    detail = " ".join((err or out).split()) or f"rc {code}"
+    if HEAD_MOVED_RE.search(detail):
+        return f"head moved since the check on {head[:7]}: {detail}"
+    return f"gh pr merge failed: {detail}"
+
+
+def merge_sha(repo, pr):
+    try:
+        data = gh_json(["pr", "view", str(pr), "-R", repo, "--json", "mergeCommit"])
+    except ReadError:
+        return "unknown"
+    oid = (
+        ((data or {}).get("mergeCommit") or {}).get("oid")
+        if isinstance(data, dict)
+        else None
+    )
+    return oid or "unknown"
+
+
+def add_label(repo, pr):
+    try:
+        gh(["pr", "edit", str(pr), "-R", repo, "--add-label", LANDED_LABEL])
+    except ReadError as exc:
+        return f"LABEL: error reason={exc}"
+    return f"LABEL: added {LANDED_LABEL}"
+
+
+def post_landed_comment(repo, pr, body):
+    try:
+        written = gh(
+            [
+                "api",
+                "--method",
+                "POST",
+                f"repos/{repo}/issues/{pr}/comments",
+                "--input",
+                "-",
+            ],
+            stdin=json.dumps({"body": f"{LANDED_MARKER}\n```\n{body}```"}),
+        )
+    except ReadError as exc:
+        return f"COMMENT: error reason={exc}"
+    try:
+        url = json.loads(written).get("html_url") or ""
+    except (json.JSONDecodeError, AttributeError):
+        url = ""
+    return f"COMMENT: created {url}".rstrip()
+
+
+def hold_line(reasons):
+    return "LAND: hold reasons=" + "; ".join(" ".join(r.split()) for r in reasons)
+
+
+def land_pr(repo, pr):
+    """The real path. Exit 0 for landed or hold; label and comment are best effort."""
+    # The switch is read first and on its own, so off or unset never reaches
+    # `gh pr merge` whatever judge() would conclude.
+    agent_land, land_holds = read_agent_land(repo)
+    if agent_land != "on":
+        print(hold_line(land_holds or ["AGENT_LAND is off or unset"]))
+        return 0
+    would_land, reasons, head = judge(repo, pr)
+    if not would_land or head is None:
+        print(hold_line(reasons))
+        return 0
+    body = audit_body(pr, reasons, head)
+    failure = merge(repo, pr, head, body)
+    if failure:
+        print(hold_line([failure]))
+        return 0
+    sha = merge_sha(repo, pr)
+    print(add_label(repo, pr))
+    print(post_landed_comment(repo, pr, f"Merge commit: {sha}\n\n{body}"))
+    print(f"LAND: landed sha={sha}")
+    return 0
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("pr", type=int)
     p.add_argument("--repo", required=True, help="owner/name")
-    p.add_argument("--dry-run", action="store_true", help="required in Phase 0")
+    p.add_argument(
+        "--dry-run", action="store_true", help="judge and comment; never merge"
+    )
     args = p.parse_args(argv)
     if "/" not in args.repo:
         p.error("--repo must be owner/name")
     if not args.dry_run:
-        print("land-pr: landing not enabled; pass --dry-run", file=sys.stderr)
-        return 2
+        return land_pr(args.repo, args.pr)
 
     would_land, reasons, head = judge(args.repo, args.pr)
     code = 0
@@ -479,7 +622,7 @@ def main(argv=None):
     if would_land:
         print("LAND: would-land")
     else:
-        print("LAND: hold reasons=" + "; ".join(" ".join(r.split()) for r in reasons))
+        print(hold_line(reasons))
     return code
 
 
