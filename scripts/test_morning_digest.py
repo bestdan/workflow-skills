@@ -205,8 +205,8 @@ class DigestTests(Base):
         self.assertEqual(err, "")
 
     def test_a_mixed_stack_prints_bottom_first(self):
-        # Listed out of order; #20 (auto) is the bottom, #22 the top.
-        self.fake.policies.update({"b20": POLICY, "b21": POLICY})
+        # Listed out of order; #20 (auto) is the bottom, #22 the top. Only
+        # main carries a policy: the upper PRs are tiered by the stack's base.
         self.fake.prs = [
             pr(22, HUMAN_FILES, brief(changed="top"), base="b21", head="b22"),
             pr(20, AUTO_FILES, brief(), base="main", head="b20"),
@@ -227,10 +227,10 @@ class DigestTests(Base):
             f"https://github.com/{REPO}/pull/20 — auto tier, lands itself", out
         )
         self.assertIn("2 PRs wait on the owner.", out)
+        self.assertNotIn("Tier: unknown", out)
         self.assertLess(out.index("middle"), out.index("top"))
 
     def test_a_stack_with_no_human_member_is_left_out(self):
-        self.fake.policies["b30"] = POLICY
         self.fake.prs = [
             pr(30, AUTO_FILES, base="main", head="b30"),
             pr(31, AUTO_FILES, base="b30", head="b31"),

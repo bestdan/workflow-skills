@@ -12,7 +12,9 @@ or missing any of its three lines, is still listed, as `brief missing`.
 Stacks: a PR whose base branch is another open PR's head branch sits on top of
 it. Chains are built over every open PR, drafts included, so a stack reads
 whole: a member that is not waiting appears as one line, `auto tier, lands
-itself` or `draft`. A stack is shown only when one of its members is waiting.
+itself` or `draft`. Every member is tiered against the policy on the branch the
+stack lands on, its bottom PR's base, where the lander would read its own base
+and find none. A stack is shown only when one of its members is waiting.
 Members are ordered bottom first, and stacks and single PRs by their lowest PR
 number.
 
@@ -114,12 +116,16 @@ def list_open_prs(repo):
     return [p for p in prs if isinstance(p, dict)]
 
 
-def tier_of(repo, pr, policies):
-    """(verdict, reasons) with AGENT_LAND on; `unknown` when a read fails."""
+def tier_of(repo, pr, base, policies):
+    """(verdict, reasons) with AGENT_LAND on; `unknown` when a read fails.
+
+    `base` is the branch whose policy applies: the base of the stack's bottom
+    PR, the branch the whole stack lands on. A stack's upper PRs target branches
+    that usually carry no policy file, and the lander holds them on that.
+    """
     try:
         data = land.read_pr(repo, pr["number"])
         files = land.read_files(repo, pr["number"])
-        base = data.get("baseRefName") or ""
         if base not in policies:
             try:
                 policies[base] = land.read_policy(repo, base)
@@ -223,10 +229,12 @@ def render(prs, today):
 
 def build(repo, today):
     prs = list_open_prs(repo)
+    bottom = {p["number"]: g[0] for g in stacks(prs) for p in g}
     policies: dict = {}
     for pr in prs:
+        base = bottom[pr["number"]].get("baseRefName") or ""
         pr["_tier"] = (
-            ("draft", []) if pr.get("isDraft") else tier_of(repo, pr, policies)
+            ("draft", []) if pr.get("isDraft") else tier_of(repo, pr, base, policies)
         )
     return render(prs, today)
 

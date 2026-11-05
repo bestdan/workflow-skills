@@ -93,8 +93,9 @@ STRICT_FILES=(scripts/research-spike.py)
 # the same file, land-pr.py, the lander, which runs
 # from the installed plugin, and merge-tier.py and co-review-evidence.py, which
 # it loads from there, merge-audit.py, the weekly audit, and morning-digest.py,
-# the owner's digest, which load land-pr.py the same way, tier-forecast.py, which /promote-tasks runs from the installed
-# plugin and which loads merge-tier.py from there,
+# the owner's digest, which load land-pr.py the same way, tier-forecast.py,
+# which /promote-tasks runs from the installed plugin and which loads
+# merge-tier.py from there,
 # and worktree-teardown-reminder.py, guard-foreign-worktree.py,
 # guard-pinned-branch.py and guard-enter-by-path.py are run by the harness
 # itself — hooks/hooks.json registers them on PostToolUse and PreToolUse, so
