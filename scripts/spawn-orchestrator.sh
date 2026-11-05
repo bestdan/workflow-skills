@@ -758,10 +758,10 @@ resolve_lazy() {
 # covering every caller scope while the harness still gets exactly what it needs.
 # See orchestrator.sb.tmpl's @@HARNESS_RUNTIME@@ comment for why denying any of
 # these poisons the harness itself (task 12 / finding #20).
-# Args: <tmpdir-canonical> <tmp-root-canonical> <session-env-dir>.
+# Args: <tmpdir-canonical> <tmp-root-canonical> <session-env-dir> <var-tmp-canonical>.
 emit_harness_runtime() {
-  local tmpdir_c="$1" tmp_root="$2" session_env="$3"
-  local sock_pattern claude_tmp_pattern
+  local tmpdir_c="$1" tmp_root="$2" session_env="$3" var_tmp="$4"
+  local sock_pattern claude_tmp_pattern heredoc_bash_pattern heredoc_zsh_pattern
   sock_pattern="^$(sbpl_regex_escape "$tmpdir_c")"'/srt-mux-[0-9]+-[0-9]+\.sock$'
   # The harness's per-project/per-session scratch + cwd tree under /tmp. This is
   # a DIRECTORY TREE it mkdir's into, not a single file — a file-only grant
@@ -789,9 +789,32 @@ emit_harness_runtime() {
   # this harness targets). So the relaxation is a real but low-severity trade of
   # tightness for the reliability that keeps finding #20 fixed.
   claude_tmp_pattern="^$(sbpl_regex_escape "$tmp_root")"'/claude-[A-Za-z0-9]+(-cwd)?(/|$)'
+  # Here-document temp files (#1396). /bin/bash 3.2 and zsh both ignore TMPDIR
+  # for a here-doc or here-string: bash writes /var/tmp/sh-thd-<n>, zsh writes
+  # /tmp/zsh<random>. Denied, every `<<`/`<<<` in the jail fails with "cannot
+  # create temp file for here document" — the worktree hooks, and the harness's
+  # own zsh snapshot eval. Granted by NAME, never the directory: other files in
+  # /tmp and /var/tmp stay denied. bash also needs the /var/tmp directory itself:
+  # it checks access(W_OK) on it first and falls through to no usable dir
+  # without it. That literal grants nothing in practice — the dir is root-owned,
+  # so it cannot be removed or chmod'ed, and an entry inside it is checked on its
+  # own path. zsh's name is its mkstemp template, exactly six alphanumerics after
+  # `zsh` (40 of 40 jailed here-strings fit it), spelled out as six classes so
+  # the grant does not cover every zsh* file in the shared /tmp.
+  #
+  # ACCEPTED RELAXATION: a name match ignores who created the file, so a jailed
+  # process can also write a same-uid un-jailed shell's here-doc file in the
+  # window between that shell writing it and reopening it by name. Accepted:
+  # the window is brief, and without the grant no here-doc works in the jail.
+  local c='[A-Za-z0-9]'
+  heredoc_bash_pattern="^$(sbpl_regex_escape "$var_tmp")"'/sh-thd-[0-9]+$'
+  heredoc_zsh_pattern="^$(sbpl_regex_escape "$tmp_root")/zsh$c$c$c$c$c$c\$"
   printf '(allow file-write*\n'
   printf '  (regex #"%s")\n' "$sock_pattern"
   printf '  (regex #"%s")\n' "$claude_tmp_pattern"
+  printf '  (literal "%s")\n' "$(sbpl_escape "$var_tmp")"
+  printf '  (regex #"%s")\n' "$heredoc_bash_pattern"
+  printf '  (regex #"%s")\n' "$heredoc_zsh_pattern"
   # The harness mkdir's a per-session dir under ~/.claude/session-env. Scoped to
   # session-env SPECIFICALLY — never a blanket ~/.claude write, which would put
   # the credential file inside a writable scope and undo the cred-RO/state-RW
@@ -1073,7 +1096,7 @@ $(emit_allow "file-write*" ${rw_c[@]+"${rw_c[@]}"})"
   # for the ambient session. When --tmpdir is given AND the render is confined,
   # require it to sit inside a confinement root so the job's later `mkdir -p` is
   # bounded.
-  local tmpdir_c tmp_root session_env
+  local tmpdir_c tmp_root var_tmp session_env
   if [ -n "$tmpdir" ]; then
     case "$tmpdir" in /*) ;; *) die "--tmpdir must be absolute (fail-closed): $tmpdir" ;; esac
     tmpdir_c="$(resolve_lazy "$tmpdir")" || exit 2
@@ -1091,8 +1114,9 @@ $(emit_allow "file-write*" ${rw_c[@]+"${rw_c[@]}"})"
     tmpdir_c="$(canonicalize "${TMPDIR:-/tmp}")" || exit 2
   fi
   tmp_root="$(canonicalize "/tmp")" || exit 2
+  var_tmp="$(canonicalize "/var/tmp")" || exit 2
   session_env="$(resolve_lazy "$HOME/.claude/session-env")" || exit 2
-  harness_block="$(emit_harness_runtime "$tmpdir_c" "$tmp_root" "$session_env")"
+  harness_block="$(emit_harness_runtime "$tmpdir_c" "$tmp_root" "$session_env" "$var_tmp")"
 
   # --toolchain also grants the installed PLUGIN CACHE (~/.claude/plugins/cache)
   # exec, and denies it writes. Every plugin script — co-review's
