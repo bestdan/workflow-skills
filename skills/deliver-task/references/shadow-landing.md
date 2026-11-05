@@ -37,8 +37,8 @@ make it pass; a hold is data, not a failure.
   merge tier <auto|human|unknown> — <first reason>`, where the first reason is
   the text before the first semicolon (no reason for `auto`). The tier is computed
   with `AGENT_LAND` taken as on, so it says whether the PR is one that lands
-  itself once landing is switched on. `/sweep-for-complete` and the morning
-  digest can then tell which PRs will land themselves. Post it with the
+  itself once landing is switched on. `/sweep-for-complete` and the review
+  queue can then tell which PRs will land themselves. Post it with the
   handler's comment write: `gh issue comment` on gh-issue, `save_comment` on
   Linear, `addCommentToJiraIssue` on Jira. On repo-pr the PR is the tracker, so
   post it on the PR with `gh pr comment <pr> -R <owner/name> --body-file

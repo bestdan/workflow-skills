@@ -124,7 +124,7 @@ class Base(unittest.TestCase):
         land.run_gh = self.fake
         self.addCleanup(setattr, land, "run_gh", original)
 
-    def run_digest(self, *extra):
+    def run_queue(self, *extra):
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = queue.main(["--repo", REPO, *extra], today=TODAY)
@@ -184,7 +184,7 @@ class QueueTests(Base):
             pr(4, HUMAN_FILES, "no brief here"),
             pr(5, HUMAN_FILES, "## Decision brief\n\n- **Changed:** only this\n"),
         ]
-        code, out, err = self.run_digest()
+        code, out, err = self.run_queue()
         self.assertEqual(code, 0, err)
         lines = out.splitlines()
         self.assertEqual(lines[0], queue.MARKER)
@@ -218,7 +218,7 @@ class QueueTests(Base):
             pr(20, AUTO_FILES, brief(), base="main", head="b20"),
             pr(21, HUMAN_FILES, brief(changed="middle"), base="b20", head="b21"),
         ]
-        code, out, _ = self.run_digest()
+        code, out, _ = self.run_queue()
         self.assertEqual(code, 0)
         self.assertEqual(
             self.headings(out)[1:],
@@ -242,7 +242,7 @@ class QueueTests(Base):
             pr(62, HUMAN_FILES, brief(), base="b60", head="b62"),
             pr(61, HUMAN_FILES, brief(), base="b60", head="b61"),
         ]
-        _, out, _ = self.run_digest()
+        _, out, _ = self.run_queue()
         self.assertIn("## Stack: #60 → #61, #62", out)
 
     def test_a_fork_pr_headed_main_is_no_stack_parent(self):
@@ -253,13 +253,13 @@ class QueueTests(Base):
             pr(41, HUMAN_FILES, brief()),
             pr(42, HUMAN_FILES, brief()),
         ]
-        _, out, _ = self.run_digest()
+        _, out, _ = self.run_queue()
         self.assertNotIn("Stack", out)
         self.assertIn("3 PRs wait on the owner.", out)
 
     def test_a_full_pr_list_warns_that_older_prs_are_left_out(self):
         self.fake.prs = [pr(n, AUTO_FILES) for n in range(1, queue.PR_LIMIT + 1)]
-        code, _, err = self.run_digest()
+        code, _, err = self.run_queue()
         self.assertEqual(code, 0)
         self.assertIn(f"listed {queue.PR_LIMIT} open PRs, the limit", err)
 
@@ -268,20 +268,20 @@ class QueueTests(Base):
             pr(30, AUTO_FILES, base="main", head="b30"),
             pr(31, AUTO_FILES, base="b30", head="b31"),
         ]
-        _, out, _ = self.run_digest()
+        _, out, _ = self.run_queue()
         self.assertIn("No human-tier PRs are waiting.", out)
         self.assertNotIn("Stack", out)
 
     def test_singletons_are_ordered_by_number(self):
         self.fake.prs = [pr(9, HUMAN_FILES, brief()), pr(3, HUMAN_FILES, brief())]
-        _, out, _ = self.run_digest()
+        _, out, _ = self.run_queue()
         self.assertEqual(
             self.headings(out)[1:], ["## #3 fix(x): change 3", "## #9 fix(x): change 9"]
         )
 
     def test_a_policy_read_failure_is_unknown_with_the_reason(self):
         self.fake.prs = [pr(7, AUTO_FILES, brief(), base="release")]
-        code, out, _ = self.run_digest()
+        code, out, _ = self.run_queue()
         self.assertEqual(code, 0)
         self.assertIn(
             "Tier: unknown — tier not computed: no .github/merge-policy.yml", out
@@ -290,7 +290,7 @@ class QueueTests(Base):
 
     def test_an_unreadable_pr_list_exits_1(self):
         self.fake.fail = {"pr list"}
-        code, out, err = self.run_digest()
+        code, out, err = self.run_queue()
         self.assertEqual((code, out), (1, ""))
         self.assertIn("cannot list open PRs", err)
 
@@ -310,7 +310,7 @@ class PostTests(Base):
         self.fake.issues = [
             {"number": 4, "body": "unrelated review-queue v1", "url": "u"}
         ]
-        code, out, err = self.run_digest("--post")
+        code, out, err = self.run_queue("--post")
         self.assertEqual(code, 0, err)
         url = f"https://github.com/{REPO}/issues/51"
         self.assertEqual(err.splitlines()[-1], f"QUEUE: created {url}")
@@ -319,7 +319,7 @@ class PostTests(Base):
 
     def test_a_failed_pin_is_a_warning(self):
         self.fake.fail = {"issue pin"}
-        code, _, err = self.run_digest("--post")
+        code, _, err = self.run_queue("--post")
         self.assertEqual(code, 0)
         self.assertIn("warning: could not pin", err)
         self.assertTrue(err.splitlines()[-1].startswith("QUEUE: created "))
@@ -332,7 +332,7 @@ class PostTests(Base):
             {"number": 15, "body": queue.MARKER + "\nnewer copy", "url": "u15"},
             {"number": 12, "body": queue.MARKER + "\nold", "url": url},
         ]
-        code, out, err = self.run_digest("--post")
+        code, out, err = self.run_queue("--post")
         self.assertEqual(self.fake.issues[1]["body"], queue.MARKER + "\nnewer copy")
         self.assertEqual(code, 0, err)
         self.assertEqual(err.splitlines()[-1], f"QUEUE: updated {url}")
@@ -340,17 +340,17 @@ class PostTests(Base):
         self.assertFalse(any(c[:2] == ["issue", "create"] for c in self.fake.calls))
 
     def test_an_identical_body_is_unchanged(self):
-        _, out, _ = self.run_digest()
+        _, out, _ = self.run_queue()
         url = f"https://github.com/{REPO}/issues/12"
         self.fake.issues = [{"number": 12, "body": out.rstrip("\n"), "url": url}]
-        code, _, err = self.run_digest("--post")
+        code, _, err = self.run_queue("--post")
         self.assertEqual(code, 0)
         self.assertEqual(err.splitlines()[-1], f"QUEUE: unchanged {url}")
         self.assertFalse(any(c[:2] == ["issue", "edit"] for c in self.fake.calls))
 
-    def test_a_failed_post_exits_1_with_the_digest_printed(self):
+    def test_a_failed_post_exits_1_with_the_queue_printed(self):
         self.fake.fail = {"issue create"}
-        code, out, err = self.run_digest("--post")
+        code, out, err = self.run_queue("--post")
         self.assertEqual(code, 1)
         self.assertTrue(out.startswith(queue.MARKER))
         self.assertIn("## #1 fix(x): change 1", out)
