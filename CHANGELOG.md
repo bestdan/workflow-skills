@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.201.0] - 2026-11-06
+
+### Features
+
+- land auto-tier PRs behind AGENT_LAND [#1316] (#1412) (360d35c)
+
 ## [2.200.1] - 2026-11-06
 
 ### Fixes
