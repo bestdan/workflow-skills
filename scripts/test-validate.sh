@@ -437,6 +437,18 @@ refs="$(git ls-remote | grep x | cut -f2 | sed 's|a|b|')"
 ```bash
 gh pr list |# a | b | c
 ```
+
+```bash
+cat <<-XX
+	| a | b | c |
+	XX
+a | b | c | d
+```
+
+```bash
+cat <<XX
+a | b | c | d
+```
 MD
 
 out_g2="$(uv run "$DIR_G2/scripts/validate.py" 2>&1)"
@@ -471,6 +483,10 @@ assert_contains "pipes in a double-quoted \$(...) are counted" "$out_g2" \
   "cmd.md: line 58: fenced shell block carries 3 pipes"
 assert_not_contains "a comment right after a pipe is not counted" "$out_g2" \
   "cmd.md: line 62"
+assert_contains "a <<- heredoc ends at its tab-indented terminator" "$out_g2" \
+  "cmd.md: line 66: fenced shell block carries 3 pipes"
+assert_contains "an unterminated heredoc keeps its lines" "$out_g2" \
+  "cmd.md: line 73: fenced shell block carries 3 pipes"
 
 # --- Fixture (h): a plugin with no fenced logic is clean -------------------
 DIR_H="$BASE/shell-logic-pass"
