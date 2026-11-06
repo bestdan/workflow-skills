@@ -29,6 +29,16 @@ unchanged> <issue url>` line, or `QUEUE: error reason=...`, on stderr. Exit 0
 on success, 1 when the PR list cannot be read or the post failed (the queue is
 still printed), 2 for a usage error. A read error on one PR is that PR's
 `unknown` tier, never a crash.
+
+Gate mode, for `/do-tasks` and `/auto-pilot` before they claim:
+  python3 scripts/review-queue.py --repo <owner/name> --limit <n>
+
+Prints one line per waiting PR (`#<n> <human|unknown> — <title>`), then
+`GATE: waiting=<count> limit=<n> open|full`. The queue is full when more PRs
+wait than the limit, so with a limit of 5 a sixth waiting PR stops claiming.
+Exit 0 when open, 1 when full, 3 when the PR list cannot be read (printed as
+`GATE: error reason=...`), 2 for a usage error. `--limit` does not combine with
+`--post`.
 """
 
 from __future__ import annotations
@@ -239,7 +249,8 @@ def render(prs, today):
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
-def build(repo, today):
+def tiered(repo):
+    """Every open PR, each carrying `_tier`."""
     prs = list_open_prs(repo)
     bottom = {p["number"]: g[0] for g in stacks(prs) for p in g}
     policies: dict = {}
@@ -248,7 +259,23 @@ def build(repo, today):
         pr["_tier"] = (
             ("draft", []) if pr.get("isDraft") else tier_of(repo, pr, base, policies)
         )
-    return render(prs, today)
+    return prs
+
+
+def build(repo, today):
+    return render(tiered(repo), today)
+
+
+def gate(prs, limit):
+    """(lines, full): the waiting PRs and the GATE line; full when over the limit."""
+    waiting_prs = sorted((p for p in prs if waiting(p)), key=lambda p: p["number"])
+    full = len(waiting_prs) > limit
+    lines = [
+        f"#{p['number']} {p['_tier'][0]} — {_flat(p.get('title'))}" for p in waiting_prs
+    ]
+    state = "full" if full else "open"
+    lines.append(f"GATE: waiting={len(waiting_prs)} limit={limit} {state}")
+    return lines, full
 
 
 # --- posting ----------------------------------------------------------------
@@ -309,9 +336,24 @@ def main(argv=None, today=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--repo", required=True, help="owner/name")
     p.add_argument("--post", action="store_true", help="write the queue issue")
+    p.add_argument(
+        "--limit", type=int, help="gate mode: exit 1 when more than this many wait"
+    )
     args = p.parse_args(argv)
     if "/" not in args.repo:
         p.error("--repo must be owner/name")
+    if args.limit is not None:
+        if args.post:
+            p.error("--limit and --post do not combine")
+        if args.limit < 0:
+            p.error("--limit must be 0 or more")
+        try:
+            lines, full = gate(tiered(args.repo), args.limit)
+        except ReadError as exc:
+            print(f"GATE: error reason={_flat(exc)}")
+            return 3
+        print("\n".join(lines))
+        return 1 if full else 0
     try:
         queue = build(args.repo, today or dt.date.today())
     except ReadError as exc:

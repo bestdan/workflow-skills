@@ -301,6 +301,57 @@ class QueueTests(Base):
         self.assertEqual(cm.exception.code, 2)
 
 
+class GateTests(Base):
+    def human(self, n):
+        self.fake.prs += [pr(i, HUMAN_FILES) for i in range(1, n + 1)]
+
+    def test_four_waiting_is_open(self):
+        self.human(4)
+        code, out, _ = self.run_queue("--limit", "5")
+        self.assertEqual(code, 0)
+        self.assertEqual(out.splitlines()[-1], "GATE: waiting=4 limit=5 open")
+
+    def test_five_waiting_is_still_open(self):
+        self.human(5)
+        code, out, _ = self.run_queue("--limit", "5")
+        self.assertEqual(code, 0)
+        self.assertEqual(out.splitlines()[-1], "GATE: waiting=5 limit=5 open")
+
+    def test_six_waiting_is_full_and_lists_them(self):
+        self.human(6)
+        code, out, _ = self.run_queue("--limit", "5")
+        self.assertEqual(code, 1)
+        lines = out.splitlines()
+        self.assertEqual(lines[-1], "GATE: waiting=6 limit=5 full")
+        self.assertEqual(lines[0], "#1 human — fix(x): change 1")
+        self.assertEqual(len(lines), 7)
+
+    def test_auto_and_draft_prs_do_not_count(self):
+        self.human(5)
+        self.fake.prs += [pr(10, AUTO_FILES), pr(11, HUMAN_FILES, draft=True)]
+        code, out, _ = self.run_queue("--limit", "5")
+        self.assertEqual(code, 0)
+        self.assertEqual(out.splitlines()[-1], "GATE: waiting=5 limit=5 open")
+
+    def test_an_unknown_tier_counts(self):
+        self.fake.prs = [pr(1, HUMAN_FILES)]
+        self.fake.fail = {"pulls/1/files"}
+        code, out, _ = self.run_queue("--limit", "0")
+        self.assertEqual(code, 1)
+        self.assertEqual(out.splitlines()[0], "#1 unknown — fix(x): change 1")
+
+    def test_an_unreadable_pr_list_exits_3(self):
+        self.fake.fail = {"pr list"}
+        code, out, _ = self.run_queue("--limit", "5")
+        self.assertEqual(code, 3)
+        self.assertTrue(out.startswith("GATE: error reason="))
+
+    def test_limit_does_not_combine_with_post(self):
+        with self.assertRaises(SystemExit) as caught:
+            self.run_queue("--limit", "5", "--post")
+        self.assertEqual(caught.exception.code, 2)
+
+
 class PostTests(Base):
     def setUp(self):
         super().setUp()
