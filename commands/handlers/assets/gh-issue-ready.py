@@ -60,6 +60,29 @@ Passing the numbers removes that window. Neither mode reads a title (a
 stranger may have written it), so each issue reports an empty title. Nor is the
 `status:2_ready` label checked, which is what lets the promote hold ask about
 un-scored issues: in this mode `ready` means only "no open blocker".
+
+  python3 gh-issue-ready.py --repo owner/name --dependents-of 7 --dependents-of 9 --json
+
+`--dependents-of` answers the other direction: which issues list <n> as a
+blocker. It is the candidate read for `/promote-tasks after=<n>` (see
+`commands/handlers/gh-issue-promote.md` → "`after=` candidates"), and it reads
+`dependencies/blocking`, the sibling of the endpoint above. It reports no
+readiness verdict: a dependent can have a second open blocker, and the promote
+flow's own hold step (3b) asks that question of the candidates printed here.
+What it does decide is which dependents are the promoter's to score:
+
+- closed dependents are dropped: they are done;
+- a dependent in another repository goes to `foreign`. A dependency can cross
+  repositories, and every other read here keys on bare issue numbers, so a
+  foreign dependent passed on would be read as a local issue with that number;
+- a dependent carrying any `status:` rung past the vocabulary's first is
+  `already_scored`, and one carrying `blocked` is `blocked_label`: the same two
+  exclusions the promote flow's candidate search makes (step 3);
+- the rest are `candidates`. Each entry names, under `via`, which of the given
+  ids it depends on.
+
+Like every mode here it never prints a title or body, though the endpoint
+returns both.
 """
 
 import argparse
@@ -78,6 +101,9 @@ from _labels import (  # noqa: E402
 
 READY_STATUS_VALUE = "2_ready"
 ESTIMATE_PREFIX = "est:"
+# Not a vocabulary label: `blocked` is the free-standing manual hold the promote
+# flow's candidate search excludes by this spelling (gh-issue-promote.md step 3).
+BLOCKED_LABEL = "blocked"
 
 
 def run_gh(args):
@@ -313,6 +339,112 @@ def compute(
     }
 
 
+def dependents(repo, issue):
+    """The issues that list `issue` as a blocker, as raw API entries.
+
+    Paginated for the same reason `open_blockers` is: a dependent past the
+    first page of 30 would otherwise never be scored, and nothing would say so.
+    """
+    code, out, err = run_gh(
+        [
+            "api",
+            "--paginate",
+            "--slurp",
+            f"repos/{repo}/issues/{issue}/dependencies/blocking",
+        ]
+    )
+    if code != 0:
+        raise SystemExit(
+            f"gh api blocking failed for {repo}#{issue}: {err.strip() or out.strip()}"
+        )
+    pages = json.loads(out or "[]")
+    return [d for page in pages for d in page]
+
+
+def repo_of(entry):
+    """`owner/name` from an API entry's `repository_url`, or None when absent."""
+    url = entry.get("repository_url") or ""
+    marker = "/repos/"
+    return url.split(marker, 1)[1] if marker in url else None
+
+
+def compute_dependents(repo, labels_file, blocker_numbers):
+    """Sort the open dependents of `blocker_numbers` into the promote buckets.
+
+    See the module docstring for what each bucket means. A dependent reached
+    through several of the given ids appears once, with every id under `via`.
+    """
+    groups, _colors = load_vocabulary(labels_file)
+    statuses = groups.get("status", [])
+    if not statuses:
+        raise VocabularyError("labels.yml: no status group")
+    # The first rung is the un-scored one; any other `status:` label means the
+    # promoter has already been here.
+    scored = {f"status:{value}" for value in statuses[1:]}
+
+    local: dict = {}
+    foreign: dict = {}
+    for blocker in blocker_numbers:
+        for entry in dependents(repo, blocker):
+            if entry.get("state") != "open":
+                continue
+            number = entry["number"]
+            owner_repo = repo_of(entry)
+            if owner_repo is None or owner_repo.lower() != repo.lower():
+                key = (owner_repo or "unknown", number)
+                foreign.setdefault(key, {"repo": key[0], "number": number, "via": []})[
+                    "via"
+                ].append(blocker)
+                continue
+            row = local.setdefault(
+                number,
+                {
+                    "number": number,
+                    "via": [],
+                    "labels": label_names(entry.get("labels")),
+                },
+            )
+            row["via"].append(blocker)
+
+    buckets: dict = {"candidates": [], "already_scored": [], "blocked_label": []}
+    for number in sorted(local):
+        row = local[number]
+        names = row.pop("labels")
+        if scored.intersection(names):
+            buckets["already_scored"].append(row)
+        elif BLOCKED_LABEL in names:
+            buckets["blocked_label"].append(row)
+        else:
+            buckets["candidates"].append(row)
+
+    return {
+        "repo": repo,
+        "dependents_of": list(blocker_numbers),
+        **buckets,
+        "foreign": [foreign[k] for k in sorted(foreign)],
+    }
+
+
+def report_dependents(result):
+    ids = ", ".join(f"#{n}" for n in result["dependents_of"])
+    print(f"{result['repo']}: open dependents of {ids}")
+    for key, title in (
+        ("candidates", "Candidates"),
+        ("already_scored", "Already scored"),
+        ("blocked_label", "Blocked label"),
+    ):
+        rows = result[key]
+        print(f"\n{title} ({len(rows)}):")
+        for row in rows:
+            via = ", ".join(f"#{n}" for n in row["via"])
+            print(f"  #{row['number']} (via {via})")
+    rows = result["foreign"]
+    print(f"\nForeign repo (skipped) ({len(rows)}):")
+    for row in rows:
+        via = ", ".join(f"#{n}" for n in row["via"])
+        print(f"  {row['repo']}#{row['number']} (via {via})")
+
+
 def label_for(issue):
     """`#<n> <title>`, or bare `#<n>` when the row has no title (neither mode reads one)."""
     return (
@@ -392,9 +524,34 @@ def main(argv=None):
             "the promote dependency hold (gh-issue-promote.md step 3b)"
         ),
     )
+    parser.add_argument(
+        "--dependents-of",
+        action="append",
+        type=int,
+        default=[],
+        metavar="N",
+        help=(
+            "list the open issues that N blocks, sorted into the promote "
+            "buckets (candidates, already_scored, blocked_label, foreign); "
+            "repeatable; no readiness verdict. Not combinable with --issue "
+            "or --max-estimate"
+        ),
+    )
     parser.add_argument("--labels-file", type=Path, default=DEFAULT_LABELS_FILE)
     parser.add_argument("--json", action="store_true", dest="as_json")
     args = parser.parse_args(argv)
+
+    if args.dependents_of:
+        if args.issue_numbers or args.max_estimate is not None:
+            parser.error(
+                "--dependents-of does not combine with --issue or --max-estimate"
+            )
+        result = compute_dependents(args.repo, args.labels_file, args.dependents_of)
+        if args.as_json:
+            print(json.dumps(result, indent=2))
+        else:
+            report_dependents(result)
+        return 0
 
     result = compute(
         args.repo,

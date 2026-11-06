@@ -1,7 +1,7 @@
 ---
 description: Score new tasks against the confidence check and promote them to ready or needs_refinement
-allowed-tools: Bash(git *), Bash(find *), Bash(grep *), Bash(cat *), Bash(gh *), Bash(python3 *), Glob, Grep, Read, Edit, AskUserQuestion, Skill, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__list_projects, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__list_issue_labels, mcp__claude_ai_Linear__create_issue_label, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__save_comment, mcp__claude_ai_Linear__list_comments, mcp__linear__list_teams, mcp__linear__get_issue, mcp__linear__list_issues, mcp__linear__list_projects, mcp__linear__list_workflow_states, mcp__linear__list_issue_labels, mcp__linear__create_issue_label, mcp__linear__save_issue, mcp__linear__save_comment, mcp__linear__list_comments, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Atlassian__getTransitionsForJiraIssue, mcp__claude_ai_Atlassian__transitionJiraIssue, mcp__claude_ai_Atlassian__addCommentToJiraIssue, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__searchJiraIssuesUsingJql, mcp__atlassian__getTransitionsForJiraIssue, mcp__atlassian__transitionJiraIssue, mcp__atlassian__addCommentToJiraIssue
-argument-hint: "[dry-run] [all] [backfill-only] (default: apply, scoped to one project/epic/milestone)"
+allowed-tools: Bash(git *), Bash(find *), Bash(grep *), Bash(cat *), Bash(gh *), Bash(python3 *), Bash("${CLAUDE_PLUGIN_ROOT}/scripts/task-scan.py":*), Glob, Grep, Read, Edit, AskUserQuestion, Skill, Agent, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__list_projects, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__list_issue_labels, mcp__claude_ai_Linear__create_issue_label, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__save_comment, mcp__claude_ai_Linear__list_comments, mcp__linear__list_teams, mcp__linear__get_issue, mcp__linear__list_issues, mcp__linear__list_projects, mcp__linear__list_workflow_states, mcp__linear__list_issue_labels, mcp__linear__create_issue_label, mcp__linear__save_issue, mcp__linear__save_comment, mcp__linear__list_comments, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Atlassian__getTransitionsForJiraIssue, mcp__claude_ai_Atlassian__transitionJiraIssue, mcp__claude_ai_Atlassian__addCommentToJiraIssue, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__searchJiraIssuesUsingJql, mcp__atlassian__getTransitionsForJiraIssue, mcp__atlassian__transitionJiraIssue, mcp__atlassian__addCommentToJiraIssue
+argument-hint: "[dry-run] [all] [backfill-only] [after=<id>[,<id>…]] (default: apply, scoped to one project/epic/milestone)"
 ---
 
 # Promote Tasks
@@ -14,12 +14,13 @@ When the configured handler is an external tracker, the same scoring runs agains
 >
 > - `dry-run` — print proposed transitions and exit without writing.
 > - `all` — on a tracker handler, score the **whole** team/project/repo backlog instead of narrowing to a single project/epic/milestone (see each tracker handler's project-filter step). No effect on the file-based `repo-pr` path, which has no sub-project scope.
+> - `after=<id>[,<id>…]` — score only the **un-scored dependents** of the given ids: the items that list one of them as a blocker. It is the re-check a completion runs, so the ids are normally items just completed (`repo-pr` slugs, `gh-issue` numbers). It narrows the candidate set and changes nothing else: every gate below still runs, including the hold check, so a dependent with a second open blocker stays held. The id set is the scope, so there is **no scope prompt** and `all` has no effect, and the legacy-migration preflight **stops and reports** instead of prompting, which makes the mode safe inside an unattended caller. It only ever touches un-scored items, so a repeat run writes nothing new. Combines with `dry-run`, never with `backfill-only` (refuse the pair by name). `repo-pr` and `gh-issue` implement it (step 1 below; `commands/handlers/gh-issue-promote.md` → "`after=` candidates"). On `linear` and `jira` say so and stop. `linear` is not wired yet: its promoter has held on native relations since #1060, so it is the next handler to get the dependents read. `jira` holds only on manual flags, which a completion does not clear, so the mode would release nothing there. Design: `dev_docs/designs/2026-11-06-promote-after-complete.md`.
 > - `<key>=<value>` — a **run-scoped config override**. `commands/task-config.md` → "Run-scoped overrides" owns the closed key table, the precedence and the refusal on an unknown key; do not re-derive any of it here. **No key in that table is read by this command today** — `max-estimate` is a claim-time bound (`commands/handlers/task-fill.md` → "Where the estimate gate lives") and `wip-limit` gates claiming, so `/promote-tasks max-estimate=8` is **refused by name**, not accepted and ignored. The token is parsed here so that refusal is explicit rather than silent; if a promoter later reads a bound, add it to that table and it works here with no change to this file.
 > - `backfill-only` — fill missing `priority`/`size` on cards at **any** rung and write nothing else: no scoring, no transition, no `auto:` change. This is the only path to those two fields on a card the promoter has already scored, and it is not a re-score — demotion stays a human's call. `gh-issue` implements it (`commands/handlers/gh-issue-promote.md` step 7); on a handler that does not, say so and stop rather than falling back to a scoring run.
 >
 > Test each token with a "contains" check (e.g. `$ARGUMENTS` contains `dry-run`), not equality — `/promote-tasks dry-run all` enables both.
 
-> **Legacy migration preflight.** Before scanning, if a legacy `dev_docs/todos/` directory exists, run the **Legacy migration** prompt from `skills/task/SKILL.md` to move it to `dev_docs/tasks/`, then continue.
+> **Legacy migration preflight.** Before scanning, if a legacy `dev_docs/todos/` directory exists, run the **Legacy migration** prompt from `skills/task/SKILL.md` to move it to `dev_docs/tasks/`, then continue. Under `after=`, do not prompt: report `legacy dev_docs/todos/ present — run /promote-tasks once attended to migrate it` and stop.
 
 ## Steps
 
@@ -35,13 +36,15 @@ cat "$ROOT/dev_docs/tasks/.task-config.local.yml" 2>/dev/null # optional gitigno
 
 Overlay the local override on the committed config — mappings merge recursively, local leaf values win — then resolve `handler:` from the merged view.
 
+If `$ARGUMENTS` contains `after=` and the handler is `linear` or `jira`, stop with "`/promote-tasks after=` is not supported on `<handler>` yet — run `/promote-tasks` to score the backlog." before dispatching (the reason is under **Arguments** above).
+
 - File absent, or no `handler:` key → `repo-pr` (default). Continue to step 1 below (file-based path).
 - `handler: repo-pr` → continue to step 1 below (file-based path).
 - `handler: linear` → **dispatch to the Linear handler.** Read `commands/handlers/linear-common.md` (shared config/preflight/kanban mapping) and `commands/handlers/linear-promote.md` (the promote flow), passing `$ARGUMENTS` (the optional `dry-run` and `all` tokens) through. The handler owns the tracker-specific scoring and transitions. Skip steps 1–4 of this file.
 
   If a relative path doesn't resolve, find the file with **Glob** (`**/commands/handlers/linear-*.md`) and Read the result.
 
-- `handler: gh-issue` → **dispatch to the gh-issue handler.** Read `commands/handlers/gh-issue-promote.md` (the promote flow; it cites the `## List` section of `commands/handlers/gh-issue.md` for the shared label vocabulary), passing `$ARGUMENTS` (the optional `dry-run`, `all` and `backfill-only` tokens) through. The handler owns the gh-issue scoring and label transitions. Skip steps 1–4 of this file.
+- `handler: gh-issue` → **dispatch to the gh-issue handler.** Read `commands/handlers/gh-issue-promote.md` (the promote flow; it cites the `## List` section of `commands/handlers/gh-issue.md` for the shared label vocabulary), passing `$ARGUMENTS` (the optional `dry-run`, `all`, `backfill-only` and `after=` tokens) through. The handler owns the gh-issue scoring and label transitions. Skip steps 1–4 of this file.
 
   If a relative path doesn't resolve, find the file with **Glob** (`**/commands/handlers/gh-issue-promote.md`) and Read the result.
 
@@ -58,6 +61,8 @@ Run the deterministic scanner and take its `cards.new` group as the candidate se
 ```bash
 "${CLAUDE_PLUGIN_ROOT}/scripts/task-scan.py" "$(git rev-parse --show-toplevel)/dev_docs/tasks"
 ```
+
+**Under `after=`,** narrow `cards.new` to the cards whose `is_blocked_by` names one of the given slugs. No other read is needed: a completed blocker is a file that is gone or `done`, and the hold check below already treats both as satisfied. The scan reads the checkout it runs in, so run it where the completion is visible (`/deliver-task` runs it on the task branch). Report and exit if the narrowed set is empty, naming the slugs.
 
 The script excludes `_archive/` (where `/archive-tasks` parks stale `done` files — see `commands/handlers/repo-pr-archive.md`), `type: epic` files (epic rollups are never scored — see **Epics** in `skills/task/SKILL.md`), and files with no frontmatter, and **fails closed** on malformed frontmatter. The tracker path applies the analogous epic skip: backlog issues with sub-issues (children) are treated as **parent rollups** and are never scored — see `commands/handlers/linear-promote.md` step 5. Report and exit if `cards.new` is empty.
 
@@ -107,6 +112,8 @@ Otherwise, for each scored candidate, use `Edit` to update the YAML frontmatter 
 Do not touch any other fields, and no other part of the body. Do not move the file. Do not stage or commit — the next git operation (manual or `/do-tasks`) will pick up the changes.
 
 ### 4. Report
+
+Under `after=`, lead with `dependents re-checked (N) after <ids>:`, where `N` counts every dependent found, and use the same sections below it.
 
 Print a summary table, annotating any card that got a backfill, and every card that reached the forecast with its tier:
 

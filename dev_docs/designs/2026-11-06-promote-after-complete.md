@@ -1,6 +1,6 @@
 ---
 created: 2026-11-06
-status: proposed
+status: accepted
 ---
 
 # Re-promote a completed item's dependents as part of completing it
@@ -11,6 +11,15 @@ verb that completes something runs it as a tail step, and so does the agent
 merge path once the lander can merge. Do not chain a full `/promote-tasks` run
 onto completion.** It pays off today on `repo-pr` and `gh-issue`. On `linear` it
 does nothing until #1060 lands. On `jira` it does nothing at all.
+
+> **Update, 2026-11-06, after merge.** Three facts below changed on `main`
+> within the day. #1060 merged, so `linear`'s promoter now holds on native
+> relations and rollout step 4 is unblocked. The lander is no longer
+> shadow-only: `/deliver-task` runs it for real after the shadow pass, and it
+> merges an `auto`-tier PR when the repo variable `AGENT_LAND` is `on`
+> (`skills/deliver-task/references/landing.md`), so read "while the lander runs
+> in shadow" as "while `AGENT_LAND` is off". And `/promote-tasks` already
+> gained `Bash(python3 *)`; rollout step 1 adds the missing `Agent`.
 
 ## What completing a task changes on the board
 

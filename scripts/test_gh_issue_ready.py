@@ -492,5 +492,155 @@ class CallerSuppliedEstimateTests(unittest.TestCase):
         self.assertEqual([c for c in repo.calls if c[:2] == ["issue", "view"]], [])
 
 
+class FakeBlockingGraph:
+    """Each blocker's `dependencies/blocking` list, as the API returns it.
+
+    `blocking` maps blocker number -> list of entry dicts. Entries carry a
+    title and body on purpose: the real endpoint returns both, and the script
+    must not pass either on.
+    """
+
+    def __init__(self, blocking, page_size=100):
+        self.blocking = blocking
+        self.page_size = page_size
+        self.calls = []
+        self.paths = []
+
+    def run_gh(self, args):
+        self.calls.append(args)
+        if args[0] != "api":
+            raise AssertionError(f"unexpected gh call: {args}")
+        path = next(a for a in args if "/issues/" in a)
+        self.paths.append(path)
+        issue = int(path.split("/issues/")[1].split("/")[0])
+        entries = self.blocking.get(issue, [])
+        pages = [
+            entries[i : i + self.page_size]
+            for i in range(0, max(len(entries), 1), self.page_size)
+        ]
+        return 0, json.dumps(pages), ""
+
+
+def dependent(number, labels=(), state="open", repo="owner/name"):
+    return {
+        "number": number,
+        "state": state,
+        "repository_url": f"https://api.github.com/repos/{repo}",
+        "labels": [{"name": name} for name in labels],
+        "title": "STRANGER TITLE",
+        "body": "STRANGER BODY",
+    }
+
+
+class DependentsOfTests(unittest.TestCase):
+    def setUp(self):
+        self._orig_run_gh = gh_issue_ready.run_gh
+        self.addCleanup(setattr, gh_issue_ready, "run_gh", self._orig_run_gh)
+
+    def run_main(self, graph, *ids):
+        gh_issue_ready.run_gh = graph.run_gh
+        argv = ["--repo", "owner/name", "--labels-file", str(LABELS_FILE), "--json"]
+        for n in ids:
+            argv += ["--dependents-of", str(n)]
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = gh_issue_ready.main(argv)
+        self.assertEqual(code, 0)
+        return out.getvalue(), json.loads(out.getvalue())
+
+    def test_reads_the_blocking_endpoint_not_blocked_by(self):
+        graph = FakeBlockingGraph({7: [dependent(8)]})
+        self.run_main(graph, 7)
+        self.assertEqual(
+            graph.paths, ["repos/owner/name/issues/7/dependencies/blocking"]
+        )
+        self.assertIn("--paginate", graph.calls[0])
+
+    def test_sorts_dependents_into_the_promote_buckets(self):
+        graph = FakeBlockingGraph(
+            {
+                7: [
+                    dependent(10),  # pre-migration: no status label at all
+                    dependent(11, ["status:0_untriaged", "prio:2"]),
+                    dependent(12, ["status:2_ready", "auto:eligible"]),
+                    dependent(13, ["status:0_untriaged", "blocked"]),
+                    dependent(14, state="closed"),
+                    dependent(15, repo="other/repo"),
+                ]
+            }
+        )
+        _, result = self.run_main(graph, 7)
+        self.assertEqual([r["number"] for r in result["candidates"]], [10, 11])
+        self.assertEqual([r["number"] for r in result["already_scored"]], [12])
+        self.assertEqual([r["number"] for r in result["blocked_label"]], [13])
+        self.assertEqual(
+            result["foreign"], [{"repo": "other/repo", "number": 15, "via": [7]}]
+        )
+        every = [
+            n
+            for k in ("candidates", "already_scored", "blocked_label")
+            for n in result[k]
+        ]
+        self.assertNotIn(14, [r["number"] for r in every])
+
+    def test_a_scored_issue_that_is_also_blocked_is_already_scored(self):
+        """Already-scored wins: the promoter never touches it, held or not."""
+        graph = FakeBlockingGraph(
+            {7: [dependent(12, ["status:1_needs_refinement", "blocked"])]}
+        )
+        _, result = self.run_main(graph, 7)
+        self.assertEqual([r["number"] for r in result["already_scored"]], [12])
+        self.assertEqual(result["blocked_label"], [])
+
+    def test_a_dependent_of_two_ids_appears_once_with_both(self):
+        graph = FakeBlockingGraph({7: [dependent(10)], 9: [dependent(10)]})
+        _, result = self.run_main(graph, 7, 9)
+        self.assertEqual(result["candidates"], [{"number": 10, "via": [7, 9]}])
+
+    def test_a_dependent_past_the_first_page_is_seen(self):
+        graph = FakeBlockingGraph(
+            {
+                7: [dependent(n, ["status:2_ready"]) for n in range(100, 140)]
+                + [dependent(10)]
+            },
+            page_size=30,
+        )
+        _, result = self.run_main(graph, 7)
+        self.assertEqual([r["number"] for r in result["candidates"]], [10])
+
+    def test_foreign_repo_match_ignores_case(self):
+        graph = FakeBlockingGraph({7: [dependent(10, repo="Owner/Name")]})
+        _, result = self.run_main(graph, 7)
+        self.assertEqual([r["number"] for r in result["candidates"]], [10])
+        self.assertEqual(result["foreign"], [])
+
+    def test_never_prints_title_or_body(self):
+        graph = FakeBlockingGraph(
+            {7: [dependent(10), dependent(15, repo="other/repo")]}
+        )
+        raw, _ = self.run_main(graph, 7)
+        self.assertNotIn("STRANGER", raw)
+
+    def test_is_read_only(self):
+        graph = FakeBlockingGraph({7: [dependent(10)]})
+        self.run_main(graph, 7)
+        self.assertTrue(all("--method" not in c for c in graph.calls))
+
+    def test_refuses_to_combine_with_issue_or_max_estimate(self):
+        for extra in (["--issue", "3"], ["--max-estimate", "3"]):
+            with self.subTest(extra=extra), contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as caught:
+                    gh_issue_ready.main(
+                        ["--repo", "owner/name", "--dependents-of", "7", *extra]
+                    )
+                self.assertEqual(caught.exception.code, 2)
+
+    def test_a_failed_read_exits_non_zero(self):
+        gh_issue_ready.run_gh = lambda args: (1, "", "boom")
+        with self.assertRaises(SystemExit) as caught:
+            gh_issue_ready.compute_dependents("owner/name", LABELS_FILE, [7])
+        self.assertIn("boom", str(caught.exception))
+
+
 if __name__ == "__main__":
     unittest.main()
