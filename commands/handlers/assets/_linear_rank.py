@@ -37,6 +37,9 @@ as met. A deleted blocker has no relation left, so it never appears. The
 GraphQL fast path always supplies the list; the MCP floor's `list_issues`
 returns no relations, so it supplies them per candidate at pre-flight
 (`linear-claim.md` → "Pre-flight", step 6) rather than for the whole set.
+`linear-promote-blockers.py` applies the same rule, through `blocked_by()`
+and `unmet_blockers()`, when `/promote-tasks` decides which Backlog
+candidates to hold, so promote never readies an issue this gate would refuse.
 
 **One caller exempts blockers inside the set.** `/auto-pilot`'s Linear
 `list_ready` stacks a dependent's branch on its in-run parent instead of
@@ -83,6 +86,29 @@ def gate(issue, max_estimate, satisfied=frozenset()):
         who = assignee.get("displayName") or assignee.get("id") or "unknown"
         return f"assigned to {who}"
     return None
+
+
+def blocked_by(issue):
+    """Fold `inverseRelations` into the `blockedBy` list `gate()` reads.
+
+    An inverse `blocks` relation names this issue's blocker in its `issue`
+    field (see linear-relations.py's header). A null `issue` is a blocker that
+    no longer exists, which satisfies the dependency, so it is left out. A
+    truncated page adds an entry with no state, so the unseen blockers hold
+    the issue rather than letting it through.
+    """
+    conn = issue.get("inverseRelations") or {}
+    out = [
+        {
+            "identifier": rel["issue"]["identifier"],
+            "stateType": rel["issue"]["state"]["type"],
+        }
+        for rel in conn.get("nodes") or []
+        if rel.get("type") == "blocks" and rel.get("issue")
+    ]
+    if (conn.get("pageInfo") or {}).get("hasNextPage"):
+        out.append({"identifier": "more than 50 blockers", "stateType": None})
+    return out
 
 
 def unmet_blockers(blocked_by):

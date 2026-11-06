@@ -48,7 +48,7 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _linear_rank import gate, rank_key, stack_in_set  # noqa: E402
+from _linear_rank import blocked_by, gate, rank_key, stack_in_set  # noqa: E402
 from _secret_resolve import SecretUnavailable, resolve_key  # noqa: E402
 from _shape import ShapeError, expect  # noqa: E402
 
@@ -159,29 +159,6 @@ def resolve_team(key, team):
     if not node:
         sys.exit(f"Team not found: {team}")
     return data["viewer"], node
-
-
-def blocked_by(issue):
-    """Fold `inverseRelations` into the `blockedBy` list `gate()` reads.
-
-    An inverse `blocks` relation names this issue's blocker in its `issue`
-    field (see linear-relations.py's header). A null `issue` is a blocker that
-    no longer exists, which satisfies the dependency, so it is left out. A
-    truncated page adds an entry with no state, so the unseen blockers hold
-    the issue rather than letting it through.
-    """
-    conn = issue.get("inverseRelations") or {}
-    out = [
-        {
-            "identifier": rel["issue"]["identifier"],
-            "stateType": rel["issue"]["state"]["type"],
-        }
-        for rel in conn.get("nodes") or []
-        if rel.get("type") == "blocks" and rel.get("issue")
-    ]
-    if (conn.get("pageInfo") or {}).get("hasNextPage"):
-        out.append({"identifier": "more than 50 blockers", "stateType": None})
-    return out
 
 
 def fetch_issues(key, team_id, project_id, page_size):
