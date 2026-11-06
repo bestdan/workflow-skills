@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# smoke-nono.sh — the Linux confinement smoke (#1349): proves the rendered nono
-# profile refuses what it must and still runs the orchestrator, through the same
+# smoke-nono.sh — the nono confinement smoke, Linux (#1349) and macOS (#1361):
+# proves the rendered nono profile refuses what it must and still runs the
+# orchestrator, through the same
 # invocation the generated wrapper uses (write-launch --jail nono): the pinned
 # nono, `run --silent --profile`, NONO_NO_UPDATE_CHECK/NONO_NO_MIGRATE, the
 # profile's own TMPDIR, the run dir as cwd, and the token handed to the jailed
@@ -17,9 +18,15 @@
 #   WRITE_TMP     a write to /tmp outside the run's TMPDIR is denied
 #   CRED_READ     ~/.claude/.credentials.json is not readable  (token command only)
 #   CRED_WRITE    ~/.claude/.credentials.json is not writable  (token command only)
-#   BUS_STAGED    a copy of systemctl staged in the run dir cannot reach the user bus
-#   BUS_DIRECT    /usr/bin/systemctl cannot reach it either
-#   BUS_BROKER    the jail cannot stop a verify-broker unit by name
+#   BUS_STAGED    a copy of systemctl staged in the run dir cannot reach the user
+#                 bus                                                   (Linux)
+#   BUS_DIRECT    /usr/bin/systemctl cannot reach it either             (Linux)
+#   BUS_BROKER    the jail cannot stop a verify-broker unit by name     (Linux)
+#   LAUNCHCTL_DIRECT  /bin/launchctl is refused in the jail             (macOS)
+#   LAUNCHCTL_STAGED  a copy of launchctl staged in the run dir cannot
+#                 submit a job: afterwards, unjailed, its label is absent (macOS)
+#   OPEN          /usr/bin/open is refused                              (macOS)
+#   HEREDOC       a here-doc under /bin/bash works in the jail (#1396)  (macOS)
 #   GIT_COMMIT    a commit in the run worktree (of a run clone) succeeds
 #   GIT_WORKTREE  a worker worktree can be added, committed in and removed, and
 #                 its branch deleted
@@ -31,7 +38,13 @@
 #
 # Without a token command the credential checks are skipped and the profile is
 # the documented fallback (~/.claude writable), which this smoke says out loud.
+# On macOS there is no fallback: the renderer requires a token command (its
+# header says why), so the smoke FAILs without one. The launchd checks prove the
+# profile's raw Seatbelt denies hold under nono.
 # The CLAUDE check makes one real one-turn model call.
+#
+# Env (tests only): AUTO_PILOT_HOST_OS stands in for `uname -s`, as in
+# spawn-orchestrator.sh.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -62,12 +75,28 @@ done
   exit 2
 }
 [ -n "$claude_bin" ] || claude_bin="$(command -v claude 2>/dev/null || true)"
+host_os="${AUTO_PILOT_HOST_OS:-$(uname -s 2>/dev/null)}"
 
 fails=0
 say() { # <check> <pass|FAIL|skip> <detail>
   echo "SMOKE $1: $2 ($3)"
   [ "$2" = FAIL ] && fails=$((fails + 1))
   return 0
+}
+
+if [ "$host_os" = Darwin ] && [ -z "$token_cmd" ]; then
+  say RENDER FAIL "macOS needs --claude-token-cmd: nono's default profile denies the Keychain, where /login keeps Claude's credential, so the jailed claude authenticates only with a token command (claude setup-token)"
+  exit 1
+fi
+
+# <secs> <command...>: coreutils timeout where there is one (Linux); macOS has
+# none, and perl's alarm survives the exec.
+bounded() {
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$@"
+  else
+    perl -e 'alarm shift; exec @ARGV or exit 127' "$@"
+  fi
 }
 
 S="$(mktemp -d "${TMPDIR:-/tmp}/smoke-nono.XXXXXX")" || exit 2
@@ -83,12 +112,18 @@ mkdir -p "$S/tmp"
 # run worktree and workers/. The scratch repos never read the owner's global
 # config or hooks.
 # Contents and modes of every file under the main checkout's .git: Landlock
-# does not mediate chmod, so a mode change counts as a change too.
+# does not mediate chmod, so a mode change counts as a change too. GNU stat
+# takes -c, BSD (macOS) stat -f.
+if stat -c %a / >/dev/null 2>&1; then
+  stat_fmt=(-c "%F %a %n")
+else
+  stat_fmt=(-f "%HT %Lp %N")
+fi
 main_sum() {
   (
     cd "$S/repo/.git" || exit 1
     find . -type f -exec cksum {} +
-    find . -exec stat -c "%F %a %n" {} +
+    find . -exec stat "${stat_fmt[@]}" {} +
   ) | sort | cksum
 }
 have_git=0
@@ -233,7 +268,9 @@ bus_check() { # <check> <command...>
   fi
 }
 sysctl="$(command -v systemctl 2>/dev/null || true)"
-if [ -z "$sysctl" ]; then
+if [ "$host_os" = Darwin ]; then
+  : # launchd, not systemd: the launchd checks below.
+elif [ -z "$sysctl" ]; then
   say BUS_STAGED skip "no systemctl on this host"
   say BUS_DIRECT skip "no systemctl on this host"
   say BUS_BROKER skip "no systemctl on this host"
@@ -253,13 +290,51 @@ else
   fi
 fi
 
+# macOS: the profile's raw Seatbelt rules (render-nono-profile's header). Each
+# escape check passes on any refusal; only a success fails.
+if [ "$host_os" = Darwin ]; then
+  uid="$(id -u)"
+  if o="$(jail /bin/sh -c '/bin/launchctl print "gui/$1"' _ "$uid" 2>&1)"; then
+    say LAUNCHCTL_DIRECT FAIL "/bin/launchctl ran in the jail and reached launchd"
+  else
+    say LAUNCHCTL_DIRECT pass "$(head -1 <<<"$o")"
+  fi
+  # A copy outside /bin escapes the exec deny by path, so what must hold is the
+  # mach-lookup deny. Recent macOS may also kill the copy outright (launch
+  # constraints); either way the job must not exist afterwards.
+  lc_label="com.autopilot.smoke-nono.$$"
+  o="$(jail /bin/sh -c 'cp /bin/launchctl ./lc && ./lc submit -l "$1" -- /usr/bin/true; rc=$?; rm -f ./lc; exit $rc' _ "$lc_label" 2>&1)"
+  rc=$?
+  if launchctl print "gui/$uid/$lc_label" >/dev/null 2>&1; then
+    say LAUNCHCTL_STAGED FAIL "a staged launchctl submitted $lc_label from the jail"
+  else
+    say LAUNCHCTL_STAGED pass "no job was submitted (staged launchctl exit $rc$([ -n "$o" ] && printf ': %s' "$(head -1 <<<"$o")"))"
+  fi
+  launchctl remove "$lc_label" >/dev/null 2>&1 || true
+  launchctl bootout "gui/$uid/$lc_label" >/dev/null 2>&1 || true
+  printf 'auto-pilot nono smoke\n' >"$W/open-probe.txt"
+  if o="$(jail /bin/sh -c '/usr/bin/open -g "$1"' _ "$W/open-probe.txt" 2>&1)"; then
+    say OPEN FAIL "/usr/bin/open ran in the jail"
+  else
+    say OPEN pass "$(head -1 <<<"$o")"
+  fi
+  o="$(jail /bin/bash -c 'cat <<EOF
+heredoc-ok
+EOF' 2>&1)"
+  if [ "$o" = heredoc-ok ]; then
+    say HEREDOC pass "a here-doc under /bin/bash works in the jail"
+  else
+    say HEREDOC FAIL "a here-doc under /bin/bash failed in the jail (#1396): $(head -1 <<<"$o")"
+  fi
+fi
+
 if [ -z "$claude_bin" ]; then
   say CLAUDE FAIL "claude not found on PATH"
 else
   token="" before="" after=""
   [ -e "$cred" ] && before="$(cksum <"$cred") $(wc -c <"$cred")"
   if [ -n "$token_cmd" ]; then
-    token="$(timeout 60 bash -c "$token_cmd" </dev/null 2>/dev/null)" || token=""
+    token="$(bounded 60 bash -c "$token_cmd" </dev/null 2>/dev/null)" || token=""
   fi
   if [ -n "$token_cmd" ] && [ -z "$token" ]; then
     say CLAUDE FAIL "the token command printed nothing, failed, or ran past 60s"
