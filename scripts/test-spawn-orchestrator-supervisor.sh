@@ -99,6 +99,17 @@ if command -v shasum >/dev/null 2>&1; then
   have "write-verify-broker: pins the verify command" 'bash scripts/check.sh' "$vbody"
   have "write-verify-broker: pins a cmd-hash" '--cmd-hash' "$vbody"
   lack "write-verify-broker: broker is UN-JAILED (no sandbox-exec)" 'sandbox-exec' "$vbody"
+  have "write-verify-broker: exports a UTF-8 locale (#1397)" 'export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8' "$vbody"
+  # Behavioral: run the rendered script under an empty environment (as launchd
+  # does) and check the pinned verify command sees the UTF-8 locale.
+  LCMD='printf "%s|%s" "$LANG" "$LC_ALL"'
+  LPIN="$(printf '%s' "$LCMD" | shasum -a 256 | awk '{print $1}')"
+  "$SCRIPT" write-verify-broker --sentinel-dir "$SENT" --verify-cmd "$LCMD" \
+    --confine-under "$ROOT" --label com.autopilot.test.loc --workdir "$WT" --log "$VB/loc.log" \
+    --path '/usr/bin:/bin' --out-script "$VB/loc.sh" --out-plist "$VB/loc.plist" >/dev/null 2>&1
+  "$SCRIPT" verify-request --sentinel-dir "$SENT" --worktree "$WT" --cmd-hash "$LPIN" --id loc >/dev/null 2>&1
+  env -i PATH=/usr/bin:/bin /bin/bash "$VB/loc.sh" >/dev/null 2>&1
+  have "verify-broker: runs the verify under the UTF-8 locale (#1397)" 'en_US.UTF-8|en_US.UTF-8' "$(cat "$SENT/loc.result" 2>/dev/null)"
   if command -v plutil >/dev/null 2>&1; then
     if plutil -lint "$VB/broker.plist" >/dev/null 2>&1; then ok "write-verify-broker: plist lints"; else bad "write-verify-broker: plist lints"; fi
   else
