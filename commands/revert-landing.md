@@ -1,6 +1,6 @@
 ---
 description: Undo a merged PR, usually a bad agent landing, by opening a revert PR of its squash commit, titled as a fix so it ships in the next release. Use on /revert-landing, or when the user asks to revert, roll back or undo a landed or merged PR.
-allowed-tools: Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/revert-landing.py":*)
+allowed-tools: Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/revert-landing.py":*), Bash(gh repo view:*)
 argument-hint: "<pr> [--repo <owner/name>] [--reason <text>]"
 ---
 

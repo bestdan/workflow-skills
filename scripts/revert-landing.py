@@ -179,17 +179,20 @@ def check(repo, pr, revert_number, merge_sha):
         original = land.read_files(repo, pr)
     except ReadError as exc:
         return f"CHECK: unknown reason=cannot read #{pr}'s files: {exc}", False
-    why = None
+    why, unreadable = None, False
     for delay in (0, *CHECK_DELAYS):
         if delay:
             land.sleep(delay)
         try:
             why = mismatch(original, land.read_files(repo, revert_number))
         except ReadError as exc:
-            why = f"cannot read #{revert_number}'s files: {exc}"
+            why, unreadable = f"cannot read #{revert_number}'s files: {exc}", True
             continue
+        unreadable = False
         if why is None:
             return f"CHECK: reverses {merge_sha[:7]}", True
+    if unreadable:
+        return f"CHECK: unknown reason={why}", False
     return f"CHECK: mismatch {why}", False
 
 

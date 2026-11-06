@@ -163,6 +163,29 @@ class RevertTests(Base):
             lines[-1], "CHECK: mismatch scripts/a.py: revert +3/-10, expected +2/-10"
         )
 
+    def test_unreadable_original_files_are_unknown(self):
+        self.fake.fail = {"pulls/7/files"}
+        code, lines = self.run_script()
+        self.assertEqual(code, 3)
+        self.assertTrue(
+            lines[-1].startswith("CHECK: unknown reason=cannot read #7's files")
+        )
+
+    def test_files_still_missing_after_every_retry_are_a_mismatch(self):
+        self.fake.empty_reads = 4
+        code, lines = self.run_script()
+        self.assertEqual(code, 3)
+        self.assertEqual(lines[-1], "CHECK: mismatch the revert PR shows no files yet")
+        self.assertEqual(self.slept, [2, 4, 8])
+
+    def test_revert_files_unreadable_on_every_retry_are_unknown(self):
+        self.fake.fail = {"pulls/8/files"}
+        code, lines = self.run_script()
+        self.assertEqual(code, 3)
+        self.assertTrue(
+            lines[-1].startswith("CHECK: unknown reason=cannot read #8's files")
+        )
+
     def test_a_merge_without_the_trailer_is_reverted_with_a_note(self):
         self.fake.message = "fix: by hand\n"
         code, lines = self.run_script()
