@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.200.0] - 2026-11-06
+
+### Features
+
+- flag pipeline-heavy fenced shell with no control flow [#936] (#1305) (9274bcd)
+
 ## [2.199.2] - 2026-11-06
 
 ### Fixes
