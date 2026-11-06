@@ -766,6 +766,16 @@ class RealLandingTests(unittest.TestCase):
         self.assertEqual(len(self.re_reads()), 2)
         self.assertEqual(self.slept, [land.RE_READ_DELAYS[0]])
 
+    def test_a_merge_commit_never_reported_after_a_failed_call_holds(self):
+        self.fake.merge_fails_after_merging = True
+        self.fake.null_merge_commit_reads = 1 + len(land.RE_READ_DELAYS)
+        lines = self.land()
+        self.assertIn("re-read: merged, but no merge commit reported", lines[-1])
+        self.assertTrue(lines[-1].endswith(", so " + land.CHECK_BY_HAND), lines[-1])
+        self.assertEqual(len(self.re_reads()), 1 + len(land.RE_READ_DELAYS))
+        self.assertEqual(self.slept, list(land.RE_READ_DELAYS))
+        self.assertEqual(self.fake.labels_added, [])
+
     def test_a_failed_call_whose_re_read_fails_holds(self):
         self.fake.merge_fails_after_merging = True
         self.fake.fail.add("state,headRefOid,mergeCommit")
