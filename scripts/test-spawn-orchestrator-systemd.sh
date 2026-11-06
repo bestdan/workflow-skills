@@ -61,7 +61,7 @@ export STUB_SYSTEMCTL_LOG="$SD/systemctl.log" STUB_SYSTEMD_RUN_LOG="$SD/systemd-
 
 # A rendered nono profile and nono settings.
 SDP="$SD/launch/profile.json"
-"$SCRIPT" render-nono-profile --rw "$RUN_WT" --tmpdir "$SD/tmp" --out "$SDP" >/dev/null 2>&1
+AUTO_PILOT_HOST_OS=Linux "$SCRIPT" render-nono-profile --rw "$RUN_WT" --tmpdir "$SD/tmp" --out "$SDP" >/dev/null 2>&1
 "$SCRIPT" render-settings --jail nono --source gh-issue --out "$SD/launch/settings.json" >/dev/null 2>&1
 printf 'run the graph\n' >"$SD/launch/prompt.txt"
 mkdir -p "$RUN_WT/.auto-pilot"
@@ -241,7 +241,7 @@ if command -v git >/dev/null 2>&1 && [ -f "$SDP" ]; then
     local d="$SD/wake-$1"
     sdrun "$d"
     : >"$d/.auto-pilot/orchestrator.log"
-    "$SCRIPT" render-nono-profile --rw "$d" --tmpdir "$SD/tmp" --out "$SD/launch/p-$1.json" >/dev/null 2>&1
+    AUTO_PILOT_HOST_OS=Linux "$SCRIPT" render-nono-profile --rw "$d" --tmpdir "$SD/tmp" --out "$SD/launch/p-$1.json" >/dev/null 2>&1
     AUTO_PILOT_HOST_OS=Linux PATH="$SD_PATH" "$SCRIPT" write-launch --jail nono --nono-bin "$NBIN" \
       --profile "$SD/launch/p-$1.json" --settings "$SD/launch/settings.json" --workdir "$d" \
       --log "$d/.auto-pilot/orchestrator.log" --prompt-file "$SD/launch/prompt.txt" \
@@ -367,7 +367,7 @@ if [ -f "$SDP" ]; then
     d="$SD/wake-broker"
     sdrun "$d"
     : >"$d/.auto-pilot/orchestrator.log"
-    "$SCRIPT" render-nono-profile --rw "$d" --tmpdir "$SD/tmp" --out "$SD/launch/p-broker.json" >/dev/null 2>&1
+    AUTO_PILOT_HOST_OS=Linux "$SCRIPT" render-nono-profile --rw "$d" --tmpdir "$SD/tmp" --out "$SD/launch/p-broker.json" >/dev/null 2>&1
     AUTO_PILOT_HOST_OS=Linux PATH="$SD_PATH" "$SCRIPT" write-launch --jail nono --nono-bin "$NBIN" \
       --profile "$SD/launch/p-broker.json" --settings "$SD/launch/settings.json" --workdir "$d" \
       --log "$d/.auto-pilot/orchestrator.log" --prompt-file "$SD/launch/prompt.txt" \

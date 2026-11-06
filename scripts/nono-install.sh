@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# nono-install.sh — the pinned nono the Linux orchestrator jail runs under
-# (#1349; dev_docs/designs/2026-11-03-orchestrator-jail.md).
+# nono-install.sh — the pinned nono the orchestrator jail runs under, on Linux
+# (Landlock, #1349) and macOS (Seatbelt, #1361;
+# dev_docs/designs/2026-11-03-orchestrator-jail.md).
 #
 # nono is pre-1.0 and releases weekly, so the jail never runs "whatever nono is
 # on PATH". It runs one version, from a release tarball whose SHA-256 and whose
@@ -11,7 +12,8 @@
 # Usage:
 #   nono-install.sh path      print the pinned binary's path
 #   nono-install.sh install   download, verify, unpack (idempotent)
-#   nono-install.sh check     verify the installed binary and the kernel
+#   nono-install.sh check     verify the installed binary (and, on Linux, the
+#                             kernel's Landlock support)
 #
 # `check` prints `NONO: ok <path> (...)` and exits 0, or prints `NONO: <problem>`
 # then `NONO FIX: <what to run>` and exits 1. Pre-flight §3b reads those lines.
@@ -25,14 +27,15 @@
 #   AUTO_PILOT_NONO_SHA256          the binary pin, instead of the table
 #   AUTO_PILOT_NONO_TARBALL_SHA256  the tarball pin, instead of the table
 #   AUTO_PILOT_NONO_URL_BASE        the release download base
-#   AUTO_PILOT_LSM_FILE             the kernel's LSM list
+#   AUTO_PILOT_LSM_FILE             the kernel's LSM list (Linux targets)
 set -uo pipefail
 
 NONO_VERSION="0.81.0"
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 
 # <target> -> "<tarball sha256> <binary sha256>". Tarball sums are the release's
-# own SHA256SUMS.txt; binary sums were taken from those tarballs (2026-11-03).
+# own SHA256SUMS.txt; binary sums were taken from those tarballs (Linux
+# 2026-11-03, macOS 2026-11-06).
 _pin() {
   case "$1" in
     x86_64-unknown-linux-gnu)
@@ -40,6 +43,12 @@ _pin() {
       ;;
     aarch64-unknown-linux-gnu)
       echo "a4d87ddb0917ef96224bcc41a2587318d7d0e92441e7ff454696e5980c9f7924 6d9c53bed08eb81e5b4c38fdf1d0089087566dc9035da7614ce26d011ed2e8f4"
+      ;;
+    aarch64-apple-darwin)
+      echo "728b1deefbf6390c9b74fc982efbded1e1c4b37b99dcdefa2e07266dfef4d9e9 b1135f21cf81ae3c8ae3b035dbbeea70072595b54f6138afad7a5402c7cedcb1"
+      ;;
+    x86_64-apple-darwin)
+      echo "f795aa88faaf75975ffc600eb870e7c9f2b52ba2035df5087ec972a0252afd40 e871eaa58e4d6b6cc3fffe6aaa19e2b74b98d023097924a52b07bc9378146d77"
       ;;
     *) return 1 ;;
   esac
@@ -53,6 +62,8 @@ _target() {
   case "$(uname -s 2>/dev/null)/$(uname -m 2>/dev/null)" in
     Linux/x86_64) echo x86_64-unknown-linux-gnu ;;
     Linux/aarch64 | Linux/arm64) echo aarch64-unknown-linux-gnu ;;
+    Darwin/arm64) echo aarch64-apple-darwin ;;
+    Darwin/x86_64) echo x86_64-apple-darwin ;;
     *) echo "$(uname -s 2>/dev/null)/$(uname -m 2>/dev/null)" ;;
   esac
 }
@@ -86,7 +97,7 @@ cmd_check() {
   local target pins bin want got ver lsm abi
   target="$(_target)"
   pins="$(_pin "$target")" || fail "no pinned nono build for this host ($target)" \
-    "the Linux jail runs on x86_64 or aarch64 Linux only"
+    "the jail runs on x86_64 or aarch64 Linux, or Apple silicon or Intel macOS, only"
   bin="$(_bin)" || fail "the nono install root is not an absolute path" \
     "set AUTO_PILOT_NONO_HOME, XDG_DATA_HOME or HOME to an absolute path"
   [ -f "$bin" ] || fail "nono $NONO_VERSION is not installed at $bin" "bash $SELF install"
@@ -98,6 +109,14 @@ cmd_check() {
   ver="$(NONO_NO_UPDATE_CHECK=1 NONO_NO_MIGRATE=1 "$bin" --version 2>/dev/null | head -1)"
   [ "$ver" = "nono $NONO_VERSION" ] || fail "$bin --version printed '$ver', want 'nono $NONO_VERSION'" \
     "reinstall the pinned build: bash $SELF install"
+  # macOS: nono confines with Seatbelt, which every supported macOS has; the
+  # Landlock checks below are the Linux kernel's.
+  case "$target" in
+    *-apple-darwin)
+      echo "NONO: ok $bin (nono $NONO_VERSION, Seatbelt)"
+      return 0
+      ;;
+  esac
   lsm="$(cat "${AUTO_PILOT_LSM_FILE:-/sys/kernel/security/lsm}" 2>/dev/null || true)"
   case ",$lsm," in
     *,landlock,*) ;;
