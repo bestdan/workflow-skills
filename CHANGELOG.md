@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.200.1] - 2026-11-06
+
+### Fixes
+
+- handle a bare run clone as the hook's cwd [#1416] (#1417) (bce8702)
+
 ## [2.200.0] - 2026-11-06
 
 ### Features
