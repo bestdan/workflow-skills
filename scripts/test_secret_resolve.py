@@ -12,6 +12,7 @@ stdout, that the full ref never appears in an error message, and the
 
 import contextlib
 import importlib.util
+import io
 import os
 import stat
 import subprocess
@@ -258,6 +259,179 @@ class RedactTests(unittest.TestCase):
         self.assertEqual(
             secret_resolve.redact("opx op://Private/x/y"), "configured secret reference"
         )
+
+
+def run_git(cwd, *args):
+    env = dict(os.environ, GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_NOSYSTEM="1")
+    subprocess.run(
+        ["git", "-C", str(cwd), *args],
+        check=True,
+        capture_output=True,
+        env=env,
+    )
+
+
+class ConfigRungTests(unittest.TestCase):
+    """The pointer and resolver read from the task config (#1426): a main
+    checkout with a committed config, an untracked local override, and a
+    linked worktree that has the committed file but not the override."""
+
+    NAMES = ("LINEAR_API_KEY", "LINEAR_API_KEY_REF", "LINEAR_API_KEY_RESOLVER")
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        root = Path(self.tmp.name)
+        self.bin_dir = root / "bin"
+        self.bin_dir.mkdir()
+        # Echo the ref back so a test can see which rung supplied it.
+        write_stub(self.bin_dir, "op", '#!/bin/sh\necho "op:$2"\n')
+        write_stub(self.bin_dir, "opx", '#!/bin/sh\necho "opx:$1"\n')
+        self.main = root / "main"
+        self.main.mkdir()
+        run_git(self.main, "init", "-q", "-b", "main")
+        self.committed = self.main / "dev_docs" / "tasks" / ".task-config.yml"
+        self.committed.parent.mkdir(parents=True)
+        self.committed.write_text("handler: linear\nlinear:\n  team: ENG\n")
+        run_git(self.main, "add", ".")
+        run_git(
+            self.main,
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.com",
+            "commit",
+            "-q",
+            "-m",
+            "init",
+        )
+        self.local = self.committed.with_name(".task-config.local.yml")
+        self.worktree = root / "wt"
+        run_git(self.main, "worktree", "add", "-q", "-b", "side", str(self.worktree))
+        self._environ = dict(os.environ)
+        self.addCleanup(self._restore_environ)
+        for key in self.NAMES:
+            os.environ.pop(key, None)
+        # Keep git on PATH for the resolver's own rev-parse calls.
+        os.environ["PATH"] = f"{self.bin_dir}{os.pathsep}{os.environ.get('PATH', '')}"
+        os.environ["GIT_CONFIG_GLOBAL"] = "/dev/null"
+
+    def _restore_environ(self):
+        os.environ.clear()
+        os.environ.update(self._environ)
+
+    def resolve(self, cwd):
+        return secret_resolve.resolve_key("LINEAR_API_KEY", cwd=cwd)
+
+    def test_local_ref_from_the_main_checkout(self):
+        self.local.write_text("linear:\n  api_key_ref: op://Dev/linear/token\n")
+        self.assertEqual(self.resolve(self.main), "op:op://Dev/linear/token")
+
+    def test_local_ref_from_a_linked_worktree(self):
+        self.local.write_text("linear:\n  api_key_ref: op://Dev/linear/token\n")
+        self.assertFalse(
+            (self.worktree / "dev_docs" / "tasks" / ".task-config.local.yml").exists()
+        )
+        self.assertEqual(self.resolve(self.worktree), "op:op://Dev/linear/token")
+
+    def test_local_ref_beats_committed_ref(self):
+        self.committed.write_text("linear:\n  api_key_ref: op://Shared/x/y\n")
+        self.local.write_text("linear:\n  api_key_ref: op://Dev/linear/token\n")
+        self.assertEqual(self.resolve(self.main), "op:op://Dev/linear/token")
+
+    def test_committed_ref_when_no_local_one(self):
+        self.committed.write_text("linear:\n  api_key_ref: op://Shared/x/y\n")
+        self.assertEqual(self.resolve(self.main), "op:op://Shared/x/y")
+
+    def test_env_ref_beats_config_ref(self):
+        self.local.write_text("linear:\n  api_key_ref: op://Dev/linear/token\n")
+        os.environ["LINEAR_API_KEY_REF"] = "op://Env/x/y"
+        self.assertEqual(self.resolve(self.main), "op:op://Env/x/y")
+
+    def test_local_resolver_applies_to_an_env_ref(self):
+        self.local.write_text("linear:\n  api_key_resolver: opx\n")
+        os.environ["LINEAR_API_KEY_REF"] = "op://Env/x/y"
+        self.assertEqual(self.resolve(self.main), "opx:op://Env/x/y")
+
+    def test_env_resolver_beats_local_resolver(self):
+        self.local.write_text(
+            "linear:\n  api_key_ref: op://Dev/a/b\n  api_key_resolver: opx\n"
+        )
+        os.environ["LINEAR_API_KEY_RESOLVER"] = "op"
+        self.assertEqual(self.resolve(self.main), "op:op://Dev/a/b")
+
+    def test_committed_resolver_is_reported_and_ignored(self):
+        self.committed.write_text("linear:\n  api_key_resolver: opx\n")
+        self.local.write_text("linear:\n  api_key_ref: op://Dev/a/b\n")
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            self.assertEqual(self.resolve(self.main), "op:op://Dev/a/b")
+        self.assertIn(
+            "api_key_resolver belongs in .task-config.local.yml", stderr.getvalue()
+        )
+
+    def test_unconfigured_names_every_source_checked(self):
+        with self.assertRaises(secret_resolve.SecretUnavailable) as ctx:
+            self.resolve(self.worktree)
+        self.assertEqual(ctx.exception.category, "unconfigured")
+        message = str(ctx.exception)
+        self.assertIn("$LINEAR_API_KEY, $LINEAR_API_KEY_REF", message)
+        self.assertIn(
+            f"linear.api_key_ref in {self.worktree.resolve()}/dev_docs/tasks/.task-config.yml (not set)",
+            message,
+        )
+        self.assertIn(
+            f"linear.api_key_ref in {self.worktree.resolve()}/dev_docs/tasks/.task-config.local.yml (absent)",
+            message,
+        )
+
+    def test_unconfigured_outside_a_checkout(self):
+        outside = Path(self.tmp.name) / "plain"
+        outside.mkdir()
+        with self.assertRaises(secret_resolve.SecretUnavailable) as ctx:
+            self.resolve(outside)
+        self.assertEqual(ctx.exception.category, "unconfigured")
+        self.assertIn("linear.api_key_ref (not in a git checkout)", str(ctx.exception))
+
+    def test_a_malformed_config_ref_does_not_fall_through(self):
+        self.local.write_text("linear:\n  api_key_ref: opx op://Dev/a/b\n")
+        with self.assertRaises(secret_resolve.SecretUnavailable) as ctx:
+            self.resolve(self.main)
+        self.assertEqual(ctx.exception.category, "malformed-ref")
+
+
+class ReadLeafTests(unittest.TestCase):
+    def leaf(self, text, key="api_key_ref"):
+        return secret_resolve.read_leaf(text, "linear", key)
+
+    def test_quoted_value_keeps_spaces_and_hashes(self):
+        self.assertEqual(
+            self.leaf("linear:\n  api_key_ref: 'op://V/Item # 2/f'\n"),
+            "op://V/Item # 2/f",
+        )
+
+    def test_inline_comment_is_stripped(self):
+        self.assertEqual(
+            self.leaf("linear:\n  api_key_ref: op://V/i/f  # mine\n"), "op://V/i/f"
+        )
+
+    def test_key_in_another_section_is_ignored(self):
+        self.assertIsNone(
+            self.leaf("jira:\n  api_key_ref: op://V/i/f\nlinear:\n  team: E\n")
+        )
+
+    def test_nested_key_is_not_the_leaf(self):
+        text = "linear:\n  projects:\n    - api_key_ref: op://V/i/f\n  team: E\n"
+        self.assertIsNone(self.leaf(text))
+
+    def test_null_and_empty_are_absent(self):
+        self.assertIsNone(self.leaf("linear:\n  api_key_ref:\n"))
+        self.assertIsNone(self.leaf("linear:\n  api_key_ref: ~\n"))
+
+    def test_leaf_after_a_long_section(self):
+        projects = "".join(f"    - {{ id: p{i}, name: P{i} }}\n" for i in range(60))
+        text = f"linear:\n  team: E\n  projects:\n{projects}  api_key_ref: op://V/i/f\n"
+        self.assertEqual(self.leaf(text), "op://V/i/f")
 
 
 if __name__ == "__main__":

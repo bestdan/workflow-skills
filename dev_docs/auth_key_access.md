@@ -45,13 +45,17 @@ inherited `$..._REF` silently suppressed the operator's configured resolver.
    config. See [Plaintext keys](#plaintext-keys).
 1. `$<NAME>` — the raw secret. Used directly; no resolver runs.
 2. `$<NAME>_REF` — resolve it.
-3. `<service>.<credential>_ref` from the **merged** config, bridged by the agent onto the
-   same Bash invocation that runs the script.
-4. Nothing → unavailable (`unconfigured`).
+3. `<service>.<credential>_ref` from the **merged** config. `_secret_resolve.py` reads it
+   itself, so the agent need not bridge it, though a bridged `$<NAME>_REF` (rung 2) still
+   wins. From a linked worktree it finds `.task-config.local.yml` in the main checkout,
+   the only place that gitignored file exists.
+4. Nothing → unavailable (`unconfigured`). The helper's message lists each source it
+   checked, and for each config file whether it was absent or lacked the key.
 
-Rung 0 is numbered from zero because it is not something the helper sees: like rung 3, it
-is a config value the **agent** bridges into the environment. An inherited `$<NAME>`
-(rung 1) is what the helper actually reads in both cases.
+Rung 0 is numbered from zero because it is not something the helper sees: it is a config
+value the **agent** bridges into the environment, so an inherited `$<NAME>` (rung 1) is
+what the helper actually reads. Rung 3 is read by the helper rather than bridged because a
+missed bridge is indistinguishable from a keyless host (#1426).
 
 A consumer **may** also read an [operator key file](#three-shapes-and-which-to-pick)
 between rungs 1 and 2 — the same raw secret as rung 0, kept outside every checkout and
@@ -64,7 +68,7 @@ by hand. A consumer that implements it says so; one that does not is still confo
 
 1. `$<NAME>_RESOLVER`.
 2. `<service>.<credential>_resolver` from `.task-config.local.yml` — see
-   [Provenance](#provenance).
+   [Provenance](#provenance). `_secret_resolve.py` reads this rung itself too.
 3. Default: `op`.
 
 A **failed** resolve never falls through to the next rung. Falling through would make a
@@ -147,7 +151,8 @@ It follows from the bridge rather than from plaintext as such, which is worth st
 because the two get conflated. A script that reads the raw `.task-config.local.yml` leaf
 **itself**, in-process, pays the repo-tree cost below and not this one: nothing is
 bridged, so nothing reaches a command line. `_secret_resolve.py` never does this — it
-reads only the environment, which is why rung 0 needs the agent at all — but a Class A
+reads the config only for the pointer and resolver rungs, never the raw secret, which is
+why rung 0 needs the agent at all — but a Class A
 script outside `commands/handlers/assets/` may, and one does: the instrument in
 [`research/2026-09-17-jev-applications/`](research/2026-09-17-jev-applications/README.md#the-secret-plumbing-already-exists-and-the-name-already-matches),
 which defines its own `resolve_key` and reads the config leaf in-process.
@@ -186,8 +191,8 @@ OPERATOR_KEY_FILE = Path.home() / ".config" / "workflow-skills" / "typesafe_api_
 
 placed **after** `$<NAME>` in the consumer's ladder — so a one-off prefix can still
 override it — and **before** any pointer, because a raw secret beats a reference, the same
-precedence rung 0 has over rung 3. `_secret_resolve.py` does **not** do this: it reads
-only the environment, and its callers get config values bridged by the agent. The Class A
+precedence rung 0 has over rung 3. `_secret_resolve.py` does **not** do this: it reads no
+key file, and its callers get a raw secret only as one bridged by the agent. The Class A
 instruments under `dev_docs/research/` do, which is what lets a human run one by hand.
 
 **Or bridge it on the command line**, for a consumer that reads only `$<NAME>`:
