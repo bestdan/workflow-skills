@@ -146,7 +146,7 @@ Print the same summary shape as the file path (`commands/promote-tasks.md` step 
 ```
 scope: project Payments revamp
 ⚠ candidate query for project Payments revamp hit the 500-candidate cap — some backlog issues may not have been scored this run.
-Promoted 5 of 8 candidates:
+Promoted 5 of 9 candidates:
   ready (4):
     - PRE-12  Fix broken import  (backfilled: estimate)
     - PRE-15  Bump eslint config
@@ -154,7 +154,7 @@ Promoted 5 of 8 candidates:
     - PRE-22  Add retry to sync job
   needs_refinement (1):
     - PRE-21  Restructure auth module  (scope exceeds estimate 5 — split into sub-issues)
-  skipped (3):
+  skipped (4):
     - PRE-09  (already scored)
     - PRE-10  (parent rollup)
     - PRE-11  (blocked)
