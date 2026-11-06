@@ -410,6 +410,14 @@ class ReadLeafTests(unittest.TestCase):
             "op://V/Item # 2/f",
         )
 
+    def test_quoted_value_with_a_trailing_comment(self):
+        self.assertEqual(
+            self.leaf("linear:\n  api_key_ref: 'op://V/i/f'  # mine\n"), "op://V/i/f"
+        )
+        self.assertEqual(
+            self.leaf('linear:\n  api_key_ref: "op://V/i/f" # mine\n'), "op://V/i/f"
+        )
+
     def test_inline_comment_is_stripped(self):
         self.assertEqual(
             self.leaf("linear:\n  api_key_ref: op://V/i/f  # mine\n"), "op://V/i/f"

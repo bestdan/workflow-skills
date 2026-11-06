@@ -157,8 +157,9 @@ def config_paths(cwd=None):
 
 def _scalar(raw):
     raw = raw.strip()
-    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "'\"":
-        return raw[1:-1]
+    quoted = re.match(r"(['\"])(.*?)\1\s*(#.*)?$", raw)
+    if quoted:
+        return quoted.group(2)
     value = re.split(r"\s+#", raw, maxsplit=1)[0].strip()
     return None if value in ("", "~", "null") else value
 
