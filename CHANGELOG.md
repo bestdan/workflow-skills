@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.202.1] - 2026-11-06
+
+### Fixes
+
+- resolve api_key_ref from task config in the assets [#1426] (#1428) (5786bd59)
+
 ## [2.202.0] - 2026-11-06
 
 ### Features
