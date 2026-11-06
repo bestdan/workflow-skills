@@ -159,6 +159,8 @@ class FakeGh:
             return 0, json.dumps(self.pr), ""
         if args[:2] == ["pr", "merge"]:
             return self.merge(args)
+        if args[:2] == ["repo", "view"]:
+            return 0, json.dumps({"defaultBranchRef": {"name": "main"}}), ""
         if args[:2] == ["pr", "edit"]:
             label = args[args.index("--add-label") + 1]
             if label not in self.repo_labels:
@@ -207,7 +209,7 @@ class FakeGh:
             return 0, json.dumps(pages), ""
         if path == f"{base}/commits/{HEAD}/check-runs":
             return 0, json.dumps([{"check_runs": self.check_runs}]), ""
-        if path == f"{base}/rules/branches/main":
+        if path.startswith(f"{base}/rules/branches/"):
             rules: List[dict] = [{"type": "deletion"}]
             if self.required:
                 rules.append(
@@ -736,6 +738,35 @@ class RealLandingTests(unittest.TestCase):
         self.assertTrue(any(line.startswith("LABEL: error") for line in lines))
         self.assertTrue(any(line.startswith("COMMENT: error") for line in lines))
         self.assertEqual(lines[-1], f"LAND: landed sha={MERGE_SHA}")
+
+    def test_a_base_other_than_the_default_branch_holds(self):
+        self.fake.pr["baseRefName"] = "bestdan/parent"
+        self.assert_held_without_merging(
+            self.land(), "base `bestdan/parent` is not the default branch `main`"
+        )
+
+    def test_an_unreadable_default_branch_holds(self):
+        self.fake.fail.add("defaultBranchRef")
+        self.assert_held_without_merging(self.land(), "cannot read the default branch")
+
+    def test_an_unreadable_merge_sha_still_lands_as_unknown(self):
+        land.MERGE_SHA_WAIT = 0
+        self.addCleanup(setattr, land, "MERGE_SHA_WAIT", 2.0)
+        orig = self.fake.run_gh
+        reads = []
+
+        def run_gh(args, stdin=None):
+            if args[-2:] == ["--json", "mergeCommit"]:
+                reads.append(args)
+                return 1, "", "gh: boom (HTTP 502)"
+            return orig(args, stdin)
+
+        land.run_gh = run_gh
+        lines = self.land()
+        self.assertEqual(len(reads), land.MERGE_SHA_TRIES)
+        self.assertEqual(lines[-1], "LAND: landed sha=unknown")
+        self.assertIn("LABEL: added landed-by-agent", lines)
+        self.assertTrue(any(line.startswith("COMMENT: created") for line in lines))
 
     def test_the_landed_comment_is_not_read_as_a_dry_run_verdict(self):
         # merge-audit.py's shadow mode reads comments starting with MARKER.

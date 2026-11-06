@@ -11,7 +11,9 @@ to the head it judged. Run it as `scripts/land-pr.sh`.
 A PR would land only when every one of these holds, and each one that does
 not is a hold reason of its own:
 
-1. The PR is open and not a draft.
+1. The PR is open, not a draft, and based on the repo's default branch. A
+   stacked PR into another branch is judged under that branch's policy,
+   which an agent can edit, so it holds until its parent has landed.
 2. `merge-tier.py`, loaded from this script's own directory (the installed
    plugin, never the PR's working tree), classifies it `auto`. Its inputs are
    the files from REST `pulls/<n>/files`, the title, body and labels, the
@@ -70,6 +72,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.parse
 from pathlib import Path
 
@@ -93,7 +96,9 @@ CO_REVIEW = "co-review"
 GREEN_CONCLUSIONS = ("success", "neutral", "skipped")
 LANDED_MARKER = "<!-- land-pr landed v1 -->"
 LANDED_LABEL = "landed-by-agent"
-# What GitHub says when --match-head-commit no longer names the PR's head.
+# What GitHub says when --match-head-commit no longer names the PR's head. If
+# the wording ever changes, the refusal goes through landed_anyway() instead,
+# which finds the PR unmerged and holds; only the reason text gets worse.
 HEAD_MOVED_RE = re.compile(r"head branch was modified", re.I)
 
 
@@ -180,6 +185,18 @@ def read_pr(repo, pr):
     ):
         raise ReadError("gh pr view: no headRefOid")
     return data
+
+
+def read_default_branch(repo):
+    data = gh_json(["repo", "view", repo, "--json", "defaultBranchRef"])
+    name = (
+        ((data or {}).get("defaultBranchRef") or {}).get("name")
+        if isinstance(data, dict)
+        else None
+    )
+    if not name:
+        raise ReadError("gh repo view: no defaultBranchRef")
+    return name
 
 
 def read_files(repo, pr):
@@ -370,6 +387,13 @@ def judge(repo, pr):
         holds.append(f"PR is {str(data.get('state')).lower()}")
     if data.get("isDraft"):
         holds.append("PR is a draft")
+    try:
+        default = read_default_branch(repo)
+    except ReadError as exc:
+        holds.append(f"cannot read the default branch: {exc}")
+    else:
+        if base != default:
+            holds.append(f"base `{base}` is not the default branch `{default}`")
 
     consult_bar = tier_mod.DEFAULT_CONSULT_BAR
     tier_reasons = []
@@ -596,17 +620,25 @@ def landed_anyway(repo, pr, head):
     return None
 
 
+MERGE_SHA_TRIES = 3
+MERGE_SHA_WAIT = 2.0
+
+
 def merge_sha(repo, pr):
-    try:
-        data = gh_json(["pr", "view", str(pr), "-R", repo, "--json", "mergeCommit"])
-    except ReadError:
-        return "unknown"
-    oid = (
-        ((data or {}).get("mergeCommit") or {}).get("oid")
-        if isinstance(data, dict)
-        else None
-    )
-    return oid or "unknown"
+    """The merge commit's sha, or `unknown` when it cannot be read: the merge
+    itself succeeded, so the label and comment still follow."""
+    for attempt in range(MERGE_SHA_TRIES):
+        if attempt:
+            time.sleep(MERGE_SHA_WAIT)
+        try:
+            data = gh_json(["pr", "view", str(pr), "-R", repo, "--json", "mergeCommit"])
+        except ReadError:
+            continue
+        if isinstance(data, dict) and (
+            oid := (data.get("mergeCommit") or {}).get("oid")
+        ):
+            return oid
+    return "unknown"
 
 
 def add_label(repo, pr):
