@@ -69,7 +69,10 @@ tokens in someone's context window.
 - **`dev_docs/tasks/` is ignored except `.task-config.yml`.** Plan scaffolding
   there is ephemeral in-flight state — durable wisdom graduates to a top-level
   `dev_docs/<name>.md`. See the comment block in `.gitignore` before trying to
-  force-track anything under it.
+  force-track anything under it. Tracking that config is atypical: for every
+  handler but `repo-pr` a consumer's copy is normally untracked
+  (`commands/task-config.md`), so a change to how the config is read must be
+  exercised with it both tracked and untracked.
 - **`.github/copilot-instructions.md` and `.github/instructions/` are
   generated.** Copilot code review cannot follow links, so those files are a
   flat copy of the marked spans in `AGENTS.md` and `CONTRIBUTING.md`. Edit the
