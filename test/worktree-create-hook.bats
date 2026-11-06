@@ -201,6 +201,30 @@ branch_of() { git -C "$1" rev-parse --abbrev-ref HEAD; }
   assert_output "$WT_ROOT/myrepo/feat-b"
 }
 
+# auto-pilot's run layout (#1401): <run root>/<repo>.git is a bare clone, and
+# the harness passes it as cwd. The repo name is then the run root's, which is
+# the name scripts/task-worktree.sh places the task worktree under (#1416).
+@test "a bare clone as cwd creates under the parent directory's name" {
+  bare="$TEST_TMPDIR/runroot/myrepo.git"
+  git clone -q --bare "$REMOTE" "$bare"
+  run_hook "$bare" feat-a
+  assert_success
+  assert_output "$WT_ROOT/runroot/feat-a"
+  run branch_of "$WT_ROOT/runroot/feat-a"
+  assert_output "tester/feat-a"
+  run git -C "$WT_ROOT/runroot/feat-a" rev-parse HEAD
+  assert_output "$REMOTE_MAIN"
+}
+
+@test "a bare clone as cwd hands back a worktree already at that path" {
+  bare="$TEST_TMPDIR/runroot/myrepo.git"
+  git clone -q --bare "$REMOTE" "$bare"
+  git -C "$bare" worktree add -q -b tester/task-7 "$WT_ROOT/runroot/task-7" main
+  run_hook "$bare" task-7
+  assert_success
+  assert_output "$WT_ROOT/runroot/task-7"
+}
+
 @test "an existing worktree on the same branch is handed back as-is" {
   run_hook "$REPO" feat-a
   assert_success
