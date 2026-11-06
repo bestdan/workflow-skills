@@ -410,7 +410,11 @@ check.
 runs `<cmd>` unjailed on each wake (`spawn-orchestrator.sh claude-token`) and
 hands its output, a `claude setup-token` token, to the jailed `claude -p` alone
 as `CLAUDE_CODE_OAUTH_TOKEN`. A host with a 1Password service account passes an
-`op read …`. A failing command halts the run with the `claude-token` alarm
+`op read …` that sets the wrapper's environment itself, because a launchd or
+systemd wake carries no session and may reach the real `op` first:
+`env OP_SA=on OP_SA_PROFILE=<profile> $HOME/.local/bin/op read 'op://<vault>/<item>/credential'`.
+The jail cannot read `~/.config/op-service-account`, where the service-account
+tokens live (measured on macOS under nono 0.81.0). A failing command halts the run with the `claude-token` alarm
 rather than relaunching into it. Pre-flight's `--claude-token-cmd` runs the same
 command in the smoke, which proves `.credentials.json` is neither readable nor
 writable and that `claude -p` answers on the token alone.
