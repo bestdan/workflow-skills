@@ -411,6 +411,20 @@ cat <<'EOF'
 | c | d |
 EOF
 ```
+
+```bash
+x=$(a | b) || return 1
+```
+
+```bash
+n=$((1 << 2))
+a | b | c | d
+```
+
+```bash
+echo "x <<EOF" # <<EOF
+a | b | c | d
+```
 MD
 
 out_g2="$(uv run "$DIR_G2/scripts/validate.py" 2>&1)"
@@ -433,6 +447,12 @@ assert_contains "pipes between a redirect pair are still counted" "$out_g2" \
   "cmd.md: line 29: fenced shell block carries 3 pipes"
 assert_not_contains "pipes in a heredoc body are not flagged" "$out_g2" \
   "cmd.md: line 33"
+assert_contains "a pipe plus a return guard is flagged" "$out_g2" \
+  "cmd.md: line 40: fenced shell block pipes a result and handles an exit status"
+assert_contains "a shift is not a heredoc that hides later pipes" "$out_g2" \
+  "cmd.md: line 44: fenced shell block carries 3 pipes"
+assert_contains "a quoted or commented <<EOF is not a heredoc" "$out_g2" \
+  "cmd.md: line 49: fenced shell block carries 3 pipes"
 
 # --- Fixture (h): a plugin with no fenced logic is clean -------------------
 DIR_H="$BASE/shell-logic-pass"

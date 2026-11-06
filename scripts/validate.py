@@ -127,7 +127,7 @@ SHELL_PLACEHOLDER_ALT = r"[A-Za-z][^\s<>|]*(?: [^\s<>|]+)*"
 SHELL_PLACEHOLDER_RE = re.compile(
     rf"<{SHELL_PLACEHOLDER_ALT}(?:\|{SHELL_PLACEHOLDER_ALT})*>"
 )
-SHELL_HEREDOC_RE = re.compile(r"(?<!<)<<-?(?!<)\s*['\"]?(\w+)['\"]?")
+SHELL_HEREDOC_RE = re.compile(r"<<(-?)\s*(['\"]?)([A-Za-z_]\w*)\2")
 # Blocks that predate the check, with the count they are allowed to keep. A new
 # offending block anywhere — including a third one here — fails. Shrink an entry
 # when you extract one; never raise one to make a new block pass.
@@ -378,36 +378,43 @@ for f in plugin_root_ref_files:
 # --- shell logic in runtime markdown ---
 # Reuses plugin_root_ref_files: the same skills/commands/agents bodies, which is
 # exactly the set an agent executes at runtime.
-def strip_heredocs(block: str) -> str:
-    """Drop heredoc bodies, which are data: a `|` in one is text, not a pipe."""
-    out: list[str] = []
-    end = None
-    for line in block.split("\n"):
-        if end is not None:
-            if line.lstrip("\t") == end:
-                end = None
-            continue
-        out.append(line)
-        m = SHELL_HEREDOC_RE.search(line)
-        if m:
-            end = m.group(1)
-    return "\n".join(out)
-
-
 def shell_code(block: str) -> str:
     """Return the block with quoted strings, comments, heredoc bodies and
     <placeholders> removed.
 
     What is left is the shell-level syntax, so a `|` that survives is a pipe.
     Quote state carries across lines, which is what drops a multi-line
-    `claude --remote "..."` prompt payload whole.
+    `claude --remote "..."` prompt payload whole. A heredoc opens only at shell
+    level, so a `<<` inside quotes or a comment is not one; a heredoc whose
+    terminator never comes keeps its lines, so the miss cannot hide pipes.
     """
-    block = SHELL_PLACEHOLDER_RE.sub("", strip_heredocs(block))
+    block = SHELL_PLACEHOLDER_RE.sub("", block)
     out = []
+    heredocs: list[tuple[str, bool]] = []
     i, n = 0, len(block)
     while i < n:
         c = block[i]
-        if c == "\\":
+        if block.startswith("<<<", i):
+            out.append("<<<")
+            i += 3
+        elif c == "<" and (m := SHELL_HEREDOC_RE.match(block, i)):
+            heredocs.append((m.group(3), m.group(1) == "-"))
+            i = m.end()
+        elif c == "\n" and heredocs:
+            out.append(c)
+            i += 1
+            for word, dash in heredocs:
+                body = i
+                while i < n:
+                    end = block.find("\n", i)
+                    line = block[i:] if end < 0 else block[i:end]
+                    i = n if end < 0 else end + 1
+                    if (line.lstrip("\t") if dash else line) == word:
+                        break
+                else:
+                    i = body
+            heredocs = []
+        elif c == "\\":
             i += 2
         elif c == "'":
             end = block.find("'", i + 1)
