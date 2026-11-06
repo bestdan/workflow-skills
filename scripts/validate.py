@@ -106,6 +106,27 @@ SHELL_OPENER_RE = re.compile(r"^\s*(if|for|while|until|case)\s")
 SHELL_TERMINATOR_RE = re.compile(r"^\s*(fi|done|esac)\s*(;|&&|\|\||#.*)?\s*$")
 # One multi-line construct still reads inline; two openers is a program.
 SHELL_OPENER_MAX = 1
+# The second shape: no control flow at all, but a pipeline doing the work. A
+# block like `refs=$(git ls-remote ...) || exit 1` followed by
+# `grep | cut | sed` shipped four defects in a row (a greedy sed, a masked exit
+# status, grep exiting 1 on no match, a raw-line comparison) while the opener
+# count above saw nothing. Only shell-level syntax counts — see shell_code(): a
+# raw `|` count also flags pipes inside quoted jq/regex strings, `<a|b|c>`
+# placeholders and `|| true` fallbacks, none of them a pipeline.
+SHELL_PIPE_MAX = 2
+SHELL_PIPE_RE = re.compile(r"(?<!\|)\|(?!\|)")
+# Exit-status handling: a guard that ends the script. `|| true` and `|| echo`
+# fallbacks are deliberately absent — CONTRIBUTING.md names a one-liner with a
+# `||` fallback as fine inline.
+SHELL_EXIT_GUARD_RE = re.compile(r"\|\|\s*(exit|return)\b")
+# A `<a|b c>` placeholder: words, single spaces between them, and `|` with no
+# space beside it. A space beside a `|` is what keeps a redirect pair such as
+# `jq . <in.json | sort >out` from matching and hiding its pipes.
+SHELL_PLACEHOLDER_ALT = r"[A-Za-z][^\s<>|]*(?: [^\s<>|]+)*"
+SHELL_PLACEHOLDER_RE = re.compile(
+    rf"<{SHELL_PLACEHOLDER_ALT}(?:\|{SHELL_PLACEHOLDER_ALT})*>"
+)
+SHELL_HEREDOC_RE = re.compile(r"<<(-?)\s*(['\"]?)([A-Za-z_]\w*)\2")
 # Blocks that predate the check, with the count they are allowed to keep. A new
 # offending block anywhere — including a third one here — fails. Shrink an entry
 # when you extract one; never raise one to make a new block pass.
@@ -356,8 +377,81 @@ for f in plugin_root_ref_files:
 # --- shell logic in runtime markdown ---
 # Reuses plugin_root_ref_files: the same skills/commands/agents bodies, which is
 # exactly the set an agent executes at runtime.
+def shell_code(block: str) -> str:
+    """Return the block with quoted strings, comments, heredoc bodies and
+    <placeholders> removed.
+
+    What is left is the shell-level syntax, so a `|` that survives is a pipe.
+    Quote state carries across lines, which is what drops a multi-line
+    `claude --remote "..."` prompt payload whole. A `$(...)` inside double
+    quotes is shell code again, so `x="$(a | b)"` keeps its pipe. A heredoc
+    opens only at shell level, so a `<<` inside quotes or a comment is not one;
+    a heredoc whose terminator never comes keeps its lines, so the miss cannot
+    hide pipes.
+    """
+    block = SHELL_PLACEHOLDER_RE.sub("", block)
+    out: list[str] = []
+    heredocs: list[tuple[str, bool]] = []
+    n = len(block)
+
+    def scan(i: int, in_subst: bool) -> int:
+        """Copy shell-level code from i; inside a `$(`, stop past its `)`."""
+        nonlocal heredocs
+        depth = 0
+        while i < n:
+            c = block[i]
+            if in_subst and c == ")" and depth == 0:
+                return i + 1
+            if block.startswith("<<<", i):
+                out.append("<<<")
+                i += 3
+            elif c == "<" and (m := SHELL_HEREDOC_RE.match(block, i)):
+                heredocs.append((m.group(3), m.group(1) == "-"))
+                i = m.end()
+            elif c == "\n" and heredocs:
+                out.append(c)
+                i += 1
+                for word, dash in heredocs:
+                    body = i
+                    while i < n:
+                        end = block.find("\n", i)
+                        line = block[i:] if end < 0 else block[i:end]
+                        i = n if end < 0 else end + 1
+                        if (line.lstrip("\t") if dash else line) == word:
+                            break
+                    else:
+                        i = body
+                heredocs = []
+            elif c == "\\":
+                i += 2
+            elif c == "'":
+                end = block.find("'", i + 1)
+                i = n if end < 0 else end + 1
+            elif c == '"':
+                i += 1
+                while i < n and block[i] != '"':
+                    if block.startswith("$(", i):
+                        out.append(" ")
+                        i = scan(i + 2, True)
+                        out.append(" ")
+                    else:
+                        i += 2 if block[i] == "\\" else 1
+                i += 1
+            elif c == "#" and (i == 0 or block[i - 1] in " \t\n;|&()"):
+                end = block.find("\n", i)
+                i = n if end < 0 else end
+            else:
+                depth += {"(": 1, ")": -1}.get(c, 0)
+                out.append(c)
+                i += 1
+        return i
+
+    scan(0, False)
+    return "".join(out)
+
+
 def shell_logic_blocks(text: str):
-    """Yield (start_line, opener_count) for each fenced shell block with logic."""
+    """Yield (start_line, reason) for each fenced shell block with logic."""
     lines = text.splitlines()
     i = 0
     while i < len(lines):
@@ -372,8 +466,22 @@ def shell_logic_blocks(text: str):
                 if SHELL_TERMINATOR_RE.match(lines[i]):
                     terminators += 1
                 i += 1
+            code = shell_code("\n".join(lines[start:i]))
+            pipes = len(SHELL_PIPE_RE.findall(code))
             if openers > SHELL_OPENER_MAX and terminators:
-                yield start, openers
+                yield (
+                    start,
+                    (
+                        f"carries {openers} control-flow statements (max {SHELL_OPENER_MAX})"
+                    ),
+                )
+            elif pipes > SHELL_PIPE_MAX:
+                yield start, f"carries {pipes} pipes (max {SHELL_PIPE_MAX})"
+            elif pipes and SHELL_EXIT_GUARD_RE.search(code):
+                yield (
+                    start,
+                    "pipes a result and handles an exit status with `|| exit`/`|| return`",
+                )
         i += 1
 
 
@@ -381,12 +489,11 @@ for f in plugin_root_ref_files:
     offenders = list(shell_logic_blocks(f.read_text()))
     allowed = SHELL_LOGIC_ALLOWLIST.get(str(rel(f)), 0)
     if len(offenders) > allowed:
-        for line_no, openers in offenders[allowed:]:
+        for line_no, reason in offenders[allowed:]:
             err(
                 rel(f),
-                f"line {line_no}: fenced shell block carries {openers} control-flow "
-                f"statements (max {SHELL_OPENER_MAX}). Nothing in the gate can lint or "
-                f"run shell inside markdown — move the logic to a typed file "
+                f"line {line_no}: fenced shell block {reason}. Nothing in the gate can "
+                f"lint or run shell inside markdown — move the logic to a typed file "
                 f"(commands/handlers/assets/<name>.py or scripts/<name>.sh) and call it "
                 f"from here. See CONTRIBUTING.md, 'Logic goes in a typed file'.",
             )

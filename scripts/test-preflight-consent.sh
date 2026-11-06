@@ -96,6 +96,7 @@ ROOT="$PROTECTED/fixture"
 mkdir -p "$ROOT/scripts" "$ROOT/dev_docs/tasks"
 cp "$REPO/scripts/preflight.sh" "$ROOT/scripts/preflight.sh"
 SCRIPT="$ROOT/scripts/preflight.sh"
+export REAL_SPAWN="$REPO/scripts/spawn-orchestrator.sh"
 
 cat >"$ROOT/scripts/preflight-freshness.sh" <<'FRESH'
 #!/bin/bash
@@ -123,6 +124,8 @@ cat >"$ROOT/scripts/spawn-orchestrator.sh" <<'SPAWN'
 #!/bin/bash
 sub="$1"
 shift
+# The run-clone check is the real one: it only reads git.
+[ "$sub" = check-run-clone ] && exec bash "$REAL_SPAWN" check-run-clone "$@"
 out=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -278,8 +281,23 @@ run_preflight() { # run_preflight <fake-mode>
     PREFLIGHT_LAUNCHCTL="$FIXBIN/fake-launchctl" \
     PREFLIGHT_TCC_LOCATIONS="$PROTECTED" \
     PREFLIGHT_CONSENT_TICKS=4 \
-    bash "$SCRIPT" --source plan --base main --run-root "$ROOT" 2>&1
+    bash "$SCRIPT" --source plan --base main --run-root "${PF_RUN_ROOT:-$ROOT}" 2>&1
 }
+
+# A run worktree made by run-clone, inside the protected location, as a real
+# run's is: pre-flight blocks on any other run worktree (both launchers).
+CR="$PROTECTED/rc"
+mkdir -p "$CR"
+(
+  export GIT_CONFIG_GLOBAL=/dev/null
+  git init -q --bare "$CR/origin.git"
+  git init -q -b main "$CR/main"
+  git -C "$CR/main" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
+  git -C "$CR/main" remote add origin "$CR/origin.git"
+  git -C "$CR/main" push -q origin main 2>/dev/null
+  bash "$REAL_SPAWN" run-clone --repo "$CR/main" --run-root "$CR/root" --run-id r >"$CR/clone.log" 2>&1
+) || bad "run-clone fixture for the clean host builds ($(tail -1 "$CR/clone.log" 2>/dev/null))"
+CRW="$CR/root/r"
 
 have_sandbox=0
 command -v sandbox-exec >/dev/null 2>&1 && have_sandbox=1
@@ -289,7 +307,7 @@ if [ "$have_sandbox" = 0 ]; then
   skipped "clean host: requires sandbox-exec (macOS)"
   skipped "submitted job runs through launchd, stdin closed, via sandbox-exec"
 else
-  out1="$(run_preflight clean)"
+  out1="$(PF_RUN_ROOT="$CRW" run_preflight clean)"
   rc1=$?
   assert_exit "clean host: exits 0" 0 "$rc1"
   assert_contains "clean host: CONSENT_GATE is pass" "PREFLIGHT CONSENT_GATE: pass" "$out1"
@@ -299,9 +317,11 @@ else
   assert_contains "clean host: fingerprint records the RESOLVED binary" \
     "PREFLIGHT ATTRIBUTION_BIN: $RESOLVED_CLAUDE" "$out1"
   assert_contains "clean host: probes the passed --run-root, not the plugin dir" \
-    "PREFLIGHT RUN_ROOT: $ROOT" "$out1"
+    "PREFLIGHT RUN_ROOT: $CRW" "$out1"
   assert_contains "clean host: probes the run root's git-common-dir too" \
-    "CONSENT resource git_common_dir: ok $ROOT/.git" "$out1"
+    "CONSENT resource git_common_dir: ok $CR/root/main.git" "$out1"
+  assert_contains "clean host: the run worktree is from a run clone" \
+    "PREFLIGHT RUN_CLONE: $CR/root/main.git" "$out1"
 
   # The job itself: launchd domain (hence detached, no controlling TTY),
   # stdin on /dev/null, and exec'd through the rendered Seatbelt profile.
@@ -622,8 +642,27 @@ assert_not_contains "linux: the supervisor is no longer a blocker" "no Linux sup
 assert_contains "linux: every smoke assertion is listed" "PREFLIGHT SMOKE_WRITE_HOME: pass" "$out10"
 assert_contains "linux: the smoke runs the pinned nono with the token command" \
   "--nono-bin $NH/0.81.0/nono --claude-token-cmd op read op://v/claude/token" "$(cat "$BASE/smoke-args" 2>/dev/null)"
-assert_contains "linux: until #1390 a jailed run has no worker worktrees, so still no-go" \
-  "PREFLIGHT VERDICT: no-go — no worker worktrees in the Linux jail yet" "$out10"
+assert_contains "linux: a run root that is not from a run clone is reported" \
+  "PREFLIGHT RUN_CLONE: none (" "$out10"
+assert_contains "linux: a run root that is not from a run clone is a no-go naming run-clone" \
+  "PREFLIGHT VERDICT: no-go — the run worktree is not from a run clone" "$out10"
+assert_not_contains "linux: worker worktrees are no longer a blocker" "no worker worktrees in the Linux jail yet" "$out10"
+# A run built by run-clone passes that check.
+RC="$BASE/rc"
+mkdir -p "$RC"
+(
+  export GIT_CONFIG_GLOBAL=/dev/null
+  git init -q --bare "$RC/origin.git"
+  git init -q -b main "$RC/main"
+  git -C "$RC/main" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
+  git -C "$RC/main" remote add origin "$RC/origin.git"
+  git -C "$RC/main" push -q origin main 2>/dev/null
+  bash "$REAL_SPAWN" run-clone --repo "$RC/main" --run-root "$RC/root" --run-id r >"$RC/clone.log" 2>&1
+) || bad "linux: the run-clone fixture builds ($(tail -1 "$RC/clone.log" 2>/dev/null))"
+out10="$(linux_preflight AUTO_PILOT_NONO_SHA256="$NSUM" -- --run-root "$RC/root/r")"
+assert_contains "linux: a run worktree from run-clone is reported with its clone" \
+  "PREFLIGHT RUN_CLONE: $(cd "$RC/root" && pwd -P)/main.git" "$out10"
+assert_not_contains "linux: a run worktree from run-clone is not a blocker" "not from a run clone" "$out10"
 assert_not_contains "linux: the verify broker is no longer a blocker" "no Linux verify broker yet" "$out10"
 out10="$(linux_preflight AUTO_PILOT_NONO_SHA256="$NSUM" STUB_LINGER=no)"
 assert_contains "linux: Linger=no is a blocker naming the fix" "fix: loginctl enable-linger" "$out10"

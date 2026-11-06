@@ -92,9 +92,10 @@ STRICT_FILES=(scripts/research-spike.py)
 # skills/co-review/references/status.md, co-review-carry.py the same way by
 # the same file, land-pr.py, the lander, which runs
 # from the installed plugin, and merge-tier.py and co-review-evidence.py, which
-# it loads from there, merge-audit.py, the weekly audit, which loads land-pr.py
-# the same way, tier-forecast.py, which /promote-tasks runs from the installed
-# plugin and which loads merge-tier.py from there,
+# it loads from there, merge-audit.py, the weekly audit, and review-queue.py,
+# the owner's queue, which load land-pr.py the same way, tier-forecast.py,
+# which /promote-tasks runs from the installed plugin and which loads
+# merge-tier.py from there,
 # and worktree-teardown-reminder.py, guard-foreign-worktree.py,
 # guard-pinned-branch.py and guard-enter-by-path.py are run by the harness
 # itself — hooks/hooks.json registers them on PostToolUse and PreToolUse, so
@@ -114,6 +115,7 @@ CONSUMER_FILES=(
   scripts/merge-tier.py
   scripts/land-pr.py
   scripts/merge-audit.py
+  scripts/review-queue.py
   scripts/tier-forecast.py
   scripts/coreview-input-lock.py
   scripts/co-review-stats.py

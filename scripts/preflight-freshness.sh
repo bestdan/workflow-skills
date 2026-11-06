@@ -10,10 +10,15 @@
 # so local state is not mutated. It needs network for the ls-remote call.
 #
 # Usage:
-#   scripts/preflight-freshness.sh [--remote <name>] [--ref <branch> ...]
+#   scripts/preflight-freshness.sh [--remote <name>] [--ref <branch> ...] [--isolated-remote]
 #
 #   --remote  Remote to compare against. Default: origin.
 #   --ref     Branch to check. Repeatable. Default: the current branch.
+#   --isolated-remote  Query the remote's URL from outside any repository, so
+#             the ls-remote reads no repo-level config. For a repo whose config
+#             is untrusted (an auto-pilot run clone, which the jail writes):
+#             there, core.sshCommand, a credential helper or
+#             remote.<name>.uploadpack would run on the query.
 #
 # Per-ref verdicts (local branch vs remote tip):
 #   fresh     local == remote tip, or local is strictly ahead (remote tip is
@@ -34,6 +39,7 @@ set -uo pipefail
 
 remote="origin"
 refs=()
+isolated=0
 
 die() {
   echo "preflight-freshness: $*" >&2
@@ -52,8 +58,12 @@ while [ $# -gt 0 ]; do
       refs+=("$2")
       shift 2
       ;;
+    --isolated-remote)
+      isolated=1
+      shift
+      ;;
     -h | --help)
-      sed -n '2,32p' "$0"
+      sed -n '2,37p' "$0"
       exit 0
       ;;
     *) die "unknown argument: $1" ;;
@@ -72,7 +82,27 @@ fi
 
 # One network round-trip for all refs. A failure here is the sandbox or a dead
 # network, not staleness — report unknown so callers can degrade gracefully.
-if ! remote_heads="$(git ls-remote --heads "$remote" "${refs[@]}" 2>&1)"; then
+if [ "$isolated" = 1 ]; then
+  # The URL is read from the repo's config only as data: the query runs in an
+  # empty directory with repository discovery fenced off, so only global and
+  # system config apply to it.
+  # The raw value: `remote get-url` would apply the repo's own insteadOf rules.
+  url="$(git config --get "remote.$remote.url")" || die "remote '$remote' has no url"
+  # A url that reads as an option (--upload-pack=<cmd>) would run <cmd>.
+  case "$url" in
+    -*)
+      echo "preflight-freshness: refusing remote '$remote': its url starts with '-'" >&2
+      echo "FRESHNESS: unknown reason=unsafe-url"
+      exit 3
+      ;;
+  esac
+  iso="$(mktemp -d "${TMPDIR:-/tmp}/freshness.XXXXXX")" || die "mktemp failed"
+  trap 'rm -rf "$iso"' EXIT
+  ls_remote() { (cd "$iso" && GIT_CEILING_DIRECTORIES="$(dirname "$iso")" git ls-remote --heads -- "$url" "$@"); }
+else
+  ls_remote() { git ls-remote --heads "$remote" "$@"; }
+fi
+if ! remote_heads="$(ls_remote "${refs[@]}" 2>&1)"; then
   echo "preflight-freshness: git ls-remote failed: $remote_heads" >&2
   echo "FRESHNESS: unknown reason=ls-remote-failed"
   exit 3

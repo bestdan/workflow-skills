@@ -16,7 +16,22 @@ with no human attached gets caught at launch.
 
 Create the dedicated run **worktree** and the **run-state branch**
 `auto-pilot/<run_id>` (branch convention:
-[`run-state.md`](run-state.md) "Run-state branch").
+[`run-state.md`](run-state.md) "Run-state branch") with one call, on both OSes:
+
+```bash
+"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" run-clone --repo <main checkout> \
+  --run-root <run root> --run-id <run_id> --base <base branch>
+```
+
+It makes the run's own git repo, a bare clone, inside `<run root>`, which must
+sit outside every checkout. It then adds the run worktree from that clone and
+prints both paths (`RUN_WORKTREE <path>`). The jail writes that repo and never
+the main checkout's `.git`; the layout, and how to recover a run's branch from
+the main checkout, are in [`launch-runtime.md`](launch-runtime.md) §1 "The
+run's own git repo". Only `<base branch>` is cloned, so the plan must be
+committed there, not on another local branch. Bring the main checkout's
+`<base branch>` up to date first (`git pull --ff-only`): the clone copies it as
+it stands, and step 2's freshness check reads the clone's copy.
 Confirm the plan / task instructions are **committed and present in the
 worktree** — an **untracked plan is a launch blocker**, since a plan that
 lives only in an uncommitted file never reaches the detached orchestrator. If
@@ -43,8 +58,8 @@ smoke is `scripts/smoke-nono.sh`, one `PREFLIGHT SMOKE_<CHECK>` line per
 assertion. Pass the token command the launch will use as `--claude-token-cmd`,
 so the smoke proves the credential file stays outside the jail. The Linux
 launcher also needs `systemd-run`, a reachable systemd user manager, and
-`Linger=yes`. Linux stays `no-go` until a jailed run can create worker
-worktrees (#1390). A
+`Linger=yes`. On both OSes the run worktree must come from `run-clone` (step 1;
+`PREFLIGHT RUN_CLONE`), because the jail writes only the run's own git repo. A
 `no-go` **BLOCKS LAUNCH** with the reason it names; treat its output as the
 source of truth rather than re-deriving these facts by hand.
 
@@ -252,10 +267,11 @@ Per [`launch-runtime.md`](launch-runtime.md):
    to `.auto-pilot/orchestrator.log`. The egress allowlist also gets the
    pre-flight's resolved `/add-task` destination host via `render-settings
    --add-task-host`, so the run's own settings never deny its own follow-up
-   filing regardless of work source. On Linux, render the nono profile with
-   `--git-worktree <run worktree>`, and write it and the launch script outside
-   every write grant (`write-launch` refuses otherwise): see
-   [`launch-runtime.md`](launch-runtime.md) "Linux: the nono profile".
+   filing regardless of work source. Grant the run root `--rw`, which covers
+   the run clone, the run worktree and `workers/`. On Linux, also render the
+   nono profile with `--git-worktree <run worktree>`, and write it and the
+   launch script outside every write grant (`write-launch` refuses otherwise):
+   see [`launch-runtime.md`](launch-runtime.md) "Linux: the nono profile".
 2. Run the **auth smoke test through that exact sandbox wrapper + env** (not
    bare) — a failure here is a launch blocker (ties to step 2). Machine-stays-
    awake was already confirmed in the pre-flight (step 2).

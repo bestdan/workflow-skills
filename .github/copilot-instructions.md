@@ -49,7 +49,8 @@ tokens in someone's context window.
   code in `commands/handlers/assets/<name>.py` (or `scripts/<name>.sh`), give it
   a test pair, and call it from the prose. `validate.py` fails a fenced block
   that carries two or more control-flow statements and closes one on its own
-  line. Full rule, including what stays inline:
+  line, or that carries three or more pipes. Full rule, including what stays
+  inline:
   CONTRIBUTING.md.
 - **Adding a skill or command means editing `README.md` in the same PR.**
   `validate.py` fails the build if the "N skills, M commands, and K subagent"
@@ -69,7 +70,10 @@ tokens in someone's context window.
 - **`dev_docs/tasks/` is ignored except `.task-config.yml`.** Plan scaffolding
   there is ephemeral in-flight state — durable wisdom graduates to a top-level
   `dev_docs/<name>.md`. See the comment block in `.gitignore` before trying to
-  force-track anything under it.
+  force-track anything under it. Tracking that config is atypical: for every
+  handler but `repo-pr` a consumer's copy is normally untracked
+  (`commands/task-config.md`), so a change to how the config is read must be
+  exercised with it both tracked and untracked.
 - **`.github/copilot-instructions.md` and `.github/instructions/` are
   generated.** Copilot code review cannot follow links, so those files are a
   flat copy of the marked spans in `AGENTS.md` and `CONTRIBUTING.md`. Edit the

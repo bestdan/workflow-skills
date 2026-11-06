@@ -419,7 +419,11 @@ fi
 
 # --- 2. Base freshness ----------------------------------------------------
 
-fresh_out="$(bash "$FRESHNESS" --ref "$base" 2>&1)"
+# Run in the run worktree: its base is the one the run builds from. For a run
+# clone that is the clone's copy of <base>, not the main checkout's. On resume
+# the jail has written that clone's config, so the remote is queried isolated
+# from it (launch-runtime.md §5).
+fresh_out="$(cd "$run_toplevel" && bash "$FRESHNESS" --ref "$base" --isolated-remote 2>&1)"
 fresh_status=$?
 printf '%s\n' "$fresh_out"
 case $fresh_status in
@@ -481,9 +485,17 @@ EOF
 # there. On a main checkout the two roots are the same directory, so the
 # fallback changes nothing. A run with no config in either place falls to the
 # documented `repo-pr` default and says so in HANDLER_SOURCE rather than
-# inheriting anything from the plugin dir.
+# inheriting anything from the plugin dir. A run clone's common dir is the
+# bare `<run root>/<repo>.git`, which does not lead back to the main checkout,
+# so `run-clone` records that path in the clone's config and it is read here.
+# On resume the jail may have rewritten it. That grants nothing new: the run
+# worktree's own task config wins over the main checkout's, and the jail can
+# already write that.
 main_root="$run_toplevel"
-[ -n "$run_gitdir" ] && main_root="$(dirname "$run_gitdir")"
+if [ -n "$run_gitdir" ]; then
+  main_root="$(git --git-dir="$run_gitdir" config --get auto-pilot.mainCheckout 2>/dev/null)" \
+    || main_root="$(dirname "$run_gitdir")"
+fi
 task_cfg="$run_toplevel/dev_docs/tasks/.task-config.yml"
 [ -f "$task_cfg" ] || task_cfg="$main_root/dev_docs/tasks/.task-config.yml"
 task_cfg_local="$run_toplevel/dev_docs/tasks/.task-config.local.yml"
@@ -550,9 +562,6 @@ elif [ "$host_os" = Linux ]; then
     else
       echo "PREFLIGHT LAUNCHER: nono + systemd-run --user (user manager: $sd_state, Linger=yes)"
     fi
-    # The jail refuses `git worktree add` under its narrow git grant, so a
-    # jailed run cannot create /deliver-task's worker worktrees until #1390.
-    blockers+=("no worker worktrees in the Linux jail yet: the jail, supervisor and verify broker are ready, but /deliver-task cannot create its worker worktree inside the jail until #1390 lands")
   else
     echo "PREFLIGHT NONO: ${nono_problem:-the check failed: $nono_out}"
     echo "PREFLIGHT LAUNCHER: none (Linux: nono not ready)"
@@ -561,6 +570,19 @@ elif [ "$host_os" = Linux ]; then
 else
   echo "PREFLIGHT LAUNCHER: none ($host_os)"
   blockers+=("no supported launcher on this host ($host_os): the orchestrator spawns through launchd + sandbox-exec on macOS, or nono on Linux, and this host has neither")
+fi
+
+# --- 3c. Run clone -----------------------------------------------------------
+# Both jails write only the run's own git repo, so the run worktree must come
+# from `spawn-orchestrator.sh run-clone`. A linked worktree of the main checkout
+# keeps its index and HEAD in the main checkout's .git, which neither jail
+# grants: on macOS its first commit fails (measured on the Mac test host), and
+# on Linux render-nono-profile --git-worktree refuses it at launch.
+if rc_out="$(bash "$SPAWN" check-run-clone --worktree "$run_toplevel" 2>&1)"; then
+  echo "PREFLIGHT RUN_CLONE: $rc_out"
+else
+  echo "PREFLIGHT RUN_CLONE: none (${rc_out#spawn-orchestrator: })"
+  blockers+=("the run worktree is not from a run clone: $run_toplevel — create the run with spawn-orchestrator.sh run-clone (launch-preflight.md step 1)")
 fi
 
 # --- 4. Confinement smoke ---------------------------------------------------
