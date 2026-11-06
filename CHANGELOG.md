@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.204.0] - 2026-11-06
+
+### Features
+
+- add /revert-landing and the landed audit [#1323] (#1437) (4419b0cc)
+
 ## [2.203.0] - 2026-11-06
 
 ### Features
