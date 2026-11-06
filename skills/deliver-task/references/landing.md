@@ -50,7 +50,12 @@ make it pass; a hold is data, not a failure.
 
 ## Then land it
 
-Right after the shadow run, run the lander without `--dry-run`, unsandboxed:
+Right after the shadow run, run the lander without `--dry-run`, unsandboxed —
+unless `/deliver-task` was given `--no-land`. Then skip this section and note
+`lander: skipped (--no-land)` in the process notes: the task is a stack parent
+in an `/auto-pilot` run, and in a repo that deletes merged branches (GitHub's
+`deleteBranchOnMerge`), landing it would delete the branch a child not yet
+delivered is based on.
 
 ```bash
 "${CLAUDE_PLUGIN_ROOT}/scripts/land-pr.sh" <pr> --repo <owner/name>
@@ -67,8 +72,10 @@ pinned to that head. Its last line decides what follows:
   verification `/sweep-for-complete` would otherwise wait for. Complete the
   task with the handler's `/complete-task` phase, passing `assume_verified:
   true` (no one is there to confirm) and a `comment_body` naming the merge sha.
-  On repo-pr the merged PR is itself the completion, so write nothing. Under
-  `/auto-pilot`, report the task as handed off and landed.
+  On repo-pr the merged PR is itself the completion, so write nothing. A
+  failed completion write is noted as `completion: <what failed>` in the process
+  notes; the PR is merged, so `/sweep-for-complete` completes the task later.
+  Under `/auto-pilot`, the `LAND:` line is what the orchestrator records.
 - **`LAND: hold reasons=...`** — the PR stays at `needs_review` exactly as step
   7 left it. A hold is data, not a failure: it becomes a "For you" item only
   when its reason is one the human has to act on.
@@ -79,6 +86,6 @@ pinned to that head. Its last line decides what follows:
 
 The `LAND:` line, with any `MERGE:`, `LABEL: error` or `COMMENT: error` line
 before it, goes verbatim into "Review and evidence". A stacked task's PR is
-based on its parent's branch, so the lander always holds it; a stack lands
-bottom-up, by a human or by later runs once its parent is in. Landing a parent
-during a run does not move a child's base, so the freeze rule still holds.
+based on its parent's branch, so the lander always holds it, and the parent
+itself is not landed mid-run (`--no-land` above); a stack lands bottom-up, by a
+human.

@@ -339,8 +339,12 @@ branch) — that distinction drives the stacked-PR handling below.
 **The per-task step.** Dispatch exactly one call per task:
 
 ```
-/deliver-task <id> --base <branch> --handler <handler> --questions .auto-pilot/QUESTIONS.md --run-state .auto-pilot/RUN.md
+/deliver-task <id> --base <branch> --handler <handler> --questions .auto-pilot/QUESTIONS.md --run-state .auto-pilot/RUN.md [--no-land]
 ```
+
+Add `--no-land` when any other `RUN.md` row's `base` is this task's branch: a
+stack parent that landed mid-run would have its branch deleted on merge, and
+its child could no longer be based on it.
 
 where `<branch>` is the task's `base` from `RUN.md` and `<handler>` is the
 run's effective handler resolved from the run's (normalized) source (plan ⇒
@@ -398,7 +402,8 @@ mechanized remedy and what re-verification a restacked child still needs:
 stacked-PR repair)".
 
 **State update after each task.** After `/deliver-task` returns, update
-`RUN.md` with the task's observed `phase`, `branch`, and `pr`, then commit to
+`RUN.md` with the task's observed `phase`, `branch`, and `pr` — and, when its
+hand-off printed `LAND: landed sha=<sha>`, `landed <sha>` in `notes` — then commit to
 the run-state branch — the **write order**'s last step
 ([`references/run-state.md`](references/run-state.md) "Write order");
 `/deliver-task` already performed that order's push + tracker-write steps.

@@ -1,7 +1,7 @@
 ---
 description: Deliver ONE task through its full per-task lifecycle — claim, implement via a routed coder worker, verify, open a PR, run non-interactive co-review, iterate, hand off at needs_review, and land the PR when its merge tier is auto and AGENT_LAND is on (unmerged work is never completed)
 allowed-tools: Bash, Glob, Grep, Read, Write, Edit, Agent, AskUserQuestion, Skill, mcp__linear, mcp__claude_ai_Linear, mcp__atlassian, mcp__claude_ai_Atlassian
-argument-hint: "<slug | identifier> [--base <branch>] [--questions <path>] [--run-state <RUN.md>] [--handler <h>]"
+argument-hint: "<slug | identifier> [--base <branch>] [--questions <path>] [--run-state <RUN.md>] [--handler <h>] [--no-land]"
 ---
 
 # Deliver Task
@@ -27,6 +27,9 @@ routing; do not re-derive or restate the workflow here.
 - `--handler <h>` — override handler resolution (`repo-pr | linear | gh-issue |
   jira`); omit to resolve from `.task-config.yml` as today. The `/auto-pilot`
   orchestrator passes its run's effective handler.
+- `--no-land` — run only the shadow lander at hand-off, never the real one. The
+  `/auto-pilot` orchestrator passes it for a task another task in the run is
+  stacked on, so landing cannot delete a branch a later child is based on.
 
 The lifecycle is claim → do → open PR → co-review → iterate → hand-off → land,
 ending at `needs_review` unless the lander merges an `auto`-tier PR (only while

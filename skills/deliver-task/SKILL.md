@@ -43,12 +43,12 @@ copied.
   judgment calls to (step 6). The `/auto-pilot` orchestrator passes its run's
   log; standalone, omit it and the calls ride out in the hand-off summary
   instead (this skill never writes run-state files itself).
-- `--run-state <RUN.md>` — the auto-pilot run's durable state. Optional and
-  used only by `/auto-pilot`; when absent, standalone behavior is unchanged.
-  When present, it enables the auto-pilot reserve gate below and this skill
-  reads any recorded less-claude profile fields only at their named lifecycle
-  steps. It does not otherwise define or rewrite run state; the reserve gate's
-  one atomic usage-baseline/delta update is the explicit exception.
+- `--run-state <RUN.md>` — the auto-pilot run's durable state, passed only by
+  `/auto-pilot` (standalone behavior is unchanged without it). It enables the
+  reserve gate below and the less-claude profile reads at their named steps; it
+  defines no run state, except the reserve gate's one atomic usage update.
+- `--no-land` — skip the real lander at hand-off (`references/landing.md`);
+  `/auto-pilot` passes it for a task another run task is stacked on.
 - `--handler <h>` — override the §0 config read; one of `repo-pr | linear |
   gh-issue | jira`. Omit to resolve from `.task-config.yml` as today. The
   `/auto-pilot` orchestrator passes its run's effective handler (a plan source
