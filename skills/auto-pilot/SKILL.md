@@ -342,9 +342,11 @@ branch) — that distinction drives the stacked-PR handling below.
 /deliver-task <id> --base <branch> --handler <handler> --questions .auto-pilot/QUESTIONS.md --run-state .auto-pilot/RUN.md [--no-land]
 ```
 
-Add `--no-land` when any other `RUN.md` row's `base` is this task's branch: a
-stack parent that landed mid-run would have its branch deleted on merge, and
-its child could no longer be based on it.
+Add `--no-land` when any other task in the run is blocked by this one — the
+`dependency_graph` edges that choose a chained task's base, whatever that
+task's phase. Branch cells cannot decide it: this task has no branch until its
+own claim. A stack parent that landed would have its branch deleted on merge,
+and its child could no longer be based on it, or keep an open PR on it.
 
 where `<branch>` is the task's `base` from `RUN.md` and `<handler>` is the
 run's effective handler resolved from the run's (normalized) source (plan ⇒

@@ -54,8 +54,8 @@ Right after the shadow run, run the lander without `--dry-run`, unsandboxed —
 unless `/deliver-task` was given `--no-land`. Then skip this section and note
 `lander: skipped (--no-land)` in the process notes: the task is a stack parent
 in an `/auto-pilot` run, and in a repo that deletes merged branches (GitHub's
-`deleteBranchOnMerge`), landing it would delete the branch a child not yet
-delivered is based on.
+`deleteBranchOnMerge`), landing it would delete the branch a child is, or
+will be, based on.
 
 ```bash
 "${CLAUDE_PLUGIN_ROOT}/scripts/land-pr.sh" <pr> --repo <owner/name>
@@ -74,7 +74,9 @@ pinned to that head. Its last line decides what follows:
   true` (no one is there to confirm) and a `comment_body` naming the merge sha.
   On repo-pr the merged PR is itself the completion, so write nothing. A
   failed completion write is noted as `completion: <what failed>` in the process
-  notes; the PR is merged, so `/sweep-for-complete` completes the task later.
+  notes; the PR is merged, so the tracker's own merge-driven completion finishes
+  it later: `/sweep-for-complete` on Linear, GitHub's `Closes #<n>` close on
+  gh-issue, Jira's GitHub integration on Jira.
   Under `/auto-pilot`, the `LAND:` line is what the orchestrator records.
 - **`LAND: hold reasons=...`** — the PR stays at `needs_review` exactly as step
   7 left it. A hold is data, not a failure: it becomes a "For you" item only
