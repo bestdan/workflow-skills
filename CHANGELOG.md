@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.203.0] - 2026-11-06
+
+### Features
+
+- stop claiming when the human-tier review queue is full [#1320] (#1436) (9f197c90)
+
 ## [2.202.2] - 2026-11-06
 
 ### Fixes
