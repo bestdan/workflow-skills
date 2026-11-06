@@ -327,10 +327,12 @@ open in. On any non-zero exit, stop the loop exactly as the deadline guard
 does: `status: paused` with `paused_until` empty, and the reason in
 `REPORT.md`. Declare exit reason `deadline` with `--detail` naming the cause:
 `review queue full: N waiting, limit L` (exit 1), `review queue unreadable:
-<GATE: error reason>` (exit 3), or `review_queue_limit invalid` (exit 2). The
-reason list is closed, and `deadline` is the one that tears the run down
-without an alarm and resumes only by `--resume`, once the owner has drained
-the queue. An unreadable queue stops the run on purpose: claiming blind is the
+<GATE: error reason>` (exit 3), or `review queue gate usage error: <the
+script's message>` (exit 2). The reason list is closed, and `deadline` is the
+one that tears the run down without an alarm. The run resumes only by
+`--resume`, once the cause is cleared: the queue drained (exit 1), `gh` access
+restored (exit 3), or the config value the message names corrected (exit 2).
+An unreadable queue stops the run on purpose: claiming blind is the
 failure this gate exists to prevent, and a `gh` outage would fail the next
 `/deliver-task` anyway.
 
