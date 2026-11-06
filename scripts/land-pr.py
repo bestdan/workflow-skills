@@ -36,9 +36,14 @@ Every read error is a hold with the reason, never a crash.
 The squash commit's body lists those reasons and the evidence pointers, and
 ends with the trailers `Landed-by: land-pr.sh` and `Co-review-head: <sha>`. A
 head that moved after the check makes GitHub refuse the merge, which is a hold.
-Any other failed `gh pr merge` is re-read: it is a landing only when the PR is
-merged at the judged head and the merge commit carries both trailers, and a
-hold with the original reason otherwise. A landing recovered that way prints
+Any other failed `gh pr merge` is re-read, with about 30 seconds of waiting
+between re-reads, while the PR is open at the judged head, its merge commit is
+not yet reported, or the read fails, since GitHub can finish the merge after
+the call fails: it is a landing only when the PR is merged at the judged head
+and the merge commit carries both trailers. Otherwise it is a hold with the
+original reason and a second one saying what the last re-read found, ending
+`check by hand whether it merged` when that read could not rule a merge out.
+A landing recovered that way prints
 `MERGE: recovered after error: <failure>` and repeats the failure in the PR
 comment, since neither the merge commit nor GitHub records it.
 After a landing, the `landed-by-agent` label and a PR comment repeating the
@@ -52,7 +57,9 @@ error reason=...`), then a `TIER:` line, then a final `LAND: would-land` or
 `LAND: hold reasons=<r1; r2>` line; exit 0 for either verdict, 1 when the
 comment could not be posted. Without it, a landing prints an optional
 `MERGE: recovered after error: <failure>` line, then `LABEL: ...` and
-`COMMENT: ...` lines, then `LAND: landed sha=<merge sha>`; a hold prints only
+`COMMENT: ...` lines, then `LAND: landed sha=<merge sha>`, or
+`LAND: landed sha=unknown reason=<why>` when the merge commit cannot be read
+after a merge call that succeeded; a hold prints only
 `LAND: hold reasons=...`; exit 0 for either. A usage error exits 2.
 
 `TIER: auto`, `TIER: human reasons=<r1; r2>` or `TIER: unknown reason=<why>` is
@@ -89,6 +96,10 @@ def _load(name, filename):
 
 tier_mod = _load("merge_tier", "merge-tier.py")
 evidence_mod = _load("co_review_evidence", "co-review-evidence.py")
+
+# Seconds between re-reads of a failed merge call; tests replace `sleep`.
+RE_READ_DELAYS = (2, 4, 8, 16)
+sleep = time.sleep
 
 MARKER = "<!-- land-pr v1 -->"
 POLICY_PATH = ".github/merge-policy.yml"
@@ -591,9 +602,31 @@ def landed_anyway(repo, pr, head):
     A client timeout or a dropped connection can fail the call after the server
     merged. It counts as this lander's landing only when the PR is MERGED, its
     head is the judged head, and the merge commit's message carries both of
-    this run's trailers; a hand merge at the same head has neither. None on
-    anything else, a read error included.
+    this run's trailers; a hand merge at the same head has neither. Returns
+    (sha, None) for a landing, else (None, why not), where the why says when
+    the PR may have merged after all and needs checking by hand.
+
+    GitHub can finish the merge after the call failed, so a PR still open at
+    the judged head, a merged PR whose merge commit is not yet reported, or a
+    read error is read again after each of RE_READ_DELAYS (30 s of waiting in
+    all). Any other PR, open at another head, merged or closed, is settled and
+    not read again.
     """
+    for delay in (0, *RE_READ_DELAYS):
+        if delay:
+            sleep(delay)
+        sha, why, settled = _read_landing(repo, pr, head)
+        if settled:
+            break
+    return sha, why
+
+
+CHECK_BY_HAND = "check by hand whether it merged"
+
+
+def _read_landing(repo, pr, head):
+    """(sha or None, why not or None, settled): one read of whether this run's
+    merge landed."""
     try:
         data = gh_json(
             [
@@ -607,17 +640,32 @@ def landed_anyway(repo, pr, head):
             ]
         )
         if not isinstance(data, dict):
-            return None
+            return None, f"re-read returned no PR data, so {CHECK_BY_HAND}", False
+        state = data.get("state")
+        at = str(data.get("headRefOid") or "")[:7] or "an unknown head"
         sha = (data.get("mergeCommit") or {}).get("oid")
-        if data.get("state") != "MERGED" or data.get("headRefOid") != head or not sha:
-            return None
+        if state == "OPEN" and data.get("headRefOid") != head:
+            # The merge was pinned to `head`, so a PR open at another head
+            # cannot become this run's landing.
+            return None, f"re-read: open at {at}, not the judged head", True
+        if state == "OPEN":
+            return None, "re-read: still open after the re-reads", False
+        if state == "MERGED" and data.get("headRefOid") != head:
+            # Pinned to `head` too, so another head rules this run out even
+            # before GitHub reports the merge commit.
+            return None, f"re-read: merged at {at}, not the judged head", True
+        if state == "MERGED" and not sha:
+            why = f"re-read: merged, but no merge commit reported, so {CHECK_BY_HAND}"
+            return None, why, False
+        if state != "MERGED":
+            return None, f"re-read: {str(state).lower()} without merging", True
         message = gh(["api", f"repos/{repo}/commits/{sha}", "--jq", ".commit.message"])
-    except ReadError:
-        return None
+    except ReadError as exc:
+        return None, f"last re-read failed: {exc}, so {CHECK_BY_HAND}", False
     lines = [line.strip() for line in message.splitlines()]
     if "Landed-by: land-pr.sh" in lines and f"Co-review-head: {head}" in lines:
-        return sha
-    return None
+        return sha, None, True
+    return None, f"re-read: merged as {str(sha)[:7]} without this run's trailers", True
 
 
 MERGE_SHA_TRIES = 3
@@ -625,20 +673,23 @@ MERGE_SHA_WAIT = 2.0
 
 
 def merge_sha(repo, pr):
-    """The merge commit's sha, or `unknown` when it cannot be read: the merge
+    """(sha, None), or ("unknown", why) when it cannot be read: the merge
     itself succeeded, so the label and comment still follow."""
+    why = "GitHub reported no merge commit"
     for attempt in range(MERGE_SHA_TRIES):
         if attempt:
-            time.sleep(MERGE_SHA_WAIT)
+            sleep(MERGE_SHA_WAIT)
         try:
             data = gh_json(["pr", "view", str(pr), "-R", repo, "--json", "mergeCommit"])
-        except ReadError:
+        except ReadError as exc:
+            why = f"cannot read the merge commit: {exc}"
             continue
         if isinstance(data, dict) and (
             oid := (data.get("mergeCommit") or {}).get("oid")
         ):
-            return oid
-    return "unknown"
+            return oid, None
+        why = "GitHub reported no merge commit"
+    return "unknown", why
 
 
 def add_label(repo, pr):
@@ -720,20 +771,29 @@ def land_pr(repo, pr):
     body = audit_body(pr, reasons, head)
     failure, head_moved = merge(repo, pr, head, body)
     record = ""
+    sha_reason = None
     if failure:
-        sha = None if head_moved else landed_anyway(repo, pr, head)
+        sha, why_not = (None, None) if head_moved else landed_anyway(repo, pr, head)
         if sha is None:
-            print(hold_line([failure]))
+            print(hold_line([failure, why_not] if why_not else [failure]))
             return 0
         # The merge commit cannot carry the failure, so the comment records it.
         reason = " ".join(failure.split())
         record = f"Recovered after error: {reason}\n"
         print(f"MERGE: recovered after error: {reason}")
     else:
-        sha = merge_sha(repo, pr)
+        sha, sha_reason = merge_sha(repo, pr)
+    sha_note = f" ({' '.join(sha_reason.split())})" if sha_reason else ""
     print(add_label(repo, pr))
-    print(post_landed_comment(repo, pr, f"Merge commit: {sha}\n{record}\n{body}"))
-    print(f"LAND: landed sha={sha}")
+    print(
+        post_landed_comment(
+            repo, pr, f"Merge commit: {sha}{sha_note}\n{record}\n{body}"
+        )
+    )
+    if sha_reason:
+        print(f"LAND: landed sha={sha} reason={' '.join(sha_reason.split())}")
+    else:
+        print(f"LAND: landed sha={sha}")
     return 0
 
 
