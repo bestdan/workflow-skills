@@ -288,6 +288,8 @@ while unblocked tasks remain and inside budget bounds:
     pick next unblocked task (phase-based readiness)
     if until is set and now + min_task_budget > until:   # pre-dispatch deadline guard
         stop the loop cleanly (record "N left, M min to deadline, not starting")
+    if review-queue.py --limit exits non-zero:              # review-queue gate
+        stop the loop the same way (record why: full, unreadable, or bad limit)
     /deliver-task it --run-state .auto-pilot/RUN.md (with per-task wall-clock + retry bounds)
     update run state on the run-state branch
     check rate-window usage
@@ -318,6 +320,21 @@ later `--resume`. `min_task_budget` is the reviewer-set-coupled floor resolved
 at launch (step 3) and read from `RUN.md` front matter, never a constant; why
 this guard exists and the floor's derivation:
 [`references/run-budget.md`](references/run-budget.md) "Minimum task budget".
+
+**Review-queue gate.** Before claiming each task, run `/do-tasks`' gate
+(`commands/do-tasks.md` "1a. Review-queue gate") against the repo the PR will
+open in. On any non-zero exit, stop the loop exactly as the deadline guard
+does: `status: paused` with `paused_until` empty, and the reason in
+`REPORT.md`. Declare exit reason `deadline` with `--detail` naming the cause:
+`review queue full: N waiting, limit L` (exit 1), `review queue unreadable:
+<GATE: error reason>` (exit 3), or `review queue gate usage error: <the
+script's message>` (exit 2). The reason list is closed, and `deadline` is the
+one that tears the run down without an alarm. The run resumes only by
+`--resume`, once the cause is cleared: the queue drained (exit 1), `gh` access
+restored (exit 3), or the config value the message names corrected (exit 2).
+An unreadable queue stops the run on purpose: claiming blind is the
+failure this gate exists to prevent, and a `gh` outage would fail the next
+`/deliver-task` anyway.
 
 **Pre-invoke reserve gate.** The outer loop dispatches each delivery with its
 `RUN.md` path; `/deliver-task`, as lifecycle owner, applies

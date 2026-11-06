@@ -189,6 +189,30 @@ If the relative paths don't resolve, find the handler files with **Glob**
 `**/commands/handlers/linear-common.md`, `**/commands/handlers/gh-issue-claim.md`,
 `**/commands/handlers/jira-claim.md`) and Read the results.
 
+### 1a. Review-queue gate
+
+Before any claim, on every handler, single and batch (`--no-claim` claims
+nothing, so it skips this), check that the owner's review queue has room:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/review-queue.py" --repo <owner/name> --limit <review_queue_limit>
+```
+
+- `<owner/name>` is the repo the PR will open in: `gh-issue.repo` when set,
+  otherwise the current repo (`gh repo view --json nameWithOwner --jq
+  .nameWithOwner`).
+- `<review_queue_limit>` is the top-level `review_queue_limit` key, default
+  `8`, or a `review-queue-limit=<n>` token (`commands/task-config.md`
+  "Run-scoped overrides").
+- Run it unsandboxed; it calls `gh`.
+
+Exit `0` → go on to the handler. Exit `1` → the queue is full: claim nothing,
+and report `Review queue full: <count> PRs waiting on review (limit <n>) — no
+task claimed`, followed by the PRs it listed. This is a decline, not an error.
+Exit `3` → the queue could not be read: claim nothing, and report the
+`GATE: error` line. A batch runs the gate once, before it selects, so a large
+batch can take the queue over the limit. `wip_limit` bounds that.
+
 ## 2. File path (`repo-pr` / absent handler)
 
 Read and follow **`commands/handlers/repo-pr-execute.md`** end to end — it holds

@@ -140,6 +140,8 @@ linear:
 
 **`archive_after`** is a top-level key (sibling of `wip_limit`), shared by every handler: the default age threshold `/archive-tasks` uses when `--older-than` is omitted. With neither set, an `/archive-tasks` **sweep** refuses to mutate (dry-run-only) to avoid a surprise bulk archive — `/archive-tasks --issues <refs>` needs no threshold, since the named list is its own bound. The per-handler archive keys (`jira.archive_status`, `linear.api_key_ref`) are documented in each handler's `*-config.md`. (`repo-pr` has no archive key — it parks files in the fixed `dev_docs/tasks/_archive/`.)
 
+**`review_queue_limit`** is a top-level key (default `8`), shared by every handler: how many open, non-draft PRs waiting on the owner (tier `human`, or `unknown` when it could not be computed) the repo may hold before `/do-tasks` and `/auto-pilot` stop claiming. `wip_limit` counts this caller's own in-flight tasks, while this counts the owner's whole review queue, whoever opened each PR. `scripts/review-queue.py --limit` defines the count (the same PRs its review-queue issue lists), and claiming stops when it is over the limit.
+
 Omit optional keys the user didn't set (the per-handler file already handles this in what it returns).
 
 ### Local override (`.task-config.local.yml`)
@@ -207,10 +209,11 @@ could be re-run.
   real config key nobody wired up — never silently dropped, because a dropped
   override reads as a bound that did not apply.
 
-  | Token          | Resolves to              | Read by                       |
-  | -------------- | ------------------------ | ----------------------------- |
-  | `max-estimate` | `<handler>.max_estimate` | `/do-tasks` (claim-time gate) |
-  | `wip-limit`    | top-level `wip_limit`    | `/do-tasks` (pre-claim gate)  |
+  | Token                | Resolves to                    | Read by                                        |
+  | -------------------- | ------------------------------ | ---------------------------------------------- |
+  | `max-estimate`       | `<handler>.max_estimate`       | `/do-tasks` (claim-time gate)                  |
+  | `wip-limit`          | top-level `wip_limit`          | `/do-tasks` (pre-claim gate)                   |
+  | `review-queue-limit` | top-level `review_queue_limit` | `/do-tasks`, `/auto-pilot` (review-queue gate) |
 
   Two things the table says that prose kept getting wrong. `wip_limit` is a
   **top-level** key shared across handlers, not `<handler>.wip_limit`
