@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.202.2] - 2026-11-06
+
+### Fixes
+
+- re-read a failed landing with backoff, and say why a sha is unknown [#1316] (#1422) (97c3ef03)
+
 ## [2.202.1] - 2026-11-06
 
 ### Fixes
