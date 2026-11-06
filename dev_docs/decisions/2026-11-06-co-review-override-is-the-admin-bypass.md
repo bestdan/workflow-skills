@@ -65,10 +65,11 @@ carries no `co-review` success.
   named.
 - A later push voids it. `dotfiles/scripts/gh_write.py` sends that SHA as the
   merge call's `sha` parameter, which GitHub refuses once the head has moved.
-- Ruleset bypass events (`/rulesets/rule-suites?rule_suite_result=bypass`)
-  aren't the record. The release workflow's direct pushes to `main` log them
-  too: on 2026-11-06 they were 7 of the 10. The merge-audit check on the PR's
-  head reads only PRs.
+- GitHub's ruleset bypass events (`/rulesets/rule-suites?rule_suite_result=bypass`)
+  show that a push went past the rules, but not who ran it or why. Release
+  pushes to `main` log them too: 7 of the 10 bypass events on 2026-11-06.
+  Matched to a PR's merge commit, an event shows that the merge used the
+  bypass. No event marks it as an owner override.
 
 ### How a repo opts in
 
@@ -80,12 +81,13 @@ for the owner has no override, and its PRs wait for co-review. Nothing in
 
 - **`scripts/land-pr.py`: no change.** It never sees an override. The lander
   lands only on `co-review: success`, and an override is a merge the owner ran.
-- **`scripts/merge-audit.py`: will count a merged PR with no `co-review` success
-  on its head as `bypassed`, once #1432 lands.** It won't count it as
-  human-merged or would-land.
-  This is the one consumer that has to tell the two apart, so the shadow tally
-  isn't skewed. That change is
-  [#1432](https://github.com/bestdan/workflow-skills/issues/1432).
+- **`scripts/merge-audit.py`: no change.** `--mode review` already lists every
+  merged PR whose head lacks `co-review` success, and labels it `bypass` when
+  the rule-suite event for its merge commit says so. `--mode shadow` never
+  counts such a PR as would-land, because the lander's dry-run holds a PR
+  whose `co-review` status isn't success.
+  [#1432](https://github.com/bestdan/workflow-skills/issues/1432), which asked
+  for this, is closed as already done.
 - **The `dli gh merge` guard: no change.** It reads no status today and needs
   none: GitHub applies the bypass, and the guard's head-SHA pin is what binds
   the override to one commit.
