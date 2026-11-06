@@ -39,7 +39,8 @@ returns no relations, so it supplies them per candidate at pre-flight
 (`linear-claim.md` → "Pre-flight", step 6) rather than for the whole set.
 `linear-promote-blockers.py` applies the same rule, through `blocked_by()`
 and `unmet_blockers()`, when `/promote-tasks` decides which Backlog
-candidates to hold, so promote never readies an issue this gate would refuse.
+candidates to hold, so promote never readies an issue this gate would refuse
+for an open blocker.
 
 **One caller exempts blockers inside the set.** `/auto-pilot`'s Linear
 `list_ready` stacks a dependent's branch on its in-run parent instead of
