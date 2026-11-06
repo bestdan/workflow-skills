@@ -120,7 +120,14 @@ SHELL_PIPE_RE = re.compile(r"(?<!\|)\|(?!\|)")
 # fallbacks are deliberately absent — CONTRIBUTING.md names a one-liner with a
 # `||` fallback as fine inline, and the tree has seven of them.
 SHELL_EXIT_GUARD_RE = re.compile(r"\|\|\s*(exit|return)\b")
-SHELL_PLACEHOLDER_RE = re.compile(r"<[A-Za-z][^<>\n]*>")
+# A `<a|b c>` placeholder: words, single spaces between them, and `|` with no
+# space beside it. A space beside a `|` is what keeps a redirect pair such as
+# `jq . <in.json | sort >out` from matching and hiding its pipes.
+SHELL_PLACEHOLDER_ALT = r"[A-Za-z][^\s<>|]*(?: [^\s<>|]+)*"
+SHELL_PLACEHOLDER_RE = re.compile(
+    rf"<{SHELL_PLACEHOLDER_ALT}(?:\|{SHELL_PLACEHOLDER_ALT})*>"
+)
+SHELL_HEREDOC_RE = re.compile(r"(?<!<)<<-?(?!<)\s*['\"]?(\w+)['\"]?")
 # Blocks that predate the check, with the count they are allowed to keep. A new
 # offending block anywhere — including a third one here — fails. Shrink an entry
 # when you extract one; never raise one to make a new block pass.
@@ -371,14 +378,31 @@ for f in plugin_root_ref_files:
 # --- shell logic in runtime markdown ---
 # Reuses plugin_root_ref_files: the same skills/commands/agents bodies, which is
 # exactly the set an agent executes at runtime.
+def strip_heredocs(block: str) -> str:
+    """Drop heredoc bodies, which are data: a `|` in one is text, not a pipe."""
+    out: list[str] = []
+    end = None
+    for line in block.split("\n"):
+        if end is not None:
+            if line.lstrip("\t") == end:
+                end = None
+            continue
+        out.append(line)
+        m = SHELL_HEREDOC_RE.search(line)
+        if m:
+            end = m.group(1)
+    return "\n".join(out)
+
+
 def shell_code(block: str) -> str:
-    """Return the block with quoted strings, comments and <placeholders> removed.
+    """Return the block with quoted strings, comments, heredoc bodies and
+    <placeholders> removed.
 
     What is left is the shell-level syntax, so a `|` that survives is a pipe.
     Quote state carries across lines, which is what drops a multi-line
     `claude --remote "..."` prompt payload whole.
     """
-    block = SHELL_PLACEHOLDER_RE.sub("", block)
+    block = SHELL_PLACEHOLDER_RE.sub("", strip_heredocs(block))
     out = []
     i, n = 0, len(block)
     while i < n:
@@ -428,7 +452,7 @@ def shell_logic_blocks(text: str):
                     ),
                 )
             elif pipes > SHELL_PIPE_MAX:
-                yield start, f"carries a {pipes}-pipe pipeline (max {SHELL_PIPE_MAX})"
+                yield start, f"carries {pipes} pipes (max {SHELL_PIPE_MAX})"
             elif pipes and SHELL_EXIT_GUARD_RE.search(code):
                 yield (
                     start,

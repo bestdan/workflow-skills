@@ -365,7 +365,7 @@ assert_not_contains "prose prompt payload is not flagged" "$out_g" "cmd.md: line
 assert_not_contains "a single multi-line construct is not flagged" "$out_g" "cmd.md: line 35"
 
 # --- Fixture (g2): a pipeline with no control flow is flagged ---------------
-# The #805 shape (issue #936): no if/for/while, so fixture (g)'s opener count
+# The shape issue #936 describes: no if/for/while, so fixture (g)'s opener count
 # sees nothing, yet the block shipped four defects. Each benign block below is
 # one of the shapes a raw `|` count flags in the real tree — pipes inside a
 # quoted jq or regex string, a `<a|b|c>` placeholder, a `|| true` fallback — and
@@ -400,12 +400,23 @@ n=$(gh issue view 1 --json number | jq .number) || exit 1
 claude --remote "Pipe the list | filter it | sort it | and report.
 || exit is prose here too."
 ```
+
+```bash
+jq . <in.json | sort | uniq | head >out.txt
+```
+
+```bash
+cat <<'EOF'
+| a | b |
+| c | d |
+EOF
+```
 MD
 
 out_g2="$(uv run "$DIR_G2/scripts/validate.py" 2>&1)"
 rc_g2=$?
-assert_contains "a 3-pipe pipeline is flagged by line, with its count" "$out_g2" \
-  "cmd.md: line 5: fenced shell block carries a 3-pipe pipeline (max 2)"
+assert_contains "a 3-pipe block is flagged by line, with its count" "$out_g2" \
+  "cmd.md: line 5: fenced shell block carries 3 pipes (max 2)"
 assert_contains "a pipe plus an exit guard is flagged" "$out_g2" \
   "cmd.md: line 20: fenced shell block pipes a result and handles an exit status"
 if [ "$rc_g2" -eq 1 ]; then
@@ -418,6 +429,10 @@ assert_not_contains "quoted, placeholder and fallback pipes are not flagged" "$o
 assert_not_contains "a 2-pipe pipeline is not flagged" "$out_g2" "cmd.md: line 16"
 assert_not_contains "pipes inside a prompt payload are not flagged" "$out_g2" \
   "cmd.md: line 24"
+assert_contains "pipes between a redirect pair are still counted" "$out_g2" \
+  "cmd.md: line 29: fenced shell block carries 3 pipes"
+assert_not_contains "pipes in a heredoc body are not flagged" "$out_g2" \
+  "cmd.md: line 33"
 
 # --- Fixture (h): a plugin with no fenced logic is clean -------------------
 DIR_H="$BASE/shell-logic-pass"
