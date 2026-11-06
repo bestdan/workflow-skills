@@ -640,7 +640,7 @@ def _read_landing(repo, pr, head):
             ]
         )
         if not isinstance(data, dict):
-            return None, f"re-read returned no PR data; {CHECK_BY_HAND}", False
+            return None, f"re-read returned no PR data, so {CHECK_BY_HAND}", False
         state = data.get("state")
         at = str(data.get("headRefOid") or "")[:7] or "an unknown head"
         sha = (data.get("mergeCommit") or {}).get("oid")
@@ -650,16 +650,18 @@ def _read_landing(repo, pr, head):
             return None, f"re-read: open at {at}, not the judged head", True
         if state == "OPEN":
             return None, "re-read: still open after the re-reads", False
+        if state == "MERGED" and data.get("headRefOid") != head:
+            # Pinned to `head` too, so another head rules this run out even
+            # before GitHub reports the merge commit.
+            return None, f"re-read: merged at {at}, not the judged head", True
         if state == "MERGED" and not sha:
-            why = f"re-read: merged, but no merge commit reported; {CHECK_BY_HAND}"
+            why = f"re-read: merged, but no merge commit reported, so {CHECK_BY_HAND}"
             return None, why, False
         if state != "MERGED":
             return None, f"re-read: {str(state).lower()} without merging", True
-        if data.get("headRefOid") != head:
-            return None, f"re-read: merged at {at}, not the judged head", True
         message = gh(["api", f"repos/{repo}/commits/{sha}", "--jq", ".commit.message"])
     except ReadError as exc:
-        return None, f"last re-read failed: {exc}; {CHECK_BY_HAND}", False
+        return None, f"last re-read failed: {exc}, so {CHECK_BY_HAND}", False
     lines = [line.strip() for line in message.splitlines()]
     if "Landed-by: land-pr.sh" in lines and f"Co-review-head: {head}" in lines:
         return sha, None, True

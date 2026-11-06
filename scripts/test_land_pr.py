@@ -741,6 +741,14 @@ class RealLandingTests(unittest.TestCase):
         self.assertEqual(len(self.re_reads()), 1)
         self.assertEqual(self.slept, [])
 
+    def test_a_pr_merged_at_another_head_before_its_commit_is_settled(self):
+        self.settle_re_read_as(state="MERGED", headRefOid=OTHER_HEAD)
+        self.fake.null_merge_commit_reads = 1
+        lines = self.land()
+        self.assertIn(f"re-read: merged at {OTHER_HEAD[:7]}", lines[-1])
+        self.assertEqual(len(self.re_reads()), 1)
+        self.assertEqual(self.slept, [])
+
     def test_a_pr_open_at_another_head_is_settled_and_not_read_again(self):
         # A refusal whose wording HEAD_MOVED_RE does not recognise.
         self.settle_re_read_as(headRefOid=OTHER_HEAD)
@@ -765,7 +773,9 @@ class RealLandingTests(unittest.TestCase):
         self.assertIn("gh pr merge failed", lines[-1])
         # An unreadable PR may have merged, and the hold says so.
         self.assertIn("last re-read failed: ", lines[-1])
-        self.assertTrue(lines[-1].endswith(land.CHECK_BY_HAND), lines[-1])
+        self.assertTrue(lines[-1].endswith(", so " + land.CHECK_BY_HAND), lines[-1])
+        # One reason the script builds is one `; `-separated field.
+        self.assertEqual(lines[-1].count("; "), 1, lines[-1])
         # A read error is retried, a bounded number of times.
         self.assertEqual(len(self.re_reads()), 1 + len(land.RE_READ_DELAYS))
         self.assertEqual(self.slept, list(land.RE_READ_DELAYS))
