@@ -365,7 +365,7 @@ assert_not_contains "prose prompt payload is not flagged" "$out_g" "cmd.md: line
 assert_not_contains "a single multi-line construct is not flagged" "$out_g" "cmd.md: line 35"
 
 # --- Fixture (g2): a pipeline with no control flow is flagged ---------------
-# The shape issue #936 describes: no if/for/while, so fixture (g)'s opener count
+# A pipeline with no control flow: no if/for/while, so fixture (g)'s opener count
 # sees nothing, yet the block shipped four defects. Each benign block below is
 # one of the shapes a raw `|` count flags in the real tree — pipes inside a
 # quoted jq or regex string, a `<a|b|c>` placeholder, a `|| true` fallback — and
@@ -425,6 +425,18 @@ a | b | c | d
 echo "x <<EOF" # <<EOF
 a | b | c | d
 ```
+
+```bash
+gh pr list --json number | jq . || true
+```
+
+```bash
+refs="$(git ls-remote | grep x | cut -f2 | sed 's|a|b|')"
+```
+
+```bash
+gh pr list |# a | b | c
+```
 MD
 
 out_g2="$(uv run "$DIR_G2/scripts/validate.py" 2>&1)"
@@ -453,6 +465,12 @@ assert_contains "a shift is not a heredoc that hides later pipes" "$out_g2" \
   "cmd.md: line 44: fenced shell block carries 3 pipes"
 assert_contains "a quoted or commented <<EOF is not a heredoc" "$out_g2" \
   "cmd.md: line 49: fenced shell block carries 3 pipes"
+assert_not_contains "a pipe with a || true fallback is not flagged" "$out_g2" \
+  "cmd.md: line 54"
+assert_contains "pipes in a double-quoted \$(...) are counted" "$out_g2" \
+  "cmd.md: line 58: fenced shell block carries 3 pipes"
+assert_not_contains "a comment right after a pipe is not counted" "$out_g2" \
+  "cmd.md: line 62"
 
 # --- Fixture (h): a plugin with no fenced logic is clean -------------------
 DIR_H="$BASE/shell-logic-pass"

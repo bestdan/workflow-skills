@@ -108,17 +108,16 @@ SHELL_TERMINATOR_RE = re.compile(r"^\s*(fi|done|esac)\s*(;|&&|\|\||#.*)?\s*$")
 SHELL_OPENER_MAX = 1
 # The second shape: no control flow at all, but a pipeline doing the work. A
 # block like `refs=$(git ls-remote ...) || exit 1` followed by
-# `grep | cut | sed` shipped four defects in a row in #805 (a greedy sed, a
-# masked exit status, grep exiting 1 on no match, a raw-line comparison) while
-# the opener count above saw nothing. Only shell-level syntax counts — see
-# shell_code(): measured 2026-11-01, a raw `|` count flags eleven blocks in this
-# tree, and every one is a pipe inside a quoted jq/regex string, a
-# `<a|b|c>` placeholder, or a plain `|| true` fallback, none of them a pipeline.
+# `grep | cut | sed` shipped four defects in a row (a greedy sed, a masked exit
+# status, grep exiting 1 on no match, a raw-line comparison) while the opener
+# count above saw nothing. Only shell-level syntax counts — see shell_code(): a
+# raw `|` count also flags pipes inside quoted jq/regex strings, `<a|b|c>`
+# placeholders and `|| true` fallbacks, none of them a pipeline.
 SHELL_PIPE_MAX = 2
 SHELL_PIPE_RE = re.compile(r"(?<!\|)\|(?!\|)")
 # Exit-status handling: a guard that ends the script. `|| true` and `|| echo`
 # fallbacks are deliberately absent — CONTRIBUTING.md names a one-liner with a
-# `||` fallback as fine inline, and the tree has seven of them.
+# `||` fallback as fine inline.
 SHELL_EXIT_GUARD_RE = re.compile(r"\|\|\s*(exit|return)\b")
 # A `<a|b c>` placeholder: words, single spaces between them, and `|` with no
 # space beside it. A space beside a `|` is what keeps a redirect pair such as
@@ -384,52 +383,70 @@ def shell_code(block: str) -> str:
 
     What is left is the shell-level syntax, so a `|` that survives is a pipe.
     Quote state carries across lines, which is what drops a multi-line
-    `claude --remote "..."` prompt payload whole. A heredoc opens only at shell
-    level, so a `<<` inside quotes or a comment is not one; a heredoc whose
-    terminator never comes keeps its lines, so the miss cannot hide pipes.
+    `claude --remote "..."` prompt payload whole. A `$(...)` inside double
+    quotes is shell code again, so `x="$(a | b)"` keeps its pipe. A heredoc
+    opens only at shell level, so a `<<` inside quotes or a comment is not one;
+    a heredoc whose terminator never comes keeps its lines, so the miss cannot
+    hide pipes.
     """
     block = SHELL_PLACEHOLDER_RE.sub("", block)
-    out = []
+    out: list[str] = []
     heredocs: list[tuple[str, bool]] = []
-    i, n = 0, len(block)
-    while i < n:
-        c = block[i]
-        if block.startswith("<<<", i):
-            out.append("<<<")
-            i += 3
-        elif c == "<" and (m := SHELL_HEREDOC_RE.match(block, i)):
-            heredocs.append((m.group(3), m.group(1) == "-"))
-            i = m.end()
-        elif c == "\n" and heredocs:
-            out.append(c)
-            i += 1
-            for word, dash in heredocs:
-                body = i
-                while i < n:
-                    end = block.find("\n", i)
-                    line = block[i:] if end < 0 else block[i:end]
-                    i = n if end < 0 else end + 1
-                    if (line.lstrip("\t") if dash else line) == word:
-                        break
-                else:
-                    i = body
-            heredocs = []
-        elif c == "\\":
-            i += 2
-        elif c == "'":
-            end = block.find("'", i + 1)
-            i = n if end < 0 else end + 1
-        elif c == '"':
-            i += 1
-            while i < n and block[i] != '"':
-                i += 2 if block[i] == "\\" else 1
-            i += 1
-        elif c == "#" and (i == 0 or block[i - 1] in " \t\n;"):
-            end = block.find("\n", i)
-            i = n if end < 0 else end
-        else:
-            out.append(c)
-            i += 1
+    n = len(block)
+
+    def scan(i: int, in_subst: bool) -> int:
+        """Copy shell-level code from i; inside a `$(`, stop past its `)`."""
+        nonlocal heredocs
+        depth = 0
+        while i < n:
+            c = block[i]
+            if in_subst and c == ")" and depth == 0:
+                return i + 1
+            if block.startswith("<<<", i):
+                out.append("<<<")
+                i += 3
+            elif c == "<" and (m := SHELL_HEREDOC_RE.match(block, i)):
+                heredocs.append((m.group(3), m.group(1) == "-"))
+                i = m.end()
+            elif c == "\n" and heredocs:
+                out.append(c)
+                i += 1
+                for word, dash in heredocs:
+                    body = i
+                    while i < n:
+                        end = block.find("\n", i)
+                        line = block[i:] if end < 0 else block[i:end]
+                        i = n if end < 0 else end + 1
+                        if (line.lstrip("\t") if dash else line) == word:
+                            break
+                    else:
+                        i = body
+                heredocs = []
+            elif c == "\\":
+                i += 2
+            elif c == "'":
+                end = block.find("'", i + 1)
+                i = n if end < 0 else end + 1
+            elif c == '"':
+                i += 1
+                while i < n and block[i] != '"':
+                    if block.startswith("$(", i):
+                        out.append(" ")
+                        i = scan(i + 2, True)
+                        out.append(" ")
+                    else:
+                        i += 2 if block[i] == "\\" else 1
+                i += 1
+            elif c == "#" and (i == 0 or block[i - 1] in " \t\n;|&()"):
+                end = block.find("\n", i)
+                i = n if end < 0 else end
+            else:
+                depth += {"(": 1, ")": -1}.get(c, 0)
+                out.append(c)
+                i += 1
+        return i
+
+    scan(0, False)
     return "".join(out)
 
 
