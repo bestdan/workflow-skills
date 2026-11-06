@@ -38,13 +38,13 @@ completion.
 
 ## Where completion happens, and whether an agent is there
 
-| Completion path                                                                                                                                       | Handlers                                    | Agent in the loop?                                                                                                |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| PR merges and closes the item natively (`Closes #n`, Linear's GitHub integration, Jira smart commits; `repo-pr`'s task-file delete lands with the PR) | all                                         | Today, no: the owner merges. Under graduated merge autonomy, yes: the agent runs `land-pr.sh`                     |
-| `/complete-task <id>`                                                                                                                                 | all                                         | Yes, one item                                                                                                     |
-| `/sweep-for-complete --apply` (and `/reconcile-tasks`, `/sweep-for-archive`, which call it)                                                           | `linear` only; `gh-issue` refuses by design | Yes, a batch                                                                                                      |
-| Nightly gh-issue routine (`dev_docs/nightly-gh-issue-routine.md`)                                                                                     | `gh-issue`                                  | Already runs `/promote-tasks all` at step 2                                                                       |
-| `/deliver-task`, `/do-tasks`, `/auto-pilot`                                                                                                           | all                                         | Today, never: they hand off at `needs_review`. Part 3 makes `/deliver-task` complete after a verified agent merge |
+| Completion path                                                                                                                                       | Handlers                                    | Agent in the loop?                                                                                                                                                                                                                                                                                     |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| PR merges and closes the item natively (`Closes #n`, Linear's GitHub integration, Jira smart commits; `repo-pr`'s task-file delete lands with the PR) | all                                         | Today, no: the owner merges. Under graduated merge autonomy, yes: the agent runs `land-pr.sh`                                                                                                                                                                                                          |
+| `/complete-task <id>`                                                                                                                                 | all                                         | Yes, one item                                                                                                                                                                                                                                                                                          |
+| `/sweep-for-complete --apply` (and `/reconcile-tasks`, `/sweep-for-archive`, which call it)                                                           | `linear` only; `gh-issue` refuses by design | Yes, a batch                                                                                                                                                                                                                                                                                           |
+| Nightly gh-issue routine (`dev_docs/nightly-gh-issue-routine.md`)                                                                                     | `gh-issue`                                  | Already runs `/promote-tasks all` at step 2                                                                                                                                                                                                                                                            |
+| `/deliver-task`, `/do-tasks`, `/auto-pilot`                                                                                                           | all                                         | Today, never: they hand off at `needs_review`. Part 3 makes `/deliver-task` complete tracker items after a verified agent merge, and re-check `repo-pr` dependents on the task PR. `/auto-pilot` inherits this because it runs `/deliver-task` per task; `/do-tasks` does not call it and is unchanged |
 
 Today the common path has no agent in it. That changes with
 [graduated merge autonomy](2026-10-03-graduated-merge-autonomy.md):
@@ -117,7 +117,7 @@ result is unchanged.
   prompt names the extra step ("then re-check dependents of #123"), so it is one
   prompt, not two.
 - **`/sweep-for-complete --apply`**: one tail call with the full set of ids it
-  completed. Without `--apply`, a dry-run tail reports what _would_ unblock.
+  completed.
   `/reconcile-tasks` and `/sweep-for-archive` get the tail for free, because
   both run this flow. The sweep is `linear`-only, so this tail does nothing
   until `linear` supports `after=`, and it ships with that (rollout step 4).
@@ -125,12 +125,25 @@ result is unchanged.
   everything.
 
 The report gains one section: `dependents re-checked (N): promoted …, held …,
-needs_refinement …`.
+needs_refinement …, skipped … (foreign repo)`.
 
-### 3. After the lander merges: complete, then re-check
+**Dry runs.** A dry run completes nothing, so the ids it would complete are
+still open blockers, and the unchanged hold check holds every dependent of
+them. A dry-run tail therefore does not claim to know what would unblock. It
+lists each id's dependents with their current hold state, and calls out on its
+own line any dependent held only by ids this run would complete: those are the
+ones the real run would release.
 
-When `land-pr.sh` exits having merged (not in shadow, not a hold),
-`/deliver-task` runs the `/complete-task` flow on its own task id with
+### 3. In `/deliver-task`: after the lander merges (trackers), or on the task branch (`repo-pr`)
+
+Part 3 has two steps, one per kind of handler. On the tracker handlers
+(`gh-issue`, `linear`, `jira`), completion and the re-check run after the merge,
+as the next three paragraphs describe; `jira` completes but skips the re-check,
+per part 2. On `repo-pr` it runs before the merge, on the task branch,
+as the paragraph after them describes.
+
+On a tracker handler, when `land-pr.sh` exits having merged (not in shadow, not
+a hold), `/deliver-task` runs the `/complete-task` flow on its own task id with
 `assume_verified: true`, then that flow's tail. The lander has just verified the
 merge against the exact head SHA, which is the verification `assume_verified`
 exists to carry (`commands/complete-task.md` → trust boundary).
@@ -139,7 +152,10 @@ Running `/complete-task` rather than going straight to `after=` closes a race.
 A native close (`Closes #n`, Linear's integration) can lag the merge by
 seconds, and a dependents read that loses the race sees the blocker still open
 and holds every dependent. `/complete-task` either finds the item already
-complete or closes it explicitly, so the tail always reads a closed blocker. It
+complete or closes it explicitly, so the tail reads a blocker this flow has
+itself confirmed or made closed. If the tracker's dependency read still lags
+that close, the dependent is only held, and the nightly routine or the next full
+`/promote-tasks` releases it. It
 also covers a tracker whose native close is off, which is why `/complete-task`
 exists.
 
@@ -172,20 +188,32 @@ same squash. There is no merge race to close on `repo-pr`, so the post-land
 step above covers the tracker handlers only.
 
 Two costs follow. The task PR's diff carries frontmatter changes to other task
-files, which its reviewers and `tier-forecast.py` see; `dev_docs/tasks/` needs
-to be an `auto`-tier path in the merge policy, or every such PR goes to the
-owner. And a dependent that another promoter edited meanwhile can conflict on a
-stale branch, which `/deliver-task`'s existing freshness check before the claim
-already mitigates.
+files, which its reviewers and `tier-forecast.py` see. Its merge tier does not
+change: the task-file deletion already puts every `repo-pr` task PR under
+`dev_docs/tasks/`, so whatever tier the merge policy gives that path (today,
+human, with the rest of `dev_docs/**`) applied before the promotions commit. And
+another promoter can edit the same dependent on the base while the task is in
+flight. That shows up as an ordinary merge conflict on the task PR, resolved by
+rebasing the task branch; `/deliver-task`'s freshness check runs at claim time
+and does not prevent it.
 
 For the same reason, `/complete-task`'s tail on `repo-pr` takes the slug as its
 input, not the file: after a normal delivery the file is gone, and
-`repo-pr-complete.md` reports that as already complete.
+`repo-pr-complete.md` reports that as already complete. A standalone
+`/complete-task` on `repo-pr` leaves its tail's promotion edits uncommitted in
+the working tree, beside its own uncommitted `status: done` edit, for the caller
+to commit. That is the convention every standalone `repo-pr` verb already
+follows (`commands/promote-tasks.md` step 3: "Do not stage or commit"), and the
+report lists every task file the tail touched so the caller stages the right
+ones. Only the post-merge case loses edits, because its branch has already
+merged, which is why `/deliver-task` runs its re-check before the PR is ready.
 
 Two paths fall outside this. The owner merging by hand, in the GitHub UI or by
 asking a session to run the owner's merge verb, has no plugin step after it;
 the nightly routine and the next full `/promote-tasks` catch those. And while
-the lander runs in shadow, part 3 is inert and parts 1 and 2 carry the feature.
+the lander runs in shadow, part 3's post-land step for the tracker handlers is
+inert and parts 1 and 2 carry the feature there; the `repo-pr` pre-ready step
+does not depend on the lander.
 
 ## Frictions and permissions
 
