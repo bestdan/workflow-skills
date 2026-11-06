@@ -93,7 +93,8 @@ STRICT_FILES=(scripts/research-spike.py)
 # the same file, land-pr.py, the lander, which runs
 # from the installed plugin, and merge-tier.py and co-review-evidence.py, which
 # it loads from there, merge-audit.py, the weekly audit, and review-queue.py,
-# the owner's queue, which load land-pr.py the same way, tier-forecast.py,
+# the owner's queue, and revert-landing.py, which /revert-landing runs,
+# all load land-pr.py the same way, tier-forecast.py,
 # which /promote-tasks runs from the installed plugin and which loads
 # merge-tier.py from there,
 # and worktree-teardown-reminder.py, guard-foreign-worktree.py,
@@ -116,6 +117,7 @@ CONSUMER_FILES=(
   scripts/land-pr.py
   scripts/merge-audit.py
   scripts/review-queue.py
+  scripts/revert-landing.py
   scripts/tier-forecast.py
   scripts/coreview-input-lock.py
   scripts/co-review-stats.py
