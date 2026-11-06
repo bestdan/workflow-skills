@@ -7,11 +7,13 @@
 # composes the existing probes rather than re-implementing them:
 #   - scripts/probe-coders.sh        coder CLI availability/auth
 #   - scripts/preflight-freshness.sh base-branch freshness vs its remote
-#   - scripts/spawn-orchestrator.sh  render-profile / render-settings, reused
-#                                    for the confinement smoke
+#   - scripts/nono-install.sh        the pinned nono the jail runs under
+#   - scripts/smoke-nono.sh          the confinement smoke, through that nono
+#   - scripts/spawn-orchestrator.sh  render-nono-profile, reused for the
+#                                    consent-gate probe
 #
-# Never mutates git or filesystem state outside a private scratch dir it
-# creates and removes for the confinement smoke.
+# Never mutates git or filesystem state outside private scratch dirs it
+# creates and removes for the smoke and the consent probe.
 #
 # Usage:
 #   scripts/preflight.sh --source <plan|linear|gh-issue> --run-root <path>
@@ -22,11 +24,13 @@
 #                    --scout-run-md is given.
 #   --base          Base branch to check for staleness. Default: main.
 #   --claude-token-cmd
-#                    Linux only: the command the launch will hand to
-#                    write-launch to supply CLAUDE_CODE_OAUTH_TOKEN. The nono
-#                    smoke runs it the same way and proves the credential file
-#                    stays outside the jail. Omitted, the smoke runs the
-#                    documented fallback (~/.claude writable in the jail).
+#                    The command the launch will hand to write-launch to
+#                    supply CLAUDE_CODE_OAUTH_TOKEN. The nono smoke runs it the
+#                    same way and proves the credential file stays outside the
+#                    jail. Required on macOS, where nono denies the Keychain
+#                    that holds the /login credential (a blocker without it).
+#                    Omitted on Linux, the smoke runs the documented fallback
+#                    (~/.claude writable in the jail).
 #   --run-root      The checkout the detached run will work in — the run
 #                    worktree launch step 1 created. REQUIRED: the consent-gate
 #                    probe tests THIS path and its --git-common-dir, and a
@@ -62,8 +66,8 @@
 # macOS attributes TCC grants to, so the grants the user gave Terminal do not
 # carry. The probe re-runs the entry path under that real attribution (a
 # transient launchd job whose program is /bin/bash, as production's is, stdin on
-# /dev/null, no controlling TTY, through the rendered Seatbelt profile) and
-# blocks launch on a denial.
+# /dev/null, no controlling TTY, through a rendered nono profile and the pinned
+# nono) and blocks launch on a denial.
 #
 # What it covers, exactly: FILESYSTEM consent — TCC folder access and Full Disk
 # Access — against the run's own paths. The other interactive gate classes
@@ -81,7 +85,8 @@
 #   PREFLIGHT_TCC_LOCATIONS colon-separated protected-location list the
 #                            consent-gate probe checks the run's paths against.
 #   PREFLIGHT_CONSENT_TICKS how many 0.25s ticks to wait for the probe job.
-#   PREFLIGHT_OS            the host OS (uname -s) the launcher check branches on.
+#   PREFLIGHT_OS            the host OS (uname -s) the launcher, smoke and
+#                            consent checks branch on.
 #   PREFLIGHT_NONO_SMOKE    path to a smoke-nono.sh-compatible executable.
 set -uo pipefail
 # xml_escape's replacements emit a literal `&`, which patsub_replacement (on by
@@ -525,18 +530,39 @@ echo "PREFLIGHT HANDLER: $handler"
 echo "PREFLIGHT HANDLER_SOURCE: $handler_source"
 
 # --- 3b. Launcher -------------------------------------------------------------
-# macOS spawns through launchd + a Seatbelt jail (spawn-orchestrator.sh
-# `write-launch` / `launch`). Linux jails the run under a pinned nono (#1349),
+# Both OSes jail the run under a pinned nono (Linux #1349, macOS #1361),
 # checked here by scripts/nono-install.sh: the binary's checksum first, then its
-# version, then Landlock with ABI 4 or later. A host with neither cannot carry
+# version, then (Linux) Landlock with ABI 4 or later. The supervisor is launchd
+# on macOS, a systemd-run --user pair on Linux. A host with neither cannot carry
 # out launch step 7. Sections 4 and 5 log a skip there — truthfully, as "this
 # probe could not run" — but a skip is not a launch that can happen, so the
 # missing launcher is a blocker of its own: the pre-flight fails closed instead
 # of printing `go` for a launch with no way to spawn.
 host_os="${PREFLIGHT_OS:-$(uname -s 2>/dev/null || echo unknown)}"
 nono_bin=""
-if [ "$host_os" != Linux ] && command -v sandbox-exec >/dev/null 2>&1 && command -v "$LAUNCHCTL_BIN" >/dev/null 2>&1; then
-  echo "PREFLIGHT LAUNCHER: launchd + sandbox-exec"
+if [ "$host_os" = Darwin ]; then
+  # nono's default profile denies the Keychain, where /login keeps Claude's
+  # credential, so on macOS the token command is the jailed claude's only way
+  # to authenticate (render-nono-profile requires it).
+  [ -n "$token_cmd" ] || blockers+=("macOS needs --claude-token-cmd: the nono jail denies the Keychain, where /login keeps Claude's credential, so the detached claude authenticates only with a token command (a \`claude setup-token\` token, e.g. read with op) — pass the command the launch will use")
+  nono_out="$(bash "$ROOT/scripts/nono-install.sh" check 2>&1)"
+  nono_ok=$?
+  nono_problem="$(sed -n 's/^NONO: //p' <<<"$nono_out" | head -1)"
+  nono_fix="$(sed -n 's/^NONO FIX: //p' <<<"$nono_out" | head -1)"
+  if [ "$nono_ok" = 0 ]; then
+    nono_bin="$(sed -n 's/^ok \(.*\) (nono .*$/\1/p' <<<"$nono_problem")"
+    echo "PREFLIGHT NONO: $nono_problem"
+    if command -v "$LAUNCHCTL_BIN" >/dev/null 2>&1; then
+      echo "PREFLIGHT LAUNCHER: launchd + nono"
+    else
+      echo "PREFLIGHT LAUNCHER: none (macOS: no launchctl)"
+      blockers+=("no launchctl on this host: the macOS supervisor is a launchd job")
+    fi
+  else
+    echo "PREFLIGHT NONO: ${nono_problem:-the check failed: $nono_out}"
+    echo "PREFLIGHT LAUNCHER: none (macOS: nono not ready)"
+    blockers+=("nono jail not ready: ${nono_problem:-nono-install.sh check failed} — fix: ${nono_fix:-see PREFLIGHT NONO}")
+  fi
 elif [ "$host_os" = Linux ]; then
   nono_out="$(bash "$ROOT/scripts/nono-install.sh" check 2>&1)"
   nono_ok=$?
@@ -569,7 +595,7 @@ elif [ "$host_os" = Linux ]; then
   fi
 else
   echo "PREFLIGHT LAUNCHER: none ($host_os)"
-  blockers+=("no supported launcher on this host ($host_os): the orchestrator spawns through launchd + sandbox-exec on macOS, or nono on Linux, and this host has neither")
+  blockers+=("no supported launcher on this host ($host_os): the orchestrator spawns under nono through launchd on macOS, or through systemd-run on Linux, and this host is neither")
 fi
 
 # --- 3c. Run clone -----------------------------------------------------------
@@ -586,127 +612,45 @@ else
 fi
 
 # --- 4. Confinement smoke ---------------------------------------------------
-# Layer 1 (filesystem/exec) is the rendered Seatbelt profile; layer 2 (network
-# egress) is the settings.json render-settings emits — see
-# skills/auto-pilot/references/launch-runtime.md "Sandbox profile". Nested
-# sandbox-exec is itself denied in some sandboxed dev environments, so probe
-# that capability first and degrade to a logged SKIP rather than a blocker.
-#
-# On Linux the smoke is scripts/smoke-nono.sh, run through the pinned nono 3b
-# just verified: one `SMOKE <CHECK>:` line per assertion, each reprinted here
-# as `PREFLIGHT SMOKE_<CHECK>:`, and every FAIL is a blocker.
+# scripts/smoke-nono.sh, on both OSes, run through the pinned nono 3b just
+# verified: one `SMOKE <CHECK>:` line per assertion, each reprinted here as
+# `PREFLIGHT SMOKE_<CHECK>:`, and every FAIL is a blocker. Its header lists the
+# checks; on macOS they include the launchd escapes the profile's raw Seatbelt
+# rules must refuse.
 
-if [ "$host_os" = Linux ]; then
-  if [ -z "$nono_bin" ]; then
-    echo "PREFLIGHT SMOKE: skip (nono is not ready — see PREFLIGHT NONO)"
-  else
-    smoke_args=(--nono-bin "$nono_bin")
-    [ -n "$token_cmd" ] && smoke_args+=(--claude-token-cmd "$token_cmd")
-    smoke_out="$(bash "${PREFLIGHT_NONO_SMOKE:-$ROOT/scripts/smoke-nono.sh}" "${smoke_args[@]}" 2>&1)"
-    smoke_rc=$?
-    smoke_fails=0
-    while IFS= read -r line; do
-      case "$line" in
-        "SMOKE "*)
-          echo "PREFLIGHT SMOKE_${line#SMOKE }"
-          case "$line" in
-            *": FAIL "*)
-              smoke_fails=$((smoke_fails + 1))
-              check="${line#SMOKE }"
-              blockers+=("confinement smoke: ${check%%:*} failed — ${check#*: FAIL }")
-              ;;
-          esac
-          ;;
-      esac
-    done <<<"$smoke_out"
-    if [ "$smoke_rc" != 0 ] && [ "$smoke_fails" = 0 ]; then
-      echo "PREFLIGHT SMOKE: FAIL (the nono smoke could not run: $(tail -1 <<<"$smoke_out"))"
-      blockers+=("confinement smoke: the nono smoke could not run — $(tail -1 <<<"$smoke_out")")
-    fi
-    [ -n "$token_cmd" ] || skip_notes+=("no --claude-token-cmd: the jail runs the documented fallback, ~/.claude writable")
-  fi
-elif ! command -v sandbox-exec >/dev/null 2>&1; then
-  echo "PREFLIGHT SMOKE: skip (sandbox-exec not available — non-macOS host)"
-  skip_notes+=("confinement smoke skipped: sandbox-exec absent (non-macOS host)")
-elif ! sandbox-exec -p '(version 1)(allow default)' /usr/bin/true >/dev/null 2>&1; then
-  echo "PREFLIGHT SMOKE: skip (nested sandbox-exec denied in this environment)"
-  skip_notes+=("confinement smoke skipped: nested sandbox-exec apply failed in this environment")
+if [ -z "$nono_bin" ]; then
+  case "$host_os" in
+    Linux | Darwin) echo "PREFLIGHT SMOKE: skip (nono is not ready — see PREFLIGHT NONO)" ;;
+    *) echo "PREFLIGHT SMOKE: skip (no supported launcher on this host)" ;;
+  esac
+elif [ "$host_os" = Darwin ] && [ -z "$token_cmd" ]; then
+  # The smoke would refuse too: there is no macOS profile without a token.
+  echo "PREFLIGHT SMOKE: skip (macOS needs --claude-token-cmd — see the blocker)"
 else
-  scratch="$(mktemp -d "${TMPDIR:-/tmp}/preflight-smoke.XXXXXX" 2>/dev/null || true)"
-  if [ -z "$scratch" ] || [ ! -d "$scratch" ]; then
-    echo "PREFLIGHT SMOKE: skip (could not create a scratch dir)"
-    skip_notes+=("confinement smoke skipped: scratch dir creation failed")
-  else
-    scratch_done=false
-    home_probe=""
-    smoke_cleanup() {
-      $scratch_done || {
-        rm -rf "$scratch"
-        rm -f "${home_probe:-}"
-      }
-      scratch_done=true
-    }
-    # On a signal, clean up and DIE — don't let bash resume past the trap and run
-    # the rest of the smoke against a just-deleted scratch dir (a spurious blocker).
-    trap smoke_cleanup EXIT
-    trap 'smoke_cleanup; trap - EXIT INT TERM; exit 130' INT TERM
-
-    ex_args=()
-    for bin in $FINGERPRINT_BINS; do
-      p="$(command -v "$bin" 2>/dev/null || true)"
-      [ -n "$p" ] && ex_args+=(--exec "$p")
-    done
-    # The smoke itself execs through the rendered profile (env, bash) to run
-    # its checks — those binaries must be on the exec whitelist too, or the
-    # smoke's own checks fail against the wall rather than testing it.
-    for smoke_bin in /usr/bin/env "$(command -v bash 2>/dev/null || true)"; do
-      [ -n "$smoke_bin" ] && [ -x "$smoke_bin" ] && ex_args+=(--exec "$smoke_bin")
-    done
-    prof="$scratch/preflight.sb"
-    if bash "$SPAWN" render-profile --rw "$scratch" ${ex_args[@]+"${ex_args[@]}"} --out "$prof" >/dev/null 2>&1; then
-      smoke_exec_ok=false
-      if sandbox-exec -f "$prof" /usr/bin/env bash -c 'exit 0' >/dev/null 2>&1; then
-        smoke_exec_ok=true
-        echo "PREFLIGHT SMOKE_EXEC: pass (sed/git/env bash exec through the jail succeeds)"
-      else
-        echo "PREFLIGHT SMOKE_EXEC: FAIL"
-        blockers+=("confinement smoke: exec through the rendered toolchain profile failed — the exec wall is broken, not just narrow")
-      fi
-
-      if ! $smoke_exec_ok; then
-        echo "PREFLIGHT SMOKE_HOME_WRITE: skip (SMOKE_EXEC failed — exec wall is already a blocker)"
-      else
-        home_probe="$(mktemp -u "$HOME/.preflight-smoke-XXXXXXXX" 2>/dev/null || true)"
-        if [ -z "$home_probe" ] || [ -e "$home_probe" ]; then
-          echo "PREFLIGHT SMOKE_HOME_WRITE: skip (could not pick a collision-free probe path)"
-          skip_notes+=("confinement smoke: HOME-write check skipped — no collision-free probe path")
-        else
-          sandbox-exec -f "$prof" /usr/bin/env bash -c ': > "$1"' _ "$home_probe" >/dev/null 2>&1
-          if [ -e "$home_probe" ]; then
-            rm -f "$home_probe"
-            echo "PREFLIGHT SMOKE_HOME_WRITE: FAIL (write to \$HOME succeeded through the jail)"
-            blockers+=("confinement smoke: a write to \$HOME succeeded through the rendered profile — the filesystem wall is broken")
-          else
-            echo "PREFLIGHT SMOKE_HOME_WRITE: pass (write to \$HOME denied, as expected)"
-          fi
-        fi
-      fi
-
-      settings="$scratch/preflight-settings.json"
-      if bash "$SPAWN" render-settings --source "$source_arg" --out "$settings" >/dev/null 2>&1 \
-        && grep -q '"allowedDomains"' "$settings" && grep -q '"enabled":true' "$settings"; then
-        echo "PREFLIGHT SMOKE_EGRESS: pass (layer-2 allowlist renders enabled + deny-by-default)"
-      else
-        echo "PREFLIGHT SMOKE_EGRESS: FAIL"
-        blockers+=("confinement smoke: layer-2 egress allowlist did not render as an enabled, deny-by-default allowlist")
-      fi
-    else
-      echo "PREFLIGHT SMOKE: FAIL (render-profile failed for this environment's fingerprint)"
-      blockers+=("confinement smoke: render-profile failed to produce a launch profile for this environment's fingerprint — the renderer is broken, not just narrow")
-    fi
-    smoke_cleanup
-    trap - EXIT INT TERM
+  smoke_args=(--nono-bin "$nono_bin")
+  [ -n "$token_cmd" ] && smoke_args+=(--claude-token-cmd "$token_cmd")
+  smoke_out="$(bash "${PREFLIGHT_NONO_SMOKE:-$ROOT/scripts/smoke-nono.sh}" "${smoke_args[@]}" 2>&1)"
+  smoke_rc=$?
+  smoke_fails=0
+  while IFS= read -r line; do
+    case "$line" in
+      "SMOKE "*)
+        echo "PREFLIGHT SMOKE_${line#SMOKE }"
+        case "$line" in
+          *": FAIL "*)
+            smoke_fails=$((smoke_fails + 1))
+            check="${line#SMOKE }"
+            blockers+=("confinement smoke: ${check%%:*} failed — ${check#*: FAIL }")
+            ;;
+        esac
+        ;;
+    esac
+  done <<<"$smoke_out"
+  if [ "$smoke_rc" != 0 ] && [ "$smoke_fails" = 0 ]; then
+    echo "PREFLIGHT SMOKE: FAIL (the nono smoke could not run: $(tail -1 <<<"$smoke_out"))"
+    blockers+=("confinement smoke: the nono smoke could not run — $(tail -1 <<<"$smoke_out")")
   fi
+  [ -n "$token_cmd" ] || skip_notes+=("no --claude-token-cmd: the jail runs the documented fallback, ~/.claude writable")
 fi
 
 # --- 5. Consent-gate probe --------------------------------------------------
@@ -722,11 +666,11 @@ fi
 # binary the responsible process — a different TCC identity holding none of
 # those grants. So a probe that passes from this terminal proves nothing about
 # the detached run. This one runs under the real attribution: a transient
-# launchd job, stdin on /dev/null, no controlling terminal, exec'd through the
-# same rendered Seatbelt profile the run uses.
+# launchd job, stdin on /dev/null, no controlling terminal, run through the
+# pinned nono under a rendered nono profile, as the run is.
 #
 # A COMPLETED probe reporting a denial is a hard blocker. An environment that
-# cannot run the probe at all (no sandbox-exec, launchd refuses the bootstrap)
+# cannot run the probe at all (not macOS, nono not ready, no launchctl)
 # degrades to a logged SKIP, the same way the confinement smoke above does — a
 # missing capability is not evidence of a consent gate.
 
@@ -749,7 +693,7 @@ resolve_link() {
 # helper and the same reasoning as spawn-orchestrator.sh's `xml_escape` — an
 # unescaped value can close the string and inject a second
 # <key>ProgramArguments</key>, which launchd execs DIRECTLY rather than under
-# sandbox-exec. Here the plainer failure matters more: `&` and `<` are legal in
+# the jail. Here the plainer failure matters more: `&` and `<` are legal in
 # macOS paths, and a malformed plist makes `launchctl bootstrap` fail, which this
 # section degrades to a SKIP — so an unescaped path turns a gate check into a
 # `go`. Relies on patsub_replacement being off (see the shopt below `set`).
@@ -772,10 +716,9 @@ attribution_bin=""
 [ -n "$claude_link" ] && attribution_bin="$(resolve_link "$claude_link")"
 echo "PREFLIGHT ATTRIBUTION_BIN: ${attribution_bin:-absent}"
 
-# Which protected locations does the run actually NEED? The jail allows
-# `(allow file-read*)` globally — deliberately; a narrow read list broke
-# traversal — so nothing stops an incidental read of ~/Documents from raising a
-# gate. Recording the needed set is what makes "none" an answer: a run whose
+# Which protected locations does the run actually NEED? TCC gates a read
+# before any jail rule is consulted, so a run path under ~/Documents raises the
+# gate whatever the profile grants. Recording the needed set is what makes "none" an answer: a run whose
 # paths all sit outside these locations should never trip one.
 under_path() { # <candidate> <ancestor> — true when candidate is at or under ancestor
   case "$1" in "$2" | "$2"/*) return 0 ;; *) return 1 ;; esac
@@ -854,10 +797,15 @@ set +f
 # genuinely absent capability, which is what the two skips below test for.
 # Blocking costs nothing real: the run itself bootstraps into the same
 # `gui/$(id -u)` domain, so a domain that refuses the probe refuses the run too.
+# nono not ready is the third skip: 3b already blocks the launch on it, so the
+# skip cannot turn into a `go`.
 consent_verdict=""
-if ! command -v sandbox-exec >/dev/null 2>&1; then
-  consent_verdict="skip (sandbox-exec not available — non-macOS host)"
-  skip_notes+=("consent-gate probe skipped: sandbox-exec absent (non-macOS host; TCC is macOS-only)")
+if [ "$host_os" != Darwin ]; then
+  consent_verdict="skip (non-macOS host — TCC is macOS-only)"
+  skip_notes+=("consent-gate probe skipped: non-macOS host (TCC is macOS-only)")
+elif [ -z "$nono_bin" ]; then
+  consent_verdict="skip (nono not ready — see PREFLIGHT NONO)"
+  skip_notes+=("consent-gate probe skipped: nono not ready (see PREFLIGHT NONO; already a blocker)")
 elif ! command -v "$LAUNCHCTL_BIN" >/dev/null 2>&1; then
   consent_verdict="skip (launchctl not available — non-macOS host)"
   skip_notes+=("consent-gate probe skipped: launchctl absent (non-macOS host)")
@@ -879,7 +827,7 @@ else
     trap consent_cleanup EXIT
     trap 'consent_cleanup; trap - EXIT INT TERM; exit 130' INT TERM
 
-    cprof="$cscratch/consent.sb"
+    cprof="$cscratch/consent.json"
     cprobe="$cscratch/consent-probe.sh"
     cwrapper="$cscratch/consent-launch.sh"
     cresult="$cscratch/consent-result"
@@ -888,22 +836,22 @@ else
 
     # The launch wrapper exists so ProgramArguments[0] is `/bin/bash`, matching
     # the production job (scripts/orchestrator.plist.tmpl), whose program is also
-    # `/bin/bash <launch script>` and which composes `sandbox-exec … claude -p …`
+    # `/bin/bash <launch script>` and which composes `nono run … claude -p …`
     # as a CHILD. launchd makes a job's own initial process the one TCC holds
     # responsible, and children inherit it — so ProgramArguments[0] is the single
     # variable that decides which identity this probe measures. Dispatching
-    # sandbox-exec directly would guarantee a different one from production's.
-    # Runs sandbox-exec as a child rather than exec'ing it, mirroring what
-    # spawn-orchestrator.sh's write-launch composes.
-    cat >"$cwrapper" <<'WRAPPER'
-#!/bin/bash
-# Written by scripts/preflight.sh — launchd's program, so that the job's
-# responsible process is /bin/bash exactly as it is for the real run.
-/usr/bin/sandbox-exec -f "$1" /bin/bash "$2" "$3" "${@:4}"
-WRAPPER
+    # nono directly would guarantee a different one from production's. Runs
+    # nono as a child rather than exec'ing it, with the environment and flags
+    # spawn-orchestrator.sh's write-launch --jail nono composes.
+    {
+      printf '#!/bin/bash\n'
+      printf '# Written by scripts/preflight.sh — launchd'"'"'s program, so that the job'"'"'s\n'
+      printf '# responsible process is /bin/bash exactly as it is for the real run.\n'
+      printf 'NONO_NO_UPDATE_CHECK=1 NONO_NO_MIGRATE=1 %q run --silent --profile "$1" -- /bin/bash "$2" "$3" "${@:4}"\n' "$nono_bin"
+    } >"$cwrapper"
 
     # The probe runs on launchd's minimal PATH under the 3.2 /bin/bash, so every
-    # binary it reaches is named absolutely and granted by --exec below.
+    # binary it reaches is named absolutely.
     cat >"$cprobe" <<'PROBE'
 #!/bin/bash
 # Written by scripts/preflight.sh — runs jailed, under launchd attribution.
@@ -941,18 +889,22 @@ done
 echo "CONSENT done: 1" >>"$out"
 PROBE
 
-    cex_args=()
-    for bin in $FINGERPRINT_BINS; do
-      p="$(command -v "$bin" 2>/dev/null || true)"
-      [ -n "$p" ] && cex_args+=(--exec "$p")
-    done
-    for cbin in /bin/bash /bin/ls; do
-      [ -x "$cbin" ] && cex_args+=(--exec "$cbin")
-    done
-
-    if ! bash "$SPAWN" render-profile --rw "$cscratch" ${cex_args[@]+"${cex_args[@]}"} --out "$cprof" >/dev/null 2>&1; then
-      consent_verdict="FAIL (render-profile failed)"
-      blockers+=("consent-gate probe could not render a Seatbelt profile for this environment — launchd-attributed consent is unproven; the confinement smoke above reports the renderer's own failure")
+    # Every path the probe reads is granted read-only. nono's reads are NOT
+    # global, as the Seatbelt template's `(allow file-read*)` was: without these
+    # grants a denial would be nono's, not TCC's, and the probe would block on a
+    # gate that does not exist. --claude-token because the macOS profile
+    # requires it; the probe runs no claude, so no token is fetched.
+    cro_args=()
+    while IFS= read -r spec; do
+      [ -n "$spec" ] && cro_args+=(--ro "${spec#*=}")
+    done <<EOF
+$consent_specs
+EOF
+    mkdir -p "$cscratch/tmp"
+    if ! bash "$SPAWN" render-nono-profile --rw "$cscratch" --tmpdir "$cscratch/tmp" --toolchain --claude-token \
+      ${cro_args[@]+"${cro_args[@]}"} --out "$cprof" >"$cscratch/render.log" 2>&1; then
+      consent_verdict="FAIL (render-nono-profile failed)"
+      blockers+=("consent-gate probe could not render a nono profile for this environment — launchd-attributed consent is unproven: $(tail -1 "$cscratch/render.log" 2>/dev/null)")
     else
       {
         echo '<?xml version="1.0" encoding="UTF-8"?>'
