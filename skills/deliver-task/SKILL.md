@@ -1,6 +1,6 @@
 ---
 name: deliver-task
-description: Take ONE identified task through its full per-task delivery lifecycle — claim, implement via a routed coder worker, verify, open a PR, run non-interactive co-review, iterate on the findings, and hand off at needs_review (never completed — completion stays merge-verified via /sweep-for-complete). Handler-dispatched (repo-pr / linear / gh-issue / jira) like the other task skills, and the per-task unit the /auto-pilot orchestrator calls. Use when the user wants one specific task driven all the way to a reviewed, hand-off-ready PR (e.g. /deliver-task <slug>), not a batch.
+description: Take ONE identified task through its full per-task delivery lifecycle — claim, implement via a routed coder worker, verify, open a PR, run non-interactive co-review, iterate on the findings, and hand off at needs_review — then land the PR when its merge tier is auto and the repo's AGENT_LAND is on, completing the task; anything unmerged is never completed, and stays for /sweep-for-complete. Handler-dispatched (repo-pr / linear / gh-issue / jira) like the other task skills, and the per-task unit the /auto-pilot orchestrator calls. Use when the user wants one specific task driven all the way to a reviewed, hand-off-ready PR (e.g. /deliver-task <slug>), not a batch.
 ---
 
 # deliver-task — one task, claimed, implemented, reviewed, handed off
@@ -10,10 +10,9 @@ One task in; a **reviewed PR handed off at `needs_review`** out.
 task properly), as opposed to `/do-tasks`, the breadth verb (select _which_ and
 _how many_). The `/auto-pilot` orchestrator calls this once per task.
 
-**The full lifecycle:** claim → do → open PR → co-review → iterate → hand-off. It
-ends at **hand-off** — the tracker at `needs_review` with a linked PR — and
-**never at `done`**: completion is merge-verified later by `/sweep-for-complete`,
-never by this skill (the `linear-claim.md` hard rule it inherits).
+**The full lifecycle:** claim → do → open PR → co-review → iterate → hand-off →
+land. It ends at **hand-off** (`needs_review`, PR linked) unless an `auto`-tier
+PR lands. **Unmerged work is never `done`** (the `linear-claim.md` hard rule).
 
 ## Compose, never duplicate
 
@@ -460,10 +459,10 @@ remaining findings and proceed — don't loop.
 
 - **Tracker → `needs_review`** via the handler's own linking/state sections
   (`linear-claim.md` "Move to review on PR open"; on repo-pr the ready
-  `task-loop` PR is itself the review signal). **Never `done`/`completed`** —
-  completion is merge-verified by `/sweep-for-complete`, per the `linear-claim.md`
-  **hard rule** (the execute path never moves an issue to a completed/canceled
-  state). This is the skill's terminal success state.
+  `task-loop` PR is itself the review signal). **Never `done`/`completed`**
+  here — completion is merge-verified (the `linear-claim.md` **hard rule**): by
+  the landing bullet below when the lander merges, else by `/sweep-for-complete`.
+  Unless the PR lands, this is the skill's terminal success state.
 
   **Auto-pilot on gh-issue: ready the draft last.** Where step 4's exception
   opened a draft, run `gh pr ready` **after** the handler's needs-review write,
@@ -472,7 +471,8 @@ remaining findings and proceed — don't loop.
   co-review, and is a no-op because the issue has already left
   `status:3_started`. A viewer without write access hands off a draft; the
   handler's needs-review write alone moves the issue.
-- **Shadow landing**, never fatal: [`references/shadow-landing.md`](references/shadow-landing.md).
+- **Landing**, never fatal: [`references/landing.md`](references/landing.md) — a
+  shadow verdict, then the real lander (`auto` tier, `AGENT_LAND` on).
 - **Hand-off summary** (structured — for a human, or the `/auto-pilot` morning
   report). It ends on what the human must act on, because the end is what a
   terminal leaves on screen. In order:
@@ -480,7 +480,7 @@ remaining findings and proceed — don't loop.
      items wait in the closing section (or "nothing needs you").
   2. **What changed** — a few lines, by behavior, not by file.
   3. **Review and evidence** — reviewer classes that ran, what the rounds
-     applied, evidence paths, and the shadow lander's `LAND:` line.
+     applied, evidence paths, and both of the lander's `LAND:` lines.
   4. **Process notes** — deviations from the normal flow, worktree left in
      place. Omit when empty.
   5. **For you**, always last, numbered, highest impact first: outstanding

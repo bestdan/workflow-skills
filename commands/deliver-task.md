@@ -1,5 +1,5 @@
 ---
-description: Deliver ONE task through its full per-task lifecycle — claim, implement via a routed coder worker, verify, open a PR, run non-interactive co-review, iterate, and hand off at needs_review (never completed)
+description: Deliver ONE task through its full per-task lifecycle — claim, implement via a routed coder worker, verify, open a PR, run non-interactive co-review, iterate, hand off at needs_review, and land the PR when its merge tier is auto and AGENT_LAND is on (unmerged work is never completed)
 allowed-tools: Bash, Glob, Grep, Read, Write, Edit, Agent, AskUserQuestion, Skill, mcp__linear, mcp__claude_ai_Linear, mcp__atlassian, mcp__claude_ai_Atlassian
 argument-hint: "<slug | identifier> [--base <branch>] [--questions <path>] [--run-state <RUN.md>] [--handler <h>]"
 ---
@@ -28,9 +28,10 @@ routing; do not re-derive or restate the workflow here.
   jira`); omit to resolve from `.task-config.yml` as today. The `/auto-pilot`
   orchestrator passes its run's effective handler.
 
-The lifecycle is claim → do → open PR → co-review → iterate → hand-off, ending at
-`needs_review` — **never** `done` (completion is merge-verified later via
-`/sweep-for-complete`).
+The lifecycle is claim → do → open PR → co-review → iterate → hand-off → land,
+ending at `needs_review` unless the lander merges an `auto`-tier PR (only while
+the repo's `AGENT_LAND` is `on`). Unmerged work is **never** `done`: completion
+follows the lander's merge, or is merge-verified later via `/sweep-for-complete`.
 
 This command **creates and removes its own worker worktree** for the
 implementation (the "Do" step's dispatch-in-isolation-then-integrate, via

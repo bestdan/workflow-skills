@@ -273,9 +273,11 @@ alone, with no human watching. It never writes code itself — every code change
 happens inside a `/deliver-task` call — and it reads and writes only the
 run-state formats defined in
 [`references/run-state.md`](references/run-state.md). It advances a task as
-far as `handed-off` and stops there; it never merges a PR or completes a
-tracker item (that is `/sweep-for-complete`'s job, later, with a human's PR
-approval in between).
+far as `handed-off` and stops there. It merges nothing itself: the only merge
+in a run is `/deliver-task`'s lander, which lands an `auto`-tier PR, and
+completes its task, only while the repo's `AGENT_LAND` is `on`. Nothing outside
+the `auto` tier is merged unattended; every other task waits for
+`/sweep-for-complete`, with a human's PR approval in between.
 
 The loop is deliberately thin:
 
@@ -432,10 +434,10 @@ it then writes the **run handoff**: one file beside the repo's worktrees
 that carries the final report, every `QUESTIONS.md` decision, and the next
 steps. The orchestrator writes nothing extra for it
 ([`references/run-state.md`](references/run-state.md) "Run handoff").
-Nothing is merged or tracker-completed by this exit: every
-task sits at whatever phase it reached (`handed-off` on the tracker as
-`needs_review`, or `started` for a `parked` task), ready for
-`/sweep-for-complete` once a human has reviewed and merged.
+This exit merges and completes nothing. A task the lander landed is
+already completed; every other task sits at whatever phase it reached
+(`handed-off` on the tracker as `needs_review`, or `started` for a `parked`
+task), ready for `/sweep-for-complete` once a human has reviewed and merged.
 
 For a **plan** source, the exit also does **not** delete the plan's
 `<name>_plan/` scaffolding — that graduate-then-delete cleanup is a **run-level
