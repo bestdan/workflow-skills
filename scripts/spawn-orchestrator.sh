@@ -45,18 +45,29 @@
 #       [--rw <dir> ...] [--ro <path> ...] [--cred-ro <path> ...] \
 #       [--confine-under <dir> ...] [--git-worktree <dir>] [--toolchain] \
 #       [--claude-token] --out <file>
+#   spawn-orchestrator.sh run-clone --repo <checkout> --run-root <dir> --run-id <id> \
+#       [--base <branch>] [--remote <name>]
+#   spawn-orchestrator.sh check-run-clone --worktree <dir>
 #   spawn-orchestrator.sh claude-token --dir <run-dir> [--label <label>] --cmd <cmd>
 #   spawn-orchestrator.sh check-nono-profile --dir <run-dir> [--label <label>] \
 #       --profile <file> --sha256 <hex>
+#   spawn-orchestrator.sh jail-run [--jail <seatbelt|nono> --profile <file> \
+#       [--nono-bin <bin>] | --label <label>] --workdir <run worktree> -- <subcommand> [args...]
 #
 #   render-nono-profile  The Linux jail (#1349): a nono JSON profile from
 #           launch-runtime.md §1. Its own comment block below is the one home
 #           of what it grants and why. write-launch takes it with --jail nono
 #           --nono-bin <pinned nono> [--claude-token-cmd <cmd>].
+#   run-clone  The run's own git repo: a bare clone inside the run root
+#           and the run worktree from it, so the jail never writes the main
+#           checkout's .git. Its comment block below is the one home of the layout.
 #   claude-token  Run a --claude-token-cmd unjailed and print the token; on
 #           failure, halt the run with an alarm (exit 3).
 #   check-nono-profile  The wrapper's per-wake pin (#1350): the profile still
 #           has the checksum write-launch baked in; else halt with an alarm.
+#   jail-run  Run one of these subcommands inside the run's jail, from an
+#           unjailed session: --resume's doctor goes through it. With no
+#           --jail/--profile it uses the jail write-launch recorded for --workdir.
 #
 # On Linux (#1350) `launch` starts the wrapper as a transient systemd user
 # timer + service pair named <label> (systemd-run --user), where macOS
@@ -474,6 +485,16 @@ _supervisor_state_path() {
   [ -n "$key" ] || return 1
   printf '%s/%s/%s/%s\n' "$root" "$label" "$key" "$SUPERVISOR_STATE_NAME"
 }
+# The launch's jail record, beside the supervisor-state file: which jail, the
+# profile and (nono) the pinned binary, and the profile's checksum. write-launch
+# writes it and jail-run reads it, so a resume session runs the doctor under the
+# same jail without being told the paths. It must sit outside the jail's write
+# grants, or the jail could rewrite it. Under nono write-launch refuses a record
+# inside one. Under Seatbelt nothing checks it: the profile grants writes only to
+# the caller's --rw paths, and the state root is not one of them, which is what
+# the supervisor ledger beside it already relies on. RUN.md could be rewritten
+# by the jail, which is why the paths are not kept there.
+JAIL_RECORD_NAME="jail-record"
 # The heartbeat the orchestrator touches per loop iteration / per /deliver-task
 # sub-step, and the launch wrapper touches at the top of each wake. Like
 # supervisor-state it is NOT committed to the run-state branch (it beats far too
@@ -1371,6 +1392,149 @@ render_settings() {
 }
 
 # ---------------------------------------------------------------------------
+# run-clone — the run's own git repo. A jailed run never writes the
+# owner's main checkout's git dir: the run worktree and every /deliver-task
+# worker worktree are linked worktrees of a bare clone that lives inside the
+# run root, beside them. So `git worktree add`, `git branch -D` and a commit all
+# write only under the run root, which the jail grants whole, on both OSes:
+#
+#   <run root>/<repo>.git    the clone (bare; origin = the main checkout's origin)
+#   <run root>/<run_id>/     the run worktree, on auto-pilot/<run_id>
+#   <run root>/workers/      the worker worktrees /deliver-task creates
+#
+# Objects are COPIED (--no-hardlinks), not hardlinked: a hardlinked object file
+# is the main checkout's object file too, and the jail can chmod and rewrite a
+# file it can reach. The clone takes the base branch only; everything else
+# comes from origin. Run branches exist only here and on origin — launch-
+# runtime.md "The run's own git repo" has the recovery path from the main
+# checkout.
+#
+# Usage: run-clone --repo <checkout> --run-root <dir> --run-id <id>
+#            [--base <branch>] [--remote <name>]
+# Prints `RUN_CLONE <dir>` and `RUN_WORKTREE <dir>`.
+run_clone() {
+  local repo="" run_root="" run_id="" base="main" remote="origin"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --repo | --run-root | --run-id | --base | --remote)
+        [ $# -ge 2 ] || die "missing value for $1"
+        case "$1" in
+          --repo) repo="$2" ;;
+          --run-root) run_root="$2" ;;
+          --run-id) run_id="$2" ;;
+          --base) base="$2" ;;
+          --remote) remote="$2" ;;
+        esac
+        shift 2
+        ;;
+      *) die "unknown run-clone argument: $1" ;;
+    esac
+  done
+  [ -n "$repo" ] && [ -n "$run_root" ] && [ -n "$run_id" ] \
+    || die "run-clone requires --repo <checkout> --run-root <dir> --run-id <id>"
+  case "$run_root" in /*) ;; *) die "--run-root must be absolute (fail-closed): $run_root" ;; esac
+  case "$run_id" in "" | . | .. | *[!A-Za-z0-9._-]*) die "--run-id must be a bare id of [A-Za-z0-9._-] (fail-closed): $run_id" ;; esac
+  local common url name
+  common="$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
+    || die "--repo is not a git checkout (fail-closed): $repo"
+  common="$(canonicalize "$common")" || exit 2
+  url="$(git -C "$repo" remote get-url "$remote" 2>/dev/null)" \
+    || die "--repo has no remote '$remote' (fail-closed): the run pushes through it"
+  local tree="$common"
+  name="$(basename "$common")"
+  case "$name" in
+    .git)
+      tree="$(dirname "$common")"
+      name="$(basename "$tree")"
+      ;;
+    *.git) name="${name%.git}" ;;
+  esac
+  # The run root must sit outside every checkout of the repo: the main one and
+  # each linked worktree. The jail writes all of it, and a run root nested in a
+  # worktree goes with that worktree when it is torn down, unpushed run
+  # branches included.
+  local -a trees=("$tree")
+  local l t
+  while IFS= read -r l; do
+    case "$l" in "worktree "*) t="$(canonicalize "${l#worktree }" 2>/dev/null)" && trees+=("$t") ;; esac
+  done < <(git -C "$repo" worktree list --porcelain 2>/dev/null)
+  # Checked on the resolved path BEFORE the mkdir, so a run root reached through
+  # a symlink into a checkout is refused without leaving a directory inside it:
+  # resolve the deepest ancestor that exists and put the missing parts back.
+  local probe="$run_root" rest=""
+  while [ ! -e "$probe" ]; do
+    rest="/$(basename "$probe")$rest"
+    probe="$(dirname "$probe")"
+  done
+  probe="$(canonicalize "$probe")" || exit 2
+  [ "$probe" = / ] && probe=""
+  probe="$probe$rest"
+  for t in "${trees[@]}"; do
+    _path_within "$probe" "$t" && die "--run-root is inside a checkout of the repo (fail-closed): $run_root is under $t"
+  done
+  mkdir -p "$run_root" || die "cannot create --run-root: $run_root"
+  run_root="$(canonicalize "$run_root")" || exit 2
+  for t in "${trees[@]}"; do
+    _path_within "$run_root" "$t" && die "--run-root is inside a checkout of the repo (fail-closed): $run_root is under $t"
+  done
+  [ -z "$(ls -A "$run_root" 2>/dev/null)" ] || die "--run-root is not empty (fail-closed): $run_root"
+  git -C "$repo" rev-parse --verify -q "refs/heads/$base" >/dev/null \
+    || die "--base '$base' is not a local branch of --repo (fail-closed)"
+
+  local clone="$run_root/$name.git" wt="$run_root/$run_id"
+  # Past this point a failure leaves the run root partly built, and a retry
+  # refuses it as not empty, so every message says so.
+  local left="$run_root is left partly built; remove it before retrying"
+  git clone -q --bare --no-hardlinks --single-branch --branch "$base" -- "$common" "$clone" \
+    || die "run-clone: git clone of $common failed — $left"
+  git -C "$clone" remote set-url origin "$url" \
+    && git -C "$clone" config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*' \
+    || die "run-clone: could not point origin at $url — $left"
+  # Pre-flight reads the main checkout's untracked task config through this
+  # (preflight.sh's handler lookup); the clone no longer leads back to it.
+  git -C "$clone" config auto-pilot.mainCheckout "$tree" || die "run-clone: could not record the main checkout — $left"
+  git -C "$clone" fetch -q origin || die "run-clone: git fetch origin failed (the run pushes through it): $url — $left"
+  git -C "$clone" worktree add -q -b "auto-pilot/$run_id" "$wt" "refs/heads/$base" \
+    || die "run-clone: could not add the run worktree $wt — $left"
+  mkdir -p "$run_root/workers" || die "cannot create $run_root/workers — $left"
+  echo "RUN_CLONE $clone"
+  echo "RUN_WORKTREE $wt"
+}
+
+# Is <worktree> a run worktree of a run clone? A linked worktree whose
+# common dir is a BARE repo beside it, in the worktree's own parent (the run
+# root, which the launch grants whole). On
+# failure, prints why on stderr and returns 1. The owner's main checkout is
+# never bare, so this is what keeps a jail grant off its git dir.
+_check_run_clone() {
+  local wt="$1" common gdir root
+  common="$(git -C "$wt" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
+    && gdir="$(git -C "$wt" rev-parse --path-format=absolute --git-dir 2>/dev/null)" || {
+    echo "not a git checkout: $wt" >&2
+    return 1
+  }
+  common="$(canonicalize "$common")" && gdir="$(canonicalize "$gdir")" \
+    && root="$(canonicalize "$(dirname "$wt")")" || return 1
+  if [ "$gdir" = "$common" ]; then
+    echo "$wt is a main checkout, not a run worktree" >&2
+    return 1
+  fi
+  if [ "$(git --git-dir="$common" config --get --bool core.bare 2>/dev/null)" != true ] \
+    || [ "$(dirname "$common")" != "$root" ]; then
+    echo "$wt is a linked worktree of $common, not of a run clone in its own run root — create the run with \`spawn-orchestrator.sh run-clone\`" >&2
+    return 1
+  fi
+  printf '%s\n' "$common"
+}
+
+# check-run-clone --worktree <dir>: print the run clone's git dir and exit 0
+# when <dir> is a run worktree of a run clone; else say why and exit 1.
+check_run_clone() {
+  [ $# -eq 2 ] && [ "$1" = --worktree ] || die "usage: check-run-clone --worktree <dir>"
+  _check_run_clone "$2"
+}
+
+# ---------------------------------------------------------------------------
 # render-nono-profile (#1349) — the Linux jail: a nono JSON profile rendered
 # from launch-runtime.md §1's table. nono is the ONLY enforcing layer
 # (render-settings --jail nono turns the harness sandbox off), so this file is
@@ -1537,40 +1701,22 @@ render_nono_profile() {
     done
   fi
 
-  # --git-worktree <dir> (#1350): a commit in a linked worktree writes into the
-  # main checkout's git common dir, which no --rw covers. The whole common dir
-  # is NOT granted writable: `hooks/` and `config` there run outside the jail on
-  # the owner's next git command in the main checkout, so a writable common dir
-  # is a jail escape. Only what a commit needs is writable — `objects/`, `refs/`,
-  # `logs/` and this worktree's own `worktrees/<name>/` — and the rest is
-  # read-only. Measured under nono 0.81.0: a commit and a branch switch succeed;
-  # a write to `hooks/` or `config` is refused, and so are `git branch -D` (it
-  # locks `packed-refs` in the common dir's root) and `git worktree add` (it
-  # creates a sibling under `worktrees/`).
+  # --git-worktree <run worktree>: a commit in a linked worktree
+  # writes into its common dir, which may sit outside every --rw. The run
+  # worktree must belong to a run clone (`run-clone`): a bare repo inside the
+  # run root, used by this run alone. Its whole git dir is granted writable, so
+  # a commit, `git worktree add`/`remove` and `git branch -D` all work in the
+  # jail. A linked worktree of the owner's main checkout is refused: there a
+  # writable common dir puts `hooks/` and `config`, which the owner's own git
+  # runs unjailed, in the agent's reach, and a narrow grant of `objects/`,
+  # `refs/` and `logs/` refuses `git worktree add` and `git branch -D` (measured
+  # under nono 0.81.0).
   local -a git_rw=()
-  local gw gcommon ggit
+  local gw gcommon
   for gw in ${gitwt[@]+"${gitwt[@]}"}; do
-    gcommon="$(git -C "$gw" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
-      || die "--git-worktree is not a git checkout (fail-closed): $gw"
-    ggit="$(git -C "$gw" rev-parse --path-format=absolute --git-dir 2>/dev/null)" \
-      || die "--git-worktree is not a git checkout (fail-closed): $gw"
-    gcommon="$(canonicalize "$gcommon")" || exit 2
-    ggit="$(canonicalize "$ggit")" || exit 2
-    # A main checkout's git dir IS the common dir: granting it is granting hooks/.
-    [ "$ggit" != "$gcommon" ] || die "--git-worktree must be a linked worktree, not a main checkout (fail-closed): $gw"
-    _path_within "$ggit" "$gcommon/worktrees" \
-      || die "--git-worktree's git dir is not under its common dir's worktrees/ (fail-closed): $ggit"
-    # The run's own worktrees/<name>/ is writable, and with this extension on,
-    # git reads a config.worktree there: the agent could set core.hooksPath,
-    # and the unjailed supervisor's own checkout in the run worktree
-    # (assert-run-head) would run the hook outside the jail.
-    [ "$(git -C "$gw" config --get --bool extensions.worktreeConfig 2>/dev/null)" = true ] \
-      && die "--git-worktree: the repo enables extensions.worktreeConfig, so a writable worktrees/<name>/ lets the jailed agent set hooks the unjailed supervisor runs (fail-closed): $gcommon"
-    ro_dir+=("$gcommon")
-    for c in "$gcommon/objects" "$gcommon/refs" "$gcommon/logs" "$ggit"; do
-      [ -d "$c" ] || mkdir -p "$c" || die "cannot create $c"
-      git_rw+=("$c")
-    done
+    gcommon="$(_check_run_clone "$gw" 2>&1)" \
+      || die "--git-worktree must be a run worktree of a run clone (fail-closed): $gcommon"
+    git_rw+=("$gcommon")
   done
   for w in ${git_rw[@]+"${git_rw[@]}"}; do
     _path_within "$home" "$w" && die "refusing a write grant that covers \$HOME (fail-closed): $w"
@@ -2016,6 +2162,13 @@ write_launch() {
     || die "the supervisor-state root must be an absolute path (AUTO_PILOT_STATE_HOME, XDG_STATE_HOME or HOME): ${AUTO_PILOT_STATE_HOME:-${XDG_STATE_HOME:-${HOME:-<unset>}}}"
   state_file="$(_supervisor_state_path "$label" "$workdir")" \
     || die "cannot derive the supervisor-state path from --label/--workdir: $label $workdir"
+  local jail_record profile_abs profile_sha
+  jail_record="$(dirname "$state_file")/$JAIL_RECORD_NAME"
+  [ "$jail" = nono ] && _refuse_in_nono_grants "$profile" "$jail_record"
+  profile_abs="$(resolve_lazy "$profile")" || exit 2
+  profile_sha="$(_sha256_file "$profile")" && [ -n "$profile_sha" ] \
+    || die "cannot checksum the profile for the jail record (needs sha256sum or shasum): $profile"
+  _write_jail_record "$jail_record" "$jail" "$profile_abs" "$nono_bin" "$profile_sha"
   # A run launched before the ledger left the run worktree (a --resume of one)
   # carries it at the legacy path, in a directory the agent could write. So its
   # content is not trusted wholesale: a symlink is never followed, only the
@@ -2365,6 +2518,122 @@ record_handle() {
     printf 'until: %s\n' "$until"
   } >"$out" || die "failed to write handle: $out"
   echo "spawn-orchestrator: handle recorded $out"
+}
+
+# Write the jail record (JAIL_RECORD_NAME) atomically. Args: <file> <jail>
+# <profile> <nono-bin> <sha256>.
+_write_jail_record() {
+  local f="$1" d tmp
+  d="$(dirname "$f")"
+  mkdir -p "$d" || die "cannot create the jail record directory: $d"
+  tmp="$(mktemp "$d/.jailrec.XXXXXX")" || die "mktemp failed"
+  {
+    printf 'jail: %s\n' "$2"
+    printf 'profile: %s\n' "$3"
+    printf 'nono_bin: %s\n' "$4"
+    printf 'sha256: %s\n' "$5"
+  } >"$tmp" && mv "$tmp" "$f" || {
+    rm -f "$tmp"
+    die "failed to write the jail record: $f"
+  }
+}
+
+# One field of a jail record, or empty.
+_jail_record_field() { # <file> <field>
+  sed -n "s/^$2: //p" "$1" | tail -1
+}
+
+# The jail record for <workdir>: under --label when given, else the only one
+# any label holds for that worktree. Prints its path; dies on none or several.
+_find_jail_record() { # <workdir> [<label>]
+  local workdir="$1" label="${2:-}" root key f n=0 found=""
+  if [ -n "$label" ]; then
+    f="$(_supervisor_state_path "$label" "$workdir")" || die "jail-run: bad --label or --workdir: $label $workdir"
+    f="$(dirname "$f")/$JAIL_RECORD_NAME"
+    [ -f "$f" ] && [ ! -L "$f" ] || die "jail-run: no jail record for label $label at $f — pass --jail and --profile"
+    printf '%s\n' "$f"
+    return 0
+  fi
+  root="$(_supervisor_state_root)" || die "jail-run: the supervisor-state root must be absolute"
+  key="$(printf '%s' "$workdir" | cksum | cut -d' ' -f1)"
+  for f in "$root"/*/"$key"/"$JAIL_RECORD_NAME"; do
+    [ -f "$f" ] && [ ! -L "$f" ] || continue
+    n=$((n + 1))
+    found="$f"
+  done
+  [ "$n" -gt 0 ] || die "jail-run: no jail record for $workdir under $root (pass the worktree path exactly as the launch did, or --jail and --profile)"
+  [ "$n" -eq 1 ] || die "jail-run: $n launches recorded a jail for $workdir under $root — pass --label"
+  printf '%s\n' "$found"
+}
+
+# Run one of this script's subcommands inside the run's own jail, from an unjailed
+# session. For --resume's doctor: it runs status, checkout, reset and worktree
+# remove in the run worktree, and the jail writes that tree's `.git` file and the
+# run clone's config and hooks, so unjailed those commands would run whatever the
+# jail planted there. Inside the jail they can do no more than the run could.
+# Takes the profile (and, for nono, the pinned binary) the launch rendered; both
+# sit outside every write grant, so the jail cannot have changed them.
+jail_run() {
+  local profile="" jail="" nono_bin="" workdir="" label=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --profile | --jail | --nono-bin | --workdir | --label)
+        [ $# -ge 2 ] || die "missing value for $1"
+        case "$1" in
+          --profile) profile="$2" ;;
+          --jail) jail="$2" ;;
+          --nono-bin) nono_bin="$2" ;;
+          --workdir) workdir="$2" ;;
+          --label) label="$2" ;;
+        esac
+        shift 2
+        ;;
+      --)
+        shift
+        break
+        ;;
+      *) die "unknown jail-run argument: $1 (the subcommand goes after --)" ;;
+    esac
+  done
+  [ $# -ge 1 ] || die "jail-run requires a subcommand after --"
+  [ -d "$workdir" ] || die "jail-run requires --workdir <dir> (the run worktree)"
+  # No jail named: take the one the launch recorded, and refuse a profile that
+  # changed since, as every wake's check-nono-profile does.
+  if [ -z "$jail$profile$nono_bin" ]; then
+    local rec want got
+    rec="$(_find_jail_record "$workdir" "$label")" || exit 2
+    jail="$(_jail_record_field "$rec" jail)"
+    profile="$(_jail_record_field "$rec" profile)"
+    nono_bin="$(_jail_record_field "$rec" nono_bin)"
+    want="$(_jail_record_field "$rec" sha256)"
+    [ -f "$profile" ] && [ ! -L "$profile" ] || die "jail-run: the recorded profile is missing or not a regular file: $profile"
+    got="$(_sha256_file "$profile")" || got=""
+    [ -n "$want" ] && [ "$got" = "$want" ] \
+      || die "jail-run: the recorded profile changed since launch (sha256 ${got:-<none>}, launched with ${want:-<none>}): $profile"
+  elif [ -n "$label" ]; then
+    die "jail-run: --label selects a recorded jail; it does not combine with --jail/--profile/--nono-bin"
+  fi
+  [ -f "$profile" ] || die "jail-run requires --profile <file> (the run's rendered profile)"
+  local -a jail_cmd=()
+  local jail_tmp=""
+  case "$jail" in
+    seatbelt)
+      command -v sandbox-exec >/dev/null 2>&1 || die "sandbox-exec not available (macOS only)"
+      jail_cmd=(sandbox-exec -f "$profile")
+      ;;
+    nono)
+      [ -x "$nono_bin" ] || die "jail-run --jail nono requires an executable --nono-bin"
+      jail_tmp="$(_nono_profile_tmpdir "$profile")"
+      [ -n "$jail_tmp" ] || die "jail-run: --profile is not a render-nono-profile profile: $profile"
+      jail_cmd=("$nono_bin" run --silent --profile "$profile" --)
+      ;;
+    *) die "jail-run --jail must be seatbelt or nono: ${jail:-<unset>}" ;;
+  esac
+  (
+    cd "$workdir" || exit 1
+    if [ -n "$jail_tmp" ]; then export NONO_NO_UPDATE_CHECK=1 NONO_NO_MIGRATE=1 TMPDIR="$jail_tmp"; fi
+    exec "${jail_cmd[@]}" /bin/bash "$ROOT/scripts/spawn-orchestrator.sh" "$@"
+  )
 }
 
 # Auth smoke-test THROUGH the exact wrapper + settings, before detaching, so a
@@ -3622,6 +3891,55 @@ _write_done_sentinel() {
   }
 }
 
+# Commit <path>... (relative to <dir>) onto <dir>'s HEAD without running any
+# program the repository names. For the unjailed callers (the supervisor's halt,
+# clear-exit-state on resume): the jail writes the run worktree's `.git` file and
+# the run clone's config and hooks, so `git add` + `git commit` there would run
+# whatever it planted (a hook, a clean filter, core.fsmonitor, gpg.program).
+# Plumbing runs none of those once hooks and fsmonitor are pinned off on the
+# command line, which outranks the repo's config: `hash-object --no-filters`
+# skips filters, `commit-tree --no-gpg-sign` skips signing, and `update-ref`'s
+# only hook is reference-transaction. Returns 0 with nothing to commit.
+_hookless_commit() {
+  local dir="$1" who="$2" msg="$3" p blob ref parent tree commit
+  shift 3
+  local -a g=(git -C "$dir" -c core.hooksPath=/dev/null -c core.fsmonitor=false
+    -c user.name="$who" -c user.email="auto-pilot@localhost")
+  "${g[@]}" rev-parse -q --git-dir >/dev/null || return 1
+  # The jail writes <dir>/.git too, so it could point this commit at a repository
+  # outside the run root (the main checkout's, say). Commit only into a git dir
+  # and common dir under <dir>'s parent, which for a run worktree is the run root.
+  local root d c
+  root="$(canonicalize "$(dirname "$dir")" 2>/dev/null)" || return 1
+  for d in --git-dir --git-common-dir; do
+    c="$("${g[@]}" rev-parse --path-format=absolute "$d")" || return 1
+    c="$(canonicalize "$c" 2>/dev/null)" || return 1
+    case "$c" in
+      "$root" | "$root"/*) ;;
+      *)
+        echo "spawn-orchestrator: refusing to commit into $c, outside $root (fail-closed)" >&2
+        return 1
+        ;;
+    esac
+  done
+  # An unborn branch (no commit yet) gets a root commit.
+  parent="$("${g[@]}" rev-parse -q --verify HEAD)" || parent=""
+  ref="$("${g[@]}" symbolic-ref -q HEAD)" || ref=HEAD
+  for p in "$@"; do
+    [ -f "$dir/$p" ] || continue
+    blob="$("${g[@]}" hash-object -w --no-filters -- "$dir/$p")" || return 1
+    "${g[@]}" update-index --add --cacheinfo "100644,$blob,$p" || return 1
+  done
+  tree="$("${g[@]}" write-tree)" || return 1
+  local -a par=()
+  if [ -n "$parent" ]; then
+    [ "$tree" != "$("${g[@]}" rev-parse "$parent^{tree}")" ] || return 0
+    par=(-p "$parent")
+  fi
+  commit="$("${g[@]}" commit-tree --no-gpg-sign ${par[@]+"${par[@]}"} -m "$msg" "$tree")" || return 1
+  "${g[@]}" update-ref -m "$msg" "$ref" "$commit" "$parent"
+}
+
 # (agent side, in-jail) Declare WHY this orchestrator is exiting, before it exits.
 # Writes `exit_reason` + `exit_reason_at` (epoch) into RUN.md's front matter and
 # commits them to the run-state branch — durable, on the branch, per the task's
@@ -3735,12 +4053,9 @@ clear_exit_state() {
   _upsert_front_field "$run_md" exit_reason_at ""
   _upsert_front_field "$run_md" exit_reason_detail ""
 
-  (
-    cd "$dir" \
-      && git add -- .auto-pilot/RUN.md 2>/dev/null \
-      && git -c user.name="auto-pilot" -c user.email="auto-pilot@localhost" \
-        commit -q -m "auto-pilot: clear exit state (resume)"
-  ) 2>/dev/null || echo "spawn-orchestrator: clear-exit-state: run-state commit failed (not a git checkout, or nothing to commit)" >&2
+  # Unjailed (resume runs it from the owner's session), so the hook-free commit.
+  _hookless_commit "$dir" auto-pilot "auto-pilot: clear exit state (resume)" .auto-pilot/RUN.md 2>/dev/null \
+    || echo "spawn-orchestrator: clear-exit-state: run-state commit failed (not a git checkout?)" >&2
 
   echo "spawn-orchestrator: exit state cleared (done-sentinel removed, exit_reason blanked) $dir"
 }
@@ -3845,14 +4160,20 @@ _run_front_field() {
 }
 
 # The handoff dir for a run worktree: <worktree root>/<repo>/.handoffs, the
-# shared handoff convention's location. <repo> is the MAIN checkout's directory
-# name (the run worktree is a linked worktree, so its own name is the run's).
+# shared handoff convention's location. <repo> is the repo's name, never the
+# run's: the main checkout's directory for a <checkout>/.git common dir, or
+# <repo> for a run clone's <run root>/<repo>.git.
 _resolve_handoff_dir() {
-  local workdir="$1" root common
+  local workdir="$1" root common name
   root="$(cd "$workdir" && "$ROOT/scripts/worktree-config.sh" root 2>/dev/null)" || return 1
   common="$(git -C "$workdir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1
   [ -n "$root" ] && [ -n "$common" ] || return 1
-  printf '%s/%s/.handoffs\n' "$root" "$(basename "$(dirname "$common")")"
+  name="$(basename "$common")"
+  case "$name" in
+    .git) name="$(basename "$(dirname "$common")")" ;;
+    *.git) name="${name%.git}" ;;
+  esac
+  printf '%s/%s/.handoffs\n' "$root" "$name"
 }
 
 # Shift every markdown heading outside a fenced block down two levels, so an
@@ -3957,7 +4278,22 @@ write_handoff() {
     printf '\n## Next steps\n\n%s\n\n' "$next"
     printf -- '- **Run worktree:** `%s`, on branch `auto-pilot/%s`%s.\n' "$dir" "$run_id" "${base:+, based on \`$base\`}"
     printf -- "- **Run state:** \`.auto-pilot/RUN.md\` there is the task graph and each task's phase; \`.auto-pilot/orchestrator.log\` is the forensic log.\n"
-    printf -- "- **Teardown:** once nothing above needs the run worktree, remove it with the plugin's \`scripts/worktree-remove.sh\`; the \`auto-pilot/%s\` branch is never merged.\n\n" "$run_id"
+    local hclone hsrc
+    if hclone="$(_check_run_clone "$dir" 2>/dev/null)"; then
+      # The jail wrote this whole run root, so git run inside it can run code the
+      # jail planted (launch-runtime.md §5). A fetch from it runs none. The jail
+      # also names the clone, so its path goes into a command meant for pasting
+      # only when the name holds nothing a shell would act on.
+      hsrc="<the bare *.git repo in the run root>"
+      case "$(basename "$hclone")" in
+        *[!A-Za-z0-9._-]*) ;;
+        *.git) hsrc="$hclone" ;;
+      esac
+      printf -- "- **The run root \`%s\` is untrusted:** the jail could write all of it, so don't run git inside it. Fetch a branch you need from the main checkout: \`git fetch %s <branch>:<branch>\`.\n" "$(dirname "$dir")" "$hsrc"
+      printf -- "- **Teardown:** once nothing above needs it, \`rm -rf %s\`; the main checkout keeps no entry for it, and the \`auto-pilot/%s\` branch is never merged.\n\n" "$(dirname "$dir")" "$run_id"
+    else
+      printf -- "- **Teardown:** once nothing above needs the run worktree, remove it with the plugin's \`scripts/worktree-remove.sh\`; the \`auto-pilot/%s\` branch is never merged.\n\n" "$run_id"
+    fi
     printf '## Report\n\n'
     if [ -s "$ap/REPORT.md" ]; then
       _demote_headings "$ap/REPORT.md"
@@ -4130,12 +4466,10 @@ _supervisor_halt() {
   fi
 
   if [ -f "$run_md" ] || [ -f "$report_md" ]; then
-    (
-      cd "$dir" \
-        && git add -- .auto-pilot/RUN.md .auto-pilot/REPORT.md 2>/dev/null \
-        && git -c user.name="auto-pilot-supervisor" -c user.email="auto-pilot@localhost" \
-          commit -q -m "auto-pilot: supervisor halt — $reason"
-    ) 2>/dev/null || echo "spawn-orchestrator: supervisor halt: run-state commit failed (not a git checkout, or nothing to commit)" >&2
+    # The supervisor is unjailed, so the hook-free commit (see _hookless_commit).
+    _hookless_commit "$dir" auto-pilot-supervisor "auto-pilot: supervisor halt — $reason" \
+      .auto-pilot/RUN.md .auto-pilot/REPORT.md 2>/dev/null \
+      || echo "spawn-orchestrator: supervisor halt: run-state commit failed (not a git checkout?)" >&2
   fi
 
   # The run handoff, before the teardown: a wedged bootout must not cost it.
@@ -8104,12 +8438,15 @@ shift
 case "$sub" in
   render-profile) render_profile "$@" ;;
   render-nono-profile) render_nono_profile "$@" ;;
+  run-clone) run_clone "$@" ;;
+  check-run-clone) check_run_clone "$@" ;;
   claude-token) claude_token "$@" ;;
   check-nono-profile) check_nono_profile "$@" ;;
   render-settings) render_settings "$@" ;;
   write-launch) write_launch "$@" ;;
   record-handle) record_handle "$@" ;;
   smoke-test) smoke_test "$@" ;;
+  jail-run) jail_run "$@" ;;
   detach) detach "$@" ;;
   teardown) teardown "$@" ;;
   launch) launch "$@" ;;

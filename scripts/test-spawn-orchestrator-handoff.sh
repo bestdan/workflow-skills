@@ -59,6 +59,35 @@ have "handoff: a fenced # line is left alone" '# a comment, not a heading' "$bod
 lack "handoff: a fenced # line is not demoted" '## a comment, not a heading' "$body"
 have "handoff: the full decision log is carried" '#### Q1 — T-1 — which key name' "$body"
 have "handoff: ends by telling the reader to delete it" 'delete this file' "$body"
+have "handoff: a plain run worktree tears down with worktree-remove.sh" 'scripts/worktree-remove.sh' "$body"
+
+# A run clone: the run root is untrusted, so the note says fetch out and rm -rf.
+if command -v git >/dev/null 2>&1; then
+  git -c init.defaultBranch=main init -q "$HO/rcm"
+  git -C "$HO/rcm" -c user.name=t -c user.email=t@t commit -q --allow-empty -m one
+  git -C "$HO/rcm" remote add origin "$HO/rcm"
+  "$SCRIPT" run-clone --repo "$HO/rcm" --run-root "$HO/rcroot" --run-id rc >/dev/null 2>&1
+  ho_run "$HO/rcroot/rc"
+  "$SCRIPT" handoff --dir "$HO/rcroot/rc" --reason done --out-dir "$HO/rc-notes" >/dev/null 2>&1
+  rcbody="$(cat "$HO/rc-notes/"*-auto-pilot-*.md 2>/dev/null)"
+  have "handoff [run clone]: names the run root as untrusted" "The run root \`$HO/rcroot\` is untrusted" "$rcbody"
+  have "handoff [run clone]: gives the fetch-out recovery" "git fetch $HO/rcroot/rcm.git <branch>:<branch>" "$rcbody"
+  have "handoff [run clone]: tears down with rm -rf" "rm -rf $HO/rcroot" "$rcbody"
+  lack "handoff [run clone]: never sends you to git in the run root" 'worktree-remove.sh' "$rcbody"
+  # The jail names the clone: a name a shell would act on never reaches the
+  # paste-ready fetch command.
+  mkdir -p "$HO/rcevil"
+  # shellcheck disable=SC2016 # the $( ) is the hostile name, never expanded
+  evil="$HO/rcevil/x\$(touch pwned).git"
+  git clone -q --bare "$HO/rcm" "$evil" 2>/dev/null
+  git -C "$evil" worktree add -q "$HO/rcevil/rc" 2>/dev/null
+  ho_run "$HO/rcevil/rc"
+  "$SCRIPT" handoff --dir "$HO/rcevil/rc" --reason done --out-dir "$HO/rcevil-notes" >/dev/null 2>&1
+  evbody="$(cat "$HO/rcevil-notes/"*-auto-pilot-*.md 2>/dev/null)"
+  have "handoff [hostile clone name]: still warns the run root is untrusted" 'is untrusted' "$evbody"
+  lack "handoff [hostile clone name]: the name never reaches the fetch command" 'touch pwned' "$evbody"
+  have "handoff [hostile clone name]: a generic fetch instruction instead" 'git fetch <the bare *.git repo in the run root>' "$evbody"
+fi
 
 # A later terminal exit for the same run supersedes, never adds a second note.
 : >"$HO/notes/2026-01-01-auto-pilot-2026-10-15-night.md"
@@ -172,6 +201,14 @@ CLEOF
   lo="$(WORKFLOW_SKILLS_WORKTREE_ROOT="$HO/lr-root" "$SCRIPT" launch --dry-run --workdir "$HO/lr-run" \
     --out-script "$HO/lr.sh" --out-plist "$HO/lr.plist" --label com.x --handle "$HO/lr-h.txt" 2>&1)"
   have "launch: resolves the handoff dir from the main checkout's name" "handoff dir   -> $HO/lr-root/lr-main/.handoffs" "$lo"
+  # A run clone: the common dir is <run root>/<repo>.git, so the repo's
+  # name is the clone's, minus .git — not the run root's.
+  git init -q --bare "$HO/lr-root/lr-run-root/lr-main.git"
+  git -C "$HO/lr-main" push -q "$HO/lr-root/lr-run-root/lr-main.git" HEAD:refs/heads/main
+  git -C "$HO/lr-root/lr-run-root/lr-main.git" worktree add -q "$HO/lr-root/lr-run-root/r" -b auto-pilot/r main
+  lo="$(WORKFLOW_SKILLS_WORKTREE_ROOT="$HO/lr-root" "$SCRIPT" launch --dry-run --workdir "$HO/lr-root/lr-run-root/r" \
+    --out-script "$HO/lr.sh" --out-plist "$HO/lr.plist" --label com.x --handle "$HO/lr-h.txt" 2>&1)"
+  have "launch: a run clone's handoff dir is named for the repo, not the run root" "handoff dir   -> $HO/lr-root/lr-main/.handoffs" "$lo"
   lo="$("$SCRIPT" launch --dry-run --workdir "$HO/lr-run" --handoff-dir "$HO/explicit" \
     --out-script "$HO/lr.sh" --out-plist "$HO/lr.plist" --label com.x --handle "$HO/lr-h.txt" 2>&1)"
   have "launch: an explicit --handoff-dir wins" "handoff dir   -> $HO/explicit" "$lo"

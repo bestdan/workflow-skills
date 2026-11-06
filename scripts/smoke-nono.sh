@@ -20,9 +20,12 @@
 #   BUS_STAGED    a copy of systemctl staged in the run dir cannot reach the user bus
 #   BUS_DIRECT    /usr/bin/systemctl cannot reach it either
 #   BUS_BROKER    the jail cannot stop a verify-broker unit by name
-#   GIT_COMMIT    a commit in the run worktree (a linked worktree) succeeds
+#   GIT_COMMIT    a commit in the run worktree (of a run clone) succeeds
+#   GIT_WORKTREE  a worker worktree can be added, committed in and removed, and
+#                 its branch deleted
 #   GIT_HOOKS     a write to the main checkout's .git/hooks is denied
 #   GIT_CONFIG    a write to the main checkout's .git/config is denied
+#   GIT_MAIN      that git work left the main checkout's .git unchanged
 #   CLAUDE        `claude -p 'ok' --max-turns 1` answers through the jail
 #   CRED_UNTOUCHED  that run left .credentials.json byte-for-byte unchanged
 #
@@ -75,23 +78,39 @@ tmp_probe="/tmp/auto-pilot-smoke-$$"
 trap 'rm -rf "$S"; rm -f "$home_probe" "$tmp_probe"' EXIT
 mkdir -p "$S/tmp"
 
-# The run dir is a linked worktree of a scratch repo, as a real run's is, so
-# the git grants (--git-worktree) are tested on the shape they exist for. The
-# scratch repo never reads the owner's global config or hooks.
+# The run is laid out as a real one is: a scratch "main checkout" with
+# an origin, and `run-clone` makes the run root from it — the bare clone, the
+# run worktree and workers/. The scratch repos never read the owner's global
+# config or hooks.
+# Contents and modes of every file under the main checkout's .git: Landlock
+# does not mediate chmod, so a mode change counts as a change too.
+main_sum() {
+  (
+    cd "$S/repo/.git" || exit 1
+    find . -type f -exec cksum {} +
+    find . -exec stat -c "%F %a %n" {} +
+  ) | sort | cksum
+}
 have_git=0
+R="$S/root"
+W="$R/run"
 if command -v git >/dev/null 2>&1 \
+  && GIT_CONFIG_GLOBAL=/dev/null git init -q --bare "$S/origin.git" \
   && GIT_CONFIG_GLOBAL=/dev/null git init -q -b main "$S/repo" \
   && GIT_CONFIG_GLOBAL=/dev/null git -C "$S/repo" -c user.name=smoke -c user.email=smoke@invalid commit -q --allow-empty -m init \
-  && GIT_CONFIG_GLOBAL=/dev/null git -C "$S/repo" worktree add -q "$S/run" -b smoke-run 2>/dev/null; then
+  && GIT_CONFIG_GLOBAL=/dev/null git -C "$S/repo" remote add origin "$S/origin.git" \
+  && GIT_CONFIG_GLOBAL=/dev/null git -C "$S/repo" push -q origin main 2>/dev/null \
+  && GIT_CONFIG_GLOBAL=/dev/null bash "$SO" run-clone --repo "$S/repo" --run-root "$R" --run-id run >"$S/clone.log" 2>&1; then
   have_git=1
+  main_before="$(main_sum)"
 else
-  mkdir -p "$S/run"
+  mkdir -p "$W"
 fi
 
-# The same renderers the launch uses, with this run's shape: the run dir
+# The same renderers the launch uses, with this run's shape: the run root
 # read-write, gh's config read-only, the host toolchain readable.
-render=(--rw "$S/run" --tmpdir "$S/tmp" --toolchain --out "$S/profile.json")
-[ "$have_git" = 1 ] && render+=(--git-worktree "$S/run")
+render=(--rw "$R" --tmpdir "$S/tmp" --toolchain --out "$S/profile.json")
+[ "$have_git" = 1 ] && render+=(--git-worktree "$W")
 [ -d "$HOME/.config/gh" ] && render+=(--cred-ro "$HOME/.config/gh")
 [ -n "$token_cmd" ] && render+=(--claude-token)
 if ! bash "$SO" render-nono-profile "${render[@]}" >"$S/render.log" 2>&1; then
@@ -106,7 +125,7 @@ jail_tmp="$(sed -n 's/^      "TMPDIR": "\(.*\)"$/\1/p' "$S/profile.json" | tail 
 
 # The wrapper's jail line, minus the claude arguments.
 jail() {
-  (cd "$S/run" && NONO_NO_UPDATE_CHECK=1 NONO_NO_MIGRATE=1 TMPDIR="$jail_tmp" \
+  (cd "$W" && NONO_NO_UPDATE_CHECK=1 NONO_NO_MIGRATE=1 TMPDIR="$jail_tmp" \
     "$nono" run --silent --profile "$S/profile.json" -- "$@")
 }
 
@@ -116,7 +135,7 @@ else
   say VALIDATE FAIL "$(tail -1 <<<"$out")"
 fi
 
-if jail /bin/sh -c 'echo x > inside' >/dev/null 2>&1 && [ -f "$S/run/inside" ]; then
+if jail /bin/sh -c 'echo x > inside' >/dev/null 2>&1 && [ -f "$W/inside" ]; then
   say WRITE_INSIDE pass "the run dir is writable"
 else
   say WRITE_INSIDE FAIL "a write inside the run dir failed — the jail cannot do the run's work"
@@ -137,17 +156,29 @@ else
 fi
 
 if [ "$have_git" = 0 ]; then
-  say GIT_COMMIT skip "no git, or the scratch repo could not be built"
+  say GIT_COMMIT skip "no git, or the scratch run clone could not be built: $(tail -1 "$S/clone.log" 2>/dev/null)"
+  say GIT_WORKTREE skip "no scratch repo"
   say GIT_HOOKS skip "no scratch repo"
   say GIT_CONFIG skip "no scratch repo"
+  say GIT_MAIN skip "no scratch repo"
 else
   # --no-verify and a null global config: this proves the grants, not the
   # owner's hooks.
   if jail /bin/sh -c 'echo x > f && git add f && GIT_CONFIG_GLOBAL=/dev/null git -c user.name=smoke -c user.email=smoke@invalid commit -q --no-verify -m smoke' >/dev/null 2>&1 \
-    && [ "$(GIT_CONFIG_GLOBAL=/dev/null git -C "$S/run" log -1 --format=%s 2>/dev/null)" = smoke ]; then
+    && [ "$(GIT_CONFIG_GLOBAL=/dev/null git -C "$W" log -1 --format=%s 2>/dev/null)" = smoke ]; then
     say GIT_COMMIT pass "a commit in the run worktree succeeds"
   else
     say GIT_COMMIT FAIL "a commit in the run worktree failed — the run cannot record its state"
+  fi
+  # What /deliver-task does with each worker worktree.
+  if o="$(jail /bin/sh -c 'export GIT_CONFIG_GLOBAL=/dev/null
+    git worktree add -q -b smoke-worker ../workers/w \
+      && (cd ../workers/w && echo y > g && git add g && git -c user.name=smoke -c user.email=smoke@invalid commit -q --no-verify -m w) \
+      && git worktree remove ../workers/w && git branch -q -D smoke-worker' 2>&1)" \
+    && [ ! -e "$R/workers/w" ]; then
+    say GIT_WORKTREE pass "a worker worktree was added, committed in and removed, and its branch deleted"
+  else
+    say GIT_WORKTREE FAIL "a worker worktree's lifecycle failed in the jail: $(tail -1 <<<"$o")"
   fi
   jail /bin/sh -c ': > "$1"' _ "$S/repo/.git/hooks/post-checkout" >/dev/null 2>&1
   if [ -e "$S/repo/.git/hooks/post-checkout" ]; then
@@ -161,6 +192,11 @@ else
     say GIT_CONFIG FAIL "a write to the main checkout's .git/config succeeded"
   else
     say GIT_CONFIG pass "the main checkout's .git/config is not writable"
+  fi
+  if [ "$(main_sum)" = "$main_before" ]; then
+    say GIT_MAIN pass "the main checkout's .git is unchanged"
+  else
+    say GIT_MAIN FAIL "the jailed git work changed the main checkout's .git"
   fi
 fi
 
@@ -237,7 +273,7 @@ else
     # Prefix assignment, as the wrapper does: the token reaches the jailed
     # process and nothing else.
     if [ -n "$token" ]; then
-      o="$(cd "$S/run" && CLAUDE_CODE_OAUTH_TOKEN="$token" NONO_NO_UPDATE_CHECK=1 NONO_NO_MIGRATE=1 TMPDIR="$jail_tmp" \
+      o="$(cd "$W" && CLAUDE_CODE_OAUTH_TOKEN="$token" NONO_NO_UPDATE_CHECK=1 NONO_NO_MIGRATE=1 TMPDIR="$jail_tmp" \
         "$nono" run --silent --profile "$S/profile.json" -- "$claude_bin" -p 'Reply with exactly: ok' --max-turns 1 \
         --permission-mode bypassPermissions --settings "$settings" --output-format json 2>"$S/claude.err")"
     else

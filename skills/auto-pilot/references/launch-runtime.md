@@ -186,16 +186,49 @@ Four dimensions across those two layers.
 
 | Scope                                                                                 | Access                 |
 | ------------------------------------------------------------------------------------- | ---------------------- |
-| The run worktree (`.claude/worktrees/<run>/`) and its run-state branch checkout       | **read-write**         |
-| Worker worktrees the orchestrator creates for `/deliver-task` workers                 | **read-write**         |
+| The run root: the run's own git repo, the run worktree, and `workers/` (below)        | **read-write**         |
 | `$TMPDIR` / the scratchpad dir                                                        | **read-write**         |
-| The rest of the repo and other worktrees                                              | **read-only**          |
+| The main checkout and its other worktrees                                             | **read-only**          |
 | Credential stores (`~/.claude`, `~/.config/gh`, `~/.config/op`, coder-CLI cred files) | **read-only** (see §3) |
 | Everything else (system, other home dirs)                                             | **no access**          |
 
 Writes are worktree-confined by construction: bookkeeping lands on the run-state
 branch, task code on task branches, worker edits in their own worktrees — the
 seams [`run-state.md`](run-state.md) already relies on.
+
+**The run's own git repo.** A jailed run never writes the main
+checkout's `.git`. `spawn-orchestrator.sh run-clone` lays out the run root, the
+same way on both OSes:
+
+| Path                     | What it is                                                                |
+| ------------------------ | ------------------------------------------------------------------------- |
+| `<run root>/<repo>.git`  | a bare clone of the main checkout's base branch; `origin` is its `origin` |
+| `<run root>/<run_id>/`   | the run worktree, on `auto-pilot/<run_id>`                                |
+| `<run root>/workers/<w>` | the worker worktrees `/deliver-task` adds and removes                     |
+
+The launch grants the run root read-write, so a commit, `git worktree add` and
+`remove`, and `git branch -D` all work in the jail, and the main checkout's
+`hooks/` and `config` stay out of reach. The clone's objects are copied, not
+hardlinked: a hardlinked object file is also the main checkout's file, and the
+jail can rewrite a file it reaches. The copy costs the repo's object size once
+per run. Put the run root outside every checkout (`run-clone` refuses one inside
+any checkout of the repo, linked worktrees included). Pre-flight blocks a run
+worktree that is not from `run-clone` on both OSes (`PREFLIGHT RUN_CLONE`), and
+on Linux `render-nono-profile --git-worktree` refuses one at launch as well.
+Measured on the Mac test host: under Seatbelt, a linked worktree of the main
+checkout cannot commit at all, because its index sits in the main checkout's
+`.git`. The run clone commits, adds and removes worker worktrees, and deletes
+branches with only `--rw <run root>`.
+
+**Recovering a run's branch from the main checkout.** Run branches live only in
+the clone and on `origin`, so the main checkout does not see them until it
+fetches. A branch the run pushed comes from `origin` as usual. A branch with
+commits the run never pushed comes from the clone. From the main checkout, run
+`git fetch <run root>/<repo>.git <branch>:<branch>`, then open a worktree on
+that branch. To resume the run itself, use `--resume` in the run worktree,
+which is already in place. Removing the run root removes all of the run's git
+state. The main checkout holds no entry for any of it, so nothing is left
+behind to prune.
 
 **The harness's own runtime surface is part of the required write surface —
 and the jail is _broken_ without it.** Three paths, each with its own failure
@@ -354,15 +387,14 @@ writable and that `claude -p` answers on the token alone.
 Egress is open (`network.block: false`) for parity with macOS; the host
 allowlist in §2 becomes the profile's `allow_domain` list in a follow-up.
 
-**The run's git common dir: `--git-worktree <run worktree>`.** A commit in a
-linked worktree writes into the main checkout's `.git`, which no `--rw` covers.
-Only `objects/`, `refs/`, `logs/` and the run's own `worktrees/<name>/` are
-granted writable; the rest of the common dir is read-only. A writable `hooks/`
-or `config` would run code outside the jail on the owner's next git command in
-the main checkout. The smoke asserts that a commit succeeds and that both writes
-are refused. The narrow grant has a measured cost: `git branch -D` (it locks
-`packed-refs` in the common dir's root) and `git worktree add` (it creates a
-sibling under `worktrees/`) are refused inside the jail.
+**Git: `--rw <run root> --git-worktree <run worktree>`.** `--git-worktree`
+refuses a run worktree that does not come from `run-clone` (§1 "The run's own
+git repo"). That includes any linked worktree of the main checkout. There, a
+writable common dir would put `hooks/` and `config` in the agent's reach,
+and a narrower grant of `objects/`, `refs/` and `logs/` refuses
+`git worktree add` and `git branch -D` in the jail (measured under nono 0.81.0). The smoke asserts a commit
+and a worker worktree's whole lifecycle in the jail. It also asserts that the
+main checkout's `.git` is unwritable and comes out unchanged.
 
 **The wrapper and the profile live outside every write grant, and the profile
 is pinned.** The generated wrapper runs unjailed, and the profile decides every
@@ -587,6 +619,33 @@ canonicalize **under the run root**. A stronger **third option** (wrap verify in
 its own fresh single-layer profile — repo RO, worktree+tmp RW, no network) is a
 tracked follow-up, but the two `test-*.sh` harnesses that themselves call
 `sandbox-exec` still won't nest under it, so v1 ships the **un-jailed** broker.
+
+**The same holds for git in a tree the jail writes.** A jailed agent can rewrite
+a worktree's `.git` file, or the run clone's `config` and `hooks/`, so that the
+next un-jailed git command there runs a program it chose: `core.fsmonitor` on a
+`git status` is enough, and so is a clean filter on `git add`, `core.sshCommand`
+on a fetch, or a signing program on a commit (measured with git 2.43.0). Pinning
+`core.fsmonitor` and `core.hooksPath` on the command line does not close it,
+because the list of keys that run a program is open-ended. The verify broker
+already runs jail-written code un-jailed, so that adds nothing during the run.
+The plugin's own un-jailed git keeps to commands that run nothing:
+
+- **The supervisor** reads refs (`rev-parse`, `log --format`, `show`), and its
+  halt commits through plumbing that runs no hook, filter or signing program
+  (`_hookless_commit` in `spawn-orchestrator.sh`), and only into a repository
+  inside the run root, so a rewritten `.git` file cannot aim it at your main
+  checkout. `clear-exit-state` commits the same way.
+- **`--resume`** runs the doctor, which checks out, resets and removes
+  worktrees, inside the run's own jail through `spawn-orchestrator.sh
+  jail-run` ([`resume.md`](resume.md)). Pre-flight's freshness check queries the
+  remote with `--isolated-remote`, so the clone's config never reaches it.
+
+What remains is your own git in the run worktree or a worker worktree, during
+or after the run. Treat the run root as untrusted. Recover branches by fetching
+them from the main checkout ("Recovering a run's branch" in §1): a fetch reads
+the clone the way it reads any remote, and runs none of its config or hooks
+(measured). Never push into the clone, and remove a run root with `rm -rf`, not
+with git run inside it.
 
 **What the broker does _not_ defend: result authority.** The sentinel dir lives in
 the run worktree, which the jailed orchestrator can write — so it could forge its

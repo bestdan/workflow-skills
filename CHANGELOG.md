@@ -4,6 +4,36 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.200.0] - 2026-11-06
+
+### Features
+
+- flag pipeline-heavy fenced shell with no control flow [#936] (#1305) (9274bcd)
+
+## [2.199.2] - 2026-11-06
+
+### Fixes
+
+- record the run's jail so resume can find it [#1400] (#1418) (d737772)
+
+## [2.199.1] - 2026-11-06
+
+### Fixes
+
+- keep unjailed git from running code the jail planted [#1400] (#1415) (eb8b3bc)
+
+## [2.199.0] - 2026-11-05
+
+### Features
+
+- morning digest of human-tier PRs [#1321] (#1411) (ef80bab)
+
+## [2.198.0] - 2026-11-05
+
+### Features
+
+- give each run its own repo clone so the jail can make worker worktrees [#1390] (#1401) (2a00d1d)
+
 ## [2.197.2] - 2026-11-05
 
 ### Fixes

@@ -602,6 +602,15 @@ rcA="${rcA%% *}"
 [ ! -f "$GT/claude-called" ] && ok "gate: future paused_until never invokes claude" \
   || bad "gate: future paused_until never invokes claude"
 have "gate: future paused_until logs the skip" "skipping this wake" "$(cat "$GT/gate-future/o.log" 2>/dev/null)"
+# A seatbelt launch records its jail too, with no pinned nono.
+sb_rec="$AUTO_PILOT_STATE_HOME/com.autopilot.gate.gate-future/$(printf '%s' "$GT/gate-future" | cksum | cut -d' ' -f1)/jail-record"
+sb_r="$(cat "$sb_rec" 2>/dev/null)"
+have "jail record (seatbelt): names the jail" "jail: seatbelt" "$sb_r"
+have "jail record (seatbelt): names the resolved profile" "profile: $(cd "$BASE" && pwd -P)/cf.sb" "$sb_r"
+grep -qx 'nono_bin: ' "$sb_rec" 2>/dev/null && ok "jail record (seatbelt): no pinned nono" \
+  || bad "jail record (seatbelt): no pinned nono" "$sb_r"
+have "jail record (seatbelt): carries the profile's checksum" \
+  "sha256: $({ command -v sha256sum >/dev/null && sha256sum || shasum -a 256; } <"$BASE/cf.sb" | cut -d' ' -f1)" "$sb_r"
 
 # Test B: paused_until in the past -> claude IS invoked.
 _gate_case gate-past "status: active

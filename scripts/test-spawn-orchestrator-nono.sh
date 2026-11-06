@@ -103,48 +103,158 @@ else
   have "nono render: without a token, the renderer warns" "/.claude is WRITABLE" "$out"
 fi
 
-# --- render-nono-profile --git-worktree (#1350) --------------------------------
-# A commit in a linked worktree writes into the main checkout's common dir. Only
-# what a commit needs is writable; hooks/ and config stay read-only.
+# --- run-clone + render-nono-profile --git-worktree ---------------------------
+# The run's own git repo: a bare clone inside the run root, the run worktree and
+# workers/ beside it. --git-worktree grants that clone's whole git dir and
+# refuses a linked worktree of a main checkout.
 if command -v python3 >/dev/null 2>&1 && command -v git >/dev/null 2>&1; then
   GM="$NO/gitmain"
+  git init -q --bare "$NO/origin.git"
   git init -q -b main "$GM"
   git -C "$GM" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
-  git -C "$GM" worktree add -q "$NO/gitwt" -b run 2>/dev/null
-  GC="$(cd "$GM/.git" && pwd -P)"
-  out="$(nrender "$NO/p-git.json" --claude-token --git-worktree "$NO/gitwt" 2>&1)"
-  have "nono render --git-worktree: succeeds" "nono profile OK" "$out"
-  gflat="$(nflat "$NO/p-git.json" 2>&1)"
-  for sub in objects refs logs worktrees/gitwt; do
-    have "nono render --git-worktree: $sub is writable" "$(printf 'allow\t%s/%s' "$GC" "$sub")" "$gflat"
-  done
-  have "nono render --git-worktree: the common dir is read-only" "$(printf 'read\t%s' "$GC")" "$gflat"
-  if awk -F'\t' -v c="$GC" '$1 == "allow" && $2 == c { found = 1 } END { exit !found }' <<<"$gflat"; then
-    bad "nono render --git-worktree: the common dir itself is not writable"
+  git -C "$GM" remote add origin "$NO/origin.git"
+  git -C "$GM" push -q origin main 2>/dev/null
+  git -C "$GM" branch -q side
+  main_sum() { (cd "$GM/.git" && find . -type f -exec cksum {} + | sort | cksum); }
+  before="$(main_sum)"
+  NR="$NO/runroot"
+  out="$("$SCRIPT" run-clone --repo "$GM" --run-root "$NR" --run-id r-1 2>&1)"
+  NR="$(cd "$NR" 2>/dev/null && pwd -P)"
+  have "run-clone: prints the clone" "RUN_CLONE $NR/gitmain.git" "$out"
+  have "run-clone: prints the run worktree" "RUN_WORKTREE $NR/r-1" "$out"
+  [ "$(git -C "$NR/r-1" rev-parse --abbrev-ref HEAD 2>/dev/null)" = auto-pilot/r-1 ] \
+    && ok "run-clone: the run worktree is on auto-pilot/<run_id>" \
+    || bad "run-clone: the run worktree is on auto-pilot/<run_id>" "$(git -C "$NR/r-1" rev-parse --abbrev-ref HEAD 2>&1)"
+  [ "$(git --git-dir="$NR/gitmain.git" config --bool core.bare 2>/dev/null)" = true ] \
+    && ok "run-clone: the clone is bare" || bad "run-clone: the clone is bare"
+  [ "$(git -C "$NR/r-1" remote get-url origin 2>/dev/null)" = "$NO/origin.git" ] \
+    && ok "run-clone: origin is the main checkout's origin, not the main checkout" \
+    || bad "run-clone: origin is the main checkout's origin, not the main checkout" "$(git -C "$NR/r-1" remote get-url origin 2>&1)"
+  git -C "$NR/r-1" rev-parse -q --verify refs/remotes/origin/main >/dev/null \
+    && ok "run-clone: origin's branches are fetched" || bad "run-clone: origin's branches are fetched"
+  git --git-dir="$NR/gitmain.git" rev-parse -q --verify refs/heads/side >/dev/null \
+    && bad "run-clone: only the base branch is cloned" "the main checkout's side branch came along" \
+    || ok "run-clone: only the base branch is cloned"
+  [ -d "$NR/workers" ] && ok "run-clone: creates workers/" || bad "run-clone: creates workers/"
+  obj="$(cd "$NR/gitmain.git/objects" && find . -type f -path './??/*' | head -1)"
+  if [ -n "$obj" ] && [ "$(stat -c %h "$NR/gitmain.git/objects/$obj" 2>/dev/null || stat -f %l "$NR/gitmain.git/objects/$obj")" = 1 ]; then
+    ok "run-clone: objects are copied, not hardlinked to the main checkout's"
   else
-    ok "nono render --git-worktree: the common dir itself is not writable"
+    bad "run-clone: objects are copied, not hardlinked to the main checkout's" "${obj:-no loose object}"
   fi
-  lack "nono render --git-worktree: hooks/ is not writable" "$(printf 'allow\t%s/hooks' "$GC")" "$gflat"
-  lack "nono render --git-worktree: config is not writable" "$(printf 'allow_file\t%s/config' "$GC")" "$gflat"
+  [ "$(main_sum)" = "$before" ] && ok "run-clone: the main checkout's .git is unchanged" \
+    || bad "run-clone: the main checkout's .git is unchanged"
+  if o="$("$SCRIPT" run-clone --repo "$GM" --run-root "$NR" --run-id r-2 2>&1)"; then
+    bad "run-clone: refuses a non-empty run root" "succeeded"
+  else
+    have "run-clone: refuses a non-empty run root" "is not empty" "$o"
+  fi
+  if o="$("$SCRIPT" run-clone --repo "$GM" --run-root "$GM/inner" --run-id r-3 2>&1)"; then
+    bad "run-clone: refuses a run root inside the repo" "succeeded"
+  else
+    have "run-clone: refuses a run root inside the repo" "inside a checkout of the repo" "$o"
+  fi
+  # A linked worktree of the repo is a checkout too: a run root there would go
+  # with the worktree when it is torn down.
+  git -C "$GM" worktree add -q "$NO/linked" -b linked 2>/dev/null
+  if o="$("$SCRIPT" run-clone --repo "$GM" --run-root "$NO/linked/rr" --run-id r-4 2>&1)"; then
+    bad "run-clone: refuses a run root inside a linked worktree of the repo" "succeeded"
+  else
+    have "run-clone: refuses a run root inside a linked worktree of the repo" "inside a checkout of the repo" "$o"
+  fi
+  # Reached through a symlink: refused before anything is created inside.
+  ln -s "$GM" "$NO/to-main"
+  if o="$("$SCRIPT" run-clone --repo "$GM" --run-root "$NO/to-main/via-link/rr" --run-id r-5 2>&1)"; then
+    bad "run-clone: refuses a run root reached through a symlink into the repo" "succeeded"
+  else
+    have "run-clone: refuses a run root reached through a symlink into the repo" "inside a checkout of the repo" "$o"
+  fi
+  [ -e "$GM/via-link" ] && bad "run-clone: a symlinked in-repo run root is refused before it is created" \
+    || ok "run-clone: a symlinked in-repo run root is refused before it is created"
+  [ "$(git --git-dir="$NR/gitmain.git" config --get auto-pilot.mainCheckout 2>/dev/null)" = "$(cd "$GM" && pwd -P)" ] \
+    && ok "run-clone: records the main checkout for pre-flight" \
+    || bad "run-clone: records the main checkout for pre-flight" "$(git --git-dir="$NR/gitmain.git" config --get auto-pilot.mainCheckout 2>&1)"
+  [ -e "$GM/inner" ] && bad "run-clone: a refused in-repo run root is not created" || ok "run-clone: a refused in-repo run root is not created"
+  if o="$("$SCRIPT" run-clone --repo "$GM" --run-root "$NO/rr-bad" --run-id 'a/b' 2>&1)"; then
+    bad "run-clone: refuses a run id that is not bare" "succeeded"
+  else
+    have "run-clone: refuses a run id that is not bare" "must be a bare id" "$o"
+  fi
+  if o="$("$SCRIPT" run-clone --repo "$GM" --run-root "$NO/rr-base" --run-id r --base nosuch 2>&1)"; then
+    bad "run-clone: refuses a --base that is not a local branch" "succeeded"
+  else
+    have "run-clone: refuses a --base that is not a local branch" "is not a local branch" "$o"
+  fi
+  [ -z "$(ls -A "$NO/rr-base" 2>/dev/null)" ] && ok "run-clone: a refused --base leaves the run root empty" \
+    || bad "run-clone: a refused --base leaves the run root empty" "$(ls -A "$NO/rr-base")"
+  if o="$("$SCRIPT" run-clone --repo "$GM" --run-root "$NO/rr-remote" --run-id r --remote nosuch 2>&1)"; then
+    bad "run-clone: refuses a --remote the repo does not have" "succeeded"
+  else
+    have "run-clone: refuses a --remote the repo does not have" "has no remote 'nosuch'" "$o"
+  fi
+
+  out="$(nrender "$NO/p-git.json" --claude-token --git-worktree "$NR/r-1" 2>&1)"
+  have "nono render --git-worktree: succeeds on a run clone" "nono profile OK" "$out"
+  gflat="$(nflat "$NO/p-git.json" 2>&1)"
+  have "nono render --git-worktree: the run clone's git dir is writable" "$(printf 'allow\t%s/gitmain.git' "$NR")" "$gflat"
+  lack "nono render --git-worktree: nothing of the main checkout's .git is granted" "$GM/.git" "$gflat"
+  git -C "$GM" worktree add -q "$NO/gitwt" -b run 2>/dev/null
+  if o="$(nrender "$NO/p-git1.json" --git-worktree "$NO/gitwt" 2>&1)"; then
+    bad "nono render --git-worktree: refuses a linked worktree of a main checkout" "render succeeded"
+  else
+    have "nono render --git-worktree: refuses a linked worktree of a main checkout" "not of a run clone" "$o"
+  fi
   if o="$(nrender "$NO/p-git2.json" --git-worktree "$GM" 2>&1)"; then
     bad "nono render --git-worktree: refuses a main checkout" "render succeeded"
   else
-    have "nono render --git-worktree: refuses a main checkout" "must be a linked worktree" "$o"
+    have "nono render --git-worktree: refuses a main checkout" "is a main checkout" "$o"
   fi
   if o="$(nrender "$NO/p-git3.json" --git-worktree "$NO/tmp" 2>&1)"; then
     bad "nono render --git-worktree: refuses a non-checkout" "render succeeded"
   else
-    have "nono render --git-worktree: refuses a non-checkout" "is not a git checkout" "$o"
+    have "nono render --git-worktree: refuses a non-checkout" "not a git checkout" "$o"
   fi
-  git -C "$GM" config extensions.worktreeConfig true
-  if o="$(nrender "$NO/p-git4.json" --git-worktree "$NO/gitwt" 2>&1)"; then
-    bad "nono render --git-worktree: refuses a repo with extensions.worktreeConfig" "render succeeded"
+  # A bare repo elsewhere is not this run's clone: the clone must sit in the
+  # worktree's own run root, under the run's write grant.
+  git -C "$NR/gitmain.git" worktree add -q "$NO/elsewhere" -b stray 2>/dev/null
+  if o="$(nrender "$NO/p-git4.json" --git-worktree "$NO/elsewhere" 2>&1)"; then
+    bad "nono render --git-worktree: refuses a clone outside the worktree's run root" "render succeeded"
   else
-    have "nono render --git-worktree: refuses a repo with extensions.worktreeConfig" "enables extensions.worktreeConfig" "$o"
+    have "nono render --git-worktree: refuses a clone outside the worktree's run root" "not of a run clone" "$o"
   fi
-  git -C "$GM" config --unset extensions.worktreeConfig
+
+  # --- jail-run: resume's doctor goes through the run's own jail -------------
+  # A stand-in nono records how it was called, then runs what follows `--`.
+  JR="$NO/jailrun"
+  mkdir -p "$JR"
+  printf '#!/bin/sh\n{ echo "cwd=$PWD"; echo "tmp=$TMPDIR"; echo "argv=$*"; } >%s\nwhile [ "$1" != -- ]; do shift; done\nshift\nexec "$@"\n' \
+    "$JR/called" >"$JR/nono"
+  chmod +x "$JR/nono"
+  out="$("$SCRIPT" jail-run --jail nono --profile "$NO/p-git.json" --nono-bin "$JR/nono" \
+    --workdir "$NR/r-1" -- check-run-clone --worktree "$NR/r-1" 2>&1)"
+  rc=$?
+  if [ "$rc" = 0 ]; then ok "jail-run: runs the subcommand and passes its exit status"; else bad "jail-run: runs the subcommand and passes its exit status" "rc=$rc $out"; fi
+  have "jail-run: the subcommand's output comes back" "$NR/gitmain.git" "$out"
+  jcalled="$(cat "$JR/called" 2>/dev/null)"
+  have "jail-run: nono gets the run's profile" "argv=run --silent --profile $NO/p-git.json --" "$jcalled"
+  have "jail-run: the subcommand runs in the run worktree" "cwd=$NR/r-1" "$jcalled"
+  have "jail-run: TMPDIR is the profile's" "tmp=$NTMP" "$jcalled"
+  "$SCRIPT" jail-run --jail nono --profile "$NO/p-git.json" --nono-bin "$JR/nono" \
+    --workdir "$NR/r-1" -- check-run-clone --worktree "$NO/tmp" >/dev/null 2>&1
+  rc=$?
+  if [ "$rc" != 0 ]; then ok "jail-run: a failing subcommand fails jail-run"; else bad "jail-run: a failing subcommand fails jail-run"; fi
+  for jr_bad in "--jail nono --profile $NO/p-git.json --workdir $NR/r-1" \
+    "--jail nono --nono-bin $JR/nono --workdir $NR/r-1" \
+    "--jail bogus --profile $NO/p-git.json --workdir $NR/r-1"; do
+    # shellcheck disable=SC2086 # the flag set is split on purpose
+    if "$SCRIPT" jail-run $jr_bad -- check-run-clone --worktree "$NR/r-1" >/dev/null 2>&1; then
+      bad "jail-run: refuses an incomplete jail ($jr_bad)"
+    else
+      ok "jail-run: refuses an incomplete jail ($jr_bad)"
+    fi
+  done
 else
-  echo "skip - render-nono-profile --git-worktree: python3 or git not available"
+  echo "skip - run-clone / render-nono-profile --git-worktree: python3 or git not available"
 fi
 
 # --- render-nono-profile: refusals --------------------------------------------
@@ -222,7 +332,67 @@ if [ -f "$NO/p.json" ]; then
     bad "write-launch nono: the token is gone before supervisor-check runs" "unset at ${tok_unset_line:-none}, check at ${check_line:-none}"
   fi
 
+  # The jail record: write-launch leaves it beside the ledger, and jail-run with
+  # no --jail/--profile runs under it.
+  wd_key="$(printf '%s' "$NO/wd" | cksum | cut -d' ' -f1)"
+  rec="$AUTO_PILOT_STATE_HOME/com.autopilot.test.nono.plain/$wd_key/jail-record"
+  r="$(cat "$rec" 2>/dev/null)"
+  have "jail record: names the jail" "jail: nono" "$r"
+  have "jail record: names the profile" "profile: $(cd "$NO" && pwd -P)/p.json" "$r"
+  have "jail record: names the pinned nono" "nono_bin: $NBIN" "$r"
+  have "jail record: carries the profile's checksum" "sha256: $({ command -v sha256sum >/dev/null && sha256sum || shasum -a 256; } <"$NO/p.json" | cut -d' ' -f1)" "$r"
+  # plain and tok both launched on $NO/wd, so the worktree alone is ambiguous.
+  if o="$("$SCRIPT" jail-run --workdir "$NO/wd" -- status --label x 2>&1)"; then
+    bad "jail-run: two recorded launches for one worktree need --label" "succeeded"
+  else
+    have "jail-run: two recorded launches for one worktree need --label" "pass --label" "$o"
+  fi
+  : >"$NO/nono.calls"
+  out="$("$SCRIPT" jail-run --label com.autopilot.test.nono.plain --workdir "$NO/wd" -- status --label x 2>&1)"
+  rc=$?
+  if [ "$rc" = 0 ] && [ -s "$NO/nono.calls" ]; then
+    ok "jail-run: runs under the recorded jail"
+  else
+    bad "jail-run: runs under the recorded jail" "rc=$rc calls=$(cat "$NO/nono.calls") $out"
+  fi
+  if o="$("$SCRIPT" jail-run --label com.autopilot.test.nono.plain --jail nono --workdir "$NO/wd" -- status 2>&1)"; then
+    bad "jail-run: --label does not combine with --jail" "succeeded"
+  else
+    have "jail-run: --label does not combine with --jail" "does not combine" "$o"
+  fi
+  mkdir -p "$NO/wd-none"
+  if o="$("$SCRIPT" jail-run --workdir "$NO/wd-none" -- status 2>&1)"; then
+    bad "jail-run: no recorded launch for the worktree is refused" "succeeded"
+  else
+    have "jail-run: no recorded launch for the worktree is refused" "no jail record" "$o"
+  fi
+  # A profile changed since launch is refused, as each wake's pin refuses it.
+  cp "$NO/p.json" "$NO/p-pin.json"
+  mkdir -p "$NO/wd-pin/.auto-pilot"
+  "$SCRIPT" write-launch --jail nono --nono-bin "$NBIN" --profile "$NO/p-pin.json" --settings "$NO/settings.json" \
+    --workdir "$NO/wd-pin" --log "$NO/wd-pin/.auto-pilot/orchestrator.log" --prompt-file "$NO/prompt.txt" \
+    --label com.autopilot.test.nono.pin --claude-bin "$BIN" --path "/usr/bin:/bin" \
+    --out-script "$NO/pin.sh" --out-plist "$NO/pin.plist" >/dev/null 2>&1
+  : >"$NO/nono.calls"
+  "$SCRIPT" jail-run --workdir "$NO/wd-pin" -- status --label x >/dev/null 2>&1 \
+    && [ -s "$NO/nono.calls" ] && ok "jail-run: finds the one recorded launch by worktree" \
+    || bad "jail-run: finds the one recorded launch by worktree"
+  printf ' \n' >>"$NO/p-pin.json"
+  : >"$NO/nono.calls"
+  if o="$("$SCRIPT" jail-run --workdir "$NO/wd-pin" -- status --label x 2>&1)"; then
+    bad "jail-run: refuses a recorded profile that changed since launch" "succeeded"
+  else
+    have "jail-run: refuses a recorded profile that changed since launch" "changed since launch" "$o"
+  fi
+  [ -s "$NO/nono.calls" ] && bad "jail-run: a changed profile never reaches nono" || ok "jail-run: a changed profile never reaches nono"
+
   # Refusals.
+  # The record must sit outside the jail's write grants, or the jail could forge it.
+  if o="$(AUTO_PILOT_STATE_HOME="$NTMP/state" nlaunch ingrant 2>&1)"; then
+    bad "write-launch nono: refuses a jail record inside a write grant" "write-launch succeeded"
+  else
+    have "write-launch nono: refuses a jail record inside a write grant" "inside the profile's write grant" "$o"
+  fi
   nlrefuse() { # <name> <expected> <args...>
     local name="$1" want="$2" o
     shift 2
