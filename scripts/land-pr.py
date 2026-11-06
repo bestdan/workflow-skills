@@ -48,7 +48,8 @@ Usage:
 `--dry-run` prints `COMMENT: <created|updated|unchanged> <url>` (or `COMMENT:
 error reason=...`), then a `TIER:` line, then a final `LAND: would-land` or
 `LAND: hold reasons=<r1; r2>` line; exit 0 for either verdict, 1 when the
-comment could not be posted. Without it, a landing prints `LABEL: ...` and
+comment could not be posted. Without it, a landing prints an optional
+`MERGE: recovered after error: <failure>` line, then `LABEL: ...` and
 `COMMENT: ...` lines, then `LAND: landed sha=<merge sha>`; a hold prints only
 `LAND: hold reasons=...`; exit 0 for either. A usage error exits 2.
 
@@ -693,8 +694,9 @@ def land_pr(repo, pr):
             print(hold_line([failure]))
             return 0
         # The merge commit cannot carry the failure, so the comment records it.
-        record = "Recovered after error: " + " ".join(failure.split()) + "\n"
-        print(f"MERGE: recovered after error: {' '.join(failure.split())}")
+        reason = " ".join(failure.split())
+        record = f"Recovered after error: {reason}\n"
+        print(f"MERGE: recovered after error: {reason}")
     else:
         sha = merge_sha(repo, pr)
     print(add_label(repo, pr))
