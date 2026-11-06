@@ -83,11 +83,17 @@ run's jail.** Run
 
 ([`run-state.md`](run-state.md) "Run doctor"). `jail-run` takes the jail,
 profile and pinned nono that `write-launch` recorded beside the run's
-supervisor ledger, outside every write grant, and refuses a profile that changed
-since launch. Pass `<run-worktree>` exactly as the launch did. If it reports
-several launches for the worktree, add `--label <the run's label>`. Run it
-outside Claude Code's own sandbox: on macOS `sandbox-exec` cannot start inside
-another Seatbelt sandbox, and the call fails before the doctor runs. The doctor checks out, resets and removes worktrees, and the jail has
+supervisor ledger, outside the jail's write grants, and refuses a profile that
+changed since launch. Pass `<run-worktree>` exactly as the launch did. If it
+reports several launches for the worktree, add `--label <the run's label>`. A
+run launched before the record existed gets `no jail record`: pass
+`--jail <seatbelt|nono> --profile <profile> [--nono-bin <nono>]` instead, the
+paths the launch wrapper names.
+
+Run it outside Claude Code's own sandbox: on macOS `sandbox-exec` cannot start
+inside another Seatbelt sandbox, and the call fails before the doctor runs.
+
+The doctor checks out, resets and removes worktrees, and the jail has
 written the run clone's config and hooks, so run unjailed those commands would
 run whatever it planted ([`launch-runtime.md`](launch-runtime.md) §5). Do the
 same for any other git in this phase that writes: unjailed, keep to reads

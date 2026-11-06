@@ -488,9 +488,12 @@ _supervisor_state_path() {
 # The launch's jail record, beside the supervisor-state file: which jail, the
 # profile and (nono) the pinned binary, and the profile's checksum. write-launch
 # writes it and jail-run reads it, so a resume session runs the doctor under the
-# same jail without being told the paths. It sits outside every write grant
-# (write-launch refuses otherwise), so the jail cannot redirect it. RUN.md could
-# be rewritten by the jail, which is why the paths are not kept there.
+# same jail without being told the paths. It must sit outside the jail's write
+# grants, or the jail could rewrite it. Under nono write-launch refuses a record
+# inside one. Under Seatbelt nothing checks it: the profile grants writes only to
+# the caller's --rw paths, and the state root is not one of them, which is what
+# the supervisor ledger beside it already relies on. RUN.md could be rewritten
+# by the jail, which is why the paths are not kept there.
 JAIL_RECORD_NAME="jail-record"
 # The heartbeat the orchestrator touches per loop iteration / per /deliver-task
 # sub-step, and the launch wrapper touches at the top of each wake. Like
