@@ -216,6 +216,25 @@ branch_of() { git -C "$1" rev-parse --abbrev-ref HEAD; }
   assert_output "$REMOTE_MAIN"
 }
 
+# Built the way spawn-orchestrator.sh builds the run clone: a single-branch bare
+# clone of the run's base, then a fetch that sets origin/HEAD to the upstream
+# default. The base must come from the bare HEAD, not origin/HEAD or `main`.
+@test "a bare clone as cwd starts from its own HEAD, not main or origin/HEAD" {
+  git -C "$TEST_TMPDIR/seed" commit -q --allow-empty -m trunk-only
+  git -C "$TEST_TMPDIR/seed" push -q origin HEAD:trunk
+  trunk=$(git -C "$TEST_TMPDIR/seed" rev-parse HEAD)
+  bare="$TEST_TMPDIR/runroot/myrepo.git"
+  git clone -q --bare --single-branch --branch trunk "$REMOTE" "$bare"
+  git -C "$bare" config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
+  git -C "$bare" fetch -q origin
+  git -C "$bare" remote set-head origin main
+  run_hook "$bare" feat-a
+  assert_success
+  assert_output "$WT_ROOT/runroot/feat-a"
+  run git -C "$WT_ROOT/runroot/feat-a" rev-parse HEAD
+  assert_output "$trunk"
+}
+
 @test "a bare clone as cwd hands back a worktree already at that path" {
   bare="$TEST_TMPDIR/runroot/myrepo.git"
   git clone -q --bare "$REMOTE" "$bare"

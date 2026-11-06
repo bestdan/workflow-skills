@@ -70,8 +70,9 @@ if ! worktree_name_valid "$name"; then
 fi
 
 # A bare repo has no working tree but can still own worktrees. auto-pilot's run
-# clone is one (#1401), and the harness passes it as cwd to a session standing
-# in one of its worktrees, so the git dir stands in for the top-level (#1416).
+# clone is one (#1401): the hook's cwd is that bare repo itself, even when the
+# session stands in one of its worktrees, so the git dir stands in for the
+# top-level (#1416). A cwd inside a linked worktree still takes the first path.
 bare=false
 if ! root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null); then
   if [[ $(git -C "$cwd" rev-parse --is-bare-repository 2>/dev/null) == true ]]; then
@@ -101,7 +102,8 @@ prefix=$(cd -- "$root" && "$script_dir/worktree-config.sh" prefix) || {
 
 # The local default branch. origin/HEAD names it when the remote was cloned
 # normally; a repo with no remote gets `main`.
-# A bare clone has no remote-tracking refs: its own HEAD names the default.
+# A bare run clone's HEAD is the branch it was cloned for. Its origin/HEAD, when
+# a fetch has set one, names the upstream default, which may not be local here.
 if [[ $bare == true ]]; then
   base=$(git -C "$root" symbolic-ref -q --short HEAD 2>/dev/null || true)
 else
