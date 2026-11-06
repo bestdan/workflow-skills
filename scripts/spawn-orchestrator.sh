@@ -51,8 +51,8 @@
 #   spawn-orchestrator.sh claude-token --dir <run-dir> [--label <label>] --cmd <cmd>
 #   spawn-orchestrator.sh check-nono-profile --dir <run-dir> [--label <label>] \
 #       --profile <file> --sha256 <hex>
-#   spawn-orchestrator.sh jail-run --jail <seatbelt|nono> --profile <file> \
-#       [--nono-bin <bin>] --workdir <run worktree> -- <subcommand> [args...]
+#   spawn-orchestrator.sh jail-run [--jail <seatbelt|nono> --profile <file> \
+#       [--nono-bin <bin>] | --label <label>] --workdir <run worktree> -- <subcommand> [args...]
 #
 #   render-nono-profile  The Linux jail (#1349): a nono JSON profile from
 #           launch-runtime.md §1. Its own comment block below is the one home
@@ -66,7 +66,8 @@
 #   check-nono-profile  The wrapper's per-wake pin (#1350): the profile still
 #           has the checksum write-launch baked in; else halt with an alarm.
 #   jail-run  Run one of these subcommands inside the run's jail, from an
-#           unjailed session: --resume's doctor goes through it.
+#           unjailed session: --resume's doctor goes through it. With no
+#           --jail/--profile it uses the jail write-launch recorded for --workdir.
 #
 # On Linux (#1350) `launch` starts the wrapper as a transient systemd user
 # timer + service pair named <label> (systemd-run --user), where macOS
@@ -484,6 +485,13 @@ _supervisor_state_path() {
   [ -n "$key" ] || return 1
   printf '%s/%s/%s/%s\n' "$root" "$label" "$key" "$SUPERVISOR_STATE_NAME"
 }
+# The launch's jail record, beside the supervisor-state file: which jail, the
+# profile and (nono) the pinned binary, and the profile's checksum. write-launch
+# writes it and jail-run reads it, so a resume session runs the doctor under the
+# same jail without being told the paths. It sits outside every write grant
+# (write-launch refuses otherwise), so the jail cannot redirect it. RUN.md could
+# be rewritten by the jail, which is why the paths are not kept there.
+JAIL_RECORD_NAME="jail-record"
 # The heartbeat the orchestrator touches per loop iteration / per /deliver-task
 # sub-step, and the launch wrapper touches at the top of each wake. Like
 # supervisor-state it is NOT committed to the run-state branch (it beats far too
@@ -2151,6 +2159,13 @@ write_launch() {
     || die "the supervisor-state root must be an absolute path (AUTO_PILOT_STATE_HOME, XDG_STATE_HOME or HOME): ${AUTO_PILOT_STATE_HOME:-${XDG_STATE_HOME:-${HOME:-<unset>}}}"
   state_file="$(_supervisor_state_path "$label" "$workdir")" \
     || die "cannot derive the supervisor-state path from --label/--workdir: $label $workdir"
+  local jail_record profile_abs profile_sha
+  jail_record="$(dirname "$state_file")/$JAIL_RECORD_NAME"
+  [ "$jail" = nono ] && _refuse_in_nono_grants "$profile" "$jail_record"
+  profile_abs="$(resolve_lazy "$profile")" || exit 2
+  profile_sha="$(_sha256_file "$profile")" && [ -n "$profile_sha" ] \
+    || die "cannot checksum the profile for the jail record (needs sha256sum or shasum): $profile"
+  _write_jail_record "$jail_record" "$jail" "$profile_abs" "$nono_bin" "$profile_sha"
   # A run launched before the ledger left the run worktree (a --resume of one)
   # carries it at the legacy path, in a directory the agent could write. So its
   # content is not trusted wholesale: a symlink is never followed, only the
@@ -2502,6 +2517,52 @@ record_handle() {
   echo "spawn-orchestrator: handle recorded $out"
 }
 
+# Write the jail record (JAIL_RECORD_NAME) atomically. Args: <file> <jail>
+# <profile> <nono-bin> <sha256>.
+_write_jail_record() {
+  local f="$1" d tmp
+  d="$(dirname "$f")"
+  mkdir -p "$d" || die "cannot create the jail record directory: $d"
+  tmp="$(mktemp "$d/.jailrec.XXXXXX")" || die "mktemp failed"
+  {
+    printf 'jail: %s\n' "$2"
+    printf 'profile: %s\n' "$3"
+    printf 'nono_bin: %s\n' "$4"
+    printf 'sha256: %s\n' "$5"
+  } >"$tmp" && mv "$tmp" "$f" || {
+    rm -f "$tmp"
+    die "failed to write the jail record: $f"
+  }
+}
+
+# One field of a jail record, or empty.
+_jail_record_field() { # <file> <field>
+  sed -n "s/^$2: //p" "$1" | tail -1
+}
+
+# The jail record for <workdir>: under --label when given, else the only one
+# any label holds for that worktree. Prints its path; dies on none or several.
+_find_jail_record() { # <workdir> [<label>]
+  local workdir="$1" label="${2:-}" root key f n=0 found=""
+  if [ -n "$label" ]; then
+    f="$(_supervisor_state_path "$label" "$workdir")" || die "jail-run: bad --label or --workdir: $label $workdir"
+    f="$(dirname "$f")/$JAIL_RECORD_NAME"
+    [ -f "$f" ] && [ ! -L "$f" ] || die "jail-run: no jail record for label $label at $f — pass --jail and --profile"
+    printf '%s\n' "$f"
+    return 0
+  fi
+  root="$(_supervisor_state_root)" || die "jail-run: the supervisor-state root must be absolute"
+  key="$(printf '%s' "$workdir" | cksum | cut -d' ' -f1)"
+  for f in "$root"/*/"$key"/"$JAIL_RECORD_NAME"; do
+    [ -f "$f" ] && [ ! -L "$f" ] || continue
+    n=$((n + 1))
+    found="$f"
+  done
+  [ "$n" -gt 0 ] || die "jail-run: no jail record for $workdir under $root (pass the worktree path exactly as the launch did, or --jail and --profile)"
+  [ "$n" -eq 1 ] || die "jail-run: $n launches recorded a jail for $workdir under $root — pass --label"
+  printf '%s\n' "$found"
+}
+
 # Run one of this script's subcommands inside the run's own jail, from an unjailed
 # session. For --resume's doctor: it runs status, checkout, reset and worktree
 # remove in the run worktree, and the jail writes that tree's `.git` file and the
@@ -2510,16 +2571,17 @@ record_handle() {
 # Takes the profile (and, for nono, the pinned binary) the launch rendered; both
 # sit outside every write grant, so the jail cannot have changed them.
 jail_run() {
-  local profile="" jail="" nono_bin="" workdir=""
+  local profile="" jail="" nono_bin="" workdir="" label=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --profile | --jail | --nono-bin | --workdir)
+      --profile | --jail | --nono-bin | --workdir | --label)
         [ $# -ge 2 ] || die "missing value for $1"
         case "$1" in
           --profile) profile="$2" ;;
           --jail) jail="$2" ;;
           --nono-bin) nono_bin="$2" ;;
           --workdir) workdir="$2" ;;
+          --label) label="$2" ;;
         esac
         shift 2
         ;;
@@ -2531,8 +2593,24 @@ jail_run() {
     esac
   done
   [ $# -ge 1 ] || die "jail-run requires a subcommand after --"
-  [ -f "$profile" ] || die "jail-run requires --profile <file> (the run's rendered profile)"
   [ -d "$workdir" ] || die "jail-run requires --workdir <dir> (the run worktree)"
+  # No jail named: take the one the launch recorded, and refuse a profile that
+  # changed since, as every wake's check-nono-profile does.
+  if [ -z "$jail$profile$nono_bin" ]; then
+    local rec want got
+    rec="$(_find_jail_record "$workdir" "$label")" || exit 2
+    jail="$(_jail_record_field "$rec" jail)"
+    profile="$(_jail_record_field "$rec" profile)"
+    nono_bin="$(_jail_record_field "$rec" nono_bin)"
+    want="$(_jail_record_field "$rec" sha256)"
+    [ -f "$profile" ] && [ ! -L "$profile" ] || die "jail-run: the recorded profile is missing or not a regular file: $profile"
+    got="$(_sha256_file "$profile")" || got=""
+    [ -n "$want" ] && [ "$got" = "$want" ] \
+      || die "jail-run: the recorded profile changed since launch (sha256 ${got:-<none>}, launched with ${want:-<none>}): $profile"
+  elif [ -n "$label" ]; then
+    die "jail-run: --label selects a recorded jail; it does not combine with --jail/--profile/--nono-bin"
+  fi
+  [ -f "$profile" ] || die "jail-run requires --profile <file> (the run's rendered profile)"
   local -a jail_cmd=()
   local jail_tmp=""
   case "$jail" in

@@ -332,7 +332,67 @@ if [ -f "$NO/p.json" ]; then
     bad "write-launch nono: the token is gone before supervisor-check runs" "unset at ${tok_unset_line:-none}, check at ${check_line:-none}"
   fi
 
+  # The jail record: write-launch leaves it beside the ledger, and jail-run with
+  # no --jail/--profile runs under it.
+  wd_key="$(printf '%s' "$NO/wd" | cksum | cut -d' ' -f1)"
+  rec="$AUTO_PILOT_STATE_HOME/com.autopilot.test.nono.plain/$wd_key/jail-record"
+  r="$(cat "$rec" 2>/dev/null)"
+  have "jail record: names the jail" "jail: nono" "$r"
+  have "jail record: names the profile" "profile: $(cd "$NO" && pwd -P)/p.json" "$r"
+  have "jail record: names the pinned nono" "nono_bin: $NBIN" "$r"
+  have "jail record: carries the profile's checksum" "sha256: $({ command -v sha256sum >/dev/null && sha256sum || shasum -a 256; } <"$NO/p.json" | cut -d' ' -f1)" "$r"
+  # plain and tok both launched on $NO/wd, so the worktree alone is ambiguous.
+  if o="$("$SCRIPT" jail-run --workdir "$NO/wd" -- status --label x 2>&1)"; then
+    bad "jail-run: two recorded launches for one worktree need --label" "succeeded"
+  else
+    have "jail-run: two recorded launches for one worktree need --label" "pass --label" "$o"
+  fi
+  : >"$NO/nono.calls"
+  out="$("$SCRIPT" jail-run --label com.autopilot.test.nono.plain --workdir "$NO/wd" -- status --label x 2>&1)"
+  rc=$?
+  if [ "$rc" = 0 ] && [ -s "$NO/nono.calls" ]; then
+    ok "jail-run: runs under the recorded jail"
+  else
+    bad "jail-run: runs under the recorded jail" "rc=$rc calls=$(cat "$NO/nono.calls") $out"
+  fi
+  if o="$("$SCRIPT" jail-run --label com.autopilot.test.nono.plain --jail nono --workdir "$NO/wd" -- status 2>&1)"; then
+    bad "jail-run: --label does not combine with --jail" "succeeded"
+  else
+    have "jail-run: --label does not combine with --jail" "does not combine" "$o"
+  fi
+  mkdir -p "$NO/wd-none"
+  if o="$("$SCRIPT" jail-run --workdir "$NO/wd-none" -- status 2>&1)"; then
+    bad "jail-run: no recorded launch for the worktree is refused" "succeeded"
+  else
+    have "jail-run: no recorded launch for the worktree is refused" "no jail record" "$o"
+  fi
+  # A profile changed since launch is refused, as each wake's pin refuses it.
+  cp "$NO/p.json" "$NO/p-pin.json"
+  mkdir -p "$NO/wd-pin/.auto-pilot"
+  "$SCRIPT" write-launch --jail nono --nono-bin "$NBIN" --profile "$NO/p-pin.json" --settings "$NO/settings.json" \
+    --workdir "$NO/wd-pin" --log "$NO/wd-pin/.auto-pilot/orchestrator.log" --prompt-file "$NO/prompt.txt" \
+    --label com.autopilot.test.nono.pin --claude-bin "$BIN" --path "/usr/bin:/bin" \
+    --out-script "$NO/pin.sh" --out-plist "$NO/pin.plist" >/dev/null 2>&1
+  : >"$NO/nono.calls"
+  "$SCRIPT" jail-run --workdir "$NO/wd-pin" -- status --label x >/dev/null 2>&1 \
+    && [ -s "$NO/nono.calls" ] && ok "jail-run: finds the one recorded launch by worktree" \
+    || bad "jail-run: finds the one recorded launch by worktree"
+  printf ' \n' >>"$NO/p-pin.json"
+  : >"$NO/nono.calls"
+  if o="$("$SCRIPT" jail-run --workdir "$NO/wd-pin" -- status --label x 2>&1)"; then
+    bad "jail-run: refuses a recorded profile that changed since launch" "succeeded"
+  else
+    have "jail-run: refuses a recorded profile that changed since launch" "changed since launch" "$o"
+  fi
+  [ -s "$NO/nono.calls" ] && bad "jail-run: a changed profile never reaches nono" || ok "jail-run: a changed profile never reaches nono"
+
   # Refusals.
+  # The record must sit outside the jail's write grants, or the jail could forge it.
+  if o="$(AUTO_PILOT_STATE_HOME="$NTMP/state" nlaunch ingrant 2>&1)"; then
+    bad "write-launch nono: refuses a jail record inside a write grant" "write-launch succeeded"
+  else
+    have "write-launch nono: refuses a jail record inside a write grant" "inside the profile's write grant" "$o"
+  fi
   nlrefuse() { # <name> <expected> <args...>
     local name="$1" want="$2" o
     shift 2
