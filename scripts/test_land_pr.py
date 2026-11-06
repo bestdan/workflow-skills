@@ -619,8 +619,19 @@ class RealLandingTests(unittest.TestCase):
         lines = self.land()
         self.assertEqual(lines[-1], f"LAND: landed sha={MERGE_SHA}")
         self.assertEqual(self.fake.labels_added, ["landed-by-agent"])
-        self.assertTrue(
-            any(c["body"].startswith(land.LANDED_MARKER) for c in self.fake.comments)
+        # The original failure is recorded on stdout, before the LABEL line,
+        # and in the comment, which is the record that lasts.
+        recovered = "MERGE: recovered after error: gh pr merge failed: timed out after 60 seconds"
+        self.assertIn(recovered, lines)
+        label = next(i for i, line in enumerate(lines) if line.startswith("LABEL: "))
+        self.assertLess(lines.index(recovered), label)
+        (comment,) = [
+            c for c in self.fake.comments if c["body"].startswith(land.LANDED_MARKER)
+        ]
+        self.assertIn(
+            f"Merge commit: {MERGE_SHA}\nRecovered after error: gh pr merge failed: "
+            "timed out after 60 seconds\n",
+            comment["body"],
         )
 
     def test_a_failed_call_whose_merge_lacks_the_trailers_holds(self):
@@ -684,6 +695,9 @@ class RealLandingTests(unittest.TestCase):
         ]
         self.assertIn(f"Merge commit: {MERGE_SHA}", comment["body"])
         self.assertIn(f"Co-review-head: {HEAD}", comment["body"])
+        # A clean landing has nothing to recover from.
+        self.assertFalse(any(line.startswith("MERGE: ") for line in lines), lines)
+        self.assertNotIn("Recovered after error", comment["body"])
 
     def test_a_missing_label_is_created_then_added(self):
         self.fake.repo_labels = set()

@@ -36,7 +36,9 @@ ends with the trailers `Landed-by: land-pr.sh` and `Co-review-head: <sha>`. A
 head that moved after the check makes GitHub refuse the merge, which is a hold.
 Any other failed `gh pr merge` is re-read: it is a landing only when the PR is
 merged at the judged head and the merge commit carries both trailers, and a
-hold with the original reason otherwise.
+hold with the original reason otherwise. A landing recovered that way prints
+`MERGE: recovered after error: <failure>` and repeats the failure in the PR
+comment, since neither the merge commit nor GitHub records it.
 After a landing, the `landed-by-agent` label and a PR comment repeating the
 record are best effort: their failure is reported and does not fail the run.
 
@@ -684,15 +686,19 @@ def land_pr(repo, pr):
         return 0
     body = audit_body(pr, reasons, head)
     failure, head_moved = merge(repo, pr, head, body)
+    record = ""
     if failure:
         sha = None if head_moved else landed_anyway(repo, pr, head)
         if sha is None:
             print(hold_line([failure]))
             return 0
+        # The merge commit cannot carry the failure, so the comment records it.
+        record = "Recovered after error: " + " ".join(failure.split()) + "\n"
+        print(f"MERGE: recovered after error: {' '.join(failure.split())}")
     else:
         sha = merge_sha(repo, pr)
     print(add_label(repo, pr))
-    print(post_landed_comment(repo, pr, f"Merge commit: {sha}\n\n{body}"))
+    print(post_landed_comment(repo, pr, f"Merge commit: {sha}\n{record}\n{body}"))
     print(f"LAND: landed sha={sha}")
     return 0
 
