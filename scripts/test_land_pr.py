@@ -110,6 +110,10 @@ class FakeGh:
         self.label_created_concurrently = False
         # A merge call that fails on the client after GitHub merged (a timeout).
         self.merge_fails_after_merging = False
+        # Re-reads that still show OPEN after such a merge, before GitHub
+        # reports it MERGED: a merge that completes after the call failed.
+        self.open_reads_after_merge = 0
+        self.merge_pending = False
         # The merge commit's message; None means the body the lander sent.
         self.merge_message: Optional[str] = None
 
@@ -145,17 +149,19 @@ class FakeGh:
         if args[:2] == ["pr", "view"]:
             if any("mergeCommit" in a for a in args):
                 merged = self.pr["state"] == "MERGED"
-                return (
-                    0,
-                    json.dumps(
-                        {
-                            "state": self.pr["state"],
-                            "headRefOid": self.pr["headRefOid"],
-                            "mergeCommit": {"oid": MERGE_SHA} if merged else None,
-                        }
-                    ),
-                    "",
+                out = json.dumps(
+                    {
+                        "state": self.pr["state"],
+                        "headRefOid": self.pr["headRefOid"],
+                        "mergeCommit": {"oid": MERGE_SHA} if merged else None,
+                    }
                 )
+                if self.merge_pending:
+                    self.open_reads_after_merge -= 1
+                    if self.open_reads_after_merge <= 0:
+                        self.merge_pending = False
+                        self.pr["state"] = "MERGED"
+                return 0, out, ""
             return 0, json.dumps(self.pr), ""
         if args[:2] == ["pr", "merge"]:
             return self.merge(args)
@@ -245,6 +251,9 @@ class FakeGh:
                 "GraphQL: Head branch was modified. Review and try the merge again."
                 " (mergePullRequest)",
             )
+        if self.merge_fails_after_merging and self.open_reads_after_merge:
+            self.merge_pending = True
+            return 127, "", "timed out after 60 seconds"
         self.pr["state"] = "MERGED"
         if self.merge_fails_after_merging:
             return 127, "", "timed out after 60 seconds"
@@ -555,6 +564,13 @@ class RealLandingTests(unittest.TestCase):
         orig = land.run_gh
         land.run_gh = self.fake.run_gh
         self.addCleanup(setattr, land, "run_gh", orig)
+        self.slept: List[float] = []
+        orig_sleep = land.sleep
+        land.sleep = self.slept.append
+        self.addCleanup(setattr, land, "sleep", orig_sleep)
+
+    def re_reads(self):
+        return [c for c in self.fake.calls if "state,headRefOid,mergeCommit" in c]
 
     def land(self):
         out = io.StringIO()
@@ -659,6 +675,38 @@ class RealLandingTests(unittest.TestCase):
             "the lander re-reads the PR after a failed merge call",
         )
         self.assertEqual(self.fake.labels_added, [])
+        # An open PR is read again a bounded number of times, well under a minute.
+        self.assertEqual(len(self.re_reads()), 1 + len(land.RE_READ_DELAYS))
+        self.assertEqual(self.slept, list(land.RE_READ_DELAYS))
+        self.assertLess(sum(self.slept), 60)
+
+    def test_a_merge_github_finishes_after_the_first_re_read_lands(self):
+        self.fake.merge_fails_after_merging = True
+        self.fake.open_reads_after_merge = 1
+        lines = self.land()
+        self.assertEqual(lines[-1], f"LAND: landed sha={MERGE_SHA}")
+        self.assertEqual(len(self.re_reads()), 2)
+        self.assertEqual(self.slept, [land.RE_READ_DELAYS[0]])
+        self.assertEqual(self.fake.labels_added, ["landed-by-agent"])
+        self.assertTrue(
+            any(c["body"].startswith(land.LANDED_MARKER) for c in self.fake.comments)
+        )
+
+    def test_a_merge_without_the_trailers_is_settled_and_not_read_again(self):
+        self.fake.merge_fails_after_merging = True
+        self.fake.merge_message = "chore(scripts): tidy the helper (#7)"
+        self.land()
+        self.assertEqual(len(self.re_reads()), 1)
+        self.assertEqual(self.slept, [])
+
+    def test_an_unreadable_merge_commit_after_a_clean_merge_says_why(self):
+        self.fake.fail.add("--json mergeCommit")
+        lines = self.land()
+        self.assertEqual(
+            lines[-1],
+            "LAND: landed sha=unknown reason=cannot read the merge commit: "
+            "gh pr view 7 failed (rc 1): gh: boom (HTTP 500)",
+        )
 
     def test_a_failed_call_whose_re_read_fails_holds(self):
         self.fake.merge_fails_after_merging = True
