@@ -60,8 +60,9 @@ as `--claude-token-cmd`, so the smoke proves the credential file stays outside
 the jail. On macOS it is required, because nono denies the Keychain that holds
 the `/login` credential, and pre-flight blocks without it. The macOS launcher
 also needs `launchctl`; the Linux one needs `systemd-run`, a reachable systemd
-user manager, and `Linger=yes`. On both OSes the run worktree must come from `run-clone` (step 1;
-`PREFLIGHT RUN_CLONE`), because the jail writes only the run's own git repo. A
+user manager, and `Linger=yes`. On both OSes the run worktree must come from
+`run-clone` (step 1; `PREFLIGHT RUN_CLONE`), because the jail writes only the
+run's own git repo. A
 `no-go` **BLOCKS LAUNCH** with the reason it names; treat its output as the
 source of truth rather than re-deriving these facts by hand.
 

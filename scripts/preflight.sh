@@ -716,10 +716,10 @@ attribution_bin=""
 [ -n "$claude_link" ] && attribution_bin="$(resolve_link "$claude_link")"
 echo "PREFLIGHT ATTRIBUTION_BIN: ${attribution_bin:-absent}"
 
-# Which protected locations does the run actually NEED? TCC gates a read
-# before any jail rule is consulted, so a run path under ~/Documents raises the
-# gate whatever the profile grants. Recording the needed set is what makes "none" an answer: a run whose
-# paths all sit outside these locations should never trip one.
+# Which protected locations does the run actually NEED? A jail grant does not
+# lift TCC: a run path under ~/Documents still raises the gate whatever the
+# profile grants. Recording the needed set is what makes "none" an answer: a
+# run whose paths all sit outside these locations should never trip one.
 under_path() { # <candidate> <ancestor> — true when candidate is at or under ancestor
   case "$1" in "$2" | "$2"/*) return 0 ;; *) return 1 ;; esac
 }
@@ -807,8 +807,8 @@ elif [ -z "$nono_bin" ]; then
   consent_verdict="skip (nono not ready — see PREFLIGHT NONO)"
   skip_notes+=("consent-gate probe skipped: nono not ready (see PREFLIGHT NONO; already a blocker)")
 elif ! command -v "$LAUNCHCTL_BIN" >/dev/null 2>&1; then
-  consent_verdict="skip (launchctl not available — non-macOS host)"
-  skip_notes+=("consent-gate probe skipped: launchctl absent (non-macOS host)")
+  consent_verdict="skip (launchctl not available — see PREFLIGHT LAUNCHER)"
+  skip_notes+=("consent-gate probe skipped: launchctl absent (see PREFLIGHT LAUNCHER; already a blocker)")
 else
   cscratch="$(mktemp -d "${TMPDIR:-/tmp}/preflight-consent.XXXXXX" 2>/dev/null || true)"
   if [ -z "$cscratch" ] || [ ! -d "$cscratch" ]; then
