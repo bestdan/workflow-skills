@@ -1,5 +1,5 @@
 ---
-description: Launch an unattended auto-pilot run — an interactive pre-flight, then spawn a detached orchestrator that advances a whole task graph (a Linear project, a GitHub milestone or label query, or a plan-with-docs directory) by taking each task through /deliver-task, with durable crash-resumable run state. Nothing is merged or tracker-completed unattended.
+description: Launch an unattended auto-pilot run — an interactive pre-flight, then spawn a detached orchestrator that advances a whole task graph (a Linear project, a GitHub milestone or label query, or a plan-with-docs directory) by taking each task through /deliver-task, with durable crash-resumable run state. Nothing outside the auto merge tier is merged or tracker-completed unattended.
 allowed-tools: Bash, Glob, Grep, Read, Write, Edit, Agent, AskUserQuestion, Skill, mcp__linear, mcp__claude_ai_Linear
 argument-hint: "<linear-project | gh-milestone | label:<name>[,label:<name>…] | plan-dir> [--until <time>] [--reserve <pct>] [--profile less-claude] [--resume]"
 ---
@@ -50,6 +50,8 @@ pre-flight and the adapters read it), then run the SKILL's Launch
 phase against the resolved source. Supported sources are `plan` (repo-pr),
 `gh-issue`, and `linear`; any other handler (`jira`) → stop and say so.
 
-The run **ends at hand-off, never done**: the orchestrator takes each task to
-`needs_review` and stops. Nothing is merged and no tracker issue is completed
-unattended — completion stays merge-verified via `/sweep-for-complete`.
+The run **ends at hand-off**: the orchestrator takes each task to
+`needs_review` and stops. Nothing outside the `auto` merge tier is merged or
+completed unattended: `/deliver-task`'s lander lands an `auto`-tier PR only
+while the repo's `AGENT_LAND` is `on`, and every other task's completion stays
+merge-verified via `/sweep-for-complete`.

@@ -273,9 +273,11 @@ alone, with no human watching. It never writes code itself — every code change
 happens inside a `/deliver-task` call — and it reads and writes only the
 run-state formats defined in
 [`references/run-state.md`](references/run-state.md). It advances a task as
-far as `handed-off` and stops there; it never merges a PR or completes a
-tracker item (that is `/sweep-for-complete`'s job, later, with a human's PR
-approval in between).
+far as `handed-off` and stops there. It merges nothing itself: the only merge
+in a run is `/deliver-task`'s lander, which lands an `auto`-tier PR, and
+completes its task, only while the repo's `AGENT_LAND` is `on`. Nothing outside
+the `auto` tier is merged unattended; every other task waits for
+`/sweep-for-complete`, with a human's PR approval in between.
 
 The loop is deliberately thin:
 
@@ -337,8 +339,14 @@ branch) — that distinction drives the stacked-PR handling below.
 **The per-task step.** Dispatch exactly one call per task:
 
 ```
-/deliver-task <id> --base <branch> --handler <handler> --questions .auto-pilot/QUESTIONS.md --run-state .auto-pilot/RUN.md
+/deliver-task <id> --base <branch> --handler <handler> --questions .auto-pilot/QUESTIONS.md --run-state .auto-pilot/RUN.md [--no-land]
 ```
+
+Add `--no-land` when any other task in the run is blocked by this one — the
+`dependency_graph` edges that choose a chained task's base, whatever that
+task's phase. Branch cells cannot decide it: this task has no branch until its
+own claim. A stack parent that landed would have its branch deleted on merge,
+and its child could no longer be based on it, or keep an open PR on it.
 
 where `<branch>` is the task's `base` from `RUN.md` and `<handler>` is the
 run's effective handler resolved from the run's (normalized) source (plan ⇒
@@ -396,7 +404,8 @@ mechanized remedy and what re-verification a restacked child still needs:
 stacked-PR repair)".
 
 **State update after each task.** After `/deliver-task` returns, update
-`RUN.md` with the task's observed `phase`, `branch`, and `pr`, then commit to
+`RUN.md` with the task's observed `phase`, `branch`, and `pr` — and, when its
+hand-off printed `LAND: landed sha=<sha>`, `landed <sha>` in `notes` — then commit to
 the run-state branch — the **write order**'s last step
 ([`references/run-state.md`](references/run-state.md) "Write order");
 `/deliver-task` already performed that order's push + tracker-write steps.
@@ -432,10 +441,10 @@ it then writes the **run handoff**: one file beside the repo's worktrees
 that carries the final report, every `QUESTIONS.md` decision, and the next
 steps. The orchestrator writes nothing extra for it
 ([`references/run-state.md`](references/run-state.md) "Run handoff").
-Nothing is merged or tracker-completed by this exit: every
-task sits at whatever phase it reached (`handed-off` on the tracker as
-`needs_review`, or `started` for a `parked` task), ready for
-`/sweep-for-complete` once a human has reviewed and merged.
+This exit merges and completes nothing. A task the lander landed is
+already completed; every other task sits at whatever phase it reached
+(`handed-off` on the tracker as `needs_review`, or `started` for a `parked`
+task), ready for `/sweep-for-complete` once a human has reviewed and merged.
 
 For a **plan** source, the exit also does **not** delete the plan's
 `<name>_plan/` scaffolding — that graduate-then-delete cleanup is a **run-level

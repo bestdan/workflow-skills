@@ -354,7 +354,8 @@ a human must judge comes last, because the end is what a reader is left on. The
 supervisor's alarm line is the one exception: it is the run's verdict, so it
 goes at the very top (`run-budget.md`, "The alarm").
 
-1. **Outcomes** — per task: `handed-off` / `parked` / `skipped` + one line why.
+1. **Outcomes** — per task: `handed-off` (or `handed-off, landed <sha>` when
+   its `notes` say so) / `parked` / `skipped` + one line why.
    A `skipped` line gives the refusal reason from its `notes` cell, and names
    each task left `pending` because it is blocked by that one.
 2. **Evidence** — links to the check output, screenshots, and exercised-feature
