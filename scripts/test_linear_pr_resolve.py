@@ -307,6 +307,22 @@ class TestProbeFailureIsUnresolved(SeamTestCase):
         self.assertIn("HTTP 502", " ".join(row["probe_errors"]))
         self.assertEqual(len(gh.calls), 2)
 
+    def test_a_caller_source_error_is_unresolved_not_no_pr(self):
+        """The Jira sweep could not read an issue's comments, so its PR link
+        may be missing. Clean empty probes must not turn that into 'no PR'."""
+        self.stub(ok([]), ok([]))
+        row = self.row(
+            {
+                "id": "j1",
+                "identifier": "PROJ-45",
+                "attachments": [],
+                "branchName": "task/PROJ-45",
+                "source_errors": ["acli comment list failed for PROJ-45: 401"],
+            }
+        )
+        self.assertEqual(row["state"], "unresolved")
+        self.assertIn("acli comment list failed", " ".join(row["probe_errors"]))
+
     def test_a_failed_branch_probe_is_unresolved(self):
         self.stub(ok([]), fail("rate limited"))
         row = self.row(

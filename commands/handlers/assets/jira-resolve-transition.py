@@ -27,6 +27,18 @@ state, so **stdout is the contract**:
 Exit 0 on success, 2 when no single transition resolves, 1 on malformed
 input or arguments.
 
+## `--from-search`: the acli path
+
+`acli` has no transitions read -- it transitions by target **status name**.
+With `--from-search`, stdin is instead an issue-search array (`acli jira
+workitem search --fields status --json`), and each distinct `fields.status`
+becomes a candidate whose id *is* its name. Category, exclude and prefer apply
+unchanged, so the acli path still picks the target by `statusCategory`, never
+by display name; it prints `<name>\\t<name>`. The candidates are the statuses
+the search saw, not the transitions available from the issue's current status,
+so the caller's transition can still be refused -- that refusal is the
+caller's to report.
+
 Usage:
   python3 jira-resolve-transition.py --category indeterminate \\
       --exclude 'hold|block|review|validation|wait' --prefer 'in progress' < transitions.json
@@ -38,7 +50,7 @@ import json
 import os
 import re
 import sys
-from typing import NamedTuple
+from typing import Dict, NamedTuple
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _shape import ShapeError, expect  # noqa: E402
@@ -68,6 +80,30 @@ def parse_transitions(payload):
         own_name = own_name if isinstance(own_name, str) else None
         transitions.append(Transition(tid, own_name, to_name, category))
     return transitions
+
+
+def statuses_from_search(payload):
+    """One candidate per distinct status in an issue-search array.
+
+    Returns the `Transition` list, or raises ShapeError. Entries acli prints
+    as `null` (it does, for fields it was not asked for) are skipped.
+    """
+    if not isinstance(payload, list):
+        raise ShapeError("response: expected an issue-search array")
+    seen: Dict[str, Transition] = {}
+    for i, issue in enumerate(payload):
+        if issue is None:
+            continue
+        where = f"[{i}]"
+        fields = expect(issue, "fields", dict, where)
+        status = expect(fields, "status", dict, f"{where}.fields")
+        name = expect(status, "name", str, f"{where}.fields.status")
+        category_obj = expect(status, "statusCategory", dict, f"{where}.fields.status")
+        category = expect(
+            category_obj, "key", str, f"{where}.fields.status.statusCategory"
+        )
+        seen.setdefault(name, Transition(name, name, name, category))
+    return list(seen.values())
 
 
 def resolve_category(transitions, category, exclude, prefer):
@@ -132,6 +168,11 @@ def main(argv=None):
     parser.add_argument(
         "--exact", help="status name to match exactly (to.name, then name)"
     )
+    parser.add_argument(
+        "--from-search",
+        action="store_true",
+        help="stdin is an issue-search array; candidates are its distinct statuses",
+    )
     args = parser.parse_args(argv)
 
     if bool(args.category) == bool(args.exact):
@@ -146,7 +187,10 @@ def main(argv=None):
         return 1
 
     try:
-        transitions = parse_transitions(payload)
+        if args.from_search:
+            transitions = statuses_from_search(payload)
+        else:
+            transitions = parse_transitions(payload)
     except ShapeError as exc:
         print(str(exc), file=sys.stderr)
         return 1

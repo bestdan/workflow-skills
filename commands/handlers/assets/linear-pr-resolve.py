@@ -32,6 +32,12 @@ Input (stdin): a JSON array of issue objects, each with at least:
                        the branch probe is skipped, not failed)
   project      obj  -- {"id": ..., "name": ...}, or a bare project id string,
                        or null. Used only to pick the repo.
+  source_errors list -- failures the caller hit while building this row
+                       (optional). Folded into `probe_errors`, so an issue
+                       whose attachments could not be read is never `no_pr`.
+
+The Jira sweep feeds this script too: `jira-pr-sources.py` builds the same
+rows from the plugin's own `PR opened:` / `Working on branch` issue comments.
 
 Usage:
   python3 linear-pr-resolve.py --config dev_docs/tasks/.task-config.yml \\
@@ -414,6 +420,7 @@ def resolve_issue(issue, repos, fallback_repo):
 
     repo = repos.get(issue_project_id(issue)) or fallback_repo
     prs, resolved_via, errors = resolve_prs(issue, repo)
+    errors = [str(e) for e in (issue.get("source_errors") or [])] + errors
 
     read = []
     for pr in prs:

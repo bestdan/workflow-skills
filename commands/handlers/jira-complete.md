@@ -10,15 +10,19 @@ Invoked from `/complete-task <identifier> [--dry-run]` when `handler: jira` is
 configured. This is a single **mechanical** phase: given one already-identified
 issue, transition it to a `Done`-category status. It does **no PR discovery and
 no merge verification** — finding which issues are done and confirming their PR
-actually merged is the job of `/sweep-for-complete` (a future jira sweep), which
-would call this file's phase directly with the caller contract defined in
+actually merged is the job of `/sweep-for-complete` (`jira-sweep-complete.md`),
+which calls this file's phase directly with the caller contract defined in
 "Caller contract" below. If you find yourself adding logic here to search for
 merged PRs or open PRs by branch, stop — that belongs one layer up.
 
 **Shared reference:** the Atlassian MCP preflight is `commands/handlers/jira.md`
-step 1; `commands/handlers/linear-complete.md` is the structural template this
-file mirrors, adapted from Linear's workflow-state `type` to Jira's
+step 1, and the choice between it and `acli` is `jira-config.md` → "Backend";
+`commands/handlers/linear-complete.md` is the structural template this file
+mirrors, adapted from Linear's workflow-state `type` to Jira's
 `statusCategory`.
+
+Each step below gives an **MCP** and an **acli** form. Use the one for the
+resolved backend throughout. Run every `acli` command unsandboxed.
 
 > **MCP namespace.** `<atlassian-mcp>__` is `mcp__claude_ai_Atlassian__` or
 > `mcp__atlassian__` depending on the install (see `jira-config.md`) —
@@ -39,8 +43,11 @@ file mirrors, adapted from Linear's workflow-state `type` to Jira's
 This phase takes, in addition to the identifier:
 
 - **`dry_run`** (bool) — print the plan and stop; no write.
-- **`assume_verified`** (bool, default `false`) — when **true**, the caller (a
-  future `/sweep-for-complete` jira path) is asserting it already confirmed the
+- **`backend`** (`acli` / `mcp`, optional) — a backend the caller already
+  resolved. When it is set, step 1 skips resolution; when unset, step 1
+  resolves it.
+- **`assume_verified`** (bool, default `false`) — when **true**, the caller
+  (`jira-sweep-complete.md`) is asserting it already confirmed the
   completing PR merged, so this phase **skips the interactive confirmation** in
   step 5 and applies the transition directly. A bare manual `/complete-task`
   never sets this — it always confirms (or, in `--dry-run`, just prints the
@@ -57,17 +64,19 @@ This phase takes, in addition to the identifier:
 
 ## Steps
 
-1. **Preflight.** Run the Atlassian MCP preflight exactly as
-   `commands/handlers/jira.md` step 1: call
+1. **Preflight.** If the caller passed `backend`, use it and skip to step 2.
+   Otherwise resolve it per `jira-config.md` → "Backend", whose MCP branch is
+   the preflight in `commands/handlers/jira.md` step 1: call
    `<atlassian-mcp>__getAccessibleAtlassianResources` (no args) and confirm a
-   resource whose `url` matches `https://<jira.site>`. On either failure,
-   **stop** with the same messages ("Jira handler needs the Atlassian MCP.
-   Install/connect it in Claude Code settings, then re-run." / "Configured Jira
-   site `<site>` is not in your accessible Atlassian resources."). Do not fall
-   back to another handler.
+   resource whose `url` matches `https://<jira.site>`. On failure, **stop**
+   with that section's messages. Do not fall back to another handler.
 
-2. **Resolve the issue.** Call `<atlassian-mcp>__getJiraIssue` with `cloudId:
-   <jira.site>`, `issueIdOrKey: <identifier>`, `fields: ["summary", "status"]`.
+2. **Resolve the issue.**
+   - **MCP:** `<atlassian-mcp>__getJiraIssue` with `cloudId: <jira.site>`,
+     `issueIdOrKey: <identifier>`, `fields: ["summary", "status"]`.
+   - **acli:** `acli jira workitem view <identifier> --fields summary,status --json`.
+     It prints the same `fields.status` object.
+
    Capture its current `status.name` and `status.statusCategory.key`
    (`new` / `indeterminate` / `done` — the only "category" this flow reads). If
    the identifier doesn't resolve, stop and report "no issue found for
@@ -85,11 +94,12 @@ This phase takes, in addition to the identifier:
    flow reports it and stops rather than trying to distinguish or re-fire a
    transition.
 
-4. **Resolve the target transition.** Call
-   `<atlassian-mcp>__getTransitionsForJiraIssue` (`cloudId`, `issueIdOrKey:
-   <identifier>`), write the response to a file, and let the helper resolve
-   the completing transition — **by status category, never by display name**,
-   since a board may rename its terminal status to anything:
+4. **Resolve the target transition** — **by status category, never by display
+   name**, since a board may rename its terminal status to anything.
+
+   **MCP:** call `<atlassian-mcp>__getTransitionsForJiraIssue` (`cloudId`,
+   `issueIdOrKey: <identifier>`), write the response to a file, and let the
+   helper resolve the completing transition:
 
    ```bash
    python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-resolve-transition.py" \
@@ -103,6 +113,25 @@ This phase takes, in addition to the identifier:
    transition is `Canceled` from being quietly completed with the wrong
    resolution. On success the helper prints `<id>\t<to.name>` — use that id in
    step 6.
+
+   **acli:** acli cannot list an issue's transitions; it transitions by target
+   status name. So take the candidates from the Done-category statuses the
+   issue's project actually uses (`<project>` is the key before its last `-`),
+   and pass the helper `--from-search` with the same filters:
+
+   ```bash
+   acli jira workitem search --jql 'project = "<project>" AND statusCategory = Done ORDER BY updated DESC' \
+     --fields key,status --limit 100 --json > /tmp/claude/jira-done-statuses.json
+   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-resolve-transition.py" --from-search \
+     --category done --exclude "won.?t do|cancel|reject|obsolete" --prefer 'done|complete|resolved' \
+     < /tmp/claude/jira-done-statuses.json
+   ```
+
+   On success it prints `<status name>\t<status name>`; step 6 uses that name.
+   A project with no Done issue yet has no candidates and prints `NONE`. That
+   status may exist without being reachable from the issue's current status,
+   in which case step 6's transition is refused. Report the refusal; do not
+   try another status.
 
    On `NONE`/`AMBIGUOUS` (exit 2), **do not guess** — never fire a transition
    just to satisfy the request, the same way `jira-claim.md` declines to guess
@@ -126,21 +155,29 @@ This phase takes, in addition to the identifier:
    - **`assume_verified: true`** (a verifying sweep's call) → skip the
      confirmation entirely and proceed straight to step 6.
 
-6. **Apply.** One `<atlassian-mcp>__transitionJiraIssue` call:
-   - `cloudId`: `<jira.site>`
-   - `issueIdOrKey`: `<identifier>`
-   - `transition`: `{ id: "<transition-id from step 4>" }`
+6. **Apply.**
+   - **MCP:** one `<atlassian-mcp>__transitionJiraIssue` call — `cloudId:
+     <jira.site>`, `issueIdOrKey: <identifier>`, `transition: { id:
+     "<transition-id from step 4>" }`.
+   - **acli:** `acli jira workitem transition --key <identifier> --status "<status name from step 4>" --yes`.
+     Then re-read the issue as in step 2. Unless its `statusCategory.key` is
+     now `done`, stop and report `<IDENTIFIER>: transition to <name> was
+     refused (<acli's output>) — resolve manually in Jira`, with no comment.
+     A non-zero exit is reported the same way.
 
    Do not touch `assignee` or `labels` here — completion only changes status.
 
-7. **Comment (optional, caller-supplied).** Call
-   `<atlassian-mcp>__addCommentToJiraIssue` with `cloudId: <jira.site>`,
-   `issueIdOrKey: <identifier>`, `commentBody: <comment_body>` from the caller
-   contract, defaulting to `Completed via /complete-task` when the parameter
+7. **Comment (optional, caller-supplied).** Post `<comment_body>` from the
+   caller contract, defaulting to `Completed via /complete-task` when the parameter
    was omitted. Skip this step only when the caller passed the explicit
    no-comment signal — `comment_body: ""` (empty string), per the caller
    contract — e.g. a sweep that batches its own summary comment elsewhere
    instead.
+   - **MCP:** `<atlassian-mcp>__addCommentToJiraIssue` with `cloudId:
+     <jira.site>`, `issueIdOrKey: <identifier>`, `commentBody: <comment_body>`.
+   - **acli:** write the body to `/tmp/claude/jira-comment.txt` (a file, so
+     quotes in it need no escaping), then
+     `acli jira workitem comment create --key <identifier> --body-file /tmp/claude/jira-comment.txt`.
 
 8. **Report.** Identifier, old status name → new status name, and whether a
    comment was posted (and its body, if short). On dry-run or idempotent

@@ -67,6 +67,7 @@ Configures the `jira` handler, which creates Jira work items via the Atlassian M
      ready_status: Selected for Development
      refinement_status: Needs Refinement
      # archive_status: Archived   # optional — /archive-tasks target (see "Archive status")
+     # backend: auto              # optional — auto | acli | mcp, for /sweep-for-complete and /complete-task (see "Backend")
    # archive_after: 30            # optional, top-level — default /archive-tasks age threshold (days)
    ```
 
@@ -96,6 +97,38 @@ So when `ready_status` is set, `commands/handlers/jira.md` **step 5** transition
 `archive_status` is an **optional** status **name** used only by `/archive-tasks`. **Native Jira issue archival is a Jira Premium feature** and is not reachable through the Atlassian MCP, so this handler instead transitions terminal (`statusCategory = Done`) issues older than the threshold to a status you've modeled as "archived" — typically an extra status in the `Done` category that your board's default filter hides. Set it to that status's name (e.g. `Archived`). The archive flow resolves the name to a per-issue transition id the same way the promote keys do (`transitionJiraIssue` takes a transition id, not a name).
 
 **When `archive_status` is unset, `/archive-tasks` is a no-op** for jira — it reports that there's nothing to do rather than guessing. The shared top-level **`archive_after`** (days) is the default age threshold when `/archive-tasks` is run without `--older-than`. See `commands/handlers/jira-archive.md`.
+
+## Backend (`backend`)
+
+`/sweep-for-complete` and `/complete-task` can reach Jira through either the
+Atlassian CLI (`acli`) or the Atlassian MCP. Every other jira flow uses the
+MCP only. `backend` is **optional**:
+
+- **`auto`** (the default when unset) — use `acli` when its check below
+  passes, otherwise the MCP.
+- **`acli`** — acli only. A failed check stops the run, and there is no MCP
+  fallback.
+- **`mcp`** — the MCP only, through the preflight in `jira.md` step 1.
+
+**The acli check.** Run `acli jira auth status` **unsandboxed**. It passes when
+it exits 0 and its `Site:` line equals `jira.site`. Sandboxed, acli cannot
+reach `api.atlassian.com`, and it reports that as an auth or JQL error rather
+than a network error, so a sandboxed failure says nothing about the login.
+When `jira.site` is a cloud id rather than a hostname, the line cannot match,
+so `auto` uses the MCP.
+
+On failure:
+
+- **`auto`** with a failed MCP preflight as well → stop with "Jira needs acli
+  (`acli jira auth login`) or the Atlassian MCP; neither is reachable for
+  `<jira.site>`."
+- **`acli`** → stop with "acli is not logged in to `<jira.site>` (`acli jira
+  auth status` said: `<its output>`). Run `acli jira auth login`, or set
+  `backend: mcp`."
+
+`auto` prefers acli because acli needs no MCP connection and puts each read
+inside a tested script rather than a chain of tool calls. In a cloud routine
+acli is normally not installed, so `auto` falls through to the MCP there.
 
 ## Team and other custom fields (`additional_fields`)
 
