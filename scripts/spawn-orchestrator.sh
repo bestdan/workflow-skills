@@ -6975,9 +6975,9 @@ verify_await() {
 # `/bin/bash <script>` directly — NO sandbox-exec — which is exactly how it escapes
 # the orchestrator's jail to reach a working execve.
 #
-# The script also exports a UTF-8 LANG/LC_ALL (#1397): launchd and systemd-run
+# The script also exports a UTF-8 LANG/LC_ALL: launchd and systemd-run
 # start the job with no locale, and in the C locale a byte-wise sed in the gate
-# splits a multibyte glyph (#937), failing a commit that passes in a UTF-8 shell.
+# splits a multibyte glyph, failing a commit that passes in a UTF-8 shell.
 # en_US.UTF-8 on macOS; C.UTF-8 on Linux, where en_US is often not generated.
 write_verify_broker() {
   local sentinel="" verify_cmd="" root="" label="" workdir="" log="" path="" \
