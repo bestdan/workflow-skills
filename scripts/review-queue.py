@@ -35,7 +35,7 @@ Gate mode, for `/do-tasks` and `/auto-pilot` before they claim:
 
 Prints one line per waiting PR (`#<n> <human|unknown> — <title>`), then
 `GATE: waiting=<count> limit=<n> open|full`. The queue is full when more PRs
-wait than the limit, so with a limit of 5 a sixth waiting PR stops claiming.
+wait than the limit, so with a limit of 8 a ninth waiting PR stops claiming.
 Exit 0 when open, 1 when full, 3 when the PR list cannot be read (printed as
 `GATE: error reason=...`), 2 for a usage error. `--limit` does not combine with
 `--post`.

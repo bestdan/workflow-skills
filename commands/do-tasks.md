@@ -202,7 +202,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/review-queue.py" --repo <owner/name> --li
   otherwise the current repo (`gh repo view --json nameWithOwner --jq
   .nameWithOwner`).
 - `<review_queue_limit>` is the top-level `review_queue_limit` key, default
-  `5`, or a `review-queue-limit=<n>` token (`commands/task-config.md`
+  `8`, or a `review-queue-limit=<n>` token (`commands/task-config.md`
   "Run-scoped overrides").
 - Run it unsandboxed; it calls `gh`.
 
