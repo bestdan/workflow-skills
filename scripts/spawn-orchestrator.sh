@@ -54,10 +54,11 @@
 #   spawn-orchestrator.sh jail-run [--jail <seatbelt|nono> --profile <file> \
 #       [--nono-bin <bin>] | --label <label>] --workdir <run worktree> -- <subcommand> [args...]
 #
-#   render-nono-profile  The Linux jail (#1349): a nono JSON profile from
-#           launch-runtime.md §1. Its own comment block below is the one home
-#           of what it grants and why. write-launch takes it with --jail nono
-#           --nono-bin <pinned nono> [--claude-token-cmd <cmd>].
+#   render-nono-profile  The jail, Linux (#1349) and macOS (#1361): a nono
+#           JSON profile from launch-runtime.md §1. Its own comment block below
+#           is the one home of what it grants and why. write-launch takes it
+#           with --jail nono --nono-bin <pinned nono> [--claude-token-cmd <cmd>]
+#           (required on macOS, with render-nono-profile --claude-token).
 #   run-clone  The run's own git repo: a bare clone inside the run root
 #           and the run worktree from it, so the jail never writes the main
 #           checkout's .git. Its comment block below is the one home of the layout.
@@ -1535,11 +1536,13 @@ check_run_clone() {
 }
 
 # ---------------------------------------------------------------------------
-# render-nono-profile (#1349) — the Linux jail: a nono JSON profile rendered
-# from launch-runtime.md §1's table. nono is the ONLY enforcing layer
-# (render-settings --jail nono turns the harness sandbox off), so this file is
-# the whole boundary. Rendered and vendored, never pulled: no `extends`, no
-# registry profile. Design: dev_docs/designs/2026-11-03-orchestrator-jail.md.
+# render-nono-profile — the orchestrator jail on Linux (#1349, Landlock) and
+# macOS (#1361, Seatbelt): a nono JSON profile rendered from launch-runtime.md
+# §1's table. nono is the ONLY enforcing layer (render-settings --jail nono
+# turns the harness sandbox off), so this file is the whole boundary. Rendered
+# and vendored, never pulled: no `extends`, no registry profile. Which OS it
+# renders for is _host_os. Design:
+# dev_docs/designs/2026-11-03-orchestrator-jail.md.
 #
 # Three Linux facts shape it, each measured on the Linux test host:
 #   - Landlock cannot deny a path inside a granted directory: nono refuses to
@@ -1562,9 +1565,71 @@ check_run_clone() {
 #     the run's --tmpdir, which the profile also pins as the jail's TMPDIR.
 #     Claude Code puts its scratch tree (claude-<uid>/) under TMPDIR, so that
 #     grant covers it.
+#
+# macOS differs in four ways. Each nono fact below is SOURCE-READ from nono
+# v0.81.0, not measured; pre-flight's nono smoke on a Mac (smoke-nono.sh's
+# launchd checks) is the acceptance check that they hold.
+#   - The default profile's system_write_macos group grants /tmp, /private/tmp,
+#     /var/folders, /private/var/folders, /dev and $TMPDIR — the twin of
+#     system_write_linux. Excluded the same way, device paths re-granted.
+#   - Seatbelt can deny inside a grant, and nono passes raw Seatbelt rules
+#     through: a top-level `unsafe_macos_seatbelt_rules` array in a file profile
+#     is kept (command_runtime::strip_untrusted_unsafe_seatbelt_rules strips it
+#     only from a non-user profile, and is_file_path_ref counts a --profile path
+#     as user), checked by validate_platform_rule (balanced S-expression; only
+#     `(allow file-read*/file-write* (subpath "/"))` is refused), applied by
+#     sandbox_prepare.rs through caps.add_platform_rule, and emitted by
+#     crates/nono/src/sandbox/macos.rs generate_profile AFTER the write grants
+#     and after nono's blanket `(allow process-exec*)` and `(allow mach-lookup)`.
+#     Seatbelt is last-match-wins, so these rules override both. They carry
+#     orchestrator.sb.tmpl's launchd/LaunchServices mach-lookup deny and its
+#     launchctl/open/osascript exec deny (the confused-deputy escape: a job
+#     launchd spawns is outside the jail). Under nono a binary staged in a
+#     writable dir runs, so the mach-lookup deny is what holds against a staged
+#     launchctl. They also carry the harness runtime grants nono's typed grants
+#     cannot express — regex names and paths that do not exist yet — ported
+#     from emit_harness_runtime, which says why each is needed. Its srt-mux
+#     socket is left out: the harness sandbox is off under nono.
+#   - No `linux` key: AF_UNIX mediation is Landlock's.
+#   - The default profile denies the Keychain (deny_keychains_macos, plus
+#     keychain mach-lookup denies), and /login keeps Claude's OAuth credential
+#     there. A jailed claude could not authenticate, so --claude-token is
+#     required: the token command is the only way in.
 # Egress parity first: network.block is false, the allowlist is a follow-up.
 # ---------------------------------------------------------------------------
 NONO_PROFILE_NAME="auto-pilot-orchestrator"
+
+# A JSON string for a raw Seatbelt rule, which carries quotes and backslashes:
+# escape those two, refuse a control character (no rule needs one).
+_nono_json_string() {
+  case "$1" in
+    *[[:cntrl:]]*)
+      echo "spawn-orchestrator: a nono rule has a control character (fail-closed): $1" >&2
+      return 1
+      ;;
+  esac
+  local s="$1" bs='\' q='"'
+  s="${s//"$bs"/$bs$bs}"
+  s="${s//"$q"/$bs$q}"
+  printf '"%s"' "$s"
+}
+
+# The raw Seatbelt rules of the macOS profile, one per line (see the header).
+# Args: <tmp-root canonical> <var-tmp canonical> <session-env dir>.
+_nono_macos_seatbelt_rules() {
+  local tmp_root="$1" var_tmp="$2" session_env="$3" c='[A-Za-z0-9]'
+  printf '%s\n' '(deny mach-lookup (global-name "com.apple.xpc.launchd") (global-name "com.apple.coreservices.launchservicesd"))'
+  # process-exec* rather than the template's process-exec: it also covers the
+  # interpreter variant that nono's blanket allow grants.
+  printf '%s\n' '(deny process-exec* (literal "/bin/launchctl") (literal "/usr/bin/open") (literal "/usr/bin/osascript"))'
+  # Read as well as write: nono's reads are not global as the Seatbelt
+  # template's are, so a write grant alone would leave these unreadable.
+  printf '(allow file-read* file-write* (regex #"^%s/claude-[A-Za-z0-9]+(-cwd)?(/|$)"))\n' "$(sbpl_regex_escape "$tmp_root")"
+  printf '(allow file-read* file-write* (literal "%s"))\n' "$(sbpl_escape "$var_tmp")"
+  printf '(allow file-read* file-write* (regex #"^%s/sh-thd-[0-9]+$"))\n' "$(sbpl_regex_escape "$var_tmp")"
+  printf '(allow file-read* file-write* (regex #"^%s/zsh%s%s%s%s%s%s$"))\n' "$(sbpl_regex_escape "$tmp_root")" "$c" "$c" "$c" "$c" "$c" "$c"
+  printf '(allow file-read* file-write* (subpath "%s"))\n' "$(sbpl_escape "$session_env")"
+}
 
 # A path for a JSON string: refuse what would need escaping rather than escape
 # it. No legitimate grant path carries a quote, a backslash or a control char.
@@ -1635,6 +1700,10 @@ render_nono_profile() {
   case "$out" in /*) ;; *) die "--out must be absolute (fail-closed): $out" ;; esac
   [ -n "$tmpdir" ] || die "render-nono-profile requires --tmpdir <dir> (the run's own TMPDIR)"
   [ -n "${HOME:-}" ] || die "HOME is unset (fail-closed)"
+  local mac=0
+  [ "$(_host_os)" = Darwin ] && mac=1
+  [ "$mac" = 0 ] || [ "$token" = 1 ] \
+    || die "render-nono-profile on macOS requires --claude-token (fail-closed): nono's default profile denies the Keychain, where /login keeps Claude's OAuth credential, so the jailed claude can authenticate only with a token command (claude setup-token) — pass --claude-token-cmd to the launch"
 
   local home claude_dir cred_file="" p c
   home="$(canonicalize "$HOME")" || exit 2
@@ -1670,6 +1739,15 @@ render_nono_profile() {
       c="$(canonicalize "$p")" || exit 2
       ro_dir+=("$c")
     done
+    # macOS: Homebrew's prefixes (Apple silicon, Intel), where claude, gh and
+    # the rest often live. Read-only.
+    if [ "$mac" = 1 ]; then
+      for p in /opt/homebrew /usr/local; do
+        [ -d "$p" ] || continue
+        c="$(canonicalize "$p")" || exit 2
+        ro_dir+=("$c")
+      done
+    fi
   fi
   # git reads its global config for the commit identity, and runs the global
   # hooks it names: a hooks path outside every grant fails each commit with
@@ -1762,12 +1840,23 @@ render_nono_profile() {
     done
   fi
 
-  # Device paths nono's system_write_linux group would have granted, kept
-  # without its /tmp. Literal, never canonicalized: /dev/fd resolves to the
-  # renderer's own /proc/<pid>/fd.
-  local -a dev_dirs=() dev_files=()
-  for p in /dev/pts /dev/fd /proc/self/fd; do [ -e "$p" ] && dev_dirs+=("$p"); done
-  for p in /dev/null /dev/zero /dev/full /dev/tty /dev/stdout /dev/stderr; do [ -e "$p" ] && dev_files+=("$p"); done
+  # Device paths nono's system_write_linux (system_write_macos) group would have
+  # granted, kept without its temp dirs. Literal, never canonicalized: /dev/fd
+  # resolves to the renderer's own /proc/<pid>/fd.
+  local -a dev_dirs=() dev_files=() sb_rules=()
+  if [ "$mac" = 1 ]; then
+    [ -e /dev/fd ] && dev_dirs+=(/dev/fd)
+    for p in /dev/null /dev/zero /dev/tty /dev/stdout /dev/stderr; do [ -e "$p" ] && dev_files+=("$p"); done
+    local tmp_root var_tmp session_env rule
+    tmp_root="$(canonicalize /tmp)" && var_tmp="$(canonicalize /var/tmp)" \
+      && session_env="$(resolve_lazy "$home/.claude/session-env")" || exit 2
+    while IFS= read -r rule; do
+      sb_rules+=("$rule")
+    done < <(_nono_macos_seatbelt_rules "$tmp_root" "$var_tmp" "$session_env")
+  else
+    for p in /dev/pts /dev/fd /proc/self/fd; do [ -e "$p" ] && dev_dirs+=("$p"); done
+    for p in /dev/null /dev/zero /dev/full /dev/tty /dev/stdout /dev/stderr; do [ -e "$p" ] && dev_files+=("$p"); done
+  fi
 
   local tmpq
   tmpq="$(_nono_json_path "$tmp_c")" || exit 2
@@ -1787,16 +1876,36 @@ render_nono_profile() {
     rm -f "$tmp"
     die "render-nono-profile: a grant path could not be written as JSON (fail-closed)"
   fi
+  # macOS's raw Seatbelt rules, one per line, so the suite and a reader can grep
+  # them.
+  local rules="" q rule
+  for rule in ${sb_rules[@]+"${sb_rules[@]}"}; do
+    q="$(_nono_json_string "$rule")" || {
+      rm -f "$tmp"
+      die "render-nono-profile: a Seatbelt rule could not be written as JSON (fail-closed)"
+    }
+    [ -z "$rules" ] || rules="$rules,"
+    rules="$rules
+    $q"
+  done
   {
     printf '{\n'
     printf '  "meta": {\n'
     printf '    "name": "%s",\n' "$NONO_PROFILE_NAME"
     printf '    "version": "1",\n'
-    printf '    "description": "Rendered by spawn-orchestrator.sh render-nono-profile; do not edit. nono is the only enforcing layer: Claude Code'"'"'s own sandbox is off (render-settings --jail nono) because it cannot start under Landlock."\n'
-    printf '  },\n'
-    printf '  "groups": { "exclude": ["system_write_linux"] },\n'
-    printf '  "filesystem": {\n%s\n  },\n' "$lists"
-    printf '  "linux": { "af_unix_mediation": "pathname" },\n'
+    if [ "$mac" = 1 ]; then
+      printf '    "description": "Rendered by spawn-orchestrator.sh render-nono-profile; do not edit. nono is the only enforcing layer: Claude Code'"'"'s own sandbox is off (render-settings --jail nono) because macOS refuses a nested Seatbelt profile."\n'
+      printf '  },\n'
+      printf '  "groups": { "exclude": ["system_write_macos"] },\n'
+      printf '  "filesystem": {\n%s\n  },\n' "$lists"
+      printf '  "unsafe_macos_seatbelt_rules": [%s\n  ],\n' "$rules"
+    else
+      printf '    "description": "Rendered by spawn-orchestrator.sh render-nono-profile; do not edit. nono is the only enforcing layer: Claude Code'"'"'s own sandbox is off (render-settings --jail nono) because it cannot start under Landlock."\n'
+      printf '  },\n'
+      printf '  "groups": { "exclude": ["system_write_linux"] },\n'
+      printf '  "filesystem": {\n%s\n  },\n' "$lists"
+      printf '  "linux": { "af_unix_mediation": "pathname" },\n'
+    fi
     printf '  "network": { "block": false },\n'
     # One key per line, last in the file: write-launch reads it back with sed to
     # export the same TMPDIR, so render and launch cannot drift.
@@ -1925,8 +2034,9 @@ write_launch() {
         profile="$2"
         shift 2
         ;;
-      # seatbelt (macOS, sandbox-exec) or nono (Linux, #1349). With nono,
-      # --profile is a render-nono-profile JSON and --nono-bin the pinned binary.
+      # seatbelt (macOS, sandbox-exec; legacy) or nono (Linux #1349, macOS
+      # #1361). With nono, --profile is a render-nono-profile JSON and
+      # --nono-bin the pinned binary.
       --jail)
         [ $# -ge 2 ] || die "missing value for --jail"
         jail="$2"
@@ -6972,19 +7082,28 @@ verify_await() {
 # Render an UN-JAILED broker launch script + its launchd plist. The verify command
 # is PINNED here (baked into the script from the run's resolved verify_command), so
 # the broker never runs anything a request or an agent supplies. The broker job runs
-# `/bin/bash <script>` directly — NO sandbox-exec — which is exactly how it escapes
-# the orchestrator's jail to reach a working execve.
+# `/bin/bash <script>` directly — no nono, no sandbox-exec — which is exactly how it
+# escapes the orchestrator's jail to reach a working execve. A nono run (the
+# default, both OSes) passes its --nono-profile; a legacy macOS Seatbelt run
+# passes --jail seatbelt.
 write_verify_broker() {
   local sentinel="" verify_cmd="" root="" label="" workdir="" log="" path="" \
     self="$ROOT/scripts/spawn-orchestrator.sh" interval="10" throttle="10" \
-    out_script="" out_plist="" plist_template="$PLIST_TEMPLATE_DEFAULT" nono_profile=""
+    out_script="" out_plist="" plist_template="$PLIST_TEMPLATE_DEFAULT" nono_profile="" jail="nono"
   while [ $# -gt 0 ]; do
     case "$1" in
-      # The run's rendered nono profile (Linux): the broker script and this
-      # script run unjailed, so both must sit outside its write grants.
+      # The run's rendered nono profile: the broker script and this script run
+      # unjailed, so both must sit outside its write grants. Required unless the
+      # run's jail is the legacy macOS Seatbelt one (--jail seatbelt), which has
+      # no nono profile to check against.
       --nono-profile)
         [ $# -ge 2 ] || die "missing value for --nono-profile"
         nono_profile="$2"
+        shift 2
+        ;;
+      --jail)
+        [ $# -ge 2 ] || die "missing value for --jail"
+        jail="$2"
         shift 2
         ;;
       --sentinel-dir)
@@ -7058,10 +7177,19 @@ write_verify_broker() {
   # Linux starts the broker with systemd-run (detach --label), so no plist.
   if _is_linux; then
     [ -n "$out_script" ] || die "write-verify-broker requires --out-script"
-    [ -n "$nono_profile" ] || die "write-verify-broker on Linux requires --nono-profile <the run's rendered profile> (fail-closed): the broker runs unjailed, so its script must be checked against the jail's write grants"
   else
     [ -n "$out_script" ] && [ -n "$out_plist" ] || die "write-verify-broker requires --out-script and --out-plist"
   fi
+  case "$jail" in
+    nono)
+      [ -n "$nono_profile" ] || die "write-verify-broker requires --nono-profile <the run's rendered profile> (fail-closed): the broker runs unjailed, so its script must be checked against the jail's write grants (a legacy Seatbelt run on macOS passes --jail seatbelt instead)"
+      ;;
+    seatbelt)
+      ! _is_linux || die "write-verify-broker --jail seatbelt is macOS only (fail-closed)"
+      [ -z "$nono_profile" ] || die "--nono-profile is only meaningful with --jail nono"
+      ;;
+    *) die "--jail must be seatbelt or nono (fail-closed): $jail" ;;
+  esac
   [ -n "$sentinel" ] && [ -n "$verify_cmd" ] && [ -n "$root" ] \
     || die "write-verify-broker requires --sentinel-dir, --verify-cmd, and --confine-under"
   [ -n "$label" ] || die "write-verify-broker requires --label"
