@@ -288,8 +288,8 @@ while unblocked tasks remain and inside budget bounds:
     pick next unblocked task (phase-based readiness)
     if until is set and now + min_task_budget > until:   # pre-dispatch deadline guard
         stop the loop cleanly (record "N left, M min to deadline, not starting")
-    if review-queue.py exits non-zero:                      # review-queue gate
-        stop the loop the same way (record "review queue full: N human-tier PRs, limit L")
+    if review-queue.py --limit exits non-zero:              # review-queue gate
+        stop the loop the same way (record why: full, unreadable, or bad limit)
     /deliver-task it --run-state .auto-pilot/RUN.md (with per-task wall-clock + retry bounds)
     update run state on the run-state branch
     check rate-window usage
@@ -323,10 +323,16 @@ this guard exists and the floor's derivation:
 
 **Review-queue gate.** Before claiming each task, run `/do-tasks`' gate
 (`commands/do-tasks.md` "1a. Review-queue gate") against the repo the PR will
-open in. When the queue is full or unreadable, stop the loop exactly as the
-deadline guard does: `status: paused` with `paused_until` empty, exit reason
-`deadline`, the reason in `REPORT.md`. The run resumes only by `--resume`,
-once the owner has drained the queue.
+open in. On any non-zero exit, stop the loop exactly as the deadline guard
+does: `status: paused` with `paused_until` empty, and the reason in
+`REPORT.md`. Declare exit reason `deadline` with `--detail` naming the cause:
+`review queue full: N waiting, limit L` (exit 1), `review queue unreadable:
+<GATE: error reason>` (exit 3), or `review_queue_limit invalid` (exit 2). The
+reason list is closed, and `deadline` is the one that tears the run down
+without an alarm and resumes only by `--resume`, once the owner has drained
+the queue. An unreadable queue stops the run on purpose: claiming blind is the
+failure this gate exists to prevent, and a `gh` outage would fail the next
+`/deliver-task` anyway.
 
 **Pre-invoke reserve gate.** The outer loop dispatches each delivery with its
 `RUN.md` path; `/deliver-task`, as lifecycle owner, applies

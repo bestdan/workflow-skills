@@ -207,7 +207,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/review-queue.py" --repo <owner/name> --li
 - Run it unsandboxed; it calls `gh`.
 
 Exit `0` → go on to the handler. Exit `1` → the queue is full: claim nothing,
-and report `Review queue full: <count> human-tier PRs open (limit <n>) — no
+and report `Review queue full: <count> PRs waiting on review (limit <n>) — no
 task claimed`, followed by the PRs it listed. This is a decline, not an error.
 Exit `3` → the queue could not be read: claim nothing, and report the
 `GATE: error` line. A batch runs the gate once, before it selects, so a large

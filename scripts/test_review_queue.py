@@ -346,6 +346,11 @@ class GateTests(Base):
         self.assertEqual(code, 3)
         self.assertTrue(out.startswith("GATE: error reason="))
 
+    def test_a_negative_limit_is_a_usage_error(self):
+        with self.assertRaises(SystemExit) as caught:
+            self.run_queue("--limit", "-1")
+        self.assertEqual(caught.exception.code, 2)
+
     def test_limit_does_not_combine_with_post(self):
         with self.assertRaises(SystemExit) as caught:
             self.run_queue("--limit", "5", "--post")
