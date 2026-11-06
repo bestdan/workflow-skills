@@ -73,10 +73,25 @@ down on its very first wake. `clear-exit-state` removes the sentinel, blanks the
 three `exit_reason*` fields, and commits — so the run's first real declaration is
 the only one on the branch.
 
-**Then run the doctor — before anything else reads the worktree.** Run
-`"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" doctor --dir <run-worktree> --run-id <run_id>
---questions .auto-pilot/QUESTIONS.md [--handler <h>]`
-([`run-state.md`](run-state.md) "Run doctor"). `--resume`'s reconciliation pass
+**Then run the doctor — before anything else reads the worktree, and inside the
+run's jail.** Run
+
+```bash
+"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orchestrator.sh" jail-run --jail <seatbelt|nono> \
+  --profile <the run's profile> [--nono-bin <the pinned nono>] --workdir <run-worktree> \
+  -- doctor --dir <run-worktree> --run-id <run_id> --questions .auto-pilot/QUESTIONS.md [--handler <h>]
+```
+
+([`run-state.md`](run-state.md) "Run doctor"). The profile and, on Linux, the
+pinned nono are the ones the launch wrapper names; both sit outside every write
+grant. The doctor checks out, resets and removes worktrees, and the jail has
+written the run clone's config and hooks, so run unjailed those commands would
+run whatever it planted ([`launch-runtime.md`](launch-runtime.md) §5). Do the
+same for any other git in this phase that writes: unjailed, keep to reads
+(`rev-parse`, `show`, `for-each-ref`, `worktree list`), and ask the remote
+through `gh` or from the main checkout rather than through the run clone's
+`origin`. `alarm-clear` runs no git, and `clear-exit-state` commits without
+running any hook or filter, so both stay unjailed. `--resume`'s reconciliation pass
 **is** the doctor, run once at the top of resume — the same seven-invariant
 audit the run loop runs every iteration, not a second, divergent
 reconciliation. Its first two invariants are exactly the two belts a crashed

@@ -255,7 +255,9 @@ procedure is in [`references/resume.md`](references/resume.md); in short:
   clear-exit-state --dir <run-worktree>`) — the done-sentinel and
   `exit_reason*` are durable and would otherwise make a resumed live run read
   back as finished ([`references/resume.md`](references/resume.md)).
-- **Then run the doctor.** A **HALT** (exit 30) stops here.
+- **Then run the doctor, inside the run's jail** (`spawn-orchestrator.sh
+  jail-run … -- doctor …`): the jail wrote the run clone's config and hooks.
+  A **HALT** (exit 30) stops here.
 - **Reconcile each non-terminal task** by observing reality in the write order's
   direction (git → tracker → run files) and matching it to `run-state.md`'s
   crash-reconciliation table (rows G1–G7) — idempotent (adopts an existing PR,
