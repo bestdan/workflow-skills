@@ -69,6 +69,7 @@ class FakeGh:
         self.comments = {}  # pr -> [comment]
         self.commits = {}  # pr -> [commit]
         self.files = {}  # pr -> [file]
+        self.messages = {}  # merge sha -> commit message
         self.fail = set()  # endpoint substrings that fail
 
     def __call__(self, args, stdin=None):
@@ -91,6 +92,8 @@ class FakeGh:
             )
         if "rule-suites" in endpoint:
             return 0, json.dumps([self.rules]), ""
+        if "/commits/" in endpoint:  # one commit's message, read with --jq
+            return 0, self.messages.get(endpoint.split("/commits/")[1], "x\n"), ""
         number = int(endpoint.split("/")[4])
         if "/comments" in endpoint:
             return 0, json.dumps([self.comments.get(number, [])]), ""
@@ -299,6 +302,59 @@ class ShadowTests(Base):
         ]
         _, lines = self.run_with_policy(POLICY_400)
         self.assertEqual(lines[-1], "AUDIT: shadow shadowed=1 would-land=0/30")
+
+
+LANDED_MESSAGE = (
+    "fix(scripts): tidy (#50)\n\nLanded-by: land-pr.sh\nCo-review-head: abc\n"
+)
+
+
+class LandedTests(Base):
+    def test_lists_trailer_merges_with_follow_ups_and_missing_labels(self):
+        labelled = pr(50, "2026-11-02T10:00:00Z")
+        labelled["labels"] = [{"name": "landed-by-agent"}]
+        unlabelled = pr(51, "2026-11-02T11:00:00Z")
+        by_hand = pr(52, "2026-11-02T12:00:00Z")
+        revert = pr(
+            53,
+            "2026-11-04T10:00:00Z",
+            title="fix: revert #50 (fix(scripts): tidy)",
+        )
+        late = pr(
+            54, "2026-11-12T10:00:00Z", title="fix(scripts): again", body="See #51."
+        )
+        self.fake.prs = [labelled, unlabelled, by_hand, revert, late]
+        self.fake.messages = {sha(1050): LANDED_MESSAGE, sha(1051): LANDED_MESSAGE}
+        code, lines = self.run_audit("--mode", "landed")
+        self.assertEqual(code, 0)
+        text = "\n".join(lines)
+        self.assertIn("#50 landed 2026-11-02", text)
+        self.assertIn("#51 landed 2026-11-02", text)
+        self.assertNotIn("#52 landed", text)
+        self.assertIn("follow-up #53", text)
+        self.assertNotIn("follow-up #54", text)  # past 7 days
+        self.assertEqual(text.count("lacks the `landed-by-agent` label"), 1)
+        self.assertEqual(
+            lines[-1], "AUDIT: landed landed=2 followed-up=1 unlabeled=1 unknown=0"
+        )
+
+    def test_a_trailer_quoted_mid_line_is_not_a_landing(self):
+        self.fake.prs = [pr(55, "2026-11-02T10:00:00Z")]
+        self.fake.messages = {
+            sha(1055): "docs: say `Landed-by: land-pr.sh` is the trailer\n"
+        }
+        _, lines = self.run_audit("--mode", "landed")
+        self.assertEqual(
+            lines[-1], "AUDIT: landed landed=0 followed-up=0 unlabeled=0 unknown=0"
+        )
+
+    def test_an_unreadable_merge_commit_is_unknown_not_a_crash(self):
+        self.fake.prs = [pr(56, "2026-11-02T10:00:00Z")]
+        self.fake.fail = {"/commits/"}
+        code, lines = self.run_audit("--mode", "landed")
+        self.assertEqual(code, 0)
+        self.assertIn("#56 unknown", lines[0])
+        self.assertTrue(lines[-1].endswith("unknown=1"))
 
 
 class UsageTests(Base):
