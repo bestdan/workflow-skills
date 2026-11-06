@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.199.2] - 2026-11-06
+
+### Fixes
+
+- record the run's jail so resume can find it [#1400] (#1418) (d737772)
+
 ## [2.199.1] - 2026-11-06
 
 ### Fixes
