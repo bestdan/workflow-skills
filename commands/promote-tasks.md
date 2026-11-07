@@ -113,7 +113,7 @@ Do not touch any other fields, and no other part of the body. Do not move the fi
 
 ### 4. Report
 
-Under `after=`, lead with `dependents re-checked (N) after <ids>:`, where `N` counts every dependent found, and use the same sections below it.
+Under `after=`, lead with `dependents re-checked (N) after <ids>:`, where `N` counts the dependents still in `status: new` (a dependent already past `new` is out of the promoter's lane and not found here), and use the same sections below it.
 
 Print a summary table, annotating any card that got a backfill, and every card that reached the forecast with its tier:
 

@@ -100,6 +100,8 @@ from _labels import (  # noqa: E402
 )
 
 READY_STATUS_VALUE = "2_ready"
+# The un-scored rung: the one status the promoter may still move an issue off.
+UNSCORED_STATUS_VALUE = "0_untriaged"
 ESTIMATE_PREFIX = "est:"
 # Not a vocabulary label: `blocked` is the free-standing manual hold the promote
 # flow's candidate search excludes by this spelling (gh-issue-promote.md step 3).
@@ -376,17 +378,21 @@ def compute_dependents(repo, labels_file, blocker_numbers):
     """
     groups, _colors = load_vocabulary(labels_file)
     statuses = groups.get("status", [])
-    if not statuses:
-        raise VocabularyError("labels.yml: no status group")
-    # The first rung is the un-scored one; any other `status:` label means the
-    # promoter has already been here.
-    scored = {f"status:{value}" for value in statuses[1:]}
+    if UNSCORED_STATUS_VALUE not in statuses:
+        raise VocabularyError(
+            f"labels.yml: status group has no `{UNSCORED_STATUS_VALUE}` value"
+        )
+    # Any other vocabulary rung means the promoter has already been here.
+    scored = {f"status:{v}" for v in statuses if v != UNSCORED_STATUS_VALUE}
 
     local: dict = {}
     foreign: dict = {}
     for blocker in blocker_numbers:
         for entry in dependents(repo, blocker):
-            if entry.get("state") != "open":
+            # GitHub documents dependencies as issue-to-issue, but the entry is
+            # the generic issue object, which can carry `pull_request`. A PR
+            # passed on would be labelled as if it were an un-scored issue.
+            if entry.get("state") != "open" or entry.get("pull_request"):
                 continue
             number = entry["number"]
             owner_repo = repo_of(entry)

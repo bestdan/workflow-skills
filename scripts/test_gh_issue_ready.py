@@ -576,12 +576,12 @@ class DependentsOfTests(unittest.TestCase):
         self.assertEqual(
             result["foreign"], [{"repo": "other/repo", "number": 15, "via": [7]}]
         )
-        every = [
-            n
+        numbers = [
+            row["number"]
             for k in ("candidates", "already_scored", "blocked_label")
-            for n in result[k]
+            for row in result[k]
         ]
-        self.assertNotIn(14, [r["number"] for r in every])
+        self.assertNotIn(14, numbers)
 
     def test_a_scored_issue_that_is_also_blocked_is_already_scored(self):
         """Already-scored wins: the promoter never touches it, held or not."""
@@ -620,6 +620,64 @@ class DependentsOfTests(unittest.TestCase):
         )
         raw, _ = self.run_main(graph, 7)
         self.assertNotIn("STRANGER", raw)
+
+    def test_the_unscored_rung_is_named_not_positional(self):
+        """A vocabulary listing the rungs out of order still buckets correctly."""
+        with tempfile.TemporaryDirectory() as tmp:
+            reordered = Path(tmp) / "labels.yml"
+            reordered.write_text(
+                LABELS_FILE.read_text().replace(
+                    "status: [0_untriaged, 1_needs_refinement,",
+                    "status: [1_needs_refinement, 0_untriaged,",
+                )
+            )
+            graph = FakeBlockingGraph(
+                {
+                    7: [
+                        dependent(10, ["status:0_untriaged"]),
+                        dependent(11, ["status:1_needs_refinement"]),
+                    ]
+                }
+            )
+            gh_issue_ready.run_gh = graph.run_gh
+            result = gh_issue_ready.compute_dependents("owner/name", reordered, [7])
+        self.assertEqual([r["number"] for r in result["candidates"]], [10])
+        self.assertEqual([r["number"] for r in result["already_scored"]], [11])
+
+    def test_the_text_report_prints_no_title_or_body(self):
+        graph = FakeBlockingGraph(
+            {
+                7: [
+                    dependent(10),
+                    dependent(12, ["status:2_ready"]),
+                    dependent(15, repo="other/repo"),
+                ]
+            }
+        )
+        gh_issue_ready.run_gh = graph.run_gh
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            gh_issue_ready.main(
+                [
+                    "--repo",
+                    "owner/name",
+                    "--labels-file",
+                    str(LABELS_FILE),
+                    "--dependents-of",
+                    "7",
+                ]
+            )
+        text = out.getvalue()
+        self.assertNotIn("STRANGER", text)
+        self.assertIn("Candidates (1):\n  #10 (via #7)", text)
+        self.assertIn("other/repo#15 (via #7)", text)
+
+    def test_a_pull_request_is_never_a_candidate(self):
+        pr = dependent(20)
+        pr["pull_request"] = {"url": "https://api.github.com/repos/owner/name/pulls/20"}
+        graph = FakeBlockingGraph({7: [pr, dependent(10)]})
+        _, result = self.run_main(graph, 7)
+        self.assertEqual([r["number"] for r in result["candidates"]], [10])
 
     def test_is_read_only(self):
         graph = FakeBlockingGraph({7: [dependent(10)]})

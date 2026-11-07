@@ -18,7 +18,7 @@ Scoring writes **both** rungs because they answer different questions: `status:`
 
 ## Steps
 
-> **`backfill-only` short-circuits this flow.** If `$ARGUMENTS` contains `backfill-only`, run step 1 (auth) and step 2 (repo), then go straight to **step 7** and stop. Step 7's helper requires `--repo`, so resolve it even when step 2 would have omitted the flag: `<repo>` is `gh-issue.repo` from `.task-config.yml` if set, else `gh repo view --json nameWithOwner --jq .nameWithOwner`. Steps 2a–6 are the scoring flow, and `backfill-only` does not score: no candidate query, no confidence check, no transition, no report of promotions that did not happen.
+> **`backfill-only` short-circuits this flow.** If `$ARGUMENTS` also contains `after=`, refuse the pair by name and stop instead (see the next note). If `$ARGUMENTS` contains `backfill-only`, run step 1 (auth) and step 2 (repo), then go straight to **step 7** and stop. Step 7's helper requires `--repo`, so resolve it even when step 2 would have omitted the flag: `<repo>` is `gh-issue.repo` from `.task-config.yml` if set, else `gh repo view --json nameWithOwner --jq .nameWithOwner`. Steps 2a–6 are the scoring flow, and `backfill-only` does not score: no candidate query, no confidence check, no transition, no report of promotions that did not happen.
 
 > **`after=<n>[,<n>…]` replaces step 3's query and nothing else.** If `$ARGUMENTS` contains `after=`, refuse it alongside `backfill-only` by name, skip step 2a (the ids are the scope; `all` has no effect), and in step 3 read the candidates through **"`after=` candidates"** below instead of `gh issue list`. Step 3's author gate, 3a, 3b, 4, 4b, 5 and 6 then run unchanged on what it returns, so a dependent with a second open blocker is held by 3b like any other.
 
