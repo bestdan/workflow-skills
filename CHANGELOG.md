@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.205.0] - 2026-11-07
+
+### Features
+
+- add after= to score a completion's dependents [N/A] (#1440) (d2af1ddb)
+
 ## [2.204.0] - 2026-11-06
 
 ### Features
