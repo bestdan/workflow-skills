@@ -18,7 +18,9 @@ Scoring writes **both** rungs because they answer different questions: `status:`
 
 ## Steps
 
-> **`backfill-only` short-circuits this flow.** If `$ARGUMENTS` contains `backfill-only`, run step 1 (auth) and step 2 (repo), then go straight to **step 7** and stop. Step 7's helper requires `--repo`, so resolve it even when step 2 would have omitted the flag: `<repo>` is `gh-issue.repo` from `.task-config.yml` if set, else `gh repo view --json nameWithOwner --jq .nameWithOwner`. Steps 2a–6 are the scoring flow, and `backfill-only` does not score: no candidate query, no confidence check, no transition, no report of promotions that did not happen.
+> **`backfill-only` short-circuits this flow.** If `$ARGUMENTS` also contains `after=`, refuse the pair by name and stop instead (see the next note). If `$ARGUMENTS` contains `backfill-only`, run step 1 (auth) and step 2 (repo), then go straight to **step 7** and stop. Step 7's helper requires `--repo`, so resolve it even when step 2 would have omitted the flag: `<repo>` is `gh-issue.repo` from `.task-config.yml` if set, else `gh repo view --json nameWithOwner --jq .nameWithOwner`. Steps 2a–6 are the scoring flow, and `backfill-only` does not score: no candidate query, no confidence check, no transition, no report of promotions that did not happen.
+
+> **`after=<n>[,<n>…]` replaces step 3's query and nothing else.** If `$ARGUMENTS` contains `after=`, refuse it alongside `backfill-only` by name, skip step 2a (the ids are the scope; `all` has no effect), and in step 3 read the candidates through **"`after=` candidates"** below instead of `gh issue list`. Step 3's author gate, 3a, 3b, 4, 4b, 5 and 6 then run unchanged on what it returns, so a dependent with a second open blocker is held by 3b like any other.
 
 ### 1. Preflight auth
 
@@ -57,6 +59,17 @@ gh issue list --state open --search '-label:"status:1_needs_refinement" -label:"
 - The `--search` filter selects the **un-scored** issues by excluding every `status:` rung past `0_untriaged`. Stating it as an exclusion rather than `label:"status:0_untriaged"` is deliberate: a pre-migration issue carries no `status:` label at all and must still be a candidate, and an inclusion filter would drop it. This mirrors how `linear-promote.md` reads candidates only from the `backlog` state, and keeps the 500-item window from being consumed by already-scored issues. Quote each label value — the names contain a colon, which is also the search syntax's own separator. The filter also excludes `blocked`-labeled issues, holding them in the backlog rather than promoting them (mirroring the file path's "hold blocked cards" rule — see `commands/promote-tasks.md`). That is only the **label** half of the hold: an open native dependency is the other, and no search term can express it, so step 3b reads it per candidate. (When `--search` is used, label filters must live in the search string, not a separate `--label` flag.)
 - `--milestone "<scope-milestone>"` only when step 2a resolved a milestone scope; omit it on an `all`/no-milestone run.
 - Limit 500 — a soft cap, not a hard page size (`gh issue list --limit` fetches through as many API pages as needed under the hood, so this is effectively exhaustive for any repo backlog short of the cap; mirrors the ceiling `gh-issue-reoptimize.md` uses for the same reason). If exactly 500 issues are returned, the query may be truncated: surface that as its own prominent report line in step 6 (not a footnote) rather than paginating further — see step 6.
+
+#### `after=` candidates
+
+Under `after=`, ask for the dependents of exactly the given numbers. `<repo>` is resolved as for the other helpers (`gh-issue.repo`, else `gh repo view --json nameWithOwner --jq .nameWithOwner`):
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-ready.py" --repo "<repo>" \
+  --dependents-of <n1> --dependents-of <n2> ... --json
+```
+
+Same `$CLAUDE_PLUGIN_ROOT` fallback as the other assets. It reads each id's `dependencies/blocking` list, drops closed dependents, and prints four buckets. Its `candidates` are the candidate set for the rest of this flow, in place of the query above. Its `already_scored` go on the `skipped` list as `already scored`, its `blocked_label` are held with reason `blocked label`, and its `foreign` entries (dependents in another repository, which every other read here would mistake for a local issue of the same number) go on the `skipped` list as `<owner/name>#<n> (foreign repo)`. None of the four is ever written to. Like step 3b, **a non-zero exit stops the run before any write**. Report and exit if `candidates` is empty, naming the ids.
 
 Set aside (do **not** score) — as a backstop to the query filter — any issue whose returned `labels` carry a `status:` rung other than `0_untriaged` and that still slips through (e.g. label-index lag, or a quoting failure in the search string): the promoter, like the file path, only acts on issues that have not yet been scored (the gh analogue of `status: new`). Keep these in a separate `skipped` list so step 6 can report them; they receive no write. Likewise, any `blocked`-labeled issue that slips through the `--search` filter is **held** with reason `blocked label` (no write), reported in step 6. Report and exit if no un-scored candidates remain.
 
@@ -262,7 +275,9 @@ backfilled (3):
 
 On a step 4b re-read failure, the first line is instead `dependency re-read failed: <quoted helper error>`, and every scored candidate appears under `held (N, blocked)` with reason `dependency re-read failed (scored HIGH)` or `dependency re-read failed (scored LOW: <failed check>)`.
 
-Skipped issues are reported with their reason — `already scored` or `parent rollup`. Held issues are reported under `held (N, blocked)`, each naming what held it: `blocked by #<n>, …` listing the open blockers step 3b or 4b returned, `blocked label`, or `dependency re-read failed (scored …)`. Like skipped issues, held ones count toward `M` without being promoted, as on the file path. The 500-cap warning (if it applied) leads the report per above, not a trailing footnote.
+Under `after=`, the scope line reads `dependents re-checked (N) after #<n>, …`, with `N` the count of every open dependent the helper returned, foreign ones included.
+
+Skipped issues are reported with their reason — `already scored`, `parent rollup`, or `foreign repo` (under `after=`). Held issues are reported under `held (N, blocked)`, each naming what held it: `blocked by #<n>, …` listing the open blockers step 3b or 4b returned, `blocked label`, or `dependency re-read failed (scored …)`. Like skipped issues, held ones count toward `M` without being promoted, as on the file path. The 500-cap warning (if it applied) leads the report per above, not a trailing footnote.
 
 **If step 3a's fallback fired, `parent rollup detection skipped (<reason>)` is the report's first line**, above the scope line — as shown above, quoting the `ROLLUP_REASON` the helper printed. It leads rather than trails because such a run may have promoted a rollup, and a reader who stops before the last line must still see that. **A step 4b re-read failure leads ahead of that**, quoting the helper's error, since it means every scored candidate in the run was held.
 
