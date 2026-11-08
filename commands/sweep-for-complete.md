@@ -1,6 +1,6 @@
 ---
 description: Safe, schedulable sweep that finds started-state issues whose linked PR merged and completes exactly those via the /complete-task primitive — composes with /loop and /schedule, no new scheduling infra
-allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Glob, Grep, Read, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__save_comment, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__linear__get_issue, mcp__linear__list_issues, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__linear__save_comment, mcp__linear__list_teams, mcp__linear__list_projects, mcp__github
+allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Glob, Grep, Read, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__save_comment, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__linear__get_issue, mcp__linear__list_issues, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__linear__save_comment, mcp__linear__list_teams, mcp__linear__list_projects, mcp__github, Bash(acli *), Bash(python3 *), Bash(mkdir *), Write, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Atlassian__getJiraIssue, mcp__claude_ai_Atlassian__getTransitionsForJiraIssue, mcp__claude_ai_Atlassian__transitionJiraIssue, mcp__claude_ai_Atlassian__addCommentToJiraIssue, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__searchJiraIssuesUsingJql, mcp__atlassian__getJiraIssue, mcp__atlassian__getTransitionsForJiraIssue, mcp__atlassian__transitionJiraIssue, mcp__atlassian__addCommentToJiraIssue
 argument-hint: "[--apply] [--all] [--project <id|name>]"
 ---
 
@@ -40,7 +40,13 @@ wraps it.
   "Preflight + resolve scope" for how the warning is computed at zero extra
   API cost.
 
-Scope is **Linear-side**, never repo-side: one run covers every configured
+On **jira** the same flags mean something narrower. The default is your own
+in-progress issues in `jira.project`, `--all` is every assignee's in that
+project, and `--project <KEY>` is your own in another project. There is no
+Unassigned bucket and no out-of-scope warning. See
+`jira-sweep-complete.md` → "Preflight + resolve scope".
+
+On linear, scope is **Linear-side**, never repo-side: one run covers every configured
 project, whatever repo each project's work lives in. The title/branch
 fallbacks — used for PRs opened outside `/do-tasks`, which carry no `links`
 attachment — query a single repo, taken from **the issue's own project**
@@ -100,16 +106,18 @@ Overlay the local override on the committed config — mappings merge recursivel
   that auto-close didn't fire, complete the issue with `/complete-task` (or
   `gh-issue-state.py --issue <n> --done --apply`). Don't use a bare
   `gh issue close` — it leaves live `status:`/`auto:` rungs on a closed issue."
-- `handler: jira` → **UNSUPPORTED.** Print: "unsupported for handler jira —
-  Jira's completion path is its GitHub integration or **smart commits**
-  (`<issue-key> #done` / `#comment` in a commit/PR) transitioning the issue
-  natively on merge. `/sweep-for-complete` has nothing to add here; configure
-  the integration or smart commits if that transition isn't firing."
+- `handler: jira` → read and follow
+  **`commands/handlers/jira-sweep-complete.md`** (resolves the backend — `acli`
+  or the Atlassian MCP — finds in-progress issues, resolves each one's own PR
+  from the plugin's `PR opened:` comment or its key and branch, checks its
+  merge state, and calls the `/complete-task` jira phase per verified match).
+  Where Jira's GitHub integration or smart commits already close issues on
+  merge, it finds nothing to do.
 - Any other (unknown) value → **stop** with: "Unknown task handler `<value>` in
   dev_docs/tasks/.task-config.yml. Run /task-config to fix it."
 
 If the relative path doesn't resolve, find the handler file with **Glob**
-(`**/commands/handlers/linear-sweep-complete.md`) and Read the result. Pass
+(`**/commands/handlers/<handler>-sweep-complete.md`) and Read the result. Pass
 `--apply`, `--all`, and `--project` through.
 
 ## 2. Report
