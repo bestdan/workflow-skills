@@ -56,10 +56,16 @@ truncated, and do not paginate.
 `failed to parse JQL`):
 
 ```bash
-mkdir -p /tmp/claude && acli jira workitem search --jql '<scope JQL>' --fields key,status,summary --limit 50 --json > /tmp/claude/jira-sweep-issues.json
+mkdir -p /tmp/claude && acli jira workitem search --jql '<scope JQL>' --fields key,status,summary --limit 50 --json > /tmp/claude/jira-sweep-<run>-issues.json
 python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-pr-sources.py" --acli \
-  < /tmp/claude/jira-sweep-issues.json > /tmp/claude/jira-sweep-rows.json
+  < /tmp/claude/jira-sweep-<run>-issues.json > /tmp/claude/jira-sweep-<run>-rows.json
 ```
+
+`<run>` names the scope: the project key plus `mine` or `all` (`IP-mine`,
+`IP-all`). A file is written in one tool call and read in a later one, so two
+sweeps running at once in different sessions must not share it, or one could
+complete issues from the other's scope. Two sweeps of the same scope share it
+harmlessly, because they hold the same rows.
 
 `--acli` makes the script fetch each issue's comments itself
 (`acli jira workitem comment list`). acli's search does not return comments.
@@ -68,7 +74,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-pr-sources.py" --ac
 <jira.site>`, `jql: <scope JQL>`, `fields: ["summary", "status"]`,
 `maxResults: 50`). Then, per issue, `<atlassian-mcp>__getJiraIssue`
 (`issueIdOrKey: <key>`, `fields: ["comment"]`). Write the array of `{ key,
-id, fields: { comment } }` objects to `/tmp/claude/jira-sweep-issues.json`
+id, fields: { comment } }` objects to `/tmp/claude/jira-sweep-<run>-issues.json`
 and run the same script **without** `--acli`. Leave out the `fields` of any
 issue whose `getJiraIssue` failed. The script records that as a source error,
 and the issue lands in `left: unresolved`.
@@ -89,7 +95,7 @@ key is source 2, and the claim comment's branch is source 3:
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/linear-pr-resolve.py" \
   --repo "$(gh repo view --json nameWithOwner --jq .nameWithOwner)" \
-  < /tmp/claude/jira-sweep-rows.json
+  < /tmp/claude/jira-sweep-<run>-rows.json
 ```
 
 Do not pass `--config`. Jira has no project-to-repo mapping, so both
@@ -112,7 +118,10 @@ Without `--apply`, print one line per candidate and stop:
 <KEY> — PR #<n> (merged <date>) → Done category
 ```
 
-Then print the left and skipped lines, and `nothing changed (dry-run).`
+The target status itself is resolved only under `--apply`, by
+`jira-complete.md` step 4, which may still stop an issue with `NONE` or
+`AMBIGUOUS` and write nothing to it. Then print the left and skipped lines,
+and `nothing changed (dry-run).`
 
 ## 6. Apply (`--apply` only)
 

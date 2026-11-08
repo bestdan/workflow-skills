@@ -125,10 +125,10 @@ This phase takes, in addition to the identifier:
 
    ```bash
    mkdir -p /tmp/claude && acli jira workitem search --jql 'project = "<project>" AND issuetype = "<type>" AND statusCategory = Done ORDER BY updated DESC' \
-     --fields key,status --limit 100 --json > /tmp/claude/jira-done-statuses.json
+     --fields key,status --limit 100 --json > /tmp/claude/jira-done-statuses-<identifier>.json
    python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-resolve-transition.py" --from-search \
      --category done --exclude "won.?t do|cancel|reject|obsolete" --prefer 'done|complete|resolved' \
-     < /tmp/claude/jira-done-statuses.json
+     < /tmp/claude/jira-done-statuses-<identifier>.json
    ```
 
    On success it prints `<status name>\t<status name>`; step 6 uses that name.
@@ -181,9 +181,9 @@ This phase takes, in addition to the identifier:
    instead.
    - **MCP:** `<atlassian-mcp>__addCommentToJiraIssue` with `cloudId:
      <jira.site>`, `issueIdOrKey: <identifier>`, `commentBody: <comment_body>`.
-   - **acli:** write the body to `/tmp/claude/jira-comment.txt` (a file, so
+   - **acli:** write the body to `/tmp/claude/jira-comment-<identifier>.txt` (a file, so
      quotes in it need no escaping), then
-     `acli jira workitem comment create --key <identifier> --body-file /tmp/claude/jira-comment.txt`.
+     `acli jira workitem comment create --key <identifier> --body-file /tmp/claude/jira-comment-<identifier>.txt`.
 
 8. **Report.** Identifier, old status name → new status name, and whether a
    comment was posted (and its body, if short). On dry-run or idempotent
