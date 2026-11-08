@@ -99,13 +99,14 @@ This phase takes, in addition to the identifier:
    name**, since a board may rename its terminal status to anything.
 
    **MCP:** call `<atlassian-mcp>__getTransitionsForJiraIssue` (`cloudId`,
-   `issueIdOrKey: <identifier>`), write the response to a file, and let the
+   `issueIdOrKey: <identifier>`), write the response to
+   `/tmp/claude/jira-transitions-<identifier>.json` with the **Write** tool, and let the
    helper resolve the completing transition:
 
    ```bash
    python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-resolve-transition.py" \
      --category done --exclude "won.?t do|cancel|reject|obsolete" --prefer 'done|complete|resolved' \
-     < <transitions-response.json>
+     < /tmp/claude/jira-transitions-<identifier>.json
    ```
 
    If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
@@ -184,8 +185,9 @@ This phase takes, in addition to the identifier:
    instead.
    - **MCP:** `<atlassian-mcp>__addCommentToJiraIssue` with `cloudId:
      <jira.site>`, `issueIdOrKey: <identifier>`, `commentBody: <comment_body>`.
-   - **acli:** write the body to `/tmp/claude/jira-comment-<identifier>.txt` (a file, so
-     quotes in it need no escaping), then
+   - **acli:** write the body to `/tmp/claude/jira-comment-<identifier>.txt`
+     with the **Write** tool (a file, so quotes in it need no escaping, and
+     never a shell heredoc, which arbitrary text could break out of), then
      `acli jira workitem comment create --key <identifier> --body-file /tmp/claude/jira-comment-<identifier>.txt`.
 
 8. **Report.** Identifier, old status name → new status name, and whether a

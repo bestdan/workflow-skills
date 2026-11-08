@@ -79,7 +79,8 @@ stops the run, and rows the other run wrote belong to the same scope.
 `maxResults: 50`). Then, per issue, `<atlassian-mcp>__getJiraIssue`
 (`issueIdOrKey: <key>`, `fields: ["comment"]`). Write the array of `{ key,
 id, fields: { comment } }` objects to `/tmp/claude/jira-sweep-<run>-issues.json`
-and run the same script **without** `--acli`. Leave out the `fields` of any
+with the **Write** tool (never a shell heredoc: comment text is arbitrary) and
+run the same script **without** `--acli`. Leave out the `fields` of any
 issue whose `getJiraIssue` failed. The script records that as a source error,
 and the issue lands in `left: unresolved`.
 
