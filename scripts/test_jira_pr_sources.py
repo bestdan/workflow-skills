@@ -117,6 +117,16 @@ class TestExtract(unittest.TestCase):
         )["comments"]
         self.assertEqual(sources.extract(comments), ([], "task/IP-722"))
 
+    def test_mcp_markdown_escaped_backticks(self):
+        """The MCP's markdown rendering escapes the code mark (observed live)."""
+        comments = acli_comments(
+            "Claimed by /deliver-task. Working on branch "
+            "\\`bestdan/IP-1032-inflation-factor\\`; PR link will follow."
+        )["comments"]
+        self.assertEqual(
+            sources.extract(comments), ([], "bestdan/IP-1032-inflation-factor")
+        )
+
     def test_a_non_pr_url_is_dropped(self):
         comments = acli_comments("PR opened: https://example.com/nope")["comments"]
         self.assertEqual(sources.extract(comments), ([], None))
@@ -143,6 +153,17 @@ class TestExtract(unittest.TestCase):
         self.assertEqual(urls, ["https://github.com/acme/w/pull/7"])
         self.assertEqual(branch, "task/P-7")
 
+    def test_a_smart_link_carries_the_url_in_attrs(self):
+        """Jira can store a pasted url as an inlineCard, with no text node."""
+        card = {
+            "type": "inlineCard",
+            "attrs": {"url": "https://github.com/acme/w/pull/8"},
+        }
+        comments = [{"body": adf(text("PR opened: "), card)}]
+        self.assertEqual(
+            sources.extract(comments), (["https://github.com/acme/w/pull/8"], None)
+        )
+
 
 class TestToRow(SeamTestCase):
     def test_mcp_shape_needs_no_acli(self):
@@ -157,6 +178,17 @@ class TestToRow(SeamTestCase):
         self.assertEqual(row["attachments"], [OPENED.split(": ", 1)[1]])
         self.assertEqual(row["source_errors"], [])
         self.assertEqual(acli.calls, [])
+
+    def test_a_truncated_comment_page_is_a_source_error(self):
+        """A cut-short thread may hide the `PR opened:` line, so the row must
+        land in unresolved rather than read as no PR."""
+        page = {"comments": acli_comments(CLAIM)["comments"], "total": 40}
+        row = sources.to_row(
+            {"id": "1", "key": "IP-9", "fields": {"comment": page}}, False
+        )
+        self.assertEqual(
+            row["source_errors"], ["only 1 of 40 comments returned for IP-9"]
+        )
 
     def test_acli_fills_missing_comments(self):
         acli = self.stub((0, json.dumps(acli_comments(CLAIM, OPENED)), ""))

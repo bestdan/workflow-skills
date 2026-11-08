@@ -56,7 +56,7 @@ truncated, and do not paginate.
 `failed to parse JQL`):
 
 ```bash
-acli jira workitem search --jql '<scope JQL>' --fields key,status,summary --limit 50 --json > /tmp/claude/jira-sweep-issues.json
+mkdir -p /tmp/claude && acli jira workitem search --jql '<scope JQL>' --fields key,status,summary --limit 50 --json > /tmp/claude/jira-sweep-issues.json
 python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-pr-sources.py" --acli \
   < /tmp/claude/jira-sweep-issues.json > /tmp/claude/jira-sweep-rows.json
 ```
@@ -109,7 +109,7 @@ using these rows as input.
 Without `--apply`, print one line per candidate and stop:
 
 ```
-<KEY> — PR #<n> (merged <date>) → Done
+<KEY> — PR #<n> (merged <date>) → Done category
 ```
 
 Then print the left and skipped lines, and `nothing changed (dry-run).`

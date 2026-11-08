@@ -58,9 +58,11 @@ from _linear_pr import pr_identity  # noqa: E402
 PR_OPENED = re.compile(r"^\s*PR opened:\s*(\S+)")
 # The backticks are optional because acli renders an ADF code mark as bare
 # spaces: "Working on branch  task/<KEY> ; PR link will follow." (observed
-# 2026-11-06). The branch then ends at whitespace or the `;`.
+# 2026-11-06). The branch then ends at whitespace or the `;`. The MCP's
+# markdown rendering escapes them instead: "branch \`task/<KEY>\`;"
+# (observed 2026-11-08), so a backslash before either backtick is optional too.
 CLAIMED_BRANCH = re.compile(
-    r"^\s*Claimed by /[\w:-]+\.\s+Working on branch\s+`?([^`\s;]+)`?"
+    r"^\s*Claimed by /[\w:-]+\.\s+Working on branch\s+\\?`?([^`\s;\\]+)"
 )
 
 
@@ -94,6 +96,8 @@ def adf_text(node):
         return text
     if node.get("type") == "hardBreak":
         return "\n"
+    if node.get("type") in ("inlineCard", "blockCard", "embedCard"):
+        return (node.get("attrs") or {}).get("url") or ""
     inner = adf_text(node.get("content") or [])
     if node.get("type") in ("paragraph", "heading", "codeBlock"):
         return inner + "\n"
@@ -118,6 +122,23 @@ def comment_list(issue) -> Optional[list]:
         return raw["comments"]
     if isinstance(raw, list):
         return raw
+    return None
+
+
+def truncated_comments(issue, comments) -> Optional[Tuple[int, int]]:
+    """(returned, total) when `fields.comment` says it holds only a page.
+
+    The issue-level comment field is paginated (`total`, `maxResults`), so a
+    long thread can arrive cut short. The missing comments may hold the `PR
+    opened:` line, so the row fails closed rather than reading as "no PR".
+    """
+    fields = issue.get("fields")
+    comment = fields.get("comment") if isinstance(fields, dict) else None
+    if not isinstance(comment, dict) or comments is None:
+        return None
+    total = comment.get("total")
+    if isinstance(total, int) and total > len(comments):
+        return len(comments), total
     return None
 
 
@@ -194,6 +215,9 @@ def to_row(issue, use_acli):
 
     errors: List[str] = []
     comments = comment_list(issue)
+    shown = truncated_comments(issue, comments)
+    if shown:
+        errors.append(f"only {shown[0]} of {shown[1]} comments returned for {key}")
     if comments is None and use_acli:
         comments, err = fetch_comments_acli(key)
         if err:

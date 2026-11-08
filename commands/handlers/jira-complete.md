@@ -120,7 +120,7 @@ This phase takes, in addition to the identifier:
    and pass the helper `--from-search` with the same filters:
 
    ```bash
-   acli jira workitem search --jql 'project = "<project>" AND statusCategory = Done ORDER BY updated DESC' \
+   mkdir -p /tmp/claude && acli jira workitem search --jql 'project = "<project>" AND statusCategory = Done ORDER BY updated DESC' \
      --fields key,status --limit 100 --json > /tmp/claude/jira-done-statuses.json
    python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-resolve-transition.py" --from-search \
      --category done --exclude "won.?t do|cancel|reject|obsolete" --prefer 'done|complete|resolved' \
