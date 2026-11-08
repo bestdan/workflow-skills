@@ -74,8 +74,9 @@ This phase takes, in addition to the identifier:
 2. **Resolve the issue.**
    - **MCP:** `<atlassian-mcp>__getJiraIssue` with `cloudId: <jira.site>`,
      `issueIdOrKey: <identifier>`, `fields: ["summary", "status"]`.
-   - **acli:** `acli jira workitem view <identifier> --fields summary,status --json`.
-     It prints the same `fields.status` object.
+   - **acli:** `acli jira workitem view <identifier> --fields summary,status,issuetype --json`.
+     It prints the same `fields.status` object. Keep `fields.issuetype.name`
+     for step 4.
 
    Capture its current `status.name` and `status.statusCategory.key`
    (`new` / `indeterminate` / `done` — the only "category" this flow reads). If
@@ -115,12 +116,15 @@ This phase takes, in addition to the identifier:
    step 6.
 
    **acli:** acli cannot list an issue's transitions; it transitions by target
-   status name. So take the candidates from the Done-category statuses the
-   issue's project actually uses (`<project>` is the key before its last `-`),
-   and pass the helper `--from-search` with the same filters:
+   status name. So take the candidates from the Done-category statuses that
+   issues of the same type in the same project actually use (`<project>` is
+   the key before its last `-`, `<type>` is step 2's issue type), and pass the
+   helper `--from-search` with the same filters. Narrowing to the type matters
+   because Jira assigns workflows per issue type: another type's terminal
+   status may be unreachable from this one.
 
    ```bash
-   mkdir -p /tmp/claude && acli jira workitem search --jql 'project = "<project>" AND statusCategory = Done ORDER BY updated DESC' \
+   mkdir -p /tmp/claude && acli jira workitem search --jql 'project = "<project>" AND issuetype = "<type>" AND statusCategory = Done ORDER BY updated DESC' \
      --fields key,status --limit 100 --json > /tmp/claude/jira-done-statuses.json
    python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-resolve-transition.py" --from-search \
      --category done --exclude "won.?t do|cancel|reject|obsolete" --prefer 'done|complete|resolved' \
@@ -128,10 +132,12 @@ This phase takes, in addition to the identifier:
    ```
 
    On success it prints `<status name>\t<status name>`; step 6 uses that name.
-   A project with no Done issue yet has no candidates and prints `NONE`. That
-   status may exist without being reachable from the issue's current status,
-   in which case step 6's transition is refused. Report the refusal; do not
-   try another status.
+   When no `<type>` issue in the project is Done yet there are no candidates,
+   and it prints `NONE`; say so in the stop message below ("no `<type>` issue
+   in `<project>` is Done yet"). Do not widen the search to other types: their
+   statuses are no evidence about this type's workflow. A resolved status may
+   still be unreachable from the issue's current status, in which case step
+   6's transition is refused. Report the refusal; do not try another status.
 
    On `NONE`/`AMBIGUOUS` (exit 2), **do not guess** — never fire a transition
    just to satisfy the request, the same way `jira-claim.md` declines to guess
