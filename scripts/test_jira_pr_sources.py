@@ -127,6 +127,14 @@ class TestExtract(unittest.TestCase):
             sources.extract(comments), ([], "bestdan/IP-1032-inflation-factor")
         )
 
+    def test_markdown_escapes_inside_the_branch_are_undone(self):
+        """`task/MY_PROJ-12` must not be cut at an escaped underscore."""
+        comments = acli_comments(
+            "Claimed by /do-tasks. Working on branch "
+            "\\`task/MY\\_PROJ-12\\`; PR link will follow."
+        )["comments"]
+        self.assertEqual(sources.extract(comments), ([], "task/MY_PROJ-12"))
+
     def test_a_non_pr_url_is_dropped(self):
         comments = acli_comments("PR opened: https://example.com/nope")["comments"]
         self.assertEqual(sources.extract(comments), ([], None))
@@ -164,6 +172,16 @@ class TestExtract(unittest.TestCase):
             sources.extract(comments), (["https://github.com/acme/w/pull/8"], None)
         )
 
+    def test_a_block_card_carries_the_url_in_attrs(self):
+        card = {
+            "type": "blockCard",
+            "attrs": {"url": "https://github.com/acme/w/pull/9"},
+        }
+        comments = [{"body": adf(text("PR opened: "), card)}]
+        self.assertEqual(
+            sources.extract(comments), (["https://github.com/acme/w/pull/9"], None)
+        )
+
 
 class TestToRow(SeamTestCase):
     def test_mcp_shape_needs_no_acli(self):
@@ -189,6 +207,13 @@ class TestToRow(SeamTestCase):
         self.assertEqual(
             row["source_errors"], ["only 1 of 40 comments returned for IP-9"]
         )
+
+    def test_a_complete_comment_page_is_not_truncated(self):
+        page = {"comments": acli_comments(CLAIM)["comments"], "total": 1}
+        row = sources.to_row(
+            {"id": "1", "key": "IP-9", "fields": {"comment": page}}, False
+        )
+        self.assertEqual(row["source_errors"], [])
 
     def test_acli_fills_missing_comments(self):
         acli = self.stub((0, json.dumps(acli_comments(CLAIM, OPENED)), ""))

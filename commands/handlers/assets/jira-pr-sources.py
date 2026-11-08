@@ -104,9 +104,16 @@ def adf_text(node):
     return inner
 
 
+MARKDOWN_ESCAPE = re.compile(r"\\([\\`*_{}\[\]()#+\-.!|~>])")
+
+
 def body_text(body):
+    """Comment text. A string body is unescaped first: the MCP renders
+    comments as markdown, escaping backticks (observed 2026-11-08) and
+    possibly `_`. Neither a git branch nor a url can hold a backslash, so
+    unescaping never corrupts either."""
     if isinstance(body, str):
-        return body
+        return MARKDOWN_ESCAPE.sub(r"\1", body)
     return adf_text(body)
 
 
@@ -131,6 +138,8 @@ def truncated_comments(issue, comments) -> Optional[Tuple[int, int]]:
     The issue-level comment field is paginated (`total`, `maxResults`), so a
     long thread can arrive cut short. The missing comments may hold the `PR
     opened:` line, so the row fails closed rather than reading as "no PR".
+    The Atlassian MCP's markdown response carried no `total` (observed
+    2026-11-08), so on that backend this guard is best-effort.
     """
     fields = issue.get("fields")
     comment = fields.get("comment") if isinstance(fields, dict) else None
