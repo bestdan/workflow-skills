@@ -78,6 +78,10 @@ This phase takes, in addition to the identifier:
      It prints the same `fields.status` object. Keep `fields.issuetype.id`
      and `.name` for step 4.
 
+   From here on, every `<identifier>` below means the `key` this read
+   returned, not the identifier as typed: a caller may pass a lowercase key or
+   a numeric id, and step 4 derives the project from the key.
+
    Capture its current `status.name` and `status.statusCategory.key`
    (`new` / `indeterminate` / `done` — the only "category" this flow reads). If
    the identifier doesn't resolve, stop and report "no issue found for
@@ -99,7 +103,8 @@ This phase takes, in addition to the identifier:
    name**, since a board may rename its terminal status to anything.
 
    **MCP:** call `<atlassian-mcp>__getTransitionsForJiraIssue` (`cloudId`,
-   `issueIdOrKey: <identifier>`), write the response to
+   `issueIdOrKey: <identifier>`), run `python3 -c 'import pathlib,sys; pathlib.Path(sys.argv[1]).unlink(missing_ok=True)' /tmp/claude/jira-transitions-<identifier>.json`
+   (the Write tool refuses to overwrite a file it has not read), then write the response to
    `/tmp/claude/jira-transitions-<identifier>.json` with the **Write** tool, and let the
    helper resolve the completing transition:
 
@@ -185,7 +190,9 @@ This phase takes, in addition to the identifier:
    instead.
    - **MCP:** `<atlassian-mcp>__addCommentToJiraIssue` with `cloudId:
      <jira.site>`, `issueIdOrKey: <identifier>`, `commentBody: <comment_body>`.
-   - **acli:** write the body to `/tmp/claude/jira-comment-<identifier>.txt`
+   - **acli:** run `python3 -c 'import pathlib,sys; pathlib.Path(sys.argv[1]).unlink(missing_ok=True)' /tmp/claude/jira-comment-<identifier>.txt` (the Write
+     tool refuses to overwrite a file it has not read), then write the body to
+     `/tmp/claude/jira-comment-<identifier>.txt`
      with the **Write** tool (a file, so quotes in it need no escaping, and
      never a shell heredoc, which arbitrary text could break out of), then
      `acli jira workitem comment create --key <identifier> --body-file /tmp/claude/jira-comment-<identifier>.txt`.
