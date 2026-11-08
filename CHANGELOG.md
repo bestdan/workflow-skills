@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.206.0] - 2026-11-08
+
+### Features
+
+- complete merged jira issues over acli or the MCP [N/A] (#1438) (128be50d)
+
 ## [2.205.0] - 2026-11-07
 
 ### Features
