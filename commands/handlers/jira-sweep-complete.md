@@ -56,16 +56,20 @@ truncated, and do not paginate.
 `failed to parse JQL`):
 
 ```bash
-mkdir -p /tmp/claude && acli jira workitem search --jql '<scope JQL>' --fields key,status,summary --limit 50 --json > /tmp/claude/jira-sweep-<run>-issues.json
-python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-pr-sources.py" --acli \
+mkdir -p /tmp/claude && acli jira workitem search --jql '<scope JQL>' --fields key,status,summary --limit 50 --json > /tmp/claude/jira-sweep-<run>-issues.json && \
+  python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-pr-sources.py" --acli \
   < /tmp/claude/jira-sweep-<run>-issues.json > /tmp/claude/jira-sweep-<run>-rows.json
 ```
+
+If acli exits non-zero, stop and report its output: the script would
+otherwise read the empty file and report invalid JSON instead.
 
 `<run>` names the scope: the project key plus `mine` or `all` (`IP-mine`,
 `IP-all`). A file is written in one tool call and read in a later one, so two
 sweeps running at once in different sessions must not share it, or one could
-complete issues from the other's scope. Two sweeps of the same scope share it
-harmlessly, because they hold the same rows.
+complete issues from the other's scope. Two sweeps of the same scope can still
+collide, and that fails closed: a file cut short mid-write does not parse and
+stops the run, and rows the other run wrote belong to the same scope.
 
 `--acli` makes the script fetch each issue's comments itself
 (`acli jira workitem comment list`). acli's search does not return comments.

@@ -135,6 +135,15 @@ class TestExtract(unittest.TestCase):
         )["comments"]
         self.assertEqual(sources.extract(comments), ([], "task/MY_PROJ-12"))
 
+    def test_markdown_escapes_inside_a_pr_url_are_undone(self):
+        comments = acli_comments("PR opened: https://github.com/acme/my\\_repo/pull/7")[
+            "comments"
+        ]
+        self.assertEqual(
+            sources.extract(comments),
+            (["https://github.com/acme/my_repo/pull/7"], None),
+        )
+
     def test_a_non_pr_url_is_dropped(self):
         comments = acli_comments("PR opened: https://example.com/nope")["comments"]
         self.assertEqual(sources.extract(comments), ([], None))
