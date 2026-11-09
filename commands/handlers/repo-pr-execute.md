@@ -324,7 +324,15 @@ The file is at dev_docs/tasks/<slug>.md with this content:
    Source task: dev_docs/tasks/<slug>.md (deleted in this PR)
 
    Claims-task: <slug>'
-   gh pr ready <pr> || exit 1
+   permission=$(gh repo view --json viewerPermission --jq .viewerPermission)
+   case "$permission" in
+     ADMIN|MAINTAIN|WRITE) ;;
+     *) echo 'PR remains draft with task-claim: pending human hand-off'; exit 1 ;;
+   esac
+   if ! gh pr ready <pr>; then
+     echo 'PR remains draft with task-claim: pending human hand-off'
+     exit 1
+   fi
    gh pr edit <pr> --add-label task-loop --remove-label task-claim
 
 ## If you cannot complete the task
