@@ -1,7 +1,7 @@
 ---
 title: Auto-pilot — the problem statement and the tree of work
 created: 2026-07-13
-status: proposed
+status: anchor
 context: written after the jail-containment findings, to re-anchor the work tree on the original problem before any further platform engineering; Part II is the lineage research that motivated it
 audience: anyone (human or agent) about to start, continue, or approve auto-pilot work
 related:
@@ -9,7 +9,7 @@ related:
   - ../research/2026-07-09-autopilot-dry-run.md
   - ../research/2026-07-10-autopilot-detached-run-1-findings.md
   - ../research/2026-07-12-auto-pilot-developer-review-feedback.md
-  - ./2026-07-12-auto-pilot-inversion.md
+  - ../designs/2026-07-12-auto-pilot-inversion.md
   - dev_docs/tasks/jail_containment_plan/jail_containment_plan.md (branch bestdan/jail-containment-findings)
 ---
 
@@ -176,7 +176,7 @@ Two layers of origin, and both matter:
 | Jul 11–12  | **Detached run #3** (Phase B: tasks 11, 14, 15, 16) — **the last run to date**                                                                                                                                                                                  | PRs #188–#191                                                                                                                    | the co-review that changed everything                                                              |
 | Jul 12     | Co-review of #188–#191: 3 of 4 PRs defective while green                                                                                                                                                                                                        | [`2026-07-12-auto-pilot-developer-review-feedback.md`](../research/2026-07-12-auto-pilot-developer-review-feedback.md) (PR #192) | tasks 22–29; the inversion question                                                                |
 | Jul 12     | Attended fixes: tasks 20, 23–27; supervisor ledger untracked                                                                                                                                                                                                    | PRs #193–#200                                                                                                                    | —                                                                                                  |
-| Jul 12–13  | **The pivot**: inversion v1 ("one root cause, rewrite") → adversarially falsified → v2 scoped                                                                                                                                                                   | [`2026-07-12-auto-pilot-inversion.md`](./2026-07-12-auto-pilot-inversion.md) + 2 codex reviews (PR #201)                         | Stage 0–3 plan; complexity tracker                                                                 |
+| Jul 12–13  | **The pivot**: inversion v1 ("one root cause, rewrite") → adversarially falsified → v2 scoped                                                                                                                                                                   | [`2026-07-12-auto-pilot-inversion.md`](../designs/2026-07-12-auto-pilot-inversion.md) + 2 codex reviews (PR #201)                | Stage 0–3 plan; complexity tracker                                                                 |
 | Jul 13     | Shell quality tooling finds real bugs **only** in `spawn-orchestrator.sh` (6,284 lines)                                                                                                                                                                         | PR #202                                                                                                                          | the Python port plan                                                                               |
 | Jul 13     | **Python port stack** (`.worktrees/orch-python`): plan #205 → audit #206 → runtime ADR #207                                                                                                                                                                     | `orch_py_plan/`, `decisions/script_language.md`                                                                                  | tasks 10–12 found _by_ the port                                                                    |
 | Jul 13     | Port side-finds: task 10 jail-exec fix (**#208 merged**); task 11 → exercise design (**#209 open**); task 12 filed: "layer 2 does not enforce"                                                                                                                  | `orch_py_task_10/11/12.md`, `designs/enforce-exercising.md`                                                                      | the containment investigation                                                                      |
@@ -315,7 +315,7 @@ Judged from the origin, the order is:
    — the plan, its STATUS, and the "failure looks like success" thesis.
 5. [`2026-07-12-auto-pilot-developer-review-feedback.md`](../research/2026-07-12-auto-pilot-developer-review-feedback.md)
    — why green suites lied; the class-level lessons.
-6. [`2026-07-12-auto-pilot-inversion.md`](./2026-07-12-auto-pilot-inversion.md) (+ the two
+6. [`2026-07-12-auto-pilot-inversion.md`](../designs/2026-07-12-auto-pilot-inversion.md) (+ the two
    codex review docs) — the scoped pivot; what is approved vs. explicitly not.
 7. `.worktrees/orch-python`: `dev_docs/tasks/orch_py_plan/orch_py_plan.md`,
    `dev_docs/decisions/script_language.md`, `dev_docs/orchestrator-python-port.md`
