@@ -10,10 +10,9 @@ land it" below.
 
 ## When
 
-Once per hand-off, after the PR's final state is set: after `gh pr ready` where
-step 7 readies a draft, and after the PR opened ready otherwise. A PR left a
-draft still gets the run; its hold reason is `PR is a draft`, which is the true
-answer.
+Once per hand-off, after step 7 has tried to mark the PR ready and then write
+the handler review state. A PR left draft for a human hand-off still gets the
+run; its hold reason is `PR is a draft`, which is the true answer.
 
 ## Run it
 

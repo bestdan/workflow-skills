@@ -334,40 +334,26 @@ Open the PR for the task branch, targeting **`--base`** (default `main`) — a
 stacked/chained task must point at its parent's branch, not the repo default, or
 its diff shows the parent's changes too.
 
-Readiness follows repo **write access**: **ready-for-review** when the viewer can
-write, **draft** otherwise. Detect with `gh repo view --json viewerPermission` —
-`ADMIN` / `MAINTAIN` / `WRITE` → ready; else draft. (`MAINTAIN` also grants
-write, so it must count as ready.) If the permission can't be determined, default
-to **draft** — the safe choice.
+Open **every** PR as a draft. A draft keeps CI and ready-only review bots out of
+the iteration loop. Step 7 makes a reviewed PR ready at the hand-off boundary,
+then writes the handler's review state. Detect write access there with `gh repo
+view --json viewerPermission`: only `ADMIN`, `MAINTAIN`, and `WRITE` may mark a
+PR ready. If the read fails, treat it as no write access.
 
-**Exception — auto-pilot on gh-issue opens a draft whatever the access.** When
-`--run-state` is present **and** the effective handler is `gh-issue`, open the PR
-as a **draft**; step 7 marks it ready at hand-off. The draft exists only to delay
-`.github/workflows/gh-issue-pr-sync.yml`, which moves the issue to
-`status:4_needs_review` on a non-draft PR's `opened` event — so a ready PR would
-read "needs review" while co-review and iteration are still running. Linear has
-no PR-open Action, and on repo-pr the ready `task-loop` PR is itself the review
-signal, so a draft there would cost bot reviews and buy nothing. gh-issue
-accepts that cost: where bots skip drafts, the `bot review skipped (draft)`
-rule below applies. Standalone
-`/deliver-task`, and every other handler, keep the write-access rule above.
-
-- On **repo-pr** this is the claim→review-PR **conversion** — relabel the draft
-  `task-claim` PR to `task-loop`, fill the body — per `repo-pr-execute.md`; **do
-  not open a second PR**. Call `gh pr ready` **only when the viewer can write**
-  (the same `ADMIN`/`MAINTAIN`/`WRITE` gate); otherwise leave it a draft and hand
-  off in that state — never fail trying to ready a PR you lack permission to. On
-  **linear/gh-issue/jira**, open the PR with the handler's own title/link
-  conventions (e.g. `fix(scope): … [PRE-12]` + the linked issue), draft per the
-  same gate (gh-issue under `--run-state`: always draft, per the exception
-  above). The title grammar is the `agent-guidance` plugin's
-  `portable.md` (`Git:` bullet), not this file.
+- On **repo-pr**, this is the claim PR. Keep its `task-claim` label while the
+  task runs. At hand-off, fill its body, mark it ready, then relabel it
+  `task-loop` — per `repo-pr-execute.md`; **do not open a second PR**. On
+  **linear/gh-issue/jira**, open a draft PR with the handler's title and link
+  conventions (for example, `fix(scope): … [PRE-12]` plus the linked issue).
+  The title grammar is the `agent-guidance` plugin's `portable.md` (`Git:`
+  bullet), not this file.
 - **PR body:** step 3's evidence (check output, screenshots, artifact paths),
   **how-to-evaluate steps** for any human-judgment item, and, where a merge
   policy exists, the **decision brief** ([`references/decision-brief.md`](references/decision-brief.md)).
 - If the repo's review bots won't run on a **draft** PR, record
   `bot review skipped (draft)` rather than waiting — step 5 falls back to the
-  reviewers that can run.
+  reviewers that can run. Do not request that bot after marking the PR ready
+  unless the repository requires the bot's approval.
 
 ## 5. Co-review
 
@@ -457,20 +443,22 @@ remaining findings and proceed — don't loop.
 
 ## 7. Hand off (and freeze)
 
-- **Tracker → `needs_review`** via the handler's own linking/state sections
-  (`linear-claim.md` "Move to review on PR open"; on repo-pr the ready
-  `task-loop` PR is itself the review signal). **Never `done`/`completed`**
-  here — completion is merge-verified (the `linear-claim.md` **hard rule**): by
-  the landing bullet below when the lander merges, else by `/sweep-for-complete`.
-  Unless the PR lands, this is the skill's terminal success state.
+- **Publish, then write the review signal.** The handler owns this whole
+  transition. Run its hand-off section, which marks the reviewed PR ready
+  exactly once, then writes its review signal. On gh-issue, the signal is
+  `status:4_needs_review`; on repo-pr, it is the ready `task-loop` label; on
+  Linear and Jira, it is their review state. This order makes a crash
+  repairable: a ready PR with stale tracker state can advance, but a tracker
+  review state on a draft PR is false. Each state write is idempotent, because
+  a ready-for-review hook can race the explicit write.
 
-  **Auto-pilot on gh-issue: ready the draft last.** Where step 4's exception
-  opened a draft, run `gh pr ready` **after** the handler's needs-review write,
-  and only when `viewerPermission` is `ADMIN`/`MAINTAIN`/`WRITE` (step 4's
-  write-access check). The Action then fires on `ready_for_review`, after
-  co-review, and is a no-op because the issue has already left
-  `status:3_started`. A viewer without write access hands off a draft; the
-  handler's needs-review write alone moves the issue.
+  If readiness cannot be established, do not write `needs_review`. A standalone
+  delivery reports a pending human hand-off and leaves the PR draft. Under
+  `--run-state`, call `flag_for_human`, keep the tracker at `started`, and park
+  the task. **Never `done`/`completed`** here — completion is merge-verified (the
+  `linear-claim.md` **hard rule**): by the landing bullet below when the lander
+  merges, else by `/sweep-for-complete`. A successful hand-off is this skill's
+  terminal state unless the PR lands.
 - **Landing**, never fatal: [`references/landing.md`](references/landing.md) — a
   shadow verdict, then the real lander (`auto` tier, `AGENT_LAND` on).
 - **Hand-off summary** (structured — for a human, or the `/auto-pilot` morning

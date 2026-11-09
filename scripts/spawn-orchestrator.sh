@@ -7961,20 +7961,32 @@ doctor() {
       local draft labels fixes=""
       draft="$(_doctor_pr_draft "$gh_bin" "$pr_num")"
       labels="$(_doctor_pr_labels "$gh_bin" "$pr_num")"
-      case ",$labels," in *,task-claim,*)
-        if "$gh_bin" pr edit "$pr_num" --remove-label task-claim --add-label task-loop >/dev/null 2>&1; then
-          fixes="label task-claim->task-loop"
-        else
-          echo "spawn-orchestrator: doctor I4: $task — \`gh pr edit\` FAILED for PR #$pr_num (label left at task-claim, not reported as a repair)"
-        fi
-        ;;
+      case "$draft" in
+        true | false) ;;
+        *)
+          i4_skipped=1
+          skipped_notes+=("I4: $task (draft state unreadable)")
+          echo "spawn-orchestrator: doctor I4: $task — could not read isDraft for PR #$pr_num, skipping (undetermined)"
+          continue
+          ;;
       esac
       if [ "$draft" = "true" ]; then
         if "$gh_bin" pr ready "$pr_num" >/dev/null 2>&1; then
           fixes="${fixes:+$fixes, }marked ready (was draft)"
+          draft=false
         else
           echo "spawn-orchestrator: doctor I4: $task — \`gh pr ready\` FAILED for PR #$pr_num (PR left as a draft, not reported as a repair)"
         fi
+      fi
+      if [ "$draft" != "true" ]; then
+        case ",$labels," in *,task-claim,*)
+          if "$gh_bin" pr edit "$pr_num" --remove-label task-claim --add-label task-loop >/dev/null 2>&1; then
+            fixes="${fixes:+$fixes, }label task-claim->task-loop"
+          else
+            echo "spawn-orchestrator: doctor I4: $task — \`gh pr edit\` FAILED for PR #$pr_num (label left at task-claim, not reported as a repair)"
+          fi
+          ;;
+        esac
       fi
       if [ -n "$fixes" ]; then
         i4_status="repaired"

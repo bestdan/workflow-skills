@@ -23,7 +23,7 @@ script, or a plain `gh` call — none are no-ops.
 | `dependency_graph` | `gh-issue-graph.py --repo <repo> --json`, scoped with `--milestone` or `--label` to match the source (the same reader `gh-issue-reoptimize.md` **Load — build the graph** uses)                                                                                                                                               |
 | `claim`            | `gh-issue-claim.md` **Pre-flight: is work already in flight?** then **Claim the issue** (the ref lock — see below); build on `gh-issue-claim.py branch-name --issue <n> --prefix "<branch_prefix>"`, never a hand-built name                                                                                                  |
 | `link_pr`          | `gh-issue-claim.md` **PR** — **only** its `PR opened: <url>` issue comment; the rung stays `status:3_started`. The PR body's `Closes #<n>` is the native link                                                                                                                                                                 |
-| `set_needs_review` | `gh pr ready <pr>` under `/deliver-task`'s write-access gate (step 4, **Open the PR**), then `gh-issue-claim.md` **Move to review on PR open** (`gh-issue-state.py` → `status:4_needs_review`); parks instead of handing off a draft — see below                                                                              |
+| `set_needs_review` | `gh-issue-claim.md` **Move to review at hand-off** — it marks the PR ready, then writes `status:4_needs_review` with `gh-issue-state.py`; parks instead of handing off a draft — see below                                                                                                                                    |
 | `flag_for_human`   | `gh-issue-claim.md` **Bail (when execution proves infeasible mid-flight)** label + comment mechanics, **diverged** — see below                                                                                                                                                                                                |
 | `comment_progress` | `gh issue comment <n> --repo <repo>`                                                                                                                                                                                                                                                                                          |
 | `wip_limit`        | `gh-issue-claim.md` **Pre-claim WIP gate** (`gh-issue-claim.py wip`, which counts this operator's `status:3_started` + `status:4_needs_review`)                                                                                                                                                                               |
@@ -59,7 +59,7 @@ never released.
 **The PR is a draft until hand-off, and that is what keeps G5 and G6 true.**
 `.github/workflows/gh-issue-pr-sync.yml` writes `status:4_needs_review` from a PR's
 non-draft `opened` event and from `ready_for_review` (`gh-issue-claim.md` **Move to
-review on PR open**). A PR opened ready would put the issue in needs-review before
+review at hand-off**). A PR opened ready would put the issue in needs-review before
 co-review ran — the state the [write order](../run-state.md#write-order) forbids. The
 run opens the PR as a **draft** (`/deliver-task` on the gh-issue handler), so the
 Action stays silent at pr-open and `link_pr` is the URL comment alone. At hand-off
@@ -68,7 +68,8 @@ remote before tracker, per the write order. Only a PR that is actually ready get
 the rung: if `viewerPermission` is not `ADMIN`/`MAINTAIN`/`WRITE`, or still cannot
 be determined after one re-read, or `gh pr ready` fails, write nothing and call
 `flag_for_human` instead (the issue stays `status:3_started`, the PR stays a
-draft). Unlike attended `/deliver-task`, the run never hands off a draft. The Action fires on that
+draft). Standalone delivery reports a pending human hand-off in this case;
+auto-pilot parks instead. The Action fires on that
 `ready_for_review` and races the verb's own write: whichever lands second either
 finds the issue already on `status:4_needs_review` and writes nothing, or writes the
 same rung again, so the two never conflict. A crash between the two steps leaves a

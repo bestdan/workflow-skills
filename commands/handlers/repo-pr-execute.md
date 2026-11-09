@@ -131,9 +131,9 @@ uses these exact steps:
 
 A claim that succeeds leaves the task file at `status: in_progress` and one open draft
 `task-claim` PR. **Finishing** the work (see the dispatch/local steps) converts that
-same PR into the review PR: delete the task file, push, then relabel it
-`task-loop`, replace the placeholder body with the real summary — **keeping the
-`Claims-task: <slug>` marker line in the new body** — and `gh pr ready` it. Retaining
+same PR into the review PR: delete the task file, push, then replace the
+placeholder body with the real summary — **keeping the `Claims-task: <slug>` marker
+line in the new body** — mark it ready, and relabel it `task-loop`. Retaining
 the marker matters because the task file still shows `status: ready` on `main` until
 the PR merges; in a branch-pinned env the review PR's head branch is not `task/<slug>`,
 so the marker is the only thing that lets the pre-claim check recognize the in-review
@@ -302,9 +302,9 @@ The file is at dev_docs/tasks/<slug>.md with this content:
    Source branch: <source_branch>'
    git push
 
-6. FINISH THE PR: Convert the draft claim PR opened in step 1 into the review PR — do NOT open a second PR. Relabel it from task-claim to task-loop (so /list-tasks shows it under needs_review), replace the placeholder body with the real summary (KEEP the 'Claims-task: <slug>' marker line in the new body — the task file still shows status: ready on main until this PR merges, and in a branch-pinned env the head branch is not task/<slug>, so this marker is the only thing that lets another session's pre-claim check see the task is already in review and not redo it), and mark it ready for review. <pr> is the claim PR number from step 1c:
+6. FINISH THE PR: Convert the draft claim PR opened in step 1 into the review PR — do NOT open a second PR. Replace the placeholder body with the real summary (KEEP the 'Claims-task: <slug>' marker line in the new body — the task file still shows status: ready on main until this PR merges, and in a branch-pinned env the head branch is not task/<slug>, so this marker is the only thing that lets another session's pre-claim check see the task is already in review and not redo it), mark it ready for review, then relabel it from task-claim to task-loop (so /list-tasks shows it under needs_review). Before readiness, read `gh repo view --json viewerPermission`; only `ADMIN`, `MAINTAIN`, and `WRITE` may continue. Otherwise, or if readiness fails, leave the PR draft with task-claim and report a pending human hand-off. <pr> is the claim PR number from step 1c:
    gh label create task-loop --description 'Auto-generated from task-loop' --color '0E8A16' 2>/dev/null || true
-   gh pr edit <pr> --add-label task-loop --remove-label task-claim --title 'chore(task): <title>' --body '## Summary
+   gh pr edit <pr> --title 'chore(task): <title>' --body '## Summary
 
    Automated follow-up from task <slug>.md, created during branch <source_branch>.
 
@@ -325,6 +325,8 @@ The file is at dev_docs/tasks/<slug>.md with this content:
 
    Claims-task: <slug>'
    gh pr ready <pr>
+   If gh pr ready fails, STOP here. Leave the PR draft with task-claim and report a pending human hand-off. Do not run the relabel below.
+   gh pr edit <pr> --add-label task-loop --remove-label task-claim
 
 ## If you cannot complete the task
 
@@ -377,7 +379,7 @@ not the branch: it works whether or not you can create `task/<slug>`.
 The size gate still applies to the batch path: `/do-tasks --all --local` with a highest-ranked task whose `size > auto_execute_max_size` **reserves** it (`--claim-only` semantics — claim only, no execution) and reports it as reserved rather than executing it. A named `/do-tasks <slug> --local` is single-task mode and is never size-gated.
 
 1. **Claim** via the Claim protocol (pre-claim check → acquire → draft `task-claim` PR → reconcile). For acquire, prefer `git checkout -b task/<slug>` from the current HEAD; in a branch-pinned session that cannot push a new branch, stay on the pinned branch — the draft PR still carries the lock. If the pre-claim check or reconcile shows the slug already claimed, STOP and report it.
-2. Route by the size gate (batch path only): if `size <= auto_execute_max_size`, execute, validate, delete the file, commit, push, and **finish the PR** (relabel `task-claim`→`task-loop`, fill the body **keeping the `Claims-task: <slug>` marker line**, `gh pr ready`); if `size > auto_execute_max_size`, **reserve** it (stop after the claim — leave the draft `task-claim` PR open). A named `/do-tasks <slug> --local` is single-task mode and always executes in full.
+2. Route by the size gate (batch path only): if `size <= auto_execute_max_size`, execute, validate, delete the file, commit, push, and **finish the PR** (fill the body **keeping the `Claims-task: <slug>` marker line**, check `viewerPermission`, `gh pr ready`, then relabel `task-claim`→`task-loop`; without `ADMIN`, `MAINTAIN`, or `WRITE`, or if readiness fails, leave the draft claim and report a pending human hand-off); if `size > auto_execute_max_size`, **reserve** it (stop after the claim — leave the draft `task-claim` PR open). A named `/do-tasks <slug> --local` is single-task mode and always executes in full.
 3. Return to the original branch with `git checkout -` (only if you created `task/<slug>`; in a branch-pinned session you stayed put).
 
 There is no remote session in this mode — report the PR opened in-session instead.

@@ -6,7 +6,7 @@ user-invocable: false
 
 # Linear handler — /do-tasks tracker flow
 
-Invoked from `/do-tasks` (section 3, "Tracker path") when `handler: linear` is configured. This file holds the full tracker execute flow: **find candidates** (read-only), **pre-flight in-flight check** (read-only), **claim the issue** (mutating, before work starts — a token-comment lock), **judge feasibility** (read-only, run _while holding the claim_), **move to review on PR open** (mutating, after the PR is opened), and a **report** at the end. In **single** mode these phases run in the **current session**; in **batch** mode (`/do-tasks --all`) each issue's flow runs in its own dispatched **remote** session (see `commands/do-tasks.md` §3 "Tracker-batch subroutine"). The **bail** phase has two distinct triggers: a _feasibility reject_ on an already-claimed card **releases the claim and continues** to the next candidate, while a _mid-execution_ failure **halts** the run. `/do-tasks` orchestrates the branch-and-execute and `gh pr create` between the judge and move-to-review phases.
+Invoked from `/do-tasks` (section 3, "Tracker path") when `handler: linear` is configured. This file holds the full tracker execute flow: **find candidates** (read-only), **pre-flight in-flight check** (read-only), **claim the issue** (mutating, before work starts — a token-comment lock), **judge feasibility** (read-only, run _while holding the claim_), **move to review at hand-off** (mutating, after the PR is ready), and a **report** at the end. In **single** mode these phases run in the **current session**; in **batch** mode (`/do-tasks --all`) each issue's flow runs in its own dispatched **remote** session (see `commands/do-tasks.md` §3 "Tracker-batch subroutine"). The **bail** phase has two distinct triggers: a _feasibility reject_ on an already-claimed card **releases the claim and continues** to the next candidate, while a _mid-execution_ failure **halts** the run. `/do-tasks` orchestrates the branch-and-execute and `gh pr create` between the judge and move-to-review phases.
 
 > **Why claim before judging?** Every step up to the claim is read-only, so two sessions that start near each other both rank the same issue #1 and both spend _minutes_ judging feasibility while the issue sits unclaimed — they collide. Claiming immediately after the cheap pre-flight (and judging feasibility only once the claim is held) collapses that unclaimed window to the pre-flight plus the lock's writes. And because racing sessions are usually authenticated as the **same** Linear user, `assignee` cannot distinguish a winner; the claim is therefore a first-writer-wins election on an append-only **comment** log carrying a unique per-session token.
 
@@ -16,7 +16,7 @@ Invoked from `/do-tasks` (section 3, "Tracker path") when `handler: linear` is c
 
 ## PR body magic words
 
-> **Inert for completion.** The magic words below drive no state change here — nothing reads them to complete an issue; that job belongs to the reconciler verbs, which key off the explicit `links` attachment (see "Move to review on PR open"), never off ids parsed from PR text. This section is intent documentation: it describes what Linear would do if the integration were live, and the discipline to keep so that it stays safe if anyone ever makes it live.
+> **Inert for completion.** The magic words below drive no state change here — nothing reads them to complete an issue; that job belongs to the reconciler verbs, which key off the explicit `links` attachment (see "Move to review at hand-off"), never off ids parsed from PR text. This section is intent documentation: it describes what Linear would do if the integration were live, and the discipline to keep so that it stays safe if anyone ever makes it live.
 
 ### Whether Linear's integration is live
 
@@ -65,7 +65,7 @@ On the fast path, the script's own prelude resolves the team itself (and exits d
 
 3. **Re-attach the resolved scope to each candidate.** The script tags each candidate's `project` with only `{ id, name, max_estimate }` — it does not know `wip_limit`. For a **configured-project** candidate, match `candidate.project.id` against the scopes resolved in step 1 and merge in that scope's `wip_limit` (and its authoritative `name`, if step 1's is more complete). For an **Unassigned-bucket** candidate (`candidate.project.id === "__unassigned__"`), merge in `{ wip_limit: <linear.unassigned_wip_limit if set, else the top-level wip_limit, default 3>, unassigned: true }` — exactly the scope shape `linear-common.md` → "The Unassigned bucket" defines, computed the same way the floor computes it. This merge is **not optional**: `do-tasks.md`'s pre-claim WIP gate reads `candidate.project.wip_limit`, and without it the WIP gate has no cap to check on the fast path — for either kind of scope.
 
-4. **Consume `meta` in place of the equivalent MCP reads.** `meta.states` (an array of `{ id, name, type }`) replaces the state-id → type map the floor builds via `list_workflow_states` — cache it the same way; "Claim the issue", "Move to review on PR open", and "Bail" all read this cache. `meta.viewer.id` replaces the `<linear-mcp>__get_user` call. On the fast path, **no** `list_teams`, `list_workflow_states`, or `get_user` read should run — only the script's one GraphQL call. The claim **mutations** (`save_comment`, `save_issue`, `create_issue_label`, etc. in "Claim the issue" onward) stay MCP-native and unchanged on both paths.
+4. **Consume `meta` in place of the equivalent MCP reads.** `meta.states` (an array of `{ id, name, type }`) replaces the state-id → type map the floor builds via `list_workflow_states` — cache it the same way; "Claim the issue", "Move to review at hand-off", and "Bail" all read this cache. `meta.viewer.id` replaces the `<linear-mcp>__get_user` call. On the fast path, **no** `list_teams`, `list_workflow_states`, or `get_user` read should run — only the script's one GraphQL call. The claim **mutations** (`save_comment`, `save_issue`, `create_issue_label`, etc. in "Claim the issue" onward) stay MCP-native and unchanged on both paths.
 
 5. **Gates and dropped issues.** The script already applied the gates and rank from `commands/handlers/assets/_linear_rank.py` (imported as `gate()`/`rank_key()` — see that module's header for the gate table) — do not re-filter. That includes the **blocker gate**: the script reads each issue's native "is blocked by" relations, with each blocker's state, in the same query, so a fast-path candidate is already dependency-ready and "Pre-flight" step 6 does not re-read it. Report each `dropped` entry the same way the floor reports a gate drop: same reason strings, by construction (the script emits the identical fixed strings from that table).
 
@@ -217,9 +217,17 @@ Apply judgment, not a checklist. Ask:
 
 If **feasible**: print the issue's identifier, title, and a one-sentence rationale, then proceed to "Branch + execute". If **not feasible**: this is a **feasibility reject** on a card you already hold — run **"Bail — feasibility reject (release-and-continue)"** below: release the claim and move to the **next ranked candidate**, re-running Pre-flight → Claim → Judge on it. **Do not halt** (halting is reserved for a _mid-execution_ failure). If every candidate is rejected, summarize the reasons and stop — do not lower the bar.
 
-## Move to review on PR open
+## Move to review at hand-off
 
-Called from `/do-tasks` immediately after `gh pr create` succeeds.
+First read `gh repo view --json viewerPermission`. Only `ADMIN`, `MAINTAIN`, and
+`WRITE` may mark the PR ready. Otherwise, leave the issue in progress and report
+a pending human hand-off. Then run:
+
+```bash
+gh pr ready <pr>
+```
+
+If readiness fails, leave the issue in progress and report a pending human hand-off.
 
 This step does two things in **one** `save_issue` call: it explicitly attaches the PR URL to the Linear issue (so the link is not dependent on branch-name auto-detection — Linear's branch-name matching is unreliable in practice and the user has reported it failing, and the GitHub integration that might otherwise create this link may not be live in your workspace — see "Whether Linear's integration is live"), and it transitions the issue to a review state if the team has one.
 
@@ -233,7 +241,8 @@ This step does two things in **one** `save_issue` call: it explicitly attaches t
    - `state`: the resolved `In Review` state id from step 1. **Omit this field entirely** if no `In Review` state exists — do not pass an empty string or null.
    - Do not touch `labels` here — `auto-claimed` stays on through review.
 
-4. **No additional comment.** The PR-URL comment already posted by `/do-tasks` right after `gh pr create` is the user-facing signal that review has started; the `links` attachment is the structural one.
+4. **No additional comment.** The PR-URL comment posted by `/do-tasks` links the
+   draft. The ready PR and the `links` attachment signal that review has started.
 
 > With Linear's GitHub integration **inert**, the explicit `links` attachment above is not just the reliable path — it is the **only** one. It does not depend on branch-name matching or magic words in the PR body at all, and it is exactly what `/sweep-for-complete` reads later to verify this issue's own PR merged and complete it. If the integration is ever made live, it may also create its own PR↔issue link on branch-name/magic-word detection; that's fine to leave de-duplicating by URL against the one set here, but do not rely on it.
 

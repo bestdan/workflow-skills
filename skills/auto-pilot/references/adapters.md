@@ -37,12 +37,14 @@ behavior (what the adapter does when the underlying handler step fails).
 | `dependency_graph` | Return the blocker edges among in-scope tasks (used to pick each task's base + stack chains)  | Missing/partial edges → treat the task as independent (base `main`), note it               |
 | `claim`            | Reserve **one** task first-writer-wins; return the claim handle + the branch name to build on | Lost race / in flight / blocked → return "not claimed" + reason; the loop writes `skipped` |
 | `link_pr`          | Attach the opened PR to the task; **leave status unchanged** (the pr-open half of hand-off)   | Attach failure → `flag_for_human` (a built-but-unlinked PR needs a human)                  |
-| `set_needs_review` | Transition the task to its **needs-review** state (the hand-off half)                         | Transition failure → `flag_for_human`; never force-complete                                |
+| `set_needs_review` | Mark the reviewed PR ready, then transition the task to **needs-review** (the hand-off half)  | Readiness or transition failure → `flag_for_human`; never force-complete                   |
 | `flag_for_human`   | Task can't proceed/reconcile: keep it in flight, **raise its priority**, leave a reason       | Best-effort; if even the flag write fails, record it in `REPORT.md`                        |
 | `comment_progress` | Post a progress breadcrumb visible to a human watching the source                             | Best-effort; a failed comment never blocks the loop                                        |
 | `wip_limit`        | Return the in-flight cap for the source's scope (the loop honors it before claiming)          | Unknown → treat as the configured default; never claim past an unknown cap                 |
 
-`set_needs_review` is the **success** hand-off; `flag_for_human` is the
+`set_needs_review` is the **success** hand-off. It publishes the PR before the
+tracker write, so a crash leaves a repairable ready PR rather than a false review
+state on a draft. `flag_for_human` is the
 **blocked** one. Both leave the task in flight (never `completed`/`canceled`) —
 completion (reaching `done`) is out of the run's scope, verified later by the
 source's own completion path (`/sweep-for-complete` for `linear`; repo-pr's

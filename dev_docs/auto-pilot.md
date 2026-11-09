@@ -75,12 +75,12 @@ things deliberately _not_ built.
   run that is resumed reconciles its own claim through `--resume`'s G1 row. A
   crashed run nobody resumes still strands the ref. `/sweep-stale-claims` releases
   it if no commits were pushed to it, and reports it for a human if there were.
-- **On gh-issue, the PR stays a draft until hand-off.** `gh-issue-pr-sync.yml`
-  writes `status:4_needs_review` when a non-draft PR opens, so a PR opened ready
-  would show the issue as needing review before co-review ran, which the write
-  order forbids. The run opens a draft and marks it ready at hand-off, then writes
-  the rung itself. Linear has no such Action, and on repo-pr the ready `task-loop`
-  PR is the review signal, so neither pays the draft's cost in skipped bot reviews.
+- **Every handler keeps its PR draft until hand-off.** This prevents CI and
+  ready-only review bots from running on review-fix pushes. At hand-off, the
+  handler marks the PR ready first and then writes its review signal. On gh-issue,
+  this prevents `gh-issue-pr-sync.yml` from setting `status:4_needs_review`
+  before co-review completes. A readiness failure parks an auto-pilot task and
+  leaves the tracker at `started`.
 
 ## Out of scope (v1)
 

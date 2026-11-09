@@ -161,7 +161,7 @@ per scope.
    (case-insensitive) `In Review`; if none exists, use the team's default
    `started`-type state (typically `In Progress`). This is a **name-based
    preference** among already-`started`-type candidates — the same pattern
-   `linear-claim.md` "Move to review on PR open" step 1 uses — not a
+   `linear-claim.md` "Move to review at hand-off" step 1 uses — not a
    name-based filter of which issues qualify (the query in step 1 above stays
    type-only).
 
