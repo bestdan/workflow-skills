@@ -127,11 +127,11 @@ that message — never a question).
     its `headRefName` (`gh pr list`/`gh pr view` → headRefName; `git fetch` it if not
     present locally — the claim may have been pushed to `task/<slug>` or, in a
     branch-pinned session, to that session's branch). Then do the work, validate,
-    delete the file, commit, push, and **finish the PR** (fill the body,
-    a `viewerPermission` check, `gh pr ready`, then relabel `task-claim` →
-    `task-loop`; without `ADMIN`, `MAINTAIN`, or `WRITE`, or if readiness fails,
-    leave it draft with `task-claim` and report a pending human hand-off) per
-    `repo-pr-execute.md`.
+    delete the file, commit, push, and **finish the PR** per
+    `repo-pr-execute.md`. That hand-off section fills the body, checks
+    `viewerPermission`, marks the PR ready, then relabels `task-claim` →
+    `task-loop`. Without `ADMIN`, `MAINTAIN`, or `WRITE`, or if readiness fails,
+    it leaves the draft with `task-claim` and reports a pending human hand-off.
   - `linear`: first run "Pre-flight: is work already in flight?" (per
     `linear-claim.md`) — if an open PR already exists for this issue, the work is
     already published, so stop and report it rather than re-executing. Otherwise
@@ -533,8 +533,8 @@ With positive WIP slack, run `commands/handlers/linear-claim.md` end to end:
    (`/sweep-for-complete` / `/reconcile-tasks`), not to anything parsed from the
    PR body — but it stays because it documents which issue this PR references and
    works cleanly wherever the integration is live.
-7. **Move to review** — mark the PR ready, then run `linear-claim.md` "Move to
-   review at hand-off": attach the PR via `links` and move to `In Review` if the
+7. **Move to review** — run `linear-claim.md` "Move to review at hand-off": it
+   marks the PR ready, attaches it via `links`, and moves it to `In Review` if the
    team has one. **Never move the
    issue to a `completed`/`canceled` state** — completion belongs to the
    reconciler verbs (`/complete-task`, `/sweep-for-complete`, `/reconcile-tasks`),
@@ -636,7 +636,7 @@ capability is actually visible — inside the remote session** — via two concr
    issue's identifier** — never instruct a session to claim more than one. For
    Linear, the remote session runs `linear-claim.md` end to end (`Claim the issue` →
    branch with the verbatim `branchName` → execute → `gh pr create --draft` with a title
-   ending in `[<id>]` plus `Closes <id>` in the body → mark ready →
+   ending in `[<id>]` plus `Closes <id>` in the body →
    `Move to review at hand-off`). The remote prompt must be
    **self-contained** — **assume the VM has no plugin** unless its environment's setup
    script installed one; a committed `.claude/settings.json` does **not** install one

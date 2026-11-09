@@ -285,10 +285,17 @@ The `[<KEY>]` in the title and the `<KEY>` / issue URL in the body are the links
 
 ## Move to review at hand-off
 
-Called after `gh pr ready` succeeds. If the viewer cannot mark the PR ready,
-leave the issue In Progress and report a pending human hand-off. Transition the
-issue to an In-Review status if the workflow has one; otherwise leave it In
-Progress.
+First read `gh repo view --json viewerPermission`. Only `ADMIN`, `MAINTAIN`, and
+`WRITE` may mark the PR ready. Otherwise, leave the issue In Progress and report
+a pending human hand-off. Then run:
+
+```bash
+gh pr ready <pr>
+```
+
+If readiness fails, leave the issue In Progress and report a pending human hand-off.
+Transition the issue to an In-Review status if the workflow has one; otherwise leave
+it In Progress.
 
 1. **Resolve the transition.** Call `getTransitionsForJiraIssue` (`cloudId`, `issueIdOrKey: <KEY>`). Look for a transition whose target status is still in the `indeterminate` category and whose `to.name` (case-insensitive) is `In Review` (or `Review`). If found, capture its id; if none exists, **skip the transition** — the issue stays In Progress, and the open PR plus the PR-URL comment are the review signal. Never pick a `done`-category transition here, regardless of how done the work feels.
 

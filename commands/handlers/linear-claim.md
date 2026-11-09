@@ -219,8 +219,15 @@ If **feasible**: print the issue's identifier, title, and a one-sentence rationa
 
 ## Move to review at hand-off
 
-Called after `gh pr ready` succeeds. If the viewer cannot mark the PR ready,
-leave the issue in progress and report a pending human hand-off.
+First read `gh repo view --json viewerPermission`. Only `ADMIN`, `MAINTAIN`, and
+`WRITE` may mark the PR ready. Otherwise, leave the issue in progress and report
+a pending human hand-off. Then run:
+
+```bash
+gh pr ready <pr>
+```
+
+If readiness fails, leave the issue in progress and report a pending human hand-off.
 
 This step does two things in **one** `save_issue` call: it explicitly attaches the PR URL to the Linear issue (so the link is not dependent on branch-name auto-detection — Linear's branch-name matching is unreliable in practice and the user has reported it failing, and the GitHub integration that might otherwise create this link may not be live in your workspace — see "Whether Linear's integration is live"), and it transitions the issue to a review state if the team has one.
 
