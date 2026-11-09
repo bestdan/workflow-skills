@@ -8,7 +8,7 @@ convention: ../typed-model-calls.md
 
 ## Context
 
-[`../designs/2026-09-18-assess-task-typed-profile.md`](../designs/2026-09-18-assess-task-typed-profile.md)
+`designs/2026-09-18-assess-task-typed-profile.md` (deleted)
 splits `scope` in two. A **concrete** card links a diff, so code counts the changed
 files; §3 of
 [`../research/2026-09-17-jev-applications/`](../research/2026-09-17-jev-applications/README.md)

@@ -1,5 +1,6 @@
 ---
 created: 2026-08-01
+status: proposed
 ---
 
 # Design — the obligation ledger for research spikes

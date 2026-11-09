@@ -1,5 +1,6 @@
 ---
 created: 2026-08-20
+status: proposed
 ---
 
 # local-review — rendered markdown preview

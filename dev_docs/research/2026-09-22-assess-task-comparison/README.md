@@ -21,7 +21,7 @@ fitted thresholds as the weak point of its result. A rule written after the numb
 would be fitted to them in the same way.
 
 The design under test is
-[`../../designs/2026-09-18-assess-task-typed-profile.md`](../../designs/2026-09-18-assess-task-typed-profile.md).
+`designs/2026-09-18-assess-task-typed-profile.md` (deleted).
 
 ## What is measured
 

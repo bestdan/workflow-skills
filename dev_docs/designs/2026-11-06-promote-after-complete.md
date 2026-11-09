@@ -1,6 +1,6 @@
 ---
 created: 2026-11-06
-status: accepted
+status: proposed
 ---
 
 # Re-promote a completed item's dependents as part of completing it

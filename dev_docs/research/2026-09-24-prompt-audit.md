@@ -396,14 +396,14 @@ Also: at `skills/task/SKILL.md:194` and `commands/handlers/repo-pr-execute.md:14
 
 **C9. `skills/co-review/reviewers/codex.md`**
 
-- :9 → "> **A `PASS` on a prose-only diff is not evidence that codex cannot see a contradiction.** The rubric names contradictions as correctness because a bugs-only framing screens prose out of scope; missing filesystem access is the wrong diagnosis, and a content predicate on the dispatch (e.g. by file extension) is not a fix. Findings that need text outside the diff stay with reviewers that read the tree. Measurements: [dev_docs/research/2026-08-21-codex-prose-review-audit.md](…)."
+- :9 → "> **A `PASS` on a prose-only diff is not evidence that codex cannot see a contradiction.** The rubric names contradictions as correctness because a bugs-only framing screens prose out of scope; missing filesystem access is the wrong diagnosis, and a content predicate on the dispatch (e.g. by file extension) is not a fix. Findings that need text outside the diff stay with reviewers that read the tree. Measurements: `[dev_docs/research/2026-08-21-codex-prose-review-audit.md](…)`."
 - :19-27: move to a dev_docs decision record; leave "gpt-5.5 returned 404 on this account; terra is unmeasured on honesty but an absent reviewer is worse than a less-measured one."
 - :36: move to `references/permissions.md`.
 - :38: "an earlier revision of this file recommended `codex config get model`, which exits with…" → "(`codex config get model` exits with `error: unexpected argument 'get' found`)".
 
 **C10. `skills/co-review/reviewers/devin.md`**
 
-- :32 → "**Keep `--model` last.** Every flag added here goes _before_ it, as `--respect-workspace-trust false` does. This file, [`agy.md`](agy.md), and the `orchestrate-coders` mirror in [`cli-coders.md`](…) share that order, and a reviewer whose command drifts from its rule goes missing silently (see the upgrade note below)."
+- :32 → "**Keep `--model` last.** Every flag added here goes _before_ it, as `--respect-workspace-trust false` does. This file, ``[`agy.md`](agy.md)``, and the `orchestrate-coders` mirror in ``[`cli-coders.md`](…)`` share that order, and a reviewer whose command drifts from its rule goes missing silently (see the upgrade note below)."
 - :35: replace through "no longer appears in the model list at all;" → "**Access is tier-gated.** A locked model returns `/upgrade to access this model`;"
 
 **C13. `skills/orchestrate-coders/SKILL.md:118-121`**

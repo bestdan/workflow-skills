@@ -1,5 +1,6 @@
 ---
 created: 2026-10-04
+status: proposed
 ---
 
 # Pinned-checkout guard — design v2

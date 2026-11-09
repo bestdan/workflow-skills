@@ -1,7 +1,7 @@
 ---
 title: Auto-pilot — the problem statement and the tree of work
 created: 2026-07-13
-status: anchor
+status: proposed
 context: written after the jail-containment findings, to re-anchor the work tree on the original problem before any further platform engineering; Part II is the lineage research that motivated it
 audience: anyone (human or agent) about to start, continue, or approve auto-pilot work
 related:

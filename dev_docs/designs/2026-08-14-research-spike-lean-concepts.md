@@ -1,5 +1,6 @@
 ---
 created: 2026-08-14
+status: proposed
 ---
 
 # Lean concepts worth importing into research-spike

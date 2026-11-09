@@ -1,5 +1,6 @@
 ---
 created: 2026-09-25
+status: proposed
 ---
 
 # jira-promote — skip parent rollups
