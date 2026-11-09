@@ -267,7 +267,7 @@ Return the issue key and url so `/do-tasks` can execute.
 **Re-read the claim first.** Immediately before `gh pr create`, re-read the issue (`getJiraIssue`, `fields: ["assignee", "status"]`). If the assignee is now a **different** account, or the status has left the `indeterminate` (In Progress) category, someone took or moved the issue during the build: do **not** open the PR, leave the issue as you found it, and stop with `<KEY>: assignee/status changed during the build (<what you read>) — work is on task/<KEY>, no PR opened`. The work stays on the branch for a human to place. This catches a different claimant or a human reassignment; it cannot catch a twin session on your own account, which reads back your own id (see "Claim the issue").
 
 ```bash
-gh pr create --title "<type>(scope): <description> [<KEY>]" --body "<KEY>: <jira issue URL>
+gh pr create --draft --title "<type>(scope): <description> [<KEY>]" --body "<KEY>: <jira issue URL>
 
 <summary of the change>"
 ```
@@ -283,9 +283,12 @@ The `[<KEY>]` in the title and the `<KEY>` / issue URL in the body are the links
   commentBody: "PR opened: <PR URL>"
 ```
 
-## Move to review on PR open
+## Move to review at hand-off
 
-Called from `/do-tasks` immediately after `gh pr create` succeeds. Transition the issue to an In-Review status if the workflow has one; otherwise leave it In Progress.
+Called after `gh pr ready` succeeds. If the viewer cannot mark the PR ready,
+leave the issue In Progress and report a pending human hand-off. Transition the
+issue to an In-Review status if the workflow has one; otherwise leave it In
+Progress.
 
 1. **Resolve the transition.** Call `getTransitionsForJiraIssue` (`cloudId`, `issueIdOrKey: <KEY>`). Look for a transition whose target status is still in the `indeterminate` category and whose `to.name` (case-insensitive) is `In Review` (or `Review`). If found, capture its id; if none exists, **skip the transition** — the issue stays In Progress, and the open PR plus the PR-URL comment are the review signal. Never pick a `done`-category transition here, regardless of how done the work feels.
 
@@ -298,7 +301,8 @@ Called from `/do-tasks` immediately after `gh pr create` succeeds. Transition th
      transition: { id: "<transition-id>" }
    ```
 
-The PR-URL comment posted right after `gh pr create` is the user-facing signal that review has started; the status transition is the structural one.
+The PR-URL comment posted right after `gh pr create` links the draft. The ready PR
+and the status transition signal that review has started.
 
 ## Bail (when execution proves infeasible mid-flight)
 

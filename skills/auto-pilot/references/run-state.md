@@ -564,8 +564,8 @@ reconcile action depend on _which_ transition it interrupted:
 
 - at the **pr-open** transition it **links the PR** and leaves the status
   `started` (review hasn't happened yet);
-- only at the **hand-off** transition — after co-review and iterate — does it set
-  `needs_review`.
+- only at the **hand-off** transition — after co-review and iterate — does it
+  mark the PR ready, then set `needs_review`.
 
 So `needs_review` is never written before review; a crash at pr-open reconciles
 to `started` + a linked PR, not to hand-off.
@@ -587,7 +587,7 @@ its action; anything that doesn't match cleanly is set to `parked` with a
 | G3 | After local commit, **before push**                                 | local commits ahead of remote; tracker `started`; no/stale PR  | push the branch, then continue to the open/refresh-PR step                                                        |
 | G4 | After **push**, before PR opened/refreshed                          | remote branch exists; **no (or stale) PR**; tracker not linked | idempotency-check for an existing PR by head branch; open/refresh it if absent; then do the pr-open tracker write |
 | G5 | pr-open transition: after PR opened, **before tracker link**        | PR open; tracker still `started`, PR not linked                | **link the PR; keep the status `started`** (review hasn't run); phase → `pr-open`; commit run state               |
-| G6 | hand-off transition: after review+iterate, **before tracker write** | PR open and reviewed; tracker still `started`                  | set `needs_review` + ensure the PR is linked; phase → `handed-off`; commit run state                              |
+| G6 | hand-off transition: after review+iterate, **before tracker write** | PR open and reviewed; tracker still `started`                  | mark the PR ready, then set `needs_review` + ensure the PR is linked; phase → `handed-off`; commit run state      |
 | G7 | After **any tracker write**, before **run-state commit**            | tracker current (any status); `RUN.md` phase stale             | recompute the phase from tracker + git; commit run state                                                          |
 
 G4's idempotency check is what makes resume safe to run repeatedly: a re-push or
@@ -682,7 +682,7 @@ the request the doctor just filed.
    and not a draft, because deliver-task's step 7 makes the ready `task-loop` PR
    the review signal (the task file is deleted in the PR rather than flipped to
    `needs_review`). A G6/G7 crash gap — still `task-claim`, still draft — is a
-   **repair**: swap the label, `gh pr ready`. Each of those two `gh` **writes**
+   **repair**: run `gh pr ready`, then swap the label. Each of those two `gh` **writes**
    has its exit code checked, and only a write that actually succeeded is
    reported as a repair — a gh blip that still recorded "I4 repaired" would be
    the same silent lie invariant 5 forbids for a failed `worktree remove`; a

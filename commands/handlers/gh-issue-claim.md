@@ -167,7 +167,7 @@ claims nothing, skips it.
    summed. Read `count`, `at_limit` and `slack` from the JSON.
 
    Both rungs count because the WIP limit exists to bound the human PR-review queue:
-   "Move to review on PR open" moves `status:3_started → status:4_needs_review`, so a
+   "Move to review at hand-off" moves `status:3_started → status:4_needs_review`, so a
    `status:4_needs_review` issue is an open PR still awaiting review — in-flight, not
    done. (This mirrors the linear gate, which counts both `In Progress` and `In Review`.)
    Both names are read from `labels.yml`, so a rename there fails loudly instead of
@@ -360,7 +360,7 @@ The claim locks on an **atomic primitive** — creating the `<branch>` ref, a se
 ## PR
 
 ```bash
-gh pr create --title "<type>(scope): <description> [#<n>]" --body "Closes #<n>
+gh pr create --draft --title "<type>(scope): <description> [#<n>]" --body "Closes #<n>
 
 <summary>" [--repo <repo>]
 ```
@@ -373,9 +373,20 @@ The title grammar is the `agent-guidance` plugin's `portable.md` (`Git:` bullet)
 gh issue comment <n> --body "PR opened: <PR URL>" [--repo <repo>]
 ```
 
-## Move to review on PR open
+## Move to review at hand-off
 
-Move the rung from `status:3_started` to `status:4_needs_review` (the issue stays open — review is signalled by the rung and the linked PR). Read the current labels, replace the one rung, pass the complete managed set:
+First mark the reviewed PR ready. Only `ADMIN`, `MAINTAIN`, and `WRITE` may do
+this. If readiness cannot be established, leave the PR draft and the issue at
+`status:3_started`, then report a pending human hand-off. Do not write the rung.
+
+```bash
+gh pr ready <pr> [--repo <repo>]
+```
+
+After that succeeds, move the rung from `status:3_started` to
+`status:4_needs_review` (the issue stays open — review is signalled by the rung
+and the linked PR). Read the current labels, replace the one rung, and pass the
+complete managed set:
 
 ```bash
 python3 commands/handlers/assets/gh-issue-state.py --repo <repo> --issue <n> \
@@ -384,7 +395,7 @@ python3 commands/handlers/assets/gh-issue-state.py --repo <repo> --issue <n> \
 
 Never `gh issue close` here, and never pass `--done`, regardless of how done the work feels — merge handles closure via `Closes #<n>`.
 
-**A backstop also runs, and its reverse has no other owner.** `.github/workflows/gh-issue-pr-sync.yml` calls `commands/handlers/assets/gh-issue-pr-sync.py`, which performs the same transition from the PR's `opened` and `ready_for_review` events — so a PR opened outside this loop still moves its issue, whether it was opened as a draft and later marked ready or opened non-draft in one step. A draft PR is filtered by the workflow's own `if:`, never by the script. The backstop writes only when the issue is already on `status:3_started`, so doing the write here first makes the Action a no-op rather than a conflict.
+**A backstop also runs, and its reverse has no other owner.** `.github/workflows/gh-issue-pr-sync.yml` calls `commands/handlers/assets/gh-issue-pr-sync.py`, which performs the same transition from the PR's `opened` and `ready_for_review` events — so a PR opened outside this loop still moves its issue, whether it was opened as a draft and later marked ready or opened non-draft in one step. A draft PR is filtered by the workflow's own `if:`, never by the script. The backstop writes only when the issue is already on `status:3_started`, so the explicit write and the Action race safely.
 
 The reverse transition is the backstop's alone: a PR **closed without merging** moves the issue back to `status:3_started`, because nothing else is watching at that point and the issue would otherwise sit in `needs_review` forever with no open PR. A PR **merged without closing** its issue — `Refs #<n>`, a partial delivery — strands it the same way, so the backstop's merged branch makes the same move for any issue the PR mentions that is left open on `status:4_needs_review` with no open PR referencing it. Both directions need the workflow's `issues: write` permission, and the workflow ships only in this repo. A consumer repo adopting the `gh-issue` handler must vendor **the workflow and every asset it runs** — `gh-issue-pr-sync.py`, plus the `gh-issue-claim.py`, `gh-issue-state.py`, `gh-issue-graph.py`, `_body_refs.py`, `_labels.py` and `labels.yml` it loads — at the paths the workflow invokes. An Actions runner sees only the checkout, never the plugin cache, so copying the workflow alone yields a run that dies on a missing script.
 

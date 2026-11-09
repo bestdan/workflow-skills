@@ -56,12 +56,16 @@ case "$sub" in
         # Real gh on a missing PR: non-zero exit plus this GraphQL error text.
         [ -f "$db/$num.state" ] || { echo "GraphQL: Could not resolve to a PullRequest with the number of $num. (repository.pullRequest)" >&2; exit 1; }
         cat "$db/$num.state" ;;
-      .isDraft) cat "$db/$num.draft" 2>/dev/null || echo false ;;
+      .isDraft)
+        [ -f "$db/$num.draft-unreadable" ] && exit 1
+        cat "$db/$num.draft" 2>/dev/null || echo false
+        ;;
       '[.labels[].name] | join(",")') cat "$db/$num.labels" 2>/dev/null; true ;;
       *) exit 1 ;;
     esac
     ;;
   edit)
+    printf 'edit %s\n' "$num" >>"$db/calls"
     while [ $# -gt 0 ]; do
       case "$1" in
         --remove-label) printf '' >"$db/$num.labels"; shift 2 ;;
@@ -70,7 +74,10 @@ case "$sub" in
       esac
     done
     ;;
-  ready) printf 'false\n' >"$db/$num.draft" ;;
+  ready)
+    printf 'ready %s\n' "$num" >>"$db/calls"
+    printf 'false\n' >"$db/$num.draft"
+    ;;
   *) exit 1 ;;
 esac
 GHEOF
@@ -508,16 +515,48 @@ GHFAILEOF
   have "doctor I4: swaps the label task-claim -> task-loop" 'task-loop' "$(cat "$I4DB/401.labels")"
   lack "doctor I4: removes task-claim from the label file" 'task-claim' "$(cat "$I4DB/401.labels")"
   have "doctor I4: marks the draft PR ready" 'false' "$(cat "$I4DB/401.draft")"
+  [ "$(tr '\n' ' ' <"$I4DB/calls")" = 'ready 401 edit 401 ' ] \
+    && ok "doctor I4: marks ready before replacing the review label" \
+    || bad "doctor I4: marks ready before replacing the review label" "$(cat "$I4DB/calls")"
   have "doctor I4: REPORT.md records the repair" 'I4 repaired — t_stale' "$(cat "$D4/run/.auto-pilot/REPORT.md")"
   # t_good's files are untouched -- no edit/ready call was ever made for it.
   [ "$(cat "$I4DB/402.labels")" = "task-loop" ] && ok "doctor I4: already-correct PR's labels are untouched" \
     || bad "doctor I4: already-correct PR's labels are untouched" "$(cat "$I4DB/402.labels")"
 
+  # --- I4: unreadable draft state is undetermined, never a label repair -----
+  D4U="$DOC/i4-draft-unreadable"
+  RUN_ID4U="doctor-i4-draft-unreadable"
+  _doctor_new_run "$D4U" "$RUN_ID4U"
+  {
+    printf -- '---\nrun_id: %s\nstatus: active\nbase_branch: main\n---\n\n' "$RUN_ID4U"
+    printf '| task | phase | branch | base | base_sha | pr | notes |\n'
+    printf '| ---- | ----- | ------ | ---- | -------- | -- | ----- |\n'
+    printf '| t_unreadable | handed-off | br-unreadable | main | - | #403 | |\n'
+  } >"$D4U/run/.auto-pilot/RUN.md"
+  : >"$D4U/run/.auto-pilot/QUESTIONS.md"
+  printf '# report\n' >"$D4U/run/.auto-pilot/REPORT.md"
+  git -C "$D4U/run" add .auto-pilot
+  git -C "$D4U/run" commit -q -m "seed run state"
+  I4UDB="$D4U/ghdb"
+  mkdir -p "$I4UDB"
+  printf 'OPEN\n' >"$I4UDB/403.state"
+  : >"$I4UDB/403.draft-unreadable"
+  printf 'task-claim\n' >"$I4UDB/403.labels"
+  export DOCTOR_GH_DB="$I4UDB"
+  d4uout="$("$SCRIPT" doctor --dir "$D4U/run" --run-id "$RUN_ID4U" --gh "$DOCTOR_GH" --questions .auto-pilot/QUESTIONS.md 2>&1)"
+  d4urc=$?
+  [ "$d4urc" = 0 ] && ok "doctor I4 (draft unreadable): exits 0" || bad "doctor I4 (draft unreadable): exits 0" "$d4uout"
+  [ "$(cat "$I4UDB/403.labels")" = "task-claim" ] && ok "doctor I4 (draft unreadable): label is untouched" \
+    || bad "doctor I4 (draft unreadable): label is untouched" "$(cat "$I4UDB/403.labels")"
+  [ ! -s "$I4UDB/calls" ] && ok "doctor I4 (draft unreadable): no gh writes" \
+    || bad "doctor I4 (draft unreadable): no gh writes" "$(cat "$I4UDB/calls")"
+  have "doctor I4 (draft unreadable): counted as skipped" 'skipped=1' "$d4uout"
+
   # --- I4: a gh WRITE that fails is never reported as a completed repair -----
   # Same D5 rule the failed `worktree remove` follows: a gh blip mid-repair that
   # still wrote "I4 repaired" into REPORT.md/QUESTIONS.md would be exactly the
   # silent lie doctor exists to eliminate. Reads succeed here (so the repair is
-  # correctly ATTEMPTED); both writes fail.
+  # correctly ATTEMPTED); readiness fails, so the label write is not attempted.
   DOCTOR_GH_WFAIL="$DOC/gh-write-fail"
   cat >"$DOCTOR_GH_WFAIL" <<'GHWEOF'
 #!/usr/bin/env bash
@@ -573,7 +612,6 @@ GHWEOF
   have "doctor I4 (write blip): the summary counts no repairs at all" 'repaired=0' "$d4wout"
   lack "doctor I4 (write blip): REPORT.md never records the repair that didn't happen" 'I4 repaired' "$(cat "$D4W/run/.auto-pilot/REPORT.md")"
   lack "doctor I4 (write blip): QUESTIONS.md never records the repair that didn't happen" 'missing its repo-pr review signal' "$(cat "$D4W/run/.auto-pilot/QUESTIONS.md")"
-  have "doctor I4 (write blip): the failed label write is announced" 'gh pr edit` FAILED' "$d4wout"
   have "doctor I4 (write blip): the failed ready write is announced" 'gh pr ready` FAILED' "$d4wout"
   unset DOCTOR_GH_DB
 

@@ -5,9 +5,9 @@ name: gh-issue PR status sync
 # On GitHub the open PR IS the `needs_review` state, so an issue's `status:`
 # rung has to follow its PR: ready-for-review moves `3_started` ->
 # `4_needs_review`, and closing without merging moves it back. The agent that
-# opens the PR is meant to write the rung itself; this catches the PRs opened
-# outside that loop, and it is the only channel that catches a PR CLOSED
-# outside it, because nothing is watching then.
+# opens the PR marks it ready before writing the rung itself. This catches that
+# race and PRs opened outside the loop. It is also the only channel that catches
+# a PR CLOSED outside the loop, because nothing is watching then.
 #
 # A PR becomes ready for review by one of two events, and BOTH are needed:
 # `ready_for_review` fires when a draft is marked ready, and `opened` fires for
@@ -15,10 +15,9 @@ name: gh-issue PR status sync
 # so without `opened` it would go uncaught forever.
 #
 # `opened` is exactly why the `draft` half of the job's `if:` exists. That event
-# fires for a draft PR too, and a draft is NOT `needs_review` — the house
-# convention makes some repos' PRs always draft, so moving one would be wrong on
-# every PR they open. The guard, not the trigger list, is what keeps drafts out;
-# do not add `opened` anywhere without it.
+# fires for a draft PR too, and a draft is NOT `needs_review`. Delivery opens
+# every PR as a draft while review fixes are in progress. The guard, not the
+# trigger list, is what keeps drafts out; do not add `opened` anywhere without it.
 #
 # `reopened` is deliberately absent. Reopening a closed PR is the inverse of the
 # close this file already handles, so it is a real gap — but it needs its own
