@@ -1,6 +1,6 @@
 ---
 created: 2026-11-03
-status: accepted
+status: proposed
 tracks: https://github.com/bestdan/workflow-skills/issues/956
 ---
 

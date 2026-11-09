@@ -1,6 +1,6 @@
 ---
 title: "Auto-pilot: invert the authority boundary (scoped)"
-status: draft v2 — revised after adversarial review
+status: proposed
 created: 2026-07-12
 revised: 2026-07-12
 related:

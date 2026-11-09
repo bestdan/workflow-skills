@@ -8,7 +8,7 @@ convention: ../../typed-model-calls.md
 
 ## Context
 
-[`../../designs/2026-09-18-assess-task-typed-profile.md`](../../designs/2026-09-18-assess-task-typed-profile.md)
+`designs/2026-09-18-assess-task-typed-profile.md` (deleted)
 rests a chain of claims on one table. `label` is "derived, not judged" — the
 **Deriving `label`** table in `skills/assess-task/SKILL.md` maps the other
 dimensions onto the eight routing labels. If that table is complete, `label` is a

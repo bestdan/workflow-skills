@@ -51,7 +51,7 @@ and is a weaker promise than a maintained script makes.
   argued from first principles, resting on a signal whose per-label spread nobody
   checked, cost 42 points. That is a review question for any future Jev ladder.
 - **Good, because** it puts a reading on agreement that the shadow-mode rollout in
-  [`../designs/2026-09-18-assess-task-typed-profile.md`](../designs/2026-09-18-assess-task-typed-profile.md)
+  `designs/2026-09-18-assess-task-typed-profile.md` (deleted)
   will need. That design logs the typed profile and today's model side by side and
   promotes what agrees. Agreement is the green light there — but this measurement is
   a case where the two agreed completely and the right conclusion was _don't adopt_,
