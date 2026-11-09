@@ -443,13 +443,14 @@ remaining findings and proceed — don't loop.
 
 ## 7. Hand off (and freeze)
 
-- **Publish, then set `needs_review`.** The handler owns this transition. First
-  mark the reviewed PR ready with `gh pr ready`; then write the handler's review
-  signal. On gh-issue, write `status:4_needs_review`; on repo-pr, relabel the
-  ready PR `task-loop`; on Linear and Jira, write their review state. This order
-  makes a crash repairable: a ready PR with stale tracker state can advance, but
-  a tracker review state on a draft PR is false. Each state write is idempotent,
-  because a ready-for-review hook can race the explicit write.
+- **Publish, then write the review signal.** The handler owns this transition.
+  First mark the reviewed PR ready with `gh pr ready`; then write the handler's
+  review signal. On gh-issue, write `status:4_needs_review`; on repo-pr,
+  relabel the ready PR `task-loop`; on Linear and Jira, write their review
+  state. This order makes a crash repairable: a ready PR with stale tracker
+  state can advance, but a tracker review state on a draft PR is false. Each
+  state write is idempotent, because a ready-for-review hook can race the
+  explicit write.
 
   If readiness cannot be established, do not write `needs_review`. A standalone
   delivery reports a pending human hand-off and leaves the PR draft. Under

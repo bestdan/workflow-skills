@@ -556,7 +556,7 @@ GHFAILEOF
   # Same D5 rule the failed `worktree remove` follows: a gh blip mid-repair that
   # still wrote "I4 repaired" into REPORT.md/QUESTIONS.md would be exactly the
   # silent lie doctor exists to eliminate. Reads succeed here (so the repair is
-  # correctly ATTEMPTED); readiness fails, so the label write is not attempted.
+  # correctly ATTEMPTED); readiness succeeds but the label write fails.
   DOCTOR_GH_WFAIL="$DOC/gh-write-fail"
   cat >"$DOCTOR_GH_WFAIL" <<'GHWEOF'
 #!/usr/bin/env bash
@@ -578,7 +578,8 @@ case "$sub" in
       *) exit 1 ;;
     esac
     ;;
-  edit|ready) exit 1 ;;   # the write blip
+  ready) exit 0 ;;
+  edit) exit 1 ;;          # the write blip
   *) exit 1 ;;
 esac
 GHWEOF
@@ -606,13 +607,10 @@ GHWEOF
   d4wout="$("$SCRIPT" doctor --dir "$D4W/run" --run-id "$RUN_ID4W" --gh "$DOCTOR_GH_WFAIL" --questions .auto-pilot/QUESTIONS.md 2>&1)"
   d4wrc=$?
   [ "$d4wrc" = 0 ] && ok "doctor I4 (write blip): exits 0" || bad "doctor I4 (write blip): exits 0" "$d4wout"
-  # The summary's repair note has the form `I4: <task> PR #<n>` — the FAILED
-  # announcements above deliberately don't, so match the note's exact shape.
-  lack "doctor I4 (write blip): a FAILED gh write is never summarized as a repair" 'I4: t_stale PR #411' "$d4wout"
-  have "doctor I4 (write blip): the summary counts no repairs at all" 'repaired=0' "$d4wout"
-  lack "doctor I4 (write blip): REPORT.md never records the repair that didn't happen" 'I4 repaired' "$(cat "$D4W/run/.auto-pilot/REPORT.md")"
-  lack "doctor I4 (write blip): QUESTIONS.md never records the repair that didn't happen" 'missing its repo-pr review signal' "$(cat "$D4W/run/.auto-pilot/QUESTIONS.md")"
-  have "doctor I4 (write blip): the failed ready write is announced" 'gh pr ready` FAILED' "$d4wout"
+  have "doctor I4 (write blip): the successful ready write is summarized" 'I4: t_stale PR #411' "$d4wout"
+  have "doctor I4 (write blip): the summary counts only the successful ready repair" 'repaired=1' "$d4wout"
+  lack "doctor I4 (write blip): the failed label is never summarized as a repair" 'label task-claim->task-loop' "$(cat "$D4W/run/.auto-pilot/REPORT.md")"
+  have "doctor I4 (write blip): the failed label write is announced" 'gh pr edit` FAILED' "$d4wout"
   unset DOCTOR_GH_DB
 
   # --- I4 (gh-issue): the issue's rung, a ready PR, and the closing link -----

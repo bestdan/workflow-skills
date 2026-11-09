@@ -128,7 +128,9 @@ that message — never a question).
     present locally — the claim may have been pushed to `task/<slug>` or, in a
     branch-pinned session, to that session's branch). Then do the work, validate,
     delete the file, commit, push, and **finish the PR** (fill the body,
-    `gh pr ready`, then relabel `task-claim` → `task-loop`) per
+    a `viewerPermission` check, `gh pr ready`, then relabel `task-claim` →
+    `task-loop`; without `ADMIN`, `MAINTAIN`, or `WRITE`, or if readiness fails,
+    leave it draft with `task-claim` and report a pending human hand-off) per
     `repo-pr-execute.md`.
   - `linear`: first run "Pre-flight: is work already in flight?" (per
     `linear-claim.md`) — if an open PR already exists for this issue, the work is

@@ -235,7 +235,7 @@ This step does two things in **one** `save_issue` call: it explicitly attaches t
    - Do not touch `labels` here — `auto-claimed` stays on through review.
 
 4. **No additional comment.** The PR-URL comment posted by `/do-tasks` links the
-draft. The ready PR and the `links` attachment signal that review has started.
+   draft. The ready PR and the `links` attachment signal that review has started.
 
 > With Linear's GitHub integration **inert**, the explicit `links` attachment above is not just the reliable path — it is the **only** one. It does not depend on branch-name matching or magic words in the PR body at all, and it is exactly what `/sweep-for-complete` reads later to verify this issue's own PR merged and complete it. If the integration is ever made live, it may also create its own PR↔issue link on branch-name/magic-word detection; that's fine to leave de-duplicating by URL against the one set here, but do not rely on it.
 
