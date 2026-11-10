@@ -29,10 +29,11 @@ mkroot() { # dir
   printf '# portable\n' >"$1/portable.md"
 }
 
-# A stub checker that reports the root it was handed and passes.
+# A stub checker that reports the arguments it was handed and passes. The
+# --write-index comment is the marker the wrapper reads as INDEX.md support.
 mkchecker() { # dir
   mkdir -p "$1/scripts"
-  printf 'import sys\nprint("checked", sys.argv[1])\n' >"$1/scripts/dev-docs-layout.py"
+  printf '# --write-index\nimport sys\nprint("checked", *sys.argv[1:])\n' >"$1/scripts/dev-docs-layout.py"
 }
 
 layout() { run env HOME="$H" "$@" bash "$SCRIPT"; }
@@ -60,6 +61,16 @@ layout() { run env HOME="$H" "$@" bash "$SCRIPT"; }
   assert_output --partial "predates it"
 }
 
+@test "a checker from before INDEX.md support reports its age, and never runs" {
+  mkroot "$TEST_TMPDIR/pre-index"
+  mkdir -p "$TEST_TMPDIR/pre-index/scripts"
+  printf 'print("ran")\n' >"$TEST_TMPDIR/pre-index/scripts/dev-docs-layout.py"
+  layout AGENT_GUIDANCE_DIR="$TEST_TMPDIR/pre-index"
+  assert_failure 2
+  assert_output --partial "predates INDEX.md support"
+  refute_output --partial "ran"
+}
+
 @test "a plugin shipping the checker runs it against this repo" {
   mkroot "$TEST_TMPDIR/new"
   mkchecker "$TEST_TMPDIR/new"
@@ -71,9 +82,17 @@ layout() { run env HOME="$H" "$@" bash "$SCRIPT"; }
 @test "the checker's own verdict is what the wrapper returns" {
   mkroot "$TEST_TMPDIR/failing"
   mkdir -p "$TEST_TMPDIR/failing/scripts"
-  printf 'import sys\nprint("1 layout violation(s)")\nsys.exit(1)\n' \
+  printf '# --write-index\nimport sys\nprint("1 layout violation(s)")\nsys.exit(1)\n' \
     >"$TEST_TMPDIR/failing/scripts/dev-docs-layout.py"
   layout AGENT_GUIDANCE_DIR="$TEST_TMPDIR/failing"
   assert_failure 1
   assert_output --partial "1 layout violation(s)"
+}
+
+@test "flags reach the checker ahead of the repo root" {
+  mkroot "$TEST_TMPDIR/new"
+  mkchecker "$TEST_TMPDIR/new"
+  run env HOME="$H" AGENT_GUIDANCE_DIR="$TEST_TMPDIR/new" bash "$SCRIPT" --write-index
+  assert_success
+  assert_output "checked --write-index $REPO_ROOT"
 }

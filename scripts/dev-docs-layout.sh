@@ -7,14 +7,23 @@
 # into the check suite it already has; this wrapper is that wiring.
 #
 # Usage:
-#   scripts/dev-docs-layout.sh
+#   scripts/dev-docs-layout.sh                 check the layout
+#   scripts/dev-docs-layout.sh --write-index   regenerate each record
+#                                              directory's INDEX.md instead
+#
+# Any arguments are passed to the checker ahead of this repo's root, so every
+# flag it takes works here too.
 #
 # Exit status:
 #   0  the layout is clean
 #   1  violations, listed on stdout; or the plugin root could not be resolved,
 #      whether because AGENT_GUIDANCE_DIR names something that is not one or
 #      because no copy of the plugin is installed
-#   2  the installed plugin is too old to ship the checker
+#   2  the installed plugin is too old to ship the checker, or ships one from
+#      before INDEX.md support
+#
+# With --write-index the checker checks nothing: 0 means each INDEX.md was
+# written, not that the layout is clean.
 #
 # A missing plugin FAILS rather than skips. A check that skips is green while
 # checking nothing, which is the failure mode this wrapper exists to avoid. CI
@@ -53,4 +62,13 @@ if [ ! -f "$checker" ]; then
   exit 2
 fi
 
-exec python3 "$checker" "$repo"
+# A checker from before INDEX.md support rejects every committed INDEX.md as a
+# misnamed record, which reads as a layout mistake rather than a stale plugin.
+# --write-index is that feature's interface, so its absence marks the age.
+if ! grep -q -- '--write-index' "$checker"; then
+  printf 'dev-docs-layout: %s predates INDEX.md support, so it cannot check or write INDEX.md files — update agent-guidance (claude plugin update agent-guidance, or pull the checkout AGENT_GUIDANCE_DIR names)\n' \
+    "$checker" >&2
+  exit 2
+fi
+
+exec python3 "$checker" "$@" "$repo"
