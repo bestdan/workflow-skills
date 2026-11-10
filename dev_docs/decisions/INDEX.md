@@ -4,6 +4,7 @@
 
 | Date       | Decision                                                                                                                              |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-11-06 | [The co-review override is the owner's admin bypass](2026-11-06-co-review-override-is-the-admin-bypass.md)                            |
 | 2026-09-24 | [`assess-task` stays a subagent: the typed profile is not adopted](2026-09-24-assess-task-stays-a-subagent.md)                        |
 | 2026-09-22 | [The eval suite's failures are not all routing failures](2026-09-22-eval-failures-are-not-all-routing.md)                             |
 | 2026-09-21 | [`label`'s derivation table is not pure code, and one cell can never be](2026-09-21-label-table-is-not-pure-code/)                    |
