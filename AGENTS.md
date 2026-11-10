@@ -4,21 +4,22 @@ Guidance for anyone — human or agent — working **on** this repository. It is
 the map and the short list of rules that are load-bearing here; everything
 deeper is one link away.
 
-| You want to…                                                   | Go to                                                                                            |
-| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| Install and use the plugin                                     | [`README.md`](README.md)                                                                         |
-| Set up the dev loop, run the gate, add a skill/command/handler | [`CONTRIBUTING.md`](CONTRIBUTING.md)                                                             |
-| Cut a release, fix a failed one, land a stack of PRs           | [`dev_docs/releasing.md`](dev_docs/releasing.md)                                                 |
-| Interpret a skipped test, or add a host-dependent one          | [`dev_docs/testing.md`](dev_docs/testing.md)                                                     |
-| Speed the gate up, or add concurrency to it                    | [`dev_docs/gate-performance.md`](dev_docs/gate-performance.md)                                   |
-| Call codex/agy/devin from a workflow                           | [`dev_docs/external-agents.md`](dev_docs/external-agents.md)                                     |
-| Change what the nightly routine does to the board              | [`dev_docs/nightly-gh-issue-routine.md`](dev_docs/nightly-gh-issue-routine.md)                   |
-| Understand secret/API-key resolution                           | [`dev_docs/auth_key_access.md`](dev_docs/auth_key_access.md)                                     |
-| Propose a typed model call (Jev) for some judgment             | [`dev_docs/typed-model-calls.md`](dev_docs/typed-model-calls.md)                                 |
-| Understand the gh-issue label/claim/completion model           | [`dev_docs/gh_issue_task_loop.md`](dev_docs/gh_issue_task_loop.md)                               |
-| Find prose that should be a helper script, and extract it      | [`dev_docs/finding-prose-that-should-be-code.md`](dev_docs/finding-prose-that-should-be-code.md) |
-| Read a design decision, or file a doc under `dev_docs/`        | [`dev_docs/README.md`](dev_docs/README.md)                                                       |
-| Pick up work a previous session left for you                   | [`dev_docs/.handoffs/README.md`](dev_docs/.handoffs/README.md)                                   |
+| You want to…                                                       | Go to                                                                                            |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| Install and use the plugin                                         | [`README.md`](README.md)                                                                         |
+| Set up the dev loop, run the gate, add a skill/command/handler     | [`CONTRIBUTING.md`](CONTRIBUTING.md)                                                             |
+| Add a Python script — register it in a `scripts/typecheck.sh` tier | [`CONTRIBUTING.md` → The gate](CONTRIBUTING.md#the-gate-just-check)                              |
+| Cut a release, fix a failed one, land a stack of PRs               | [`dev_docs/releasing.md`](dev_docs/releasing.md)                                                 |
+| Interpret a skipped test, or add a host-dependent one              | [`dev_docs/testing.md`](dev_docs/testing.md)                                                     |
+| Speed the gate up, or add concurrency to it                        | [`dev_docs/gate-performance.md`](dev_docs/gate-performance.md)                                   |
+| Call codex/agy/devin from a workflow                               | [`dev_docs/external-agents.md`](dev_docs/external-agents.md)                                     |
+| Change what the nightly routine does to the board                  | [`dev_docs/nightly-gh-issue-routine.md`](dev_docs/nightly-gh-issue-routine.md)                   |
+| Understand secret/API-key resolution                               | [`dev_docs/auth_key_access.md`](dev_docs/auth_key_access.md)                                     |
+| Propose a typed model call (Jev) for some judgment                 | [`dev_docs/typed-model-calls.md`](dev_docs/typed-model-calls.md)                                 |
+| Understand the gh-issue label/claim/completion model               | [`dev_docs/gh_issue_task_loop.md`](dev_docs/gh_issue_task_loop.md)                               |
+| Find prose that should be a helper script, and extract it          | [`dev_docs/finding-prose-that-should-be-code.md`](dev_docs/finding-prose-that-should-be-code.md) |
+| Read a design decision, or file a doc under `dev_docs/`            | [`dev_docs/README.md`](dev_docs/README.md)                                                       |
+| Pick up work a previous session left for you                       | [`dev_docs/.handoffs/README.md`](dev_docs/.handoffs/README.md)                                   |
 
 ## What this repo is
 
