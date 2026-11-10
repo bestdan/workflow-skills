@@ -58,23 +58,36 @@ harder value only when the description warrants it.
 
 ### Deriving `label`
 
-The label is a single tag summarizing the dominant demand, drawn from a fixed set.
-When several fit, pick the one that captures why the task is _hard to route_ —
-the standout dimension wins over the mild ones.
+The label is a lookup over the seven dimensions, not a judgment. Walk the rows
+top to bottom and take the **first** whose trigger holds. `standard-pr` is the
+default: it fires when no row above it does, so every profile gets exactly one
+label.
 
-| Label                    | Fires when the profile is dominated by…                                          |
-| ------------------------ | -------------------------------------------------------------------------------- |
-| `architecture`           | `complexity: hard` with `multi-file`/refactor scope, or a genuinely hard bug.    |
-| `standard-pr`            | The unremarkable middle — `standard` complexity, `pr-sized`, nothing extreme.    |
-| `mechanical-bulk`        | `mechanical` complexity and/or `cost_sensitivity: high` high-volume simple work. |
-| `frontend-creative`      | `creativity: high` — design, frontend/visual, API & naming ergonomics.           |
-| `latency-loop`           | `speed_sensitivity: high` — a latency-critical tight loop.                       |
-| `whole-codebase`         | `scope: whole-codebase` — needs to read most of the tree at once.                |
-| `verification-sensitive` | `verification_criticality: high` — the check is the task.                        |
-| `long-horizon`           | `autonomy: long-horizon` — overnight-scale autonomous work.                      |
+| # | Label                    | Trigger                                                                                     |
+| - | ------------------------ | ------------------------------------------------------------------------------------------- |
+| 1 | `verification-sensitive` | `verification_criticality: high` — the check is the task.                                   |
+| 2 | `architecture`           | `complexity: hard` — architecture, cross-cutting refactor, subtle bug, or unclear approach. |
+| 3 | `long-horizon`           | `autonomy: long-horizon` — overnight-scale autonomous work.                                 |
+| 4 | `frontend-creative`      | `creativity: high` — design, frontend/visual, API & naming ergonomics.                      |
+| 5 | `whole-codebase`         | `scope: whole-codebase` — needs to read most of the tree at once.                           |
+| 6 | `latency-loop`           | `speed_sensitivity: high` — a latency-critical tight loop.                                  |
+| 7 | `mechanical-bulk`        | `complexity: mechanical` — renames, config churn, high-volume simple edits.                 |
+| 8 | `standard-pr`            | None of the above — the unremarkable middle.                                                |
 
-If two labels are genuinely tied, set `confidence: low` and put the runner-up
-label in `runner_up` — consumers (e.g. select-coder) can then weigh both.
+Why this order: each label selects a row of candidates in select-coder's
+`matrix.md`, so when two triggers hold, the higher must be the row whose
+candidates also serve the lower. `verification-sensitive` is first because its
+row alone excludes a model (`gpt-5.6-sol`) that three rows below it rank.
+`whole-codebase` sits under the rows whose candidates all serve a 1M window and
+over `mechanical-bulk`, whose row includes Haiku's 200K. The cheap and fast
+rows, `latency-loop` and `mechanical-bulk`, win only when nothing more
+demanding fired. Rows 2–4 share a first pick, so their relative order is
+unmeasured. `cost_sensitivity` triggers no row; it is scored for the consumers.
+
+`confidence` and `runner_up` describe the dimension scores, not the lookup:
+when torn between two scorings, set `confidence: low` and put the label the
+other scoring derives in `runner_up` — consumers (e.g. select-coder) can then
+weigh both.
 
 ## Procedure
 
