@@ -66,7 +66,7 @@ fi
 # misnamed record, which reads as a layout mistake rather than a stale plugin.
 # --write-index is that feature's interface, so its absence marks the age.
 if ! grep -q -- '--write-index' "$checker"; then
-  printf 'dev-docs-layout: %s predates INDEX.md support, so it cannot check or write INDEX.md files — update agent-guidance\n' \
+  printf 'dev-docs-layout: %s predates INDEX.md support, so it cannot check or write INDEX.md files — update agent-guidance (claude plugin update agent-guidance, or pull the checkout AGENT_GUIDANCE_DIR names)\n' \
     "$checker" >&2
   exit 2
 fi
