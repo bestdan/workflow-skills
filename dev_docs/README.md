@@ -14,8 +14,9 @@ Each record directory (`decisions/`, `designs/`, `research/`,
 front matter and title, and the layout check fails while one is out of date, so
 it is never edited by hand. Adding or retitling a record therefore means
 re-running `--write-index` in the same PR. Two PRs that each add a record
-conflict on `INDEX.md`. Resolve it by taking either side and re-running
-`--write-index` after the merge; never merge the table by hand.
+conflict on `INDEX.md`. Resolve it by taking either side, re-running
+`--write-index`, and committing the regenerated `INDEX.md` as part of the
+resolution; never merge the table by hand.
 
 | Path                  | Holds                                                                         |
 | --------------------- | ----------------------------------------------------------------------------- |

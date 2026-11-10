@@ -19,7 +19,11 @@
 #   1  violations, listed on stdout; or the plugin root could not be resolved,
 #      whether because AGENT_GUIDANCE_DIR names something that is not one or
 #      because no copy of the plugin is installed
-#   2  the installed plugin is too old to ship the checker
+#   2  the installed plugin is too old to ship the checker, or ships one from
+#      before INDEX.md support
+#
+# With --write-index the checker checks nothing: 0 means each INDEX.md was
+# written, not that the layout is clean.
 #
 # A missing plugin FAILS rather than skips. A check that skips is green while
 # checking nothing, which is the failure mode this wrapper exists to avoid. CI
@@ -55,6 +59,15 @@ checker="$root/scripts/dev-docs-layout.py"
 if [ ! -f "$checker" ]; then
   printf 'dev-docs-layout: %s has no scripts/dev-docs-layout.py — the installed agent-guidance predates it\n' \
     "$root" >&2
+  exit 2
+fi
+
+# A checker from before INDEX.md support rejects every committed INDEX.md as a
+# misnamed record, which reads as a layout mistake rather than a stale plugin.
+# --write-index is that feature's interface, so its absence marks the age.
+if ! grep -q -- '--write-index' "$checker"; then
+  printf 'dev-docs-layout: %s predates INDEX.md support, so it cannot check or write INDEX.md files — update agent-guidance\n' \
+    "$checker" >&2
   exit 2
 fi
 
