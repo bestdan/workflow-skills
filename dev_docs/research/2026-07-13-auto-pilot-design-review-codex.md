@@ -2,7 +2,9 @@
 created: 2026-07-13
 ---
 
-# Verdict
+# Codex review of the auto-pilot design: the architecture manufactures the bugs
+
+## Verdict
 
 Yes: the architecture is manufacturing these bugs.
 
