@@ -29,10 +29,10 @@ mkroot() { # dir
   printf '# portable\n' >"$1/portable.md"
 }
 
-# A stub checker that reports the root it was handed and passes.
+# A stub checker that reports the arguments it was handed and passes.
 mkchecker() { # dir
   mkdir -p "$1/scripts"
-  printf 'import sys\nprint("checked", sys.argv[1])\n' >"$1/scripts/dev-docs-layout.py"
+  printf 'import sys\nprint("checked", *sys.argv[1:])\n' >"$1/scripts/dev-docs-layout.py"
 }
 
 layout() { run env HOME="$H" "$@" bash "$SCRIPT"; }
@@ -76,4 +76,12 @@ layout() { run env HOME="$H" "$@" bash "$SCRIPT"; }
   layout AGENT_GUIDANCE_DIR="$TEST_TMPDIR/failing"
   assert_failure 1
   assert_output --partial "1 layout violation(s)"
+}
+
+@test "flags reach the checker ahead of the repo root" {
+  mkroot "$TEST_TMPDIR/new"
+  mkchecker "$TEST_TMPDIR/new"
+  run env HOME="$H" AGENT_GUIDANCE_DIR="$TEST_TMPDIR/new" bash "$SCRIPT" --write-index
+  assert_success
+  assert_output "checked --write-index $REPO_ROOT"
 }

@@ -7,7 +7,12 @@
 # into the check suite it already has; this wrapper is that wiring.
 #
 # Usage:
-#   scripts/dev-docs-layout.sh
+#   scripts/dev-docs-layout.sh                 check the layout
+#   scripts/dev-docs-layout.sh --write-index   regenerate each record
+#                                              directory's INDEX.md instead
+#
+# Any arguments are passed to the checker ahead of this repo's root, so every
+# flag it takes works here too.
 #
 # Exit status:
 #   0  the layout is clean
@@ -53,4 +58,4 @@ if [ ! -f "$checker" ]; then
   exit 2
 fi
 
-exec python3 "$checker" "$repo"
+exec python3 "$checker" "$@" "$repo"

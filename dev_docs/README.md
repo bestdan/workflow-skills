@@ -8,6 +8,15 @@ exceptions it makes; it does not restate the convention.
 `scripts/dev-docs-layout.sh` runs the plugin's checker over this directory as
 part of `just check`.
 
+Each record directory (`decisions/`, `designs/`, `research/`,
+`workflow-review/`) lists its records, newest first, in an `INDEX.md`.
+`scripts/dev-docs-layout.sh --write-index` generates it from each record's
+front matter and title, and the layout check fails while one is out of date, so
+it is never edited by hand. Adding or retitling a record therefore means
+re-running `--write-index` in the same PR. Two PRs that each add a record
+conflict on `INDEX.md`. Resolve it by taking either side and re-running
+`--write-index` after the merge; never merge the table by hand.
+
 | Path                  | Holds                                                                         |
 | --------------------- | ----------------------------------------------------------------------------- |
 | `<topic>.md`          | conventions and runbooks — how a subsystem works, how to release, how to test |
