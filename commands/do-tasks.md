@@ -127,13 +127,16 @@ that message — never a question).
     its `headRefName` (`gh pr list`/`gh pr view` → headRefName; `git fetch` it if not
     present locally — the claim may have been pushed to `task/<slug>` or, in a
     branch-pinned session, to that session's branch). Then do the work, validate,
-    delete the file, commit, push, and **finish the PR** (relabel `task-claim` →
-    `task-loop`, fill the body, `gh pr ready`) per `repo-pr-execute.md`.
+    delete the file, commit, push, and **finish the PR** per
+    `repo-pr-execute.md`. That hand-off section fills the body, checks
+    `viewerPermission`, marks the PR ready, then relabels `task-claim` →
+    `task-loop`. Without `ADMIN`, `MAINTAIN`, or `WRITE`, or if readiness fails,
+    it leaves the draft with `task-claim` and reports a pending human hand-off.
   - `linear`: first run "Pre-flight: is work already in flight?" (per
     `linear-claim.md`) — if an open PR already exists for this issue, the work is
     already published, so stop and report it rather than re-executing. Otherwise
-    check out Linear's verbatim `branchName`, do the work, open the PR, and "Move to
-    review on PR open" — without re-claiming.
+    check out Linear's verbatim `branchName`, do the work, open the draft PR, and
+    "Move to review at hand-off" — without re-claiming.
   - `gh-issue`: check out the handler's deterministic claim branch
     `<branch_prefix>task-<n>`, which the claim created as its lock
     (`git fetch origin && git switch "<branch>"`); create it
@@ -141,14 +144,14 @@ that message — never a question).
     comment-election path, which creates no ref. **Resolve `<branch>` with
     `python3 commands/handlers/assets/gh-issue-claim.py branch-name --issue <n> [--prefix "<branch_prefix>"]`,
     never by spelling it** — `gh-issue.branch_prefix` is per-repo, so a literal is right in one
-    repo and wrong in the next. Then do the work, open the PR, and "Move to review on PR
-    open" (per `gh-issue-claim.md`) — without re-claiming.
+    repo and wrong in the next. Then do the work, open the draft PR, and "Move to review
+    at hand-off" (per `gh-issue-claim.md`) — without re-claiming.
   - `jira`: first check for an open PR carrying `[<KEY>]` (pre-flight step 1 in
     `jira-claim.md`) — if one exists, the work is already published, so stop and report
     it. Otherwise run "Branch + execute" in its resume form: reuse the handler's
     deterministic work branch `task/<KEY>` when it exists as this caller's own work,
     and create it from `origin/<base>` when it does not (the claim creates no branch).
-    Then do the work, open the PR, and "Move to review on PR open" (per
+    Then do the work, open the draft PR, and "Move to review at hand-off" (per
     `jira-claim.md`) — without re-claiming.
 
 **Batching.** `--claim-only` is the one execute-family action safe to batch — it
@@ -188,6 +191,30 @@ If the relative paths don't resolve, find the handler files with **Glob**
 (`**/commands/handlers/repo-pr-execute.md`, `**/commands/handlers/linear-claim.md`,
 `**/commands/handlers/linear-common.md`, `**/commands/handlers/gh-issue-claim.md`,
 `**/commands/handlers/jira-claim.md`) and Read the results.
+
+### 1a. Review-queue gate
+
+Before any claim, on every handler, single and batch (`--no-claim` claims
+nothing, so it skips this), check that the owner's review queue has room:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/review-queue.py" --repo <owner/name> --limit <review_queue_limit>
+```
+
+- `<owner/name>` is the repo the PR will open in: `gh-issue.repo` when set,
+  otherwise the current repo (`gh repo view --json nameWithOwner --jq
+  .nameWithOwner`).
+- `<review_queue_limit>` is the top-level `review_queue_limit` key, default
+  `8`, or a `review-queue-limit=<n>` token (`commands/task-config.md`
+  "Run-scoped overrides").
+- Run it unsandboxed; it calls `gh`.
+
+Exit `0` → go on to the handler. Exit `1` → the queue is full: claim nothing,
+and report `Review queue full: <count> PRs waiting on review (limit <n>) — no
+task claimed`, followed by the PRs it listed. This is a decline, not an error.
+Exit `3` → the queue could not be read: claim nothing, and report the
+`GATE: error` line. A batch runs the gate once, before it selects, so a large
+batch can take the queue over the limit. `wip_limit` bounds that.
 
 ## 2. File path (`repo-pr` / absent handler)
 
@@ -486,7 +513,7 @@ With positive WIP slack, run `commands/handlers/linear-claim.md` end to end:
 5. **Branch + execute** — branch with Linear's **verbatim** `branchName` (never
    reconstruct it when the field is present), do the work, run the project's
    tests/lints (`just check` here).
-6. **PR** — `gh pr create` with a Conventional Commits title ending in the Linear
+6. **PR** — `gh pr create --draft` with a Conventional Commits title ending in the Linear
    identifier in brackets (`<type>(scope): <description> [PRE-12]`) and
    `Closes <identifier>` on its own line in the body; post the PR URL as a Linear
    comment. The title grammar is the `agent-guidance` plugin's
@@ -506,8 +533,9 @@ With positive WIP slack, run `commands/handlers/linear-claim.md` end to end:
    (`/sweep-for-complete` / `/reconcile-tasks`), not to anything parsed from the
    PR body — but it stays because it documents which issue this PR references and
    works cleanly wherever the integration is live.
-7. **Move to review** — `linear-claim.md` "Move to review on PR open": attach the
-   PR via `links` and move to `In Review` if the team has one. **Never move the
+7. **Move to review** — run `linear-claim.md` "Move to review at hand-off": it
+   marks the PR ready, attaches it via `links`, and moves it to `In Review` if the
+   team has one. **Never move the
    issue to a `completed`/`canceled` state** — completion belongs to the
    reconciler verbs (`/complete-task`, `/sweep-for-complete`, `/reconcile-tasks`),
    never to this path itself. A live Linear integration may additionally
@@ -607,9 +635,9 @@ capability is actually visible — inside the remote session** — via two concr
    cloud VM running the handler's single-issue claim+execute flow against **that one
    issue's identifier** — never instruct a session to claim more than one. For
    Linear, the remote session runs `linear-claim.md` end to end (`Claim the issue` →
-   branch with the verbatim `branchName` → execute → `gh pr create` with a title
+   branch with the verbatim `branchName` → execute → `gh pr create --draft` with a title
    ending in `[<id>]` plus `Closes <id>` in the body →
-   `Move to review on PR open`). The remote prompt must be
+   `Move to review at hand-off`). The remote prompt must be
    **self-contained** — **assume the VM has no plugin** unless its environment's setup
    script installed one; a committed `.claude/settings.json` does **not** install one
    (both probed 2026-09-05 and after, `dev_docs/research/2026-09-05-cloud-session-plugin-and-proxy.md`
@@ -657,8 +685,8 @@ capability is actually visible — inside the remote session** — via two concr
 Read and follow **`commands/handlers/gh-issue-claim.md`** end to end — it holds
 the find-candidates query, the in-flight pre-flight, the feasibility judgment, the
 atomic `<branch_prefix>task-<n>` claim lock (defined in
-`commands/handlers/claim-lock.md`), the work branch, `gh pr create` with
-`Closes #<n>`, the move to the `status:4_needs_review` rung, bail mechanics, and the
+`commands/handlers/claim-lock.md`), the work branch, `gh pr create --draft` with
+`Closes #<n>`, readiness before the move to the `status:4_needs_review` rung, bail mechanics, and the
 report format. If the relative path doesn't resolve, find it with **Glob**
 (`**/commands/handlers/gh-issue-claim.md`).
 
@@ -1196,8 +1224,8 @@ step 5's self-check stops each session loudly on its own issue.
 Read and follow **`commands/handlers/jira-claim.md`** end to end — it holds the
 config read (`ready_status` is required here), the find-candidates JQL, the
 in-flight pre-flight, the feasibility judgment, the assignee-based claim (self-assign +
-transition to In Progress), the `task/<KEY>` work branch, `gh pr create` with a
-Conventional Commits title ending in `[<KEY>]`, the move-to-review transition,
+transition to In Progress), the `task/<KEY>` work branch, `gh pr create --draft` with a
+Conventional Commits title ending in `[<KEY>]`, readiness before the move-to-review transition,
 bail mechanics, and the
 report format. `/do-tasks` runs these phases in the **current session** over the
 Atlassian MCP. If the relative path doesn't resolve, find it with **Glob**

@@ -13,7 +13,7 @@ A Claude Code plugin bundling Daniel's general engineering workflow skills: coll
 
 ## What's in the box
 
-20 skills, 24 commands, and 2 subagents, organized into eight workflows. Each
+20 skills, 25 commands, and 2 subagents, organized into eight workflows. Each
 entry links to its own doc — that's where the flags, edge cases, and handler
 support live.
 
@@ -23,6 +23,7 @@ support live.
 | -------------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | [**co-review**](skills/co-review/SKILL.md)         | `/co-review [PR# \| --local \| --remote \| --post] [--base <branch>]` | Review a PR yourself, pull in other local agents (codex, agy, devin, copilot, crush, grok) as extra reviewers, reconcile everything against existing GitHub comments, auto-fix the high-confidence items, and surface the judgment calls.  |
 | [**co-review-stats**](commands/co-review-stats.md) | `/co-review-stats [--since <date>] [--repo <owner/name>]`             | Print the per-reviewer quality table from the co-review ledger, verbatim. Human-run only: the one reader of the ledger, so scores never reach a review.                                                                                    |
+| [**revert-landing**](commands/revert-landing.md)   | `/revert-landing <pr> [--repo <owner/name>] [--reason <text>]`        | Open a `fix: revert #<pr> (<title>)` PR of a merged PR's squash commit, so the undo of a bad landing ships in the next release, and check its diff mirrors the original's.                                                                 |
 | [**local-review**](skills/local-review/SKILL.md)   | "let me look over these changes", "open the diff so I can comment"    | Open a GitHub-style split-diff UI on localhost so _you_ read an agent's changes and leave inline line comments; the feedback is written to a file the agent acts on. Local-only — nothing touches GitHub unless you flag a comment for it. |
 
 **Run local-review by hand** (no agent needed): the server is a plain script —

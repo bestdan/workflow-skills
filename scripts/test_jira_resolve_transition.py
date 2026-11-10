@@ -194,6 +194,53 @@ class TestAmbiguous(ResolveTestCase):
         self.assertEqual(out, "NONE\nOn Hold\nBlocked\n")
 
 
+def _issue(key, status, category):
+    return {
+        "key": key,
+        "fields": {"status": {"name": status, "statusCategory": {"key": category}}},
+    }
+
+
+class TestFromSearch(ResolveTestCase):
+    """The acli path: candidates are the distinct statuses an issue search saw,
+    and the printed id is the status name `acli ... transition --status` takes."""
+
+    def test_dedups_statuses_and_resolves_by_category(self):
+        payload = [
+            _issue("P-1", "Done", "done"),
+            _issue("P-2", "Done", "done"),
+            _issue("P-3", "Won't Do", "done"),
+            None,
+        ]
+        code, out = self.call(
+            payload,
+            [
+                "--from-search",
+                "--category",
+                "done",
+                "--exclude",
+                "won.?t do|cancel|reject|obsolete",
+            ],
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(out, "Done\tDone\n")
+
+    def test_a_cancel_only_project_resolves_nothing(self):
+        payload = [_issue("P-1", "Canceled", "done")]
+        code, out = self.call(
+            payload,
+            ["--from-search", "--category", "done", "--exclude", "cancel"],
+        )
+        self.assertEqual(code, 2)
+        self.assertEqual(out, "NONE\nCanceled\n")
+
+    def test_an_object_payload_is_malformed(self):
+        code, _ = self.call(
+            {"transitions": []}, ["--from-search", "--category", "done"]
+        )
+        self.assertEqual(code, 1)
+
+
 class TestArgValidation(unittest.TestCase):
     def test_requires_exactly_one_of_category_or_exact(self):
         with self.assertRaises(SystemExit):

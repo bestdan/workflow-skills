@@ -2,7 +2,9 @@
 created: 2026-07-13
 ---
 
-# Verdict
+# Codex review of the auto-pilot inversion design
+
+## Verdict
 
 **Proceed, but cut it down to Stages 1–3 — the scenario harness, supervisor-owned authority, and the watcher split. Do not approve Stages 4–5 or the one-task-per-process model yet.**
 
@@ -311,7 +313,7 @@ That case is stronger than Stages 4–5 as currently justified.
 
 It is weaker than the limited inversion because supervisor-owned leases, an external verdict path, and a stable watcher directly remove two demonstrated structural hazards without replacing the graph or delivery lifecycle.
 
-# Recommendation
+## Recommendation
 
 **Proceed, but cut it down to:**
 

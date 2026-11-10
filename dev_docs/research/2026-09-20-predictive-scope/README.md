@@ -7,7 +7,7 @@ feeds: ../../decisions/2026-09-20-drop-subsystem-floor-from-predictive-scope.md
 # Forecasting `scope` from a card (2026-09-20)
 
 Evidence for the half of
-[`../../designs/2026-09-18-assess-task-typed-profile.md`](../../designs/2026-09-18-assess-task-typed-profile.md)
+`designs/2026-09-18-assess-task-typed-profile.md` (deleted)
 that nothing has measured: whether `scope` can be forecast from prose, where there is
 nothing to count. That design's own text calls this "the part of the design most likely
 to be wrong."
@@ -374,7 +374,7 @@ lists it under what would reopen the choice.
 
 ## Feeds
 
-[`../../designs/2026-09-18-assess-task-typed-profile.md`](../../designs/2026-09-18-assess-task-typed-profile.md)
+`designs/2026-09-18-assess-task-typed-profile.md` (deleted)
 — its predictive `scope` lane, which findings 6 and 7 measure; its `whole-codebase` cut
 point, which finding 2 establishes this corpus cannot license; and its upward-only
 correction, which findings 8 and 11 show points the wrong way once the question is

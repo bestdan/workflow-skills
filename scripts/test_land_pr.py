@@ -110,6 +110,12 @@ class FakeGh:
         self.label_created_concurrently = False
         # A merge call that fails on the client after GitHub merged (a timeout).
         self.merge_fails_after_merging = False
+        # Re-reads that still show OPEN after such a merge, before GitHub
+        # reports it MERGED: a merge that completes after the call failed.
+        self.open_reads_after_merge = 0
+        self.merge_pending = False
+        # Reads that report MERGED before GitHub has filled in mergeCommit.
+        self.null_merge_commit_reads = 0
         # The merge commit's message; None means the body the lander sent.
         self.merge_message: Optional[str] = None
 
@@ -145,17 +151,22 @@ class FakeGh:
         if args[:2] == ["pr", "view"]:
             if any("mergeCommit" in a for a in args):
                 merged = self.pr["state"] == "MERGED"
-                return (
-                    0,
-                    json.dumps(
-                        {
-                            "state": self.pr["state"],
-                            "headRefOid": self.pr["headRefOid"],
-                            "mergeCommit": {"oid": MERGE_SHA} if merged else None,
-                        }
-                    ),
-                    "",
+                if merged and self.null_merge_commit_reads > 0:
+                    self.null_merge_commit_reads -= 1
+                    merged = False
+                out = json.dumps(
+                    {
+                        "state": self.pr["state"],
+                        "headRefOid": self.pr["headRefOid"],
+                        "mergeCommit": {"oid": MERGE_SHA} if merged else None,
+                    }
                 )
+                if self.merge_pending:
+                    self.open_reads_after_merge -= 1
+                    if self.open_reads_after_merge <= 0:
+                        self.merge_pending = False
+                        self.pr["state"] = "MERGED"
+                return 0, out, ""
             return 0, json.dumps(self.pr), ""
         if args[:2] == ["pr", "merge"]:
             return self.merge(args)
@@ -247,6 +258,9 @@ class FakeGh:
                 "GraphQL: Head branch was modified. Review and try the merge again."
                 " (mergePullRequest)",
             )
+        if self.merge_fails_after_merging and self.open_reads_after_merge:
+            self.merge_pending = True
+            return 127, "", "timed out after 60 seconds"
         self.pr["state"] = "MERGED"
         if self.merge_fails_after_merging:
             return 127, "", "timed out after 60 seconds"
@@ -557,6 +571,13 @@ class RealLandingTests(unittest.TestCase):
         orig = land.run_gh
         land.run_gh = self.fake.run_gh
         self.addCleanup(setattr, land, "run_gh", orig)
+        self.slept: List[float] = []
+        orig_sleep = land.sleep
+        land.sleep = self.slept.append
+        self.addCleanup(setattr, land, "sleep", orig_sleep)
+
+    def re_reads(self):
+        return [c for c in self.fake.calls if "state,headRefOid,mergeCommit" in c]
 
     def land(self):
         out = io.StringIO()
@@ -657,15 +678,117 @@ class RealLandingTests(unittest.TestCase):
         lines = self.land()
         self.assertIn("gh pr merge failed: gh: boom (HTTP 500)", lines[-1])
         self.assertTrue(
+            lines[-1].endswith("; re-read: still open after the re-reads"), lines[-1]
+        )
+        self.assertTrue(
             any("mergeCommit" in a for c in self.fake.calls for a in c),
             "the lander re-reads the PR after a failed merge call",
         )
+        self.assertEqual(self.fake.labels_added, [])
+        # An open PR is read again a bounded number of times, well under a minute.
+        self.assertEqual(len(self.re_reads()), 1 + len(land.RE_READ_DELAYS))
+        self.assertEqual(self.slept, list(land.RE_READ_DELAYS))
+        self.assertLess(sum(self.slept), 60)
+
+    def test_a_merge_github_finishes_after_the_first_re_read_lands(self):
+        self.fake.merge_fails_after_merging = True
+        self.fake.open_reads_after_merge = 1
+        lines = self.land()
+        self.assertEqual(lines[-1], f"LAND: landed sha={MERGE_SHA}")
+        self.assertEqual(len(self.re_reads()), 2)
+        self.assertEqual(self.slept, [land.RE_READ_DELAYS[0]])
+        self.assertEqual(self.fake.labels_added, ["landed-by-agent"])
+        self.assertTrue(
+            any(c["body"].startswith(land.LANDED_MARKER) for c in self.fake.comments)
+        )
+
+    def test_a_merge_without_the_trailers_is_settled_and_not_read_again(self):
+        self.fake.merge_fails_after_merging = True
+        self.fake.merge_message = "chore(scripts): tidy the helper (#7)"
+        lines = self.land()
+        self.assertIn(
+            f"re-read: merged as {MERGE_SHA[:7]} without this run's trailers",
+            lines[-1],
+        )
+        self.assertEqual(len(self.re_reads()), 1)
+        self.assertEqual(self.slept, [])
+
+    def settle_re_read_as(self, **pr):
+        """Fail the merge call, then have the first re-read see `pr`."""
+        self.fake.fail.add("pr merge")
+        orig = self.fake.run_gh
+
+        def run_gh(args, stdin=None):
+            if "state,headRefOid,mergeCommit" in args:
+                self.fake.pr.update(pr)
+            return orig(args, stdin)
+
+        land.run_gh = run_gh
+
+    def test_a_closed_pr_is_settled_and_not_read_again(self):
+        self.settle_re_read_as(state="CLOSED")
+        lines = self.land()
+        self.assertTrue(lines[-1].startswith("LAND: hold"), lines[-1])
+        self.assertIn("re-read: closed without merging", lines[-1])
+        self.assertEqual(len(self.re_reads()), 1)
+        self.assertEqual(self.slept, [])
+
+    def test_a_pr_merged_at_another_head_is_settled_and_not_read_again(self):
+        self.settle_re_read_as(state="MERGED", headRefOid=OTHER_HEAD)
+        lines = self.land()
+        self.assertTrue(lines[-1].startswith("LAND: hold"), lines[-1])
+        self.assertIn(f"re-read: merged at {OTHER_HEAD[:7]}", lines[-1])
+        self.assertEqual(len(self.re_reads()), 1)
+        self.assertEqual(self.slept, [])
+
+    def test_a_pr_merged_at_another_head_before_its_commit_is_settled(self):
+        self.settle_re_read_as(state="MERGED", headRefOid=OTHER_HEAD)
+        self.fake.null_merge_commit_reads = 1
+        lines = self.land()
+        self.assertIn(f"re-read: merged at {OTHER_HEAD[:7]}", lines[-1])
+        self.assertEqual(len(self.re_reads()), 1)
+        self.assertEqual(self.slept, [])
+
+    def test_a_pr_open_at_another_head_is_settled_and_not_read_again(self):
+        # A refusal whose wording HEAD_MOVED_RE does not recognise.
+        self.settle_re_read_as(headRefOid=OTHER_HEAD)
+        lines = self.land()
+        self.assertTrue(lines[-1].startswith("LAND: hold"), lines[-1])
+        self.assertIn(f"re-read: open at {OTHER_HEAD[:7]}", lines[-1])
+        self.assertEqual(len(self.re_reads()), 1)
+        self.assertEqual(self.slept, [])
+
+    def test_a_merge_reported_before_its_merge_commit_is_read_again_and_lands(self):
+        self.fake.merge_fails_after_merging = True
+        self.fake.null_merge_commit_reads = 1
+        lines = self.land()
+        self.assertEqual(lines[-1], f"LAND: landed sha={MERGE_SHA}")
+        self.assertEqual(len(self.re_reads()), 2)
+        self.assertEqual(self.slept, [land.RE_READ_DELAYS[0]])
+
+    def test_a_merge_commit_never_reported_after_a_failed_call_holds(self):
+        self.fake.merge_fails_after_merging = True
+        self.fake.null_merge_commit_reads = 1 + len(land.RE_READ_DELAYS)
+        lines = self.land()
+        self.assertIn("re-read: merged, but no merge commit reported", lines[-1])
+        self.assertTrue(lines[-1].endswith(", so " + land.CHECK_BY_HAND), lines[-1])
+        self.assertEqual(len(self.re_reads()), 1 + len(land.RE_READ_DELAYS))
+        self.assertEqual(self.slept, list(land.RE_READ_DELAYS))
         self.assertEqual(self.fake.labels_added, [])
 
     def test_a_failed_call_whose_re_read_fails_holds(self):
         self.fake.merge_fails_after_merging = True
         self.fake.fail.add("state,headRefOid,mergeCommit")
-        self.assertIn("gh pr merge failed", self.land()[-1])
+        lines = self.land()
+        self.assertIn("gh pr merge failed", lines[-1])
+        # An unreadable PR may have merged, and the hold says so.
+        self.assertIn("last re-read failed: ", lines[-1])
+        self.assertTrue(lines[-1].endswith(", so " + land.CHECK_BY_HAND), lines[-1])
+        # One reason the script builds is one `; `-separated field.
+        self.assertEqual(lines[-1].count("; "), 1, lines[-1])
+        # A read error is retried, a bounded number of times.
+        self.assertEqual(len(self.re_reads()), 1 + len(land.RE_READ_DELAYS))
+        self.assertEqual(self.slept, list(land.RE_READ_DELAYS))
 
     def test_a_head_moved_refusal_is_not_re_read(self):
         self.fake.head_at_merge = OTHER_HEAD
@@ -764,9 +887,28 @@ class RealLandingTests(unittest.TestCase):
         land.run_gh = run_gh
         lines = self.land()
         self.assertEqual(len(reads), land.MERGE_SHA_TRIES)
-        self.assertEqual(lines[-1], "LAND: landed sha=unknown")
+        # The cause reaches the output rather than a bare `unknown`.
+        self.assertEqual(
+            lines[-1],
+            "LAND: landed sha=unknown reason=cannot read the merge commit: "
+            "gh pr view 7 failed (rc 1): gh: boom (HTTP 502)",
+        )
         self.assertIn("LABEL: added landed-by-agent", lines)
         self.assertTrue(any(line.startswith("COMMENT: created") for line in lines))
+        # The comment, the lasting record, carries the cause too.
+        (comment,) = [
+            c for c in self.fake.comments if c["body"].startswith(land.LANDED_MARKER)
+        ]
+        self.assertIn(
+            "Merge commit: unknown (cannot read the merge commit: ", comment["body"]
+        )
+
+    def test_a_merge_commit_never_reported_lands_as_unknown_with_why(self):
+        self.fake.null_merge_commit_reads = land.MERGE_SHA_TRIES
+        lines = self.land()
+        self.assertEqual(
+            lines[-1], "LAND: landed sha=unknown reason=GitHub reported no merge commit"
+        )
 
     def test_the_landed_comment_is_not_read_as_a_dry_run_verdict(self):
         # merge-audit.py's shadow mode reads comments starting with MARKER.

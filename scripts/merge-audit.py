@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Audit landed PRs: the co-review gate, and the shadow lander's record.
+"""Audit landed PRs: the co-review gate, the shadow lander's record, and the
+agent's real landings.
 
-Two modes, both read-only:
+Three modes, all read-only:
 
 - `review` lists every PR merged since `--since` whose final head carries no
   `co-review` `success` commit status. Each one is named by how it got in,
@@ -26,12 +27,22 @@ Two modes, both read-only:
   verdict. It counts as would-land when the candidate tiers it `auto` and the
   posted comment had no hold besides the tier's.
 
+- `landed` lists every PR merged since `--since` whose merge commit carries
+  the `Landed-by: land-pr.sh` trailer, with each follow-up fix or revert found
+  by the same rule as `shadow`'s. `/revert-landing` titles its revert so that
+  rule finds it. It also names any such merge that lacks the `landed-by-agent`
+  label. Whether a follow-up's defect was one a gate could have caught, and so
+  shrinks the auto slice, is the owner's call. A landing less than 7 days old
+  can still collect a follow-up; set `--since` 14 days back to audit a full
+  window each week.
+
 Usage:
   python3 scripts/merge-audit.py --repo <owner/name> --since YYYY-MM-DD \
-    --mode review|shadow [--policy <file>]
+    --mode review|shadow|landed [--policy <file>]
 
 Ends with one summary line: `AUDIT: review merged=N lacking=M bypass=B
-ungated=U unknown=K`, or `AUDIT: shadow shadowed=S would-land=W/30`.
+ungated=U unknown=K`, `AUDIT: shadow shadowed=S would-land=W/30`, or
+`AUDIT: landed landed=L followed-up=F unlabeled=U unknown=K`.
 Exit 0 for any finding, 1 when the merged-PR list cannot be read, 2 for a
 usage error. A read error on one PR is reported against that PR, never a crash.
 
@@ -74,6 +85,7 @@ PR_LIMIT = 1000
 RULE_SUITE_DAYS = 30
 FOLLOW_UP_DAYS = 7
 FOLLOW_UP_TYPES = ("fix", "revert")
+LANDED_TRAILER = "Landed-by: land-pr.sh"
 # Posted hold reasons that come from the tier, which --policy recomputes.
 TIER_HOLDS = (
     "tier human: ",
@@ -318,11 +330,50 @@ def shadow(repo, prs, policy_text):
     print(f"AUDIT: shadow shadowed={shadowed} would-land={len(landing)}/{GRADUATION}")
 
 
+# --- landed -----------------------------------------------------------------
+
+
+def read_message(repo, sha):
+    return land.gh(["api", f"repos/{repo}/commits/{sha}", "--jq", ".commit.message"])
+
+
+def landed(repo, prs):
+    count, followed, unlabeled, unknown = 0, 0, 0, 0
+    for p in prs:
+        sha = (p.get("mergeCommit") or {}).get("oid") or ""
+        if not sha:
+            continue
+        try:
+            message = read_message(repo, sha)
+        except ReadError as exc:
+            unknown += 1
+            print(f"#{p['number']} unknown  cannot read {sha[:7]}: {exc}")
+            continue
+        if LANDED_TRAILER not in [line.strip() for line in message.splitlines()]:
+            continue
+        count += 1
+        print(f"#{p['number']} landed {p['mergedAt'][:10]} — {p.get('title', '')}")
+        labels = {(lb or {}).get("name") for lb in p.get("labels") or []}
+        if land.LANDED_LABEL not in labels:
+            unlabeled += 1
+            print(f"    lacks the `{land.LANDED_LABEL}` label")
+        fixes = follow_ups(p, prs)
+        followed += bool(fixes)
+        for q in fixes:
+            print(
+                f"    follow-up #{q['number']} merged {q['mergedAt'][:10]}: {q.get('title', '')}"
+            )
+    print(
+        f"AUDIT: landed landed={count} followed-up={followed} "
+        f"unlabeled={unlabeled} unknown={unknown}"
+    )
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--repo", required=True, help="owner/name")
     p.add_argument("--since", required=True, help="YYYY-MM-DD, merged on or after")
-    p.add_argument("--mode", required=True, choices=("review", "shadow"))
+    p.add_argument("--mode", required=True, choices=("review", "shadow", "landed"))
     p.add_argument("--policy", help="shadow only: a candidate merge-policy.yml")
     args = p.parse_args(argv)
     if "/" not in args.repo:
@@ -347,6 +398,8 @@ def main(argv=None):
         return 1
     if args.mode == "review":
         review(args.repo, prs, args.since)
+    elif args.mode == "landed":
+        landed(args.repo, prs)
     else:
         shadow(args.repo, prs, policy_text)
     return 0

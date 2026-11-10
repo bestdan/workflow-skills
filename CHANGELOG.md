@@ -4,6 +4,42 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.206.1] - 2026-11-09
+
+### Fixes
+
+- publish reviews at handoff [#1444] (#1445) (7c94f708)
+
+## [2.206.0] - 2026-11-08
+
+### Features
+
+- complete merged jira issues over acli or the MCP [N/A] (#1438) (128be50d)
+
+## [2.205.0] - 2026-11-07
+
+### Features
+
+- add after= to score a completion's dependents [N/A] (#1440) (d2af1ddb)
+
+## [2.204.0] - 2026-11-06
+
+### Features
+
+- add /revert-landing and the landed audit [#1323] (#1437) (4419b0cc)
+
+## [2.203.0] - 2026-11-06
+
+### Features
+
+- stop claiming when the human-tier review queue is full [#1320] (#1436) (9f197c90)
+
+## [2.202.2] - 2026-11-06
+
+### Fixes
+
+- re-read a failed landing with backoff, and say why a sha is unknown [#1316] (#1422) (97c3ef03)
+
 ## [2.202.1] - 2026-11-06
 
 ### Fixes

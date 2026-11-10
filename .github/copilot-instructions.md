@@ -66,7 +66,10 @@ tokens in someone's context window.
   Which directory holds what is `dev_docs/README.md`, and
   the convention itself is `dev_docs_layout.md` in the `agent-guidance` plugin.
   `scripts/dev-docs-layout.sh` runs that plugin's checker and **fails when the
-  plugin is missing** rather than skipping, so CI clones it.
+  plugin is missing** rather than skipping, so CI clones it. A new or retitled
+  record means regenerating its directory's `INDEX.md` with
+  `scripts/dev-docs-layout.sh --write-index`, and an `INDEX.md` merge conflict
+  is resolved the same way, never by hand.
 - **`dev_docs/tasks/` is ignored except `.task-config.yml`.** Plan scaffolding
   there is ephemeral in-flight state — durable wisdom graduates to a top-level
   `dev_docs/<name>.md`. See the comment block in `.gitignore` before trying to

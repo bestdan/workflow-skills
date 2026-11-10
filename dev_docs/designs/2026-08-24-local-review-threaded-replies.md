@@ -1,5 +1,6 @@
 ---
 created: 2026-08-24
+status: proposed
 ---
 
 # local-review — threaded replies and multi-round review

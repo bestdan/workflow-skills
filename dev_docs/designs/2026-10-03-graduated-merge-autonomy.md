@@ -1,5 +1,6 @@
 ---
 created: 2026-10-03
+status: proposed
 ---
 
 # Graduated merge autonomy for the software factory
