@@ -87,8 +87,8 @@ and never list the bot. Nothing in `.github/merge-policy.yml` changes.
 
 ## Consequences
 
-- Good, because an agent can no longer merge past co-review: GitHub refuses
-  the bot.
+- Good, because an agent can no longer merge without a `co-review` success
+  status: GitHub refuses the bot a bypass.
 - Good, because an override costs the owner one approved command, and no new
   identity, workflow or `dli gh override` command is built.
   [#1431](https://github.com/bestdan/workflow-skills/issues/1431) is closed as
