@@ -3,113 +3,104 @@ created: 2026-11-06
 status: accepted
 ---
 
-# The co-review override is the owner's say-so plus the admin bypass
+# The co-review override is the owner's admin bypass
 
 ## Context
 
 `main`'s ruleset (id 17035293) requires a `co-review` commit status. Agents post
-that status with `scripts/co-review-status.py`, using the owner's own `gh`
-login. The owner wanted a per-repo escape hatch: a way to merge an easy PR that
-has no `co-review` success, without running a full co-review round
+that status with `scripts/co-review-status.py`. The owner wanted a per-repo
+escape hatch: a way to merge an easy PR that has no `co-review` success, without
+running a full co-review round
 ([#1429](https://github.com/bestdan/workflow-skills/issues/1429)).
 
-The first proposal was an override posted by an identity agents can't use: a
-GitHub App, or a second account. That only helps if using the identity proves
-the owner is present. Agents run unsandboxed as the owner's Unix user, so any
-credential the owner can use on that machine without a fresh approval, agents
-can read too. Every candidate therefore traded reach for strength:
+An override only means something if it comes from an identity agents can't use.
+When this record was first drafted, agents and the owner shared the `bestdan`
+login, so no such identity existed without new machinery: a GitHub App whose key
+sits behind 1Password (Mac only), or a second account approving from the phone.
+The draft took the ruleset's admin bypass anyway, accepting that GitHub couldn't
+tell the owner's bypass from an agent's, and was held until the identity
+question was settled.
 
-- **GitHub App:** the key sits behind 1Password biometrics. It's strong, but
-  works only from the Mac.
-- **Second account:** signed in on the owner's phone and browser, it approves
-  the PR, and a workflow turns that approval into the status. It works
-  anywhere, but needs a second account and a workflow that an agent's PR
-  could edit.
-- **The admin bypass already on the ruleset:** no setup, but GitHub can't tell
-  the owner's bypass from an agent's.
-
-Two facts made the third option cheap:
-
-- **The bypass is already live.** The ruleset's bypass list gives
-  `RepositoryRole` 5 (admin) `bypass_mode: always`.
-- **The co-review check is already honor-system.** Any session holding the
-  owner's login can post `co-review: success` without a review. An
-  identity-gated override would guard a door next to one that stays open.
-
-The owner chose the admin bypass on 2026-11-06.
+It was settled by
+[bestdan/dotfiles#1143](https://github.com/bestdan/dotfiles/pull/1143). Agents
+now act on `bestdan` repos as `bestdan-bot`, a Write collaborator with no admin
+role and no bypass. The owner's `bestdan` login stays the admin, reached through
+the browser or one Duo-approved command at a time with `dli as-owner`
+(dotfiles `dev_docs/decisions/2026-11-07-agents-act-as-a-non-admin-bot.md`).
+That makes the admin bypass the identity agents can't use, with no setup in this
+repo: the ruleset's bypass list grants it to admins, and the bot is not one.
 
 ## Decision
 
 ### Who may override
 
-The owner, by saying so in a session. The words that count are an explicit
-instruction to merge a named PR without co-review, e.g. "merge #1500 without
-co-review". The agent then runs `dli gh merge <repo> <pr> <head-sha>` as it
-does for any merge.
+The owner, as `bestdan`, in one of two ways:
 
-That call is the REST `PUT /pulls/{n}/merge`, and GitHub honors the admin
-bypass on it. #1428 (head `66d4ac7`) merged through `dli gh merge` on
-2026-11-06 with no `co-review` status, and GitHub logged it as a ruleset
-bypass. Before the merge, the agent states the head SHA it read, so the owner
-can see what lands. An agent never overrides on its own judgment. The same
-rule that keeps it from running `dli gh merge` without the owner's OK covers
-this, and nothing new enforces it.
+- **The browser:** the merge box's bypass checkbox on the PR.
+- **A terminal on lindev:**
+  `dli as-owner bestdan/<repo> pr merge <n> --squash --admin --match-head-commit <sha>`.
+  It sends a Duo push that names the command, and runs it with the owner's
+  token only once the owner approves.
+
+An agent never runs either. When the owner says to merge a named PR without
+co-review, the agent reads the PR's head SHA and hands the owner that command
+with the SHA filled in. The agent's own `dli gh merge` runs as the bot, and
+GitHub refuses it a merge past the required check (dotfiles local test 9,
+2026-11-07).
 
 ### What the override looks like on GitHub
 
-There is no override record. The evidence is the merged PR whose head SHA
-carries no `co-review` success.
+There is no override record. The evidence is a merged PR whose head SHA carries
+no `co-review` success, plus the ruleset's bypass event on its merge commit,
+which names the actor.
 
-- The head is pinned by the `head-sha` argument of `dli gh merge`. That is the
-  head the agent read and stated when it started the merge, not one the owner
-  named.
-- A later push voids it. `dotfiles/scripts/gh_write.py` sends that SHA as the
-  merge call's `sha` parameter, which GitHub refuses once the head has moved.
-- GitHub's ruleset bypass events (`/rulesets/rule-suites?rule_suite_result=bypass`)
-  show that a push went past the rules, but not who ran it or why. Release
-  pushes to `main` log them too: 7 of the 10 bypass events on 2026-11-06.
-  Matched to a PR's merge commit, an event shows that the merge used the
-  bypass. No event marks it as an owner override.
+- **One head SHA:** `--match-head-commit` makes GitHub refuse the merge once
+  the head has moved, so a later push voids the override. The browser merges
+  the head the owner is looking at.
+- **Attributable:** the bot holds no bypass, so a `bypass` rule-suite event on
+  a PR's merge commit means the owner's credential was used. Release pushes to
+  `main` also log bypass events, so the audit matches events to merge commits
+  rather than counting them.
 
 ### How a repo opts in
 
-A repo opts in through its ruleset's bypass list. A repo with no bypass entry
-for the owner has no override, and its PRs wait for co-review. Nothing in
-`.github/merge-policy.yml` changes.
+A repo opts in through its ruleset's bypass list. A repo with no admin bypass
+entry has no override, and its PRs wait for co-review. To give another repo the
+override, add `RepositoryRole` admin with `bypass_mode: always` to its ruleset,
+and never list the bot. Nothing in `.github/merge-policy.yml` changes.
 
 ### How the tools tell an override from a real pass
 
 - **`scripts/land-pr.py`: no change.** It never sees an override. The lander
   lands only on `co-review: success`, and an override is a merge the owner ran.
-- **`scripts/merge-audit.py`: no change.** `--mode review` already lists every
-  merged PR whose head lacks `co-review` success, and labels it `bypass` when
-  the rule-suite event for its merge commit says so. `--mode shadow` never
-  counts such a PR as would-land, because the lander's dry-run holds a PR
-  whose `co-review` status isn't success.
-  [#1432](https://github.com/bestdan/workflow-skills/issues/1432), which asked
-  for this, is closed as already done.
-- **The `dli gh merge` guard: no change.** It reads no status today and needs
-  none: GitHub applies the bypass, and the guard's head-SHA pin is what binds
-  the override to one commit.
-
-## One-time setup
-
-None for this repo: the admin bypass is already on ruleset 17035293. To give
-another repo the override, add `RepositoryRole` admin with
-`bypass_mode: always` to its ruleset's bypass list.
+- **The `dli gh merge` guard: no change.** As the bot it cannot bypass, so a
+  merge without `co-review` success fails at GitHub.
+- **`scripts/merge-audit.py`: follow-up,
+  [#1432](https://github.com/bestdan/workflow-skills/issues/1432).**
+  `--mode review` already lists every merged PR whose head lacks `co-review`
+  success, and `--mode shadow` never counts one as would-land. But it labels a
+  PR `bypass` from the rule-suites API, which needs admin: as the bot, that
+  call returns 404 (measured 2026-11-10), so the audit now reports such PRs
+  `unknown` rather than `bypass`. #1432 owns reading the rule suites with the
+  owner's credential and splitting `bypass` by actor, so a bypass by `bestdan`
+  reads as an owner override and any other actor raises an alarm.
 
 ## Consequences
 
-- An agent that ignores the rule can merge past co-review. That was already
-  true, since it could post the status itself. This decision only declines to
-  build a guard that wouldn't close the gap.
-- [#1431](https://github.com/bestdan/workflow-skills/issues/1431) (an override
-  identity and a `dli gh override` command) is not needed and is closed.
+- Good, because an agent can no longer merge past co-review: GitHub refuses
+  the bot.
+- Good, because an override costs the owner one approved command, and no new
+  identity, workflow or `dli gh override` command is built.
+  [#1431](https://github.com/bestdan/workflow-skills/issues/1431) is closed as
+  not needed.
+- Bad, because the `co-review` status is still self-attested: the bot can post
+  `co-review: success` without a review. This decision closes the bypass, not
+  that.
+- Bad, because until #1432 lands, the audit can't show an override as one.
 
 ## Revisit when
 
-- **Agents stop running as the owner's login.** Then an App-posted status would
-  be the override, and the ruleset could pin `co-review` to an
-  `integration_id`.
-- **The co-review status stops being honor-system.** Then the admin bypass would
-  be the one open door, and it should be narrowed.
+- **GitHub lets a ruleset require a status from a source the bot can't post
+  as.** Then self-attestation closes too, and the override is the one door left.
+- **Agents regain admin, or the bot is added to a bypass list.** Then a bypass
+  no longer proves the owner, and the identity question reopens.
