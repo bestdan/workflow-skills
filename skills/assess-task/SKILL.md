@@ -58,7 +58,7 @@ harder value only when the description warrants it.
 
 ### Deriving `label`
 
-The label is a lookup over the seven dimensions, not a judgment. Walk the rows
+The label is a lookup over the dimension scores, not a judgment. Walk the rows
 top to bottom and take the **first** whose trigger holds. `standard-pr` is the
 default: it fires when no row above it does, so every profile gets exactly one
 label.
@@ -82,7 +82,7 @@ row alone excludes a model (`gpt-5.6-sol`) that three rows below it rank.
 over `mechanical-bulk`, whose row includes Haiku's 200K. The cheap and fast
 rows, `latency-loop` and `mechanical-bulk`, win only when nothing more
 demanding fired. Rows 2–4 share a first pick, so their relative order is
-unmeasured. `cost_sensitivity` triggers no row; it is scored for the consumers.
+unmeasured. `cost_sensitivity` triggers no row, and no consumer reads it today.
 
 `confidence` and `runner_up` describe the dimension scores, not the lookup:
 when torn between two scorings, set `confidence: low` and put the label the
