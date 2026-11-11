@@ -32,6 +32,14 @@ does nothing until #1060 lands. On `jira` it does nothing at all.
 > `jira-promote.md` step 3 still holds only on `Flagged` and
 > `jira.blocked_statuses`, which a completion does not clear.
 
+> **Update, 2026-11-11, rollout step 2.** `/complete-task` runs the re-check
+> as its step 2, in the command rather than in each handler file, so
+> `/sweep-for-complete`, which follows the handler files directly, does not run
+> it once per issue on top of its own batch call. The capability matrix gets no
+> separate "re-promotes dependents after completion" row: its values would be
+> those of the `after=` row, so the sentence under the table says the
+> completing verbs run that mode instead.
+
 ## What completing a task changes on the board
 
 The promoter holds a card in `new` while it has an unresolved blocker

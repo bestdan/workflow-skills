@@ -1,6 +1,6 @@
 ---
-description: Explicitly transition one identified work item to its tracker's completed state — a handler-dispatched, manually-invoked primitive that trusts the caller and does no PR/merge verification of its own
-allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(find *), Glob, Grep, Read, Edit, AskUserQuestion, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__save_comment, mcp__claude_ai_Linear__list_teams, mcp__linear__get_issue, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__linear__save_comment, mcp__linear__list_teams, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__getJiraIssue, mcp__claude_ai_Atlassian__getTransitionsForJiraIssue, mcp__claude_ai_Atlassian__transitionJiraIssue, mcp__claude_ai_Atlassian__addCommentToJiraIssue, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__getJiraIssue, mcp__atlassian__getTransitionsForJiraIssue, mcp__atlassian__transitionJiraIssue, mcp__atlassian__addCommentToJiraIssue, Bash(acli *), Bash(python3 *), Bash(mkdir *), Write
+description: Explicitly transition one identified work item to its tracker's completed state, then re-promote the dependents it was blocking — a handler-dispatched, manually-invoked primitive that trusts the caller and does no PR/merge verification of its own
+allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(find *), Glob, Grep, Read, Edit, AskUserQuestion, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__save_comment, mcp__claude_ai_Linear__list_teams, mcp__linear__get_issue, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__linear__save_comment, mcp__linear__list_teams, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__list_projects, mcp__claude_ai_Linear__list_issue_labels, mcp__claude_ai_Linear__create_issue_label, mcp__claude_ai_Linear__list_comments, mcp__linear__list_issues, mcp__linear__list_projects, mcp__linear__list_issue_labels, mcp__linear__create_issue_label, mcp__linear__list_comments, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__getJiraIssue, mcp__claude_ai_Atlassian__getTransitionsForJiraIssue, mcp__claude_ai_Atlassian__transitionJiraIssue, mcp__claude_ai_Atlassian__addCommentToJiraIssue, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__getJiraIssue, mcp__atlassian__getTransitionsForJiraIssue, mcp__atlassian__transitionJiraIssue, mcp__atlassian__addCommentToJiraIssue, Bash(acli *), Bash(python3 *), Bash(mkdir *), Write, Bash(grep *), Bash("${CLAUDE_PLUGIN_ROOT}/scripts/task-scan.py":*), Skill, Agent
 argument-hint: "<identifier> [--dry-run]"
 ---
 
@@ -20,10 +20,10 @@ handler's terminal `done`/`completed` state.
 > **trusts the caller**. It does **not** check whether a PR merged, whether the
 > work actually landed, or whether anything shipped — it takes the identifier at
 > face value and completes it. The merge-verification step lives **one layer
-> up**, in `/sweep-for-complete` (a future command that discovers merged PRs and
-> then calls this primitive per verified issue, passing an already-verified
-> signal — see the handler file's `assume_verified` caller contract, an internal
-> parameter set only by the sweep, not a user-facing flag). `/complete-task`
+> up**, in `/sweep-for-complete`, which discovers merged PRs and then runs each
+> verified issue through the handler file's completion phase (not this command),
+> passing an already-verified signal — see the handler file's `assume_verified` caller contract, an internal
+> parameter set only by the sweep, not a user-facing flag. `/complete-task`
 > itself does no PR discovery and no verification: it is the purely mechanical
 > "flip this one state" step, nothing more. Do not add merge-detection logic
 > here — that belongs in the sweep, one layer up.
@@ -40,7 +40,8 @@ drift.
 - **`<identifier>`** (required) — the tracker's issue identifier (e.g. `PRE-123`
   for Linear, `142` or `#142` for gh-issue). No default; the command trusts
   exactly the id it is given.
-- **`--dry-run`** — print the planned transition and stop. Change nothing.
+- **`--dry-run`** — print the planned transition and the dependents re-check
+  (step 2) as dry runs. Change nothing.
 
 ## 1. Resolve the handler
 
@@ -91,7 +92,42 @@ If the relative path doesn't resolve, find the handler file with **Glob**
 `**/commands/handlers/jira-complete.md`) and Read the result. Pass the
 identifier and the `--dry-run` flag through.
 
-## 2. Report
+When the handler asks before mutating, make it one question that names both
+steps: `<its planned-transition line>, then re-check dependents of <id>`.
+
+## 2. Re-check dependents
+
+When the handler's outcome is **applied**, **already complete**, or (under
+`--dry-run`) its **dry-run** plan, score the
+items the completed one was blocking: follow `commands/promote-tasks.md` with
+`after=<id>`, plus `dry-run` under `--dry-run`. Pass the id as the handler
+resolved it (a `repo-pr` slug, a `gh-issue` number, a `linear` identifier).
+`already complete` counts because it usually means a merge closed the item a
+moment earlier, which releases its dependents just as this command would; a
+re-run on an item completed long ago writes nothing. Any other outcome (a
+declined confirmation, a stop) skips this step.
+
+`/promote-tasks` decides whether the handler supports `after=`. When it refuses,
+report its one-line refusal under the completion and leave the completion's
+result as it is. The step asks nothing, and every gate of a full promote run
+still applies, so a dependent with another open blocker stays held. Its writes
+are promotions only; it never completes or demotes anything.
+
+**Under `--dry-run`** the item is not complete yet, so the hold check still
+counts it as an open blocker and holds every dependent it has. Report each
+dependent with the hold reason it got, and call out on its own line each one
+whose only open blocker is `<id>`: those are the ones the real run would
+release. (If the item was already complete, the dry run is exact.)
+
+**On `repo-pr`** neither step stages or commits, as with every standalone
+`repo-pr` command. The report lists each file they changed.
+
+`/sweep-for-complete` calls the handler files directly, not this command, and
+runs one re-check for its whole batch, so this step never runs twice for one
+completion. Design: `dev_docs/designs/2026-11-06-promote-after-complete.md`,
+part 2.
+
+## 3. Report
 
 The handler file owns its report format, but every outcome fits this skeleton:
 
@@ -102,3 +138,8 @@ The handler file owns its report format, but every outcome fits this skeleton:
   and an explicit "nothing changed (dry-run)".
 - **applied** — the identifier, old state → new state, and whether a comment
   was posted.
+- **Dependents re-checked** — after an applied, already-complete or dry-run
+  outcome, the report step 2's `/promote-tasks after=` run printed, headed
+  `dependents re-checked (N) after <id>`, or on a dry run the hold list step 2
+  describes. On a handler that refuses `after=`, its refusal line instead. On
+  `repo-pr`, the files changed and left uncommitted.
