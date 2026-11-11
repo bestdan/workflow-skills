@@ -91,8 +91,11 @@ class NoOptInTests(HookCase):
     def test_imports_nothing_a_bare_interpreter_does_not(self):
         # Every turn of a session that never opted in pays for this run, so it
         # must not reach json or datetime: they load only once opted in.
-        extra = self.hook_imports(self.payload("Stop")) - self.bare_imports("pass")
-        self.assertEqual(extra, set())
+        seen = self.hook_imports(self.payload("Stop"))
+        # Startup always imports something, so an empty set means the
+        # -X importtime parse broke, not that the hook is lean.
+        self.assertTrue(seen)
+        self.assertEqual(seen - self.bare_imports("pass"), set())
 
     def test_no_config_writes_nothing(self):
         proc = self.run_hook(self.payload("UserPromptSubmit", prompt=PROMPT))
@@ -241,9 +244,11 @@ class OptInTests(HookCase):
         # nothing. This checks that import set rather than timing a run: a
         # timed run on a loaded machine can take over a second whatever the
         # hook does, so a wall-clock ceiling fails on load alone.
-        allowed = self.bare_imports("import json, datetime")
-        extra = self.hook_imports(self.payload("Stop")) - allowed
-        self.assertEqual(extra, set())
+        seen = self.hook_imports(self.payload("Stop"))
+        # json proves both that the run took the opted-in path and that the
+        # -X importtime parse worked; without it the subset check is vacuous.
+        self.assertIn("json", seen)
+        self.assertEqual(seen - self.bare_imports("import json, datetime"), set())
 
 
 def _imports(args, stdin="", env=None):
