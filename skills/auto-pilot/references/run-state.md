@@ -230,8 +230,8 @@ does the bootout.
 loop iteration** and **each `/deliver-task` sub-step boundary**; the launch wrapper
 also beats it at the top of every wake, so a `claude` that wedges before its first
 iteration still leaves an ageable timestamp. `status` ages it against the per-task
-ceiling (`--task-ceiling`, default 2700s = 45m) and reports `healthy` or a
-**STALL** — "last heartbeat 40 minutes ago, per-task ceiling is 45m" is a
+ceiling (`--task-ceiling`, default 2700s = 45m) and, for a run that is still
+expected to run, reports `healthy` or a **STALL** — "last heartbeat 40 minutes ago, per-task ceiling is 45m" is a
 distinction **no other signal in the system can make**: to an exit code, a PID, and
 a log tail, a slow task and a hung one are identical. Once the run has stopped for
 good (`relaunch expected: no`), an old beat is reported as `stopped` instead: a
