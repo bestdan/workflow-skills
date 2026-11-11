@@ -1062,10 +1062,12 @@ lack "smoke-test: stream-json check does not pipe into grep" '| grep' "$smoke_co
 # tool call, with a result line of subtype error_max_turns. That run had a live
 # credential: the API answered. A missing credential exits 1 too, but its result
 # line is subtype "success" with is_error true and "Not logged in" (captured from
-# claude with an empty HOME). Each stub prints those shapes, keys in the order
-# the real CLI used, and exits as the real CLI did.
+# claude with an empty HOME). Each stub prints those shapes and exits as the
+# real CLI did. The real result line has "subtype" before "type"; JSON key order
+# is not a contract, so maxturns uses the real order and maxturns_typefirst the
+# other one, and the smoke must pass both.
 SMK="$BASE/smoke-stubs"
-for case in maxturns noauth crash healthy; do
+for case in maxturns maxturns_typefirst noauth crash healthy; do
   mkdir -p "$SMK/$case"
   printf '#!/bin/sh\nshift 2\nexec "$@"\n' >"$SMK/$case/sandbox-exec"
 done
@@ -1073,7 +1075,13 @@ cat >"$SMK/maxturns/claude" <<'EOF'
 #!/bin/sh
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"s"}'
 printf '%s\n' '{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"tool_use","name":"Bash"}]}}'
-printf '%s\n' '{"duration_api_ms":2853,"stop_reason":"tool_use","session_id":"s","type":"result","subtype":"error_max_turns","is_error":true,"num_turns":2}'
+printf '%s\n' '{"duration_api_ms":2853,"stop_reason":"tool_use","session_id":"s","is_error":true,"num_turns":2,"subtype":"error_max_turns","type":"result"}'
+exit 1
+EOF
+cat >"$SMK/maxturns_typefirst/claude" <<'EOF'
+#!/bin/sh
+printf '%s\n' '{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"tool_use","name":"Bash"}]}}'
+printf '%s\n' '{"type":"result","subtype":"error_max_turns","is_error":true,"num_turns":2}'
 exit 1
 EOF
 cat >"$SMK/noauth/claude" <<'EOF'
@@ -1101,9 +1109,12 @@ smoke_run() { # case — the smoke's output, then its exit code on the last line
 smk="$(smoke_run maxturns)"
 have "smoke-test: a turn spent on a tool call (error_max_turns) passes" 'exit=0' "$smk"
 have "smoke-test: the max-turns pass says why it passed" 'used its one turn' "$smk"
+smk="$(smoke_run maxturns_typefirst)"
+have "smoke-test: error_max_turns passes with type before subtype too" 'exit=0' "$smk"
 smk="$(smoke_run noauth)"
 lack "smoke-test: a not-logged-in stream still fails" 'exit=0' "$smk"
 have "smoke-test: the not-logged-in failure blames the credential" 'auth smoke-test failed' "$smk"
+have "smoke-test: the failure names claude's exit code" '(claude exit 1)' "$smk"
 smk="$(smoke_run crash)"
 lack "smoke-test: a non-stream-json error exit still fails" 'exit=0' "$smk"
 have "smoke-test: the error exit refuses to detach" 'not detaching' "$smk"

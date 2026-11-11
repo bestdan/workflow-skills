@@ -2708,7 +2708,7 @@ smoke_test() {
   # result line come in no fixed order, hence both orders.
   if [ "$rc" != 0 ]; then
     grep -Eq '^\{.*("type":"result".*"subtype":"error_max_turns"|"subtype":"error_max_turns".*"type":"result")' <<<"$out" \
-      || die "auth smoke-test failed THROUGH the wrapper — a credential or the jail is wrong; not detaching"
+      || die "auth smoke-test failed THROUGH the wrapper (claude exit $rc) — a credential or the jail is wrong; not detaching"
     note=" (the model used its one turn on a tool call; the API answered, so the credential is live)"
   fi
   [ -n "$out" ] || die "auth smoke-test produced no output THROUGH the wrapper — credential/jail suspect; not detaching"
