@@ -17,7 +17,7 @@ under the proposed architecture.
 
 `/co-review-stats` explicitly lets "the model present" aggregate scores, so an
 agent learns the biasing information and can retain it for a later co-review in
-the same conversation ([design](reviewer-quality-score-design.md#L201)). The main
+the same conversation ([design](https://github.com/bestdan/workflow-skills/blob/44eb833b/dev_docs/reviewer-quality-score-design.md#L201)). The main
 agent also retains filesystem read access to the predictable ledger path.
 
 A human-only output surface or mandatory fresh, isolated context is required.
@@ -27,9 +27,9 @@ a capability boundary.
 ### P1: GitHub reviewers are not currently blinded
 
 The design assumes every source is relabeled neutrally
-([design](reviewer-quality-score-design.md#L21)), but the current reconciler
+([design](https://github.com/bestdan/workflow-skills/blob/44eb833b/dev_docs/reviewer-quality-score-design.md#L21)), but the current reconciler
 contract passes GitHub comments with their authors while anonymizing only Claude
-and local agents ([co-review step 8](../skills/co-review/SKILL.md#L242)). Bot
+and local agents ([co-review step 8](https://github.com/bestdan/workflow-skills/blob/44eb833b/skills/co-review/SKILL.md#L391)). Bot
 scores would therefore be produced by a non-blind grader.
 
 Normalize every source, including GitHub bots and human comments, before
@@ -39,7 +39,7 @@ reconciliation. Preserve the identity mapping outside the reconciler.
 
 Reviewers skip, fail, and time out, but the proposed table compares each
 reviewer's marginal rate against Claude's rate across all runs
-([design](reviewer-quality-score-design.md#L210)). That confounds reviewer
+([design](https://github.com/bestdan/workflow-skills/blob/44eb833b/dev_docs/reviewer-quality-score-design.md#L210)). That confounds reviewer
 quality with workload selection: a reviewer that runs only on a harder subset of
 changes is compared with Claude's performance on the entire population.
 
@@ -52,7 +52,7 @@ so a few finding-heavy runs do not dominate the comparison.
 A config name such as `devin` can represent different models, prompts, CLI
 versions, and context, while reconciler changes alter every grade. Aggregating
 them under one name destroys the ability to detect the model or prompt
-regressions the design promises ([design](reviewer-quality-score-design.md#L159)).
+regressions the design promises ([design](https://github.com/bestdan/workflow-skills/blob/44eb833b/dev_docs/reviewer-quality-score-design.md#L159)).
 
 Record at least:
 
@@ -67,7 +67,7 @@ Record at least:
 Concurrent reviews can interleave, a failure can append the run but only some
 findings, and retrying can duplicate the batch. Recording only at the end also
 cannot satisfy "one run record per invocation" when earlier steps abort
-([design](reviewer-quality-score-design.md#L177)). These failure modes directly
+([design](https://github.com/bestdan/workflow-skills/blob/44eb833b/dev_docs/reviewer-quality-score-design.md#L177)). These failure modes directly
 corrupt both denominators and percentages.
 
 Define the eligible cohort, add idempotency and locking with an atomic batch, or
@@ -79,7 +79,7 @@ or represented by an incomplete run state.
 
 If Devin and a human report the same issue, removing the human from `sources`
 makes Devin appear to be the sole discoverer
-([design](reviewer-quality-score-design.md#L155)). The same metric is also
+([design](https://github.com/bestdan/workflow-skills/blob/44eb833b/dev_docs/reviewer-quality-score-design.md#L155)). The same metric is also
 conditional on which automated reviewers happened to run.
 
 Preserve an anonymous `human_corroborated` flag and define the metric as
