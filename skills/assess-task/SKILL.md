@@ -79,10 +79,13 @@ Why this order: each label selects a row of candidates in select-coder's
 exclusion first, then capability needs, then the cheap and fast rows.
 `verification-sensitive` is first because its row alone excludes a model
 (`gpt-5.6-sol`) that three rows below it rank. `whole-codebase` sits over
-`mechanical-bulk`, whose row includes Haiku's 200K window. The cheap and fast
-rows, `latency-loop` and `mechanical-bulk`, win only when nothing more
-demanding fired. Rows 1–4 share a first pick; row 1 is placed by its exclusion,
-so only the order of rows 2–4 is unmeasured. `cost_sensitivity` triggers no row, and no consumer reads it today.
+`latency-loop` and `mechanical-bulk`, whose rows include 200K windows
+(`swe-1.6-fast`, Haiku). The cheap and fast rows, `latency-loop` and
+`mechanical-bulk`, win only when nothing more demanding fired. Rows 1–4 share a
+first pick; row 1 is placed by its exclusion, so only the order of rows 2–4 is
+unmeasured.
+
+`cost_sensitivity` triggers no row, and no consumer reads it today.
 
 `confidence` and `runner_up` describe the dimension scores, not the lookup:
 when torn between two scorings, set `confidence: low` and put the label the
