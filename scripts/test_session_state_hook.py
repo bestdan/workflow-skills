@@ -247,6 +247,7 @@ class OptInTests(HookCase):
         # json proves both that the run took the opted-in path and that the
         # -X importtime parse worked; without it the subset check is vacuous.
         self.assertIn("json", seen)
+        self.assertIn("datetime", seen)
         self.assertEqual(seen - self.bare_imports("import json, datetime"), set())
 
 
