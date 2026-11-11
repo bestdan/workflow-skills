@@ -11,6 +11,7 @@ deeper is one link away.
 | Cut a release, fix a failed one, land a stack of PRs           | [`dev_docs/releasing.md`](dev_docs/releasing.md)                                                 |
 | Interpret a skipped test, or add a host-dependent one          | [`dev_docs/testing.md`](dev_docs/testing.md)                                                     |
 | Speed the gate up, or add concurrency to it                    | [`dev_docs/gate-performance.md`](dev_docs/gate-performance.md)                                   |
+| Switch agent landing on or off, tune or audit the merge policy | [`dev_docs/merge-autonomy.md`](dev_docs/merge-autonomy.md)                                       |
 | Call codex/agy/devin from a workflow                           | [`dev_docs/external-agents.md`](dev_docs/external-agents.md)                                     |
 | Change what the nightly routine does to the board              | [`dev_docs/nightly-gh-issue-routine.md`](dev_docs/nightly-gh-issue-routine.md)                   |
 | Understand secret/API-key resolution                           | [`dev_docs/auth_key_access.md`](dev_docs/auth_key_access.md)                                     |
