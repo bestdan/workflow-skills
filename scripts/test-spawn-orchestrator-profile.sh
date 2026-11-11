@@ -1067,7 +1067,7 @@ lack "smoke-test: stream-json check does not pipe into grep" '| grep' "$smoke_co
 # is not a contract, so maxturns uses the real order and maxturns_typefirst the
 # other one, and the smoke must pass both.
 SMK="$BASE/smoke-stubs"
-for case in maxturns maxturns_typefirst noauth crash healthy; do
+for case in maxturns maxturns_typefirst maxturns_otherexit noauth crash healthy; do
   mkdir -p "$SMK/$case"
   printf '#!/bin/sh\nshift 2\nexec "$@"\n' >"$SMK/$case/sandbox-exec"
 done
@@ -1083,6 +1083,13 @@ cat >"$SMK/maxturns_typefirst/claude" <<'EOF'
 printf '%s\n' '{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"tool_use","name":"Bash"}]}}'
 printf '%s\n' '{"type":"result","subtype":"error_max_turns","is_error":true,"num_turns":2}'
 exit 1
+EOF
+# The max-turns result, but an exit code claude does not use for the turn cap:
+# whatever failed, it was not claude stopping at its one turn.
+cat >"$SMK/maxturns_otherexit/claude" <<'EOF'
+#!/bin/sh
+printf '%s\n' '{"duration_api_ms":2853,"session_id":"s","is_error":true,"num_turns":2,"subtype":"error_max_turns","type":"result"}'
+exit 2
 EOF
 cat >"$SMK/noauth/claude" <<'EOF'
 #!/bin/sh
@@ -1111,6 +1118,9 @@ have "smoke-test: a turn spent on a tool call (error_max_turns) passes" 'exit=0'
 have "smoke-test: the max-turns pass says why it passed" 'used its one turn' "$smk"
 smk="$(smoke_run maxturns_typefirst)"
 have "smoke-test: error_max_turns passes with type before subtype too" 'exit=0' "$smk"
+smk="$(smoke_run maxturns_otherexit)"
+lack "smoke-test: error_max_turns with an exit code other than 1 fails" 'exit=0' "$smk"
+have "smoke-test: that failure names the exit code" '(claude exit 2)' "$smk"
 smk="$(smoke_run noauth)"
 lack "smoke-test: a not-logged-in stream still fails" 'exit=0' "$smk"
 have "smoke-test: the not-logged-in failure blames the credential" 'auth smoke-test failed' "$smk"
@@ -1120,6 +1130,7 @@ lack "smoke-test: a non-stream-json error exit still fails" 'exit=0' "$smk"
 have "smoke-test: the error exit refuses to detach" 'not detaching' "$smk"
 smk="$(smoke_run healthy)"
 have "smoke-test: a healthy exit-0 stream still passes" 'smoke-test OK' "$smk"
+lack "smoke-test: a healthy exit-0 pass carries no max-turns note" 'smoke-test OK (' "$smk"
 
 # shellcheck source=scripts/lib/spawn-orchestrator-test-epilogue.sh
 . "$SO_LIB/spawn-orchestrator-test-epilogue.sh"

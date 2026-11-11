@@ -2705,9 +2705,11 @@ smoke_test() {
   # Only a run whose API call answered can reach that cap, so the credential is
   # live. A missing credential also exits 1, but its result is subtype "success"
   # with is_error true ("Not logged in"), so it still fails here. The keys of the
-  # result line come in no fixed order, hence both orders.
+  # result line come in no fixed order, hence both orders. Only exit 1 counts,
+  # because that is the code claude stops at its turn cap with; any other code
+  # means something else failed.
   if [ "$rc" != 0 ]; then
-    grep -Eq '^\{.*("type":"result".*"subtype":"error_max_turns"|"subtype":"error_max_turns".*"type":"result")' <<<"$out" \
+    [ "$rc" = 1 ] && grep -Eq '^\{.*("type":"result".*"subtype":"error_max_turns"|"subtype":"error_max_turns".*"type":"result")' <<<"$out" \
       || die "auth smoke-test failed THROUGH the wrapper (claude exit $rc) — a credential or the jail is wrong; not detaching"
     note=" (the model used its one turn on a tool call; the API answered, so the credential is live)"
   fi
