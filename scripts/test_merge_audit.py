@@ -80,12 +80,13 @@ class FakeGh:
         self.files = {}  # pr -> [file]
         self.messages = {}  # merge sha -> commit message
         self.fail = set()  # endpoint substrings that fail
+        self.fail_err = "HTTP 500"  # the stderr a failing call returns
 
     def __call__(self, args, stdin=None):
         joined = " ".join(args)
         for bad in self.fail:
             if bad in joined:
-                return 1, "", "HTTP 500"
+                return 1, "", self.fail_err
         if args[:2] == ["pr", "list"]:
             return 0, json.dumps(self.prs), ""
         endpoint = next(a for a in args if a.startswith("repos/"))
@@ -202,13 +203,22 @@ class ReviewTests(Base):
     def test_unreadable_rule_suites_are_unknown_not_a_crash(self):
         self.fake.prs = [pr(5, "2026-11-02T10:00:00Z")]
         self.fake.fail = {"rule-suites"}
+        self.fake.fail_err = "Not Found (HTTP 404)"
         code, lines = self.run_audit("--mode", "review")
         self.assertEqual(code, 0)
         self.assertTrue(lines[0].startswith("note: cannot read rule suites"))
         self.assertIn("needs Administration read", lines[0])
         self.assertTrue(lines[1].startswith("#5 unknown"))
         self.assertIn("merged by acme-bot", lines[1])
+        self.assertIn("rule suites unreadable", lines[1])
         self.assertTrue(lines[-1].endswith("unknown=1"))
+
+    def test_a_non_404_rule_suite_failure_names_no_permission(self):
+        self.fake.prs = [pr(5, "2026-11-02T10:00:00Z")]
+        self.fake.fail = {"rule-suites"}
+        _, lines = self.run_audit("--mode", "review")
+        self.assertTrue(lines[0].startswith("note: cannot read rule suites"))
+        self.assertNotIn("Administration", lines[0])
 
     def test_unreadable_rule_suites_are_noted_once_per_base(self):
         self.fake.prs = [pr(n, "2026-11-02T10:00:00Z") for n in (5, 6)]
@@ -224,6 +234,7 @@ class ReviewTests(Base):
         code, lines = self.run_audit("--mode", "review")
         self.assertEqual(code, 0)
         self.assertIn("cannot read statuses", lines[0])
+        self.assertIn("merged by acme-bot", lines[0])
         self.assertTrue(lines[-1].endswith("unknown=1"))
 
     def test_a_result_at_the_search_limit_is_an_error_not_a_short_count(self):

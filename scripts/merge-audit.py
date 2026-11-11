@@ -199,10 +199,13 @@ def review(repo, prs, since, owner):
     lacking, rule_cache, unreadable = [], {}, set()
     for p in prs:
         head = p.get("headRefOid") or ""
+        merged_by = (p.get("mergedBy") or {}).get("login") or "unknown"
         try:
             state = land.read_statuses(repo, head).get(land.CO_REVIEW)
         except ReadError as exc:
-            lacking.append((p, "unknown", f"cannot read statuses: {exc}"))
+            lacking.append(
+                (p, "unknown", f"cannot read statuses: {exc}; merged by {merged_by}")
+            )
             continue
         if state == "success":
             continue
@@ -214,17 +217,25 @@ def review(repo, prs, since, owner):
                 rule_cache[base] = exc
         rules = rule_cache[base]
         merge_sha = (p.get("mergeCommit") or {}).get("oid") or ""
-        merged_by = (p.get("mergedBy") or {}).get("login") or "unknown"
         status_note = f"`co-review` {state or 'missing'} on {head[:7]}"
         if isinstance(rules, ReadError):
             if base not in unreadable:
                 unreadable.add(base)
+                hint = (
+                    " (needs Administration read)"
+                    if getattr(rules, "not_found", False)
+                    else ""
+                )
                 print(
-                    f"note: cannot read rule suites for {base or '?'} (needs "
-                    f"Administration read), so its gaps read unknown: {rules}"
+                    f"note: cannot read rule suites for {base or '?'}{hint}, "
+                    f"so its gaps read unknown: {rules}"
                 )
             lacking.append(
-                (p, "unknown", f"{status_note}; merged by {merged_by}; no rule suites")
+                (
+                    p,
+                    "unknown",
+                    f"{status_note}; merged by {merged_by}; rule suites unreadable",
+                )
             )
             continue
         result, actor = rules.get(merge_sha, (None, None))
