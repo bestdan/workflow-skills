@@ -282,7 +282,11 @@ def review(repo, prs, since, owner, suites=None):
         result, actor = rules.get(merge_sha, (None, None))
         if result == "bypass":
             # No actor on the suite: name mergedBy, and say it was inferred.
-            who = actor or f"{merged_by} (from mergedBy)"
+            # With neither, say so rather than credit an absent source.
+            has_merged_by = bool((p.get("mergedBy") or {}).get("login"))
+            who = actor or (
+                f"{merged_by} (from mergedBy)" if has_merged_by else "an unknown actor"
+            )
             actor = actor or merged_by
             kind = "owner" if actor.lower() == owner.lower() else "bypass"
             lacking.append((p, kind, f"{status_note}; bypassed by {who}"))

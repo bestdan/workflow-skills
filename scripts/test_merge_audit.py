@@ -200,6 +200,14 @@ class ReviewTests(Base):
         self.assertTrue(lines[0].startswith("#9 owner"))
         self.assertIn("bypassed by acme (from mergedBy)", lines[0])
 
+    def test_a_bypass_with_no_actor_and_no_merged_by_says_unknown_actor(self):
+        self.fake.prs = [pr(9, "2026-11-02T10:00:00Z", merged_by=None)]
+        self.fake.rules = [{"after_sha": sha(1009), "result": "bypass"}]
+        _, lines = self.run_audit("--mode", "review")
+        self.assertTrue(lines[0].startswith("#9 bypass"))
+        self.assertIn("bypassed by an unknown actor", lines[0])
+        self.assertNotIn("from mergedBy", lines[0])
+
     def test_unreadable_rule_suites_are_unknown_not_a_crash(self):
         self.fake.prs = [pr(5, "2026-11-02T10:00:00Z")]
         self.fake.fail = {"rule-suites"}
