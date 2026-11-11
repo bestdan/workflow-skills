@@ -4,6 +4,12 @@
 
 | Date       | Decision                                                                                                                              |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-10-31 | [Release-cutting titles may land in workflow-skills' first `auto` slice](2026-10-31-release-cutting-titles-in-the-first-slice.md)     |
+| 2026-10-03 | [A tested script sets the merge tier; models can only demote](2026-10-03-rules-tier-models-only-demote.md)                            |
+| 2026-10-03 | [Review-complete is a required `co-review` status on the reviewed head](2026-10-03-review-complete-is-a-required-status.md)           |
+| 2026-10-03 | [`dev_docs/` stays human-tier in every repo for the first slice](2026-10-03-no-dev-docs-in-the-first-auto-slice.md)                   |
+| 2026-10-03 | [Starting thresholds for merge autonomy: size cap, review-queue limit, consult bar](2026-10-03-merge-autonomy-starting-thresholds.md) |
+| 2026-10-03 | [The lander is a plugin script the session runs after co-review](2026-10-03-lander-runs-in-the-session.md)                            |
 | 2026-09-24 | [`assess-task` stays a subagent: the typed profile is not adopted](2026-09-24-assess-task-stays-a-subagent.md)                        |
 | 2026-09-22 | [The eval suite's failures are not all routing failures](2026-09-22-eval-failures-are-not-all-routing.md)                             |
 | 2026-09-21 | [`label`'s derivation table is not pure code, and one cell can never be](2026-09-21-label-table-is-not-pure-code/)                    |

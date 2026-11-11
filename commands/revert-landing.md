@@ -35,6 +35,6 @@ A `NOTE:` saying the commit carries no `Landed-by: land-pr.sh` trailer means a
 person merged it, not the lander. The revert is still opened; mention it.
 
 `scripts/merge-audit.py --mode landed` lists the agent's landings and finds the
-revert by its title, so don't retitle it. The design is
-[`dev_docs/designs/2026-10-03-graduated-merge-autonomy.md`](../dev_docs/designs/2026-10-03-graduated-merge-autonomy.md)
-(component 9).
+revert by its title, so don't retitle it. Why landing and its undo work this
+way:
+[`dev_docs/decisions/2026-10-03-lander-runs-in-the-session.md`](../dev_docs/decisions/2026-10-03-lander-runs-in-the-session.md).

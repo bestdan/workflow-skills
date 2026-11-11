@@ -3,8 +3,8 @@
 # branch, never its head, and hands it to scripts/merge-tier.py, which fails
 # closed to `human` on anything outside the YAML subset it parses: flat
 # `key: value`, `key: [a, b]`, and `key:` followed by `  - item` lines.
-# Design: dev_docs/designs/2026-10-03-graduated-merge-autonomy.md,
-# "Initial per-repo policy".
+# Why the tier works this way:
+# dev_docs/decisions/2026-10-03-rules-tier-models-only-demote.md.
 
 # scripts/** is auto only when its test pair passes on the head SHA. That is
 # not a rule here: the lander already holds any PR whose checks on the head are
@@ -43,8 +43,8 @@ always_human:
 size_cap: 300
 
 # Releasing types land too, so a bad landing can ship a release;
-# `/revert-landing` (#1323) is the undo. The owner chose this, option B of the
-# design's open question 1, on 2026-10-31.
+# `/revert-landing` (#1323) is the undo. The owner chose this on 2026-10-31:
+# dev_docs/decisions/2026-10-31-release-cutting-titles-in-the-first-slice.md.
 allowed_types: [feat, fix, perf, refactor, test, chore, ci, build, style, docs]
 
 repo_rules:

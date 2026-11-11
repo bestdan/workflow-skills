@@ -1,7 +1,7 @@
 # Landing at hand-off
 
 Step 7 of `/deliver-task` runs the merge lander twice
-(`dev_docs/designs/2026-10-03-graduated-merge-autonomy.md`). First in
+(`dev_docs/decisions/2026-10-03-lander-runs-in-the-session.md`). First in
 **shadow**: it posts a "would land: yes/no" comment on the PR and never merges.
 Those comments are the shadow record that `scripts/merge-audit.py --mode shadow`
 counts toward graduation, so every delivered PR should get one. Then for
