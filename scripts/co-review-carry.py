@@ -39,7 +39,8 @@ step 12 already passed to co-review-stamp.py.
 Exit 0 prints `CARRY: carried from=<short> to=<short> stamp=<outcome>
 status=<url>`, plus a `co-review-carry: warning:` line on stderr when the
 stamp could not delete a duplicate. Exit 3 prints `CARRY: refused reason=<why>` and writes
-nothing; that is the normal answer for a round that did not pass. Exit 1
+nothing; that is the normal answer for a round that did not pass, and for a
+repo co-review-status.py's owner list leaves out. Exit 1
 prints `CARRY: error reason=<why>` for a `gh` failure (a stamp written before
 a failed status leaves the fix commit without `success`, which the lander
 holds on). A usage error exits 2 before any `gh` call. /co-review treats
@@ -137,6 +138,9 @@ def compare(repo, base, head):
 
 def check(args, record):
     """Raise Refused with the first condition that does not hold."""
+    skip = status_mod.owner_skip_reason(args.repo)
+    if skip:
+        raise Refused(skip)
     if args.verdict != "pass":
         raise Refused(f"verdict is {args.verdict}, not pass")
     if args.applied_blocking:

@@ -12,10 +12,12 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -92,6 +94,11 @@ class FakeGh(ThreadFake):
 
 class CarryTests(unittest.TestCase):
     def setUp(self):
+        owners = carry.status_mod.OWNERS_ENV
+        env = {k: v for k, v in os.environ.items() if k != owners}
+        patcher = mock.patch.dict(os.environ, env, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.fake = FakeGh()
         for mod in (carry, reader.stamp):
             orig = mod.run_gh
@@ -182,6 +189,11 @@ class CarryTests(unittest.TestCase):
         self.assert_refused("is failure, not success")
         self.fake.statuses[REVIEWED] = []
         self.assert_refused("is missing, not success")
+
+    def test_an_owner_outside_the_status_list_is_refused_before_any_gh_call(self):
+        with mock.patch.dict(os.environ, {carry.status_mod.OWNERS_ENV: "someone"}):
+            self.assert_refused("is not in WORKFLOW_SKILLS_CO_REVIEW_STATUS_OWNERS")
+        self.assertEqual(self.fake.calls, [])
 
     def test_more_than_the_fix_commit_is_refused(self):
         self.fake.ahead_behind = (2, 0)
