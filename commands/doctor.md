@@ -566,8 +566,8 @@ prints nothing, so it is skipped too. **Never touched by `--fix`**: reloading an
 agent or logging in to Jira is the user's call, and `/task-dashboard` owns both.
 
 **Check 11 — admin `gh` account on a personal repo.** Whether the account this
-machine's `gh` acts as can administer the repo. An agent with admin rights
-merges past a required check such as `co-review` without anyone choosing to:
+machine's `gh` acts as can administer the repo. An agent with admin rights can
+usually merge past a required check such as `co-review` without anyone choosing to:
 `gh pr merge`, `land-pr.py` and `dli gh merge` all run as whichever account is
 active, and nothing warns at the time. `merge-audit.py --mode review` only finds
 it afterwards. Without a required `co-review` check there is nothing to skip,
