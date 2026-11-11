@@ -10,10 +10,11 @@ Write the diff step 3 fetched to a fixed absolute path (not `$TMPDIR`), then
 measure it:
 
 ```bash
-gh pr diff <n> --repo <owner>/<name> > "$HOME/.claude/co-review-input/size.<run_id>.diff" && python3 "${CLAUDE_PLUGIN_ROOT}/scripts/co-review-size.py" --diff "$HOME/.claude/co-review-input/size.<run_id>.diff"
+mkdir -p "$HOME/.claude/co-review-input" && gh pr diff <n> --repo <owner>/<name> > "$HOME/.claude/co-review-input/size.<run_id>.diff" && python3 "${CLAUDE_PLUGIN_ROOT}/scripts/co-review-size.py" --diff "$HOME/.claude/co-review-input/size.<run_id>.diff"
 ```
 
-Keep the `&&`. The redirect empties the file before `gh` runs, so a failed
+Keep both `&&`s. The `mkdir` covers a host where no reviewer has created the
+directory yet. SKILL.md grants it as typed here, so spell it exactly. The redirect empties the file before `gh` runs, so a failed
 fetch left unchained would measure an empty diff and report 0 lines. A failed
 fetch is `size: not measured`.
 
