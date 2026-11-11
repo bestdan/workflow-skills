@@ -465,7 +465,7 @@ in the report.
 
 ## 5. Dry-run (default)
 
-Without `--apply`, print the candidate table and stop — change nothing:
+Without `--apply`, print the candidate table — change nothing:
 
 ```
 <IDENTIFIER> — PR #<n> (merged <date>) → Done
@@ -476,8 +476,9 @@ no-PR issues skipped), and an explicit "nothing changed (dry-run)."
 
 Then run step 6's **Re-check dependents** as a dry run over the identifiers in
 the candidate table. Those issues are still open, so the promoter's blocker
-hold holds every one of their dependents; the dry run does not claim to know
-what would unblock. Report each dependent with the hold reason it got, and
+hold holds every one of their dependents: the dry run cannot run the hold
+against the state after completion, so it infers releases only from the
+`waiting on` lists. Report each dependent with the hold reason it got, and
 call out on its own line each one whose `waiting on` names only identifiers
 in the table: those are the ones `--apply` would release. Mutation
 requires the caller to have passed `--apply` — this mirrors `/archive-tasks`'

@@ -179,7 +179,7 @@ note: scored project Payments revamp only — backlog in other configured projec
 ⚠ workspace at ≥250/250 non-archived issues — Linear will refuse to CREATE new issues until you run /archive-tasks. Promotions are unaffected by this cap.
 ```
 
-Under `after=`, the scope line reads `dependents re-checked (N) after <identifiers>`, with `N` the count of every Backlog dependent the script returned, other-team and unread ones included, and the out-of-scope note is omitted: the ids were the scope.
+Under `after=`, the scope line reads `dependents re-checked (N) after <identifiers>`, with `N` the count of every dependent the script returned: candidates, other-team and unread, and the out-of-scope note is omitted: the ids were the scope.
 
 Skipped issues are reported with their reason — `already scored`, `parent rollup`, `blocked`, `waiting on <identifier>[, …]`, or, under `after=`, `other team` and `dependent read failed`. **There is no `held (quota)` section**: a promotion spends no quota, so nothing is ever held for one (see step 7). When step 7 finds the workspace at or over the cap, its warning is the report's **last line**, below the out-of-scope note: it is the one line that asks the reader to act, and the constraint binds the next `/add-task` or `/push-plan` rather than this run. The 500-cap warning (if it applied) still leads, because it qualifies this run's counts rather than asking for an action.
 
