@@ -206,8 +206,8 @@ done | sort -rn | head
 
 ## Does adding concurrency help?
 
-Sometimes. Each case below was settled by measurement, and the bats case
-inverted as the suite grew.
+For the bats files and for the orchestrator driver, yes; each case below was
+settled by measurement.
 
 **The bats fan-out.** `scripts/test-shell.sh` runs each `.bats` file as its own
 job, in every mode. On the 18-core Mac, 2026-11-11, with 40 files and 580 tests:
@@ -220,14 +220,14 @@ full gate, bats per file    217s
 ```
 
 Serial bats spends more than half its wall time waiting rather than on CPU, and
-running the files concurrently recovers that. Running them serially in the full
-gate rested on serial bats finishing inside the orchestrator suite. That held
-with 10 files and stopped holding as the count grew to 40, with nothing to say
-so. An assumption that decays as a suite grows is what the
-[timing warnings](#timing-warnings) exist to surface.
+running the files concurrently recovers that. Serial bats would be harmless only
+if it finished inside the orchestrator suite, and at 40 files it does not; the
+[timing warnings](#timing-warnings) are how a check that grows onto the critical
+path gets noticed.
 
 **The split's own concurrency.** The driver running its parts concurrently
-versus serially, interleaved A/B of the full `check.sh`:
+versus serially, interleaved A/B of the full `check.sh`, measured on the 4-core
+Linux box while bats still ran serially:
 
 ```
 driver concurrent   42.7s  43.5s  43.6s
@@ -297,7 +297,7 @@ the gate; wall time is too noisy to gate on.
 - **Budget.** The gate's total exceeded the budget for its mode, set in
   `scripts/check.sh` beside `timing_mode=`: full 300s, `--fast` 180s,
   dev_docs-only 60s. Each sits above that mode's normal spread on the 18-core
-  Mac (full 200–235s, `--fast` ~127s over five runs, 2026-11-11) and well
+  Mac (full 200–235s over four runs, `--fast` 127s in one run, 2026-11-11) and well
   below the 479s the full gate took with serial bats. A fixed number catches
   slow creep that a rolling
   comparison absorbs: a gate that grows 10% a week never looks unusual against
@@ -339,9 +339,9 @@ for i in 1 2; do
 done
 ```
 
-The A/B tables in [the concurrency section](#does-adding-concurrency-help) are
-what that produces. Both were worth running: one confirmed a conclusion (bats),
-one would have been easy to get backwards by reasoning alone (the driver).
+The driver A/B in [the concurrency section](#does-adding-concurrency-help) is
+what that produces, and it was worth running: its answer would have been easy to
+get backwards by reasoning alone.
 
 Report wall **and** CPU (`user` + `sys`): a change that raises CPU while holding
 wall flat is buying nothing. After any concurrency change, run the full gate at
@@ -360,8 +360,8 @@ Three traps this document's own measurements fell into, all worth avoiding:
 - **Cold caches read as real cost.** The `doctor` part first measured 37.8s and
   settled at ~8s once warm. Discard the first run of anything.
 - **Your own measuring load is background drift.** The concurrent-driver A/B
-  above ran at 42.7–43.6s for a configuration that measures ~41s on an otherwise
-  idle box, and this document's early isolated runs read ~10% faster than its
+  above ran at 42.7–43.6s for a configuration that measured ~41s on the same
+  otherwise idle Linux box, and that section's early isolated runs read ~10% faster than its
   final interleaved ones. That is exactly why the comparison is interleaved:
   both arms drift together, and the _difference_ survives. Absolute numbers in
   this file are worth about ±10%; the ratios are not.
