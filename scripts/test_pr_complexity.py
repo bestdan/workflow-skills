@@ -126,8 +126,9 @@ class Score(unittest.TestCase):
         m = pc.Measurement(
             additions=25, files=1, packages=1, hunks=0, categories=["code"]
         )
-        # 0.5 + 1.5 = 2.0 ; and 0.5 rounds up, not to even
+        # 0.5 + 1.5 = 2.0
         self.assertEqual(pc.score(m), 2)
+        # 0.5 rounds up to 1, not to even
         m = pc.Measurement(additions=25, files=0, packages=0, hunks=0, categories=[])
         self.assertEqual(pc.score(m), 1)
 
@@ -214,6 +215,14 @@ class Cli(unittest.TestCase):
                 ["--config", str(cfg), "--threshold", "50", "--json"], self.DIFF
             )
             self.assertEqual(json.loads(out)["threshold"], 50)
+
+    def test_config_list_at_the_key_indent(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            cfg = Path(d) / ".co-review.yml"
+            cfg.write_text(
+                "complexity:\n  exclude:\n  - '^src/'\n  - x\n  split_threshold: 5\n"
+            )
+            self.assertEqual(pc.load_config(str(cfg)), (5, ["^src/", "x"]))
 
     def test_missing_config_is_not_an_error(self) -> None:
         rc, out = run(["--config", "/nonexistent/.co-review.yml", "--json"], self.DIFF)

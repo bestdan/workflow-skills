@@ -42,8 +42,8 @@ and add to the defaults; `--no-default-excludes` drops the defaults. A missing
 Output, on stdout, exit 0:
 
     ### Complexity: 72 / 100 (High)
-    Reviewable: +240 / -110 across 18 files · 5 packages · 34 hunks · code+test
-    COMPLEXITY: score=72 band=High threshold=60 split=required r=350 f=18 p=5 h=34 e=2 excluded=3
+    Reviewable: +830 / -320 across 18 files · 5 packages · 34 hunks · code+test
+    COMPLEXITY: score=72 band=High threshold=60 split=required r=1150 f=18 p=5 h=34 e=2 excluded=3
 
 `split=required` when score >= threshold, else `split=not-required`. With
 `--json`, one JSON object carrying the same fields instead. Exit 2 is a usage
@@ -266,7 +266,8 @@ def load_config(path: str) -> tuple[int | None, list[str]]:
             continue
         if block_indent is None:
             block_indent = indent
-        if indent == block_indent:
+        is_item = in_exclude and text.startswith("- ")
+        if indent == block_indent and not is_item:
             in_exclude = False
             key, _, value = text.partition(":")
             value = value.strip()
@@ -285,7 +286,7 @@ def load_config(path: str) -> tuple[int | None, list[str]]:
                     raise SystemExit(
                         _usage(f"{path}: complexity.exclude must be a block list")
                     )
-        elif in_exclude and text.startswith("- "):
+        elif is_item:
             item = text[2:].strip()
             if len(item) >= 2 and item[0] == item[-1] and item[0] in "'\"":
                 quote, item = item[0], item[1:-1]

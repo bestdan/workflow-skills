@@ -24,8 +24,8 @@ It prints three lines. The first two are the report:
 
 ```
 ### Complexity: 72 / 100 (High)
-Reviewable: +240 / -110 across 18 files · 5 packages · 34 hunks · code+test
-COMPLEXITY: score=72 band=High threshold=60 split=required r=350 f=18 p=5 h=34 e=2 excluded=3
+Reviewable: +830 / -320 across 18 files · 5 packages · 34 hunks · code+test
+COMPLEXITY: score=72 band=High threshold=60 split=required r=1150 f=18 p=5 h=34 e=2 excluded=3
 ```
 
 The `COMPLEXITY:` line is for you: `split=required` means the score met the
@@ -43,7 +43,9 @@ category are in the script's header, which is their one home.
 
 A pipe reports only the script's exit code, so a failed `gh pr diff` reaches
 the script as an empty diff and scores `0 / 100 (Low)` with `f=0`. Treat
-`f=0` on a diff you know is non-empty as a failed run. If the script exits
+`f=0` with `excluded=0` on a diff you know is non-empty as a failed run; a
+diff of only excluded files, such as a lockfile bump, legitimately prints
+`f=0` with `excluded` above zero. If the script exits
 non-zero, prints nothing, or fails that way, open the summary with
 `### Complexity: unavailable — <the stderr line>` and judge scope on the
 qualitative signals alone. Never estimate a score yourself; a guessed number
