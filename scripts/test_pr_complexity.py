@@ -89,6 +89,14 @@ class ParseDiff(unittest.TestCase):
         [f] = pc.parse_diff(text)
         self.assertEqual((f.additions, f.deletions), (1, 1))
 
+    def test_quoted_path_with_spaces(self) -> None:
+        header = (
+            'diff --git "a/my dir/x y.py" "b/my dir/x y.py"\n'
+            'index 1..2 100644\n--- "a/my dir/x y.py"\n+++ "b/my dir/x y.py"\n'
+        )
+        [f] = pc.parse_diff(file_diff("", ["+a"], 0, 1, header=header))
+        self.assertEqual((f.path, f.additions), ("my dir/x y.py", 1))
+
     def test_form_feed_inside_a_line_does_not_split_it(self) -> None:
         text = file_diff("x.c", [" a", "+b\x0c++ y", "+c", " a2"], 2, 4)
         [f] = pc.parse_diff(text)

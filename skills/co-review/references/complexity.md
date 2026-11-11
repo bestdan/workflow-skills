@@ -20,8 +20,10 @@ plugin path step 6 shows. The variable is substituted in SKILL.md only, not in
 this file and not in the Bash environment, so the line above copied literally
 runs `/scripts/pr-complexity.py`.
 
-- `--local`: swap `gh pr diff …` for `git diff <base>` (the same merge-base
-  caveat applies), and pass each untracked file step 3 found as
+- `--local`: swap `gh pr diff …` for
+  `git diff --src-prefix=a/ --dst-prefix=b/ <base>` (the same merge-base
+  caveat applies; the prefixes override a user's `diff.noprefix` or
+  `diff.mnemonicPrefix`, which the parser cannot read past), and pass each untracked file step 3 found as
   `--untracked <path>`.
 - `--post`: unchanged. The score describes the diff, whoever wrote it.
 
