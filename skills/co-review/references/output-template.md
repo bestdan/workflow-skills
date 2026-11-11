@@ -9,9 +9,10 @@ Symbols: ✅ pass / ran / done · 🟡 pass with suggestions · ⛔ blocking · 
 <✅ **pass** | 🟡 **pass with suggestions** | ⛔ **blocking**> — <N> fixes · <N> skipped · <N> calls · <N> checks
 <one line of why, judged as the change will stand once the auto-fixes below are applied>
 
-**Scope:** <✅ **one unit** — <why it holds together>[; <large | very-large> but one unit — <why>] | 🟡 **split recommended** — <why>>
-<only when split: - <piece>: <files/hunks> — <one-line description>>
-<only when very-large and split: the split prompt, a fenced block>
+**Scope:** <✅ **one unit** — <why it holds together>[; <large | very-large> but one unit — <why>] | 🟡 **split recommended** — <why> | 🟡 **too big** — <score> / 100, <N> reviewable lines across <N> files[; <N> lines of prose beside code]>
+<only when split or too big: - <piece>: <files/globs> (<N> lines) — <one-line description>, in landing order>
+<only when too big: the split prompt, a fenced block>
+**Coverage:** <✅ **full** — every reviewable file read line by line | full — <paths> · skim — <paths> · none — <paths>>
 
 <reviewer> <✅ ran | ❌ failed | ⏱️ timed out | ➖ skipped — reason> · … · conventions <✅ attached | ➖ not attached — reason> · ledger <✅ <receipt> | ❌ not recorded — reason> · stamp <✅ <receipt> | ⚠️ <receipt> — warning | ❌ not written — reason | ➖ not applicable — `--local`>
 
