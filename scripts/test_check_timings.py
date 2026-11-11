@@ -122,6 +122,20 @@ class CheckTimingsTest(unittest.TestCase):
         self.assertEqual(len(kept), ct.RUNS_KEPT)
         self.assertEqual(kept[0][0], "run005")
 
+    def test_jump_from_a_zero_median_has_no_ratio(self) -> None:
+        self.seed(3, {"instant": 0}, 40)
+        rc, out = self.run_main({"instant": 12}, 45, "--history", str(self.history))
+        self.assertEqual(rc, 0)
+        self.assertIn("⚠ slower: instant took 12s, up from its median of 0s", out)
+
+    def test_history_keeps_recent_runs_per_mode(self) -> None:
+        rows = [(f"full{i}", "full", "a", i) for i in range(3)]
+        rows += [(f"fast{i:03d}", "fast", "a", i) for i in range(ct.RUNS_KEPT + 5)]
+        ct.write_history(self.history, rows)
+        kept = ct.read_history(self.history)
+        self.assertEqual(sum(1 for r in kept if r[1] == "full"), 3)
+        self.assertEqual(sum(1 for r in kept if r[1] == "fast"), ct.RUNS_KEPT)
+
     def test_malformed_history_lines_are_skipped(self) -> None:
         self.history.write_text("garbage\nr\tfull\ta\tNaN\nr\tfull\ta\t7\n")
         self.assertEqual(ct.read_history(self.history), [("r", "full", "a", 7)])

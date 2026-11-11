@@ -74,11 +74,16 @@ def read_history(path: Path) -> list[Row]:
 
 
 def write_history(path: Path, rows: list[Row]) -> None:
-    runs: list[str] = []
-    for run, _, _, _ in rows:
+    """Write rows back, keeping the last RUNS_KEPT runs of each mode.
+
+    Per mode, so a burst of --fast runs cannot evict every full-mode sample.
+    """
+    runs_by_mode: dict[str, list[str]] = {}
+    for run, mode, _, _ in rows:
+        runs = runs_by_mode.setdefault(mode, [])
         if run not in runs:
             runs.append(run)
-    keep = set(runs[-RUNS_KEPT:])
+    keep = {run for runs in runs_by_mode.values() for run in runs[-RUNS_KEPT:]}
     text = "".join(f"{r}\t{m}\t{n}\t{s}\n" for r, m, n, s in rows if r in keep)
     tmp = path.with_name(f"{path.name}.{time.time_ns()}.tmp")
     tmp.write_text(text)
@@ -100,8 +105,11 @@ def jumps(
             continue
         median = statistics.median(samples)
         if secs >= median * JUMP_RATIO and secs - median >= JUMP_MIN_SECONDS:
+            # Whole-second timing records a sub-second check as 0, so the
+            # median can be 0 and a ratio is undefined.
+            ratio = f"{secs / median:.1f}x" if median else "up from"
             found.append(
-                f"{name} took {secs}s, {secs / median:.1f}x its median of "
+                f"{name} took {secs}s, {ratio} its median of "
                 f"{median:g}s over the last {len(samples)} green {mode} runs"
             )
     return found

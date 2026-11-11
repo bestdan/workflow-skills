@@ -37,7 +37,9 @@ The gate starts about 140 jobs at once: roughly 100 `scripts/test-*.sh`
 harnesses, the 40 bats files, and the linters. So a single check's time says as
 much about contention as about the check. `test-research-spike.sh` took ~81s in
 a run where the bats files ran serially and ~155s in one where they ran in
-parallel, while the gate as a whole fell from 479s to 217s. Sys time exceeding
+parallel, while the gate as a whole fell from 479s to 217s. The same holds for
+`test-shell.sh`: its bats files take 113s run alone in parallel, and ~216s in
+the full gate. Sys time exceeding
 user time says that much of the CPU goes to the kernel spawning processes, not
 to test logic.
 
@@ -303,7 +305,10 @@ the gate; wall time is too noisy to gate on.
   went. Raise a budget only with a measurement, recorded here.
 - **Jump.** A check, or the whole gate, took at least 1.5× its median over this
   machine's recent green runs of the same mode, and at least 10s more. It needs
-  3 earlier runs and keeps the last 20. This names the check that moved.
+  3 earlier runs and keeps the last 20 per mode. This names the check that
+  moved. Under `--fast`, a jump on `scripts/lint-shell.sh --fast` usually
+  reflects how many shell files the branch touches (the per-file narrowing
+  above), not a regression.
 
 The history is `check-timings.tsv` in the clone's common dir, so every worktree
 of a clone shares it, and it is never tracked. Only green runs without
