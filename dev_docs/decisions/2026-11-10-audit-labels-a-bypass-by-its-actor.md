@@ -40,7 +40,9 @@ alarm. The owner is `--owner`, and defaults to the repo's owner segment. The
 actor is the rule suite's `actor_name`, falling back to `mergedBy`. Every line
 names the actor, including `ungated` and `unknown` lines, which use
 `mergedBy`. When rule suites cannot be read, the audit says so once and names
-the permission it lacks. `/doctor` gains Check 11, which warns when the active
+the permission it lacks. `--rule-suites <file>` reads a saved rule-suites
+response instead: the owner makes that one read with their own credential, and
+the audit itself, run by anyone, never touches it. `/doctor` gains Check 11, which warns when the active
 `gh` account is an admin of a personal repo that requires `co-review`, the
 setup that made the old `bypass` label ambiguous. A repo with no such check
 gets a `PASS`: its owner is always an admin, and there is nothing to skip.
@@ -51,8 +53,8 @@ gets a `PASS`: its owner is always an admin, and there is nothing to skip.
   are the owner's own deliberate merges.
 - Good, because a run as the bot still names who merged each gap, even with
   no rule suites.
-- Bad, because the split needs the owner's credential to run. As the bot, every
-  gap is `unknown`, so the weekly run belongs to the owner.
+- Bad, because the split needs one read with the owner's credential each week.
+  As the bot alone, every gap is `unknown`.
 - Bad, because `owner` trusts the identity split. If an agent is logged in as
   the owner again, its bypasses read as `owner`. Check 11 is what catches that.
 
@@ -68,7 +70,8 @@ gets a `PASS`: its owner is always an admin, and there is nothing to skip.
 ## Confirmation
 
 `scripts/test_merge_audit.py` covers the owner, other-actor, `--owner`,
-`mergedBy` fallback and unreadable-rule-suite cases. Check 11 has no
+`mergedBy` fallback, unreadable-rule-suite and `--rule-suites` file cases
+(both response shapes, and a file from another repo). Check 11 has no
 automated test; it rests on `/doctor` being run.
 
 ## Alternatives
@@ -78,3 +81,9 @@ automated test; it rests on `/doctor` being run.
 - Raise the bot's role so it can read rule suites: rejected, because a
   collaborator gets Administration only with the admin role, and that is the
   role whose bypass this whole change is about.
+- An `--as-owner` flag that has the script fetch through the owner's
+  per-command approval helper: rejected, because any agent running the audit
+  could then raise the owner's approval prompt, and it would put one machine's
+  private helper inside a public plugin.
+- Bot-only, with the owner reading bypasses by eye: rejected, because a clean
+  week would never read as clean, and the `owner` label would go unused.

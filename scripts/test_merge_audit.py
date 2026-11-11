@@ -228,6 +228,42 @@ class ReviewTests(Base):
         self.assertEqual(len(notes), 1)
         self.assertTrue(lines[-1].endswith("unknown=2"))
 
+    def write_suites(self, data):
+        d = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, d)
+        path = Path(d) / "suites.json"
+        path.write_text(json.dumps(data))
+        return str(path)
+
+    def test_a_saved_rule_suites_file_replaces_the_api_read(self):
+        # The API read fails, as it does for a Write-role bot; the file wins.
+        self.fake.prs = [pr(7, "2026-11-02T10:00:00Z"), pr(8, "2026-11-02T11:00:00Z")]
+        self.fake.fail = {"rule-suites"}
+        suite = {"repository_name": "widgets", "result": "bypass"}
+        slurped = [
+            [{**suite, "after_sha": sha(1007), "actor_name": "acme"}],
+            [{**suite, "after_sha": sha(1008), "actor_name": "mallory"}],
+        ]
+        for data in (slurped, slurped[0] + slurped[1]):
+            with self.subTest(shape="slurped" if data is slurped else "one page"):
+                path = self.write_suites(data)
+                code, lines = self.run_audit("--mode", "review", "--rule-suites", path)
+                self.assertEqual(code, 0)
+                self.assertFalse(any(line.startswith("note:") for line in lines))
+                self.assertTrue(lines[0].startswith("#7 owner"))
+                self.assertTrue(lines[1].startswith("#8 bypass"))
+                self.assertIn("owner=1 bypass=1", lines[-1])
+
+    def test_a_rule_suites_file_from_another_repo_is_a_usage_error(self):
+        path = self.write_suites(
+            [{"repository_name": "gadgets", "after_sha": sha(1), "result": "bypass"}]
+        )
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            with self.assertRaises(SystemExit) as cm:
+                self.run_audit("--mode", "review", "--rule-suites", path)
+        self.assertEqual(cm.exception.code, 2)
+        self.assertIn("gadgets", err.getvalue())
+
     def test_unreadable_statuses_are_unknown_not_a_crash(self):
         self.fake.prs = [pr(6, "2026-11-02T10:00:00Z")]
         self.fake.fail = {"/status"}
@@ -434,6 +470,26 @@ class UsageTests(Base):
             ["--repo", REPO, "--since", "11/01/2026", "--mode", "review"],
             ["--repo", REPO, "--since", SINCE, "--mode", "review", "--policy", "x.yml"],
             ["--repo", REPO, "--since", SINCE, "--mode", "landed", "--owner", "x"],
+            [
+                "--repo",
+                REPO,
+                "--since",
+                SINCE,
+                "--mode",
+                "shadow",
+                "--rule-suites",
+                "x",
+            ],
+            [
+                "--repo",
+                REPO,
+                "--since",
+                SINCE,
+                "--mode",
+                "review",
+                "--rule-suites",
+                "/nonexistent/x.json",
+            ],
             ["--repo", "widgets", "--since", SINCE, "--mode", "review"],
         ):
             with self.subTest(argv=argv), contextlib.redirect_stderr(io.StringIO()):

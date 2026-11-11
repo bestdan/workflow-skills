@@ -22,6 +22,12 @@ Three modes, all read-only:
   Reading rule suites needs Administration (read) on the repo. A run without
   it, such as one as a Write-role bot, cannot tell a bypass from an ungated
   merge, so every gap reads `unknown`; it still names who merged it.
+  `--rule-suites <file>` reads a saved response instead, so an admin fetches
+  the suites once and anyone runs the audit:
+    gh api 'repos/<o>/<r>/rulesets/rule-suites?time_period=month&per_page=100' \
+      --paginate --slurp > suites.json
+  Where the admin's token sits behind a per-command approval, they run that
+  one fetch themselves; this script never asks for the credential.
 
 - `shadow` reads the `land-pr.sh --dry-run` comment on each PR merged since
   `--since` and reports the would-land count against the 30 graduation needs.
@@ -47,7 +53,8 @@ Three modes, all read-only:
 
 Usage:
   python3 scripts/merge-audit.py --repo <owner/name> --since YYYY-MM-DD \
-    --mode review|shadow|landed [--policy <file>] [--owner <login>]
+    --mode review|shadow|landed [--policy <file>] [--owner <login>] \
+    [--rule-suites <file>]
 
 Ends with one summary line: `AUDIT: review merged=N lacking=M owner=O
 bypass=B ungated=U unknown=K`, `AUDIT: shadow shadowed=S would-land=W/30`, or
@@ -68,6 +75,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import importlib.util
+import json
 import re
 import sys
 import urllib.parse
@@ -149,18 +157,48 @@ def read_rule_results(repo, base):
     `actor_name`, or None.
     """
     ref = urllib.parse.quote(f"refs/heads/{base}", safe="")
+    return index_rule_suites(
+        land._pages(
+            [
+                f"repos/{repo}/rulesets/rule-suites?ref={ref}&time_period=month&per_page=100"
+            ]
+        )
+    )
+
+
+def index_rule_suites(pages, repo=None):
+    """{after_sha: (result, actor_name)} from pages of rule suites.
+
+    With `repo`, a suite naming a different repository is an error, so a file
+    saved from the wrong repo cannot pass as this one's.
+    """
     results: dict = {}
-    for page in land._pages(
-        [f"repos/{repo}/rulesets/rule-suites?ref={ref}&time_period=month&per_page=100"]
-    ):
+    for page in pages:
         if not isinstance(page, list):
             raise ReadError("rule suites: a page is not a list")
         for suite in page:
-            if isinstance(suite, dict) and suite.get("after_sha"):
-                results.setdefault(
-                    suite["after_sha"], (suite.get("result"), suite.get("actor_name"))
-                )
+            if not (isinstance(suite, dict) and suite.get("after_sha")):
+                continue
+            name = suite.get("repository_name")
+            if repo and name and name != repo.split("/")[1]:
+                raise ReadError(f"rule suites: a suite is for {name}, not {repo}")
+            results.setdefault(
+                suite["after_sha"], (suite.get("result"), suite.get("actor_name"))
+            )
     return results
+
+
+def load_rule_suites(path, repo):
+    """Index a saved `gh api …/rule-suites` response: one page, or a
+    `--paginate --slurp` list of pages."""
+    try:
+        data = json.loads(Path(path).read_text())
+    except (OSError, ValueError) as exc:
+        raise ReadError(f"cannot read --rule-suites {path}: {exc}") from exc
+    if not isinstance(data, list):
+        raise ReadError(f"--rule-suites {path}: expected a JSON list")
+    pages = data if data and all(isinstance(x, list) for x in data) else [data]
+    return index_rule_suites(pages, repo)
 
 
 def read_lander_comment(repo, pr):
@@ -188,7 +226,7 @@ def read_commits(repo, pr):
 # --- review -----------------------------------------------------------------
 
 
-def review(repo, prs, since, owner):
+def review(repo, prs, since, owner, suites=None):
     if dt.date.today() - dt.date.fromisoformat(since) > dt.timedelta(
         days=RULE_SUITE_DAYS
     ):
@@ -210,7 +248,10 @@ def review(repo, prs, since, owner):
         if state == "success":
             continue
         base = p.get("baseRefName") or ""
-        if base not in rule_cache:
+        if suites is not None:
+            # A saved file is keyed by merge sha, so it serves every base.
+            rule_cache[base] = suites
+        elif base not in rule_cache:
             try:
                 rule_cache[base] = read_rule_results(repo, base)
             except ReadError as exc:
@@ -420,6 +461,10 @@ def main(argv=None):
         "--owner",
         help="review only: the login whose bypass is expected (default: the repo owner)",
     )
+    p.add_argument(
+        "--rule-suites",
+        help="review only: a saved rule-suites response to read instead of the API",
+    )
     args = p.parse_args(argv)
     if "/" not in args.repo:
         p.error("--repo must be owner/name")
@@ -431,6 +476,14 @@ def main(argv=None):
         p.error("--policy applies to --mode shadow only")
     if args.owner and args.mode != "review":
         p.error("--owner applies to --mode review only")
+    if args.rule_suites and args.mode != "review":
+        p.error("--rule-suites applies to --mode review only")
+    suites = None
+    if args.rule_suites:
+        try:
+            suites = load_rule_suites(args.rule_suites, args.repo)
+        except ReadError as exc:
+            p.error(str(exc))
     policy_text = None
     if args.policy:
         try:
@@ -444,7 +497,9 @@ def main(argv=None):
         print(f"AUDIT: error reason={exc}")
         return 1
     if args.mode == "review":
-        review(args.repo, prs, args.since, args.owner or args.repo.split("/")[0])
+        review(
+            args.repo, prs, args.since, args.owner or args.repo.split("/")[0], suites
+        )
     elif args.mode == "landed":
         landed(args.repo, prs)
     else:
