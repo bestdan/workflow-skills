@@ -233,7 +233,9 @@ iteration still leaves an ageable timestamp. `status` ages it against the per-ta
 ceiling (`--task-ceiling`, default 2700s = 45m) and reports `healthy` or a
 **STALL** — "last heartbeat 40 minutes ago, per-task ceiling is 45m" is a
 distinction **no other signal in the system can make**: to an exit code, a PID, and
-a log tail, a slow task and a hung one are identical.
+a log tail, a slow task and a hung one are identical. Once the run has stopped for
+good (`relaunch expected: no`), an old beat is reported as `stopped` instead: a
+finished run is not expected to beat.
 
 It is deliberately **not committed** to the run-state branch: it beats many times
 per task and would drown the run's durable record in churn. Like `supervisor-state`

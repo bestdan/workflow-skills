@@ -7345,7 +7345,11 @@ status() {
     *)
       hb_age=$(($(date +%s) - hb_at))
       [ "$hb_age" -ge 0 ] || hb_age=0
-      if [ "$hb_age" -gt "$ceiling" ]; then
+      if [ "$hb_age" -gt "$ceiling" ] && [ "$relaunch" = "no" ]; then
+        # A stopped run stops beating, so an old beat is expected, not a wedge.
+        hb_state="stopped"
+        hb_line="${hb_iso:-?} (${hb_age}s ago) — the run has stopped (exit reason ${exit_r:-done}), so no beat is expected${hb_note:+ [last: $hb_note]}"
+      elif [ "$hb_age" -gt "$ceiling" ]; then
         hb_state="stale"
         hb_line="${hb_iso:-?} (${hb_age}s ago, per-task ceiling ${ceiling}s) — STALL: no heartbeat for longer than a whole task is allowed to take${hb_note:+ [last: $hb_note]}"
       else
