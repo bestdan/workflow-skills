@@ -39,8 +39,8 @@ login is `owner`. A bypass by any other actor is `bypass`, which is now an
 alarm. The owner is `--owner`, and defaults to the repo's owner segment. The
 actor is the rule suite's `actor_name`, falling back to `mergedBy`. Every line
 names the actor, including `ungated` and `unknown` lines, which use
-`mergedBy`. When rule suites cannot be read, the audit says so once and names
-the permission it lacks. `--rule-suites <file>` reads a saved rule-suites
+`mergedBy`. When rule suites cannot be read, the audit says so once per base,
+and on a 404 names the permission it lacks, Administration (read). `--rule-suites <file>` reads a saved rule-suites
 response instead: the owner makes that one read with their own credential, and
 the audit itself, run by anyone, never touches it. `/doctor` gains Check 11, which warns when the active
 `gh` account is an admin of a personal repo that requires `co-review`, the
