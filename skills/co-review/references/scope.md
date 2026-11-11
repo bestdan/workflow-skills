@@ -10,14 +10,19 @@ Write the diff step 3 fetched to a fixed absolute path (not `$TMPDIR`), then
 measure it:
 
 ```bash
-gh pr diff <n> --repo <owner>/<name> > "$HOME/.claude/co-review-input/size.<run_id>.diff"
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/co-review-size.py" --diff "$HOME/.claude/co-review-input/size.<run_id>.diff"
+gh pr diff <n> --repo <owner>/<name> > "$HOME/.claude/co-review-input/size.<run_id>.diff" && python3 "${CLAUDE_PLUGIN_ROOT}/scripts/co-review-size.py" --diff "$HOME/.claude/co-review-input/size.<run_id>.diff"
 ```
 
+Keep the `&&`. The redirect empties the file before `gh` runs, so a failed
+fetch left unchained would measure an empty diff and report 0 lines. A failed
+fetch is `size: not measured`.
+
 Under `--local`, write `git diff <base>` there instead. Untracked files are not
-in that diff, so add each untracked file's line count to `reviewable.lines`
-yourself. Under `--post`, pass `--no-attrs`, because the checkout's
-`.gitattributes` is not the PR's.
+in that diff, so add each untracked file to `reviewable.files` and its line
+count to `reviewable.lines` yourself, skipping any file the generated rules
+below would exclude, then apply the gate to the adjusted totals. Under
+`--post`, pass `--no-attrs`, because the checkout's `.gitattributes` is not the
+PR's.
 
 The script excludes generated files (lockfiles, stubs, bundles, vendored trees,
 `linguist-generated` paths, and files whose first lines say `@generated` or
