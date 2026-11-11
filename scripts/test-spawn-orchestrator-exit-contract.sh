@@ -1331,6 +1331,32 @@ mkdir -p "$NOHB/.auto-pilot"
 have "heartbeat: absent heartbeat reports none (not a false stall)" 'heartbeat=none' \
   "$("$SCRIPT" status --label com.autopilot.nohb --dir "$NOHB" 2>&1)"
 
+# A finished run stops beating, so its last beat ages past the ceiling while
+# nothing is wrong: that is a stopped run, never a STALL.
+cp "$HB/.auto-pilot/RUN.md" "$HB/.auto-pilot/RUN.md.bak"
+{
+  printf 'at: %s\n' "$(($(date +%s) - 3000))"
+  printf 'iso: 2026-07-11T00:00:00Z\n'
+  printf 'note: loop-iteration\n'
+} >"$HB/.auto-pilot/heartbeat"
+printf 'reason: done\n' >"$HB/.auto-pilot/orchestrator.done"
+hbd="$("$SCRIPT" status --label com.autopilot.hb --dir "$HB" --task-ceiling 2700 2>&1)"
+have "heartbeat: a finished run's old beat reports stopped" 'heartbeat=stopped' "$hbd"
+lack "heartbeat: a finished run is not a STALL" 'STALL' "$hbd"
+# …but a resumed run, whose RUN.md declares it continuing after the sentinel,
+# is expected to beat again, so the same old beat is a STALL once more.
+{
+  printf -- '---\n'
+  printf 'status: active\n'
+  printf 'exit_reason: continuing\n'
+  printf 'exit_reason_at: %s\n' "$(($(date +%s) + 60))"
+  printf -- '---\n'
+} >"$HB/.auto-pilot/RUN.md"
+have "heartbeat: a resumed run's old beat is a STALL again" 'heartbeat=stale' \
+  "$("$SCRIPT" status --label com.autopilot.hb --dir "$HB" --task-ceiling 2700 2>&1)"
+rm -f "$HB/.auto-pilot/orchestrator.done"
+mv "$HB/.auto-pilot/RUN.md.bak" "$HB/.auto-pilot/RUN.md"
+
 # --- the generated launch script wires the contract up (task 15) ---------------
 lbody15="$(cat "$BASE/launch.sh" 2>/dev/null)"
 have "launch: beats the heartbeat at the top of the wake" 'heartbeat --dir' "$lbody15"
