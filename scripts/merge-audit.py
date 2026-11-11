@@ -8,11 +8,26 @@ Three modes, all read-only:
   `co-review` `success` commit status. Each one is named by how it got in,
   from the base branch's ruleset evaluations (`rulesets/rule-suites`, matched
   on the merge commit):
-    bypass   a bypass actor pushed past the rules (the admin bypass)
+    owner    the owner's login pushed past the rules (the admin bypass)
+    bypass   any other actor pushed past the rules; an alarm, since only the
+             owner is meant to hold the bypass
     ungated  the rules passed the merge, though its head shows no `co-review`
              success now; usually the check was not yet required
     unknown  no evaluation found; GitHub keeps them for about a month
-  The list should be empty apart from deliberate bypasses.
+  Every line names the actor: the rule suite's `actor_name` for a bypass,
+  otherwise the PR's `mergedBy`. The owner is `--owner`, by default the
+  repo's owner segment. Agents act as a non-admin bot, so `owner` means the
+  owner's own credential was used: their browser session or a per-command
+  approval. The list should be empty apart from `owner` lines.
+  Reading rule suites needs Administration (read) on the repo. A run without
+  it, such as one as a Write-role bot, cannot tell a bypass from an ungated
+  merge, so every gap reads `unknown`; it still names who merged it.
+  `--rule-suites <file>` reads a saved response instead, so an admin fetches
+  the suites once and anyone runs the audit:
+    gh api 'repos/<o>/<r>/rulesets/rule-suites?time_period=month&per_page=100' \
+      --paginate --slurp > suites.json
+  Where the admin's token sits behind a per-command approval, they run that
+  one fetch themselves; this script never asks for the credential.
 
 - `shadow` reads the `land-pr.sh --dry-run` comment on each PR merged since
   `--since` and reports the would-land count against the 30 graduation needs.
@@ -38,10 +53,11 @@ Three modes, all read-only:
 
 Usage:
   python3 scripts/merge-audit.py --repo <owner/name> --since YYYY-MM-DD \
-    --mode review|shadow|landed [--policy <file>]
+    --mode review|shadow|landed [--policy <file>] [--owner <login>] \
+    [--rule-suites <file>]
 
-Ends with one summary line: `AUDIT: review merged=N lacking=M bypass=B
-ungated=U unknown=K`, `AUDIT: shadow shadowed=S would-land=W/30`, or
+Ends with one summary line: `AUDIT: review merged=N lacking=M owner=O
+bypass=B ungated=U unknown=K`, `AUDIT: shadow shadowed=S would-land=W/30`, or
 `AUDIT: landed landed=L followed-up=F unlabeled=U unknown=K`.
 Exit 0 for any finding, 1 when the merged-PR list cannot be read, 2 for a
 usage error. A read error on one PR is reported against that PR, never a crash.
@@ -59,6 +75,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import importlib.util
+import json
 import re
 import sys
 import urllib.parse
@@ -119,7 +136,7 @@ def read_merged(repo, since):
             "--limit",
             str(PR_LIMIT),
             "--json",
-            "number,title,body,url,mergedAt,headRefOid,baseRefName,mergeCommit,labels",
+            "number,title,body,url,mergedAt,headRefOid,baseRefName,mergeCommit,labels,mergedBy",
         ]
     )
     if not isinstance(prs, list):
@@ -134,18 +151,59 @@ def read_merged(repo, since):
 
 
 def read_rule_results(repo, base):
-    """{merge sha: 'pass'|'bypass'|...} from the base branch's rule evaluations."""
+    """{merge sha: (result, actor)} from the base branch's rule evaluations.
+
+    `result` is 'pass', 'bypass' and so on; `actor` is the suite's
+    `actor_name`, or None.
+    """
     ref = urllib.parse.quote(f"refs/heads/{base}", safe="")
+    return index_rule_suites(
+        land._pages(
+            [
+                f"repos/{repo}/rulesets/rule-suites?ref={ref}&time_period=month&per_page=100"
+            ]
+        )
+    )
+
+
+def index_rule_suites(pages, repo=None, ref=None):
+    """{after_sha: (result, actor_name)} from pages of rule suites.
+
+    With `repo`, a suite whose `repository_name` differs is an error. Only the
+    name is compared, not the owner, so this catches a file saved from another
+    of the owner's repos. With `ref`, suites for other refs are skipped, so a
+    `pass` on another branch cannot hide a `bypass` on this one.
+    """
     results: dict = {}
-    for page in land._pages(
-        [f"repos/{repo}/rulesets/rule-suites?ref={ref}&time_period=month&per_page=100"]
-    ):
+    for page in pages:
         if not isinstance(page, list):
             raise ReadError("rule suites: a page is not a list")
         for suite in page:
-            if isinstance(suite, dict) and suite.get("after_sha"):
-                results.setdefault(suite["after_sha"], suite.get("result"))
+            if not (isinstance(suite, dict) and suite.get("after_sha")):
+                continue
+            name = suite.get("repository_name")
+            if repo and name and name.lower() != repo.split("/")[1].lower():
+                raise ReadError(f"rule suites: a suite is for {name}, not {repo}")
+            if ref and suite.get("ref") and suite["ref"] != ref:
+                continue
+            results.setdefault(
+                suite["after_sha"], (suite.get("result"), suite.get("actor_name"))
+            )
     return results
+
+
+def load_rule_suites(path, repo):
+    """Pages of a saved `gh api …/rule-suites` response: one page, or a
+    `--paginate --slurp` list of pages. Checked here, indexed per base later."""
+    try:
+        data = json.loads(Path(path).read_text())
+    except (OSError, ValueError) as exc:
+        raise ReadError(f"cannot read --rule-suites {path}: {exc}") from exc
+    if not isinstance(data, list):
+        raise ReadError(f"--rule-suites {path}: expected a JSON list")
+    pages = data if data and all(isinstance(x, list) for x in data) else [data]
+    index_rule_suites(pages, repo)
+    return pages
 
 
 def read_lander_comment(repo, pr):
@@ -173,7 +231,7 @@ def read_commits(repo, pr):
 # --- review -----------------------------------------------------------------
 
 
-def review(repo, prs, since):
+def review(repo, prs, since, owner, suites=None):
     if dt.date.today() - dt.date.fromisoformat(since) > dt.timedelta(
         days=RULE_SUITE_DAYS
     ):
@@ -181,18 +239,25 @@ def review(repo, prs, since):
             f"note: rule suites cover about the last {RULE_SUITE_DAYS} days; "
             "an older PR lacking co-review reads as unknown"
         )
-    lacking, rule_cache = [], {}
+    lacking, rule_cache, unreadable = [], {}, set()
     for p in prs:
         head = p.get("headRefOid") or ""
+        merged_by = (p.get("mergedBy") or {}).get("login") or "unknown"
         try:
             state = land.read_statuses(repo, head).get(land.CO_REVIEW)
         except ReadError as exc:
-            lacking.append((p, "unknown", f"cannot read statuses: {exc}"))
+            lacking.append(
+                (p, "unknown", f"cannot read statuses: {exc}; merged by {merged_by}")
+            )
             continue
         if state == "success":
             continue
         base = p.get("baseRefName") or ""
-        if base not in rule_cache:
+        if suites is not None:
+            # A saved file holds every ref; keep only this base's suites.
+            if base not in rule_cache:
+                rule_cache[base] = index_rule_suites(suites, ref=f"refs/heads/{base}")
+        elif base not in rule_cache:
             try:
                 rule_cache[base] = read_rule_results(repo, base)
             except ReadError as exc:
@@ -201,22 +266,49 @@ def review(repo, prs, since):
         merge_sha = (p.get("mergeCommit") or {}).get("oid") or ""
         status_note = f"`co-review` {state or 'missing'} on {head[:7]}"
         if isinstance(rules, ReadError):
+            if base not in unreadable:
+                unreadable.add(base)
+                hint = (
+                    " (needs Administration read)"
+                    if getattr(rules, "not_found", False)
+                    else ""
+                )
+                print(
+                    f"note: cannot read rule suites for {base or '?'}{hint}, "
+                    f"so its gaps read unknown: {rules}"
+                )
             lacking.append(
-                (p, "unknown", f"{status_note}; cannot read rule suites: {rules}")
+                (
+                    p,
+                    "unknown",
+                    f"{status_note}; merged by {merged_by}; rule suites unreadable",
+                )
             )
             continue
-        result = rules.get(merge_sha)
-        kind = {"bypass": "bypass", "pass": "ungated"}.get(result or "", "unknown")
-        lacking.append((p, kind, status_note))
+        result, actor = rules.get(merge_sha, (None, None))
+        if result == "bypass":
+            # No actor on the suite: name mergedBy, and say it was inferred.
+            # With neither, say so rather than credit an absent source.
+            has_merged_by = bool((p.get("mergedBy") or {}).get("login"))
+            who = actor or (
+                f"{merged_by} (from mergedBy)" if has_merged_by else "an unknown actor"
+            )
+            actor = actor or (merged_by if has_merged_by else None)
+            kind = "owner" if actor and actor.lower() == owner.lower() else "bypass"
+            lacking.append((p, kind, f"{status_note}; bypassed by {who}"))
+            continue
+        kind = "ungated" if result == "pass" else "unknown"
+        lacking.append((p, kind, f"{status_note}; merged by {merged_by}"))
     for p, kind, note in lacking:
         print(f"#{p['number']} {kind:8} {note} — {p.get('title', '')}")
     counts = {
         k: sum(1 for _, kind, _ in lacking if kind == k)
-        for k in ("bypass", "ungated", "unknown")
+        for k in ("owner", "bypass", "ungated", "unknown")
     }
     print(
         f"AUDIT: review merged={len(prs)} lacking={len(lacking)} "
-        f"bypass={counts['bypass']} ungated={counts['ungated']} unknown={counts['unknown']}"
+        f"owner={counts['owner']} bypass={counts['bypass']} "
+        f"ungated={counts['ungated']} unknown={counts['unknown']}"
     )
 
 
@@ -375,6 +467,14 @@ def main(argv=None):
     p.add_argument("--since", required=True, help="YYYY-MM-DD, merged on or after")
     p.add_argument("--mode", required=True, choices=("review", "shadow", "landed"))
     p.add_argument("--policy", help="shadow only: a candidate merge-policy.yml")
+    p.add_argument(
+        "--owner",
+        help="review only: the login whose bypass is expected (default: the repo owner)",
+    )
+    p.add_argument(
+        "--rule-suites",
+        help="review only: a saved rule-suites response to read instead of the API",
+    )
     args = p.parse_args(argv)
     if "/" not in args.repo:
         p.error("--repo must be owner/name")
@@ -384,6 +484,16 @@ def main(argv=None):
         p.error("--since must be YYYY-MM-DD")
     if args.policy and args.mode != "shadow":
         p.error("--policy applies to --mode shadow only")
+    if args.owner and args.mode != "review":
+        p.error("--owner applies to --mode review only")
+    if args.rule_suites and args.mode != "review":
+        p.error("--rule-suites applies to --mode review only")
+    suites = None
+    if args.rule_suites:
+        try:
+            suites = load_rule_suites(args.rule_suites, args.repo)
+        except ReadError as exc:
+            p.error(str(exc))
     policy_text = None
     if args.policy:
         try:
@@ -397,7 +507,9 @@ def main(argv=None):
         print(f"AUDIT: error reason={exc}")
         return 1
     if args.mode == "review":
-        review(args.repo, prs, args.since)
+        review(
+            args.repo, prs, args.since, args.owner or args.repo.split("/")[0], suites
+        )
     elif args.mode == "landed":
         landed(args.repo, prs)
     else:

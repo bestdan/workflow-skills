@@ -1,5 +1,5 @@
 ---
-description: Diagnose and optionally fix the plugin setup — config validity, handler prerequisites, legacy dirs, schema drift, hygiene, co-review and teardown allow-rule drift, the worktree root and branch prefix, co-review ledger sync, and the task-dashboard agent
+description: Diagnose and optionally fix the plugin setup — config validity, handler prerequisites, legacy dirs, schema drift, hygiene, co-review and teardown allow-rule drift, the worktree root and branch prefix, co-review ledger sync, the task-dashboard agent, and an admin gh account on a personal repo
 allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(find *), Bash(grep *), Bash(uv *), Bash(python3 *), Bash(mkdir *), Bash(rmdir *), Bash("${CLAUDE_PLUGIN_ROOT}/scripts/worktree-config.sh":*), Glob, Grep, Read, Edit, Write, AskUserQuestion, mcp__claude_ai_Linear__list_teams, mcp__linear__list_teams, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__atlassian__getAccessibleAtlassianResources
 argument-hint: "[--fix]"
 ---
@@ -8,10 +8,10 @@ argument-hint: "[--fix]"
 
 One explicit "diagnose and fix my setup" entry point. It runs a set of checks
 against `dev_docs/tasks/` and the configured handler — plus one over co-review's and the teardown scripts'
-allow-rules, Check 7, one over the worktree root and branch prefix, Check 8, one over co-review ledger sync, Check 9, and one over the task-dashboard agent, Check 10 — prints a `PASS` / `WARN` / `FAIL` line per check with a
+allow-rules, Check 7, one over the worktree root and branch prefix, Check 8, one over co-review ledger sync, Check 9, one over the task-dashboard agent, Check 10, and one over the active `gh` account's role, Check 11 — prints a `PASS` / `WARN` / `FAIL` line per check with a
 remediation hint, and changes **nothing** unless invoked with `--fix`.
 
-Most of what it checks is the task loop. Checks 7 to 10 are not, and that is deliberate:
+Most of what it checks is the task loop. Checks 7 to 11 are not, and that is deliberate:
 each covers a failure that is **silent by construction**, so the only way anyone
 learns of it is by asking, and this is the one place people already come to ask.
 A check nobody runs does not fix a problem nobody notices. Read that as the bar
@@ -564,6 +564,49 @@ loaded, a stale sync (with the last run's error, which names the login command,
 `acli jira auth login` or `gh auth login`, when it was an auth failure), or a launchd state, config or DB it could not read. Exit `3` (no plist)
 prints nothing, so it is skipped too. **Never touched by `--fix`**: reloading an
 agent or logging in to Jira is the user's call, and `/task-dashboard` owns both.
+
+**Check 11 — admin `gh` account on a personal repo.** Whether the account this
+machine's `gh` acts as can administer the repo. An agent with admin rights can
+usually merge past a required check such as `co-review` without anyone choosing to:
+`gh pr merge`, `land-pr.py` and `dli gh merge` all run as whichever account is
+active, and nothing warns at the time. `merge-audit.py --mode review` only finds
+it afterwards. Without a required `co-review` check there is nothing to skip,
+and on a personal repo the owner is always an admin, so the check warns only
+where both hold. Run unsandboxed (it calls the GitHub API). Substitute the repo
+and its default branch from the first call before running the rest:
+
+```bash
+gh repo view --json nameWithOwner,defaultBranchRef --jq '[.nameWithOwner, .defaultBranchRef.name] | @tsv'
+gh api user --jq .login
+gh api repos/<owner/name> --jq '[.owner.type, .permissions.admin] | @tsv'
+gh api repos/<owner/name>/rules/branches/<default> --jq '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | index("co-review") != null'
+gh api repos/<owner/name>/branches/<default> --jq '(.protection.required_status_checks.contexts // []) | index("co-review") != null'
+```
+
+The last two read the required checks from rulesets and from classic branch
+protection. Neither needs admin. `co-review` is required when either prints
+`true`.
+
+- The owner is an `Organization` → skip this check silently and print no line.
+  An org decides its own roles, and its admins are often meant to merge.
+- `.permissions.admin` is `true` and `co-review` is required → `WARN`: "`gh`
+  acts as `<login>`, an admin of `<owner/name>`, which requires `co-review`; an
+  admin can usually merge past it (as a bypass actor, or where admins are not
+  enforced) and can edit the rules regardless. Agents should act as a non-admin
+  account (Write role), keeping admin for the owner's own per-command use". Name
+  the login. The check does not read the bypass configuration on purpose: an
+  agent acting as an admin is the risk, whatever the rules say today.
+- `.permissions.admin` is `true` and `co-review` is not required → `PASS`,
+  naming the login and saying no `co-review` check is required, so there is
+  nothing for an admin to skip.
+- `.permissions.admin` is `false` → `PASS`, naming the login and that it is not
+  an admin.
+- `.permissions.admin` is empty or missing, or any call fails (no remote, no
+  `gh` auth, no network) → `WARN` "admin `gh` account check skipped — <reason>",
+  the same treatment as Check 1c. Never read a missing field as `PASS`.
+
+**Never touched by `--fix`.** Switching accounts is the user's call, and an
+agent switching `gh` to another account is exactly what this check guards.
 
 ### 3. Report (and fix under `--fix`)
 
