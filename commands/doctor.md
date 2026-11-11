@@ -570,23 +570,37 @@ machine's `gh` acts as can administer the repo. An agent with admin rights
 merges past a required check such as `co-review` without anyone choosing to:
 `gh pr merge`, `land-pr.py` and `dli gh merge` all run as whichever account is
 active, and nothing warns at the time. `merge-audit.py --mode review` only finds
-it afterwards. Run unsandboxed (it calls the GitHub API):
+it afterwards. Without a required `co-review` check there is nothing to skip,
+and on a personal repo the owner is always an admin, so the check warns only
+where both hold. Run unsandboxed (it calls the GitHub API). Substitute the repo
+and its default branch from the first call before running the rest:
 
 ```bash
-gh repo view --json nameWithOwner --jq .nameWithOwner
+gh repo view --json nameWithOwner,defaultBranchRef --jq '[.nameWithOwner, .defaultBranchRef.name] | @tsv'
 gh api user --jq .login
 gh api repos/<owner/name> --jq '[.owner.type, .permissions.admin] | @tsv'
+gh api repos/<owner/name>/rules/branches/<default> --jq '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | index("co-review") != null'
+gh api repos/<owner/name>/branches/<default> --jq '(.protection.required_status_checks.contexts // []) | index("co-review") != null'
 ```
 
-- The owner is a `User` (a personal repo) and `.permissions.admin` is `true` →
-  `WARN`: "`gh` acts as `<login>`, an admin of `<owner/name>`; agents should act
-  as a non-admin account (Write role), keeping admin for the owner's own
-  per-command use". Name the login.
+The last two read the required checks from rulesets and from classic branch
+protection. Neither needs admin. `co-review` is required when either prints
+`true`.
+
 - The owner is an `Organization` → skip this check silently and print no line.
   An org decides its own roles, and its admins are often meant to merge.
-- Otherwise → `PASS`, naming the login and that it is not an admin.
-- Any of the calls fails (no remote, no `gh` auth, no network) → `WARN`
-  "admin `gh` account check skipped — <reason>", the same treatment as Check 1c.
+- `.permissions.admin` is `true` and `co-review` is required → `WARN`: "`gh`
+  acts as `<login>`, an admin of `<owner/name>`, which requires `co-review`; an
+  admin's merge skips it. Agents should act as a non-admin account (Write role),
+  keeping admin for the owner's own per-command use". Name the login.
+- `.permissions.admin` is `true` and `co-review` is not required → `PASS`,
+  naming the login and saying no `co-review` check is required, so there is
+  nothing for an admin to skip.
+- `.permissions.admin` is `false` → `PASS`, naming the login and that it is not
+  an admin.
+- `.permissions.admin` is empty or missing, or any call fails (no remote, no
+  `gh` auth, no network) → `WARN` "admin `gh` account check skipped — <reason>",
+  the same treatment as Check 1c. Never read a missing field as `PASS`.
 
 **Never touched by `--fix`.** Switching accounts is the user's call, and an
 agent switching `gh` to another account is exactly what this check guards.

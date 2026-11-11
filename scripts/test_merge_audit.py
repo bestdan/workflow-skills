@@ -198,7 +198,7 @@ class ReviewTests(Base):
         self.fake.rules = [{"after_sha": sha(1009), "result": "bypass"}]
         _, lines = self.run_audit("--mode", "review")
         self.assertTrue(lines[0].startswith("#9 owner"))
-        self.assertIn("bypassed by acme", lines[0])
+        self.assertIn("bypassed by acme (from mergedBy)", lines[0])
 
     def test_unreadable_rule_suites_are_unknown_not_a_crash(self):
         self.fake.prs = [pr(5, "2026-11-02T10:00:00Z")]

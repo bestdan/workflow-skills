@@ -12,7 +12,9 @@ convention: ../releasing.md
 admin role. Until 2026-11-07 agents ran `gh` as `bestdan`, the owner and an
 admin, so any agent merge could pass the check without anyone choosing to.
 `scripts/merge-audit.py --mode review` reported such a merge as `bypass` and
-could not say whose hand was on it. #1429 asked for that gap to be closed.
+could not say whose hand was on it.
+[Issue #1429](https://github.com/bestdan/workflow-skills/issues/1429) asked for
+that gap to be closed.
 
 The fix was made on the identity side, in `bestdan/dotfiles`
 (`dev_docs/designs/2026-11-06-agent-github-identity.md`, graduating to
@@ -39,8 +41,9 @@ actor is the rule suite's `actor_name`, falling back to `mergedBy`. Every line
 names the actor, including `ungated` and `unknown` lines, which use
 `mergedBy`. When rule suites cannot be read, the audit says so once and names
 the permission it lacks. `/doctor` gains Check 11, which warns when the active
-`gh` account is an admin of a personal repo, the setup that made the old
-`bypass` label ambiguous.
+`gh` account is an admin of a personal repo that requires `co-review`, the
+setup that made the old `bypass` label ambiguous. A repo with no such check
+gets a `PASS`: its owner is always an admin, and there is nothing to skip.
 
 ## Consequences
 
