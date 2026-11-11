@@ -111,10 +111,10 @@ cannot delete the refs it releases.
 
 ### Autonomous execution
 
-| Skill                                            | Trigger                                                             | What it does                                                                                                                                                                                                     |
-| ------------------------------------------------ | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [**deliver-task**](skills/deliver-task/SKILL.md) | `/deliver-task <slug \| id> [--base <branch>] [--questions <path>]` | One task, all the way: claim → implement via a routed worker in an isolated worktree → verify → PR → non-interactive co-review → hand off at `needs_review`, then land it if `auto`-tier and `AGENT_LAND` is on. |
-| [**auto-pilot**](skills/auto-pilot/SKILL.md)     | `/auto-pilot <linear-project \| plan-dir>` _(in progress)_          | Advance a whole task graph unattended — a thin orchestrator walking the graph via `/deliver-task`, with crash-resumable state. See [the design notes](dev_docs/auto-pilot.md).                                   |
+| Skill                                            | Trigger                                                             | What it does                                                                                                                                                                                                                       |
+| ------------------------------------------------ | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [**deliver-task**](skills/deliver-task/SKILL.md) | `/deliver-task <slug \| id> [--base <branch>] [--questions <path>]` | One task, all the way: claim → implement via a routed worker in an isolated worktree → verify → PR → co-review (non-interactive when unattended) → hand off at `needs_review`, then land it if `auto`-tier and `AGENT_LAND` is on. |
+| [**auto-pilot**](skills/auto-pilot/SKILL.md)     | `/auto-pilot <linear-project \| plan-dir>` _(in progress)_          | Advance a whole task graph unattended — a thin orchestrator walking the graph via `/deliver-task`, with crash-resumable state. See [the design notes](dev_docs/auto-pilot.md).                                                     |
 
 ### Auditable analysis
 
