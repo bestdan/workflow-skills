@@ -26,8 +26,8 @@ below would exclude, then apply the gate to the adjusted totals. Under
 PR's.
 
 The script excludes generated files (lockfiles, stubs, bundles, vendored trees,
-`linguist-generated` paths, and files whose first lines say `@generated` or
-`DO NOT EDIT`) from every count. The list of what it excluded is in
+`linguist-generated` paths, and files whose first lines, where the diff shows
+them, say `@generated` or `DO NOT EDIT`) from every count. The list of what it excluded is in
 `generated.paths`. It prints:
 
 - `reviewable.lines` / `reviewable.files`, split into `code_lines`,
@@ -120,8 +120,7 @@ them too.
 
 ## Worked example
 
-This happened on a ~3,150-line PR in a private repo (2026-11-11), reviewed by
-claude, codex and copilot.
+A 3,155-line PR, reviewed by claude, codex and copilot:
 
 | Part                                   | ~Lines | Reviewed?            |
 | -------------------------------------- | ------ | -------------------- |
@@ -139,7 +138,7 @@ them. Measured, this diff is `too_big` with `prose_split` true. The output
 should have read:
 
 ```text
-**Scope:** 🟡 **too big** — 3,150 reviewable lines across 41 files (gate: 800 / 30); 1,140 lines of prose beside code
+**Scope:** 🟡 **too big** — 3,155 reviewable lines across 41 files (gate: 800 / 30); 1,140 lines of prose beside code
 - decision records: dev_docs/decisions/** (800) — docs-only, lands first, reviewed as prose
 - model + renderer + save: scripts/*.py, tests/** (1,250) — the feature
 - template + assets: templates/**, assets/** (765) — copied from an earlier PR; review the diff against the original
