@@ -89,6 +89,11 @@ class ParseDiff(unittest.TestCase):
         [f] = pc.parse_diff(text)
         self.assertEqual((f.additions, f.deletions), (1, 1))
 
+    def test_form_feed_inside_a_line_does_not_split_it(self) -> None:
+        text = file_diff("x.c", [" a", "+b\x0c++ y", "+c", " a2"], 2, 4)
+        [f] = pc.parse_diff(text)
+        self.assertEqual((f.path, f.additions, f.deletions), ("x.c", 2, 0))
+
 
 class Categories(unittest.TestCase):
     def test_paths(self) -> None:
@@ -142,11 +147,34 @@ class Score(unittest.TestCase):
         )
         self.assertEqual(pc.score(m), 40 + 20 + 20 + 10 + 10)
 
-    def test_bands(self) -> None:
+    def test_size_bands_at_the_default_cuts(self) -> None:
         self.assertEqual(
-            [pc.band(v) for v in (0, 29, 30, 59, 60, 100)],
-            ["Low", "Low", "Moderate", "Moderate", "High", "High"],
+            [pc.size(v, pc.DEFAULT_CUTS)[0] for v in (0, 29, 30, 59, 60, 79, 80, 100)],
+            [
+                "small",
+                "small",
+                "medium",
+                "medium",
+                "large",
+                "large",
+                "very-large",
+                "very-large",
+            ],
         )
+
+    def test_size_bands_follow_custom_cuts(self) -> None:
+        cuts = {"medium": 10, "large": 20, "very_large": 90}
+        self.assertEqual(
+            [pc.size(v, cuts)[0] for v in (9, 10, 20, 89, 90)],
+            ["small", "medium", "large", "large", "very-large"],
+        )
+
+    def test_line_trigger_makes_a_saturated_diff_very_large(self) -> None:
+        cuts = pc.DEFAULT_CUTS
+        self.assertEqual(pc.size(79, cuts, 2999, 3000), ("large", "score"))
+        self.assertEqual(pc.size(79, cuts, 3000, 3000), ("very-large", "lines"))
+        self.assertEqual(pc.size(85, cuts, 5000, 3000), ("very-large", "score"))
+        self.assertEqual(pc.size(10, cuts, 10**5, 0), ("small", "score"))
 
 
 class Excludes(unittest.TestCase):
@@ -177,11 +205,11 @@ class Cli(unittest.TestCase):
         rc, out = run([], self.DIFF)
         self.assertEqual(rc, 0)
         lines = out.splitlines()
-        self.assertEqual(lines[0], "### Complexity: 2 / 100 (Low)")
+        self.assertEqual(lines[0], "### Complexity: 2 / 100 (small)")
         self.assertEqual(
             lines[1], "Reviewable: +10 / -0 across 1 file · 1 package · 1 hunk · code"
         )
-        self.assertIn("split=not-required", lines[2])
+        self.assertIn("size=small by=score cuts=30/60/80 lines_at=3000", lines[2])
         self.assertIn("excluded=1", lines[2])
 
     def test_no_default_excludes_counts_it(self) -> None:
@@ -189,50 +217,104 @@ class Cli(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(json.loads(out)["r"], 510)
 
-    def test_threshold_flag_sets_split(self) -> None:
-        rc, out = run(["--threshold", "2", "--json"], self.DIFF)
+    def test_cut_flags_set_the_size(self) -> None:
+        rc, out = run(
+            ["--medium-at", "1", "--large-at", "2", "--very-large-at", "3", "--json"],
+            self.DIFF,
+        )
         data = json.loads(out)
-        self.assertEqual((rc, data["split"], data["threshold"]), (0, "required", 2))
+        self.assertEqual(
+            (rc, data["size"], data["cuts"]),
+            (0, "large", {"medium": 1, "large": 2, "very_large": 3}),
+        )
+
+    def test_cuts_that_do_not_rise_are_a_usage_error(self) -> None:
+        self.assertEqual(run(["--large-at", "90"], self.DIFF)[0], 2)
+        self.assertEqual(run(["--medium-at", "0"], self.DIFF)[0], 2)
 
     def test_config_block(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             cfg = Path(d) / ".co-review.yml"
             cfg.write_text(
                 "local_reviewers:\n  - codex\n"
-                "complexity:\n  split_threshold: 1  # low\n  exclude:\n    - '^src/'\n    - \"x\"\n"
+                "complexity:\n  medium_at: 1  # low\n  large_at: 2\n  very_large_at: 3\n"
+                "  exclude:\n    - '^src/'\n    - \"x\"\n"
                 "other:\n  exclude:\n    - '.*'\n"
             )
-            self.assertEqual(pc.load_config(str(cfg)), (1, ["^src/", "x"]))
+            self.assertEqual(
+                pc.load_config(str(cfg)),
+                ({"medium": 1, "large": 2, "very_large": 3}, ["^src/", "x"]),
+            )
             rc, out = run(
                 ["--config", str(cfg), "--no-default-excludes", "--json"], self.DIFF
             )
             data = json.loads(out)
             self.assertEqual(
-                (rc, data["f"], data["adds"], data["split"]), (0, 1, 500, "required")
+                (rc, data["f"], data["adds"], data["size"]), (0, 1, 500, "very-large")
             )
             # a flag outranks the config
             rc, out = run(
-                ["--config", str(cfg), "--threshold", "50", "--json"], self.DIFF
+                ["--config", str(cfg), "--very-large-at", "50", "--json"], self.DIFF
             )
-            self.assertEqual(json.loads(out)["threshold"], 50)
+            self.assertEqual(json.loads(out)["cuts"]["very_large"], 50)
 
     def test_config_list_at_the_key_indent(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             cfg = Path(d) / ".co-review.yml"
             cfg.write_text(
-                "complexity:\n  exclude:\n  - '^src/'\n  - x\n  split_threshold: 5\n"
+                "complexity:\n  exclude:\n  - '^src/'\n  - x\n  large_at: 5\n"
             )
-            self.assertEqual(pc.load_config(str(cfg)), (5, ["^src/", "x"]))
+            self.assertEqual(pc.load_config(str(cfg)), ({"large": 5}, ["^src/", "x"]))
+
+    def test_hash_inside_a_quoted_exclude_is_not_a_comment(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            cfg = Path(d) / ".co-review.yml"
+            cfg.write_text(
+                "complexity:\n  exclude:\n    - \"foo #bar\"  # why\n    - 'a#b'\n"
+            )
+            self.assertEqual(pc.load_config(str(cfg)), ({}, ["foo #bar", "a#b"]))
 
     def test_missing_config_is_not_an_error(self) -> None:
         rc, out = run(["--config", "/nonexistent/.co-review.yml", "--json"], self.DIFF)
-        self.assertEqual((rc, json.loads(out)["threshold"]), (0, pc.DEFAULT_THRESHOLD))
+        self.assertEqual((rc, json.loads(out)["cuts"]), (0, pc.DEFAULT_CUTS))
 
-    def test_bad_config_threshold_is_usage_error(self) -> None:
+    def test_line_trigger_from_flag_and_config(self) -> None:
+        rc, out = run(["--very-large-lines", "10", "--json"], self.DIFF)
+        data = json.loads(out)
+        self.assertEqual(
+            (rc, data["size"], data["by"], data["lines_at"]),
+            (0, "very-large", "lines", 10),
+        )
+        rc, out = run(["--very-large-lines", "10"], self.DIFF)
+        self.assertEqual(
+            out.splitlines()[0],
+            "### Complexity: 2 / 100 (very-large: 10 reviewable lines)",
+        )
+        with tempfile.TemporaryDirectory() as d:
+            cfg = Path(d) / ".co-review.yml"
+            cfg.write_text("complexity:\n  very_large_lines: 0\n")
+            self.assertEqual(pc.load_config(str(cfg)), ({"lines": 0}, []))
+            rc, out = run(["--config", str(cfg), "--json"], self.DIFF)
+            self.assertEqual(json.loads(out)["lines_at"], 0)
+        self.assertEqual(run(["--very-large-lines", "-1"], self.DIFF)[0], 2)
+
+    def test_bad_config_cut_is_usage_error(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             cfg = Path(d) / "c.yml"
-            cfg.write_text("complexity:\n  split_threshold: high\n")
+            cfg.write_text("complexity:\n  large_at: high\n")
             self.assertEqual(run(["--config", str(cfg)], self.DIFF)[0], 2)
+
+    def test_non_utf8_stdin_is_replaced_not_a_crash(self) -> None:
+        diff = file_diff("x.c", ["-a\xe9", "+b"], 1, 1).encode("latin-1")
+        out = io.StringIO()
+        old_stdin = pc.sys.stdin
+        pc.sys.stdin = io.TextIOWrapper(io.BytesIO(diff), encoding="utf-8")
+        try:
+            with contextlib.redirect_stdout(out):
+                rc = pc.main(["--json"])
+        finally:
+            pc.sys.stdin = old_stdin
+        self.assertEqual((rc, json.loads(out.getvalue())["r"]), (0, 2))
 
     def test_bad_regex_is_usage_error(self) -> None:
         self.assertEqual(run(["--exclude", "("], self.DIFF)[0], 2)
@@ -248,7 +330,9 @@ class Cli(unittest.TestCase):
     def test_empty_diff(self) -> None:
         rc, out = run(["--json"], "")
         data = json.loads(out)
-        self.assertEqual((rc, data["score"], data["band"], data["p"]), (0, 0, "Low", 0))
+        self.assertEqual(
+            (rc, data["score"], data["size"], data["p"]), (0, 0, "small", 0)
+        )
 
 
 if __name__ == "__main__":

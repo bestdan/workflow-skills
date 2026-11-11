@@ -17,8 +17,19 @@ drops excluded paths (generated code and lockfiles), and measures:
     score = min(40, R / 50) + min(20, F * 1.5) + clamp((P - 1) * 4, 0, 20)
           + min(10, H * 0.5) + clamp((E - 1) * 3, 0, 10)
 
-rounded half-up to a whole number, banded `< 30` Low, `30-59` Moderate,
-`>= 60` High. R, F, P and H and their terms match Betterment/mobile's
+rounded half-up to a whole number, and placed in one of four size bands by
+default: `small` below 30, `medium` 30-59, `large` 60-79, `very-large` 80 and
+up. The first two cuts match mobile's Low/Moderate/High bands, so a `small` or
+`medium` diff here reads the same there.
+
+A diff of 3000 or more reviewable lines is also `very-large`, whatever its
+score. The R, F and H terms reach their caps at 2000 lines, 14 files and 20
+hunks, so a diff confined to one top-level directory (P = 1) can score at most
+80, and only by touching all five categories: without this line trigger, a
+30,000-line change in one app would read `large`. The output's `by=` field
+says which trigger set the size.
+
+R, F, P and H and their terms match Betterment/mobile's
 measure-pr-complexity action. E is the one departure: mobile leaves it to the
 reviewer's judgment, because "feature" and "refactor" cannot be told apart from
 a path. Here it is classified from paths alone, with feature and refactor
@@ -31,23 +42,36 @@ Configuration comes from flags or from the `complexity:` block of a
 `.co-review.yml` passed as `--config`:
 
     complexity:
-      split_threshold: 60
+      medium_at: 30
+      large_at: 60
+      very_large_at: 80
+      very_large_lines: 3000
       exclude:
         - '\\.pb\\.go$'
 
 `exclude` entries are Python regexes searched against the repo-relative path
 and add to the defaults; `--no-default-excludes` drops the defaults. A missing
-`--config` file is not an error (the config is optional).
+`--config` file is not an error (the config is optional). Each cut is the
+lowest score in its band; `--medium-at`, `--large-at` and `--very-large-at`
+outrank the file, and the three must rise strictly above 0.
+`very_large_lines` (flag `--very-large-lines`) is the line trigger; 0 turns it
+off.
 
 Output, on stdout, exit 0:
 
-    ### Complexity: 72 / 100 (High)
+    ### Complexity: 72 / 100 (large)
     Reviewable: +830 / -320 across 18 files · 5 packages · 34 hunks · code+test
-    COMPLEXITY: score=72 band=High threshold=60 split=required r=1150 f=18 p=5 h=34 e=2 excluded=3
+    COMPLEXITY: score=72 size=large by=score cuts=30/60/80 lines_at=3000 r=1150 f=18 p=5 h=34 e=2 excluded=3
 
-`split=required` when score >= threshold, else `split=not-required`. With
+When the line trigger set the size, the first line reads
+`### Complexity: 79 / 100 (very-large: 3142 reviewable lines)` and the last
+carries `by=lines`.
+
+The size is an input to the split judgment, not the judgment: what each band
+asks of a reviewer is in skills/co-review/references/complexity.md. With
 `--json`, one JSON object carrying the same fields instead. Exit 2 is a usage
-error (bad flag, bad regex, unreadable config or diff file).
+error (bad flag, bad regex, cuts that do not rise, unreadable config or diff
+file).
 """
 
 from __future__ import annotations
@@ -60,7 +84,10 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-DEFAULT_THRESHOLD = 60
+DEFAULT_CUTS = {"medium": 30, "large": 60, "very_large": 80}
+CUT_KEYS = {"medium_at": "medium", "large_at": "large", "very_large_at": "very_large"}
+DEFAULT_LINES = 3000
+LINES_KEY = "very_large_lines"
 
 DEFAULT_EXCLUDES = (
     r"\.(fakes|freezed|g|gql|mapper)\.dart$",
@@ -142,7 +169,7 @@ def parse_diff(text: str) -> list[FileDiff]:
     old_left = new_left = 0
     minus_path: str | None = None
     hunk_re = re.compile(r"^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@")
-    for line in text.splitlines():
+    for line in text.split("\n"):
         if old_left > 0 or new_left > 0:
             if line.startswith("+"):
                 cur.additions += 1  # type: ignore[union-attr]
@@ -226,33 +253,56 @@ def score(m: Measurement) -> int:
     return int(math.floor(total + 0.5))
 
 
-def band(value: int) -> str:
-    if value >= 60:
-        return "High"
-    if value >= 30:
-        return "Moderate"
-    return "Low"
+def size(
+    value: int, cuts: dict[str, int], r: int = 0, lines_at: int = 0
+) -> tuple[str, str]:
+    """The size band and what set it: `score` from each band's lower cut, or
+    `lines` when `r` reviewable lines reach `lines_at` (0 turns that off)."""
+    if value >= cuts["very_large"]:
+        return "very-large", "score"
+    if lines_at and r >= lines_at:
+        return "very-large", "lines"
+    if value >= cuts["large"]:
+        return "large", "score"
+    if value >= cuts["medium"]:
+        return "medium", "score"
+    return "small", "score"
 
 
-def load_config(path: str) -> tuple[int | None, list[str]]:
-    """Read `complexity.split_threshold` and `complexity.exclude` from a
-    `.co-review.yml`. Only that block's two keys are understood: a scalar
-    threshold and a block list of quoted or bare strings."""
+def _strip_comment(raw: str) -> str:
+    """Drop a YAML `#` comment: one at the line start or after whitespace,
+    and never inside a single- or double-quoted scalar."""
+    quote = None
+    for i, ch in enumerate(raw):
+        if quote:
+            if ch == quote:
+                quote = None
+        elif ch in "'\"":
+            quote = ch
+        elif ch == "#" and (i == 0 or raw[i - 1] in " \t"):
+            return raw[:i].rstrip()
+    return raw.rstrip()
+
+
+def load_config(path: str) -> tuple[dict[str, int], list[str]]:
+    """Read the band cuts (`complexity.medium_at`, `large_at`,
+    `very_large_at`), the line trigger (`very_large_lines`, returned under
+    `lines`) and `complexity.exclude` from a `.co-review.yml`. Only that
+    block's keys are understood: integers and a block list of quoted or bare
+    strings. Returns only the values the file sets."""
     p = Path(path)
     if not p.exists():
-        return None, []
+        return {}, []
     try:
         lines = p.read_text().splitlines()
     except OSError as exc:
         raise SystemExit(_usage(f"cannot read config {path}: {exc}"))
-    threshold: int | None = None
+    cuts: dict[str, int] = {}
     excludes: list[str] = []
     in_block = in_exclude = False
     block_indent = None
     for raw in lines:
-        stripped = (
-            raw.split(" #", 1)[0].rstrip() if not raw.lstrip().startswith("#") else ""
-        )
+        stripped = _strip_comment(raw)
         if not stripped.strip():
             continue
         indent = len(stripped) - len(stripped.lstrip())
@@ -271,13 +321,13 @@ def load_config(path: str) -> tuple[int | None, list[str]]:
             in_exclude = False
             key, _, value = text.partition(":")
             value = value.strip()
-            if key == "split_threshold":
+            if key in CUT_KEYS or key == LINES_KEY:
                 try:
-                    threshold = int(value)
+                    cuts[CUT_KEYS.get(key, "lines")] = int(value)
                 except ValueError:
                     raise SystemExit(
                         _usage(
-                            f"{path}: complexity.split_threshold must be an integer, got {value!r}"
+                            f"{path}: complexity.{key} must be an integer, got {value!r}"
                         )
                     )
             elif key == "exclude":
@@ -293,7 +343,7 @@ def load_config(path: str) -> tuple[int | None, list[str]]:
                 if quote == "'":
                     item = item.replace("''", "'")
             excludes.append(item)
-    return threshold, excludes
+    return cuts, excludes
 
 
 def _usage(msg: str) -> int:
@@ -308,18 +358,40 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--config", help="a .co-review.yml whose complexity: block to read")
     ap.add_argument("--exclude", action="append", default=[], metavar="REGEX")
     ap.add_argument("--no-default-excludes", action="store_true")
+    for key, name in CUT_KEYS.items():
+        ap.add_argument(
+            f"--{key.replace('_', '-')}",
+            dest=name,
+            type=int,
+            help=f"lowest score in the {name.replace('_', '-')} band "
+            f"(default {DEFAULT_CUTS[name]})",
+        )
     ap.add_argument(
-        "--threshold", type=int, help=f"split threshold (default {DEFAULT_THRESHOLD})"
+        "--very-large-lines",
+        dest="lines",
+        type=int,
+        help=f"reviewable lines that make a diff very-large whatever its score; "
+        f"0 turns it off (default {DEFAULT_LINES})",
     )
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args(argv)
 
-    cfg_threshold, cfg_excludes = (
-        load_config(args.config) if args.config else (None, [])
-    )
-    threshold = args.threshold if args.threshold is not None else cfg_threshold
-    if threshold is None:
-        threshold = DEFAULT_THRESHOLD
+    cfg_cuts, cfg_excludes = load_config(args.config) if args.config else ({}, [])
+    lines_at = cfg_cuts.pop("lines", DEFAULT_LINES)
+    if args.lines is not None:
+        lines_at = args.lines
+    if lines_at < 0:
+        return _usage(f"very_large_lines must be 0 or more, got {lines_at}")
+    cuts = dict(DEFAULT_CUTS)
+    cuts.update(cfg_cuts)
+    for name in DEFAULT_CUTS:
+        if getattr(args, name) is not None:
+            cuts[name] = getattr(args, name)
+    if not 0 < cuts["medium"] < cuts["large"] < cuts["very_large"]:
+        return _usage(
+            "band cuts must rise: 0 < medium_at < large_at < very_large_at, got "
+            f"{cuts['medium']}/{cuts['large']}/{cuts['very_large']}"
+        )
 
     sources = [] if args.no_default_excludes else list(DEFAULT_EXCLUDES)
     sources += cfg_excludes + args.exclude
@@ -334,23 +406,30 @@ def main(argv: list[str] | None = None) -> int:
         except OSError as exc:
             return _usage(f"cannot read diff file: {exc}")
     else:
-        text = sys.stdin.read()
+        buf = getattr(sys.stdin, "buffer", None)
+        text = (
+            buf.read().decode("utf-8", "replace")
+            if buf is not None
+            else sys.stdin.read()
+        )
 
     files = parse_diff(text) + [untracked_file(p) for p in args.untracked]
     m = measure(files, excludes)
     value = score(m)
-    split = "required" if value >= threshold else "not-required"
-    cats = "+".join(m.categories) or "none"
     r = m.additions + m.deletions
+    band, by = size(value, cuts, r, lines_at)
+    cut_text = f"{cuts['medium']}/{cuts['large']}/{cuts['very_large']}"
+    cats = "+".join(m.categories) or "none"
 
     if args.json:
         print(
             json.dumps(
                 {
                     "score": value,
-                    "band": band(value),
-                    "threshold": threshold,
-                    "split": split,
+                    "size": band,
+                    "by": by,
+                    "cuts": cuts,
+                    "lines_at": lines_at,
                     "r": r,
                     "adds": m.additions,
                     "dels": m.deletions,
@@ -368,13 +447,14 @@ def main(argv: list[str] | None = None) -> int:
     noun = "file" if m.files == 1 else "files"
     pkg = "package" if m.packages == 1 else "packages"
     hunk = "hunk" if m.hunks == 1 else "hunks"
-    print(f"### Complexity: {value} / 100 ({band(value)})")
+    label = f"{band}: {r} reviewable lines" if by == "lines" else band
+    print(f"### Complexity: {value} / 100 ({label})")
     print(
         f"Reviewable: +{m.additions} / -{m.deletions} across {m.files} {noun} · "
         f"{m.packages} {pkg} · {m.hunks} {hunk} · {cats}"
     )
     print(
-        f"COMPLEXITY: score={value} band={band(value)} threshold={threshold} split={split} "
+        f"COMPLEXITY: score={value} size={band} by={by} cuts={cut_text} lines_at={lines_at} "
         f"r={r} f={m.files} p={m.packages} h={m.hunks} e={len(m.categories)} excluded={m.excluded}"
     )
     return 0
