@@ -75,14 +75,14 @@ label.
 | 8 | `standard-pr`            | None of the above — the unremarkable middle.                                                |
 
 Why this order: each label selects a row of candidates in select-coder's
-`matrix.md`, so when two triggers hold, the higher must be the row whose
-candidates also serve the lower. `verification-sensitive` is first because its
-row alone excludes a model (`gpt-5.6-sol`) that three rows below it rank.
-`whole-codebase` sits under the rows whose candidates all serve a 1M window and
-over `mechanical-bulk`, whose row includes Haiku's 200K. The cheap and fast
+`matrix.md`, so the order ranks rows by what a wrong route costs: a model
+exclusion first, then capability needs, then the cheap and fast rows.
+`verification-sensitive` is first because its row alone excludes a model
+(`gpt-5.6-sol`) that three rows below it rank. `whole-codebase` sits over
+`mechanical-bulk`, whose row includes Haiku's 200K window. The cheap and fast
 rows, `latency-loop` and `mechanical-bulk`, win only when nothing more
-demanding fired. Rows 2–4 share a first pick, so their relative order is
-unmeasured. `cost_sensitivity` triggers no row, and no consumer reads it today.
+demanding fired. Rows 1–4 share a first pick; row 1 is placed by its exclusion,
+so only the order of rows 2–4 is unmeasured. `cost_sensitivity` triggers no row, and no consumer reads it today.
 
 `confidence` and `runner_up` describe the dimension scores, not the lookup:
 when torn between two scorings, set `confidence: low` and put the label the
