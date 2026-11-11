@@ -76,7 +76,8 @@ once `co-review` reports `success` on its exact head
 (`skills/co-review/references/status.md`). The admin bypass above skips that
 check as well as the release push. So does any merge made with an admin's
 token, which is why agents act as a Write-role bot and `/doctor` warns when
-the active `gh` account is an admin (Check 11). A skip shows up afterwards
+the active `gh` account is an admin of a repo that requires `co-review`
+(Check 11). A skip shows up afterwards
 rather than being blocked: `scripts/merge-audit.py --mode review` lists merged
 PRs whose final head has no `co-review` `success`, and names each `owner` (the
 owner's login took the bypass), `bypass` (any other actor did, which is an

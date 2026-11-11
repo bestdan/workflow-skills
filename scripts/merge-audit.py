@@ -180,7 +180,7 @@ def index_rule_suites(pages, repo=None):
             if not (isinstance(suite, dict) and suite.get("after_sha")):
                 continue
             name = suite.get("repository_name")
-            if repo and name and name != repo.split("/")[1]:
+            if repo and name and name.lower() != repo.split("/")[1].lower():
                 raise ReadError(f"rule suites: a suite is for {name}, not {repo}")
             results.setdefault(
                 suite["after_sha"], (suite.get("result"), suite.get("actor_name"))
