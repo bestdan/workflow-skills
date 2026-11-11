@@ -15,7 +15,6 @@ import stat
 import subprocess
 import sys
 import tempfile
-import time
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
@@ -48,8 +47,7 @@ class HookCase(unittest.TestCase):
         cfg.write_text(body)
 
     def run_hook(self, payload, **extra_env):
-        env = {k: v for k, v in os.environ.items() if k != hook.CONFIG_ENV}
-        env["HOME"] = str(self.home)
+        env = self._env()
         env.update(extra_env)
         proc = subprocess.run(
             [sys.executable, str(HOOK)],
@@ -60,6 +58,19 @@ class HookCase(unittest.TestCase):
             timeout=10,
         )
         return proc
+
+    def _env(self):
+        env = {k: v for k, v in os.environ.items() if k != hook.CONFIG_ENV}
+        env["HOME"] = str(self.home)
+        return env
+
+    def hook_imports(self, payload):
+        """The modules one hook run imports, from ``-X importtime``."""
+        return _imports([str(HOOK)], json.dumps(payload), self._env())
+
+    def bare_imports(self, code):
+        """The modules ``python3 -c <code>`` imports, in the hook's environment."""
+        return _imports(["-c", code], "", self._env())
 
     def payload(self, event, **extra):
         p = {
@@ -76,6 +87,15 @@ class HookCase(unittest.TestCase):
 
 
 class NoOptInTests(HookCase):
+    def test_imports_nothing_a_bare_interpreter_does_not(self):
+        # Every turn of a session that never opted in pays for this run, so it
+        # must not reach json or datetime: they load only once opted in.
+        seen = self.hook_imports(self.payload("Stop"))
+        # Startup always imports something, so an empty set means the
+        # -X importtime parse broke, not that the hook is lean.
+        self.assertTrue(seen)
+        self.assertEqual(seen - self.bare_imports("pass"), set())
+
     def test_no_config_writes_nothing(self):
         proc = self.run_hook(self.payload("UserPromptSubmit", prompt=PROMPT))
         self.assertEqual(proc.returncode, 0)
@@ -218,13 +238,36 @@ class OptInTests(HookCase):
                 self.assertEqual(proc.returncode, 0)
                 self.assertFalse(self.state.exists())
 
-    def test_fast(self):
-        start = time.monotonic()
-        proc = self.run_hook(self.payload("Stop"))
-        elapsed = time.monotonic() - start
-        self.assertEqual(proc.returncode, 0)
-        # Generous ceiling for a loaded CI box; locally it is ~20ms.
-        self.assertLess(elapsed, 1.0)
+    def test_imports_only_json_and_datetime(self):
+        # The hook runs on every turn, so it stays cheap by importing almost
+        # nothing. This checks that import set rather than timing a run: a
+        # timed run on a loaded machine can take over a second whatever the
+        # hook does, so a wall-clock ceiling fails on load alone.
+        seen = self.hook_imports(self.payload("Stop"))
+        # json proves both that the run took the opted-in path and that the
+        # -X importtime parse worked; without it the subset check is vacuous.
+        self.assertIn("json", seen)
+        self.assertEqual(seen - self.bare_imports("import json, datetime"), set())
+
+
+def _imports(args, stdin="", env=None):
+    """The module names ``python3 -X importtime <args>`` reports importing."""
+    proc = subprocess.run(
+        [sys.executable, "-X", "importtime", *args],
+        input=stdin,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=10,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return {
+        line.rsplit("|", 1)[1].strip()
+        for line in proc.stderr.splitlines()
+        if line.startswith("import time:")
+        and "|" in line
+        and "imported package" not in line
+    }
 
 
 def _rec(kind, content=None, **extra):
