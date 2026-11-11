@@ -46,7 +46,9 @@ load test_helper
 }
 
 @test "session status fails closed for past or absurd future resets" {
-  for reset in $(($(date +%s) - 60)) $(($(date +%s) + 21601)); do
+  # An hour past the script's 6h bound, not a second: the script reads the
+  # clock again later, and under a loaded gate that gap exceeds a second.
+  for reset in $(($(date +%s) - 60)) $(($(date +%s) + 21600 + 3600)); do
     resets_at="$(python3 -c 'import datetime,sys; print(datetime.datetime.fromtimestamp(int(sys.argv[1]), datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))' "$reset")"
     write_fixture "$TEST_TMPDIR/usage.json" "{\"limits\":[{\"kind\":\"session\",\"percent\":90,\"resets_at\":\"$resets_at\"}]}"
     CLAUDE_USAGE_RESET_STATE_FILE="$TEST_TMPDIR/reset-state.json" run bash -c 'bash "$1" --from-file "$2" --session-status 2>"$3"' _ "$REPO_ROOT/scripts/claude-usage.sh" "$TEST_TMPDIR/usage.json" "$TEST_TMPDIR/stderr"
