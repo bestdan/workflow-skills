@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.208.1] - 2026-11-11
+
+### Fixes
+
+- stop reporting a finished run's old heartbeat as a stall [N/A] (#1473) (4c0539e6)
+
 ## [2.208.0] - 2026-11-11
 
 ### Features
