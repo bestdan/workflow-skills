@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.211.1] - 2026-11-11
+
+### Fixes
+
+- run bats files in parallel and warn when the gate slows [N/A] (#1488) (e244ac17)
+
 ## [2.211.0] - 2026-11-11
 
 ### Features
