@@ -1,6 +1,7 @@
 ---
 created: 2026-10-03
 status: accepted
+convention: ../merge-autonomy.md
 ---
 
 # Starting thresholds for merge autonomy: size cap, review-queue limit, consult bar

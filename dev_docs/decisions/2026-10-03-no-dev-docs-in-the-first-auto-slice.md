@@ -1,6 +1,7 @@
 ---
 created: 2026-10-03
 status: accepted
+convention: ../merge-autonomy.md
 ---
 
 # `dev_docs/` stays human-tier in every repo for the first slice

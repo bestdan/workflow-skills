@@ -1,6 +1,7 @@
 ---
 created: 2026-10-03
 status: accepted
+convention: ../merge-autonomy.md
 ---
 
 # A tested script sets the merge tier; models can only demote

@@ -1,6 +1,7 @@
 ---
 created: 2026-10-31
 status: accepted
+convention: ../merge-autonomy.md
 ---
 
 # Release-cutting titles may land in workflow-skills' first `auto` slice

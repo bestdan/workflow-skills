@@ -15,8 +15,10 @@ _Design proposal, 2026-10-03. Evidence:
 The review-complete gate, the tier script and the lander are built, and every
 repo runs the lander in shadow. What remains is the plan below: graduate each
 repo out of shadow on its own count, switch landing on there, then build the
-Phase 2 gates that widen the `auto` slice one class of PR at a time. The
-choices the built part rests on are decision records:
+Phase 2 gates that widen the `auto` slice one class of PR at a time. How the
+built part works today, and how to tune or switch it off, is
+[`../merge-autonomy.md`](../merge-autonomy.md). The choices it rests on are
+decision records:
 
 - [Review-complete is a required `co-review` status](../decisions/2026-10-03-review-complete-is-a-required-status.md)
 - [A tested script sets the merge tier; models can only demote](../decisions/2026-10-03-rules-tier-models-only-demote.md)

@@ -1,6 +1,7 @@
 ---
 created: 2026-10-03
 status: accepted
+convention: ../merge-autonomy.md
 ---
 
 # The lander is a plugin script the session runs after co-review
