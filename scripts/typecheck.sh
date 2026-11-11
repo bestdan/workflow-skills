@@ -113,6 +113,7 @@ CONSUMER_FILES=(
   scripts/co-review-evidence.py
   scripts/co-review-status.py
   scripts/co-review-carry.py
+  scripts/co-review-size.py
   scripts/merge-tier.py
   scripts/land-pr.py
   scripts/merge-audit.py
