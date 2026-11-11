@@ -13,7 +13,7 @@
 | 2026-10-18 | [Sync co-review ledgers across machines](2026-10-18-co-review-ledger-sync.md)                               | <https://github.com/bestdan/workflow-skills/issues/1041> |
 | 2026-10-14 | [Re-enter hook-layout worktrees by name, and refuse the path form](2026-10-14-reenter-worktrees-by-name.md) | <https://github.com/bestdan/workflow-skills/issues/992>  |
 | 2026-10-04 | [Pinned-checkout guard — design v2](2026-10-04-pinned-checkout-guard-v2.md)                                 |                                                          |
-| 2026-10-03 | [Graduated merge autonomy for the software factory](2026-10-03-graduated-merge-autonomy.md)                 |                                                          |
+| 2026-10-03 | [Graduated merge autonomy for the software factory](2026-10-03-graduated-merge-autonomy.md)                 | <https://github.com/bestdan/workflow-skills/issues/1443> |
 | 2026-09-25 | [jira-promote — skip parent rollups](2026-09-25-jira-parent-rollup-skip.md)                                 |                                                          |
 | 2026-08-24 | [local-review — threaded replies and multi-round review](2026-08-24-local-review-threaded-replies.md)       |                                                          |
 | 2026-08-20 | [local-review — rendered markdown preview](2026-08-20-local-review-markdown-preview.md)                     |                                                          |

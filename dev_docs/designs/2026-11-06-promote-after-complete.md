@@ -75,7 +75,7 @@ completion.
 | `/deliver-task`, `/do-tasks`, `/auto-pilot`                                                                                                           | all                                         | Today, never: they hand off at `needs_review`. Part 3 makes `/deliver-task` complete tracker items after a verified agent merge, and re-check `repo-pr` dependents on the task PR. `/auto-pilot` inherits this because it runs `/deliver-task` per task; `/do-tasks` does not call it and is unchanged |
 
 Today the common path has no agent in it. That changes with
-[graduated merge autonomy](2026-10-03-graduated-merge-autonomy.md):
+[the merge lander](../decisions/2026-10-03-lander-runs-in-the-session.md):
 `/deliver-task` gains a final step that runs `scripts/land-pr.sh`, an explicit
 merge command an agent runs. It runs in shadow today (`--dry-run` only;
 `skills/deliver-task/references/shadow-landing.md`). Once it merges for real,
