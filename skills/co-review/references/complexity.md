@@ -93,9 +93,9 @@ across many files qualifies. Copied code and new prose do not, because each
 still has to be read line by line. "It's mostly copied" or "it's mostly docs"
 is not a reason to call a change one unit.
 
-**Prose beside code is its own unit by default.** When the report's categories
-include `docs` and the prose is more than a short section, treat it as a
-candidate split piece at every band. Prose that teaches or decides (decision
+**Prose beside code is a split signal.** When the report's categories include
+`docs` and the prose is more than a short section, count it as a signal at
+every band, held to that band's threshold in the table above. Prose that teaches or decides (decision
 records, `AGENTS.md`, a skill body) needs checking against the code and against
 itself, which a code reviewer skims. Keep it in only when it documents the code
 in the same diff and cannot stand alone, such as a README section for the new
@@ -120,15 +120,19 @@ purpose; and it tells the agent to build them as a GitHub stacked PR with the
 ```text
 gh extension install github/gh-stack     # once
 gh stack init <piece-1-branch>           # bottom of the stack, on the base
-# commit piece 1, then for each further piece:
-gh stack add <piece-n-branch>
+# stage only piece 1's files, then: git commit -m "<piece-1 purpose>"
+# then for each further piece:
+gh stack add <piece-n-branch>            # a new branch on top of the last
+# stage only piece n's files, then: git commit -m "<piece-n purpose>"
 gh stack submit                          # pushes every branch, opens and links the PRs
 ```
 
 When the pieces already exist as open PRs, `gh stack link` joins them into a
 stack. A stack needs every branch in one repository, so for a PR from a fork
-the prompt asks for stacked branches without the `gh stack` commands. Under `--post` it goes in the review `body` after the report lines, so
-it reaches the author rather than only you.
+the prompt asks for stacked branches without the `gh stack` commands.
+
+Under `--post`, the split prompt goes in the review `body` after the report
+lines, so it reaches the author rather than only you.
 
 ## Configuration
 
@@ -152,7 +156,7 @@ its backslashes alone. Flags outrank the file: `--medium-at`, `--large-at`,
 
 ## Worked example
 
-A 3,155-line PR, reviewed by claude, codex and copilot:
+A 3,155-line PR:
 
 | Part                                   | ~Lines | Reviewed?            |
 | -------------------------------------- | ------ | -------------------- |
@@ -162,16 +166,16 @@ A 3,155-line PR, reviewed by claude, codex and copilot:
 | 20 decision records (prose)            | 800    | Effectively no       |
 | Field list + `AGENTS.md` (prose)       | 340    | A few claims checked |
 
-It was called ✅ **one unit**. That was defensible on unrelated concerns,
-since all of it served one feature. But the line trigger makes it `very-large`,
-the copied template and the prose are not mechanical, and the decision records
-could land alone because nothing depends on them. No reviewer covered more than
-about a fifth of it, which the Coverage line ([`coverage.md`](coverage.md))
-exists to say. The output should have read:
+Calling it ✅ **one unit** because it all serves one feature is wrong here. The
+line trigger makes it `very-large`, the copied template and the prose are not
+mechanical, and the decision records can land alone because nothing depends on
+them. Most of it got a skim or less, which the Coverage line
+([`coverage.md`](coverage.md)) states. The output reads:
 
 ```text
 ### Complexity: <score> / 100 (very-large: 3155 reviewable lines)
-**Scope:** 🟡 **too big** — 3,155 reviewable lines, over the 3,000-line trigger; 1,140 lines of prose beside code
+Reviewable: +<adds> / -<dels> across <N> files · <N> packages · <N> hunks · code+test+docs
+**Scope:** 🟡 **too big** — <score> / 100, 3,155 reviewable lines across <N> files; 1,140 lines of prose beside code
 - decision records: dev_docs/decisions/** (800) — docs-only, lands first, reviewed as prose
 - model + renderer + save: scripts/*.py, tests/** (1,250) — the feature
 - template + assets: templates/**, assets/** (765) — copied from an earlier PR; review it against the original
