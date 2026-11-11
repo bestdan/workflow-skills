@@ -166,11 +166,13 @@ def read_rule_results(repo, base):
     )
 
 
-def index_rule_suites(pages, repo=None):
+def index_rule_suites(pages, repo=None, ref=None):
     """{after_sha: (result, actor_name)} from pages of rule suites.
 
-    With `repo`, a suite naming a different repository is an error, so a file
-    saved from the wrong repo cannot pass as this one's.
+    With `repo`, a suite whose `repository_name` differs is an error. Only the
+    name is compared, not the owner, so this catches a file saved from another
+    of the owner's repos. With `ref`, suites for other refs are skipped, so a
+    `pass` on another branch cannot hide a `bypass` on this one.
     """
     results: dict = {}
     for page in pages:
@@ -182,6 +184,8 @@ def index_rule_suites(pages, repo=None):
             name = suite.get("repository_name")
             if repo and name and name.lower() != repo.split("/")[1].lower():
                 raise ReadError(f"rule suites: a suite is for {name}, not {repo}")
+            if ref and suite.get("ref") and suite["ref"] != ref:
+                continue
             results.setdefault(
                 suite["after_sha"], (suite.get("result"), suite.get("actor_name"))
             )
@@ -189,8 +193,8 @@ def index_rule_suites(pages, repo=None):
 
 
 def load_rule_suites(path, repo):
-    """Index a saved `gh api …/rule-suites` response: one page, or a
-    `--paginate --slurp` list of pages."""
+    """Pages of a saved `gh api …/rule-suites` response: one page, or a
+    `--paginate --slurp` list of pages. Checked here, indexed per base later."""
     try:
         data = json.loads(Path(path).read_text())
     except (OSError, ValueError) as exc:
@@ -198,7 +202,8 @@ def load_rule_suites(path, repo):
     if not isinstance(data, list):
         raise ReadError(f"--rule-suites {path}: expected a JSON list")
     pages = data if data and all(isinstance(x, list) for x in data) else [data]
-    return index_rule_suites(pages, repo)
+    index_rule_suites(pages, repo)
+    return pages
 
 
 def read_lander_comment(repo, pr):
@@ -249,8 +254,9 @@ def review(repo, prs, since, owner, suites=None):
             continue
         base = p.get("baseRefName") or ""
         if suites is not None:
-            # A saved file is keyed by merge sha, so it serves every base.
-            rule_cache[base] = suites
+            # A saved file holds every ref; keep only this base's suites.
+            if base not in rule_cache:
+                rule_cache[base] = index_rule_suites(suites, ref=f"refs/heads/{base}")
         elif base not in rule_cache:
             try:
                 rule_cache[base] = read_rule_results(repo, base)
@@ -287,8 +293,8 @@ def review(repo, prs, since, owner, suites=None):
             who = actor or (
                 f"{merged_by} (from mergedBy)" if has_merged_by else "an unknown actor"
             )
-            actor = actor or merged_by
-            kind = "owner" if actor.lower() == owner.lower() else "bypass"
+            actor = actor or (merged_by if has_merged_by else None)
+            kind = "owner" if actor and actor.lower() == owner.lower() else "bypass"
             lacking.append((p, kind, f"{status_note}; bypassed by {who}"))
             continue
         kind = "ungated" if result == "pass" else "unknown"

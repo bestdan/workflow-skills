@@ -262,6 +262,32 @@ class ReviewTests(Base):
                 self.assertTrue(lines[1].startswith("#8 bypass"))
                 self.assertIn("owner=1 bypass=1", lines[-1])
 
+    def test_a_rule_suites_file_counts_only_the_base_branch(self):
+        # A pass on another branch for the same sha must not hide main's bypass.
+        self.fake.prs = [pr(7, "2026-11-02T10:00:00Z")]
+        self.fake.fail = {"rule-suites"}
+        suite = {"repository_name": "widgets", "after_sha": sha(1007)}
+        path = self.write_suites(
+            [
+                {**suite, "ref": "refs/heads/release", "result": "pass"},
+                {
+                    **suite,
+                    "ref": "refs/heads/main",
+                    "result": "bypass",
+                    "actor_name": "mallory",
+                },
+            ]
+        )
+        _, lines = self.run_audit("--mode", "review", "--rule-suites", path)
+        self.assertTrue(lines[0].startswith("#7 bypass"))
+        self.assertIn("bypassed by mallory", lines[0])
+
+    def test_an_owner_named_unknown_is_not_credited_with_an_unknown_bypass(self):
+        self.fake.prs = [pr(9, "2026-11-02T10:00:00Z", merged_by=None)]
+        self.fake.rules = [{"after_sha": sha(1009), "result": "bypass"}]
+        _, lines = self.run_audit("--mode", "review", "--owner", "unknown")
+        self.assertTrue(lines[0].startswith("#9 bypass"))
+
     def test_a_rule_suites_file_from_another_repo_is_a_usage_error(self):
         path = self.write_suites(
             [{"repository_name": "gadgets", "after_sha": sha(1), "result": "bypass"}]
