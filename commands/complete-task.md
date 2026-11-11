@@ -20,10 +20,10 @@ handler's terminal `done`/`completed` state.
 > **trusts the caller**. It does **not** check whether a PR merged, whether the
 > work actually landed, or whether anything shipped — it takes the identifier at
 > face value and completes it. The merge-verification step lives **one layer
-> up**, in `/sweep-for-complete` (a future command that discovers merged PRs and
-> then calls this primitive per verified issue, passing an already-verified
-> signal — see the handler file's `assume_verified` caller contract, an internal
-> parameter set only by the sweep, not a user-facing flag). `/complete-task`
+> up**, in `/sweep-for-complete`, which discovers merged PRs and then runs each
+> verified issue through the handler file's completion phase (not this command),
+> passing an already-verified signal — see the handler file's `assume_verified` caller contract, an internal
+> parameter set only by the sweep, not a user-facing flag. `/complete-task`
 > itself does no PR discovery and no verification: it is the purely mechanical
 > "flip this one state" step, nothing more. Do not add merge-detection logic
 > here — that belongs in the sweep, one layer up.
@@ -97,7 +97,8 @@ steps: `<its planned-transition line>, then re-check dependents of <id>`.
 
 ## 2. Re-check dependents
 
-When the handler's outcome is **applied** or **already complete**, score the
+When the handler's outcome is **applied**, **already complete**, or (under
+`--dry-run`) its **dry-run** plan, score the
 items the completed one was blocking: follow `commands/promote-tasks.md` with
 `after=<id>`, plus `dry-run` under `--dry-run`. Pass the id as the handler
 resolved it (a `repo-pr` slug, a `gh-issue` number, a `linear` identifier).
