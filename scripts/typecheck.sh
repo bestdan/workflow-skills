@@ -90,7 +90,8 @@ STRICT_FILES=(scripts/research-spike.py)
 # commands/doctor.md, co-review-stamp.py the same way by
 # skills/co-review/references/stamping.md, co-review-status.py the same way by
 # skills/co-review/references/status.md, co-review-carry.py the same way by
-# the same file, land-pr.py, the lander, which runs
+# the same file, pr-complexity.py the same way by
+# skills/co-review/references/complexity.md, land-pr.py, the lander, which runs
 # from the installed plugin, and merge-tier.py and co-review-evidence.py, which
 # it loads from there, merge-audit.py, the weekly audit, and review-queue.py,
 # the owner's queue, and revert-landing.py, which /revert-landing runs,
@@ -113,7 +114,7 @@ CONSUMER_FILES=(
   scripts/co-review-evidence.py
   scripts/co-review-status.py
   scripts/co-review-carry.py
-  scripts/co-review-size.py
+  scripts/pr-complexity.py
   scripts/merge-tier.py
   scripts/land-pr.py
   scripts/merge-audit.py

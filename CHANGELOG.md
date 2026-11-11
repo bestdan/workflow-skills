@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.211.0] - 2026-11-11
+
+### Features
+
+- add a deterministic PR size and complexity report [#520] (#1478) (19d499fb)
+
 ## [2.210.0] - 2026-11-11
 
 ### Features
