@@ -282,6 +282,13 @@ class Cli(unittest.TestCase):
             )
             self.assertEqual(pc.load_config(str(cfg)), ({}, ["foo #bar", "a#b"]))
 
+    def test_empty_exclude_entry_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            cfg = Path(d) / ".co-review.yml"
+            for item in ("''", '""'):
+                cfg.write_text(f"complexity:\n  exclude:\n    - {item}\n")
+                self.assertEqual(run(["--config", str(cfg)], self.DIFF)[0], 2, item)
+
     def test_missing_config_is_not_an_error(self) -> None:
         rc, out = run(["--config", "/nonexistent/.co-review.yml", "--json"], self.DIFF)
         self.assertEqual((rc, json.loads(out)["cuts"]), (0, pc.DEFAULT_CUTS))

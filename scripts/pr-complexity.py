@@ -30,7 +30,8 @@ hunks, so a diff confined to one top-level directory (P = 1) can score at most
 says which trigger set the size.
 
 R, F, P and H and their terms match Betterment/mobile's
-measure-pr-complexity action. E is the one departure: mobile leaves it to the
+measure-pr-complexity action, as read in 2026-11; that comparison is not kept
+in sync, so re-check mobile before relying on it. E is the one departure: mobile leaves it to the
 reviewer's judgment, because "feature" and "refactor" cannot be told apart from
 a path. Here it is classified from paths alone, with feature and refactor
 merged into one `code` category, so the whole score is deterministic.
@@ -342,6 +343,13 @@ def load_config(path: str) -> tuple[dict[str, int], list[str]]:
                 quote, item = item[0], item[1:-1]
                 if quote == "'":
                     item = item.replace("''", "'")
+            if not item:
+                raise SystemExit(
+                    _usage(
+                        f"{path}: complexity.exclude has an empty entry,"
+                        " which would match every path"
+                    )
+                )
             excludes.append(item)
     return cuts, excludes
 
