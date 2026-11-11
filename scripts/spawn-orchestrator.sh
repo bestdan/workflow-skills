@@ -2688,7 +2688,7 @@ smoke_test() {
   # the smoke validates the same invocation the detached job will run. Assert on
   # observable output, not just $?, so a degraded claude that exits 0 without a live
   # credential can't false-pass the auth gate.
-  local out
+  local out rc=0 note=""
   # Exported inside the subshell, never passed as `env` arguments: argv is
   # world-readable through `ps`, the environment only to this user.
   out="$(
@@ -2698,11 +2698,19 @@ smoke_test() {
     "${jail_cmd[@]}" "$claude_bin" -p 'ok' --max-turns 1 \
       --permission-mode bypassPermissions --settings "$json" \
       --verbose --output-format stream-json 2>/dev/null
-  )" || {
-    tok=""
-    die "auth smoke-test failed THROUGH the wrapper — a credential or the jail is wrong; not detaching"
-  }
+  )" || rc=$?
   tok=""
+  # A model that spends its one turn on a tool call (reading a file in the run
+  # worktree, say) makes claude exit 1 with a result of subtype error_max_turns.
+  # Only a run whose API call answered can reach that cap, so the credential is
+  # live. A missing credential also exits 1, but its result is subtype "success"
+  # with is_error true ("Not logged in"), so it still fails here. The keys of the
+  # result line come in no fixed order, hence both orders.
+  if [ "$rc" != 0 ]; then
+    grep -Eq '^\{.*("type":"result".*"subtype":"error_max_turns"|"subtype":"error_max_turns".*"type":"result")' <<<"$out" \
+      || die "auth smoke-test failed THROUGH the wrapper — a credential or the jail is wrong; not detaching"
+    note=" (the model used its one turn on a tool call; the API answered, so the credential is live)"
+  fi
   [ -n "$out" ] || die "auth smoke-test produced no output THROUGH the wrapper — credential/jail suspect; not detaching"
   # Assert the output is actually parseable stream-json (a line beginning with
   # `{` and containing "type"), not just non-empty: a degraded claude could print
@@ -2715,7 +2723,7 @@ smoke_test() {
   # margin is one growth spurt of the tool roster wide.
   grep -Eq '^\{.*"type"' <<<"$out" \
     || die "auth smoke-test produced non-stream-json output THROUGH the wrapper — flag/jail suspect; not detaching"
-  echo "spawn-orchestrator: smoke-test OK"
+  echo "spawn-orchestrator: smoke-test OK$note"
 }
 
 # --- Linux: the systemd user manager carries the run (#1350) ------------------

@@ -1057,5 +1057,58 @@ have "smoke-test: uses --output-format stream-json" '--output-format stream-json
 smoke_code="$(grep -v '^[[:space:]]*#' <<<"$smoke_src")"
 lack "smoke-test: stream-json check does not pipe into grep" '| grep' "$smoke_code"
 
+# --- smoke_test: a turn spent on a tool call is not a dead credential ----------
+# `claude -p 'ok' --max-turns 1` exits 1 when the model spends its one turn on a
+# tool call, with a result line of subtype error_max_turns. That run had a live
+# credential: the API answered. A missing credential exits 1 too, but its result
+# line is subtype "success" with is_error true and "Not logged in" (captured from
+# claude with an empty HOME). Each stub prints those shapes, keys in the order
+# the real CLI used, and exits as the real CLI did.
+SMK="$BASE/smoke-stubs"
+for case in maxturns noauth crash healthy; do
+  mkdir -p "$SMK/$case"
+  printf '#!/bin/sh\nshift 2\nexec "$@"\n' >"$SMK/$case/sandbox-exec"
+done
+cat >"$SMK/maxturns/claude" <<'EOF'
+#!/bin/sh
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"s"}'
+printf '%s\n' '{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"tool_use","name":"Bash"}]}}'
+printf '%s\n' '{"duration_api_ms":2853,"stop_reason":"tool_use","session_id":"s","type":"result","subtype":"error_max_turns","is_error":true,"num_turns":2}'
+exit 1
+EOF
+cat >"$SMK/noauth/claude" <<'EOF'
+#!/bin/sh
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"s"}'
+printf '%s\n' '{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"Not logged in · Please run /login"}]}}'
+printf '%s\n' '{"type":"result","subtype":"success","is_error":true,"result":"Not logged in · Please run /login"}'
+exit 1
+EOF
+cat >"$SMK/crash/claude" <<'EOF'
+#!/bin/sh
+printf 'Error: something broke\n'
+exit 1
+EOF
+cat >"$SMK/healthy/claude" <<'EOF'
+#!/bin/sh
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"ok"}'
+EOF
+chmod +x "$SMK"/*/claude "$SMK"/*/sandbox-exec
+smoke_run() { # case — the smoke's output, then its exit code on the last line
+  local o c=0
+  o="$(PATH="$SMK/$1:$PATH" "$SCRIPT" smoke-test --profile "$BASE/cf.sb" --settings "$BASE/wl.json" --workdir "$BASE" 2>&1)" || c=$?
+  printf '%s\nexit=%s\n' "$o" "$c"
+}
+smk="$(smoke_run maxturns)"
+have "smoke-test: a turn spent on a tool call (error_max_turns) passes" 'exit=0' "$smk"
+have "smoke-test: the max-turns pass says why it passed" 'used its one turn' "$smk"
+smk="$(smoke_run noauth)"
+lack "smoke-test: a not-logged-in stream still fails" 'exit=0' "$smk"
+have "smoke-test: the not-logged-in failure blames the credential" 'auth smoke-test failed' "$smk"
+smk="$(smoke_run crash)"
+lack "smoke-test: a non-stream-json error exit still fails" 'exit=0' "$smk"
+have "smoke-test: the error exit refuses to detach" 'not detaching' "$smk"
+smk="$(smoke_run healthy)"
+have "smoke-test: a healthy exit-0 stream still passes" 'smoke-test OK' "$smk"
+
 # shellcheck source=scripts/lib/spawn-orchestrator-test-epilogue.sh
 . "$SO_LIB/spawn-orchestrator-test-epilogue.sh"
