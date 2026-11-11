@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.207.0] - 2026-11-11
+
+### Features
+
+- derive label by a precedence order [#1296] (#1464) (bcbfeb4e)
+
 ## [2.206.1] - 2026-11-09
 
 ### Fixes
