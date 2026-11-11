@@ -64,18 +64,11 @@ if [[ "$fast" == 1 && "$with_evals" == 1 ]]; then
   exit 2
 fi
 
-# --fast is the edit-loop gate, not the pre-push one. Three things account for
-# essentially all of a full run's wall time, measured on a 4-core Linux box:
-# test-research-spike.sh at ~25s (305 python invocations, most of it interpreter
-# startup), shellcheck inside lint-shell.sh at ~23s, and the orchestrator suite
-# at ~21s. Every other check here finishes inside ~4s.
-#
-# Those three used to be one dominant cost and two also-rans: the orchestrator
-# harness was a single 5816-line file that cost ~60s to run and, because
-# ShellCheck's cost is superlinear in the size of a file's top-level scope, ~31s
-# of lint-shell's own bill. Splitting it into scripts/test-spawn-orchestrator-*.sh
-# cut both. What is left is three co-equal ~21-25s members and no single lever —
-# see dev_docs/gate-performance.md before trying to make this faster.
+# --fast is the edit-loop gate, not the pre-push one. It drops the suites below
+# because they are among the gate's slowest; where the wall time goes today is
+# in dev_docs/gate-performance.md, and every run prints its own slowest checks
+# at the end (scripts/check-timings.py). Read both before trying to make this
+# faster.
 #
 # Coverage is SKIPPED here, not sharded or sampled: it is simply gone. So
 # `just check` still has to pass before you push, and CI runs this script
@@ -176,14 +169,35 @@ report_unfinished() {
     cat "$tmp/$i.out" >&2
   done
 }
-trap 'report_unfinished; kill "${pids[@]:-}" 2>/dev/null; rm -rf "$tmp"; exit 130' INT TERM
+#
+# Each pid is the timing subshell in run(), not the check itself, so killing the
+# pid alone would orphan the check; kill_checks takes the check down first.
+kill_checks() {
+  local pid
+  for pid in "${pids[@]:-}"; do
+    [[ -n "$pid" ]] || continue
+    pkill -TERM -P "$pid" 2>/dev/null
+    kill "$pid" 2>/dev/null
+  done
+}
+trap 'report_unfinished; kill_checks; rm -rf "$tmp"; exit 130' INT TERM
 
+# Each check runs in a subshell that writes its wall time to $tmp/<i>.secs, for
+# the timing report at the end. Whole seconds: $SECONDS is all Bash 3.2 has,
+# and the warnings it feeds are about tens of seconds.
+gate_start=$SECONDS
 checks=()
 pids=()
 run() {
   local i="${#checks[@]}"
   checks+=("$*")
-  "$@" >"$tmp/$i.out" 2>&1 &
+  (
+    start=$SECONDS
+    "$@"
+    rc=$?
+    echo "$((SECONDS - start))" >"$tmp/$i.secs"
+    exit "$rc"
+  ) >"$tmp/$i.out" 2>&1 &
   pids+=("$!")
 }
 
@@ -263,6 +277,34 @@ for i in "${!checks[@]}"; do
     failed="${failed:+$failed, }${checks[$i]}"
   fi
 done
+
+# Timing report: the slowest checks, and an advisory warning when the gate is
+# over its budget or a check jumped against this machine's recent green runs.
+# It never fails the gate (`|| true`): wall time is too noisy to gate on. See
+# scripts/check-timings.py for both signals, and dev_docs/gate-performance.md
+# for where the budgets come from — revisit them there, with a measurement.
+if [[ "$docs_only" == 1 ]]; then
+  timing_mode=docs budget=60
+elif [[ "$fast" == 1 ]]; then
+  timing_mode=fast budget=180
+else
+  timing_mode=full budget=300
+fi
+for i in "${!checks[@]}"; do
+  [[ -f "$tmp/$i.secs" ]] && printf '%s\t%s\n' "$(cat "$tmp/$i.secs")" "${checks[$i]}"
+done >"$tmp/times.tsv"
+timing_args=(--times "$tmp/times.tsv" --total "$((SECONDS - gate_start))"
+  --mode "$timing_mode" --budget "$budget")
+if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+  # A fresh runner has no history to compare against; annotate instead.
+  timing_args+=(--github)
+elif history_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
+  # The common dir, so every worktree of this clone shares one history: a fresh
+  # worktree per task would otherwise never have enough samples to compare.
+  timing_args+=(--history "$history_dir/check-timings.tsv")
+  [[ "$fail" == 0 && "$with_evals" == 0 ]] && timing_args+=(--record)
+fi
+python3 scripts/check-timings.py "${timing_args[@]}" || true
 
 if [[ "$fail" != 0 ]]; then
   echo "check.sh: FAIL ($failed)" >&2

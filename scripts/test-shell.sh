@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Usage: scripts/test-shell.sh [--fast]
-#   --fast  skip the orchestrator harness (the ~21s suite). NOT the gate — see
+#   --fast  skip the orchestrator harness. NOT the gate — see
 #           the fast_skips list in scripts/check.sh for what that costs you.
 set -uo pipefail
 
@@ -51,32 +51,21 @@ run() {
   pids+=("$!")
 }
 
-# The bats files fan out ONLY when the orchestrator suite is skipped, because
-# only then are they on the critical path.
-#
-# In a full run the bats files sit alongside the orchestrator suite, and serial
-# bats still finishes inside it — so fanning out here cannot shorten this
-# wrapper, and the extra jobs only contend with the suite that is the actual
-# critical path (which since the split runs its own parts
-# concurrently). Under --fast the orchestrator is gone, bats becomes the
-# critical path, and the fan-out is the whole difference.
-#
-# That margin used to be structural and is now thin — re-measure rather than
-# assume before changing this condition. dev_docs/gate-performance.md carries
-# the numbers, the interleaved A/B behind them, and a one-liner that checks the
-# margin directly; it is also where the wall-clock hazard is written up, which
-# is what makes "just add more jobs" costly here (oversubscription is what
-# pushed test/await-pr-review.bats past its budget, see 1ddb13e).
-if [ "$fast" -eq 1 ]; then
-  for suite in test/*.bats; do
-    [ -f "$suite" ] || continue
-    run test/vendor/bats-core/bin/bats "$suite"
-  done
-else
-  run test/vendor/bats-core/bin/bats test/*.bats
-  # Scheduled LAST because the replay loop below is strictly index-ordered: this
-  # is the longer of the two, and anything after it would have its output held
-  # back behind it. Same reasoning as the tail of check.sh's run list.
+# One job per bats file, in every mode. Run serially, the bats files are the
+# gate's critical path by minutes, and most of that time is waiting rather than
+# CPU — dev_docs/gate-performance.md has the measurement. More jobs raise the
+# wall-clock hazard written up there (oversubscription is what pushed
+# test/await-pr-review.bats past its budget, see 1ddb13e), so a test that
+# measures itself against elapsed time must be made time-independent, not
+# given a serial run.
+for suite in test/*.bats; do
+  [ -f "$suite" ] || continue
+  run test/vendor/bats-core/bin/bats "$suite"
+done
+if [ "$fast" -eq 0 ]; then
+  # Scheduled LAST because the replay loop below is strictly index-ordered and
+  # this is one of the longest jobs: anything after it would have its output
+  # held back behind it. Same reasoning as the tail of check.sh's run list.
   # "$BASH", not `bash`: a bare `bash` re-resolves through PATH, which would
   # drop the interpreter CI pinned when it invoked this wrapper as
   # /bin/bash (the Bash 3.2 floor — see dev_docs/testing.md).

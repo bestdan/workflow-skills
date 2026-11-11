@@ -7,45 +7,45 @@ Day-to-day contributing doesn't require any of this — see
 [`CONTRIBUTING.md`](../CONTRIBUTING.md). Read this before trying to speed the
 gate up, or before adding concurrency anywhere in it.
 
-Every number here was measured on a 4-core Intel Xeon @ 2.80GHz Linux box, warm
-(the mypy pin already fetched, the dprint plugins already compiled). Times on
-your machine will differ; the ratios are what travel.
+Two machines appear here, and each measurement names its own: an 18-core Mac
+(how most sessions run the gate) and a 4-core Intel Xeon @ 2.80GHz Linux box,
+which the sections on the orchestrator split and ShellCheck were measured on.
+All runs are warm (the mypy pin already fetched, the dprint plugins already
+compiled). Times on your machine will differ; the ratios are what travel.
 
 ## Where the time goes
 
 `scripts/check.sh` runs its checks concurrently, so a run costs roughly its
-slowest member rather than their sum:
+slowest member rather than their sum. Every run ends with its own answer to
+this section: a `→ timing` block naming its five slowest checks (see
+[Timing warnings](#timing-warnings)). Trust that over the table below, which
+ages as checks are added.
 
-| check                                       | wall     | why                                                                      |
-| ------------------------------------------- | -------- | ------------------------------------------------------------------------ |
-| `scripts/test-research-spike.sh`            | **~27s** | 305 Python invocations; most of each is interpreter startup              |
-| `scripts/test-shell.sh`                     | **~24s** | 10 bats files (~18s serial) alongside the orchestrator suite             |
-| ↳ `scripts/test-spawn-orchestrator.sh`      | ~21s     | 8 parts run concurrently; their serial sum is ~58s                       |
-| `shellcheck` inside `scripts/lint-shell.sh` | **~22s** | see [ShellCheck's cost](#shellchecks-cost-is-superlinear-in-file-length) |
-| `scripts/typecheck.sh`                      | ~3s      | ~8s on the first run of a new mypy pin, while `uvx` fetches it           |
-| everything else (9 checks)                  | ≤ ~4s    |                                                                          |
-| **full `just check`**                       | **~41s** | above the slowest member: three of them contend for 4 cores              |
+Full gate on the 18-core Mac, unsandboxed, 2026-11-11:
 
-The shape that matters: there is **no single dominant check any more**. Three
-members sit within a few seconds of each other, so shaving one of them moves the
-total by a fraction of what it costs. That is a change from the situation this
-document used to describe, when one 5816-line file was both the slowest suite
-and most of the lint bill; see [the split](#the-orchestrator-harness-is-several-files).
+| check                                | wall      | why                                                        |
+| ------------------------------------ | --------- | ---------------------------------------------------------- |
+| `scripts/test-shell.sh`              | **~216s** | 40 bats files, one job each, plus the orchestrator suite   |
+| `scripts/test-research-spike.sh`     | ~155s     | hundreds of Python invocations, mostly interpreter startup |
+| `scripts/test-pr-review-comments.sh` | ~72s      |                                                            |
+| `scripts/test-preflight-consent.sh`  | ~68s      |                                                            |
+| `scripts/test-verify-fix.sh`         | ~47s      |                                                            |
+| **full `just check`**                | **~217s** | CPU: 245s user + 388s sys; 200–235s over four runs         |
+| `just check-fast`                    | ~127s     | bounded by the bats files, which it still runs             |
 
-Interleaved A/B of the full gate across that change, three passes each:
+The gate starts about 140 jobs at once: roughly 100 `scripts/test-*.sh`
+harnesses, the 40 bats files, and the linters. So a single check's time says as
+much about contention as about the check. `test-research-spike.sh` took ~81s in
+a run where the bats files ran serially and ~155s in one where they ran in
+parallel, while the gate as a whole fell from 479s to 217s. Sys time exceeding
+user time says that much of the CPU goes to the kernel spawning processes, not
+to test logic.
 
-```
-base (monolith)   61.8s  62.0s  60.3s   (mean 61.4s)
-split             41.0s  40.2s  40.8s   (mean 40.7s)
-```
-
-`just check-fast` is ~7.5s. It skips `test-research-spike.sh` and the
-orchestrator suite outright and narrows the shell lint to the files your branch
-has touched. That narrowing is per-file, so **a branch that adds several long
-shell files pays their full lint cost on every `--fast` run** — the branch that
-performed this split measured 13–15s while it was adding nine of them, against
-~7.5s once they were in the base. That is the mechanism working, not a
-regression.
+`just check-fast` skips `test-research-spike.sh` and the orchestrator suite
+outright and narrows the shell lint to the files your branch has touched. That
+narrowing is per-file, so **a branch that adds several long shell files pays
+their full lint cost on every `--fast` run**. That is the mechanism working,
+not a regression.
 
 ## The orchestrator harness is several files
 
@@ -204,44 +204,25 @@ done | sort -rn | head
 
 ## Does adding concurrency help?
 
-It did not before the split, and the reason was that everything hid behind a
-~58s suite. That reason is gone, so the question was re-derived on the new tree
-rather than carried forward. The answer is still "no", but the margin is now
-thin enough that it should be re-measured rather than assumed.
+Sometimes. Each case below was settled by measurement, and the bats case
+inverted as the suite grew.
 
-**The bats fan-out.** `scripts/test-shell.sh` fans its ten `.bats` files into ten
-jobs **only under `--fast`**. Serially they cost ~18s; fanned, ~6s. In a full run
-they sit alongside the orchestrator suite, so serial bats still finishes inside
-it. Interleaved A/B of the full `check.sh`, three passes each:
+**The bats fan-out.** `scripts/test-shell.sh` runs each `.bats` file as its own
+job, in every mode. On the 18-core Mac, 2026-11-11, with 40 files and 580 tests:
 
 ```
-bats serial   37.4s  38.5s  40.5s   (mean 38.8s)
-bats fanned   39.0s  38.0s  44.6s   (mean 40.5s)
+bats serial, alone          455s wall   (CPU: 84s user + 128s sys)
+bats one job per file       113s wall   (slowest: test/guard-pinned-branch.bats)
+full gate, bats serial      479s
+full gate, bats per file    217s
 ```
 
-Read that honestly: at n=3, with a ~3s spread on a ~40s measurement, a 1.7s mean
-difference is **indistinguishable from noise**, not a demonstrated regression —
-the gap rests entirely on one 44.6s outlier. What it does establish is that
-fanning out buys nothing measurable, and a tie goes to the configuration with
-fewer jobs feeding the wall-clock hazard below.
-
-The margin is also much thinner than it was: 17s of bats against a 60s suite
-before, 18s against 21s now. **This conclusion is close to inverting.**
-
-Don't try to settle that with more whole-gate A/B passes — the noise floor is
-larger than the effect. Measure the margin directly instead, which is
-noise-independent because both numbers come from the same run:
-
-```sh
-# does serial bats still finish inside the orchestrator suite?
-( time test/vendor/bats-core/bin/bats test/*.bats >/dev/null 2>&1 ) 2>&1 | grep real &
-( time bash scripts/test-spawn-orchestrator.sh >/dev/null 2>&1 ) 2>&1 | grep real &
-wait
-```
-
-If bats stops finishing first, the fan-out condition in `scripts/test-shell.sh`
-(search for `if [ "$fast" -eq 1 ]`) should change — as a measurement, not a
-preference. Re-run this whenever the orchestrator parts get faster.
+Serial bats spends more than half its wall time waiting rather than on CPU, and
+running the files concurrently recovers that. Running them serially in the full
+gate rested on serial bats finishing inside the orchestrator suite. That held
+with 10 files and stopped holding as the count grew to 40, with nothing to say
+so. An assumption that decays as a suite grows is what the
+[timing warnings](#timing-warnings) exist to surface.
 
 **The split's own concurrency.** The driver running its parts concurrently
 versus serially, interleaved A/B of the full `check.sh`:
@@ -285,27 +266,53 @@ shape.
 
 ## What the bottleneck is now
 
-There isn't one. Three checks sit at ~21–27s and the gate is ~41s, so the next
-real gain needs either two of them to move together or the concurrency to fit the
-box better.
+The slowest bats files. With one job per file, `scripts/test-shell.sh` is
+bounded by its slowest file. Run alone in parallel, the five slowest took
+104–113s each: `guard-pinned-branch`, `guard-foreign-worktree`,
+`worktree-remove`, `worktree-create-hook` and `co-review-ledger-sync`. Every
+one of them builds repository fixtures per test.
 
-Ranked by what they would actually buy:
+Ranked by what they would buy:
 
-1. **`scripts/test-research-spike.sh` (~27s)** is the biggest single lever, and
-   the same shape the orchestrator suite was: 305 Python invocations that are
-   mostly interpreter startup. Batching the fixtures through one interpreter, or
-   splitting the file so its cases run concurrently, is the obvious move — the
-   orchestrator split is the worked precedent.
-2. **ShellCheck (~22s)** is now spread across many files rather than concentrated
-   in one, so there is no single split left to make. The two largest are named
-   above.
-3. **The orchestrator suite (~21s)** is bounded by its `exit-contract` part
-   (~16.5s). Splitting _that_ part further is the only thing that moves the
-   suite's floor, and it would buy at most ~5s before `status-report` (~11.8s)
-   becomes the bound.
+1. **Split or speed up those bats files.** Splitting moves the floor directly,
+   the way the orchestrator split did.
+2. **`scripts/test-research-spike.sh`** is the next bound: Python invocations
+   that are mostly interpreter startup. Batching them through one interpreter,
+   or splitting the file, is the move.
+3. **Contention.** About 140 jobs start at once on 18 cores, and sys time
+   exceeds user time. Capping concurrency is unmeasured; settle it with an
+   interleaved A/B before adopting it.
+4. **Not running at all.** Skipping a re-run on a tree unchanged since the last
+   green run is #1486.
 
-Getting the whole gate meaningfully under ~30s means doing (1) and (3), because
-of the contention: on 4 cores, three ~21–27s members cannot all run flat out.
+## Timing warnings
+
+Every `scripts/check.sh` run ends with a `→ timing (<mode>)` block from
+`scripts/check-timings.py`: the total wall time and the five slowest checks.
+Two warnings follow when they apply, each prefixed `⚠ slower:`. Neither fails
+the gate; wall time is too noisy to gate on.
+
+- **Budget.** The gate's total exceeded the budget for its mode, set in
+  `scripts/check.sh` beside `timing_mode=`: full 300s, `--fast` 180s,
+  dev_docs-only 60s. Each sits above that mode's normal spread on the 18-core
+  Mac (full 200–235s, `--fast` ~127s over five runs, 2026-11-11) and well
+  below the 479s the full gate took with serial bats. A fixed number catches
+  slow creep that a rolling
+  comparison absorbs: a gate that grows 10% a week never looks unusual against
+  its own last few runs. When it trips, the slowest list says where the time
+  went. Raise a budget only with a measurement, recorded here.
+- **Jump.** A check, or the whole gate, took at least 1.5× its median over this
+  machine's recent green runs of the same mode, and at least 10s more. It needs
+  3 earlier runs and keeps the last 20. This names the check that moved.
+
+The history is `check-timings.tsv` in the clone's common dir, so every worktree
+of a clone shares it, and it is never tracked. Only green runs without
+`--with-evals` are recorded. CI starts with no history, so there only the
+budget applies, emitted as a `::warning::` annotation on the run.
+
+Other load on the machine, such as another session's gate, inflates both
+signals. Treat a warning as a prompt to read the slowest list, not as proof of
+a regression.
 
 ## Measuring a change
 
