@@ -1,6 +1,6 @@
 ---
 description: Safe, schedulable sweep that finds started-state issues whose linked PR merged and completes exactly those via the /complete-task primitive — composes with /loop and /schedule, no new scheduling infra
-allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Glob, Grep, Read, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__save_comment, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__linear__get_issue, mcp__linear__list_issues, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__linear__save_comment, mcp__linear__list_teams, mcp__linear__list_projects, mcp__github, Bash(acli *), Bash(python3 *), Bash(mkdir *), Write, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Atlassian__getJiraIssue, mcp__claude_ai_Atlassian__getTransitionsForJiraIssue, mcp__claude_ai_Atlassian__transitionJiraIssue, mcp__claude_ai_Atlassian__addCommentToJiraIssue, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__searchJiraIssuesUsingJql, mcp__atlassian__getJiraIssue, mcp__atlassian__getTransitionsForJiraIssue, mcp__atlassian__transitionJiraIssue, mcp__atlassian__addCommentToJiraIssue
+allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Glob, Grep, Read, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__save_comment, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__linear__get_issue, mcp__linear__list_issues, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__linear__save_comment, mcp__linear__list_teams, mcp__linear__list_projects, mcp__github, Bash(acli *), Bash(python3 *), Bash(mkdir *), Write, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Atlassian__getJiraIssue, mcp__claude_ai_Atlassian__getTransitionsForJiraIssue, mcp__claude_ai_Atlassian__transitionJiraIssue, mcp__claude_ai_Atlassian__addCommentToJiraIssue, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__searchJiraIssuesUsingJql, mcp__atlassian__getJiraIssue, mcp__atlassian__getTransitionsForJiraIssue, mcp__atlassian__transitionJiraIssue, mcp__atlassian__addCommentToJiraIssue, Agent, mcp__claude_ai_Linear__list_issue_labels, mcp__claude_ai_Linear__create_issue_label, mcp__claude_ai_Linear__list_comments, mcp__linear__list_issue_labels, mcp__linear__create_issue_label, mcp__linear__list_comments
 argument-hint: "[--apply] [--all] [--project <id|name>]"
 ---
 
@@ -132,6 +132,11 @@ skeleton:
 - **Applied (`--apply`)** — the same scope line and table, now with each
   row's completion outcome, plus the summary counts the handler's "Report"
   step defines.
+
+On linear, both also carry the **dependents re-checked** section: the sweep
+runs `/promote-tasks after=` over what it completed, or would complete, as its
+last step (`linear-sweep-complete.md` → "Re-check dependents"), so the issues
+those were blocking are scored without a separate promote run.
 
 Both, on the default (no-flag) scope only, also carry the out-of-scope
 warning line the handler's "Report" step prints when a non-empty bucket was

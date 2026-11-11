@@ -12,6 +12,8 @@ Invoked from `/promote-tasks` when `handler: linear` is configured. Scores the t
 
 > **Hard rule: this path only ever touches `backlog`-type issues.** It never scores or transitions an issue already in `unstarted`/`started`/`completed`/`canceled` — those are past the `new` column and are out of the promoter's lane, exactly as the file path never touches tasks past `status: new`. If you are about to `save_issue` against a non-`backlog` issue, you have a bug — stop.
 
+> **`after=<id>[,<id>…]` replaces step 5's query and nothing else.** If `$ARGUMENTS` contains `after=`, skip step 4 (the ids are the scope; `all` has no effect and nothing is asked), and in step 5 read the candidates through **"`after=` candidates"** instead of `list_issues`. Step 5's set-asides, including the native-blocker hold, and steps 6–9 then run unchanged on what it returns, so a dependent with a second open blocker is held like any other.
+
 ## Steps
 
 ### 1. Preflight
@@ -64,6 +66,17 @@ Also **hold** any candidate still standing that has an open native **"is blocked
 - **MCP floor.** Build each candidate's `blockedBy` as `linear-claim.md` "Pre-flight" step 6 items 1–2 do (`<linear-mcp>__get_issue` with `includeRelations: true`, then one `get_issue` per blocker for its `statusType`, leaving a blocker out only when its read reports **not found**), with two exceptions: read each distinct blocker once, however many candidates it blocks, and do not read a blocker that this step collected from Backlog this run, whether or not it was set aside: it is in Backlog, so attach `statusType: "backlog"` and it holds. Pipe the candidates with `blockedBy` attached to the same script without `--fetch`. The cost is one call per surviving candidate (already bounded by the 500-candidate budget) plus one per distinct blocker this step did not collect. There is deliberately no further cap: the only safe behaviour past one is to hold the unread candidates, which would make a cost limit decide readiness, and promoting them unchecked would promote issues whose blockers are still open, the defect #1060 fixed. A large keyless backlog is what the fast path is for, so prefer it whenever a key resolves.
 
 Either way the script prints `{"held": {"<identifier>": "waiting on …"}, "clear": [...]}`; hold every `held` entry with its reason as given and score only `clear`. Run this check last among the set-asides, so the relation reads are spent only on candidates nothing else has already removed.
+
+#### `after=` candidates
+
+Under `after=`, the candidates are the issues the given ids **block**, read by the same script in its `--dependents` mode with step 1's team id. It keeps only `backlog`-type dependents in that team, so nothing past the promoter's lane reaches a write:
+
+- **Fast path**, behind the same gate: pipe `[{"id": "<identifier>"}, …]` for the given ids to `python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/linear-promote-blockers.py" --dependents --team-id <team id> --fetch`. A non-zero exit means fall back to the floor.
+- **MCP floor.** For each id, `<linear-mcp>__get_issue` with `includeRelations: true` and follow `relations.blocks`. Read each distinct dependent once with `get_issue` for its `statusType` and `teamId`, leaving it out only when the read reports **not found**, and keeping it with no `statusType` on any other failure. Pipe the ids with `blocks: [{"id", "teamId", "statusType"}, …]` attached to the same command without `--fetch`.
+
+Its `candidates` replace the `list_issues` result: read each in full with `get_issue` (step 6 needs the description and fields), then apply the set-asides above in order, so an already-scored, parent-rollup, `blocked`-label or still-blocked dependent is skipped or held exactly as on a full run. Its `foreign` entries (dependents in another team, whose labels and states are not this team's) go on the `skipped` list as `<identifier> (other team)`, its `unread` entries as `<identifier> (dependent read failed)`, and an id under `truncated` (more than 50 relations, read on the fast path only) earns a report line saying its later dependents were not seen. None of those is written to. Report and exit if `candidates` is empty, naming the ids.
+
+Under `after=` there is no project filter: a dependent in an unconfigured project, or in none, is still this team's backlog and is scored. The 500-candidate budget does not bind, because the fan-out is the given ids' dependents.
 
 ### 6. Score each candidate
 
@@ -166,7 +179,9 @@ note: scored project Payments revamp only — backlog in other configured projec
 ⚠ workspace at ≥250/250 non-archived issues — Linear will refuse to CREATE new issues until you run /archive-tasks. Promotions are unaffected by this cap.
 ```
 
-Skipped issues are reported with their reason — `already scored`, `parent rollup`, `blocked`, or `waiting on <identifier>[, …]`. **There is no `held (quota)` section**: a promotion spends no quota, so nothing is ever held for one (see step 7). When step 7 finds the workspace at or over the cap, its warning is the report's **last line**, below the out-of-scope note: it is the one line that asks the reader to act, and the constraint binds the next `/add-task` or `/push-plan` rather than this run. The 500-cap warning (if it applied) still leads, because it qualifies this run's counts rather than asking for an action.
+Under `after=`, the scope line reads `dependents re-checked (N) after <identifiers>`, with `N` the count of every Backlog dependent the script returned, other-team and unread ones included, and the out-of-scope note is omitted: the ids were the scope.
+
+Skipped issues are reported with their reason — `already scored`, `parent rollup`, `blocked`, `waiting on <identifier>[, …]`, or, under `after=`, `other team` and `dependent read failed`. **There is no `held (quota)` section**: a promotion spends no quota, so nothing is ever held for one (see step 7). When step 7 finds the workspace at or over the cap, its warning is the report's **last line**, below the out-of-scope note: it is the one line that asks the reader to act, and the constraint binds the next `/add-task` or `/push-plan` rather than this run. The 500-cap warning (if it applied) still leads, because it qualifies this run's counts rather than asking for an action.
 
 **Out-of-scope backlog note.** When the resolved scope is **narrower than the whole team** — a single project (step 4 cases 3–4), or the all-configured union (which still excludes unconfigured projects and unassigned issues) — append a one-line note that backlog outside the scored scope was **not** examined this run, so the run's success isn't mistaken for "the whole backlog is triaged". Make the remediation **scope-aware**, and note that the whole-team backlog has **no per-run override** — it is scored only when **no** projects are configured (step 4 cases 1–2), a config-level state, not a flag. For example:
 

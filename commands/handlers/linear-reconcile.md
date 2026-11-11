@@ -437,6 +437,9 @@ Print, grouped by rule:
   name — report the idle duration against `orphan_claim_hours` instead.
 - **Anomaly lines** — the row 1/row 2 scope-gap case from step 3.3 above,
   called out explicitly rather than silently dropped.
+- **Dependents re-checked** — row 1's re-check of the issues it completed
+  (`linear-sweep-complete.md` → "Re-check dependents"), as that file's report
+  prints it. Omit it when row 1 completed nothing.
 - Never write a bare `<TEAM>-NNN` token in this report or anywhere else in
   this file — see `linear-claim.md` "PR body magic words" for why a bare id
   auto-closes on merge; every mention here is wrapped in a non-closing phrase
