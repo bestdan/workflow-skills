@@ -591,8 +591,11 @@ protection. Neither needs admin. `co-review` is required when either prints
   An org decides its own roles, and its admins are often meant to merge.
 - `.permissions.admin` is `true` and `co-review` is required → `WARN`: "`gh`
   acts as `<login>`, an admin of `<owner/name>`, which requires `co-review`; an
-  admin's merge skips it. Agents should act as a non-admin account (Write role),
-  keeping admin for the owner's own per-command use". Name the login.
+  admin can usually merge past it (as a bypass actor, or where admins are not
+  enforced) and can edit the rules regardless. Agents should act as a non-admin
+  account (Write role), keeping admin for the owner's own per-command use". Name
+  the login. The check does not read the bypass configuration on purpose: an
+  agent acting as an admin is the risk, whatever the rules say today.
 - `.permissions.admin` is `true` and `co-review` is not required → `PASS`,
   naming the login and saying no `co-review` check is required, so there is
   nothing for an admin to skip.

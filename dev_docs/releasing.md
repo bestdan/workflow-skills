@@ -86,8 +86,8 @@ required) or `unknown`. Reading the rule suites behind that split needs
 Administration (read), which the bot lacks, so a run as the bot reads every
 gap as `unknown`. For the split, the owner fetches the rule suites once into a
 file (one `gh api` call; here, through their per-command approval) and the audit
-reads it with `--rule-suites <file>`. Run it weekly; its docstring has both
-commands.
+reads it with `--rule-suites <file>`. Run it weekly; its docstring has the
+fetch command and the usage line.
 
 ### One-time: the first run seeds a baseline
 
