@@ -1,6 +1,7 @@
 ---
 created: 2026-10-03
 status: accepted
+convention: ../merge-autonomy.md
 ---
 
 # Review-complete is a required `co-review` status on the reviewed head
