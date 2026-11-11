@@ -304,7 +304,10 @@ the gate; wall time is too noisy to gate on.
   its own last few runs. When it trips, the slowest list says where the time
   went. Raise a budget only with a measurement, recorded here.
 - **Jump.** A check, or the whole gate, took at least 1.5× its median over this
-  machine's recent green runs of the same mode, and at least 10s more. It needs
+  machine's recent green runs of the same mode, and at least 30s more. The
+  30s floor is set by contention: single checks swing about 2× between loaded
+  runs, and a 10s floor warned on two different checks in two consecutive green
+  runs (`test-plan-graph.sh` 14s → 29s, `typecheck.sh` 11s → 25s). It needs
   3 earlier runs and keeps the last 20 per mode. This names the check that
   moved. Under `--fast`, a jump on `scripts/lint-shell.sh --fast` usually
   reflects how many shell files the branch touches (the per-file narrowing

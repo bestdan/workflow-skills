@@ -39,7 +39,7 @@ from pathlib import Path
 
 SLOWEST_SHOWN = 5
 JUMP_RATIO = 1.5
-JUMP_MIN_SECONDS = 10
+JUMP_MIN_SECONDS = 30
 MIN_SAMPLES = 3
 RUNS_KEPT = 20
 TOTAL = "(whole gate)"

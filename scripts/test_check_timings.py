@@ -95,6 +95,11 @@ class CheckTimingsTest(unittest.TestCase):
         _, out = self.run_main({"tiny": 8}, 40, "--history", str(self.history))
         self.assertNotIn("⚠", out)
 
+    def test_contention_sized_doubling_is_ignored(self) -> None:
+        self.seed(3, {"plan-graph": 14}, 200)
+        _, out = self.run_main({"plan-graph": 29}, 200, "--history", str(self.history))
+        self.assertNotIn("⚠", out)
+
     def test_needs_enough_samples(self) -> None:
         self.seed(2, {"slow": 20}, 40)
         _, out = self.run_main({"slow": 90}, 95, "--history", str(self.history))
@@ -124,9 +129,9 @@ class CheckTimingsTest(unittest.TestCase):
 
     def test_jump_from_a_zero_median_has_no_ratio(self) -> None:
         self.seed(3, {"instant": 0}, 40)
-        rc, out = self.run_main({"instant": 12}, 45, "--history", str(self.history))
+        rc, out = self.run_main({"instant": 35}, 45, "--history", str(self.history))
         self.assertEqual(rc, 0)
-        self.assertIn("⚠ slower: instant took 12s, up from its median of 0s", out)
+        self.assertIn("⚠ slower: instant took 35s, up from its median of 0s", out)
 
     def test_history_keeps_recent_runs_per_mode(self) -> None:
         rows = [(f"full{i}", "full", "a", i) for i in range(3)]
