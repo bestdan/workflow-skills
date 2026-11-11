@@ -47,8 +47,7 @@ class HookCase(unittest.TestCase):
         cfg.write_text(body)
 
     def run_hook(self, payload, **extra_env):
-        env = {k: v for k, v in os.environ.items() if k != hook.CONFIG_ENV}
-        env["HOME"] = str(self.home)
+        env = self._env()
         env.update(extra_env)
         proc = subprocess.run(
             [sys.executable, str(HOOK)],
