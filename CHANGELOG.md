@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.210.0] - 2026-11-11
+
+### Features
+
+- label a co-review bypass by its actor [#1429] (#1465) (fd029c66)
+
 ## [2.209.0] - 2026-11-11
 
 ### Features
