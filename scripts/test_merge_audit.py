@@ -37,7 +37,15 @@ def sha(n):
     return f"{n:x}".rjust(40, "a")
 
 
-def pr(number, merged, title="fix(scripts): tidy", body="", head=None, merge=None):
+def pr(
+    number,
+    merged,
+    title="fix(scripts): tidy",
+    body="",
+    head=None,
+    merge=None,
+    merged_by="acme-bot",
+):
     return {
         "number": number,
         "title": title,
@@ -48,6 +56,7 @@ def pr(number, merged, title="fix(scripts): tidy", body="", head=None, merge=Non
         "baseRefName": "main",
         "mergeCommit": {"oid": merge or sha(1000 + number)},
         "labels": [],
+        "mergedBy": {"login": merged_by},
     }
 
 
@@ -133,30 +142,81 @@ class ReviewTests(Base):
             sha(3): {"ci": "success"},
         }
         self.fake.rules = [
-            {"after_sha": sha(1002), "result": "bypass"},
-            {"after_sha": sha(1003), "result": "pass"},
+            {"after_sha": sha(1002), "result": "bypass", "actor_name": "mallory"},
+            {"after_sha": sha(1003), "result": "pass", "actor_name": "acme-bot"},
         ]
         code, lines = self.run_audit("--mode", "review")
         self.assertEqual(code, 0)
         self.assertFalse(any(line.startswith("#1 ") for line in lines))
         self.assertTrue(
-            any(line.startswith("#2 bypass") and "pending" in line for line in lines)
+            any(
+                line.startswith("#2 bypass")
+                and "pending" in line
+                and "bypassed by mallory" in line
+                for line in lines
+            )
         )
         self.assertTrue(
-            any(line.startswith("#3 ungated") and "missing" in line for line in lines)
+            any(
+                line.startswith("#3 ungated")
+                and "missing" in line
+                and "merged by acme-bot" in line
+                for line in lines
+            )
         )
         self.assertTrue(any(line.startswith("#4 unknown") for line in lines))
         self.assertEqual(
-            lines[-1], "AUDIT: review merged=4 lacking=3 bypass=1 ungated=1 unknown=1"
+            lines[-1],
+            "AUDIT: review merged=4 lacking=3 owner=0 bypass=1 ungated=1 unknown=1",
         )
+
+    def test_a_bypass_by_the_owner_is_owner_not_an_alarm(self):
+        # The default owner is the repo's owner segment, matched case-blind.
+        self.fake.prs = [pr(7, "2026-11-02T10:00:00Z", merged_by="Acme")]
+        self.fake.rules = [
+            {"after_sha": sha(1007), "result": "bypass", "actor_name": "Acme"}
+        ]
+        code, lines = self.run_audit("--mode", "review")
+        self.assertEqual(code, 0)
+        self.assertTrue(lines[0].startswith("#7 owner"))
+        self.assertIn("bypassed by Acme", lines[0])
+        self.assertIn("owner=1 bypass=0", lines[-1])
+
+    def test_owner_flag_names_the_expected_bypasser(self):
+        self.fake.prs = [pr(8, "2026-11-02T10:00:00Z")]
+        self.fake.rules = [
+            {"after_sha": sha(1008), "result": "bypass", "actor_name": "jane"}
+        ]
+        _, lines = self.run_audit("--mode", "review", "--owner", "jane")
+        self.assertTrue(lines[0].startswith("#8 owner"))
+        _, lines = self.run_audit("--mode", "review")
+        self.assertTrue(lines[0].startswith("#8 bypass"))
+
+    def test_a_bypass_with_no_actor_falls_back_to_merged_by(self):
+        self.fake.prs = [pr(9, "2026-11-02T10:00:00Z", merged_by="acme")]
+        self.fake.rules = [{"after_sha": sha(1009), "result": "bypass"}]
+        _, lines = self.run_audit("--mode", "review")
+        self.assertTrue(lines[0].startswith("#9 owner"))
+        self.assertIn("bypassed by acme", lines[0])
 
     def test_unreadable_rule_suites_are_unknown_not_a_crash(self):
         self.fake.prs = [pr(5, "2026-11-02T10:00:00Z")]
         self.fake.fail = {"rule-suites"}
         code, lines = self.run_audit("--mode", "review")
         self.assertEqual(code, 0)
-        self.assertIn("cannot read rule suites", lines[0])
+        self.assertTrue(lines[0].startswith("note: cannot read rule suites"))
+        self.assertIn("needs Administration read", lines[0])
+        self.assertTrue(lines[1].startswith("#5 unknown"))
+        self.assertIn("merged by acme-bot", lines[1])
         self.assertTrue(lines[-1].endswith("unknown=1"))
+
+    def test_unreadable_rule_suites_are_noted_once_per_base(self):
+        self.fake.prs = [pr(n, "2026-11-02T10:00:00Z") for n in (5, 6)]
+        self.fake.fail = {"rule-suites"}
+        _, lines = self.run_audit("--mode", "review")
+        notes = [line for line in lines if line.startswith("note: cannot read")]
+        self.assertEqual(len(notes), 1)
+        self.assertTrue(lines[-1].endswith("unknown=2"))
 
     def test_unreadable_statuses_are_unknown_not_a_crash(self):
         self.fake.prs = [pr(6, "2026-11-02T10:00:00Z")]
@@ -362,6 +422,7 @@ class UsageTests(Base):
         for argv in (
             ["--repo", REPO, "--since", "11/01/2026", "--mode", "review"],
             ["--repo", REPO, "--since", SINCE, "--mode", "review", "--policy", "x.yml"],
+            ["--repo", REPO, "--since", SINCE, "--mode", "landed", "--owner", "x"],
             ["--repo", "widgets", "--since", SINCE, "--mode", "review"],
         ):
             with self.subTest(argv=argv), contextlib.redirect_stderr(io.StringIO()):

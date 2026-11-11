@@ -75,12 +75,16 @@ job's `if:` guard exists; both are load-bearing here.
 once `co-review` reports `success` on its exact head
 (`skills/co-review/references/status.md`). The admin bypass above skips that
 check as well as the release push. So does any merge made with an admin's
-token, including `dli gh merge` run by an agent. A skip shows up afterwards
+token, which is why agents act as a Write-role bot and `/doctor` warns when
+the active `gh` account is an admin (Check 11). A skip shows up afterwards
 rather than being blocked: `scripts/merge-audit.py --mode review` lists merged
-PRs whose final head has no `co-review` `success`, and names each a `bypass`,
-`ungated` (the rules passed the merge; usually the check was not yet required)
-or `unknown`. Run it weekly;
-its docstring has the command.
+PRs whose final head has no `co-review` `success`, and names each `owner` (the
+owner's login took the bypass), `bypass` (any other actor did, which is an
+alarm), `ungated` (the rules passed the merge; usually the check was not yet
+required) or `unknown`. Reading the rule suites behind that split needs
+Administration (read), which the bot lacks, so a run as the bot reads every
+gap as `unknown`; run it with the owner's credential. Run it weekly; its
+docstring has the command.
 
 ### One-time: the first run seeds a baseline
 
