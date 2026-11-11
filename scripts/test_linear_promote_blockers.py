@@ -192,5 +192,154 @@ class QueryShapeTests(Harness):
         self.assertIn("state { type }", q)
 
 
+TEAM = "team-pre"
+
+
+def dep_node(identifier, deps, truncated=False):
+    """The fast path's reply for one completed id: its dependents as forward
+    `blocks` relations, plus a `related` edge and an inverse-direction-only
+    neighbour that must both be ignored."""
+    nodes: list[dict] = [
+        {
+            "type": "related",
+            "relatedIssue": {
+                "identifier": "REL-1",
+                "team": {"id": TEAM},
+                "state": {"type": "backlog"},
+            },
+        }
+    ]
+    for ident, team, state in deps:
+        issue = (
+            None
+            if state is DELETED
+            else {
+                "identifier": ident,
+                "team": {"id": team},
+                "state": None if state is None else {"type": state},
+            }
+        )
+        nodes.append({"type": "blocks", "relatedIssue": issue})
+    return {
+        "identifier": identifier,
+        "relations": {"nodes": nodes, "pageInfo": {"hasNextPage": truncated}},
+    }
+
+
+def floor_ids(world):
+    """The MCP floor's input: a deleted dependent is left out (its read
+    reported not found); one whose read failed carries no statusType."""
+    out = []
+    for ident, deps in world.items():
+        blocks = []
+        for d, team, state in deps:
+            if state is DELETED:
+                continue
+            entry = {"id": d, "teamId": team}
+            if state is not None:
+                entry["statusType"] = state
+            blocks.append(entry)
+        out.append({"id": ident, "blocks": blocks})
+    return out
+
+
+class DependentsTests(Harness):
+    ARGS = ["--dependents", "--team-id", TEAM]
+
+    def dep_fast(self, world):
+        def fake_gql(key, query, variables):
+            self.queries.append((query, variables))
+            return {
+                alias.replace("i", "c", 1): dep_node(ident, world[ident])
+                for alias, ident in variables.items()
+            }
+
+        mod.gql = fake_gql
+        return run(self.ARGS + ["--fetch"], [{"id": i} for i in world])
+
+    def dep_both(self, world):
+        fast, floor = self.dep_fast(world), run(self.ARGS, floor_ids(world))
+        self.assertEqual(fast, floor, "fast path and MCP floor disagree")
+        return fast
+
+    def test_backlog_dependent_in_team_is_a_candidate(self):
+        out = self.dep_both({"PRE-9": [("PRE-12", TEAM, "backlog")]})
+        self.assertEqual(out["candidates"], [{"id": "PRE-12", "via": ["PRE-9"]}])
+        self.assertEqual(out["dependents_of"], ["PRE-9"])
+        self.assertEqual((out["foreign"], out["unread"]), ([], []))
+
+    def test_dependent_past_backlog_is_dropped(self):
+        out = self.dep_both(
+            {
+                "PRE-9": [
+                    ("PRE-12", TEAM, "unstarted"),
+                    ("PRE-13", TEAM, "started"),
+                    ("PRE-14", TEAM, "completed"),
+                    ("PRE-15", TEAM, "canceled"),
+                ]
+            }
+        )
+        self.assertEqual(
+            (out["candidates"], out["foreign"], out["unread"]), ([], [], [])
+        )
+
+    def test_deleted_dependent_is_dropped(self):
+        out = self.dep_both({"PRE-9": [("PRE-12", TEAM, DELETED)]})
+        self.assertEqual(out["candidates"], [])
+
+    def test_other_team_dependent_is_foreign(self):
+        out = self.dep_both({"PRE-9": [("OPS-3", "team-ops", "backlog")]})
+        self.assertEqual(out["candidates"], [])
+        self.assertEqual(out["foreign"], [{"id": "OPS-3", "via": ["PRE-9"]}])
+
+    def test_unread_dependent_is_never_a_candidate(self):
+        out = self.dep_both({"PRE-9": [("PRE-12", TEAM, None)]})
+        self.assertEqual(out["candidates"], [])
+        self.assertEqual(out["unread"], [{"id": "PRE-12", "via": ["PRE-9"]}])
+
+    def test_shared_dependent_appears_once_with_every_via(self):
+        out = self.dep_both(
+            {
+                "PRE-9": [("PRE-12", TEAM, "backlog")],
+                "PRE-10": [("PRE-12", TEAM, "backlog"), ("PRE-11", TEAM, "backlog")],
+            }
+        )
+        self.assertEqual(
+            out["candidates"],
+            [
+                {"id": "PRE-11", "via": ["PRE-10"]},
+                {"id": "PRE-12", "via": ["PRE-9", "PRE-10"]},
+            ],
+        )
+
+    def test_fast_truncated_relation_page_is_reported(self):
+        mod.gql = lambda key, query, variables: {
+            "c0": dep_node("PRE-9", [("PRE-12", TEAM, "backlog")], truncated=True)
+        }
+        out = run(self.ARGS + ["--fetch"], [{"id": "PRE-9"}])
+        self.assertEqual(out["truncated"], ["PRE-9"])
+        self.assertEqual(out["candidates"], [{"id": "PRE-12", "via": ["PRE-9"]}])
+
+    def test_fast_query_reads_forward_relations(self):
+        self.dep_fast({"PRE-9": []})
+        query = self.queries[0][0]
+        self.assertIn("relations(first: 50)", query)
+        self.assertIn("relatedIssue { identifier team { id } state { type } }", query)
+        self.assertNotIn("inverseRelations", query)
+
+    def test_fast_missing_issue_exits_for_floor_fallback(self):
+        mod.gql = lambda key, query, variables: {"c0": None}
+        with self.assertRaises(SystemExit) as cm:
+            run(self.ARGS + ["--fetch"], [{"id": "PRE-9"}])
+        self.assertIn("PRE-9", str(cm.exception.code))
+
+    def test_dependents_needs_team_id(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                run(["--dependents"], [{"id": "PRE-9"}])
+            with self.assertRaises(SystemExit):
+                run(["--team-id", TEAM], [{"id": "PRE-9"}])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

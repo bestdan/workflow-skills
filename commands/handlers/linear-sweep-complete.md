@@ -465,14 +465,22 @@ in the report.
 
 ## 5. Dry-run (default)
 
-Without `--apply`, print the candidate table and stop — change nothing:
+Without `--apply`, print the candidate table — change nothing:
 
 ```
 <IDENTIFIER> — PR #<n> (merged <date>) → Done
 ```
 
 followed by the left/skipped lines (open PRs left, closed-unmerged PRs left,
-no-PR issues skipped), and an explicit "nothing changed (dry-run)." Mutation
+no-PR issues skipped), and an explicit "nothing changed (dry-run)."
+
+Then run step 6's **Re-check dependents** as a dry run over the identifiers in
+the candidate table. Those issues are still open, so the promoter's blocker
+hold holds every one of their dependents: the dry run cannot run the hold
+against the state after completion, so it infers releases only from the
+`waiting on` lists. Report each dependent with the hold reason it got, and
+call out on its own line each one whose `waiting on` names only identifiers
+in the table: those are the ones `--apply` would release. Mutation
 requires the caller to have passed `--apply` — this mirrors `/archive-tasks`'
 dry-run-first posture: always show the candidate list before ever touching
 anything.
@@ -503,6 +511,19 @@ already makes a re-run of this sweep safe: an issue already in a
 complete" and is not written again, so re-running the sweep after a partial
 apply is not destructive.
 
+### Re-check dependents
+
+Once every completion above has run, score the issues they were blocking: follow
+`linear-promote.md` with `after=<identifiers>`, passing the identifiers this run
+completed (not the `already complete` ones, whose completion happened on an
+earlier run), and `dry-run` when step 5 sent you here. It is one call for the
+whole batch, it asks nothing, and every gate of a full promote run still applies,
+so a dependent with another open blocker stays in Backlog. Skip it when there is
+no identifier to pass. Its writes are promotions only (Backlog → `unstarted` with
+`auto-eligible`, or `human-approval-requested` with a comment); it never
+completes or demotes anything. Design:
+`dev_docs/designs/2026-11-06-promote-after-complete.md`, part 2.
+
 ## 7. Report
 
 Print:
@@ -518,6 +539,9 @@ Print:
   an idempotent no-op).
 - On dry-run, the same table with no outcome column, plus "nothing changed
   (dry-run)."
+- **Dependents re-checked** — the report the step 6 re-check printed, headed
+  `dependents re-checked (N) after <identifiers>`, or on a dry run the hold
+  list step 5 describes. Omit it when the re-check was skipped.
 - **Out-of-scope warning**, always the last line, because it is the one
   line that asks the reader to act (default scope only, when 1+ projects are
   configured; omit entirely for `--all`, for `--project`, and for the

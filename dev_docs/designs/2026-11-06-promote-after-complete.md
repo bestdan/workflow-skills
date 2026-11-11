@@ -21,6 +21,17 @@ does nothing until #1060 lands. On `jira` it does nothing at all.
 > in shadow" as "while `AGENT_LAND` is off". And `/promote-tasks` already
 > gained `Bash(python3 *)`; rollout step 1 adds the missing `Agent`.
 
+> **Update, 2026-11-10, rollout step 4 shipped ahead of steps 2 and 3.** `linear`
+> supports `after=`. Its dependents read is a `--dependents` mode of
+> `linear-promote-blockers.py`, the script that already makes the blocker hold,
+> so no fourth graph reader was added. The `/sweep-for-complete` tail lives in
+> `linear-sweep-complete.md` rather than in the command, because
+> `/reconcile-tasks` and `/sweep-for-archive` follow that file directly. One fact
+> above is now stale: `/sweep-for-complete` supports `jira` too (#1438), so
+> "the sweep is `linear`-only" no longer holds. `jira` still gets no `after=`:
+> `jira-promote.md` step 3 still holds only on `Flagged` and
+> `jira.blocked_statuses`, which a completion does not clear.
+
 ## What completing a task changes on the board
 
 The promoter holds a card in `new` while it has an unresolved blocker

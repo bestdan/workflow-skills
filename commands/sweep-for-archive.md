@@ -1,6 +1,6 @@
 ---
 description: Close-out sweep over a recent window — verify what closed was really delivered, complete anything whose PR merged, then archive exactly the verified closures. Composes /find-false-closures, /sweep-for-complete, and /archive-tasks with the verified id set carried between them
-allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(op *), Bash(python3 *), Glob, Grep, Read, AskUserQuestion, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__save_comment, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__linear__get_issue, mcp__linear__list_issues, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__linear__save_comment, mcp__linear__list_teams, mcp__linear__list_projects
+allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(op *), Bash(python3 *), Glob, Grep, Read, AskUserQuestion, mcp__claude_ai_Linear__get_issue, mcp__claude_ai_Linear__list_issues, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Linear__save_comment, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__linear__get_issue, mcp__linear__list_issues, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__linear__save_comment, mcp__linear__list_teams, mcp__linear__list_projects, Agent, mcp__claude_ai_Linear__list_issue_labels, mcp__claude_ai_Linear__create_issue_label, mcp__claude_ai_Linear__list_comments, mcp__linear__list_issue_labels, mcp__linear__create_issue_label, mcp__linear__list_comments
 argument-hint: "[--since 24h] [--apply] [--project <uuid>] [--restore-false-closures]"
 ---
 
@@ -119,7 +119,10 @@ On a **dry run**, nothing is actually completed, so nothing joins `verified` —
 report those candidates as "would complete, then would archive" rather than
 silently folding them into leg 3's list.
 
-Carry leg 2's out-of-scope warning line through to the final report unchanged.
+Carry leg 2's out-of-scope warning line through to the final report unchanged,
+and its **dependents re-checked** section too: the sweep scores the issues its
+completions were blocking (`linear-sweep-complete.md` → "Re-check dependents").
+A promoted dependent is in `unstarted`, not closed, so it never joins `verified`.
 
 ## 4. Leg 3 — archive the verified set
 
