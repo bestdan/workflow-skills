@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.208.0] - 2026-11-11
+
+### Features
+
+- support after= on linear, re-check after the sweep [N/A] (#1468) (9f03e32a)
+
 ## [2.207.1] - 2026-11-11
 
 ### Fixes
