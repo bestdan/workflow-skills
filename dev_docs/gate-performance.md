@@ -7,9 +7,11 @@ Day-to-day contributing doesn't require any of this — see
 [`CONTRIBUTING.md`](../CONTRIBUTING.md). Read this before trying to speed the
 gate up, or before adding concurrency anywhere in it.
 
-Two machines appear here, and each measurement names its own: an 18-core Mac
-(how most sessions run the gate) and a 4-core Intel Xeon @ 2.80GHz Linux box,
-which the sections on the orchestrator split and ShellCheck were measured on.
+Each measurement here names its machine: an 18-core Mac (how most sessions run
+the gate), a 4-core Intel Xeon @ 2.80GHz Linux box, which the sections on the
+orchestrator split and ShellCheck were measured on, and CI's `macos-latest`
+runners, which appear once, in
+[the bats fan-out on CI](#the-bats-fan-out-on-the-macos-ci-runner).
 All runs are warm (the mypy pin already fetched, the dprint plugins already
 compiled). Times on your machine will differ; the ratios are what travel.
 
@@ -157,7 +159,7 @@ On macOS the same suite reports **777 passed / 0 skipped** — the 14 Linux skip
 run for real, plus three host-fixture assertions Linux reports as bare notes.
 CI runs that as a second job (`Host-sensitive suites (macOS)`, added in #360)
 with `SO_TEST_REQUIRE_SEATBELT=1`, so the zero-skip claim is enforced rather
-than hoped for. That job only starts once a PR leaves draft.
+than hoped for.
 
 ## ShellCheck's cost is superlinear in file length
 
@@ -236,6 +238,51 @@ driver serial       65.2s  69.5s  68.2s
 
 That one is not close. The concurrency inside the driver is load-bearing and
 pays for the ~1s of extra fixture setup each part costs.
+
+### The bats fan-out on the macOS CI runner
+
+CI's `macos` job runs only `scripts/test-shell.sh`, on a runner far smaller
+than the Mac above, so the fan-out was measured there separately, 2026-11-12.
+A throwaway branch ran the job as a matrix of six CI jobs, each on its own
+runner: three ran all 40 bats files in one serial `bats` process, and three
+ran one background process per file, as `main` does. The whole matrix then ran
+a second time. Run
+[43203256575](https://github.com/bestdan/workflow-skills/actions/runs/43203256575),
+attempts 1 and 2. Job duration, with the `test-shell.sh` step in brackets:
+
+```
+attempt 1   serial     384s (364)   481s (457)   239s (225)*
+            per file   209s (187)   175s (157)   268s (249)
+attempt 2   serial     445s (424)   397s (374)   332s (313)
+            per file   229s (210)   191s (173)   104s  (87)*
+```
+
+`macos-latest` is not one machine. The two runs marked `*` landed on an
+"Apple M2 Pro (Virtual)" runner with 5 cores and 14 GB; the other ten ran on
+"Apple M1 (Virtual)" with 3 cores and 7 GB. Compare within a runner type:
+
+| runner      | serial               | per file             |
+| ----------- | -------------------- | -------------------- |
+| M1, 3 cores | 332–481s, median 397 | 175–268s, median 209 |
+| M2 Pro, 5   | 239s (one run)       | 104s (one run)       |
+
+On the M1 runner the slowest per-file run (268s) beat the fastest serial run
+(332s), so the gain is outside run-to-run noise, and all twelve CI jobs passed.
+The spread within one arm on one runner type is still 90–150s, and the runner
+type alone moves a run by about as much. A single macOS duration therefore
+says little: one before/after pair can show either sign.
+
+Per file costs no extra CPU there (attempt 1 on M1: serial 3m57s–4m33s user,
+per file 3m31s–4m57s). What it costs is latency per test. `bats --timing`
+showed no serial test over 5s; per file, 23 to 92 tests per M1 run took over
+10s, and the slowest took 61s against 3.6s serial
+(`test/guard-foreign-worktree.bats`). Summed over every test, attempt 1 on M1
+came to 2215–3581s per file against 276–357s serial, 6 to 13 times as much. Nothing
+failed. The 5s budget in `test/await-pr-review.bats` that concurrency broke on
+a workstation (see [the wall-clock hazard](#the-wall-clock-hazard)) is now
+`LAND_TIMEOUT=60`, and that file's slowest test took 9.1s. A new bats test
+with an elapsed-time bound has to hold on a 3-core runner running 41
+processes at once: the 40 bats files and the orchestrator suite.
 
 ## The wall-clock hazard
 
