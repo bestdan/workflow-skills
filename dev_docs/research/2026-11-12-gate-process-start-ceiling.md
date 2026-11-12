@@ -8,11 +8,12 @@ feeds: "https://github.com/bestdan/workflow-skills/issues/1498"
 
 **Capping concurrency does not shorten the gate on the laptop, so no cap
 ships.** With at most 9 jobs running at once, the full gate took a median of
-185s, against 179s uncapped and 177s on `main`. A cap of 18 matched uncapped.
-Cap 9 cut the gate's CPU by about 4% (551 against 575 CPU-s), so contention
-between gate jobs explains little of the 170 CPU-s gap described below. The
-rest of the gate's time is process starts, and the way to win it back is to
-start fewer of them.
+185s, against 179s uncapped and 177s on `main`. A cap of 18 showed no
+measurable difference in two valid passes. Cap 9 cut the gate's CPU by about 4%
+(551 against 575 CPU-s), so contention between gate jobs explains little of the
+gap, described below, between the units' CPU alone and the full run's. What
+that gap is remains unmeasured. What has moved the gate so far is starting
+fewer processes (#1505).
 
 All measurements are from the 18-core work laptop (host `NYC-BETTERMENT*`),
 unsandboxed, on 2026-11-12. Process starts there hit a ceiling for the whole
@@ -63,13 +64,14 @@ Each unit run alone, one at a time, with CPU as user plus sys:
 | `scripts/test-task-dashboard-snapshot.sh` | 8.7      | 6.9            |
 | the other ~95 units                       | —        | under 6.4 each |
 
-The orchestrator suite's 11 parts sum to 103 CPU-s when run one by one; the
-largest are `exit-contract` (25.0), `doctor` (18.1) and `alarm` (9.5). The
+The orchestrator suite's 11 parts sum to 103 CPU-s when run one by one, about
+25 less than the suite itself, which starts all 11 at once; the cause of that
+difference was not measured. The largest are `exit-contract` (25.0), `doctor` (18.1) and `alarm` (9.5). The
 bats files lead with `guard-foreign-worktree` (17.1), `co-review-ledger-sync`
 (16.5), `guard-pinned-branch` (14.9) and `worktree-remove` (12.8).
 
 The units sum to about 394 CPU-s alone, against about 566 in a full parallel
-run. The 170 CPU-s gap was assumed to be overhead from contention, and was
+run before #1505 and about 575 after it. The gap of 170–180 CPU-s was assumed to be overhead from contention, and was
 never proven to be; recovering it was the case for a cap.
 
 ## What was ruled out
@@ -95,7 +97,8 @@ per slot into it. Each leaf job then read one byte before it started and wrote
 it back when it ended. Scripts that only wait on their children took no slot.
 A blocking one-byte read is how Bash 3.2 limits jobs without `wait -n`, and it
 costs no extra process per job. The `CHECK_JOBS` environment variable set the
-slot count and left the gate uncapped when unset.
+slot count and left the gate uncapped when unset. The implementation was
+reverted before commit, and no branch or commit keeps it.
 
 Interleaved A/B, `scripts/check.sh --no-cache`, three passes of four arms in
 rotation. `main` ran from a detached worktree at a4ad7868; the other arms ran
@@ -110,8 +113,9 @@ the branch with `CHECK_JOBS` unset, 9 and 18. Wall seconds:
 
 Cap 18's third pass is void: Homebrew upgraded `git` at 12:02, during that
 run, which broke the run's `git` calls and failed one orchestrator assertion
-in it. In every branch run, `dprint` and `dev-docs-layout` failed on this
-record, then a draft, and neither is a long check.
+in it. In every branch run, `dprint` and `dev-docs-layout` failed on the
+unfinished draft of this record; neither is a long check, and both pass on the
+committed record.
 
 CPU, `/usr/bin/time -p` around the whole gate, two runs per arm, alternating:
 
@@ -120,9 +124,9 @@ CPU, `/usr/bin/time -p` around the whole gate, two runs per arm, alternating:
 | uncapped | 184.1 / 184.3 | 224.3 / 224.0 | 351.9 / 349.0 | 576 / 573 |
 | cap 9    | 190.0 / 182.1 | 220.8 / 218.0 | 337.6 / 325.5 | 558 / 543 |
 
-Capped at 9 jobs, the long units queue behind short ones:
-`scripts/test-shell.sh` took 184–189s capped at 9, against 172–175s on
-`main`. The cap cut sys time slightly but did not bring the CPU anywhere near
+Capped at 9 jobs, the long units likely wait behind short ones for a slot;
+no run measured slot waits. What was measured is that `scripts/test-shell.sh`
+took 184–189s capped at 9, against 176–196s uncapped and 172–175s on `main`. The cap cut sys time slightly but did not bring the CPU anywhere near
 the 394 CPU-s the units take alone. So most of that gap is not contention
 between gate jobs, and what it is remains unmeasured.
 

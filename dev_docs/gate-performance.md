@@ -378,7 +378,7 @@ Two things that look promising do not pay on the laptop:
 
 - **Capping concurrency (#1498).** Nine jobs at a time made the gate slower
   (median 185s against 179s uncapped) and cut its CPU by only about 4%; 18 made
-  no difference. No cap ships.
+  no measurable difference in two valid passes. No cap ships.
 - **Batching `research-spike.py` calls (#1497).** That harness is about 3% of
   the gate's CPU, most of it interpreter startup that batching would only
   partly remove.
