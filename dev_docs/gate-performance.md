@@ -362,20 +362,24 @@ Applied to `guard-pinned-branch`, `guard-foreign-worktree` and
 
 Ranked by what they would buy next:
 
-1. **Fewer processes in the orchestrator suite.** `test-spawn-orchestrator.sh`
-   is the largest single unit, about 128 of the gate's roughly 575 CPU-seconds.
-   Its cost is `spawn-orchestrator.sh` doing real work rather than test
-   overhead, so a gain there means fewer `doctor` calls or a cheaper `doctor`;
-   the record has the trace.
-2. **Fewer processes in the heaviest bats files.** The 40 files together take
+1. **Fewer processes in the heaviest bats files.** The 40 files together take
    about 164 CPU-seconds. Solo CPU (user plus sys) is the proxy for a unit's
    share of the process budget; `guard-foreign-worktree` (17.1s),
    `co-review-ledger-sync` (16.5s) and `guard-pinned-branch` (14.9s) lead.
-3. **Splitting the slowest files**, on machines without Falcon only. There the
+   Those figures are after #1505, which converted `guard-foreign-worktree` and
+   `guard-pinned-branch`; the heaviest files not yet converted are
+   `co-review-ledger-sync` and `worktree-remove` (12.8s).
+2. **Splitting the slowest files**, on machines without Falcon only. There the
    slowest file may still bound the gate; measure the gate there first.
 
-Two things that look promising do not pay on the laptop:
+Three things that look promising do not pay on the laptop:
 
+- **The orchestrator suite.** `test-spawn-orchestrator.sh` is the largest
+  single unit, about 128 of the gate's roughly 575 CPU-seconds, but the cost is
+  `spawn-orchestrator.sh` doing real work. A trace found no hotspot, and the one
+  test-side change found saves about 3 CPU-seconds; the
+  [research record](research/2026-11-12-gate-process-start-ceiling.md) has the
+  trace.
 - **Capping concurrency (#1498).** Nine jobs at a time made the gate slower
   (median 185s against 179s uncapped) and cut its CPU by only about 4%; 18 made
   no measurable difference in two valid passes. No cap ships.
