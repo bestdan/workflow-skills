@@ -147,7 +147,9 @@ jobs:
     # output then reads as not-shell-free, so every failure runs the suites.
     if: ${{ !cancelled() && needs.changes.outputs.shell_free != 'true' }}
     runs-on: macos-latest
-    # A normal run is 5-7 minutes; see the quality job's timeout.
+    # A normal run is 3-5 minutes, and the runner type alone moves it by a
+    # couple of minutes (dev_docs/gate-performance.md has the measurement);
+    # see the quality job's timeout.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
