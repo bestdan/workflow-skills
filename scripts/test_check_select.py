@@ -35,7 +35,8 @@ TREE = {
     "scripts/test-dashpkg-server.sh": "cd scripts/dashpkg/ && python3 -m unittest",
     "scripts/test-validate.sh": "uv run scripts/validate.py",
     "scripts/test-spawn-orchestrator.sh": "for part in scripts/test-spawn-orchestrator-*.sh",
-    "scripts/test-spawn-orchestrator-alarm.sh": "echo alarm",
+    "scripts/test-spawn-orchestrator-alarm.sh": "load scripts/sandbox.sb.tmpl",
+    "scripts/sandbox.sb.tmpl": "(allow default)",
     "scripts/test-other.sh": "echo unrelated",
     "scripts/orphan.sh": "echo nobody tests me",
     "skills/demo/SKILL.md": "# demo",
@@ -73,12 +74,19 @@ class SelectTest(unittest.TestCase):
             {"scripts/test-spawn-orchestrator.sh"},
         )
 
-    def test_unnamed_prose_selects_nothing(self) -> None:
-        self.assertEqual(pick("docs/notes.txt"), set())
+    def test_a_file_an_orchestrator_part_names_runs_the_orchestrator(self) -> None:
+        self.assertEqual(
+            pick("scripts/sandbox.sb.tmpl"), {"scripts/test-spawn-orchestrator.sh"}
+        )
 
-    def test_unnamed_code_needs_the_full_gate(self) -> None:
-        with self.assertRaisesRegex(cs.FullGate, "no test names scripts/orphan.sh"):
-            pick("scripts/orphan.sh")
+    def test_an_unnamed_dev_docs_file_selects_nothing(self) -> None:
+        self.assertEqual(pick("dev_docs/notes.md"), set())
+
+    def test_an_unnamed_file_needs_the_full_gate(self) -> None:
+        for path in ("scripts/orphan.sh", "hooks/new-hook.json", "docs/notes.txt"):
+            with self.subTest(path=path):
+                with self.assertRaisesRegex(cs.FullGate, f"no test names {path}"):
+                    pick(path)
 
     def test_gate_infrastructure_needs_the_full_gate(self) -> None:
         for path in (
@@ -158,6 +166,12 @@ class MainTest(unittest.TestCase):
                 "unit test/widget.bats",
             ],
         )
+
+    def test_a_rename_selects_tests_naming_the_old_path(self) -> None:
+        git("mv", "scripts/widget.sh", "scripts/gizmo.sh")
+        (self.repo / "scripts/test-widget.sh").write_text("run scripts/gizmo.sh")
+        git("commit", "-qam", "rename widget")
+        self.assertIn("unit test/widget.bats", self.run_main().splitlines())
 
     def test_an_unchanged_branch_selects_nothing(self) -> None:
         self.assertEqual(self.run_main(), "subset\n")

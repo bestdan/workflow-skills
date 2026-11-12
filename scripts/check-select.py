@@ -22,13 +22,16 @@ A changed file selects:
   unittest file it runs rather than the code under test;
 - for a file in a subdirectory, every test unit naming that directory, which
   is how a Python package's modules reach the tests that import them;
+- `scripts/test-spawn-orchestrator.sh`, for a file that one of its parts
+  (`scripts/test-spawn-orchestrator-*.sh`) names;
 - `scripts/test-validate.sh`, for a file under `skills/`, `commands/` or
   `agents/`, which the real-tree validator reads.
 
 The result is the full gate instead when a changed file is gate infrastructure,
-or is code (`.sh`, `.py`, `.bash`) that no test unit names: an unplaced code
-file is the case most likely to be a missed dependency. Any other file nothing
-names selects nothing, and is left to the checks that always run.
+or selects nothing: a file no test names may still be read by one through a
+glob or a loop, so an unplaced file is never taken as safe to skip. The one
+exception is `dev_docs/`, which no test unit reads apart from the two that
+`check.sh` always runs.
 
 Usage: scripts/check-select.py
 Prints `full <reason>`, or `subset` followed by one `unit <path>` line per test
@@ -59,7 +62,9 @@ FULL_FILES = {
 }
 FULL_PREFIXES = ("scripts/lib/", "test/vendor/", ".github/")
 
-CODE_SUFFIXES = (".sh", ".py", ".bash")
+# check.sh always runs the two units that read the real dev_docs/ tree.
+UNREAD_PREFIXES = ("dev_docs/",)
+ORCHESTRATOR = "scripts/test-spawn-orchestrator.sh"
 VALIDATED_PREFIXES = ("skills/", "commands/", "agents/")
 VALIDATOR_TEST = "scripts/test-validate.sh"
 # A token shorter than this matches too much text to mean anything.
@@ -119,6 +124,7 @@ def select(changed: Iterable[str], texts: Dict[str, str]) -> Set[str]:
     """
     units = {p for p in texts if is_unit(p)}
     helpers = {p for p in texts if is_helper(p)}
+    parts = {p for p in texts if orchestrator_part(p)}
 
     def naming(subject_tokens: List[str], within: Set[str]) -> Set[str]:
         return {p for p in within if any(t in texts[p] for t in subject_tokens)}
@@ -130,16 +136,16 @@ def select(changed: Iterable[str], texts: Dict[str, str]) -> Set[str]:
         found: Set[str] = set()
         if path in units:
             found.add(path)
-        if orchestrator_part(path):
-            found.add("scripts/test-spawn-orchestrator.sh")
         own = tokens(path)
+        if orchestrator_part(path) or naming(own, parts - {path}):
+            found.add(ORCHESTRATOR)
         found |= naming(own, units - {path})
         for helper in naming(own, helpers - {path}):
             found |= naming(tokens(helper), units)
         found |= naming(dir_tokens(path), units - {path})
         if path.startswith(VALIDATED_PREFIXES) and VALIDATOR_TEST in units:
             found.add(VALIDATOR_TEST)
-        if not found and path.endswith(CODE_SUFFIXES) and not is_helper(path):
+        if not found and not path.startswith(UNREAD_PREFIXES):
             raise FullGate(f"no test names {path}")
         chosen |= found
     return chosen
@@ -166,7 +172,9 @@ def changed_files() -> Optional[List[str]]:
             break
     else:
         return None
-    diff = _git("diff", "--name-only", base)
+    # --no-renames lists a renamed file under its old path too, so the tests
+    # that still name the old path are selected.
+    diff = _git("diff", "--name-only", "--no-renames", base)
     untracked = _git("ls-files", "--others", "--exclude-standard")
     if diff is None or untracked is None:
         return None

@@ -69,7 +69,7 @@ branch that adds several long shell files pays their lint cost on every
 It runs the cheap checks and only the test files your branch's diff can reach,
 which `scripts/check-select.py` picks by which tests name the files you
 changed. It runs the full gate instead when you change gate infrastructure or
-code that no test names, and it lists what it selected. Like `--fast`, it is
+a file outside `dev_docs/` that no test names, and it lists what it selected. Like `--fast`, it is
 not the gate: `just check` still has to pass before you push. How the
 selection works and what it was measured against is in
 [gate performance](dev_docs/gate-performance.md#choosing-checks-from-the-diff).

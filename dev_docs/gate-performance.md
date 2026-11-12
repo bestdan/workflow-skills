@@ -339,7 +339,9 @@ name, by the unittest file a wrapper runs, or by the package directory a Python
 module sits in. A change under `skills/`, `commands/` or `agents/` adds
 `test-validate.sh`. The run is the full gate instead when the diff touches gate
 infrastructure (`check.sh`, `scripts/lib/`, the bats helper, `mise.toml`…) or
-code that no test names.
+a file outside `dev_docs/` that no test names: a test can read a file through
+a glob or a loop without naming it, so an unplaced file is never skipped.
+Renames count under both the old and the new path.
 
 This is a heuristic, and it is safe only as an edit loop. Plain `just check`
 and CI always run the full gate, so a selection that misses a dependency costs
