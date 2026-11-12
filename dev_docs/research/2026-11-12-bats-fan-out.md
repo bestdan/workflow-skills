@@ -8,8 +8,8 @@ feeds: "https://github.com/bestdan/workflow-skills/pull/1488, https://github.com
 
 **Running each `test/*.bats` file as its own job cut the full gate from 479s
 to 217s on the 18-core workstation, and the macOS CI job from a median of 397s
-to 209s on the 3-core M1 runner.** It costs no extra CPU on CI, but each test
-takes 6 to 13 times as long to finish there, because 41 processes share 3
+to 209s on the 3-core M1 runner.** It costs no extra CPU on CI, but its tests
+together take 6 to 13 times as long to finish there, because 41 processes share 3
 cores.
 
 These measurements were taken for #1488 (workstation, 2026-11-11) and #1452 (CI,

@@ -7,8 +7,8 @@ Day-to-day contributing doesn't require any of this — see
 [`CONTRIBUTING.md`](../CONTRIBUTING.md). Read this before trying to speed the
 gate up, or before adding concurrency anywhere in it.
 
-This file keeps the rules and the few numbers a decision needs today. Each
-number links to the dated research record that holds its measurement, machine
+This file keeps the rules and the few numbers a decision needs today. Most
+numbers link to the dated research record that holds its measurement, machine
 and raw figures. Times on your machine will differ; the ratios are what travel.
 
 ## Where the time goes
@@ -47,8 +47,8 @@ Each part is independently runnable (`bash scripts/test-spawn-orchestrator-docto
 and self-contained: `scripts/lib/spawn-orchestrator-test-prelude.sh` builds it a
 private fixture tree and the isolation guards, and
 `scripts/lib/spawn-orchestrator-test-epilogue.sh` asserts they held. The driver
-runs the parts concurrently. Splitting the monolith cut both the suite's wall
-time and its ShellCheck bill to about a third, even though every part rebuilds
+runs the parts concurrently. Splitting the monolith cut the suite's wall
+time to about a third and its ShellCheck bill to about a quarter, even though every part rebuilds
 the prelude's fixture bundle
 ([record](research/2026-11-12-orchestrator-harness-split.md)).
 
@@ -68,8 +68,8 @@ A lexical `$NAME` scan misses two classes of coupling:
   carries no sigil. Grep for the bare word, not just `$`.
 - **Fixture files, not variables.** A part can read a file another part's tests
   built, with no variable crossing. The comment above `CX=` in
-  `scripts/test-spawn-orchestrator-exit-contract.sh` is one such file, rebuilt
-  locally; the prelude's shared fixture bundle exists for the same reason.
+  `scripts/test-spawn-orchestrator-exit-contract.sh` names one such file, now
+  rebuilt locally; the prelude's shared fixture bundle exists for the same reason.
 
 Four guarantees are structural rather than ordinary tests, and any further
 resharding has to keep them:
@@ -158,8 +158,8 @@ measurement.
   load-bearing, and pays for the extra fixture setup each part costs.
 
 What the fan-out costs is latency per test, on small machines most. On CI's
-3-core macOS runner each test takes 6 to 13 times as long to finish as it does
-run serially, with nothing failing. A single macOS job duration says little:
+3-core macOS runner the tests together take 6 to 13 times as long to finish as
+they do run serially, with nothing failing. A single macOS job duration says little:
 the spread within one arm on one runner type was 90–150s, and `macos-latest`
 hands out two runner types that move a run by about as much. **A new bats test
 with an elapsed-time bound has to hold on a 3-core runner running 41 processes
@@ -221,7 +221,7 @@ changes:
 
 Applied to `guard-pinned-branch`, `guard-foreign-worktree` and
 `worktree-create-hook` (#1505), that took the full gate from a median of 182s to
-173s.
+173s ([record](research/2026-11-12-bats-process-starts.md)).
 
 Ranked by what they would buy next:
 
@@ -235,7 +235,8 @@ Ranked by what they would buy next:
 Three things that look promising do not pay on the laptop:
 
 - **The orchestrator suite.** `test-spawn-orchestrator.sh` is the largest
-  single unit, about 128 of the gate's roughly 575 CPU-seconds, but the cost is
+  single unit, about 128 of the gate's roughly 575 CPU-seconds
+  ([record](research/2026-11-12-gate-process-start-ceiling.md)), but the cost is
   `spawn-orchestrator.sh` doing real work. A trace found no hotspot, and the one
   test-side change found saves about 3 CPU-seconds.
 - **Capping concurrency (#1498).** Nine jobs at a time made the gate slower and
@@ -326,8 +327,8 @@ the gate; wall time is too noisy to gate on.
 
 - **Budget.** The gate's total exceeded the budget for its mode, set in
   `scripts/check.sh` beside `timing_mode=`: full 300s, `--fast` 180s,
-  `--changed` 120s, dev_docs-only 60s. Each sits above that mode's normal spread
-  on the 18-core Mac ([record](research/2026-11-12-bats-fan-out.md)). A fixed
+  `--changed` 120s, dev_docs-only 60s. The full and `--fast` budgets sit above their
+  modes' normal spread on the 18-core Mac ([record](research/2026-11-12-bats-fan-out.md)). A fixed
   number catches slow creep that a rolling comparison absorbs: a gate that grows
   10% a week never looks unusual against its own last few runs. When it trips,
   the slowest list says where the time went. Raise a budget only with a

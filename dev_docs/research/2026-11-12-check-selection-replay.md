@@ -42,9 +42,8 @@ Tests reach markdown without naming it in at least three ways:
   `"$SKILL"/reviewers/*.md`;
 - a path join: `scripts/test-local-review.sh` builds
   `os.path.join(..., "references", "threads.md")`;
-- a recursive grep of a skill directory: `test/pinned-checkout-skill.bats`.
+- a recursive grep of the skills tree: `test/auto-pilot-reserve.bats`.
 
-A co-review consultant agreed with keeping the broad rule at 80% confidence.
 Tightening it needs its own replay, measured against the files each test
 actually opens rather than against name matches.
 
