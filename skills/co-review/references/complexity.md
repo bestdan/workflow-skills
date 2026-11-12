@@ -94,12 +94,12 @@ still has to be read line by line. "It's mostly copied" or "it's mostly docs"
 is not a reason to call a change one unit.
 
 **Prose beside code is a split signal.** When the report's categories include
-`docs` and the prose is more than a short section, count it as a signal at
-every band, held to that band's threshold in the table above. Prose that teaches or decides (decision
-records, `AGENTS.md`, a skill body) needs checking against the code and against
-itself, which a code reviewer skims. Keep it in only when it documents the code
-in the same diff and cannot stand alone, such as a README section for the new
-flag, and say which on the Scope line.
+`docs` and the prose is more than a short section, count it as a signal at every
+band, held to that band's threshold in the table above. Prose that teaches or
+decides (decision records, `AGENTS.md`, a skill body) needs checking against the
+code and against itself, which a code reviewer skims. Keep it in only when it
+documents the code in the same diff and cannot stand alone, such as a README
+section for the new flag, and say which on the Scope line.
 
 Every split recommendation lists concrete pieces beneath the Scope line, in
 landing order, with the piece nothing else depends on first. Give each its files
