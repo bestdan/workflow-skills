@@ -4,11 +4,18 @@
 # Kill states are built directly (an unpushed commit, a dirty tree, a
 # half-made clone) rather than by killing a process mid-step.
 
+# The empty bare remote is built once per file and copied into each test.
+setup_file() {
+  pin_git_env "$BATS_FILE_TMPDIR"
+  git init -q --bare -b main "$BATS_FILE_TMPDIR/empty.git"
+  mkdir "$BATS_FILE_TMPDIR/references"
+}
+
 setup() {
   setup_test
   unset CO_REVIEW_HOST CO_REVIEW_LEDGER_REMOTE CO_REVIEW_SYNC_LOCK_TIMEOUT
   REMOTE="$TEST_TMPDIR/remote.git"
-  git init -q --bare -b main "$REMOTE"
+  cp -R "$BATS_FILE_TMPDIR/empty.git" "$REMOTE"
   export CO_REVIEW_LEDGER_REMOTE="file://$REMOTE"
   A="$TEST_TMPDIR/a"
   B="$TEST_TMPDIR/b"
@@ -37,16 +44,23 @@ remote_file() { git --git-dir="$REMOTE" show "main:ledgers/$1.jsonl"; }
 commits() { git --git-dir="$REMOTE" rev-list --count main; }
 
 # reference <dir> <host>: the shared file an uninterrupted first push of
-# <dir>'s ledger produces, against a fresh remote.
+# <dir>'s ledger produces, against a fresh remote. Several tests compare against
+# the same ledger, so each result is kept for the file, keyed by the ledger's
+# bytes and the host.
 reference() {
-  local ref="$TEST_TMPDIR/ref.git" rdir="$TEST_TMPDIR/ref"
-  rm -rf "$ref" "$rdir"
-  git init -q --bare -b main "$ref"
-  mkdir -p "$rdir"
-  cp "$1/findings.jsonl" "$rdir/findings.jsonl"
-  CO_REVIEW_LEDGER_REMOTE="file://$ref" CO_REVIEW_HOST="$2" \
-    python3 "$REPO_ROOT/$SCRIPT_REL" --dir "$rdir" --push >/dev/null
-  git --git-dir="$ref" show "main:ledgers/$2.jsonl"
+  local key cached ref="$TEST_TMPDIR/ref.git" rdir="$TEST_TMPDIR/ref"
+  key="$(cksum <"$1/findings.jsonl")"
+  cached="$BATS_FILE_TMPDIR/references/$2.${key%% *}.${key#* }"
+  if [ ! -f "$cached" ]; then
+    rm -rf "$ref" "$rdir"
+    cp -R "$BATS_FILE_TMPDIR/empty.git" "$ref"
+    mkdir -p "$rdir"
+    cp "$1/findings.jsonl" "$rdir/findings.jsonl"
+    CO_REVIEW_LEDGER_REMOTE="file://$ref" CO_REVIEW_HOST="$2" \
+      python3 "$REPO_ROOT/$SCRIPT_REL" --dir "$rdir" --push >/dev/null
+    git --git-dir="$ref" show "main:ledgers/$2.jsonl" >"$cached"
+  fi
+  cat "$cached"
 }
 
 @test "an unset remote prints off, exits 0, and makes no clone" {

@@ -223,17 +223,19 @@ Applied to `guard-pinned-branch`, `guard-foreign-worktree` and
 `worktree-create-hook` (#1505), that took the full gate from a median of 182s to
 173s ([record](research/2026-11-12-bats-process-starts.md)).
 
-Ranked by what they would buy next:
+What would buy something next: **splitting the slowest files**, on machines
+without Falcon only. There the slowest file may still bound the gate; measure
+the gate there first.
 
-1. **Fewer processes in the heaviest bats files.** Solo CPU (user plus sys) is
-   the proxy for a unit's share of the process budget. The heaviest files #1505
-   did not convert are `co-review-ledger-sync` (16.5 CPU-s) and
-   `worktree-remove` (12.8).
-2. **Splitting the slowest files**, on machines without Falcon only. There the
-   slowest file may still bound the gate; measure the gate there first.
+Four things that look promising do not pay on the laptop:
 
-Three things that look promising do not pay on the laptop:
-
+- **More bats files converted.** After #1505, the next two heaviest files took
+  the fixture move (#1509; neither builds hook payloads) and cut about 240 of their processes and 4.4
+  CPU-seconds, under 1% of the gate's CPU, which an interleaved full-gate A/B
+  could not tell apart from noise. What is left in them is the scripts under
+  test doing their work
+  ([record](research/2026-11-12-bats-fixtures-round-two.md)). Apply the moves to
+  a new test as a habit, not as a speedup project.
 - **The orchestrator suite.** `test-spawn-orchestrator.sh` is the largest
   single unit, about 128 of the gate's roughly 575 CPU-seconds
   ([record](research/2026-11-12-gate-process-start-ceiling.md)), but the cost is
