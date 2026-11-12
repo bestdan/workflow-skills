@@ -13,6 +13,42 @@
 # default stub fails, which is the keep-the-branch path; the branch cases set the
 # verdict they need.
 
+# The fixture repos are built once per file and copied into each test with one
+# `cp -R`, which starts far fewer processes than rebuilding them with git.
+setup_file() {
+  pin_git_env "$BATS_FILE_TMPDIR"
+  local fx="$BATS_FILE_TMPDIR/fixtures"
+  mkdir -p "$fx"
+
+  # A fixture repo that versions its own agent config, which is what makes the
+  # sandbox refuse part of a removal on the real thing.
+  git init -q -b main "$fx/repo"
+  mkdir -p "$fx/repo/.claude" "$fx/repo/sub"
+  echo '{}' >"$fx/repo/.claude/settings.json"
+  echo committed >"$fx/repo/file.txt"
+  echo committed >"$fx/repo/sub/a.txt"
+  git -C "$fx/repo" add -A
+  git -C "$fx/repo" commit -qm fixture
+  # The branch gate resolves the default branch from origin/HEAD, so the fixture
+  # needs one even though it has no remote — symbolic-ref writes the ref without
+  # checking that either half exists. test/branch-remove.bats owns the cases
+  # where it is missing.
+  git -C "$fx/repo" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+
+  # The submodule fixture. Its submodule URL names $fx/upstream, which every
+  # test's copy clones from and none writes to.
+  git init -q -b main "$fx/upstream"
+  echo up >"$fx/upstream/s.txt"
+  git -C "$fx/upstream" add -A
+  git -C "$fx/upstream" commit -qm upstream
+  git init -q -b main "$fx/sup"
+  echo top >"$fx/sup/file.txt"
+  git -C "$fx/sup" add -A
+  git -C "$fx/sup" commit -qm fixture
+  git -C "$fx/sup" -c protocol.file.allow=always submodule add -q "$fx/upstream" vendor/s
+  git -C "$fx/sup" commit -qm addsub
+}
+
 setup() {
   setup_test
   SCRIPT="$REPO_ROOT/scripts/worktree-remove.sh"
@@ -20,21 +56,8 @@ setup() {
   mkdir -p "$HOME"
   export HOME
 
-  # A fixture repo that versions its own agent config, which is what makes the
-  # sandbox refuse part of a removal on the real thing.
   REPO="$TEST_TMPDIR/repo"
-  git init -q -b main "$REPO"
-  mkdir -p "$REPO/.claude" "$REPO/sub"
-  echo '{}' >"$REPO/.claude/settings.json"
-  echo committed >"$REPO/file.txt"
-  echo committed >"$REPO/sub/a.txt"
-  git -C "$REPO" add -A
-  git -C "$REPO" commit -qm fixture
-  # The branch gate resolves the default branch from origin/HEAD, so the fixture
-  # needs one even though it has no remote — symbolic-ref writes the ref without
-  # checking that either half exists. test/branch-remove.bats owns the cases
-  # where it is missing.
-  git -C "$REPO" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+  cp -R "$BATS_FILE_TMPDIR/fixtures/repo" "$REPO"
   # git reports worktree paths resolved, and on macOS $TMPDIR sits under a
   # /tmp -> /private/tmp symlink — so a message naming a checkout is compared
   # against the resolved spelling, not the one mktemp handed back.
@@ -302,17 +325,8 @@ run_wr() {
 # Every claim here was verified against real git before the cases were written.
 
 mk_sub_fixture() { # sets SUBROOT
-  git init -q -b main "$TEST_TMPDIR/upstream"
-  echo up >"$TEST_TMPDIR/upstream/s.txt"
-  git -C "$TEST_TMPDIR/upstream" add -A
-  git -C "$TEST_TMPDIR/upstream" commit -qm upstream
   SUBROOT="$TEST_TMPDIR/sup"
-  git init -q -b main "$SUBROOT"
-  echo top >"$SUBROOT/file.txt"
-  git -C "$SUBROOT" add -A
-  git -C "$SUBROOT" commit -qm fixture
-  git -C "$SUBROOT" -c protocol.file.allow=always submodule add -q "$TEST_TMPDIR/upstream" vendor/s
-  git -C "$SUBROOT" commit -qm addsub
+  cp -R "$BATS_FILE_TMPDIR/fixtures/sup" "$SUBROOT"
 }
 
 # swt <name> <populate|nopopulate> — linked worktree on the submodule fixture
