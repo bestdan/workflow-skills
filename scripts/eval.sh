@@ -160,7 +160,9 @@ while IFS=$'\t' read -r skill prompt_file max_turns; do
     # this one changed. Whether it also picked the right skill is beside that.
     echo "  ❌ FAIL — wrote into the repo under test:"
     printf '%s\n' "$residue" | sed 's/^/       /'
-    echo "$triage" | sed 's/^  [❌✅⚠]/     also/'
+    # An alternation, not a bracket class: under the C locale a class matches
+    # one byte of a multibyte emoji and leaves the rest in the output (#937).
+    echo "$triage" | sed -E 's/^  (❌|✅|⚠)/     also/'
     fail=$((fail + 1))
     failed+=("$skill")
     dirtied+=("$skill")
