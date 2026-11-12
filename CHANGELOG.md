@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.215.0] - 2026-11-12
+
+### Features
+
+- render mermaid fences in preview [N/A] (#1511) (6383a42a)
+
 ## [2.214.0] - 2026-11-12
 
 ### Features
