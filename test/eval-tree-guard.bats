@@ -225,7 +225,9 @@ SH
 
 @test "a row that dirtied the repo still reports what it routed to" {
   stub_claude_dirty
-  run bash "$FAKE/scripts/eval.sh"
+  # The C locale is what the nightly runner starts with, and it is the locale in
+  # which a sed bracket class splits the triage line's multibyte emoji.
+  run env LC_ALL=C bash "$FAKE/scripts/eval.sh"
   assert_failure
   assert_output --partial "wrote into the repo under test"
   # The residue verdict does not cost us the routing one.

@@ -161,7 +161,7 @@ while IFS=$'\t' read -r skill prompt_file max_turns; do
     echo "  ❌ FAIL — wrote into the repo under test:"
     printf '%s\n' "$residue" | sed 's/^/       /'
     # An alternation, not a bracket class: under the C locale a class matches
-    # one byte of a multibyte emoji and leaves the rest in the output (#937).
+    # one byte of a multibyte emoji and leaves the rest in the output.
     echo "$triage" | sed -E 's/^  (❌|✅|⚠)/     also/'
     fail=$((fail + 1))
     failed+=("$skill")
