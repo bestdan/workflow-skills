@@ -15,11 +15,14 @@ wasn't, or adding a test that depends on the host.
 
 ## The suites
 
-| Suite                                | Shape                            | Size           |
-| ------------------------------------ | -------------------------------- | -------------- |
-| `test/*.bats`                        | Bats, 11 files                   | 75 tests       |
-| `scripts/test-spawn-orchestrator.sh` | Hand-rolled asserts, single file | 744 assertions |
-| `scripts/test-*.sh` (the rest)       | Hand-rolled, per-subject         | tens each      |
+| Suite                                | Shape                            |
+| ------------------------------------ | -------------------------------- |
+| `test/*.bats`                        | Bats, one file per subject       |
+| `scripts/test-spawn-orchestrator.sh` | Hand-rolled asserts, single file |
+| `scripts/test-*.sh` (the rest)       | Hand-rolled, per-subject         |
+
+Sizes change with most PRs, so this table gives none. To count the Bats cases
+per file, run `rg -c '^@test' test/*.bats`.
 
 `scripts/test-shell.sh` runs the Bats files and the orchestrator suite;
 `scripts/check.sh` runs everything. The `test/*.bats` files are ordinary tracked

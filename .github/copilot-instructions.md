@@ -90,7 +90,9 @@ tokens in someone's context window.
   no backwards-compat shims. Three similar lines beat a premature abstraction.
 - Don't refactor surrounding code, add comments/docstrings/type annotations to
   code you didn't change, or add unasked-for functionality.
-- Don't disable or delete tests to make the gate pass.
+- Don't disable or delete tests to make the gate pass. Removing a redundant
+  test is a different change and is allowed: its PR names the test that still
+  covers the behavior, or says why the behavior needs no test.
 - Don't add dependencies without discussing it first. `scripts/validate.py`'s
   single dependency is hash-locked in `scripts/validate.py.lock`.
 
