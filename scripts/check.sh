@@ -5,7 +5,7 @@
 # `check` target wraps it, so local and CI checks can never drift. Runs every
 # check even if an earlier one fails, then exits non-zero if any failed.
 #
-# Usage: scripts/check.sh [--with-evals] [--fast] [--base <ref>]
+# Usage: scripts/check.sh [--with-evals] [--fast] [--base <ref>] [--no-cache]
 #   --with-evals  also run the behavioral skill-triggering harness
 #                 (scripts/eval.sh; needs ANTHROPIC_API_KEY)
 #   --fast        edit-loop mode: skip the two long suites. NOT the gate — see
@@ -14,6 +14,9 @@
 #                 says the diff is dev_docs-only, skip the shell/bats suites
 #                 (see docs_skips below) instead of the --fast list. Anything
 #                 other than an exact docs-only verdict runs the full gate.
+#   --no-cache    run even when the tree is unchanged since the last green
+#                 full run (see "Skipping an unchanged tree" below). Setting
+#                 CHECK_NO_CACHE=1 does the same.
 #
 # research-spike: this repo does not gate on its own dev_docs/research/ tree.
 # scripts/test-research-spike.sh (below) exercises the script's fixture
@@ -35,6 +38,8 @@ cd "$ROOT" || exit 1
 with_evals=0
 fast=0
 base_ref=""
+no_cache=""
+[[ "${CHECK_NO_CACHE:-}" == 1 ]] && no_cache=1
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --with-evals) with_evals=1 ;;
@@ -48,6 +53,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --base=*) base_ref="${1#--base=}" ;;
+    --no-cache) no_cache=1 ;;
     *)
       echo "unknown argument: $1" >&2
       exit 2
@@ -62,6 +68,27 @@ done
 if [[ "$fast" == 1 && "$with_evals" == 1 ]]; then
   echo "--fast and --with-evals are mutually exclusive" >&2
   exit 2
+fi
+
+# Skipping an unchanged tree. After a green full run, scripts/check-cache.py
+# stores a fingerprint of the tree and the outside inputs it lists; when this
+# run's matches, report OK without running. Tools outside that list, such as
+# uv, are not fingerprinted (dev_docs/gate-performance.md says what to do). A full green
+# run covers --fast and --base too, since both only drop checks from it.
+# --with-evals always runs: evals call a model, and nothing here fingerprints
+# that. CI never uses the cache, so every PR still gets a full run. The record
+# lives in this worktree's own git dir (--absolute-git-dir, not the common
+# dir), because worktrees share the common dir but not the tree.
+cache_key=""
+cache_record=""
+# --no-cache skips only the lookup: a forced green run still refreshes the record.
+if [[ -z "${GITHUB_ACTIONS:-}" && -z "${CI:-}" && "$with_evals" == 0 ]] \
+  && cache_dir="$(git rev-parse --absolute-git-dir 2>/dev/null)" \
+  && cache_key="$(python3 scripts/check-cache.py key)"; then
+  cache_record="$cache_dir/check-green.json"
+  if [[ -z "$no_cache" ]]; then
+    python3 scripts/check-cache.py lookup "$cache_record" "$cache_key" && exit 0
+  fi
 fi
 
 # --fast is the edit-loop gate, not the pre-push one. It drops the suites below
@@ -330,5 +357,10 @@ if [[ "$fast" == 1 ]]; then
   done
   echo "  run \`just check\` before pushing"
   exit 0
+fi
+# Only a full run stores the fingerprint; store re-checks it, so an edit made
+# while the gate ran is not cached as green.
+if [[ -n "$cache_record" ]]; then
+  python3 scripts/check-cache.py store "$cache_record" "$cache_key" || true
 fi
 echo "check.sh: OK"

@@ -44,6 +44,11 @@ just verify-fix "<description>"  # the standard post-fix verification bundle (be
 `just check` is a thin wrapper around `scripts/check.sh` — the script is the
 source of truth, and CI calls it directly.
 
+A repeat `just check` on a tree that already passed it returns at once:
+`check.sh` skips a tree unchanged since its last green full run, and
+`--no-cache` (or `CHECK_NO_CACHE=1`) forces a run. What counts as unchanged is
+in [gate performance](dev_docs/gate-performance.md#skipping-an-unchanged-tree).
+
 Once a fix is ready to verify, use `just verify-fix "<description>"`
 (`scripts/verify-fix.sh`) instead of hand-composing the check sequence —
 it bundles the full run, a multi-round stability check, a process/orphan
