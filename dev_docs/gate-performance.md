@@ -315,9 +315,12 @@ shape.
 
 ## What the bottleneck is now
 
-Process creation, machine-wide. On the 18-core Mac the full gate is bounded by
-how many processes the whole run starts, not by its slowest file, so splitting
-a file buys nothing there. The measurements, all unsandboxed, 2026-11-12:
+It depends on the machine. On the 18-core work laptop it is process creation,
+machine-wide, because CrowdStrike Falcon vets every launch. There the full gate
+is bounded by how many processes the whole run starts, not by its slowest file,
+so splitting a file buys nothing. On machines without Falcon, process starts
+scale with the cores, and the slowest file can still be the bound. The
+laptop's measurements, all unsandboxed, 2026-11-12:
 
 - **The gate leaves the cores idle.** A full run took 181s wall for 227s user
   and 340s sys: about 3 of 18 cores busy on average, with sys above user.
@@ -333,12 +336,24 @@ a file buys nothing there. The measurements, all unsandboxed, 2026-11-12:
   167s in the full gate. Inside each slow file the cost is spread evenly
   (median 0.5–1.4s a test), so no single test dominates.
 
-The cause of the ceiling is not established. An endpoint-security agent
-inspecting every `exec` would fit both the low single-loop rate and the sys
-time, but nothing here checked for one. CI runners and other machines may not
-share it, so measure there before applying this.
+The ceiling is Falcon's. The laptop runs it as an Endpoint Security extension
+(`com.crowdstrike.falcon.Agent` 8.10 in `systemextensionsctl list`). The same
+`/usr/bin/true` benchmark on three machines without it, 2026-11-12, unsandboxed:
 
-What moves the gate here is starting fewer processes, wherever they are. For
+| N loops | work laptop (18 cores, Falcon) | Mac mini (M4, 10) | MacBook (M3 Pro, 11) | lindev (Linux, 12 threads) |
+| ------- | ------------------------------ | ----------------- | -------------------- | -------------------------- |
+| 1       | 272                            | 760               | 859                  | 1132                       |
+| 9       | 716                            | 3223              | 2452                 | 11673                      |
+| 18      | 579                            | 3445              | 3548                 | 13529                      |
+| 72      | 619                            | 3126              | 4207                 | 13300                      |
+
+Figures are total starts/s. Without Falcon, throughput climbs to about the core
+count and holds there, 5–21 times the laptop's ceiling, and even a single loop
+runs about three times faster. The gate's wall time on those machines has not
+been measured. The benchmark is in PR #1505's comments.
+
+What moves the gate on the laptop is starting fewer processes, wherever they
+are, and that helps every other machine too. For
 the bats files (#1496) that meant two changes in the heaviest suites:
 
 - **Build fixtures once.** `setup_file` builds the fixture repos, and each test
@@ -364,9 +379,11 @@ Ranked by what they would buy next:
 2. **`scripts/test-research-spike.sh`** (about 120s in the gate): Python
    invocations that are mostly interpreter startup. Batching them through one
    interpreter cuts processes; splitting the file would not.
-3. **Contention.** Capping concurrency (#1498) is unmeasured. The ceiling
-   above predicts little gain past about nine jobs, but settle it with an
+3. **Contention.** Capping concurrency (#1498) is unmeasured. On the laptop
+   the ceiling predicts little gain past about nine jobs, but settle it with an
    interleaved A/B before adopting it.
+4. **Splitting the slowest files**, on machines without Falcon only. There the
+   slowest file may still bound the gate; measure the gate there first.
 
 ## Skipping an unchanged tree
 
@@ -449,7 +466,7 @@ naming it in at least three ways: a glob of `reviewers/*.md`, an
 `os.path.join(..., "references", "threads.md")`, and a recursive grep of a
 skill directory. So the selector keeps the broad rule, and the time comes back
 by cutting the processes those files start, which shortens both modes;
-splitting them would not, for the reason in
+splitting them would not on the work laptop, for the reason in
 [What the bottleneck is now](#what-the-bottleneck-is-now). Tightening the
 rule later needs its own replay, measured against the files each test
 actually opens rather than against name matches.
