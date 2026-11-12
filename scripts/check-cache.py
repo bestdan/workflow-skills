@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Let scripts/check.sh skip a run on a tree that already passed the full gate.
 
-After a green full run, check.sh stores a fingerprint of everything the gate
-reads. The next run computes the fingerprint again, and when it matches, the
-gate's result cannot have changed, so check.sh reports OK without running.
+After a green full run, check.sh stores a fingerprint of the tree and of the
+outside inputs listed below. The next run computes the fingerprint again, and
+when it matches, check.sh reports OK without running. Tools outside that list,
+such as uv, are not fingerprinted.
 
 The fingerprint covers:
 
-- **The working tree.** `git write-tree` over a temporary copy of the index
-  after `git add -A`, so it holds tracked edits and untracked, non-ignored
+- **The working tree.** `git write-tree` over an empty temporary index after
+  `git add -A`, so it holds tracked edits and untracked, non-ignored
   files, staged or not, and leaves the real index alone. Pins that live in
   tracked files (mise.toml, the mypy pin in typecheck.sh) come with it.
 - **What the gate reads from outside the tree** (ENVIRONMENT below): the
@@ -34,7 +35,6 @@ import datetime
 import hashlib
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -42,7 +42,7 @@ from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
 # Bump when the fingerprint's contents change, so an old record cannot match.
-FORMAT = "check-cache-v1"
+FORMAT = "check-cache-v2"
 
 
 def _run(args: List[str], env: Optional[dict] = None) -> Optional[str]:
@@ -56,15 +56,16 @@ def _run(args: List[str], env: Optional[dict] = None) -> Optional[str]:
 
 
 def tree_hash() -> Optional[str]:
-    """The tree of the working directory as `git add -A` would stage it."""
-    index = _run(["git", "rev-parse", "--path-format=absolute", "--git-path", "index"])
-    if index is None:
-        return None
+    """The tree of the working directory as `git add -A` would stage it.
+
+    The temporary index starts empty, so every file is hashed. Starting from a
+    copy of the real index would let git trust its cached stat data, and a copy
+    has a newer mtime than the original, which defeats git's racy-entry check:
+    a file rewritten at the same size within a second of the last index write
+    would keep its old hash. About 0.5s on this repo.
+    """
     with tempfile.TemporaryDirectory() as tmp:
-        tmp_index = Path(tmp) / "index"
-        if Path(index).exists():
-            shutil.copyfile(index, tmp_index)
-        env = dict(os.environ, GIT_INDEX_FILE=str(tmp_index))
+        env = dict(os.environ, GIT_INDEX_FILE=str(Path(tmp) / "index"))
         if _run(["git", "add", "-A"], env=env) is None:
             return None
         return _run(["git", "write-tree"], env=env)
@@ -117,8 +118,12 @@ def store(record: Path, want: str) -> bool:
         return False
     when = datetime.datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z")
     tmp = record.with_name(record.name + ".tmp")
-    tmp.write_text(json.dumps({"key": want, "time": when}) + "\n")
-    tmp.replace(record)
+    try:
+        tmp.write_text(json.dumps({"key": want, "time": when}) + "\n")
+        tmp.replace(record)
+    except OSError as e:
+        print(f"check.sh: could not record the green run: {e}", file=sys.stderr)
+        return False
     return True
 
 

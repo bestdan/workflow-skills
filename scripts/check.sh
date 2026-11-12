@@ -38,7 +38,8 @@ cd "$ROOT" || exit 1
 with_evals=0
 fast=0
 base_ref=""
-no_cache="${CHECK_NO_CACHE:-}"
+no_cache=""
+[[ "${CHECK_NO_CACHE:-}" == 1 ]] && no_cache=1
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --with-evals) with_evals=1 ;;
@@ -70,8 +71,9 @@ if [[ "$fast" == 1 && "$with_evals" == 1 ]]; then
 fi
 
 # Skipping an unchanged tree. After a green full run, scripts/check-cache.py
-# stores a fingerprint of everything the gate reads; when this run's matches,
-# the result cannot have changed, so report OK without running. A full green
+# stores a fingerprint of the tree and the outside inputs it lists; when this
+# run's matches, report OK without running. Tools outside that list, such as
+# uv, are not fingerprinted (dev_docs/gate-performance.md says what to do). A full green
 # run covers --fast and --base too, since both only drop checks from it.
 # --with-evals always runs: evals call a model, and nothing here fingerprints
 # that. CI never uses the cache, so every PR still gets a full run. The record

@@ -302,7 +302,7 @@ The fingerprint, computed by `scripts/check-cache.py`, covers:
   non-ignored files, built in a temporary index so the real one is untouched.
   Staging and committing do not change it, and pins in tracked files
   (`mise.toml`, the mypy pin) come with the tree.
-- what the gate reads from outside the tree: the installed `claude` version,
+- four inputs from outside the tree: the installed `claude` version,
   the agent-guidance plugin copy, `python3 --version`, and whether the run is
   inside Claude Code's sandbox, where some suites skip.
 
@@ -314,7 +314,8 @@ satisfies a later `--fast` or `--base` run too, since both only drop checks.
 still refreshes the record.
 
 The fingerprint does not cover tools that resolve outside the tree and are not
-listed above, such as the `dprint` or `uv` on PATH. After upgrading one of
+listed above: `uv`, and `dprint`, `shellcheck` or `shfmt` when they come from
+PATH rather than the `mise.toml` pins, which the tree covers. After upgrading one of
 those, run with `--no-cache`.
 
 Choosing checks from the diff against `main` is out of scope: it needs a map

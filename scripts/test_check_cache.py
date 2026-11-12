@@ -100,6 +100,17 @@ class CheckCacheTest(unittest.TestCase):
         git("add", "a.txt")
         self.assertEqual(before, self.key())
 
+    def test_same_size_rewrite_right_after_a_commit_changes_the_key(self) -> None:
+        # Fingerprinting from a copy of the real index let git trust stale stat
+        # data: a same-size rewrite just after a commit kept the old key in
+        # about 1 run in 8. Repeat the pattern so a regression shows up.
+        for i in range(30):
+            (self.repo / "a.txt").write_text(f"{i}\n")
+            git("commit", "-qam", f"c{i}")
+            before = self.key()
+            (self.repo / "a.txt").write_text(f"{(i + 1) % 10}\n")
+            self.assertNotEqual(before, self.key(), f"iteration {i}")
+
     def test_real_index_is_untouched(self) -> None:
         (self.repo / "new.txt").write_text("x\n")
         self.key()
