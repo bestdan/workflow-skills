@@ -338,21 +338,10 @@ laptop's measurements, all unsandboxed, 2026-11-12:
   (median 0.5–1.4s a test), so no single test dominates.
 
 The ceiling is most likely Falcon's, though no run has compared one machine
-with and without it. The laptop runs Falcon as an Endpoint Security extension
-(`com.crowdstrike.falcon.Agent` 8.10 in `systemextensionsctl list`). The same
-`/usr/bin/true` benchmark on three machines without it, 2026-11-12, unsandboxed:
-
-| N loops | work laptop (18 cores, Falcon) | Mac mini (M4, 10) | MacBook (M3 Pro, 11) | lindev (Linux, 12 threads) |
-| ------- | ------------------------------ | ----------------- | -------------------- | -------------------------- |
-| 1       | 272                            | 760               | 859                  | 1132                       |
-| 9       | 716                            | 3223              | 2452                 | 11673                      |
-| 18      | 579                            | 3445              | 3548                 | 13529                      |
-| 72      | 619                            | 3126              | 4207                 | 13300                      |
-
-Figures are total starts/s. Without Falcon, throughput climbs to about the core
-count and holds there, 5–21 times the laptop's ceiling, and even a single loop
-runs 2.8–4.2 times faster. The gate's wall time on those machines has not
-been measured. The benchmark is in PR #1505's comments.
+with and without it. On three machines without Falcon, starts climb to about
+the core count, 5–21 times the laptop's ceiling. The benchmark, the four-machine
+table, the per-unit CPU ranking and the concurrency-cap A/B are in
+[the research record](research/2026-11-12-gate-process-start-ceiling.md).
 
 What moves the gate on the laptop is starting fewer processes, wherever they
 are, and that helps every other machine too. For
@@ -373,19 +362,26 @@ Applied to `guard-pinned-branch`, `guard-foreign-worktree` and
 
 Ranked by what they would buy next:
 
-1. **Fewer processes in the heaviest units.** The bats files account for about
-   164 of the gate's 566 CPU-seconds; the rest is the `scripts/test-*.sh`
-   harnesses. Solo CPU (user plus sys) is the proxy for a unit's share of the
-   process budget. Among the bats files, `co-review-ledger-sync` (16.5s) and
-   `worktree-remove` (12.8s) lead what is left.
-2. **`scripts/test-research-spike.sh`** (about 120s in the gate): Python
-   invocations that are mostly interpreter startup. Batching them through one
-   interpreter cuts processes; splitting the file would not.
-3. **Contention.** Capping concurrency (#1498) is unmeasured. On the laptop
-   the ceiling predicts little gain past about nine jobs, but settle it with an
-   interleaved A/B before adopting it.
-4. **Splitting the slowest files**, on machines without Falcon only. There the
+1. **Fewer processes in the orchestrator suite.** `test-spawn-orchestrator.sh`
+   is the largest single unit, about 128 of the gate's roughly 575 CPU-seconds.
+   Its cost is `spawn-orchestrator.sh` doing real work rather than test
+   overhead, so a gain there means fewer `doctor` calls or a cheaper `doctor`;
+   the record has the trace.
+2. **Fewer processes in the heaviest bats files.** The 40 files together take
+   about 164 CPU-seconds. Solo CPU (user plus sys) is the proxy for a unit's
+   share of the process budget; `guard-foreign-worktree` (17.1s),
+   `co-review-ledger-sync` (16.5s) and `guard-pinned-branch` (14.9s) lead.
+3. **Splitting the slowest files**, on machines without Falcon only. There the
    slowest file may still bound the gate; measure the gate there first.
+
+Two things that look promising do not pay on the laptop:
+
+- **Capping concurrency (#1498).** Nine jobs at a time made the gate slower
+  (median 185s against 179s uncapped) and cut its CPU by only about 4%; 18 made
+  no measurable difference in two valid passes. No cap ships.
+- **Batching `research-spike.py` calls (#1497).** That harness is about 3% of
+  the gate's CPU, most of it interpreter startup that batching would only
+  partly remove.
 
 ## Skipping an unchanged tree
 
