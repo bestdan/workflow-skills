@@ -356,7 +356,8 @@ The fingerprint, computed by `scripts/check-cache.py`, covers:
 
 Only a full run stores it, and only when the tree still matches at the end, so
 a file edited while the gate ran is not recorded as green. A green full run
-satisfies a later `--fast` or `--base` run too, since both only drop checks.
+satisfies a later `--fast`, `--changed` or `--base` run too, since each only
+drops checks.
 `--with-evals` and CI (`GITHUB_ACTIONS` or `CI` set) never use it.
 `--no-cache` or `CHECK_NO_CACHE=1` forces a run, and a forced green run
 still refreshes the record.
@@ -374,8 +375,58 @@ one, run with `--no-cache` too:
 - **Uncommitted edits inside a submodule.** The `test/vendor/bats-*` checkouts
   count only by the commit each one is on.
 
-Choosing checks from the diff against `main` is out of scope: it needs a map
-from each file to the checks that read it, and that map is a heuristic.
+## Choosing checks from the diff
+
+`just check-changed` (`scripts/check.sh --changed`) runs the cheap checks and
+only the test units this branch's diff can reach. A test unit is one job of the
+full gate: a `test/*.bats` file, a `scripts/test-*.sh` harness, or the
+orchestrator suite. `scripts/check-select.py` picks them, and its docstring has
+the rules. In short, a changed file selects every test that names it, by file
+name, by the unittest file a wrapper runs, or by the package directory a Python
+module sits in. A change under `skills/`, `commands/` or `agents/` adds
+`test-validate.sh`. The run is the full gate instead when the diff touches gate
+infrastructure (`check.sh`, `scripts/lib/`, the bats helper, `mise.toml`…) or
+a file outside `dev_docs/` that no test names: a test can read a file through
+a glob or a loop without naming it, so an unplaced file is never skipped.
+Renames count under both the old and the new path.
+
+This is a heuristic, and it is safe only as an edit loop. Plain `just check`
+and CI always run the full gate, so a selection that misses a dependency costs
+a red CI run, never a bad merge.
+
+Replaying the last 100 merged PRs through `select()` as shipped, on the
+18-core Mac, 2026-11-12: 74 got a subset, 16 the full gate (11 for
+infrastructure, 5 for a file no test names), and 10 touched only `dev_docs/`.
+The subset runs selected a median of 13 of 136 units and took a median of
+142s against 204s for the full gate, about 127 minutes saved over the 100.
+32 of the 74 finished within 60s; a trial run after a one-line edit to
+`scripts/check-cache.py` selected one unit and took 11s. The times are upper
+bounds, taken from one run with every unit in parallel; a subset runs with less
+contention.
+
+The median is high because four bats files of 142–167s each
+(`guard-pinned-branch`, `worktree-create-hook`, `co-review-ledger-sync`,
+`utilities`) are selected often, mostly through the directory rule matching a
+skill's bare directory name such as `references`. Narrowing that rule for
+markdown would cut the median to about 41s, but tests reach markdown without
+naming it in at least three ways: a glob of `reviewers/*.md`, an
+`os.path.join(..., "references", "threads.md")`, and a recursive grep of a
+skill directory. So the selector keeps the broad rule, and the time comes back
+by splitting those files (#1496), which shortens both modes. Tightening the
+rule later needs its own replay, measured against the files each test
+actually opens rather than against name matches.
+
+Before it was built (#1492), simpler rules simulated on the same PRs gave
+lower figures: 3 units and 20s when only tests naming the file count, 4 units
+and 36s with the package and skill rules. Following every chain of files that
+name each other selected 121 units, so the selector never does.
+
+Replaying the 12 failed CI runs whose logs carry the current
+`check.sh: FAIL (...)` summary, the selection missed 5 failing units and caught
+3. All 5 misses were unrelated to their diffs: four `test-spawn-orchestrator.sh`
+wall-clock and launchctl failures, and one `test-local-review.sh` that could not
+bind its address. That sample is small, which is the main reason this stays an
+edit loop rather than becoming the gate.
 
 ## Timing warnings
 

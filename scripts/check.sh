@@ -5,11 +5,16 @@
 # `check` target wraps it, so local and CI checks can never drift. Runs every
 # check even if an earlier one fails, then exits non-zero if any failed.
 #
-# Usage: scripts/check.sh [--with-evals] [--fast] [--base <ref>] [--no-cache]
+# Usage: scripts/check.sh [--with-evals] [--fast] [--changed] [--base <ref>] [--no-cache]
 #   --with-evals  also run the behavioral skill-triggering harness
 #                 (scripts/eval.sh; needs ANTHROPIC_API_KEY)
 #   --fast        edit-loop mode: skip the two long suites. NOT the gate — see
 #                 the fast_skips list below for exactly what stops being checked.
+#   --changed     edit-loop mode: run the cheap checks, and only the test units
+#                 scripts/check-select.py picks from this branch's diff. NOT the
+#                 gate either; it falls back to the full gate when the selector
+#                 cannot place a change. See "Choosing checks from the diff" in
+#                 dev_docs/gate-performance.md.
 #   --base <ref>  classify <ref>..HEAD with scripts/ci-docs-only.sh; when it
 #                 says the diff is dev_docs-only, skip the shell/bats suites
 #                 (see docs_skips below) instead of the --fast list. Anything
@@ -37,6 +42,7 @@ cd "$ROOT" || exit 1
 
 with_evals=0
 fast=0
+changed=0
 base_ref=""
 no_cache=""
 [[ "${CHECK_NO_CACHE:-}" == 1 ]] && no_cache=1
@@ -44,6 +50,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --with-evals) with_evals=1 ;;
     --fast) fast=1 ;;
+    --changed) changed=1 ;;
     --base)
       if [[ $# -lt 2 ]]; then
         echo "--base requires a value" >&2
@@ -69,12 +76,18 @@ if [[ "$fast" == 1 && "$with_evals" == 1 ]]; then
   echo "--fast and --with-evals are mutually exclusive" >&2
   exit 2
 fi
+# --changed is its own selection; layering --fast or --base on it would make
+# the skipped set the product of two lists nobody reads together.
+if [[ "$changed" == 1 && ("$fast" == 1 || "$with_evals" == 1 || -n "$base_ref") ]]; then
+  echo "--changed cannot be combined with --fast, --base or --with-evals" >&2
+  exit 2
+fi
 
 # Skipping an unchanged tree. After a green full run, scripts/check-cache.py
 # stores a fingerprint of the tree and the outside inputs it lists; when this
 # run's matches, report OK without running. Tools outside that list, such as
 # uv, are not fingerprinted (dev_docs/gate-performance.md says what to do). A full green
-# run covers --fast and --base too, since both only drop checks from it.
+# run covers --fast, --changed and --base too, since each only drops checks from it.
 # --with-evals always runs: evals call a model, and nothing here fingerprints
 # that. CI never uses the cache, so every PR still gets a full run. The record
 # lives in this worktree's own git dir (--absolute-git-dir, not the common
@@ -150,6 +163,37 @@ if [[ "$docs_only" == 1 ]]; then
 elif [[ -n "$base_ref" ]]; then
   echo "→ --base $base_ref: not dev_docs-only — running the full gate"
 fi
+
+# --changed asks scripts/check-select.py which test units the diff can affect.
+# The selector's own answer may be the full gate (infrastructure changed, or
+# code no test names), and so is any failure to run it: like --base, this only
+# narrows the gate on positive evidence. A run that falls back is a real full
+# run, so it times and caches as one.
+selected=()
+if [[ "$changed" == 1 ]]; then
+  if ! select_output="$(python3 scripts/check-select.py)"; then
+    echo "→ --changed: could not list the changed files — running the full gate"
+    changed=0
+  elif [[ "$select_output" == full* ]]; then
+    echo "→ --changed: ${select_output#full } — running the full gate"
+    changed=0
+  else
+    while IFS= read -r line; do
+      [[ "$line" == "unit "* ]] && selected+=("${line#unit }")
+    done <<<"$select_output"
+    echo "→ --changed: running ${#selected[@]} test unit(s) the diff can reach — this is NOT the full gate"
+    for unit in "${selected[@]:-}"; do
+      [[ -n "$unit" ]] && echo "    selected: $unit"
+    done
+  fi
+fi
+is_selected() {
+  local unit
+  for unit in "${selected[@]:-}"; do
+    [[ "$unit" == "$1" ]] && return 0
+  done
+  return 1
+}
 
 if [[ "$fast" == 1 && "$docs_only" != 1 ]]; then
   echo "→ --fast: skipping the long suites — this is NOT the full gate"
@@ -236,7 +280,7 @@ run scripts/typecheck.sh
 run scripts/lint-python.sh
 if [[ "$docs_only" == 1 ]]; then
   : # skipped — see docs_skips above
-elif [[ "$fast" == 1 ]]; then
+elif [[ "$fast" == 1 || "$changed" == 1 ]]; then
   run scripts/lint-shell.sh --fast
 else
   run scripts/lint-shell.sh
@@ -270,6 +314,7 @@ for test_script in scripts/test-*.sh; do
   esac
   # docs_only drops every remaining scripts/test-*.sh — see docs_skips above.
   [[ "$docs_only" == 1 ]] && continue
+  [[ "$changed" == 1 ]] && ! is_selected "$test_script" && continue
   run "$test_script"
 done
 # Scheduled LAST because the replay loop is strictly index-ordered: this is the
@@ -277,6 +322,15 @@ done
 # it. At the end, the fast checks drain as they finish and only this one blocks.
 if [[ "$docs_only" == 1 ]]; then
   : # skipped — see docs_skips above
+elif [[ "$changed" == 1 ]]; then
+  # The selected units that scripts/test-shell.sh would otherwise run, one job
+  # each, as that script runs them; ensure-bats.sh already ran above.
+  for unit in "${selected[@]:-}"; do
+    case "$unit" in
+      test/*.bats) run test/vendor/bats-core/bin/bats "$unit" ;;
+      scripts/test-spawn-orchestrator.sh) run "$BASH" "$unit" ;;
+    esac
+  done
 elif [[ "$fast" == 1 ]]; then
   run scripts/test-shell.sh --fast
 else
@@ -312,6 +366,8 @@ done
 # for where the budgets come from — revisit them there, with a measurement.
 if [[ "$docs_only" == 1 ]]; then
   timing_mode=docs budget=60
+elif [[ "$changed" == 1 ]]; then
+  timing_mode=changed budget=120
 elif [[ "$fast" == 1 ]]; then
   timing_mode=fast budget=180
 else
@@ -355,6 +411,12 @@ if [[ "$fast" == 1 ]]; then
   for skipped in "${fast_skips[@]}"; do
     echo "    skipped: $skipped"
   done
+  echo "  run \`just check\` before pushing"
+  exit 0
+fi
+if [[ "$changed" == 1 ]]; then
+  # Repeated at the end for the same reason as --fast's caveat above.
+  echo "check.sh: OK (--changed — ${#selected[@]} selected test unit(s); NOT the full gate)"
   echo "  run \`just check\` before pushing"
   exit 0
 fi

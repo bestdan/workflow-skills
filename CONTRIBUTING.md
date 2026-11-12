@@ -35,6 +35,7 @@ discover a failure only after pushing.
 ```sh
 just check       # the full deterministic gate (what CI runs on every PR)
 just check-fast  # edit loop: skips the long suites, lints only what you touched
+just check-changed  # edit loop: only the tests your diff can reach
 just fmt         # auto-format everything with dprint + shfmt
 just validate    # only the repo-native structural/consistency validator
 just eval        # gate + behavioral skill-triggering evals (opt-in, needs auth)
@@ -63,6 +64,15 @@ branch has touched — that is skipped coverage, not sharded or sampled, so
 dropped, on entry and again at the end. (The lint narrowing is per-file, so a
 branch that adds several long shell files pays their lint cost on every
 `--fast` run — that is the narrowing working, not a regression.)
+
+`just check-changed` (`scripts/check.sh --changed`) is the narrower edit loop.
+It runs the cheap checks and only the test files your branch's diff can reach,
+which `scripts/check-select.py` picks by which tests name the files you
+changed. It runs the full gate instead when you change gate infrastructure or
+a file outside `dev_docs/` that no test names, and it lists what it selected. Like `--fast`, it is
+not the gate: `just check` still has to pass before you push. How the
+selection works and what it was measured against is in
+[gate performance](dev_docs/gate-performance.md#choosing-checks-from-the-diff).
 
 `scripts/check.sh --base <ref>` classifies `<ref>..HEAD` with
 `scripts/ci-docs-only.sh` and, only when the diff is confined to `dev_docs/`,
