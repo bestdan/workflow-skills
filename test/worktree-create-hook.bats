@@ -19,6 +19,28 @@
 # every call that uses it.
 bats_require_minimum_version 1.5.0
 
+# A "remote" and a clone of it, so origin/main exists and would be the tempting
+# start point. The clone's local main is deliberately left one commit BEHIND
+# origin/main, so the two start points are distinguishable by commit. Built
+# once per file and copied into each test, which may then mutate its own copy:
+# the build costs about fifteen processes, the copy three.
+setup_file() {
+  local fx="$BATS_FILE_TMPDIR/fixtures"
+  pin_git_env "$BATS_FILE_TMPDIR"
+  mkdir "$fx"
+  git init -q --bare -b main "$fx/remote.git"
+  git clone -q "$fx/remote.git" "$fx/seed"
+  git -C "$fx/seed" commit -q --allow-empty -m one
+  git -C "$fx/seed" push -q origin HEAD:main
+  git clone -q "$fx/remote.git" "$fx/myrepo"
+  git -C "$fx/seed" commit -q --allow-empty -m two
+  git -C "$fx/seed" push -q origin HEAD:main
+  git -C "$fx/myrepo" fetch -q origin
+  LOCAL_MAIN=$(git -C "$fx/myrepo" rev-parse main)
+  REMOTE_MAIN=$(git -C "$fx/myrepo" rev-parse origin/main)
+  export LOCAL_MAIN REMOTE_MAIN
+}
+
 setup() {
   setup_test
   HOOK="$REPO_ROOT/scripts/worktree-create-hook.sh"
@@ -32,41 +54,36 @@ setup() {
   export WORKFLOW_SKILLS_BRANCH_PREFIX="tester"
   export WT_ROOT
 
-  # A "remote" and a clone of it, so origin/main exists and would be the
-  # tempting start point. The clone's local main is deliberately left one commit
-  # BEHIND origin/main, so the two start points are distinguishable by commit.
+  cp -R "$BATS_FILE_TMPDIR/fixtures/remote.git" "$BATS_FILE_TMPDIR/fixtures/seed" \
+    "$BATS_FILE_TMPDIR/fixtures/myrepo" "$TEST_TMPDIR/"
   REMOTE="$TEST_TMPDIR/remote.git"
-  git init -q --bare -b main "$REMOTE"
-  seed="$TEST_TMPDIR/seed"
-  git clone -q "$REMOTE" "$seed"
-  git -C "$seed" commit -q --allow-empty -m one
-  git -C "$seed" push -q origin HEAD:main
   REPO="$TEST_TMPDIR/myrepo"
-  git clone -q "$REMOTE" "$REPO"
-  git -C "$seed" commit -q --allow-empty -m two
-  git -C "$seed" push -q origin HEAD:main
-  git -C "$REPO" fetch -q origin
-  LOCAL_MAIN=$(git -C "$REPO" rev-parse main)
-  REMOTE_MAIN=$(git -C "$REPO" rev-parse origin/main)
-  export REMOTE REPO LOCAL_MAIN REMOTE_MAIN
+  # The clones' origin still names the template's remote; point it at the copy.
+  git -C "$TEST_TMPDIR/seed" remote set-url origin "$REMOTE"
+  git -C "$REPO" remote set-url origin "$REMOTE"
+  export REMOTE REPO
 }
 teardown() { teardown_test; }
 load test_helper
 
 # run_hook <cwd> <name> [session] — feed the hook a WorktreeCreate payload.
-# Python builds the JSON so the suite carries no jq dependency.
+# json_string builds the JSON so the suite carries no jq dependency and
+# spends no process on it.
 run_hook() {
-  local cwd="$1" name="$2" session="${3-}"
-  python3 - "$cwd" "$name" "$session" >"$TEST_TMPDIR/payload.json" <<'PY'
-import json, sys
-print(json.dumps({"hook_event_name": "WorktreeCreate", "cwd": sys.argv[1],
-                  "name": sys.argv[2], "session_id": sys.argv[3]}))
-PY
+  local cwd name session
+  json_string "$1" || return 1
+  cwd=$REPLY
+  json_string "$2" || return 1
+  name=$REPLY
+  json_string "${3-}" || return 1
+  session=$REPLY
+  printf '{"hook_event_name": "WorktreeCreate", "cwd": %s, "name": %s, "session_id": %s}\n' \
+    "$cwd" "$name" "$session" >"$TEST_TMPDIR/payload.json"
   # --separate-stderr because stdout IS the contract: the harness reads the
   # worktree path off it and aborts the creation on anything else, so git's own
   # chatter is deliberately sent to stderr. A merged capture cannot tell the
   # two apart, and would pass a hook that printed the chatter to stdout.
-  run --separate-stderr bash -c '"$1" <"$2"' _ "$HOOK" "$TEST_TMPDIR/payload.json"
+  run --separate-stderr "$HOOK" <"$TEST_TMPDIR/payload.json"
 }
 
 # The hook's refusals go to stderr, which the bats-assert vendored here has no

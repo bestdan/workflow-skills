@@ -315,22 +315,77 @@ shape.
 
 ## What the bottleneck is now
 
-The slowest bats files. With one job per file, `scripts/test-shell.sh` is
-bounded by its slowest file. Run alone in parallel, the five slowest took
-104–113s each: `guard-pinned-branch`, `guard-foreign-worktree`,
-`worktree-remove`, `worktree-create-hook` and `co-review-ledger-sync`. Every
-one of them builds repository fixtures per test.
+It depends on the machine. On the 18-core work laptop it is process creation,
+machine-wide, and the evidence points at CrowdStrike Falcon, which vets every
+launch. There the full gate
+is bounded by how many processes the whole run starts, not by its slowest file,
+so splitting a file buys nothing. On machines without Falcon, process starts
+scale with the cores, and the slowest file can still be the bound. The
+laptop's measurements, all unsandboxed, 2026-11-12:
 
-Ranked by what they would buy:
+- **The gate leaves the cores idle.** A full run took 181s wall for 227s user
+  and 340s sys: about 3 of 18 cores busy on average, with sys above user.
+- **Process starts hit a ceiling.** N concurrent loops of `/usr/bin/true`
+  level off at 580–720 starts/s in total from N=9 up to N=72;
+  `python3 -c pass` levels off at about 375/s from the same N=9. One loop alone manages only
+  272 starts/s.
+- **Running the bats files in parallel barely beats running them in series.**
+  The 40 files run one after another took 293s; `scripts/test-shell.sh` runs
+  them in parallel in 180s.
+- **A file is slow mainly because it shares the machine.**
+  `guard-pinned-branch` took 30s alone, 46s beside five other slow files, and
+  167s in the full gate. Inside each slow file the cost is spread evenly
+  (median 0.5–1.4s a test), so no single test dominates.
 
-1. **Split or speed up those bats files.** Splitting moves the floor directly,
-   the way the orchestrator split did.
-2. **`scripts/test-research-spike.sh`** is the next bound: Python invocations
-   that are mostly interpreter startup. Batching them through one interpreter,
-   or splitting the file, is the move.
-3. **Contention.** About 140 jobs start at once on 18 cores, and sys time
-   exceeds user time. Capping concurrency is unmeasured; settle it with an
+The ceiling is most likely Falcon's, though no run has compared one machine
+with and without it. The laptop runs Falcon as an Endpoint Security extension
+(`com.crowdstrike.falcon.Agent` 8.10 in `systemextensionsctl list`). The same
+`/usr/bin/true` benchmark on three machines without it, 2026-11-12, unsandboxed:
+
+| N loops | work laptop (18 cores, Falcon) | Mac mini (M4, 10) | MacBook (M3 Pro, 11) | lindev (Linux, 12 threads) |
+| ------- | ------------------------------ | ----------------- | -------------------- | -------------------------- |
+| 1       | 272                            | 760               | 859                  | 1132                       |
+| 9       | 716                            | 3223              | 2452                 | 11673                      |
+| 18      | 579                            | 3445              | 3548                 | 13529                      |
+| 72      | 619                            | 3126              | 4207                 | 13300                      |
+
+Figures are total starts/s. Without Falcon, throughput climbs to about the core
+count and holds there, 5–21 times the laptop's ceiling, and even a single loop
+runs 2.8–4.2 times faster. The gate's wall time on those machines has not
+been measured. The benchmark is in PR #1505's comments.
+
+What moves the gate on the laptop is starting fewer processes, wherever they
+are, and that helps every other machine too. For
+the bats files (#1496) that meant two changes in the heaviest suites:
+
+- **Build fixtures once.** `setup_file` builds the fixture repos, and each test
+  copies them with one `cp -R` instead of about fifteen to twenty `git` calls.
+  `pin_git_env` in `test/test_helper.bash` gives `setup_file` the same git
+  isolation `setup_test` has.
+- **Build hook payloads in bash.** `json_string` in the helper replaces the
+  `python3` that built each payload, and `guard-foreign-worktree` reads the
+  verdict with a pattern match instead of a second `python3`.
+
+Applied to `guard-pinned-branch`, `guard-foreign-worktree` and
+`worktree-create-hook`, that cut the full gate from a median of 182s
+(181–187s) to 173s on every one of three interleaved passes each.
+`guard-pinned-branch` alone went from 30.5s to 21.7s.
+
+Ranked by what they would buy next:
+
+1. **Fewer processes in the heaviest units.** The bats files account for about
+   164 of the gate's 566 CPU-seconds; the rest is the `scripts/test-*.sh`
+   harnesses. Solo CPU (user plus sys) is the proxy for a unit's share of the
+   process budget. Among the bats files, `co-review-ledger-sync` (16.5s) and
+   `worktree-remove` (12.8s) lead what is left.
+2. **`scripts/test-research-spike.sh`** (about 120s in the gate): Python
+   invocations that are mostly interpreter startup. Batching them through one
+   interpreter cuts processes; splitting the file would not.
+3. **Contention.** Capping concurrency (#1498) is unmeasured. On the laptop
+   the ceiling predicts little gain past about nine jobs, but settle it with an
    interleaved A/B before adopting it.
+4. **Splitting the slowest files**, on machines without Falcon only. There the
+   slowest file may still bound the gate; measure the gate there first.
 
 ## Skipping an unchanged tree
 
@@ -412,7 +467,9 @@ markdown would cut the median to about 41s, but tests reach markdown without
 naming it in at least three ways: a glob of `reviewers/*.md`, an
 `os.path.join(..., "references", "threads.md")`, and a recursive grep of a
 skill directory. So the selector keeps the broad rule, and the time comes back
-by splitting those files (#1496), which shortens both modes. Tightening the
+by cutting the processes those files start, which shortens both modes;
+splitting them would not on the work laptop, for the reason in
+[What the bottleneck is now](#what-the-bottleneck-is-now). Tightening the
 rule later needs its own replay, measured against the files each test
 actually opens rather than against name matches.
 

@@ -12,6 +12,13 @@ setup_test() {
   load "$REPO_ROOT/test/vendor/bats-assert/load"
   load "$REPO_ROOT/test/vendor/bats-file/load"
 
+  pin_git_env "$TEST_TMPDIR"
+}
+
+# pin_git_env <dir> — isolate every later git call from the developer's
+# environment, writing the pinned gitconfig into <dir>. setup_test calls it per
+# test; a setup_file that builds a shared fixture calls it on BATS_FILE_TMPDIR.
+pin_git_env() {
   # A developer's global/system git config leaks into fixture repos too:
   # core.hooksPath (whose pre-commit hook blocks commits to main, and git init
   # names the initial branch main) can silently veto fixture commits, and
@@ -35,15 +42,37 @@ setup_test() {
     GIT_COMMON_DIR GIT_TEMPLATE_DIR \
     GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_AUTHOR_DATE \
     GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL GIT_COMMITTER_DATE
-  printf '[user]\n\tname = Test\n\temail = test@example.com\n[init]\n\tdefaultBranch = main\n' >"$TEST_TMPDIR/gitconfig"
-  export GIT_CONFIG_GLOBAL="$TEST_TMPDIR/gitconfig"
+  printf '[user]\n\tname = Test\n\temail = test@example.com\n[init]\n\tdefaultBranch = main\n' >"$1/gitconfig"
+  export GIT_CONFIG_GLOBAL="$1/gitconfig"
   export GIT_CONFIG_SYSTEM=/dev/null
   # Symmetry insurance, not a live fix: unlike the shell suites, this file has
   # no repo-local fallback if mktemp -d fails (setup just fails loudly), so
-  # TEST_TMPDIR is already safer by construction. A ceiling only stops a
-  # discovery walk that would cross TEST_TMPDIR; it's inert for git ops
+  # the directory passed in (setup_test's mktemp TEST_TMPDIR, or bats' own
+  # BATS_FILE_TMPDIR) is already safer by construction. A ceiling only stops
+  # a discovery walk that would cross that directory; it's inert for git ops
   # against REPO_ROOT, which find .git at depth zero.
-  export GIT_CEILING_DIRECTORIES="$TEST_TMPDIR"
+  export GIT_CEILING_DIRECTORIES="$1"
+}
+
+# json_string <s> — sets REPLY to <s> as a JSON string literal. A hook payload
+# built this way costs no process, where a python3 builder costs one per hook
+# call; process creation, not CPU, is what bounds the gate on the
+# Falcon-equipped work laptop (dev_docs/gate-performance.md). Refuses control characters other than \n,
+# \t and \r rather than emitting invalid JSON.
+json_string() {
+  local s=$1 bs='\' q='"'
+  s=${s//"$bs"/"$bs$bs"}
+  s=${s//"$q"/"$bs$q"}
+  s=${s//$'\n'/"${bs}n"}
+  s=${s//$'\t'/"${bs}t"}
+  s=${s//$'\r'/"${bs}r"}
+  case $s in
+    *[$'\001'-$'\037']*)
+      echo "json_string: a control character other than \\n, \\t or \\r" >&2
+      return 1
+      ;;
+  esac
+  REPLY="\"$s\""
 }
 
 teardown_test() {

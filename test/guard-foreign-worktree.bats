@@ -37,29 +37,31 @@ new_repo() {
 }
 
 # verdict <tool> <cwd> <payload-field> <value> [session] -> deny|warn|allow
+# The payload is built and the verdict read in bash, so a case costs one
+# process, the guard itself. The guard prints with json.dumps' default
+# separators; reason() below parses a denial in full, as JSON.
 verdict() {
   local tool=$1 cwd=$2 key=$3 value=$4 session=${5:-$RANDOM.$RANDOM} out
-  out=$(python3 -c '
-import json, sys
-tool, cwd, session, key, value = sys.argv[1:]
-print(json.dumps({"tool_name": tool, "cwd": cwd, "session_id": session,
-                  "tool_input": {key: value}}))
-' "$tool" "$cwd" "$session" "$key" "$value" \
+  local j_tool j_cwd j_session j_key j_value
+  json_string "$tool" || return 1
+  j_tool=$REPLY
+  json_string "$cwd" || return 1
+  j_cwd=$REPLY
+  json_string "$session" || return 1
+  j_session=$REPLY
+  json_string "$key" || return 1
+  j_key=$REPLY
+  json_string "$value" || return 1
+  j_value=$REPLY
+  out=$(printf '{"tool_name": %s, "cwd": %s, "session_id": %s, "tool_input": {%s: %s}}\n' \
+    "$j_tool" "$j_cwd" "$j_session" "$j_key" "$j_value" \
     | TMPDIR="$stamps/$session" python3 "$HOOK" 2>/dev/null)
-  if [ -z "$out" ]; then
-    printf 'allow'
-    return
-  fi
-  printf %s "$out" | python3 -c '
-import json, sys
-h = json.load(sys.stdin).get("hookSpecificOutput", {})
-if h.get("permissionDecision") == "deny":
-    print("deny", end="")
-elif h.get("additionalContext"):
-    print("warn", end="")
-else:
-    print("unexpected", end="")
-'
+  case $out in
+    '') printf 'allow' ;;
+    *'"permissionDecision": "deny"'*) printf 'deny' ;;
+    *'"additionalContext": "'[!\"]*) printf 'warn' ;;
+    *) printf 'unexpected' ;;
+  esac
 }
 
 # expect <want> <tool> <cwd> <payload-field> <value> [session]
