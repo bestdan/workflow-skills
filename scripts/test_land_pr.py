@@ -322,13 +322,17 @@ class LandTests(unittest.TestCase):
 
     # --- the co-review status and CI -------------------------------------
 
-    def test_co_review_status_missing_holds(self):
-        del self.fake.statuses["co-review"]
-        self.assert_hold(f"`co-review` status on {HEAD[:7]} is missing, not success")
-
-    def test_co_review_status_pending_holds(self):
-        self.fake.statuses["co-review"] = "pending"
-        self.assert_hold(f"`co-review` status on {HEAD[:7]} is pending, not success")
+    def test_a_co_review_status_that_is_not_success_holds(self):
+        for state in ("pending", None):
+            with self.subTest(state=state):
+                if state is None:
+                    del self.fake.statuses["co-review"]
+                else:
+                    self.fake.statuses["co-review"] = state
+                self.assert_hold(
+                    f"`co-review` status on {HEAD[:7]} is {state or 'missing'},"
+                    " not success"
+                )
 
     def test_a_red_check_holds(self):
         self.fake.check_runs[0]["conclusion"] = "failure"
@@ -401,10 +405,6 @@ class LandTests(unittest.TestCase):
     def test_an_invalid_policy_holds(self):
         self.fake.policies["main"] = "auto: scripts/**\n"
         self.assert_hold("tier human: policy invalid")
-
-    def test_agent_land_off_holds(self):
-        self.fake.agent_land = "off"
-        self.assert_hold("tier human: AGENT_LAND=off")
 
     def test_agent_land_unset_is_off(self):
         self.fake.agent_land = None

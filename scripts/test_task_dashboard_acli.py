@@ -11,10 +11,12 @@ Needs Python 3.11: run via scripts/test-task-dashboard-acli.sh.
 import importlib.util
 import json
 import re
+import subprocess
 import sys
 import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 PKG = ROOT / "scripts" / "task-dashboard"
@@ -90,11 +92,15 @@ class RunnerSeamTests(unittest.TestCase):
         self.assertIn("not found", err)
 
     def test_timeout_is_data_not_exception(self):
-        rc, _, err = acli.run_acli(
-            [sys.executable, "-c", "import time; time.sleep(5)"], timeout=0.2
-        )
+        # A stand-in that times out at once, and only when handed the timeout
+        # run_acli was given: no child process and no real wait.
+        def expire(argv, **kwargs):
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+
+        with mock.patch.object(acli.subprocess, "run", expire):
+            rc, _, err = acli.run_acli(["acli"], timeout=0.2)
         self.assertEqual(rc, 124)
-        self.assertIn("timed out", err)
+        self.assertIn("timed out after 0.2s", err)
 
 
 class SearchTests(unittest.TestCase):

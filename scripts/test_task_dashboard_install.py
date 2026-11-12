@@ -325,12 +325,6 @@ class PlanTest(Home):
         with self.assertRaisesRegex(si.InstallError, "absolute"):
             si.plan(self.cfg, home=self.home, tools=self.tools, uid=501)
 
-    def test_notes_say_the_url_is_local_only(self):
-        p = si.plan(self.cfg, home=self.home, tools=self.tools, uid=501)
-        self.assertIn(
-            "http://127.0.0.1:8765/ (localhost: opens only on this machine)", p.notes[0]
-        )
-
 
 class FakeRunner:
     """Records argv; answers by the first matching (needle, rc, out, err)."""
@@ -903,7 +897,10 @@ class CliTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 2)
         self.assertIn("not allowed with argument", proc.stderr)
 
-    def test_open_is_an_alias_of_url(self):
+    def test_open_prints_the_loopback_url(self):
+        # `open` is an alias of `url`, which
+        # test_status_and_url_use_the_agents_config covers in process; this is
+        # the one spawn, so it takes the alias and the real argv together.
         with tempfile.TemporaryDirectory() as d:
             cfg = Path(d) / "config.toml"
             cfg.write_text(
@@ -912,16 +909,6 @@ class CliTest(unittest.TestCase):
             )
             proc = self.run_cli("open", "--config", str(cfg))
         self.assertEqual(proc.stdout.strip(), "http://127.0.0.1:9003/")
-
-    def test_url_prints_the_loopback_url(self):
-        with tempfile.TemporaryDirectory() as d:
-            cfg = Path(d) / "config.toml"
-            cfg.write_text(
-                '[jira]\nsite = "x.atlassian.net"\nboard_ids = []\n'
-                '[jira.fields]\nsprint = "a"\nflagged = "b"\n[server]\nport = 9001\n'
-            )
-            proc = self.run_cli("url", "--config", str(cfg))
-        self.assertEqual(proc.stdout.strip(), "http://127.0.0.1:9001/")
 
 
 class InstalledPathsTest(unittest.TestCase):

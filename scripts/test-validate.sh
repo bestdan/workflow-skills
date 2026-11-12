@@ -712,6 +712,51 @@ fi
 # The outside-root target is (n)'s alone; don't leave it for a later fixture.
 rm -rf "$BASE/dev_docs"
 
+# --- Fixture (o): forbidden wording and a dangling component pointer -------
+# One run for both checks. The fixture ships two of the four paths the
+# time-of-day pin scans, so it also shows that a scanned path which is gone
+# while its siblings remain is an error rather than a pin retired in silence.
+# Every earlier plugin fixture ships none of the scanned paths and exits 0,
+# which is the quiet case.
+DIR_O="$BASE/forbidden-wording"
+make_plugin_fixture "$DIR_O"
+mkdir -p "$DIR_O/skills/auto-pilot/references"
+cat >"$DIR_O/skills/auto-pilot/SKILL.md" <<'MD'
+---
+name: auto-pilot
+description: fixture skill
+---
+
+The run is unattended. Overnighting is not a framing word.
+MD
+echo "The user wakes to a report." >"$DIR_O/skills/auto-pilot/references/extra.md"
+cat >"$DIR_O/commands/auto-pilot.md" <<'MD'
+---
+description: fixture command
+---
+
+Load the `workflow-skills:auto-pilot` skill.
+MD
+echo 'print("load the workflow-skills:no-such-skill skill")' >"$DIR_O/scripts/pointer.py"
+echo "This fixture plugin has 1 skill, 1 command, and 0 subagents." >"$DIR_O/README.md"
+out_o="$(uv run "$DIR_O/scripts/validate.py" 2>&1)"
+rc_o=$?
+assert_contains "forbidden wording in a file under a scanned directory is flagged" "$out_o" \
+  "skills/auto-pilot/references/extra.md: line 1: 'user wakes to' is time-of-day framing"
+assert_not_contains "a word that only contains a forbidden one is not flagged" "$out_o" \
+  "skills/auto-pilot/SKILL.md: line"
+assert_contains "a scanned path missing beside its siblings is flagged" "$out_o" \
+  "dev_docs/auto-pilot.md: is scanned for forbidden wording but does not exist"
+assert_contains "a pointer naming no component is flagged" "$out_o" \
+  "scripts/pointer.py: line 1: workflow-skills:no-such-skill names no skill, command or agent"
+assert_not_contains "a pointer naming a shipped skill is not flagged" "$out_o" \
+  "workflow-skills:auto-pilot names no"
+if [ "$rc_o" -eq 1 ]; then
+  ok "forbidden wording and dangling pointer: exits 1"
+else
+  bad "forbidden wording and dangling pointer: should exit 1, got $rc_o"
+fi
+
 # --- Default (no arg): still validates this plugin's own dev_docs/tasks --
 # (preserves today's CI behavior — see validate.py module docstring)
 out_default="$(uv run "$SCRIPT" 2>&1)"

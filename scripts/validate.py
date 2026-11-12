@@ -87,6 +87,56 @@ DEV_DOCS_REF_RE = re.compile(
 # "./dev_docs/..." or bare "dev_docs/..." link cannot resolve from these files'
 # depth anyway, and none exists, so that form is a known gap, not an oversight.
 DEV_DOCS_LINK_RE = re.compile(r"\]\((\.\./[^)\s]*dev_docs/[^)#\s]*)")
+# --- wording runtime prose must not carry ---
+# Each row is (paths, pattern, what the wording is). A path is a file, or a
+# directory scanned whole, so a reference file added later is covered without
+# anyone registering it. These are the repo's absence pins on prompt text, kept
+# as one table here rather than one grep per test file; a pin on wording that
+# must be PRESENT does not belong here, because it fails on every intended
+# edit and on no bug.
+_TIME_OF_DAY = (
+    "overnight|tonight|3am|goes to bed|user wakes to|whole night|morning report"
+    "|morning summary|morning handoff|next morning|multi-night|light nights"
+)
+FORBIDDEN_WORDING = (
+    # Every auto-pilot guarantee serves a run with no human attached, which
+    # holds at 10am as much as at night. Time-of-day framing produced real
+    # design errors, so it is guarded rather than just edited out.
+    (
+        (
+            "skills/auto-pilot",
+            "commands/auto-pilot.md",
+            "dev_docs/auto-pilot.md",
+            "dev_docs/auto-pilot-hardening.md",
+        ),
+        re.compile(rf"(?<!\w)(?:{_TIME_OF_DAY})(?!\w)", re.IGNORECASE),
+        "time-of-day framing: an auto-pilot run is unattended, not nocturnal, "
+        "so say what the run needs with no human attached",
+    ),
+    # The skill was written from a user-level copy of the same reference that
+    # described one machine's own setup; plugin users have none of it (#933).
+    (
+        ("skills/pinned-checkout",),
+        re.compile(r"dotfiles|bestdan|DOTFILES_"),
+        "owner-specific setup that a plugin user does not have",
+    ),
+    (
+        ("skills/pinned-checkout",),
+        re.compile(r"switch -C|--no-track"),
+        "a worktree route: skills/worktree-entry is that material's one home, "
+        "so link to it",
+    ),
+    # Moved from a personal config whose teardown half named `dli` recipes.
+    (
+        ("skills/worktree-entry/SKILL.md",),
+        re.compile(r"(?<![A-Za-z0-9_])dli(?![A-Za-z0-9_])|just --justfile"),
+        "a dli/just recipe this plugin does not ship",
+    ),
+)
+# A `workflow-skills:<name>` pointer in a script's output or a prompt tells an
+# agent to load that skill, command or agent, so one that names nothing dead-
+# ends mid-session (#933).
+COMPONENT_POINTER_RE = re.compile(r"workflow-skills:([a-z0-9]+(?:-[a-z0-9]+)*)")
 # --- shell logic in runtime markdown ---
 # A fenced shell block in a skill/command/handler/agent body is runtime prompt
 # text. `scripts/lint-shell.sh` globs only `*.sh`/`*.bash`/`*.bats` from
@@ -372,6 +422,51 @@ for f in plugin_root_ref_files:
             resolved = (f.parent / target).resolve()
             if not (resolved.is_relative_to(ROOT) and resolved.exists()):
                 err(rel(f), f"line {n}: relative link {target} does not resolve")
+
+
+# --- wording runtime prose must not carry ---
+for pin_paths, pin_re, pin_what in FORBIDDEN_WORDING:
+    pin_present = [ROOT / p for p in pin_paths if (ROOT / p).exists()]
+    # A rename must not silently retire a pin, so a path that is gone while its
+    # siblings remain is an error. All absent is the quiet case: the tree does
+    # not ship that surface at all.
+    if pin_present:
+        for p in pin_paths:
+            if not (ROOT / p).exists():
+                err(p, "is scanned for forbidden wording but does not exist")
+    for top in pin_present:
+        for f in sorted(top.rglob("*")) if top.is_dir() else [top]:
+            if not f.is_file():
+                continue
+            pin_lines = f.read_text(errors="replace").splitlines()
+            for n, line in enumerate(pin_lines, start=1):
+                hit = pin_re.search(line)
+                if hit:
+                    err(rel(f), f"line {n}: '{hit.group(0)}' is {pin_what}")
+
+# --- workflow-skills:<name> pointers ---
+component_names = (
+    {d.name for d in skill_dirs}
+    | {c.stem for c in command_files}
+    | {a.stem for a in agent_files}
+)
+pointer_files = [
+    *plugin_root_ref_files,
+    *(
+        f
+        for pat in ("*.py", "*.sh")
+        for f in sorted((ROOT / "scripts").glob(pat))
+        if not f.name.startswith(("test_", "test-")) and f.name != "validate.py"
+    ),
+]
+for f in pointer_files:
+    for n, line in enumerate(f.read_text().splitlines(), start=1):
+        for ref in COMPONENT_POINTER_RE.finditer(line):
+            if ref.group(1) not in component_names:
+                err(
+                    rel(f),
+                    f"line {n}: {ref.group(0)} names no skill, command or agent",
+                )
 
 
 # --- shell logic in runtime markdown ---
