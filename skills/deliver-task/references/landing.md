@@ -71,7 +71,10 @@ pinned to that head. Its last line decides what follows:
   verification `/sweep-for-complete` would otherwise wait for. Complete the
   task with the handler's `/complete-task` phase, passing `assume_verified:
   true` (no one is there to confirm) and a `comment_body` naming the merge sha.
-  On repo-pr the merged PR is itself the completion, so write nothing. A
+  Then re-check the task's dependents
+  ([`recheck-dependents.md`](recheck-dependents.md) → "Tracker handlers").
+  On repo-pr the merged PR is itself the completion, so write nothing; its
+  re-check already ran on the task branch. A
   failed completion write is noted as `completion: <what failed>` in the process
   notes; the PR is merged, so the tracker's own merge-driven completion finishes
   it later: `/sweep-for-complete` on Linear, GitHub's `Closes #<n>` close on
@@ -86,7 +89,8 @@ pinned to that head. Its last line decides what follows:
   retry, and never merge any other way.
 
 The `LAND:` line, with any `MERGE:`, `LABEL: error` or `COMMENT: error` line
-before it, goes verbatim into "Review and evidence". A stacked task's PR is
+before it, goes verbatim into "Review and evidence", followed by the
+`dependents re-checked` report when the re-check ran. A stacked task's PR is
 based on its parent's branch, so the lander always holds it, and the parent
 itself is not landed mid-run (`--no-land` above); a stack lands bottom-up, by a
 human.

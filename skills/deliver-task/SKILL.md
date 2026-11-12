@@ -354,6 +354,8 @@ PR ready. If the read fails, treat it as no write access.
   `bot review skipped (draft)` rather than waiting — step 5 falls back to the
   reviewers that can run. Do not request that bot after marking the PR ready
   unless the repository requires the bot's approval.
+- On **repo-pr**, re-check the task's dependents before step 5:
+  [`references/recheck-dependents.md`](references/recheck-dependents.md).
 
 ## 5. Co-review
 
