@@ -30,6 +30,11 @@ resolution; never merge the table by hand.
 | `co-review/`          | `/co-review`'s machine-local config                                           |
 | `orchestrate-coders/` | `/orchestrate-coders`' machine-local config                                   |
 
+A convention doc keeps its rules and the few numbers a reader needs today. The
+measurements behind them, with their machines, dates and raw figures, go in a
+dated record under `research/` (or `decisions/` for the choice they settled),
+and the convention doc links to it.
+
 ## Exceptions
 
 - **`tasks/` is ignored except `.task-config.yml`.** This repo's handler is

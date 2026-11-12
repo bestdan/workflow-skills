@@ -106,7 +106,7 @@ enough, because **every bare `bash` below that point re-resolves through
 hop, as `"$BASH"` (a shell's own path, so it propagates without an export):
 
 ```
-/bin/bash → test-shell.sh → test-spawn-orchestrator.sh → its seven parts
+/bin/bash → test-shell.sh → test-spawn-orchestrator.sh → its parts
 ```
 
 Delivery is not arrival, and a dropped hop is invisible: the pin still _looks_
@@ -344,4 +344,4 @@ instead of racing a real one. That does not reach bash's `SECONDS`, a real
 Before adding concurrency anywhere in the gate, grep for `sleep`, `SECONDS`,
 `--timeout`, and polling loops in the suites it touches — and read
 [`gate-performance.md`](gate-performance.md), which covers where the gate's wall
-time actually goes and why more concurrency does not help.
+time actually goes and where more concurrency helps.
