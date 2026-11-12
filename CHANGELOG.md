@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.212.1] - 2026-11-12
+
+### Fixes
+
+- skip the gate on a tree unchanged since the last green run (#1490) (c45488a0)
+
 ## [2.212.0] - 2026-11-12
 
 ### Features
