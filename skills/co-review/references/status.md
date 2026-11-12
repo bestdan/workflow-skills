@@ -14,6 +14,15 @@ Only in the default disposition, `--non-interactive` included. Never under
 else's and a status from this account would gate their merge. Record it as
 `status ➖ not applicable — --local` or `— --post` on the reviewer line.
 
+**Only on repos whose owner is listed**, when
+`WORKFLOW_SKILLS_CO_REVIEW_STATUS_OWNERS` (comma-separated GitHub owners, case
+ignored) is set; unset or empty, every repo gets it. Outside the list the
+status is a check no lander reads, on someone else's PRs. The scripts apply
+the list themselves, so make the calls below as usual: an unlisted repo comes
+back as exit 3 with nothing posted, and carrying is refused the same way.
+A repo whose ruleset requires the `co-review` check needs its owner on the
+list, or every PR there waits on a check that is never posted.
+
 - **`pending`** once step 3's pre-flights have passed, before the bot wait and
   before any reviewer is dispatched. Posting after the pre-flights rather than
   straight after the metadata read means a run that stops on a stale or
@@ -100,7 +109,8 @@ head in the record, and posts `success` on the fix commit described as
 - **Exit 0** prints `CARRY: carried from=<short> to=<short> …`. Put
   `status ✅ carried to <short>` on the Next round section's fix-commit line.
 - **Exit 3** prints `CARRY: refused reason=<why>` and wrote nothing. Put
-  `status ➖ not carried — <why>` there; the fix commit waits for a round.
+  `status ➖ not carried — <why>` there; the fix commit waits for a round,
+  except on an unlisted owner's repo, where no round posts one.
 - **Exit 1** is a failed GitHub call, a warning like the others:
   `status ❌ not carried — <reason>`. Don't retry in a loop.
 
@@ -117,3 +127,7 @@ comment, so a carried head is never mistaken for a reviewed one.
   and a failed run costs the whole review. Don't retry in a loop.
 - **Exit 2** is a usage error, usually a short sha or an unrendered
   `${CLAUDE_PLUGIN_ROOT}`. Fix the call and run it once more.
+- **Exit 3** prints `STATUS: skipped sha=<short> reason=<reason>`: the repo's
+  owner is not in `WORKFLOW_SKILLS_CO_REVIEW_STATUS_OWNERS`, and nothing was
+  posted. Put `status ➖ not applicable — owner not listed` on the reviewer
+  line. The run's later states skip the same way.

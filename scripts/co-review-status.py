@@ -18,14 +18,22 @@ On success prints exactly one line, `STATUS: <state> sha=<short> url=<url>`,
 and exits 0. `<url>` is the status's `target_url` when one was given, else the
 API URL of the status itself. A `gh` failure prints `STATUS: error sha=<short>
 reason=<reason>` and exits 1. A usage error (including a SHA that is not 40
-lowercase hex) exits 2 before any `gh` call. /co-review treats every non-zero
-exit as a warning on its run summary, never as a failed run.
+lowercase hex) exits 2 before any `gh` call. /co-review treats exit 1 and 2 as
+a warning on its run summary, never as a failed run.
+
+`WORKFLOW_SKILLS_CO_REVIEW_STATUS_OWNERS`, a comma-separated list of GitHub
+owners, limits the status to repos those owners hold. Unset or empty, it is
+posted everywhere. For a repo outside the list the script prints `STATUS:
+skipped sha=<short> reason=<reason>`, makes no `gh` call, and exits 3: a repo
+whose merges the lander never gates gets a check nobody reads, and on a repo
+someone else owns it is noise on every PR.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -35,6 +43,8 @@ STATES = ("pending", "success", "failure")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 # GitHub rejects a status description longer than 140 characters.
 DESCRIPTION_MAX = 140
+OWNERS_ENV = "WORKFLOW_SKILLS_CO_REVIEW_STATUS_OWNERS"
+SKIPPED = 3
 
 
 class StatusError(Exception):
@@ -61,6 +71,16 @@ def clip(description):
     if len(line) <= DESCRIPTION_MAX:
         return line
     return line[: DESCRIPTION_MAX - 1] + "…"
+
+
+def owner_skip_reason(repo, environ=None):
+    """Why `repo` gets no status under OWNERS_ENV, or None when it gets one."""
+    raw = (os.environ if environ is None else environ).get(OWNERS_ENV, "")
+    owners = {o.strip().lower() for o in raw.split(",") if o.strip()}
+    owner = repo.split("/", 1)[0]
+    if not owners or owner.lower() in owners:
+        return None
+    return f"owner {owner} is not in {OWNERS_ENV}"
 
 
 def post_status(repo, sha, state, description, target_url=None):
@@ -103,6 +123,10 @@ def parse_args(argv):
 def main(argv=None):
     args = parse_args(argv)
     short = args.sha[:7]
+    skip = owner_skip_reason(args.repo)
+    if skip:
+        print(f"STATUS: skipped sha={short} reason={skip}")
+        return SKIPPED
     try:
         url = post_status(
             args.repo, args.sha, args.state, args.description, args.target_url

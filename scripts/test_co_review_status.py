@@ -18,6 +18,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "co-review-status.py"
@@ -30,6 +31,13 @@ _spec.loader.exec_module(status_mod)
 REPO = "owner/name"
 SHA = "a" * 40
 PR_URL = f"https://github.com/{REPO}/pull/42"
+OWNERS = status_mod.OWNERS_ENV
+
+
+def without_owner_list():
+    """Patch the owner list out, so the caller's own setting cannot skip a case."""
+    env = {k: v for k, v in os.environ.items() if k != OWNERS}
+    return mock.patch.dict(os.environ, env, clear=True)
 
 
 class FakeGh:
@@ -58,7 +66,14 @@ class FakeGh:
         )
 
 
-class StatusTests(unittest.TestCase):
+class StatusCase(unittest.TestCase):
+    """Helpers for the in-process cases; holds no tests of its own."""
+
+    def setUp(self):
+        patcher = without_owner_list()
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def use(self, fake):
         orig = status_mod.run_gh
         status_mod.run_gh = fake.run_gh
@@ -77,6 +92,8 @@ class StatusTests(unittest.TestCase):
             args += [f"--{key.replace('_', '-')}", value]
         return args
 
+
+class StatusTests(StatusCase):
     def test_each_state_posts_the_co_review_context_on_the_sha(self):
         for state in ("pending", "success", "failure"):
             with self.subTest(state=state):
@@ -184,6 +201,36 @@ class StatusTests(unittest.TestCase):
         self.assertNotIn("Traceback", out)
 
 
+class OwnerListTests(StatusCase):
+    def test_an_unset_or_blank_list_posts_everywhere(self):
+        for raw in (None, "", " , "):
+            with self.subTest(raw=raw):
+                env = {} if raw is None else {OWNERS: raw}
+                self.assertIsNone(status_mod.owner_skip_reason(REPO, env))
+
+    def test_a_listed_owner_posts_whatever_the_case(self):
+        env = {OWNERS: "someone, OWNER"}
+        self.assertIsNone(status_mod.owner_skip_reason(REPO, env))
+
+    def test_an_unlisted_owner_is_skipped_without_calling_gh(self):
+        fake = self.use(FakeGh())
+        with mock.patch.dict(os.environ, {OWNERS: "someone"}):
+            code, out, _ = self.run_main(self.argv("pending", target_url=PR_URL))
+        self.assertEqual(code, status_mod.SKIPPED)
+        self.assertEqual(fake.calls, [])
+        self.assertEqual(
+            out,
+            f"STATUS: skipped sha={SHA[:7]} reason=owner owner is not in {OWNERS}\n",
+        )
+
+    def test_a_listed_owner_still_posts(self):
+        fake = self.use(FakeGh())
+        with mock.patch.dict(os.environ, {OWNERS: "owner"}):
+            code, _, _ = self.run_main(self.argv("success"))
+        self.assertEqual(code, 0)
+        self.assertEqual(len(fake.calls), 1)
+
+
 class SubprocessTests(unittest.TestCase):
     """The real `gh` call, against a stub first on PATH."""
 
@@ -202,7 +249,7 @@ echo '{"url": "https://api.github.com/x", "target_url": null}'
             stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
             log = Path(tmp) / "log"
             env = dict(
-                os.environ,
+                {k: v for k, v in os.environ.items() if k != OWNERS},
                 PATH=f"{tmp}{os.pathsep}{os.environ['PATH']}",
                 GH_STUB_LOG=str(log),
             )
