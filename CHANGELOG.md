@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.212.2] - 2026-11-12
+
+### Fixes
+
+- match triage emoji by alternation so the C locale works [#937] (#1499) (f0064414)
+
 ## [2.212.1] - 2026-11-12
 
 ### Fixes
