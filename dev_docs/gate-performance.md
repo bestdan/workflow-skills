@@ -243,9 +243,10 @@ pays for the ~1s of extra fixture setup each part costs.
 
 CI's `macos` job runs only `scripts/test-shell.sh`, on a runner far smaller
 than the Mac above, so the fan-out was measured there separately, 2026-11-12.
-A throwaway branch ran the job as a matrix: three jobs with all 40 bats files
-in one serial `bats` process, three with one job per file, each on its own
-runner, and then the whole matrix a second time. Run
+A throwaway branch ran the job as a matrix of six CI jobs, each on its own
+runner: three ran all 40 bats files in one serial `bats` process, and three
+ran one background process per file, as `main` does. The whole matrix then ran
+a second time. Run
 [43203256575](https://github.com/bestdan/workflow-skills/actions/runs/43203256575),
 attempts 1 and 2. Job duration, with the `test-shell.sh` step in brackets:
 
@@ -266,7 +267,7 @@ attempt 2   serial     445s (424)   397s (374)   332s (313)
 | M2 Pro, 5   | 239s (one run)       | 104s (one run)       |
 
 On the M1 runner the slowest per-file run (268s) beat the fastest serial run
-(332s), so the gain is outside run-to-run noise, and all twelve jobs passed.
+(332s), so the gain is outside run-to-run noise, and all twelve CI jobs passed.
 The spread within one arm on one runner type is still 90–150s, and the runner
 type alone moves a run by about as much. A single macOS duration therefore
 says little: one before/after pair can show either sign.
@@ -276,12 +277,12 @@ per file 3m31s–4m57s). What it costs is latency per test. `bats --timing`
 showed no serial test over 5s; per file, 23 to 92 tests per M1 run took over
 10s, and the slowest took 61s against 3.6s serial
 (`test/guard-foreign-worktree.bats`). Summed over every test, attempt 1 on M1
-came to 2215–3581s per file against 276–357s serial, about ten times. Nothing
+came to 2215–3581s per file against 276–357s serial, 6 to 13 times as much. Nothing
 failed. The 5s budget in `test/await-pr-review.bats` that concurrency broke on
 a workstation (see [the wall-clock hazard](#the-wall-clock-hazard)) is now
 `LAND_TIMEOUT=60`, and that file's slowest test took 9.1s. A new bats test
-with an elapsed-time bound has to hold on a 3-core runner running 41 jobs at
-once: the 40 bats files and the orchestrator suite.
+with an elapsed-time bound has to hold on a 3-core runner running 41
+processes at once: the 40 bats files and the orchestrator suite.
 
 ## The wall-clock hazard
 
