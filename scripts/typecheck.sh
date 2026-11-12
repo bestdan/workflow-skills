@@ -141,6 +141,7 @@ CONSUMER_PYTHON=3.9
 DEV_FILES=(
   scripts/build-copilot-instructions.py
   scripts/bump-version.py
+  scripts/check-cache.py
   scripts/check-timings.py
   scripts/eval-triage.py
   scripts/plan-graph.py

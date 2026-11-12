@@ -284,8 +284,41 @@ Ranked by what they would buy:
 3. **Contention.** About 140 jobs start at once on 18 cores, and sys time
    exceeds user time. Capping concurrency is unmeasured; settle it with an
    interleaved A/B before adopting it.
-4. **Not running at all.** Skipping a re-run on a tree unchanged since the last
-   green run is #1486.
+
+## Skipping an unchanged tree
+
+A repeat run on a tree that already passed the full gate does not run again.
+After a green full run, `scripts/check.sh` stores a fingerprint in
+`check-green.json` in the worktree's own git dir, never tracked; a later run
+whose fingerprint matches prints
+`check.sh: OK (tree unchanged since the last green full run at <time>)` and
+exits 0 in under a second, against about 200s for the run it skips. Common
+cases: a re-check before pushing, an amend that only rewords the commit, and a
+second agent in the same worktree.
+
+The fingerprint, computed by `scripts/check-cache.py`, covers:
+
+- the working tree as `git add -A` would stage it: tracked edits and untracked,
+  non-ignored files, built in a temporary index so the real one is untouched.
+  Staging and committing do not change it, and pins in tracked files
+  (`mise.toml`, the mypy pin) come with the tree.
+- what the gate reads from outside the tree: the installed `claude` version,
+  the agent-guidance plugin copy, `python3 --version`, and whether the run is
+  inside Claude Code's sandbox, where some suites skip.
+
+Only a full run stores it, and only when the tree still matches at the end, so
+a file edited while the gate ran is not recorded as green. A green full run
+satisfies a later `--fast` or `--base` run too, since both only drop checks.
+`--with-evals` and CI (`GITHUB_ACTIONS` or `CI` set) never use it.
+`--no-cache` or `CHECK_NO_CACHE=1` forces a run, and a forced green run
+still refreshes the record.
+
+The fingerprint does not cover tools that resolve outside the tree and are not
+listed above, such as the `dprint` or `uv` on PATH. After upgrading one of
+those, run with `--no-cache`.
+
+Choosing checks from the diff against `main` is out of scope: it needs a map
+from each file to the checks that read it, and that map is a heuristic.
 
 ## Timing warnings
 
