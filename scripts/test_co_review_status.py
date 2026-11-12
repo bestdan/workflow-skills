@@ -66,7 +66,9 @@ class FakeGh:
         )
 
 
-class StatusTests(unittest.TestCase):
+class StatusCase(unittest.TestCase):
+    """Helpers for the in-process cases; holds no tests of its own."""
+
     def setUp(self):
         patcher = without_owner_list()
         patcher.start()
@@ -90,6 +92,8 @@ class StatusTests(unittest.TestCase):
             args += [f"--{key.replace('_', '-')}", value]
         return args
 
+
+class StatusTests(StatusCase):
     def test_each_state_posts_the_co_review_context_on_the_sha(self):
         for state in ("pending", "success", "failure"):
             with self.subTest(state=state):
@@ -197,7 +201,7 @@ class StatusTests(unittest.TestCase):
         self.assertNotIn("Traceback", out)
 
 
-class OwnerListTests(StatusTests):
+class OwnerListTests(StatusCase):
     def test_an_unset_or_blank_list_posts_everywhere(self):
         for raw in (None, "", " , "):
             with self.subTest(raw=raw):

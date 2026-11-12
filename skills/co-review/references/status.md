@@ -20,6 +20,8 @@ ignored) is set; unset or empty, every repo gets it. Outside the list the
 status is a check no lander reads, on someone else's PRs. The scripts apply
 the list themselves, so make the calls below as usual: an unlisted repo comes
 back as exit 3 with nothing posted, and carrying is refused the same way.
+A repo whose ruleset requires the `co-review` check needs its owner on the
+list, or every PR there waits on a check that is never posted.
 
 - **`pending`** once step 3's pre-flights have passed, before the bot wait and
   before any reviewer is dispatched. Posting after the pre-flights rather than
@@ -107,7 +109,8 @@ head in the record, and posts `success` on the fix commit described as
 - **Exit 0** prints `CARRY: carried from=<short> to=<short> …`. Put
   `status ✅ carried to <short>` on the Next round section's fix-commit line.
 - **Exit 3** prints `CARRY: refused reason=<why>` and wrote nothing. Put
-  `status ➖ not carried — <why>` there; the fix commit waits for a round.
+  `status ➖ not carried — <why>` there; the fix commit waits for a round,
+  except on an unlisted owner's repo, where no round posts one.
 - **Exit 1** is a failed GitHub call, a warning like the others:
   `status ❌ not carried — <reason>`. Don't retry in a loop.
 
