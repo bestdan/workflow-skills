@@ -82,6 +82,12 @@ class SelectTest(unittest.TestCase):
     def test_an_unnamed_dev_docs_file_selects_nothing(self) -> None:
         self.assertEqual(pick("dev_docs/notes.md"), set())
 
+    def test_a_dev_docs_file_a_test_names_selects_that_test(self) -> None:
+        tree = dict(TREE, **{"scripts/test-other.sh": "grep rule dev_docs/design.md"})
+        self.assertEqual(
+            cs.select(["dev_docs/design.md"], tree), {"scripts/test-other.sh"}
+        )
+
     def test_an_unnamed_file_needs_the_full_gate(self) -> None:
         for path in ("scripts/orphan.sh", "hooks/new-hook.json", "docs/notes.txt"):
             with self.subTest(path=path):

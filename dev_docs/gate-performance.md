@@ -347,22 +347,32 @@ This is a heuristic, and it is safe only as an edit loop. Plain `just check`
 and CI always run the full gate, so a selection that misses a dependency costs
 a red CI run, never a bad merge.
 
-Measured before it was built (#1492), by replaying the last 100 merged PRs
-against the rules on the 18-core Mac, 2026-11-12:
+Replaying the last 100 merged PRs through `select()` as shipped, on the
+18-core Mac, 2026-11-12: 74 got a subset, 16 the full gate (11 for
+infrastructure, 5 for a file no test names), and 10 touched only `dev_docs/`.
+The subset runs selected a median of 13 of 136 units and took a median of
+142s against 204s for the full gate, about 127 minutes saved over the 100.
+32 of the 74 finished within 60s; a trial run after a one-line edit to
+`scripts/check-cache.py` selected one unit and took 11s. The times are upper
+bounds, taken from one run with every unit in parallel; a subset runs with less
+contention.
 
-| Selection rule                             | Test units (median, of 136) | Wall time (median) |
-| ------------------------------------------ | --------------------------- | ------------------ |
-| A test names the file                      | 3                           | 20s                |
-| That, plus the package and skill rules     | 4                           | 36s                |
-| Follow every chain of files naming another | 121                         | 167s               |
+The median is high because four bats files of 142–167s each
+(`guard-pinned-branch`, `worktree-create-hook`, `co-review-ledger-sync`,
+`utilities`) are selected often, mostly through the directory rule matching a
+skill's bare directory name such as `references`. Narrowing that rule for
+markdown would cut the median to about 41s, but tests reach markdown without
+naming it in at least three ways: a glob of `reviewers/*.md`, an
+`os.path.join(..., "references", "threads.md")`, and a recursive grep of a
+skill directory. So the selector keeps the broad rule, and the time comes back
+by splitting those files (#1496), which shortens both modes. Tightening the
+rule later needs its own replay, measured against the files each test
+actually opens rather than against name matches.
 
-82 of the 100 PRs got a subset; 10 touched only `dev_docs/` and 8 touched
-gate infrastructure. The times are upper bounds, taken from one run with every
-unit in parallel; a subset runs with less contention. A trial run after a
-one-line edit to `scripts/check-cache.py` selected one unit and took 11s.
-Following chains selects nearly everything, so the selector never does. The
-package rule exists because Python tests import a module by name rather than
-naming its file.
+Before it was built (#1492), simpler rules simulated on the same PRs gave
+lower figures: 3 units and 20s when only tests naming the file count, 4 units
+and 36s with the package and skill rules. Following every chain of files that
+name each other selected 121 units, so the selector never does.
 
 Replaying the 12 failed CI runs whose logs carry the current
 `check.sh: FAIL (...)` summary, the selection missed 5 failing units and caught
@@ -370,10 +380,6 @@ Replaying the 12 failed CI runs whose logs carry the current
 wall-clock and launchctl failures, and one `test-local-review.sh` that could not
 bind its address. That sample is small, which is the main reason this stays an
 edit loop rather than becoming the gate.
-
-Still slow under selection: 23 of the 82 subset PRs took over 120s, because they
-touched the subject of one of the slow bats files above. Splitting those files
-helps both modes.
 
 ## Timing warnings
 
