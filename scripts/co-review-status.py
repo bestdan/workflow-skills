@@ -18,8 +18,8 @@ On success prints exactly one line, `STATUS: <state> sha=<short> url=<url>`,
 and exits 0. `<url>` is the status's `target_url` when one was given, else the
 API URL of the status itself. A `gh` failure prints `STATUS: error sha=<short>
 reason=<reason>` and exits 1. A usage error (including a SHA that is not 40
-lowercase hex) exits 2 before any `gh` call. /co-review treats every non-zero
-exit as a warning on its run summary, never as a failed run.
+lowercase hex) exits 2 before any `gh` call. /co-review treats exit 1 and 2 as
+a warning on its run summary, never as a failed run.
 
 `WORKFLOW_SKILLS_CO_REVIEW_STATUS_OWNERS`, a comma-separated list of GitHub
 owners, limits the status to repos those owners hold. Unset or empty, it is
