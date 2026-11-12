@@ -15,10 +15,10 @@ gap, described below, between the units' CPU alone and the full run's. What
 that gap is remains unmeasured. What has moved the gate so far is starting
 fewer processes (#1505).
 
-All measurements are from the 18-core work laptop (host `NYC-BETTERMENT*`),
-unsandboxed, on 2026-11-12. Process starts there hit a ceiling for the whole
-machine. CrowdStrike Falcon, which vets every launch, is the likely cause; no
-run compared this machine with and without it.
+All measurements are from the 18-core work laptop, unsandboxed, on
+2026-11-12. Process starts there hit a ceiling for the whole machine.
+CrowdStrike Falcon, which vets every launch, is the likely cause; no run
+compared this machine with and without it.
 
 ## Question
 
