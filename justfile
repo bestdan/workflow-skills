@@ -22,6 +22,11 @@ check:
 check-fast:
     scripts/check.sh --fast
 
+# Runs the cheap checks and only the test units this branch's diff can reach
+# (scripts/check-select.py). NOT the gate: `just check` still runs before pushing.
+check-changed:
+    scripts/check.sh --changed
+
 # Auto-format all files with dprint and shfmt.
 fmt:
     dprint fmt --incremental=false

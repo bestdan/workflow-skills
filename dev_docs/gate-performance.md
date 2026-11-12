@@ -309,7 +309,8 @@ The fingerprint, computed by `scripts/check-cache.py`, covers:
 
 Only a full run stores it, and only when the tree still matches at the end, so
 a file edited while the gate ran is not recorded as green. A green full run
-satisfies a later `--fast` or `--base` run too, since both only drop checks.
+satisfies a later `--fast`, `--changed` or `--base` run too, since each only
+drops checks.
 `--with-evals` and CI (`GITHUB_ACTIONS` or `CI` set) never use it.
 `--no-cache` or `CHECK_NO_CACHE=1` forces a run, and a forced green run
 still refreshes the record.
@@ -327,8 +328,50 @@ one, run with `--no-cache` too:
 - **Uncommitted edits inside a submodule.** The `test/vendor/bats-*` checkouts
   count only by the commit each one is on.
 
-Choosing checks from the diff against `main` is out of scope: it needs a map
-from each file to the checks that read it, and that map is a heuristic.
+## Choosing checks from the diff
+
+`just check-changed` (`scripts/check.sh --changed`) runs the cheap checks and
+only the test units this branch's diff can reach. A test unit is one job of the
+full gate: a `test/*.bats` file, a `scripts/test-*.sh` harness, or the
+orchestrator suite. `scripts/check-select.py` picks them, and its docstring has
+the rules. In short, a changed file selects every test that names it, by file
+name, by the unittest file a wrapper runs, or by the package directory a Python
+module sits in. A change under `skills/`, `commands/` or `agents/` adds
+`test-validate.sh`. The run is the full gate instead when the diff touches gate
+infrastructure (`check.sh`, `scripts/lib/`, the bats helper, `mise.toml`…) or
+code that no test names.
+
+This is a heuristic, and it is safe only as an edit loop. Plain `just check`
+and CI always run the full gate, so a selection that misses a dependency costs
+a red CI run, never a bad merge.
+
+Measured before it was built (#1492), by replaying the last 100 merged PRs
+against the rules on the 18-core Mac, 2026-11-12:
+
+| Selection rule                             | Test units (median, of 136) | Wall time (median) |
+| ------------------------------------------ | --------------------------- | ------------------ |
+| A test names the file                      | 3                           | 20s                |
+| That, plus the package and skill rules     | 4                           | 36s                |
+| Follow every chain of files naming another | 121                         | 167s               |
+
+82 of the 100 PRs got a subset; 10 touched only `dev_docs/` and 8 touched
+gate infrastructure. The times are upper bounds, taken from one run with every
+unit in parallel; a subset runs with less contention. A trial run after a
+one-line edit to `scripts/check-cache.py` selected one unit and took 11s.
+Following chains selects nearly everything, so the selector never does. The
+package rule exists because Python tests import a module by name rather than
+naming its file.
+
+Replaying the 12 failed CI runs whose logs carry the current
+`check.sh: FAIL (...)` summary, the selection missed 5 failing units and caught
+3. All 5 misses were unrelated to their diffs: four `test-spawn-orchestrator.sh`
+wall-clock and launchctl failures, and one `test-local-review.sh` that could not
+bind its address. That sample is small, which is the main reason this stays an
+edit loop rather than becoming the gate.
+
+Still slow under selection: 23 of the 82 subset PRs took over 120s, because they
+touched the subject of one of the slow bats files above. Splitting those files
+helps both modes.
 
 ## Timing warnings
 
