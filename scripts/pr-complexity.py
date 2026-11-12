@@ -19,8 +19,7 @@ drops generated files and lockfiles, and measures what is left:
 
 rounded half-up to a whole number, and placed in one of four size bands by
 default: `small` below 30, `medium` 30-59, `large` 60-79, `very-large` 80 and
-up. The first two cuts match mobile's Low/Moderate/High bands, so a `small` or
-`medium` diff here reads the same there.
+up.
 
 A diff of 3000 or more reviewable lines is also `very-large`, whatever its
 score. The R, F and H terms reach their caps at 2000 lines, 14 files and 20
@@ -29,14 +28,9 @@ hunks, so a diff confined to one top-level directory (P = 1) can score at most
 30,000-line change in one app would read `large`. The output's `by=` field
 says which trigger set the size.
 
-R, F, P and H and their terms match Betterment/mobile's measure-pr-complexity
-action, as read in 2026-11, except that the generated rules below exclude more
-than mobile does, so R, F, P and H can read lower here for the same diff. That
-comparison is not kept in sync, so re-check mobile before relying on it. E is
-the one departure: mobile leaves it to the reviewer's judgment, because
-"feature" and "refactor" cannot be told apart from a path. Here it is
-classified from paths alone, with feature and refactor merged into one `code`
-category, so the whole score is deterministic.
+E is classified from paths alone. "Feature" and "refactor" cannot be told
+apart from a path, so they are merged into one `code` category, which keeps
+the whole score deterministic.
 
 A file counts as generated, and is left out of every term, when any of these
 hold:
