@@ -7,10 +7,10 @@ Day-to-day contributing doesn't require any of this — see
 [`CONTRIBUTING.md`](../CONTRIBUTING.md). Read this before trying to speed the
 gate up, or before adding concurrency anywhere in it.
 
-Two machines appear here, and each measurement names its own: an 18-core Mac
-(how most sessions run the gate) and a 4-core Intel Xeon @ 2.80GHz Linux box,
-which the sections on the orchestrator split and ShellCheck were measured on.
-CI's `macos-latest` runner appears once, in
+Each measurement here names its machine: an 18-core Mac (how most sessions run
+the gate), a 4-core Intel Xeon @ 2.80GHz Linux box, which the sections on the
+orchestrator split and ShellCheck were measured on, and CI's `macos-latest`
+runners, which appear once, in
 [the bats fan-out on CI](#the-bats-fan-out-on-the-macos-ci-runner).
 All runs are warm (the mypy pin already fetched, the dprint plugins already
 compiled). Times on your machine will differ; the ratios are what travel.
@@ -227,6 +227,18 @@ if it finished inside the orchestrator suite, and at 40 files it does not; the
 [timing warnings](#timing-warnings) are how a check that grows onto the critical
 path gets noticed.
 
+**The split's own concurrency.** The driver running its parts concurrently
+versus serially, interleaved A/B of the full `check.sh`, measured on the 4-core
+Linux box while bats still ran serially:
+
+```
+driver concurrent   42.7s  43.5s  43.6s
+driver serial       65.2s  69.5s  68.2s
+```
+
+That one is not close. The concurrency inside the driver is load-bearing and
+pays for the ~1s of extra fixture setup each part costs.
+
 ### The bats fan-out on the macOS CI runner
 
 CI's `macos` job runs only `scripts/test-shell.sh`, on a runner far smaller
@@ -263,24 +275,13 @@ Per file costs no extra CPU there (attempt 1 on M1: serial 3m57s–4m33s user,
 per file 3m31s–4m57s). What it costs is latency per test. `bats --timing`
 showed no serial test over 5s; per file, 23 to 92 tests per M1 run took over
 10s, and the slowest took 61s against 3.6s serial
-(`test/guard-foreign-worktree.bats`). Nothing failed. The bound that broke
-before, in `test/await-pr-review.bats`, is now `LAND_TIMEOUT=60`, and that
-file's slowest test took 9.1s. That is the
-[wall-clock hazard](#the-wall-clock-hazard) at roughly ten times the
-workstation's scale, so a new bats test with an elapsed-time bound has to hold
-on a 3-core runner running 41 jobs.
-
-**The split's own concurrency.** The driver running its parts concurrently
-versus serially, interleaved A/B of the full `check.sh`, measured on the 4-core
-Linux box while bats still ran serially:
-
-```
-driver concurrent   42.7s  43.5s  43.6s
-driver serial       65.2s  69.5s  68.2s
-```
-
-That one is not close. The concurrency inside the driver is load-bearing and
-pays for the ~1s of extra fixture setup each part costs.
+(`test/guard-foreign-worktree.bats`). Summed over every test, attempt 1 on M1
+came to 2215–3581s per file against 276–357s serial, about ten times. Nothing
+failed. The 5s budget in `test/await-pr-review.bats` that concurrency broke on
+a workstation (see [the wall-clock hazard](#the-wall-clock-hazard)) is now
+`LAND_TIMEOUT=60`, and that file's slowest test took 9.1s. A new bats test
+with an elapsed-time bound has to hold on a 3-core runner running 41 jobs at
+once: the 40 bats files and the orchestrator suite.
 
 ## The wall-clock hazard
 
