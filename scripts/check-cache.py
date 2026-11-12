@@ -48,9 +48,9 @@ FORMAT = "check-cache-v2"
 def _run(args: List[str], env: Optional[dict] = None) -> Optional[str]:
     try:
         out = subprocess.run(
-            args, capture_output=True, text=True, env=env, check=True
+            args, capture_output=True, text=True, env=env, check=True, timeout=30
         ).stdout
-    except (OSError, subprocess.CalledProcessError):
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return None
     return out.strip()
 

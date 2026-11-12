@@ -292,7 +292,8 @@ After a green full run, `scripts/check.sh` stores a fingerprint in
 `check-green.json` in the worktree's own git dir, never tracked; a later run
 whose fingerprint matches prints
 `check.sh: OK (tree unchanged since the last green full run at <time>)` and
-exits 0 in under a second, against about 200s for the run it skips. Common
+exits 0 in under a second, against about 200s for the run it skips (both on
+the 18-core Mac, unsandboxed, 2026-11-11). Common
 cases: a re-check before pushing, an amend that only rewords the commit, and a
 second agent in the same worktree.
 
@@ -317,6 +318,14 @@ The fingerprint does not cover tools that resolve outside the tree and are not
 listed above: `uv`, and `dprint`, `shellcheck` or `shfmt` when they come from
 PATH rather than the `mise.toml` pins, which the tree covers. After upgrading one of
 those, run with `--no-cache`.
+
+It does not cover two kinds of file inside the tree either, and after editing
+one, run with `--no-cache` too:
+
+- **Ignored files the gate reads.** `validate.py` checks the task cards in
+  `dev_docs/tasks/`, which `.gitignore` excludes.
+- **Uncommitted edits inside a submodule.** The `test/vendor/bats-*` checkouts
+  count only by the commit each one is on.
 
 Choosing checks from the diff against `main` is out of scope: it needs a map
 from each file to the checks that read it, and that map is a heuristic.

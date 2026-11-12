@@ -105,11 +105,16 @@ class CheckCacheTest(unittest.TestCase):
         # data: a same-size rewrite just after a commit kept the old key in
         # about 1 run in 8. Repeat the pattern so a regression shows up.
         for i in range(30):
-            (self.repo / "a.txt").write_text(f"{i}\n")
+            (self.repo / "a.txt").write_text(f"{i % 10}\n")
             git("commit", "-qam", f"c{i}")
             before = self.key()
             (self.repo / "a.txt").write_text(f"{(i + 1) % 10}\n")
             self.assertNotEqual(before, self.key(), f"iteration {i}")
+
+    def test_mode_change_changes_the_key(self) -> None:
+        before = self.key()
+        (self.repo / "a.txt").chmod(0o755)
+        self.assertNotEqual(before, self.key())
 
     def test_real_index_is_untouched(self) -> None:
         (self.repo / "new.txt").write_text("x\n")
