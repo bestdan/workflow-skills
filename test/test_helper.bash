@@ -47,16 +47,17 @@ pin_git_env() {
   export GIT_CONFIG_SYSTEM=/dev/null
   # Symmetry insurance, not a live fix: unlike the shell suites, this file has
   # no repo-local fallback if mktemp -d fails (setup just fails loudly), so
-  # TEST_TMPDIR is already safer by construction. A ceiling only stops a
-  # discovery walk that would cross TEST_TMPDIR; it's inert for git ops
+  # the directory passed in (setup_test's mktemp TEST_TMPDIR, or bats' own
+  # BATS_FILE_TMPDIR) is already safer by construction. A ceiling only stops
+  # a discovery walk that would cross that directory; it's inert for git ops
   # against REPO_ROOT, which find .git at depth zero.
   export GIT_CEILING_DIRECTORIES="$1"
 }
 
 # json_string <s> — sets REPLY to <s> as a JSON string literal. A hook payload
 # built this way costs no process, where a python3 builder costs one per hook
-# call; process creation, not CPU, is what bounds the gate on macOS
-# (dev_docs/gate-performance.md). Refuses control characters other than \n,
+# call; process creation, not CPU, is what bounds the gate on the
+# Falcon-equipped work laptop (dev_docs/gate-performance.md). Refuses control characters other than \n,
 # \t and \r rather than emitting invalid JSON.
 json_string() {
   local s=$1 bs='\' q='"'

@@ -316,7 +316,8 @@ shape.
 ## What the bottleneck is now
 
 It depends on the machine. On the 18-core work laptop it is process creation,
-machine-wide, because CrowdStrike Falcon vets every launch. There the full gate
+machine-wide, and the evidence points at CrowdStrike Falcon, which vets every
+launch. There the full gate
 is bounded by how many processes the whole run starts, not by its slowest file,
 so splitting a file buys nothing. On machines without Falcon, process starts
 scale with the cores, and the slowest file can still be the bound. The
@@ -325,8 +326,8 @@ laptop's measurements, all unsandboxed, 2026-11-12:
 - **The gate leaves the cores idle.** A full run took 181s wall for 227s user
   and 340s sys: about 3 of 18 cores busy on average, with sys above user.
 - **Process starts hit a ceiling.** N concurrent loops of `/usr/bin/true`
-  reach about 620 starts/s in total, flat from N=9 to N=72; `python3 -c pass`
-  flattens at about 375/s from the same N=9. One loop alone manages only
+  level off at 580–720 starts/s in total from N=9 up to N=72;
+  `python3 -c pass` levels off at about 375/s from the same N=9. One loop alone manages only
   272 starts/s.
 - **Running the bats files in parallel barely beats running them in series.**
   The 40 files run one after another took 293s; `scripts/test-shell.sh` runs
@@ -336,7 +337,8 @@ laptop's measurements, all unsandboxed, 2026-11-12:
   167s in the full gate. Inside each slow file the cost is spread evenly
   (median 0.5–1.4s a test), so no single test dominates.
 
-The ceiling is Falcon's. The laptop runs it as an Endpoint Security extension
+The ceiling is most likely Falcon's, though no run has compared one machine
+with and without it. The laptop runs Falcon as an Endpoint Security extension
 (`com.crowdstrike.falcon.Agent` 8.10 in `systemextensionsctl list`). The same
 `/usr/bin/true` benchmark on three machines without it, 2026-11-12, unsandboxed:
 
@@ -349,7 +351,7 @@ The ceiling is Falcon's. The laptop runs it as an Endpoint Security extension
 
 Figures are total starts/s. Without Falcon, throughput climbs to about the core
 count and holds there, 5–21 times the laptop's ceiling, and even a single loop
-runs about three times faster. The gate's wall time on those machines has not
+runs 2.8–4.2 times faster. The gate's wall time on those machines has not
 been measured. The benchmark is in PR #1505's comments.
 
 What moves the gate on the laptop is starting fewer processes, wherever they
