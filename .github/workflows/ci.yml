@@ -147,6 +147,12 @@ jobs:
     # output then reads as not-shell-free, so every failure runs the suites.
     if: ${{ !cancelled() && needs.changes.outputs.shell_free != 'true' }}
     runs-on: macos-latest
+    # MEASUREMENT ONLY (#1452): three runs per arm, on separate runners.
+    strategy:
+      fail-fast: false
+      matrix:
+        arm: [serial, fanout]
+        rep: [1, 2, 3]
     # A normal run is 5-7 minutes; see the quality job's timeout.
     timeout-minutes: 20
     steps:
@@ -202,7 +208,10 @@ jobs:
         env:
           SO_TEST_REQUIRE_SEATBELT: 1
           SO_TEST_REQUIRE_BASH3: 1
-        run: /bin/bash scripts/test-shell.sh
+          TEST_SHELL_BATS_SERIAL: ${{ matrix.arm == 'serial' && '1' || '0' }}
+        run: |
+          sysctl -n hw.ncpu hw.memsize machdep.cpu.brand_string
+          time /bin/bash scripts/test-shell.sh
 
   # NOTE: a relative-link-integrity job (lychee --offline) was intentionally
   # dropped — the shipped docs (README, skills, commands, agents) contain no

@@ -58,10 +58,15 @@ run() {
 # test/await-pr-review.bats past its budget, see 1ddb13e), so a test that
 # measures itself against elapsed time must be made time-independent, not
 # given a serial run.
-for suite in test/*.bats; do
-  [ -f "$suite" ] || continue
-  run test/vendor/bats-core/bin/bats "$suite"
-done
+if [ "${TEST_SHELL_BATS_SERIAL:-0}" = 1 ]; then
+  # MEASUREMENT ONLY (#1452): the pre-#1488 full-run shape, one serial process.
+  run test/vendor/bats-core/bin/bats --timing test/*.bats
+else
+  for suite in test/*.bats; do
+    [ -f "$suite" ] || continue
+    run test/vendor/bats-core/bin/bats --timing "$suite"
+  done
+fi
 if [ "$fast" -eq 0 ]; then
   # Scheduled LAST because the replay loop below is strictly index-ordered and
   # this is one of the longest jobs: anything after it would have its output
