@@ -31,3 +31,18 @@ patched. Do not downgrade below it.
 The sha256 above was recorded when the file was vendored. It proves the file
 has not changed since; it does not independently establish that the fetched
 artifact was authentic.
+
+vendor/pele.global.js is Pele v1.12.0 (https://github.com/obsidianmd/pele),
+(c) 2026 kepano, MIT licensed, which renders preview's mermaid fences. Its
+full upstream LICENSE, including the ISC notice for the Lucide icon it
+bundles, is retained in vendor/LICENSE.
+
+  version: 1.12.0
+  file:    dist/pele.global.js from the npm package
+  size:    730358 bytes
+  sha256:  787ed66bb4bd56c15e224109ff5b89ed395ebfacf71fae2c0ccad1f86d6e24ef
+
+pele returns an SVG string. The page never parses it: it goes only into an
+<iframe sandbox=""> with a fetch-blocking CSP, so a pele sanitizer bug yields
+a wrong drawing, not script in the page that holds the review token. Keep it
+that way when replacing this file — never assign its output as HTML here.

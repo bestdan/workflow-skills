@@ -136,6 +136,20 @@ the cost of `highlightAuto` running every vendored grammar over a body a fork
 PR chooses. See [`../local-review.md`](../local-review.md) for the current
 posture and the measurements.
 
+### Mermaid fences
+
+**Added later.** A `mermaid` fence is drawn by the vendored Pele. That is the
+one place this design admits an SVG and an HTML parse. Neither happens in this
+document. Pele's SVG string goes only into the `srcdoc` of an
+`<iframe sandbox="">`, a frame with no scripts, an opaque origin, no forms,
+popups or top navigation, and a `default-src 'none'` CSP. The invariant above
+is about the page that holds the token. A parse in a frame that can neither run
+code nor read that page is outside the invariant, not an exception to it. The
+diagram's source stays one toggle away, and it opens by default when it holds
+`%%` comments or `accTitle`/`accDescr` text that the drawing would hide (see
+_What the reviewer must be able to see_). Current posture:
+[`../local-review.md`](../local-review.md).
+
 ### Frontmatter
 
 Recognized only as a `---` line at offset 0 with a matching closing `---`; an

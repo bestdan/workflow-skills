@@ -179,8 +179,8 @@ Split diff by file, per-file and per-section collapse, syntax highlighting
 (language auto-detected per file). A file with nothing on one side — a new
 file, a deletion, a pure append — opens in **Single** instead, dropping the
 empty column. A newly added markdown file opens in **Preview**, rendered as a
-document; clicking any block (a list item, a table row, a paragraph) comments
-on it. A **Split | Single | Preview** control in the file header switches
+document, with `mermaid` fences drawn as diagrams; clicking any block (a list
+item, a table row, a paragraph, a diagram's header bar) comments on it. A **Split | Single | Preview** control in the file header switches
 between whichever modes a given file allows. The user:
 
 - Clicks a line to add a comment; a saved comment has **✎ edit** and **×**
