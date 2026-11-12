@@ -315,9 +315,9 @@ satisfies a later `--fast` or `--base` run too, since both only drop checks.
 still refreshes the record.
 
 The fingerprint does not cover tools that resolve outside the tree and are not
-listed above: `uv`, and `dprint`, `shellcheck` or `shfmt` when they come from
-PATH rather than the `mise.toml` pins, which the tree covers. After upgrading one of
-those, run with `--no-cache`.
+listed above: `uv`, and `dprint`, `node`, `shellcheck` or `shfmt` when they
+come from PATH rather than the `mise.toml` pins, which the tree covers. After
+upgrading one of those, run with `--no-cache`.
 
 It does not cover two kinds of file inside the tree either, and after editing
 one, run with `--no-cache` too:
