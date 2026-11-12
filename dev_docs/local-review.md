@@ -86,10 +86,12 @@ additive across fences. A `mermaid` fence is drawn as a diagram by the
 vendored Pele. Pele's output is an SVG string, so it is parsed only inside an
 `<iframe sandbox="">`: no scripts, an opaque origin, and a CSP in the frame
 document that blocks every fetch (`default-src 'none'`, with inline styles
-allowed). Output carrying a link, refresh or base element is refused, and a
-document draws at most 50 diagrams or 200 KiB of diagram source. The page itself never parses it. That frame is the
-one exception to the closed set of sinks, and it holds because nothing in the
-frame can run or read the token. The fence stays one comment target, and its
+allowed). The page itself never parses the SVG. That frame is the one
+exception to the closed set of sinks, and it holds because nothing in the
+frame can run or read the token. Output carrying a link, refresh or base
+element is refused, and a document draws at most 50 diagrams or 200 KiB of
+diagram source; a fence that reaches Pele spends its share whether or not it
+draws. The fence stays one comment target, and its
 source is a toggle away. The source opens by default when it carries `%%`
 comments or `accTitle`/`accDescr` text, which the drawing would hide. If Pele
 is missing or fails, the fence renders as plain code. The server sends

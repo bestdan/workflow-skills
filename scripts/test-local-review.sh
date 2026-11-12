@@ -650,6 +650,27 @@ _svg_sinks = [ln.strip() for ln in server.PAGE.split("\n")
 check("build_page: the sandbox frame is the only place a diagram's SVG is parsed",
       "frame.setAttribute('sandbox', '');" in server.PAGE and not _svg_sinks,
       _svg_sinks or "sandbox attribute line missing")
+# The per-line check above misses an alias (`const s = r.svg; el.innerHTML = s`)
+# or a split line, so the diagram code itself carries no HTML sink at all.
+_diagram_region = server.PAGE.split("function diagramDoc(", 1)[1].split("function materialize(", 1)[0]
+_region_sinks = _svg_re.findall(
+    r"innerHTML|outerHTML|insertAdjacentHTML|DOMParser|createContextualFragment|document\.write",
+    _diagram_region)
+check("build_page: the diagram code uses no HTML parser sink at all",
+      not _region_sinks, _region_sinks)
+# The pure-region tests call the budget and the unsafe-SVG check directly, and
+# materializeDiagram needs a DOM this harness lacks, so pin the wiring in the
+# source: renderPreview shares one budget per document, and materializeDiagram
+# spends it before rendering and applies the unsafe check to the output.
+_render_preview = server.PAGE.split("function renderPreview(", 1)[1].split("\nfunction ", 1)[0]
+_materialize_diagram = server.PAGE.split("function materializeDiagram(", 1)[1].split("\nfunction ", 1)[0]
+check("build_page: renderPreview gives each document one shared diagram budget",
+      "diagrams: newDiagramBudget()" in _render_preview, "ctx.diagrams not set in renderPreview")
+check("build_page: materializeDiagram spends the budget before it calls pele.render",
+      0 <= _materialize_diagram.find("spendDiagramBudget(") < _materialize_diagram.find("pele.render("),
+      "budget not spent before the render")
+check("build_page: materializeDiagram refuses unsafe output before drawing it",
+      "DIAGRAM_UNSAFE_SVG.test(r.svg)" in _materialize_diagram, "unsafe-SVG check not applied")
 
 # --- build_page: meta['url'] is escaped before landing in the href ----------
 evil_meta = {"title": "t", "url": '"><script>alert(2)</script>', "number": 1}
@@ -3172,7 +3193,8 @@ out.hiddenText = ['%% note\nflowchart LR', 'flowchart LR\n  accTitle: x', 'flowc
   .map(s => DIAGRAM_HIDDEN_TEXT.test(s));
 
 // The per-document budget: the count cap and the character cap each stop
-// drawing, and a refused fence spends nothing.
+// drawing, and a fence the budget refuses spends nothing. (A fence that
+// reaches Pele spends its share whether or not it draws; see server.py.)
 const byCount = newDiagramBudget();
 let drawn = 0;
 for(let i = 0; i < DIAGRAM_MAX_COUNT + 5; i++) if(spendDiagramBudget(byCount, 'flowchart LR\n A-->B')) drawn++;

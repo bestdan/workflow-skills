@@ -1374,7 +1374,9 @@ const DIAGRAM_HIDDEN_TEXT = /^\s*(%%|accTitle|accDescr)/m;
 // adds up across fences, the same shape that keeps highlightAuto out: a
 // 512 KiB document holds ~10 maximal fences (~2.5s of synchronous layout) or
 // thousands of tiny ones, each a frame document. Past this budget a fence
-// stays plain code, labelled.
+// stays plain code, labelled. A fence that reaches Pele spends its share even
+// when the render throws or is refused: the work was done either way, and
+// refunding it would let fences that throw buy the stall back.
 const DIAGRAM_MAX_COUNT = 50;
 const DIAGRAM_MAX_CHARS = 200 * 1024;
 function newDiagramBudget(){ return {count: 0, chars: 0}; }
