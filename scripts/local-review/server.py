@@ -646,6 +646,12 @@ main{max-width:1180px;margin:0 auto;padding:18px}
 .md-target{cursor:pointer;border-radius:3px}
 .md-target:hover{background:var(--accent-bg);box-shadow:0 0 0 3px var(--accent-bg)}
 .md-cmt{margin:.5em 0;border-radius:6px}
+.md-diagram{margin:.7em 0;border:1px solid var(--border);border-radius:6px;padding:8px 10px;
+  background:var(--surface)}
+.md-diagram-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  font-size:11.5px;color:var(--dim);margin-bottom:6px}
+.md-diagram-frame{display:block;width:100%;border:0}
+.md-diagram .md-code{margin:8px 0 0}
 .num{font-family:var(--mono);font-size:12px;color:var(--dim);text-align:right;padding:1px 8px;
   user-select:none;border-right:1px solid var(--border);white-space:nowrap}
 .code{font-family:var(--mono);font-size:12.5px;padding:1px 10px;white-space:pre-wrap;word-break:break-word;
@@ -779,6 +785,7 @@ main{max-width:1180px;margin:0 auto;padding:18px}
 <script src="vendor/highlight.min.js"></script>
 <script src="vendor/dart.min.js"></script>
 <script src="vendor/marked.umd.js"></script>
+<script src="vendor/pele.global.js"></script>
 <script>
 const DIFF = /*__DIFF_JSON__*/[];
 const META = /*__META_JSON__*/{};
@@ -1225,7 +1232,11 @@ function describeBlock(t, ln, depth){
       const known = typeof hljs !== 'undefined' && hint && hljs.getLanguage(hint);
       const tree = known ? hlTree(src, hint) : null;
       const kids = tree ? hlNodes(tree) : null;
-      return node('pre', Object.assign({attrs:{class:'md-block md-code'},
+      // A mermaid fence keeps its full source description and is only MARKED
+      // as a diagram; materialize() draws it, and falls back to this same
+      // <pre> when it cannot.
+      const diagram = hint.toLowerCase() === 'mermaid' ? src : null;
+      return node('pre', Object.assign({attrs:{class:'md-block md-code'}, diagram,
         kids:[kids && kids.length ? node('code', {kids}) : node('code', {text: src})]}, span));
     }
     case 'blockquote':
@@ -1347,11 +1358,140 @@ function describe(src){
   return node('div', {attrs:{class:'md-doc'}, kids});
 }
 
+// ---- preview: mermaid fences as diagrams ---------------------------------
+// pele renders mermaid to an SVG *string*, and this page's invariant is that
+// no attacker-derived string reaches an HTML parser in this document. So the
+// string is parsed only inside an <iframe sandbox="">: no scripts, an opaque
+// origin that cannot read this page, its URL or the token, no forms, popups or
+// top navigation, and a CSP that refuses every fetch. Everything else in the
+// frame document is this page's own constant text and theme colors.
+//
+// Mermaid comments and accessibility text are in the file but not in the
+// drawing, so a fence carrying them opens with its source shown.
+const DIAGRAM_HIDDEN_TEXT = /^\s*(%%|accTitle|accDescr)/m;
+
+// Pele caps each fence (50k source chars, 5k edges, 4 MB of SVG), but the cost
+// adds up across fences, the same shape that keeps highlightAuto out: a
+// 512 KiB document holds ~10 maximal fences (~2.5s of synchronous layout) or
+// thousands of tiny ones, each a frame document. Past this budget a fence
+// stays plain code, labelled. A fence that reaches Pele spends its share even
+// when the render throws or is refused: the work was done either way, and
+// refunding it would let fences that throw buy the stall back.
+const DIAGRAM_MAX_COUNT = 50;
+const DIAGRAM_MAX_CHARS = 200 * 1024;
+function newDiagramBudget(){ return {count: 0, chars: 0}; }
+function spendDiagramBudget(budget, src){
+  if(budget.count + 1 > DIAGRAM_MAX_COUNT || budget.chars + src.length > DIAGRAM_MAX_CHARS) return false;
+  budget.count += 1; budget.chars += src.length;
+  return true;
+}
+
+// With links:false Pele emits no link, refresh or base element. One appearing
+// means a Pele bug, and the frame could then navigate itself — an empty
+// sandbox does not stop that and no CSP directive does — so such output is
+// treated as a failed render rather than drawn.
+const DIAGRAM_UNSAFE_SVG = /<(a|meta|base)[\s>\/]/i;
+
+function diagramDoc(svg, colors){
+  const vars = Object.keys(colors).map(k => '--pele-' + k + ':' + colors[k]).join(';');
+  return '<!doctype html><meta charset="utf-8">'
+    + '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'">'
+    + '<meta name="referrer" content="no-referrer">'
+    + '<style>:root{' + vars + '}'
+    + 'html,body{margin:0;height:100%;overflow:hidden;background:var(--pele-bg)}'
+    + 'body>svg{display:block;width:100%!important;height:100%!important;max-width:none!important}</style>'
+    + svg;
+}
+
 // <<< PURE-PREVIEW-END
+
+function diagramAvailable(){
+  return typeof pele !== 'undefined' && typeof pele.render === 'function';
+}
+
+// The page's own theme tokens, read at draw time so the frame matches
+// whichever of light, dark or the OS preference is in force.
+function diagramColors(){
+  const cs = getComputedStyle(document.documentElement);
+  const v = n => cs.getPropertyValue(n).trim();
+  return {bg: v('--surface'), fg: v('--text'), muted: v('--dim'), line: v('--dim'),
+          surface: v('--surface2'), 'surface-alt': v('--bg'), border: v('--border'),
+          accent: v('--accent'), font: v('--ui')};
+}
+
+function refreshDiagramThemes(){
+  const colors = diagramColors();
+  document.querySelectorAll('.md-diagram-frame').forEach(f => {
+    if(f.__svg) f.srcdoc = diagramDoc(f.__svg, colors);
+  });
+}
+
+// One comment target for the whole fence, as a plain fence is. A click inside
+// the frame never reaches this document, so the bar and the source are what
+// open the composer.
+function materializeDiagram(desc, ctx){
+  if(!diagramAvailable()) return null;
+  const src = desc.diagram;
+  const colors = diagramColors();
+  let r = null, err = null;
+  const budget = (ctx && ctx.diagrams) || newDiagramBudget();
+  if(!spendDiagramBudget(budget, src)){
+    err = {message: 'this document has more diagrams than the preview draws'};
+  }else{
+    try{ r = pele.render(src, {links: false, images: false, fontFamily: colors.font}); }
+    catch(e){ err = e; }
+    if(r && typeof r.svg === 'string' && DIAGRAM_UNSAFE_SVG.test(r.svg)){
+      r = null; err = {message: 'the output contained a link or redirect'};
+    }
+  }
+  const wrap = document.createElement('div');
+  wrap.className = 'md-block md-diagram';
+  const bar = document.createElement('div');
+  bar.className = 'md-diagram-bar';
+  const label = document.createElement('span');
+  bar.appendChild(label);
+  wrap.appendChild(bar);
+  const source = materialize(Object.assign({}, desc, {diagram: null, attrs: {class: 'md-code'}}), null);
+  if(r && typeof r.svg === 'string' && r.width > 0 && r.height > 0){
+    const frame = document.createElement('iframe');
+    frame.className = 'md-diagram-frame';
+    // Set before the frame is attached, so its first document already loads
+    // under every restriction.
+    frame.setAttribute('sandbox', '');
+    frame.setAttribute('referrerpolicy', 'no-referrer');
+    frame.title = 'Rendered mermaid diagram';
+    frame.style.maxWidth = r.width + 'px';
+    frame.style.aspectRatio = r.width + ' / ' + r.height;
+    frame.__svg = r.svg;
+    frame.srcdoc = diagramDoc(r.svg, colors);
+    wrap.appendChild(frame);
+    const hidden = DIAGRAM_HIDDEN_TEXT.test(src);
+    label.textContent = hidden
+      ? 'Mermaid diagram — its source has comments or accessibility text the drawing does not show'
+      : 'Mermaid diagram';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn md-diagram-toggle';
+    const show = on => { source.hidden = !on; btn.textContent = on ? 'Hide source' : 'Show source'; };
+    btn.onclick = e => { e.stopPropagation(); show(source.hidden); };
+    bar.appendChild(btn);
+    show(hidden);
+  }else{
+    label.textContent = 'Mermaid diagram not rendered: '
+      + String(err && err.message ? err.message : 'no output');
+  }
+  wrap.appendChild(source);
+  if(ctx && desc.line != null) attachBlockComment(wrap, desc, ctx);
+  return wrap;
+}
 
 // No logic here on purpose: everything security-relevant is decided in
 // describe() and is testable without a DOM.
 function materialize(desc, ctx){
+  if(desc.diagram != null){
+    const d = materializeDiagram(desc, ctx);
+    if(d) return d;
+  }
   const tag = SAFE_TAGS.indexOf(desc.tag) === -1 ? 'span' : desc.tag;
   const el = document.createElement(tag);
   const cls = desc.attrs && desc.attrs.class;
@@ -1530,7 +1670,7 @@ function renderPreview(file, body, built){
   const wrap = document.createElement('div');
   wrap.className = 'md-wrap';
   wrap.innerHTML = '<div class="md-warn">Rendered from the diff. Content is untrusted — links open externally and images are not loaded.</div>';
-  const ctx = {file, lines, root: wrap};
+  const ctx = {file, lines, root: wrap, diagrams: newDiagramBudget()};
   wrap.appendChild(materialize(desc, ctx));
   body.appendChild(wrap);
   // Flush saved comments only now that the tree is attached. Comments outlive
@@ -2220,7 +2360,11 @@ document.getElementById('theme').onclick = () => {
   const r=document.documentElement;
   const cur=r.getAttribute('data-theme')|| (matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');
   r.setAttribute('data-theme', cur==='dark'?'light':'dark');
+  refreshDiagramThemes();
 };
+// The page follows the OS scheme until the toggle sets data-theme; the frames'
+// colors are baked into srcdoc, so they have to be redrawn when it changes.
+matchMedia('(prefers-color-scheme:dark)').addEventListener('change', refreshDiagramThemes);
 
 // Out-of-sync detection: the server recomputes the diff from the same source it
 // was launched with and reports whether it differs from what this page is showing.

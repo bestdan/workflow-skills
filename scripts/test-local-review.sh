@@ -635,12 +635,42 @@ check("build_page: the raw injected payload does not survive",
       "</script><script>alert(1)</script>" not in page_html, page_html)
 check("build_page: the diff's </script> is escaped to \\u003c/script>",
       "\\u003c/script>" in page_html, page_html)
-# PAGE has exactly four structural </script> closes: the three vendored
-# <script src=...></script> includes (highlight, dart, marked) and the one
-# inline block. A diff/meta payload that could inject a fifth would mean the
-# escaping regressed.
-check("build_page: exactly the 4 structural </script> closes remain, none injected from the diff",
-      page_html.count("</script>") == 4, page_html.count("</script>"))
+# PAGE has exactly five structural </script> closes: the four vendored
+# <script src=...></script> includes (highlight, dart, marked, pele) and the
+# one inline block. A diff/meta payload that could inject a sixth would mean
+# the escaping regressed.
+check("build_page: exactly the 5 structural </script> closes remain, none injected from the diff",
+      page_html.count("</script>") == 5, page_html.count("</script>"))
+# Scoped to the diagram's SVG variables: PAGE uses innerHTML legitimately for
+# constant templates, so a page-wide ban on these sinks would be wrong.
+import re as _svg_re
+_svg_sinks = [ln.strip() for ln in server.PAGE.split("\n")
+              if _svg_re.search(r"(innerHTML|outerHTML|insertAdjacentHTML|DOMParser|createContextualFragment|document\.write)"
+                           r"[^;\n]*(r\.svg|__svg)", ln)]
+check("build_page: the sandbox frame is the only place a diagram's SVG is parsed",
+      "frame.setAttribute('sandbox', '');" in server.PAGE and not _svg_sinks,
+      _svg_sinks or "sandbox attribute line missing")
+# The per-line check above misses an alias (`const s = r.svg; el.innerHTML = s`)
+# or a split line, so the diagram code itself carries no HTML sink at all.
+_diagram_region = server.PAGE.split("function diagramDoc(", 1)[1].split("function materialize(", 1)[0]
+_region_sinks = _svg_re.findall(
+    r"innerHTML|outerHTML|insertAdjacentHTML|DOMParser|createContextualFragment|document\.write",
+    _diagram_region)
+check("build_page: the diagram code uses no HTML parser sink at all",
+      not _region_sinks, _region_sinks)
+# The pure-region tests call the budget and the unsafe-SVG check directly, and
+# materializeDiagram needs a DOM this harness lacks, so pin the wiring in the
+# source: renderPreview shares one budget per document, and materializeDiagram
+# spends it before rendering and applies the unsafe check to the output.
+_render_preview = server.PAGE.split("function renderPreview(", 1)[1].split("\nfunction ", 1)[0]
+_materialize_diagram = server.PAGE.split("function materializeDiagram(", 1)[1].split("\nfunction ", 1)[0]
+check("build_page: renderPreview gives each document one shared diagram budget",
+      "diagrams: newDiagramBudget()" in _render_preview, "ctx.diagrams not set in renderPreview")
+check("build_page: materializeDiagram spends the budget before it calls pele.render",
+      0 <= _materialize_diagram.find("spendDiagramBudget(") < _materialize_diagram.find("pele.render("),
+      "budget not spent before the render")
+check("build_page: materializeDiagram refuses unsafe output before drawing it",
+      "DIAGRAM_UNSAFE_SVG.test(r.svg)" in _materialize_diagram, "unsafe-SVG check not applied")
 
 # --- build_page: meta['url'] is escaped before landing in the href ----------
 evil_meta = {"title": "t", "url": '"><script>alert(2)</script>', "number": 1}
@@ -3144,6 +3174,39 @@ out.unlabelledBodyIntact = unlabelled.text.includes(fenceBody);
 out.unknownLabelTokenized = unknownLabel.tokenized;
 out.unknownLabelBodyIntact = unknownLabel.text.includes('const x = 1;');
 
+// A mermaid fence is only MARKED for drawing: describe() keeps the whole
+// source description, so the fallback <pre> and the anchor are unchanged.
+const mmBody = 'flowchart LR\n  A["<img src=x onerror=alert(1)>"] --> B';
+const mmPres = [];
+walk(describe('# T\n\n```Mermaid\n' + mmBody + '\n```\n\n```js\nx\n```\n'),
+     n => { if(n.tag === 'pre') mmPres.push(n); });
+out.mermaidMarked = mmPres.map(p => p.diagram === undefined ? null : p.diagram);
+out.mermaidLines = mmPres.length ? [mmPres[0].line, mmPres[0].endLine] : null;
+let mmText = '';
+if(mmPres.length) walk(mmPres[0], n => { if(n.text) mmText += n.text; });
+out.mermaidBodyIntact = mmText.includes(mmBody);
+const doc = diagramDoc('<svg class="pele"></svg>', {bg: '#fff', fg: '#000'});
+out.diagramDocCsp = doc.includes('content="default-src \'none\'; style-src \'unsafe-inline\'"');
+out.diagramDocNoScript = !/<script/i.test(doc);
+out.diagramDocVars = doc.includes(':root{--pele-bg:#fff;--pele-fg:#000}');
+out.hiddenText = ['%% note\nflowchart LR', 'flowchart LR\n  accTitle: x', 'flowchart LR\n A-->B']
+  .map(s => DIAGRAM_HIDDEN_TEXT.test(s));
+
+// The per-document budget: the count cap and the character cap each stop
+// drawing, and a fence the budget refuses spends nothing. (A fence that
+// reaches Pele spends its share whether or not it draws; see server.py.)
+const byCount = newDiagramBudget();
+let drawn = 0;
+for(let i = 0; i < DIAGRAM_MAX_COUNT + 5; i++) if(spendDiagramBudget(byCount, 'flowchart LR\n A-->B')) drawn++;
+out.budgetCount = drawn === DIAGRAM_MAX_COUNT;
+const byChars = newDiagramBudget();
+const big = 'x'.repeat(Math.floor(DIAGRAM_MAX_CHARS / 2) + 1);
+out.budgetChars = [spendDiagramBudget(byChars, big), spendDiagramBudget(byChars, big),
+                   spendDiagramBudget(byChars, 'flowchart LR\n A-->B')];
+out.unsafeSvg = ['<svg><a href="https://x.test">x</a></svg>', '<svg><meta http-equiv="refresh" content="0;url=https://x.test"></svg>',
+                 '<svg><base href="https://x.test/"/></svg>', '<svg><animate attributeName="x"/><g aria-label="a"></g></svg>']
+  .map(s => DIAGRAM_UNSAFE_SVG.test(s));
+
 // hljs does not only fail by throwing: its `illegal` and safeMode
 // `errorRaised` branches RETURN a partial emitter next to a complete escaped
 // `value`. Reaching those through hlTree's own call shapes is hard —
@@ -3264,6 +3327,27 @@ console.log(JSON.stringify(out));
                   "an unknown fence label fell through to highlightAuto")
             check("highlight: an unknown-labelled fence still shows its body",
                   _o["unknownLabelBodyIntact"] is True, _o["unknownLabelBodyIntact"])
+            check("mermaid: only the mermaid fence is marked, case-insensitively, with its source",
+                  _o["mermaidMarked"] == ['flowchart LR\n  A["<img src=x onerror=alert(1)>"] --> B', None],
+                  _o["mermaidMarked"])
+            check("mermaid: the fence still anchors to its own lines",
+                  _o["mermaidLines"] == [3, 6], _o["mermaidLines"])
+            check("mermaid: the fallback description still shows the whole body",
+                  _o["mermaidBodyIntact"] is True, _o["mermaidBodyIntact"])
+            check("mermaid: the frame document carries a fetch-blocking CSP",
+                  _o["diagramDocCsp"] is True, "CSP meta missing or changed")
+            check("mermaid: the frame document adds no script of its own",
+                  _o["diagramDocNoScript"] is True, "diagramDoc emitted a <script>")
+            check("mermaid: theme colors become --pele-* variables",
+                  _o["diagramDocVars"] is True, "theme variables missing")
+            check("mermaid: comments and accessibility text open the source by default",
+                  _o["hiddenText"] == [True, True, False], _o["hiddenText"])
+            check("mermaid: the per-document count budget stops drawing at its cap",
+                  _o["budgetCount"] is True, "drew more or fewer than DIAGRAM_MAX_COUNT")
+            check("mermaid: the character budget refuses the fence that would exceed it",
+                  _o["budgetChars"] == [True, False, True], _o["budgetChars"])
+            check("mermaid: SVG with a link, refresh or base element is refused, plain SVG is not",
+                  _o["unsafeSvg"] == [True, True, True, False], _o["unsafeSvg"])
             check("highlight: an hljs `illegal` result is rejected, not rendered partial",
                   _o["guard"]["illegal"] is None, _o["guard"]["illegal"])
             check("highlight: an hljs `errorRaised` result is rejected too",
