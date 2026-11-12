@@ -230,13 +230,12 @@ the gate there first.
 Four things that look promising do not pay on the laptop:
 
 - **More bats files converted.** After #1505, the next two heaviest files took
-  the same two moves (#1509) and cut about 240 of their processes and 4.4
+  the fixture move (#1509; neither builds hook payloads) and cut about 240 of their processes and 4.4
   CPU-seconds, under 1% of the gate's CPU, which an interleaved full-gate A/B
   could not tell apart from noise. What is left in them is the scripts under
   test doing their work
   ([record](research/2026-11-12-bats-fixtures-round-two.md)). Apply the moves to
   a new test as a habit, not as a speedup project.
-
 - **The orchestrator suite.** `test-spawn-orchestrator.sh` is the largest
   single unit, about 128 of the gate's roughly 575 CPU-seconds
   ([record](research/2026-11-12-gate-process-start-ceiling.md)), but the cost is

@@ -26,7 +26,7 @@ recording each call's parent:
   `git init --bare` per test, plus the `reference()` helper, which runs a whole
   extra flush to produce the expected file.
 - **`worktree-remove`**: 468 `git` calls. Each test's `setup` rebuilt the same
-  fixture repo with about five, and five tests rebuilt a nine-call submodule
+  fixture repo with about five, and five tests rebuilt an eight-call submodule
   fixture.
 
 Neither file builds hook payloads, so the second #1505 move (bash
@@ -62,7 +62,9 @@ interleaved, three passes each:
 The spread within each arm (about 30s, 50 CPU-s) is ten times the expected
 saving, and the machine was busier than in the first round, where `main` took
 about 175s. A rerun of the branch's gate passed; the failing check in pass 2
-was not captured. No conclusion about the gate follows from these runs beyond
+was not captured, and its cause is unknown. Afterwards both changed files ran
+five times each, the two in parallel with each other, and passed every time
+(30/30 and 32/32). No conclusion about the gate follows from these runs beyond
 "too small to see".
 
 ## What it means
