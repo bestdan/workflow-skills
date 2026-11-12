@@ -31,7 +31,7 @@ says which trigger set the size.
 
 R, F, P and H and their terms match Betterment/mobile's measure-pr-complexity
 action, as read in 2026-11, except that the generated rules below exclude more
-than mobile does, so R and F can read lower here for the same diff. That
+than mobile does, so R, F, P and H can read lower here for the same diff. That
 comparison is not kept in sync, so re-check mobile before relying on it. E is
 the one departure: mobile leaves it to the reviewer's judgment, because
 "feature" and "refactor" cannot be told apart from a path. Here it is
