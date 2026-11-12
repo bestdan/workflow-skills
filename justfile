@@ -18,7 +18,7 @@ check:
 # Skips the two long suites and lints only the files this branch touched, so it
 # skips REAL coverage — `just check` must still pass before you push.
 # (`just --list` shows only the last comment line, so keep the summary last.)
-# Edit-loop gate: the full gate minus its three slowest parts (~8s, not ~66s).
+# Edit-loop gate: the full gate minus the research-spike and orchestrator suites.
 check-fast:
     scripts/check.sh --fast
 

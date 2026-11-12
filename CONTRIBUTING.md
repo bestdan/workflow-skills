@@ -50,7 +50,8 @@ it bundles the full run, a multi-round stability check, a process/orphan
 watch, the confinement smoke (macOS-only, skipped elsewhere), and a final
 gate check into one invocation, and always dumps diagnostics on failure.
 
-`just check-fast` is for the edit loop: ~8s against the full gate's ~41s. It
+`just check-fast` is for the edit loop: ~127s against the full gate's ~217s on an
+18-core Mac (see [gate performance](dev_docs/gate-performance.md)). It
 skips the two long test suites and narrows the shell lint to the files your
 branch has touched — that is skipped coverage, not sharded or sampled, so
 `just check` still has to pass before you push. It announces exactly what it
