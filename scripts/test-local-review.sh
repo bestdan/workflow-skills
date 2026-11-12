@@ -641,10 +641,15 @@ check("build_page: the diff's </script> is escaped to \\u003c/script>",
 # the escaping regressed.
 check("build_page: exactly the 5 structural </script> closes remain, none injected from the diff",
       page_html.count("</script>") == 5, page_html.count("</script>"))
+# Scoped to the diagram's SVG variables: PAGE uses innerHTML legitimately for
+# constant templates, so a page-wide ban on these sinks would be wrong.
+import re as _svg_re
+_svg_sinks = [ln.strip() for ln in server.PAGE.split("\n")
+              if _svg_re.search(r"(innerHTML|outerHTML|insertAdjacentHTML|DOMParser|createContextualFragment|document\.write)"
+                           r"[^;\n]*(r\.svg|__svg)", ln)]
 check("build_page: the sandbox frame is the only place a diagram's SVG is parsed",
-      "frame.setAttribute('sandbox', '');" in server.PAGE
-      and "innerHTML = r.svg" not in server.PAGE and "innerHTML=r.svg" not in server.PAGE,
-      "diagram SVG reaches this document's parser")
+      "frame.setAttribute('sandbox', '');" in server.PAGE and not _svg_sinks,
+      _svg_sinks or "sandbox attribute line missing")
 
 # --- build_page: meta['url'] is escaped before landing in the href ----------
 evil_meta = {"title": "t", "url": '"><script>alert(2)</script>', "number": 1}
@@ -3166,6 +3171,20 @@ out.diagramDocVars = doc.includes(':root{--pele-bg:#fff;--pele-fg:#000}');
 out.hiddenText = ['%% note\nflowchart LR', 'flowchart LR\n  accTitle: x', 'flowchart LR\n A-->B']
   .map(s => DIAGRAM_HIDDEN_TEXT.test(s));
 
+// The per-document budget: the count cap and the character cap each stop
+// drawing, and a refused fence spends nothing.
+const byCount = newDiagramBudget();
+let drawn = 0;
+for(let i = 0; i < DIAGRAM_MAX_COUNT + 5; i++) if(spendDiagramBudget(byCount, 'flowchart LR\n A-->B')) drawn++;
+out.budgetCount = drawn === DIAGRAM_MAX_COUNT;
+const byChars = newDiagramBudget();
+const big = 'x'.repeat(Math.floor(DIAGRAM_MAX_CHARS / 2) + 1);
+out.budgetChars = [spendDiagramBudget(byChars, big), spendDiagramBudget(byChars, big),
+                   spendDiagramBudget(byChars, 'flowchart LR\n A-->B')];
+out.unsafeSvg = ['<svg><a href="https://x.test">x</a></svg>', '<svg><meta http-equiv="refresh" content="0;url=https://x.test"></svg>',
+                 '<svg><base href="https://x.test/"/></svg>', '<svg><animate attributeName="x"/><g aria-label="a"></g></svg>']
+  .map(s => DIAGRAM_UNSAFE_SVG.test(s));
+
 // hljs does not only fail by throwing: its `illegal` and safeMode
 // `errorRaised` branches RETURN a partial emitter next to a complete escaped
 // `value`. Reaching those through hlTree's own call shapes is hard —
@@ -3301,6 +3320,12 @@ console.log(JSON.stringify(out));
                   _o["diagramDocVars"] is True, "theme variables missing")
             check("mermaid: comments and accessibility text open the source by default",
                   _o["hiddenText"] == [True, True, False], _o["hiddenText"])
+            check("mermaid: the per-document count budget stops drawing at its cap",
+                  _o["budgetCount"] is True, "drew more or fewer than DIAGRAM_MAX_COUNT")
+            check("mermaid: the character budget refuses the fence that would exceed it",
+                  _o["budgetChars"] == [True, False, True], _o["budgetChars"])
+            check("mermaid: SVG with a link, refresh or base element is refused, plain SVG is not",
+                  _o["unsafeSvg"] == [True, True, True, False], _o["unsafeSvg"])
             check("highlight: an hljs `illegal` result is rejected, not rendered partial",
                   _o["guard"]["illegal"] is None, _o["guard"]["illegal"])
             check("highlight: an hljs `errorRaised` result is rejected too",

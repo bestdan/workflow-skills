@@ -1370,6 +1370,26 @@ function describe(src){
 // drawing, so a fence carrying them opens with its source shown.
 const DIAGRAM_HIDDEN_TEXT = /^\s*(%%|accTitle|accDescr)/m;
 
+// Pele caps each fence (50k source chars, 5k edges, 4 MB of SVG), but the cost
+// adds up across fences, the same shape that keeps highlightAuto out: a
+// 512 KiB document holds ~10 maximal fences (~2.5s of synchronous layout) or
+// thousands of tiny ones, each a frame document. Past this budget a fence
+// stays plain code, labelled.
+const DIAGRAM_MAX_COUNT = 50;
+const DIAGRAM_MAX_CHARS = 200 * 1024;
+function newDiagramBudget(){ return {count: 0, chars: 0}; }
+function spendDiagramBudget(budget, src){
+  if(budget.count + 1 > DIAGRAM_MAX_COUNT || budget.chars + src.length > DIAGRAM_MAX_CHARS) return false;
+  budget.count += 1; budget.chars += src.length;
+  return true;
+}
+
+// With links:false Pele emits no link, refresh or base element. One appearing
+// means a Pele bug, and the frame could then navigate itself — an empty
+// sandbox does not stop that and no CSP directive does — so such output is
+// treated as a failed render rather than drawn.
+const DIAGRAM_UNSAFE_SVG = /<(a|meta|base)[\s>\/]/i;
+
 function diagramDoc(svg, colors){
   const vars = Object.keys(colors).map(k => '--pele-' + k + ':' + colors[k]).join(';');
   return '<!doctype html><meta charset="utf-8">'
@@ -1412,8 +1432,16 @@ function materializeDiagram(desc, ctx){
   const src = desc.diagram;
   const colors = diagramColors();
   let r = null, err = null;
-  try{ r = pele.render(src, {links: false, images: false, fontFamily: colors.font}); }
-  catch(e){ err = e; }
+  const budget = (ctx && ctx.diagrams) || newDiagramBudget();
+  if(!spendDiagramBudget(budget, src)){
+    err = {message: 'this document has more diagrams than the preview draws'};
+  }else{
+    try{ r = pele.render(src, {links: false, images: false, fontFamily: colors.font}); }
+    catch(e){ err = e; }
+    if(r && typeof r.svg === 'string' && DIAGRAM_UNSAFE_SVG.test(r.svg)){
+      r = null; err = {message: 'the output contained a link or redirect'};
+    }
+  }
   const wrap = document.createElement('div');
   wrap.className = 'md-block md-diagram';
   const bar = document.createElement('div');
@@ -1640,7 +1668,7 @@ function renderPreview(file, body, built){
   const wrap = document.createElement('div');
   wrap.className = 'md-wrap';
   wrap.innerHTML = '<div class="md-warn">Rendered from the diff. Content is untrusted — links open externally and images are not loaded.</div>';
-  const ctx = {file, lines, root: wrap};
+  const ctx = {file, lines, root: wrap, diagrams: newDiagramBudget()};
   wrap.appendChild(materialize(desc, ctx));
   body.appendChild(wrap);
   // Flush saved comments only now that the tree is attached. Comments outlive
@@ -2332,6 +2360,9 @@ document.getElementById('theme').onclick = () => {
   r.setAttribute('data-theme', cur==='dark'?'light':'dark');
   refreshDiagramThemes();
 };
+// The page follows the OS scheme until the toggle sets data-theme; the frames'
+// colors are baked into srcdoc, so they have to be redrawn when it changes.
+matchMedia('(prefers-color-scheme:dark)').addEventListener('change', refreshDiagramThemes);
 
 // Out-of-sync detection: the server recomputes the diff from the same source it
 // was launched with and reports whether it differs from what this page is showing.

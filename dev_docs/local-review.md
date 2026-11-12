@@ -84,8 +84,10 @@ PR chooses — 2.7s of synchronous work for 512 KiB, against 248ms for the same
 body labelled. A per-fence size cap would not fix that, because the cost is
 additive across fences. A `mermaid` fence is drawn as a diagram by the
 vendored Pele. Pele's output is an SVG string, so it is parsed only inside an
-`<iframe sandbox="">`: no scripts, an opaque origin, and a `default-src 'none'`
-CSP in the frame document. The page itself never parses it. That frame is the
+`<iframe sandbox="">`: no scripts, an opaque origin, and a CSP in the frame
+document that blocks every fetch (`default-src 'none'`, with inline styles
+allowed). Output carrying a link, refresh or base element is refused, and a
+document draws at most 50 diagrams or 200 KiB of diagram source. The page itself never parses it. That frame is the
 one exception to the closed set of sinks, and it holds because nothing in the
 frame can run or read the token. The fence stays one comment target, and its
 source is a toggle away. The source opens by default when it carries `%%`
