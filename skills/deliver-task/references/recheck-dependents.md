@@ -25,21 +25,27 @@ carries to the base, and a promotion is an edit to another task file. Both can
 only land through a commit, so the re-check runs on the task branch and its
 edits ride in the task's own PR. They then land if and only if the task does.
 
-Run it in step 4, once the handler's delete step has removed the task file and
-that commit is pushed, and before step 5, so co-review reads the promotions and
-the head it reviews is the head that is handed off:
+Run it in step 4, before step 5, so co-review reads the promotions and the head
+it reviews is the head that is handed off:
 
-1. Follow `commands/promote-tasks.md` with `after=<slug>`, in the checkout that
+1. If `dev_docs/tasks/<slug>.md` still exists on the task branch, remove it
+   first, as the handler's delete step does (`git rm`, commit, push). While the
+   file is present and not `done` it counts as an open blocker, so the run
+   would hold every dependent and write nothing.
+2. Follow `commands/promote-tasks.md` with `after=<slug>`, in the checkout that
    has the task branch checked out. The scan reads the checkout it runs in, and
    only there is the task file already gone.
-2. If it wrote nothing (no dependents, all held, or it stopped on the legacy
+3. If it wrote nothing (no dependents, all held, or it stopped on the legacy
    preflight), commit nothing and move on.
-3. Otherwise stage only the task files its report names, commit them as
+4. Otherwise stage only the task files its report names, commit them as
    `chore(tasks): promote dependents of <slug>`, and push.
-4. Name the re-checked slugs and their outcomes in the PR body, under a
+5. Name the re-checked slugs and their outcomes in the PR body, under a
    `Dependents re-checked` heading.
 
-After a bail the commit stays on the unmerged branch and reaches nothing.
+A bail after this point finds the task file gone, and the handler's bail path
+edits that file. Restore it first (`git checkout <base> -- dev_docs/tasks/<slug>.md`),
+then follow the bail path. The promotions commit stays on the unmerged branch
+and reaches nothing unless a human later finishes and merges the PR.
 
 ## Tracker handlers: after the lander merges
 
