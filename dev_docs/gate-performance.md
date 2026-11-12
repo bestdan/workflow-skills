@@ -315,21 +315,57 @@ shape.
 
 ## What the bottleneck is now
 
-The slowest bats files. With one job per file, `scripts/test-shell.sh` is
-bounded by its slowest file. Run alone in parallel, the five slowest took
-104–113s each: `guard-pinned-branch`, `guard-foreign-worktree`,
-`worktree-remove`, `worktree-create-hook` and `co-review-ledger-sync`. Every
-one of them builds repository fixtures per test.
+Process creation, machine-wide. On the 18-core Mac the full gate is bounded by
+how many processes the whole run starts, not by its slowest file, so splitting
+a file buys nothing there. The measurements, all unsandboxed, 2026-11-12:
 
-Ranked by what they would buy:
+- **The gate leaves the cores idle.** A full run took 181s wall for 227s user
+  and 340s sys: about 3 of 18 cores busy on average, with sys above user.
+- **Process starts hit a ceiling.** N concurrent loops of `/usr/bin/true`
+  reach about 620 starts/s in total, flat from N=9 to N=72; `python3 -c pass`
+  flattens at about 375/s from the same N=9. One loop alone manages only
+  272 starts/s.
+- **Running the bats files in parallel barely beats running them in series.**
+  The 40 files run one after another took 293s; `scripts/test-shell.sh` runs
+  them in parallel in 180s.
+- **A file is slow mainly because it shares the machine.**
+  `guard-pinned-branch` took 30s alone, 46s beside five other slow files, and
+  167s in the full gate. Inside each slow file the cost is spread evenly
+  (median 0.5–1.4s a test), so no single test dominates.
 
-1. **Split or speed up those bats files.** Splitting moves the floor directly,
-   the way the orchestrator split did.
-2. **`scripts/test-research-spike.sh`** is the next bound: Python invocations
-   that are mostly interpreter startup. Batching them through one interpreter,
-   or splitting the file, is the move.
-3. **Contention.** About 140 jobs start at once on 18 cores, and sys time
-   exceeds user time. Capping concurrency is unmeasured; settle it with an
+The cause of the ceiling is not established. An endpoint-security agent
+inspecting every `exec` would fit both the low single-loop rate and the sys
+time, but nothing here checked for one. CI runners and other machines may not
+share it, so measure there before applying this.
+
+What moves the gate here is starting fewer processes, wherever they are. For
+the bats files (#1496) that meant two changes in the heaviest suites:
+
+- **Build fixtures once.** `setup_file` builds the fixture repos, and each test
+  copies them with one `cp -R` instead of about fifteen to twenty `git` calls.
+  `pin_git_env` in `test/test_helper.bash` gives `setup_file` the same git
+  isolation `setup_test` has.
+- **Build hook payloads in bash.** `json_string` in the helper replaces the
+  `python3` that built each payload, and `guard-foreign-worktree` reads the
+  verdict with a pattern match instead of a second `python3`.
+
+Applied to `guard-pinned-branch`, `guard-foreign-worktree` and
+`worktree-create-hook`, that cut the full gate from a median of 182s
+(181–187s) to 173s on every one of three interleaved passes each.
+`guard-pinned-branch` alone went from 30.5s to 21.7s.
+
+Ranked by what they would buy next:
+
+1. **Fewer processes in the heaviest units.** The bats files account for about
+   164 of the gate's 566 CPU-seconds; the rest is the `scripts/test-*.sh`
+   harnesses. Solo CPU (user plus sys) is the proxy for a unit's share of the
+   process budget. Among the bats files, `co-review-ledger-sync` (16.5s) and
+   `worktree-remove` (12.8s) lead what is left.
+2. **`scripts/test-research-spike.sh`** (about 120s in the gate): Python
+   invocations that are mostly interpreter startup. Batching them through one
+   interpreter cuts processes; splitting the file would not.
+3. **Contention.** Capping concurrency (#1498) is unmeasured. The ceiling
+   above predicts little gain past about nine jobs, but settle it with an
    interleaved A/B before adopting it.
 
 ## Skipping an unchanged tree
@@ -412,7 +448,9 @@ markdown would cut the median to about 41s, but tests reach markdown without
 naming it in at least three ways: a glob of `reviewers/*.md`, an
 `os.path.join(..., "references", "threads.md")`, and a recursive grep of a
 skill directory. So the selector keeps the broad rule, and the time comes back
-by splitting those files (#1496), which shortens both modes. Tightening the
+by cutting the processes those files start, which shortens both modes;
+splitting them would not, for the reason in
+[What the bottleneck is now](#what-the-bottleneck-is-now). Tightening the
 rule later needs its own replay, measured against the files each test
 actually opens rather than against name matches.
 

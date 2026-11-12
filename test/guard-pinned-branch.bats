@@ -8,6 +8,16 @@
 # the guard at them. Branches carry DIFFERENT file contents, so a switch is
 # a real change to the tree rather than a no-op.
 
+# The two repos are built once per file and copied into each test, which may
+# then mutate its own copy: a copy costs one process, a build about twenty.
+setup_file() {
+  pin_git_env "$BATS_FILE_TMPDIR"
+  export GIT_CONFIG_GLOBAL=/dev/null
+  mkdir "$BATS_FILE_TMPDIR/fixtures"
+  new_repo "$BATS_FILE_TMPDIR/fixtures/pinned" main
+  new_repo "$BATS_FILE_TMPDIR/fixtures/plain"
+}
+
 setup() {
   setup_test
   # Pin git's config for the guard and every fixture call: a developer's
@@ -15,16 +25,17 @@ setup() {
   export GIT_CONFIG_GLOBAL=/dev/null
   HOOK="$REPO_ROOT/scripts/guard-pinned-branch.py"
   tmp="$TEST_TMPDIR"
-  pinned="$(new_repo pinned main)"
-  plain="$(new_repo plain)"
+  cp -R "$BATS_FILE_TMPDIR/fixtures/pinned" "$BATS_FILE_TMPDIR/fixtures/plain" "$tmp/"
+  pinned="$tmp/pinned"
+  plain="$tmp/plain"
 }
 teardown() { teardown_test; }
 load test_helper
 
-# new_repo <name> [pinned-branch] — main commits file.txt "main"; `other`
+# new_repo <dir> [pinned-branch] — main commits file.txt "main"; `other`
 # commits file.txt "other". A branch name opts the repo in to the pin.
 new_repo() {
-  local dir="$tmp/$1"
+  local dir="$1"
   git init -q -b main "$dir"
   git -C "$dir" config user.name test
   git -C "$dir" config user.email test@example.com
@@ -36,16 +47,19 @@ new_repo() {
   git -C "$dir" commit -q -am other
   git -C "$dir" checkout -q main
   if [ -n "${2:-}" ]; then git -C "$dir" config hooks.pinnedBranch "$2"; fi
-  printf %s "$dir"
 }
 
 # run_hook <cwd> <command> — prints the guard's stdout.
 run_hook() {
-  python3 -c '
-import json, sys
-print(json.dumps({"tool_name": "Bash", "cwd": sys.argv[1],
-                  "tool_input": {"command": sys.argv[2]}}))
-' "$1" "$2" | python3 "$HOOK"
+  local cwd command
+  # The guard fails open on a malformed payload, so an encoding failure must
+  # fail the case here, or every `allowed` check would pass untested.
+  json_string "$1" || return 1
+  cwd=$REPLY
+  json_string "$2" || return 1
+  command=$REPLY
+  printf '{"tool_name": "Bash", "cwd": %s, "tool_input": {"command": %s}}\n' "$cwd" "$command" \
+    | python3 "$HOOK"
 }
 
 denied() {
