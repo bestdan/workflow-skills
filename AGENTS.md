@@ -149,7 +149,9 @@ whether it belongs one level down instead. The answer is usually yes.
   no backwards-compat shims. Three similar lines beat a premature abstraction.
 - Don't refactor surrounding code, add comments/docstrings/type annotations to
   code you didn't change, or add unasked-for functionality.
-- Don't disable or delete tests to make the gate pass.
+- Don't disable or delete tests to make the gate pass. Removing a redundant
+  test is a different change and is allowed: its PR names the test that still
+  covers the behavior, or says why the behavior needs no test.
 - Don't add dependencies without discussing it first. `scripts/validate.py`'s
   single dependency is hash-locked in `scripts/validate.py.lock`.
 
@@ -174,6 +176,10 @@ whether it belongs one level down instead. The answer is usually yes.
 <!-- copilot:end -->
 
 ## Shell and script conventions
+
+- What a test must earn before it is written or kept is in the
+  `agent-guidance` plugin's `testing` skill. Load it before adding, reviewing,
+  or pruning a test.
 
 <!-- copilot:begin id=shell-conventions -->
 
