@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.212.0] - 2026-11-12
+
+### Features
+
+- say "too big" plainly, report coverage, catch generated headers [#1476] (#1477) (07a55447)
+
 ## [2.211.1] - 2026-11-11
 
 ### Fixes
