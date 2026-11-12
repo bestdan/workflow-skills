@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.214.0] - 2026-11-12
+
+### Features
+
+- add just check --changed to run only the tests a diff can reach [#1495] (#1503) (43f46533)
+
 ## [2.213.0] - 2026-11-12
 
 ### Features
