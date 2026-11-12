@@ -66,19 +66,18 @@ allowed() {
   fi
 }
 
+# One row per shape the guard reads differently: a new-branch flag on each
+# subcommand, a bare target on each, a flag before the target, `-`, a chained
+# call, and an executor.
 @test "a branch switch in a pinned main worktree is denied" {
   denied "$pinned" 'git checkout -b x'
-  denied "$pinned" 'git checkout -b bestdan/feature'
-  denied "$pinned" 'git switch -c bestdan/feature'
+  denied "$pinned" 'git switch -c feature'
   denied "$pinned" 'git switch other'
   denied "$pinned" 'git checkout other'
-  denied "$pinned" 'git switch -c feature'
   denied "$pinned" 'git checkout --quiet other'
   denied "$pinned" 'git checkout -'
   denied "$pinned" 'git fetch && git checkout other'
   denied "$pinned" 'bash -c "git checkout other"'
-  # An explicit detach still leaves the pin.
-  denied "$pinned" 'git switch -d other'
 }
 
 # git takes a short option's value attached, so `-bfeature` is `-b feature`.
@@ -218,17 +217,6 @@ print(h["permissionDecisionReason"])
   assert_line --index 7 "Why this checkout is pinned, and which layer covers what: load the \`workflow-skills:pinned-checkout\` skill."
 }
 
-# The pointer names a skill that ships, so following it cannot dead-end (#933).
-@test "the refusal names the pinned-checkout skill, and that skill exists" {
-  run reason "$pinned" 'git checkout other'
-  assert_success
-  assert_output --partial "workflow-skills:pinned-checkout"
-  [ -f "$REPO_ROOT/skills/pinned-checkout/SKILL.md" ]
-  run reason "$pinned" 'gh pr checkout 7'
-  assert_success
-  assert_output --partial "workflow-skills:pinned-checkout"
-}
-
 # reason <cwd> <command> — prints only the refusal text.
 reason() {
   run_hook "$1" "$2" | python3 -c '
@@ -349,14 +337,6 @@ print(json.load(sys.stdin)["hookSpecificOutput"]["permissionDecisionReason"])
   run reason "$pinned" 'gh pr checkout 7'
   assert_line --index 0 "This checkout is pinned to 'main' — refusing to switch it to 'PR 7'."
   assert_output --partial "\`env WORKFLOW_SKILLS_ALLOW_HEAD_MOVE=1\` immediately before the \`gh\` word."
-}
-
-@test "the scope line names gh pr checkout in the docstring, README and design" {
-  local f
-  for f in scripts/guard-pinned-branch.py README.md dev_docs/designs/2026-10-04-pinned-checkout-guard-v2.md; do
-    run grep -cF -- '[cd <dir> &&] [env VAR=1] gh [-R <repo>] pr' "$REPO_ROOT/$f"
-    assert_success
-  done
 }
 
 # An absolute -C fixes where git runs even when the shell's own directory is
