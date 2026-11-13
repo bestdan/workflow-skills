@@ -1,5 +1,5 @@
 ---
-created: 2026-11-13
+created: 2026-11-06
 status: accepted
 convention: ../auth_key_access.md
 ---

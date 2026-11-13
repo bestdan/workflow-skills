@@ -7,14 +7,14 @@ or a GitHub token tomorrow.
 This document is the contract itself. Why the rules are shaped this way, and the
 alternatives that were rejected, are in the decision records:
 
-- [The resolver is an allow-listed identifier, never a command](decisions/2026-11-13-auth-key-resolver-is-an-allow-listed-identifier.md)
-- [The pointer and resolver ladders are independent, with no fall-through](decisions/2026-11-13-auth-key-pointer-and-resolver-ladders-are-independent.md)
-- [The helper reads the config pointer and resolver itself](decisions/2026-11-13-auth-key-helper-reads-config-rungs.md)
-- [The resolver is machine-scoped](decisions/2026-11-13-auth-key-resolver-is-machine-scoped.md)
-- [A raw key is accepted in the local config](decisions/2026-11-13-auth-key-plaintext-local-rung.md)
-- [A reference must start with a scheme](decisions/2026-11-13-auth-key-reference-grammar.md)
-- [Failures are typed, redacted categories](decisions/2026-11-13-auth-key-failures-are-redacted-categories.md)
-- [The resolver timeout is 120 seconds](decisions/2026-11-13-auth-key-resolver-timeout.md)
+- [The resolver is an allow-listed identifier, never a command](decisions/2026-08-01-auth-key-resolver-is-an-allow-listed-identifier.md)
+- [The pointer and resolver ladders are independent, with no fall-through](decisions/2026-08-01-auth-key-pointer-and-resolver-ladders-are-independent.md)
+- [The helper reads the config pointer and resolver itself](decisions/2026-11-06-auth-key-helper-reads-config-rungs.md)
+- [The resolver is machine-scoped](decisions/2026-08-01-auth-key-resolver-is-machine-scoped.md)
+- [A raw key is accepted in the local config](decisions/2026-08-01-auth-key-plaintext-local-rung.md)
+- [A reference must start with a scheme](decisions/2026-08-01-auth-key-reference-grammar.md)
+- [Failures are typed, redacted categories](decisions/2026-08-01-auth-key-failures-are-redacted-categories.md)
+- [The resolver timeout is 120 seconds](decisions/2026-08-01-auth-key-resolver-timeout.md)
 
 ## The three names
 

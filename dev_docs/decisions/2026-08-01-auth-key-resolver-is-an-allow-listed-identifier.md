@@ -1,5 +1,5 @@
 ---
-created: 2026-11-13
+created: 2026-08-01
 status: accepted
 convention: ../auth_key_access.md
 ---
@@ -17,7 +17,7 @@ key-consuming Linear asset ran `subprocess.run(["op", "read", ref])` itself, and
 
 The pressure was to let the operator say which program unlocks the reference. The
 obvious way to say it is to let the reference value carry the command, and one
-operator's local config already did: an `api_key_ref` prefixed with `opx `, which ran as
+operator's local config already did: an `api_key_ref` prefixed with `opx`, which ran as
 `op read "opx op://…"`, failed, and floored every Linear fast path to MCP unnoticed.
 
 The merged config includes the **committed** `.task-config.yml`, so whatever the config

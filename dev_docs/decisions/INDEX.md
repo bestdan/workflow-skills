@@ -4,15 +4,8 @@
 
 | Date       | Decision                                                                                                                                                                    |
 | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 2026-11-13 | [The resolver call is bounded at 120 seconds, one value for every resolver](2026-11-13-auth-key-resolver-timeout.md)                                                        |
-| 2026-11-13 | [A credential's resolver is honoured only from the environment or the local config](2026-11-13-auth-key-resolver-is-machine-scoped.md)                                      |
-| 2026-11-13 | [A credential's resolver is an allow-listed identifier, never a command](2026-11-13-auth-key-resolver-is-an-allow-listed-identifier.md)                                     |
-| 2026-11-13 | [A secret reference must start with a scheme, and may contain spaces](2026-11-13-auth-key-reference-grammar.md)                                                             |
-| 2026-11-13 | [The pointer and the resolver resolve down separate ladders, and a failed resolve never falls through](2026-11-13-auth-key-pointer-and-resolver-ladders-are-independent.md) |
-| 2026-11-13 | [A raw key is accepted in `.task-config.local.yml` as rung 0](2026-11-13-auth-key-plaintext-local-rung.md)                                                                  |
-| 2026-11-13 | [`_secret_resolve.py` reads the config pointer and resolver itself, not only through the agent's bridge](2026-11-13-auth-key-helper-reads-config-rungs.md)                  |
-| 2026-11-13 | [An unavailable credential is a typed, redacted category, and the caller decides what it means](2026-11-13-auth-key-failures-are-redacted-categories.md)                    |
 | 2026-11-10 | [The merge audit labels a bypass by its actor](2026-11-10-audit-labels-a-bypass-by-its-actor.md)                                                                            |
+| 2026-11-06 | [`_secret_resolve.py` reads the config pointer and resolver itself, not only through the agent's bridge](2026-11-06-auth-key-helper-reads-config-rungs.md)                  |
 | 2026-09-24 | [`assess-task` stays a subagent: the typed profile is not adopted](2026-09-24-assess-task-stays-a-subagent.md)                                                              |
 | 2026-09-22 | [The eval suite's failures are not all routing failures](2026-09-22-eval-failures-are-not-all-routing.md)                                                                   |
 | 2026-09-21 | [`label`'s derivation table is not pure code, and one cell can never be](2026-09-21-label-table-is-not-pure-code/)                                                          |
@@ -25,3 +18,10 @@
 | 2026-08-24 | [Why the task loop left Linear for GitHub Issues](2026-08-24-leaving-linear-for-github-issues.md)                                                                           |
 | 2026-08-21 | [WIP gate attendedness](2026-08-21-wip-gate-attendedness.md)                                                                                                                |
 | 2026-08-19 | [local-review view modes](2026-08-19-local-review-view-modes.md)                                                                                                            |
+| 2026-08-01 | [The resolver call is bounded at 120 seconds, one value for every resolver](2026-08-01-auth-key-resolver-timeout.md)                                                        |
+| 2026-08-01 | [A credential's resolver is honoured only from the environment or the local config](2026-08-01-auth-key-resolver-is-machine-scoped.md)                                      |
+| 2026-08-01 | [A credential's resolver is an allow-listed identifier, never a command](2026-08-01-auth-key-resolver-is-an-allow-listed-identifier.md)                                     |
+| 2026-08-01 | [A secret reference must start with a scheme, and may contain spaces](2026-08-01-auth-key-reference-grammar.md)                                                             |
+| 2026-08-01 | [The pointer and the resolver resolve down separate ladders, and a failed resolve never falls through](2026-08-01-auth-key-pointer-and-resolver-ladders-are-independent.md) |
+| 2026-08-01 | [A raw key is accepted in `.task-config.local.yml` as rung 0](2026-08-01-auth-key-plaintext-local-rung.md)                                                                  |
+| 2026-08-01 | [An unavailable credential is a typed, redacted category, and the caller decides what it means](2026-08-01-auth-key-failures-are-redacted-categories.md)                    |
