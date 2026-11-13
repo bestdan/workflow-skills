@@ -1,5 +1,5 @@
 ---
-created: 2026-11-13
+created: 2026-10-27
 status: accepted
 convention: ../task-dashboard.md
 ---
@@ -21,20 +21,20 @@ Ship's order is a fixed sequence of tiers in code (`fleet_now.TIERS`): a
 session that asked; close-outs; ready to merge (`quick_win`, and
 `own_approved`, my PR approved with CI green); the review queue; started;
 the rest; and, last, blocked
-(`2026-11-13-blocked-items-get-a-last-tier.md`). `score.fleet_score` orders
+(`2026-10-28-blocked-items-get-a-last-tier.md`). `score.fleet_score` orders
 items only within a tier, and a tie goes to the longer wait. A session that
 asked leads, above close-outs, because it is the one item whose wait stalls
 work already in progress. An approved own PR with CI pending stays in the
 rest as `own_pr`. `score.FLEET_CATEGORIES` gained `close_out` and
 `own_approved`, each with a default weight, now in `[score.categories]`
-(`2026-11-13-score-tables-renamed-without-aliases.md`). `tune` still
+(`2026-10-28-score-tables-renamed-without-aliases.md`). `tune` still
 proposes weights, and they act within a tier.
 
 Landed in PR [#1221](https://github.com/bestdan/workflow-skills/pull/1221).
 The blocked tier came later, with the shared ranker, in
 [#1237](https://github.com/bestdan/workflow-skills/pull/1237), and a folded
 PR can lift its parent's tier
-(`2026-11-13-linked-prs-fold-into-their-parent.md`).
+(`2026-10-28-linked-prs-fold-into-their-parent.md`).
 
 ## Consequences
 

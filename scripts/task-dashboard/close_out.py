@@ -2,7 +2,7 @@
 
 Now's Ship order (fleet_now.py) puts them second, after a session that asked.
 This docstring is the spec, and
-dev_docs/decisions/2026-11-13-close-outs-tick-from-evidence.md the reasons.
+dev_docs/decisions/2026-10-27-close-outs-tick-from-evidence.md the reasons.
 It reads SQLite only and acts on
 nothing: every step is ticked from evidence the dashboard already mirrors,
 never from a click.

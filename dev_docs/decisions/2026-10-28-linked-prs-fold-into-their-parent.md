@@ -1,5 +1,5 @@
 ---
-created: 2026-11-13
+created: 2026-10-28
 status: accepted
 convention: ../task-dashboard.md
 ---
@@ -9,7 +9,7 @@ convention: ../task-dashboard.md
 ## Context
 
 Once Jira tickets and PRs shared one Now ranker
-(`2026-11-13-one-now-ranker-for-every-instance.md`), a ticket and the PR that
+(`2026-10-27-one-now-ranker-for-every-instance.md`), a ticket and the PR that
 implements it sat on Now as two cards with the same next step, and snoozing
 one left the other on the list. Jira's old `review` term raised a ticket by
 an additive bump when its linked PR was approved or green. Inside fixed

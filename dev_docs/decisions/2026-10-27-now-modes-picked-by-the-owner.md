@@ -1,5 +1,5 @@
 ---
-created: 2026-11-13
+created: 2026-10-27
 status: accepted
 convention: ../task-dashboard.md
 ---
@@ -20,7 +20,7 @@ and no curation.
 ## Decision
 
 Now has modes, each answering one question with its own collector and its
-own order (`2026-11-13-each-now-mode-has-its-own-collector.md`): Ship (the
+own order (`2026-10-27-each-now-mode-has-its-own-collector.md`): Ship (the
 default, "what is closest to done?"), Little, Deep, Tidy, and Plan, added
 later by PR #1298 to show the live plan in its own order. The owner picks
 one with a button in the page header that cycles `overlay.NOW_MODES`. The

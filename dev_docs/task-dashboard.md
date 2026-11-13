@@ -113,19 +113,19 @@ order are `fleet_now.py`'s module docstring; close-outs are `close_out.py`'s.
 
 The choices behind them, each with what would reopen it:
 
-- [one ranker on every instance](decisions/2026-11-13-one-now-ranker-for-every-instance.md),
+- [one ranker on every instance](decisions/2026-10-27-one-now-ranker-for-every-instance.md),
   with being a fleet narrowed to ingesting from other hosts;
-- [a linked PR folds into its ticket or issue](decisions/2026-11-13-linked-prs-fold-into-their-parent.md)
+- [a linked PR folds into its ticket or issue](decisions/2026-10-28-linked-prs-fold-into-their-parent.md)
   and lends it its tier;
-- [blocked items get a last tier](decisions/2026-11-13-blocked-items-get-a-last-tier.md);
-- [`github.scope` replaces `github.fleet`](decisions/2026-11-13-github-scope-replaces-github-fleet.md);
-- [the score tables were renamed with no aliases](decisions/2026-11-13-score-tables-renamed-without-aliases.md);
-- [the owner picks Now's mode](decisions/2026-11-13-now-modes-picked-by-the-owner.md),
+- [blocked items get a last tier](decisions/2026-10-28-blocked-items-get-a-last-tier.md);
+- [`github.scope` replaces `github.fleet`](decisions/2026-10-27-github-scope-replaces-github-fleet.md);
+- [the score tables were renamed with no aliases](decisions/2026-10-28-score-tables-renamed-without-aliases.md);
+- [the owner picks Now's mode](decisions/2026-10-27-now-modes-picked-by-the-owner.md),
   and it is saved in the overlay;
-- [each mode has its own collector](decisions/2026-11-13-each-now-mode-has-its-own-collector.md);
-- [Ship orders by fixed tiers](decisions/2026-11-13-ship-orders-by-fixed-tiers.md);
-- [close-outs tick from evidence, within a window and a cap](decisions/2026-11-13-close-outs-tick-from-evidence.md);
-- ["closed today" counts the fleet's output](decisions/2026-11-13-closed-today-counts-fleet-output.md).
+- [each mode has its own collector](decisions/2026-10-27-each-now-mode-has-its-own-collector.md);
+- [Ship orders by fixed tiers](decisions/2026-10-27-ship-orders-by-fixed-tiers.md);
+- [close-outs tick from evidence, within a window and a cap](decisions/2026-10-27-close-outs-tick-from-evidence.md);
+- ["closed today" counts the fleet's output](decisions/2026-10-27-closed-today-counts-fleet-output.md).
 
 Shared by every page:
 

@@ -1,5 +1,5 @@
 ---
-created: 2026-11-13
+created: 2026-10-27
 status: accepted
 convention: ../task-dashboard.md
 ---

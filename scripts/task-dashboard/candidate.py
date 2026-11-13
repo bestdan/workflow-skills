@@ -1,6 +1,6 @@
 """The ranking-side source seam: what a source hands Now to rank.
 
-dev_docs/decisions/2026-11-13-one-now-ranker-for-every-instance.md. Each
+dev_docs/decisions/2026-10-27-one-now-ranker-for-every-instance.md. Each
 source turns its rows into Candidates, and the ranker (fleet_now.rank) reads
 Candidates only: their category puts them in a tier, their `terms` feed the
 score, and `need` is what the card shows. A new source (Jira tickets, Linear

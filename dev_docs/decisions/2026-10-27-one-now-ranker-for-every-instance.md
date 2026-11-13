@@ -1,5 +1,5 @@
 ---
-created: 2026-11-13
+created: 2026-10-27
 status: accepted
 convention: ../task-dashboard.md
 ---
@@ -78,4 +78,4 @@ output.
   unranked on the work laptop and doubled every ranking change.
 - **Keep "fleet" as owner scope or ingest:** rejected, because the GitHub half
   is a decision about read width, which `github.scope` now owns
-  (`2026-11-13-github-scope-replaces-github-fleet.md`).
+  (`2026-10-27-github-scope-replaces-github-fleet.md`).

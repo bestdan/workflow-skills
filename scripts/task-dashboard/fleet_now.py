@@ -1,7 +1,7 @@
 """Now (`/now`, and `/` on a fleet instance): what to do next.
 
 Every instance's Now is this one ranker, over every source the instance has
-(dev_docs/decisions/2026-11-13-one-now-ranker-for-every-instance.md). Needs
+(dev_docs/decisions/2026-10-27-one-now-ranker-for-every-instance.md). Needs
 you (needs.py) is
 the full list of what waits on the owner; Now is the short queue drawn from
 it, ranked, with the owner's own work added.
@@ -62,7 +62,7 @@ is a source that returns candidate.Candidate rows: the item, its category,
 its why, the score terms it has data for, and its features. rank() reads
 those only, and every ordering and render below reads its Ranked.
 
-MODES (dev_docs/decisions/2026-11-13-now-modes-picked-by-the-owner.md). The
+MODES (dev_docs/decisions/2026-10-27-now-modes-picked-by-the-owner.md). The
 owner picks one with the mode button at the end of the page header bar, after the filter (mode_button,
 which the server puts there on Now only). It reads the mode's name, cycles
 overlay.NOW_MODES and saves the pick in the overlay; `?mode=` shows one mode

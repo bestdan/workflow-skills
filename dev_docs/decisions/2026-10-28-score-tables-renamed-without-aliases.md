@@ -1,5 +1,5 @@
 ---
-created: 2026-11-13
+created: 2026-10-28
 status: accepted
 convention: ../../skills/task-dashboard/SKILL.md
 ---
@@ -9,7 +9,7 @@ convention: ../../skills/task-dashboard/SKILL.md
 ## Context
 
 Once one ranker scored every instance's Now
-(`2026-11-13-one-now-ranker-for-every-instance.md`), its weights still lived
+(`2026-10-27-one-now-ranker-for-every-instance.md`), its weights still lived
 in two tables named for the old split: `[score.fleet]` for Ship's categories
 and `[score.weights]` for Jira's terms. A GitHub issue's `prio:` label and a
 Jira ticket's priority were two terms for one idea. Jira's `review` and

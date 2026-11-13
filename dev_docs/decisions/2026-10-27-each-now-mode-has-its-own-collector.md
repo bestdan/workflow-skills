@@ -1,5 +1,5 @@
 ---
-created: 2026-11-13
+created: 2026-10-27
 status: accepted
 convention: ../task-dashboard.md
 ---
@@ -8,7 +8,7 @@ convention: ../task-dashboard.md
 
 ## Context
 
-The modes (`2026-11-13-now-modes-picked-by-the-owner.md`) each answer a
+The modes (`2026-10-27-now-modes-picked-by-the-owner.md`) each answer a
 different question: what is closest to done, what can be knocked out fast,
 which decision unblocks the most, what is rotting. Filtering Ship's
 candidates cannot answer the last three, because Ship leaves out exactly the

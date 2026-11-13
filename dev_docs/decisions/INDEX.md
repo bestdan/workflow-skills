@@ -4,17 +4,17 @@
 
 | Date       | Decision                                                                                                                              |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| 2026-11-13 | [Ship orders Now by fixed tiers, with weights only inside a tier](2026-11-13-ship-orders-by-fixed-tiers.md)                           |
-| 2026-11-13 | [The score tables were renamed, with no aliases](2026-11-13-score-tables-renamed-without-aliases.md)                                  |
-| 2026-11-13 | [One Now ranker for every instance, and being a fleet means ingesting](2026-11-13-one-now-ranker-for-every-instance.md)               |
-| 2026-11-13 | [The owner picks Now's mode, and the pick is saved in the overlay](2026-11-13-now-modes-picked-by-the-owner.md)                       |
-| 2026-11-13 | [A linked PR folds into its ticket or issue, and lends it its tier](2026-11-13-linked-prs-fold-into-their-parent.md)                  |
-| 2026-11-13 | [`github.scope` replaces the GitHub half of `github.fleet`](2026-11-13-github-scope-replaces-github-fleet.md)                         |
-| 2026-11-13 | [Each Now mode has its own collector and its own rule](2026-11-13-each-now-mode-has-its-own-collector.md)                             |
-| 2026-11-13 | ["Closed today" counts the fleet's output, from one search per sync](2026-11-13-closed-today-counts-fleet-output.md)                  |
-| 2026-11-13 | [Close-outs tick from evidence, within a 14-day window and a cap of 3](2026-11-13-close-outs-tick-from-evidence.md)                   |
-| 2026-11-13 | [Blocked items get a last tier of their own on Ship](2026-11-13-blocked-items-get-a-last-tier.md)                                     |
 | 2026-11-10 | [The merge audit labels a bypass by its actor](2026-11-10-audit-labels-a-bypass-by-its-actor.md)                                      |
+| 2026-10-28 | [The score tables were renamed, with no aliases](2026-10-28-score-tables-renamed-without-aliases.md)                                  |
+| 2026-10-28 | [A linked PR folds into its ticket or issue, and lends it its tier](2026-10-28-linked-prs-fold-into-their-parent.md)                  |
+| 2026-10-28 | [Blocked items get a last tier of their own on Ship](2026-10-28-blocked-items-get-a-last-tier.md)                                     |
+| 2026-10-27 | [Ship orders Now by fixed tiers, with weights only inside a tier](2026-10-27-ship-orders-by-fixed-tiers.md)                           |
+| 2026-10-27 | [One Now ranker for every instance, and being a fleet means ingesting](2026-10-27-one-now-ranker-for-every-instance.md)               |
+| 2026-10-27 | [The owner picks Now's mode, and the pick is saved in the overlay](2026-10-27-now-modes-picked-by-the-owner.md)                       |
+| 2026-10-27 | [`github.scope` replaces the GitHub half of `github.fleet`](2026-10-27-github-scope-replaces-github-fleet.md)                         |
+| 2026-10-27 | [Each Now mode has its own collector and its own rule](2026-10-27-each-now-mode-has-its-own-collector.md)                             |
+| 2026-10-27 | ["Closed today" counts the fleet's output, from one search per sync](2026-10-27-closed-today-counts-fleet-output.md)                  |
+| 2026-10-27 | [Close-outs tick from evidence, within a 14-day window and a cap of 3](2026-10-27-close-outs-tick-from-evidence.md)                   |
 | 2026-09-24 | [`assess-task` stays a subagent: the typed profile is not adopted](2026-09-24-assess-task-stays-a-subagent.md)                        |
 | 2026-09-22 | [The eval suite's failures are not all routing failures](2026-09-22-eval-failures-are-not-all-routing.md)                             |
 | 2026-09-21 | [`label`'s derivation table is not pure code, and one cell can never be](2026-09-21-label-table-is-not-pure-code/)                    |

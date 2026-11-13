@@ -81,7 +81,7 @@ def fleet_pages(cfg: dict[str, Any]) -> bool:
     on a fleet, or with GitHub's owner scope, which mirrors what they show.
     Kept apart from enabled() while the tabs question is open ("Revisit
     when" in
-    dev_docs/decisions/2026-11-13-one-now-ranker-for-every-instance.md)."""
+    dev_docs/decisions/2026-10-27-one-now-ranker-for-every-instance.md)."""
     return sync.fleet_enabled(cfg) or enabled(cfg)
 
 

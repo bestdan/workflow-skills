@@ -1,5 +1,5 @@
 ---
-created: 2026-11-13
+created: 2026-10-28
 status: accepted
 convention: ../task-dashboard.md
 ---
@@ -26,7 +26,7 @@ GitHub issue, the `blocked` label or an open native `blocked_by`; and, since
 PR #1264, for a Linear issue, an open blocking issue or the `blocked` label.
 Jira's `blocked` weight is gone. A folded PR that is ready to merge still
 lifts a blocked parent out of this tier
-(`2026-11-13-linked-prs-fold-into-their-parent.md`).
+(`2026-10-28-linked-prs-fold-into-their-parent.md`).
 
 Landed in PR [#1237](https://github.com/bestdan/workflow-skills/pull/1237),
 which added the native `blockedBy` field to `github_fleet.py`'s issue query.
