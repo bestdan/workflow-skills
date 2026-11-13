@@ -300,6 +300,7 @@ if [ -f "$SDP" ]; then
   have "write-verify-broker linux: needs no --out-plist" "verify-broker written $VBL/broker.sh (pin" "$out"
   have "write-verify-broker linux: the script runs the pinned broker" "verify-broker" "$(cat "$VBL/broker.sh" 2>/dev/null)"
   lack "write-verify-broker linux: the broker is unjailed (no nono)" " run --silent --profile " "$(cat "$VBL/broker.sh" 2>/dev/null)"
+  have "write-verify-broker linux: exports the portable C.UTF-8 locale" "export LANG=C.UTF-8 LC_ALL=C.UTF-8" "$(cat "$VBL/broker.sh" 2>/dev/null)"
   if o="$(sdvb --out-script "$VBL/b2.sh" 2>&1)"; then
     bad "write-verify-broker linux: requires --nono-profile" "write-verify-broker succeeded"
   else

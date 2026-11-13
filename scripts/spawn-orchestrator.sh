@@ -6984,6 +6984,11 @@ verify_await() {
 # the broker never runs anything a request or an agent supplies. The broker job runs
 # `/bin/bash <script>` directly — NO sandbox-exec — which is exactly how it escapes
 # the orchestrator's jail to reach a working execve.
+#
+# The script also exports a UTF-8 LANG/LC_ALL: launchd and systemd-run
+# start the job with no locale, and in the C locale a byte-wise sed in the gate
+# splits a multibyte glyph, failing a commit that passes in a UTF-8 shell.
+# en_US.UTF-8 on macOS; C.UTF-8 on Linux, where en_US is often not generated.
 write_verify_broker() {
   local sentinel="" verify_cmd="" root="" label="" workdir="" log="" path="" \
     self="$ROOT/scripts/spawn-orchestrator.sh" interval="10" throttle="10" \
@@ -7090,6 +7095,8 @@ write_verify_broker() {
 
   local pin
   pin="$(verify_hash "$verify_cmd")"
+  local locale=en_US.UTF-8
+  if _is_linux; then locale=C.UTF-8; fi
   local tmp
   tmp="$(mktemp "${TMPDIR:-/tmp}/verify-broker-launch.XXXXXX")" || die "mktemp failed"
   {
@@ -7100,6 +7107,7 @@ write_verify_broker() {
     printf '# command supplied by a request or an agent.\n'
     printf 'set -uo pipefail\n'
     printf 'export PATH=%q\n' "$path"
+    printf 'export LANG=%s LC_ALL=%s\n' "$locale" "$locale"
     printf 'cd %q\n' "$workdir"
     printf 'exec /bin/bash %q verify-broker \\\n' "$self"
     printf '  --sentinel-dir %q \\\n' "$sentinel"
