@@ -302,10 +302,87 @@ of each run to `ledgers/<host>.jsonl` in a private repo, and
 `co-review-stats.py` reads the local ledger followed by every host's file. It
 runs at session end from the plugin's `SessionEnd` hook, before
 `/co-review-stats`, and by hand.
-The shared copy is a ledger like any other, so the firewall covers it too. The
-design, the allowlist, and the failure rules are
-[`designs/2026-10-18-co-review-ledger-sync.md`](designs/2026-10-18-co-review-ledger-sync.md).
+The shared copy is a ledger like any other, so the firewall covers it too.
 Cloud sessions are not covered: their rows are lost with the container (#1048).
+
+#### Syncing ledgers across machines
+
+**Setup.** `CO_REVIEW_LEDGER_REMOTE` names the shared repo, a private repo of
+its own, `bestdan/co-review-ledgers`, set in the synced Claude settings' `env`
+block. Unset, sync is off: the flush prints `ledger sync: off` and the stats
+read the local file alone. `CO_REVIEW_HOST` overrides the hostname for both the
+writer and the flush, for containers and cloned VMs that share one. The clone
+lives at `~/.claude/co-review/shared/`, under the same optional deny path as
+the local ledger. Each machine writes only `ledgers/<host>.jsonl` on `main`.
+
+**The modes.** `--push` sends this machine's new runs. `--push --detach` is the
+`SessionEnd` hook: it forks the flush into its own session (`os.setsid`, then a
+second fork), points every descriptor away from the hook, returns at once, and
+writes the receipt to `~/.claude/co-review/last-push.log`, overwritten each
+time. `--pull`, run by `/co-review-stats`, is `--push` followed by a fetch and
+`git reset --hard @{u}`, and always makes one network call. `--check` is
+`/doctor` Check 9.
+
+**The allowlist.** The flush copies only these fields. A field added to the
+ledger later stays local until someone adds it to `RUN_FIELDS`,
+`REVIEWER_FIELDS` or `FINDING_FIELDS` on purpose, because git history is
+permanent and the writer copies every key the reconciler returns onto a
+finding.
+
+| Record              | Fields copied                                                                                                   |
+| ------------------- | --------------------------------------------------------------------------------------------------------------- |
+| run                 | `type`, `schema`, `run_id`, `host`, `ts`, `repo`, `mode`, `diff_lines`, `co_review_version`, `reconciler_model` |
+| run → each reviewer | `name`, `disposition`, `model`, `duration_s`                                                                    |
+| finding             | `type`, `run_id`, `host`, `sources`, `human_corroborated`, `verdict`                                            |
+
+Every field `co-review-stats.py` reads is in it. Left behind: `issue`,
+`rationale`, `recommended_fix`, `file` and `line` (code and prose from private
+repos); a reviewer's `command` and `reason` (a custom command can carry a
+token or a path); `pr`, `base_sha` and `head_sha` (they identify a commit in a
+private repo). Why `repo` is kept:
+[`decisions/2026-11-13-ledger-sync-copies-repo-as-is.md`](decisions/2026-11-13-ledger-sync-copies-repo-as-is.md).
+
+**The failure rules.**
+
+- **The local ledger is only read**, under a shared `flock`, so no failure can
+  touch it. A run block whose last line is torn is skipped whole.
+- **The watermark is the pushed file.** The flush reads
+  `@{u}:ledgers/<host>.jsonl` to learn which runs are already sent, so a run
+  appended or committed but never pushed is selected again, and a kill at any
+  step loses nothing. With nothing new it makes no network call.
+- **The clone is disposable.** The flush never rebases or merges; it moves the
+  branch only with `git reset --hard` onto the fetched upstream. It deletes and
+  reclones a clone that is not a valid repo, is mid-rebase or mid-merge, points
+  at another remote, or whose old upstream is not an ancestor of the newly
+  fetched one (a history rewrite). A dirty tree is reset. A clone is built in
+  `shared.tmp/` with `git init -b main` plus a fetch, and renamed into place
+  only once it succeeds.
+- **A rejected push** fetches, resets and retries once. A second rejection, or
+  any other failure, deletes the clone; the next flush starts over.
+- **One flush at a time.** It takes `~/.claude/co-review/shared.lock` and gives
+  up after 30 seconds (`CO_REVIEW_SYNC_LOCK_TIMEOUT`).
+- **Receipts only, exit 0.** `--push` and `--pull` print `ledger sync: …` lines
+  and always exit 0. A failure's reason is one of `unreachable`,
+  `clone failed`, `push rejected twice`, `another flush is running`,
+  `git failed`, `ledger unreadable`, `internal error`, never git's own
+  message, which can carry the remote URL.
+- **Rows cannot be deleted from the shared repo while a local ledger still
+  holds them**: the next flush pushes them back. Remove them locally first.
+  After a history rewrite on the remote, every old clone is discarded by the
+  rewrite check rather than pushing the leak back.
+
+**The read.** `co-review-stats.py` takes `--ledger` more than once, and a
+directory means every `*.jsonl` in it. With sync on, its default is the local
+ledger followed by `shared/ledgers/`, so this machine's full rows win over its
+own redacted copies by the `(host, run_id)` rule, and a missing
+`shared/ledgers/` is not an error.
+
+The choices behind this are recorded in
+[`decisions/2026-11-13-co-review-ledgers-get-their-own-repo.md`](decisions/2026-11-13-co-review-ledgers-get-their-own-repo.md),
+[`decisions/2026-11-13-ledger-flush-detaches-from-sessionend.md`](decisions/2026-11-13-ledger-flush-detaches-from-sessionend.md)
+and
+[`decisions/2026-11-13-ledger-sync-leaves-out-cloud-sessions.md`](decisions/2026-11-13-ledger-sync-leaves-out-cloud-sessions.md),
+alongside the one on `repo` above.
 
 ### 3. The write — `scripts/co-review-record.py`
 

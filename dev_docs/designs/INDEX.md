@@ -10,7 +10,6 @@
 | 2026-10-27 | [One Now ranker for every task-dashboard instance](2026-10-27-shared-now-ranker.md)                         | <https://github.com/bestdan/workflow-skills/issues/1225> |
 | 2026-10-26 | [Now modes — rank the fleet Now by the kind of session the owner is in](2026-10-26-now-modes.md)            |                                                          |
 | 2026-10-24 | [Ideas to borrow from workdesk for the task dashboard and fleet view](2026-10-24-workdesk-borrowings.md)    |                                                          |
-| 2026-10-18 | [Sync co-review ledgers across machines](2026-10-18-co-review-ledger-sync.md)                               | <https://github.com/bestdan/workflow-skills/issues/1041> |
 | 2026-10-14 | [Re-enter hook-layout worktrees by name, and refuse the path form](2026-10-14-reenter-worktrees-by-name.md) | <https://github.com/bestdan/workflow-skills/issues/992>  |
 | 2026-10-04 | [Pinned-checkout guard — design v2](2026-10-04-pinned-checkout-guard-v2.md)                                 |                                                          |
 | 2026-10-03 | [Graduated merge autonomy for the software factory](2026-10-03-graduated-merge-autonomy.md)                 |                                                          |
