@@ -1070,7 +1070,7 @@ function placeThreads(files, threads){
 // emits HTML, are never called. describe() turns tokens into a plain tree and
 // is a pure function (no DOM), so the security-critical half is testable under
 // bare node; materialize() turns that tree into elements and has no logic.
-// Rationale: dev_docs/decisions/2026-11-13-local-review-preview-builds-dom-from-tokens.md
+// Rationale: dev_docs/decisions/2026-08-20-local-review-preview-builds-dom-from-tokens.md
 const PREVIEW_MAX_BYTES = 512 * 1024;
 const PREVIEW_MAX_DEPTH = 24;
 
@@ -1311,7 +1311,7 @@ function describeBlock(t, ln, depth){
       // An UNKNOWN token stays inert: its raw source as text, no element
       // derived from the token type and no walk of its fields. That is one of
       // the closed-sink rules in
-      // dev_docs/decisions/2026-11-13-local-review-preview-builds-dom-from-tokens.md, and the
+      // dev_docs/decisions/2026-08-20-local-review-preview-builds-dom-from-tokens.md, and the
       // security corpus asserts it directly — which is why the `text` token
       // above is handled by name rather than by widening this branch.
       return node('div', Object.assign({attrs:{class:'md-plain'},
@@ -2597,7 +2597,7 @@ class Handler(BaseHTTPRequestHandler):
     _submitted = False
     # Thread store, threads mode only. Server memory, not disk: the store dies
     # with the server on purpose (see
-    # dev_docs/decisions/2026-11-13-local-review-server-owns-thread-state.md) — the transcript plus the round payloads the agent already read
+    # dev_docs/decisions/2026-08-25-local-review-server-owns-thread-state.md) — the transcript plus the round payloads the agent already read
     # are the durable record. Guarded by its own lock; _submit_lock keeps its
     # existing job of serializing /submit itself.
     threads: "list[dict]" = []  # list of thread dicts, insertion order = creation order

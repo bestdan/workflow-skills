@@ -102,12 +102,12 @@ file is absent, so stripping `vendor/` costs the mode rather than breaking the
 page.
 
 Why preview is built this way, one decision per record:
-[the closed set of sinks](decisions/2026-11-13-local-review-preview-builds-dom-from-tokens.md),
-[showing what the file hides](decisions/2026-11-13-local-review-preview-shows-what-the-file-hides.md),
-[the size and depth caps](decisions/2026-11-13-local-review-preview-bounds-the-lexer.md),
-[leaf-block anchoring](decisions/2026-11-13-local-review-preview-anchors-leaf-blocks.md),
-[the hand-tested DOM half](decisions/2026-11-13-local-review-preview-dom-is-tested-by-hand.md),
-and [mermaid in a sandboxed frame](decisions/2026-11-13-local-review-mermaid-in-a-sandboxed-frame.md).
+[the closed set of sinks](decisions/2026-08-20-local-review-preview-builds-dom-from-tokens.md),
+[showing what the file hides](decisions/2026-08-20-local-review-preview-shows-what-the-file-hides.md),
+[the size and depth caps](decisions/2026-08-20-local-review-preview-bounds-the-lexer.md),
+[leaf-block anchoring](decisions/2026-08-20-local-review-preview-anchors-leaf-blocks.md),
+[the hand-tested DOM half](decisions/2026-08-20-local-review-preview-dom-is-tested-by-hand.md),
+and [mermaid in a sandboxed frame](decisions/2026-11-12-local-review-mermaid-in-a-sandboxed-frame.md).
 
 `single` emits a genuine two-column grid rather than hiding two of four, so
 `insertAfterRow()` reads the column count from `grid.dataset.cols` instead of
@@ -140,9 +140,9 @@ already takes. `--out`'s argparse default moved from `pr_comments.json` to
 `--once` always means "exit after one successful submit," in every mode.
 Only an explicit `--out` with no `--once` keeps the server alive. Why there is
 no flag:
-[`decisions/2026-11-13-local-review-mode-derives-from-out.md`](decisions/2026-11-13-local-review-mode-derives-from-out.md).
+[`decisions/2026-08-25-local-review-mode-derives-from-out.md`](decisions/2026-08-25-local-review-mode-derives-from-out.md).
 No mode carries a verdict
-([`decisions/2026-11-13-local-review-has-no-verdict.md`](decisions/2026-11-13-local-review-has-no-verdict.md)).
+([`decisions/2026-08-25-local-review-has-no-verdict.md`](decisions/2026-08-25-local-review-has-no-verdict.md)).
 
 - **Startup:** the server prints `LOCAL_REVIEW_URL=http://127.0.0.1:<port>/<token>/`
   on its own line — the machine contract, unchanged. Port defaults to the
@@ -217,7 +217,7 @@ No mode carries a verdict
 Each submit is a **round**, numbered from 1 by the server. The server mints
 each new comment's id (`t1`, `t2`, … a per-launch counter) at submit time and
 holds threads in memory only
-([`decisions/2026-11-13-local-review-server-owns-thread-state.md`](decisions/2026-11-13-local-review-server-owns-thread-state.md)). `--out`'s `comments` array keeps its
+([`decisions/2026-08-25-local-review-server-owns-thread-state.md`](decisions/2026-08-25-local-review-server-owns-thread-state.md)). `--out`'s `comments` array keeps its
 one-shot meaning (the entries new in this round) plus the minted `id`;
 `threads` carries the complete state, resolved threads included, so the
 previous round's file can be overwritten with nothing lost. `finished: true`
@@ -243,11 +243,11 @@ re-placement across `/refresh`, resolved-thread semantics — is in
 `skills/local-review/references/threads.md`.
 
 Why the protocol is shaped this way, one decision per record:
-[HTTP replies and the `threads_rev` poll](decisions/2026-11-13-local-review-agent-replies-over-http.md),
-[resolve is the user's](decisions/2026-11-13-local-review-resolve-is-the-users.md),
-[replies are plain text](decisions/2026-11-13-local-review-replies-are-plain-text.md),
-[re-placement that never drops a thread](decisions/2026-11-13-local-review-threads-re-place-and-never-drop.md),
-and [the round summary's thread](decisions/2026-11-13-local-review-round-summary-is-a-thread.md).
+[HTTP replies and the `threads_rev` poll](decisions/2026-08-25-local-review-agent-replies-over-http.md),
+[resolve is the user's](decisions/2026-08-25-local-review-resolve-is-the-users.md),
+[replies are plain text](decisions/2026-08-25-local-review-replies-are-plain-text.md),
+[re-placement that never drops a thread](decisions/2026-08-26-local-review-threads-re-place-and-never-drop.md),
+and [the round summary's thread](decisions/2026-09-14-local-review-round-summary-is-a-thread.md).
 
 ## Threat model — loopback is not a trust boundary
 

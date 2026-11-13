@@ -1,5 +1,5 @@
 ---
-created: 2026-11-13
+created: 2026-11-12
 status: accepted
 convention: ../local-review.md
 ---
@@ -10,7 +10,7 @@ convention: ../local-review.md
 
 Preview builds every element itself from `marked`'s tokens and never hands an
 attacker-derived string to an HTML parser, per
-[`2026-11-13-local-review-preview-builds-dom-from-tokens.md`](2026-11-13-local-review-preview-builds-dom-from-tokens.md).
+[`2026-08-20-local-review-preview-builds-dom-from-tokens.md`](2026-08-20-local-review-preview-builds-dom-from-tokens.md).
 A diagram renderer returns an SVG string, which has to be parsed to be drawn.
 A drawn diagram also hides text its source carries: `%%` comments and
 `accTitle`/`accDescr`.

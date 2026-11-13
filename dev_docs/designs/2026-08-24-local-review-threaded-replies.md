@@ -6,7 +6,7 @@ status: proposed
 # local-review — the agent claims a round by rename before reading it
 
 Threaded replies and multi-round review have landed. The decisions they
-carried are the `2026-11-13-local-review-*` thread records under
+carried are the `local-review-*` thread records under
 `../decisions/`, and the protocol is in [`../local-review.md`](../local-review.md)
 and `skills/local-review/references/threads.md`. One part of this design has
 not landed: the agent's round loop in `skills/local-review/SKILL.md` reads

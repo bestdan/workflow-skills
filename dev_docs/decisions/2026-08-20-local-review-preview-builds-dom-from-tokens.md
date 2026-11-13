@@ -1,5 +1,5 @@
 ---
-created: 2026-11-13
+created: 2026-08-20
 status: accepted
 convention: ../local-review.md
 ---
@@ -45,7 +45,7 @@ relative links inert.
   until it gets one it renders as inert raw text.
 - Bad, because the invariant closes HTML-parser injection only. Content
   spoofing and prompt injection into the agent are handled separately, in
-  [`2026-11-13-local-review-preview-shows-what-the-file-hides.md`](2026-11-13-local-review-preview-shows-what-the-file-hides.md).
+  [`2026-08-20-local-review-preview-shows-what-the-file-hides.md`](2026-08-20-local-review-preview-shows-what-the-file-hides.md).
 
 ## Revisit when
 
