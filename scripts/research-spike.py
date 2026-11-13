@@ -11,8 +11,8 @@ derivation and freshness, and `suggest` are the script's. Prose, proposed ids,
 belong to `skills/research-spike/SKILL.md`, which never computes a status or a
 count.
 
-Stdlib only, deliberately — the design mandates no dependencies, so there is
-nothing to lock and no `uv` header. Invoked as:
+Stdlib only, deliberately: with no dependencies there is nothing to lock and
+no `uv` header. Invoked as:
 
     python3 "${CLAUDE_PLUGIN_ROOT}/scripts/research-spike.py" [--root DIR] VERB
 
@@ -87,8 +87,8 @@ EXIT_USAGE = 2
 RESEARCH_SUBPATH = ("dev_docs", "research")
 TRACKS_DIRNAME = "tracks"
 # The one file the coverage rule reaches. Fixed by the directory convention,
-# not configured per repo — see the design's "resolves structurally rather
-# than by config" note.
+# not configured per repo — see
+# `dev_docs/decisions/2026-08-01-research-spike-layout-is-skill-owned.md`.
 QUESTIONS_FILENAME = "questions.md"
 
 RECORD_KINDS = ("question", "obligation", "decision", "card")
@@ -225,7 +225,8 @@ LEDGER_END = "<!-- /research-spike:ledger -->"
 # The `suggest` phrase list — the advisory lexical scan's whole domain
 # knowledge, kept in this one clearly-labelled constant so an adopting repo
 # can edit it without hunting through the file. It is a **starting point**,
-# not a contract (design §"What is repo-specific": "that repo's idiom").
+# not a contract: it came from one repo's idiom
+# (`dev_docs/decisions/2026-08-02-research-spike-suggest-cannot-fail.md`).
 # Matched case-insensitively as a literal substring against each non-inert
 # line. "once … lands" is a grammatical shape rather than a fixed string, so
 # it alone gets a small regex instead of living in the literal list.
@@ -1545,7 +1546,8 @@ def validate_cards(tree: Tree, report: Report) -> None:
 #
 # Scope is questions files and `contracts/` only. Widening it to every markdown
 # file would turn the discipline into noise and train people to satisfy it
-# mechanically (design §"What the skill must **not** do").
+# mechanically
+# (`dev_docs/decisions/2026-08-02-research-spike-coverage-is-declared-per-section.md`).
 
 # The one sentence that ends every coverage error, because every one of them is
 # fixed the same way.
@@ -3265,8 +3267,7 @@ def track_index_entry(track: str) -> str:
 def index_track(lines: list[str], track: str, rel: str) -> list[str] | None:
     """`PROJECT.md` with the new track added to its tracks index, or None.
 
-    An index nobody updates is the dead structure this design criticises
-    elsewhere, so `init` keeps it current. It appends within the `## Tracks`
+    An index nobody updates is dead structure, so `init` keeps it current. It appends within the `## Tracks`
     section and nowhere else; if a human has removed that heading, `init`
     returns None so the caller can say so and leave the file alone rather than
     guessing where the list went. A missing index is a note, not a refusal —
@@ -3833,8 +3834,8 @@ def find_deferral_phrase(line: str) -> str | None:
 
 
 def verb_suggest(args: argparse.Namespace, root: Path) -> int:
-    """The advisory lexical scan (design §"What is deliberately not in the
-    gate"). Measured, not assumed: run against the reference tree this
+    """The advisory lexical scan, kept out of the gate
+    (`dev_docs/decisions/2026-08-02-research-spike-suggest-cannot-fail.md`). Measured, not assumed: run against the reference tree this
     returned 29 hits, most of them prose describing behaviour rather than
     deferring work — so this is a report, never a gate, and there is no code
     path below that returns non-zero, including a directory this run cannot
@@ -3849,7 +3850,7 @@ def verb_suggest(args: argparse.Namespace, root: Path) -> int:
     `discover`'s own parse findings (unknown keys, bad ids, and the like) are
     `validate`'s business, not this scan's, and are never surfaced here.
 
-    Suppression matters more than the phrase list (per the design), and the
+    Suppression matters more than the phrase list, and the
     interpretation of "immediately adjacent" is a judgment call, stated
     plainly here rather than left implicit. A hit is suppressed when:
 
@@ -3857,8 +3858,7 @@ def verb_suggest(args: argparse.Namespace, root: Path) -> int:
         section already carries an `obligation` block — a real one or a bare
         `none:` — anywhere in that section. The section is the coverage
         rule's own unit, so a hit already declared over there is exactly the
-        "done correctly" case the design says would otherwise dominate the
-        output; or
+        "done correctly" case that would otherwise dominate the output; or
       - it falls anywhere in a file under `tracks/<track>/contracts/` that
         carries at least one `obligation` block anywhere in the file — the
         contracts coverage rule is file-scoped, not section-scoped (see

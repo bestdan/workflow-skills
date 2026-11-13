@@ -1,5 +1,5 @@
 ---
-created: 2026-11-13
+created: 2026-08-02
 status: accepted
 convention: ../research_spike.md
 ---
@@ -42,7 +42,7 @@ enum, and says the report may be incomplete. It reprints none of them, and it
 does not fail the run. Without it, a typo in `blocks:` resolves to nothing and
 the decision prints `READY`. The taint suffix and the `declared none` column
 came later, under
-[a separate record](2026-11-13-research-spike-taint-and-none-in-status-only.md).
+[a separate record](2026-10-18-research-spike-taint-and-none-in-status-only.md).
 
 ## Consequences
 
@@ -60,7 +60,7 @@ came later, under
 - The one-third threshold fires on a spike where a reviewer agrees most
   obligations really do gate decisions.
 - A consumer needs the report as data rather than text
-  ([deferred, E](2026-11-13-research-spike-lean-b-d-e-deferred.md)).
+  ([deferred, E](2026-08-14-research-spike-lean-b-d-e-deferred.md)).
 
 ## Confirmation
 

@@ -1,5 +1,5 @@
 ---
-created: 2026-11-13
+created: 2026-08-14
 status: accepted
 convention: ../research_spike.md
 ---
@@ -11,7 +11,7 @@ convention: ../research_spike.md
 The lean-concepts design (`2026-08-14-research-spike-lean-concepts.md`,
 deleted on graduation) named five concepts worth importing from Lean. Two, A
 (taint) and C (counting `none:`), shipped
-([record](2026-11-13-research-spike-taint-and-none-in-status-only.md)). The
+([record](2026-10-18-research-spike-taint-and-none-in-status-only.md)). The
 other three were recorded as deferred and unscheduled so that nobody has to
 rediscover them. None is built: `CARD_KINDS` is still `("stub", "receipt")`,
 there is no `trend` verb, and nothing in `scripts/research-spike.py` emits

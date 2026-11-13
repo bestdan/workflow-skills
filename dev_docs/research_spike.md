@@ -10,7 +10,7 @@ decision records under [`decisions/`](decisions/INDEX.md), listed under
 `aiutopilot` incident, roughly 6 obligations discharged against 23 open, the
 rule that a deferral stayed visible only when its destination was a file) is
 the context of the
-[destination record](decisions/2026-11-13-research-spike-destinations-must-exist.md).
+[destination record](decisions/2026-08-02-research-spike-destinations-must-exist.md).
 This doc covers how the pieces fit and the operational traps a maintainer will
 hit.
 
@@ -34,12 +34,12 @@ status or a count — every procedure ends by running `validate`, and the
 validator, not the procedure, is what guarantees the result held.
 
 Why the line falls there:
-[script/agent record](decisions/2026-11-13-research-spike-script-computes-agent-judges.md).
+[script/agent record](decisions/2026-08-02-research-spike-script-computes-agent-judges.md).
 
 ### The on-disk convention
 
 Fixed by the skill, not configurable per repo
-([layout record](decisions/2026-11-13-research-spike-layout-is-skill-owned.md)):
+([layout record](decisions/2026-08-01-research-spike-layout-is-skill-owned.md)):
 
 ```
 dev_docs/research/<project>/
@@ -195,25 +195,25 @@ stored ledgers.
 
 Each is a record with its context, consequences and reopen conditions:
 
-- [The layout is skill-owned](decisions/2026-11-13-research-spike-layout-is-skill-owned.md):
+- [The layout is skill-owned](decisions/2026-08-01-research-spike-layout-is-skill-owned.md):
   multiple projects, scoped ids, no cross-project destinations.
-- [The script computes, the agent judges](decisions/2026-11-13-research-spike-script-computes-agent-judges.md):
+- [The script computes, the agent judges](decisions/2026-08-02-research-spike-script-computes-agent-judges.md):
   the six subcommands and the five procedures.
-- [Destinations must be existing files](decisions/2026-11-13-research-spike-destinations-must-exist.md),
+- [Destinations must be existing files](decisions/2026-08-02-research-spike-destinations-must-exist.md),
   including the plan-directory warning and the `done`/`abandoned` error.
-- [Every question section declares coverage](decisions/2026-11-13-research-spike-coverage-is-declared-per-section.md),
+- [Every question section declares coverage](decisions/2026-08-02-research-spike-coverage-is-declared-per-section.md),
   as do `contracts/` files.
-- [`suggest` can never fail a run](decisions/2026-11-13-research-spike-suggest-cannot-fail.md).
-- [The ledger is stored and checked](decisions/2026-11-13-research-spike-ledger-is-stored.md):
+- [`suggest` can never fail a run](decisions/2026-08-02-research-spike-suggest-cannot-fail.md).
+- [The ledger is stored and checked](decisions/2026-08-02-research-spike-ledger-is-stored.md):
   scoped freshness, the `--strict` tier, no auto-repair, no trend.
-- [Readiness is derived](decisions/2026-11-13-research-spike-readiness-is-derived.md):
+- [Readiness is derived](decisions/2026-08-02-research-spike-readiness-is-derived.md):
   decisions store only `state`, and the reopen shape.
-- [The `status` report's rules](decisions/2026-11-13-research-spike-status-report-rules.md):
+- [The `status` report's rules](decisions/2026-08-02-research-spike-status-report-rules.md):
   separate counts, per-track lines, the fixed scarcity warning, retirement.
-- [Bridges use receipt cards](decisions/2026-11-13-research-spike-bridges-use-receipt-cards.md):
+- [Bridges use receipt cards](decisions/2026-08-02-research-spike-bridges-use-receipt-cards.md):
   no reconciliation and no `sweep` in v1.
-- [Taint and the `none:` count live in `status` only](decisions/2026-11-13-research-spike-taint-and-none-in-status-only.md).
-- [Assumption cards, `trend` and `status --json` are deferred](decisions/2026-11-13-research-spike-lean-b-d-e-deferred.md).
+- [Taint and the `none:` count live in `status` only](decisions/2026-10-18-research-spike-taint-and-none-in-status-only.md).
+- [Assumption cards, `trend` and `status --json` are deferred](decisions/2026-08-14-research-spike-lean-b-d-e-deferred.md).
 
 ## Gotchas
 
@@ -227,7 +227,7 @@ into `LEDGER.md`, and `validate` fails when a stored block disagrees with a
 fresh derivation. Any record you add or change therefore fails the gate until
 you run `write-ledger`, scoped to the track you touched (see gotcha 7). That
 is the check working. Why it is stored:
-[ledger record](decisions/2026-11-13-research-spike-ledger-is-stored.md).
+[ledger record](decisions/2026-08-02-research-spike-ledger-is-stored.md).
 
 ### 2. Do not put `suggest` in the gate
 
@@ -235,7 +235,7 @@ is the check working. Why it is stored:
 nothing. In a repo with an advisory tier it may run there as a non-failing
 report (`skills/research-spike/references/adoption.md` step 5). That
 licenses nothing about `validate`, which belongs in the blocking gate. Why:
-[`suggest` record](decisions/2026-11-13-research-spike-suggest-cannot-fail.md).
+[`suggest` record](decisions/2026-08-02-research-spike-suggest-cannot-fail.md).
 
 ### 3. There is no field for readiness
 
@@ -243,7 +243,7 @@ A decision stores only `state: pending | decided`, plus `decided_in:` and
 `reopened_because:` where required. A hand-typed `ready:` or `blocked:` is an
 unknown-key error, because `KNOWN_FIELDS` for `decision` omits them.
 Readiness is computed on every `status` and `validate` run. Why:
-[readiness record](decisions/2026-11-13-research-spike-readiness-is-derived.md).
+[readiness record](decisions/2026-08-02-research-spike-readiness-is-derived.md).
 
 ### 4. `/push-plan` does not update receipt cards
 
@@ -253,7 +253,7 @@ card's `url:`. The card survives `/push-plan`, which deletes only the plan
 directory, but `/push-plan` has no step that finds receipt cards. Updating a
 card's `url:` to the pushed tracker URL is a manual part of the handoff. Why
 receipts:
-[bridges record](decisions/2026-11-13-research-spike-bridges-use-receipt-cards.md).
+[bridges record](decisions/2026-08-02-research-spike-bridges-use-receipt-cards.md).
 
 ### 5. The dprint/generated-block stability trap, and how it is verified
 
@@ -455,5 +455,5 @@ to verify this.
 | `skills/research-spike/SKILL.md`                     | The judgment half — the five procedures and the script/LLM boundary.                                                                                 |
 | `skills/research-spike/references/record-grammar.md` | The full field reference, written by hand against the script's own constants — see "Where the record grammar lives" for why that sync is not tested. |
 | `skills/research-spike/references/adoption.md`       | The setup playbook for turning this on in a repo with real deferred work.                                                                            |
-| `dev_docs/decisions/2026-11-13-research-spike-*.md`  | The decision records — why each choice was made and what would reopen it.                                                                            |
+| `dev_docs/decisions/*-research-spike-*.md`           | The decision records — why each choice was made and what would reopen it.                                                                            |
 | `dev_docs/research_spike.md` (this file)             | The engineering record — architecture, the status report, gotchas.                                                                                   |

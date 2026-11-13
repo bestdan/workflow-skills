@@ -1,5 +1,5 @@
 ---
-created: 2026-11-13
+created: 2026-08-02
 status: accepted
 convention: ../research_spike.md
 ---
@@ -56,7 +56,7 @@ the subcommand (`--root`, `-v`). The design's `status <project>` shipped as
   produced correctly, enough that the cost of hand-writing exceeds the cost of
   a script that edits prose.
 - A consumer needs the derived state without re-parsing the markdown (see
-  [the deferred `status --json`](2026-11-13-research-spike-lean-b-d-e-deferred.md)).
+  [the deferred `status --json`](2026-08-14-research-spike-lean-b-d-e-deferred.md)).
 
 ## Confirmation
 

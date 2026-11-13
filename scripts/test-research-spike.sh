@@ -3213,7 +3213,7 @@ assert_contains "the 'total' track's row and the aggregate row carry their own n
 # A decision can print DECIDED (or READY, or BLOCKED) while resting on work
 # that is still open and has nowhere to go — the edge is section co-location
 # with a question's `blocks:`, not the scarce, hand-declared `blocking:`. See
-# `dev_docs/decisions/2026-11-13-research-spike-taint-and-none-in-status-only.md`.
+# `dev_docs/decisions/2026-10-18-research-spike-taint-and-none-in-status-only.md`.
 
 # The reproduction: one decided decision, one answered question that gates
 # it, and one still-open obligation in the same section pointing at a stub —

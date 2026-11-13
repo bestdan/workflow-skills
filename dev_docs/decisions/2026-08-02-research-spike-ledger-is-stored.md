@@ -1,5 +1,5 @@
 ---
-created: 2026-11-13
+created: 2026-08-02
 status: accepted
 convention: ../research_spike.md
 ---
@@ -62,7 +62,7 @@ blocks against this repo's `dprint.json` only.
 
 - An adopter's formatter rewrites the generated blocks.
 - A history-reading `trend` verb is built
-  ([deferred, D](2026-11-13-research-spike-lean-b-d-e-deferred.md)), which
+  ([deferred, D](2026-08-14-research-spike-lean-b-d-e-deferred.md)), which
   may change what the stored lines need to carry.
 - The roll-up's organizer-only ownership becomes the bottleneck in a project
   with many tracks.

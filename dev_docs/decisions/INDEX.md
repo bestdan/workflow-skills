@@ -4,18 +4,8 @@
 
 | Date       | Decision                                                                                                                                         |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 2026-11-13 | [research-spike reports obligation taint and the `none:` count in `status` only](2026-11-13-research-spike-taint-and-none-in-status-only.md)     |
-| 2026-11-13 | [research-spike: the lexical deferral scan is advisory and can never fail a run](2026-11-13-research-spike-suggest-cannot-fail.md)               |
-| 2026-11-13 | [research-spike's `status` report: what it separates, warns about, and never fails on](2026-11-13-research-spike-status-report-rules.md)         |
-| 2026-11-13 | [research-spike: the script computes every status and count, the agent only judges](2026-11-13-research-spike-script-computes-agent-judges.md)   |
-| 2026-11-13 | [research-spike decisions store only their human state; readiness is derived](2026-11-13-research-spike-readiness-is-derived.md)                 |
-| 2026-11-13 | [research-spike stores its ledger and checks it, rather than computing it on demand](2026-11-13-research-spike-ledger-is-stored.md)              |
-| 2026-11-13 | [research-spike defers three Lean concepts: an assumption card, a trend verb, `status --json`](2026-11-13-research-spike-lean-b-d-e-deferred.md) |
-| 2026-11-13 | [research-spike owns its directory layout instead of configuring it per repo](2026-11-13-research-spike-layout-is-skill-owned.md)                |
-| 2026-11-13 | [research-spike: an obligation's destination must be an existing file in the repo](2026-11-13-research-spike-destinations-must-exist.md)         |
-| 2026-11-13 | [research-spike: every question section must declare what it owes, even nothing](2026-11-13-research-spike-coverage-is-declared-per-section.md)  |
-| 2026-11-13 | [research-spike bridges to the task loop through receipt cards, with no reconciliation](2026-11-13-research-spike-bridges-use-receipt-cards.md)  |
 | 2026-11-10 | [The merge audit labels a bypass by its actor](2026-11-10-audit-labels-a-bypass-by-its-actor.md)                                                 |
+| 2026-10-18 | [research-spike reports obligation taint and the `none:` count in `status` only](2026-10-18-research-spike-taint-and-none-in-status-only.md)     |
 | 2026-09-24 | [`assess-task` stays a subagent: the typed profile is not adopted](2026-09-24-assess-task-stays-a-subagent.md)                                   |
 | 2026-09-22 | [The eval suite's failures are not all routing failures](2026-09-22-eval-failures-are-not-all-routing.md)                                        |
 | 2026-09-21 | [`label`'s derivation table is not pure code, and one cell can never be](2026-09-21-label-table-is-not-pure-code/)                               |
@@ -28,3 +18,13 @@
 | 2026-08-24 | [Why the task loop left Linear for GitHub Issues](2026-08-24-leaving-linear-for-github-issues.md)                                                |
 | 2026-08-21 | [WIP gate attendedness](2026-08-21-wip-gate-attendedness.md)                                                                                     |
 | 2026-08-19 | [local-review view modes](2026-08-19-local-review-view-modes.md)                                                                                 |
+| 2026-08-14 | [research-spike defers three Lean concepts: an assumption card, a trend verb, `status --json`](2026-08-14-research-spike-lean-b-d-e-deferred.md) |
+| 2026-08-02 | [research-spike: the lexical deferral scan is advisory and can never fail a run](2026-08-02-research-spike-suggest-cannot-fail.md)               |
+| 2026-08-02 | [research-spike's `status` report: what it separates, warns about, and never fails on](2026-08-02-research-spike-status-report-rules.md)         |
+| 2026-08-02 | [research-spike: the script computes every status and count, the agent only judges](2026-08-02-research-spike-script-computes-agent-judges.md)   |
+| 2026-08-02 | [research-spike decisions store only their human state; readiness is derived](2026-08-02-research-spike-readiness-is-derived.md)                 |
+| 2026-08-02 | [research-spike stores its ledger and checks it, rather than computing it on demand](2026-08-02-research-spike-ledger-is-stored.md)              |
+| 2026-08-02 | [research-spike: an obligation's destination must be an existing file in the repo](2026-08-02-research-spike-destinations-must-exist.md)         |
+| 2026-08-02 | [research-spike: every question section must declare what it owes, even nothing](2026-08-02-research-spike-coverage-is-declared-per-section.md)  |
+| 2026-08-02 | [research-spike bridges to the task loop through receipt cards, with no reconciliation](2026-08-02-research-spike-bridges-use-receipt-cards.md)  |
+| 2026-08-01 | [research-spike owns its directory layout instead of configuring it per repo](2026-08-01-research-spike-layout-is-skill-owned.md)                |

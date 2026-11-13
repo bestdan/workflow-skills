@@ -1,5 +1,5 @@
 ---
-created: 2026-11-13
+created: 2026-08-02
 status: accepted
 convention: ../research_spike.md
 ---
@@ -11,7 +11,7 @@ convention: ../research_spike.md
 Records catch a malformed deferral. They cannot catch the deferral nobody
 registered, which was the actual failure in `aiutopilot`. Grepping prose for
 deferral vocabulary does not answer that question reliably (see
-[the `suggest` record](2026-11-13-research-spike-suggest-cannot-fail.md)). In
+[the `suggest` record](2026-08-02-research-spike-suggest-cannot-fail.md)). In
 that repo a precondition stated in a contract document was on no list at all,
 which is a second class of hidden work.
 
@@ -43,7 +43,7 @@ real obligation.
   the origin repo, are covered in a directory the skill owns.
 - Bad, because a `none:` can be written to satisfy the rule mechanically. The
   `status` report counts them for that reason
-  ([taint and `none:` count](2026-11-13-research-spike-taint-and-none-in-status-only.md)).
+  ([taint and `none:` count](2026-10-18-research-spike-taint-and-none-in-status-only.md)).
 - Bad, because a deferral stated in prose anywhere else in the tree is still
   registered only voluntarily.
 

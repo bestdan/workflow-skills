@@ -1,5 +1,5 @@
 ---
-created: 2026-11-13
+created: 2026-08-02
 status: accepted
 convention: ../research_spike.md
 ---
@@ -12,7 +12,7 @@ Where the workflow-skills task loop is configured, a deferral could go to a
 tracker (`/add-task`) and a decision's evidence could be a plan
 (`plan-with-docs`, `/push-plan`). Both first drafts broke the
 destination-must-exist rule
-([record](2026-11-13-research-spike-destinations-must-exist.md)): tracker
+([record](2026-08-02-research-spike-destinations-must-exist.md)): tracker
 handlers return URLs, not paths, and `/push-plan` deletes plan directories
 after migration, so a pointer at either rots.
 
@@ -53,7 +53,7 @@ finds or updates receipt cards; whoever runs it updates `url:` by hand.
   tracker work closed, often enough to justify the `sweep` verb (walk
   receipts, check tracker state, propose discharges). It would pair with the
   deferred `status --json`
-  ([E](2026-11-13-research-spike-lean-b-d-e-deferred.md)).
+  ([E](2026-08-14-research-spike-lean-b-d-e-deferred.md)).
 - `/push-plan` gains a step that can find receipt cards.
 
 ## Confirmation

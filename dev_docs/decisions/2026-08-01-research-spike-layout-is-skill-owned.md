@@ -1,5 +1,5 @@
 ---
-created: 2026-11-13
+created: 2026-08-01
 status: accepted
 convention: ../research_spike.md
 ---
