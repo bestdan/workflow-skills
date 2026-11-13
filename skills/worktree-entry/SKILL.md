@@ -42,6 +42,16 @@ section below applies. Exit `2` is a usage or config error. Do not derive the
 name from the directory's basename yourself: a worktree on a re-pointed branch
 has the right basename and no name route.
 
+The same-repo condition is there because the hook resolves `<repo>` from the
+session's cwd. A worktree of another repo at a path that happens to match the
+layout would get a `name` that creates a new worktree in the session's repo,
+so it gets no name and is left to `path`. The resolver is the only copy of
+this mapping: co-review (`scripts/reach-pr-branch.sh`), the write guard
+(`scripts/guard-foreign-worktree.py`) and the `path` guard all call it, so
+they cannot disagree. A new caller asks it too rather than re-implementing
+the check, which would drift from `worktree-config.sh` and the create hook's
+name rule.
+
 ## Already in a worktree? Leave it first
 
 `EnterWorktree` with `name` is refused while the session is already in a
@@ -108,7 +118,12 @@ hook's layout, which is any worktree `worktree-name-for.sh` exits `1` on, and
 only when a person is at the terminal. The test is the layout, not whether the
 worktree exists. `${CLAUDE_PLUGIN_ROOT}/scripts/guard-enter-by-path.py` enforces
 it: a `path` call on a worktree that has a name is refused, and the refusal
-names the `name` route.
+names the `name` route. A `path` with no name, or any error inside the guard,
+gets no decision, and the prompt appears as usual. Why the guard is shaped
+this way:
+[refuse rather than rewrite](../../dev_docs/decisions/2026-11-13-refuse-enterworktree-path-rather-than-rewrite.md),
+[refuse only with a name, and fail open](../../dev_docs/decisions/2026-11-13-refuse-enterworktree-path-only-with-a-name-and-fail-open.md),
+and [leave the exit step to the agent](../../dev_docs/decisions/2026-11-13-worktree-refusals-never-infer-session-state.md).
 
 A model-supplied path outside `.claude/worktrees/` raises an approval prompt.
 Neither a `permissions.allow` rule nor a `PreToolUse` hook answering `allow`
