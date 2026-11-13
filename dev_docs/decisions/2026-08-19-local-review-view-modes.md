@@ -81,7 +81,7 @@ store rather than treating the DOM as the record.
   from the token stream, so no attacker-derived string ever reaches an HTML
   parser and there is nothing to sanitize. Full reasoning, and the eight claims
   the first design draft got wrong, are in
-  [`../designs/2026-08-20-local-review-markdown-preview.md`](../designs/2026-08-20-local-review-markdown-preview.md).
+  `2026-08-20-local-review-markdown-preview.md` (deleted).
 
 ## Revisit when
 
