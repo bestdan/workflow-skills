@@ -1,10 +1,14 @@
 ---
-created: 2026-11-13
+created: 2026-10-18
 status: accepted
 convention: ../reviewer-quality-score-design.md
 ---
 
 # The ledger sync leaves out cloud sessions
+
+> [!NOTE]
+> 2026-11-13: issue #1048 is still open, so the three conditions remain
+> unchecked.
 
 ## Context
 
@@ -21,8 +25,7 @@ flush for local machines.
 
 The sync covers local machines only. A cloud session's rows stay lost, as they
 were before the sync existed. Checking the three conditions is
-[issue #1048](https://github.com/bestdan/workflow-skills/issues/1048), still
-open on 2026-11-13.
+[issue #1048](https://github.com/bestdan/workflow-skills/issues/1048).
 
 ## Consequences
 

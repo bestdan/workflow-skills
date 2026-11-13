@@ -1,10 +1,18 @@
 ---
-created: 2026-11-13
+created: 2026-10-18
 status: accepted
 convention: ../reviewer-quality-score-design.md
 ---
 
 # The `SessionEnd` hook starts the ledger flush detached
+
+> [!NOTE]
+> 2026-11-13: the manual check under "Confirmation" has still not been run as a
+> controlled test on either platform. One read-only observation that day on the
+> owner's macOS machine is consistent with survival: `last-push.log` held
+> `ledger sync: pushed 2 runs` stamped 11:48:14Z, and the shared repo's newest
+> commit, that machine's `+2 runs`, was 11:48:16Z. Only `--detach` writes that
+> log, but nothing ties the run to a particular session's exit.
 
 ## Context
 
@@ -60,13 +68,6 @@ writes its receipt, and that `hooks/hooks.json` runs the exact command. No test
 can show survival of a real session's exit. The manual check is: with
 `CO_REVIEW_LEDGER_REMOTE` set, record a co-review run, exit the session, then
 read `last-push.log` and the shared repo's latest commit.
-
-That check has not been run as a controlled test, on 2026-11-13, on either
-platform. One read-only observation that day on the owner's macOS machine is
-consistent with survival: `last-push.log` held `ledger sync: pushed 2 runs`
-stamped 11:48:14Z, and the shared repo's newest commit, that machine's
-`+2 runs`, was 11:48:16Z. Only `--detach` writes that log, but nothing ties the
-run to a particular session's exit.
 
 ## Alternatives
 

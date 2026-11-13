@@ -1,5 +1,5 @@
 ---
-created: 2026-11-13
+created: 2026-10-18
 status: accepted
 convention: ../reviewer-quality-score-design.md
 ---

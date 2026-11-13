@@ -340,7 +340,7 @@ Every field `co-review-stats.py` reads is in it. Left behind: `issue`,
 repos); a reviewer's `command` and `reason` (a custom command can carry a
 token or a path); `pr`, `base_sha` and `head_sha` (they identify a commit in a
 private repo). Why `repo` is kept:
-[`decisions/2026-11-13-ledger-sync-copies-repo-as-is.md`](decisions/2026-11-13-ledger-sync-copies-repo-as-is.md).
+[`decisions/2026-10-18-ledger-sync-copies-repo-as-is.md`](decisions/2026-10-18-ledger-sync-copies-repo-as-is.md).
 
 **The failure rules.**
 
@@ -378,10 +378,10 @@ own redacted copies by the `(host, run_id)` rule, and a missing
 `shared/ledgers/` is not an error.
 
 The choices behind this are recorded in
-[`decisions/2026-11-13-co-review-ledgers-get-their-own-repo.md`](decisions/2026-11-13-co-review-ledgers-get-their-own-repo.md),
-[`decisions/2026-11-13-ledger-flush-detaches-from-sessionend.md`](decisions/2026-11-13-ledger-flush-detaches-from-sessionend.md)
+[`decisions/2026-10-18-co-review-ledgers-get-their-own-repo.md`](decisions/2026-10-18-co-review-ledgers-get-their-own-repo.md),
+[`decisions/2026-10-18-ledger-flush-detaches-from-sessionend.md`](decisions/2026-10-18-ledger-flush-detaches-from-sessionend.md)
 and
-[`decisions/2026-11-13-ledger-sync-leaves-out-cloud-sessions.md`](decisions/2026-11-13-ledger-sync-leaves-out-cloud-sessions.md),
+[`decisions/2026-10-18-ledger-sync-leaves-out-cloud-sessions.md`](decisions/2026-10-18-ledger-sync-leaves-out-cloud-sessions.md),
 alongside the one on `repo` above.
 
 ### 3. The write — `scripts/co-review-record.py`
