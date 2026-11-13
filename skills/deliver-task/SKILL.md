@@ -1,6 +1,6 @@
 ---
 name: deliver-task
-description: Take ONE identified task through its full per-task delivery lifecycle — claim, implement via a routed coder worker, verify, open a PR, run non-interactive co-review, iterate on the findings, and hand off at needs_review — then land the PR when its merge tier is auto and the repo's AGENT_LAND is on, completing the task; anything unmerged is never completed, and stays for /sweep-for-complete. Handler-dispatched (repo-pr / linear / gh-issue / jira) like the other task skills, and the per-task unit the /auto-pilot orchestrator calls. Use when the user wants one specific task driven all the way to a reviewed, hand-off-ready PR (e.g. /deliver-task <slug>), not a batch.
+description: Take ONE identified task through its full per-task delivery lifecycle — claim, implement via a routed coder worker, verify, open a PR, run co-review (non-interactive only when the run is unattended), iterate on the findings, and hand off at needs_review — then land the PR when its merge tier is auto and the repo's AGENT_LAND is on, completing the task; anything unmerged is never completed, and stays for /sweep-for-complete. Handler-dispatched (repo-pr / linear / gh-issue / jira) like the other task skills, and the per-task unit the /auto-pilot orchestrator calls. Use when the user wants one specific task driven all the way to a reviewed, hand-off-ready PR (e.g. /deliver-task <slug>), not a batch.
 ---
 
 # deliver-task — one task, claimed, implemented, reviewed, handed off
@@ -28,7 +28,7 @@ copied.
 | Run the worker in isolation, integrate the diff | the worktree + integrate rules in `orchestrate-coders` (`skills/orchestrate-coders/SKILL.md`)   |
 | Base-freshness                                  | `"${CLAUDE_PLUGIN_ROOT}/scripts/preflight-freshness.sh"`                                        |
 | Exercise the feature                            | driving the changed behavior end-to-end, inline (see step 3)                                    |
-| Review the PR                                   | `/co-review --non-interactive` (`skills/co-review/SKILL.md`)                                    |
+| Review the PR                                   | `/co-review`, `--non-interactive` only when unattended (`skills/co-review/SKILL.md`)            |
 | Open the PR + hand off                          | the handler's own PR-link + review-state sections (see steps 4, 7) — never a bespoke transition |
 
 ## Arguments
@@ -41,8 +41,10 @@ copied.
   for a **stacked** (dependency-chained) task, so the child builds on the parent.
 - `--questions <path>` — a `QUESTIONS.md` decision log to append deferred
   judgment calls to (step 6). The `/auto-pilot` orchestrator passes its run's
-  log; standalone, omit it and the calls ride out in the hand-off summary
-  instead (this skill never writes run-state files itself).
+  log; standalone, omit it — the calls are asked, or under `--non-interactive`
+  ride out in the hand-off summary (this skill never writes run-state files).
+- `--non-interactive` — no human is present: steps 5–6 run co-review that way
+  and defer judgment calls. `--run-state` implies it.
 - `--run-state <RUN.md>` — the auto-pilot run's durable state, passed only by
   `/auto-pilot` (standalone behavior is unchanged without it). It enables the
   reserve gate below and the less-claude profile reads at their named steps; it
@@ -360,8 +362,8 @@ PR ready. If the read fails, treat it as no write access.
 For an auto-pilot invocation, run the one `reserve-gate` call immediately
 before this co-review boundary. Read `co_review_mode` from the same `--run-state` at this
 step. `off` means **skip `/co-review` entirely** and record `co-review skipped (profile)` in the hand-off summary. `cheap-single` means run `/co-review
---non-interactive --reviewer-set cheap-single`; `default` (or no `--run-state`)
-runs `/co-review --non-interactive` exactly as before. Its never-prompt guarantee and bounded per-class timeouts are what make it safe in an
+--non-interactive --reviewer-set cheap-single`; `default` runs `/co-review --non-interactive`. With no `--run-state`, whether
+the flag is passed follows the rule below the list. Its never-prompt guarantee and bounded per-class timeouts are what make it safe in an
 unattended run. **Record which reviewer classes ran / timed-out / skipped** — that
 line goes into the hand-off summary (step 7). If `/co-review` can't run **at all**
 (every reviewer unavailable, MCP/auth failure, or a pre-flight hard error that
@@ -382,6 +384,13 @@ depends on who is waiting:
 - **Otherwise** (standalone, with no `--run-state`): the work is already
   verified, so note `co-review unavailable` and proceed to hand-off.
 
+**Pass `--non-interactive` only when unattended** (`--run-state`, or the caller
+passed `--non-interactive`); otherwise call plain `/co-review`, so medium findings
+and the Next round recommendation reach the user as questions. An answered
+`AskUserQuestion` (e.g. the claim's held-issue override) makes the run attended
+per `commands/handlers/attendedness.md`. These defaults describe the run, not the
+user: once the delivery ends they say nothing about whether the user is present.
+
 This plugin grants co-review's own scripts when run as the `/deliver-task` command;
 `bypassPermissions` skips the check. Via the Skill tool in `default` mode, with no allow rule or sandbox
 auto-allow, each script is denied silently under `claude -p` (measured) and should
@@ -392,14 +401,15 @@ prompt interactively (not measured). Why: [`../co-review/references/permissions.
 Each iteration is a full round: apply co-review's **high-confidence** fixes,
 then, for an auto-pilot invocation, run the one `reserve-gate` call
 immediately before the **re-verify** (step 3's check), re-push, and run it
-again immediately before every repeated **co-review** when re-running `/co-review --non-interactive`
-on the updated PR to gather fresh findings. **Judgment calls** (medium findings)
+again immediately before every repeated **co-review** when re-running `/co-review` (with
+`--non-interactive` on the step 5 rule) on the updated PR to gather fresh findings. **Judgment calls** (medium findings)
 are never applied silently:
 
 - append each to the **caller-provided** `--questions <path>` decision log when
   one is passed (the `/auto-pilot` orchestrator's `QUESTIONS.md`);
-- **standalone (no `--questions`)**, carry them in the hand-off summary instead —
-  this skill never writes run-state files itself.
+- **unattended, no `--questions`**: carry them in the hand-off summary — this
+  skill never writes run-state files itself;
+- **attended**: ask the user (plain `/co-review` already does) — never defer.
 
 **Co-review's Next round recommendation rides the same path.** After the last
 round, append it to `--questions <path>` as one more entry — the question is
@@ -409,8 +419,8 @@ the reasoning is co-review's stated reason verbatim. The hand-off summary
 (step 7) is never written to run state, and `REPORT.md` is rebuilt from
 `RUN.md` and `QUESTIONS.md` alone, so this entry is what puts the
 recommendation in front of the morning reader; without it the recommendation
-exists only in transient command output. Standalone, it rides in the hand-off
-summary like the judgment calls above.
+exists only in transient command output. Unattended without `--questions`, it
+rides in the hand-off summary like the judgment calls above; attended, ask it.
 
 **Verification tests come back with the findings.** Co-review's step 9 hands
 over a list of real-machine checks, each naming the environment it needs and
