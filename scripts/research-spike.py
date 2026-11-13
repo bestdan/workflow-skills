@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """The research-spike instrument: obligation-ledger tooling for research spikes.
 
-Implements the script half of `dev_docs/designs/2026-08-01-research-spike-skill.md`. The
-boundary that design draws is hard and this file is one side of it: **if two
-runs over the same tree could disagree, it belongs here.** Parsing, every
+The script half of research-spike; `dev_docs/research_spike.md` is the
+maintainer's doc and links the decision records. The boundary between the
+script and the skill is hard and this file is one side of it: **if two runs
+over the same tree could disagree, it belongs here.** Parsing, every
 validation rule, decision-status computation, the `status` report, ledger
 derivation and freshness, and `suggest` are the script's. Prose, proposed ids,
 `none:` reasons, and the judgment of *whether* something is a deferral at all

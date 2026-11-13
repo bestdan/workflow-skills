@@ -1,23 +1,18 @@
 # research-spike — the obligation ledger, engineering record
 
 This is the durable maintainer's doc for `scripts/research-spike.py` and
-`skills/research-spike/`. It graduates the load-bearing decisions and gotchas
-from the thirteen-task plan that built the skill (all delivered) before that
-plan's scaffolding is deleted, per `dev_docs/tasks/`'s convention that a plan
-folder is temporary project-tracker scaffolding, not permanent documentation.
-If you are about to touch the script or the skill and want to know why it
-looks the way it does, this is the doc — not the design doc, and not (any
-longer) the plan.
+`skills/research-spike/`. If you are about to touch the script or the skill,
+start here.
 
-The product design — the problem, the measured evidence, the record formats,
-the full on-disk structure — is settled and lives at
-[`dev_docs/designs/2026-08-01-research-spike-skill.md`](designs/2026-08-01-research-spike-skill.md).
-Read it for the "why does this skill exist at all" story (the four-day
-`aiutopilot` incident, the 6-discharged-against-23-open numbers, the
-deferral-visibility table). This doc does not repeat that story; it covers
-what changed or hardened between that design and the shipped code, and the
-operational traps a maintainer will hit that the design doc, written before
-implementation, could not yet know about.
+The choices behind the instrument, each with what would reopen it, are
+decision records under [`decisions/`](decisions/INDEX.md), listed under
+"Decisions" below. The "why does this skill exist at all" story (the four-day
+`aiutopilot` incident, roughly 6 obligations discharged against 23 open, the
+rule that a deferral stayed visible only when its destination was a file) is
+the context of the
+[destination record](decisions/2026-11-13-research-spike-destinations-must-exist.md).
+This doc covers how the pieces fit and the operational traps a maintainer will
+hit.
 
 ## Architecture
 
@@ -38,15 +33,13 @@ the call on whether a sentence is a deferral at all. It never computes a
 status or a count — every procedure ends by running `validate`, and the
 validator, not the procedure, is what guarantees the result held.
 
-Presenting the two as one flat verb list was reviewed as the most likely way
-to implement the wrong half of this split, which is why both `SKILL.md` and
-this doc state the boundary before listing anything else.
+Why the line falls there:
+[script/agent record](decisions/2026-11-13-research-spike-script-computes-agent-judges.md).
 
 ### The on-disk convention
 
-Fixed by the skill, not configurable per repo — this is what replaces the
-reference implementation's three per-repo config knobs (coverage-file
-location, heading regex, coverage scope):
+Fixed by the skill, not configurable per repo
+([layout record](decisions/2026-11-13-research-spike-layout-is-skill-owned.md)):
 
 ```
 dev_docs/research/<project>/
@@ -82,7 +75,7 @@ cross-project destinations are forbidden by construction, so no reference
 ever needs qualifying.
 
 `init <project> [--track <name>]` is the one verb that legitimately creates
-files (the design's "what the skill must not do" list otherwise forbids
+files (SKILL.md's "What the skill must not do" list otherwise forbids
 creating a destination to make a record resolve). It scaffolds a tree that
 passes its own `validate` immediately — ledger markers already fresh, an
 inert worked example of the `### Q<n>.` convention inside an HTML comment.
@@ -98,7 +91,7 @@ Two places, deliberately kept in sync by pointing at the same source:
   [`skills/research-spike/references/record-grammar.md`](../skills/research-spike/references/record-grammar.md) —
   the full field table for all four record kinds plus the `none:` sentinel,
   written explicitly against the script as source of truth (its own header
-  says so) rather than against this doc's or the design's memory of it.
+  says so) rather than against this doc's memory of it.
 
 If the two ever disagree, the script is right and the reference file has
 drifted — fix the doc, not the code, unless the code itself needs to change.
@@ -175,87 +168,92 @@ stops people from running it is worse than no check at all (the same logic
 gotcha 2 states for `suggest`), so only `validate` — the one verb explicitly
 invoked as the gate — is allowed to fail a run over ordinary tree content.
 
-## Load-bearing decisions and rationale
+## Reading the `status` report
 
-| Decision                                                                                | Rationale                                                                                                                                                                                                                                               |
-| --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Directory convention is skill-owned, not configurable                                   | Replaces the reference implementation's three per-repo config knobs. A mechanical rule can be applied structurally once the skill owns the layout, instead of trusting per-repo config to be right.                                                     |
-| `destination:` must resolve to an **existing regular file**, not a directory            | This is the entire mechanism. In the origin repo, a deferral stayed visible exactly when its destination was a file that already existed; a bare directory can exist while saying nothing about the work.                                               |
-| Coverage rule: every question section declares an `obligation` or a bare `none:` reason | "Did you use a deferral word?" is a heuristic and unanswerable over English prose. "Is the field present?" is mechanical — forgetting stops being available, only deliberate silence remains, and a reviewer can see and challenge silence.             |
-| No `sweep` verb in v1                                                                   | Bridged work (obligations handed to a tracker via a receipt card) is not reconciled — completing the tracker task does not discharge the local obligation. Receipt cards are what would make a later `sweep` possible; building it now is out of scope. |
-| Cross-project destinations are forbidden                                                | A destination pointing into a foreign project's tree would hide that project's inbound dependency from its own ledger. The fix is to file the work in the receiving project and point the local obligation at a receipt card recording the handoff.     |
-| No trend computation                                                                    | The ledgers store no history. "Questions converging while obligations climb" is read by a human across commits (`git log` on the ledger lines); the script must not pretend to compute or print a delta.                                                |
-| No auto-repair, anywhere                                                                | `validate` never rewrites a stale ledger and never creates a missing destination. Either would let the tool quietly satisfy its own gate, which is how a check becomes theatre.                                                                         |
-| `blocking:` obligations are warned scarce (>1/3 of open obligations, fixed threshold)   | If everything blocks, nothing converges and the flag has become emphasis rather than signal. Not configurable, deliberately — a repo tuning the threshold is a repo negotiating with the warning instead of fixing the cause.                           |
-| Retired questions never fold into "answered"                                            | Folding them together would let a project converge by giving up. Retirement is legitimate scope reduction, counted separately everywhere, including in the header totals.                                                                               |
+Each decision prints one line: `DECIDED`, `READY` (nothing outstanding,
+waiting on a human), `BLOCKED` (with its live blockers and their paths
+beneath), or `PROPOSED` (filed in a track, not yet promoted). Two suffixes can
+follow:
+
+- `(unblocked by retirement: <ids>)` on a `READY` line whose only remaining
+  blockers were retired rather than answered.
+- `— rests on N open obligation(s) (N stub(s), N receipt(s))` under any
+  label: open obligations in a section whose question `blocks:` this
+  decision, other than ones already shown as `blocking:` blockers. The label
+  does not change.
+
+Then one line per track and a total, for example
+`account:  Q 4 answered / 3 open / 1 retired    O 2 discharged / 8 open (2 blocking, 2 stubs) / 3 declared none`.
+Zero subtotals inside the parentheses are omitted. The last figure counts bare
+`none:` obligation blocks. A `⚠` line follows when
+more than a third of open obligations carry `blocking:`, and a footer when the
+tree has validation errors or unresolved references, in which case run
+`validate`. Neither the taint suffix nor the `declared none` figure is in the
+stored ledgers.
+
+## Decisions
+
+Each is a record with its context, consequences and reopen conditions:
+
+- [The layout is skill-owned](decisions/2026-11-13-research-spike-layout-is-skill-owned.md):
+  multiple projects, scoped ids, no cross-project destinations.
+- [The script computes, the agent judges](decisions/2026-11-13-research-spike-script-computes-agent-judges.md):
+  the six subcommands and the five procedures.
+- [Destinations must be existing files](decisions/2026-11-13-research-spike-destinations-must-exist.md),
+  including the plan-directory warning and the `done`/`abandoned` error.
+- [Every question section declares coverage](decisions/2026-11-13-research-spike-coverage-is-declared-per-section.md),
+  as do `contracts/` files.
+- [`suggest` can never fail a run](decisions/2026-11-13-research-spike-suggest-cannot-fail.md).
+- [The ledger is stored and checked](decisions/2026-11-13-research-spike-ledger-is-stored.md):
+  scoped freshness, the `--strict` tier, no auto-repair, no trend.
+- [Readiness is derived](decisions/2026-11-13-research-spike-readiness-is-derived.md):
+  decisions store only `state`, and the reopen shape.
+- [The `status` report's rules](decisions/2026-11-13-research-spike-status-report-rules.md):
+  separate counts, per-track lines, the fixed scarcity warning, retirement.
+- [Bridges use receipt cards](decisions/2026-11-13-research-spike-bridges-use-receipt-cards.md):
+  no reconciliation and no `sweep` in v1.
+- [Taint and the `none:` count live in `status` only](decisions/2026-11-13-research-spike-taint-and-none-in-status-only.md).
+- [Assumption cards, `trend` and `status --json` are deferred](decisions/2026-11-13-research-spike-lean-b-d-e-deferred.md).
 
 ## Gotchas
 
-Seven traps a maintainer will hit. Five are the ones the design and the plan
-paid for; two more surfaced only once the plan was implemented and are worth
-graduating from its history.
+Seven traps a maintainer will hit. The reasons behind the first four are in
+the decision records linked from each.
 
-### 1. Why the ledger is stored, not computed on demand
+### 1. A new record makes the stored ledger stale
 
-A number you must remember to run reproduces the exact failure this whole
-instrument exists to prevent: invisible unless someone thinks to look. The
-ledger — questions answered/open/retired, obligations discharged/open (with
-blocking/stub/external subtotals) — is stored as a bullet list at the top of
-each track's `questions.md`, and rolled up into `LEDGER.md` per project.
-`validate` checks the stored numbers against a fresh derivation and fails if
-they disagree; `write-ledger` is the only thing that ever rewrites them, and
-it is always an explicit, human-triggered act (see gotcha 7).
+The ledger is stored at the top of each track's `questions.md` and rolled up
+into `LEDGER.md`, and `validate` fails when a stored block disagrees with a
+fresh derivation. Any record you add or change therefore fails the gate until
+you run `write-ledger`, scoped to the track you touched (see gotcha 7). That
+is the check working. Why it is stored:
+[ledger record](decisions/2026-11-13-research-spike-ledger-is-stored.md).
 
-### 2. Why `suggest` can never fail a run
+### 2. Do not put `suggest` in the gate
 
-The lexical scan (`deferred to`, `gated on`, `belongs to`, …) is the tempting
-half — grep for deferral vocabulary and flag anything unregistered. It
-survives only as an advisory mode with a hard-structural exit-0 guarantee,
-and the reason is measured, not fastidious: run against the reference tree
-(`aiutopilot`), `suggest` returned **29 hits**, most of them prose
-_describing_ behaviour rather than deferring work (e.g. "the stop is never
-gated on the lock"). In a repo with no baseline file, no allowlist, and no
-skip flag, a lexical scan as a gate would have been noise with nowhere legal
-to go. The rule that generalizes: **a check whose false positives have
-nowhere to go must not be able to fail the build.** In a repo that _does_
-have an advisory tier, `suggest` may run there as a non-failing report — see
-`skills/research-spike/references/adoption.md` step 5.
+`suggest` always exits `0`, and wiring it into a blocking check would gain
+nothing. In a repo with an advisory tier it may run there as a non-failing
+report (`skills/research-spike/references/adoption.md` step 5). That
+licenses nothing about `validate`, which belongs in the blocking gate. Why:
+[`suggest` record](decisions/2026-11-13-research-spike-suggest-cannot-fail.md).
 
-### 3. Why decision readiness is derived, never stored
+### 3. There is no field for readiness
 
-A decision (`decisions.md`) stores only `state: pending | decided` (plus
-`decided_in:` / `reopened_because:` where required). There is no `ready` or
-`blocked` key — the `KNOWN_FIELDS` table for `decision` does not include
-them, so a hand-typed `ready: true` is an unknown-key error, not a silently
-accepted lie. Readiness (every blocking question answered/retired, every
-blocking obligation discharged) is computed fresh on every `status`/`validate`
-run. Storing both the derived and a hand-edited copy was reviewed as a
-defect, not a convenience, precisely because a stale stored status can
-disagree with the derived one — the record format itself is what makes that
-class of bug impossible, rather than a rule that has to be remembered.
+A decision stores only `state: pending | decided`, plus `decided_in:` and
+`reopened_because:` where required. A hand-typed `ready:` or `blocked:` is an
+unknown-key error, because `KNOWN_FIELDS` for `decision` omits them.
+Readiness is computed on every `status` and `validate` run. Why:
+[readiness record](decisions/2026-11-13-research-spike-readiness-is-derived.md).
 
-### 4. Why both bridges route through receipt cards
+### 4. `/push-plan` does not update receipt cards
 
-`defer` → task loop, and `decided` → plan-with-docs both had their first
-drafts rejected in review, for the same reason: tracker handlers return
-**URLs, not paths** (`/add-task`'s contract hands back `issue.url`, never a
-tracker id or a filesystem location), and `/push-plan` **deletes** plan
-directories once every task in them has migrated. An obligation's
-`destination:` or a decision's `decided_in:` pointing directly at either
-would violate the one invariant the whole instrument rests on
-(path-must-exist) or rot on the very next push.
-
-Both bridges therefore write a `kind: receipt` card under
-`tracks/<track>/obligations/` — a file, which is a path that exists — and put
-the external reference (`url:`, optional `handler:`/`tracker_id:`) inside the
-card's _content_, which the validator never path-checks and (being offline by
-contract) could not verify anyway. The obligation's `destination:` or the
-decision's `decided_in:` then points at the card, not at the tracker. A
-receipt card survives `/push-plan` because it lives in the spike's own
-`tracks/<track>/obligations/` directory, not in the plan directory that
-command deletes — but `/push-plan` has no receipt-discovery step, so updating
-a card's `url:` to a pushed tracker URL is a manual part of the handoff, not
-something the push performs.
+Both bridges write a `kind: receipt` card under `tracks/<track>/obligations/`
+and point `destination:` or `decided_in:` at it; the tracker URL lives in the
+card's `url:`. The card survives `/push-plan`, which deletes only the plan
+directory, but `/push-plan` has no step that finds receipt cards. Updating a
+card's `url:` to the pushed tracker URL is a manual part of the handoff. Why
+receipts:
+[bridges record](decisions/2026-11-13-research-spike-bridges-use-receipt-cards.md).
 
 ### 5. The dprint/generated-block stability trap, and how it is verified
 
@@ -450,12 +448,12 @@ to verify this.
 
 ## File map
 
-| Path                                                  | What it is                                                                                                                                           |
-| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `scripts/research-spike.py`                           | The script half — stdlib-only, deterministic — the only research-spike thing CI runs (via `scripts/check.sh`, which runs many other checks besides). |
-| `scripts/test-research-spike.sh`                      | The hermetic fixture harness, wired into `scripts/check.sh`.                                                                                         |
-| `skills/research-spike/SKILL.md`                      | The judgment half — the five procedures and the script/LLM boundary.                                                                                 |
-| `skills/research-spike/references/record-grammar.md`  | The full field reference, written by hand against the script's own constants — see "Where the record grammar lives" for why that sync is not tested. |
-| `skills/research-spike/references/adoption.md`        | The setup playbook for turning this on in a repo with real deferred work.                                                                            |
-| `dev_docs/designs/2026-08-01-research-spike-skill.md` | The product design — problem, evidence, and the settled architecture.                                                                                |
-| `dev_docs/research_spike.md` (this file)              | The engineering record — decisions, rationale, gotchas.                                                                                              |
+| Path                                                 | What it is                                                                                                                                           |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scripts/research-spike.py`                          | The script half — stdlib-only, deterministic — the only research-spike thing CI runs (via `scripts/check.sh`, which runs many other checks besides). |
+| `scripts/test-research-spike.sh`                     | The hermetic fixture harness, wired into `scripts/check.sh`.                                                                                         |
+| `skills/research-spike/SKILL.md`                     | The judgment half — the five procedures and the script/LLM boundary.                                                                                 |
+| `skills/research-spike/references/record-grammar.md` | The full field reference, written by hand against the script's own constants — see "Where the record grammar lives" for why that sync is not tested. |
+| `skills/research-spike/references/adoption.md`       | The setup playbook for turning this on in a repo with real deferred work.                                                                            |
+| `dev_docs/decisions/2026-11-13-research-spike-*.md`  | The decision records — why each choice was made and what would reopen it.                                                                            |
+| `dev_docs/research_spike.md` (this file)             | The engineering record — architecture, the status report, gotchas.                                                                                   |
