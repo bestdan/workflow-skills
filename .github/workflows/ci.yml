@@ -78,13 +78,14 @@ jobs:
       - name: Fetch agent-guidance (dev_docs layout checker)
         # scripts/dev-docs-layout.sh runs the checker that ships in the
         # agent-guidance plugin, and fails rather than skips when it cannot
-        # find one. A runner has no plugin install, so clone the public repo
-        # and point the resolver at it. Shallow: the checker and the
-        # conventions beside it are all that gets read.
-        run: |
-          clone="$RUNNER_TEMP/agent-guidance"
-          git clone --depth 1 https://github.com/bestdan/agent-guidance.git "$clone"
-          echo "AGENT_GUIDANCE_DIR=$clone" >>"$GITHUB_ENV"
+        # find one. A runner has no plugin install, so agent-guidance's own
+        # action exports AGENT_GUIDANCE_DIR for the resolver. check: "false"
+        # because the quality gate below runs the checker itself. @main on
+        # purpose: this repo follows the convention as agent-guidance main
+        # states it.
+        uses: bestdan/agent-guidance/actions/dev-docs@main
+        with:
+          check: "false"
 
       # NOTE (tracked in dev_docs/.../step_3.md): first CI run verifies whether
       # `claude plugin validate` works headless (no auth) on a GitHub runner. If

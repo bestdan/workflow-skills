@@ -27,8 +27,8 @@
 #
 # A missing plugin FAILS rather than skips. A check that skips is green while
 # checking nothing, which is the failure mode this wrapper exists to avoid. CI
-# without a plugin install clones bestdan/agent-guidance and exports
-# AGENT_GUIDANCE_DIR (see .github/workflows/ci.yml).
+# without a plugin install gets AGENT_GUIDANCE_DIR from agent-guidance's
+# actions/dev-docs action at @main (see .github/workflows/ci.yml).
 set -uo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
