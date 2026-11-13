@@ -90,8 +90,9 @@ run launched before the record existed gets `no jail record`: pass
 `--jail <seatbelt|nono> --profile <profile> [--nono-bin <nono>]` instead, the
 paths the launch wrapper names.
 
-Run it outside Claude Code's own sandbox: on macOS `sandbox-exec` cannot start
-inside another Seatbelt sandbox, and the call fails before the doctor runs.
+Run it outside Claude Code's own sandbox: on macOS neither nono nor
+`sandbox-exec` can apply a Seatbelt profile inside another Seatbelt sandbox,
+and the call fails before the doctor runs.
 
 The doctor checks out, resets and removes worktrees, and the jail has
 written the run clone's config and hooks, so run unjailed those commands would

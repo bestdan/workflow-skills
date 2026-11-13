@@ -90,8 +90,9 @@ if command -v shasum >/dev/null 2>&1; then
   fcr "worktree is a file" "is not a directory" --sentinel-dir "$SENT" --worktree "$VB/notadir" --cmd-hash "$PIN"
 
   # write-verify-broker: renders an UN-JAILED launch script (no sandbox-exec) + a
-  # valid plist, with the verify command pinned in.
-  "$SCRIPT" write-verify-broker --sentinel-dir "$SENT" --verify-cmd 'bash scripts/check.sh' \
+  # valid plist, with the verify command pinned in. A legacy Seatbelt run: a
+  # nono run passes --nono-profile instead (test-spawn-orchestrator-nono.sh).
+  "$SCRIPT" write-verify-broker --jail seatbelt --sentinel-dir "$SENT" --verify-cmd 'bash scripts/check.sh' \
     --confine-under "$VB" --label com.autopilot.test.verify --workdir "$WT" --log "$VB/b.log" \
     --path '/usr/bin:/bin' --out-script "$VB/broker.sh" --out-plist "$VB/broker.plist" >/dev/null 2>&1
   vbody="$(cat "$VB/broker.sh" 2>/dev/null)"
@@ -105,7 +106,7 @@ if command -v shasum >/dev/null 2>&1; then
     echo "skip - write-verify-broker: plist lint (plutil absent)"
   fi
   # write-verify-broker fail-closed: bad label
-  wvbc="$("$SCRIPT" write-verify-broker --sentinel-dir "$SENT" --verify-cmd 'x' --confine-under "$VB" \
+  wvbc="$("$SCRIPT" write-verify-broker --jail seatbelt --sentinel-dir "$SENT" --verify-cmd 'x' --confine-under "$VB" \
     --label 'bad label' --workdir "$WT" --log "$VB/b.log" --path '/usr/bin:/bin' \
     --out-script "$VB/x.sh" --out-plist "$VB/x.plist" 2>&1)"
   wvc=$?
@@ -114,6 +115,18 @@ if command -v shasum >/dev/null 2>&1; then
   else
     bad "write-verify-broker: bad label fails closed" "exit=$wvc"
   fi
+  # A nono run (the default jail) on macOS needs its profile, as on Linux.
+  wvbc="$("$SCRIPT" write-verify-broker --sentinel-dir "$SENT" --verify-cmd 'x' --confine-under "$VB" \
+    --label com.autopilot.test.verify --workdir "$WT" --log "$VB/b.log" --path '/usr/bin:/bin' \
+    --out-script "$VB/y.sh" --out-plist "$VB/y.plist" 2>&1)"
+  wvc=$?
+  if [ "$wvc" = 2 ] && grep -qF 'requires --nono-profile' <<<"$wvbc"; then
+    ok "write-verify-broker macOS: a nono run requires --nono-profile"
+  else
+    bad "write-verify-broker macOS: a nono run requires --nono-profile" "exit=$wvc $wvbc"
+  fi
+  [ -e "$VB/y.sh" ] && bad "write-verify-broker macOS: the refusal writes no script" \
+    || ok "write-verify-broker macOS: the refusal writes no script"
 else
   echo "skip - verify broker: shasum not available (needed for the command pin)"
 fi
