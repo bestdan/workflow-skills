@@ -4,10 +4,10 @@
 
 | Date       | Decision                                                                                                                                                         |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 2026-11-13 | [Worktree refusals give the whole route and leave the exit step to the agent](2026-11-13-worktree-refusals-never-infer-session-state.md)                         |
-| 2026-11-13 | [Refuse an `EnterWorktree` `path` call that has a name; do not rewrite it](2026-11-13-refuse-enterworktree-path-rather-than-rewrite.md)                          |
-| 2026-11-13 | [The `EnterWorktree` `path` guard refuses only when a name route exists, and fails open](2026-11-13-refuse-enterworktree-path-only-with-a-name-and-fail-open.md) |
 | 2026-11-10 | [The merge audit labels a bypass by its actor](2026-11-10-audit-labels-a-bypass-by-its-actor.md)                                                                 |
+| 2026-10-15 | [Worktree refusals give the whole route and leave the exit step to the agent](2026-10-15-worktree-refusals-never-infer-session-state.md)                         |
+| 2026-10-15 | [Refuse an `EnterWorktree` `path` call that has a name; do not rewrite it](2026-10-15-refuse-enterworktree-path-rather-than-rewrite.md)                          |
+| 2026-10-15 | [The `EnterWorktree` `path` guard refuses only when a name route exists, and fails open](2026-10-15-refuse-enterworktree-path-only-with-a-name-and-fail-open.md) |
 | 2026-09-24 | [`assess-task` stays a subagent: the typed profile is not adopted](2026-09-24-assess-task-stays-a-subagent.md)                                                   |
 | 2026-09-22 | [The eval suite's failures are not all routing failures](2026-09-22-eval-failures-are-not-all-routing.md)                                                        |
 | 2026-09-21 | [`label`'s derivation table is not pure code, and one cell can never be](2026-09-21-label-table-is-not-pure-code/)                                               |

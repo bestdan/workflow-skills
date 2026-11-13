@@ -121,9 +121,9 @@ it: a `path` call on a worktree that has a name is refused, and the refusal
 names the `name` route. A `path` with no name, or any error inside the guard,
 gets no decision, and the prompt appears as usual. Why the guard is shaped
 this way:
-[refuse rather than rewrite](../../dev_docs/decisions/2026-11-13-refuse-enterworktree-path-rather-than-rewrite.md),
-[refuse only with a name, and fail open](../../dev_docs/decisions/2026-11-13-refuse-enterworktree-path-only-with-a-name-and-fail-open.md),
-and [leave the exit step to the agent](../../dev_docs/decisions/2026-11-13-worktree-refusals-never-infer-session-state.md).
+[refuse rather than rewrite](../../dev_docs/decisions/2026-10-15-refuse-enterworktree-path-rather-than-rewrite.md),
+[refuse only with a name, and fail open](../../dev_docs/decisions/2026-10-15-refuse-enterworktree-path-only-with-a-name-and-fail-open.md),
+and [leave the exit step to the agent](../../dev_docs/decisions/2026-10-15-worktree-refusals-never-infer-session-state.md).
 
 A model-supplied path outside `.claude/worktrees/` raises an approval prompt.
 Neither a `permissions.allow` rule nor a `PreToolUse` hook answering `allow`

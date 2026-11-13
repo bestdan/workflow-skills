@@ -1,5 +1,5 @@
 ---
-created: 2026-11-13
+created: 2026-10-15
 status: accepted
 convention: ../../skills/worktree-entry/SKILL.md
 ---
@@ -10,7 +10,7 @@ convention: ../../skills/worktree-entry/SKILL.md
 
 `scripts/guard-enter-by-path.py` refuses an `EnterWorktree` `path` call so the
 agent takes the prompt-free `name` route instead
-([`2026-11-13-refuse-enterworktree-path-rather-than-rewrite.md`](2026-11-13-refuse-enterworktree-path-rather-than-rewrite.md)).
+([`2026-10-15-refuse-enterworktree-path-rather-than-rewrite.md`](2026-10-15-refuse-enterworktree-path-rather-than-rewrite.md)).
 Some worktrees have no `name` route: one at a path the `WorktreeCreate` hook
 did not choose, one of another repo, or a hook-created worktree switched to
 another branch. For those, the `path` form and its prompt are the only way

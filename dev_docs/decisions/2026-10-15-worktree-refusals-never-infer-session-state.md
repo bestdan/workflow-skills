@@ -1,5 +1,5 @@
 ---
-created: 2026-11-13
+created: 2026-10-15
 status: accepted
 convention: ../../skills/worktree-entry/SKILL.md
 ---
