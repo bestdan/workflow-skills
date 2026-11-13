@@ -40,6 +40,22 @@ does nothing until #1060 lands. On `jira` it does nothing at all.
 > those of the `after=` row, so the sentence under the table says the
 > completing verbs run that mode instead.
 
+> **Update, 2026-11-12, rollout step 3.** `/deliver-task` runs the re-check
+> (`skills/deliver-task/references/recheck-dependents.md`). Two things differ
+> from part 3. On `repo-pr` it runs before co-review rather than just before the
+> PR is marked ready, so reviewers read the promotions and the lander's
+> co-review evidence stays on the head that is handed off; the step removes
+> the task file itself when it is still present, and a later bail restores it
+> before marking it blocked. On the tracker
+> handlers the lander PR had already added the completion write, as the
+> handler's completion phase rather than the `/complete-task` command, so step 3
+> added only the re-check after it, which is skipped when that write fails.
+> `/deliver-task`'s command frontmatter already allowed bare `Bash`, `Agent`,
+> `Skill`, `Edit` and both MCP servers, a superset of the union, so it did not
+> change. The path that writes a completion owns its re-check: a task
+> `/deliver-task` completed has left the started state, so `/sweep-for-complete`
+> never selects it.
+
 ## What completing a task changes on the board
 
 The promoter holds a card in `new` while it has an unresolved blocker

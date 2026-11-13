@@ -10,7 +10,8 @@ argument-hint: "[--apply] [--all] [--project <id|name>]"
 it trusts whatever identifier it's given and does no merge verification of its
 own. `/sweep-for-complete` is the layer above it: it finds the issues that are
 **actually** done — sitting in a started-type state with their own linked PR
-already merged — and calls `/complete-task` once per verified match. Nothing
+already merged — and runs the handler's `/complete-task` phase once per
+verified match. Nothing
 here searches PR text for bare issue ids; it starts from the issues the
 tracker is already holding open and asks, for each one individually, whether
 **its own** structurally-linked PR merged.
