@@ -66,8 +66,8 @@ its project, but Linear _issues_ never become items. For FinPlan that is most
 of the work. The mirror holds four Linear projects named for FinPlan, 49 open
 `bestdan/finplan` PRs and 14 worktrees, and two GitHub issues. The backlog an
 owner would prioritize lives in Linear team PRE and isn't there. repo-pr task
-files aren't mirrored either. The shared-ranker design
-([`2026-10-27-shared-now-ranker.md`](2026-10-27-shared-now-ranker.md)) names
+files aren't mirrored either. The shared-ranker design,
+`2026-10-27-shared-now-ranker.md` (deleted), names
 both as future sources behind its seam. (Since then, #1264 mirrors the
 owner's assigned Linear issues; §7 has what it covers.)
 
@@ -301,8 +301,8 @@ duration per item, and the mirror has only signals of size. `size` turns those
 into a rough estimate and says where it came from:
 
 - `bucket` is one of `bot_pr`, `docs_pr`, `small_pr`, `large_pr` or `est:N`.
-  The first three are Little mode's PR buckets
-  ([`2026-10-26-now-modes.md`](2026-10-26-now-modes.md#little)), a small PR
+  The first three are Little mode's PR buckets, from
+  `2026-10-26-now-modes.md` (deleted), a small PR
   being at most 3 files and 50 lines; `large_pr` is a sized PR that is none
   of them. `est:N` reads an issue's or ticket's `est:` label. One function,
   `fleet_now.pr_bucket`, sorts PRs for both `items` and Little, so the two

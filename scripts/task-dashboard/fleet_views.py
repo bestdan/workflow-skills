@@ -79,8 +79,9 @@ def enabled(cfg: dict[str, Any]) -> bool:
 def fleet_pages(cfg: dict[str, Any]) -> bool:
     """The fleet's tabs (ONLY), Now as the home page, and the Stale lanes:
     on a fleet, or with GitHub's owner scope, which mirrors what they show.
-    Kept apart from enabled() while the tabs question is open ("Not decided
-    here" in dev_docs/designs/2026-10-27-shared-now-ranker.md)."""
+    Kept apart from enabled() while the tabs question is open ("Revisit
+    when" in
+    dev_docs/decisions/2026-11-13-one-now-ranker-for-every-instance.md)."""
     return sync.fleet_enabled(cfg) or enabled(cfg)
 
 

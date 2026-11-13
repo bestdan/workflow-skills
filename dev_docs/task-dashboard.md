@@ -21,9 +21,13 @@ It runs as one of two kinds of instance from the same code:
   the owner's machines, read from a phone over the tailnet. See
   [Fleet instance](#fleet-instance).
 
-An instance is a fleet instance when `github.scope = "owner"` and GitHub is
-enabled (`sync.fleet_enabled()`). Jira can be on or off in either kind
-(`jira.enabled`).
+Two separate settings make an instance a fleet one. `[ingest.machines]` makes
+it collect snapshots from other hosts, and that is all being a fleet means in
+code (`fleet_views.enabled()`). `github.scope = "owner"`, with GitHub enabled,
+turns on the owner-wide GitHub read (`sync.fleet_enabled()`). The fleet tabs,
+Now as the home page and the Stale lanes show when either is set
+(`fleet_views.fleet_pages()`). Now, its modes, `tune` and "why not now" run on
+every instance. Jira can be on or off in either kind (`jira.enabled`).
 
 ## Architecture
 
@@ -104,10 +108,24 @@ deterministic sum of config-weighted terms
 ([`score.py`](../scripts/task-dashboard/score.py)), and each card shows its
 terms, so the ranking can be argued with. Nothing calls a model at runtime.
 `dashboard.py tune` only suggests weight changes from the "why not now"
-answers. The modes are specified in
-[`designs/2026-10-26-now-modes.md`](designs/2026-10-26-now-modes.md), and the
-shared ranker in
-[`designs/2026-10-27-shared-now-ranker.md`](designs/2026-10-27-shared-now-ranker.md).
+answers. The ranking rules, the source seam and each mode's collector and
+order are `fleet_now.py`'s module docstring; close-outs are `close_out.py`'s.
+
+The choices behind them, each with what would reopen it:
+
+- [one ranker on every instance](decisions/2026-11-13-one-now-ranker-for-every-instance.md),
+  with being a fleet narrowed to ingesting from other hosts;
+- [a linked PR folds into its ticket or issue](decisions/2026-11-13-linked-prs-fold-into-their-parent.md)
+  and lends it its tier;
+- [blocked items get a last tier](decisions/2026-11-13-blocked-items-get-a-last-tier.md);
+- [`github.scope` replaces `github.fleet`](decisions/2026-11-13-github-scope-replaces-github-fleet.md);
+- [the score tables were renamed with no aliases](decisions/2026-11-13-score-tables-renamed-without-aliases.md);
+- [the owner picks Now's mode](decisions/2026-11-13-now-modes-picked-by-the-owner.md),
+  and it is saved in the overlay;
+- [each mode has its own collector](decisions/2026-11-13-each-now-mode-has-its-own-collector.md);
+- [Ship orders by fixed tiers](decisions/2026-11-13-ship-orders-by-fixed-tiers.md);
+- [close-outs tick from evidence, within a window and a cap](decisions/2026-11-13-close-outs-tick-from-evidence.md);
+- ["closed today" counts the fleet's output](decisions/2026-11-13-closed-today-counts-fleet-output.md).
 
 Shared by every page:
 
