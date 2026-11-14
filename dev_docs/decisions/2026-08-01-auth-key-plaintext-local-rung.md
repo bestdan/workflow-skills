@@ -18,6 +18,9 @@ negates only the committed config), but it sits inside the repo tree, where ever
 session, editor index and folder backup can read it. Bridging a config value into the
 environment also writes it into the command the agent runs, and so into the transcript.
 
+The rung was added at the owner's request during review of
+[PR #310](https://github.com/bestdan/workflow-skills/pull/310).
+
 ## Decision
 
 `<service>.<credential>` in `.task-config.local.yml` is a supported rung 0 of the secret
@@ -25,9 +28,7 @@ ladder, ahead of `$<NAME>`. The agent reads it from the raw local leaf and bridg
 into `$<NAME>`; `_secret_resolve.py` never reads it. In the committed `.task-config.yml`
 it is refused with a loud error, never merged and never used. It is never echoed in a
 diagnostic. The exposure it carries is documented where it is configured rather than
-prevented, because it is the operator's call about their own token. The rung was added
-at the owner's request during review of
-[PR #310](https://github.com/bestdan/workflow-skills/pull/310).
+prevented, because it is the operator's call about their own token.
 
 ## Consequences
 
