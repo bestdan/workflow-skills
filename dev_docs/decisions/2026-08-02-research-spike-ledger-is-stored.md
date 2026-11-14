@@ -15,7 +15,7 @@ until something already feels wrong. Projects with several tracks add a
 second problem: parallel agents working different tracks must not fail each
 other's checks, or contend on one file.
 
-The design (`2026-08-01-research-spike-skill.md`, deleted on graduation) chose
+The design (`dev_docs/designs/2026-08-01-research-spike-skill.md`, deleted on graduation) chose
 stored ledgers with scoped freshness. They landed in
 [#327](https://github.com/bestdan/workflow-skills/pull/327).
 

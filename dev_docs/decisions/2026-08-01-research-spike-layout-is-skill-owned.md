@@ -16,7 +16,7 @@ either turn each into a per-repo setting or fix them by owning the layout.
 The skill was also meant for long-running projects with several concurrent
 lines of research, which one flat file does not hold.
 
-The design (`2026-08-01-research-spike-skill.md`, deleted on graduation) chose
+The design (`dev_docs/designs/2026-08-01-research-spike-skill.md`, deleted on graduation) chose
 the layout. It landed in
 [#319](https://github.com/bestdan/workflow-skills/pull/319) (skeleton and
 discovery) and [#320](https://github.com/bestdan/workflow-skills/pull/320)

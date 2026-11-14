@@ -16,14 +16,14 @@ convenience. Decision evidence has a second hazard: `/push-plan` deletes plan
 directories after migrating them, so a decision pointing at a plan loses its
 evidence on the first push.
 
-The design (`2026-08-01-research-spike-skill.md`, deleted on graduation) set
+The design (`dev_docs/designs/2026-08-01-research-spike-skill.md`, deleted on graduation) set
 the record format. Decisions and referential integrity landed in
 [#325](https://github.com/bestdan/workflow-skills/pull/325); derived readiness
 in [#326](https://github.com/bestdan/workflow-skills/pull/326).
 
 ## Decision
 
-A `decision` block stores `id`, `state` (`pending | decided`), and
+A `decision` block stores `id`, `state` (`pending | decided`, or `proposed` inside a track's `questions.md` only), and
 `decided_in:` / `reopened_because:` where required. There is no key for
 `ready` or `blocked`, so typing one is an unknown-key error. A decision is
 ready when every question that `blocks:` it is answered or retired and every

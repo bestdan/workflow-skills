@@ -15,7 +15,7 @@ deferral vocabulary does not answer that question reliably (see
 that repo a precondition stated in a contract document was on no list at all,
 which is a second class of hidden work.
 
-The design (`2026-08-01-research-spike-skill.md`, deleted on graduation) chose
+The design (`dev_docs/designs/2026-08-01-research-spike-skill.md`, deleted on graduation) chose
 a structural rule. Question coverage landed in
 [#323](https://github.com/bestdan/workflow-skills/pull/323); contracts
 coverage with the decisions work in

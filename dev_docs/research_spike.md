@@ -239,8 +239,9 @@ licenses nothing about `validate`, which belongs in the blocking gate. Why:
 
 ### 3. There is no field for readiness
 
-A decision stores only `state: pending | decided`, plus `decided_in:` and
-`reopened_because:` where required. A hand-typed `ready:` or `blocked:` is an
+A decision stores only `state: pending | decided` (or `proposed`, inside a
+track's `questions.md` only), plus `decided_in:` and `reopened_because:` where
+required. A hand-typed `ready:` or `blocked:` is an
 unknown-key error, because `KNOWN_FIELDS` for `decision` omits them.
 Readiness is computed on every `status` and `validate` run. Why:
 [readiness record](decisions/2026-08-02-research-spike-readiness-is-derived.md).

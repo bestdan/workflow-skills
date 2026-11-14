@@ -10,7 +10,7 @@ convention: ../research_spike.md
 
 [`../research/2026-08-14-research-spike-lean-evaluation.md`](../research/2026-08-14-research-spike-lean-evaluation.md)
 found Lean the wrong language for the script but the right model for it, and
-the lean-concepts design (`2026-08-14-research-spike-lean-concepts.md`,
+the lean-concepts design (`dev_docs/designs/2026-08-14-research-spike-lean-concepts.md`,
 deleted on graduation) picked concepts to import. Two gaps were worth closing
 at once:
 

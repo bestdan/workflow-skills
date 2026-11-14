@@ -15,7 +15,7 @@ hide one sick track. A flag meant to be rare can be put on everything.
 Retiring questions can make a project look converged. A broken record can make
 a decision look readier than it is.
 
-The design (`2026-08-01-research-spike-skill.md`, deleted on graduation) set
+The design (`dev_docs/designs/2026-08-01-research-spike-skill.md`, deleted on graduation) set
 the report's rules. They landed in
 [#326](https://github.com/bestdan/workflow-skills/pull/326).
 

@@ -16,7 +16,7 @@ destination-must-exist rule
 handlers return URLs, not paths, and `/push-plan` deletes plan directories
 after migration, so a pointer at either rots.
 
-The design (`2026-08-01-research-spike-skill.md`, deleted on graduation)
+The design (`dev_docs/designs/2026-08-01-research-spike-skill.md`, deleted on graduation)
 routed both through cards. It landed in
 [#330](https://github.com/bestdan/workflow-skills/pull/330).
 

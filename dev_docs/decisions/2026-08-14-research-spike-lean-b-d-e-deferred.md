@@ -8,7 +8,7 @@ convention: ../research_spike.md
 
 ## Context
 
-The lean-concepts design (`2026-08-14-research-spike-lean-concepts.md`,
+The lean-concepts design (`dev_docs/designs/2026-08-14-research-spike-lean-concepts.md`,
 deleted on graduation) named five concepts worth importing from Lean. Two, A
 (taint) and C (counting `none:`), shipped
 ([record](2026-10-18-research-spike-taint-and-none-in-status-only.md)). The

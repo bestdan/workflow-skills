@@ -13,7 +13,7 @@ checking that a destination exists, counting answered questions. Some is
 judgment: writing a question, choosing an id, deciding whether a sentence
 defers work at all. An agent asked to report progress will happily produce a
 count itself, and a count it produces can disagree with the tree. The design
-(`2026-08-01-research-spike-skill.md`, deleted on graduation) noted that
+(`dev_docs/designs/2026-08-01-research-spike-skill.md`, deleted on graduation) noted that
 presenting the two halves as one flat list of verbs was the likeliest way to
 build the wrong half.
 

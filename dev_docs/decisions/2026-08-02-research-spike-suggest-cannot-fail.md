@@ -15,7 +15,7 @@ deferring work ("the stop is never gated on the lock"). That repo's check had
 no baseline file, no allowlist and no skip flag, so a false positive in the
 gate had nowhere legal to go.
 
-The design (`2026-08-01-research-spike-skill.md`, deleted on graduation) kept
+The design (`dev_docs/designs/2026-08-01-research-spike-skill.md`, deleted on graduation) kept
 the scan out of the gate. It landed in
 [#324](https://github.com/bestdan/workflow-skills/pull/324).
 
