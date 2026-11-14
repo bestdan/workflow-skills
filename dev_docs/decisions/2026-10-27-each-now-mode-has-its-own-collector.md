@@ -42,7 +42,8 @@ score:
 Pins, ignores, snoozes and the include filter apply in every mode. Pins show
 ahead of the list, and Deep's limit counts only unpinned items.
 
-Since the design, three sources joined. PR
+Since the design, `dev_docs/designs/2026-10-26-now-modes.md` (deleted on
+graduation), three sources joined. PR
 [#1256](https://github.com/bestdan/workflow-skills/pull/1256) added my Jira
 tickets to Deep (those blocking open tickets, and to-do ones in a status
 `DEEP_JIRA_STATUSES` names) and to Tidy (not updated in `OPEN_ITEM_DAYS`),

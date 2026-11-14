@@ -10,8 +10,10 @@ convention: ../task-dashboard.md
 
 Jira's score sank a blocked ticket with a −10 `blocked` weight. Under the
 shared ranker weights only order items within a tier, so that weight could
-only reorder one tier. Within a tier the category weight still counts: a
-blocked `quick_win` (weight 10) would sort above an unblocked `ready` (1.5).
+only reorder one tier. A blocked `started` issue would stay in the started
+tier, above everything in the rest. Within the rest the category weight still
+counts: a blocked `human_issue` (weight 3) would sort above an unblocked
+`ready` issue (1.5).
 Zeroing the category term is not enough either, because `prio` and `age` can
 still lift a blocked item by up to 1.3, past an unblocked `own_pr` (1). The
 dashboard's standing rule is that blocked work sinks but stays visible.

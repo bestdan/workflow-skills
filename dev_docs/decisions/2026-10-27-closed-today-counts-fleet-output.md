@@ -9,8 +9,9 @@ convention: ../task-dashboard.md
 ## Context
 
 Little mode borrows from Amabile and Kramer's _The Progress Principle_: small,
-visible progress drives motivation. The design put a "closed today: N" header
-over Little's list. The mirror could not supply the count:
+visible progress drives motivation. The design,
+`dev_docs/designs/2026-10-26-now-modes.md` (deleted on graduation), put a
+"closed today: N" header over Little's list. The mirror could not supply the count:
 `github_fleet.CLOSED_QUERY` covers only the owner's PRs, and the open-issue
 mirror drops closed issues.
 

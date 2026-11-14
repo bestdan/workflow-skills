@@ -28,7 +28,8 @@ queue and beats its own, and its why line names the PR
 (`ship: ready to merge via o/r#12`). Every overlay action on the card acts on
 the parent's key. The ticket is the work, and the PR is how far along it is.
 
-Two details settled while building it differ from the design text. A ready
+Two details settled while building it differ from the design text,
+`dev_docs/designs/2026-10-27-shared-now-ranker.md` (deleted on graduation). A ready
 PR lifts a blocked parent out of the blocked tier, because a mergeable PR
 means the work is done. Only PRs Now ranks fold: a draft, or one waiting on
 CI or review, is still listed on its Jira ticket's card as a `↳` line that
