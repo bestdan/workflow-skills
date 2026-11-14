@@ -100,7 +100,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-pr-sources.py" --tw
 Any other exit means the read failed as a whole. Run the same `get` once
 more before giving up: twg can fail a whole batch transiently, with exit 1 and
 a 404 "Issue does not exist" for keys the search had just returned, and the
-identical retry then succeeds. If the retry also fails, stop and report the
+identical retry then succeeds. A retry that exits 0 or 3 goes on to the
+script as above. If the retry also fails, stop and report the
 `error.message` from the JSON twg printed to that file, and do not run the
 script. The `<run>` naming below applies to these files too.
 

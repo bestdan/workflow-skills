@@ -12,8 +12,8 @@ Configures the `jira` handler, which creates Jira work items through `twg` or th
 
 ## Steps
 
-0. **twg first.** When `twg` is on `PATH` and `backend` is not already set to
-   `mcp`, run `twg --mode agent jira space query --limit 50 -o json
+0. **twg first.** When `twg` is on `PATH` or `backend` is already `twg` (and
+   `backend` is not `mcp`), run `twg --mode agent jira space query --limit 50 -o json
    --output-summary none` **unsandboxed**. It is the one twg call without
    `--site`: no site is known yet, so it uses twg's logged-in default. If it exits 0, its `request.site` is
    the site twg is logged in to and `data.projects[]` holds the visible

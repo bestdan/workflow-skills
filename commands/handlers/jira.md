@@ -37,7 +37,7 @@ jira:
 1. **Preflight.** Resolve the backend per `jira-config.md` → "Backend": `twg` when its check passes for `<jira.site>` (unless `backend: mcp`), otherwise the Atlassian MCP. On a resolved `twg`, the check itself is the preflight; go to step 2. On `backend: twg` with a failed check, stop with that section's message. Otherwise confirm the Atlassian MCP is reachable and the configured site is accessible:
 
    Call `<atlassian-mcp>__getAccessibleAtlassianResources` (no args).
-   - If the tool errors or returns no resources, **stop** with: "Jira handler needs twg (`twg login`) or the Atlassian MCP. Log in to twg, or install/connect the MCP in Claude Code settings, then re-run." Do not fall back to another handler.
+   - If the tool errors or returns no resources, **stop** with `jira-config.md` → "Backend"'s `auto` message, in its form without acli: "Jira needs twg (`twg login`) or the Atlassian MCP; none is reachable for `<jira.site>`." Do not fall back to another handler.
    - If the response does not include a resource whose `url` matches `https://<jira.site>`, **stop** with: "Configured Jira site `<site>` is not in your accessible Atlassian resources." (List the URLs that were returned.)
 
    `jira-archive.md`, `jira-claim.md` and `jira-promote.md` run this preflight as their own and stop with the same messages. `jira-complete.md` and `jira-sweep-complete.md` resolve through `jira-config.md` → "Backend", which can also pick acli.

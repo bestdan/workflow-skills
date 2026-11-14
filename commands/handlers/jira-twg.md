@@ -90,7 +90,6 @@ REST shapes the MCP returns, so nothing below the top level differs.
   on stdout, not stderr; `error.message` says what went wrong. Report it the
   way the step reports the MCP tool's error.
 
-The create, transition, comment, link and update shapes come from the CLI's
-code and its help; the reads above were checked against a live site
-(2026-11-14). The first write a flow makes over twg on a new site is the place
-to confirm them.
+Every command and response shape above was checked against a live site with
+twg 1.4.4, writes included. A later twg release can change them; when a call
+starts failing on a shape, compare it with `twg help describe "<command>"`.
