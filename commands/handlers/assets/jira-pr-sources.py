@@ -25,7 +25,12 @@ Input (stdin): a JSON array of issues. Each needs `key`. Comments are read from
 whichever shape the backend produced:
 
   fields.comment.comments[]   -- the Atlassian MCP's getJiraIssue
-  comments[] / comments{comments[]}  -- `acli jira workitem comment list --json`
+  comments[] / comments{comments[]}  -- `acli jira workitem comment list --json`,
+                                        and `twg jira workitem get --comments`
+
+With `--twg`, stdin is instead the whole `twg jira workitem get <KEY>...
+--comments -o json --output-summary none` envelope, and a key twg could not
+read becomes a row whose `source_errors` names it.
 
 A comment `body` may be plain text (acli renders it) or an Atlassian Document
 Format tree (the REST v3 shape); ADF inline code is re-wrapped in backticks so
@@ -246,19 +251,65 @@ def to_row(issue, use_acli):
     }
 
 
+def twg_issues(payload) -> List[Tuple[dict, Optional[str]]]:
+    """(issue, error) pairs out of a `twg jira workitem get` envelope.
+
+    One key prints `data` as a list of issues; several print `data.items`,
+    one `{input, ok, data | error}` per key. A failed key becomes an issue with
+    only its key, carrying the error, so its row lands in unresolved.
+    """
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if isinstance(data, list):
+        return [(issue, None) for issue in data]
+    items = data.get("items") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        die("stdin: expected a twg envelope with `data` or `data.items`")
+        return []
+    pairs: List[Tuple[dict, Optional[str]]] = []
+    for item in items:
+        if item.get("ok") and isinstance(item.get("data"), dict):
+            pairs.append((item["data"], None))
+            continue
+        error = item.get("error")
+        message = (
+            error.get("message") if isinstance(error, dict) else error
+        ) or "no error message"
+        key = item.get("input")
+        pairs.append(({"key": key}, f"twg get failed for {key}: {message}"))
+    return pairs
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument(
+    source = ap.add_mutually_exclusive_group()
+    source.add_argument(
         "--acli",
         action="store_true",
         help="fetch comments with acli for any issue that carries none",
     )
+    source.add_argument(
+        "--twg",
+        action="store_true",
+        help="stdin is `twg jira workitem get ... --comments -o json` output",
+    )
     args = ap.parse_args(argv)
 
     try:
-        issues = json.load(sys.stdin)
+        payload = json.load(sys.stdin)
     except json.JSONDecodeError as exc:
         die(f"stdin: invalid JSON: {exc}")
+
+    if args.twg:
+        rows = []
+        for issue, error in twg_issues(payload):
+            row = to_row(issue, False)
+            if error:
+                row["source_errors"] = [error]
+            rows.append(row)
+        print(json.dumps(rows, indent=2))
+        return 0
+
+    issues = payload
     if not isinstance(issues, list):
         die(f"stdin: expected a JSON array, got {type(issues).__name__}")
 

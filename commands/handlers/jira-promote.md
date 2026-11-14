@@ -8,9 +8,9 @@ user-invocable: false
 
 Invoked from `/promote-tasks` when `handler: jira` is configured. Scores the project's **new, un-scored** issues against the same confidence check the file path uses, then applies the kanban transitions by **status**: HIGH → transition to `ready_status` (the jira analogue of moving to `Todo`/`auto-eligible`); LOW → transition to `refinement_status` and leave a comment naming the failed check. Both target statuses are taken from config when set, or resolved dynamically and prompted for when unset (step 3a).
 
-**Shared reference:** the Atlassian MCP preflight is `commands/handlers/jira.md` step 1; the `ready_status`/`refinement_status` config keys are defined in `commands/handlers/jira-config.md`; the field-mapped confidence gate is `commands/handlers/linear-promote.md` step 6, read here against the Jira issue rather than Linear fields.
+**Shared reference:** the preflight and backend resolution are `commands/handlers/jira.md` step 1; the `ready_status`/`refinement_status` config keys are defined in `commands/handlers/jira-config.md`; the field-mapped confidence gate is `commands/handlers/linear-promote.md` step 6, read here against the Jira issue rather than Linear fields.
 
-> **MCP namespace.** `<atlassian-mcp>__` is `mcp__claude_ai_Atlassian__` or `mcp__atlassian__` depending on the install (see `jira-config.md`) — substitute the prefix loaded in your session. Tool names after the prefix (`getAccessibleAtlassianResources`, `searchJiraIssuesUsingJql`, `getTransitionsForJiraIssue`, `transitionJiraIssue`, `addCommentToJiraIssue`) are identical across installs.
+> **MCP namespace.** `<atlassian-mcp>__` is `mcp__claude_ai_Atlassian__` or `mcp__atlassian__` depending on the install (see `jira-config.md`) — substitute the prefix loaded in your session. Tool names after the prefix (`getAccessibleAtlassianResources`, `searchJiraIssuesUsingJql`, `getTransitionsForJiraIssue`, `transitionJiraIssue`, `addCommentToJiraIssue`) are identical across installs. On the `twg` backend, make each call with the command `jira-twg.md` maps it to.
 
 > **Target statuses: configured or resolved-and-prompted.** `ready_status` and `refinement_status` are both **target status names**, and both are **optional**. When set in config they are used two ways: as a **status name** in the step-3 candidate query (`status != "<ready_status>"`), and — because `transitionJiraIssue` takes a transition **id**, not a status name — resolved to a transition id at apply time (step 5) by matching the configured name against the issue's available transitions. When **unset**, step 3a resolves the project's reachable statuses **dynamically** (from a candidate's available transitions) and prompts the user to pick via `AskUserQuestion`, so no status id or name is ever hard-coded on either path. The step-3 `status !=` filter matches on status name; if a site's transition name differs from its target status name the step-5 lookup still resolves correctly (it matches the transition's target status `to.name`), and the step-3 dedup backstop covers the query-filter edge regardless.
 
@@ -20,7 +20,7 @@ Invoked from `/promote-tasks` when `handler: jira` is configured. Scores the pro
 
 ### 1. Preflight
 
-Run the Atlassian MCP preflight exactly as `commands/handlers/jira.md` step 1: call `<atlassian-mcp>__getAccessibleAtlassianResources` (no args) and confirm a resource whose `url` matches `https://<jira.site>`. On either failure, **stop** with the same messages ("Jira handler needs the Atlassian MCP. Install/connect it in Claude Code settings, then re-run." / "Configured Jira site `<site>` is not in your accessible Atlassian resources."). Do not fall back to another handler.
+Run the preflight in `commands/handlers/jira.md` step 1, which resolves the backend (`twg` or the Atlassian MCP) per `jira-config.md` → "Backend" and stops with its messages on failure. Do not fall back to another handler.
 
 ### 2. Resolve config (optional keys)
 

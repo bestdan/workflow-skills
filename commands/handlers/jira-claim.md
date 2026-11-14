@@ -6,11 +6,11 @@ user-invocable: false
 
 # jira handler — /do-tasks execute flow
 
-Invoked from `/do-tasks` (section 5, "jira path") when `handler: jira` is configured. This file holds the full jira claim/execute flow, run in the current session over the Atlassian MCP: **find candidates** (read-only), **pre-flight in-flight check** (read-only), **judge feasibility** (read-only), **claim the issue** (mutating, before work starts), **branch + execute**, **PR**, and **move to review on PR open** (mutating, after the PR is opened). A separate **bail** phase runs when work proves infeasible mid-execution. It mirrors the tracker flow in `commands/handlers/linear-claim.md`, over the Atlassian MCP instead of the Linear MCP — the same way `gh-issue-claim.md` mirrors it over the `gh` CLI.
+Invoked from `/do-tasks` (section 5, "jira path") when `handler: jira` is configured. This file holds the full jira claim/execute flow, run in the current session over the backend `jira.md` step 1 resolves (`twg` or the Atlassian MCP): **find candidates** (read-only), **pre-flight in-flight check** (read-only), **judge feasibility** (read-only), **claim the issue** (mutating, before work starts), **branch + execute**, **PR**, and **move to review on PR open** (mutating, after the PR is opened). A separate **bail** phase runs when work proves infeasible mid-execution. It mirrors the tracker flow in `commands/handlers/linear-claim.md`, over Jira instead of the Linear MCP — the same way `gh-issue-claim.md` mirrors it over the `gh` CLI.
 
-**Shared reference:** the Atlassian MCP preflight is `commands/handlers/jira.md` step 1; the `ready_status` config key (the jira analogue of the Linear `Todo`/`unstarted` ready lane) is defined in `commands/handlers/jira-config.md`; `commands/handlers/linear-claim.md` is the structural template. The claim is decided by the Jira **assignee** field, not by a GitHub ref: the state of a Jira claim lives in Jira, so a `task/<KEY>` branch that outlived its work cannot hold the ticket. `commands/handlers/claim-lock.md` is the gh-issue handler's ref lock and is **not** used here — "Claim the issue" names the race that costs, and why it is accepted.
+**Shared reference:** the preflight and backend resolution are `commands/handlers/jira.md` step 1; the `ready_status` config key (the jira analogue of the Linear `Todo`/`unstarted` ready lane) is defined in `commands/handlers/jira-config.md`; `commands/handlers/linear-claim.md` is the structural template. The claim is decided by the Jira **assignee** field, not by a GitHub ref: the state of a Jira claim lives in Jira, so a `task/<KEY>` branch that outlived its work cannot hold the ticket. `commands/handlers/claim-lock.md` is the gh-issue handler's ref lock and is **not** used here — "Claim the issue" names the race that costs, and why it is accepted.
 
-> **MCP namespace.** `<atlassian-mcp>__` is `mcp__claude_ai_Atlassian__` or `mcp__atlassian__` depending on the install (see `jira-config.md`) — substitute the prefix loaded in your session. Tool names after the prefix (`getAccessibleAtlassianResources`, `searchJiraIssuesUsingJql`, `getJiraIssue`, `editJiraIssue`, `atlassianUserInfo`, `getTransitionsForJiraIssue`, `transitionJiraIssue`, `addCommentToJiraIssue`) are identical across installs.
+> **MCP namespace.** `<atlassian-mcp>__` is `mcp__claude_ai_Atlassian__` or `mcp__atlassian__` depending on the install (see `jira-config.md`) — substitute the prefix loaded in your session. Tool names after the prefix (`getAccessibleAtlassianResources`, `searchJiraIssuesUsingJql`, `getJiraIssue`, `editJiraIssue`, `atlassianUserInfo`, `getTransitionsForJiraIssue`, `transitionJiraIssue`, `addCommentToJiraIssue`) are identical across installs. On the `twg` backend, make each call with the command `jira-twg.md` maps it to.
 
 > **Scope.** This flow now carries the same `--claim-only`/`--no-claim` split and pre-claim WIP gate that `linear-claim.md` and `gh-issue-claim.md` do — see "Modes: atomic vs. claim/execute split" and "Pre-claim WIP gate" below. `/do-tasks` claims and executes atomically by default; the two flags split that into composable steps.
 
@@ -123,7 +123,7 @@ nothing and report the WIP-limit decline).
 
 ## Find candidates
 
-1. **Preflight.** Run the Atlassian MCP preflight exactly as `commands/handlers/jira.md` step 1: call `<atlassian-mcp>__getAccessibleAtlassianResources` (no args) and confirm a resource whose `url` matches `https://<jira.site>`. On either failure, **stop** with the same messages ("Jira handler needs the Atlassian MCP. Install/connect it in Claude Code settings, then re-run." / "Configured Jira site `<site>` is not in your accessible Atlassian resources."). Do not fall back to another handler. Also confirm `gh auth status`, a clean working tree, and fetch the base branch.
+1. **Preflight.** Run the preflight in `commands/handlers/jira.md` step 1, which resolves the backend (`twg` or the Atlassian MCP) per `jira-config.md` → "Backend" and stops with its messages on failure. Do not fall back to another handler. Also confirm `gh auth status`, a clean working tree, and fetch the base branch.
 
 2. **Query.** Call `<atlassian-mcp>__searchJiraIssuesUsingJql` with:
    - `cloudId`: `<jira.site>`
@@ -328,7 +328,7 @@ and name the new branch in the bail comment so a human can find the work. **Rena
 never `git branch -D` it**: the stash holds only uncommitted changes, so a delete loses
 any committed work, and once the remote copy is gone the reflog is the only one left.
 Touch either branch **only** if this session created it; a branch that existed before
-this run is someone else's to clear. Then, over the Atlassian MCP — first re-reading the
+this run is someone else's to clear. Then, over the resolved backend — first re-reading the
 issue (`getJiraIssue`, `fields: ["assignee", "status"]`). If the assignee is no longer your
 `account_id`, or the status has left the `indeterminate` (In Progress) category, someone
 took or moved the issue during the build: skip steps 1 and 2, which would clobber their

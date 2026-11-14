@@ -241,6 +241,72 @@ class TestFromSearch(ResolveTestCase):
         self.assertEqual(code, 1)
 
 
+def _twg(*transitions):
+    """`twg jira workitem transitions query -o json` as printed for a live issue on
+    2026-11-14: a `data` envelope, `toName`, and the category's *name*."""
+    return {
+        "apiVersion": "v2",
+        "command": "jira.workitem.transitions",
+        "data": {
+            "transitions": [
+                {"id": tid, "name": name, "toName": to_name, "category": category}
+                for tid, name, to_name, category in transitions
+            ]
+        },
+    }
+
+
+PROJ_104 = _twg(
+    ("141", "Needs Refinement", "Needs Refinement", "To Do"),
+    ("151", "Ready for Development", "Ready for Development", "To Do"),
+    ("161", "In Progress", "In progress", "In Progress"),
+    ("71", "On Hold/Blocked", "On Hold/Blocked", "In Progress"),
+    ("2", "Validation", "Validation", "In Progress"),
+    ("61", "Canceled", "Canceled", "Done"),
+    ("41", "Done", "Done", "Done"),
+)
+
+
+class TestTwg(ResolveTestCase):
+    """The twg path: category names map onto the keys `--category` takes."""
+
+    def test_claim_resolves_the_in_progress_category(self):
+        code, out = self.call(
+            PROJ_104,
+            [
+                "--twg",
+                "--category",
+                "indeterminate",
+                "--exclude",
+                "hold|block|review|validation|wait",
+            ],
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(out, "161\tIn progress\n")
+
+    def test_complete_drops_canceled_from_the_done_category(self):
+        code, out = self.call(
+            PROJ_104, ["--twg", "--category", "done", "--exclude", "cancel"]
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(out, "41\tDone\n")
+
+    def test_exact_matches_the_target_status(self):
+        code, out = self.call(PROJ_104, ["--twg", "--exact", "Ready for Development"])
+        self.assertEqual(code, 0)
+        self.assertEqual(out, "151\tReady for Development\n")
+
+    def test_an_unknown_category_name_is_malformed(self):
+        payload = _twg(("9", "Odd", "Odd", "Somewhere Else"))
+        code, _ = self.call(payload, ["--twg", "--category", "done"])
+        self.assertEqual(code, 1)
+
+    def test_an_mcp_payload_is_malformed(self):
+        payload = {"transitions": [_transition("1", "Done", "done")]}
+        code, _ = self.call(payload, ["--twg", "--category", "done"])
+        self.assertEqual(code, 1)
+
+
 class TestArgValidation(unittest.TestCase):
     def test_requires_exactly_one_of_category_or_exact(self):
         with self.assertRaises(SystemExit):

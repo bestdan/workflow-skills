@@ -18,8 +18,8 @@ project defines one; otherwise it is a documented no-op.
 > is a **no-op** — report that and stop. Either way, completion state is
 > unchanged: an issue only becomes a candidate once it is already terminal.
 
-**Shared reference:** see `commands/handlers/jira.md` step 1 for the Atlassian MCP
-preflight and `commands/handlers/jira-config.md` for the config keys.
+**Shared reference:** see `commands/handlers/jira.md` step 1 for the preflight
+and backend resolution and `commands/handlers/jira-config.md` for the config keys.
 
 ## What counts as terminal here
 
@@ -31,8 +31,9 @@ date is older than the threshold. Never touch issues in the `To Do` or
 
 ## Steps
 
-1. **Preflight.** Run the Atlassian MCP preflight from `jira.md` step 1 (resolve
-   `cloudId` from the configured `site`). Read the `jira:` block for `project`,
+1. **Preflight.** Run the preflight from `jira.md` step 1, which resolves the
+   backend (`twg` or the Atlassian MCP); on `twg`, make each call below with the
+   command `jira-twg.md` maps it to. Read the `jira:` block for `project`,
    `labels` (the task-loop labels), and the optional **`archive_status`** key (the
    name of the terminal-category status to move archived issues to — see
    `jira-config.md` → "Archive status").

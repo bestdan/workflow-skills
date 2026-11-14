@@ -1,6 +1,6 @@
 ---
 description: Configure where /add-task delivers tasks (repo PR, GitHub issue, Jira, or Linear)
-allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(mkdir *), Bash(python3 *), Read, Write, Glob, AskUserQuestion, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__getVisibleJiraProjects, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__getVisibleJiraProjects, mcp__atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__linear__list_teams, mcp__linear__list_projects
+allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(mkdir *), Bash(python3 *), Read, Write, Glob, AskUserQuestion, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__getVisibleJiraProjects, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__getVisibleJiraProjects, mcp__atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__linear__list_teams, mcp__linear__list_projects, Bash(twg *)
 argument-hint: [repo-pr | gh-issue | jira | linear]
 ---
 
@@ -123,6 +123,7 @@ jira:
   # additional_fields: {}    # optional — extra createJiraIssue fields (Team, components, custom fields)
   # ready_status: Selected for Development # optional — where a complete, unblocked issue lands at capture
   # archive_status: Archived # optional — terminal-category status /archive-tasks transitions to
+  # backend: auto           # optional — auto | twg | acli | mcp; auto prefers twg (see jira-config.md → "Backend")
 # archive_after: 30          # optional, top-level — default /archive-tasks age threshold (days)
 ```
 

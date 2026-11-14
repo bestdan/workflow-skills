@@ -1,6 +1,6 @@
 ---
 description: Push a vetted local plan to the configured tracker — repo-pr is a no-op; Linear creates one issue per task under a project, gh-issue under a milestone, and jira under an Epic, in dependency order, with native blocker links on all three
-allowed-tools: Bash(git *), Bash(find *), Bash(grep *), Bash(cat *), Bash(gh *), Bash(python3 *), Glob, Grep, Read, Write, Edit, AskUserQuestion, mcp__linear__list_teams, mcp__linear__list_projects, mcp__linear__save_project, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__claude_ai_Linear__save_project, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__getJiraProjectIssueTypesMetadata, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Atlassian__createJiraIssue, mcp__claude_ai_Atlassian__editJiraIssue, mcp__claude_ai_Atlassian__getIssueLinkTypes, mcp__claude_ai_Atlassian__createIssueLink, mcp__claude_ai_Atlassian__getJiraIssue, mcp__claude_ai_Atlassian__getTransitionsForJiraIssue, mcp__claude_ai_Atlassian__transitionJiraIssue, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__getJiraProjectIssueTypesMetadata, mcp__atlassian__searchJiraIssuesUsingJql, mcp__atlassian__createJiraIssue, mcp__atlassian__editJiraIssue, mcp__atlassian__getIssueLinkTypes, mcp__atlassian__createIssueLink, mcp__atlassian__getJiraIssue, mcp__atlassian__getTransitionsForJiraIssue, mcp__atlassian__transitionJiraIssue
+allowed-tools: Bash(git *), Bash(find *), Bash(grep *), Bash(cat *), Bash(gh *), Bash(python3 *), Glob, Grep, Read, Write, Edit, AskUserQuestion, mcp__linear__list_teams, mcp__linear__list_projects, mcp__linear__save_project, mcp__linear__list_workflow_states, mcp__linear__save_issue, mcp__claude_ai_Linear__list_teams, mcp__claude_ai_Linear__list_projects, mcp__claude_ai_Linear__save_project, mcp__claude_ai_Linear__list_workflow_states, mcp__claude_ai_Linear__save_issue, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__getJiraProjectIssueTypesMetadata, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Atlassian__createJiraIssue, mcp__claude_ai_Atlassian__editJiraIssue, mcp__claude_ai_Atlassian__getIssueLinkTypes, mcp__claude_ai_Atlassian__createIssueLink, mcp__claude_ai_Atlassian__getJiraIssue, mcp__claude_ai_Atlassian__getTransitionsForJiraIssue, mcp__claude_ai_Atlassian__transitionJiraIssue, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__getJiraProjectIssueTypesMetadata, mcp__atlassian__searchJiraIssuesUsingJql, mcp__atlassian__createJiraIssue, mcp__atlassian__editJiraIssue, mcp__atlassian__getIssueLinkTypes, mcp__atlassian__createIssueLink, mcp__atlassian__getJiraIssue, mcp__atlassian__getTransitionsForJiraIssue, mcp__atlassian__transitionJiraIssue, Bash(twg *)
 argument-hint: "<plan-name> [--ready-only]"
 ---
 
@@ -541,9 +541,8 @@ files and the in-memory map must still be intact when it runs.
 ## 5b. jira path
 
 The jira path mirrors the Linear path (§4) — same topological order, same live
-slug→id map, same create-missing-only idempotency (§6). It uses the Atlassian MCP
-(`<atlassian-mcp>__*`, **not** a CLI), so it needs that MCP connected rather than
-any local tooling. Two things differ from Linear: the container is a Jira **Epic**
+slug→id map, same create-missing-only idempotency (§6). It reaches Jira through
+`twg` or the Atlassian MCP, whichever the jira preflight resolves. Two things differ from Linear: the container is a Jira **Epic**
 (children set their `parent` to its key), and blockers become native issue links
 created in a **second pass** — because `createJiraIssue` has no link parameter,
 every issue must exist before its `is_blocked_by` edges can be drawn.
@@ -551,7 +550,9 @@ every issue must exist before its `is_blocked_by` edges can be drawn.
 > **MCP namespace.** `<atlassian-mcp>__` is `mcp__claude_ai_Atlassian__` or
 > `mcp__atlassian__` depending on the install (see `commands/handlers/jira-config.md`),
 > parallel to `<linear-mcp>__` in §4 — substitute the prefix loaded in your session.
-> The `allowed-tools` front-matter names both concrete prefixes.
+> The `allowed-tools` front-matter names both concrete prefixes. On the `twg`
+> backend, make each call with the command `commands/handlers/jira-twg.md` maps
+> it to.
 
 > **Value note (spike §3 / O1).** `/do-tasks` execution is Linear-only, so — like
 > the gh-issue push — a jira push produces a board you then work **manually**. The
@@ -559,10 +560,9 @@ every issue must exist before its `is_blocked_by` edges can be drawn.
 
 ### 5b.1 Preflight
 
-Run the `jira` create-flow preflight (`commands/handlers/jira.md` step 1): call
-`<atlassian-mcp>__getAccessibleAtlassianResources` and confirm a resource
-whose `url` matches `https://<jira.site>`. On failure, reuse the create-flow's
-messages and **stop** — do not fall back to another handler. Read
+Run the `jira` create-flow preflight (`commands/handlers/jira.md` step 1),
+which resolves the backend (`twg` or the Atlassian MCP). On failure, reuse the
+create-flow's messages and **stop** — do not fall back to another handler. Read
 `commands/handlers/jira.md` for the config block (`jira.site`, `jira.project`,
 `jira.issue_type`, `jira.labels`) and the create/link steps reused below; if the
 relative path doesn't resolve, find it with **Glob** (`**/commands/handlers/jira.md`).

@@ -6,7 +6,9 @@ user-invocable: false
 
 # Handler: jira
 
-Creates a Jira work item via the Atlassian MCP server (`mcp__claude_ai_Atlassian__*`). Foreground call, no git plumbing, no CLI install. The new ticket is placed under a selected epic.
+Creates a Jira work item through `twg` or the Atlassian MCP server, whichever `jira-config.md` → "Backend" resolves to. Foreground call, no git plumbing. The new ticket is placed under a selected epic.
+
+> **Calls.** Every Jira call in this file is written as an Atlassian MCP tool, `<atlassian-mcp>__<tool>` — `<atlassian-mcp>__` is `mcp__claude_ai_Atlassian__` or `mcp__atlassian__` depending on the install (see `jira-config.md`). On the `twg` backend, make each call with the command `jira-twg.md` maps it to.
 
 > **Required interaction:** step 2 (epic selection) MUST prompt the user via `AskUserQuestion` unless `jira.default_epic` is set in config. This applies in auto mode too. Treat a missing or empty `jira.default_epic` (including `null`, `""`, or the key being absent from the config block) as "not set" — you MUST prompt. If you find yourself about to call `createJiraIssue` without having asked AND without a non-empty `jira.default_epic`, stop and go back to step 2.
 
@@ -32,17 +34,19 @@ jira:
 
 ## Steps
 
-1. **Preflight.** Confirm the Atlassian MCP is reachable and the configured site is accessible:
+1. **Preflight.** Resolve the backend per `jira-config.md` → "Backend": `twg` when its check passes for `<jira.site>` (unless `backend: mcp`), otherwise the Atlassian MCP. On a resolved `twg`, the check itself is the preflight; go to step 2. On `backend: twg` with a failed check, stop with that section's message. Otherwise confirm the Atlassian MCP is reachable and the configured site is accessible:
 
-   Call `mcp__claude_ai_Atlassian__getAccessibleAtlassianResources` (no args).
-   - If the tool errors or returns no resources, **stop** with: "Jira handler needs the Atlassian MCP. Install/connect it in Claude Code settings, then re-run." Do not fall back to another handler.
+   Call `<atlassian-mcp>__getAccessibleAtlassianResources` (no args).
+   - If the tool errors or returns no resources, **stop** with `jira-config.md` → "Backend"'s `auto` message, in its form without acli: "Jira needs twg (`twg login`) or the Atlassian MCP; none is reachable for `<jira.site>`." Do not fall back to another handler.
    - If the response does not include a resource whose `url` matches `https://<jira.site>`, **stop** with: "Configured Jira site `<site>` is not in your accessible Atlassian resources." (List the URLs that were returned.)
+
+   `jira-archive.md`, `jira-claim.md` and `jira-promote.md` run this preflight as their own and stop with the same messages. `jira-complete.md` and `jira-sweep-complete.md` resolve through `jira-config.md` → "Backend", which can also pick acli.
 
 2. **Select the epic. HARD STOP — DO NOT SKIP.** You MUST ask the user which epic to attach the ticket to before creating it, using `AskUserQuestion`. Do not infer the epic from the title, the project, or recent activity. Do not proceed to step 3 until the user has answered the `AskUserQuestion` call in this step. The ONLY way to skip this prompt is if `jira.default_epic` is set in the config file (then use that key as-is and proceed).
 
    Fetch the project's open epics:
 
-   Call `mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql` with:
+   Call `<atlassian-mcp>__searchJiraIssuesUsingJql` with:
    - `cloudId`: `<jira.site>`
    - `jql`: `project = "<project>" AND issuetype = Epic AND statusCategory != Done ORDER BY updated DESC`
    - `fields`: `["summary", "status"]`
@@ -63,7 +67,7 @@ jira:
    Blocked by task: <is_blocked_by>
    ```
 
-4. **Create the work item.** Call `mcp__claude_ai_Atlassian__createJiraIssue` with:
+4. **Create the work item.** Call `<atlassian-mcp>__createJiraIssue` with:
    - `cloudId`: `<jira.site>`
    - `projectKey`: `<project>`
    - `issueTypeName`: `<issue_type>` (default `Task`)
@@ -105,13 +109,13 @@ This handler does **not** create any `dev_docs/tasks/*.md` file, branch, or PR.
 
 ## List
 
-Invoked from `/list-tasks` when `handler: jira` is configured. Read-only — one `searchJiraIssuesUsingJql` query, no edits, no claims. Renders the configured project's issues as the same vertical-section kanban the file-based path uses, so `$ARGUMENTS` and the layout match `commands/list-tasks.md` step 4.
+Invoked from `/list-tasks` when `handler: jira` is configured. Read-only — one issue search, no edits, no claims. Renders the configured project's issues as the same vertical-section kanban the file-based path uses, so `$ARGUMENTS` and the layout match `commands/list-tasks.md` step 4.
 
 > **Coverage note.** `jira` now supports capture (`/add-task`), promote (`jira-promote.md`), single `/do-tasks` execute (`jira-claim.md`), and explicit completion (`/complete-task` → `jira-complete.md`, the fallback for when Jira's GitHub integration or smart commits didn't fire) — create, promote, and claim move issues by **status transition** (To Do → `ready_status`/`refinement_status` → In Progress → In Review), not by status labels. So an actively-driven board populates the `in_progress`/`needs_review` sections via `statusCategory`. The status-**label** mapping below is still honored when those labels happen to be present (e.g. set by hand or a board automation); a board only ever touched by `/add-task` renders mostly `new`/`ready`/`done`, the same fallback the gh-issue `## List` path has.
 
-1. **Preflight.** Reuse the create flow's step 1 preflight: call `mcp__claude_ai_Atlassian__getAccessibleAtlassianResources` (no args) and confirm a resource whose `url` matches `https://<jira.site>`. On either failure, **stop** with the same messages ("Jira handler needs the Atlassian MCP…" / "Configured Jira site `<site>` is not in your accessible Atlassian resources."). Do not fall back to another handler.
+1. **Preflight.** Run the create flow's step 1 preflight, which resolves the backend and stops with its messages on failure.
 
-2. **Query issues.** Call `mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql` with:
+2. **Query issues.** Call `<atlassian-mcp>__searchJiraIssuesUsingJql` with:
    - `cloudId`: `<jira.site>`
    - `jql`: `project = "<project>"`, plus one `AND labels = "<label>"` clause per entry in `jira.labels` when it is non-empty (AND-joined, so the board shows only issues carrying **all** configured labels — matching the gh-issue handler's per-`--label` AND filter; `labels in (...)` would be OR), then `ORDER BY created DESC`
    - `fields`: `["summary", "status", "assignee", "priority", "labels", "created"]`
@@ -175,8 +179,6 @@ Invoked from `/list-tasks` when `handler: jira` is configured. Read-only — one
 ## Link
 
 Invoked from `/push-plan` (§5b) to translate a task's `is_blocked_by` into a native Jira **issue link** — the capability the create flow above lacks (`createJiraIssue` has no link parameter). Each call adds one "blocks / is blocked by" edge between two existing issues, so it runs in a **second pass** after every issue in the batch exists and its key is known.
-
-> **MCP namespace.** `<atlassian-mcp>__` is `mcp__claude_ai_Atlassian__` or `mcp__atlassian__` depending on the install (see `jira-config.md`) — substitute the prefix loaded in your session.
 
 1. **Resolve the link type** into `<blocks-link-type>`. The blocker relationship is Jira's built-in `Blocks` type (`inward: "is blocked by"`, `outward: "blocks"`), so default `<blocks-link-type>` to `Blocks`. If a site has renamed or removed it, call `<atlassian-mcp>__getIssueLinkTypes` (`cloudId: <jira.site>`) and set `<blocks-link-type>` to the `name` of the type whose `inward` is `is blocked by`; if none exists, **skip linking** and note it in the report (the board still has the parent/child epic structure, just no blocker edges). Use `<blocks-link-type>` — not the literal `Blocks` — in steps 2 and 3 so a renamed type still links.
 

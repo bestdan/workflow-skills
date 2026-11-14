@@ -6,11 +6,25 @@ user-invocable: false
 
 # jira handler — /task-config setup
 
-Configures the `jira` handler, which creates Jira work items via the Atlassian MCP server at `/add-task` time. This file owns the Atlassian MCP preflight and the site/project/issue_type/default_epic/labels prompts; the actual create flow lives in `jira.md`.
+Configures the `jira` handler, which creates Jira work items through `twg` or the Atlassian MCP server at `/add-task` time (see "Backend"). This file owns the backend rule, the Atlassian MCP preflight and the site/project/issue_type/default_epic/labels prompts; the actual create flow lives in `jira.md`.
 
 > **Atlassian MCP tool namespace.** Like Linear, the Atlassian MCP can be installed via `claude.ai` settings (tools prefixed `<atlassian-mcp>__`) or via `claude mcp add` (tools prefixed `mcp__<server-name>__`, where `<server-name>` is the name passed at install — `mcp-setup-offer.md` uses `atlassian`, so `mcp__atlassian__`). Use whichever prefix is loaded. Tool names after the prefix (`getAccessibleAtlassianResources`, `getVisibleJiraProjects`, `searchJiraIssuesUsingJql`, `createJiraIssue`) are identical. This file writes tool names as `<atlassian-mcp>__getAccessibleAtlassianResources`, etc.
 
 ## Steps
+
+0. **twg first.** When `twg` is on `PATH` or `backend` is already `twg` (and
+   `backend` is not `mcp`), run `twg --mode agent jira space query --limit 50 -o json
+   --output-summary none` **unsandboxed**. It is the one twg call without
+   `--site`: no site is known yet, so it uses twg's logged-in default. If it exits 0, its `request.site` is
+   the site twg is logged in to and `data.projects[]` holds the visible
+   projects: take that one site in step 2 and those projects in step 3, make
+   the later steps' calls through `jira-twg.md`, and skip step 1. If it fails,
+   or twg is not installed, fall through to step 1, unless `backend` is
+   already `twg`: then **stop** with "twg cannot reach Jira (`twg jira space
+   query` said: `<its output>`). Run `twg login`, or set `backend: mcp`." and do
+   not write the config. twg's site is its login
+   default; a user who wants a different site runs `twg login` for it first, or
+   picks the MCP route.
 
 1. **Atlassian MCP preflight.** Call `<atlassian-mcp>__getAccessibleAtlassianResources` (no args) to discover accessible sites.
    - If the tool isn't available at all (the `<atlassian-mcp>__*` namespace isn't loaded), the Atlassian MCP isn't connected yet. **Dispatch to `mcp-setup-offer.md`** with:
@@ -67,7 +81,7 @@ Configures the `jira` handler, which creates Jira work items via the Atlassian M
      ready_status: Selected for Development
      refinement_status: Needs Refinement
      # archive_status: Archived   # optional — /archive-tasks target (see "Archive status")
-     # backend: auto              # optional — auto | acli | mcp, for /sweep-for-complete and /complete-task (see "Backend")
+     # backend: auto              # optional — auto | twg | acli | mcp (see "Backend")
    # archive_after: 30            # optional, top-level — default /archive-tasks age threshold (days)
    ```
 
@@ -100,35 +114,57 @@ So when `ready_status` is set, `commands/handlers/jira.md` **step 5** transition
 
 ## Backend (`backend`)
 
-`/sweep-for-complete` and `/complete-task` can reach Jira through either the
-Atlassian CLI (`acli`) or the Atlassian MCP. Every other jira flow uses the
-MCP only. `backend` is **optional**:
+Every jira flow reaches Jira through the Teamwork Graph CLI (`twg`) or the
+Atlassian MCP. `/sweep-for-complete` and `/complete-task` can also use the
+Atlassian CLI (`acli`). `backend` is **optional**:
 
-- **`auto`** (the default when unset) — use `acli` when its check below
-  passes, otherwise the MCP.
-- **`acli`** — acli only. A failed check stops the run, and there is no MCP
-  fallback.
+- **`auto`** (the default when unset) — the first of these whose check below
+  passes: `twg`, then `acli` (only in `/sweep-for-complete` and
+  `/complete-task`), then the MCP.
+- **`twg`** — twg only. A failed check stops the run.
+- **`acli`** — acli only, and only in those two flows. A failed check stops
+  the run; any other flow treats `acli` as `auto`.
 - **`mcp`** — the MCP only, through the preflight in `jira.md` step 1.
+
+Resolve the backend once per run, at the flow's preflight, and use it for every
+call in that run. Hand it to any flow the run calls into (`/sweep-for-complete`
+passes it to `jira-complete.md`'s `backend` parameter) rather than resolving it
+again.
+
+**Each backend's calls.** The handler files write every call as an MCP tool.
+On `twg`, `jira-twg.md` maps each one to its command and says how to read the
+response. On `acli`, the two flows that support it give their own `acli` forms
+step by step.
+
+**The twg check.** Run
+`twg --mode agent --site <jira.site> whoami -o json --output-summary none`
+**unsandboxed**. It passes when twg is on `PATH` and the call exits 0 with a
+`data.accountId`. A site twg cannot reach exits non-zero. A sandboxed failure
+says nothing about the login, for the same reason as acli's below.
 
 **The acli check.** Run `acli jira auth status` **unsandboxed**. It passes when
 it exits 0 and its `Site:` line equals `jira.site`. Sandboxed, acli cannot
 reach `api.atlassian.com`, and it reports that as an auth or JQL error rather
 than a network error, so a sandboxed failure says nothing about the login.
 When `jira.site` is a cloud id rather than a hostname, the line cannot match,
-so `auto` uses the MCP.
+so `auto` moves on to the MCP.
 
 On failure:
 
-- **`auto`** with a failed MCP preflight as well → stop with "Jira needs acli
-  (`acli jira auth login`) or the Atlassian MCP; neither is reachable for
-  `<jira.site>`."
+- **`auto`** with every check failed → stop with "Jira needs twg (`twg
+  login`), acli (`acli jira auth login`), or the Atlassian MCP; none is
+  reachable for `<jira.site>`." Leave acli out of the message in a flow that
+  does not use it.
+- **`twg`** → stop with "twg cannot reach `<jira.site>` (`twg whoami` said:
+  `<its output>`). Run `twg login`, or set `backend: mcp`."
 - **`acli`** → stop with "acli is not logged in to `<jira.site>` (`acli jira
   auth status` said: `<its output>`). Run `acli jira auth login`, or set
   `backend: mcp`."
 
-`auto` prefers acli because acli needs no MCP connection and puts each read
-inside a tested script rather than a chain of tool calls. In a cloud routine
-acli is normally not installed, so `auto` falls through to the MCP there.
+`auto` prefers a CLI because a CLI needs no MCP connection and its output can
+go straight into the handler's tested scripts rather than through a chain of
+tool calls. twg comes first because it covers every flow. In a cloud routine
+neither CLI is normally installed, so `auto` falls through to the MCP there.
 
 ## Team and other custom fields (`additional_fields`)
 

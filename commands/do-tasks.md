@@ -1,6 +1,6 @@
 ---
 description: Execute ready tasks — the unified, handler-dispatched verb for turning ready tasks into PRs
-allowed-tools: Bash(git *), Bash(gh *), Bash(claude *), Bash(find *), Bash(grep *), Bash(cat *), Bash(python3 *), Glob, Grep, Read, Write, Edit, AskUserQuestion, Agent, mcp__linear, mcp__claude_ai_Linear, mcp__atlassian, mcp__claude_ai_Atlassian
+allowed-tools: Bash(git *), Bash(gh *), Bash(claude *), Bash(find *), Bash(grep *), Bash(cat *), Bash(python3 *), Glob, Grep, Read, Write, Edit, AskUserQuestion, Agent, mcp__linear, mcp__claude_ai_Linear, mcp__atlassian, mcp__claude_ai_Atlassian, Bash(twg *)
 argument-hint: "[slug | --all | -n N] [--remote|--local] [--claim-only|--no-claim] [--project X] [--non-interactive]"
 ---
 
@@ -1227,8 +1227,8 @@ in-flight pre-flight, the feasibility judgment, the assignee-based claim (self-a
 transition to In Progress), the `task/<KEY>` work branch, `gh pr create --draft` with a
 Conventional Commits title ending in `[<KEY>]`, readiness before the move-to-review transition,
 bail mechanics, and the
-report format. `/do-tasks` runs these phases in the **current session** over the
-Atlassian MCP. If the relative path doesn't resolve, find it with **Glob**
+report format. `/do-tasks` runs these phases in the **current session** over
+`twg` or the Atlassian MCP, whichever the handler's preflight resolves. If the relative path doesn't resolve, find it with **Glob**
 (`**/commands/handlers/jira-claim.md`).
 
 **Single by nature.** Unlike the Linear tracker path (which batches via the

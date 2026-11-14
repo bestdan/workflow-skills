@@ -1,6 +1,6 @@
 ---
 description: Deliver ONE task through its full per-task lifecycle — claim, implement via a routed coder worker, verify, open a PR, run non-interactive co-review, iterate, hand off at needs_review, and land the PR when its merge tier is auto and AGENT_LAND is on (unmerged work is never completed)
-allowed-tools: Bash, Glob, Grep, Read, Write, Edit, Agent, AskUserQuestion, Skill, mcp__linear, mcp__claude_ai_Linear, mcp__atlassian, mcp__claude_ai_Atlassian
+allowed-tools: Bash, Glob, Grep, Read, Write, Edit, Agent, AskUserQuestion, Skill, mcp__linear, mcp__claude_ai_Linear, mcp__atlassian, mcp__claude_ai_Atlassian, Bash(twg *)
 argument-hint: "<slug | identifier> [--base <branch>] [--questions <path>] [--run-state <RUN.md>] [--handler <h>] [--no-land]"
 ---
 
