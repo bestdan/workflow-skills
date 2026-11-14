@@ -20,8 +20,8 @@ which is the failure class this contract exists to remove.
 
 `*_resolver` is honoured only from `$<NAME>_RESOLVER` or the gitignored
 `.task-config.local.yml`. One found in the committed config is reported loudly and not
-used. It is the only config key read from the raw local leaf rather than the merged
-view.
+used. It is read from the raw local leaf rather than the merged view, an exception it
+shares only with the raw secret (`<service>.<credential>`).
 
 As designed, enforcement lived only in the bridging agent, since the helper received
 environment variables and could not see their origin. Since

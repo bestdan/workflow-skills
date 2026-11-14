@@ -30,9 +30,12 @@ Resolve the secret and pointer down one ladder (`$<NAME>`, then `$<NAME>_REF`, t
 resolver down another (`$<NAME>_RESOLVER`, then `<service>.<credential>_resolver` from
 `.task-config.local.yml`, then `op`). First hit wins on each, and any pointer source
 composes with any resolver source. A resolve that fails at a pointer rung raises its
-category and stops; it never tries the next rung. `resolve_key()` in
-`commands/handlers/assets/_secret_resolve.py` implements both ladders as written, landed
-in [PR #310](https://github.com/bestdan/workflow-skills/pull/310).
+category and stops; it never tries the next rung. The ladders landed in
+[PR #310](https://github.com/bestdan/workflow-skills/pull/310), with the agent bridging
+the config rungs into `$<NAME>_REF` and `$<NAME>_RESOLVER`. Since
+[PR #1428](https://github.com/bestdan/workflow-skills/pull/1428), `resolve_key()` in
+`commands/handlers/assets/_secret_resolve.py` reads the config rungs itself (see
+[`2026-11-06-auth-key-helper-reads-config-rungs.md`](2026-11-06-auth-key-helper-reads-config-rungs.md)).
 
 ## Consequences
 
