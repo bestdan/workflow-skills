@@ -75,7 +75,7 @@ Overlay the local override on the committed config — mappings merge recursivel
   this handler only covers the residual case of a task file left behind in a
   non-terminal status whose work landed some other way.
 - `handler: jira` → read and follow **`commands/handlers/jira-complete.md`**
-  (resolves a `Done`-category transition via the Atlassian MCP, checks
+  (resolves a `Done`-category transition via `twg`, `acli` or the Atlassian MCP, checks
   idempotence by status category, confirms before mutating, applies the
   transition via `transitionJiraIssue`, optionally posts a comment). Jira's
   completion path is normally its GitHub integration or **smart commits**

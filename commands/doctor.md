@@ -170,11 +170,10 @@ the auth flows):
   `commands/handlers/linear-sweep-complete.md`, and
   `commands/handlers/linear-reconcile.md` resolve; if any are missing, report
   `WARN` with the missing path.
-- `jira` → a backend is reachable: run the twg check in
-  `commands/handlers/jira-config.md` → "Backend" (unsandboxed) for `jira.site`,
-  and when it fails, call `<atlassian-mcp>__getAccessibleAtlassianResources` and
-  confirm it returns sites (see `commands/handlers/jira-config.md` step 1). Name
-  the backend that passed.
+- `jira` → a backend is reachable: resolve the backend for `jira.site` per
+  `commands/handlers/jira-config.md` → "Backend" (unsandboxed), running that
+  backend's check, and name the backend that passed. On failure, `WARN` with
+  that section's message.
 
 Met → `PASS`. Unmet → `WARN` (auth/MCP is a human action, never auto-fixed) with
 the handler doc's own remediation.

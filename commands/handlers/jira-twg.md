@@ -23,7 +23,8 @@ twg --mode agent --site <jira.site> <command> -o json --output-summary none
 
 `--mode agent` is the CLI's agent opt-in; it is used in place of the
 `TWG_AGENT_DEFAULTS=1` environment prefix so the call matches a
-`Bash(twg *)` permission rule. `--output-summary none` puts the whole response
+`Bash(twg *)` permission rule. The one call without `--site` is
+`jira-config.md` step 0's site discovery, which runs before a site is known. `--output-summary none` puts the whole response
 on stdout instead of a summary envelope that points at a file.
 
 ## Calls

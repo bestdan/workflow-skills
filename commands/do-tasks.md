@@ -1227,8 +1227,8 @@ in-flight pre-flight, the feasibility judgment, the assignee-based claim (self-a
 transition to In Progress), the `task/<KEY>` work branch, `gh pr create --draft` with a
 Conventional Commits title ending in `[<KEY>]`, readiness before the move-to-review transition,
 bail mechanics, and the
-report format. `/do-tasks` runs these phases in the **current session** over the
-Atlassian MCP. If the relative path doesn't resolve, find it with **Glob**
+report format. `/do-tasks` runs these phases in the **current session** over
+`twg` or the Atlassian MCP, whichever the handler's preflight resolves. If the relative path doesn't resolve, find it with **Glob**
 (`**/commands/handlers/jira-claim.md`).
 
 **Single by nature.** Unlike the Linear tracker path (which batches via the

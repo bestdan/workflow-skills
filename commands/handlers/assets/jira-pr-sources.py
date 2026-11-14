@@ -271,7 +271,9 @@ def twg_issues(payload) -> List[Tuple[dict, Optional[str]]]:
             pairs.append((item["data"], None))
             continue
         error = item.get("error")
-        message = error.get("message") if isinstance(error, dict) else error
+        message = (
+            error.get("message") if isinstance(error, dict) else error
+        ) or "no error message"
         key = item.get("input")
         pairs.append(({"key": key}, f"twg get failed for {key}: {message}"))
     return pairs

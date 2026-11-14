@@ -8,7 +8,7 @@ user-invocable: false
 
 Creates a Jira work item through `twg` or the Atlassian MCP server, whichever `jira-config.md` → "Backend" resolves to. Foreground call, no git plumbing. The new ticket is placed under a selected epic.
 
-> **Calls.** Every Jira call in this file is written as an Atlassian MCP tool, `<atlassian-mcp>__<tool>` — `<atlassian-mcp>__` is `<atlassian-mcp>__` or `mcp__atlassian__` depending on the install (see `jira-config.md`). On the `twg` backend, make each call with the command `jira-twg.md` maps it to.
+> **Calls.** Every Jira call in this file is written as an Atlassian MCP tool, `<atlassian-mcp>__<tool>` — `<atlassian-mcp>__` is `mcp__claude_ai_Atlassian__` or `mcp__atlassian__` depending on the install (see `jira-config.md`). On the `twg` backend, make each call with the command `jira-twg.md` maps it to.
 
 > **Required interaction:** step 2 (epic selection) MUST prompt the user via `AskUserQuestion` unless `jira.default_epic` is set in config. This applies in auto mode too. Treat a missing or empty `jira.default_epic` (including `null`, `""`, or the key being absent from the config block) as "not set" — you MUST prompt. If you find yourself about to call `createJiraIssue` without having asked AND without a non-empty `jira.default_epic`, stop and go back to step 2.
 

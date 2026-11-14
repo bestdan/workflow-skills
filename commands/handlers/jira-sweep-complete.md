@@ -82,18 +82,24 @@ mkdir -p /tmp/claude && twg --mode agent --site <jira.site> jira workitem query 
 
 Stop on a non-zero exit. Read the keys out of its `data.issues[]`; when there
 are none, the sweep has nothing to do. Then read every key's comments in one
-call and turn them into rows:
+call, as a command of its own so its exit status is the one you read:
 
 ```bash
-twg --mode agent --site <jira.site> jira workitem get <KEY> <KEY>... --fields summary,status --comments -o json --output-summary none > /tmp/claude/jira-sweep-<run>-issues.json; \
-  python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-pr-sources.py" --twg \
+twg --mode agent --site <jira.site> jira workitem get <KEY> <KEY>... --fields summary,status --comments -o json --output-summary none > /tmp/claude/jira-sweep-<run>-issues.json
+```
+
+`get` exits 3 when some keys could not be read and still prints the rest. On
+0 or 3, turn the response into rows; `--twg` turns each failed key into a
+source error, so that issue lands in `left: unresolved`:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-pr-sources.py" --twg \
   < /tmp/claude/jira-sweep-<run>-issues.json > /tmp/claude/jira-sweep-<run>-rows.json
 ```
 
-`get` exits 3 when some keys could not be read and still prints the rest;
-`--twg` turns each failed key into a source error, so that issue lands in
-`left: unresolved`. Any other non-zero exit means the read failed as a whole:
-stop and report it. The `<run>` naming below applies to these files too.
+Any other exit means the read failed as a whole: stop and report twg's
+stderr, and do not run the script. The `<run>` naming below applies to these
+files too.
 
 **MCP backend.** Call `<atlassian-mcp>__searchJiraIssuesUsingJql` (`cloudId:
 <jira.site>`, `jql: <scope JQL>`, `fields: ["summary", "status"]`,

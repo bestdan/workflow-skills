@@ -107,8 +107,8 @@ Overlay the local override on the committed config — mappings merge recursivel
   `gh-issue-state.py --issue <n> --done --apply`). Don't use a bare
   `gh issue close` — it leaves live `status:`/`auto:` rungs on a closed issue."
 - `handler: jira` → read and follow
-  **`commands/handlers/jira-sweep-complete.md`** (resolves the backend — `acli`
-  or the Atlassian MCP — finds in-progress issues, resolves each one's own PR
+  **`commands/handlers/jira-sweep-complete.md`** (resolves the backend — `twg`,
+  `acli` or the Atlassian MCP — finds in-progress issues, resolves each one's own PR
   from the plugin's `PR opened:` comment or its key and branch, checks its
   merge state, and calls the `/complete-task` jira phase per verified match).
   Where Jira's GitHub integration or smart commits already close issues on
