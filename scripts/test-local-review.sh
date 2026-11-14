@@ -1449,9 +1449,9 @@ try:
               len(before.get("threads", [])) == 2
               and all(t.get("resolved") is False and t.get("replies") == [] for t in before["threads"]),
               before)
-        # Minted threads carry the diff_sig of the round that created them
-        # (design doc, "Comment identity") -- no behavioral use yet, but the
-        # field must ride the payload for the re-placement work to read later.
+        # Minted threads carry the diff_sig of the round that created them --
+        # no behavioral use yet, but the field must ride the payload for
+        # re-placement to read later.
         check("server: minted threads carry a non-empty diff_sig matching /state's sig",
               all(t.get("diff_sig") and t.get("diff_sig") == state0.get("sig") for t in before["threads"]),
               (before, state0))
@@ -2588,9 +2588,9 @@ finally:
     _shutil.rmtree(git_dir1, ignore_errors=True)
 
 # -- --git uncommitted, threads mode: threads survive a live /refresh -------
-# (dev_docs/designs/2026-08-24-local-review-threaded-replies.md, "State
-# ownership": threads live in server memory and must survive /refresh, which
-# always ends in the page reloading -- only unsubmitted drafts are lost.)
+# (skills/local-review/references/threads.md, "State ownership": threads
+# live in server memory and must survive /refresh, which always ends in the
+# page reloading -- only unsubmitted drafts are lost.)
 # This is the server-side half of re-placement: the thread and its reply must
 # still be there after the diff moves under it. The page-side re-anchoring is
 # covered by the placeThreads() node corpus below.
@@ -2828,8 +2828,8 @@ else:
 _UNTRUSTED = ["a.path", "c.file", "file.display", "h.header", "h.section",
               "c.text", "cell.s", "res.value", "_emitter",
               # Threads (server-owned comment threads + replies): the same
-              # invariant extends unchanged, per the design doc's security
-              # posture -- a reply is never rendered through an HTML parser.
+              # invariant extends unchanged -- a reply is never rendered
+              # through an HTML parser.
               "thread.file", "thread.text", "reply.author", "reply.text", "reply.ts"]
 _dirty = []
 for _chunk in server.PAGE.split("innerHTML")[1:]:
@@ -3075,7 +3075,7 @@ out.tightListRawStars = seen('- **Hook:** once\n- **Party:** 3-6\n').includes('*
 out.looseListStrong = tagsOf('- **Hook:** once\n\n- **Party:** 3-6\n').filter(g => g === 'strong').length;
 // ...and an UNKNOWN token stays inert even when it carries a `tokens` field.
 // No markdown source produces one, so the token is synthesized: this asserts
-// the design doc's own bullet — the fallback never derives an element from the
+// the closed-sink rule — the fallback never derives an element from the
 // token type and never walks arbitrary token fields.
 const mystery = describeBlock({type: 'mystery', raw: 'MYSTERY_RAW',
   tokens: [{type: 'strong', raw: '**x**', tokens: [{type: 'text', text: 'x'}]}]},

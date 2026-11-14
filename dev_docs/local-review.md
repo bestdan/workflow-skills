@@ -95,9 +95,19 @@ draws. The fence stays one comment target, and its
 source is a toggle away. The source opens by default when it carries `%%`
 comments or `accTitle`/`accDescr` text, which the drawing would hide. If Pele
 is missing or fails, the fence renders as plain code. The server sends
-`Referrer-Policy: no-referrer` because the token is in the URL (see #386), and
-the whole design including eight corrections to its first draft is in
-[`designs/2026-08-20-local-review-markdown-preview.md`](designs/2026-08-20-local-review-markdown-preview.md).
+`Referrer-Policy: no-referrer` because the token is in the URL (see #386).
+`marked` is vendored at one exact version, recorded with its SHA-256 in
+`scripts/local-review/NOTICE`; `legalModes()` drops `preview` when the vendored
+file is absent, so stripping `vendor/` costs the mode rather than breaking the
+page.
+
+Why preview is built this way, one decision per record:
+[the closed set of sinks](decisions/2026-08-20-local-review-preview-builds-dom-from-tokens.md),
+[showing what the file hides](decisions/2026-08-20-local-review-preview-shows-what-the-file-hides.md),
+[the size and depth caps](decisions/2026-08-20-local-review-preview-bounds-the-lexer.md),
+[leaf-block anchoring](decisions/2026-08-20-local-review-preview-anchors-leaf-blocks.md),
+[the hand-tested DOM half](decisions/2026-08-20-local-review-preview-dom-is-tested-by-hand.md),
+and [mermaid in a sandboxed frame](decisions/2026-11-12-local-review-mermaid-in-a-sandboxed-frame.md).
 
 `single` emits a genuine two-column grid rather than hiding two of four, so
 `insertAfterRow()` reads the column count from `grid.dataset.cols` instead of
@@ -120,15 +130,19 @@ There is no mode flag; the server derives the mode from two arguments it
 already takes. `--out`'s argparse default moved from `pr_comments.json` to
 `None`, so "given" means "given explicitly":
 
-| Launch shape             | Mode       | Behavior                                                                         |
-| ------------------------ | ---------- | -------------------------------------------------------------------------------- |
-| `--out`, no `--once`     | threads    | stays alive across rounds; thread endpoints and thread UI on                     |
-| `--out` with `--once`    | one-shot   | one round, write `--out`, exit — today's skill launch, pre-stage-1 payload shape |
-| no `--out`, no `--once`  | human-only | hand-run behavior; no thread endpoints, no Reply/Resolve controls                |
-| no `--out` with `--once` | human-only | one round, write `pr_comments.json`, exit                                        |
+| Launch shape             | Mode       | Behavior                                                          |
+| ------------------------ | ---------- | ----------------------------------------------------------------- |
+| `--out`, no `--once`     | threads    | stays alive across rounds; thread endpoints and thread UI on      |
+| `--out` with `--once`    | one-shot   | one round, write `--out`, exit, in the one-shot payload shape     |
+| no `--out`, no `--once`  | human-only | hand-run behavior; no thread endpoints, no Reply/Resolve controls |
+| no `--out` with `--once` | human-only | one round, write `pr_comments.json`, exit                         |
 
 `--once` always means "exit after one successful submit," in every mode.
-Only an explicit `--out` with no `--once` keeps the server alive.
+Only an explicit `--out` with no `--once` keeps the server alive. Why there is
+no flag:
+[`decisions/2026-08-25-local-review-mode-derives-from-out.md`](decisions/2026-08-25-local-review-mode-derives-from-out.md).
+No mode carries a verdict
+([`decisions/2026-08-25-local-review-has-no-verdict.md`](decisions/2026-08-25-local-review-has-no-verdict.md)).
 
 - **Startup:** the server prints `LOCAL_REVIEW_URL=http://127.0.0.1:<port>/<token>/`
   on its own line — the machine contract, unchanged. Port defaults to the
@@ -172,7 +186,7 @@ Only an explicit `--out` with no `--once` keeps the server alive.
   `--out`, it selects one-shot mode (see Modes above); the skill no longer launches with it by
   default — an explicit `--out` with no `--once` is what the skill passes,
   selecting threads mode instead. `--once` remains available as an explicit
-  one-round opt-out, keeping the pre-stage-1 payload shape. The recorded PID
+  one-round opt-out, keeping the one-shot payload shape. The recorded PID
   is cleanup only for an abandoned session (one the user never finishes).
 - **`--out`:** written via temp file + `os.replace` — a poller checking
   `[ -s "$OUT" ]` never sees a torn payload. It is now the **last** thing
@@ -201,10 +215,9 @@ Only an explicit `--out` with no `--once` keeps the server alive.
 ### Round protocol (threads mode)
 
 Each submit is a **round**, numbered from 1 by the server. The server mints
-each new comment's id (`t1`, `t2`, … a per-launch counter) at submit time,
-not the browser — before submit a comment is a browser-only draft with no
-identity, and after submit the server owns the thread store, so it is the
-natural authority for the keys into it. `--out`'s `comments` array keeps its
+each new comment's id (`t1`, `t2`, … a per-launch counter) at submit time and
+holds threads in memory only
+([`decisions/2026-08-25-local-review-server-owns-thread-state.md`](decisions/2026-08-25-local-review-server-owns-thread-state.md)). `--out`'s `comments` array keeps its
 one-shot meaning (the entries new in this round) plus the minted `id`;
 `threads` carries the complete state, resolved threads included, so the
 previous round's file can be overwritten with nothing lost. `finished: true`
@@ -228,6 +241,13 @@ so the page's Submit dialog can show it before the round is sent. Full
 detail — schemas, anchor
 re-placement across `/refresh`, resolved-thread semantics — is in
 `skills/local-review/references/threads.md`.
+
+Why the protocol is shaped this way, one decision per record:
+[HTTP replies and the `threads_rev` poll](decisions/2026-08-25-local-review-agent-replies-over-http.md),
+[resolve is the user's](decisions/2026-08-25-local-review-resolve-is-the-users.md),
+[replies are plain text](decisions/2026-08-25-local-review-replies-are-plain-text.md),
+[re-placement that never drops a thread](decisions/2026-08-26-local-review-threads-re-place-and-never-drop.md),
+and [the round summary's thread](decisions/2026-09-14-local-review-round-summary-is-a-thread.md).
 
 ## Threat model — loopback is not a trust boundary
 

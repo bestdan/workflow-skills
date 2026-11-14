@@ -612,7 +612,7 @@ main{max-width:1180px;margin:0 auto;padding:18px}
 .grid{display:grid;grid-template-columns:46px minmax(0,1fr) 46px minmax(0,1fr);min-width:760px}
 .grid.single{grid-template-columns:46px minmax(0,1fr);min-width:380px}
 /* preview: rendered markdown. Visually bounded so attacker prose does not
-   inherit the page's own authority — see the design doc. */
+   inherit the page's own authority. */
 .md-wrap{padding:14px 18px 20px}
 .md-warn{font-size:11.5px;color:var(--dim);border:1px dashed var(--border);
   border-radius:6px;padding:5px 9px;margin-bottom:14px}
@@ -997,8 +997,9 @@ function hlIsComment(tree){
 // time. `--git uncommitted` re-runs the diff on every check and `/refresh`
 // ends in a reload, so the row a thread named can move or vanish under it.
 // placeThreads() answers, for every thread, where it renders now -- per the
-// design doc's "Comment identity", in order: the same row wins (exact); else
-// a uniquely-identical row elsewhere in the file wins (moved) -- two or more
+// rules in skills/local-review/references/threads.md, in order: the same row
+// wins (exact); else a uniquely-identical row elsewhere in the file wins
+// (moved) -- two or more
 // candidates is NOT a signal, and falls through rather than guessing; else
 // the thread is never dropped, it goes to that file's Outdated strip
 // (outdated). `files` is parse_diff's output (mirrored in the harness
@@ -1070,7 +1071,7 @@ function placeThreads(files, threads){
 // emits HTML, are never called. describe() turns tokens into a plain tree and
 // is a pure function (no DOM), so the security-critical half is testable under
 // bare node; materialize() turns that tree into elements and has no logic.
-// Full rationale: dev_docs/designs/2026-08-20-local-review-markdown-preview.md
+// Rationale: dev_docs/decisions/2026-08-20-local-review-preview-builds-dom-from-tokens.md
 const PREVIEW_MAX_BYTES = 512 * 1024;
 const PREVIEW_MAX_DEPTH = 24;
 
@@ -1310,7 +1311,8 @@ function describeBlock(t, ln, depth){
     default:
       // An UNKNOWN token stays inert: its raw source as text, no element
       // derived from the token type and no walk of its fields. That is one of
-      // the three bullets under "The invariant" in the design doc, and the
+      // the closed-sink rules in dev_docs/decisions/
+      // 2026-08-20-local-review-preview-builds-dom-from-tokens.md, and the
       // security corpus asserts it directly — which is why the `text` token
       // above is handled by name rather than by widening this branch.
       return node('div', Object.assign({attrs:{class:'md-plain'},
@@ -1630,7 +1632,7 @@ function renderBlockChip(el, desc, ctx){
 // The reconstructed source of a wholly-added file: every right-side row, in
 // order. parse_diff drops the "\ No newline at end of file" marker, so a file
 // without a trailing newline round-trips with one added — immaterial to
-// rendering, and noted in the design doc.
+// rendering.
 function sourceOf(file){
   const out = [];
   for(const h of file.hunks) for(const r of h.rows){
@@ -1791,7 +1793,7 @@ function openThreadReply(chip, thread){
 // `opts.reopen` renders the resolved-strip shape (Reopen only); otherwise the
 // open-thread shape (Reply + Resolve). The Resolve click is the only path
 // that ever posts `resolved: true` — that button exists solely in the page,
-// per the design doc: resolving is the user's decision, not the agent's.
+// because resolving is the user's decision, not the agent's.
 function buildThreadChip(thread, opts){
   opts = opts || {};
   const chip = document.createElement('div');
@@ -1977,9 +1979,10 @@ async function fetchThreads(){
 // Above the file cards, independent of `root`: render() rebuilds root from
 // DIFF on every call and would otherwise wipe these on each poll tick.
 // Resolved summary threads stay visible here too -- unlike a per-line
-// thread they have no file card to collapse into a strip, and "never
-// dropped" (the design doc's own rule for a resolved thread) applies just
-// as much to one with no anchor. Staying visible is not the same as giving
+// thread they have no file card to collapse into a strip, and resolving a
+// thread hides it without deleting it, so it must stay reachable; for a
+// thread with no anchor that means staying in view. Staying visible is not
+// the same as giving
 // no signal, though: the per-file strip's collapse IS a per-line thread's
 // resolved affordance, so a summary chip carries .summary-resolved and is
 // dimmed in place instead.
@@ -2020,7 +2023,7 @@ function fileOutdatedThreads(file){
 // Per-file Outdated strip: threads whose anchor failed placeThreads() rules 1
 // and 2. Collapsed behind a count toggle like the resolved strip -- expanded
 // chips push the diff down without being actionable in place. "Never dropped"
-// (design doc) is carried by the always-visible "N outdated" count, not by
+// is carried by the always-visible "N outdated" count, not by
 // forced expansion. Each chip shows the ORIGINAL anchor (the thread's own
 // file/side/line, untouched by placement) and keeps its normal Reply/Resolve
 // controls -- these are live unresolved threads, just ones whose row is gone.
@@ -2595,9 +2598,10 @@ class Handler(BaseHTTPRequestHandler):
     _submit_lock = threading.Lock()
     _submitted = False
     # Thread store, threads mode only. Server memory, not disk: the store dies
-    # with the server on purpose (see "State ownership" in the threaded-replies
-    # design) — the transcript plus the round payloads the agent already read
-    # are the durable record. Guarded by its own lock; _submit_lock keeps its
+    # with the server on purpose (see dev_docs/decisions/
+    # 2026-08-25-local-review-server-owns-thread-state.md) — the transcript
+    # plus the round payloads the agent already read are the durable record.
+    # Guarded by its own lock; _submit_lock keeps its
     # existing job of serializing /submit itself.
     threads: "list[dict]" = []  # list of thread dicts, insertion order = creation order
     _thread_counter = 0  # per-launch counter minting ids: t1, t2, ...
