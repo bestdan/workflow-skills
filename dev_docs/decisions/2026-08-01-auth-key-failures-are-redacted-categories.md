@@ -33,7 +33,7 @@ What unavailability means is the caller's decision. As shipped, every asset's `g
 is the same (`sys.exit(str(e))`, a non-zero exit with the redacted message), and the
 fatal-versus-floor split lives in each command's handler doc: `linear-common.md` floors
 the three read fast paths, while `linear-archive.md` and `linear-false-closures.md` treat
-the exit as fatal. The design had placed that split in each script's `get_key()`.
+the exit as fatal. The design, `dev_docs/designs/2026-08-01-auth-key-resolution.md` (deleted on graduation), had placed that split in each script's `get_key()`.
 
 ## Consequences
 

@@ -23,7 +23,7 @@ which is the failure class this contract exists to remove.
 used. It is read from the raw local leaf rather than the merged view, an exception it
 shares only with the raw secret (`<service>.<credential>`).
 
-As designed, enforcement lived only in the bridging agent, since the helper received
+As designed in `dev_docs/designs/2026-08-01-auth-key-resolution.md` (deleted on graduation), enforcement lived only in the bridging agent, since the helper received
 environment variables and could not see their origin. Since
 [PR #1428](https://github.com/bestdan/workflow-skills/pull/1428) the helper also enforces
 it for the config rung: `resolve_key()` reads the resolver from the local file only, and

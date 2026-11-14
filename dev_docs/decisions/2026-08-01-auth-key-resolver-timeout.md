@@ -21,7 +21,7 @@ would kill a resolve mid-approval.
 `_run_resolver()` passes `timeout=TIMEOUT` (120 seconds) to `subprocess.run` for every
 resolver, and a timeout fails as `timeout`.
 
-The design reasoned that 120 seconds "sits under the Bash tool's own default", so a hung
+The design, `dev_docs/designs/2026-08-01-auth-key-resolution.md` (deleted on graduation), reasoned that 120 seconds "sits under the Bash tool's own default", so a hung
 read would surface as a clean `timeout` rather than a hung tool call. The Bash tool's
 default timeout is also 120 seconds, so the two are equal rather than one under the
 other: a resolve that runs the full 120 seconds can lose the race to the tool's own

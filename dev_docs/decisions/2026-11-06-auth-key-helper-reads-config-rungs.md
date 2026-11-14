@@ -8,7 +8,7 @@ convention: ../auth_key_access.md
 
 ## Context
 
-The design behind [PR #310](https://github.com/bestdan/workflow-skills/pull/310) kept
+The design behind [PR #310](https://github.com/bestdan/workflow-skills/pull/310), `dev_docs/designs/2026-08-01-auth-key-resolution.md` (deleted on graduation), kept
 the asset scripts env-in / JSON-out and parsing no YAML. The agent read
 `linear.api_key_ref` and `linear.api_key_resolver` from the config and bridged them onto
 the same Bash invocation as `$LINEAR_API_KEY_REF` and `$LINEAR_API_KEY_RESOLVER`.

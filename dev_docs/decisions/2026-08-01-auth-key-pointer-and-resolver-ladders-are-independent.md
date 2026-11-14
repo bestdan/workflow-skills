@@ -25,8 +25,12 @@ a host with no key at all, so every failure looked like absence.
 
 ## Decision
 
-Resolve the secret and pointer down one ladder (`$<NAME>`, then `$<NAME>_REF`, then
-`<service>.<credential>_ref` from the merged config, then `unconfigured`) and the
+Resolve the secret and pointer down one ladder (`<service>.<credential>` from
+`.task-config.local.yml`, which the agent bridges into `$<NAME>` and the helper does not
+read, see
+[`2026-08-01-auth-key-plaintext-local-rung.md`](2026-08-01-auth-key-plaintext-local-rung.md);
+then `$<NAME>`, then `$<NAME>_REF`, then `<service>.<credential>_ref` from the merged
+config, then `unconfigured`) and the
 resolver down another (`$<NAME>_RESOLVER`, then `<service>.<credential>_resolver` from
 `.task-config.local.yml`, then `op`). First hit wins on each, and any pointer source
 composes with any resolver source. A resolve that fails at a pointer rung raises its
