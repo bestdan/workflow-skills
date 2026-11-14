@@ -191,9 +191,10 @@ def move(key, issue, target):
     """Move the issue, confirming by a re-read when the move call fails.
 
     A failed call can still have applied the move, so the issue is read
-    again: sitting in the target state now means it moved. Another completed
-    state means someone else closed it, which this call must not report as
-    its own. Exits non-zero when the move is not confirmed, including when
+    again: sitting in the target state now means it moved. Any other state,
+    including another completed one, leaves the move unconfirmed; a
+    completed one means someone else closed it, which this call must not
+    report as its own. Exits non-zero when the move is not confirmed, including when
     the re-read fails too.
     """
     try:

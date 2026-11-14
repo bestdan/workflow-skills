@@ -55,7 +55,11 @@ class FakeLinear:
         issue_found=True,
         reread_error=None,
         closed_elsewhere=None,
+        reread_missing=False,
     ):
+        # reread_missing: an issue read after a move call returns issue: null.
+        # Separate from issue_found, which also blanks the first read.
+        self.reread_missing = reread_missing
         self.state_type = state_type
         self.state_id = "s-x"
         # closed_elsewhere: a state id another actor moves the issue to while
@@ -99,7 +103,7 @@ class FakeLinear:
         if "issue(" in query:
             if self.reread_error and self.mutations:
                 sys.exit(self.reread_error)
-            if not self.issue_found:
+            if not self.issue_found or (self.reread_missing and self.mutations):
                 return {"issue": None}
             return {
                 "issue": {
@@ -220,6 +224,19 @@ class CompleteTests(unittest.TestCase):
         msg = str(cm.exception.code)
         self.assertIn("timed out", msg)
         self.assertIn("connection reset", msg)
+        self.assertEqual([m[0] for m in fake.mutations], ["move"])
+
+    def test_failed_move_then_missing_issue_on_re_read_exits_nonzero(self):
+        fake = FakeLinear(
+            "started",
+            move_error="GraphQL request failed: timed out",
+            reread_missing=True,
+        )
+        with self.assertRaises(SystemExit) as cm:
+            self.run_with(fake)
+        msg = str(cm.exception.code)
+        self.assertIn("is not in Renamed Done", msg)
+        self.assertIn("now unknown", msg)
         self.assertEqual([m[0] for m in fake.mutations], ["move"])
 
     def test_failed_move_call_that_did_not_apply_exits_nonzero(self):

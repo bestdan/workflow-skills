@@ -85,7 +85,11 @@ happened, since a request can apply while its response is lost. When the move
 call fails, the script re-reads the issue and counts it as moved only when it
 sits in the exact state the move targeted.
 Falling to the MCP steps below stays safe because step 4 refuses an issue that
-is already terminal. Log the gate's one debug line and run them. When no
+is already terminal. One case loses the comment: the move applied, but both
+its response and the re-read failed. Step 4 then finds the issue complete and
+stops, and the script never posted its comment. So when step 4 reports an
+issue already complete right after a script failure, say the completion
+comment may be missing. Log the gate's one debug line and run them. When no
 Linear MCP is loaded either, stop and report the script's stderr reason. There
 is no third route.
 
