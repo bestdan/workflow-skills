@@ -50,7 +50,40 @@ This phase takes, in addition to the identifier:
   no-comment signal step 7 checks for; omitted and empty are deliberately
   distinct.
 
-## Steps
+## Fast path (GraphQL, via `linear-complete.py`)
+
+Try this first, behind the shared gate in `linear-common.md` "Fast-path /
+MCP-floor gate" — including its "Key resolution" bridge on the same command.
+The script runs steps 1–4, 6 and 7 below over the API with the personal key,
+so it also works in a session with no Linear MCP loaded:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/linear-complete.py" \
+  --team "<linear.team>" --issue "<IDENTIFIER>" [--comment "<comment_body>"] [--dry-run]
+```
+
+Pass `--comment` with the caller's `comment_body` — omit it for the default
+note, and pass `--comment ""` for the explicit no-comment signal. Step 5 still
+applies: with `dry_run: true`, or for a manual run that must confirm, run it
+with `--dry-run` first, print the planned line from its `from`/`to`, confirm,
+and only then run it again without the flag. `assume_verified: true` runs it
+once, without `--dry-run`.
+
+Read the one JSON object it prints. `result` is `completed`, `planned`
+(dry run), or one of step 4's two no-write reports: `already-complete` and
+`canceled`. Report those exactly as step 4 and step 8 say. `comment` is
+`posted`, `skipped`, or `failed`. On `failed` the state **has** moved: post
+the same body with `<linear-mcp>__save_comment` when that tool is loaded, and
+otherwise report the completion with `comment_error`. Never re-run the script
+to retry a comment, because the re-run finds the issue already complete and
+posts nothing.
+
+**A non-zero exit means nothing was written**, so falling to the MCP steps
+below is safe. Log the gate's one debug line and run them. When no Linear MCP
+is loaded either, stop and report the script's stderr reason. There is no
+third route.
+
+## Steps (MCP floor)
 
 1. **Preflight.** Run the shared preflight from `linear-common.md` (call
    `<linear-mcp>__list_teams`, match `<linear.team>`, capture the team `id`). On

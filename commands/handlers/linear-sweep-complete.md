@@ -35,7 +35,11 @@ pattern.
 
 1. Run the shared preflight from `linear-common.md` (call
    `<linear-mcp>__list_teams`, match `<linear.team>`, capture the team `id`).
-   Same failure messages.
+   Same failure messages. **In a session with no Linear MCP loaded**, skip this
+   call: step 2's fast path resolves the team itself, and its non-zero exit is
+   then the preflight failure — stop and report its reason, since there is no
+   floor to fall to. A `--project` pin naming an **unconfigured** project still
+   needs `list_projects` and so the MCP; without one, stop and say so.
 2. **Resolve scope.** `--all` and `--project <id|name>` are mutually exclusive
    (one widens, the other narrows) — if both are passed, stop and ask which
    was meant.
@@ -79,7 +83,7 @@ already terminal. See `linear-common.md` "In-flight scan" for the read this
 section implements (state scope, skinny fields, per-scope resolution) — that
 block is the single source of truth; it is not restated here.
 
-**Fast-path/floor gate.** This step runs behind the shared gate — see `linear-common.md` "Fast-path / MCP-floor gate (and the security boundary)" for the mechanism (the script's non-zero exit _is_ the gate; **no** separate `[ -n "$LINEAR_API_KEY" ]` pre-check) and the security boundary. The script here is `linear-scan.py`; this consumer **batches all configured projects into one call** (step 2 below), and the script exits non-zero as a whole on any scope's failure, so its fallback granularity is the **whole configured-project batch** — a failure floors all configured projects together, not one scope. The Unassigned scope is a **separate** pass that always floors on its own (the script has no null-project exclusion mode), as "Fast path" below details.
+**Fast-path/floor gate.** This step runs behind the shared gate — see `linear-common.md` "Fast-path / MCP-floor gate (and the security boundary)" for the mechanism (the script's non-zero exit _is_ the gate; **no** separate `[ -n "$LINEAR_API_KEY" ]` pre-check) and the security boundary. The script here is `linear-scan.py`; this consumer **batches all configured projects into one call** (step 2 below), and the script exits non-zero as a whole on any scope's failure, so its fallback granularity is the **whole configured-project batch** — a failure floors all configured projects together, not one scope. On the default scope the same call also serves the Unassigned bucket (`--with-unassigned`), so it floors with the batch.
 
 ### Fast path (GraphQL, via `linear-scan.py`)
 
@@ -100,8 +104,18 @@ block is the single source of truth; it is not restated here.
    ```bash
    python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/linear-scan.py" --team "<linear.team>" \
      --project "<scope-1-id>" --project "<scope-2-id>" ... \
-     --state-type started
+     --state-type started [--with-unassigned]
    ```
+
+   **Add `--with-unassigned` on the default scope** (1+ projects configured,
+   no `--all`, no `--project` pin). It serves the Unassigned bucket's
+   sweep/reconcile variant in the same call: one whole-team query, keeping the
+   configured projects' issues plus the project-less ones (`scope:
+   "Unassigned"`), and counting every other project's issues into
+   `meta.out_of_scope` for step 7's warning. That replaces the MCP floor's
+   Unassigned pass and its out-of-scope bucket (floor steps 2 and 4) on this
+   path. Never add it for `--all` or a `--project` pin, which have no
+   Unassigned bucket.
 
    If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/linear-scan.py`.
    Parse stdout as the `{ meta: { viewer, team, states }, issues: [ { id,
@@ -110,13 +124,7 @@ block is the single source of truth; it is not restated here.
    `{ id, name }` (or `null`), and `scope` is the query that returned it; see
    `linear-common.md` "In-flight scan" for why the two are not
    interchangeable. A parse failure is itself a fallback
-   trigger (see above). The **Unassigned bucket's exclusion pass** has no
-   equivalent in the script (it has no null-project filter, same limitation
-   `linear-claim.md` "Find candidates" step 1 documents for `linear-ready.py`)
-   — when the Unassigned bucket applies (1+ projects configured, no `--all`),
-   **fall back to the MCP floor** for that scope's pass so unassigned
-   in-flight work isn't missed; the configured-project scopes can still run
-   fast.
+   trigger (see above).
 
 3. **Consume `meta` in place of the equivalent MCP reads.** `meta.states` (an
    array of `{ id, name, type }`) replaces the state-id → type map the floor
@@ -180,12 +188,9 @@ Runs whenever the fast path isn't attempted or falls back per the gate above.
    read of the same result set the Unassigned pass already fetched. It
    inherits that query's 50-per-state truncation cap, so a full cap can
    under-count (or entirely miss) out-of-scope work — never report an empty
-   bucket as "nothing out of scope" when the query truncated. This step
-   applies identically regardless of whether the Unassigned pass itself ran
-   on the fast path or floored here — the fast path already falls back to
-   this MCP floor for the Unassigned scope (see "Fast path" step 2 above),
-   so the same whole-team result set is what's available to bucket either
-   way.
+   bucket as "nothing out of scope" when the query truncated. On the fast
+   path this step does not run: `--with-unassigned` returns the bucket as
+   `meta.out_of_scope`, already counted per project over a paginated read.
 
 On the **MCP floor**, the per-issue `get_issue` read that step 3's input needs
 (`attachments`, `branchName`, `project`) runs as written below — that read is
@@ -519,7 +524,10 @@ completed (not the `already complete` ones, whose completion happened on an
 earlier run), and `dry-run` when step 5 sent you here. It is one call for the
 whole batch, it asks nothing, and every gate of a full promote run still applies,
 so a dependent with another open blocker stays in Backlog. Skip it when there is
-no identifier to pass. Its writes are promotions only (Backlog → `unstarted` with
+no identifier to pass. `linear-promote.md` runs only over the Linear MCP, so in
+a session with none loaded, skip it too and report `dependents not re-checked
+(no Linear MCP): <identifiers>`. The next `/promote-tasks` run scores those
+dependents like any other backlog issue. Its writes are promotions only (Backlog → `unstarted` with
 `auto-eligible`, or `human-approval-requested` with a comment); it never
 completes or demotes anything. Design:
 `dev_docs/designs/2026-11-06-promote-after-complete.md`, part 2.
@@ -546,11 +554,13 @@ Print:
   line that asks the reader to act (default scope only, when 1+ projects are
   configured; omit entirely for `--all`, for `--project`, and for the
   no-projects-configured case, since each of those already covers the whole
-  team) — from the bucket built by step 2's MCP floor step 4 (at zero extra
+  team) — from `meta.out_of_scope` on the fast path, or the bucket built by
+  step 2's MCP floor step 4 (at zero extra
   API cost, off the Unassigned pass's own whole-team query), print one
   line: `⚠ N started-type issue(s) outside configured scope: <project>
   (n), <project> (n) — not swept. Use --all or --project <name> to reach
-  them.` This count is a **floor, not a census** — it inherits the
+  them.` The fast path's count is complete, since its read paginates. The
+  floor's count is a **floor, not a census** — it inherits the
   Unassigned pass's 50-row truncation cap, so note that explicitly whenever
   that cap was hit (e.g. append "(query truncated — actual count may be
   higher)"). Omit the line only when the bucket is empty **and** the query
