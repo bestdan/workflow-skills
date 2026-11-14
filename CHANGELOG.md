@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.217.0] - 2026-11-14
+
+### Features
+
+- prefer twg over the Atlassian MCP when it is available [N/A] (#1537) (bc67c564)
+
 ## [2.216.1] - 2026-11-14
 
 ### Fixes
