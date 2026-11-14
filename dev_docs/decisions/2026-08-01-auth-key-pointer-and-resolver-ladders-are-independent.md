@@ -46,9 +46,11 @@ the config rungs into `$<NAME>_REF` and `$<NAME>_RESOLVER`. Since
 - Good, because an inherited `$<NAME>_REF` no longer changes which program runs.
 - Good, because a misconfigured pointer surfaces as its own category instead of
   flooring as if keyless.
-- Good, because the fast-path gate is unchanged: any non-zero exit from a script still
+- Good, because the fast-path gate is unchanged: for the three read fast paths
+  (`linear-ready.py`, `linear-scan.py`, `linear-relations.py`), any non-zero exit still
   means "fast path unavailable" and the verb floors to MCP, with no
-  `[ -n "$LINEAR_API_KEY" ]` pre-check.
+  `[ -n "$LINEAR_API_KEY" ]` pre-check. `linear-archive.py` and
+  `linear-false-closures.py` have no MCP floor and treat the exit as fatal.
 - Good, because the unattended path is unchanged: a raw `$LINEAR_API_KEY` wins outright,
   and `$OP_SERVICE_ACCOUNT_TOKEN` plus a pointer works under the default `op` resolver.
 - Bad, because a correct lower rung is ignored when a higher one is configured wrongly;
