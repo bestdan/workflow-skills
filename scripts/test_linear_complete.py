@@ -54,8 +54,14 @@ class FakeLinear:
         teams_found=True,
         issue_found=True,
         reread_error=None,
+        closed_elsewhere=None,
     ):
         self.state_type = state_type
+        self.state_id = "s-x"
+        # closed_elsewhere: a state id another actor moves the issue to while
+        # this call's move fails, so the re-read finds it completed but not
+        # in the target state.
+        self.closed_elsewhere = closed_elsewhere
         self.team_id = team_id
         self.move_ok = move_ok
         # move_error: the call exits with this message; move_applied says
@@ -77,11 +83,13 @@ class FakeLinear:
         if "issueUpdate" in query:
             self.mutations.append(("move", variables))
             if self.move_error:
-                if self.move_applied:
-                    self.state_type = "completed"
+                if self.closed_elsewhere:
+                    self.state_type, self.state_id = "completed", self.closed_elsewhere
+                elif self.move_applied:
+                    self.state_type, self.state_id = "completed", variables["state"]
                 sys.exit(self.move_error)
             if self.move_ok:
-                self.state_type = "completed"
+                self.state_type, self.state_id = "completed", variables["state"]
             return {"issueUpdate": {"success": self.move_ok}}
         if "commentCreate" in query:
             self.mutations.append(("comment", variables))
@@ -98,7 +106,11 @@ class FakeLinear:
                     "id": "uuid-12",
                     "identifier": "ABC-12",
                     "team": {"id": self.team_id},
-                    "state": {"id": "s-x", "name": "Current", "type": self.state_type},
+                    "state": {
+                        "id": self.state_id,
+                        "name": "Current",
+                        "type": self.state_type,
+                    },
                 }
             }
         raise AssertionError(f"unexpected query: {query}")
@@ -185,6 +197,18 @@ class CompleteTests(unittest.TestCase):
         self.assertEqual(out["result"], "completed")
         self.assertEqual(out["comment"], "posted")
 
+    def test_failed_move_then_closed_elsewhere_is_not_reported_as_ours(self):
+        fake = FakeLinear(
+            "started",
+            move_error="GraphQL request failed: timed out",
+            move_applied=False,
+            closed_elsewhere="s-shipped",
+        )
+        with self.assertRaises(SystemExit) as cm:
+            self.run_with(fake)
+        self.assertIn("is not in Renamed Done", str(cm.exception.code))
+        self.assertEqual([m[0] for m in fake.mutations], ["move"])
+
     def test_failed_re_read_exits_naming_both_failures(self):
         fake = FakeLinear(
             "started",
@@ -206,7 +230,7 @@ class CompleteTests(unittest.TestCase):
         )
         with self.assertRaises(SystemExit) as cm:
             self.run_with(fake)
-        self.assertIn("is not completed", str(cm.exception.code))
+        self.assertIn("is not in Renamed Done", str(cm.exception.code))
         self.assertEqual([m[0] for m in fake.mutations], ["move"])
 
     def test_comment_failure_is_reported_not_raised(self):

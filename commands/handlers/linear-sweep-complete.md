@@ -118,11 +118,14 @@ block is the single source of truth; it is not restated here.
    Unassigned bucket.
 
    If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/handlers/assets/linear-scan.py`.
-   Parse stdout as the `{ meta: { viewer, team, states }, issues: [ { id,
-   identifier, title, url, state, attachments, project, scope } ] }` object
-   described in the script's header comment — `project` is the issue's **own**
-   `{ id, name }` (or `null`), and `scope` is the query that returned it; see
-   `linear-common.md` "In-flight scan" for why the two are not
+   Parse stdout as the `{ meta: { viewer, team, states, out_of_scope? },
+   issues: [ { id, identifier, title, url, state, attachments, project, scope }
+   ] }` object described in the script's header comment. `meta.out_of_scope`
+   appears only with `--with-unassigned`. `project` is the issue's **own**
+   `{ id, name }` (or `null`). `scope` is the query that returned it, except
+   with `--with-unassigned`, where one whole-team query returns everything and
+   `scope` is the issue's configured project id or `"Unassigned"`. See
+   `linear-common.md` "In-flight scan" for why `project` and `scope` are not
    interchangeable. A parse failure is itself a fallback
    trigger (see above).
 

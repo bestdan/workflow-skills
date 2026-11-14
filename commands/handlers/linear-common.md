@@ -278,7 +278,7 @@ Every Linear-handled command starts the same way. Failure messages are identical
 
 2. (Per-verb files do additional setup — e.g. `list_workflow_states` for `/list-tasks` and `/do-tasks`.) The shared part is just the team check.
 
-A session can carry the personal key and no Linear MCP: a headless `claude -p` job authenticated by `claude setup-token`, for one, does not receive claude.ai connectors. Only `/complete-task`, `/sweep-for-complete`, `/find-false-closures` and `/archive-tasks`'s GraphQL backstop run there, because every step they need has a GraphQL route; each handler file says what stands in for this check. The dependents re-check that `/complete-task` and `/sweep-for-complete` run after a completion is `linear-promote.md`, which needs the MCP, so in such a session it is skipped and the completion is reported without it. Every other verb needs the MCP and stops here.
+A session can carry the personal key and no Linear MCP: a headless `claude -p` job authenticated by `claude setup-token`, for one, does not receive claude.ai connectors. Only `/complete-task`, `/sweep-for-complete`, `/find-false-closures` and `/archive-tasks`'s GraphQL backstop run there, because every step they need has a GraphQL route; each handler file says what stands in for this check. After a completion, `/complete-task` and `/sweep-for-complete` re-check dependents through `linear-promote.md`, which needs the MCP; in such a session that re-check is skipped and the completion is reported without it. Every other verb needs the MCP and stops here.
 
 ## Kanban mapping
 

@@ -12,7 +12,8 @@ discovery and no merge verification; that is the caller's job.
 Exit status is the fallback contract. A non-zero exit means no state change
 was CONFIRMED. It cannot mean none happened: a request can reach Linear and
 apply while its response is lost. So when the move call fails, the script
-re-reads the issue, and an issue that is now completed counts as moved.
+re-reads the issue, and counts it as moved only when it now sits in the exact
+state the move targeted. Any other state, completed or not, is unconfirmed.
 Falling to the MCP floor after a non-zero exit stays safe because the floor's
 idempotence check refuses an issue that is already terminal. Once the move is
 confirmed the script exits 0 whatever happens to the comment, and reports the
@@ -190,8 +191,10 @@ def move(key, issue, target):
     """Move the issue, confirming by a re-read when the move call fails.
 
     A failed call can still have applied the move, so the issue is read
-    again: completed now means it moved. Exits non-zero when the move is not
-    confirmed, including when the re-read fails too.
+    again: sitting in the target state now means it moved. Another completed
+    state means someone else closed it, which this call must not report as
+    its own. Exits non-zero when the move is not confirmed, including when
+    the re-read fails too.
     """
     try:
         moved = gql(key, MOVE, {"id": issue["id"], "state": target["id"]})
@@ -203,9 +206,13 @@ def move(key, issue, target):
                 f"issueUpdate failed ({e.code}) and the re-read of "
                 f"{issue['identifier']} failed too ({e2.code})"
             )
-        if (after.get("state") or {}).get("type") == "completed":
+        state = after.get("state") or {}
+        if state.get("id") == target["id"]:
             return
-        die(f"issueUpdate failed and {issue['identifier']} is not completed: {e.code}")
+        die(
+            f"issueUpdate failed and {issue['identifier']} is not in "
+            f"{target['name']} (now {state.get('name', 'unknown')}): {e.code}"
+        )
     if not (moved.get("issueUpdate") or {}).get("success"):
         die(f"issueUpdate returned success=false for {issue['identifier']}")
 

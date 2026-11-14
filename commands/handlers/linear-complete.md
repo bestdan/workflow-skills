@@ -82,7 +82,8 @@ re-run finds the issue already complete and posts nothing.
 
 **A non-zero exit means no move was confirmed.** It does not prove nothing
 happened, since a request can apply while its response is lost. When the move
-call fails, the script re-reads the issue and counts a completed one as moved.
+call fails, the script re-reads the issue and counts it as moved only when it
+sits in the exact state the move targeted.
 Falling to the MCP steps below stays safe because step 4 refuses an issue that
 is already terminal. Log the gate's one debug line and run them. When no
 Linear MCP is loaded either, stop and report the script's stderr reason. There
