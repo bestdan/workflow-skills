@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Jira tickets as a source of the shared Now ranker, and the blocked tier
-(fleet_now.py; dev_docs/designs/2026-10-27-shared-now-ranker.md, slice 3).
+(fleet_now.py; dev_docs/decisions/2026-10-28-blocked-items-get-a-last-tier.md).
 
 Hermetic: a temp DB seeded by hand, on a Jira instance with
 `github.scope = "me"` unless a test says otherwise.
