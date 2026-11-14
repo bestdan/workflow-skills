@@ -9,6 +9,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -238,7 +239,7 @@ class ReviewTests(Base):
 
     def write_suites(self, data):
         d = tempfile.mkdtemp()
-        self.addCleanup(__import__("shutil").rmtree, d)
+        self.addCleanup(shutil.rmtree, d)
         path = Path(d) / "suites.json"
         path.write_text(json.dumps(data))
         return str(path)
