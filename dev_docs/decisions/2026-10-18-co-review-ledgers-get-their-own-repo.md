@@ -13,8 +13,9 @@ count every machine's runs. The flush that copies rows off a machine,
 `scripts/co-review-ledger-sync.py`, treats its clone as disposable: it moves
 the branch only with `git reset --hard`, and deletes and reclones the clone on
 any failure. Those operations are safe only on a repo that holds nothing else.
-The owner chose the destination on 2026-10-18, in the design that preceded
-[PR #1057](https://github.com/bestdan/workflow-skills/pull/1057), which built
+The owner chose the destination on 2026-10-18, in the design
+`dev_docs/designs/2026-10-18-co-review-ledger-sync.md` (deleted on
+graduation), which preceded [PR #1057](https://github.com/bestdan/workflow-skills/pull/1057), which built
 the flush.
 
 ## Decision

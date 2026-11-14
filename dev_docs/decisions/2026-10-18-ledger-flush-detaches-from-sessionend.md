@@ -37,7 +37,9 @@ session's exit, the fallback is an `async: true` hook, which Claude Code
 documents as running in the background with no timeout, provided `SessionEnd`
 accepts it.
 
-As shipped this differs from the design in one respect. The design said the
+As shipped this differs from the design,
+`dev_docs/designs/2026-10-18-co-review-ledger-sync.md` (deleted on
+graduation), in one respect. The design said the
 hook would ship only after a manual check on a real session passed.
 [PR #1073](https://github.com/bestdan/workflow-skills/pull/1073) shipped it
 with that check left to the owner, since a flush lost at exit costs only a
