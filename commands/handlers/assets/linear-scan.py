@@ -30,10 +30,19 @@ On any failure (missing key, GraphQL error, team not found) this exits
 non-zero with the reason on stderr, so the caller can fall back to the MCP
 floor. Stdout carries exactly one JSON object and nothing else.
 
+`--with-unassigned` serves the Unassigned bucket's sweep/reconcile variant
+(project-less issues only) that a per-project query cannot express: it runs one
+whole-team query, keeps the `--project` issues plus the project-less ones
+(`scope: "Unassigned"`), and reports every other project's issues only as
+counts in `meta.out_of_scope` — `[{project: {id, name}, count}]`, most first.
+It paginates to exhaustion, so unlike the MCP floor's 50-row read those counts
+are a census, not a floor.
+
 Usage:
   python3 linear-scan.py --team Platform
   python3 linear-scan.py --team Platform --state-type started --state-type unstarted
   python3 linear-scan.py --team Platform --project <uuid> --project <uuid>
+  python3 linear-scan.py --team Platform --project <uuid> --with-unassigned
 """
 
 import argparse
@@ -179,6 +188,38 @@ def fetch_issues(key, team_id, state_types, project_id, page_size):
         cursor = page["pageInfo"]["endCursor"]
 
 
+UNASSIGNED = "Unassigned"
+
+
+def partition(issues, project_ids):
+    """Split one whole-team result into the sweep's scopes.
+
+    Keeps an issue in a configured project (scope = that project's id) or in no
+    project at all (scope = "Unassigned"). An issue in any OTHER project is not
+    kept: the sweep/reconcile variant of the Unassigned bucket is project-less
+    issues only, never "outside the configured set" (linear-common.md, "The
+    Unassigned bucket"). Those are counted per project instead, for the
+    out-of-scope warning, most first.
+    """
+    configured = set(project_ids)
+    kept = []
+    outside: dict = {}
+    for issue in issues:
+        project = issue.get("project")
+        if project is None:
+            issue["scope"] = UNASSIGNED
+            kept.append(issue)
+        elif project["id"] in configured:
+            issue["scope"] = project["id"]
+            kept.append(issue)
+        else:
+            entry = outside.setdefault(project["id"], {"project": project, "count": 0})
+            entry["count"] += 1
+    return kept, sorted(
+        outside.values(), key=lambda o: (-o["count"], o["project"]["name"])
+    )
+
+
 def parse_project_arg(raw):
     # Colon-joined `a:b` is also accepted as a way to pass multiple project ids
     # in one --project flag.
@@ -212,6 +253,13 @@ def main():
         "backlog. Default: started.",
     )
     ap.add_argument(
+        "--with-unassigned",
+        action="store_true",
+        help="Run one whole-team query instead of one per --project, keep the "
+        "--project issues plus project-less ones (scope 'Unassigned'), and count "
+        "every other project's issues into meta.out_of_scope. Needs --project.",
+    )
+    ap.add_argument(
         "--limit",
         type=int,
         default=50,
@@ -230,6 +278,39 @@ def main():
         for pid in parse_project_arg(raw):
             if pid not in project_ids:
                 project_ids.append(pid)
+
+    if args.with_unassigned:
+        if not project_ids:
+            sys.exit("--with-unassigned needs at least one --project")
+        issues = fetch_issues(key, team_node["id"], state_types, None, args.limit)
+        for issue in issues:
+            issue["attachments"] = [n["url"] for n in issue["attachments"]["nodes"]]
+        kept, outside = partition(issues, project_ids)
+        print(
+            f"Resolved team={team_node['name']} whole-team pass, "
+            f"{len(project_ids)} configured project(s) + Unassigned "
+            f"state_types={state_types}",
+            file=sys.stderr,
+        )
+        print(
+            f"{len(kept)} in-scope issue(s), "
+            f"{sum(o['count'] for o in outside)} outside configured scope",
+            file=sys.stderr,
+        )
+        print(
+            json.dumps(
+                {
+                    "meta": {
+                        "viewer": viewer,
+                        "team": {"id": team_node["id"], "name": team_node["name"]},
+                        "states": team_node["states"]["nodes"],
+                        "out_of_scope": outside,
+                    },
+                    "issues": kept,
+                }
+            )
+        )
+        return
 
     scopes = (
         [{"id": pid, "name": pid} for pid in project_ids]

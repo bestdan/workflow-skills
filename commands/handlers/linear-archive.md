@@ -81,7 +81,11 @@ native window, or needs to drain a workspace that has already hit the cap.
 
 1. Run the shared preflight from `linear-common.md` (call `<linear-mcp>__list_teams`,
    match `<linear.team>`, capture the team `id`). On failure, stop with the same
-   error messages.
+   error messages. **In a session with no Linear MCP loaded**, run
+   `linear-scan.py --team "<linear.team>"` instead, with step 2's key bridge on
+   the same command, and stop on a non-zero exit. That check is needed because
+   `linear-archive.py` does not validate the team: a misspelled name matches no
+   issues and reads as "Nothing to archive."
 2. **Resolve the API key.** The GraphQL call needs a Linear **personal API key**
    (the MCP's OAuth session is not usable for raw GraphQL). Read it from the
    reference configured in `linear.api_key_ref` (see `linear-config.md`), never
