@@ -51,7 +51,8 @@ Landed in [PR #1021](https://github.com/bestdan/workflow-skills/pull/1021).
 - The create hook learns to hand back a worktree on any branch. More
   worktrees would then have a name route once `scripts/worktree-name-for.sh`
   follows the same rule, and the guard would refuse more `path` calls with no
-  change of its own.
+  change of its own. Proposed in
+  [issue #1533](https://github.com/bestdan/workflow-skills/issues/1533).
 - Shared leftovers from cross-session re-entry pile up enough to matter.
 
 ## Confirmation
