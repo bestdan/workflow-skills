@@ -19,7 +19,10 @@ Configures the `jira` handler, which creates Jira work items through `twg` or th
    the site twg is logged in to and `data.projects[]` holds the visible
    projects: take that one site in step 2 and those projects in step 3, make
    the later steps' calls through `jira-twg.md`, and skip step 1. If it fails,
-   or twg is not installed, fall through to step 1. twg's site is its login
+   or twg is not installed, fall through to step 1, unless `backend` is
+   already `twg`: then **stop** with "twg cannot reach Jira (`twg jira space
+   query` said: `<its output>`). Run `twg login`, or set `backend: mcp`." and do
+   not write the config. twg's site is its login
    default; a user who wants a different site runs `twg login` for it first, or
    picks the MCP route.
 

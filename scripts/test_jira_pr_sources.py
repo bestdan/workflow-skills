@@ -207,12 +207,12 @@ class TestToRow(SeamTestCase):
         self.assertEqual(acli.calls, [])
 
     def test_twg_shape_reads_the_complete_comments_list(self):
-        """`twg jira workitem get <KEY> --comments -o json` (GDNC-51,
+        """`twg jira workitem get <KEY> --comments -o json` (a live site,
         2026-11-14): fields are flattened, and beside the complete `comments`
         list sits a top-level `comment` page that came back empty."""
         issue = {
             "id": "500442",
-            "key": "GDNC-51",
+            "key": "PROJ-51",
             "comment": {"comments": [], "maxResults": 0, "total": 0},
             "comments": [{"body": adf(text(CLAIM))}, {"body": adf(text(OPENED))}],
         }
@@ -314,28 +314,28 @@ class TestMain(SeamTestCase):
 
     def test_twg_single_key_envelope(self):
         """`twg jira workitem get <KEY> --comments -o json`: `data` is a list."""
-        issue = {"key": "GDNC-51", "comments": [{"body": adf(text(OPENED))}]}
+        issue = {"key": "PROJ-51", "comments": [{"body": adf(text(OPENED))}]}
         code, rows = self.run_main({"data": [issue]}, ["--twg"])
         self.assertEqual(code, 0)
         self.assertEqual(rows[0]["attachments"], [OPENED.split(": ", 1)[1]])
 
     def test_twg_batch_envelope_turns_a_failed_key_into_a_source_error(self):
-        """Several keys (GDNC-51 GDNC-104 GDNC-99999, 2026-11-14): `data.items`
+        """Several keys, one of them missing (a live site, 2026-11-14): `data.items`
         holds one `{input, ok, data | error}` per key, and a key that failed
         must land in unresolved, never read as "no PR"."""
         payload = {
             "data": {
                 "items": [
                     {
-                        "input": "GDNC-51",
+                        "input": "PROJ-51",
                         "ok": True,
                         "data": {
-                            "key": "GDNC-51",
+                            "key": "PROJ-51",
                             "comments": [{"body": adf(text(OPENED))}],
                         },
                     },
                     {
-                        "input": "GDNC-99999",
+                        "input": "PROJ-99999",
                         "ok": False,
                         "error": {"message": "Issue does not exist"},
                     },
@@ -344,11 +344,11 @@ class TestMain(SeamTestCase):
         }
         code, rows = self.run_main(payload, ["--twg"])
         self.assertEqual(code, 0)
-        self.assertEqual([r["identifier"] for r in rows], ["GDNC-51", "GDNC-99999"])
+        self.assertEqual([r["identifier"] for r in rows], ["PROJ-51", "PROJ-99999"])
         self.assertEqual(rows[0]["source_errors"], [])
         self.assertEqual(
             rows[1]["source_errors"],
-            ["twg get failed for GDNC-99999: Issue does not exist"],
+            ["twg get failed for PROJ-99999: Issue does not exist"],
         )
 
     def test_twg_needs_the_envelope(self):

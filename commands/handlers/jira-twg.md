@@ -86,8 +86,9 @@ REST shapes the MCP returns, so nothing below the top level differs.
 - **Projects** → `data.projects[]` (`key`, `name`). **Issue types** → `data[]`
   (`id`, `name`, `hierarchyLevel`). **Create metadata** → `data.fields[]`, each
   with `id`, `name`, `required` and `schema`.
-- **A failed call** exits non-zero with the error on stderr. Report it the way
-  the step reports the MCP tool's error.
+- **A failed call** exits non-zero and prints `{"ok": false, "error": {...}}`
+  on stdout, not stderr; `error.message` says what went wrong. Report it the
+  way the step reports the MCP tool's error.
 
 The create, transition, comment, link and update shapes come from the CLI's
 code and its help; the reads above were checked against a live site

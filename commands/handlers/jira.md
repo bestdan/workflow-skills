@@ -40,7 +40,7 @@ jira:
    - If the tool errors or returns no resources, **stop** with: "Jira handler needs twg (`twg login`) or the Atlassian MCP. Log in to twg, or install/connect the MCP in Claude Code settings, then re-run." Do not fall back to another handler.
    - If the response does not include a resource whose `url` matches `https://<jira.site>`, **stop** with: "Configured Jira site `<site>` is not in your accessible Atlassian resources." (List the URLs that were returned.)
 
-   Every other jira handler file runs this preflight as its own, and stops with the same messages.
+   `jira-archive.md`, `jira-claim.md` and `jira-promote.md` run this preflight as their own and stop with the same messages. `jira-complete.md` and `jira-sweep-complete.md` resolve through `jira-config.md` → "Backend", which can also pick acli.
 
 2. **Select the epic. HARD STOP — DO NOT SKIP.** You MUST ask the user which epic to attach the ticket to before creating it, using `AskUserQuestion`. Do not infer the epic from the title, the project, or recent activity. Do not proceed to step 3 until the user has answered the `AskUserQuestion` call in this step. The ONLY way to skip this prompt is if `jira.default_epic` is set in the config file (then use that key as-is and proceed).
 

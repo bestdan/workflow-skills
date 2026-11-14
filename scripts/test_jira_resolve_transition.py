@@ -242,7 +242,7 @@ class TestFromSearch(ResolveTestCase):
 
 
 def _twg(*transitions):
-    """`twg jira workitem transitions query -o json` as printed for GDNC-104 on
+    """`twg jira workitem transitions query -o json` as printed for a live issue on
     2026-11-14: a `data` envelope, `toName`, and the category's *name*."""
     return {
         "apiVersion": "v2",
@@ -256,7 +256,7 @@ def _twg(*transitions):
     }
 
 
-GDNC_104 = _twg(
+PROJ_104 = _twg(
     ("141", "Needs Refinement", "Needs Refinement", "To Do"),
     ("151", "Ready for Development", "Ready for Development", "To Do"),
     ("161", "In Progress", "In progress", "In Progress"),
@@ -272,7 +272,7 @@ class TestTwg(ResolveTestCase):
 
     def test_claim_resolves_the_in_progress_category(self):
         code, out = self.call(
-            GDNC_104,
+            PROJ_104,
             [
                 "--twg",
                 "--category",
@@ -286,13 +286,13 @@ class TestTwg(ResolveTestCase):
 
     def test_complete_drops_canceled_from_the_done_category(self):
         code, out = self.call(
-            GDNC_104, ["--twg", "--category", "done", "--exclude", "cancel"]
+            PROJ_104, ["--twg", "--category", "done", "--exclude", "cancel"]
         )
         self.assertEqual(code, 0)
         self.assertEqual(out, "41\tDone\n")
 
     def test_exact_matches_the_target_status(self):
-        code, out = self.call(GDNC_104, ["--twg", "--exact", "Ready for Development"])
+        code, out = self.call(PROJ_104, ["--twg", "--exact", "Ready for Development"])
         self.assertEqual(code, 0)
         self.assertEqual(out, "151\tReady for Development\n")
 

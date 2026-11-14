@@ -173,7 +173,8 @@ the auth flows):
 - `jira` → a backend is reachable: resolve the backend for `jira.site` per
   `commands/handlers/jira-config.md` → "Backend" (unsandboxed), running that
   backend's check, and name the backend that passed. On failure, `WARN` with
-  that section's message.
+  that section's message, or with `jira.md` step 1's when the MCP was the
+  backend tried.
 
 Met → `PASS`. Unmet → `WARN` (auth/MCP is a human action, never auto-fixed) with
 the handler doc's own remediation.

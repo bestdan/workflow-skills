@@ -97,8 +97,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-pr-sources.py" --tw
   < /tmp/claude/jira-sweep-<run>-issues.json > /tmp/claude/jira-sweep-<run>-rows.json
 ```
 
-Any other exit means the read failed as a whole: stop and report twg's
-stderr, and do not run the script. The `<run>` naming below applies to these
+Any other exit means the read failed as a whole: stop and report the
+`error.message` from the JSON twg printed to that file, and do not run the
+script. The `<run>` naming below applies to these
 files too.
 
 **MCP backend.** Call `<atlassian-mcp>__searchJiraIssuesUsingJql` (`cloudId:
