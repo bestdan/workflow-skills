@@ -20,8 +20,8 @@ per-line thread with `file`, `side`, `line`, `code` and `endLine` all `null`,
 and `kind: "summary"`. It takes `/reply` and the user's Resolve like any other
 thread. It skips anchor re-placement and renders in its own strip above the file
 cards, in round order, dimmed in place when resolved. An empty summary mints
-nothing. Landed in [#585](https://github.com/bestdan/workflow-skills/pull/585); the threaded-replies design had deferred carrying
-summaries in the store until real use showed the need.
+nothing. Landed in [#585](https://github.com/bestdan/workflow-skills/pull/585); the thread store as first built did not hold
+summaries, deferring them until real use showed the need.
 
 ## Consequences
 

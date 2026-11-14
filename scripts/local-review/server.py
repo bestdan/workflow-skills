@@ -997,8 +997,9 @@ function hlIsComment(tree){
 // time. `--git uncommitted` re-runs the diff on every check and `/refresh`
 // ends in a reload, so the row a thread named can move or vanish under it.
 // placeThreads() answers, for every thread, where it renders now -- per the
-// rules in skills/local-review/references/threads.md, in order: the same row wins (exact); else
-// a uniquely-identical row elsewhere in the file wins (moved) -- two or more
+// rules in skills/local-review/references/threads.md, in order: the same row
+// wins (exact); else a uniquely-identical row elsewhere in the file wins
+// (moved) -- two or more
 // candidates is NOT a signal, and falls through rather than guessing; else
 // the thread is never dropped, it goes to that file's Outdated strip
 // (outdated). `files` is parse_diff's output (mirrored in the harness
@@ -1310,8 +1311,8 @@ function describeBlock(t, ln, depth){
     default:
       // An UNKNOWN token stays inert: its raw source as text, no element
       // derived from the token type and no walk of its fields. That is one of
-      // the closed-sink rules in
-      // dev_docs/decisions/2026-08-20-local-review-preview-builds-dom-from-tokens.md, and the
+      // the closed-sink rules in dev_docs/decisions/
+      // 2026-08-20-local-review-preview-builds-dom-from-tokens.md, and the
       // security corpus asserts it directly — which is why the `text` token
       // above is handled by name rather than by widening this branch.
       return node('div', Object.assign({attrs:{class:'md-plain'},
@@ -2596,9 +2597,10 @@ class Handler(BaseHTTPRequestHandler):
     _submit_lock = threading.Lock()
     _submitted = False
     # Thread store, threads mode only. Server memory, not disk: the store dies
-    # with the server on purpose (see
-    # dev_docs/decisions/2026-08-25-local-review-server-owns-thread-state.md) — the transcript plus the round payloads the agent already read
-    # are the durable record. Guarded by its own lock; _submit_lock keeps its
+    # with the server on purpose (see dev_docs/decisions/
+    # 2026-08-25-local-review-server-owns-thread-state.md) — the transcript
+    # plus the round payloads the agent already read are the durable record.
+    # Guarded by its own lock; _submit_lock keeps its
     # existing job of serializing /submit itself.
     threads: "list[dict]" = []  # list of thread dicts, insertion order = creation order
     _thread_counter = 0  # per-launch counter minting ids: t1, t2, ...

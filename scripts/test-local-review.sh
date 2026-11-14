@@ -2588,8 +2588,9 @@ finally:
     _shutil.rmtree(git_dir1, ignore_errors=True)
 
 # -- --git uncommitted, threads mode: threads survive a live /refresh -------
-# (skills/local-review/references/threads.md, "State ownership": threads live in server memory and must survive /refresh, which
-# always ends in the page reloading -- only unsubmitted drafts are lost.)
+# (skills/local-review/references/threads.md, "State ownership": threads
+# live in server memory and must survive /refresh, which always ends in the
+# page reloading -- only unsubmitted drafts are lost.)
 # This is the server-side half of re-placement: the thread and its reply must
 # still be there after the diff moves under it. The page-side re-anchoring is
 # covered by the placeThreads() node corpus below.
@@ -2827,7 +2828,8 @@ else:
 _UNTRUSTED = ["a.path", "c.file", "file.display", "h.header", "h.section",
               "c.text", "cell.s", "res.value", "_emitter",
               # Threads (server-owned comment threads + replies): the same
-              # invariant extends unchanged -- a reply is never rendered through an HTML parser.
+              # invariant extends unchanged -- a reply is never rendered
+              # through an HTML parser.
               "thread.file", "thread.text", "reply.author", "reply.text", "reply.ts"]
 _dirty = []
 for _chunk in server.PAGE.split("innerHTML")[1:]:
