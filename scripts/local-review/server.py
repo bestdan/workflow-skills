@@ -1979,9 +1979,10 @@ async function fetchThreads(){
 // Above the file cards, independent of `root`: render() rebuilds root from
 // DIFF on every call and would otherwise wipe these on each poll tick.
 // Resolved summary threads stay visible here too -- unlike a per-line
-// thread they have no file card to collapse into a strip, and "never
-// dropped" (the rule for a resolved thread) applies just
-// as much to one with no anchor. Staying visible is not the same as giving
+// thread they have no file card to collapse into a strip, and resolving a
+// thread hides it without deleting it, so it must stay reachable; for a
+// thread with no anchor that means staying in view. Staying visible is not
+// the same as giving
 // no signal, though: the per-file strip's collapse IS a per-line thread's
 // resolved affordance, so a summary chip carries .summary-resolved and is
 // dimmed in place instead.

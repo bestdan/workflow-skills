@@ -33,12 +33,16 @@ An unknown token renders its `raw` as a
 `https:` or `mailto:` in its raw text before the platform `URL` parser sees it,
 so relative and protocol-relative hrefs render as plain text with the URL
 visible. A permitted link opens in a new tab with `rel="noopener noreferrer"`.
-Images never load: they render as their alt text and URL. Every response
-carries the `Referrer-Policy: no-referrer` header, because the token was in the
-URL when this landed in [#388](https://github.com/bestdan/workflow-skills/pull/388).
-The token URL is still a bearer credential after the cookie redirect: anyone
-holding it can post comments to the review. [#391](https://github.com/bestdan/workflow-skills/pull/391) hardened it and [#481](https://github.com/bestdan/workflow-skills/pull/481) made
-relative links inert.
+Images never load: they render as their alt text and URL.
+
+Every response carries the `Referrer-Policy: no-referrer` header. It landed in
+[#388](https://github.com/bestdan/workflow-skills/pull/388), when the token was
+in the URL, and it still matters: after the cookie redirect the token URL
+remains a bearer credential, and anyone holding it can post comments to the
+review. The preview rules were hardened in
+[#391](https://github.com/bestdan/workflow-skills/pull/391), and
+[#481](https://github.com/bestdan/workflow-skills/pull/481) made relative hrefs
+render as plain text.
 
 ## Consequences
 
