@@ -350,17 +350,17 @@ private repo). Why `repo` is kept:
 - **The watermark is the pushed file.** The flush reads
   `@{u}:ledgers/<host>.jsonl` to learn which runs are already sent, so a run
   appended or committed but never pushed is selected again, and a kill at any
-  step loses nothing. With nothing new it makes no network call.
+  step loses nothing. With nothing new and a usable clone, `--push` makes no
+  network call.
 - **The clone is disposable.** The flush never rebases or merges, because a
   rebase can stop on a conflict and leave state that breaks every later pull,
-  and after a history rewrite it can replay the leaked commit and push it
-  again. It moves the branch only with `git reset --hard` onto the fetched
-  upstream. It deletes and
-  reclones a clone that is not a valid repo, is mid-rebase or mid-merge, points
-  at another remote, or whose old upstream is not an ancestor of the newly
-  fetched one (a history rewrite). A dirty tree is reset. A clone is built in
-  `shared.tmp/` with `git init -b main` plus a fetch, and renamed into place
-  only once it succeeds.
+  and after a history rewrite it can replay a commit that leaked a field and
+  push it again. It moves the branch only with `git reset --hard` onto the
+  fetched upstream. It deletes and reclones a clone that is not a valid repo,
+  is mid-rebase or mid-merge, points at another remote, or whose old upstream
+  is not an ancestor of the newly fetched one (a history rewrite). A dirty
+  tree is reset. A clone is built in `shared.tmp/` with `git init -b main`
+  plus a fetch, and renamed into place only once it succeeds.
 - **A rejected push** fetches, resets and retries once. A second rejection, or
   any other failure, deletes the clone; the next flush starts over.
 - **One flush at a time.** It takes `~/.claude/co-review/shared.lock` and gives
