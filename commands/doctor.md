@@ -579,7 +579,7 @@ and its default branch from the first call before running the rest:
 gh repo view --json nameWithOwner,defaultBranchRef --jq '[.nameWithOwner, .defaultBranchRef.name] | @tsv'
 gh api user --jq .login
 gh api repos/<owner/name> --jq '[.owner.type, .permissions.admin] | @tsv'
-gh api repos/<owner/name>/rules/branches/<default> --jq '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | index("co-review") != null'
+gh api 'repos/<owner/name>/rules/branches/<default>?per_page=100' --jq '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | index("co-review") != null'
 gh api repos/<owner/name>/branches/<default> --jq '(.protection.required_status_checks.contexts // []) | index("co-review") != null'
 ```
 
