@@ -320,7 +320,8 @@ the local ledger. Each machine writes only `ledgers/<host>.jsonl` on `main`.
 second fork), points every descriptor away from the hook, returns at once, and
 writes the receipt to `~/.claude/co-review/last-push.log`, overwritten each
 time. `--pull`, run by `/co-review-stats`, is `--push` followed by a fetch and
-`git reset --hard @{u}`, and always makes one network call. `--check` is
+`git reset --hard @{u}`, so it always fetches, and the `--push` before it may
+clone and push as well. `--check` is
 `/doctor` Check 9.
 
 **The allowlist.** The flush copies only these fields. A field added to the
@@ -350,8 +351,11 @@ private repo). Why `repo` is kept:
   `@{u}:ledgers/<host>.jsonl` to learn which runs are already sent, so a run
   appended or committed but never pushed is selected again, and a kill at any
   step loses nothing. With nothing new it makes no network call.
-- **The clone is disposable.** The flush never rebases or merges; it moves the
-  branch only with `git reset --hard` onto the fetched upstream. It deletes and
+- **The clone is disposable.** The flush never rebases or merges, because a
+  rebase can stop on a conflict and leave state that breaks every later pull,
+  and after a history rewrite it can replay the leaked commit and push it
+  again. It moves the branch only with `git reset --hard` onto the fetched
+  upstream. It deletes and
   reclones a clone that is not a valid repo, is mid-rebase or mid-merge, points
   at another remote, or whose old upstream is not an ancestor of the newly
   fetched one (a history rewrite). A dirty tree is reset. A clone is built in
