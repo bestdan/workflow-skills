@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.216.0] - 2026-11-14
+
+### Features
+
+- complete issues over GraphQL when no Linear MCP [N/A] (#1534) (00552d5d)
+
 ## [2.215.0] - 2026-11-12
 
 ### Features
