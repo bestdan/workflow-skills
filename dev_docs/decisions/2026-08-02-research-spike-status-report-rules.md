@@ -17,8 +17,7 @@ a decision look readier than it is.
 
 The design (`2026-08-01-research-spike-skill.md`, deleted on graduation) set
 the report's rules. They landed in
-[#326](https://github.com/bestdan/workflow-skills/pull/326) and
-[#1047](https://github.com/bestdan/workflow-skills/pull/1047).
+[#326](https://github.com/bestdan/workflow-skills/pull/326).
 
 ## Decision
 
@@ -34,7 +33,8 @@ the total. The rules:
   threshold is fixed and not configurable.
 - Retired questions are counted apart from answered ones everywhere. A ready
   decision unblocked by a retirement says so on its line.
-- `status` always exits `0`.
+- `status` exits `0` whatever the tree contains; only a caller error, such as
+  an unknown project, exits `2`.
 
 Shipped beyond the design: a completeness footer. It counts validation
 findings, references to no decision, and decisions with a `state:` outside the

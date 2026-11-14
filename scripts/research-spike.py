@@ -1546,8 +1546,8 @@ def validate_cards(tree: Tree, report: Report) -> None:
 #
 # Scope is questions files and `contracts/` only. Widening it to every markdown
 # file would turn the discipline into noise and train people to satisfy it
-# mechanically
-# (`dev_docs/decisions/2026-08-02-research-spike-coverage-is-declared-per-section.md`).
+# mechanically. See
+# dev_docs/decisions/2026-08-02-research-spike-coverage-is-declared-per-section.md
 
 # The one sentence that ends every coverage error, because every one of them is
 # fixed the same way.
@@ -3267,9 +3267,10 @@ def track_index_entry(track: str) -> str:
 def index_track(lines: list[str], track: str, rel: str) -> list[str] | None:
     """`PROJECT.md` with the new track added to its tracks index, or None.
 
-    An index nobody updates is dead structure, so `init` keeps it current. It appends within the `## Tracks`
-    section and nowhere else; if a human has removed that heading, `init`
-    returns None so the caller can say so and leave the file alone rather than
+    An index nobody updates is dead structure, so `init` keeps it current. It
+    appends within the `## Tracks` section and nowhere else; if a human has
+    removed that heading, `init` returns None so the caller can say so and
+    leave the file alone rather than
     guessing where the list went. A missing index is a note, not a refusal —
     unlike the ledger, nothing downstream reads it.
     """
@@ -3834,10 +3835,12 @@ def find_deferral_phrase(line: str) -> str | None:
 
 
 def verb_suggest(args: argparse.Namespace, root: Path) -> int:
-    """The advisory lexical scan, kept out of the gate
-    (`dev_docs/decisions/2026-08-02-research-spike-suggest-cannot-fail.md`). Measured, not assumed: run against the reference tree this
-    returned 29 hits, most of them prose describing behaviour rather than
-    deferring work — so this is a report, never a gate, and there is no code
+    """The advisory lexical scan, kept out of the gate (see
+    dev_docs/decisions/2026-08-02-research-spike-suggest-cannot-fail.md).
+
+    Measured, not assumed: run against the reference tree this returned 29
+    hits, most of them prose describing behaviour rather than deferring work
+    — so this is a report, never a gate, and there is no code
     path below that returns non-zero, including a directory this run cannot
     even list (`PermissionError` out of `discover`'s own `iterdir()` calls —
     `rglob`/`is_file` already swallow that themselves on the Python versions
@@ -3850,9 +3853,9 @@ def verb_suggest(args: argparse.Namespace, root: Path) -> int:
     `discover`'s own parse findings (unknown keys, bad ids, and the like) are
     `validate`'s business, not this scan's, and are never surfaced here.
 
-    Suppression matters more than the phrase list, and the
-    interpretation of "immediately adjacent" is a judgment call, stated
-    plainly here rather than left implicit. A hit is suppressed when:
+    Suppression matters more than the phrase list, and the interpretation of
+    "immediately adjacent" is a judgment call, stated plainly here rather than
+    left implicit. A hit is suppressed when:
 
       - it falls inside a `### Q<n>.` section of a `questions.md` whose
         section already carries an `obligation` block — a real one or a bare

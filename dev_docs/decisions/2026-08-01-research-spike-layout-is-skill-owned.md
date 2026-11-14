@@ -36,8 +36,10 @@ about it is configurable.
 What shipped differs from the design in one respect: discovery does not
 require the layout. `discover()` reads every `*.md` under a project
 recursively, and a record's kind comes from its fence's info string, not from
-the file it sits in. Only `obligations/` is checked for shape (every file must
-hold a `card` block).
+the file it sits in. Only `obligations/` is checked for card shape (every file
+must hold a `card` block); `questions.md` sections and `contracts/` files
+carry the coverage rule instead
+([coverage record](2026-08-02-research-spike-coverage-is-declared-per-section.md)).
 
 ## Consequences
 
