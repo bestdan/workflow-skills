@@ -231,8 +231,8 @@ is the check working. Why it is stored:
 
 ### 2. Do not put `suggest` in the gate
 
-`suggest` always exits `0`, and wiring it into a blocking check would gain
-nothing. In a repo with an advisory tier it may run there as a non-failing
+`suggest` never fails over tree content (it exits `2` only on a bad argument),
+and wiring it into a blocking check would gain nothing. In a repo with an advisory tier it may run there as a non-failing
 report (`skills/research-spike/references/adoption.md` step 5). That
 licenses nothing about `validate`, which belongs in the blocking gate. Why:
 [`suggest` record](decisions/2026-08-02-research-spike-suggest-cannot-fail.md).
