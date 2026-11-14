@@ -18,17 +18,19 @@ mirror drops closed issues.
 
 The fleet sync step runs one GraphQL call per sync, two `issueCount`
 searches per configured owner, and stores the `closed_today` row: PRs merged
-and issues closed since local midnight. With `github.scope = "owner"` it
-counts them by anyone, the fleet's output rather than the owner's clicks;
-with `"me"`, only the owner's merged PRs and closed assigned issues. The
-count is in the agent view's notes for Little, and only when the row counts
-from today's local midnight.
+and issues closed since local midnight, by anyone: the fleet's output rather
+than the owner's clicks. The sync runs that step only with
+`github.scope = "owner"` (`sync.fleet_enabled`), so a `"me"` instance has no
+`closed_today` row. `github_fleet.closed_today` has a `"me"` variant that
+counts only the owner's merged PRs and closed assigned issues, but the sync
+never calls it. The count is in the agent view's notes for Little, and only
+when the row counts from today's local midnight.
 
 That differs from the design: the page does not show it. PR
 [#1224](https://github.com/bestdan/workflow-skills/pull/1224) shipped the
 header line, and PR
 [#1259](https://github.com/bestdan/workflow-skills/pull/1259) removed it
-while tightening Now's cards, leaving the count to agents. The `me` variant
+while tightening Now's cards, leaving the count to agents. The unused `me` variant
 came with `github.scope` in PR
 [#1234](https://github.com/bestdan/workflow-skills/pull/1234).
 

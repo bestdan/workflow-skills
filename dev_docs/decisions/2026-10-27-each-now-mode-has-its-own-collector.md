@@ -32,7 +32,7 @@ score:
 - **Deep** takes proposed designs, issues that block open issues (GitHub's
   native `blocking` field), issues at `status:1_needs_refinement`, and
   `status:2_ready` issues at `est:8` or more. Order: most blocked, then
-  `prio`, then the larger estimate. It shows `DEEP_LIMIT` (3): one to take up
+  `prio`, then the larger estimate, then the longer wait. It shows `DEEP_LIMIT` (3): one to take up
   and two alternates.
 - **Tidy** takes `auto:human-review-needed`, `status:0_untriaged` and
   `status:1_needs_refinement` issues, plus my own PRs open longer than

@@ -20,9 +20,8 @@ hosts and has nothing to do with read width.
 
 How much the instance reads from GitHub is `github.scope`. `"owner"` is the
 wide read on the configured owners' repos; `"me"` reads only what involves
-the owner: PRs authored by or asking for the owner's review, issues assigned
-to or opened by the owner, and, in the "closed today" count, only the owner's
-merged PRs and closed assigned issues. The default is `"me"`, so an unset key
+the owner: PRs authored by or asking for the owner's review, and issues
+assigned to or opened by the owner. The default is `"me"`, so an unset key
 never mirrors a whole org, as `github.fleet` defaulting to off did.
 `sync.fleet_enabled` now means `scope = "owner"`, and its callers keep their
 meaning. Collecting from other hosts stays with `ingest.machines`. A config
