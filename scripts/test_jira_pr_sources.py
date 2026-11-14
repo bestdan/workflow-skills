@@ -127,6 +127,14 @@ class TestExtract(unittest.TestCase):
             sources.extract(comments), ([], "bestdan/IP-1032-inflation-factor")
         )
 
+    def test_a_stacked_claim_drops_the_comma_after_the_branch(self):
+        """/deliver-task's stacked claim puts a comma straight after the branch."""
+        comments = acli_comments(
+            "Claimed by /deliver-task. Working on branch task/PROJ-80, stacked on "
+            "task/PROJ-78 (#239); PR link will follow."
+        )["comments"]
+        self.assertEqual(sources.extract(comments), ([], "task/PROJ-80"))
+
     def test_markdown_escapes_inside_the_branch_are_undone(self):
         """`task/MY_PROJ-12` must not be cut at an escaped underscore."""
         comments = acli_comments(

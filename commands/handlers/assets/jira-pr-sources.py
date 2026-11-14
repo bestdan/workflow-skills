@@ -61,6 +61,9 @@ PR_OPENED = re.compile(r"^\s*PR opened:\s*(\S+)")
 # 2026-11-06). The branch then ends at whitespace or the `;`. The MCP's
 # markdown rendering escapes them instead: "branch \`task/<KEY>\`;"
 # (observed 2026-11-08), so a backslash before either backtick is optional too.
+# A stacked claim puts a comma straight after a bare branch ("branch task/<KEY>,
+# stacked on ..."); git allows commas in a name, so extract() strips a trailing
+# `,` or `.` rather than the regex refusing them.
 CLAIMED_BRANCH = re.compile(
     r"^\s*Claimed by /[\w:-]+\.\s+Working on branch\s+\\?`?([^`\s;\\]+)"
 )
@@ -176,7 +179,7 @@ def extract(comments) -> Tuple[List[str], Optional[str]]:
             continue
         m = CLAIMED_BRANCH.match(text)
         if m:
-            branch = m.group(1)
+            branch = m.group(1).rstrip(".,")
     return urls, branch
 
 
