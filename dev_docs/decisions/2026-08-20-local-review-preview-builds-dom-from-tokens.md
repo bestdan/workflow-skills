@@ -23,8 +23,12 @@ attacker-derived string reaches an HTML parser. The safety comes from a closed
 set of sinks rather than from the API names. The element type comes from a
 hard-coded allowlist (`div`, `span`, `p`, `h1`–`h6`, `ul`, `ol`, `li`, the
 table elements, `pre`, `code`, `blockquote`, `em`, `strong`, `del`, `a`, `hr`,
-`br`), never from `token.type`. The only attacker-influenced assignments are
-`textContent` and, on `a`, `href`. An unknown token renders its `raw` as a
+`br`), never from `token.type`. For ordinary markdown tokens, the only
+attacker-influenced assignments are `textContent` and, on `a`, `href`. A
+`mermaid` fence's drawn SVG is a separate sink, confined to a sandboxed frame;
+see
+[`2026-11-12-local-review-mermaid-in-a-sandboxed-frame.md`](2026-11-12-local-review-mermaid-in-a-sandboxed-frame.md).
+An unknown token renders its `raw` as a
 `span`'s text, and its fields are never walked. A link must carry `http:`,
 `https:` or `mailto:` in its raw text before the platform `URL` parser sees it,
 so relative and protocol-relative hrefs render as plain text with the URL

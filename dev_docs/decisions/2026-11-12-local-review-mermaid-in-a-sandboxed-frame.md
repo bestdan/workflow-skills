@@ -44,7 +44,12 @@ code. Landed in [#1511](https://github.com/bestdan/workflow-skills/pull/1511).
 
 ## Confirmation
 
-`scripts/test-local-review.sh` covers the mermaid path.
+`scripts/test-local-review.sh` asserts that the sandbox frame is the only place
+a diagram's SVG is parsed, that the frame document carries a fetch-blocking CSP
+and adds no script of its own, that SVG carrying a link, refresh or base
+element is refused, that the per-document count and character budgets stop
+drawing at their caps, that `%%` comments and accessibility text open the
+source by default, and that the fallback still shows the whole fence body.
 
 ## Alternatives
 
