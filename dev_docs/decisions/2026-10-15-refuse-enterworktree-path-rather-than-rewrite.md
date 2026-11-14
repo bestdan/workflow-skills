@@ -25,7 +25,7 @@ choice:
 - `name` is refused while the session is already in a worktree, so a rewrite
   would fail there, and that case needs a refusal with a route anyway.
 
-The [#1001 probe](../research/2026-10-14-enterworktree-deny-probe/README.md)
+The [probe for issue #1001](../research/2026-10-14-enterworktree-deny-probe/README.md)
 showed that a `deny` from a `PreToolUse` hook reaches the agent with the
 hook's own reason text under `claude -p`, and that the agent can follow it to
 the `name` route.
@@ -36,8 +36,8 @@ the `name` route.
 `hooks/hooks.json`, denies a `path` call when `scripts/worktree-name-for.sh`
 gives that path a name. The reason names the worktree's `name` verbatim and
 the calls that reach it with no prompt. It never rewrites the call. Landed in
-[#1021](https://github.com/bestdan/workflow-skills/pull/1021), closing
-[#989](https://github.com/bestdan/workflow-skills/issues/989).
+[PR #1021](https://github.com/bestdan/workflow-skills/pull/1021), closing
+[issue #989](https://github.com/bestdan/workflow-skills/issues/989).
 
 ## Consequences
 

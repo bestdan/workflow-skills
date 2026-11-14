@@ -32,7 +32,7 @@ into a refusal of every ``path`` call, including those with no other route.
 Usage: ``skills/worktree-entry/SKILL.md``. Decisions:
 ``dev_docs/decisions/2026-10-15-refuse-enterworktree-path-rather-than-rewrite.md``,
 ``dev_docs/decisions/2026-10-15-refuse-enterworktree-path-only-with-a-name-and-fail-open.md``
-and ``dev_docs/decisions/2026-10-15-worktree-refusals-never-infer-session-state.md``.
+and ``dev_docs/decisions/2026-10-15-worktree-refusals-give-the-whole-route.md``.
 
 Reads the hook payload as JSON on stdin; emits a PreToolUse decision on stdout.
 """

@@ -25,7 +25,7 @@ The costs are lopsided. A missing exit gets `name` refused, and an agent that
 then falls back to `path` meets the prompt or the path guard. Naming
 `ExitWorktree` unconditionally looked free, on the belief that it was a silent
 no-op outside a worktree. The
-[#1001 probe](../research/2026-10-14-enterworktree-deny-probe/README.md) found
+[probe for issue #1001](../research/2026-10-14-enterworktree-deny-probe/README.md) found
 that it is a no-op that still returns `is_error: true`, which reads as a
 failure in a transcript.
 
@@ -37,10 +37,10 @@ prose: call `ExitWorktree` with `action: keep` first only if the session is
 already in a worktree, otherwise skip it, then call `EnterWorktree` with
 `name: <n>`. The agent, which knows whether it entered a worktree, decides.
 Landed for the path guard in
-[#1021](https://github.com/bestdan/workflow-skills/pull/1021) (issue
-[#989](https://github.com/bestdan/workflow-skills/issues/989)), and the write
-guard adopted the same wording in
-[#1026](https://github.com/bestdan/workflow-skills/pull/1026).
+[PR #1021](https://github.com/bestdan/workflow-skills/pull/1021), closing
+[issue #989](https://github.com/bestdan/workflow-skills/issues/989), and the
+write guard adopted the same wording in
+[PR #1026](https://github.com/bestdan/workflow-skills/pull/1026).
 
 ## Consequences
 

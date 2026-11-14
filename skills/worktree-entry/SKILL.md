@@ -123,7 +123,7 @@ gets no decision, and the prompt appears as usual. Why the guard is shaped
 this way:
 [refuse rather than rewrite](../../dev_docs/decisions/2026-10-15-refuse-enterworktree-path-rather-than-rewrite.md),
 [refuse only with a name, and fail open](../../dev_docs/decisions/2026-10-15-refuse-enterworktree-path-only-with-a-name-and-fail-open.md),
-and [leave the exit step to the agent](../../dev_docs/decisions/2026-10-15-worktree-refusals-never-infer-session-state.md).
+and [leave the exit step to the agent](../../dev_docs/decisions/2026-10-15-worktree-refusals-give-the-whole-route.md).
 
 A model-supplied path outside `.claude/worktrees/` raises an approval prompt.
 Neither a `permissions.allow` rule nor a `PreToolUse` hook answering `allow`

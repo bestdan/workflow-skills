@@ -30,7 +30,7 @@ With no name it returns no decision, and the harness prompts as it always has.
 Any failure also returns no decision: malformed stdin, a payload that is not
 an object, a non-string `path`, a missing, crashing, non-executable or exit-2
 resolver, stdout that is not a valid name, or an unreadable worktree config.
-Landed in [#1021](https://github.com/bestdan/workflow-skills/pull/1021).
+Landed in [PR #1021](https://github.com/bestdan/workflow-skills/pull/1021).
 
 ## Consequences
 
