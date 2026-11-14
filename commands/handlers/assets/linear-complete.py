@@ -196,7 +196,13 @@ def move(key, issue, target):
     try:
         moved = gql(key, MOVE, {"id": issue["id"], "state": target["id"]})
     except SystemExit as e:
-        after = gql(key, ISSUE, {"id": issue["id"]}).get("issue") or {}
+        try:
+            after = gql(key, ISSUE, {"id": issue["id"]}).get("issue") or {}
+        except SystemExit as e2:
+            die(
+                f"issueUpdate failed ({e.code}) and the re-read of "
+                f"{issue['identifier']} failed too ({e2.code})"
+            )
         if (after.get("state") or {}).get("type") == "completed":
             return
         die(f"issueUpdate failed and {issue['identifier']} is not completed: {e.code}")

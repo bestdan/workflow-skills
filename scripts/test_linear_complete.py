@@ -5,8 +5,8 @@
 
 - a terminal issue (completed or canceled) is never written;
 - the target state is chosen by type and board position, never by name;
-- a non-zero exit happens only before any write, so the caller's MCP fallback
-  can never double-write;
+- a non-zero exit means no move was confirmed; a failed move call that Linear
+  applied anyway is caught by a re-read and counts as completed;
 - a comment failure after the state moved is reported, not raised.
 """
 
@@ -53,6 +53,7 @@ class FakeLinear:
         states=STATES,
         teams_found=True,
         issue_found=True,
+        reread_error=None,
     ):
         self.state_type = state_type
         self.team_id = team_id
@@ -65,6 +66,8 @@ class FakeLinear:
         self.states = states
         self.teams_found = teams_found
         self.issue_found = issue_found
+        # reread_error: an issue read after a move call exits with this.
+        self.reread_error = reread_error
         self.mutations = []
 
     def __call__(self, key, query, variables=None):
@@ -86,6 +89,8 @@ class FakeLinear:
                 sys.exit(self.comment_error)
             return {"commentCreate": {"success": True}}
         if "issue(" in query:
+            if self.reread_error and self.mutations:
+                sys.exit(self.reread_error)
             if not self.issue_found:
                 return {"issue": None}
             return {
@@ -179,6 +184,19 @@ class CompleteTests(unittest.TestCase):
         out = self.run_with(fake)
         self.assertEqual(out["result"], "completed")
         self.assertEqual(out["comment"], "posted")
+
+    def test_failed_re_read_exits_naming_both_failures(self):
+        fake = FakeLinear(
+            "started",
+            move_error="GraphQL request failed: timed out",
+            reread_error="GraphQL request failed: connection reset",
+        )
+        with self.assertRaises(SystemExit) as cm:
+            self.run_with(fake)
+        msg = str(cm.exception.code)
+        self.assertIn("timed out", msg)
+        self.assertIn("connection reset", msg)
+        self.assertEqual([m[0] for m in fake.mutations], ["move"])
 
     def test_failed_move_call_that_did_not_apply_exits_nonzero(self):
         fake = FakeLinear(
