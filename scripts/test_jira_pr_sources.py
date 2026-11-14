@@ -206,6 +206,21 @@ class TestToRow(SeamTestCase):
         self.assertEqual(row["source_errors"], [])
         self.assertEqual(acli.calls, [])
 
+    def test_twg_shape_reads_the_complete_comments_list(self):
+        """`twg jira workitem get <KEY> --comments -o json` (GDNC-51,
+        2026-11-14): fields are flattened, and beside the complete `comments`
+        list sits a top-level `comment` page that came back empty."""
+        issue = {
+            "id": "500442",
+            "key": "GDNC-51",
+            "comment": {"comments": [], "maxResults": 0, "total": 0},
+            "comments": [{"body": adf(text(CLAIM))}, {"body": adf(text(OPENED))}],
+        }
+        row = sources.to_row(issue, use_acli=False)
+        self.assertEqual(row["attachments"], [OPENED.split(": ", 1)[1]])
+        self.assertEqual(row["branchName"], "bestdan/IP-1032-inflation-factor")
+        self.assertEqual(row["source_errors"], [])
+
     def test_a_truncated_comment_page_is_a_source_error(self):
         """A cut-short thread may hide the `PR opened:` line, so the row must
         land in unresolved rather than read as no PR."""
@@ -296,6 +311,54 @@ class TestMain(SeamTestCase):
         self.assertEqual([r["identifier"] for r in rows], ["A-1", "A-2"])
         self.assertEqual(rows[0]["attachments"], [])
         self.assertEqual(len(rows[1]["attachments"]), 1)
+
+    def test_twg_single_key_envelope(self):
+        """`twg jira workitem get <KEY> --comments -o json`: `data` is a list."""
+        issue = {"key": "GDNC-51", "comments": [{"body": adf(text(OPENED))}]}
+        code, rows = self.run_main({"data": [issue]}, ["--twg"])
+        self.assertEqual(code, 0)
+        self.assertEqual(rows[0]["attachments"], [OPENED.split(": ", 1)[1]])
+
+    def test_twg_batch_envelope_turns_a_failed_key_into_a_source_error(self):
+        """Several keys (GDNC-51 GDNC-104 GDNC-99999, 2026-11-14): `data.items`
+        holds one `{input, ok, data | error}` per key, and a key that failed
+        must land in unresolved, never read as "no PR"."""
+        payload = {
+            "data": {
+                "items": [
+                    {
+                        "input": "GDNC-51",
+                        "ok": True,
+                        "data": {
+                            "key": "GDNC-51",
+                            "comments": [{"body": adf(text(OPENED))}],
+                        },
+                    },
+                    {
+                        "input": "GDNC-99999",
+                        "ok": False,
+                        "error": {"message": "Issue does not exist"},
+                    },
+                ]
+            }
+        }
+        code, rows = self.run_main(payload, ["--twg"])
+        self.assertEqual(code, 0)
+        self.assertEqual([r["identifier"] for r in rows], ["GDNC-51", "GDNC-99999"])
+        self.assertEqual(rows[0]["source_errors"], [])
+        self.assertEqual(
+            rows[1]["source_errors"],
+            ["twg get failed for GDNC-99999: Issue does not exist"],
+        )
+
+    def test_twg_needs_the_envelope(self):
+        old = sys.stdin
+        sys.stdin = io.StringIO(json.dumps([{"key": "A-1"}]))
+        try:
+            with self.assertRaises(SystemExit):
+                sources.main(["--twg"])
+        finally:
+            sys.stdin = old
 
     def test_a_missing_key_stops_the_run(self):
         old = sys.stdin

@@ -16,13 +16,16 @@ which calls this file's phase directly with the caller contract defined in
 merged PRs or open PRs by branch, stop — that belongs one layer up.
 
 **Shared reference:** the Atlassian MCP preflight is `commands/handlers/jira.md`
-step 1, and the choice between it and `acli` is `jira-config.md` → "Backend";
+step 1, and the choice between `twg`, `acli` and the MCP is `jira-config.md` →
+"Backend";
 `commands/handlers/linear-complete.md` is the structural template this file
 mirrors, adapted from Linear's workflow-state `type` to Jira's
 `statusCategory`.
 
 Each step below gives an **MCP** and an **acli** form. Use the one for the
-resolved backend throughout. Run every `acli` command unsandboxed.
+resolved backend throughout. On **twg**, make each MCP form's call with the
+command `jira-twg.md` maps it to. Run every `acli` and `twg` command
+unsandboxed.
 
 > **MCP namespace.** `<atlassian-mcp>__` is `mcp__claude_ai_Atlassian__` or
 > `mcp__atlassian__` depending on the install (see `jira-config.md`) —
@@ -43,7 +46,7 @@ resolved backend throughout. Run every `acli` command unsandboxed.
 This phase takes, in addition to the identifier:
 
 - **`dry_run`** (bool) — print the plan and stop; no write.
-- **`backend`** (`acli` / `mcp`, optional) — a backend the caller already
+- **`backend`** (`twg` / `acli` / `mcp`, optional) — a backend the caller already
   resolved. When it is set, step 1 skips resolution; when unset, step 1
   resolves it.
 - **`assume_verified`** (bool, default `false`) — when **true**, the caller

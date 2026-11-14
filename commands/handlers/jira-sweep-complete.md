@@ -16,7 +16,7 @@ and "Steps".
 This flow exists for boards where Jira's GitHub integration and smart commits
 are not closing issues on merge. Where they are, it finds nothing to do.
 
-**Shared reference:** the backend rule (`acli` or the Atlassian MCP) is
+**Shared reference:** the backend rule (`twg`, `acli` or the Atlassian MCP) is
 `jira-config.md` → "Backend"; `linear-sweep-complete.md` is the structural
 template, and its steps 3–4 (PR resolution and merge state) run here unchanged.
 
@@ -73,6 +73,27 @@ stops the run, and rows the other run wrote belong to the same scope.
 
 `--acli` makes the script fetch each issue's comments itself
 (`acli jira workitem comment list`). acli's search does not return comments.
+
+**twg backend.** Run both calls unsandboxed. First the search:
+
+```bash
+mkdir -p /tmp/claude && twg --mode agent --site <jira.site> jira workitem query --jql '<scope JQL>' --fields summary,status --limit 50 -o json --output-summary none > /tmp/claude/jira-sweep-<run>-search.json
+```
+
+Stop on a non-zero exit. Read the keys out of its `data.issues[]`; when there
+are none, the sweep has nothing to do. Then read every key's comments in one
+call and turn them into rows:
+
+```bash
+twg --mode agent --site <jira.site> jira workitem get <KEY> <KEY>... --fields summary,status --comments -o json --output-summary none > /tmp/claude/jira-sweep-<run>-issues.json; \
+  python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-pr-sources.py" --twg \
+  < /tmp/claude/jira-sweep-<run>-issues.json > /tmp/claude/jira-sweep-<run>-rows.json
+```
+
+`get` exits 3 when some keys could not be read and still prints the rest;
+`--twg` turns each failed key into a source error, so that issue lands in
+`left: unresolved`. Any other non-zero exit means the read failed as a whole:
+stop and report it. The `<run>` naming below applies to these files too.
 
 **MCP backend.** Call `<atlassian-mcp>__searchJiraIssuesUsingJql` (`cloudId:
 <jira.site>`, `jql: <scope JQL>`, `fields: ["summary", "status"]`,
@@ -152,7 +173,7 @@ of the batch continues.
 
 - **Scope** — `scope: <project>, mine (default)`, `scope: <project>, all
   assignees (--all)`, or `scope: <KEY>, mine (--project)`, then the backend
-  (`via acli` / `via Atlassian MCP`).
+  (`via twg` / `via acli` / `via Atlassian MCP`).
 - **Counts** — `k completed, m open (left), u unresolved (left), s no-PR
   skipped, c closed-unmerged (left)`.
 - **Per-issue lines** — key, current status name, the PR resolved (if any) and

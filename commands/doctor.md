@@ -1,6 +1,6 @@
 ---
 description: Diagnose and optionally fix the plugin setup — config validity, handler prerequisites, legacy dirs, schema drift, hygiene, co-review and teardown allow-rule drift, the worktree root and branch prefix, co-review ledger sync, the task-dashboard agent, and an admin gh account on a personal repo
-allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(find *), Bash(grep *), Bash(uv *), Bash(python3 *), Bash(mkdir *), Bash(rmdir *), Bash("${CLAUDE_PLUGIN_ROOT}/scripts/worktree-config.sh":*), Glob, Grep, Read, Edit, Write, AskUserQuestion, mcp__claude_ai_Linear__list_teams, mcp__linear__list_teams, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__atlassian__getAccessibleAtlassianResources
+allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(find *), Bash(grep *), Bash(uv *), Bash(python3 *), Bash(mkdir *), Bash(rmdir *), Bash("${CLAUDE_PLUGIN_ROOT}/scripts/worktree-config.sh":*), Glob, Grep, Read, Edit, Write, AskUserQuestion, mcp__claude_ai_Linear__list_teams, mcp__linear__list_teams, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__atlassian__getAccessibleAtlassianResources, Bash(twg *)
 argument-hint: "[--fix]"
 ---
 
@@ -170,9 +170,11 @@ the auth flows):
   `commands/handlers/linear-sweep-complete.md`, and
   `commands/handlers/linear-reconcile.md` resolve; if any are missing, report
   `WARN` with the missing path.
-- `jira` → the Atlassian MCP is reachable: call
-  `<atlassian-mcp>__getAccessibleAtlassianResources` and confirm it returns sites
-  (see `commands/handlers/jira-config.md` step 1).
+- `jira` → a backend is reachable: run the twg check in
+  `commands/handlers/jira-config.md` → "Backend" (unsandboxed) for `jira.site`,
+  and when it fails, call `<atlassian-mcp>__getAccessibleAtlassianResources` and
+  confirm it returns sites (see `commands/handlers/jira-config.md` step 1). Name
+  the backend that passed.
 
 Met → `PASS`. Unmet → `WARN` (auth/MCP is a human action, never auto-fixed) with
 the handler doc's own remediation.

@@ -39,6 +39,15 @@ the search saw, not the transitions available from the issue's current status,
 so the caller's transition can still be refused -- that refusal is the
 caller's to report.
 
+## `--twg`: the twg path
+
+With `--twg`, stdin is `twg jira workitem transitions query --id <KEY> -o json
+--output-summary none`. It wraps the list in `data`, names the target status
+`toName`, and gives the category's *name* (`To Do` / `In Progress` / `Done`)
+rather than its key, so those three names are mapped onto the keys `--category`
+takes; any other name is malformed input. The printed id is a real transition
+id, which `twg jira workitem transition --transition-id` takes.
+
 Usage:
   python3 jira-resolve-transition.py --category indeterminate \\
       --exclude 'hold|block|review|validation|wait' --prefer 'in progress' < transitions.json
@@ -76,6 +85,30 @@ def parse_transitions(payload):
         to_name = expect(to, "name", str, f"{where}.to")
         category_obj = expect(to, "statusCategory", dict, f"{where}.to")
         category = expect(category_obj, "key", str, f"{where}.to.statusCategory")
+        own_name = entry.get("name")
+        own_name = own_name if isinstance(own_name, str) else None
+        transitions.append(Transition(tid, own_name, to_name, category))
+    return transitions
+
+
+# twg names the category where the MCP gives its key.
+TWG_CATEGORY_KEYS = {"To Do": "new", "In Progress": "indeterminate", "Done": "done"}
+
+
+def parse_twg_transitions(payload):
+    """Return the `Transition` list from `twg jira workitem transitions query
+    -o json`, or raise ShapeError."""
+    data = expect(payload, "data", dict, "response")
+    raw = expect(data, "transitions", list, "response.data")
+    transitions = []
+    for i, entry in enumerate(raw):
+        where = f"data.transitions[{i}]"
+        tid = expect(entry, "id", str, where)
+        to_name = expect(entry, "toName", str, where)
+        category_name = expect(entry, "category", str, where)
+        category = TWG_CATEGORY_KEYS.get(category_name)
+        if category is None:
+            raise ShapeError(f"{where}.category: unknown category {category_name!r}")
         own_name = entry.get("name")
         own_name = own_name if isinstance(own_name, str) else None
         transitions.append(Transition(tid, own_name, to_name, category))
@@ -173,8 +206,15 @@ def main(argv=None):
         action="store_true",
         help="stdin is an issue-search array; candidates are its distinct statuses",
     )
+    parser.add_argument(
+        "--twg",
+        action="store_true",
+        help="stdin is `twg jira workitem transitions query -o json` output",
+    )
     args = parser.parse_args(argv)
 
+    if args.twg and args.from_search:
+        parser.error("--twg and --from-search are different inputs; pass one")
     if bool(args.category) == bool(args.exact):
         parser.error("exactly one of --category or --exact is required")
     if args.exact and (args.exclude or args.prefer):
@@ -189,6 +229,8 @@ def main(argv=None):
     try:
         if args.from_search:
             transitions = statuses_from_search(payload)
+        elif args.twg:
+            transitions = parse_twg_transitions(payload)
         else:
             transitions = parse_transitions(payload)
     except ShapeError as exc:
