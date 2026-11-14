@@ -10,6 +10,7 @@ would widen the sweep to every unconfigured project's work.
 import contextlib
 import importlib.util
 import io
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -74,6 +75,47 @@ class PartitionTests(unittest.TestCase):
             scan.main()
         self.assertIn("needs at least one --project", str(cm.exception.code))
         fetch.assert_not_called()
+
+    def test_with_unassigned_prints_the_partitioned_whole_team_result(self):
+        argv = [
+            "linear-scan.py",
+            "--team",
+            "Core",
+            "--project",
+            "p-a",
+            "--with-unassigned",
+        ]
+        prelude = ({"id": "v"}, {"id": "t", "name": "Core", "states": {"nodes": []}})
+
+        def node(ident, project):
+            return {
+                "identifier": ident,
+                "project": project,
+                "attachments": {"nodes": [{"url": f"https://x/{ident}"}]},
+            }
+
+        fetched = [node("X-1", A), node("X-2", None), node("X-3", B)]
+        out = io.StringIO()
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.object(sys, "argv", argv))
+            stack.enter_context(mock.patch.object(scan, "get_key", return_value="k"))
+            stack.enter_context(
+                mock.patch.object(scan, "resolve_team", return_value=prelude)
+            )
+            fetch = stack.enter_context(
+                mock.patch.object(scan, "fetch_issues", return_value=fetched)
+            )
+            stack.enter_context(contextlib.redirect_stdout(out))
+            stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
+            scan.main()
+        self.assertIsNone(fetch.call_args.args[3], "expected one whole-team query")
+        result = json.loads(out.getvalue())
+        self.assertEqual(
+            [(i["identifier"], i["scope"]) for i in result["issues"]],
+            [("X-1", "p-a"), ("X-2", "Unassigned")],
+        )
+        self.assertEqual(result["issues"][0]["attachments"], ["https://x/X-1"])
+        self.assertEqual(result["meta"]["out_of_scope"], [{"project": B, "count": 1}])
 
 
 if __name__ == "__main__":

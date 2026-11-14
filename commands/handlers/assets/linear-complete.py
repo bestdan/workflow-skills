@@ -9,11 +9,15 @@ TYPE (never by display name), refuse to write when the issue is already
 terminal, move it, and post the caller's completion comment. It does no PR
 discovery and no merge verification; that is the caller's job.
 
-Exit status is the fallback contract, and it is narrower than "did it work":
-a non-zero exit means NOTHING WAS WRITTEN, so the caller may fall to the MCP
-floor without risking a double write. Once the state change has landed, the
-script exits 0 even if the comment then fails, and reports the comment as
-`failed` in its JSON so the caller can post it another way.
+Exit status is the fallback contract. A non-zero exit means no state change
+was CONFIRMED. It cannot mean none happened: a request can reach Linear and
+apply while its response is lost. So when the move call fails, the script
+re-reads the issue, and an issue that is now completed counts as moved.
+Falling to the MCP floor after a non-zero exit stays safe because the floor's
+idempotence check refuses an issue that is already terminal. Once the move is
+confirmed the script exits 0 whatever happens to the comment, and reports the
+comment as `failed` (Linear refused it, so posting it another way is safe) or
+`unknown` (the request may have landed, so reposting could duplicate it).
 
 The API key is resolved by _secret_resolve.py (see dev_docs/auth_key_access.md);
 this script reads no config. Stdout carries exactly one JSON object:
@@ -21,10 +25,10 @@ this script reads no config. Stdout carries exactly one JSON object:
   {"identifier": "ABC-12", "from": {"name": "In Progress", "type": "started"},
    "to": {"name": "Done", "type": "completed"},
    "result": "completed" | "already-complete" | "canceled" | "planned",
-   "comment": "posted" | "skipped" | "failed", "comment_error": "..."}
+   "comment": "posted" | "skipped" | "failed" | "unknown", "comment_error": "..."}
 
 `to` is null when nothing was planned (already terminal). `comment_error`
-appears only with `"comment": "failed"`.
+appears only with `"comment": "failed"` or `"unknown"`.
 
 Usage:
   python3 linear-complete.py --team PreThink --issue ABC-12 --dry-run
@@ -34,6 +38,7 @@ Usage:
 """
 
 import argparse
+import http.client
 import json
 import os
 import re
@@ -109,6 +114,12 @@ def gql(key, query, variables=None):
         sys.exit(f"GraphQL HTTP {e.code}: {e.read().decode(errors='replace')}")
     except urllib.error.URLError as e:
         sys.exit(f"GraphQL request failed: {e.reason}")
+    except (OSError, ValueError, http.client.HTTPException) as e:
+        # Raised while reading or decoding the body, after urlopen returned:
+        # a read timeout (TimeoutError), a short read (IncompleteRead), or a
+        # body that is not JSON. urlopen wraps none of these as URLError, and
+        # a write's caller must see a SystemExit here, not a traceback.
+        sys.exit(f"GraphQL request failed: {e}")
     if not isinstance(payload, dict):
         sys.exit(f"GraphQL response: expected an object, got {type(payload).__name__}")
     if "errors" in payload:
@@ -155,15 +166,42 @@ def plan(team_node, issue):
     return "planned", completed_state(team_node)
 
 
+REFUSED_RE = re.compile(r"^GraphQL (error|HTTP 4\d\d)\b")
+
+
 def post_comment(key, issue_id, body):
-    """Post the completion comment. Never exits: the state already moved."""
+    """Post the completion comment. Never exits: the state already moved.
+
+    `failed` means Linear answered and refused (a GraphQL error, an HTTP 4xx,
+    success=false), so the comment is not there. Any other failure is
+    `unknown`, because the request may have landed before it broke.
+    """
     try:
         ok = gql(key, COMMENT, {"issue": issue_id, "body": body})
     except SystemExit as e:
-        return "failed", str(e.code)
+        msg = str(e.code)
+        return ("failed" if REFUSED_RE.match(msg) else "unknown"), msg
     if not (ok.get("commentCreate") or {}).get("success"):
         return "failed", "commentCreate returned success=false"
     return "posted", None
+
+
+def move(key, issue, target):
+    """Move the issue, confirming by a re-read when the move call fails.
+
+    A failed call can still have applied the move, so the issue is read
+    again: completed now means it moved. Exits non-zero when the move is not
+    confirmed, including when the re-read fails too.
+    """
+    try:
+        moved = gql(key, MOVE, {"id": issue["id"], "state": target["id"]})
+    except SystemExit as e:
+        after = gql(key, ISSUE, {"id": issue["id"]}).get("issue") or {}
+        if (after.get("state") or {}).get("type") == "completed":
+            return
+        die(f"issueUpdate failed and {issue['identifier']} is not completed: {e.code}")
+    if not (moved.get("issueUpdate") or {}).get("success"):
+        die(f"issueUpdate returned success=false for {issue['identifier']}")
 
 
 def run(key, team, identifier, comment, dry_run):
@@ -182,9 +220,7 @@ def run(key, team, identifier, comment, dry_run):
     if result != "planned" or dry_run:
         return out
 
-    moved = gql(key, MOVE, {"id": issue["id"], "state": target["id"]})
-    if not (moved.get("issueUpdate") or {}).get("success"):
-        die(f"issueUpdate returned success=false for {issue['identifier']}")
+    move(key, issue, target)
     out["result"] = "completed"
 
     if comment:

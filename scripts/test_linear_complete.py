@@ -16,6 +16,7 @@ import io
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ASSET = (
     Path(__file__).resolve().parents[1]
@@ -41,31 +42,52 @@ STATES = [
 class FakeLinear:
     """Answers each operation by what its text asks for; records mutations."""
 
-    def __init__(self, state_type, team_id=TEAM_ID, move_ok=True, comment_fails=False):
+    def __init__(
+        self,
+        state_type,
+        team_id=TEAM_ID,
+        move_ok=True,
+        move_error=None,
+        move_applied=True,
+        comment_error=None,
+        states=STATES,
+        teams_found=True,
+        issue_found=True,
+    ):
         self.state_type = state_type
         self.team_id = team_id
         self.move_ok = move_ok
-        self.comment_fails = comment_fails
+        # move_error: the call exits with this message; move_applied says
+        # whether Linear applied it anyway, which the re-read then shows.
+        self.move_error = move_error
+        self.move_applied = move_applied
+        self.comment_error = comment_error
+        self.states = states
+        self.teams_found = teams_found
+        self.issue_found = issue_found
         self.mutations = []
 
     def __call__(self, key, query, variables=None):
         if "teams(" in query:
-            return {
-                "teams": {
-                    "nodes": [
-                        {"id": TEAM_ID, "name": "Core", "states": {"nodes": STATES}}
-                    ]
-                }
-            }
+            team = {"id": TEAM_ID, "name": "Core", "states": {"nodes": self.states}}
+            return {"teams": {"nodes": [team] if self.teams_found else []}}
         if "issueUpdate" in query:
             self.mutations.append(("move", variables))
+            if self.move_error:
+                if self.move_applied:
+                    self.state_type = "completed"
+                sys.exit(self.move_error)
+            if self.move_ok:
+                self.state_type = "completed"
             return {"issueUpdate": {"success": self.move_ok}}
         if "commentCreate" in query:
             self.mutations.append(("comment", variables))
-            if self.comment_fails:
-                sys.exit("GraphQL request failed: timed out")
+            if self.comment_error:
+                sys.exit(self.comment_error)
             return {"commentCreate": {"success": True}}
         if "issue(" in query:
+            if not self.issue_found:
+                return {"issue": None}
             return {
                 "issue": {
                     "id": "uuid-12",
@@ -139,12 +161,66 @@ class CompleteTests(unittest.TestCase):
         self.assertIn("success=false", str(cm.exception.code))
         self.assertEqual([m[0] for m in fake.mutations], ["move"])
 
-    def test_comment_failure_after_the_move_is_reported_not_raised(self):
-        fake = FakeLinear("started", comment_fails=True)
+    def test_exits_before_any_write_when_nothing_resolves(self):
+        no_done = [s for s in STATES if s["type"] != "completed"]
+        cases = {
+            "no completed state": FakeLinear("started", states=no_done),
+            "team not found": FakeLinear("started", teams_found=False),
+            "issue not found": FakeLinear("started", issue_found=False),
+        }
+        for name, fake in cases.items():
+            with self.subTest(name):
+                with self.assertRaises(SystemExit):
+                    self.run_with(fake)
+                self.assertEqual(fake.mutations, [])
+
+    def test_failed_move_call_that_applied_counts_as_completed(self):
+        fake = FakeLinear("started", move_error="GraphQL request failed: timed out")
         out = self.run_with(fake)
         self.assertEqual(out["result"], "completed")
-        self.assertEqual(out["comment"], "failed")
-        self.assertIn("timed out", out["comment_error"])
+        self.assertEqual(out["comment"], "posted")
+
+    def test_failed_move_call_that_did_not_apply_exits_nonzero(self):
+        fake = FakeLinear(
+            "started",
+            move_error="GraphQL request failed: timed out",
+            move_applied=False,
+        )
+        with self.assertRaises(SystemExit) as cm:
+            self.run_with(fake)
+        self.assertIn("is not completed", str(cm.exception.code))
+        self.assertEqual([m[0] for m in fake.mutations], ["move"])
+
+    def test_comment_failure_is_reported_not_raised(self):
+        cases = {
+            "GraphQL request failed: timed out": "unknown",
+            "GraphQL HTTP 503: unavailable": "unknown",
+            "GraphQL HTTP 400: bad input": "failed",
+            'GraphQL error: [{"message": "no"}]': "failed",
+        }
+        for error, outcome in cases.items():
+            with self.subTest(error):
+                fake = FakeLinear("started", comment_error=error)
+                out = self.run_with(fake)
+                self.assertEqual(out["result"], "completed")
+                self.assertEqual(out["comment"], outcome)
+                self.assertEqual(out["comment_error"], error)
+
+
+class GqlTransportTests(unittest.TestCase):
+    """A body-read failure must become a SystemExit, never a traceback."""
+
+    def test_read_errors_exit_with_a_message(self):
+        for exc in (TimeoutError("timed out"), ValueError("not json")):
+            with self.subTest(type(exc).__name__):
+                response = mock.MagicMock()
+                response.__enter__.return_value.read.side_effect = exc
+                with mock.patch.object(
+                    lc.urllib.request, "urlopen", return_value=response
+                ):
+                    with self.assertRaises(SystemExit) as cm:
+                        lc.gql("k", "{ x }")
+                self.assertIn("GraphQL request failed", str(cm.exception.code))
 
 
 if __name__ == "__main__":

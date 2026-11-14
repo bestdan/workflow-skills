@@ -72,16 +72,21 @@ once, without `--dry-run`.
 Read the one JSON object it prints. `result` is `completed`, `planned`
 (dry run), or one of step 4's two no-write reports: `already-complete` and
 `canceled`. Report those exactly as step 4 and step 8 say. `comment` is
-`posted`, `skipped`, or `failed`. On `failed` the state **has** moved: post
-the same body with `<linear-mcp>__save_comment` when that tool is loaded, and
-otherwise report the completion with `comment_error`. Never re-run the script
-to retry a comment, because the re-run finds the issue already complete and
-posts nothing.
+`posted`, `skipped`, `failed` or `unknown`, and on the last two the state
+**has** moved. On `failed`, Linear refused the comment: post the same body
+with `<linear-mcp>__save_comment` when that tool is loaded, and otherwise
+report the completion with `comment_error`. On `unknown`, the request may have
+landed, so do not repost. Report the completion with `comment_error` and say
+the comment may be missing. Never re-run the script to retry a comment: the
+re-run finds the issue already complete and posts nothing.
 
-**A non-zero exit means nothing was written**, so falling to the MCP steps
-below is safe. Log the gate's one debug line and run them. When no Linear MCP
-is loaded either, stop and report the script's stderr reason. There is no
-third route.
+**A non-zero exit means no move was confirmed.** It does not prove nothing
+happened, since a request can apply while its response is lost. When the move
+call fails, the script re-reads the issue and counts a completed one as moved.
+Falling to the MCP steps below stays safe because step 4 refuses an issue that
+is already terminal. Log the gate's one debug line and run them. When no
+Linear MCP is loaded either, stop and report the script's stderr reason. There
+is no third route.
 
 ## Steps (MCP floor)
 
