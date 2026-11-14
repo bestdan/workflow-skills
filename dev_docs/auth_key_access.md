@@ -4,9 +4,17 @@ How a credential reference becomes a credential in this plugin. Follow this for 
 secret a skill, command, or asset script needs — the Linear API key today, a Jira token
 or a GitHub token tomorrow.
 
-The design rationale, the alternatives that were rejected, and why the rules are shaped
-this way live in [`dev_docs/designs/2026-08-01-auth-key-resolution.md`](designs/2026-08-01-auth-key-resolution.md).
-This document is the contract itself.
+This document is the contract itself. Why the rules are shaped this way, and the
+alternatives that were rejected, are in the decision records:
+
+- [The resolver is an allow-listed identifier, never a command](decisions/2026-08-01-auth-key-resolver-is-an-allow-listed-identifier.md)
+- [The pointer and resolver ladders are independent, with no fall-through](decisions/2026-08-01-auth-key-pointer-and-resolver-ladders-are-independent.md)
+- [The helper reads the config pointer and resolver itself](decisions/2026-11-06-auth-key-helper-reads-config-rungs.md)
+- [The resolver is machine-scoped](decisions/2026-08-01-auth-key-resolver-is-machine-scoped.md)
+- [A raw key is accepted in the local config](decisions/2026-08-01-auth-key-plaintext-local-rung.md)
+- [A reference must start with a scheme](decisions/2026-08-01-auth-key-reference-grammar.md)
+- [Failures are typed, redacted categories](decisions/2026-08-01-auth-key-failures-are-redacted-categories.md)
+- [The resolver timeout is 120 seconds](decisions/2026-08-01-auth-key-resolver-timeout.md)
 
 ## The three names
 
@@ -113,11 +121,13 @@ rather than a generic "no key" error.
 A resolver key found in the committed config is a **loud error** — report it, do not
 bridge it. Silently ignoring it recreates the failure mode this contract exists to kill.
 
-Enforcement lives in the **bridging agent**, not in the helper: the helper receives
-environment variables and cannot see where they came from. So the agent must read
-`*_resolver` from the raw `.task-config.local.yml` leaf in isolation — a deliberate
-exception to the repo-wide "always read the merged view" rule, and the only key that has
-one.
+Both sides enforce it. `_secret_resolve.py` reads the config resolver rung from
+`.task-config.local.yml` only, and a resolver in the committed file is reported on stderr
+and ignored. The helper cannot see where an **environment** value came from, so the
+bridging agent must also read `*_resolver` from the raw `.task-config.local.yml` leaf in
+isolation before bridging it — a deliberate exception to the repo-wide "always read the
+merged view" rule, which it shares only with the raw secret (see
+[Plaintext keys](#plaintext-keys)).
 
 What this buys, precisely: it stops an **untrusted checkout** from naming the program
 that runs on your machine. It does not defend against a hostile environment — anyone who
