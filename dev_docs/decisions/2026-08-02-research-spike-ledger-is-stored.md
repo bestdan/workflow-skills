@@ -31,8 +31,9 @@ Each track stores its ledger, two bullet lines between
 
 The project's `LEDGER.md` rolls up a decisions list, the same lines per track,
 and totals. `validate` compares each stored block with a fresh derivation and
-reports a mismatch; it never rewrites one. `write-ledger` is the only writer
-and is always run on purpose. Freshness is scoped: a track's ledger is checked
+reports a mismatch; it never rewrites one. `init` writes the blocks when it
+scaffolds a project or adds a track; after that only `write-ledger` refreshes
+them, and always on purpose. Freshness is scoped: a track's ledger is checked
 against that track only, and a stale `LEDGER.md` is a warning under plain
 `validate` and an error under `validate --strict`, the organizer's gate. The
 ledger stores no history, so the script computes no trend.
