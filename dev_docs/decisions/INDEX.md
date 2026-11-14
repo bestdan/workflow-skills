@@ -5,6 +5,10 @@
 | Date       | Decision                                                                                                                              |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | 2026-11-10 | [The merge audit labels a bypass by its actor](2026-11-10-audit-labels-a-bypass-by-its-actor.md)                                      |
+| 2026-10-18 | [The ledger sync leaves out cloud sessions](2026-10-18-ledger-sync-leaves-out-cloud-sessions.md)                                      |
+| 2026-10-18 | [The ledger sync copies `repo` as-is](2026-10-18-ledger-sync-copies-repo-as-is.md)                                                    |
+| 2026-10-18 | [The `SessionEnd` hook starts the ledger flush detached](2026-10-18-ledger-flush-detaches-from-sessionend.md)                         |
+| 2026-10-18 | [Co-review ledgers sync to a private repo of their own](2026-10-18-co-review-ledgers-get-their-own-repo.md)                           |
 | 2026-09-24 | [`assess-task` stays a subagent: the typed profile is not adopted](2026-09-24-assess-task-stays-a-subagent.md)                        |
 | 2026-09-22 | [The eval suite's failures are not all routing failures](2026-09-22-eval-failures-are-not-all-routing.md)                             |
 | 2026-09-21 | [`label`'s derivation table is not pure code, and one cell can never be](2026-09-21-label-table-is-not-pure-code/)                    |
