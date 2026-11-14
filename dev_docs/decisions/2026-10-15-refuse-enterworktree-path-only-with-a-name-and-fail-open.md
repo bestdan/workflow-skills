@@ -49,8 +49,9 @@ Landed in [#1021](https://github.com/bestdan/workflow-skills/pull/1021).
 - The `PreToolUse` input gains a field that says whether a person can answer
   a prompt, so refusing in other cases becomes safe.
 - The create hook learns to hand back a worktree on any branch. More
-  worktrees would then have a name route, and the hook would refuse more
-  `path` calls with no change of its own.
+  worktrees would then have a name route once `scripts/worktree-name-for.sh`
+  follows the same rule, and the guard would refuse more `path` calls with no
+  change of its own.
 - Shared leftovers from cross-session re-entry pile up enough to matter.
 
 ## Confirmation

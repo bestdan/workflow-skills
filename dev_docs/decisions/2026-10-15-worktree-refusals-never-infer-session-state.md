@@ -22,9 +22,9 @@ is `cwd`, which follows the session into a worktree but does not say how it
 got there, so a cwd inside a linked worktree is not the same predicate.
 
 The costs are lopsided. A missing exit gets `name` refused, and an agent that
-then falls back to `path` meets the prompt or the path guard. The design
-first planned to name `ExitWorktree` unconditionally, on the belief that it
-was a silent no-op outside a worktree. The
+then falls back to `path` meets the prompt or the path guard. Naming
+`ExitWorktree` unconditionally looked free, on the belief that it was a silent
+no-op outside a worktree. The
 [#1001 probe](../research/2026-10-14-enterworktree-deny-probe/README.md) found
 that it is a no-op that still returns `is_error: true`, which reads as a
 failure in a transcript.
@@ -66,8 +66,8 @@ being in a worktree") and the name-route cases in
 
 ## Alternatives
 
-- **Name `ExitWorktree` unconditionally:** the design's first plan; rejected
-  once the probe showed the no-op reports an error.
+- **Name `ExitWorktree` unconditionally:** rejected once the probe showed the
+  no-op reports an error.
 - **Infer the state from a linked-worktree cwd or the owner stamp:** cheap,
   since the write guard already tests the cwd, but not the predicate the
   harness uses to refuse `name`.
