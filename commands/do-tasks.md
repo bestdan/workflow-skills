@@ -968,9 +968,9 @@ step 5's self-check stops each session loudly on its own issue.
    self-check has passed, since the self-check probes `$CLAUDE_PLUGIN_ROOT` and the
    copied call does not. Each becomes
    `python3 "$CLAUDE_PLUGIN_ROOT/commands/handlers/assets/…"`. The check is on the
-   **unprefixed** spelling: no asset call without the `$CLAUDE_PLUGIN_ROOT/` prefix
-   may survive in the dispatched prompt. The prefixed form still contains the
-   repo-relative path, so do not grep for that substring alone. **Never** inline a token or any other secret —
+   **unprefixed** spelling: no `python3 commands/` may survive in the dispatched
+   prompt. Search for that literal, not for the bare path alone, which the
+   prefixed form also contains. **Never** inline a token or any other secret —
    the dispatched session authenticates through its own `gh` — **documented, not
    measured; the probed session's `gh` had no working credential at all**, so whose
    account it would present was never observed. That is also what step 2's bound

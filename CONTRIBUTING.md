@@ -225,8 +225,9 @@ and document the `$CLAUDE_PLUGIN_ROOT`-unset fallback (Glob
 handler file the same way, prose included: Claude Code substitutes the braced
 root into those bodies (not into the handler and `references/` files read
 afterwards), and a bare `commands/handlers/...` sends a `--plugin-dir` session
-to the installed cache copy instead of the checkout. `validate.py` rejects the
-bare form (#1542). Steps run as separate tool calls with no shared
+to the installed cache copy instead of the checkout
+([measured](dev_docs/research/2026-11-14-plugin-root-substitution.md)).
+`validate.py` rejects the bare form. Steps run as separate tool calls with no shared
 shell state, so **the helper's stdout is the contract** — a shell variable or a
 temp path does not survive the invocation. Say in the prose what the helper
 prints, and keep the two in sync: prose disagreeing with the output channel is
