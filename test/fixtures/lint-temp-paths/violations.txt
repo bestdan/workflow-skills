@@ -6,3 +6,7 @@ cat "${TMPDIR:-/tmp}/prompt.txt"
 echo > /tmp/claude/$RUN.json
 cat "$TMPDIR"/prompt.txt
 cat "${TMPDIR}"/prompt.txt
+cp x /tmp/claude/.payload
+cp x /tmp/claude/-out
+cat $TMPDIR/-out
+cat $TMPDIR/.cache

@@ -16,7 +16,8 @@
 # Flagged:
 #   /tmp/claude/<name>          anything INSIDE the root, literally. A bare
 #                               `/tmp/claude/` followed by a backtick, space or
-#                               punctuation is prose and passes.
+#                               punctuation is prose and passes; a dot or dash
+#                               that starts a name (`.payload`, `-out`) is a name.
 #   $TMPDIR/<name>, ${TMPDIR}/<name>, ${TMPDIR:-/tmp}/<name>
 #                               unless the line carries an `XXX` mktemp
 #                               template, which is unique.
@@ -41,11 +42,11 @@ while IFS= read -r hit; do
   fail=1
 done < <(awk '
   /temp-path-lint:[[:space:]]*allow/ { next }
-  /\/tmp\/claude\/[A-Za-z0-9_<$]/ {
+  /\/tmp\/claude\/([A-Za-z0-9_<$-]|\.[A-Za-z0-9_.-])/ {
     printf "%s:%d: fixed name inside the shared /tmp/claude/ root\n", FILENAME, FNR
     next
   }
-  /\$(\{TMPDIR(:-[^}]*)?\}|TMPDIR)"?\/[A-Za-z0-9_<.*$]/ && !/XXX/ {
+  /\$(\{TMPDIR(:-[^}]*)?\}|TMPDIR)"?\/([A-Za-z0-9_<*$-]|\.[A-Za-z0-9_.-])/ && !/XXX/ {
     printf "%s:%d: fixed name under $TMPDIR\n", FILENAME, FNR
   }
 ' "$@")
