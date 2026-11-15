@@ -52,14 +52,17 @@ fingerprint / environment class, coder availability, base freshness, the
 resolved PATH/exec dirs, the add-task host, the launcher, the confinement
 smoke, and the consent-gate probe (below). A host with no supported launcher is
 a `no-go`: the smoke and consent probes there log skips, but a skipped probe is
-not a launch that can happen. On Linux the launcher check is the pinned nono
-(`scripts/nono-install.sh check`: checksum, version, Landlock ABI 4+), and the
-smoke is `scripts/smoke-nono.sh`, one `PREFLIGHT SMOKE_<CHECK>` line per
-assertion. Pass the token command the launch will use as `--claude-token-cmd`,
-so the smoke proves the credential file stays outside the jail. The Linux
-launcher also needs `systemd-run`, a reachable systemd user manager, and
-`Linger=yes`. On both OSes the run worktree must come from `run-clone` (step 1;
-`PREFLIGHT RUN_CLONE`), because the jail writes only the run's own git repo. A
+not a launch that can happen. On both OSes the launcher check is the pinned
+nono (`scripts/nono-install.sh check`: checksum, version, and on Linux Landlock
+ABI 4+), and the smoke is `scripts/smoke-nono.sh`, one `PREFLIGHT
+SMOKE_<CHECK>` line per assertion. Pass the token command the launch will use
+as `--claude-token-cmd`, so the smoke proves the credential file stays outside
+the jail. On macOS it is required, because nono denies the Keychain that holds
+the `/login` credential, and pre-flight blocks without it. The macOS launcher
+also needs `launchctl`; the Linux one needs `systemd-run`, a reachable systemd
+user manager, and `Linger=yes`. On both OSes the run worktree must come from
+`run-clone` (step 1; `PREFLIGHT RUN_CLONE`), because the jail writes only the
+run's own git repo. A
 `no-go` **BLOCKS LAUNCH** with the reason it names; treat its output as the
 source of truth rather than re-deriving these facts by hand.
 
@@ -199,8 +202,8 @@ so verify runs **outside** the jail: `"${CLAUDE_PLUGIN_ROOT}/scripts/spawn-orche
 write-verify-broker` registers a second, un-jailed job (launchd on macOS) that runs the
 **pinned** `verify_command` in a run-root-confined worktree, and each task's
 verify becomes a `verify-request` → `verify-await` handshake
-([`launch-runtime.md`](launch-runtime.md) §5). On Linux, pass the run's
-nono profile as `--nono-profile` and start the broker with `detach --label
+([`launch-runtime.md`](launch-runtime.md) §5). Pass the run's nono profile
+as `--nono-profile`. On Linux, start the broker with `detach --label
 <broker label> --script <broker script>`. Pass the broker's label to the
 orchestrator's `launch` as `--broker-label`: every supervisor teardown then
 stops the broker too.
@@ -262,16 +265,18 @@ the require/prefer bit on the task route.
 Per [`launch-runtime.md`](launch-runtime.md):
 
 1. Write the self-contained **launch script** — env, the sandbox wrapper (the
-   two-layer profile: seatbelt/nono for filesystem+process, the harness network
+   two-layer profile: nono for filesystem+process, the harness network
    allowlist narrowed to this run's tools for host egress), and log redirection
    to `.auto-pilot/orchestrator.log`. The egress allowlist also gets the
    pre-flight's resolved `/add-task` destination host via `render-settings
    --add-task-host`, so the run's own settings never deny its own follow-up
    filing regardless of work source. Grant the run root `--rw`, which covers
-   the run clone, the run worktree and `workers/`. On Linux, also render the
-   nono profile with `--git-worktree <run worktree>`, and write it and the
-   launch script outside every write grant (`write-launch` refuses otherwise):
-   see [`launch-runtime.md`](launch-runtime.md) "Linux: the nono profile".
+   the run clone, the run worktree and `workers/`. Render the nono profile
+   with `--git-worktree <run worktree>` (and `--claude-token`, required on
+   macOS), launch with `write-launch --jail nono --nono-bin <pinned nono>
+   --claude-token-cmd <cmd>`, and write the profile and the launch script
+   outside every write grant (`write-launch` refuses otherwise): see
+   [`launch-runtime.md`](launch-runtime.md) "The nono profile".
 2. Run the **auth smoke test through that exact sandbox wrapper + env** (not
    bare) — a failure here is a launch blocker (ties to step 2). Machine-stays-
    awake was already confirmed in the pre-flight (step 2).

@@ -170,8 +170,9 @@ The orchestrator runs `bypassPermissions` **inside** a sandbox: no per-action
 prompts, but the jail — not a human — is what bounds it. Enforcement is **two
 layers**, because no single one covers everything:
 
-- **Filesystem + process scope** → the OS sandbox (`sandbox-exec` seatbelt
-  profile on macOS / nono on Linux). This is what confines writes and gates
+- **Filesystem + process scope** → the OS sandbox: nono on both OSes (§
+  "The nono profile"); the older `sandbox-exec` Seatbelt profile stays on macOS
+  as `--jail seatbelt` until #1362 removes it. This is what confines writes and gates
   `exec`. Seatbelt does **not** filter network by hostname (it only gates
   network by class/socket), so it is **not** the layer that enforces the egress
   allowlist below.
@@ -214,7 +215,7 @@ jail can rewrite a file it reaches. The copy costs the repo's object size once
 per run. Put the run root outside every checkout (`run-clone` refuses one inside
 any checkout of the repo, linked worktrees included). Pre-flight blocks a run
 worktree that is not from `run-clone` on both OSes (`PREFLIGHT RUN_CLONE`), and
-on Linux `render-nono-profile --git-worktree` refuses one at launch as well.
+under nono `render-nono-profile --git-worktree` refuses one at launch as well.
 Measured on the Mac test host: under Seatbelt, a linked worktree of the main
 checkout cannot commit at all, because its index sits in the main checkout's
 `.git`. The run clone commits, adds and removes worker worktrees, and deletes
@@ -345,16 +346,17 @@ loads, and auto-update adds versions between relaunches. The cost is that a
 jailed run cannot install or update plugins. A plugin loaded with `--plugin-dir`
 from a checkout stays exec-denied, as before.
 
-### Linux: the nono profile
+### The nono profile (Linux and macOS)
 
-On Linux the jail is a pinned nono (`scripts/nono-install.sh`), and it is the
-**only** enforcing layer: `render-settings --jail nono` turns Claude Code's own
-sandbox off, because under Landlock it cannot start and would fail open. The
-decision and its evidence are in
+On both OSes the jail is a pinned nono (`scripts/nono-install.sh`), and it is
+the **only** enforcing layer: `render-settings --jail nono` turns Claude Code's
+own sandbox off, because it cannot start under Landlock and macOS refuses a
+nested Seatbelt profile, so it would fail open. The decision and its evidence
+are in
 [`2026-11-03-orchestrator-jail.md`](../../../dev_docs/designs/2026-11-03-orchestrator-jail.md).
 `spawn-orchestrator.sh render-nono-profile` writes §1's table as a nono JSON
-profile, and its header comment is the one home of the details. Three rules
-differ from the Seatbelt profile:
+profile for the host it runs on, and its header comment is the one home of the
+details. On Linux, three rules differ from the Seatbelt profile:
 
 - **No deny inside a grant.** Landlock cannot keep one path out of a granted
   directory; nono refuses to start on that overlap. So nothing secret may sit
@@ -375,11 +377,44 @@ differ from the Seatbelt profile:
   excluded; the run's own `--tmpdir` is granted and pinned as the jail's
   `TMPDIR`, where Claude Code also puts its `claude-<uid>/` scratch tree.
 
+**macOS** (#1361) takes the same renderer, flags and grants, with these
+differences. The nono behaviour each relies on is read from the nono v0.81.0
+source, not yet measured on a Mac; pre-flight's smoke there is the acceptance
+check.
+
+- **`system_write_macos` is excluded** instead of `system_write_linux`: it
+  grants `/tmp`, `/var/folders`, `/dev` and `$TMPDIR`. The device files are
+  re-granted, and the run's `--tmpdir` is the only temp dir writable.
+- **Raw Seatbelt rules.** Seatbelt can deny inside a grant, and nono passes a
+  top-level `unsafe_macos_seatbelt_rules` array from a `--profile` file through
+  to the profile it generates, after its own blanket `(allow process-exec*)` and
+  `(allow mach-lookup)`. Seatbelt applies the last matching rule, so these win
+  (`ProfileDeserialize`, `sandbox_prepare.rs`,
+  `command_runtime::strip_untrusted_unsafe_seatbelt_rules`,
+  `crates/nono/src/sandbox/macos.rs` `generate_profile`). They carry the
+  Seatbelt template's launchd and LaunchServices `mach-lookup` deny, its
+  `launchctl`/`open`/`osascript` exec deny, and the harness runtime grants that
+  nono's typed grants cannot express: here-doc temp files (#1396),
+  `/tmp/claude-<id>`, and `~/.claude/session-env`. There is no socket rule on
+  macOS. A `launchctl` copied into a writable dir runs, so the `mach-lookup`
+  deny is what keeps it from reaching launchd.
+- **The token command is required.** nono's default profile denies the
+  Keychain, where `/login` keeps Claude's credential, so the jailed `claude`
+  can only authenticate with a token. `render-nono-profile` refuses to render
+  without `--claude-token`, and pre-flight blocks without `--claude-token-cmd`.
+- **The smoke checks launchd, not systemd.** `LAUNCHCTL_DIRECT`,
+  `LAUNCHCTL_STAGED`, `OPEN` and `HEREDOC` replace the `BUS_*` checks
+  (`scripts/smoke-nono.sh` header).
+
 **Credential: the token command.** `write-launch --claude-token-cmd '<cmd>'`
 runs `<cmd>` unjailed on each wake (`spawn-orchestrator.sh claude-token`) and
 hands its output, a `claude setup-token` token, to the jailed `claude -p` alone
 as `CLAUDE_CODE_OAUTH_TOKEN`. A host with a 1Password service account passes an
-`op read …`. A failing command halts the run with the `claude-token` alarm
+`op read …` that sets the wrapper's environment itself, because a launchd or
+systemd wake carries no session and may reach the real `op` first:
+`env OP_SA=on OP_SA_PROFILE=<profile> $HOME/.local/bin/op read 'op://<vault>/<item>/credential'`.
+The jail cannot read `~/.config/op-service-account`, where the service-account
+tokens live (measured on macOS under nono 0.81.0). A failing command halts the run with the `claude-token` alarm
 rather than relaunching into it. Pre-flight's `--claude-token-cmd` runs the same
 command in the smoke, which proves `.credentials.json` is neither readable nor
 writable and that `claude -p` answers on the token alone.
@@ -595,9 +630,9 @@ un-jailed verifier. So verify runs in a **separate, un-jailed job** (launchd on 
 timer + service pair, started with `detach --label <broker label> --script
 <broker script>`. It wakes 10 s after each scan ends, the same mechanism as the
 orchestrator supervisor (§ "Spawn mechanics"). The request and result protocol
-is unchanged. `write-verify-broker` on Linux requires the run's `--nono-profile`
-and refuses a broker script inside any of its write grants, since the script
-runs unjailed. The jail cannot start or stop the broker's unit: the profile's
+is unchanged. `write-verify-broker` requires the run's `--nono-profile` on both
+OSes (a legacy macOS Seatbelt run passes `--jail seatbelt` instead) and refuses
+a broker script inside any of its write grants, since the script runs unjailed. The jail cannot start or stop the broker's unit: the profile's
 `af_unix_mediation` refuses the user bus socket, and the nono smoke's
 `BUS_BROKER` check asserts it.
 
