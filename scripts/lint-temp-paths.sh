@@ -45,7 +45,7 @@ done < <(awk '
     printf "%s:%d: fixed name inside the shared /tmp/claude/ root\n", FILENAME, FNR
     next
   }
-  /\$(\{TMPDIR(:-[^}]*)?\}|TMPDIR)\/[A-Za-z0-9_<.*$]/ && !/XXX/ {
+  /\$(\{TMPDIR(:-[^}]*)?\}|TMPDIR)"?\/[A-Za-z0-9_<.*$]/ && !/XXX/ {
     printf "%s:%d: fixed name under $TMPDIR\n", FILENAME, FNR
   }
 ' "$@")

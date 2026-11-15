@@ -4,3 +4,5 @@ cat "$TMPDIR/prompt.txt"
 cat "${TMPDIR}/prompt.txt"
 cat "${TMPDIR:-/tmp}/prompt.txt"
 echo > /tmp/claude/$RUN.json
+cat "$TMPDIR"/prompt.txt
+cat "${TMPDIR}"/prompt.txt

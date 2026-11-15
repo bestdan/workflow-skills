@@ -105,3 +105,13 @@ wt() { run "$REPO_ROOT/scripts/work-tmp.sh" "$@"; }
   wt --key
   assert_failure 2
 }
+
+@test "--key and --sub refuse '.' and '..', which would climb out of scope" {
+  cd "$REPO"
+  wt --key ..
+  assert_failure 2
+  wt --sub ..
+  assert_failure 2
+  wt --sub .
+  assert_failure 2
+}

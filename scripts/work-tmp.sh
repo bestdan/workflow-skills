@@ -77,6 +77,17 @@ if [ -n "$common" ]; then
   sha="$(git rev-parse --short HEAD 2>/dev/null)" || sha=""
 fi
 
+# `.` survives sanitize, so `--key ..` or `--sub ..` would climb out of the
+# directory this exists to scope.
+for part in "$key" "$sub"; do
+  case "$part" in
+    . | ..)
+      echo "work-tmp: --key/--sub may not be '.' or '..'" >&2
+      exit 2
+      ;;
+  esac
+done
+
 session="${CLAUDE_CODE_SESSION_ID:-}"
 if [ -n "$key" ]; then
   leaf="$(sanitize "$key")"

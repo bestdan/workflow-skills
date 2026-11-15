@@ -23,6 +23,7 @@ template, and its steps 3–4 (PR resolution and merge state) run here unchanged
 > **Temp files.** `<work-tmp>` is the directory `"${CLAUDE_PLUGIN_ROOT}/scripts/work-tmp.sh"` prints (per
 > repo and branch, created `0700`, so a concurrent session cannot overwrite your files). Run it once
 > and write the printed path out literally in every path below: the Write tool takes no variable.
+> If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob `**/scripts/work-tmp.sh`.
 
 > **This sweep never reads issue keys out of PR text.** It starts from the
 > issues Jira holds in progress and asks, for each one, whether **its own**

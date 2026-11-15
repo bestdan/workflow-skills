@@ -21,6 +21,8 @@ fx() { printf '%s' "$REPO_ROOT/test/fixtures/lint-temp-paths/$1"; }
   assert_output --partial "violations.txt:4:"
   assert_output --partial "violations.txt:5:"
   assert_output --partial "violations.txt:6:"
+  assert_output --partial "violations.txt:7:"
+  assert_output --partial "violations.txt:8:"
 }
 
 @test "the finding names the resolver" {
