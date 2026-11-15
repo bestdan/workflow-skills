@@ -102,9 +102,9 @@ still appear in the summary as `already pushed (<tracker_id>)`.
 
 Run the `linear-common.md` preflight (call `<linear-mcp>__list_teams`, match
 `<linear.team>`, capture the team `id`; reuse its failure messages). Read
-`commands/handlers/linear-common.md` for the MCP namespace note (`<linear-mcp>__`
+`${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-common.md` for the MCP namespace note (`<linear-mcp>__`
 is `mcp__linear__` or `mcp__claude_ai_Linear__` depending on the install) and the
-config schema. If the relative path doesn't resolve, find it with **Glob**
+config schema. If that path does not exist (the plugin root was not substituted), find it with **Glob**
 (`**/commands/handlers/linear-common.md`).
 
 ### 4.2 Resolve the container (epic → Linear project)
@@ -114,7 +114,7 @@ order, and **reuse before create** so re-push never duplicates the container:
 
 1. If the **epic file** already records a `tracker_id`, reuse that project id.
 2. Else call the **"Resolve configured projects"** step in
-   `commands/handlers/linear-common.md` (do **not** read the scalar
+   `${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-common.md` (do **not** read the scalar
    `default_project`). A plan goes to **one** project — no per-task routing:
    - **Exactly one** configured project (the list has a single entry with a
      non-null `id`) → use it directly, no prompt.
@@ -210,7 +210,7 @@ Walk the tasks in topological order. For each:
    fail on those. A single-value `is_blocked_by` stays a single value; a list
    stays a list (each entry translated independently), so a task with **multiple**
    blockers hands off a list of resolved ids.
-4. **Create the issue** by following `commands/handlers/linear-add.md` steps 3–5
+4. **Create the issue** by following `${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-add.md` steps 3–5
    (compose description, `save_issue`, return the url) with the resolved team and
    the **container project id from §4.2**. Because the container is already
    resolved here, **skip `linear-add.md` step 2's project prompt** — pass the
@@ -356,8 +356,7 @@ dependency the graph does not have.
 Run the `gh-issue` create-flow preflight: `gh auth status 2>&1`. On failure use
 the create-flow's handling (TLS/x509 → sandbox keychain hint; otherwise report
 the auth failure) and **stop** — do not fall back to another handler. Read
-`commands/handlers/gh-issue.md` for the auth and create steps reused below; if
-the relative path doesn't resolve, find it with **Glob**
+`${CLAUDE_PLUGIN_ROOT}/commands/handlers/gh-issue.md` for the auth and create steps reused below; if that path does not exist (the plugin root was not substituted), find it with **Glob**
 (`**/commands/handlers/gh-issue.md`). Resolve `<repo>` from `gh-issue.repo`
 (omit `--repo` to use the current repo, matching the create flow).
 
@@ -548,10 +547,10 @@ created in a **second pass** — because `createJiraIssue` has no link parameter
 every issue must exist before its `is_blocked_by` edges can be drawn.
 
 > **MCP namespace.** `<atlassian-mcp>__` is `mcp__claude_ai_Atlassian__` or
-> `mcp__atlassian__` depending on the install (see `commands/handlers/jira-config.md`),
+> `mcp__atlassian__` depending on the install (see `${CLAUDE_PLUGIN_ROOT}/commands/handlers/jira-config.md`),
 > parallel to `<linear-mcp>__` in §4 — substitute the prefix loaded in your session.
 > The `allowed-tools` front-matter names both concrete prefixes. On the `twg`
-> backend, make each call with the command `commands/handlers/jira-twg.md` maps
+> backend, make each call with the command `${CLAUDE_PLUGIN_ROOT}/commands/handlers/jira-twg.md` maps
 > it to.
 
 > **Value note (spike §3 / O1).** `/do-tasks` execution is Linear-only, so — like
@@ -560,12 +559,11 @@ every issue must exist before its `is_blocked_by` edges can be drawn.
 
 ### 5b.1 Preflight
 
-Run the `jira` create-flow preflight (`commands/handlers/jira.md` step 1),
+Run the `jira` create-flow preflight (`${CLAUDE_PLUGIN_ROOT}/commands/handlers/jira.md` step 1),
 which resolves the backend (`twg` or the Atlassian MCP). On failure, reuse the
 create-flow's messages and **stop** — do not fall back to another handler. Read
-`commands/handlers/jira.md` for the config block (`jira.site`, `jira.project`,
-`jira.issue_type`, `jira.labels`) and the create/link steps reused below; if the
-relative path doesn't resolve, find it with **Glob** (`**/commands/handlers/jira.md`).
+`${CLAUDE_PLUGIN_ROOT}/commands/handlers/jira.md` for the config block (`jira.site`, `jira.project`,
+`jira.issue_type`, `jira.labels`) and the create/link steps reused below; if that path does not exist (the plugin root was not substituted), find it with **Glob** (`**/commands/handlers/jira.md`).
 Confirm the project has an `Epic` issue type (and the configured `jira.issue_type`)
 via `<atlassian-mcp>__getJiraProjectIssueTypesMetadata`
 (`cloudId: <jira.site>`, `projectIdOrKey: <jira.project>`); if `Epic` is absent, **stop** and report it (no

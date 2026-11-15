@@ -9,7 +9,7 @@ argument-hint: "[--apply] [--project <uuid>] [--repo <owner/name>] [--prs-file <
 A repo-local merge workflow scraped **bare** issue ids (`PRE-123`) out of a
 merged PR's title and body and swept every match to Done, so a PR that merely
 name-dropped a sibling issue closed it — no branch, no PR, no code. Linear's own
-GitHub integration is not the source; see `commands/handlers/linear-claim.md`,
+GitHub integration is not the source; see `${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-claim.md`,
 "Whether Linear's integration is live". `/reconcile-tasks` can't repair it (its rule table is
 promote/complete-only and never demotes), and `/sweep-for-complete` is immune
 to the bug but doesn't detect issues already falsely closed.
@@ -35,7 +35,7 @@ whichever of those wraps it.
 - **`--prs-file <path>`** — a JSON file with a pre-fetched merged-PR list,
   instead of `--repo`, for hosts where `gh` cannot reach the GitHub API (a
   Claude Code cloud routine). Mutually exclusive with `--repo`. See
-  `commands/handlers/linear-false-closures.md` for the file format and the
+  `${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-false-closures.md` for the file format and the
   coverage guard it requires.
 - **`--since <window>`** — only consider issues completed within the window:
   `48h` / `2d` shorthand, an ISO datetime, or a Linear duration (`-P2D`).
@@ -59,9 +59,9 @@ cat "$ROOT/dev_docs/tasks/.task-config.local.yml" 2>/dev/null # optional gitigno
 Overlay the local override on the committed config — mappings merge recursively, local leaf values win — then resolve `handler:` from the merged view.
 
 - `handler: linear` → read and follow
-  **`commands/handlers/linear-false-closures.md`** (resolves scope + repo,
+  **`${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-false-closures.md`** (resolves scope + repo,
   runs the detection asset per project, and — with `--apply` — restores the
-  flagged issues). If the relative path doesn't resolve, find it with **Glob**
+  flagged issues). If that path does not exist (the plugin root was not substituted), find it with **Glob**
   (`**/commands/handlers/linear-false-closures.md`) and Read the result. Pass
   `--apply`, `--project`, `--repo`, `--prs-file`, `--since`, and `--only`
   through.

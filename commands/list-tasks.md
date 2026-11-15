@@ -26,11 +26,11 @@ Overlay the local override on the committed config — mappings merge recursivel
 
 - File absent, or no `handler:` key → `repo-pr` (default). Continue to step 2 below (file-based path).
 - `handler: repo-pr` → continue to step 2 below (file-based path).
-- `handler: gh-issue | jira` → **dispatch to the handler.** Read `commands/handlers/<handler>.md` and follow its `## List` section, passing `$ARGUMENTS` (the optional status filter) through. Both handlers ship a `## List` section (gh-issue via the `gh-issue-trust.py --board` read, jira via a JQL query). The handler owns all tracker-specific querying and renders the same vertical-section kanban layout described in step 4. Skip steps 2–4 of this file.
+- `handler: gh-issue | jira` → **dispatch to the handler.** Read `${CLAUDE_PLUGIN_ROOT}/commands/handlers/<handler>.md` and follow its `## List` section, passing `$ARGUMENTS` (the optional status filter) through. Both handlers ship a `## List` section (gh-issue via the `gh-issue-trust.py --board` read, jira via a JQL query). The handler owns all tracker-specific querying and renders the same vertical-section kanban layout described in step 4. Skip steps 2–4 of this file.
 
-- `handler: linear` → **dispatch to the Linear handler.** Read `commands/handlers/linear-common.md` (shared config/preflight/kanban mapping) and `commands/handlers/linear-list.md` (the list flow), passing `$ARGUMENTS` through. Skip steps 2–4 of this file.
+- `handler: linear` → **dispatch to the Linear handler.** Read `${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-common.md` (shared config/preflight/kanban mapping) and `${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-list.md` (the list flow), passing `$ARGUMENTS` through. Skip steps 2–4 of this file.
 
-  If a relative path doesn't resolve, find the file with **Glob** (`**/commands/handlers/<handler>.md` or `**/commands/handlers/linear-*.md`) and Read the result. Do not read handler files for handlers other than the resolved one.
+  If that path does not exist (the plugin root was not substituted), find the file with **Glob** (`**/commands/handlers/<handler>.md` or `**/commands/handlers/linear-*.md`) and Read the result. Do not read handler files for handlers other than the resolved one.
 
 - Any other (unknown) value → stop with: "Unknown task handler `<value>` in dev_docs/tasks/.task-config.yml. Run /task-config to fix it."
 
@@ -43,7 +43,7 @@ find "$(git rev-parse --show-toplevel)/dev_docs/tasks" -name '*.md' -type f \
 
 The `-not -path '*/_archive/*'` guard skips `dev_docs/tasks/_archive/`, where
 `/archive-tasks` parks retired `done` task files (see
-`commands/handlers/repo-pr-archive.md`).
+`${CLAUDE_PLUGIN_ROOT}/commands/handlers/repo-pr-archive.md`).
 
 If the directory doesn't exist or is empty, report "No tasks found in this repo."
 

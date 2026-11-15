@@ -18,7 +18,7 @@ terminal-state work past an age threshold.
 
 Like `/do-tasks` and `/promote-tasks`, this command is a **thin dispatcher**: it
 resolves the **handler** from `dev_docs/tasks/.task-config.yml` (absent →
-`repo-pr`) and then reads and follows `commands/handlers/<handler>-archive.md`,
+`repo-pr`) and then reads and follows `${CLAUDE_PLUGIN_ROOT}/commands/handlers/<handler>-archive.md`,
 which owns the tracker-specific terminal-state query and the retire operation.
 The mechanics live in the handler files this command **references rather than
 re-specifies**, so the two cannot drift.
@@ -45,7 +45,7 @@ cause and one conditional one:
 - **Hard: the Linear MCP exposes no archive mutation.** The read side is fully
   available, but there is no `issueArchive` (or delete) MCP call at all, so
   retiring goes through the GraphQL backstop —
-  `commands/handlers/assets/linear-archive.py`.
+  `${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/linear-archive.py`.
 - **Conditional: that backstop needs an API key in its environment.** How
   the key gets there is **not** this command's business — it is the two-ladder
   contract in `dev_docs/auth_key_access.md`, applied by `linear-common.md` →
@@ -91,7 +91,7 @@ includes `Bash(op *)`). And it is not "you must use 1Password" — `op` is the
 default resolver, not the only one, and a plaintext or exported key needs no
 resolver at all. Take the mechanism from `auth_key_access.md`, never from this
 section. See "Run it without an agent — the shipped script" in
-`commands/handlers/linear-archive.md` for the invocation, and §3 below for
+`${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-archive.md` for the invocation, and §3 below for
 scheduling it on a cadence.
 
 The other handlers are unaffected: `repo-pr` archives by moving files, and
@@ -165,21 +165,21 @@ cat "$ROOT/dev_docs/tasks/.task-config.local.yml" 2>/dev/null # optional gitigno
 Overlay the local override on the committed config — mappings merge recursively, local leaf values win — then resolve `handler:` from the merged view.
 
 - File absent, or `handler: repo-pr` → read and follow
-  **`commands/handlers/repo-pr-archive.md`** (move stale `done` task files to an
+  **`${CLAUDE_PLUGIN_ROOT}/commands/handlers/repo-pr-archive.md`** (move stale `done` task files to an
   archive dir).
-- `handler: linear` → read and follow **`commands/handlers/linear-archive.md`**
+- `handler: linear` → read and follow **`${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-archive.md`**
   (native auto-archive guidance + the GraphQL `issueArchive` backstop; uses
-  `commands/handlers/linear-common.md` for preflight/state-type mapping).
+  `${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-common.md` for preflight/state-type mapping).
 - `handler: gh-issue` → read and follow
-  **`commands/handlers/gh-issue-archive.md`** (close/label stale completed
+  **`${CLAUDE_PLUGIN_ROOT}/commands/handlers/gh-issue-archive.md`** (close/label stale completed
   issues; hygiene-only, GitHub has no cap).
-- `handler: jira` → read and follow **`commands/handlers/jira-archive.md`**
+- `handler: jira` → read and follow **`${CLAUDE_PLUGIN_ROOT}/commands/handlers/jira-archive.md`**
   (transition terminal issues to an archived status where one exists; default to
   a documented no-op otherwise).
 - Any other (unknown) value → **stop** with: "Unknown task handler `<value>` in
   dev_docs/tasks/.task-config.yml. Run /task-config to fix it."
 
-If the relative path doesn't resolve, find the handler file with **Glob**
+If that path does not exist (the plugin root was not substituted), find the handler file with **Glob**
 (`**/commands/handlers/<handler>-archive.md`) and Read the result. Pass the
 resolved threshold — **or the `--issues` refs** — and the `--all` and `dry-run`
 flags through.
@@ -212,6 +212,6 @@ the cap. Two ways, neither handler-specific:
 For the **Linear** GraphQL backstop specifically, the retire step needs only a
 personal API key, so it can alternatively run as a standalone scheduled job (a
 GitHub Action or cron) **independent of an agent session** — see the "Run it
-without an agent" note in `commands/handlers/linear-archive.md`. Keep the
+without an agent" note in `${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-archive.md`. Keep the
 scheduling decision here; the handler files own only the per-tracker retire
 mechanics.

@@ -113,13 +113,13 @@ cat "$ROOT/dev_docs/tasks/.task-config.local.yml" 2>/dev/null # optional gitigno
 
 Overlay the local override on the committed config — mappings merge recursively, local leaf values win — then resolve `handler:` from the merged view.
 
-- absent / `handler: repo-pr` → `commands/handlers/repo-pr-execute.md`
-- `handler: linear` → `commands/handlers/linear-claim.md` (+ `linear-common.md`)
-- `handler: gh-issue` → `commands/handlers/gh-issue-claim.md`
-- `handler: jira` → `commands/handlers/jira-claim.md`
+- absent / `handler: repo-pr` → `${CLAUDE_PLUGIN_ROOT}/commands/handlers/repo-pr-execute.md`
+- `handler: linear` → `${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-claim.md` (+ `linear-common.md`)
+- `handler: gh-issue` → `${CLAUDE_PLUGIN_ROOT}/commands/handlers/gh-issue-claim.md`
+- `handler: jira` → `${CLAUDE_PLUGIN_ROOT}/commands/handlers/jira-claim.md`
 - any other value → **stop**: "Unknown task handler `<value>` … Run /task-config."
 
-If a relative path doesn't resolve, find it with **Glob**
+If that path does not exist (the plugin root was not substituted), find it with **Glob**
 (`**/commands/handlers/<name>.md`) and Read it.
 
 **This read is provisional.** Where `.task-config.yml` is tracked, step 1's fetch
@@ -235,7 +235,7 @@ version has hard-won race handling that must not be forked:
   `linear-claim.md` (the token-comment election with the live-window + state-backed
   eligibility filters).
 - **gh-issue** → "Claim the issue" in `gh-issue-claim.md` (acquire the atomic
-  `<branch_prefix>task-<n>` ref lock per `commands/handlers/claim-lock.md`, then write
+  `<branch_prefix>task-<n>` ref lock per `${CLAUDE_PLUGIN_ROOT}/commands/handlers/claim-lock.md`, then write
   the assignee + label board marker). The lock is the ref **creation**, not the
   assignee; a 422 is a lost race, and a create blocked by a branch-pinned environment
   degrades to the comment-token election with an explicit note.

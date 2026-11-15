@@ -18,7 +18,7 @@ It is **propose-then-apply**: every analysis is read-only, the findings are
 presented for review, and nothing is mutated until you approve it per group.
 
 This command is a thin dispatcher. **v1 implements the `linear` handler only** —
-its analysis + apply logic lives in `commands/handlers/linear-reoptimize.md`.
+its analysis + apply logic lives in `${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-reoptimize.md`.
 `jira` and `gh-issue` re-optimize are planned follow-ups (see the capability
 matrix in `commands/task-config.md`); until they land, those handlers stop with
 a "planned" message rather than running a half-wired flow.
@@ -37,22 +37,20 @@ Overlay the local override on the committed config — mappings merge recursivel
 
 Dispatch on the `handler:` key (same resolution as `/push-plan` §1):
 
-- `handler: linear` → follow `commands/handlers/linear-reoptimize.md` (§Linear
-  below names the steps; that file has the detail). If the relative path doesn't
-  resolve, find it with **Glob** (`**/commands/handlers/linear-reoptimize.md`).
-- `handler: gh-issue` → follow `commands/handlers/gh-issue-reoptimize.md`.
+- `handler: linear` → follow `${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-reoptimize.md` (§Linear
+  below names the steps; that file has the detail). If that path does not exist (the plugin root was not substituted), find it with **Glob** (`**/commands/handlers/linear-reoptimize.md`).
+- `handler: gh-issue` → follow `${CLAUDE_PLUGIN_ROOT}/commands/handlers/gh-issue-reoptimize.md`.
   Dimensions 1–2 read and write the **native `blocked_by` edge** — the same one
   `/push-plan` draws and `/do-tasks` reads — creating, removing and cycle-checking
   it directly; the `Blocked by:` body footer is a human-readable echo of an edge
   that exists, never a substitute for one. Priority fixes apply through
   `gh-issue-state.py`. Two things have no native counterpart and stay prose:
-  `Related:` (a cross-reference, not a blocking relation) and `duplicateOf`. If
-  the relative path doesn't resolve, find it with **Glob**
+  `Related:` (a cross-reference, not a blocking relation) and `duplicateOf`. If that path does not exist (the plugin root was not substituted), find it with **Glob**
   (`**/commands/handlers/gh-issue-reoptimize.md`).
 - `handler: jira` → **planned, not yet implemented.** **stop** with:
   "`/reoptimize-tasks` supports the `linear` and `gh-issue` handlers today;
   `jira` re-optimize is a planned follow-up. For now, re-order in your tracker
-  directly." (When it lands it'll get a `commands/handlers/jira-reoptimize.md`
+  directly." (When it lands it'll get a `jira-reoptimize.md` handler
   reference and the Atlassian MCP tool surface in this command's
   `allowed-tools`, mirroring `push-plan.md`.)
 - `handler: repo-pr`, no `handler:` key, or file absent → **stop** with:

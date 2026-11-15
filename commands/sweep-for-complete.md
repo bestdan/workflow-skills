@@ -93,7 +93,7 @@ cat "$ROOT/dev_docs/tasks/.task-config.local.yml" 2>/dev/null # optional gitigno
 Overlay the local override on the committed config — mappings merge recursively, local leaf values win — then resolve `handler:` from the merged view.
 
 - `handler: linear` → read and follow
-  **`commands/handlers/linear-sweep-complete.md`** (resolves scope, finds
+  **`${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-sweep-complete.md`** (resolves scope, finds
   started-type issues, resolves each one's own linked PR, checks its merge
   state, and calls the `/complete-task` linear phase per verified match).
 - File absent, or `handler: repo-pr` → **UNSUPPORTED.** Print: "unsupported for
@@ -107,7 +107,7 @@ Overlay the local override on the committed config — mappings merge recursivel
   `gh-issue-state.py --issue <n> --done --apply`). Don't use a bare
   `gh issue close` — it leaves live `status:`/`auto:` rungs on a closed issue."
 - `handler: jira` → read and follow
-  **`commands/handlers/jira-sweep-complete.md`** (resolves the backend — `twg`,
+  **`${CLAUDE_PLUGIN_ROOT}/commands/handlers/jira-sweep-complete.md`** (resolves the backend — `twg`,
   `acli` or the Atlassian MCP — finds in-progress issues, resolves each one's own PR
   from the plugin's `PR opened:` comment or its key and branch, checks its
   merge state, and calls the `/complete-task` jira phase per verified match).
@@ -116,7 +116,7 @@ Overlay the local override on the committed config — mappings merge recursivel
 - Any other (unknown) value → **stop** with: "Unknown task handler `<value>` in
   dev_docs/tasks/.task-config.yml. Run /task-config to fix it."
 
-If the relative path doesn't resolve, find the handler file with **Glob**
+If that path does not exist (the plugin root was not substituted), find the handler file with **Glob**
 (`**/commands/handlers/<handler>-sweep-complete.md`) and Read the result. Pass
 `--apply`, `--all`, and `--project` through.
 

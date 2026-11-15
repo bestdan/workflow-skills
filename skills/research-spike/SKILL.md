@@ -80,7 +80,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/research-spike.py" \
 ```
 
 If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
-`**/scripts/research-spike.py` (mirrors `commands/handlers/linear-common.md`'s
+`**/scripts/research-spike.py` (mirrors `${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-common.md`'s
 fallback for the same class of script).
 
 The **data root** — where `dev_docs/research/` actually lives — resolves
@@ -286,7 +286,7 @@ handler, `/add-task` is offered as an alternative to a stub. On acceptance,
 `/add-task` runs and returns the created work item's **URL** — its contract
 does not return a tracker id back to the caller (`commands/add-task.md`
 "The drafted task (handler input)"; a handler such as
-`commands/handlers/linear-add.md` step 5 hands back `issue.url` only). The
+`${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-add.md` step 5 hands back `issue.url` only). The
 procedure writes a `kind: receipt` card carrying that `url:` and points the
 obligation's `destination:` at the card rather than at a stub.
 `validate_cards` requires only `url:` on a receipt — `tracker_id:` is

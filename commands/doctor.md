@@ -119,7 +119,7 @@ check whether the repo's own branches say it should be set. Its own status line,
 separate from Check 1.
 
 The key is not cosmetic: `<branch_prefix>task-<n>` is the claim **lock ref**
-(`commands/handlers/claim-lock.md`), so two callers that disagree about the prefix
+(`${CLAUDE_PLUGIN_ROOT}/commands/handlers/claim-lock.md`), so two callers that disagree about the prefix
 acquire different refs, neither sees the other, and both believe they hold the
 claim. Unset means empty, and empty is only correct for a repo that really does
 push bare `task-<n>` branches.
@@ -162,16 +162,16 @@ the auth flows):
 
 - `repo-pr` / `gh-issue` → `gh auth status 2>&1` must succeed (PR/issue creation
   needs it). On a TLS/x509/certificate error, note it's likely the sandbox blocking
-  keychain access (see `commands/handlers/gh-issue-config.md` step 1).
+  keychain access (see `${CLAUDE_PLUGIN_ROOT}/commands/handlers/gh-issue-config.md` step 1).
 - `linear` → the Linear MCP is reachable: call `<linear-mcp>__list_teams` and
-  confirm it returns teams (see `commands/handlers/linear-common.md` → "Preflight
+  confirm it returns teams (see `${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-common.md` → "Preflight
   pattern"). Also confirm the reconciler handler files
-  `commands/handlers/linear-complete.md`,
-  `commands/handlers/linear-sweep-complete.md`, and
-  `commands/handlers/linear-reconcile.md` resolve; if any are missing, report
+  `${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-complete.md`,
+  `${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-sweep-complete.md`, and
+  `${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-reconcile.md` resolve; if any are missing, report
   `WARN` with the missing path.
 - `jira` → a backend is reachable: resolve the backend for `jira.site` per
-  `commands/handlers/jira-config.md` → "Backend" (unsandboxed), running that
+  `${CLAUDE_PLUGIN_ROOT}/commands/handlers/jira-config.md` → "Backend" (unsandboxed), running that
   backend's check, and name the backend that passed. On failure, `WARN` with
   that section's message, or with `jira.md` step 1's when the MCP was the
   backend tried.
@@ -309,7 +309,7 @@ auto-archive, store an API key). Report against the resolved handler:
   dry-run-only until you pass `--older-than <N>d` or set it." (Not a failure — a
   bare `/archive-tasks` safely refuses to mutate; this just flags that scheduled
   archiving won't run.)
-- **Handler has an archive file.** Confirm `commands/handlers/<handler>-archive.md`
+- **Handler has an archive file.** Confirm `${CLAUDE_PLUGIN_ROOT}/commands/handlers/<handler>-archive.md`
   resolves for the resolved handler (Glob fallback as elsewhere). Missing → `WARN`
   pointing at the gap.
 - **`linear` specifics** — assume **native team auto-archive** is the primary

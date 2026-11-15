@@ -393,6 +393,32 @@ for f in plugin_root_ref_files:
                     f"line {n}: ${{CLAUDE_PLUGIN_ROOT}}/{captured} does not exist",
                 )
 
+# --- bare handler paths in command and skill bodies ---
+# Claude Code substitutes ${CLAUDE_PLUGIN_ROOT} into command and SKILL.md text,
+# so a prefixed handler path names the running plugin. A bare
+# commands/handlers/... does not resolve from a consumer repo: the agent Globs,
+# finds the installed copy under ~/.claude/plugins/cache/, and under
+# --plugin-dir silently runs released code instead of the checkout (#1542).
+# Handler files and references/ are Read later and never substituted, so they
+# are out of scope. "*/" allows a Glob fallback; the unbraced
+# $CLAUDE_PLUGIN_ROOT/ is the shell spelling do-tasks inlines into remote
+# prompts, where the dispatched session's own environment expands it.
+BARE_HANDLER_RE = re.compile(
+    r"(?<!\$\{CLAUDE_PLUGIN_ROOT\}/)(?<!\$CLAUDE_PLUGIN_ROOT/)(?<!\*/)commands/handlers/"
+)
+for f in [*command_files, *sorted((ROOT / "skills").glob("*/SKILL.md"))]:
+    lines = f.read_text().splitlines()
+    start = 0
+    if lines and lines[0] == "---":
+        start = next((i + 1 for i in range(1, len(lines)) if lines[i] == "---"), 0)
+    for n, line in enumerate(lines[start:], start=start + 1):
+        if BARE_HANDLER_RE.search(line):
+            err(
+                rel(f),
+                f"line {n}: names commands/handlers/... by a bare relative path "
+                "— write ${CLAUDE_PLUGIN_ROOT}/commands/handlers/... (#1542)",
+            )
+
 # --- dev_docs/ documentation references ---
 # Same scan set as above: the bodies an agent actually reads at runtime.
 for f in plugin_root_ref_files:
