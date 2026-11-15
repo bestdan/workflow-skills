@@ -34,6 +34,21 @@ wt() { run "$REPO_ROOT/scripts/work-tmp.sh" "$@"; }
   assert_output "$ROOT/myrepo/bestdan/task-1"
   git checkout -q -b 'odd#name'
   wt
+  assert_output "$ROOT/myrepo/odd_name-$(printf '%s' 'odd#name' | cksum | cut -d' ' -f1)"
+}
+
+@test "branches that sanitize alike still get distinct directories" {
+  cd "$REPO"
+  git checkout -q -b 'odd#name'
+  wt
+  hash_one="$output"
+  git checkout -q -b 'odd%name'
+  wt
+  hash_two="$output"
+  git checkout -q -b 'odd_name'
+  wt
+  [ "$hash_one" != "$hash_two" ]
+  [ "$hash_one" != "$output" ]
   assert_output "$ROOT/myrepo/odd_name"
 }
 
@@ -67,7 +82,7 @@ wt() { run "$REPO_ROOT/scripts/work-tmp.sh" "$@"; }
   cd "$REPO"
   git checkout -q --detach
   CLAUDE_CODE_SESSION_ID='abc/12 3' wt
-  assert_output "$ROOT/myrepo/_session/abc_12_3"
+  assert_output "$ROOT/myrepo/_session/abc_12_3-$(printf '%s' 'abc/12 3' | cksum | cut -d' ' -f1)"
 }
 
 @test "outside a repo, a session id scopes it" {

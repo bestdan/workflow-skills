@@ -19,7 +19,8 @@
 # two pieces of work never share a directory. <repo> is the MAIN repo's name
 # (from the common dir), so every worktree of one repo shares it. `/` in a
 # branch is kept (bestdan/task-1 -> bestdan/task-1); every character outside
-# [A-Za-z0-9._/-] becomes `_`.
+# [A-Za-z0-9._/-] becomes `_`, and a name that changed gains a `-<cksum>` of
+# the original, so two branches never sanitize to one directory.
 #
 # Fallbacks, when HEAD names no branch:
 #   --key <name>                       replaces the branch component
@@ -54,13 +55,20 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-# sanitize <s> [slash] — map everything outside the allowed set to `_`.
+# sanitize <s> [slash] — map everything outside the allowed set to `_`. When
+# that changed the name, append its cksum, so `odd#name`, `odd%name` and a real
+# `odd_name` stay three directories.
 sanitize() {
+  local out
   if [ "${2:-}" = slash ]; then
-    printf '%s' "$1" | LC_ALL=C sed 's|[^A-Za-z0-9._/-]|_|g'
+    out="$(printf '%s' "$1" | LC_ALL=C sed 's|[^A-Za-z0-9._/-]|_|g')"
   else
-    printf '%s' "$1" | LC_ALL=C sed 's|[^A-Za-z0-9._-]|_|g'
+    out="$(printf '%s' "$1" | LC_ALL=C sed 's|[^A-Za-z0-9._-]|_|g')"
   fi
+  if [ "$out" != "$1" ]; then
+    out="$out-$(printf '%s' "$1" | cksum | cut -d' ' -f1)"
+  fi
+  printf '%s' "$out"
 }
 
 repo="_norepo"

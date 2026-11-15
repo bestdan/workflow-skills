@@ -10,3 +10,4 @@ cp x /tmp/claude/.payload
 cp x /tmp/claude/-out
 cat $TMPDIR/-out
 cat $TMPDIR/.cache
+cat "$TMPDIR/prompt.txt"  # XXX fixme

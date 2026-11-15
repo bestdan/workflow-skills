@@ -19,7 +19,7 @@
 #                               punctuation is prose and passes; a dot or dash
 #                               that starts a name (`.payload`, `-out`) is a name.
 #   $TMPDIR/<name>, ${TMPDIR}/<name>, ${TMPDIR:-/tmp}/<name>
-#                               unless the line carries an `XXX` mktemp
+#                               unless that path is itself an `XXX` mktemp
 #                               template, which is unique.
 # Not flagged: `/tmp/claude-<N>/`, the harness's own directory.
 #
@@ -46,7 +46,7 @@ done < <(awk '
     printf "%s:%d: fixed name inside the shared /tmp/claude/ root\n", FILENAME, FNR
     next
   }
-  /\$(\{TMPDIR(:-[^}]*)?\}|TMPDIR)"?\/([A-Za-z0-9_<*$-]|\.[A-Za-z0-9_.-])/ && !/XXX/ {
+  /\$(\{TMPDIR(:-[^}]*)?\}|TMPDIR)"?\/([A-Za-z0-9_<*$-]|\.[A-Za-z0-9_.-])/ && !/TMPDIR(:-[^}]*)?\}?"?\/[^[:space:]"`]*XXX/ {
     printf "%s:%d: fixed name under $TMPDIR\n", FILENAME, FNR
   }
 ' "$@")
