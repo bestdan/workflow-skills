@@ -75,6 +75,7 @@ SELF_PATHS = (
     "scripts/merge-tier.py",
     "scripts/land-pr.py",
     "scripts/land-pr.sh",
+    "scripts/land-pr-shadow.sh",
     "scripts/co-review-evidence.py",
     "scripts/co-review-stamp.py",
 )

@@ -41,6 +41,10 @@ Three modes, all read-only:
   that candidate policy (with AGENT_LAND on) instead of trusting the posted
   verdict. It counts as would-land when the candidate tiers it `auto` and the
   posted comment had no hold besides the tier's.
+  In both forms a `PR is a draft` hold does not count against a PR. A PR is
+  often still a draft when co-review shadows it, and that says where the PR is
+  in its life, not whether the lander judged it well. Without `--policy`, a
+  `no` whose only hold is the draft counts as would-land.
 
 - `landed` lists every PR merged since `--since` whose merge commit carries
   the `Landed-by: land-pr.sh` trailer, with each follow-up fix or revert found
@@ -110,6 +114,10 @@ TIER_HOLDS = (
     "cannot read AGENT_LAND",
     "AGENT_LAND is ",
 )
+# Holds that say where a PR is in its lifecycle, not whether the lander judged
+# it well. PRs often stay drafts until hand-off, so many shadow runs see one,
+# and counting that hold would keep graduation at zero for no reason.
+LIFECYCLE_HOLDS = ("PR is a draft",)
 VERDICT_RE = re.compile(r"would land: \*\*(yes|no)\*\*")
 HEAD_RE = re.compile(r"dry run on `([0-9a-f]{7,40})`")
 TYPE_RE = re.compile(r"^([a-z]+)(?:\([^)]*\))?!?: ")
@@ -376,13 +384,25 @@ def shadow(repo, prs, policy_text):
         shadowed += 1
         verdict, judged, reasons = parse_comment(comment.get("body") or "")
         if policy_text is None:
-            would = verdict == "yes"
-            why = "posted verdict yes" if would else None
+            would = verdict == "yes" or (
+                verdict == "no"
+                and bool(reasons)
+                and all(r in LIFECYCLE_HOLDS for r in reasons)
+            )
+            why = (
+                ("posted verdict yes" if verdict == "yes" else "held only as a draft")
+                if would
+                else None
+            )
         else:
             other_holds = (
                 []
                 if verdict == "yes"
-                else [r for r in reasons if not r.startswith(TIER_HOLDS)]
+                else [
+                    r
+                    for r in reasons
+                    if not r.startswith(TIER_HOLDS) and r not in LIFECYCLE_HOLDS
+                ]
             )
             try:
                 tier, tier_reasons = retier(repo, p, policy_text)
