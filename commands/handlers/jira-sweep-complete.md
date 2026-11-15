@@ -20,6 +20,10 @@ are not closing issues on merge. Where they are, it finds nothing to do.
 `jira-config.md` → "Backend"; `linear-sweep-complete.md` is the structural
 template, and its steps 3–4 (PR resolution and merge state) run here unchanged.
 
+> **Temp files.** `<work-tmp>` is the directory `"${CLAUDE_PLUGIN_ROOT}/scripts/work-tmp.sh"` prints (per
+> repo and branch, created `0700`, so a concurrent session cannot overwrite your files). Run it once
+> and write the printed path out literally in every path below: the Write tool takes no variable.
+
 > **This sweep never reads issue keys out of PR text.** It starts from the
 > issues Jira holds in progress and asks, for each one, whether **its own**
 > PR merged. "Its own" means a PR this plugin linked to the issue when it opened
@@ -56,9 +60,9 @@ truncated, and do not paginate.
 `failed to parse JQL`):
 
 ```bash
-mkdir -p /tmp/claude && acli jira workitem search --jql '<scope JQL>' --fields key,status,summary --limit 50 --json > /tmp/claude/jira-sweep-<run>-issues.json && \
+acli jira workitem search --jql '<scope JQL>' --fields key,status,summary --limit 50 --json > <work-tmp>/jira-sweep-<run>-issues.json && \
   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-pr-sources.py" --acli \
-  < /tmp/claude/jira-sweep-<run>-issues.json > /tmp/claude/jira-sweep-<run>-rows.json
+  < <work-tmp>/jira-sweep-<run>-issues.json > <work-tmp>/jira-sweep-<run>-rows.json
 ```
 
 If acli exits non-zero, stop and report its output: the script would
@@ -77,7 +81,7 @@ stops the run, and rows the other run wrote belong to the same scope.
 **twg backend.** Run both calls unsandboxed. First the search:
 
 ```bash
-mkdir -p /tmp/claude && twg --mode agent --site <jira.site> jira workitem query --jql '<scope JQL>' --fields summary,status --limit 50 -o json --output-summary none > /tmp/claude/jira-sweep-<run>-search.json
+twg --mode agent --site <jira.site> jira workitem query --jql '<scope JQL>' --fields summary,status --limit 50 -o json --output-summary none > <work-tmp>/jira-sweep-<run>-search.json
 ```
 
 Stop on a non-zero exit. Read the keys out of its `data.issues[]`; when there
@@ -85,7 +89,7 @@ are none, the sweep has nothing to do. Then read every key's comments in one
 call, as a command of its own so its exit status is the one you read:
 
 ```bash
-twg --mode agent --site <jira.site> jira workitem get <KEY> <KEY>... --fields summary,status --comments -o json --output-summary none > /tmp/claude/jira-sweep-<run>-issues.json
+twg --mode agent --site <jira.site> jira workitem get <KEY> <KEY>... --fields summary,status --comments -o json --output-summary none > <work-tmp>/jira-sweep-<run>-issues.json
 ```
 
 `get` exits 3 when some keys could not be read and still prints the rest. On
@@ -94,7 +98,7 @@ source error, so that issue lands in `left: unresolved`:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-pr-sources.py" --twg \
-  < /tmp/claude/jira-sweep-<run>-issues.json > /tmp/claude/jira-sweep-<run>-rows.json
+  < <work-tmp>/jira-sweep-<run>-issues.json > <work-tmp>/jira-sweep-<run>-rows.json
 ```
 
 Any other exit means the read failed as a whole. Run the same `get` once
@@ -109,7 +113,7 @@ script. The `<run>` naming below applies to these files too.
 <jira.site>`, `jql: <scope JQL>`, `fields: ["summary", "status"]`,
 `maxResults: 50`). Then, per issue, `<atlassian-mcp>__getJiraIssue`
 (`cloudId: <jira.site>`, `issueIdOrKey: <key>`, `fields: ["comment"]`). Run
-`python3 -c 'import pathlib,sys; pathlib.Path(sys.argv[1]).unlink(missing_ok=True)' /tmp/claude/jira-sweep-<run>-issues.json` (the Write tool refuses to overwrite a file it has not read, and an earlier
+`python3 -c 'import pathlib,sys; pathlib.Path(sys.argv[1]).unlink(missing_ok=True)' <work-tmp>/jira-sweep-<run>-issues.json` (the Write tool refuses to overwrite a file it has not read, and an earlier
 run may have left one; `rm` outside the working directory needs approval, so
 this uses the already-granted `python3`), then
 write the array of `{ key, id, fields: { comment } }` objects to that path
@@ -134,7 +138,7 @@ key is source 2, and the claim comment's branch is source 3:
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/linear-pr-resolve.py" \
   --repo "$(gh repo view --json nameWithOwner --jq .nameWithOwner)" \
-  < /tmp/claude/jira-sweep-<run>-rows.json
+  < <work-tmp>/jira-sweep-<run>-rows.json
 ```
 
 Do not pass `--config`. Jira has no project-to-repo mapping, so both

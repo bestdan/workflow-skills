@@ -1,0 +1,2 @@
+`$TMPDIR/srt-mux-*.sock` is the harness socket <!-- temp-path-lint: allow -->
+cat "$TMPDIR/prompt.txt"

@@ -1,0 +1,6 @@
+Write `/tmp/claude/jira-comment-<identifier>.txt` first.
+cp x /tmp/claude/foo/bar
+cat "$TMPDIR/prompt.txt"
+cat "${TMPDIR}/prompt.txt"
+cat "${TMPDIR:-/tmp}/prompt.txt"
+echo > /tmp/claude/$RUN.json

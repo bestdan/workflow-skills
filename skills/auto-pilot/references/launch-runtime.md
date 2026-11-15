@@ -234,11 +234,11 @@ behind to prune.
 and the jail is _broken_ without it.** Three paths, each with its own failure
 mode if denied (finding #20 / task 12):
 
-| Path                              | What it is                                                           | Denied ⇒                                                                                 |
-| --------------------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `$TMPDIR/srt-mux-*.sock`          | the unix socket the harness's **own inner sandbox** binds/listens on | inner sandbox **silently disables itself** — the two-layer posture degrades to one layer |
-| `/tmp/claude-<N>/…` + `-cwd` file | its per-project/per-session scratch + cwd **tree**, and the cwd file | the Bash tool **EPERMs before running anything** — every call reports exit 1             |
-| `~/.claude/session-env/<session>` | the per-session env dir it `mkdir`s on startup                       | same — the Bash tool never executes the command at all                                   |
+| Path                              | What it is                                                                                          | Denied ⇒                                                                                 |
+| --------------------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `$TMPDIR/srt-mux-*.sock`          | the unix socket the harness's **own inner sandbox** binds/listens on <!-- temp-path-lint: allow --> | inner sandbox **silently disables itself** — the two-layer posture degrades to one layer |
+| `/tmp/claude-<N>/…` + `-cwd` file | its per-project/per-session scratch + cwd **tree**, and the cwd file                                | the Bash tool **EPERMs before running anything** — every call reports exit 1             |
+| `~/.claude/session-env/<session>` | the per-session env dir it `mkdir`s on startup                                                      | same — the Bash tool never executes the command at all                                   |
 
 A fourth grant is not the harness's own but every shell's: **here-document
 temp files** (#1396). `/bin/bash` 3.2 writes a here-doc or here-string to

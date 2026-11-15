@@ -27,6 +27,10 @@ resolved backend throughout. On **twg**, make each MCP form's call with the
 command `jira-twg.md` maps it to. Run every `acli` and `twg` command
 unsandboxed.
 
+> **Temp files.** `<work-tmp>` is the directory `"${CLAUDE_PLUGIN_ROOT}/scripts/work-tmp.sh"` prints (per
+> repo and branch, created `0700`, so a concurrent session cannot overwrite your files). Run it once
+> and write the printed path out literally in every path below: the Write tool takes no variable.
+
 > **MCP namespace.** `<atlassian-mcp>__` is `mcp__claude_ai_Atlassian__` or
 > `mcp__atlassian__` depending on the install (see `jira-config.md`) —
 > substitute the prefix loaded in your session.
@@ -106,15 +110,15 @@ This phase takes, in addition to the identifier:
    name**, since a board may rename its terminal status to anything.
 
    **MCP:** call `<atlassian-mcp>__getTransitionsForJiraIssue` (`cloudId`,
-   `issueIdOrKey: <identifier>`), run `python3 -c 'import pathlib,sys; pathlib.Path(sys.argv[1]).unlink(missing_ok=True)' /tmp/claude/jira-transitions-<identifier>.json`
+   `issueIdOrKey: <identifier>`), run `python3 -c 'import pathlib,sys; pathlib.Path(sys.argv[1]).unlink(missing_ok=True)' <work-tmp>/jira-transitions-<identifier>.json`
    (the Write tool refuses to overwrite a file it has not read), then write the response to
-   `/tmp/claude/jira-transitions-<identifier>.json` with the **Write** tool, and let the
+   `<work-tmp>/jira-transitions-<identifier>.json` with the **Write** tool, and let the
    helper resolve the completing transition:
 
    ```bash
    python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-resolve-transition.py" \
      --category done --exclude "won.?t do|cancel|reject|obsolete" --prefer 'done|complete|resolved' \
-     < /tmp/claude/jira-transitions-<identifier>.json
+     < <work-tmp>/jira-transitions-<identifier>.json
    ```
 
    If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
@@ -133,11 +137,11 @@ This phase takes, in addition to the identifier:
    status may be unreachable from this one.
 
    ```bash
-   mkdir -p /tmp/claude && acli jira workitem search --jql 'project = "<project>" AND issuetype = <type-id> AND statusCategory = Done ORDER BY updated DESC' \
-     --fields key,status --limit 100 --json > /tmp/claude/jira-done-statuses-<identifier>.json && \
+   acli jira workitem search --jql 'project = "<project>" AND issuetype = <type-id> AND statusCategory = Done ORDER BY updated DESC' \
+     --fields key,status --limit 100 --json > <work-tmp>/jira-done-statuses-<identifier>.json && \
      python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-resolve-transition.py" --from-search \
      --category done --exclude "won.?t do|cancel|reject|obsolete" --prefer 'done|complete|resolved' \
-     < /tmp/claude/jira-done-statuses-<identifier>.json
+     < <work-tmp>/jira-done-statuses-<identifier>.json
    ```
 
    The type goes in by its numeric id, so a type name holding a quote cannot
@@ -193,12 +197,12 @@ This phase takes, in addition to the identifier:
    instead.
    - **MCP:** `<atlassian-mcp>__addCommentToJiraIssue` with `cloudId:
      <jira.site>`, `issueIdOrKey: <identifier>`, `commentBody: <comment_body>`.
-   - **acli:** run `python3 -c 'import pathlib,sys; pathlib.Path(sys.argv[1]).unlink(missing_ok=True)' /tmp/claude/jira-comment-<identifier>.txt` (the Write
+   - **acli:** run `python3 -c 'import pathlib,sys; pathlib.Path(sys.argv[1]).unlink(missing_ok=True)' <work-tmp>/jira-comment-<identifier>.txt` (the Write
      tool refuses to overwrite a file it has not read), then write the body to
-     `/tmp/claude/jira-comment-<identifier>.txt`
+     `<work-tmp>/jira-comment-<identifier>.txt`
      with the **Write** tool (a file, so quotes in it need no escaping, and
      never a shell heredoc, which arbitrary text could break out of), then
-     `acli jira workitem comment create --key <identifier> --body-file /tmp/claude/jira-comment-<identifier>.txt`.
+     `acli jira workitem comment create --key <identifier> --body-file <work-tmp>/jira-comment-<identifier>.txt`.
 
 8. **Report.** Identifier, old status name → new status name, and whether a
    comment was posted (and its body, if short). On dry-run or idempotent
