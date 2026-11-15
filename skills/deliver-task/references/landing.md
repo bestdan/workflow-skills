@@ -12,7 +12,10 @@ land it" below.
 
 Once per hand-off, after step 7 has tried to mark the PR ready and then write
 the handler review state. A PR left draft for a human hand-off still gets the
-run; its hold reason is `PR is a draft`, which is the true answer.
+run; its hold reason is `PR is a draft`, which is the true answer. This is the
+delivered PR's only shadow run. A hand-run `/co-review` runs the lander in
+shadow at the end of each round, but not under `--non-interactive`, which is
+how this lifecycle calls it (`skills/co-review/references/shadow-landing.md`).
 
 ## Run it
 

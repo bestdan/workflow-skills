@@ -50,12 +50,15 @@ After a landing, the `landed-by-agent` label and a PR comment repeating the
 record are best effort: their failure is reported and does not fail the run.
 
 Usage:
-  python3 scripts/land-pr.py <pr> --repo <owner/name> [--dry-run]
+  python3 scripts/land-pr.py <pr> --repo <owner/name> [--dry-run [--if-policy]]
 
 `--dry-run` prints `COMMENT: <created|updated|unchanged> <url>` (or `COMMENT:
 error reason=...`), then a `TIER:` line, then a final `LAND: would-land` or
 `LAND: hold reasons=<r1; r2>` line; exit 0 for either verdict, 1 when the
-comment could not be posted. Without it, a landing prints an optional
+comment could not be posted. With `--if-policy`, a repo whose default branch
+has no merge policy takes no part in landing: the run reads nothing more,
+posts no comment, prints only `LAND: skipped reason=<why>`, and exits 0. Any
+other failure to read the policy still runs the dry run, which holds on it. Without it, a landing prints an optional
 `MERGE: recovered after error: <failure>` line, then `LABEL: ...` and
 `COMMENT: ...` lines, then `LAND: landed sha=<merge sha>`, or
 `LAND: landed sha=unknown reason=<why>` when the merge commit cannot be read
@@ -236,7 +239,9 @@ def read_policy(repo, base):
         data = gh_json(["api", f"repos/{repo}/contents/{POLICY_PATH}?ref={ref}"])
     except ReadError as exc:
         if exc.not_found:
-            raise ReadError(f"no {POLICY_PATH} on base `{base}`") from exc
+            raise ReadError(
+                f"no {POLICY_PATH} on base `{base}`", not_found=True
+            ) from exc
         raise
     if not isinstance(data, dict) or data.get("encoding") != "base64":
         raise ReadError(f"{POLICY_PATH} on `{base}`: not a base64 file")
@@ -797,6 +802,23 @@ def land_pr(repo, pr):
     return 0
 
 
+def no_policy_reason(repo):
+    """Why the repo takes no part in landing, or None when it does or may.
+
+    Only a policy file that is plainly absent from the default branch skips the
+    run. Any other read failure returns None, so the dry run goes ahead and
+    records the failure as a hold.
+    """
+    try:
+        default = read_default_branch(repo)
+        read_policy(repo, default)
+    except ReadError as exc:
+        if exc.not_found:
+            return f"no {POLICY_PATH} on the default branch"
+        return None
+    return None
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("pr", type=int)
@@ -804,11 +826,23 @@ def main(argv=None):
     p.add_argument(
         "--dry-run", action="store_true", help="judge and comment; never merge"
     )
+    p.add_argument(
+        "--if-policy",
+        action="store_true",
+        help="with --dry-run: skip, posting nothing, when the default branch has no merge policy",
+    )
     args = p.parse_args(argv)
     if "/" not in args.repo:
         p.error("--repo must be owner/name")
+    if args.if_policy and not args.dry_run:
+        p.error("--if-policy needs --dry-run")
     if not args.dry_run:
         return land_pr(args.repo, args.pr)
+    if args.if_policy:
+        skip = no_policy_reason(args.repo)
+        if skip:
+            print(f"LAND: skipped reason={skip}")
+            return 0
 
     would_land, reasons, head, line = judge(args.repo, args.pr)
     code = 0

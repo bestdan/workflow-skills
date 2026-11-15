@@ -29,6 +29,7 @@ always_human:
   - scripts/merge-tier.py
   - scripts/land-pr.py
   - scripts/land-pr.sh
+  - scripts/land-pr-shadow.sh
   - scripts/co-review-evidence.py
   - scripts/co-review-stamp.py
   # The gate scripts/** relies on: a PR that edits them could make "checks

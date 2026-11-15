@@ -231,6 +231,7 @@ class TierTests(unittest.TestCase):
     def test_the_lander_and_its_evidence_reader_are_always_human(self):
         for path in (
             "scripts/land-pr.sh",
+            "scripts/land-pr-shadow.sh",
             "scripts/land-pr.py",
             "scripts/co-review-evidence.py",
             "scripts/co-review-stamp.py",
