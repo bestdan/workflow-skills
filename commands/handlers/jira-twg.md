@@ -51,8 +51,10 @@ on stdout instead of a summary envelope that points at a file.
 `--labels a,b`. The rest of `additional_fields` → `--fields-json '<mapping>'`,
 passed through verbatim exactly as the MCP path passes it, so the shape rules in
 `jira-config.md` → "Team and other custom fields" apply unchanged. Write a
-description or comment body to a file under `/tmp/claude/` first and pass it
-with `"$(cat …)"`: an inline multi-line body is a quoting hazard.
+description or comment body to a file under the directory `"${CLAUDE_PLUGIN_ROOT}/scripts/work-tmp.sh"` prints first and pass it
+with `"$(cat …)"`: an inline multi-line body is a quoting hazard. If
+`$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
+`**/scripts/work-tmp.sh`.
 
 **Link direction is the MCP's.** `--id` is sent as `inwardIssue` and
 `--target-id` as `outwardIssue` (read from the CLI's own request code, twg

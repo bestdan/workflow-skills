@@ -350,6 +350,10 @@ PR ready. If the read fails, treat it as no write access.
 - **PR body:** step 3's evidence (check output, screenshots, artifact paths),
   **how-to-evaluate steps** for any human-judgment item, and, where a merge
   policy exists, the **decision brief** ([`references/decision-brief.md`](references/decision-brief.md)).
+- **Temp files** (the PR body, review inputs, payloads) go in the directory
+  `"${CLAUDE_PLUGIN_ROOT}/scripts/work-tmp.sh"` prints, never a bare name in
+  `/tmp/claude/` or `$TMPDIR`. On a task branch it is already task-scoped, so a
+  parallel worker cannot overwrite your PR body ([#1011](https://github.com/bestdan/workflow-skills/issues/1011)).
 - If the repo's review bots won't run on a **draft** PR, record
   `bot review skipped (draft)` rather than waiting — step 5 falls back to the
   reviewers that can run. Do not request that bot after marking the PR ready

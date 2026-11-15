@@ -82,6 +82,14 @@ tokens in someone's context window.
   flat copy of the marked spans in `AGENTS.md` and `CONTRIBUTING.md`. Edit the
   rule where it lives, then rerun
   `python3 scripts/build-copilot-instructions.py`; the gate fails on drift.
+- **Temp files go in the directory `scripts/work-tmp.sh` prints, never a bare
+  name in `/tmp/claude/` or `$TMPDIR`.** `/tmp/claude/` is shared by every
+  session on the machine, so a fixed name there is overwritten by a concurrent
+  session or worker (#1011). Machine-local guidance that says "a fixed path
+  under `/tmp/claude/`" means a path _inside_ that directory.
+  `scripts/lint-temp-paths.sh` fails a skill, command or agent page that names
+  one; a line that only describes such a path carries
+  `<!-- temp-path-lint: allow -->`.
 - **Don't commit state another system owns.** Linear, GitHub, and the changelog
   already know their own facts; write a link, not a copy. A file that records a
   moment carries its date in the name.

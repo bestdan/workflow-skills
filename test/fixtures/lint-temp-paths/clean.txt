@@ -1,0 +1,8 @@
+Files live under /tmp/claude/ and `/tmp/claude/`.
+It sits in /tmp/claude/, shared.
+The harness owns /tmp/claude-501/foo.
+mktemp -d "${TMPDIR:-/tmp}/work.XXXXXX"
+Write "$WORK_TMP/pr-body.md" or <work-tmp>/pr-body.md.
+No $TMPDIR here, and $TMPDIR alone.
+Everything lives in /tmp/claude/.
+Not under $TMPDIR/.

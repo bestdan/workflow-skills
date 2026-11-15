@@ -285,6 +285,9 @@ elif [[ "$fast" == 1 || "$changed" == 1 ]]; then
 else
   run scripts/lint-shell.sh
 fi
+# A fixed name in a machine-shared temp root, in skill/command/agent text.
+# Cheap and file-list-driven, so it runs in every mode.
+run bash -c 'git ls-files -z "skills/*.md" "commands/*.md" "agents/*.md" dev_docs/external-agents.md | xargs -0 scripts/lint-temp-paths.sh'
 # Self-registering: every scripts/test-*.sh harness is picked up by this glob,
 # so a new one needs no edit here (the exact gap PRE-650 exists to close).
 # A file named scripts/test-*.sh is by definition a standalone harness that

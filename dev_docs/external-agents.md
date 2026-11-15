@@ -20,41 +20,45 @@ one-line fix:
    invocations or turns** (and resolves differently across the sandbox
    boundary — see the co-review skill's "Why a single shell call" note). The
    files vanished before they could be read, forcing a re-run. → **Write every
-   file to the session scratchpad, never `$TMPDIR`/`/tmp`.**
+   file under the `scripts/work-tmp.sh` directory, never `$TMPDIR`/`/tmp`.**
 3. **Silent empty prompt.** The prompt was passed inline as
-   `"$(cat "$TMPDIR/prompt.txt")"`. When `$TMPDIR` was stale the substitution
+   `"$(cat "$TMPDIR/prompt.txt")"`. When `$TMPDIR` was stale the substitution <!-- temp-path-lint: allow -->
    expanded to an empty string and codex was handed an **empty prompt** with no
    error. → **Never inline `$(cat …)` off an unstable path: write the prompt to
-   a stable scratchpad file, verify it's non-empty (`[ -s … ]`), then feed it via
+   a stable work-tmp file, verify it's non-empty (`[ -s … ]`), then feed it via
    stdin (preferred) or an inline `$(cat …)` from that guarded file.**
 
 ## The pattern
 
-Use the **session scratchpad** for the prompt, the output, and the log. The
-harness provides a stable per-session scratchpad path (`…/scratchpad`); anchor
-everything there. Below, `SP` stands for that directory.
+Use the directory `scripts/work-tmp.sh` prints (`WT = $(scripts/work-tmp.sh)`:
+`/tmp/claude/<repo>/<branch>`, `0700`, the same path sandboxed and not) <!-- temp-path-lint: allow --> for the
+prompt, the output, and the log. It is scoped to the branch, so parallel
+workers on different branches cannot overwrite each other's files; the session
+scratchpad is shared by every worker in one session, which is exactly that
+failure ([#1011](https://github.com/bestdan/workflow-skills/issues/1011)). Two
+runs on one branch still need distinct names (a run id in the file name).
 
 ```bash
-# 1. Write the prompt to a stable file (scratchpad, NOT $TMPDIR).
+# 1. Write the prompt to a stable file (the work-tmp dir, NOT $TMPDIR).
 #    Assemble it however you like — here-doc, cat of rubric + diff, etc.
-cat rubric.md diff.txt > "$SP/codex-prompt.txt"
+cat rubric.md diff.txt > "$WT/codex-prompt.txt"
 
 # 2. Guard against an empty prompt BEFORE spending an agent run on it.
-[ -s "$SP/codex-prompt.txt" ] || { echo "EMPTY PROMPT — aborting"; exit 1; }
+[ -s "$WT/codex-prompt.txt" ] || { echo "EMPTY PROMPT — aborting"; exit 1; }
 
 # 3. Dispatch with machine-readable capture (-o file, or --json) and a log.
 #    Pass the prompt from the guarded, stable file (step 2) — never off an
 #    unstable temp path (see the note below on the positional-arg cat).
-codex exec --sandbox read-only -o "$SP/codex-out.md" \
-  "$(cat "$SP/codex-prompt.txt")" > "$SP/codex.log" 2>&1
+codex exec --sandbox read-only -o "$WT/codex-out.md" \
+  "$(cat "$WT/codex-prompt.txt")" > "$WT/codex.log" 2>&1
 
 # 4. Make an empty / failed / incomplete result detectable: capture exit code,
 #    byte count, and the output's last line, and append them to the log so a
 #    poller detects completion in one place.
 exit_code=$?
-bytes=$(wc -c < "$SP/codex-out.md" 2>/dev/null || echo 0)
-last=$(tail -n 1 "$SP/codex-out.md" 2>/dev/null)
-echo "exit=$exit_code bytes=$bytes last=$last" >> "$SP/codex.log"
+bytes=$(wc -c < "$WT/codex-out.md" 2>/dev/null || echo 0)
+last=$(tail -n 1 "$WT/codex-out.md" 2>/dev/null)
+echo "exit=$exit_code bytes=$bytes last=$last" >> "$WT/codex.log"
 ```
 
 Run step 3 with the Bash tool's **`run_in_background: true`** for any review that
@@ -66,7 +70,7 @@ completion rather than blocking a foreground call to the 7-minute ceiling.
 > `cat`": **never inline a prompt straight off an unstable path.** The `[ -s … ]`
 > guard in step 2 is what makes this safe — by the time the substitution runs,
 > the file is confirmed non-empty and on a stable path. If your codex version
-> reads the prompt on **stdin** (`cat "$SP/codex-prompt.txt" | codex exec …`),
+> reads the prompt on **stdin** (`cat "$WT/codex-prompt.txt" | codex exec …`),
 > prefer that: it sidesteps the substitution entirely.
 
 ### Checklist
@@ -74,8 +78,9 @@ completion rather than blocking a foreground call to the 7-minute ceiling.
 - **Background long runs.** `run_in_background: true` for anything that might
   exceed ~2 min; the Bash foreground ceiling is ~7 min and a hit there loses
   all output.
-- **Scratchpad, never `$TMPDIR`.** Prompt, `-o` output, and log all live in
-  the session scratchpad — a stable path that survives across turns.
+- **Work-tmp dir, never `$TMPDIR`.** Prompt, `-o` output, and log all live in
+  the `scripts/work-tmp.sh` directory — a stable path that survives across
+  turns.
 - **Machine-readable capture.** Prefer `codex exec -o <file>` (or `--json`)
   over scraping stdout, so the result is a file you can re-read next turn.
 - **Detect empty _and_ incomplete results.** Always echo the **exit code**
@@ -89,8 +94,8 @@ completion rather than blocking a foreground call to the 7-minute ceiling.
   **incomplete, not PASS**. A co-review dispatch stamped for the run record
   ends in `date +%s`, so its exit code is the stamp's: there, the byte count
   and the verdict line are the whole check.
-- **Guard the prompt.** `[ -s "$SP/codex-prompt.txt" ]` before dispatch; never
-  inline `$(cat "$TMPDIR/…")`.
+- **Guard the prompt.** `[ -s "$WT/codex-prompt.txt" ]` before dispatch; never
+  inline `$(cat "$TMPDIR/…")`. <!-- temp-path-lint: allow -->
 - **Run unsandboxed — but only the _Bash_ sandbox.** `codex` (and `agy`) need
   **network**, so dispatch must run with the **Bash/tool** sandbox disabled.
   That is _not_ the same as the agent's own `--sandbox read-only` flag —
@@ -126,7 +131,7 @@ command string, so its exact-match permission rule must be updated in lockstep).
 ## Open question: a `run-codex` wrapper?
 
 The PRE-83 task asked whether this should become a reusable skill/wrapper that
-standardizes the scratchpad paths, backgrounding, and timeout rather than living
+standardizes the work-tmp paths, backgrounding, and timeout rather than living
 as documentation. For now it's documentation — the pattern is short and the only
 in-repo consumer (co-review) has bespoke, permission-sensitive invocation needs
 that a generic wrapper would fight. Revisit if a second workflow starts calling
