@@ -14,7 +14,7 @@ this command repairs one it didn't.
 
 It is a thin wrapper. The verdicts, the release order and the exit codes belong
 to `gh-issue-claim.py stale-claims`, documented in
-`commands/handlers/gh-issue-claim.md` → **Sweep stale claims**. Do not restate
+`${CLAUDE_PLUGIN_ROOT}/commands/handlers/gh-issue-claim.md` → **Sweep stale claims**. Do not restate
 or re-derive them here.
 
 ## Arguments

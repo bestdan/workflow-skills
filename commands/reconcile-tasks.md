@@ -14,7 +14,7 @@ enumerated rule table, not open-ended "fix whatever looks off" judgment.
 **Each handler's table is its own**, because the two trackers drift in different
 places. The rows below are the **`linear`** table; the `gh-issue` table is four
 rows auditing the label invariants and lives in
-`commands/handlers/gh-issue-reconcile.md`. What both tables share is the
+`${CLAUDE_PLUGIN_ROOT}/commands/handlers/gh-issue-reconcile.md`. What both tables share is the
 doctrine: a closed rule set, and no rule that retires live work on an ambiguous
 read.
 
@@ -75,7 +75,7 @@ cat "$ROOT/dev_docs/tasks/.task-config.local.yml" 2>/dev/null # optional gitigno
 
 Overlay the local override on the committed config — mappings merge recursively, local leaf values win — then resolve `handler:` from the merged view.
 
-- `handler: linear` → read and follow **`commands/handlers/linear-reconcile.md`**
+- `handler: linear` → read and follow **`${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-reconcile.md`**
   (resolves scope, applies row 1 via the `/sweep-for-complete` flow, applies
   row 2 by finding open-PR issues stuck in a non-started column, and folds
   both into one combined report).
@@ -84,7 +84,7 @@ Overlay the local override on the committed config — mappings merge recursivel
   no separate tracker state to reconcile. `/reconcile-tasks` has nothing to
   do."
 - `handler: gh-issue` → read and follow
-  **`commands/handlers/gh-issue-reconcile.md`**. It reconciles something
+  **`${CLAUDE_PLUGIN_ROOT}/commands/handlers/gh-issue-reconcile.md`**. It reconciles something
   different from the Linear rows above, and deliberately: GitHub closes the
   issue natively on merge via `Closes #<n>` and the open PR **is** the review
   state, so the PR-versus-column drift rows 1–2 repair cannot occur. What can
@@ -103,7 +103,7 @@ Overlay the local override on the committed config — mappings merge recursivel
 - Any other (unknown) value → **stop** with: "Unknown task handler `<value>` in
   dev_docs/tasks/.task-config.yml. Run /task-config to fix it."
 
-If the relative path doesn't resolve, find the handler file with **Glob**
+If that path does not exist (the plugin root was not substituted), find the handler file with **Glob**
 (`**/commands/handlers/<handler>-reconcile.md`) and Read the result. Pass
 `--apply`, `--all`, and `--project` through.
 

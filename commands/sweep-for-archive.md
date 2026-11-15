@@ -75,7 +75,7 @@ report) that are new.
 
 ## 2. Leg 1 — verify the window's closures (always read-only)
 
-Follow **`commands/handlers/linear-false-closures.md`** ("Invoked from
+Follow **`${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-false-closures.md`** ("Invoked from
 `/find-false-closures`"), passing `--since <window>` and, if given, `--project`.
 Run it **without `--apply` even when this command was given `--apply`** — this
 leg's mutation is a _restore_, which step 5 gates separately.
@@ -104,7 +104,7 @@ would archive nothing while reporting a clean sweep.
 
 ## 3. Leg 2 — complete what merged
 
-Follow **`commands/handlers/linear-sweep-complete.md`** in full, passing
+Follow **`${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-sweep-complete.md`** in full, passing
 `--apply` through only if this command got it, and `--project` if given. Do not
 pass `--since`: that file has no such flag and the sweep is deliberately
 unbounded (see the window note above).
@@ -129,7 +129,7 @@ A promoted dependent is in `unstarted`, not closed, so it never joins `verified`
 If `verified` is empty, skip the leg and report "nothing verified in the window —
 nothing to archive."
 
-Otherwise follow **`commands/handlers/linear-archive.md`** → "`--issues` —
+Otherwise follow **`${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-archive.md`** → "`--issues` —
 archive specific issues, no age threshold", passing `verified` as the refs and
 `--apply` only if this command got it:
 

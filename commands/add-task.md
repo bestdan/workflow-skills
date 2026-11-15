@@ -132,14 +132,14 @@ Resolve the handler name:
 
 ### 7. Deliver via the handler
 
-Each handler's full instructions live in sibling file(s) under `commands/handlers/`:
+Each handler's full instructions live in sibling file(s) under `${CLAUDE_PLUGIN_ROOT}/commands/handlers/`:
 
-- `handler: repo-pr | gh-issue | jira` → Read `commands/handlers/<handler>.md` and follow it.
-- `handler: linear` → Read `commands/handlers/linear-common.md` (shared config/preflight/kanban mapping) and `commands/handlers/linear-add.md` (the create flow), and follow them.
+- `handler: repo-pr | gh-issue | jira` → Read `${CLAUDE_PLUGIN_ROOT}/commands/handlers/<handler>.md` and follow it.
+- `handler: linear` → Read `${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-common.md` (shared config/preflight/kanban mapping) and `${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-add.md` (the create flow), and follow them.
 
 Use the **Read** tool, then follow it, passing the drafted task from step 5. The handler file(s) own everything about how the task lands — preflight checks, dispatch, parsing, and the artifact URL returned.
 
-If a relative path doesn't resolve, find the file with **Glob** (`**/commands/handlers/<handler>.md` or `**/commands/handlers/linear-*.md`) and Read the result.
+If that path does not exist (the plugin root was not substituted), find the file with **Glob** (`**/commands/handlers/<handler>.md` or `**/commands/handlers/linear-*.md`) and Read the result.
 
 Do not embed handler logic here; do not read handler files for handlers other than the resolved one.
 

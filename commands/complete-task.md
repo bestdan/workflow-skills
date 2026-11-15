@@ -55,11 +55,11 @@ cat "$ROOT/dev_docs/tasks/.task-config.local.yml" 2>/dev/null # optional gitigno
 
 Overlay the local override on the committed config — mappings merge recursively, local leaf values win — then resolve `handler:` from the merged view.
 
-- `handler: linear` → read and follow **`commands/handlers/linear-complete.md`**
+- `handler: linear` → read and follow **`${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-complete.md`**
   (resolves the team's `completed`-type state, checks idempotence, confirms
   before mutating, applies the transition via `save_issue`, optionally posts a
   comment).
-- `handler: gh-issue` → read and follow **`commands/handlers/gh-issue-complete.md`**
+- `handler: gh-issue` → read and follow **`${CLAUDE_PLUGIN_ROOT}/commands/handlers/gh-issue-complete.md`**
   (resolves the issue via `gh issue view`, checks idempotence — including the
   `NOT_PLANNED` closed-reason distinction — confirms before mutating, applies
   the transition via `gh issue close --reason completed`, optionally posts a
@@ -67,14 +67,14 @@ Overlay the local override on the committed config — mappings merge recursivel
   the PR body; this handler is the explicit escape hatch for when that
   auto-close didn't fire.
 - File absent, or `handler: repo-pr` → read and follow
-  **`commands/handlers/repo-pr-complete.md`** (resolves the task file by slug,
+  **`${CLAUDE_PLUGIN_ROOT}/commands/handlers/repo-pr-complete.md`** (resolves the task file by slug,
   checks idempotence via `status: done` or a missing file, confirms before
   mutating, flips the frontmatter via `Edit`, optionally appends a completion
   note under `## Consumer Notes`). A merged PR (and the claim protocol's
   file-delete on review) is still the **primary** done signal for `repo-pr` —
   this handler only covers the residual case of a task file left behind in a
   non-terminal status whose work landed some other way.
-- `handler: jira` → read and follow **`commands/handlers/jira-complete.md`**
+- `handler: jira` → read and follow **`${CLAUDE_PLUGIN_ROOT}/commands/handlers/jira-complete.md`**
   (resolves a `Done`-category transition via `twg`, `acli` or the Atlassian MCP, checks
   idempotence by status category, confirms before mutating, applies the
   transition via `transitionJiraIssue`, optionally posts a comment). Jira's
@@ -85,7 +85,7 @@ Overlay the local override on the committed config — mappings merge recursivel
 - Any other (unknown) value → **stop** with: "Unknown task handler `<value>` in
   dev_docs/tasks/.task-config.yml. Run /task-config to fix it."
 
-If the relative path doesn't resolve, find the handler file with **Glob**
+If that path does not exist (the plugin root was not substituted), find the handler file with **Glob**
 (`**/commands/handlers/linear-complete.md`,
 `**/commands/handlers/gh-issue-complete.md`,
 `**/commands/handlers/repo-pr-complete.md`, or

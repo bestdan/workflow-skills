@@ -290,6 +290,56 @@ assert_not_contains "placeholder under a missing parent is not flagged" "$out_f"
 assert_not_contains "end-of-sentence reference is not flagged" "$out_f" \
   "real-thing.sh does not exist"
 
+# --- Fixture (f2): bare commands/handlers/ path in a command body -----------
+# A prefixed path and a **/ Glob fallback pass; a bare path inside a handler
+# file is not checked, since handler files are never substituted.
+DIR_F2="$BASE/bare-handler-path"
+make_plugin_fixture "$DIR_F2"
+mkdir -p "$DIR_F2/commands/handlers"
+cat >"$DIR_F2/commands/handlers/real.md" <<'MD'
+Bare inside a handler (not flagged): commands/handlers/other.md
+MD
+cat >"$DIR_F2/commands/cmd.md" <<'MD'
+---
+description: fixture command
+---
+
+Read `commands/handlers/real.md`.
+
+Prefixed (not flagged): `${CLAUDE_PLUGIN_ROOT}/commands/handlers/real.md`
+
+Glob (not flagged): `**/commands/handlers/real.md`
+
+Unbraced (not flagged): "$CLAUDE_PLUGIN_ROOT/commands/handlers/real.md"
+MD
+mkdir -p "$DIR_F2/skills/x"
+cat >"$DIR_F2/skills/x/SKILL.md" <<'MD'
+---
+name: x
+description: fixture skill
+---
+
+Read `commands/handlers/real.md`.
+MD
+
+out_f2="$(uv run "$DIR_F2/scripts/validate.py" 2>&1)"
+rc_f2=$?
+assert_contains "bare handler path in a command body is flagged" "$out_f2" \
+  "cmd.md: line 5: names commands/handlers/... by a bare relative path"
+assert_not_contains "prefixed and Glob handler paths are not flagged" "$out_f2" \
+  "cmd.md: line 7"
+assert_not_contains "Glob handler path is not flagged" "$out_f2" "cmd.md: line 9"
+assert_not_contains "unbraced prefix is not flagged" "$out_f2" "cmd.md: line 11"
+assert_contains "bare handler path in a skill body is flagged" "$out_f2" \
+  "skills/x/SKILL.md: line 6: names commands/handlers/... by a bare relative path"
+assert_not_contains "bare path in a handler file is not flagged" "$out_f2" \
+  "handlers/real.md"
+if [ "$rc_f2" -eq 1 ]; then
+  ok "bare handler path: exits 1"
+else
+  bad "bare handler path: should exit 1, got $rc_f2"
+fi
+
 # --- Fixture (g): a fenced shell block carrying real logic is flagged ------
 # Also covers the two shapes that must NOT be flagged: a guarded one-liner
 # (one control-flow statement is still legible inline), and a prose "prompt

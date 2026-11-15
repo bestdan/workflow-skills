@@ -12,8 +12,8 @@ way `/add-task` and `/list-tasks` do, then turns dependency-ready tasks into PRs
 
 The per-handler mechanics live in handler reference files this command
 **references rather than re-specifies**, so the two cannot drift:
-`commands/handlers/repo-pr-execute.md` (file path) and
-`commands/handlers/linear-claim.md` (tracker path).
+`${CLAUDE_PLUGIN_ROOT}/commands/handlers/repo-pr-execute.md` (file path) and
+`${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-claim.md` (tracker path).
 
 > **Legacy migration preflight.** Before scanning, if a legacy `dev_docs/todos/`
 > directory exists, run the **Legacy migration** prompt from
@@ -37,7 +37,7 @@ The per-handler mechanics live in handler reference files this command
 - `/do-tasks --no-claim` — skip the claim step and execute a task this caller already claimed
 - `/do-tasks --project <name|id|unassigned|any>` — **`linear` only** (the other tracker handlers have no project dimension: `gh-issue` refuses the flag, see section 4; `jira` has no scope prompt): pin which scope to claim from, skipping the scope prompt. `any` ranks across all projects (per-project caps); `unassigned` claims from the Unassigned bucket; a name/id picks one project (a live project not in config triggers an offer to add it). See section 3.
 - `/do-tasks <key>=<value>` — a **run-scoped config override**, e.g. `/do-tasks max-estimate=8`. Combinable with any flag above. `commands/task-config.md` → "Run-scoped overrides" owns the allowed keys, the precedence and the refusal on an unknown one; this file restates none of it. Report the overridden keys in section 6.
-- `/do-tasks --non-interactive` — declare that no human is present: **never prompt anywhere in this command**. Every decision that would otherwise ask takes a documented default — matching the same flag on `/co-review` and `/select-coder`, which is why the guarantee is global rather than a list of exceptions. All six prompt sites are covered: the scope prompt resolves to **Any** (section 3), the WIP gate declines instead of offering its override (`commands/handlers/attendedness.md`), the held-issue override on a direct pick declines the same way (same file), the persist-unconfigured-project offer never fires (`linear-common.md`), the legacy-migration preflight skips with a note (above), and a `--claim-only`/`--no-claim` conflict is a hard error rather than a question. Pass it from any unattended caller — a cron, a wrapper script, or a dispatching session handing work to a remote worker.
+- `/do-tasks --non-interactive` — declare that no human is present: **never prompt anywhere in this command**. Every decision that would otherwise ask takes a documented default — matching the same flag on `/co-review` and `/select-coder`, which is why the guarantee is global rather than a list of exceptions. All six prompt sites are covered: the scope prompt resolves to **Any** (section 3), the WIP gate declines instead of offering its override (`${CLAUDE_PLUGIN_ROOT}/commands/handlers/attendedness.md`), the held-issue override on a direct pick declines the same way (same file), the persist-unconfigured-project offer never fires (`linear-common.md`), the legacy-migration preflight skips with a note (above), and a `--claim-only`/`--no-claim` conflict is a hard error rather than a question. Pass it from any unattended caller — a cron, a wrapper script, or a dispatching session handing work to a remote worker.
 
 **Scope of `--all` / `-n N`.** Batch _execution_ is meaningful only for **remote**
 dispatch (each task gets its own cloud VM). Foreground pairing is inherently
@@ -79,26 +79,26 @@ that message — never a question).
 - **default** (neither flag) — atomic claim + execute, unchanged.
 - **`--claim-only`** — run the claim step and **stop**: no execution, no review PR.
   - `repo-pr`: run the **Claim protocol** in
-    `commands/handlers/repo-pr-execute.md` (pre-claim check → acquire the work branch
+    `${CLAUDE_PLUGIN_ROOT}/commands/handlers/repo-pr-execute.md` (pre-claim check → acquire the work branch
     and flip `status: ready → in_progress` → open the draft `task-claim` PR that names
     the slug → reconcile). The open draft `task-claim` PR is the reservation marker.
     Do **not** delete the file or convert it to a `task-loop` review PR. The claim lock
     is that PR, not the branch name, so this works in branch-pinned environments that
     cannot create `task/<slug>`.
   - `linear`: run "Pre-flight: is work already in flight?" then "Claim the issue"
-    in `commands/handlers/linear-claim.md` (skip if a PR/branch already exists; else
+    in `${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-claim.md` (skip if a PR/branch already exists; else
     the token-comment lock — post a token-bearing claim comment first, set
     `started`-type state + `auto-claimed` + viewer assignee, then re-read the comments
     and elect the earliest state-backed claim as the winner), record the branch name,
     then stop before "Branch + execute" — `--claim-only` reserves the card **without**
     judging feasibility (the judge now runs after the claim, which `--claim-only` skips).
   - `gh-issue`: run through "Claim the issue" in
-    `commands/handlers/gh-issue-claim.md` (pre-claim WIP gate → find candidates →
+    `${CLAUDE_PLUGIN_ROOT}/commands/handlers/gh-issue-claim.md` (pre-claim WIP gate → find candidates →
     pre-flight → judge → acquire the atomic `<branch_prefix>task-<n>` claim lock →
     assign `@me`, move the rung to `status:3_started`), then stop before "Branch +
     execute". The created lock ref plus the assigned, started issue is the
     reservation marker — no PR.
-  - `jira`: run through "Claim the issue" in `commands/handlers/jira-claim.md`
+  - `jira`: run through "Claim the issue" in `${CLAUDE_PLUGIN_ROOT}/commands/handlers/jira-claim.md`
     (pre-claim WIP gate → find candidates → pre-flight → judge → self-assign +
     transition to an In-Progress status), then stop before "Branch + execute". The
     assigned, In-Progress issue is the reservation marker — no branch, no PR.
@@ -106,7 +106,7 @@ that message — never a question).
   On `gh-issue` the lock is the **atomic creation of that ref** (GitHub's create-ref
   API, which returns 422 rather than updating an existing ref), not the assignee — so
   two sessions authenticated as the **same** account cannot both win (see
-  `commands/handlers/claim-lock.md`, which also carries the comment-token election
+  `${CLAUDE_PLUGIN_ROOT}/commands/handlers/claim-lock.md`, which also carries the comment-token election
   the handler degrades to in a branch-pinned environment that cannot create the ref).
   On `jira` the claim is the **assignee** itself: the state of a Jira claim lives in
   Jira, so a leftover `task/<KEY>` branch cannot hold a ticket, at the accepted cost
@@ -142,7 +142,7 @@ that message — never a question).
     (`git fetch origin && git switch "<branch>"`); create it
     (`git switch -c "<branch>" origin/<base>`) only when the claim ran on the degraded
     comment-election path, which creates no ref. **Resolve `<branch>` with
-    `python3 commands/handlers/assets/gh-issue-claim.py branch-name --issue <n> [--prefix "<branch_prefix>"]`,
+    `python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/gh-issue-claim.py" branch-name --issue <n> [--prefix "<branch_prefix>"]`,
     never by spelling it** — `gh-issue.branch_prefix` is per-repo, so a literal is right in one
     repo and wrong in the next. Then do the work, open the draft PR, and "Move to review
     at hand-off" (per `gh-issue-claim.md`) — without re-claiming.
@@ -173,21 +173,21 @@ cat "$ROOT/dev_docs/tasks/.task-config.local.yml" 2>/dev/null # optional gitigno
 Overlay the local override on the committed config — mappings merge recursively, local leaf values win — then resolve `handler:` from the merged view.
 
 - File absent, or `handler: repo-pr` → **file path** (section 2 below). Read and
-  follow `commands/handlers/repo-pr-execute.md`.
+  follow `${CLAUDE_PLUGIN_ROOT}/commands/handlers/repo-pr-execute.md`.
 - `handler: linear` → **tracker path** (section 3 below). Follow
-  `commands/handlers/linear-claim.md` (with `commands/handlers/linear-common.md`
+  `${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-claim.md` (with `${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-common.md`
   for config/preflight/kanban mapping) for the full claim flow.
 - `handler: gh-issue` → **gh-issue path** (section 4 below). Follow
-  `commands/handlers/gh-issue-claim.md` for the full claim/execute flow —
+  `${CLAUDE_PLUGIN_ROOT}/commands/handlers/gh-issue-claim.md` for the full claim/execute flow —
   foreground single in the current session by default, or batch remote dispatch
   for `--all` / `-n N` (section 4, "gh-issue batch").
 - `handler: jira` → **jira path** (section 5 below). Follow
-  `commands/handlers/jira-claim.md` for the full claim/execute flow
+  `${CLAUDE_PLUGIN_ROOT}/commands/handlers/jira-claim.md` for the full claim/execute flow
   (foreground single, current session).
 - Any other (unknown) value → **stop** with: "Unknown task handler `<value>` in
   dev_docs/tasks/.task-config.yml. Run /task-config to fix it."
 
-If the relative paths don't resolve, find the handler files with **Glob**
+If those paths do not exist (the plugin root was not substituted), find the handler files with **Glob**
 (`**/commands/handlers/repo-pr-execute.md`, `**/commands/handlers/linear-claim.md`,
 `**/commands/handlers/linear-common.md`, `**/commands/handlers/gh-issue-claim.md`,
 `**/commands/handlers/jira-claim.md`) and Read the results.
@@ -218,7 +218,7 @@ batch can take the queue over the limit. `wip_limit` bounds that.
 
 ## 2. File path (`repo-pr` / absent handler)
 
-Read and follow **`commands/handlers/repo-pr-execute.md`** end to end — it holds
+Read and follow **`${CLAUDE_PLUGIN_ROOT}/commands/handlers/repo-pr-execute.md`** end to end — it holds
 the scan, ranking, multi-blocker readiness, WIP cap, remote dispatch prompt,
 `--local` mechanics, and report format. The arguments map straight through:
 
@@ -278,15 +278,15 @@ Both are defined in `repo-pr-execute.md`:
 
 ## 3. Tracker path (`linear` handler)
 
-Read and follow **`commands/handlers/linear-claim.md`** (with
-`commands/handlers/linear-common.md` for config/preflight/kanban mapping) end to
+Read and follow **`${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-claim.md`** (with
+`${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-common.md` for config/preflight/kanban mapping) end to
 end — it holds the find-candidates query, the in-flight pre-flight, the
 token-comment claim lock, the feasibility judgment (now run _after_ the claim),
 the branch-name-verbatim rule, PR↔issue linking, move-to-review, the two-trigger
 bail mechanics, and the report format. In **single** mode `/do-tasks` runs these
 phases in the **current session**; in **batch** mode it runs them inside a
 dispatched **remote session per issue** (see the Tracker-batch subroutine below).
-If the relative paths don't resolve, find them with **Glob**
+If those paths do not exist (the plugin root was not substituted), find them with **Glob**
 (`**/commands/handlers/linear-claim.md`,
 `**/commands/handlers/linear-common.md`).
 
@@ -296,7 +296,7 @@ If the relative paths don't resolve, find them with **Glob**
   foreground, current session. Bare `/do-tasks` selects the single highest-ranked
   dependency-ready issue; `<identifier>` claims that one issue (a
   `human-approval-requested` hold is offered as the override in
-  `commands/handlers/attendedness.md`, not refused).
+  `${CLAUDE_PLUGIN_ROOT}/commands/handlers/attendedness.md`, not refused).
 - `/do-tasks --all` / `-n N` (without `--claim-only`) — **true batch execution**:
   dispatch up to `min(N, wip_slack)` **remote** single-claim sessions (one per
   dependency-ready issue, each its own cloud VM), via the **Tracker-batch
@@ -350,7 +350,7 @@ the claim scope is resolved (above), **before** judging feasibility or claiming:
 > here, always; a **single** claim in an attended session offers the user a
 > one-keystroke override first. This applies to the per-project caps **and** to
 > `global_wip_limit` — a deliberate absolute ceiling is still a cap a present human
-> may knowingly exceed. See `commands/handlers/attendedness.md`, which owns the rule.
+> may knowingly exceed. See `${CLAUDE_PLUGIN_ROOT}/commands/handlers/attendedness.md`, which owns the rule.
 
 1. **Resolve caps.** Take the **chosen scope(s)** from "Resolve claim scope" above — one
    project, the Unassigned bucket, or (for **Any**/non-interactive) the full resolved
@@ -412,7 +412,7 @@ the claim scope is resolved (above), **before** judging feasibility or claiming:
      wrong).
 3. **Global ceiling.** If `linear.global_wip_limit` is set and **total in-flight** (the
    all-projects count from step 2) **≥ `global_wip_limit`**, **no** project can claim.
-   Apply the at-limit procedure in `commands/handlers/attendedness.md`; when it resolves
+   Apply the at-limit procedure in `${CLAUDE_PLUGIN_ROOT}/commands/handlers/attendedness.md`; when it resolves
    to decline, decline outright:
    `Global WIP limit <N> reached (<total> of your issues in flight across all projects) — no issue claimed`
    and stop. When it resolves to override, continue to step 4 — the ceiling is lifted for
@@ -428,7 +428,7 @@ the claim scope is resolved (above), **before** judging feasibility or claiming:
    (render `<name>` as `the whole team` when the scope's `name` is `null`; the same
    convention applies to the direct-mode decline message in step 5).
    If every remaining candidate's project is full, apply the at-limit procedure in
-   `commands/handlers/attendedness.md` **once, here** — not per candidate. Walking the
+   `${CLAUDE_PLUGIN_ROOT}/commands/handlers/attendedness.md` **once, here** — not per candidate. Walking the
    ranked list is not an at-limit outcome, because another project may still have slack;
    the run only meets the limit once nothing is left to try. On override, claim the
    top-ranked candidate whose project was full. On decline, report that no issue was
@@ -441,7 +441,7 @@ the claim scope is resolved (above), **before** judging feasibility or claiming:
    The Unassigned bucket's in-flight is the subtraction from step 2 (already computed once
    the bucket exists); a configured project's is its per-project count. Also gate against
    the global ceiling. If either is at its limit, apply the at-limit procedure in
-   `commands/handlers/attendedness.md` — this is a **single** action, so an attended run
+   `${CLAUDE_PLUGIN_ROOT}/commands/handlers/attendedness.md` — this is a **single** action, so an attended run
    gets the override. On override, claim the named issue. On decline, **stop** — no
    fall-through — with the global message (step 3) or, for the per-project cap,
    `WIP limit <wip_limit> reached (<count> in flight) in project <name> — no issue claimed`
@@ -463,7 +463,7 @@ This is the **single**, foreground path (`/do-tasks`, `/do-tasks <identifier>`,
 `--no-claim`). Batch runs the same `linear-claim.md` flow, but once per issue
 inside a remote session — see the **Tracker-batch subroutine** below.
 
-With positive WIP slack, run `commands/handlers/linear-claim.md` end to end:
+With positive WIP slack, run `${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-claim.md` end to end:
 
 1. **Preflight** — `linear-common.md` preflight (resolve team) + `linear-claim.md`
    "Find candidates" (resolve workflow states, query unstarted issues, filter by
@@ -682,12 +682,12 @@ capability is actually visible — inside the remote session** — via two concr
 
 ## 4. gh-issue path (`gh-issue` handler)
 
-Read and follow **`commands/handlers/gh-issue-claim.md`** end to end — it holds
+Read and follow **`${CLAUDE_PLUGIN_ROOT}/commands/handlers/gh-issue-claim.md`** end to end — it holds
 the find-candidates query, the in-flight pre-flight, the feasibility judgment, the
 atomic `<branch_prefix>task-<n>` claim lock (defined in
-`commands/handlers/claim-lock.md`), the work branch, `gh pr create --draft` with
+`${CLAUDE_PLUGIN_ROOT}/commands/handlers/claim-lock.md`), the work branch, `gh pr create --draft` with
 `Closes #<n>`, readiness before the move to the `status:4_needs_review` rung, bail mechanics, and the
-report format. If the relative path doesn't resolve, find it with **Glob**
+report format. If that path does not exist (the plugin root was not substituted), find it with **Glob**
 (`**/commands/handlers/gh-issue-claim.md`).
 
 **Execution modes.**
@@ -695,7 +695,7 @@ report format. If the relative path doesn't resolve, find it with **Glob**
 - `/do-tasks`, `/do-tasks <#n>`, and `--no-claim` — **single and foreground**, in the
   current session over the `gh` CLI. `/do-tasks <#n>` claims that one issue, and
   when the issue is withheld from automation a present human is offered the
-  one-keystroke override in `commands/handlers/attendedness.md` rather than refused.
+  one-keystroke override in `${CLAUDE_PLUGIN_ROOT}/commands/handlers/attendedness.md` rather than refused.
 - `--claim-only` — reserves without executing, so it batches regardless of mode,
   bounded by the pre-claim WIP gate (`gh-issue-claim.md` "Pre-claim WIP gate").
   Unchanged by this section.
@@ -710,7 +710,7 @@ are documented in `gh-issue-claim.md` ("Modes: atomic vs. claim/execute split" a
 "Pre-claim WIP gate").
 
 **`--project` is refused on this handler**, for the reason
-`commands/handlers/gh-issue-reconcile.md` step 3 already gives and owns: the
+`${CLAUDE_PLUGIN_ROOT}/commands/handlers/gh-issue-reconcile.md` step 3 already gives and owns: the
 gh-issue handler has no project dimension **yet**, milestones being the presumed
 mapping. Read it there rather than here. The refusal follows that file's rule
 exactly — a scope this handler cannot honour, plus a write, acts outside what the
@@ -822,7 +822,7 @@ step 5's self-check stops each session loudly on its own issue.
    negative, and `gh-issue-claim.py` owns the clamp so no caller has to remember it.
    If `slack` is `0`, dispatch nothing and report `WIP limit <wip_limit> reached
    (<count> in flight) — nothing dispatched`. This bound is **unconditional**: a
-   batch never offers the attended override (`commands/handlers/attendedness.md`
+   batch never offers the attended override (`${CLAUDE_PLUGIN_ROOT}/commands/handlers/attendedness.md`
    step 2).
 3. **Drop the dependency-blocked and the oversized.** One call, over **exactly** the
    ranked candidates from step 1:
@@ -843,7 +843,7 @@ step 5's self-check stops each session loudly on its own issue.
    each entry in `oversized` with the reason string it reports.
 
    **`--max-estimate` is not optional here.** A batch is the one path with no human
-   to offer the override to (`commands/handlers/attendedness.md` — an at-limit batch
+   to offer the override to (`${CLAUDE_PLUGIN_ROOT}/commands/handlers/attendedness.md` — an at-limit batch
    declines rather than prompting), so it is exactly where the bound has to hold.
    Omitting it would dispatch a remote session per oversized issue — the unattended
    claim the bound exists to prevent. Resolve it from the merged config including any
@@ -963,16 +963,14 @@ step 5's self-check stops each session loudly on its own issue.
    calls that need rewriting as you inline.
 
    **Rewrite the paths as you inline, and check the inlined text before you
-   dispatch.** `gh-issue-claim.md` spells every asset call
-   `python3 commands/handlers/assets/…`, so copying its steps verbatim carries that
-   spelling into the prompt and the session's first script call fails — after the
+   dispatch.** `gh-issue-claim.md` spells every asset call repo-relative, with no
+   root prefix, so copying its steps verbatim carries that spelling into the prompt and the session's first script call fails — after the
    self-check has passed, since the self-check probes `$CLAUDE_PLUGIN_ROOT` and the
    copied call does not. Each becomes
    `python3 "$CLAUDE_PLUGIN_ROOT/commands/handlers/assets/…"`. The check is on the
-   **unprefixed** spelling: no `python3 commands/handlers/assets/` may survive in
-   the dispatched prompt. Every asset call must carry the `$CLAUDE_PLUGIN_ROOT/`
-   prefix — which of course still contains `commands/handlers/assets/`, so do not
-   grep for that substring alone. **Never** inline a token or any other secret —
+   **unprefixed** spelling: no `python3 commands/` may survive in the dispatched
+   prompt. Search for that literal, not for the bare path alone, which the
+   prefixed form also contains. **Never** inline a token or any other secret —
    the dispatched session authenticates through its own `gh` — **documented, not
    measured; the probed session's `gh` had no working credential at all**, so whose
    account it would present was never observed. That is also what step 2's bound
@@ -1221,14 +1219,14 @@ step 5's self-check stops each session loudly on its own issue.
 
 ## 5. jira path (`jira` handler)
 
-Read and follow **`commands/handlers/jira-claim.md`** end to end — it holds the
+Read and follow **`${CLAUDE_PLUGIN_ROOT}/commands/handlers/jira-claim.md`** end to end — it holds the
 config read (`ready_status` is required here), the find-candidates JQL, the
 in-flight pre-flight, the feasibility judgment, the assignee-based claim (self-assign +
 transition to In Progress), the `task/<KEY>` work branch, `gh pr create --draft` with a
 Conventional Commits title ending in `[<KEY>]`, readiness before the move-to-review transition,
 bail mechanics, and the
 report format. `/do-tasks` runs these phases in the **current session** over
-`twg` or the Atlassian MCP, whichever the handler's preflight resolves. If the relative path doesn't resolve, find it with **Glob**
+`twg` or the Atlassian MCP, whichever the handler's preflight resolves. If that path does not exist (the plugin root was not substituted), find it with **Glob**
 (`**/commands/handlers/jira-claim.md`).
 
 **Single by nature.** Unlike the Linear tracker path (which batches via the
@@ -1242,7 +1240,7 @@ bounded by the pre-claim WIP gate. The claim/execute split (`--claim-only` /
 in `jira-claim.md` ("Modes: atomic vs. claim/execute split" and "Pre-claim WIP gate").
 `/do-tasks <KEY>` (a specific issue key, e.g. `PLAT-142`) claims that one issue; an
 issue outside `ready_status` or carrying `human-approval-requested` is offered as the
-override in `commands/handlers/attendedness.md`, not refused.
+override in `${CLAUDE_PLUGIN_ROOT}/commands/handlers/attendedness.md`, not refused.
 
 ## 6. Report
 
