@@ -398,7 +398,7 @@ for f in plugin_root_ref_files:
 # so a prefixed handler path names the running plugin. A bare
 # commands/handlers/... does not resolve from a consumer repo: the agent Globs,
 # finds the installed copy under ~/.claude/plugins/cache/, and under
-# --plugin-dir silently runs released code instead of the checkout (#1542).
+# --plugin-dir silently runs released code instead of the checkout.
 # Handler files and references/ are Read later and never substituted, so they
 # are out of scope. "*/" allows a Glob fallback; the unbraced
 # $CLAUDE_PLUGIN_ROOT/ is the shell spelling do-tasks inlines into remote
@@ -416,7 +416,7 @@ for f in [*command_files, *sorted((ROOT / "skills").glob("*/SKILL.md"))]:
             err(
                 rel(f),
                 f"line {n}: names commands/handlers/... by a bare relative path "
-                "— write ${CLAUDE_PLUGIN_ROOT}/commands/handlers/... (#1542)",
+                "— write ${CLAUDE_PLUGIN_ROOT}/commands/handlers/...",
             )
 
 # --- dev_docs/ documentation references ---

@@ -290,7 +290,7 @@ assert_not_contains "placeholder under a missing parent is not flagged" "$out_f"
 assert_not_contains "end-of-sentence reference is not flagged" "$out_f" \
   "real-thing.sh does not exist"
 
-# --- Fixture (f2): bare commands/handlers/ path in a command body (#1542) ---
+# --- Fixture (f2): bare commands/handlers/ path in a command body -----------
 # A prefixed path and a **/ Glob fallback pass; a bare path inside a handler
 # file is not checked, since handler files are never substituted.
 DIR_F2="$BASE/bare-handler-path"
@@ -309,6 +309,17 @@ Read `commands/handlers/real.md`.
 Prefixed (not flagged): `${CLAUDE_PLUGIN_ROOT}/commands/handlers/real.md`
 
 Glob (not flagged): `**/commands/handlers/real.md`
+
+Unbraced (not flagged): "$CLAUDE_PLUGIN_ROOT/commands/handlers/real.md"
+MD
+mkdir -p "$DIR_F2/skills/x"
+cat >"$DIR_F2/skills/x/SKILL.md" <<'MD'
+---
+name: x
+description: fixture skill
+---
+
+Read `commands/handlers/real.md`.
 MD
 
 out_f2="$(uv run "$DIR_F2/scripts/validate.py" 2>&1)"
@@ -318,6 +329,9 @@ assert_contains "bare handler path in a command body is flagged" "$out_f2" \
 assert_not_contains "prefixed and Glob handler paths are not flagged" "$out_f2" \
   "cmd.md: line 7"
 assert_not_contains "Glob handler path is not flagged" "$out_f2" "cmd.md: line 9"
+assert_not_contains "unbraced prefix is not flagged" "$out_f2" "cmd.md: line 11"
+assert_contains "bare handler path in a skill body is flagged" "$out_f2" \
+  "skills/x/SKILL.md: line 6: names commands/handlers/... by a bare relative path"
 assert_not_contains "bare path in a handler file is not flagged" "$out_f2" \
   "handlers/real.md"
 if [ "$rc_f2" -eq 1 ]; then
