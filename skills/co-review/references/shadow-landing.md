@@ -11,7 +11,8 @@ Rollout step 2). It never merges.
 Last in step 12: after the evidence re-stamp and any `co-review-carry.py` call,
 so the lander judges the PR as this round leaves it. When the round pushed a fix
 that was not carried, the new head has no `co-review` success, and the comment
-holds on that. That is the true answer.
+holds on that. That is the true answer. A PR that is still a draft gets the
+hold `PR is a draft` too, and the audit does not count that one against it.
 
 Only in the default disposition, and not in every run of it:
 

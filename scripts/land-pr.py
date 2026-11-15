@@ -55,10 +55,14 @@ Usage:
 `--dry-run` prints `COMMENT: <created|updated|unchanged> <url>` (or `COMMENT:
 error reason=...`), then a `TIER:` line, then a final `LAND: would-land` or
 `LAND: hold reasons=<r1; r2>` line; exit 0 for either verdict, 1 when the
-comment could not be posted. With `--if-policy`, a repo whose default branch
-has no merge policy takes no part in landing: the run reads nothing more,
-posts no comment, prints only `LAND: skipped reason=<why>`, and exits 0. Any
-other failure to read the policy still runs the dry run, which holds on it. Without it, a landing prints an optional
+comment could not be posted.
+
+With `--if-policy`, a repo whose default branch has no merge policy takes no
+part in landing: the run reads nothing more, posts no comment, prints only
+`LAND: skipped reason=<why>`, and exits 0. Any other failure to read the
+policy still runs the dry run, which holds on it.
+
+Without `--dry-run`, a landing prints an optional
 `MERGE: recovered after error: <failure>` line, then `LABEL: ...` and
 `COMMENT: ...` lines, then `LAND: landed sha=<merge sha>`, or
 `LAND: landed sha=unknown reason=<why>` when the merge commit cannot be read

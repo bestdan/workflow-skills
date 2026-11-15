@@ -445,6 +445,43 @@ class ShadowTests(Base):
         _, lines = self.run_with_policy(POLICY_400)
         self.assertEqual(lines[-1], "AUDIT: shadow shadowed=1 would-land=0/30")
 
+    def test_a_hold_only_for_being_a_draft_counts(self):
+        self.fake.prs = [pr(60, "2026-11-02T10:00:00Z")]
+        self.fake.comments = {60: [lander_comment("no", sha(60), ["PR is a draft"])]}
+        self.fake.commits = {60: [{"sha": sha(60), "commit": {"message": "x"}}]}
+        _, lines = self.run_audit("--mode", "shadow")
+        self.assertIn("#60 would-land (held only as a draft)", "\n".join(lines))
+        self.assertEqual(lines[-1], "AUDIT: shadow shadowed=1 would-land=1/30")
+
+    def test_a_draft_hold_beside_another_hold_does_not_count(self):
+        self.fake.prs = [pr(61, "2026-11-02T10:00:00Z")]
+        self.fake.comments = {
+            61: [
+                lander_comment(
+                    "no",
+                    sha(61),
+                    ["PR is a draft", "no co-review evidence for head aaaaaaa"],
+                )
+            ]
+        }
+        _, lines = self.run_audit("--mode", "shadow")
+        self.assertEqual(lines[-1], "AUDIT: shadow shadowed=1 would-land=0/30")
+
+    def test_a_draft_hold_is_ignored_under_a_policy(self):
+        self._sized_pr()
+        self.fake.comments[30] = [
+            lander_comment(
+                "no",
+                sha(30),
+                [
+                    "PR is a draft",
+                    "tier human: size 350 changed lines over size_cap 300",
+                ],
+            )
+        ]
+        _, lines = self.run_with_policy(POLICY_400)
+        self.assertEqual(lines[-1], "AUDIT: shadow shadowed=1 would-land=1/30")
+
 
 LANDED_MESSAGE = (
     "fix(scripts): tidy (#50)\n\nLanded-by: land-pr.sh\nCo-review-head: abc\n"
