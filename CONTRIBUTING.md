@@ -223,8 +223,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/<name>.py" --repo "<repo
 and document the `$CLAUDE_PLUGIN_ROOT`-unset fallback (Glob
 `**/handlers/assets/<name>.py`). A command or `SKILL.md` body names every
 handler file the same way, prose included: Claude Code substitutes the braced
-root into those bodies (not into the handler and `references/` files read
-afterwards), and a bare `commands/handlers/...` sends a `--plugin-dir` session
+root into those bodies (and, by assumption, since the probe did not cover them,
+not into the handler and `references/` files read afterwards), and a bare `commands/handlers/...` sends a `--plugin-dir` session
 to the installed cache copy instead of the checkout
 ([measured](dev_docs/research/2026-11-14-plugin-root-substitution.md)).
 `validate.py` rejects the bare form. Steps run as separate tool calls with no shared
