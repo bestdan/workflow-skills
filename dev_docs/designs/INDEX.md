@@ -19,5 +19,4 @@
 | 2026-08-20 | [local-review — rendered markdown preview](2026-08-20-local-review-markdown-preview.md)                     |                                                          |
 | 2026-08-14 | [Lean concepts worth importing into research-spike](2026-08-14-research-spike-lean-concepts.md)             |                                                          |
 | 2026-08-01 | [Design — the obligation ledger for research spikes](2026-08-01-research-spike-skill.md)                    |                                                          |
-| 2026-08-01 | [Design — generic auth-key resolution](2026-08-01-auth-key-resolution.md)                                   |                                                          |
 | 2026-07-12 | [Auto-pilot: invert the authority boundary (scoped)](2026-07-12-auto-pilot-inversion.md)                    |                                                          |
