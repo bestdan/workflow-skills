@@ -7,8 +7,6 @@
 | 2026-11-06 | [Re-promote a completed item's dependents as part of completing it](2026-11-06-promote-after-complete.md)   |                                                          |
 | 2026-11-03 | [One jail for the orchestrator on macOS and Linux: nono](2026-11-03-orchestrator-jail.md)                   | <https://github.com/bestdan/workflow-skills/issues/956>  |
 | 2026-10-30 | [The task dashboard as a data source an agent can query](2026-10-30-dashboard-as-agent-data-source.md)      | <https://github.com/bestdan/workflow-skills/issues/1281> |
-| 2026-10-27 | [One Now ranker for every task-dashboard instance](2026-10-27-shared-now-ranker.md)                         | <https://github.com/bestdan/workflow-skills/issues/1225> |
-| 2026-10-26 | [Now modes — rank the fleet Now by the kind of session the owner is in](2026-10-26-now-modes.md)            |                                                          |
 | 2026-10-24 | [Ideas to borrow from workdesk for the task dashboard and fleet view](2026-10-24-workdesk-borrowings.md)    |                                                          |
 | 2026-10-18 | [Sync co-review ledgers across machines](2026-10-18-co-review-ledger-sync.md)                               | <https://github.com/bestdan/workflow-skills/issues/1041> |
 | 2026-10-14 | [Re-enter hook-layout worktrees by name, and refuse the path form](2026-10-14-reenter-worktrees-by-name.md) | <https://github.com/bestdan/workflow-skills/issues/992>  |
