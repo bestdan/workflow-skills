@@ -180,8 +180,9 @@ the auth flows):
   `<atlassian-mcp>__getJiraIssueTypeMetaWithFields` once (`cloudId: <jira.site>`,
   `jira.project`, `jira.issue_type`); see `jira-config.md` → "Estimate and
   priority encoding". The call is MCP-only, whatever backend resolved; with no
-  Atlassian MCP reachable, `WARN: could not confirm` both keys. Create-screen metadata can omit a field the site has, so neither result
-  is ever "does not exist":
+  Atlassian MCP reachable, `WARN: could not confirm` both keys. Create-screen
+  metadata can omit a field the site has, so neither result is ever "does not
+  exist":
   - `estimate_field` → `PASS` when the id is among the returned fields, else
     `WARN: could not confirm <id> on <project>/<issue_type>`.
   - `priority_map` → `PASS` when every value is one of the returned
