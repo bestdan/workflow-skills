@@ -82,6 +82,8 @@ Configures the `jira` handler, which creates Jira work items through `twg` or th
      refinement_status: Needs Refinement
      # archive_status: Archived   # optional — /archive-tasks target (see "Archive status")
      # backend: auto              # optional — auto | twg | acli | mcp (see "Backend")
+     # estimate_field: customfield_10300  # optional — Fibonacci estimate field (see "Estimate and priority encoding")
+     # priority_map: {}           # optional — symbolic level → site priority name
    # archive_after: 30            # optional, top-level — default /archive-tasks age threshold (days)
    ```
 
@@ -189,6 +191,25 @@ jira:
 - Most other custom fields take a plain string, a number, or an `{ "id": … }` object.
 
 When a value is rejected, read the error's own `expectedShape` and `currentValue` — Jira returns both, and together they say whether the id or the shape is wrong. If `createJiraIssue` rejects a field, the create flow stops and reports it rather than silently creating the issue without it.
+
+## Estimate and priority encoding (`estimate_field` / `priority_map`)
+
+Two **optional** keys that say how a symbolic estimate and priority are written on this site:
+
+- **`estimate_field`** — the custom-field id holding the Fibonacci estimate (e.g. `customfield_10300`). Story points are a per-project custom field, so the id cannot be hard-coded.
+- **`priority_map`** — symbolic level → site priority **name**, name to name. Never map to a bare integer or a priority id: scheme names are what the site configures. It is an open map, so it can hold task-fill's vocabulary (`urgent`/`high`/`medium`/`low`) and the importance scale (`blocker`/`critical`/`major`/`minor`/`trivial`) side by side:
+
+```yaml
+jira:
+  estimate_field: customfield_10300
+  priority_map:
+    urgent: P1-Critical
+    high: P2-High
+    medium: P3-Medium
+    low: P4-Low
+```
+
+When both are unset, nothing reads them, `/doctor` included. No command writes through them yet; the Jira garden handler (#1521) will be the first writer. `/doctor` Check 2 validates whichever is set against the project's create-screen metadata.
 
 ## Blocked statuses (`blocked_statuses`)
 
