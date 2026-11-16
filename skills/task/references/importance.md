@@ -19,13 +19,13 @@ Pick the level from the **consequence** the ticket describes, not from its
 wording, its reporter, or its neighbours. Read the table top-down and stop at
 the first row whose test the ticket meets.
 
-| Level      | Test                                                                                                                                       | Examples                                                                                                                                                                                |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `blocker`  | Wrong money movement, wrong advice or tax outcome, data loss or exposure, or a compliance breach — **happening now**, with evidence it is. | A transfer posts twice for every user who retries it. Projections shown today use last year's contribution limit. A support export includes other users' account numbers.               |
-| `critical` | The same consequences, but **conditional or rare**; or a core user flow **broken with no workaround**.                                     | A tax estimate is wrong only for filers with two states of residence. A rounding edge case could misstate a balance above some threshold. Users cannot link an external account at all. |
-| `major`    | A user flow **degraded, or broken with a workaround**; or a material, recurring internal-ops cost. No wrong money, advice or data.         | A goal chart fails to load until the page is refreshed. Editing a plan loses unsaved inputs on back-navigation. Support re-keys every rejected form by hand each week.                  |
-| `minor`    | **User-observable but harmless**: cosmetic, copy, alignment; or internal hygiene with no user effect.                                      | A label is misaligned on narrow screens. A tooltip has a typo. A deprecated helper still has three callers.                                                                             |
-| `trivial`  | **No observable effect** on users or operations; a nice-to-have.                                                                           | Rename a private variable. Add a convenience flag nobody has asked for.                                                                                                                 |
+| Level      | Test                                                                                                                                                                           | Examples                                                                                                                                                                                |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `blocker`  | Wrong money movement, wrong advice or tax outcome, data loss or exposure, or a compliance breach — **happening now**, with evidence it is.                                     | A transfer posts twice for every user who retries it. Projections shown today use last year's contribution limit. A support export includes other users' account numbers.               |
+| `critical` | The same consequences, but **conditional or rare**; or a core user flow **broken with no workaround**.                                                                         | A tax estimate is wrong only for filers with two states of residence. A rounding edge case could misstate a balance above some threshold. Users cannot link an external account at all. |
+| `major`    | A user flow **degraded**, a non-core flow **broken**, or a core flow **broken with a workaround**; or a material, recurring internal-ops cost. No wrong money, advice or data. | A goal chart fails to load until the page is refreshed. Editing a plan loses unsaved inputs on back-navigation. Support re-keys every rejected form by hand each week.                  |
+| `minor`    | **User-observable but harmless**: cosmetic, copy, alignment; or internal hygiene with no user effect.                                                                          | A label is misaligned on narrow screens. A tooltip has a typo. A deprecated helper still has three callers.                                                                             |
+| `trivial`  | **No observable effect** on users or operations; a nice-to-have.                                                                                                               | Rename a private variable. Add a convenience flag nobody has asked for.                                                                                                                 |
 
 The boundaries between adjacent levels, stated once:
 
@@ -36,8 +36,9 @@ The boundaries between adjacent levels, stated once:
   `critical`, however rare.
 - `major` / `minor` — **a task is harder or fails vs it only looks wrong**.
   Something a user or operator cannot do, or does slower, is `major`.
-- `minor` / `trivial` — **observable vs not**. If nobody outside the code can
-  see the difference, it is `trivial`.
+- `minor` / `trivial` — **observable, or a real cost to the people maintaining
+  the code, vs neither**. If nobody sees the difference and it costs no one
+  anything, it is `trivial`.
 
 ### Never `blocker` without evidence of current harm
 
