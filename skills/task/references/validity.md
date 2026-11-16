@@ -61,8 +61,10 @@ Stop at the first conclusive rung. Record each rung you ran in `evidence`.
    --repo <repo>`, `git log --all -i --grep '<term>'`, and `git log -S
    '<string>'` for the commit that added or removed a string. A hit here is a
    lead, not proof: verify it on rung 3. The exception is `obsolete`: a commit
-   that removed the feature the ticket is about is the positive evidence that
-   verdict needs.
+   that removed the feature the ticket is about, and is reachable from
+   `origin/HEAD` (`git merge-base --is-ancestor <sha> origin/HEAD`), is the
+   positive evidence that verdict needs. A removal found only on another
+   branch stays a lead for rung 3.
 
 3. **Read the code on the default branch.** Does the code path, flag,
    endpoint or error string still exist, and does it still behave as the
