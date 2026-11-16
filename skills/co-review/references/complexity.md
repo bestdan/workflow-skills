@@ -60,7 +60,7 @@ each category are in the script's header, which is their one home.
   line appear only when Scope is 🟡 split recommended or 🟡 too big, after that summary,
   where they back the ask. For a change that is ✅ one unit they stay out of
   the posted body: a score tells the author nothing they can act on.
-- **Under `--non-interactive`:** the same as the summary, and the `COMPLEXITY:` line goes on
+- **Under `--non-interactive`:** the same as **Summary** above, and the `COMPLEXITY:` line goes on
   section 1's reviewer line so the caller can read the score without parsing
   markdown.
 
