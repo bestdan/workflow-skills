@@ -482,7 +482,7 @@ The remaining steps depend on disposition.
 
 12. **Post one batched PR review.** Submit a single review via `gh api repos/<owner>/<name>/pulls/<n>/reviews` — `<owner>/<name>` is the repo resolved in step 2, not necessarily `cwd`'s — (use `--method POST` with `--input` reading a JSON file you write, so quoting and newlines survive):
     - `event` = the chosen verdict.
-    - `body` = a short summary, the report, Scope and Coverage lines, plus any findings that can't be anchored to a specific diff line (e.g., "missing test for X", whole-file concerns). Each such finding keeps its conventional-comment label.
+    - `body` = opens with a short summary addressed to the author: what the review found and why the verdict is what it is. **Never open it with the complexity score**: the author needs the verdict first, not a number. The report lines and the Scope line go in only when Scope is 🟡 split recommended or 🟡 too big, after the summary, as the evidence for that ask ([`references/complexity.md`](references/complexity.md#where-the-report-goes)). Then come any findings that can't be anchored to a specific diff line (e.g., "missing test for X", whole-file concerns), each keeping its conventional-comment label. The Coverage line closes the body.
     - `comments` = an array of `{path, line, body}`, one per anchored candidate. Each `body` opens with the finding's conventional-comment label (see **Comment style**). `line` is the **actual file line number on the right/new side** of the diff (not a relative diff position) — a comment on an unchanged line is rejected by the API. **Anchor-check every candidate before submitting** — a bad line rejects the whole review and posts nothing, so validate up front rather than reacting to a rejection:
 
       ```bash
