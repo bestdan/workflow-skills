@@ -25,7 +25,7 @@ says ✅ **full**. Otherwise it names the `skim` and `none` paths: an unreviewed
 area is stated, never implied. At `large` and `very-large` expect at least one
 `skim` or `none` entry, and look again before claiming ✅ **full**.
 
-Under `--post`, the review `body` carries the Coverage line after the report
-lines, so the author and every later reader see it too. Under
+Under `--post`, the Coverage line closes the review `body`, so the author and
+every later reader see it too. Under
 `--non-interactive`, it goes on section 1's reviewer line beside the
 `COMPLEXITY:` line.
