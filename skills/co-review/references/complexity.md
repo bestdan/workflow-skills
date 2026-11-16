@@ -56,11 +56,11 @@ each category are in the script's header, which is their one home.
 - **Summary:** the two report lines open the output template, above
   **Overview**, in every mode.
 - **`--post`:** the posted review's `body` never opens with them. It opens
-  with the summary addressed to the author. The two lines and the Scope line
-  appear only when Scope is a split or too-big verdict, after that summary,
+  with the summary addressed to the author. The two report lines and the Scope
+  line appear only when Scope is 🟡 split recommended or 🟡 too big, after that summary,
   where they back the ask. For a change that is ✅ one unit they stay out of
   the posted body: a score tells the author nothing they can act on.
-- **Under `--non-interactive`:** the same, and the `COMPLEXITY:` line goes on
+- **Under `--non-interactive`:** the same as the summary, and the `COMPLEXITY:` line goes on
   section 1's reviewer line so the caller can read the score without parsing
   markdown.
 
