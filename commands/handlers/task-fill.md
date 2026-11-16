@@ -100,7 +100,7 @@ the number is not a promotion, and neither is declining to record one.
 ### Reason precedence
 
 When the estimate is over the ceiling, the reason slot goes to
-`scope exceeds size 5 — split into sub-tasks` (`sub-issues` on a tracker path),
+`scope exceeds size 5 — split into sub-tasks` (on every path),
 **not** to `no estimate set` / `size_valid` / `required_fields_present`. Ordering
 by first-failure buries the one reason that says what to actually do behind one
 that reads as "fill in a number". `skills/break-down-task/SKILL.md` is how that

@@ -67,9 +67,7 @@ From conversation context and diff, draft:
 - `title`: from user description or `$ARGUMENTS`, specific enough to read on a board (see the `title` row of **Field reference** in `skills/task/SKILL.md`)
 - `related_files`: files from current diff or conversation that are relevant
 - `tags`: infer from context (e.g., `cleanup`, `tests`, `docs`)
-- **Context** section: why this exists and what you saw (see **Body sections** in `skills/task/SKILL.md`)
-- **Task** section: concrete steps to complete it
-- **Acceptance Criteria**: definition of done
+- the body sections that **Body sections** in `skills/task/SKILL.md` defines, drafted so the card can pass that file's **Confidence check** (`has_acceptance_criteria`, `no_open_questions_or_tbd`, `scope_fits`)
 
 If the user indicates this task depends on another task, or the dependency is obvious from context, ask whether to set `is_blocked_by` to that task's slug/id. Validate each entry against the resolved handler (step 6; read the config now if needed):
 

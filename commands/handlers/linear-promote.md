@@ -88,16 +88,15 @@ If a relative path doesn't resolve, find it with **Glob** (`**/commands/handlers
 
 Then, for each candidate, run the **confidence check** from `skills/task/SKILL.md` — the **same judgment-based gate the file path uses** (`commands/promote-tasks.md` step 2), read against Linear fields rather than frontmatter, **using the backfilled `priority`/`estimate` values** from above:
 
-**HIGH (→ promote)** requires ALL of:
+**HIGH (→ promote)** requires the named conditions of the **Confidence check** in `skills/task/SKILL.md` — `has_acceptance_criteria`, `no_open_questions_or_tbd` and `scope_fits` — with their reason strings, read against this mapping, plus the Linear-only field checks:
 
-- `title` present and non-empty.
+- `title` present and non-empty (the `required_fields_present` analogue).
 - `priority` is set (Linear `priority` ≠ `0`). Linear's `none` (`0`) counts as "no priority set", but backfill above always sets it to `medium` first, so this check never fails in practice — it stays as a defensive check against a backfill bug rather than a live gate. `urgent` (`1`) is not excluded — it passes this check like any other priority.
 - `estimate` is set and is one of `1` / `2` / `3` / `5` (Linear's `estimate` is the same Fibonacci scale as our task `size` — see `linear-common.md`). An unset or out-of-scale estimate fails (the analogue of a missing/invalid `size`) — this only still fails when the honest backfill estimate exceeded `5` and was left unset.
-- `description` is non-empty and contains acceptance-style content — a concrete, checkable outcome (the analogue of the file path's `## Acceptance Criteria` requirement). A bare title with an empty or "investigate X" description fails.
-- `description` has no unresolved open-questions / TBD content.
-- **Scope fits estimate 5 (judgment, not keywords).** Assess whether the described scope plausibly fits within estimate `5` (~300 lines / ~5 files — see **Task size** in `skills/task/SKILL.md`), weighing the stated `estimate` against the breadth of the description. A word like "migrate" or "refactor" is not itself disqualifying; a description implying multi-module rework is. If the scope clearly exceeds `5`, score LOW with reason `scope exceeds estimate 5 — split into sub-issues`. The `break-down-task` skill (`skills/break-down-task/SKILL.md`) performs that split on the Linear path — convert the issue into a parent and create the components as child issues.
+- The description is `description`. An equivalent concrete, checkable outcome also satisfies `has_acceptance_criteria`; an empty or "investigate X" description does not.
+- `scope_fits` weighs the stated `estimate` against the description's breadth. On a failure, `break-down-task` (`skills/break-down-task/SKILL.md`) splits on the Linear path by converting the issue into a parent and creating the components as child issues.
 
-**LOW** if any HIGH condition fails. Record the first failed check as the reason (e.g. `no estimate set`, `description missing acceptance criteria`, `no priority set`) — **except** when backfill deliberately left `estimate` unset because the honest estimate exceeded `5`, where `task-fill.md`'s **reason precedence** gives the slot to `scope exceeds estimate 5 — split into sub-issues` instead.
+**LOW** if any HIGH condition fails. Record the first failed check's canonical reason (e.g. `no estimate set`, `description missing acceptance criteria`, `no priority set`) — **except** when backfill deliberately left `estimate` unset because the honest estimate exceeded `5`, where `task-fill.md`'s **reason precedence** gives the slot to `scope exceeds size 5 — split into sub-tasks` instead.
 
 > **`max_estimate` is deliberately absent from the list above.** It is a claim-time bound on this handler (`linear-ready.py` / `_linear_rank.py`), not a promote-time one, and since v2.59 `gh-issue` matches — see `commands/handlers/task-fill.md` → "Where the estimate gate lives", which owns the rule for both. The scale check above is a different thing: it asks whether the estimate is a legal Fibonacci value, not whether it is under an operator's bound.
 
@@ -166,7 +165,7 @@ Promoted 5 of 9 candidates:
     - PRE-18  Remove stale alias  (backfilled: priority, estimate)
     - PRE-22  Add retry to sync job
   needs_refinement (1):
-    - PRE-21  Restructure auth module  (scope exceeds estimate 5 — split into sub-issues)
+    - PRE-21  Restructure auth module  (scope exceeds size 5 — split into sub-tasks)
   skipped (4):
     - PRE-09  (already scored)
     - PRE-10  (parent rollup)
