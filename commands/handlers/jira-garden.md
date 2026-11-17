@@ -94,7 +94,7 @@ failed. If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
    returning keys, never a per-ticket changelog read.
 
 2. **Page each query to the end.** Candidate fields:
-   `summary,description,status,issuetype,priority,parent,updated,labels,comment`
+   `summary,description,status,issuetype,priority,parent,updated,labels,comment,issuelinks`
    plus `<estimate_field>` when set. The `priority_changed` query needs only
    `priority`.
    - **twg:** run unsandboxed, once per query, into its own directory:
@@ -140,6 +140,12 @@ failed. If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
      type), or a provenance comment recorded a kind write and the type no
      longer matches it. The script's docstring names the case this misses.
    - `linked_prs` — the ticket's own-PR trail per **Validity rung 1** below.
+   - `blocked_by` — the keys behind the ticket's "is blocked by" links whose
+     status is not in the Done category, or null when the page has no
+     `issuelinks` field.
+
+4. **Resolve rung 1** — **Validity rung 1** below, which adds `own_pr` to
+   every row. The core's `prejudge` reads that output, not `rows`'s.
 
 ## 3. Read `(key)`
 
@@ -216,12 +222,21 @@ early exit finds the comment by its `garden-backlog:` prefix.
 `skills/task/references/validity.md` rung 1 for Jira is
 `jira-sweep-complete.md` §3–4. A row's `linked_prs` is the
 `jira-pr-sources.py` row for the ticket, built from the plugin's own
-`PR opened:` and claim comments in the page's `comment` field. Write it to a
-file as a one-element array and resolve it with
-`${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/linear-pr-resolve.py --repo <the repo validity.md §1 resolved>`.
-Never use the ticket's remote links or its development panel: both list PRs
-that only cite the key. A `source_errors` entry means the trail could not be
-read — the resolver lands that ticket in `unresolved`, never in "no PR".
+`PR opened:` and claim comments in the page's `comment` field. It is the
+resolver's **input**, empty on any ticket the plugin did not deliver, and is
+never read as a verdict. Resolve every row at once, before the judges run:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-garden.py" own-prs --rows <rows file> --repo <owner/name> [--repo <owner/name> ...]
+```
+
+Pass every repo the scope's tickets name (validity.md §1; for an epic, the
+union over its children). Each row gains `own_pr`: `linear-pr-resolve.py`'s
+`state`, `prs`, `resolved_via` and `probe_errors`, strongest verdict across
+the repos. Its title probe is what finds a merged PR whose title carries the
+key on a ticket with no trail. Never use the ticket's remote links or its
+development panel: both list PRs that only cite the key. A `source_errors`
+entry or a failed probe lands the row in `unresolved`, never in "no PR".
 
 ## Hard rules
 

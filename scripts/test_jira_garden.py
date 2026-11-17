@@ -486,6 +486,44 @@ class RowTest(unittest.TestCase):
         del i["fields"]["comment"]
         self.assertTrue(row(i)["linked_prs"]["source_errors"])
 
+    def test_blocked_by_lists_unresolved_blockers_only(self) -> None:
+        blocks = {"name": "Blocks", "inward": "is blocked by", "outward": "blocks"}
+        links = [
+            {
+                "type": blocks,
+                "inwardIssue": {
+                    "key": "IP-7",
+                    "fields": {"status": status("To Do", "new")},
+                },
+            },
+            {
+                "type": blocks,
+                "inwardIssue": {
+                    "key": "IP-6",
+                    "fields": {"status": status("Done", "done")},
+                },
+            },
+            {
+                "type": blocks,
+                "outwardIssue": {
+                    "key": "IP-8",
+                    "fields": {"status": status("To Do", "new")},
+                },
+            },
+            {
+                "type": {
+                    "name": "Relates",
+                    "inward": "relates to",
+                    "outward": "relates to",
+                },
+                "inwardIssue": {"key": "IP-5"},
+            },
+            {"type": blocks, "inwardIssue": {"key": "IP-4", "status": {"name": "x"}}},
+        ]
+        self.assertEqual(row(issue(issuelinks=links))["blocked_by"], ["IP-7", "IP-4"])
+        self.assertEqual(row(issue(issuelinks=[]))["blocked_by"], [])
+        self.assertIsNone(row(issue())["blocked_by"])
+
     def test_build_rows_requires_default_priority_and_dedupes(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, "p.json")
@@ -588,6 +626,65 @@ class FieldsTest(unittest.TestCase):
     def test_unknown_group(self) -> None:
         with self.assertRaises(garden.InputError):
             self.run_fields([{"group": "issuetype", "value": "Spike"}], [])
+
+
+class OwnPrsTest(unittest.TestCase):
+    """Rung 1 on a ticket the plugin never delivered: no comment trail, but a
+    merged PR whose title carries the key."""
+
+    PR = "https://github.com/acme/web/pull/99"
+
+    def fake_gh(self, args: List[str]) -> Any:
+        if args[:2] == ["pr", "list"]:
+            repo = args[args.index("-R") + 1]
+            hits = []
+            if repo == "acme/web":
+                hits = [
+                    {"number": 98, "url": "u", "title": "fix IP-120", "state": "OPEN"},
+                    {
+                        "number": 99,
+                        "url": self.PR,
+                        "title": "feat(x): show the link [IP-12]",
+                        "state": "MERGED",
+                    },
+                ]
+            return 0, json.dumps(hits), ""
+        if args[:2] == ["pr", "view"]:
+            return (
+                0,
+                json.dumps(
+                    {
+                        "number": 99,
+                        "url": self.PR,
+                        "state": "MERGED",
+                        "mergedAt": "2026-10-26T14:00:52Z",
+                    }
+                ),
+                "",
+            )
+        raise AssertionError(args)
+
+    def test_tagged_merged_pr_resolves_at_rung_1(self) -> None:
+        r = row(issue("IP-12"))
+        self.assertEqual(r["linked_prs"]["attachments"], [])
+        with mock.patch.object(garden.pr_resolve, "run_gh", self.fake_gh):
+            out = garden.own_prs([r], ["acme/api", "acme/web"])[0]["own_pr"]
+        self.assertEqual(out["state"], "merged")
+        self.assertEqual(out["repo"], "acme/web")
+        self.assertEqual(out["resolved_via"], "title")
+        self.assertEqual([p["number"] for p in out["prs"]], [99])
+
+    def test_a_failed_probe_is_unresolved_not_no_pr(self) -> None:
+        with mock.patch.object(
+            garden.pr_resolve, "run_gh", lambda _a: (1, "", "HTTP 502")
+        ):
+            out = garden.own_prs([row(issue("IP-12"))], ["acme/web"])[0]["own_pr"]
+        self.assertEqual(out["state"], "unresolved")
+        self.assertTrue(out["probe_errors"])
+
+    def test_needs_a_repo(self) -> None:
+        with self.assertRaises(garden.InputError):
+            garden.own_prs([row(issue())], [])
 
 
 if __name__ == "__main__":

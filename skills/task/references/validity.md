@@ -60,9 +60,15 @@ Stop at the first conclusive rung. Record each rung you ran in `evidence`.
    means a probe failed, never "no PR": go on, and say so in the note.
 
 2. **Search PRs and commits** for the ticket key and its distinctive terms:
-   an error string, endpoint, flag or function name. `gh search prs "<term>"
-   --repo <repo>`, `git log --all -i --grep '<term>'`, and `git log -S
-   '<string>'` for the commit that added or removed a string. A hit here is a
+   an error string, endpoint, flag or function name. For the **key**, run
+   `python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/garden-checks.py" key-search --key <key> --repo <owner/name> --checkout <path>`
+   rather than searching by hand: GitHub search splits `AB-12` into tokens and
+   matches the bare `AB`, and git's extended regex has no `\b`, so both miss.
+   It prints the PRs and the `origin/HEAD` commits carrying the key as a whole
+   token; exit `4` means a search failed, which is not "no hit". For the
+   **terms**, `gh search prs "<term>" --repo <repo>`, `git log --all -i --grep
+   '<term>'`, and `git log -S '<string>'` for the commit that added or removed
+   a string. A hit here is a
    lead, not proof: verify it on rung 3. The exception is `obsolete`: a commit
    that removed the feature the ticket is about, and is reachable from
    `origin/HEAD` (`git merge-base --is-ancestor <sha> origin/HEAD`), is the
