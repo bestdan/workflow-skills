@@ -129,7 +129,7 @@ One object per ticket:
 
 ```json
 {
-  "ticket": "IP-123",
+  "ticket": "PROJ-123",
   "repo": "acme/widgets",
   "verdict": "fixed",
   "confidence": "high",

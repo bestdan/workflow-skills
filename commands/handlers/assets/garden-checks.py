@@ -36,7 +36,7 @@ writes from it. The holds:
   status write is held and the ticket queued for a human.
 
 WHY KEY-SEARCH IS A SCRIPT. As prose, rung 2 said `gh search prs "<key>"` and
-`git log --grep`. GitHub search tokenizes `IP-39` and matches the bare `IP`,
+`git log --grep`. GitHub search tokenizes `AB-39` and matches the bare `AB`,
 and a `\\b` in git's extended regex silently matches nothing, so both missed a
 PR tagged with its key. Here the GitHub search is a quoted phrase, the git
 search a fixed string, and both are post-filtered by `key_in_text`, so

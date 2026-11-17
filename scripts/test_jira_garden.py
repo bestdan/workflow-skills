@@ -2,8 +2,8 @@
 
 Loaded via importlib since the asset's filename is hyphenated. The one seam is
 `run_twg`, stubbed per test, so no test needs `twg` or a network. The page
-shapes are the ones twg 1.4.4 and the Atlassian MCP returned for IP on
-2026-11-16.
+shapes are the ones twg 1.4.4 and the Atlassian MCP returned for a real
+project on 2026-11-16.
 """
 
 import argparse
@@ -59,7 +59,7 @@ def status(name: str, category: str) -> Dict[str, Any]:
 
 
 def issue(
-    key: str = "IP-1", comments: Optional[List[Dict[str, Any]]] = None, **fields: Any
+    key: str = "PROJ-1", comments: Optional[List[Dict[str, Any]]] = None, **fields: Any
 ) -> Dict[str, Any]:
     f: Dict[str, Any] = {
         "summary": "Fix it",
@@ -92,52 +92,56 @@ def row(
 class JqlTest(unittest.TestCase):
     def test_project_epic_and_fragment(self) -> None:
         self.assertTrue(
-            garden.build_jql("IP", wide=True)["candidates"].startswith(
-                'project = "IP" AND statusCategory != Done'
+            garden.build_jql("PROJ", wide=True)["candidates"].startswith(
+                'project = "PROJ" AND statusCategory != Done'
             )
         )
-        self.assertIn('parent = "IP-12" AND', garden.build_jql("IP-12")["candidates"])
-        q = garden.build_jql("project = IP AND labels = x", wide=True)
-        self.assertTrue(q["candidates"].startswith("(project = IP AND labels = x) AND"))
+        self.assertIn(
+            'parent = "PROJ-12" AND', garden.build_jql("PROJ-12")["candidates"]
+        )
+        q = garden.build_jql("project = PROJ AND labels = x", wide=True)
+        self.assertTrue(
+            q["candidates"].startswith("(project = PROJ AND labels = x) AND")
+        )
         self.assertIn("AND priority CHANGED ORDER BY key ASC", q["priority_changed"])
 
     def test_wide_scope_without_flag_names_the_flag(self) -> None:
-        for scope in ("IP", "project = IP", "labels = garden"):
+        for scope in ("PROJ", "project = PROJ", "labels = garden"):
             with self.subTest(scope=scope):
                 with self.assertRaisesRegex(garden.InputError, "--wide"):
                     garden.build_jql(scope)
 
     def test_cli_refuses_wide_scope_with_exit_2(self) -> None:
         with mock.patch("sys.stderr") as err, mock.patch("sys.stdout"):
-            self.assertEqual(garden.main(["jql", "--scope", "IP"]), 2)
+            self.assertEqual(garden.main(["jql", "--scope", "PROJ"]), 2)
         self.assertIn("--wide", "".join(c.args[0] for c in err.write.call_args_list))
         with mock.patch("sys.stdout"):
-            self.assertEqual(garden.main(["jql", "--scope", "IP", "--wide"]), 0)
+            self.assertEqual(garden.main(["jql", "--scope", "PROJ", "--wide"]), 0)
 
     def test_key_query_is_one_ticket_and_needs_no_flag(self) -> None:
-        q = garden.build_key_jql("IP-7")["candidates"]
-        self.assertTrue(q.startswith('key = "IP-7" AND statusCategory != Done'))
+        q = garden.build_key_jql("PROJ-7")["candidates"]
+        self.assertTrue(q.startswith('key = "PROJ-7" AND statusCategory != Done'))
         with self.assertRaises(garden.InputError):
-            garden.build_key_jql("IP")
+            garden.build_key_jql("PROJ")
 
     def test_report_from_a_wide_run_passes_the_apply_preflight(self) -> None:
         # Apply skips the scope gate and reads each record by key, so a report
         # whose scope needed --wide applies without it.
         report = (
-            "Scope: IP (project, --wide)\n\n```yaml\n"
-            "- key: IP-101\n  early_exit: gardened, unchanged since\n"
-            "- key: IP-102\n  proposed_writes: [{ group: size, field: size, value: 3 }]\n"
+            "Scope: PROJ (project, --wide)\n\n```yaml\n"
+            "- key: PROJ-101\n  early_exit: gardened, unchanged since\n"
+            "- key: PROJ-102\n  proposed_writes: [{ group: size, field: size, value: 3 }]\n"
             "```\n"
         )
         keys = re.findall(r"^- key: (\S+)$", report, re.MULTILINE)
-        self.assertEqual(keys, ["IP-101", "IP-102"])
+        self.assertEqual(keys, ["PROJ-101", "PROJ-102"])
         with mock.patch("sys.stderr"), mock.patch("sys.stdout"):
-            self.assertEqual(garden.main(["jql", "--scope", "IP"]), 2)
+            self.assertEqual(garden.main(["jql", "--scope", "PROJ"]), 2)
             for key in keys:
                 self.assertEqual(garden.main(["jql", "--key", key]), 0)
 
     def test_excludes_epics_done_and_active_sprints(self) -> None:
-        q = garden.build_jql("IP-12")["candidates"]
+        q = garden.build_jql("PROJ-12")["candidates"]
         for clause in (
             "issuetype != Epic",
             "statusCategory != Done",
@@ -147,22 +151,24 @@ class JqlTest(unittest.TestCase):
 
     def test_lowercase_key_is_a_key_not_jql(self) -> None:
         self.assertTrue(
-            garden.build_jql(" ip ", wide=True)["candidates"].startswith(
-                'project = "IP" AND'
+            garden.build_jql(" proj ", wide=True)["candidates"].startswith(
+                'project = "PROJ" AND'
             )
         )
-        self.assertIn('parent = "IP-12" AND', garden.build_jql("ip-12")["candidates"])
-        self.assertIn('key = "IP-7"', garden.build_key_jql("ip-7")["candidates"])
+        self.assertIn(
+            'parent = "PROJ-12" AND', garden.build_jql("proj-12")["candidates"]
+        )
+        self.assertIn('key = "PROJ-7"', garden.build_key_jql("proj-7")["candidates"])
 
     def test_order_by_in_scope_rejected(self) -> None:
         with self.assertRaises(garden.InputError):
-            garden.build_jql("project = IP order by created", wide=True)
+            garden.build_jql("project = PROJ order by created", wide=True)
 
 
 class PageTest(unittest.TestCase):
     def test_twg_shape(self) -> None:
         page = {
-            "data": {"issues": [{"key": "IP-1"}]},
+            "data": {"issues": [{"key": "PROJ-1"}]},
             "pageInfo": {"hasNextPage": True, "nextCursor": "c1"},
         }
         self.assertEqual(len(garden.page_issues(page)), 1)
@@ -178,7 +184,7 @@ class PageTest(unittest.TestCase):
             garden.page_next({"pageInfo": {"hasNextPage": True, "nextCursor": ""}})
 
     def test_mcp_shape(self) -> None:
-        page = {"issues": [{"key": "IP-1"}], "nextPageToken": "t", "isLast": False}
+        page = {"issues": [{"key": "PROJ-1"}], "nextPageToken": "t", "isLast": False}
         self.assertEqual(garden.page_next(page), "t")
         self.assertIsNone(
             garden.page_next({"issues": [], "nextPageToken": "t", "isLast": True})
@@ -478,7 +484,7 @@ class RowTest(unittest.TestCase):
 
     def test_importance_human_set(self) -> None:
         self.assertFalse(row(issue())["importance_human_set"])
-        self.assertTrue(row(issue(), changed={"IP-1"})["importance_human_set"])
+        self.assertTrue(row(issue(), changed={"PROJ-1"})["importance_human_set"])
         self.assertTrue(
             row(issue(priority={"name": "P2-Major"}))["importance_human_set"]
         )
@@ -494,15 +500,15 @@ class RowTest(unittest.TestCase):
         )
         c = [gcomment(body, "2026-11-12T09:00:00.000-0500")]
         self.assertFalse(
-            row(issue(comments=c, priority={"name": "P2-Major"}), changed={"IP-1"})[
+            row(issue(comments=c, priority={"name": "P2-Major"}), changed={"PROJ-1"})[
                 "importance_human_set"
             ]
         )
         # A human moved it again afterwards.
         self.assertTrue(
-            row(issue(comments=c, priority={"name": "P1-Critical"}), changed={"IP-1"})[
-                "importance_human_set"
-            ]
+            row(
+                issue(comments=c, priority={"name": "P1-Critical"}), changed={"PROJ-1"}
+            )["importance_human_set"]
         )
 
     def test_kind_from_issue_type(self) -> None:
@@ -536,14 +542,14 @@ class RowTest(unittest.TestCase):
 
     def test_twg_flattened_issue_and_pr_trail(self) -> None:
         flat = {
-            "key": "IP-9",
+            "key": "PROJ-9",
             "id": "9",
-            "url": "https://x/browse/IP-9",
+            "url": "https://x/browse/PROJ-9",
             "summary": "s",
             "status": status("Needs Refinement", "new"),
             "priority": {"name": "P3-Minor"},
             "updated": "2026-11-10T10:00:00.000-0500",
-            "parent": {"key": "IP-2"},
+            "parent": {"key": "PROJ-2"},
             "comment": {
                 "comments": [
                     gcomment(
@@ -555,13 +561,13 @@ class RowTest(unittest.TestCase):
             },
         }
         r = row(flat)
-        self.assertEqual(r["parent"], "IP-2")
-        self.assertEqual(r["url"], "https://x/browse/IP-9")
+        self.assertEqual(r["parent"], "PROJ-2")
+        self.assertEqual(r["url"], "https://x/browse/PROJ-9")
         self.assertEqual(
             r["linked_prs"]["attachments"], ["https://github.com/a/b/pull/7"]
         )
         # linear-pr-resolve.py refuses a row without its identifier.
-        self.assertEqual(r["linked_prs"]["identifier"], "IP-9")
+        self.assertEqual(r["linked_prs"]["identifier"], "PROJ-9")
 
     def test_missing_comment_field_is_a_source_error(self) -> None:
         i = issue()
@@ -574,21 +580,21 @@ class RowTest(unittest.TestCase):
             {
                 "type": blocks,
                 "inwardIssue": {
-                    "key": "IP-7",
+                    "key": "PROJ-7",
                     "fields": {"status": status("To Do", "new")},
                 },
             },
             {
                 "type": blocks,
                 "inwardIssue": {
-                    "key": "IP-6",
+                    "key": "PROJ-6",
                     "fields": {"status": status("Done", "done")},
                 },
             },
             {
                 "type": blocks,
                 "outwardIssue": {
-                    "key": "IP-8",
+                    "key": "PROJ-8",
                     "fields": {"status": status("To Do", "new")},
                 },
             },
@@ -598,11 +604,13 @@ class RowTest(unittest.TestCase):
                     "inward": "relates to",
                     "outward": "relates to",
                 },
-                "inwardIssue": {"key": "IP-5"},
+                "inwardIssue": {"key": "PROJ-5"},
             },
-            {"type": blocks, "inwardIssue": {"key": "IP-4", "status": {"name": "x"}}},
+            {"type": blocks, "inwardIssue": {"key": "PROJ-4", "status": {"name": "x"}}},
         ]
-        self.assertEqual(row(issue(issuelinks=links))["blocked_by"], ["IP-7", "IP-4"])
+        self.assertEqual(
+            row(issue(issuelinks=links))["blocked_by"], ["PROJ-7", "PROJ-4"]
+        )
         self.assertEqual(row(issue(issuelinks=[]))["blocked_by"], [])
         self.assertIsNone(row(issue())["blocked_by"])
 
@@ -610,11 +618,13 @@ class RowTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, "p.json")
             Path(p).write_text(
-                json.dumps({"issues": [issue("IP-1"), issue("IP-1"), issue("IP-2")]})
+                json.dumps(
+                    {"issues": [issue("PROJ-1"), issue("PROJ-1"), issue("PROJ-2")]}
+                )
             )
             args = cfg(pages=[p], changed_pages=None, limit=None, limit_cut=False)
             out = garden.build_rows(args)
-            self.assertEqual([r["key"] for r in out["rows"]], ["IP-1", "IP-2"])
+            self.assertEqual([r["key"] for r in out["rows"]], ["PROJ-1", "PROJ-2"])
             args.limit = 1
             self.assertTrue(garden.build_rows(args)["limit_cut"])
             args.default_priority = None
@@ -632,10 +642,10 @@ class RowTest(unittest.TestCase):
 
     def test_unset_refinement_is_inferred_from_the_one_unready_status(self) -> None:
         issues = [
-            issue("IP-1"),
-            issue("IP-2", status=status("Ready for Development", "new")),
-            issue("IP-3", status=status("On Hold/Blocked", "new")),
-            issue("IP-4", status=status("In Progress", "indeterminate")),
+            issue("PROJ-1"),
+            issue("PROJ-2", status=status("Ready for Development", "new")),
+            issue("PROJ-3", status=status("On Hold/Blocked", "new")),
+            issue("PROJ-4", status=status("In Progress", "indeterminate")),
         ]
         out = self.rows_from(issues, refinement_status=None)
         self.assertEqual(out["refinement_status"], "Needs Refinement")
@@ -648,8 +658,8 @@ class RowTest(unittest.TestCase):
         self.assertEqual(configured["refinement_status_source"], "config")
 
     def test_unset_refinement_refuses_when_not_exactly_one(self) -> None:
-        two = [issue("IP-1"), issue("IP-2", status=status("Backlog", "new"))]
-        none = [issue("IP-1", status=status("Ready for Development", "new"))]
+        two = [issue("PROJ-1"), issue("PROJ-2", status=status("Backlog", "new"))]
+        none = [issue("PROJ-1", status=status("Ready for Development", "new"))]
         for issues in (two, none):
             with self.subTest(n=len(issues)):
                 with self.assertRaisesRegex(
@@ -758,11 +768,16 @@ class OwnPrsTest(unittest.TestCase):
             hits = []
             if repo == "acme/web":
                 hits = [
-                    {"number": 98, "url": "u", "title": "fix IP-120", "state": "OPEN"},
+                    {
+                        "number": 98,
+                        "url": "u",
+                        "title": "fix PROJ-120",
+                        "state": "OPEN",
+                    },
                     {
                         "number": 99,
                         "url": self.PR,
-                        "title": "feat(x): show the link [IP-12]",
+                        "title": "feat(x): show the link [PROJ-12]",
                         "state": "MERGED",
                     },
                 ]
@@ -783,7 +798,7 @@ class OwnPrsTest(unittest.TestCase):
         raise AssertionError(args)
 
     def test_tagged_merged_pr_resolves_at_rung_1(self) -> None:
-        r = row(issue("IP-12"))
+        r = row(issue("PROJ-12"))
         self.assertEqual(r["linked_prs"]["attachments"], [])
         with mock.patch.object(garden.pr_resolve, "run_gh", self.fake_gh):
             out = garden.own_prs([r], ["acme/api", "acme/web"])[0]["own_pr"]
@@ -796,7 +811,7 @@ class OwnPrsTest(unittest.TestCase):
         with mock.patch.object(
             garden.pr_resolve, "run_gh", lambda _a: (1, "", "HTTP 502")
         ):
-            out = garden.own_prs([row(issue("IP-12"))], ["acme/web"])[0]["own_pr"]
+            out = garden.own_prs([row(issue("PROJ-12"))], ["acme/web"])[0]["own_pr"]
         self.assertEqual(out["state"], "unresolved")
         self.assertTrue(out["probe_errors"])
 

@@ -44,7 +44,7 @@ If a path does not resolve (the plugin root was not substituted), find it with
   label, or a query the handler understands. Without it the handler refuses a
   wider scope and the run **stops** with its message, which names `--wide`.
   The reason is cost: one epic of 30 tickets took about 440k judge tokens
-  (#1561), so a 418-ticket project would take about 6M.
+  (#1561), so a project of about 400 tickets would take about 6M.
 - `dry-run` — the default. Judge every ticket in scope, write the report, write
   nothing to the tracker.
 - `apply <report-file>` — apply a report a previous dry run wrote. The scope comes
@@ -123,7 +123,7 @@ The handler implements four operations. Everything it returns is symbolic.
 Defined once, here. Every candidate in scope ends with exactly one record.
 
 ```yaml
-key: IP-123
+key: PROJ-123
 early_exit: null # or the reason it exited, e.g. "gardened, unchanged since"
 validity: {
   verdict: valid,

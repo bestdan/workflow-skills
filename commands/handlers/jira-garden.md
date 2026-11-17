@@ -74,7 +74,7 @@ failed. If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
    `<atlassian-mcp>__getJiraIssueTypeMetaWithFields` (`cloudId: <jira.site>`,
    `projectIdOrKey: <project>`, the `issueTypeId` of `jira.issue_type`,
    `requiredFieldsOnly: false`) and take the `priority` field's
-   `defaultValue.name` (IP: `P3-Minor`). twg's `field create-metadata` leaves
+   `defaultValue.name` (e.g. `P3-Minor`). twg's `field create-metadata` leaves
    system fields out (measured, twg 1.4.4), so this one read is always the
    MCP's. If the MCP is not loaded, ask the owner which priority is the
    default, offering the `priority_map` values. "Human-set" priority depends
