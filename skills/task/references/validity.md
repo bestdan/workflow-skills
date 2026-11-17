@@ -81,7 +81,7 @@ Stop at the first conclusive rung. Record each rung you ran in `evidence`.
 4. **Production signal** (optional; bugs only; only when the calling command
    or the repo's config enables it). Datadog logs or a Sentry issue for the
    described error in a recent window. The error still occurring supports
-   `valid`. Its absence is absence: it never makes `fixed` on its own.
+   a rung-3 `valid`; on its own it leaves `unsure`. Its absence is absence: it never makes `fixed` on its own.
 
 ## 3. Duplicates
 
