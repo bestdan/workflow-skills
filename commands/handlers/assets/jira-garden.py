@@ -575,7 +575,7 @@ def build_row(
         url = f"https://{cfg.site}/browse/{key}"
     description = fields.get("description")
     if isinstance(description, (dict, list)):
-        description = pr_sources.adf_text(description).strip()
+        description = pr_sources.adf_text(description, headings=True).strip()
     pr_row = pr_sources.to_row(
         {"key": key, "id": issue.get("id"), "fields": fields}, False
     )

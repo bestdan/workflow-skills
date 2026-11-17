@@ -27,6 +27,13 @@ assert _spec is not None and _spec.loader is not None, f"cannot load {ASSET}"
 garden = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(garden)
 
+_cspec = importlib.util.spec_from_file_location(
+    "garden_checks", ROOT / "commands" / "handlers" / "assets" / "garden-checks.py"
+)
+assert _cspec is not None and _cspec.loader is not None
+checks = importlib.util.module_from_spec(_cspec)
+_cspec.loader.exec_module(checks)
+
 PMAP = {"major": "P2-Major", "minor": "P3-Minor", "high": "P2-Major"}
 EST = "customfield_10300"
 
@@ -352,7 +359,51 @@ class CommentTest(unittest.TestCase):
         self.assertIn("left as found", garden.render_comment({"date": "2026-11-16"}))
 
 
+def adf_heading(text: str, level: int = 2) -> Dict[str, Any]:
+    return {
+        "type": "heading",
+        "attrs": {"level": level},
+        "content": [{"type": "text", "text": text}],
+    }
+
+
+def adf_para(text: str) -> Dict[str, Any]:
+    return {"type": "paragraph", "content": [{"type": "text", "text": text}]}
+
+
+def adf_bullets(*items: str) -> Dict[str, Any]:
+    return {
+        "type": "bulletList",
+        "content": [{"type": "listItem", "content": [adf_para(t)]} for t in items],
+    }
+
+
+def adf_doc(*content: Dict[str, Any]) -> Dict[str, Any]:
+    return {"type": "doc", "version": 1, "content": list(content)}
+
+
 class RowTest(unittest.TestCase):
+    def ac_check(self, description: Dict[str, Any]) -> str:
+        r = row(issue(description=description))
+        return checks.prejudge([r])[0]["checks"]["has_acceptance_criteria"]
+
+    def test_adf_empty_ac_heading_before_notes_fails(self) -> None:
+        doc = adf_doc(
+            adf_heading("Acceptance Criteria"),
+            adf_heading("Notes"),
+            adf_para("We will decide the details later."),
+        )
+        self.assertEqual(self.ac_check(doc), "fail")
+
+    def test_adf_ac_bullets_pass(self) -> None:
+        doc = adf_doc(
+            adf_heading("Acceptance Criteria"),
+            adf_bullets("The link always shows", "The page loads under 1s"),
+            adf_heading("Notes"),
+            adf_para("Context."),
+        )
+        self.assertEqual(self.ac_check(doc), "pass")
+
     def test_status_mapping(self) -> None:
         cases = [
             (status("Ready for Development", "new"), "ready"),
