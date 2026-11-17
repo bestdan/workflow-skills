@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.220.0] - 2026-11-17
+
+### Features
+
+- add the /garden-backlog command core [#1520] (#1554) (52fd2db4)
+
 ## [2.219.0] - 2026-11-17
 
 ### Features
