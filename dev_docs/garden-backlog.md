@@ -46,7 +46,8 @@ filled costs one read:
 2. **Validity** — a `fixed`, `duplicate` or `obsolete` verdict at high
    confidence proposes the closure mark and ends the ladder: a ticket about to
    close needs no better description.
-3. **Kind**, **quality**, **size**, **importance**, **status**, in that order.
+3. **Kind**, **quality**, **size**, **importance**, **status**, **outcomes**, in
+   that order.
 
 The ladder's rules and each rung's verdicts are
 [`commands/garden-backlog.md` §4](../commands/garden-backlog.md#4-judge-each-ticket-read-only).
@@ -117,8 +118,8 @@ consumer of the same rules `/promote-tasks` and `/add-task` use:
 - **Status respects blockers.** A quality-passing ticket with an unresolved
   blocker stays where it is, and so does one whose blocker links were not
   read: moving it to the ready status would tell a reader, and the task loop,
-  that it can be picked up while it cannot. Neither gets the "gardened" mark, so the next run judges it
-  again. Started work is never moved.
+  that it can be picked up while it cannot. Neither gets the "gardened" mark,
+  so the next run judges it again. Started work is never moved.
 - **Status is a verdict, not a default.** A ticket sits in the refinement status
   only when the quality check failed, and the report names the condition. The
   statuses reuse `/promote-tasks`' `ready_status` and `refinement_status` keys.
