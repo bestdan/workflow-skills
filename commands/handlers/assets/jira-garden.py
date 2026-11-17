@@ -145,7 +145,7 @@ def scope_clause(scope: str, wide: bool = False) -> str:
     s = scope.strip()
     if not s:
         raise InputError("empty scope")
-    # Jira keys are uppercase, so `ip` means the project, not a JQL fragment.
+    # Jira keys are uppercase, so `proj` means the project, not a JQL fragment.
     key = s.upper()
     if ISSUE_KEY_RE.match(key):
         return f'parent = "{key}"'
