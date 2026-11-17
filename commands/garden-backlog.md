@@ -65,8 +65,9 @@ generic rubric alone. Set → a path relative to the repo root
 (`git rev-parse --show-toplevel`) to the overlay `importance.md` → **Repo
 overlay** describes. If the value is not a string, or `<root>/<path>` is not a
 file, **stop** with: "`garden.importance_overlay` must name a file in the repo;
-`<value>` does not. Fix the path or unset the key." Gardening without it would judge importance on harms the
-repo has said are incomplete.
+`<value>` does not. Fix the path or unset the key." Without the overlay,
+importance would be judged on the generic harms the repo has said are
+incomplete.
 
 ## 2. The handler contract
 
