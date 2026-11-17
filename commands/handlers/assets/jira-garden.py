@@ -9,7 +9,8 @@ otherwise have to catch by reading markdown:
   fetch    page a JQL search to completion through twg, one file per page
   page     read one saved search page: its issue count and next-page token
   rows     turn saved pages into the core's List rows (symbolic values only)
-  fields   turn one ticket's approved writes into an edit payload
+  fields   turn one ticket's approved writes into an edit payload, and a kind
+           write into the issue-type id it names
   comment  render the provenance comment the next run's early exit reads
 
 WHY THE PROVENANCE COMMENT IS PARSED HERE. Three judgments in `rows` depend on
@@ -25,6 +26,13 @@ value nobody chose:
   newest comment that recorded a write to that field wrote the value the
   ticket holds now. Otherwise the garden's own write would make the field
   human-set, and the next run would refuse to touch its own work.
+- Kind is the issue type: `Spike` is `spike`, any other type is `fix`. The
+  type is human-set when it is not the project's creation type
+  (`jira.issue_type`), unless the garden wrote it. Once the garden has written
+  a kind, the type is human-set exactly when it no longer matches that write,
+  so a human who changed it back is not overruled. No changelog is read, so a
+  type a human reset to the creation type before the garden ever wrote one
+  reads as not human-set; the gated apply is what stands in front of that.
 
 `comment` renders the body and `parse_comment` reads it, so the two cannot
 drift apart; the tests round-trip one through the other.
@@ -57,6 +65,7 @@ _spec.loader.exec_module(pr_sources)
 MARKER = "garden-backlog:"
 CLOSE_LABEL = "garden:close-candidate"
 HUMAN_LABEL = "garden:needs-human"
+SPIKE_TYPE = "Spike"
 IMPORTANCE_LEVELS = ("blocker", "critical", "major", "minor", "trivial")
 UPDATE_SLACK = timedelta(seconds=5)
 BASE_FILTER = (
@@ -68,7 +77,7 @@ ISSUE_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*-\d+$")
 # The bullet is optional: a markdown body posted through the API comes back as
 # ADF, whose list items flatten to bare lines.
 WRITE_LINE = re.compile(
-    r"^\s*(?:[-*]\s*)?(size|importance):\s*(.*?)\s*->\s*(.*?)\s*(?:;\s*reason:.*)?$"
+    r"^\s*(?:[-*]\s*)?(size|importance|kind):\s*(.*?)\s*->\s*(.*?)\s*(?:;\s*reason:.*)?$"
 )
 META_KEYS = ("id", "key", "self", "expand", "url")
 
@@ -280,7 +289,8 @@ def render_comment(spec: Dict[str, Any]) -> str:
     """The provenance comment body (markdown) for one ticket's applied writes.
 
     `spec`: {"date", "changes": [{"field", "old", "new", "reason"}],
-    "labels": [...], "human_queue": [...]}. A `size` or `importance` change is
+    "labels": [...], "human_queue": [...]}. A `size`, `importance` or `kind`
+    change (kind as issue-type names) is
     written as `- <field>: <old> -> <new>; reason: <reason>`, the line `parse_comment`
     reads back; any other field (status) uses the same shape.
     """
@@ -362,6 +372,35 @@ def same_value(written: str, current: Any) -> bool:
         return written.strip() == str(current).strip()
 
 
+def same_name(a: str, b: str) -> bool:
+    return a.strip().casefold() == b.strip().casefold()
+
+
+def issue_type_list(payload: Any) -> List[Dict[str, Any]]:
+    """The issue types of a saved project-metadata read, in any shape the MCP
+    or a REST call returns: a bare list, or one under `issueTypes`, `values`
+    or `data`."""
+    if isinstance(payload, dict):
+        for k in ("issueTypes", "values", "data"):
+            if isinstance(payload.get(k), (list, dict)):
+                return issue_type_list(payload[k])
+        raise InputError("issue-type metadata has no issue-type list")
+    if not isinstance(payload, list):
+        raise InputError("issue-type metadata is not a JSON list or object")
+    return [t for t in payload if isinstance(t, dict)]
+
+
+def resolve_issue_type(types: List[Dict[str, Any]], name: str) -> Optional[str]:
+    """The id of the non-subtask issue type called `name`, or None."""
+    for t in types:
+        n, tid = t.get("name"), t.get("id")
+        if t.get("subtask") is True or not isinstance(n, str):
+            continue
+        if same_name(n, name) and isinstance(tid, (str, int)):
+            return str(tid)
+    return None
+
+
 def build_row(
     issue: Dict[str, Any],
     changed: Set[str],
@@ -414,6 +453,21 @@ def build_row(
         priority != cfg.default_priority or key in changed
     )
 
+    issuetype = name_of(fields.get("issuetype"))
+    kind = None
+    if issuetype is not None:
+        kind = "spike" if same_name(issuetype, SPIKE_TYPE) else "fix"
+    if "kind" in last_write:
+        kind_human_set = not (
+            issuetype is not None and same_name(last_write["kind"][1], issuetype)
+        )
+    else:
+        kind_human_set = not (
+            issuetype is not None
+            and bool(cfg.issue_type)
+            and same_name(issuetype, cfg.issue_type)
+        )
+
     parent = fields.get("parent")
     url = issue.get("url")
     if not isinstance(url, str) and cfg.site and "." in cfg.site:
@@ -433,7 +487,9 @@ def build_row(
         "parent": parent.get("key") if isinstance(parent, dict) else None,
         "status": symbolic_status(fields, cfg),
         "status_name": name_of(fields.get("status")),
-        "issuetype": name_of(fields.get("issuetype")),
+        "issuetype": issuetype,
+        "kind": kind,
+        "kind_human_set": kind is not None and kind_human_set,
         "labels": [x for x in fields.get("labels") or [] if isinstance(x, str)],
         "updated_at": updated_at.isoformat() if updated_at else None,
         "gardened_at": gardened_at.isoformat() if gardened_at else None,
@@ -501,7 +557,12 @@ def build_fields(cfg: argparse.Namespace) -> Dict[str, Any]:
     `--writes`: a file holding the record's approved `proposed_writes`.
     `--labels`: a file holding the ticket's labels from a fresh Read, since a
     label edit replaces the whole set.
-    A write whose config key is unset lands in `report_only`, never guessed.
+    `--issue-types`: the project's issue-type metadata, read only for a kind
+    write. The kind write comes back as `issuetype`, apart from `fields`, so the
+    caller sends it as its own edit: Jira refuses a type change between
+    workflows, and that refusal must not take the other fields with it.
+    A write whose config key is unset, or whose target issue type the project
+    lacks, lands in `report_only`, never guessed.
     """
     writes = load_page(cfg.writes)
     labels = load_page(cfg.labels)
@@ -511,6 +572,7 @@ def build_fields(cfg: argparse.Namespace) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
     report_only: List[str] = []
     transition: Optional[str] = None
+    issuetype: Optional[Dict[str, str]] = None
     new_labels = [x for x in labels if isinstance(x, str)]
     for w in writes:
         if not isinstance(w, dict):
@@ -541,11 +603,41 @@ def build_fields(cfg: argparse.Namespace) -> Dict[str, Any]:
             if not target:
                 raise InputError(f"status target {value!r} has no configured status")
             transition = target
+        elif group == "kind":
+            issuetype, line = kind_target(str(value), cfg)
+            if line:
+                report_only.append(line)
         elif group != "gardened":
             raise InputError(f"unknown write group {group!r}")
     if new_labels != [x for x in labels if isinstance(x, str)]:
         out["labels"] = new_labels
-    return {"fields": out, "transition_to": transition, "report_only": report_only}
+    return {
+        "fields": out,
+        "issuetype": issuetype,
+        "transition_to": transition,
+        "report_only": report_only,
+    }
+
+
+def kind_target(
+    kind: str, cfg: argparse.Namespace
+) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
+    """A kind write as `({"id": ...}, None)`, or `(None, <report line>)`."""
+    name: Optional[str]
+    if kind == "spike":
+        name = SPIKE_TYPE
+    elif kind == "fix":
+        name = cfg.issue_type
+        if not name:
+            return None, "kind fix: jira.issue_type is unset"
+    else:
+        raise InputError(f"kind {kind!r} is not fix or spike")
+    if not cfg.issue_types:
+        return None, f"kind {kind}: no project issue-type metadata was read"
+    tid = resolve_issue_type(issue_type_list(load_page(cfg.issue_types)), name)
+    if tid is None:
+        return None, f"kind {kind}: the project has no `{name}` issue type"
+    return {"id": tid}, None
 
 
 # ------------------------------------------------------------------- main
@@ -573,6 +665,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         sp.add_argument("--ready-status", required=True)
         sp.add_argument("--refinement-status", required=True)
         sp.add_argument("--priority-map-json")
+        sp.add_argument("--issue-type")
 
     s = sub.add_parser("rows")
     s.add_argument("--pages", nargs="+", required=True)
@@ -589,6 +682,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     s.add_argument("--writes", required=True)
     s.add_argument("--labels", required=True)
     s.add_argument("--estimate-field")
+    s.add_argument("--issue-types")
     status_args(s)
 
     s = sub.add_parser("comment")

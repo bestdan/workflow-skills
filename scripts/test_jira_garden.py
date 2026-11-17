@@ -37,6 +37,8 @@ def cfg(**over: Any) -> argparse.Namespace:
         "default_priority": "P3-Minor",
         "site": "acme.atlassian.net",
         "priority_map_json": json.dumps(PMAP),
+        "issue_type": "Task",
+        "issue_types": None,
     }
     base.update(over)
     return argparse.Namespace(**base)
@@ -52,6 +54,7 @@ def issue(
     f: Dict[str, Any] = {
         "summary": "Fix it",
         "status": status("Needs Refinement", "new"),
+        "issuetype": {"name": "Task"},
         "priority": {"name": "P3-Minor"},
         "updated": "2026-11-10T10:00:00.000-0500",
         "comment": {"comments": comments or [], "total": len(comments or [])},
@@ -219,6 +222,12 @@ class CommentTest(unittest.TestCase):
             {"size": ("none", "3"), "importance": ("P3-Minor", "P2-Major")},
         )
 
+    def test_kind_round_trip(self) -> None:
+        body = garden.render_comment(
+            {"date": "d", "changes": [{"field": "kind", "old": "Task", "new": "Spike"}]}
+        )
+        self.assertEqual(garden.parse_comment(body), {"kind": ("Task", "Spike")})
+
     def test_free_text_cannot_inject_a_write_line(self) -> None:
         body = garden.render_comment(
             {
@@ -378,6 +387,29 @@ class RowTest(unittest.TestCase):
             ]
         )
 
+    def test_kind_from_issue_type(self) -> None:
+        r = row(issue())
+        self.assertEqual((r["kind"], r["kind_human_set"]), ("fix", False))
+        r = row(issue(issuetype={"name": "Spike"}))
+        self.assertEqual((r["kind"], r["kind_human_set"]), ("spike", True))
+        # Any type other than the creation type was chosen by someone.
+        self.assertTrue(row(issue(issuetype={"name": "Bug"}))["kind_human_set"])
+        # Without the creation type nothing can be shown to be the default.
+        self.assertTrue(row(issue(), issue_type=None)["kind_human_set"])
+
+    def test_kind_written_by_garden_is_not_human_set(self) -> None:
+        body = garden.render_comment(
+            {"date": "d", "changes": [{"field": "kind", "old": "Task", "new": "Spike"}]}
+        )
+        c = [gcomment(body, "2026-11-12T09:00:00.000-0500")]
+        self.assertFalse(
+            row(issue(comments=c, issuetype={"name": "Spike"}))["kind_human_set"]
+        )
+        # A human changed it back to the creation type afterwards.
+        self.assertTrue(
+            row(issue(comments=c, issuetype={"name": "Task"}))["kind_human_set"]
+        )
+
     def test_importance_reverse_map_uses_only_the_importance_scale(self) -> None:
         self.assertEqual(
             row(issue(priority={"name": "P2-Major"}))["importance"], "major"
@@ -442,7 +474,44 @@ class FieldsTest(unittest.TestCase):
             w, lab = os.path.join(d, "w.json"), os.path.join(d, "l.json")
             Path(w).write_text(json.dumps(writes))
             Path(lab).write_text(json.dumps(labels))
+            if "types" in over:
+                t = os.path.join(d, "t.json")
+                Path(t).write_text(json.dumps(over.pop("types")))
+                over["issue_types"] = t
             return garden.build_fields(cfg(writes=w, labels=lab, **over))
+
+    TYPES = {
+        "issueTypes": [
+            {"id": "10001", "name": "Task", "subtask": False},
+            {"id": "10002", "name": "Spike", "subtask": False},
+            {"id": "10003", "name": "Sub-task", "subtask": True},
+        ]
+    }
+
+    def test_kind_resolves_the_type_id_apart_from_fields(self) -> None:
+        out = self.run_fields(
+            [{"group": "kind", "value": "spike"}, {"group": "size", "value": 2}],
+            [],
+            types=self.TYPES,
+        )
+        self.assertEqual(out["issuetype"], {"id": "10002"})
+        self.assertEqual(out["fields"], {EST: 2})
+        fix = self.run_fields([{"group": "kind", "value": "fix"}], [], types=self.TYPES)
+        self.assertEqual(fix["issuetype"], {"id": "10001"})
+
+    def test_missing_target_type_is_a_report_line(self) -> None:
+        types = [
+            {"id": "10001", "name": "Task"},
+            {"id": "10009", "name": "Spike", "subtask": True},
+        ]
+        out = self.run_fields([{"group": "kind", "value": "spike"}], [], types=types)
+        self.assertIsNone(out["issuetype"])
+        self.assertEqual(
+            out["report_only"], ["kind spike: the project has no `Spike` issue type"]
+        )
+        bare = self.run_fields([{"group": "kind", "value": "spike"}], [])
+        self.assertIsNone(bare["issuetype"])
+        self.assertEqual(len(bare["report_only"]), 1)
 
     def test_all_groups(self) -> None:
         out = self.run_fields(
@@ -482,7 +551,7 @@ class FieldsTest(unittest.TestCase):
 
     def test_unknown_group(self) -> None:
         with self.assertRaises(garden.InputError):
-            self.run_fields([{"group": "kind", "value": "spike"}], [])
+            self.run_fields([{"group": "issuetype", "value": "Spike"}], [])
 
 
 if __name__ == "__main__":
