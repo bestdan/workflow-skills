@@ -6,6 +6,7 @@ part two runs must do identically, and every part a review round would
 otherwise have to catch by reading markdown:
 
   jql      the candidate query and the `priority CHANGED` query for a scope
+           (an epic unless --wide) or for one ticket (--key)
   fetch    page a JQL search to completion through twg, one file per page
   page     read one saved search page: its issue count and next-page token
   rows     turn saved pages into the core's List rows (symbolic values only)
@@ -108,28 +109,52 @@ def run_twg(args: Sequence[str]) -> TwgResult:
 # --------------------------------------------------------------------- jql
 
 
-def scope_clause(scope: str) -> str:
-    """A project key, an epic key, or a JQL fragment, as one JQL clause."""
+def scope_clause(scope: str, wide: bool = False) -> str:
+    """An epic key, or with `wide` a project key or JQL fragment, as one clause.
+
+    Wide scopes are refused by default on cost: judging one epic of 30 tickets
+    took about 440k tokens (#1561), so a 418-ticket project would take about
+    6M. The refusal names the flag so the caller can pass it on purpose.
+    """
     s = scope.strip()
     if not s:
         raise InputError("empty scope")
-    if PROJECT_RE.match(s):
-        return f'project = "{s}"'
     if ISSUE_KEY_RE.match(s):
         return f'parent = "{s}"'
-    if re.search(r"\border\s+by\b", s, re.IGNORECASE):
+    if PROJECT_RE.match(s):
+        clause, what = f'project = "{s}"', "a project"
+    elif re.search(r"\border\s+by\b", s, re.IGNORECASE):
         raise InputError(
             "a JQL scope must not carry ORDER BY; the handler sets the order"
         )
-    return f"({s})"
+    else:
+        clause, what = f"({s})", "a JQL query"
+    if not wide:
+        raise InputError(
+            f"scope {s!r} is {what}, wider than one epic; pass --wide to garden"
+            " it anyway (one epic of 30 tickets cost about 440k tokens)"
+        )
+    return clause
 
 
-def build_jql(scope: str) -> Dict[str, str]:
-    where = f"{scope_clause(scope)} AND {BASE_FILTER}"
+def queries(where: str) -> Dict[str, str]:
+    where = f"{where} AND {BASE_FILTER}"
     return {
         "candidates": f"{where} ORDER BY key ASC",
         "priority_changed": f"{where} AND priority CHANGED ORDER BY key ASC",
     }
+
+
+def build_jql(scope: str, wide: bool = False) -> Dict[str, str]:
+    return queries(scope_clause(scope, wide))
+
+
+def build_key_jql(key: str) -> Dict[str, str]:
+    """One ticket, for Read: never a scope, so never subject to the epic gate."""
+    k = key.strip()
+    if not ISSUE_KEY_RE.match(k):
+        raise InputError(f"--key {key!r} is not an issue key")
+    return queries(f'key = "{k}"')
 
 
 # ------------------------------------------------------------------- pages
@@ -648,7 +673,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("jql")
-    s.add_argument("--scope", required=True)
+    g = s.add_mutually_exclusive_group(required=True)
+    g.add_argument("--scope")
+    g.add_argument("--key")
+    s.add_argument("--wide", action="store_true")
 
     s = sub.add_parser("fetch")
     s.add_argument("--site", required=True)
@@ -694,7 +722,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 2
     try:
         if args.cmd == "jql":
-            result: Any = build_jql(args.scope)
+            if args.key is not None:
+                result: Any = build_key_jql(args.key)
+            else:
+                result = build_jql(args.scope, args.wide)
         elif args.cmd == "fetch":
             result = fetch(
                 args.site,

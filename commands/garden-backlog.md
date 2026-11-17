@@ -1,7 +1,7 @@
 ---
 description: Garden an existing tracker backlog ticket by ticket — judge each ticket's validity, kind, quality, size, importance and status, write a dry-run report, then apply only the owner-approved writes. Low-confidence verdicts go to a human queue instead of being written. The core is handler-agnostic; jira is the first handler, every other handler stops as not yet implemented.
 allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(python3 *), Bash(twg *), Bash("${CLAUDE_PLUGIN_ROOT}/scripts/work-tmp.sh":*), Glob, Grep, Read, Write, AskUserQuestion, Skill, Agent, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Atlassian__getJiraIssue, mcp__claude_ai_Atlassian__getTransitionsForJiraIssue, mcp__claude_ai_Atlassian__transitionJiraIssue, mcp__claude_ai_Atlassian__editJiraIssue, mcp__claude_ai_Atlassian__addCommentToJiraIssue, mcp__claude_ai_Atlassian__getJiraIssueTypeMetaWithFields, mcp__claude_ai_Atlassian__getJiraProjectIssueTypesMetadata, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__searchJiraIssuesUsingJql, mcp__atlassian__getJiraIssue, mcp__atlassian__getTransitionsForJiraIssue, mcp__atlassian__transitionJiraIssue, mcp__atlassian__editJiraIssue, mcp__atlassian__addCommentToJiraIssue, mcp__atlassian__getJiraIssueTypeMetaWithFields, mcp__atlassian__getJiraProjectIssueTypesMetadata
-argument-hint: "<scope> [dry-run] [--limit N] | apply <report-file>"
+argument-hint: "<epic> [--wide] [dry-run] [--limit N] | apply <report-file>"
 ---
 
 # Garden Backlog
@@ -36,8 +36,13 @@ If a path does not resolve (the plugin root was not substituted), find it with
 
 ## Arguments
 
-- `<scope>` — a project, epic, or query the handler understands. Missing → ask
-  via `AskUserQuestion` (header: "Scope").
+- `<scope>` — an epic key by default. Missing → ask via `AskUserQuestion`
+  (header: "Scope").
+- `--wide` — dry run only; `apply` rejects it. Lets `<scope>` be wider than one epic: a project, a
+  label, or a query the handler understands. Without it the handler refuses a
+  wider scope and the run **stops** with its message, which names `--wide`.
+  The reason is cost: one epic of 30 tickets took about 440k judge tokens
+  (#1561), so a 418-ticket project would take about 6M.
 - `dry-run` — the default. Judge every ticket in scope, write the report, write
   nothing to the tracker.
 - `apply <report-file>` — apply a report a previous dry run wrote. The scope comes
@@ -73,13 +78,16 @@ incomplete.
 
 The handler implements four operations. Everything it returns is symbolic.
 
-- **List** `(scope, limit)` → one row per open ticket in scope, paginated to the
+- **List** `(scope, wide, limit)` → one row per open ticket in scope, paginated to the
   end or to `limit`: `key`, `url`, `title`, `description`, `parent` (epic key or
   null), `status` (`initial` | `ready` | `refinement` | `started` | `other`),
   `updated_at`, `gardened_at` (the time of this command's newest provenance
   comment, or null), `size` and `size_human_set`, `importance` and
   `importance_human_set`, `kind` (`fix` | `spike`) and `kind_human_set`,
-  `linked_prs`. The handler defines **human-set** for its tracker — on Jira,
+  `linked_prs`. Without `wide`, List refuses any scope wider than one epic
+  before its first tracker read, with a message that names `--wide`; the
+  handler decides what counts as an epic on its tracker. The handler defines
+  **human-set** for its tracker — on Jira,
   priority is never empty, so it means a non-default value or a recorded change —
   and owns any adjustment needed so its own writes do not count as an update
   after `gardened_at`. A handler that cannot write kind returns `kind: null`.
@@ -106,7 +114,7 @@ quality: pass # or the failed condition's name, e.g. has_acceptance_criteria
 size: {
   fibonacci: 3,
   confidence: high,
-} # or { split: true, pointer: break-down-task }
+} # or { split: true, pointer: break-down-task, reason: "two flows" }
 importance: {
   level: major,
   confidence: high,
@@ -118,6 +126,7 @@ status: {
 } # ready | refinement | unchanged
 proposed_writes: [{ group: size, field: size, value: 3 }]
 human_queue: [] # reasons, one string each
+outcomes: [] # e.g. [{ tag: partly_done, reason: "...", evidence: "..." }]
 ```
 
 - `validity` is `validity.md`'s verdict and confidence; `evidence` is its list.
@@ -130,6 +139,12 @@ human_queue: [] # reasons, one string each
   `spike`. A `closure` write is the `garden:close-candidate` label;
   `human-queue` is the `garden:needs-human` label; `gardened` is the provenance
   comment alone.
+- `outcomes` carries the judge's three outcome tags that no other field
+  holds, each with a one-line `reason` and an `evidence` pointer:
+  `stale_description` (the code it names moved, or part of it shipped),
+  `partly_done` (some of the asked-for change is on the default branch), and
+  `product_decision` (it works as designed, so the open question is a product
+  call, not a bug; kind is then `unclear`). Empty when none applies.
 - An early-exit record carries `early_exit` and nothing else but `key`.
 
 ## 4. Judge each ticket (read-only)
@@ -144,7 +159,8 @@ human_queue: [] # reasons, one string each
 
 ### The ladder
 
-Run in order: **validity → kind → quality → size → importance → status.**
+Run in order: **validity → kind → quality → size → importance → status →
+outcomes.**
 Validity comes before quality because a closed ticket needs no better
 description.
 
@@ -179,6 +195,9 @@ description.
      to, the refinement status.
    - quality fail → `refinement`, reason = the failed condition's name.
    - Target equal to the current status → no write.
+7. **Outcomes** — tag each of §3's `outcomes` that the evidence above
+   supports. A ticket that works as designed is `kind: unclear` plus
+   `product_decision`, not a bug.
 
 ### What may be written
 
@@ -186,7 +205,8 @@ description.
   reason instead (`<field> low confidence: <why>`).
 - **Human-set values are never overwritten.** Where the verdict disagrees with a
   human-set size, importance or kind, record the disagreement in `human_queue` and
-  leave the field.
+  leave the field, worded `<field> <verdict> disagrees with human-set
+  <value>`; §5 groups size disagreements by that wording.
 - **Kind is written only at `high` confidence, and only where the handler can
   write it.** Propose a `kind` write when the verdict is `fix` or `spike` at
   `high`, the row's `kind` is not null, and the verdict differs from it. Where
@@ -225,14 +245,36 @@ prints, and print the path. It holds, in order:
 2. Counts: early exits, validity verdicts, kinds (and how many differ from
    the ticket's current kind), quality pass / each failed
    condition, status targets.
-3. Closure candidates, each with its evidence.
+3. **Overview by outcome**, one heading per group below, in this order, each
+   line `<key> — <one-line reason> (<evidence pointer>)`. A ticket may sit in
+   several groups; an empty group is left out.
+   - **Close candidates** — validity `fixed`, `duplicate` or `obsolete` at any
+     confidence; the verdict, its confidence and the first `evidence` entry.
+   - **Stale descriptions** — an `outcomes` tag `stale_description`.
+   - **Partly done** — an `outcomes` tag `partly_done`.
+   - **Product decisions rather than bugs** — an `outcomes` tag
+     `product_decision`.
+   - **Code located** — validity `valid` with a `file:line` in `evidence`;
+     that pointer is the evidence.
+   - **Size disagreements with a human-set size** — a `size … disagrees with
+     human-set …` reason in `human_queue`; that reason is the line.
+   - **Splits** — `size.split`; its `reason`, pointing at `break-down-task`.
 4. The human queue, each ticket with its reasons.
 5. Proposed writes grouped by `group`, one line per ticket.
-6. All records as one fenced `yaml` list — what `apply` reads.
+6. **Per-ticket table**: one row per record, early exits included, so every
+   ticket in the run appears here whether or not a group above lists it.
+   Columns: key, early exit, validity, kind, quality, size, importance,
+   status target, outcome groups.
+7. All records as one fenced `yaml` list — what `apply` reads.
 
 Then print a chat summary of sections 2–5 and the path.
 
 ## 6. Apply (gated)
+
+`apply` given `--wide` or `--limit` → **stop** with: "`--wide` and `--limit`
+shape a dry run's scope; `apply` takes its tickets from the report. Drop the
+flag." Apply runs no scope gate: it reads each ticket by key, so a report from
+a `--wide` run applies like any other.
 
 1. Read the report's records. For each ticket with proposed writes, **Read** it
    fresh; if `updated_at` is later than the report's run time, skip it and list it

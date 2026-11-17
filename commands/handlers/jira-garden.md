@@ -37,12 +37,18 @@ failed. If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
 
 ## 1. Preflight and config
 
-1. **Backend.** Resolve it per `jira.md` step 1 and stop with its messages on
+1. **Scope gate, first — dry run only.** Run List step 1's `jql` call before
+   anything else. Exit `2` stops the run with the message it prints: that is
+   how a project key or JQL scope without `--wide` stops, before any tracker
+   read. Skip it at `apply`: apply reaches each ticket through Read
+   (`jql --key`), which takes no scope, so a report from a `--wide` run applies
+   without the flag.
+2. **Backend.** Resolve it per `jira.md` step 1 and stop with its messages on
    failure. **Prefer `twg`.** A backlog of hundreds of tickets, with
    descriptions and comments, is paged by `fetch` straight into files on
    `twg`; on the MCP every page passes through the conversation twice — once
    as the tool result, once written to a file.
-2. **Keys.** From `dev_docs/tasks/.task-config.yml` read `jira.site`,
+3. **Keys.** From `dev_docs/tasks/.task-config.yml` read `jira.site`,
    `jira.project`, `jira.issue_type`, `jira.ready_status`,
    `jira.refinement_status`, `jira.blocked_statuses`, `jira.estimate_field` and
    `jira.priority_map`. This flow adds no key of its own.
@@ -54,7 +60,7 @@ failed. If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
      start it.
    - `estimate_field` or `priority_map` unset → that field's proposals stay
      report-only; `fields` (step 4) reports them rather than writing.
-3. **Project default priority.** Call
+4. **Project default priority.** Call
    `<atlassian-mcp>__getJiraIssueTypeMetaWithFields` (`cloudId: <jira.site>`,
    `projectIdOrKey: <project>`, the `issueTypeId` of `jira.issue_type`,
    `requiredFieldsOnly: false`) and take the `priority` field's
@@ -63,7 +69,7 @@ failed. If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
    MCP's. If the MCP is not loaded, ask the owner which priority is the
    default, offering the `priority_map` values. "Human-set" priority depends
    on it, so `rows` refuses to run without one.
-4. **Project issue types** — at apply only, and only when an approved group
+5. **Project issue types** — at apply only, and only when an approved group
    is `kind`. Call `<atlassian-mcp>__getJiraProjectIssueTypesMetadata`
    (`cloudId: <jira.site>`, `projectIdOrKey: <project>`) and Write the
    response verbatim to `<dir>/issue-types.json`; `fields` (step 4) resolves a
@@ -75,12 +81,13 @@ failed. If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
 1. **Build the queries:**
 
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-garden.py" jql --scope "<scope>"
+   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-garden.py" jql --scope "<scope>" [--wide]
    ```
 
-   It prints `{candidates, priority_changed}`. `<scope>` is a project key, an
-   epic key (its children, via `parent`), or a JQL fragment without
-   `ORDER BY`. Both queries take open, non-epic tickets outside an active
+   It prints `{candidates, priority_changed}`. `<scope>` is an epic key (its
+   children, via `parent`); with `--wide`, also a project key or a JQL
+   fragment without `ORDER BY` (a label scope is a JQL fragment, such as
+   `labels = x`). Pass `--wide` exactly when the core was given it. Both queries take open, non-epic tickets outside an active
    sprint, in every status category but Done — `On Hold/Blocked` and
    `Ready for Development` included — ordered by key so pages are stable.
    `priority_changed` is the same set narrowed by `priority CHANGED`: one query
@@ -136,8 +143,9 @@ failed. If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
 
 ## 3. Read `(key)`
 
-The same three calls as List, with `--scope 'key = "<KEY>"'` and no limit: one
-code path, one row shape. A ticket the query no longer returns — moved into an
+The same three calls as List, with `jql --key <KEY>` in place of `--scope` and
+no limit: one code path, one row shape, and no epic gate, since one ticket is
+never a wide scope. A ticket the query no longer returns — moved into an
 active sprint, done, or turned into an epic since the dry run — is reported as
 changed since the dry run and skipped.
 
