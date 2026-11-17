@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.219.0] - 2026-11-17
+
+### Features
+
+- add a cheapest-first ticket validity ladder [#1519] (#1552) (608a5a82)
+
 ## [2.218.3] - 2026-11-17
 
 ### Fixes
