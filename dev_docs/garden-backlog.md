@@ -12,8 +12,7 @@ This doc records why the command is shaped the way it is. How it runs — the
 arguments, the record schema, the report sections, the apply steps — is
 [`commands/garden-backlog.md`](../commands/garden-backlog.md), and this doc
 does not repeat it. It graduates the design from milestone
-[#21](https://github.com/bestdan/workflow-skills/milestone/21), built in PRs
-#1550, #1551, #1552, #1553, #1554, #1556, #1557, #1559, #1564, #1565 and #1566.
+[#21](https://github.com/bestdan/workflow-skills/milestone/21).
 
 The motivating case was Betterment's IP (Insights & Planning) Jira backlog: 402
 open tickets on 2026-11-12, 283 with no Story Points and 308 at the default
@@ -120,8 +119,10 @@ consumer of the same rules `/promote-tasks` and `/add-task` use:
   read: moving it to the ready status would tell a reader, and the task loop,
   that it can be picked up while it cannot. Neither gets the "gardened" mark,
   so the next run judges it again. Started work is never moved.
-- **Status is a verdict, not a default.** A ticket sits in the refinement status
-  only when the quality check failed, and the report names the condition. The
+- **Status is a verdict, not a default.** The command targets the refinement
+  status only when the quality check failed, and the report names the
+  condition. A ticket held by a blocker, or whose quality verdict is unknown,
+  keeps its current status, which may already be the refinement status. The
   statuses reuse `/promote-tasks`' `ready_status` and `refinement_status` keys.
 - **Importance has its own five-level scale** (`blocker` / `critical` / `major`
   / `minor` / `trivial`), mapped one-to-one onto a site's priority names.
