@@ -176,9 +176,10 @@ the auth flows):
   that section's message, or with `jira.md` step 1's when the MCP was the
   backend tried.
 
-  When `jira.estimate_field` or `jira.priority_map` is set, also make one
-  metadata read; see `jira-config.md` → "Estimate and priority encoding". The
-  tool takes an issue-type **id**, and `jira.issue_type` is a name, so first
+  When `jira.estimate_field` or `jira.priority_map` is set, also read the issue
+  type's create metadata; see `jira-config.md` → "Estimate and priority
+  encoding". The metadata tool takes an issue-type **id**, and
+  `jira.issue_type` is a name, so first
   call `<atlassian-mcp>__getJiraProjectIssueTypesMetadata`
   (`cloudId: <jira.site>`, `projectIdOrKey: <jira.project>`) and take the `id`
   of the type whose `name` is `jira.issue_type` (no match →
@@ -188,7 +189,7 @@ the auth flows):
   `requiredFieldsOnly: false` — the default returns required fields only, which
   hides an optional Story Points field). The call is MCP-only, whatever
   backend resolved; with no Atlassian MCP reachable, `WARN: could not confirm`
-  both keys. Create-screen metadata can omit a field the site has, so neither
+  the set keys. Create-screen metadata can omit a field the site has, so neither
   result is ever "does not exist":
   - `estimate_field` → `PASS` when the id is among the returned fields, else
     `WARN: could not confirm <id> on <project>/<issue_type>`.
