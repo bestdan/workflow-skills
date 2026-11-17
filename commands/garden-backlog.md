@@ -199,9 +199,10 @@ description.
    finalize` derives it (**Fan-out**); the rules it applies:
    - `started` (in progress, in review, blocked) or `other` → `unchanged`,
      always.
-   - quality pass and an unresolved blocker, or `blocked_by` null →
-     `unchanged`, reason `blocked by <keys>`, and no `gardened` write, so the
-     next run judges it again once the blocker clears.
+   - quality pass and an unresolved blocker → `unchanged`, reason `blocked by
+     <keys>`; quality pass and `blocked_by` null → `unchanged`, reason
+     `blocker links were not read`. Neither gets a `gardened` write, so the
+     next run judges it again.
    - quality pass → `ready`; a quality-passing ticket is never left in, or moved
      to, the refinement status.
    - quality fail → `refinement`, reason = the failed condition's name.
@@ -245,7 +246,10 @@ the **Write** tool.
 1. **Before.** Once the handler has resolved `own_pr` on the rows, run
    `python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/garden-checks.py" prejudge --rows <rows file>`.
    It adds `checks.has_acceptance_criteria` (`pass` | `fail`) and the forms it
-   found. The judges get these rows, never the ones before it ran.
+   found. Write its stdout to a file in the directory
+   `"${CLAUDE_PLUGIN_ROOT}/scripts/work-tmp.sh" --sub garden-backlog` prints:
+   that file is the rows the judges get, never the ones before it ran, and the
+   `--rows` step 3 passes to `finalize`.
 2. **Judge.** Group the rows by `parent` (null is its own group); split a group
    above 25 tickets into chunks. Hand each group to one `Agent` subagent whose
    brief is §3 and §4 of this file, the rubric paths in the table above, the

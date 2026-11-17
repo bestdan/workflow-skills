@@ -105,6 +105,7 @@ class AcceptanceCriteria(unittest.TestCase):
         out = final(row(), record(quality="has_acceptance_criteria"))
         self.assertEqual(groups(out), ["human-queue"])
         self.assertTrue(any("later conditions" in q for q in out["human_queue"]))
+        self.assertEqual(out["status"]["target"], "unchanged")
 
 
 class Status(unittest.TestCase):

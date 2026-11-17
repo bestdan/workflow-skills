@@ -250,6 +250,9 @@ def finalize_one(record: Dict[str, Any], row: Optional[Dict[str, Any]]) -> None:
         )
     elif quality == "pass":
         target, reason = "ready", "quality pass"
+    elif quality_unknown:
+        target = "unchanged"
+        reason = "quality unknown: the judge failed has_acceptance_criteria but the check passed"
     else:
         target, reason = "refinement", str(quality)
     record["status"] = {"target": target, "reason": reason}
