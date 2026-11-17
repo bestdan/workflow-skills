@@ -271,6 +271,11 @@ Then print a chat summary of sections 2–5 and the path.
 
 ## 6. Apply (gated)
 
+`apply` given `--wide` or `--limit` → **stop** with: "`--wide` and `--limit`
+shape a dry run's scope; `apply` takes its tickets from the report. Drop the
+flag." Apply runs no scope gate: it reads each ticket by key, so a report from
+a `--wide` run applies like any other.
+
 1. Read the report's records. For each ticket with proposed writes, **Read** it
    fresh; if `updated_at` is later than the report's run time, skip it and list it
    as changed since the dry run.

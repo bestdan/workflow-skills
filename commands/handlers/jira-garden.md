@@ -37,9 +37,12 @@ failed. If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
 
 ## 1. Preflight and config
 
-1. **Scope gate, first.** Run List step 1's `jql` call before anything else.
-   Exit `2` stops the run with the message it prints: that is how a project
-   key or JQL scope without `--wide` stops, before any tracker read.
+1. **Scope gate, first — dry run only.** Run List step 1's `jql` call before
+   anything else. Exit `2` stops the run with the message it prints: that is
+   how a project key or JQL scope without `--wide` stops, before any tracker
+   read. Skip it at `apply`: apply reaches each ticket through Read
+   (`jql --key`), which takes no scope, so a report from a `--wide` run applies
+   without the flag.
 2. **Backend.** Resolve it per `jira.md` step 1 and stop with its messages on
    failure. **Prefer `twg`.** A backlog of hundreds of tickets, with
    descriptions and comments, is paged by `fetch` straight into files on
