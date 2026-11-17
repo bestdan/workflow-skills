@@ -8,9 +8,11 @@ shapes are the ones twg 1.4.4 and the Atlassian MCP returned for IP on
 
 import argparse
 import importlib.util
+import io
 import json
 import os
 import re
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -136,6 +138,15 @@ class JqlTest(unittest.TestCase):
         ):
             self.assertIn(clause, q)
 
+    def test_lowercase_key_is_a_key_not_jql(self) -> None:
+        self.assertTrue(
+            garden.build_jql(" ip ", wide=True)["candidates"].startswith(
+                'project = "IP" AND'
+            )
+        )
+        self.assertIn('parent = "IP-12" AND', garden.build_jql("ip-12")["candidates"])
+        self.assertIn('key = "IP-7"', garden.build_key_jql("ip-7")["candidates"])
+
     def test_order_by_in_scope_rejected(self) -> None:
         with self.assertRaises(garden.InputError):
             garden.build_jql("project = IP order by created", wide=True)
@@ -219,6 +230,26 @@ class FetchTest(unittest.TestCase):
         self.stub([self.page(["A-1"], "c1"), self.page(["A-2"], "c1")])
         with self.assertRaises(garden.TwgFailed):
             garden.fetch("s", "jql", "summary", self.tmp.name, None, 1)
+
+    def test_unwritable_out_dir_is_bad_input(self) -> None:
+        self.stub([self.page(["A-1"], None)])
+        blocker = os.path.join(self.tmp.name, "file")
+        Path(blocker).write_text("")
+        with self.assertRaises(garden.InputError):
+            garden.fetch("s", "jql", "summary", os.path.join(blocker, "d"), None, 1)
+        os.chmod(self.tmp.name, 0o500)
+        try:
+            with self.assertRaises(garden.InputError):
+                garden.fetch("s", "jql", "summary", self.tmp.name, None, 1)
+        finally:
+            os.chmod(self.tmp.name, 0o700)
+
+    def test_page_size_below_one_exits_2(self) -> None:
+        argv = ["fetch", "--site", "s", "--jql", "j", "--fields", "f"]
+        argv += ["--out-dir", self.tmp.name, "--page-size", "0"]
+        with mock.patch.object(sys, "stderr", io.StringIO()):
+            self.assertEqual(garden.main(argv), 2)
+        self.assertEqual(self.calls, [])
 
     def test_failed_call(self) -> None:
         self.stub([{"ok": False}], rc=1)
@@ -538,6 +569,42 @@ class RowTest(unittest.TestCase):
             args.default_priority = None
             with self.assertRaises(garden.InputError):
                 garden.build_rows(args)
+
+    def rows_from(self, issues: List[Dict[str, Any]], **over: Any) -> Dict[str, Any]:
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "p.json")
+            Path(p).write_text(json.dumps({"issues": issues}))
+            args = cfg(pages=[p], changed_pages=None, limit=None, limit_cut=False)
+            for k, v in over.items():
+                setattr(args, k, v)
+            return garden.build_rows(args)
+
+    def test_unset_refinement_is_inferred_from_the_one_unready_status(self) -> None:
+        issues = [
+            issue("IP-1"),
+            issue("IP-2", status=status("Ready for Development", "new")),
+            issue("IP-3", status=status("On Hold/Blocked", "new")),
+            issue("IP-4", status=status("In Progress", "indeterminate")),
+        ]
+        out = self.rows_from(issues, refinement_status=None)
+        self.assertEqual(out["refinement_status"], "Needs Refinement")
+        self.assertEqual(out["refinement_status_source"], "inferred")
+        self.assertEqual(
+            [r["status"] for r in out["rows"]],
+            ["refinement", "ready", "started", "started"],
+        )
+        configured = self.rows_from(issues)
+        self.assertEqual(configured["refinement_status_source"], "config")
+
+    def test_unset_refinement_refuses_when_not_exactly_one(self) -> None:
+        two = [issue("IP-1"), issue("IP-2", status=status("Backlog", "new"))]
+        none = [issue("IP-1", status=status("Ready for Development", "new"))]
+        for issues in (two, none):
+            with self.subTest(n=len(issues)):
+                with self.assertRaisesRegex(
+                    garden.InputError, "jira.refinement_status is unset"
+                ):
+                    self.rows_from(issues, refinement_status=None)
 
 
 class FieldsTest(unittest.TestCase):
