@@ -1,6 +1,6 @@
 ---
 description: Garden an existing tracker backlog ticket by ticket — judge each ticket's validity, kind, quality, size, importance and status, write a dry-run report, then apply only the owner-approved writes. Low-confidence verdicts go to a human queue instead of being written. The core is handler-agnostic; jira is the first handler, every other handler stops as not yet implemented.
-allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(python3 *), Bash(twg *), Bash("${CLAUDE_PLUGIN_ROOT}/scripts/work-tmp.sh":*), Glob, Grep, Read, Write, AskUserQuestion, Skill, Agent, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Atlassian__getJiraIssue, mcp__claude_ai_Atlassian__getTransitionsForJiraIssue, mcp__claude_ai_Atlassian__transitionJiraIssue, mcp__claude_ai_Atlassian__editJiraIssue, mcp__claude_ai_Atlassian__addCommentToJiraIssue, mcp__claude_ai_Atlassian__getJiraIssueTypeMetaWithFields, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__searchJiraIssuesUsingJql, mcp__atlassian__getJiraIssue, mcp__atlassian__getTransitionsForJiraIssue, mcp__atlassian__transitionJiraIssue, mcp__atlassian__editJiraIssue, mcp__atlassian__addCommentToJiraIssue, mcp__atlassian__getJiraIssueTypeMetaWithFields
+allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(python3 *), Bash(twg *), Bash("${CLAUDE_PLUGIN_ROOT}/scripts/work-tmp.sh":*), Glob, Grep, Read, Write, AskUserQuestion, Skill, Agent, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Atlassian__getJiraIssue, mcp__claude_ai_Atlassian__getTransitionsForJiraIssue, mcp__claude_ai_Atlassian__transitionJiraIssue, mcp__claude_ai_Atlassian__editJiraIssue, mcp__claude_ai_Atlassian__addCommentToJiraIssue, mcp__claude_ai_Atlassian__getJiraIssueTypeMetaWithFields, mcp__claude_ai_Atlassian__getJiraProjectIssueTypesMetadata, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__searchJiraIssuesUsingJql, mcp__atlassian__getJiraIssue, mcp__atlassian__getTransitionsForJiraIssue, mcp__atlassian__transitionJiraIssue, mcp__atlassian__editJiraIssue, mcp__atlassian__addCommentToJiraIssue, mcp__atlassian__getJiraIssueTypeMetaWithFields, mcp__atlassian__getJiraProjectIssueTypesMetadata
 argument-hint: "<scope> [dry-run] [--limit N] | apply <report-file>"
 ---
 
@@ -78,10 +78,11 @@ The handler implements four operations. Everything it returns is symbolic.
   null), `status` (`initial` | `ready` | `refinement` | `started` | `other`),
   `updated_at`, `gardened_at` (the time of this command's newest provenance
   comment, or null), `size` and `size_human_set`, `importance` and
-  `importance_human_set`, `linked_prs`. The handler defines **human-set** for its
-  tracker — on Jira, priority is never empty, so it means a non-default value or a
-  recorded change — and owns any adjustment needed so its own writes do not count
-  as an update after `gardened_at`.
+  `importance_human_set`, `kind` (`fix` | `spike`) and `kind_human_set`,
+  `linked_prs`. The handler defines **human-set** for its tracker — on Jira,
+  priority is never empty, so it means a non-default value or a recorded change —
+  and owns any adjustment needed so its own writes do not count as an update
+  after `gardened_at`. A handler that cannot write kind returns `kind: null`.
 - **Read** `(key)` → the same row for one ticket, fresh. Apply uses it.
 - **Write** `(key, writes)` → apply one ticket's approved writes and return what
   landed. Status targets are `ready` / `refinement`; the handler maps them to
@@ -124,8 +125,9 @@ human_queue: [] # reasons, one string each
   stable name, applying the rows a tracker handler cites (that section says
   which). Over-ceiling size takes the reason slot per `task-fill.md` → **Reason
   precedence**.
-- `proposed_writes` groups are `closure`, `human-queue`, `size`, `importance`,
-  `status`, `gardened`. A `closure` write is the `garden:close-candidate` label;
+- `proposed_writes` groups are `closure`, `human-queue`, `kind`, `size`,
+  `importance`, `status`, `gardened`. A `kind` write's value is `fix` or
+  `spike`. A `closure` write is the `garden:close-candidate` label;
   `human-queue` is the `garden:needs-human` label; `gardened` is the provenance
   comment alone.
 - An early-exit record carries `early_exit` and nothing else but `key`.
@@ -160,7 +162,8 @@ description.
    deliverable is an answer (an unknown approach, a question to settle). The
    `assess-task` profile is the input — `complexity: hard` with an unclear
    approach leans `spike`. Torn → `unclear`, `confidence: low`, human queue.
-   Kind is never written; it informs the reader and the quality read.
+   Kind informs the reader and the quality read, and is written only as
+   **What may be written** says.
 3. **Quality** — the Confidence check, as `quality` above says. A spike passes
    like a fix: a clear question with a checkable definition of done meets
    `has_acceptance_criteria`.
@@ -182,8 +185,14 @@ description.
 - **Low confidence proposes no write for that field** and adds a `human_queue`
   reason instead (`<field> low confidence: <why>`).
 - **Human-set values are never overwritten.** Where the verdict disagrees with a
-  human-set size or importance, record the disagreement in `human_queue` and
+  human-set size, importance or kind, record the disagreement in `human_queue` and
   leave the field.
+- **Kind is written only at `high` confidence, and only where the handler can
+  write it.** Propose a `kind` write when the verdict is `fix` or `spike` at
+  `high`, the row's `kind` is not null, and the verdict differs from it. Where
+  the row's `kind` is human-set, the disagreement goes to `human_queue`
+  (`kind <verdict> disagrees with human-set <kind>`) instead. A `kind: null`
+  row gets no kind write: the report carries the verdict alone.
 - **Importance is written only once `importance.md` is signed off.** While its
   PM / EM sign-off table is empty, record the level and propose no importance
   write; the report says why once, not per ticket.
@@ -213,7 +222,8 @@ prints, and print the path. It holds, in order:
 
 1. Scope, handler, run time, the importance overlay path (or none), and
    whether `--limit` cut the scope.
-2. Counts: early exits, validity verdicts, kinds, quality pass / each failed
+2. Counts: early exits, validity verdicts, kinds (and how many differ from
+   the ticket's current kind), quality pass / each failed
    condition, status targets.
 3. Closure candidates, each with its evidence.
 4. The human queue, each ticket with its reasons.
@@ -234,8 +244,8 @@ Then print a chat summary of sections 2–5 and the path.
    (the bound is the batch-writes incident in
    `${CLAUDE_PLUGIN_ROOT}/commands/handlers/jira-promote.md` → **5. Apply**).
 4. Each written ticket gets **one** provenance comment through **Comment**: the
-   marker `garden-backlog`, the date, each field changed with its old and new
-   value and the reason, and the human-queue reasons if any.
+   marker `garden-backlog`, the date, each field changed (kind included) with
+   its old and new value and the reason, and the human-queue reasons if any.
 5. Print what was applied, skipped and failed.
 
 **Hard rules:** never close a ticket or move it to a done status; never

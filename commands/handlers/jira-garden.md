@@ -63,6 +63,12 @@ failed. If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
    MCP's. If the MCP is not loaded, ask the owner which priority is the
    default, offering the `priority_map` values. "Human-set" priority depends
    on it, so `rows` refuses to run without one.
+4. **Project issue types** — at apply only, and only when an approved group
+   is `kind`. Call `<atlassian-mcp>__getJiraProjectIssueTypesMetadata`
+   (`cloudId: <jira.site>`, `projectIdOrKey: <project>`) and Write the
+   response verbatim to `<dir>/issue-types.json`; `fields` (step 4) resolves a
+   kind write's target id from it. If the MCP is not loaded, skip this read:
+   every kind write then lands in `report_only` rather than being guessed.
 
 ## 2. List `(scope, limit)`
 
@@ -102,7 +108,7 @@ failed. If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
 3. **Build the rows:**
 
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-garden.py" rows --pages <candidate pages> --changed-pages <priority_changed pages> --default-priority "<name>" --ready-status "<ready_status>" --refinement-status "<refinement_status>" [--blocked-status "<name>" ...] [--estimate-field <id>] [--priority-map-json '<map as JSON>'] --site <jira.site> [--limit <N>] [--limit-cut]
+   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-garden.py" rows --pages <candidate pages> --changed-pages <priority_changed pages> --default-priority "<name>" --ready-status "<ready_status>" --refinement-status "<refinement_status>" [--blocked-status "<name>" ...] [--estimate-field <id>] [--priority-map-json '<map as JSON>'] --issue-type "<jira.issue_type>" --site <jira.site> [--limit <N>] [--limit-cut]
    ```
 
    Pass `--limit-cut` when `fetch` (or the MCP loop) stopped at the limit. It
@@ -122,6 +128,10 @@ failed. If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
      recorded a priority write did not write this value.
    - `importance` — `priority_map` read backwards over the five importance
      levels only; `null` when the name maps to none.
+   - `kind` — `spike` when the issue type is `Spike`, otherwise `fix`.
+   - `kind_human_set` — the type is not `jira.issue_type` (the creation
+     type), or a provenance comment recorded a kind write and the type no
+     longer matches it. The script's docstring names the case this misses.
    - `linked_prs` — the ticket's own-PR trail per **Validity rung 1** below.
 
 ## 3. Read `(key)`
@@ -139,15 +149,18 @@ Apply one ticket's approved writes. Read it fresh first (step 3).
    and the fresh row's `labels` to `<dir>/<KEY>-labels.json`, then:
 
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-garden.py" fields --writes <dir>/<KEY>-writes.json --labels <dir>/<KEY>-labels.json --ready-status "<ready_status>" --refinement-status "<refinement_status>" [--estimate-field <id>] [--priority-map-json '<map as JSON>']
+   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-garden.py" fields --writes <dir>/<KEY>-writes.json --labels <dir>/<KEY>-labels.json --ready-status "<ready_status>" --refinement-status "<refinement_status>" [--estimate-field <id>] [--priority-map-json '<map as JSON>'] --issue-type "<jira.issue_type>" [--issue-types <dir>/issue-types.json]
    ```
 
-   It prints `{fields, transition_to, report_only}`: the estimate into
+   It prints `{fields, issuetype, transition_to, report_only}`: the estimate into
    `estimate_field`, the importance level as the priority name
    `priority_map` gives it, `garden:close-candidate` / `garden:needs-human`
    merged into the labels (an edit replaces the whole label set, which is why
-   the labels come from the fresh read), and the status name to move to.
-   `report_only` lines go to the apply summary, not the tracker.
+   the labels come from the fresh read), the status name to move to, and a
+   kind write as the target issue type's id (`Spike` for `spike`,
+   `jira.issue_type` for `fix`). A project without that type, subtask types
+   aside, gives a `report_only` line and no `issuetype`. `report_only` lines
+   go to the apply summary, not the tracker.
 2. **Edit**, when `fields` is non-empty: one `<atlassian-mcp>__editJiraIssue`
    (`cloudId`, `issueIdOrKey: <KEY>`, `fields: <fields>`).
 3. **Transition**, when `transition_to` is set and differs from the ticket's
@@ -159,17 +172,17 @@ Apply one ticket's approved writes. Read it fresh first (step 3).
    the transitions the ticket offers, as `jira-promote.md` step 5 does. A
    `started` or `other` ticket never reaches here: the core targets it
    `unchanged`.
-4. Return what landed and what failed, per call.
+4. **Issue type**, when `issuetype` is set: one more
+   `<atlassian-mcp>__editJiraIssue` with `fields: {"issuetype": <issuetype>}`,
+   on its own so that a refusal leaves the other writes standing. Jira refuses
+   a type change between workflows or field configurations, which only its
+   Move screen can do; report that refusal as this ticket's failed kind write.
+5. Return what landed and what failed, per call.
 
 **Bounded writes.** Tickets go serially, or in concurrent groups of at most
 5, each group finished before the next; the incident behind the bound is in
 `jira-promote.md` step 5. Every write is its own tool call: auto mode denies
 a loop-shaped batch however short the list.
-
-**Issue type.** The core never writes kind (`garden-backlog.md` §4, step 2),
-so this handler changes no issue type. A ticket judged `spike` whose
-`issuetype` is not `Spike` gets a report line proposing the change, for a
-human to make.
 
 ## 5. Comment `(key, body)`
 
@@ -177,7 +190,8 @@ After the ticket's writes, and always as its last write: the comment's own
 bump is what step 2 excludes from `updated_at`, which works only if nothing
 follows it. Write the comment spec —
 `{date, changes: [{field, old, new, reason}], labels, human_queue}`, `field`
-one of `size`, `importance` (old and new as priority names), `status` — to
+one of `size`, `importance` (old and new as priority names), `kind` (old and
+new as issue-type names), `status` — to
 `<dir>/<KEY>-comment.json`, then:
 
 ```bash
@@ -205,5 +219,6 @@ read — the resolver lands that ticket in `unresolved`, never in "no PR".
 
 Never close a ticket or transition it to a Done-category status. Never
 transition into a started status. Never write a field whose config key is
-unset. Never overwrite a human-set value — the core proposes no such write,
+unset, and never change an issue type except through an approved `kind`
+write. Never overwrite a human-set value — the core proposes no such write,
 and `fields` is not where that is decided.
