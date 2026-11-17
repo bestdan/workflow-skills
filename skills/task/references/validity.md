@@ -82,7 +82,9 @@ Stop at the first conclusive rung. Record each rung you ran in `evidence`.
    Still there and still behaving so → `valid`. Changed so the described
    behaviour cannot occur, with the change traced to a PR or commit (`git
    blame`, `git log -L`) → `fixed`. Gone, with the removing commit from rung
-   2 → `obsolete`. Not found, or changed with no traceable cause → `unsure`.
+   2 reachable from `origin/HEAD` (`git merge-base --is-ancestor <sha>
+   origin/HEAD`) → `obsolete`. Not found, changed with no traceable cause, or
+   removed only by a commit `origin/HEAD` does not contain → `unsure`.
 
 4. **Production signal** (optional; bugs only; only when the calling command
    or the repo's config enables it). Datadog logs or a Sentry issue for the
@@ -120,8 +122,8 @@ over `valid` and `unsure`.
 `confidence` is `high` (the evidence settles it on its own), `medium` (it
 needs one inference a reader can check), or `low`. A `fixed` that is not
 `high` is reported as `unsure`, with the lead as evidence. Every `fixed` needs
-evidence a human can check in under a minute: a PR link and the line it
-changed, not a narrative.
+evidence a human can check in under a minute: a link to the PR or commit and
+the line it changed, not a narrative.
 
 One object per ticket:
 

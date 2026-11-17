@@ -9,8 +9,10 @@ argument-hint: "<epic> [--wide] [dry-run] [--limit N] | apply <report-file>"
 Tend a backlog that was filled haphazardly: for each open ticket, decide whether
 it is still valid, whether it is a known fix or a spike, whether it is described
 well enough to pick up, how big it is, how important it is, and which status it
-belongs in. Nothing is written until the owner approves the dry-run report, and
-any verdict the judge is unsure of goes to a human instead of the tracker.
+belongs in. **Dry run is the default: nothing is written to the tracker without
+`apply`**, and `apply` writes only what the owner approves from a dry-run
+report. Any verdict the judge is unsure of goes to a human instead of the
+tracker.
 
 **The split.** This file owns the judgment and the per-ticket record. The handler
 file owns the tracker I/O — the backlog query, the field reads, the writes — and
