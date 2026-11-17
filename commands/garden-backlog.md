@@ -29,7 +29,7 @@ apply.
 | quality    | `${CLAUDE_PLUGIN_ROOT}/skills/task/SKILL.md` → **Confidence check**, by condition name                                              |
 | size       | `${CLAUDE_PLUGIN_ROOT}/skills/task/SKILL.md` → **Task size**; `${CLAUDE_PLUGIN_ROOT}/commands/handlers/task-fill.md` → **Estimate** |
 | split      | `${CLAUDE_PLUGIN_ROOT}/skills/break-down-task/SKILL.md`                                                                             |
-| importance | `${CLAUDE_PLUGIN_ROOT}/skills/task/references/importance.md`                                                                        |
+| importance | `${CLAUDE_PLUGIN_ROOT}/skills/task/references/importance.md`, then the repo overlay when one is set (§1)                            |
 
 If a path does not resolve (the plugin root was not substituted), find it with
 **Glob** (`**/<path>`).
@@ -59,6 +59,15 @@ does (`commands/task-config.md` → "Resolving the handler").
   "`/garden-backlog` is not yet implemented for the `<handler>` handler."
 - Unknown value → **stop** with: "Unknown task handler `<value>` in
   dev_docs/tasks/.task-config.yml. Run /task-config to fix it."
+
+Then read `garden.importance_overlay` from the same merged view. Unset → the
+generic rubric alone. Set → a path relative to the repo root
+(`git rev-parse --show-toplevel`) to the overlay `importance.md` → **Repo
+overlay** describes. If the value is not a string, or `<root>/<path>` is not a
+file, **stop** with: "`garden.importance_overlay` must name a file in the repo;
+`<value>` does not. Fix the path or unset the key." Without the overlay,
+importance would be judged on the generic harms the repo has said are
+incomplete.
 
 ## 2. The handler contract
 
@@ -158,7 +167,8 @@ description.
 4. **Size** — a Fibonacci estimate on the `1`/`2`/`3`/`5` scale, judged as
    `task-fill.md` → **Estimate** says, using the `assess-task` `scope` read. Over
    `5` → `split: true` with a pointer to `break-down-task`; no size write.
-5. **Importance** — `importance.md`'s level, confidence and one-line reason.
+5. **Importance** — `importance.md`'s level, confidence and one-line reason,
+   with the overlay's harms and examples read in when one is set.
 6. **Status** — from the verdicts, never from the default:
    - `started` (in progress, in review, blocked) or `other` → `unchanged`,
      always.
@@ -189,9 +199,10 @@ description.
 
 Group the listing rows by `parent` (null is its own group); split a group above
 25 tickets into chunks. Hand each group to one `Agent` subagent whose brief is
-§3 and §4 of this file, the rubric paths in the table above, and the group's
-rows. Subagents read; they never write. Run no more at once than the session's
-agent budget allows. Merge their records; a candidate with no record, or a
+§3 and §4 of this file, the rubric paths in the table above, the overlay's
+absolute path (resolved in §1) when one is set, and the group's rows. Subagents
+read; they never write. Run no more at once than the session's agent budget
+allows. Merge their records; a candidate with no record, or a
 record that fails §3's shape, gets one whose `human_queue` says so.
 
 ## 5. Dry-run report
@@ -200,7 +211,8 @@ Write the report to `<dir>/<scope-slug>-<UTC yyyymmddTHHMMSSZ>.md`, where `<dir>
 is what `"${CLAUDE_PLUGIN_ROOT}/scripts/work-tmp.sh" --sub garden-backlog`
 prints, and print the path. It holds, in order:
 
-1. Scope, handler, run time, and whether `--limit` cut the scope.
+1. Scope, handler, run time, the importance overlay path (or none), and
+   whether `--limit` cut the scope.
 2. Counts: early exits, validity verdicts, kinds, quality pass / each failed
    condition, status targets.
 3. Closure candidates, each with its evidence.
