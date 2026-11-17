@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.224.3] - 2026-11-17
+
+### Fixes
+
+- keep ADF heading levels so an empty AC heading fails [#1567] (#1568) (a41bd787)
+
 ## [2.224.2] - 2026-11-17
 
 ### Fixes
