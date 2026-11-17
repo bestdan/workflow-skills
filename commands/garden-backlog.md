@@ -1,7 +1,7 @@
 ---
 description: Garden an existing tracker backlog ticket by ticket — judge each ticket's validity, kind, quality, size, importance and status, write a dry-run report, then apply only the owner-approved writes. Low-confidence verdicts go to a human queue instead of being written. The core is handler-agnostic; jira is the first handler (planned), every other handler stops as not yet implemented.
 allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(python3 *), Bash(twg *), Bash("${CLAUDE_PLUGIN_ROOT}/scripts/work-tmp.sh":*), Glob, Grep, Read, Write, AskUserQuestion, Skill, Agent, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql, mcp__claude_ai_Atlassian__getJiraIssue, mcp__claude_ai_Atlassian__getTransitionsForJiraIssue, mcp__claude_ai_Atlassian__transitionJiraIssue, mcp__claude_ai_Atlassian__editJiraIssue, mcp__claude_ai_Atlassian__addCommentToJiraIssue, mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__searchJiraIssuesUsingJql, mcp__atlassian__getJiraIssue, mcp__atlassian__getTransitionsForJiraIssue, mcp__atlassian__transitionJiraIssue, mcp__atlassian__editJiraIssue, mcp__atlassian__addCommentToJiraIssue
-argument-hint: "<scope> [dry-run] | apply <report-file> [--limit N]"
+argument-hint: "<scope> [dry-run] [--limit N] | apply <report-file>"
 ---
 
 # Garden Backlog
@@ -42,7 +42,8 @@ If a path does not resolve (the plugin root was not substituted), find it with
   nothing to the tracker.
 - `apply <report-file>` — apply a report a previous dry run wrote. The scope comes
   from the report; no re-judging.
-- `--limit N` — list at most `N` tickets, early exits included. The report says
+- `--limit N` — dry run only; `apply` rejects it. List at most `N` tickets,
+  early exits included. The report says
   when the limit cut the scope.
 
 ## 1. Resolve the handler
@@ -218,7 +219,8 @@ Then print a chat summary of sections 2–5 and the path.
    tickets. Only approved groups go on.
 3. Per ticket, hand the approved writes to the handler's **Write**, serially or
    in concurrent groups of at most 5 tickets, waiting for each group to finish
-   (the bound is `jira-promote.md` step 5's incident).
+   (the bound is the batch-writes incident in
+   `${CLAUDE_PLUGIN_ROOT}/commands/handlers/jira-promote.md` → **5. Apply**).
 4. Each written ticket gets **one** provenance comment through **Comment**: the
    marker `garden-backlog`, the date, each field changed with its old and new
    value and the reason, and the human-queue reasons if any.
