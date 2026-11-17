@@ -25,7 +25,7 @@ apply.
 | Rung       | Defined in                                                                                                                          |
 | ---------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | validity   | `${CLAUDE_PLUGIN_ROOT}/skills/task/references/validity.md`                                                                          |
-| kind, size | `${CLAUDE_PLUGIN_ROOT}/skills/assess-task/SKILL.md` (`task_profile`), plus the size scale below                                     |
+| kind       | `${CLAUDE_PLUGIN_ROOT}/skills/assess-task/SKILL.md` (`task_profile`; its `scope` read also feeds size)                              |
 | quality    | `${CLAUDE_PLUGIN_ROOT}/skills/task/SKILL.md` → **Confidence check**, by condition name                                              |
 | size       | `${CLAUDE_PLUGIN_ROOT}/skills/task/SKILL.md` → **Task size**; `${CLAUDE_PLUGIN_ROOT}/commands/handlers/task-fill.md` → **Estimate** |
 | split      | `${CLAUDE_PLUGIN_ROOT}/skills/break-down-task/SKILL.md`                                                                             |
@@ -126,9 +126,9 @@ human_queue: [] # reasons, one string each
 
 1. `gardened_at` is set and `updated_at` is not later → exit, "gardened,
    unchanged since".
-2. `size_human_set` and `importance_human_set` are both true **and** the quality
-   check passes on the row's title and description → exit, "human-set and
-   passes quality".
+2. `size_human_set` and `importance_human_set` are both true, the quality check
+   passes on the row's title and description, **and** `status` is `ready` or
+   `started` → exit, "human-set and passes quality".
 
 ### The ladder
 
@@ -159,7 +159,8 @@ description.
    `5` → `split: true` with a pointer to `break-down-task`; no size write.
 5. **Importance** — `importance.md`'s level, confidence and one-line reason.
 6. **Status** — from the verdicts, never from the default:
-   - `started` (in progress, in review, blocked) → `unchanged`, always.
+   - `started` (in progress, in review, blocked) or `other` → `unchanged`,
+     always.
    - quality pass → `ready`; a quality-passing ticket is never left in, or moved
      to, the refinement status.
    - quality fail → `refinement`, reason = the failed condition's name.
