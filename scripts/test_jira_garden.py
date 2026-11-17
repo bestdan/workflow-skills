@@ -126,6 +126,10 @@ class PageTest(unittest.TestCase):
             garden.page_next({"issues": [], "nextPageToken": "t", "isLast": True})
         )
 
+    def test_mcp_not_last_without_token_is_an_error(self) -> None:
+        with self.assertRaises(garden.InputError):
+            garden.page_next({"issues": [], "isLast": False})
+
     def test_no_issue_list_is_an_error(self) -> None:
         with self.assertRaises(garden.InputError):
             garden.page_issues({"data": {}})
@@ -204,6 +208,16 @@ class CommentTest(unittest.TestCase):
             garden.parse_comment(body),
             {"size": ("none", "3"), "importance": ("P3-Minor", "P2-Major")},
         )
+
+    def test_free_text_cannot_inject_a_write_line(self) -> None:
+        body = garden.render_comment(
+            {
+                "date": "d",
+                "human_queue": ["unclear\nsize: 1 -> 9"],
+                "labels": ["x\nsize: 1 -> 9"],
+            }
+        )
+        self.assertEqual(garden.parse_comment(body), {})
 
     def test_adf_list_and_markdown_escapes(self) -> None:
         # Markdown posted through the API comes back as ADF list items.
@@ -386,6 +400,8 @@ class RowTest(unittest.TestCase):
         self.assertEqual(
             r["linked_prs"]["attachments"], ["https://github.com/a/b/pull/7"]
         )
+        # linear-pr-resolve.py refuses a row without its identifier.
+        self.assertEqual(r["linked_prs"]["identifier"], "IP-9")
 
     def test_missing_comment_field_is_a_source_error(self) -> None:
         i = issue()

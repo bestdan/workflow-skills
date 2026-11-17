@@ -156,7 +156,11 @@ def page_next(payload: Any) -> Optional[str]:
     if payload.get("isLast") is True:
         return None
     token = payload.get("nextPageToken")
-    return token if isinstance(token, str) and token else None
+    if isinstance(token, str) and token:
+        return token
+    if payload.get("isLast") is False:
+        raise InputError("isLast is false but nextPageToken is empty")
+    return None
 
 
 def load_page(path: str) -> Any:
@@ -263,6 +267,12 @@ def parse_comment(text: str) -> Optional[Dict[str, Tuple[str, str]]]:
     return writes
 
 
+def one_line(value: Any) -> str:
+    """A value on one line: free text with a newline in it could otherwise
+    carry a line `parse_comment` reads as a garden write."""
+    return str(value).replace("\r", " ").replace("\n", " ").strip()
+
+
 def render_comment(spec: Dict[str, Any]) -> str:
     """The provenance comment body (markdown) for one ticket's applied writes.
 
@@ -279,14 +289,14 @@ def render_comment(spec: Dict[str, Any]) -> str:
         if not isinstance(ch, dict) or not ch.get("field"):
             raise InputError(f"bad change {ch!r}")
         old = ch.get("old")
-        old_s = "none" if old in (None, "") else str(old)
-        reason = str(ch.get("reason") or "").replace("\n", " ").strip()
-        line = f"- {ch['field']}: {old_s} -> {ch.get('new')}"
+        old_s = "none" if old in (None, "") else one_line(old)
+        reason = one_line(ch.get("reason") or "")
+        line = f"- {one_line(ch['field'])}: {old_s} -> {one_line(ch.get('new'))}"
         lines.append(f"{line}; reason: {reason}" if reason else line)
     for label in spec.get("labels") or []:
-        lines.append(f"- label: {label}")
+        lines.append(f"- label: {one_line(label)}")
     for reason in spec.get("human_queue") or []:
-        lines.append(f"- needs a human: {reason}")
+        lines.append(f"- needs a human: {one_line(reason)}")
     if len(lines) == 2:
         lines.append("- no field changed; reviewed and left as found")
     return "\n".join(lines) + "\n"
@@ -429,11 +439,9 @@ def build_row(
         "priority": priority,
         "importance": reverse.get(priority) if priority else None,
         "importance_human_set": importance_marked and not importance_by_garden,
-        "linked_prs": {
-            "attachments": pr_row["attachments"],
-            "branchName": pr_row["branchName"],
-            "source_errors": pr_row["source_errors"],
-        },
+        # The whole jira-pr-sources row: linear-pr-resolve.py needs its
+        # `identifier` as well as the trail.
+        "linked_prs": pr_row,
     }
 
 
