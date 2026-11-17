@@ -103,8 +103,8 @@ consumer of the same rules `/promote-tasks` and `/add-task` use:
   domain harms.** This plugin is public. The rubric names four harm classes and
   five levels; what those harms mean for one company's product is that
   company's content, so it lives in an overlay file the
-  `garden.importance_overlay` key points at, outside this repo. The overlay may add harms and examples but
-  never change the levels or their tests.
+  `garden.importance_overlay` key points at, outside this repo. The overlay may
+  add harms and examples but never change the levels or their tests.
 - **Importance is never written until the PM / EM sign-off.** Importance lands
   in the priority field, which the PM and EM use to trade work off. A rubric
   they have not agreed to would overwrite their field with someone else's
