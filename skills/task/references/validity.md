@@ -52,7 +52,9 @@ Stop at the first conclusive rung. Record each rung you ran in `evidence`.
      **Branch name** and **PR**). Such a PR merged on an issue still open
      means the auto-close failed: report it for `/complete-task`, not here.
 
-   A `merged` PR whose diff touches the code the ticket describes → `fixed`.
+   A `merged` PR into the default branch whose change is still present there
+   (the touched `file:line` read at `origin/HEAD`, with the commit named, and
+   not reverted) → `fixed`.
    A merged PR that touches other code is a lead for rung 3. `unresolved`
    means a probe failed, never "no PR": go on, and say so in the note.
 
@@ -123,7 +125,7 @@ One object per ticket:
     "https://github.com/acme/widgets/pull/412 (merged 2026-03-02)",
     "app/models/widget.rb:40 @ 9f3c2e1"
   ],
-  "note": "PR 412 removes the nil branch the ticket reports."
+  "note": "PR #412 removes the nil branch the ticket reports."
 }
 ```
 
