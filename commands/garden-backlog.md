@@ -206,6 +206,9 @@ description.
    - quality pass → `ready`; a quality-passing ticket is never left in, or moved
      to, the refinement status.
    - quality fail → `refinement`, reason = the failed condition's name.
+   - the check passed but the judge failed `has_acceptance_criteria` →
+     `unchanged`, reason `quality unknown`, no status write, and a human-queue
+     reason: the judge never ruled on the later conditions.
    - Target equal to the current status → no write.
 7. **Outcomes** — tag each of §3's `outcomes` that the evidence above
    supports. A ticket that works as designed is `kind: unclear` plus
