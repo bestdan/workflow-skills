@@ -82,17 +82,36 @@ def row(
 class JqlTest(unittest.TestCase):
     def test_project_epic_and_fragment(self) -> None:
         self.assertTrue(
-            garden.build_jql("IP")["candidates"].startswith(
+            garden.build_jql("IP", wide=True)["candidates"].startswith(
                 'project = "IP" AND statusCategory != Done'
             )
         )
         self.assertIn('parent = "IP-12" AND', garden.build_jql("IP-12")["candidates"])
-        q = garden.build_jql("project = IP AND labels = x")
+        q = garden.build_jql("project = IP AND labels = x", wide=True)
         self.assertTrue(q["candidates"].startswith("(project = IP AND labels = x) AND"))
         self.assertIn("AND priority CHANGED ORDER BY key ASC", q["priority_changed"])
 
+    def test_wide_scope_without_flag_names_the_flag(self) -> None:
+        for scope in ("IP", "project = IP", "labels = garden"):
+            with self.subTest(scope=scope):
+                with self.assertRaisesRegex(garden.InputError, "--wide"):
+                    garden.build_jql(scope)
+
+    def test_cli_refuses_wide_scope_with_exit_2(self) -> None:
+        with mock.patch("sys.stderr") as err, mock.patch("sys.stdout"):
+            self.assertEqual(garden.main(["jql", "--scope", "IP"]), 2)
+        self.assertIn("--wide", "".join(c.args[0] for c in err.write.call_args_list))
+        with mock.patch("sys.stdout"):
+            self.assertEqual(garden.main(["jql", "--scope", "IP", "--wide"]), 0)
+
+    def test_key_query_is_one_ticket_and_needs_no_flag(self) -> None:
+        q = garden.build_key_jql("IP-7")["candidates"]
+        self.assertTrue(q.startswith('key = "IP-7" AND statusCategory != Done'))
+        with self.assertRaises(garden.InputError):
+            garden.build_key_jql("IP")
+
     def test_excludes_epics_done_and_active_sprints(self) -> None:
-        q = garden.build_jql("IP")["candidates"]
+        q = garden.build_jql("IP-12")["candidates"]
         for clause in (
             "issuetype != Epic",
             "statusCategory != Done",
@@ -102,7 +121,7 @@ class JqlTest(unittest.TestCase):
 
     def test_order_by_in_scope_rejected(self) -> None:
         with self.assertRaises(garden.InputError):
-            garden.build_jql("project = IP order by created")
+            garden.build_jql("project = IP order by created", wide=True)
 
 
 class PageTest(unittest.TestCase):
