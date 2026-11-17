@@ -169,10 +169,12 @@ python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/garden-overlay.py" --val
 - The helper exits `0` → `PASS`, naming the path it printed:
   "`garden.importance_overlay` resolves to `<printed path>`."
 - Anything else → `WARN`, never auto-fixed: which file the repo meant is a
-  judgment. "`garden.importance_overlay` (`<value>`) resolves to
-  `<printed path>`, which is not a file — fix the path or unset the key in
-  `.task-config.yml`." For a non-string value, say that instead of naming a
-  path.
+  judgment. On helper exit `3`: "`garden.importance_overlay` (`<value>`)
+  resolves to `<printed path>`, which is not a file — fix the path or unset the
+  key in `.task-config.yml`." On exit `2` the helper prints no path, so report
+  its stderr line instead: "`garden.importance_overlay` (`<value>`): `<stderr>`
+  — fix or unset the key in `.task-config.yml`." For a non-string value, say
+  that instead of naming a path.
 
 **Check 2 — Handler prerequisites.** If Check 1 did **not** resolve a known handler
 (invalid YAML or an unknown value), **skip this check and report `WARN`** ("handler

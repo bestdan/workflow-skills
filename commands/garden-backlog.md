@@ -76,9 +76,17 @@ python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/garden-overlay.py" --val
 ```
 
 It prints the absolute path; that path is what §4's fan-out and §5's report
-carry. If the value is not a string, or the helper exits non-zero, **stop**
-with: "`garden.importance_overlay` must name a file; `<value>` resolves to
-`<printed path>`, which is not one. Fix the path or unset the key." Without the
+carry. Otherwise **stop**, with the message that fits:
+
+- the value is not a string → "`garden.importance_overlay` must be a path
+  string; `<value>` is not. Fix it or unset the key."
+- the helper exits `2` (it prints no path) → "`garden.importance_overlay`:
+  `<the helper's stderr line>`. Fix it or unset the key."
+- the helper exits `3` → "`garden.importance_overlay` must name a file;
+  `<value>` resolves to `<printed path>`, which is not one. Fix the path or
+  unset the key."
+
+Without the
 overlay, importance would be judged on the generic harms the repo has said are
 incomplete.
 
