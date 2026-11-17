@@ -13,7 +13,7 @@ A Claude Code plugin bundling Daniel's general engineering workflow skills: coll
 
 ## What's in the box
 
-20 skills, 25 commands, and 2 subagents, organized into eight workflows. Each
+20 skills, 26 commands, and 2 subagents, organized into eight workflows. Each
 entry links to its own doc — that's where the flags, edge cases, and handler
 support live.
 
@@ -84,6 +84,7 @@ capability matrix.
 | [**`/promote-tasks`**](commands/promote-tasks.md)             | `/promote-tasks [dry-run \| apply]`                                       | Score `new` tasks against the confidence check and promote them to `ready` or `needs_refinement`.                                |
 | [**`/push-plan`**](commands/push-plan.md)                     | `/push-plan <name> [--ready-only]`                                        | Push a vetted local plan to the tracker in dependency order, recording ids back so re-runs don't duplicate.                      |
 | [**`/reoptimize-tasks`**](commands/reoptimize-tasks.md)       | `/reoptimize-tasks [project \| initiative \| team] [name]`                | The inverse of `/push-plan` — reconcile prose dependencies against native relations and fix cycles, stale links, and overlap.    |
+| [**`/garden-backlog`**](commands/garden-backlog.md)           | `/garden-backlog <scope> [dry-run] [--limit N] \| apply <report>`         | Judge each backlog ticket's validity, quality, size, importance and status; apply only approved writes. **jira (planned)**.      |
 | [**`/task-config`**](commands/task-config.md)                 | `/task-config [handler]`                                                  | Choose the handler and verify its prerequisites (writes `dev_docs/tasks/.task-config.yml`).                                      |
 | [**`/complete-task`**](commands/complete-task.md)             | `/complete-task <identifier> [--dry-run]`                                 | Transition one identified work item to its tracker's completed state, then re-check its dependents. All four handlers.           |
 | [**`/archive-tasks`**](commands/archive-tasks.md)             | `/archive-tasks [--older-than <N>d] [--issues <refs>] [--all] [dry-run]`  | Retire terminal-state work past an age threshold. A sweep refuses to mutate without a threshold.                                 |
