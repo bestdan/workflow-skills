@@ -209,7 +209,9 @@ jira:
     low: P4-Low
 ```
 
-When both are unset, nothing reads them, `/doctor` included. No command writes through them yet; the Jira garden handler (#1521) will be the first writer. `/doctor` Check 2 validates whichever is set against the project's create-screen metadata.
+When both are unset, nothing reads them, `/doctor` included. The one writer is `/garden-backlog` (`jira-garden.md`); with either key unset, that field's proposals stay report-only. `/doctor` Check 2 validates whichever is set against the project's create-screen metadata.
+
+`jira-garden.md` also reads `ready_status` and `refinement_status` as its status targets, and `blocked_statuses` as started work it never moves. It adds no key of its own.
 
 ## Blocked statuses (`blocked_statuses`)
 
