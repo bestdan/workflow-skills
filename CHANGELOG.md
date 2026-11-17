@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.223.0] - 2026-11-17
+
+### Features
+
+- write a ticket's kind through the gated apply [#1558] (#1559) (cc919974)
+
 ## [2.222.0] - 2026-11-17
 
 ### Features
