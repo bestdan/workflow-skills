@@ -29,7 +29,7 @@ Handler feature parity is jagged — `linear` supports every verb in the table b
 | archive (`/archive-tasks`)                 | yes       | hygiene    | opt     | yes      |
 | reoptimize (`/reoptimize-tasks`)           | no        | yes        | no      | yes      |
 | reconcile (`/reconcile-tasks`)             | no        | audit      | no      | yes      |
-| garden (`/garden-backlog`)                 | no        | no         | planned | no       |
+| garden (`/garden-backlog`)                 | no        | no         | yes     | no       |
 | sweep stale claims (`/sweep-stale-claims`) | no        | yes        | no      | no       |
 | sweep for complete (`/sweep-for-complete`) | n/a       | n/a        | yes     | yes      |
 | auto-pilot (`/auto-pilot`)                 | plan      | yes        | no      | yes      |
@@ -42,7 +42,7 @@ Handler feature parity is jagged — `linear` supports every verb in the table b
 
 `reoptimize` (`/reoptimize-tasks`) is the exception that runs _against_ the tracker graph rather than the local files. **`linear`** applies relation edits, priority, and duplicates natively. **`gh-issue`** applies dependency edits natively too: it reads, creates and removes the same `blocked_by` edge `/push-plan` draws and `/do-tasks` reads, and detects cycles over that real graph. The `Blocked by:` body footer is a human-readable echo of an edge that exists, never a substitute for one. `Related:` and `duplicateOf` have no native counterpart on GitHub and stay prose. `jira` re-optimize is a planned follow-up, and `repo-pr` is `no` because its tasks are local plan files — re-optimize those directly (or `/push-plan` to a tracker first).
 
-`garden` (`/garden-backlog`) tends an existing tracker backlog ticket by ticket. Its core is handler-agnostic and needs one `<handler>-garden.md` per tracker; `jira` is **`planned`** — the command dispatches to it, but the handler file ships with #1521, and until then the command stops. Every other handler stops as not yet implemented.
+`garden` (`/garden-backlog`) tends an existing tracker backlog ticket by ticket. Its core is handler-agnostic and needs one `<handler>-garden.md` per tracker; `jira` is the one handler shipped, `${CLAUDE_PLUGIN_ROOT}/commands/handlers/jira-garden.md`. Every other handler stops as not yet implemented.
 
 `reconcile` (`/reconcile-tasks`) fixes issues sitting in the wrong state against a **closed** rule table, and the two supporting handlers reconcile different things. **`linear`** repairs drift between an issue's column and its PR — the four rows in `${CLAUDE_PLUGIN_ROOT}/commands/handlers/linear-reconcile.md`. **`gh-issue`** is `audit`: on GitHub the open PR **is** the review state and a merge closes the issue natively, so that drift cannot occur; what can drift is the label state model, which the web UI can edit by hand. Its four rows check the `labels.yml` invariants, and two of them write — row 1 and row 4 (see `${CLAUDE_PLUGIN_ROOT}/commands/handlers/gh-issue-reconcile.md`). `repo-pr` is `no` because a merged PR **is** its done signal, and `jira` is `no` because its GitHub integration or smart commits transition the issue natively.
 
