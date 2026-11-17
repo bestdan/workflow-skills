@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.224.0] - 2026-11-17
+
+### Features
+
+- require an epic scope and group the report by outcome [#1561] (#1564) (d5b4b308)
+
 ## [2.223.0] - 2026-11-17
 
 ### Features
