@@ -14,6 +14,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSET = ROOT / "commands" / "handlers" / "assets" / "jira-garden.py"
@@ -184,6 +185,15 @@ class FetchTest(unittest.TestCase):
         self.stub([{"ok": False}], rc=1)
         with self.assertRaises(garden.TwgFailed):
             garden.fetch("s", "jql", "summary", self.tmp.name, None, 1)
+
+    def test_missing_twg_is_a_twg_failure(self) -> None:
+        # The documented exit for a failed twg call is 4, not a traceback.
+        def missing(*_a: Any, **_k: Any) -> Any:
+            raise FileNotFoundError("twg")
+
+        with mock.patch.object(garden.subprocess, "run", missing):
+            with self.assertRaises(garden.TwgFailed):
+                garden.run_twg(["whoami"])
 
 
 class CommentTest(unittest.TestCase):

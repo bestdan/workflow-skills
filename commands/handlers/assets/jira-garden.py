@@ -89,7 +89,10 @@ class TwgResult(NamedTuple):
 
 def run_twg(args: Sequence[str]) -> TwgResult:
     """The single subprocess seam; tests stub it."""
-    proc = subprocess.run(["twg", *args], capture_output=True, text=True)
+    try:
+        proc = subprocess.run(["twg", *args], capture_output=True, text=True)
+    except OSError as exc:
+        raise TwgFailed(f"cannot run twg: {exc}") from exc
     return TwgResult(returncode=proc.returncode, stdout=proc.stdout, stderr=proc.stderr)
 
 
