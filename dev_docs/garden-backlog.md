@@ -14,9 +14,9 @@ arguments, the record schema, the report sections, the apply steps — is
 does not repeat it. It graduates the design from milestone
 [#21](https://github.com/bestdan/workflow-skills/milestone/21).
 
-The motivating case was Betterment's IP (Insights & Planning) Jira backlog: 402
-open tickets on 2026-11-12, 283 with no Story Points and 308 at the default
-priority with no recorded change. `/promote-tasks` could not fix that: on Jira
+The motivating case was a product team's Jira backlog: about 400 open tickets
+on 2026-11-12, 283 with no Story Points and 308 at the default priority with no
+recorded change. `/promote-tasks` could not fix that: on Jira
 it backfills neither field, and it reads one unpaginated page of candidates.
 
 ## What it does not do
@@ -92,17 +92,18 @@ consumer of the same rules `/promote-tasks` and `/add-task` use:
   that changed since the dry run, asks the owner to approve each write group,
   and writes in groups of at most 5 (the bound from the batch-writes incident
   in `jira-promote.md` step 5).
-- **An epic is the default scope, and `--wide` widens it.** The IP-122
-  calibration ([#1522](https://github.com/bestdan/workflow-skills/issues/1522),
-  record in PR [#1560](https://github.com/bestdan/workflow-skills/pull/1560))
-  cost about 440k judge tokens for 30 tickets, so the 418-ticket project would
-  cost about 6M. A wider scope has to be asked for, and the handler refuses it
-  before its first tracker read.
+- **An epic is the default scope, and `--wide` widens it.** The calibration
+  run on a 30-ticket epic on a real Jira site
+  ([#1522](https://github.com/bestdan/workflow-skills/issues/1522), record in
+  PR [#1560](https://github.com/bestdan/workflow-skills/pull/1560)) cost about
+  440k judge tokens, so the whole backlog of about 400 tickets would cost about
+  6M. A wider scope has to be asked for, and the handler refuses it before its
+  first tracker read.
 - **The importance rubric is generic, and a repo-local overlay carries the
   domain harms.** This plugin is public. The rubric names four harm classes and
-  five levels; what those harms mean for a financial product is Betterment
-  content, so it lives in an overlay file the `garden.importance_overlay` key
-  points at, outside this repo. The overlay may add harms and examples but
+  five levels; what those harms mean for one company's product is that
+  company's content, so it lives in an overlay file the
+  `garden.importance_overlay` key points at, outside this repo. The overlay may add harms and examples but
   never change the levels or their tests.
 - **Importance is never written until the PM / EM sign-off.** Importance lands
   in the priority field, which the PM and EM use to trade work off. A rubric

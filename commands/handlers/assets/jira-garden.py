@@ -138,8 +138,9 @@ def scope_clause(scope: str, wide: bool = False) -> str:
     """An epic key, or with `wide` a project key or JQL fragment, as one clause.
 
     Wide scopes are refused by default on cost: judging one epic of 30 tickets
-    took about 440k tokens (#1561), so a 418-ticket project would take about
-    6M. The refusal names the flag so the caller can pass it on purpose.
+    took about 440k tokens (#1561), so a project of about 400 tickets would
+    take about 6M. The refusal names the flag so the caller can pass it on
+    purpose.
     """
     s = scope.strip()
     if not s:
