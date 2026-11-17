@@ -50,7 +50,8 @@ Stop at the first conclusive rung. Record each rung you ran in `evidence`.
    - gh-issue: there is no sweep. The own PR carries `Closes #<n>` or comes
      from the claim branch (`${CLAUDE_PLUGIN_ROOT}/commands/handlers/gh-issue-claim.md`,
      **Branch name** and **PR**). Such a PR merged on an issue still open
-     means the auto-close failed: report it for `/complete-task`, not here.
+     means the auto-close failed: apply the `fixed` rule below, and say in
+     the note that `/complete-task` should close the issue.
 
    A `merged` PR into the default branch whose change is still present there
    (the touched `file:line` read at `origin/HEAD`, with the commit named, and
@@ -95,6 +96,10 @@ Use the handler's existing duplicate rule rather than a new one:
 
 A match that rule confirms → `duplicate`, with the other ticket's link as the
 evidence. A suspected match it does not confirm is a note, not a verdict.
+
+Run it after the ladder, and only when the ladder ended `valid` or `unsure`:
+`fixed` and `obsolete` stand, and a confirmed `duplicate` takes precedence
+over `valid` and `unsure`.
 
 ## 4. Verdicts
 
