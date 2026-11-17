@@ -84,7 +84,10 @@ The handler implements four operations. Everything it returns is symbolic.
   `updated_at`, `gardened_at` (the time of this command's newest provenance
   comment, or null), `size` and `size_human_set`, `importance` and
   `importance_human_set`, `kind` (`fix` | `spike`) and `kind_human_set`,
-  `linked_prs`. Without `wide`, List refuses any scope wider than one epic
+  `linked_prs`, `own_pr` (validity rung 1's verdict, which the handler
+  resolves before the judges run), and `blocked_by` (the keys of unresolved
+  blockers, `[]` when there are none, or null when the handler did not read
+  them). Without `wide`, List refuses any scope wider than one epic
   before its first tracker read, with a message that names `--wide`; the
   handler decides what counts as an epic on its tracker. The handler defines
   **human-set** for its tracker — on Jira,
@@ -182,18 +185,30 @@ description.
    **What may be written** says.
 3. **Quality** — the Confidence check, as `quality` above says. A spike passes
    like a fix: a clear question with a checkable definition of done meets
-   `has_acceptance_criteria`.
+   `has_acceptance_criteria`. **That condition is not the judge's:** the row's
+   `checks.has_acceptance_criteria` (from **Fan-out**) is final either way.
+   Judge the other conditions. A criterion that waits on a product or design
+   decision still owed is an open question: it fails
+   `no_open_questions_or_tbd`.
 4. **Size** — a Fibonacci estimate on the `1`/`2`/`3`/`5` scale, judged as
    `task-fill.md` → **Estimate** says, using the `assess-task` `scope` read. Over
    `5` → `split: true` with a pointer to `break-down-task`; no size write.
 5. **Importance** — `importance.md`'s level, confidence and one-line reason,
    with the overlay's harms and examples read in when one is set.
-6. **Status** — from the verdicts, never from the default:
+6. **Status** — from the verdicts, never from the default. `garden-checks.py
+   finalize` derives it (**Fan-out**); the rules it applies:
    - `started` (in progress, in review, blocked) or `other` → `unchanged`,
      always.
+   - quality pass and an unresolved blocker → `unchanged`, reason `blocked by
+     <keys>`; quality pass and `blocked_by` null → `unchanged`, reason
+     `blocker links were not read`. Neither gets a `gardened` write, so the
+     next run judges it again.
    - quality pass → `ready`; a quality-passing ticket is never left in, or moved
      to, the refinement status.
    - quality fail → `refinement`, reason = the failed condition's name.
+   - the check passed but the judge failed `has_acceptance_criteria` →
+     `unchanged`, reason `quality unknown`, no status write, and a human-queue
+     reason: the judge never ruled on the later conditions.
    - Target equal to the current status → no write.
 7. **Outcomes** — tag each of §3's `outcomes` that the evidence above
    supports. A ticket that works as designed is `kind: unclear` plus
@@ -216,23 +231,42 @@ description.
 - **Importance is written only once `importance.md` is signed off.** While its
   PM / EM sign-off table is empty, record the level and propose no importance
   write; the report says why once, not per ticket.
-- **Validity not settled holds the status write.** While validity is `unsure`
-  (or a sub-`high` closure verdict), show the status target in the record but
-  propose no status write: a ticket that may already be fixed is not sent to
-  `ready`.
+- **Validity not settled holds the status and kind writes.** While validity
+  is `unsure` (or a sub-`high` closure verdict), show the status target and the
+  kind verdict in the record but propose neither write: a ticket that may
+  already be fixed is not sent to `ready`, nor retyped.
 - A ticket with a `human_queue` reason gets the `human-queue` write. A ticket
   with no writes and no queue reason gets the `gardened` write, so the next run
   exits it early.
 
 ### Fan-out
 
-Group the listing rows by `parent` (null is its own group); split a group above
-25 tickets into chunks. Hand each group to one `Agent` subagent whose brief is
-§3 and §4 of this file, the rubric paths in the table above, the overlay's
-absolute path (resolved in §1) when one is set, and the group's rows. Subagents
-read; they never write. Run no more at once than the session's agent budget
-allows. Merge their records; a candidate with no record, or a
-record that fails §3's shape, gets one whose `human_queue` says so.
+Two deterministic passes bracket the judges, both in
+`${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/garden-checks.py`, whose
+docstring says why each rule lives there. Every input file is written with
+the **Write** tool.
+
+1. **Before.** Once the handler has resolved `own_pr` on the rows, run
+   `python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/garden-checks.py" prejudge --rows <rows file>`.
+   It adds `checks.has_acceptance_criteria` (`pass` | `fail`) and the forms it
+   found. Write its stdout to a file in the directory
+   `"${CLAUDE_PLUGIN_ROOT}/scripts/work-tmp.sh" --sub garden-backlog` prints:
+   that file is the rows the judges get, never the ones before it ran, and the
+   `--rows` step 3 passes to `finalize`.
+2. **Judge.** Group the rows by `parent` (null is its own group); split a group
+   above 25 tickets into chunks. Hand each group to one `Agent` subagent whose
+   brief is §3 and §4 of this file, the rubric paths in the table above, the
+   overlay's absolute path (resolved in §1) when one is set, and the group's
+   rows. Subagents read; they never write. Run no more at once than the
+   session's agent budget allows. Merge their records; a candidate with no
+   record, or a record that fails §3's shape, gets one whose `human_queue`
+   says so.
+3. **After.** Write the merged records to a JSON file and run
+   `python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/garden-checks.py" finalize --rows <prejudged rows file> --records <records file>`.
+   Its output is the record set the report carries: it reconciles quality with
+   the check, sets each status target, applies the holds above, and rebuilds
+   the `status`, `human-queue` and `gardened` writes. It exits `2` on bad
+   input.
 
 ## 5. Dry-run report
 

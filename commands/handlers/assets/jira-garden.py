@@ -10,6 +10,9 @@ otherwise have to catch by reading markdown:
   fetch    page a JQL search to completion through twg, one file per page
   page     read one saved search page: its issue count and next-page token
   rows     turn saved pages into the core's List rows (symbolic values only)
+  own-prs  run validity rung 1 over the rows: resolve each row's own-PR trail
+           and title through `linear-pr-resolve.py`, and put the verdict on
+           the row as `own_pr`
   fields   turn one ticket's approved writes into an edit payload, and a kind
            write into the issue-type id it names
   comment  render the provenance comment the next run's early exit reads
@@ -34,6 +37,19 @@ value nobody chose:
   so a human who changed it back is not overruled. No changelog is read, so a
   type a human reset to the creation type before the garden ever wrote one
   reads as not human-set; the gated apply is what stands in front of that.
+
+WHY `own-prs` WRITES ITS VERDICT ONTO THE ROW. A row's `linked_prs` is the
+resolver's *input*: the plugin's own comment trail, which is empty on every
+ticket the plugin did not deliver. In the #1522 calibration the resolver ran,
+and its title probe found the one ticket whose merged PR carried its key, but
+its output was a separate file the judges never got. They read the empty
+trail as "no PR" for all 30 tickets. With the verdict on the row, the judge
+reads the resolver's answer, not its input.
+
+WHY `blocked_by` IS ON THE ROW. "Quality pass -> ready" moved tickets still
+blocked by an earlier slice. `blocked_by` lists the keys of the ticket's
+unresolved "is blocked by" links; `garden-checks.py finalize` holds Ready
+while it is non-empty, or null because the `issuelinks` field was not read.
 
 `comment` renders the body and `parse_comment` reads it, so the two cannot
 drift apart; the tests round-trip one through the other.
@@ -62,6 +78,15 @@ _spec = importlib.util.spec_from_file_location(
 assert _spec is not None and _spec.loader is not None, "cannot load jira-pr-sources.py"
 pr_sources = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(pr_sources)
+
+_rspec = importlib.util.spec_from_file_location(
+    "linear_pr_resolve", os.path.join(HERE, "linear-pr-resolve.py")
+)
+assert _rspec is not None and _rspec.loader is not None, (
+    "cannot load linear-pr-resolve.py"
+)
+pr_resolve = importlib.util.module_from_spec(_rspec)
+_rspec.loader.exec_module(pr_resolve)
 
 MARKER = "garden-backlog:"
 CLOSE_LABEL = "garden:close-candidate"
@@ -426,6 +451,48 @@ def resolve_issue_type(types: List[Dict[str, Any]], name: str) -> Optional[str]:
     return None
 
 
+def blockers(fields: Dict[str, Any]) -> Optional[List[str]]:
+    """Keys of the unresolved issues this one "is blocked by", or None when the
+    `issuelinks` field was not read.
+
+    On the issue's own link, the description that applies is the one on the
+    side the *other* issue sits: `inwardIssue` reads as `type.inward` ("is
+    blocked by"), `outwardIssue` as `type.outward`. A linked issue whose status
+    is missing counts as unresolved, so an unread status holds Ready.
+    """
+    links = fields.get("issuelinks")
+    if links is None:
+        return None
+    if not isinstance(links, list):
+        raise InputError("issuelinks is not a list")
+    keys: List[str] = []
+    for link in links:
+        if not isinstance(link, dict):
+            continue
+        raw_type = link.get("type")
+        ltype: Dict[str, Any] = raw_type if isinstance(raw_type, dict) else {}
+        for side, desc in (("inwardIssue", "inward"), ("outwardIssue", "outward")):
+            other = link.get(side)
+            text = ltype.get(desc)
+            if not isinstance(other, dict) or not isinstance(text, str):
+                continue
+            if "blocked by" not in text.casefold():
+                continue
+            ofields = (
+                other.get("fields") if isinstance(other.get("fields"), dict) else other
+            )
+            status = ofields.get("status") if isinstance(ofields, dict) else None
+            category = None
+            if isinstance(status, dict) and isinstance(
+                status.get("statusCategory"), dict
+            ):
+                category = status["statusCategory"].get("key")
+            key = other.get("key")
+            if category != "done" and isinstance(key, str) and key not in keys:
+                keys.append(key)
+    return keys
+
+
 def build_row(
     issue: Dict[str, Any],
     changed: Set[str],
@@ -526,6 +593,7 @@ def build_row(
         # The whole jira-pr-sources row: linear-pr-resolve.py needs its
         # `identifier` as well as the trail.
         "linked_prs": pr_row,
+        "blocked_by": blockers(fields),
     }
 
 
@@ -571,6 +639,45 @@ def build_rows(cfg: argparse.Namespace) -> Dict[str, Any]:
         "limit_cut": limit_cut or bool(cfg.limit_cut),
         "rows": rows,
     }
+
+
+# ---------------------------------------------------------------- own-prs
+
+STATE_RANK = ("merged", "open", "unresolved", "closed_unmerged", "no_pr")
+
+
+def own_prs(rows: List[Dict[str, Any]], repos: List[str]) -> List[Dict[str, Any]]:
+    """Each row with `own_pr`: rung 1's verdict across every repo searched.
+
+    `linear-pr-resolve.py` takes one repo per issue, and an epic can span
+    several, so each repo is resolved in turn and the strongest verdict kept,
+    in its own precedence: positive evidence from one repo stands over a probe
+    failure in another, and a failure anywhere outranks a clean "no PR".
+    """
+    if not repos:
+        raise InputError("own-prs needs at least one --repo")
+    out = []
+    for row in rows:
+        src = row.get("linked_prs")
+        if not isinstance(src, dict) or not src.get("identifier"):
+            src = {"identifier": row.get("key"), "attachments": [], "branchName": None}
+        results = [pr_resolve.resolve_issue(src, {}, repo) for repo in repos]
+        best = min(results, key=lambda r: STATE_RANK.index(r["state"]))
+        errors = [e for r in results for e in r["probe_errors"]]
+        prs = [p for r in results for p in r["prs"]]
+        out.append(
+            {
+                **row,
+                "own_pr": {
+                    "state": best["state"],
+                    "repo": best["repo"],
+                    "resolved_via": best["resolved_via"],
+                    "prs": prs,
+                    "probe_errors": errors,
+                },
+            }
+        )
+    return out
 
 
 # ----------------------------------------------------------------- fields
@@ -706,6 +813,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     s.add_argument("--limit-cut", action="store_true")
     status_args(s)
 
+    s = sub.add_parser("own-prs")
+    s.add_argument("--rows", required=True)
+    s.add_argument("--repo", action="append", default=[])
+
     s = sub.add_parser("fields")
     s.add_argument("--writes", required=True)
     s.add_argument("--labels", required=True)
@@ -740,6 +851,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             result = {"count": len(page_issues(payload)), "next": page_next(payload)}
         elif args.cmd == "rows":
             result = build_rows(args)
+        elif args.cmd == "own-prs":
+            data = load_page(args.rows)
+            if isinstance(data, dict):
+                data = data.get("rows")
+            if not isinstance(data, list):
+                raise InputError("--rows must be a row list or `rows` output")
+            result = own_prs([r for r in data if isinstance(r, dict)], args.repo)
         elif args.cmd == "fields":
             result = build_fields(args)
         else:
