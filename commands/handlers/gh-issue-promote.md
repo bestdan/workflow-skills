@@ -154,20 +154,19 @@ If a relative path doesn't resolve, find it with **Glob** (`**/commands/handlers
 
 The backfilled `est:` is **recorded for claim-time selection**, not read by any gate in this step. `/do-tasks` is what consumes it (`commands/handlers/gh-issue-claim.md` → "Find candidates", via `gh-issue-ready.py --max-estimate`), which is why filling it here still matters: an issue with no `est:` label is invisible to that bound, so the promoter is the only place the number reliably gets written. Scoring below judges the card's specification, never its size.
 
-**HIGH (→ promote)** requires ALL of:
+**HIGH (→ promote)** requires the named conditions of the **Confidence check** in `skills/task/SKILL.md` — `has_acceptance_criteria`, `no_open_questions_or_tbd` and `scope_fits` — with their reason strings, read against this mapping:
 
-- `title` present and non-empty.
-- `body` contains acceptance-style content — a `## Acceptance Criteria` section (or an equivalent concrete, checkable outcome). A bare title or an "investigate X" body fails with `body missing acceptance criteria`.
-- `body` has no unresolved `## Open Questions` / `## TBD` content (an empty heading is fine) → otherwise `unresolved open questions`.
+- `title` present and non-empty (the `required_fields_present` analogue).
+- The description is the issue `body`, in GitHub markdown: a section is a `##` heading. An equivalent concrete, checkable outcome also satisfies `has_acceptance_criteria`; a bare title or an "investigate X" body does not.
 - **There is no `est:` gate here.** `max_estimate` is a **claim-time** bound on this handler, exactly as on `linear` — see `commands/handlers/task-fill.md` → "Where the estimate gate lives", which both handlers cite and which owns the rule. This step still **records** the estimate (the backfill above); it just does not judge the card on it.
 
   > **This moved, and the old placement is the bug.** Until v2.59 the gate ran here and scored an oversized card LOW, which conflated two different verdicts: "this card is not well enough specified for automation" and "this card is too big for one unattended session". The first needs a human to clear it, and a demoted card can only be retrieved by one; the second is a routing decision the loop makes every time it selects, and the card should stay `status:2_ready` and visible while it waits. Measured on `bestdan/dotfiles` 2026-09-20: five correctly-specified cards (complete acceptance criteria, no open questions) were demoted to `needs_refinement` on nothing but `max_estimate` defaulting to `3` against an exclusive bound — three of them sized exactly `3`. Re-promoting them was impossible without a config PR, because the promoter only ever scores un-scored issues. See bestdan/workflow-skills#746.
 
-- **Scope fits one PR (~size 5), judgment not keywords.** This is the same judgment that produced the backfilled `est:` above — weigh the body's breadth against ~300 lines / ~5 files (see **Task size** in `skills/task/SKILL.md`). If the scope clearly exceeds size `5`, the honest `est:8`/`est:13` is recorded and the issue scores LOW with reason `scope exceeds size 5 — split into sub-issues`. The `break-down-task` skill (`skills/break-down-task/SKILL.md`) performs that split.
+- `scope_fits` is the same judgment that produced the backfilled `est:` above, weighed against the body's breadth. When it fails, the honest `est:8`/`est:13` is still recorded.
 
-**The size-`5` ceiling is not `max_estimate`, and removing the latter does not soften the former.** The scope check above still scores LOW on a card that cannot fit one PR, at any `max_estimate`. The two were easy to conflate while both lived here, which is what made the old gate look load-bearing: `max_estimate` is a tunable routing bound the loop applies at selection, while size `5` is the fixed ceiling above which a card needs splitting rather than scheduling. A card sized `8` fails the scope check and is demoted, as before; a card sized `3` or `5` is now the loop's problem, not the promoter's.
+**The size-`5` ceiling is not `max_estimate`, and removing the latter does not soften the former.** `scope_fits` still scores LOW on a card that cannot fit one PR, at any `max_estimate`. The two were easy to conflate while both lived here, which is what made the old gate look load-bearing: `max_estimate` is a tunable routing bound the loop applies at selection, while size `5` is the fixed ceiling above which a card needs splitting rather than scheduling. A card sized `8` fails `scope_fits` and is demoted, as before; a card sized `3` or `5` is now the loop's problem, not the promoter's.
 
-**LOW** if any HIGH condition fails. Record the first failed check as the reason (e.g. `body missing acceptance criteria`, `unresolved open questions`).
+**LOW** if any HIGH condition fails. Record the first failed check's canonical reason (e.g. `description missing acceptance criteria`, `unresolved open questions`).
 
 **Forecast the tier, then confirm the Intent,** for each candidate still HIGH, as `skills/task/references/intent-confirmation.md` says. The paths come from the body's `## Task` and `## Context`; an issue has no `related_files`. A `human` issue the confirmer does not confirm at or above `consult_bar` turns LOW, with reason `intent not confirmed: <crux>`. What the step 5 comment records is the reference's "Where things are recorded". If a relative path doesn't resolve, Glob `**/skills/task/references/intent-confirmation.md`.
 
@@ -257,8 +256,8 @@ Promoted 5 of 9 candidates:
     - #145  Bump eslint config  (backfilled: prio, est)
     - #148  Remove stale alias
   needs_refinement (2):
-    - #151  Restructure auth module  (scope exceeds size 5 — split into sub-issues)  (backfilled: est 8)
-    - #152  Rewrite the config loader  (body missing acceptance criteria)
+    - #151  Restructure auth module  (scope exceeds size 5 — split into sub-tasks)  (backfilled: est 8)
+    - #152  Rewrite the config loader  (description missing acceptance criteria)
   held (2, blocked):
     - #111  (blocked by #112, #115)
     - #113  (blocked label)

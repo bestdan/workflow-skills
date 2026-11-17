@@ -94,14 +94,13 @@ For each candidate, run the **confidence check** from `skills/task/SKILL.md` —
 
 **This path backfills neither field, and that is a declared property, not an omission.** `commands/handlers/task-fill.md` defines the shared backfill and carries a **`jira` adapter** saying why jira opts out of both halves: there is no estimate field to write (story points, when a project exposes them, are a per-project custom field this handler does not resolve), and `priority`, though native and read, has site-configured scheme names that the symbolic vocabulary has no fixed encoding for without a config key this handler does not yet have. Size therefore folds into the scope judgment below, and priority is read as found.
 
-**HIGH (→ promote)** requires ALL of:
+**HIGH (→ promote)** requires the named conditions of the **Confidence check** in `skills/task/SKILL.md` — `has_acceptance_criteria`, `no_open_questions_or_tbd` and `scope_fits` — with their reason strings, read against this mapping:
 
-- `fields.summary` present and non-empty.
-- `fields.description` contains acceptance-style content — a `## Acceptance Criteria` section (or an equivalent concrete, checkable outcome). A bare summary or an "investigate X" description fails with `description missing acceptance criteria`.
-- `fields.description` has no unresolved `## Open Questions` / `## TBD` content (an empty heading is fine) → otherwise `unresolved open questions`.
-- **Scope fits one PR (~size 5), judgment not keywords.** Weigh the description's breadth against ~300 lines / ~5 files (see **Task size** in `skills/task/SKILL.md`); a story-points custom field, if the project exposes one, is a hint. If the scope clearly exceeds size `5`, score LOW with reason `scope exceeds size 5 — split into sub-issues`. The `break-down-task` skill (`skills/break-down-task/SKILL.md`) performs that split.
+- `fields.summary` present and non-empty (the `required_fields_present` analogue).
+- The description is `fields.description`. An equivalent concrete, checkable outcome also satisfies `has_acceptance_criteria`; a bare summary or an "investigate X" description does not.
+- `scope_fits` weighs the description's breadth; a story-points custom field, if the project exposes one, is a hint.
 
-**LOW** if any HIGH condition fails. Record the first failed check as the reason (e.g. `description missing acceptance criteria`, `unresolved open questions`).
+**LOW** if any HIGH condition fails. Record the first failed check's canonical reason (e.g. `description missing acceptance criteria`, `unresolved open questions`).
 
 **Forecast the tier, then confirm the Intent,** for each candidate still HIGH, as `skills/task/references/intent-confirmation.md` says. The paths come from the description; an issue has no `related_files`. A `human` issue the confirmer does not confirm at or above `consult_bar` turns LOW, with reason `intent not confirmed: <crux>`. What the step 5 comment records is the reference's "Where things are recorded". If a relative path doesn't resolve, Glob `**/skills/task/references/intent-confirmation.md`.
 
@@ -175,7 +174,7 @@ Promoted 4 of 6 candidates:
     - PLAT-145  Bump eslint config
     - PLAT-148  Remove stale alias
   needs_refinement (1):
-    - PLAT-151  Restructure auth module  (scope exceeds size 5 — split into sub-issues)
+    - PLAT-151  Restructure auth module  (scope exceeds size 5 — split into sub-tasks)
   skipped (2, already scored):
     - PLAT-109
     - PLAT-110
