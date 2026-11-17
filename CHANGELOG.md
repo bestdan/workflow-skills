@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.224.1] - 2026-11-17
+
+### Fixes
+
+- blockers, deterministic AC check, validity rungs 1-2, kind hold [#1562] (#1565) (cbc03eb8)
+
 ## [2.224.0] - 2026-11-17
 
 ### Features
