@@ -266,7 +266,9 @@ def finalize_one(record: Dict[str, Any], row: Optional[Dict[str, Any]]) -> None:
         if settled and not quality_unknown:
             writes.append({"group": "status", "field": "status", "value": target})
     record["proposed_writes"] = writes
-    rebuild_queue_writes(record, held=quality == "pass" and blocked)
+    rebuild_queue_writes(
+        record, held=current not in STARTED and quality == "pass" and blocked
+    )
 
 
 def rebuild_queue_writes(record: Dict[str, Any], held: bool) -> None:

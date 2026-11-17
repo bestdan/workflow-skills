@@ -141,6 +141,12 @@ class Status(unittest.TestCase):
         self.assertEqual(out["status"]["target"], "unchanged")
         self.assertEqual(groups(out), ["gardened"])
 
+    def test_started_with_a_blocker_is_still_gardened(self) -> None:
+        for blocked_by in (["AB-7"], None):
+            out = final(row(status="started", blocked_by=blocked_by), record())
+            self.assertEqual(out["status"]["target"], "unchanged")
+            self.assertEqual(groups(out), ["gardened"])
+
     def test_target_equal_to_current_writes_nothing(self) -> None:
         self.assertEqual(groups(final(row(status="ready"), record())), ["gardened"])
 
