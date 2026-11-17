@@ -158,10 +158,12 @@ about someone else's naming and would pin a prefix this repo never pushes.
 the repo root and `/garden-backlog` stops when it is missing. Its own status line,
 separate from Check 1.
 
+- Check 1 found the YAML unparseable → skip and report `WARN` ("overlay
+  unchecked — fix Check 1 first").
 - Key unset → `PASS`.
 - The value is a string and `"$ROOT/<path>"` is a file → `PASS`.
 - Anything else → `WARN`, never auto-fixed: which file the repo meant is a
-  judgment. "`garden.importance_overlay` names `<path>`, which does not exist —
+  judgment. "`garden.importance_overlay` names `<path>`, which is not a file —
   fix the path or unset the key in `.task-config.yml`." For a non-string value,
   say that instead of naming a path.
 

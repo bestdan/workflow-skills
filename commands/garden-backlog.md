@@ -63,9 +63,9 @@ does (`commands/task-config.md` → "Resolving the handler").
 Then read `garden.importance_overlay` from the same merged view. Unset → the
 generic rubric alone. Set → a path relative to the repo root
 (`git rev-parse --show-toplevel`) to the overlay `importance.md` → **Repo
-overlay** describes. If that file does not exist, **stop** with:
-"`garden.importance_overlay` names `<path>`, which does not exist. Fix the path
-or unset the key." Gardening without it would judge importance on harms the
+overlay** describes. If the value is not a string, or `<root>/<path>` is not a
+file, **stop** with: "`garden.importance_overlay` must name a file in the repo;
+`<value>` does not. Fix the path or unset the key." Gardening without it would judge importance on harms the
 repo has said are incomplete.
 
 ## 2. The handler contract
@@ -198,9 +198,10 @@ description.
 
 Group the listing rows by `parent` (null is its own group); split a group above
 25 tickets into chunks. Hand each group to one `Agent` subagent whose brief is
-§3 and §4 of this file, the rubric paths in the table above, the overlay path
-when one is set, and the group's rows. Subagents read; they never write. Run no more at once than the session's
-agent budget allows. Merge their records; a candidate with no record, or a
+§3 and §4 of this file, the rubric paths in the table above, the overlay's
+absolute path (resolved in §1) when one is set, and the group's rows. Subagents
+read; they never write. Run no more at once than the session's agent budget
+allows. Merge their records; a candidate with no record, or a
 record that fails §3's shape, gets one whose `human_queue` says so.
 
 ## 5. Dry-run report
