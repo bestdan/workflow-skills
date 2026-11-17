@@ -153,6 +153,18 @@ about someone else's naming and would pin a prefix this repo never pushes.
   gives an unavailable `validate.py`: a check that could not run is reported, not
   folded into `PASS`, because the vocabulary has no third state to hide it in.
 
+**Check 1d — importance overlay exists.** Any handler. When the merged view sets
+`garden.importance_overlay` (`commands/task-config.md`), the path is relative to
+the repo root and `/garden-backlog` stops when it is missing. Its own status line,
+separate from Check 1.
+
+- Key unset → `PASS`.
+- The value is a string and `"$ROOT/<path>"` is a file → `PASS`.
+- Anything else → `WARN`, never auto-fixed: which file the repo meant is a
+  judgment. "`garden.importance_overlay` names `<path>`, which does not exist —
+  fix the path or unset the key in `.task-config.yml`." For a non-string value,
+  say that instead of naming a path.
+
 **Check 2 — Handler prerequisites.** If Check 1 did **not** resolve a known handler
 (invalid YAML or an unknown value), **skip this check and report `WARN`** ("handler
 unresolved — fix Check 1 first") rather than defaulting to `repo-pr` prerequisites,

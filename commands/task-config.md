@@ -148,6 +148,8 @@ linear:
 
 **`review_queue_limit`** is a top-level key (default `8`), shared by every handler: how many open, non-draft PRs waiting on the owner (tier `human`, or `unknown` when it could not be computed) the repo may hold before `/do-tasks` and `/auto-pilot` stop claiming. `wip_limit` counts this caller's own in-flight tasks, while this counts the owner's whole review queue, whoever opened each PR. `scripts/review-queue.py --limit` defines the count (the same PRs its review-queue issue lists), and claiming stops when it is over the limit.
 
+**`garden.importance_overlay`** is an optional top-level `garden:` mapping key, shared by every handler: a path, relative to the repo root, to a markdown overlay that names the repo's own critical harms and examples for the importance rubric. `/garden-backlog` reads it after the generic `skills/task/references/importance.md`, whose **Repo overlay** section says what an overlay may hold, and stops if the path is set but missing. Unset, the generic rubric is used alone. `/doctor` Check 1d reports a configured path that does not exist.
+
 Omit optional keys the user didn't set (the per-handler file already handles this in what it returns).
 
 ### Local override (`.task-config.local.yml`)

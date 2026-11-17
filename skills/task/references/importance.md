@@ -4,8 +4,8 @@ This file owns the **importance rubric**: five levels that say how bad a
 ticket's problem is for a user or the business while it stays open, the inputs
 a judge may use to pick one, and when the verdict is too uncertain to write.
 Importance is an objective property of the ticket, like severity. A bug that
-gives people bad financial advice is important whatever else is in the backlog;
-a slightly misaligned button is not. It is **draft pending PM / EM review**:
+silently corrupts users' saved data is important whatever else is in the
+backlog; a slightly misaligned button is not. It is **draft pending PM / EM review**:
 no command writes a verdict from it until the sign-off below is filled in.
 
 | Sign-off | Name | Date |
@@ -19,21 +19,35 @@ Pick the level from the **consequence** the ticket describes, not from its
 wording, its reporter, or its neighbours. Read the table top-down and stop at
 the first row whose test the ticket meets.
 
-| Level      | Test                                                                                                                                                                           | Examples                                                                                                                                                                                |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `blocker`  | Wrong money movement, wrong advice or tax outcome, data loss or exposure, or a compliance breach — **happening now**, with evidence it is.                                     | A transfer posts twice for every user who retries it. Projections shown today use last year's contribution limit. A support export includes other users' account numbers.               |
-| `critical` | The same consequences, but **conditional or rare**; or a core user flow **broken with no workaround**.                                                                         | A tax estimate is wrong only for filers with two states of residence. A rounding edge case could misstate a balance above some threshold. Users cannot link an external account at all. |
-| `major`    | A user flow **degraded**, a non-core flow **broken**, or a core flow **broken with a workaround**; or a material, recurring internal-ops cost. No wrong money, advice or data. | A goal chart fails to load until the page is refreshed. Editing a plan loses unsaved inputs on back-navigation. Support re-keys every rejected form by hand each week.                  |
-| `minor`    | **User-observable but harmless**: cosmetic, copy, alignment; or internal hygiene with no user effect.                                                                          | A label is misaligned on narrow screens. A tooltip has a typo. A deprecated helper still has three callers.                                                                             |
-| `trivial`  | **No observable effect** on users or operations; a nice-to-have.                                                                                                               | Rename a private variable. Add a convenience flag nobody has asked for.                                                                                                                 |
+The top two levels are set by four **harm classes**:
+
+- **Wrong financial outcome** — a user or the business is charged, paid,
+  credited or told a figure that is wrong.
+- **Irreversible user harm** — an action taken for or on a user that cannot
+  be undone.
+- **Data loss or exposure** — data destroyed, corrupted, or shown to someone
+  who should not see it.
+- **Legal or compliance breach** — the product breaks a law, regulation or
+  contractual obligation.
+
+A repo can name what these mean in its own domain with an overlay (see
+**Repo overlay** below); the classes and the levels stay as they are here.
+
+| Level      | Test                                                                                                                                                                      | Examples                                                                                                                                                                             |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `blocker`  | A harm-class consequence — **happening now**, with evidence it is.                                                                                                        | Every user who retries checkout is charged twice. A nightly job has deleted records it should keep since its last deploy. A shared export includes other customers' email addresses. |
+| `critical` | The same consequences, but **conditional or rare**; or a core user flow **broken with no workaround**.                                                                    | Invoice totals are wrong only for orders that mix two currencies. A race under concurrent edits could drop a saved change. Users cannot sign in through single sign-on at all.       |
+| `major`    | A user flow **degraded**, a non-core flow **broken**, or a core flow **broken with a workaround**; or a material, recurring internal-ops cost. No harm-class consequence. | A dashboard fails to load until the page is refreshed. Editing a form loses unsaved inputs on back-navigation. Support re-keys every rejected import by hand each week.              |
+| `minor`    | **User-observable but harmless**: cosmetic, copy, alignment; or internal hygiene with no user effect.                                                                     | A label is misaligned on narrow screens. A tooltip has a typo. A deprecated helper still has three callers.                                                                          |
+| `trivial`  | **No observable effect** on users or operations; a nice-to-have.                                                                                                          | Rename a private variable. Add a convenience flag nobody has asked for.                                                                                                              |
 
 The boundaries between adjacent levels, stated once:
 
 - `blocker` / `critical` — **happening now vs conditional**. Both carry the
   worst consequences; only evidence of current harm makes it `blocker`.
 - `critical` / `major` — **wrong outcome or no workaround vs a workaround
-  exists**. Any wrong money, advice, tax or data outcome is at least
-  `critical`, however rare.
+  exists**. Any harm-class consequence is at least `critical`, however
+  rare.
 - `major` / `minor` — **a task is harder or fails vs it only looks wrong**.
   Something a user or operator cannot do, or does slower, is `major`.
 - `minor` / `trivial` — **observable, or a real cost to the people maintaining
@@ -75,6 +89,25 @@ names through task-fill's `priority_map`; this file does not define that map.
 How a Jira priority name reads back as a symbolic level is the Priority row of
 the field mapping in `commands/handlers/jira.md` → **List**.
 
+## Repo overlay
+
+A repo whose harms are more specific than the four classes can name them in an
+overlay: a markdown file in the repo, at the path the optional
+`garden.importance_overlay` key in `.task-config.yml` gives
+(`commands/task-config.md`). `/garden-backlog` reads this file, then the
+overlay. With the key unset, this file is the whole rubric.
+
+The overlay holds two things and nothing else:
+
+- **Critical harms** — what each harm class means in the repo's domain, and
+  any domain harm that counts as one of them.
+- **Examples** — per level, cases from the repo's own product.
+
+It does not restate or change the levels, their tests and boundaries, the
+evidence rule for `blocker`, the inputs, confidence or output. Where an overlay
+appears to, this file wins. A harm the overlay names is a harm-class
+consequence for every rule above.
+
 ## Inputs
 
 The judge may use:
@@ -99,7 +132,7 @@ The judge may not use:
 Every verdict carries `confidence: high | low`. It is `low` when either holds:
 
 - the consequence depends on facts the ticket does not state (who is affected,
-  whether money or advice is touched, whether a workaround exists), or
+  whether a harm class is touched, whether a workaround exists), or
 - two levels are equally defensible from what the ticket does state.
 
 Otherwise it is `high`. A `low` verdict is not written to the tracker; the
@@ -112,7 +145,7 @@ One record per ticket. The consumer owns the full schema.
 ```yaml
 importance: critical
 confidence: high
-evidence: "Tax estimate is wrong for filers with two states; no report of it occurring."
+evidence: "Invoice total is wrong for mixed-currency orders; no report of it occurring."
 ```
 
 `evidence` is one line naming the consequence and, for `blocker`, the sign of
