@@ -58,20 +58,28 @@ does (`commands/task-config.md` → "Resolving the handler").
 
 - `handler: jira` → follow `${CLAUDE_PLUGIN_ROOT}/commands/handlers/<handler>-garden.md`
   with `<handler>` = `jira`. If that file does not exist in the installed
-  plugin, **stop** with: "`/garden-backlog`: the jira garden handler is not
-  installed yet (#1521)."
+  plugin, **stop** with: "`/garden-backlog`: the installed workflow-skills
+  plugin has no jira garden handler. Update the plugin."
 - Any other handler (`gh-issue`, `linear`, `repo-pr`, absent) → **stop** with:
   "`/garden-backlog` is not yet implemented for the `<handler>` handler."
 - Unknown value → **stop** with: "Unknown task handler `<value>` in
   dev_docs/tasks/.task-config.yml. Run /task-config to fix it."
 
 Then read `garden.importance_overlay` from the same merged view. Unset → the
-generic rubric alone. Set → a path relative to the repo root
-(`git rev-parse --show-toplevel`) to the overlay `importance.md` → **Repo
-overlay** describes. If the value is not a string, or `<root>/<path>` is not a
-file, **stop** with: "`garden.importance_overlay` must name a file in the repo;
-`<value>` does not. Fix the path or unset the key." Without the overlay,
-importance would be judged on the generic harms the repo has said are
+generic rubric alone. Set → the overlay `importance.md` → **Repo overlay**
+describes: an absolute path, a `$HOME` or `~` path, or a path relative to the
+repo root (`git rev-parse --show-toplevel`). Resolve it with the helper rather
+than by hand, so this read and `/doctor` agree:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/garden-overlay.py" --value '<value>' --root "<root>"
+```
+
+It prints the absolute path; that path is what §4's fan-out and §5's report
+carry. If the value is not a string, or the helper exits non-zero, **stop**
+with: "`garden.importance_overlay` must name a file; `<value>` resolves to
+`<printed path>`, which is not one. Fix the path or unset the key." Without the
+overlay, importance would be judged on the generic harms the repo has said are
 incomplete.
 
 ## 2. The handler contract

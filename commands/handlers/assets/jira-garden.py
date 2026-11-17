@@ -144,9 +144,12 @@ def scope_clause(scope: str, wide: bool = False) -> str:
     s = scope.strip()
     if not s:
         raise InputError("empty scope")
-    if ISSUE_KEY_RE.match(s):
-        return f'parent = "{s}"'
-    if PROJECT_RE.match(s):
+    # Jira keys are uppercase, so `ip` means the project, not a JQL fragment.
+    key = s.upper()
+    if ISSUE_KEY_RE.match(key):
+        return f'parent = "{key}"'
+    if PROJECT_RE.match(key):
+        s = key
         clause, what = f'project = "{s}"', "a project"
     elif re.search(r"\border\s+by\b", s, re.IGNORECASE):
         raise InputError(
@@ -176,7 +179,7 @@ def build_jql(scope: str, wide: bool = False) -> Dict[str, str]:
 
 def build_key_jql(key: str) -> Dict[str, str]:
     """One ticket, for Read: never a scope, so never subject to the epic gate."""
-    k = key.strip()
+    k = key.strip().upper()
     if not ISSUE_KEY_RE.match(k):
         raise InputError(f"--key {key!r} is not an issue key")
     return queries(f'key = "{k}"')
@@ -242,7 +245,10 @@ def fetch(
     Stops with an error when a cursor repeats, rather than re-reading the same
     page forever.
     """
-    os.makedirs(out_dir, exist_ok=True)
+    try:
+        os.makedirs(out_dir, exist_ok=True)
+    except OSError as exc:
+        raise InputError(f"--out-dir {out_dir}: {exc}") from exc
     paths: List[str] = []
     seen: Set[str] = set()
     count = 0
@@ -277,8 +283,11 @@ def fetch(
         except json.JSONDecodeError as exc:
             raise TwgFailed(f"twg query printed invalid JSON: {exc}") from exc
         path = os.path.join(out_dir, f"page-{len(paths) + 1:03d}.json")
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(payload, fh)
+        try:
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh)
+        except OSError as exc:
+            raise InputError(f"--out-dir {out_dir}: {exc}") from exc
         paths.append(path)
         count += len(page_issues(payload))
         cursor = page_next(payload)
@@ -622,23 +631,60 @@ def build_rows(cfg: argparse.Namespace) -> Dict[str, Any]:
         for issue in page_issues(load_page(path)):
             if isinstance(issue.get("key"), str):
                 changed.add(issue["key"])
+    issues = [i for path in cfg.pages for i in page_issues(load_page(path))]
+    source = "config"
+    if not cfg.refinement_status:
+        cfg.refinement_status = inferred_refinement(issues, cfg)
+        source = "inferred"
     rows: List[Dict[str, Any]] = []
     seen: Set[str] = set()
-    for path in cfg.pages:
-        for issue in page_issues(load_page(path)):
-            row = build_row(issue, changed, cfg, pmap)
-            if row["key"] in seen:
-                continue
-            seen.add(row["key"])
-            rows.append(row)
+    for issue in issues:
+        row = build_row(issue, changed, cfg, pmap)
+        if row["key"] in seen:
+            continue
+        seen.add(row["key"])
+        rows.append(row)
     limit_cut = cfg.limit is not None and len(rows) > cfg.limit
     if cfg.limit is not None:
         rows = rows[: cfg.limit]
     return {
         "count": len(rows),
         "limit_cut": limit_cut or bool(cfg.limit_cut),
+        "refinement_status": cfg.refinement_status,
+        "refinement_status_source": source,
         "rows": rows,
     }
+
+
+def inferred_refinement(issues: List[Dict[str, Any]], cfg: argparse.Namespace) -> str:
+    """The refinement target when `jira.refinement_status` is unset.
+
+    It is the one To Do status the in-scope tickets hold other than
+    `ready_status` and the blocked statuses. That need not be the workflow's
+    initial status, and it does not have to be: the garden's query does not
+    filter on status and a target equal to the current status is no write, so a
+    ticket that fails quality stays beside its unready peers, and the pick is
+    always To Do, so nothing is started. Anything but exactly one is refused,
+    not guessed.
+    """
+    skip = {cfg.ready_status, *(cfg.blocked_status or [])}
+    names: Set[str] = set()
+    for issue in issues:
+        status = flat_fields(issue).get("status")
+        name = name_of(status)
+        cat = status.get("statusCategory") if isinstance(status, dict) else None
+        if name and name not in skip and isinstance(cat, dict):
+            if cat.get("key") == "new":
+                names.add(name)
+    if len(names) != 1:
+        found = ", ".join(sorted(names)) or "none"
+        raise InputError(
+            "jira.refinement_status is unset and cannot be inferred: "
+            f"the candidates hold {len(names)} To Do statuses besides "
+            f"ready_status and the blocked statuses ({found}). Set jira.refinement_status in "
+            "dev_docs/tasks/.task-config.yml."
+        )
+    return names.pop()
 
 
 # ---------------------------------------------------------------- own-prs
@@ -796,9 +842,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     s = sub.add_parser("page")
     s.add_argument("path")
 
-    def status_args(sp: argparse.ArgumentParser) -> None:
+    def status_args(sp: argparse.ArgumentParser, refinement_required: bool) -> None:
         sp.add_argument("--ready-status", required=True)
-        sp.add_argument("--refinement-status", required=True)
+        sp.add_argument("--refinement-status", required=refinement_required)
         sp.add_argument("--priority-map-json")
         sp.add_argument("--issue-type")
 
@@ -811,7 +857,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     s.add_argument("--site")
     s.add_argument("--limit", type=int)
     s.add_argument("--limit-cut", action="store_true")
-    status_args(s)
+    status_args(s, refinement_required=False)
 
     s = sub.add_parser("own-prs")
     s.add_argument("--rows", required=True)
@@ -822,15 +868,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     s.add_argument("--labels", required=True)
     s.add_argument("--estimate-field")
     s.add_argument("--issue-types")
-    status_args(s)
+    status_args(s, refinement_required=True)
 
     s = sub.add_parser("comment")
     s.add_argument("--spec", required=True)
 
     args = p.parse_args(argv)
-    if getattr(args, "limit", None) is not None and args.limit < 1:
-        print("jira-garden: --limit must be at least 1", file=sys.stderr)
-        return 2
+    for flag in ("limit", "page_size"):
+        if getattr(args, flag, None) is not None and getattr(args, flag) < 1:
+            name = flag.replace("_", "-")
+            print(f"jira-garden: --{name} must be at least 1", file=sys.stderr)
+            return 2
     try:
         if args.cmd == "jql":
             if args.key is not None:

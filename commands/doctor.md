@@ -154,18 +154,25 @@ about someone else's naming and would pin a prefix this repo never pushes.
   folded into `PASS`, because the vocabulary has no third state to hide it in.
 
 **Check 1d — importance overlay exists.** Any handler. When the merged view sets
-`garden.importance_overlay` (`commands/task-config.md`), the path is relative to
-the repo root and `/garden-backlog` stops when it is missing. Its own status line,
-separate from Check 1.
+`garden.importance_overlay` (`commands/task-config.md`), `/garden-backlog` stops
+when it names no file. Its own status line, separate from Check 1. Resolve a
+string value with the same helper `/garden-backlog` §1 uses, so both read one
+path:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/garden-overlay.py" --value '<value>' --root "$ROOT"
+```
 
 - Check 1 found the YAML unparseable → skip and report `WARN` ("overlay
   unchecked — fix Check 1 first").
 - Key unset → `PASS`.
-- The value is a string and `"$ROOT/<path>"` is a file → `PASS`.
+- The helper exits `0` → `PASS`, naming the path it printed:
+  "`garden.importance_overlay` resolves to `<printed path>`."
 - Anything else → `WARN`, never auto-fixed: which file the repo meant is a
-  judgment. "`garden.importance_overlay` names `<path>`, which is not a file —
-  fix the path or unset the key in `.task-config.yml`." For a non-string value,
-  say that instead of naming a path.
+  judgment. "`garden.importance_overlay` (`<value>`) resolves to
+  `<printed path>`, which is not a file — fix the path or unset the key in
+  `.task-config.yml`." For a non-string value, say that instead of naming a
+  path.
 
 **Check 2 — Handler prerequisites.** If Check 1 did **not** resolve a known handler
 (invalid YAML or an unknown value), **skip this check and report `WARN`** ("handler

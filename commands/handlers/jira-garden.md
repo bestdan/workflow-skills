@@ -52,12 +52,22 @@ failed. If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
    `jira.project`, `jira.issue_type`, `jira.ready_status`,
    `jira.refinement_status`, `jira.blocked_statuses`, `jira.estimate_field` and
    `jira.priority_map`. This flow adds no key of its own.
-   - `ready_status` / `refinement_status` unset → **stop and ask**, exactly as
-     `jira-promote.md` step 3a does: resolve the reachable statuses from one
-     candidate's transitions, ask via `AskUserQuestion`, and offer to persist
-     the answer. Never guess a status name. `rows` refuses a configured target
+   - `ready_status` / `refinement_status` unset, and the owner can be asked →
+     **stop and ask**, exactly as `jira-promote.md` step 3a does: resolve the
+     reachable statuses from one candidate's transitions, ask via
+     `AskUserQuestion`, and offer to persist the answer. Offer the status
+     unready tickets already sit in first for `refinement_status`: unlike
+     promote, the garden's query does not filter on status, so that is a valid
+     target here. Never guess a status name. `rows` refuses a configured target
      outside the To Do status category, since moving a ticket there would
      start it.
+   - **Nobody can be asked** — a subagent, a `claude -p` run, or a session
+     without `AskUserQuestion` → never prompt; take both keys from config.
+     `ready_status` unset → **stop** with: "`jira.ready_status` is unset and
+     no one can be asked; set it in `dev_docs/tasks/.task-config.yml`."
+     `refinement_status` unset → leave `--refinement-status` off the dry run's
+     `rows` call; `rows` infers it or stops with a message naming the key
+     (step 2.3).
    - `estimate_field` or `priority_map` unset → that field's proposals stay
      report-only; `fields` (step 4) reports them rather than writing.
 4. **Project default priority.** Call
@@ -115,11 +125,17 @@ failed. If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
 3. **Build the rows:**
 
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-garden.py" rows --pages <candidate pages> --changed-pages <priority_changed pages> --default-priority "<name>" --ready-status "<ready_status>" --refinement-status "<refinement_status>" [--blocked-status "<name>" ...] [--estimate-field <id>] [--priority-map-json '<map as JSON>'] --issue-type "<jira.issue_type>" --site <jira.site> [--limit <N>] [--limit-cut]
+   python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-garden.py" rows --pages <candidate pages> --changed-pages <priority_changed pages> --default-priority "<name>" --ready-status "<ready_status>" [--refinement-status "<refinement_status>"] [--blocked-status "<name>" ...] [--estimate-field <id>] [--priority-map-json '<map as JSON>'] --issue-type "<jira.issue_type>" --site <jira.site> [--limit <N>] [--limit-cut]
    ```
 
-   Pass `--limit-cut` when `fetch` (or the MCP loop) stopped at the limit. It
-   prints `{count, limit_cut, rows}`, each row the core's List shape plus
+   Pass `--limit-cut` when `fetch` (or the MCP loop) stopped at the limit.
+   Without `--refinement-status`, `rows` uses the one To Do status the
+   candidates hold besides `ready_status` and the blocked statuses (not
+   necessarily the workflow's initial status), and exits `2` naming `jira.refinement_status` when
+   there is not exactly one. It prints `{count, limit_cut, refinement_status,
+   refinement_status_source, rows}`; when the source is `inferred`, put
+   the name in the report's scope line, and pass it as `--refinement-status`
+   to every later `rows` (Read) and `fields` call. Each row is the core's List shape plus
    `status_name`, `issuetype`, `labels` and `priority` for the report and for
    step 4. The rules behind the symbolic fields, all in the script:
    - `status` — `ready_status` → `ready`, `refinement_status` →

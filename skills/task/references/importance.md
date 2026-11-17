@@ -92,7 +92,7 @@ the field mapping in `commands/handlers/jira.md` → **List**.
 ## Repo overlay
 
 A repo whose harms are more specific than the four classes can name them in an
-overlay: a markdown file in the repo, at the path the optional
+overlay: a markdown file, in the repo or outside it, at the path the optional
 `garden.importance_overlay` key in `.task-config.yml` gives
 (`commands/task-config.md`). `/garden-backlog` reads this file, then the
 overlay. With the key unset, this file is the whole rubric.

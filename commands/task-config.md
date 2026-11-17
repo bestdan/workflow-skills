@@ -128,6 +128,8 @@ jira:
   # archive_status: Archived # optional — terminal-category status /archive-tasks transitions to
   # backend: auto           # optional — auto | twg | acli | mcp; auto prefers twg (see jira-config.md → "Backend")
 # archive_after: 30          # optional, top-level — default /archive-tasks age threshold (days)
+# garden:                    # optional, top-level, any handler — read by /garden-backlog
+#   importance_overlay: docs/importance-overlay.md # absolute, $HOME/…, ~/… or repo-relative
 ```
 
 ```yaml
@@ -148,7 +150,7 @@ linear:
 
 **`review_queue_limit`** is a top-level key (default `8`), shared by every handler: how many open, non-draft PRs waiting on the owner (tier `human`, or `unknown` when it could not be computed) the repo may hold before `/do-tasks` and `/auto-pilot` stop claiming. `wip_limit` counts this caller's own in-flight tasks, while this counts the owner's whole review queue, whoever opened each PR. `scripts/review-queue.py --limit` defines the count (the same PRs its review-queue issue lists), and claiming stops when it is over the limit.
 
-**`garden.importance_overlay`** is an optional top-level `garden:` mapping key, shared by every handler: a path, relative to the repo root, to a markdown overlay that names the repo's own critical harms and examples for the importance rubric. `/garden-backlog` reads it after the generic `skills/task/references/importance.md`, whose **Repo overlay** section says what an overlay may hold, and stops if the key is set and does not name a file. Unset, the generic rubric is used alone. `/doctor` Check 1d warns when the key is set but does not name a file.
+**`garden.importance_overlay`** is an optional top-level `garden:` mapping key, shared by every handler and written nested, as in the jira block above (`garden:` with `importance_overlay:` under it): a path to a markdown overlay that names the repo's own critical harms and examples for the importance rubric. `/garden-backlog` reads it after the generic `skills/task/references/importance.md`, whose **Repo overlay** section says what an overlay may hold, and stops if the key is set and does not name a file. The path may be absolute, start with `$HOME` or `~`, or be relative to the repo root; `${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/garden-overlay.py` resolves it for both readers. Unset, the generic rubric is used alone. `/doctor` Check 1d reports the path it resolved, and warns when that is not a file.
 
 Omit optional keys the user didn't set (the per-handler file already handles this in what it returns).
 
