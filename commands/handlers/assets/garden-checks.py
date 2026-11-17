@@ -115,9 +115,9 @@ class InputError(Exception):
 def heading_of(line: str) -> Tuple[Optional[str], str]:
     """`(section kind, same-line content)` when `line` opens a known section.
 
-    A heading may be markdown (`## Expected`), bold (`**Expected:**`), a bare
-    line (ADF headings flatten to one), or a label with its content after the
-    colon (`Expected: the chart loads`).
+    A heading may be markdown (`## Expected`, which is also how jira-garden.py
+    flattens an ADF heading), bold (`**Expected:**`), a bare line, or a label
+    with its content after the colon (`Expected: the chart loads`).
     """
     s = line.strip()
     s = re.sub(r"^#{1,6}\s*", "", s)
@@ -129,22 +129,41 @@ def heading_of(line: str) -> Tuple[Optional[str], str]:
     return None, ""
 
 
+def md_level(line: str) -> Optional[int]:
+    """The level of a `#` markdown heading, else None."""
+    m = re.match(r"^\s*(#{1,6})\s", line)
+    return len(m.group(1)) if m else None
+
+
 def sections_with_content(description: Any) -> Dict[str, bool]:
-    """Which known sections the description opens, each with content."""
+    """Which known sections the description opens, each with content.
+
+    A markdown heading ends the open section only at the same level or
+    higher; a deeper one is a subsection of it. A bold heading has no level,
+    so it always ends the section.
+    """
     found: Dict[str, bool] = {}
     if not isinstance(description, str):
         return found
     current: Optional[str] = None
+    current_level: Optional[int] = None
     for line in description.splitlines():
+        level = md_level(line)
         kind, inline = heading_of(line)
         if kind is not None:
-            current = kind
+            current, current_level = kind, level
             found.setdefault(kind, False)
             if inline:
                 found[kind] = True
             continue
         if MD_HEADING.match(line):
-            current = None
+            deeper = (
+                level is not None
+                and current_level is not None
+                and level > current_level
+            )
+            if not deeper:
+                current, current_level = None, None
             continue
         if current is not None and line.strip(" \t-*•"):
             found[current] = True

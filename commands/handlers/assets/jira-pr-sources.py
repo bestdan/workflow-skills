@@ -87,10 +87,13 @@ def run_acli(args):
 # ------------------------------------------------------------- comment bodies
 
 
-def adf_text(node):
-    """Flatten an ADF node to text, keeping inline code in backticks."""
+def adf_text(node, headings=False):
+    """Flatten an ADF node to text, keeping inline code in backticks.
+
+    With `headings`, a heading node keeps its level as a markdown `#` prefix,
+    so a reader can tell where a section ends (#1567)."""
     if isinstance(node, list):
-        return "".join(adf_text(n) for n in node)
+        return "".join(adf_text(n, headings) for n in node)
     if not isinstance(node, dict):
         return ""
     if node.get("type") == "text":
@@ -103,7 +106,15 @@ def adf_text(node):
         return "\n"
     if node.get("type") in ("inlineCard", "blockCard", "embedCard"):
         return (node.get("attrs") or {}).get("url") or ""
-    inner = adf_text(node.get("content") or [])
+    inner = adf_text(node.get("content") or [], headings)
+    level = (node.get("attrs") or {}).get("level")
+    if (
+        headings
+        and node.get("type") == "heading"
+        and isinstance(level, int)
+        and 1 <= level <= 6
+    ):
+        return "#" * level + " " + inner + "\n"
     if node.get("type") in ("paragraph", "heading", "codeBlock"):
         return inner + "\n"
     return inner

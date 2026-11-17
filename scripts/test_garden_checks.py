@@ -87,11 +87,23 @@ class AcceptanceCriteria(unittest.TestCase):
             checks.ac_forms("# Acceptance Criteria\n- [ ] done\n"), ["section"]
         )
 
+    def test_deeper_heading_stays_in_the_section(self) -> None:
+        self.assertEqual(
+            checks.ac_forms("## Acceptance Criteria\n### Scenario\n- done\n"),
+            ["section"],
+        )
+
     def test_expected_actual_without_repro_fails(self) -> None:
         self.assertEqual(checks.ac_forms("Expected: loads\nActual: spins\n"), [])
 
     def test_empty_heading_and_prose_fail(self) -> None:
         self.assertEqual(checks.ac_forms("Acceptance Criteria\n## Notes\nlater\n"), [])
+        self.assertEqual(
+            checks.ac_forms("## Acceptance Criteria\n## Notes\nlater\n"), []
+        )
+        self.assertEqual(
+            checks.ac_forms("### Acceptance Criteria\n# Notes\nlater\n"), []
+        )
         self.assertEqual(checks.ac_forms("We should look at the expected value."), [])
         self.assertEqual(checks.ac_forms(None), [])
 
