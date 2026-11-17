@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.221.0] - 2026-11-17
+
+### Features
+
+- add the jira /garden-backlog handler [#1521] (#1556) (e2c945b0)
+
 ## [2.220.0] - 2026-11-17
 
 ### Features
