@@ -244,6 +244,8 @@ an over-ceiling estimate rather than discarding it.
 per-project custom field this handler does not resolve — so size folds into the
 scope judgment and nothing is written. Priority is native and is **read**, but the
 site's priority scheme names are configured per Jira site, so the symbolic
-vocabulary has no fixed encoding without a config key the handler does not yet
-have; backfilling it would mean guessing a scheme. Until that key exists, jira
-backfills neither field.
+vocabulary has no fixed encoding without a config key; backfilling it without
+one would mean guessing a scheme. `jira.estimate_field` and `jira.priority_map`
+([`jira-config.md`](jira-config.md#estimate-and-priority-encoding-estimate_field--priority_map))
+are that encoding for a Jira writer, but `/promote-tasks` still backfills neither
+field on Jira.

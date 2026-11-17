@@ -1,6 +1,6 @@
 ---
 description: Diagnose and optionally fix the plugin setup — config validity, handler prerequisites, legacy dirs, schema drift, hygiene, co-review and teardown allow-rule drift, the worktree root and branch prefix, co-review ledger sync, the task-dashboard agent, and an admin gh account on a personal repo
-allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(find *), Bash(grep *), Bash(uv *), Bash(python3 *), Bash(mkdir *), Bash(rmdir *), Bash("${CLAUDE_PLUGIN_ROOT}/scripts/worktree-config.sh":*), Glob, Grep, Read, Edit, Write, AskUserQuestion, mcp__claude_ai_Linear__list_teams, mcp__linear__list_teams, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__atlassian__getAccessibleAtlassianResources, Bash(twg *), Bash("${CLAUDE_PLUGIN_ROOT}/scripts/work-tmp.sh")
+allowed-tools: Bash(git *), Bash(gh *), Bash(cat *), Bash(find *), Bash(grep *), Bash(uv *), Bash(python3 *), Bash(mkdir *), Bash(rmdir *), Bash("${CLAUDE_PLUGIN_ROOT}/scripts/worktree-config.sh":*), Glob, Grep, Read, Edit, Write, AskUserQuestion, mcp__claude_ai_Linear__list_teams, mcp__linear__list_teams, mcp__claude_ai_Atlassian__getAccessibleAtlassianResources, mcp__atlassian__getAccessibleAtlassianResources, mcp__claude_ai_Atlassian__getJiraIssueTypeMetaWithFields, mcp__atlassian__getJiraIssueTypeMetaWithFields, mcp__claude_ai_Atlassian__getJiraProjectIssueTypesMetadata, mcp__atlassian__getJiraProjectIssueTypesMetadata, Bash(twg *), Bash("${CLAUDE_PLUGIN_ROOT}/scripts/work-tmp.sh")
 argument-hint: "[--fix]"
 ---
 
@@ -175,6 +175,27 @@ the auth flows):
   backend's check, and name the backend that passed. On failure, `WARN` with
   that section's message, or with `jira.md` step 1's when the MCP was the
   backend tried.
+
+  When `jira.estimate_field` or `jira.priority_map` is set, also read the issue
+  type's create metadata; see `jira-config.md` → "Estimate and priority
+  encoding". The metadata tool takes an issue-type **id**, and
+  `jira.issue_type` is a name, so first
+  call `<atlassian-mcp>__getJiraProjectIssueTypesMetadata`
+  (`cloudId: <jira.site>`, `projectIdOrKey: <jira.project>`) and take the `id`
+  of the type whose `name` is `jira.issue_type` (no match →
+  `WARN: could not confirm` the set keys). Then call
+  `<atlassian-mcp>__getJiraIssueTypeMetaWithFields` (`cloudId: <jira.site>`,
+  `projectIdOrKey: <jira.project>`, `issueTypeId: <that id>`,
+  `requiredFieldsOnly: false` — the default returns required fields only, which
+  hides an optional Story Points field). The call is MCP-only, whatever
+  backend resolved; with no Atlassian MCP reachable, `WARN: could not confirm`
+  the set keys. Create-screen metadata can omit a field the site has, so neither
+  result is ever "does not exist":
+  - `estimate_field` → `PASS` when the id is among the returned fields, else
+    `WARN: could not confirm <id> on <project>/<issue_type>`.
+  - `priority_map` → `PASS` when every value is one of the returned
+    `priority.allowedValues[].name`; `WARN` naming each value that is not. No
+    `priority` field in the metadata → `WARN: could not confirm`.
 
 Met → `PASS`. Unmet → `WARN` (auth/MCP is a human action, never auto-fixed) with
 the handler doc's own remediation.
