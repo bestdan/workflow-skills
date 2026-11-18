@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.224.5] - 2026-11-18
+
+### Fixes
+
+- pick the LOW reason in a helper, not the model [#1571] (#1573) (69d26316)
+
 ## [2.224.4] - 2026-11-18
 
 ### Fixes
