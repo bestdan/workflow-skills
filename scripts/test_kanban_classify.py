@@ -213,6 +213,30 @@ class JiraClassifyTests(unittest.TestCase):
             [r["id"] for r in result["sections"]["ready"]], ["URGENT", "LOW", "NONE"]
         )
 
+    def test_priority_names_are_mapped_onto_the_domain(self):
+        names = {
+            "Highest": "urgent",
+            "Blocker": "urgent",
+            "P1-Critical": "urgent",
+            "P2": "high",
+            "Major": "medium",
+            "P4-Trivial": "low",
+            "Lowest": "low",
+            "Urgent": "urgent",
+            "Pending": None,
+            "P5": None,
+            None: None,
+        }
+        rows = [
+            row(str(name), "new", labels=["auto-eligible"], priority=name)
+            for name in names
+        ]
+        ready = run("jira", rows)["sections"]["ready"]
+        self.assertEqual(
+            {r["id"]: r["priority"] for r in ready},
+            {str(name): level for name, level in names.items()},
+        )
+
     def test_no_match(self):
         result = run("jira", [row("A-1", "cancelled")])
         self.assertEqual(result["unmatched"], ["A-1"])

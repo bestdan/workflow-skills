@@ -221,8 +221,9 @@ description.
      <keys>`; quality pass and `blocked_by` null → `unchanged`, reason
      `blocker links were not read`. Neither gets a `gardened` write, so the
      next run judges it again.
-   - quality pass → `ready`; a quality-passing ticket is never left in, or moved
-     to, the refinement status.
+   - quality pass with no blocker → `ready`. A quality-passing ticket is never
+     moved to the refinement status, but one held by a blocker stays where it
+     is, which may be the refinement status.
    - quality fail → `refinement`, reason = the failed condition's name.
    - the check passed but the judge failed `has_acceptance_criteria` →
      `unchanged`, reason `quality unknown`, no status write, and a human-queue
@@ -266,7 +267,11 @@ the **Write** tool.
 
 1. **Before.** Once the handler has resolved `own_pr` on the rows, run
    `python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/garden-checks.py" prejudge --rows <rows file>`.
-   It adds `checks.has_acceptance_criteria` (`pass` | `fail`) and the forms it
+   The rows file is a top-level JSON array with one object per ticket, each
+   carrying §2's List fields, `own_pr` included; any extra fields the handler
+   adds pass through. `prejudge`
+   prints the same array, adding to each row a `checks` object:
+   `has_acceptance_criteria` (`pass` | `fail`) and `ac_forms`, the forms it
    found. Write its stdout to a file in the directory
    `"${CLAUDE_PLUGIN_ROOT}/scripts/work-tmp.sh" --sub garden-backlog` prints:
    that file is the rows the judges get, never the ones before it ran, and the

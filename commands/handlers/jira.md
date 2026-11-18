@@ -132,13 +132,13 @@ Invoked from `/list-tasks` when `handler: jira` is configured. Read-only — one
 
 3. **Group into kanban sections.** Map each issue into a row and classify with the shared helper, `commands/handlers/assets/kanban-classify.py`, rather than hand-walking the section table. Reuse the same status-label vocabulary as the gh-issue `## List` and the Linear mapping in `linear-common.md` so a board behaves consistently across trackers:
 
-   | Row field   | Source                                                                                        |
-   | ----------- | --------------------------------------------------------------------------------------------- |
-   | `id`        | issue `key`                                                                                   |
-   | `category`  | `fields.status.statusCategory.key` — `new` \| `indeterminate` \| `done`                       |
-   | `labels`    | `fields.labels[]`                                                                             |
-   | `priority`  | `fields.priority.name` mapped to `urgent`/`high`/`medium`/`low` per step 4's table, or `null` |
-   | `sort_date` | `fields.created`                                                                              |
+   | Row field   | Source                                                                  |
+   | ----------- | ----------------------------------------------------------------------- |
+   | `id`        | issue `key`                                                             |
+   | `category`  | `fields.status.statusCategory.key` — `new` \| `indeterminate` \| `done` |
+   | `labels`    | `fields.labels[]`                                                       |
+   | `priority`  | `fields.priority.name` as-is, or `null`; the helper maps it             |
+   | `sort_date` | `fields.created`                                                        |
 
    ```bash
    python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/kanban-classify.py" --tracker jira
@@ -156,13 +156,13 @@ Invoked from `/list-tasks` when `handler: jira` is configured. Read-only — one
 
    Field mapping (vs. the `repo-pr` card line, which uses slug + frontmatter):
 
-   | Field       | Source                                                                                                                                                                                                                                                                                                                    |
-   | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-   | Priority    | `fields.priority.name` mapped to `urgent`/`high`/`medium`/`low`. Default scheme: Highest→urgent, High→high, Medium→medium, Low/Lowest→low. `P`-scheme (custom, common): P0/P1→urgent, P2→high, P3→medium, P4→low (match the leading `P<n>`, e.g. `P4-Trivial`). Any other custom name, or no priority, → `[—]`, sort last |
-   | Identifier  | issue `key`                                                                                                                                                                                                                                                                                                               |
-   | Title       | `fields.summary`                                                                                                                                                                                                                                                                                                          |
-   | Assignee    | `fields.assignee.displayName` (omit `— assignee …` when unassigned)                                                                                                                                                                                                                                                       |
-   | Annotations | `human-approval-requested`, `blocked`, `needs-review` — bare label name when present, comma-separated and appended after the assignee with `—`                                                                                                                                                                            |
+   | Field       | Source                                                                                                                                                                                               |
+   | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | Priority    | the helper's `priority` on the row: `urgent`/`high`/`medium`/`low`, mapped from the Jira name by `jira_priority()` in `kanban-classify.py`, which owns the scheme table. `null` → `[—]`, sorted last |
+   | Identifier  | issue `key`                                                                                                                                                                                          |
+   | Title       | `fields.summary`                                                                                                                                                                                     |
+   | Assignee    | `fields.assignee.displayName` (omit `— assignee …` when unassigned)                                                                                                                                  |
+   | Annotations | `human-approval-requested`, `blocked`, `needs-review` — bare label name when present, comma-separated and appended after the assignee with `—`                                                       |
 
    The helper already sorted each section (priority `urgent > high > medium > low`, none last, then `created` oldest first) — render its order as-is.
 

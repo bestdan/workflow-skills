@@ -15,29 +15,29 @@ row when the linked issue is mirrored, else the category Jira inlined in the
 link. views.py does that join in SQL; this module only reads the result.
 """
 
+import importlib.util
 import json
 import math
 from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Any
 
-# Jira priority names onto the urgent/high/medium/low domain kanban-classify
-# uses. Both the current scheme (Highest..Lowest) and the older one
-# (Blocker..Trivial) are mapped, and Linear's labels (Urgent, High, Medium,
-# Low), which linear_issues.py stores in the same column; an unknown name maps
-# to None.
-JIRA_PRIORITY = {
-    "urgent": "urgent",
-    "highest": "urgent",
-    "blocker": "urgent",
-    "critical": "urgent",
-    "high": "high",
-    "medium": "medium",
-    "major": "medium",
-    "low": "low",
-    "lowest": "low",
-    "minor": "low",
-    "trivial": "low",
-}
+# Jira priority names (and Linear's labels, which linear_issues.py stores in
+# the same column) onto urgent/high/medium/low. The mapping is kanban-classify's
+# `jira_priority()`, the one /list-tasks uses, so there is no second copy here.
+_KANBAN_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "commands"
+    / "handlers"
+    / "assets"
+    / "kanban-classify.py"
+)
+_spec = importlib.util.spec_from_file_location("kanban_classify", _KANBAN_PATH)
+if _spec is None or _spec.loader is None:
+    raise ImportError(f"cannot load {_KANBAN_PATH}")
+_kanban = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_kanban)
+jira_priority = _kanban.jira_priority
 
 # Priority term = weight x level. Unknown or unset priority scores 0.
 PRIORITY_LEVEL = {"urgent": 4, "high": 3, "medium": 2, "low": 1}
@@ -195,7 +195,7 @@ def score(
     def add(name: str, factor: float, why: str) -> None:
         terms.append((name, _round(float(weights.get(name, 0)) * factor), why))
 
-    level = JIRA_PRIORITY.get((issue.get("priority") or "").lower())
+    level = jira_priority(issue.get("priority"))
     add(
         "priority",
         PRIORITY_LEVEL.get(level or "", 0),
