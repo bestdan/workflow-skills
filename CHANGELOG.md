@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.224.4] - 2026-11-18
+
+### Fixes
+
+- correct rung 6, doc the rows file, twg doctor check, one priority map [#1571] (#1572) (f5d5909f)
+
 ## [2.224.3] - 2026-11-17
 
 ### Fixes
