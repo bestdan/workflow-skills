@@ -15,6 +15,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSET = ROOT / "commands" / "handlers" / "assets" / "promote-reason.py"
+SKILL = ROOT / "skills" / "task" / "SKILL.md"
 
 _spec = importlib.util.spec_from_file_location("promote_reason", ASSET)
 assert _spec is not None and _spec.loader is not None, f"cannot load {ASSET}"
@@ -66,6 +67,16 @@ class MainTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "SKILL.md"
             path.write_text("# Task\n\nNo table here.\n", encoding="utf-8")
+            with self.assertRaises(reason.ReasonError):
+                reason.load_table(path)
+
+    def test_table_with_an_unreadable_row_is_an_error(self):
+        text = SKILL.read_text(encoding="utf-8").replace(
+            "| `required_fields_present` ", "| required_fields_present ", 1
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "SKILL.md"
+            path.write_text(text, encoding="utf-8")
             with self.assertRaises(reason.ReasonError):
                 reason.load_table(path)
 

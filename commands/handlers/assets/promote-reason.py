@@ -35,6 +35,7 @@ from typing import List, Optional, Sequence, Tuple
 SKILL = Path(__file__).resolve().parents[3] / "skills" / "task" / "SKILL.md"
 CEILING = 5
 SCOPE_CHECK = "scope_fits"
+SEPARATOR = re.compile(r"^\|[\s:|-]+\|\s*$")
 ROW = re.compile(r"^\|\s*`(?P<name>[a-z_]+)`\s*\|.*\|\s*`(?P<reason>[^`]+)`\s*\|\s*$")
 
 
@@ -52,9 +53,12 @@ def load_table(path: Path = SKILL) -> List[Tuple[str, str]]:
             continue
         if not line.startswith("|"):
             break
+        if SEPARATOR.match(line):
+            continue
         m = ROW.match(line)
-        if m:
-            rows.append((m.group("name"), m.group("reason")))
+        if not m:
+            raise ReasonError(f"unreadable Confidence check row in {path}: {line}")
+        rows.append((m.group("name"), m.group("reason")))
     if not rows or SCOPE_CHECK not in dict(rows):
         raise ReasonError(f"no Confidence check table with {SCOPE_CHECK} in {path}")
     return rows
