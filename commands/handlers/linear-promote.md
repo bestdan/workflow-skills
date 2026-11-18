@@ -96,7 +96,14 @@ Then, for each candidate, run the **confidence check** from `skills/task/SKILL.m
 - The description is `description`. An equivalent concrete, checkable outcome also satisfies `has_acceptance_criteria`; an empty or "investigate X" description does not.
 - `scope_fits` weighs the stated `estimate` against the description's breadth. On a failure, `break-down-task` (`skills/break-down-task/SKILL.md`) splits on the Linear path by converting the issue into a parent and creating the components as child issues.
 
-**LOW** if any HIGH condition fails. Record the first failed check's canonical reason (e.g. `no estimate set`, `description missing acceptance criteria`, `no priority set`) — **except** when backfill deliberately left `estimate` unset because the honest estimate exceeded `5`, where `task-fill.md`'s **reason precedence** gives the slot to `scope exceeds size 5 — split into sub-tasks` instead.
+**LOW** if any HIGH condition fails. Do not write the reason yourself: pass the failed check names to the helper and record what it prints, verbatim. The title and `priority` checks fail as `required_fields_present`, the `estimate` check as `size_valid`. Pass the honest estimate as `--estimate`, including one backfill left unset because it exceeded `5`: the helper then applies `task-fill.md`'s **reason precedence** and records the split reason.
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/promote-reason.py" \
+  [--estimate <n>] <failed check> [<failed check> …]
+```
+
+A gloss of your own goes in the step 8 comment, never in the reason. Same `$CLAUDE_PLUGIN_ROOT` fallback as the other assets: Glob `**/handlers/assets/promote-reason.py`.
 
 > **`max_estimate` is deliberately absent from the list above.** It is a claim-time bound on this handler (`linear-ready.py` / `_linear_rank.py`), not a promote-time one, and since v2.59 `gh-issue` matches — see `commands/handlers/task-fill.md` → "Where the estimate gate lives", which owns the rule for both. The scale check above is a different thing: it asks whether the estimate is a legal Fibonacci value, not whether it is under an operator's bound.
 
