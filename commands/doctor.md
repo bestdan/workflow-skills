@@ -201,24 +201,31 @@ the auth flows):
 
   When `jira.estimate_field` or `jira.priority_map` is set, also read the issue
   type's create metadata; see `jira-config.md` → "Estimate and priority
-  encoding". The metadata tool takes an issue-type **id**, and
-  `jira.issue_type` is a name, so first
-  call `<atlassian-mcp>__getJiraProjectIssueTypesMetadata`
-  (`cloudId: <jira.site>`, `projectIdOrKey: <jira.project>`) and take the `id`
-  of the type whose `name` is `jira.issue_type` (no match →
-  `WARN: could not confirm` the set keys). Then call
-  `<atlassian-mcp>__getJiraIssueTypeMetaWithFields` (`cloudId: <jira.site>`,
-  `projectIdOrKey: <jira.project>`, `issueTypeId: <that id>`,
-  `requiredFieldsOnly: false` — the default returns required fields only, which
-  hides an optional Story Points field). The call is MCP-only, whatever
-  backend resolved; with no Atlassian MCP reachable, `WARN: could not confirm`
-  the set keys. Create-screen metadata can omit a field the site has, so neither
+  encoding". Read it through the backend that passed above:
+  - **`twg`** → `jira workitem field create-metadata` per
+    `${CLAUDE_PLUGIN_ROOT}/commands/handlers/jira-twg.md` (its frame, its
+    **Create metadata** shape). It takes `jira.issue_type` by name, so no id
+    lookup is needed. A failed call → `WARN: could not confirm` the set keys.
+  - **otherwise** → the Atlassian MCP. Its metadata tool takes an issue-type
+    **id**, and `jira.issue_type` is a name, so first call
+    `<atlassian-mcp>__getJiraProjectIssueTypesMetadata`
+    (`cloudId: <jira.site>`, `projectIdOrKey: <jira.project>`) and take the
+    `id` of the type whose `name` is `jira.issue_type` (no match →
+    `WARN: could not confirm` the set keys). Then call
+    `<atlassian-mcp>__getJiraIssueTypeMetaWithFields` (`cloudId: <jira.site>`,
+    `projectIdOrKey: <jira.project>`, `issueTypeId: <that id>`,
+    `requiredFieldsOnly: false` — the default returns required fields only,
+    which hides an optional Story Points field). With no Atlassian MCP
+    reachable (an `acli`-only machine), `WARN: could not confirm` the set keys.
+
+  Create-screen metadata can omit a field the site has, so neither
   result is ever "does not exist":
   - `estimate_field` → `PASS` when the id is among the returned fields, else
     `WARN: could not confirm <id> on <project>/<issue_type>`.
   - `priority_map` → `PASS` when every value is one of the returned
     `priority.allowedValues[].name`; `WARN` naming each value that is not. No
-    `priority` field in the metadata → `WARN: could not confirm`.
+    `priority` field, or one without `allowedValues`, in the metadata →
+    `WARN: could not confirm`.
 
 Met → `PASS`. Unmet → `WARN` (auth/MCP is a human action, never auto-fixed) with
 the handler doc's own remediation.

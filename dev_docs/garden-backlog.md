@@ -68,7 +68,9 @@ The deterministic parts are scripts with tests, not prose:
 `commands/handlers/assets/garden-checks.py` (the acceptance-criteria check, the
 status derivation, the key search), `garden-overlay.py` (overlay paths), and
 `jira-garden.py` (JQL, paging, rows, write payloads, the provenance comment).
-Each docstring says why its rules are shaped as they are.
+Each docstring says why its rules are shaped as they are. The rows file the
+two `garden-checks.py` passes read, and what `prejudge` adds to it, are
+[§4 Fan-out of the command](../commands/garden-backlog.md#fan-out).
 
 ## Where the rubrics live
 

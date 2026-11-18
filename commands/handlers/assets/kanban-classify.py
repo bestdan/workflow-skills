@@ -49,7 +49,9 @@ last):
 
   linear    int 0-4 (0 = none) — fed straight into `_linear_rank.rank_key()`
   gh-issue  int 0-3, or null
-  jira      one of "urgent" | "high" | "medium" | "low", or null
+  jira      the Jira priority name, or null. `jira_priority()` maps it onto
+            "urgent" | "high" | "medium" | "low" (or null) before anything
+            reads it, and the output row carries the mapped value
 
 `sort_date` is the tie-break: Linear's own rank rule sorts `updatedAt`
 ascending (deliberately, to surface stale cards — see `_linear_rank.py`);
@@ -76,6 +78,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -92,6 +95,38 @@ SECTION_ORDER = [
 ]
 
 _JIRA_PRIORITY_RANK = {"urgent": 1, "high": 2, "medium": 3, "low": 4}
+
+# Jira priority names onto the jira `priority` domain: the default scheme
+# (Highest..Lowest), the older one (Blocker..Trivial), and the domain's own
+# names, which Linear's priority labels share. The task dashboard's scorer
+# calls `jira_priority()` too, so its Board and Now rank as /list-tasks does.
+_JIRA_PRIORITY_NAMES = {
+    "urgent": "urgent",
+    "highest": "urgent",
+    "blocker": "urgent",
+    "critical": "urgent",
+    "high": "high",
+    "medium": "medium",
+    "major": "medium",
+    "low": "low",
+    "lowest": "low",
+    "minor": "low",
+    "trivial": "low",
+}
+# A custom `P<n>` scheme, matched on its leading token: `P4-Trivial` is P4.
+_JIRA_P_LEVELS = {0: "urgent", 1: "urgent", 2: "high", 3: "medium", 4: "low"}
+_JIRA_P_NAME = re.compile(r"p(\d+)(?![0-9a-z])")
+
+
+def jira_priority(name):
+    """A Jira priority name's level, or None when it maps to none."""
+    if not isinstance(name, str):
+        return None
+    key = name.strip().lower()
+    m = _JIRA_P_NAME.match(key)
+    if m:
+        return _JIRA_P_LEVELS.get(int(m.group(1)))
+    return _JIRA_PRIORITY_NAMES.get(key)
 
 
 def classify(row, tracker):
@@ -181,6 +216,8 @@ def main():
     sections: dict[str, list] = {name: [] for name in SECTION_ORDER}
     unmatched = []
     for row in rows:
+        if args.tracker == "jira":
+            row["priority"] = jira_priority(row.get("priority"))
         section = classify(row, args.tracker)
         if section is None:
             unmatched.append(row.get("id"))

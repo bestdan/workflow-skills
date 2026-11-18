@@ -65,7 +65,6 @@ import needs
 import overlay
 import plan_ticks
 import refresh
-import score
 import sync
 import view_model
 import views
@@ -100,9 +99,6 @@ SECTION_TITLES = {
     "needs_review": "Needs review",
     "done": "Done",
 }
-
-# Jira priority names onto kanban-classify's jira domain; score.py owns it.
-JIRA_PRIORITY = score.JIRA_PRIORITY
 
 
 # --- sync thread -------------------------------------------------------------
@@ -432,7 +428,7 @@ def board_rows(conn: sqlite3.Connection, me: str = "") -> list[dict[str, Any]]:
                 "id": key,
                 "category": category,
                 "labels": label_list if isinstance(label_list, list) else [],
-                "priority": JIRA_PRIORITY.get((priority or "").lower()),
+                "priority": kanban().jira_priority(priority),
                 "sort_date": created,
                 "summary": summary,
                 "status_name": status,
