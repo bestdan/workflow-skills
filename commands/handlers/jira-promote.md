@@ -100,7 +100,7 @@ For each candidate, run the **confidence check** from `skills/task/SKILL.md` —
 - The description is `fields.description`. An equivalent concrete, checkable outcome also satisfies `has_acceptance_criteria`; a bare summary or an "investigate X" description does not.
 - `scope_fits` weighs the description's breadth; a story-points custom field, if the project exposes one, is a hint.
 
-**LOW** if any HIGH condition fails. Do not write the reason yourself: pass the failed check names, with the summary check as `required_fields_present`, to the helper and record what it prints, verbatim. Jira has no estimate field, so precedence keys off your scope judgment: when `scope_fits` failed because the work is larger than size `5`, pass the size that judgment reached as `--estimate` and the split reason wins, as on the other paths. Otherwise omit it and the table's order decides.
+**LOW** if any HIGH condition fails. Do not write the reason yourself: pass the failed check names, with the summary check as `required_fields_present`, to the helper and record what it prints, verbatim. Jira has no estimate field, so precedence keys off your scope judgment: when `scope_fits` failed because the work is larger than size `5`, pass the size that judgment reached as `--estimate` and the split reason wins, as on the other paths. Otherwise omit it and the table's order decides. The flag is the only size the helper can see on this path, so leaving it off an oversized issue that also failed an earlier check records that check's reason instead of the split reason.
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/promote-reason.py" \

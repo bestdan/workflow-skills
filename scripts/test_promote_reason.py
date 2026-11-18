@@ -31,6 +31,9 @@ class PickTest(unittest.TestCase):
         # The #1571 dry run: estimated 13, recorded the AC reason.
         self.assertEqual(reason.pick(["has_acceptance_criteria"], 13), SPLIT)
 
+    def test_estimate_over_ceiling_with_nothing_failed(self):
+        self.assertEqual(reason.pick([], 13), SPLIT)
+
     def test_estimate_at_ceiling_keeps_first_failure(self):
         self.assertEqual(reason.pick(["has_acceptance_criteria"], 5), AC)
 
@@ -59,6 +62,12 @@ class MainTest(unittest.TestCase):
 
     def test_unknown_check_fails_loudly(self):
         code, out, err = self.run_main(["has_acceptance_criteria", "has_ac"])
+        self.assertEqual(code, 2)
+        self.assertEqual(out, "")
+        self.assertIn("has_ac", err)
+
+    def test_unknown_check_fails_despite_estimate_over_ceiling(self):
+        code, out, err = self.run_main(["--estimate", "8", "has_ac"])
         self.assertEqual(code, 2)
         self.assertEqual(out, "")
         self.assertIn("has_ac", err)
