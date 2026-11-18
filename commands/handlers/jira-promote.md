@@ -100,7 +100,14 @@ For each candidate, run the **confidence check** from `skills/task/SKILL.md` —
 - The description is `fields.description`. An equivalent concrete, checkable outcome also satisfies `has_acceptance_criteria`; a bare summary or an "investigate X" description does not.
 - `scope_fits` weighs the description's breadth; a story-points custom field, if the project exposes one, is a hint.
 
-**LOW** if any HIGH condition fails. Record the first failed check's canonical reason (e.g. `description missing acceptance criteria`, `unresolved open questions`).
+**LOW** if any HIGH condition fails. Do not write the reason yourself: pass the failed check names, with the summary check as `required_fields_present`, to the helper and record what it prints, verbatim. Jira has no estimate field, so precedence keys off your scope judgment: when `scope_fits` failed because the work is larger than size `5`, pass the size that judgment reached as `--estimate` and the split reason wins, as on the other paths. Otherwise omit it and the table's order decides.
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/promote-reason.py" \
+  [--estimate <n>] <failed check> [<failed check> …]
+```
+
+A gloss of your own goes in the step 5 comment, never in the reason. Same `$CLAUDE_PLUGIN_ROOT` fallback as the other assets: Glob `**/handlers/assets/promote-reason.py`.
 
 **Forecast the tier, then confirm the Intent,** for each candidate still HIGH, as `skills/task/references/intent-confirmation.md` says. The paths come from the description; an issue has no `related_files`. A `human` issue the confirmer does not confirm at or above `consult_bar` turns LOW, with reason `intent not confirmed: <crux>`. What the step 5 comment records is the reference's "Where things are recorded". If a relative path doesn't resolve, Glob `**/skills/task/references/intent-confirmation.md`.
 

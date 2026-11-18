@@ -166,7 +166,14 @@ The backfilled `est:` is **recorded for claim-time selection**, not read by any 
 
 **The size-`5` ceiling is not `max_estimate`, and removing the latter does not soften the former.** `scope_fits` still scores LOW on a card that cannot fit one PR, at any `max_estimate`. The two were easy to conflate while both lived here, which is what made the old gate look load-bearing: `max_estimate` is a tunable routing bound the loop applies at selection, while size `5` is the fixed ceiling above which a card needs splitting rather than scheduling. A card sized `8` fails `scope_fits` and is demoted, as before; a card sized `3` or `5` is now the loop's problem, not the promoter's.
 
-**LOW** if any HIGH condition fails. Record the first failed check's canonical reason (e.g. `description missing acceptance criteria`, `unresolved open questions`).
+**LOW** if any HIGH condition fails. Do not write the reason yourself: pass the failed check names, with the title check as `required_fields_present`, and the estimate from the backfill above, and record what the helper prints, verbatim. It applies `task-fill.md`'s **reason precedence**, so an estimate over `5` records the split reason whatever else failed.
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/promote-reason.py" \
+  [--estimate <n>] <failed check> [<failed check> …]
+```
+
+A gloss of your own (which section is missing, what is still unknown) goes in the step 5 comment, never in the reason. Same `$CLAUDE_PLUGIN_ROOT` fallback as the other assets: Glob `**/handlers/assets/promote-reason.py`.
 
 **Forecast the tier, then confirm the Intent,** for each candidate still HIGH, as `skills/task/references/intent-confirmation.md` says. The paths come from the body's `## Task` and `## Context`; an issue has no `related_files`. A `human` issue the confirmer does not confirm at or above `consult_bar` turns LOW, with reason `intent not confirmed: <crux>`. What the step 5 comment records is the reference's "Where things are recorded". If a relative path doesn't resolve, Glob `**/skills/task/references/intent-confirmation.md`.
 
