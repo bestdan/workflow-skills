@@ -11,6 +11,9 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 from typing import List, Optional
@@ -402,6 +405,34 @@ class LandTests(unittest.TestCase):
             "tier not computed: no .github/merge-policy.yml on base `main`"
         )
 
+    def test_if_policy_skips_a_repo_with_no_policy_and_posts_nothing(self):
+        del self.fake.policies["main"]
+        code, out, _ = self.run_land("--if-policy")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(
+            out.splitlines(),
+            ["LAND: skipped reason=no .github/merge-policy.yml on the default branch"],
+        )
+        self.assertEqual(self.fake.lander_comments(), [])
+
+    def test_if_policy_runs_as_usual_when_the_policy_exists(self):
+        code, out, _ = self.run_land("--if-policy")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out.splitlines()[-1], "LAND: would-land")
+        self.assertEqual(len(self.fake.lander_comments()), 1)
+
+    def test_if_policy_runs_the_dry_run_when_the_policy_read_fails(self):
+        self.fake.fail.add("contents/.github/merge-policy.yml")
+        code, out, _ = self.run_land("--if-policy")
+        self.assertEqual(code, 0, out)
+        self.assertTrue(out.splitlines()[-1].startswith("LAND: hold reasons="), out)
+        self.assertEqual(len(self.fake.lander_comments()), 1)
+
+    def test_if_policy_without_dry_run_is_a_usage_error(self):
+        with self.assertRaises(SystemExit) as caught:
+            self.run_land("--if-policy", dry_run=False)
+        self.assertEqual(caught.exception.code, 2)
+
     def test_an_invalid_policy_holds(self):
         self.fake.policies["main"] = "auto: scripts/**\n"
         self.assert_hold("tier human: policy invalid")
@@ -561,6 +592,47 @@ class LandTests(unittest.TestCase):
         self.assertIn("COMMENT: error", out)
         self.assertEqual(out.splitlines()[-1], "LAND: would-land")
         self.assertEqual(out.splitlines()[-2], "TIER: auto")
+
+
+GH_STUB = """\
+#!/bin/sh
+echo "$*" >> "$GH_STUB_LOG"
+case "$*" in
+  "repo view"*) echo '{"defaultBranchRef": {"name": "main"}}' ;;
+  *merge-policy.yml*) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
+  *) exit 99 ;;
+esac
+"""
+
+
+class ShadowWrapperTests(unittest.TestCase):
+    """land-pr-shadow.sh, run for real against a `gh` stub on PATH."""
+
+    def test_the_wrapper_adds_dry_run_and_if_policy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            stub = Path(tmp) / "gh"
+            stub.write_text(GH_STUB)
+            stub.chmod(0o755)
+            log = Path(tmp) / "calls"
+            env = dict(
+                os.environ,
+                PATH=f"{tmp}:{os.environ['PATH']}",
+                GH_STUB_LOG=str(log),
+            )
+            proc = subprocess.run(
+                [str(ROOT / "scripts" / "land-pr-shadow.sh"), str(PR), "--repo", REPO],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=60,
+            )
+            calls = log.read_text().splitlines()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(
+            proc.stdout.splitlines(),
+            ["LAND: skipped reason=no .github/merge-policy.yml on the default branch"],
+        )
+        self.assertFalse(any(c.startswith("pr merge") for c in calls), calls)
 
 
 class RealLandingTests(unittest.TestCase):
