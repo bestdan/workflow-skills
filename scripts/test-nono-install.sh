@@ -81,8 +81,21 @@ rc=$?
 if [ "$rc" = 0 ]; then ok "check: the pinned build on a Landlock 4+ kernel passes"; else bad "check: the pinned build on a Landlock 4+ kernel passes" "rc=$rc $o"; fi
 have "check: a pass names the binary and the ABI" "NONO: ok $BIN (nono 0.81.0, Landlock ABI 8)" "$o"
 
-o="$(check AUTO_PILOT_NONO_TARGET=Darwin/arm64)"
-have "check: an unpinned target is a no-go" "no pinned nono build for this host (Darwin/arm64)" "$o"
+o="$(check AUTO_PILOT_NONO_TARGET=FreeBSD/amd64)"
+have "check: an unpinned target is a no-go" "no pinned nono build for this host (FreeBSD/amd64)" "$o"
+
+# macOS: Seatbelt, not Landlock — no LSM list or ABI is read, and the ok line
+# keeps the shape pre-flight parses.
+for dt in aarch64-apple-darwin x86_64-apple-darwin; do
+  o="$(check AUTO_PILOT_NONO_TARGET="$dt" AUTO_PILOT_NONO_SHA256="$S" AUTO_PILOT_LSM_FILE="$BASE/lsm-none" STUB_ABI=3)"
+  rc=$?
+  if [ "$rc" = 0 ]; then ok "check: $dt passes without Landlock"; else bad "check: $dt passes without Landlock" "rc=$rc $o"; fi
+  have "check: $dt names Seatbelt" "NONO: ok $BIN (nono 0.81.0, Seatbelt)" "$o"
+done
+o="$(check AUTO_PILOT_NONO_TARGET=aarch64-apple-darwin)"
+have "check: macOS still verifies the pinned checksum" "does not match the pinned SHA-256" "$o"
+o="$(check AUTO_PILOT_NONO_TARGET=aarch64-apple-darwin AUTO_PILOT_NONO_SHA256="$S" STUB_VERSION=0.80.0)"
+have "check: macOS still verifies the version" "want 'nono 0.81.0'" "$o"
 
 # The checksum is verified BEFORE the binary runs: a replaced file never executes.
 cat >"$BIN" <<STUB

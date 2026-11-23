@@ -32,11 +32,12 @@ RW1="$(cd "$RUN_WT" && pwd -P)"
 RW2="$(cd "$WORKER_WT" && pwd -P)"
 RO1="$(cd "$REPO_RO" && pwd -P)"
 
-# Render with the fixture home. Extra args go last.
+# Render with the fixture home, for Linux (the prelude's default host is
+# Darwin; the macOS branch has its own section below). Extra args go last.
 nrender() { # <out> [args...]
   local out="$1"
   shift
-  HOME="$NH" "$SCRIPT" render-nono-profile --rw "$RUN_WT" --rw "$WORKER_WT" --ro "$REPO_RO" \
+  HOME="$NH" AUTO_PILOT_HOST_OS=Linux "$SCRIPT" render-nono-profile --rw "$RUN_WT" --rw "$WORKER_WT" --ro "$REPO_RO" \
     --cred-ro "$NH/.config/gh" --tmpdir "$NO/tmp" --out "$out" "$@"
 }
 # One `<key>\t<path>` line per filesystem grant, plus the scalar settings, so the
@@ -54,6 +55,9 @@ print("af_unix_mediation\t%s" % p.get("linux", {}).get("af_unix_mediation"))
 print("network.block\t%s" % p.get("network", {}).get("block"))
 print("groups.exclude\t%s" % ",".join(p.get("groups", {}).get("exclude", [])))
 print("TMPDIR\t%s" % p.get("environment", {}).get("set_vars", {}).get("TMPDIR"))
+print("linux_key\t%s" % ("linux" in p))
+for r in p.get("unsafe_macos_seatbelt_rules", []):
+    print(f"rule\t{r}")
 PY
 }
 
@@ -101,6 +105,68 @@ else
   have "nono render: without a token, ~/.claude is writable (the fallback)" \
     "$(printf 'allow\t%s' "$NH/.claude")" "$(nflat "$NO/p-fallback.json" 2>&1)"
   have "nono render: without a token, the renderer warns" "/.claude is WRITABLE" "$out"
+  lack "nono render: no raw Seatbelt rules on Linux" "unsafe_macos_seatbelt_rules" "$(cat "$NO/p.json")"
+
+  # --- the macOS branch (#1361) -----------------------------------------------
+  nmac() { # <out> [args...]
+    local out="$1"
+    shift
+    HOME="$NH" AUTO_PILOT_HOST_OS=Darwin "$SCRIPT" render-nono-profile --rw "$RUN_WT" --rw "$WORKER_WT" --ro "$REPO_RO" \
+      --cred-ro "$NH/.config/gh" --tmpdir "$NO/tmp" --out "$out" "$@"
+  }
+  if o="$(nmac "$NO/mac-notoken.json" 2>&1)"; then
+    bad "nono render macOS: refuses to render without --claude-token" "render succeeded"
+  else
+    have "nono render macOS: refuses to render without --claude-token" "on macOS requires --claude-token" "$o"
+    have "nono render macOS: the refusal names the Keychain" "denies the Keychain" "$o"
+  fi
+  [ -e "$NO/mac-notoken.json" ] && bad "nono render macOS: a refused render writes no profile" \
+    || ok "nono render macOS: a refused render writes no profile"
+  out="$(nmac "$NO/mac.json" --claude-token 2>&1)"
+  have "nono render macOS: succeeds with a token" "nono profile OK" "$out"
+  mflat="$(nflat "$NO/mac.json" 2>&1)"
+  have "nono render macOS: system_write_macos is excluded" "$(printf 'groups.exclude\tsystem_write_macos')" "$mflat"
+  have "nono render macOS: no linux key" "$(printf 'linux_key\tFalse')" "$mflat"
+  have "nono render macOS: the run worktree is read-write" "$(printf 'allow\t%s' "$RW1")" "$mflat"
+  have "nono render macOS: the run TMPDIR is read-write and pinned" "$(printf 'TMPDIR\t%s' "$NTMP")" "$mflat"
+  have "nono render macOS: ~/.claude's other files are read-only" "$(printf 'read_file\t%s' "$NH/.claude/settings.json")" "$mflat"
+  lack "nono render macOS: the credential file is in no grant" ".credentials.json" "$mflat"
+  [ -e /dev/null ] && have "nono render macOS: /dev/null is re-granted" "$(printf 'allow_file\t/dev/null')" "$mflat"
+  [ -e /dev/fd ] && have "nono render macOS: /dev/fd is re-granted" "$(printf 'allow\t/dev/fd')" "$mflat"
+  lack "nono render macOS: no Linux device paths" "/proc/self/fd" "$mflat"
+  lack "nono render macOS: no /dev/full" "/dev/full" "$mflat"
+  # The raw rules, parsed back out of the JSON: each must survive the escaping
+  # exactly, quotes and all.
+  T="$(cd /tmp && pwd -P)"
+  V="$(cd /var/tmp && pwd -P)"
+  have "nono render macOS: denies the launchd and LaunchServices brokers" \
+    "$(printf 'rule\t(deny mach-lookup (global-name "com.apple.xpc.launchd") (global-name "com.apple.coreservices.launchservicesd"))')" "$mflat"
+  have "nono render macOS: denies exec of launchctl, open and osascript" \
+    "$(printf 'rule\t(deny process-exec* (literal "/bin/launchctl") (literal "/usr/bin/open") (literal "/usr/bin/osascript"))')" "$mflat"
+  have "nono render macOS: the harness's claude-<id> tree" \
+    "$(printf 'rule\t(allow file-read* file-write* (regex #"^%s/claude-[A-Za-z0-9]+(-cwd)?(/|$)"))' "$T")" "$mflat"
+  have "nono render macOS: the /var/tmp directory itself, for bash's here-doc check" \
+    "$(printf 'rule\t(allow file-read* file-write* (literal "%s"))' "$V")" "$mflat"
+  have "nono render macOS: bash here-doc files (#1396)" \
+    "$(printf 'rule\t(allow file-read* file-write* (regex #"^%s/sh-thd-[0-9]+$"))' "$V")" "$mflat"
+  c6='[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9]'
+  have "nono render macOS: zsh here-doc files (#1396)" \
+    "$(printf 'rule\t(allow file-read* file-write* (regex #"^%s/zsh%s$"))' "$T" "$c6")" "$mflat"
+  have "nono render macOS: ~/.claude/session-env, created lazily" \
+    "$(printf 'rule\t(allow file-read* file-write* (subpath "%s/.claude/session-env"))' "$NH")" "$mflat"
+  lack "nono render macOS: no srt-mux socket (the harness sandbox is off)" "srt-mux" "$mflat"
+  # One rule per line in the file itself, so a reader can grep them.
+  have "nono render macOS: one rule per line, JSON-escaped" \
+    '    "(deny mach-lookup (global-name \"com.apple.xpc.launchd\")' "$(cat "$NO/mac.json")"
+  # The launch's write-grant refusal reads the same "allow" array on macOS.
+  if o="$(HOME="$NH" "$SCRIPT" write-verify-broker --nono-profile "$NO/mac.json" --sentinel-dir "$RUN_WT/s" \
+    --verify-cmd 'bash scripts/check.sh' --confine-under "$RUN_WT" --label com.autopilot.test.macvb \
+    --workdir "$RUN_WT" --log "$NO/vb.log" --path /usr/bin:/bin --out-script "$RUN_WT/broker.sh" \
+    --out-plist "$NO/vb.plist" 2>&1)"; then
+    bad "write-verify-broker macOS: refuses a broker script inside a write grant" "succeeded"
+  else
+    have "write-verify-broker macOS: refuses a broker script inside a write grant" "inside the profile's write grant" "$o"
+  fi
 fi
 
 # --- run-clone + render-nono-profile --git-worktree ---------------------------
@@ -261,7 +327,7 @@ fi
 nrefuse() { # <name> <expected text> <args...>
   local name="$1" want="$2" o
   shift 2
-  if o="$(HOME="$NH" "$SCRIPT" render-nono-profile --tmpdir "$NO/tmp" --out "$NO/r.json" "$@" 2>&1)"; then
+  if o="$(HOME="$NH" AUTO_PILOT_HOST_OS=Linux "$SCRIPT" render-nono-profile --tmpdir "$NO/tmp" --out "$NO/r.json" "$@" 2>&1)"; then
     bad "$name" "render succeeded"
   else
     have "$name" "$want" "$o"
@@ -277,7 +343,7 @@ nrefuse "nono render: refuses a --rw outside --confine-under" "outside every --c
 mkdir -p "$NO/we\"ird"
 nrefuse "nono render: refuses a path JSON would need escaped" "quote, backslash" --rw "$NO/we\"ird"
 nrefuse "nono render: requires --out" "requires --out" --rw "$RUN_WT" --out ""
-if o="$(HOME="$NH" "$SCRIPT" render-nono-profile --rw "$RUN_WT" --out "$NO/r.json" 2>&1)"; then
+if o="$(HOME="$NH" AUTO_PILOT_HOST_OS=Linux "$SCRIPT" render-nono-profile --rw "$RUN_WT" --out "$NO/r.json" 2>&1)"; then
   bad "nono render: requires --tmpdir" "render succeeded"
 else
   have "nono render: requires --tmpdir" "requires --tmpdir" "$o"

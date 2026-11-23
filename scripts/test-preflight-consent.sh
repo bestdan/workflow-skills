@@ -12,17 +12,16 @@
 # The two properties the probe exists to hold:
 #   - it runs the entry path AS LAUNCHD WILL — bootstrapped into the user's
 #     launchd domain (so: detached, no controlling TTY), stdin on /dev/null,
-#     exec'd through the rendered Seatbelt profile. Asserted against the
+#     run through the pinned nono under a rendered profile. Asserted against the
 #     captured job, and asserted to be load-bearing: when the probe reports it
 #     ran with a terminal attached, the pre-flight blocks.
 #   - a resource that reads fine FROM THIS TERMINAL but is gated under launchd
 #     attribution is a no-go, with a message naming the resolved binary path
 #     and the Full Disk Access remedy.
 #
-# Host dependence: the consent probe only runs where `sandbox-exec` exists
-# (TCC is macOS-only, and preflight.sh degrades to a logged skip elsewhere), so
-# cases 1-4 skip on Linux and are covered by CI's macOS job. See
-# dev_docs/testing.md.
+# Host independence: the macOS cases pin PREFLIGHT_OS=Darwin and run against a
+# stub nono (#1361: the macOS jail is nono), a fake launchctl and a fake
+# renderer, so they run on Linux CI as well as on macOS.
 #
 # Run directly: bash scripts/test-preflight-consent.sh
 set -uo pipefail
@@ -116,16 +115,16 @@ echo "    installed: false"
 exit 0
 CODERS
 
-# Fake spawn-orchestrator: render-profile emits a REAL, minimal Seatbelt
-# profile (so the confinement smoke above the consent section still passes on a
-# macOS host rather than adding blockers that muddy these assertions), and
-# render-settings emits the shape the smoke greps for.
+# Fake spawn-orchestrator: render-nono-profile records its arguments (the
+# consent probe's grants are asserted against them) and writes a stand-in
+# profile; nothing here runs nono.
 cat >"$ROOT/scripts/spawn-orchestrator.sh" <<'SPAWN'
 #!/bin/bash
 sub="$1"
 shift
 # The run-clone check is the real one: it only reads git.
 [ "$sub" = check-run-clone ] && exec bash "$REAL_SPAWN" check-run-clone "$@"
+[ "$sub" = render-nono-profile ] && printf '%s\n' "$@" >"$CAPTURE/render-args"
 out=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -138,11 +137,12 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$out" ] || exit 2
 case "$sub" in
-  render-profile)
-    printf '(version 1)\n(allow default)\n(deny file-write* (subpath "%s"))\n' "$HOME" >"$out"
-    ;;
-  render-settings)
-    printf '{"allowedDomains":[],"enabled":true}\n' >"$out"
+  render-nono-profile)
+    [ "${FAKE_RENDER_FAIL:-}" = 1 ] && {
+      echo "spawn-orchestrator: render failed (fixture)" >&2
+      exit 2
+    }
+    printf '{"meta":{"name":"auto-pilot-orchestrator"}}\n' >"$out"
     ;;
   *) exit 2 ;;
 esac
@@ -274,14 +274,62 @@ exit 0
 LAUNCHCTL
 chmod +x "$FIXBIN/fake-launchctl"
 
-run_preflight() { # run_preflight <fake-mode>
-  CONSENT_FAKE_MODE="$1" \
-    CAPTURE="$CAPTURE" \
-    PATH="$FIXTURE_PATH" \
-    PREFLIGHT_LAUNCHCTL="$FIXBIN/fake-launchctl" \
-    PREFLIGHT_TCC_LOCATIONS="$PROTECTED" \
+# --- The pinned nono, stubbed ------------------------------------------------
+# The real nono-install.sh runs against a stub binary whose checksum the test
+# pins, so each no-go is the installer's own text. The smoke is a stub that
+# prints the real smoke's line shape and records its arguments. Both OSes use
+# them: macOS (#1361) jails the run under nono too.
+cp "$REPO/scripts/nono-install.sh" "$ROOT/scripts/nono-install.sh"
+NH="$BASE/nono-home"
+mkdir -p "$NH/0.81.0"
+cat >"$NH/0.81.0/nono" <<'STUB'
+#!/bin/sh
+case "$1" in
+  --version) echo "nono ${STUB_VERSION:-0.81.0}" ;;
+  setup) echo "  * Landlock V${STUB_ABI:-8}" ;;
+esac
+exit 0
+STUB
+chmod 755 "$NH/0.81.0/nono"
+if command -v sha256sum >/dev/null 2>&1; then
+  NSUM="$(sha256sum "$NH/0.81.0/nono" | cut -d' ' -f1)"
+else
+  NSUM="$(shasum -a 256 "$NH/0.81.0/nono" | cut -d' ' -f1)"
+fi
+printf 'landlock\n' >"$BASE/lsm-ok"
+printf 'yama\n' >"$BASE/lsm-none"
+cat >"$FIXBIN/smoke-nono" <<'SMOKE'
+#!/bin/bash
+printf '%s\n' "$*" >"$SMOKE_ARGS"
+echo "SMOKE WRITE_HOME: pass (a write to \$HOME is denied)"
+echo "SMOKE CRED_READ: ${SMOKE_CRED:-pass} (the credential file)"
+[ "${SMOKE_CRED:-pass}" = pass ]
+SMOKE
+chmod +x "$FIXBIN/smoke-nono"
+
+# macOS: PREFLIGHT_OS pins the branch, so these cases run on every host — the
+# launchd job is the fake's and the nono is the stub. Extra env first, then
+# `--` and extra pre-flight args.
+mac_preflight() { # <fake-mode> [VAR=value ...] [-- preflight args...]
+  local mode="$1"
+  shift
+  local -a e=() a=()
+  while [ $# -gt 0 ] && [ "$1" != -- ]; do
+    e+=("$1")
+    shift
+  done
+  [ "${1:-}" = -- ] && shift
+  a=("$@")
+  env CONSENT_FAKE_MODE="$mode" CAPTURE="$CAPTURE" PATH="$FIXTURE_PATH" PREFLIGHT_OS=Darwin \
+    PREFLIGHT_LAUNCHCTL="$FIXBIN/fake-launchctl" PREFLIGHT_TCC_LOCATIONS="$PROTECTED" \
     PREFLIGHT_CONSENT_TICKS=4 \
-    bash "$SCRIPT" --source plan --base main --run-root "${PF_RUN_ROOT:-$ROOT}" 2>&1
+    AUTO_PILOT_NONO_HOME="$NH" AUTO_PILOT_NONO_TARGET=aarch64-apple-darwin AUTO_PILOT_NONO_SHA256="$NSUM" \
+    PREFLIGHT_NONO_SMOKE="$FIXBIN/smoke-nono" SMOKE_ARGS="$BASE/smoke-args" ${e[@]+"${e[@]}"} \
+    bash "${PF_SCRIPT:-$SCRIPT}" --source plan --base main --run-root "${PF_RUN_ROOT:-$ROOT}" \
+    --claude-token-cmd 'op read op://v/claude/token' ${a[@]+"${a[@]}"} 2>&1
+}
+run_preflight() { # run_preflight <fake-mode>
+  mac_preflight "$1"
 }
 
 # A run worktree made by run-clone, inside the protected location, as a real
@@ -299,168 +347,179 @@ mkdir -p "$CR"
 ) || bad "run-clone fixture for the clean host builds ($(tail -1 "$CR/clone.log" 2>/dev/null))"
 CRW="$CR/root/r"
 
-have_sandbox=0
-command -v sandbox-exec >/dev/null 2>&1 && have_sandbox=1
-
 # --- Case 1: clean host — the probe passes, and the submitted job is right --
-if [ "$have_sandbox" = 0 ]; then
-  skipped "clean host: requires sandbox-exec (macOS)"
-  skipped "submitted job runs through launchd, stdin closed, via sandbox-exec"
-else
-  out1="$(PF_RUN_ROOT="$CRW" run_preflight clean)"
-  rc1=$?
-  assert_exit "clean host: exits 0" 0 "$rc1"
-  assert_contains "clean host: CONSENT_GATE is pass" "PREFLIGHT CONSENT_GATE: pass" "$out1"
-  assert_contains "clean host: verdict is go" "PREFLIGHT VERDICT: go" "$out1"
-  assert_contains "clean host: names the needed protected location" \
-    "PREFLIGHT CONSENT_PROTECTED: $PROTECTED" "$out1"
-  assert_contains "clean host: fingerprint records the RESOLVED binary" \
-    "PREFLIGHT ATTRIBUTION_BIN: $RESOLVED_CLAUDE" "$out1"
-  assert_contains "clean host: probes the passed --run-root, not the plugin dir" \
-    "PREFLIGHT RUN_ROOT: $CRW" "$out1"
-  assert_contains "clean host: probes the run root's git-common-dir too" \
-    "CONSENT resource git_common_dir: ok $CR/root/main.git" "$out1"
-  assert_contains "clean host: the run worktree is from a run clone" \
-    "PREFLIGHT RUN_CLONE: $CR/root/main.git" "$out1"
+: >"$BASE/smoke-args"
+out1="$(PF_RUN_ROOT="$CRW" run_preflight clean)"
+rc1=$?
+assert_exit "clean host: exits 0" 0 "$rc1"
+assert_contains "clean host: CONSENT_GATE is pass" "PREFLIGHT CONSENT_GATE: pass" "$out1"
+assert_contains "clean host: verdict is go" "PREFLIGHT VERDICT: go" "$out1"
+assert_contains "clean host: names the needed protected location" \
+  "PREFLIGHT CONSENT_PROTECTED: $PROTECTED" "$out1"
+assert_contains "clean host: fingerprint records the RESOLVED binary" \
+  "PREFLIGHT ATTRIBUTION_BIN: $RESOLVED_CLAUDE" "$out1"
+assert_contains "clean host: probes the passed --run-root, not the plugin dir" \
+  "PREFLIGHT RUN_ROOT: $CRW" "$out1"
+assert_contains "clean host: probes the run root's git-common-dir too" \
+  "CONSENT resource git_common_dir: ok $CR/root/main.git" "$out1"
+assert_contains "clean host: the run worktree is from a run clone" \
+  "PREFLIGHT RUN_CLONE: $CR/root/main.git" "$out1"
+assert_contains "macOS: the pinned nono is checked (Seatbelt, no Landlock)" \
+  "PREFLIGHT NONO: ok $NH/0.81.0/nono (nono 0.81.0, Seatbelt)" "$out1"
+assert_contains "macOS: the launcher is launchd + nono" "PREFLIGHT LAUNCHER: launchd + nono" "$out1"
+assert_contains "macOS: the nono smoke runs, every assertion listed" "PREFLIGHT SMOKE_WRITE_HOME: pass" "$out1"
+assert_contains "macOS: the smoke runs the pinned nono with the token command" \
+  "--nono-bin $NH/0.81.0/nono --claude-token-cmd op read op://v/claude/token" "$(cat "$BASE/smoke-args" 2>/dev/null)"
+assert_not_contains "macOS: no sandbox-exec smoke any more" "SMOKE_EXEC" "$out1"
+# The consent profile grants every path the probe reads: nono's reads are not
+# global, so an ungranted path would be refused by nono, not TCC.
+rargs="$(cat "$CAPTURE/render-args" 2>/dev/null)"
+for want in --claude-token --toolchain "$CRW" "$ROOT" "$CR/root/main.git" "$PROTECTED"; do
+  if grep -qxF -- "$want" <<<"$rargs"; then
+    ok "consent profile: rendered with $want"
+  else
+    bad "consent profile: not rendered with $want (args: $(tr '\n' ' ' <<<"$rargs"))"
+  fi
+done
 
-  # The job itself: launchd domain (hence detached, no controlling TTY),
-  # stdin on /dev/null, and exec'd through the rendered Seatbelt profile.
-  domain="$(cat "$CAPTURE/domain" 2>/dev/null)"
-  plist="$(cat "$CAPTURE/plist" 2>/dev/null)"
-  assert_contains "job is bootstrapped into the user's launchd domain" \
-    "gui/$(id -u)" "$domain"
-  plist_flat="$(printf '%s' "$plist" | tr -d ' \n')"
-  if grep -q '<key>StandardInPath</key><string>/dev/null</string>' <<<"$plist_flat"; then
-    ok "job closes stdin (StandardInPath /dev/null)"
-  else
-    bad "job does not set StandardInPath to /dev/null"
-  fi
-  # ProgramArguments[0] is the one variable that decides which process launchd
-  # makes responsible for the job, so it must be /bin/bash — what the production
-  # plist (scripts/orchestrator.plist.tmpl) runs — and not sandbox-exec.
-  prog="$(printf '%s' "$plist" | sed -n 's/^ *<string>\(.*\)<\/string>$/\1/p' | tail -n +2 | head -3 | tr '\n' ' ')"
-  case "$prog" in
-    "/bin/bash "*consent-launch.sh*consent.sb*) ok "job's program is /bin/bash, as the production job's is" ;;
-    *) bad "job's ProgramArguments does not lead with /bin/bash <wrapper> (got: $prog)" ;;
-  esac
-  wrapper="$(cat "$CAPTURE/wrapper.sh" 2>/dev/null)"
-  case "$wrapper" in
-    *'/usr/bin/sandbox-exec -f "$1" /bin/bash "$2"'*) ok "wrapper runs sandbox-exec on the rendered profile, as a child" ;;
-    *) bad "wrapper does not run sandbox-exec -f <profile> (got: $wrapper)" ;;
-  esac
-  if grep -q '<key>RunAtLoad</key><true/>' <<<"$plist_flat"; then
-    ok "job runs at load"
-  else
-    bad "job does not set RunAtLoad"
-  fi
+# The job itself: launchd domain (hence detached, no controlling TTY),
+# stdin on /dev/null, and run through nono under the rendered profile.
+domain="$(cat "$CAPTURE/domain" 2>/dev/null)"
+plist="$(cat "$CAPTURE/plist" 2>/dev/null)"
+assert_contains "job is bootstrapped into the user's launchd domain" \
+  "gui/$(id -u)" "$domain"
+plist_flat="$(printf '%s' "$plist" | tr -d ' \n')"
+if grep -q '<key>StandardInPath</key><string>/dev/null</string>' <<<"$plist_flat"; then
+  ok "job closes stdin (StandardInPath /dev/null)"
+else
+  bad "job does not set StandardInPath to /dev/null"
+fi
+# ProgramArguments[0] is the one variable that decides which process launchd
+# makes responsible for the job, so it must be /bin/bash — what the production
+# plist (scripts/orchestrator.plist.tmpl) runs — and not nono.
+prog="$(printf '%s' "$plist" | sed -n 's/^ *<string>\(.*\)<\/string>$/\1/p' | tail -n +2 | head -3 | tr '\n' ' ')"
+case "$prog" in
+  "/bin/bash "*consent-launch.sh*consent.json*) ok "job's program is /bin/bash, as the production job's is" ;;
+  *) bad "job's ProgramArguments does not lead with /bin/bash <wrapper> (got: $prog)" ;;
+esac
+wrapper="$(cat "$CAPTURE/wrapper.sh" 2>/dev/null)"
+case "$wrapper" in
+  *"NONO_NO_UPDATE_CHECK=1 NONO_NO_MIGRATE=1 $NH/0.81.0/nono run --silent --profile \"\$1\" -- /bin/bash \"\$2\""*)
+    ok "wrapper runs the pinned nono on the rendered profile, as a child, as write-launch does"
+    ;;
+  *) bad "wrapper does not run nono run --silent --profile <profile> (got: $wrapper)" ;;
+esac
+assert_not_contains "wrapper: no sandbox-exec" "sandbox-exec" "$wrapper"
+if grep -q '<key>RunAtLoad</key><true/>' <<<"$plist_flat"; then
+  ok "job runs at load"
+else
+  bad "job does not set RunAtLoad"
 fi
 
 # --- Case 2: gated under launchd, readable from this terminal --------------
-if [ "$have_sandbox" = 0 ]; then
-  skipped "consent gate: requires sandbox-exec (macOS)"
+# The asymmetry this whole probe exists for: the terminal can read it.
+if ls -- "$PROTECTED" >/dev/null 2>&1; then
+  ok "gated resource reads fine from this terminal"
 else
-  # The asymmetry this whole probe exists for: the terminal can read it.
-  if ls -- "$PROTECTED" >/dev/null 2>&1; then
-    ok "gated resource reads fine from this terminal"
-  else
-    bad "fixture protected dir is unreadable from the terminal — test is not measuring the asymmetry"
-  fi
-  out2="$(run_preflight gated)"
-  rc2=$?
-  assert_exit "consent gate: exits 1" 1 "$rc2"
-  assert_contains "consent gate: CONSENT_GATE reports the gate" \
-    "PREFLIGHT CONSENT_GATE: FAIL (interactive consent gate)" "$out2"
-  blocker2="$(printf '%s\n' "$out2" | grep '^PREFLIGHT BLOCKER: interactive consent gate')"
-  assert_contains "consent gate: blocker names the gated path" "$PROTECTED" "$blocker2"
-  assert_contains "consent gate: blocker names the RESOLVED binary path" \
-    "$RESOLVED_CLAUDE" "$blocker2"
-  assert_contains "consent gate: blocker names the Full Disk Access remedy" \
-    "System Settings → Privacy & Security → Full Disk Access" "$blocker2"
-  assert_contains "consent gate: blocker warns the dialog shows only a version number" \
-    "'9.9.9'" "$blocker2"
+  bad "fixture protected dir is unreadable from the terminal — test is not measuring the asymmetry"
 fi
+out2="$(run_preflight gated)"
+rc2=$?
+assert_exit "consent gate: exits 1" 1 "$rc2"
+assert_contains "consent gate: CONSENT_GATE reports the gate" \
+  "PREFLIGHT CONSENT_GATE: FAIL (interactive consent gate)" "$out2"
+blocker2="$(printf '%s\n' "$out2" | grep '^PREFLIGHT BLOCKER: interactive consent gate')"
+assert_contains "consent gate: blocker names the gated path" "$PROTECTED" "$blocker2"
+assert_contains "consent gate: blocker names the RESOLVED binary path" \
+  "$RESOLVED_CLAUDE" "$blocker2"
+assert_contains "consent gate: blocker names the Full Disk Access remedy" \
+  "System Settings → Privacy & Security → Full Disk Access" "$blocker2"
+assert_contains "consent gate: blocker warns the dialog shows only a version number" \
+  "'9.9.9'" "$blocker2"
 
 # --- Case 3: the no-TTY/stdin self-check is load-bearing -------------------
-if [ "$have_sandbox" = 0 ]; then
-  skipped "terminal-attached probe: requires sandbox-exec (macOS)"
-else
-  out3="$(run_preflight terminal)"
-  rc3=$?
-  assert_exit "terminal-attached probe: exits 1" 1 "$rc3"
-  assert_contains "terminal-attached probe: blocks with the reason" \
-    "PREFLIGHT BLOCKER: consent-gate probe ran with a terminal attached" "$out3"
-fi
+out3="$(run_preflight terminal)"
+rc3=$?
+assert_exit "terminal-attached probe: exits 1" 1 "$rc3"
+assert_contains "terminal-attached probe: blocks with the reason" \
+  "PREFLIGHT BLOCKER: consent-gate probe ran with a terminal attached" "$out3"
 
 # --- Case 4: a probe that never reports back fails closed ------------------
-if [ "$have_sandbox" = 0 ]; then
-  skipped "silent probe: requires sandbox-exec (macOS)"
-else
-  out4="$(run_preflight silent)"
-  rc4=$?
-  assert_exit "silent probe: exits 1" 1 "$rc4"
-  assert_contains "silent probe: blocks as unproven" \
-    "PREFLIGHT BLOCKER: consent-gate probe did not complete" "$out4"
-  # "see the log" is not an answer at 3am: the blocker must name the resource it
-  # stalled on and carry the same remedy the denial branch does.
-  assert_contains "silent probe: names the resource it stalled on" \
-    ", and stalled on run_root: $ROOT" "$out4"
-  assert_contains "silent probe: carries the Full Disk Access remedy" \
-    "System Settings → Privacy & Security → Full Disk Access" "$out4"
+out4="$(run_preflight silent)"
+rc4=$?
+assert_exit "silent probe: exits 1" 1 "$rc4"
+assert_contains "silent probe: blocks as unproven" \
+  "PREFLIGHT BLOCKER: consent-gate probe did not complete" "$out4"
+# "see the log" is not an answer at 3am: the blocker must name the resource it
+# stalled on and carry the same remedy the denial branch does.
+assert_contains "silent probe: names the resource it stalled on" \
+  ", and stalled on run_root: $ROOT" "$out4"
+assert_contains "silent probe: carries the Full Disk Access remedy" \
+  "System Settings → Privacy & Security → Full Disk Access" "$out4"
 
-  # The other half of the same branch: every read answered, only the completion
-  # marker missing. Still a blocker — the property is unproven — but nothing
-  # stalled, so naming a resource would send the operator after a path this very
-  # file records as `ok`.
-  out4b="$(run_preflight nomarker)"
-  rc4b=$?
-  assert_exit "probe with no completion marker: exits 1" 1 "$rc4b"
-  assert_contains "probe with no completion marker: still blocks" \
-    "PREFLIGHT BLOCKER: consent-gate probe did not complete" "$out4b"
-  # Match the DYNAMIC clause only. The blocker also carries a constant sentence
-  # ("If it stalled on a protected path, …"), which is present either way, so a
-  # bare "stalled on" would match prose rather than the claim under test.
-  case "$out4b" in
-    *", and stalled on "*) bad "no completion marker: names a resource that returned ok" ;;
-    *) ok "no completion marker: claims no stalled resource" ;;
-  esac
-fi
+# The other half of the same branch: every read answered, only the completion
+# marker missing. Still a blocker — the property is unproven — but nothing
+# stalled, so naming a resource would send the operator after a path this very
+# file records as `ok`.
+out4b="$(run_preflight nomarker)"
+rc4b=$?
+assert_exit "probe with no completion marker: exits 1" 1 "$rc4b"
+assert_contains "probe with no completion marker: still blocks" \
+  "PREFLIGHT BLOCKER: consent-gate probe did not complete" "$out4b"
+# Match the DYNAMIC clause only. The blocker also carries a constant sentence
+# ("If it stalled on a protected path, …"), which is present either way, so a
+# bare "stalled on" would match prose rather than the claim under test.
+case "$out4b" in
+  *", and stalled on "*) bad "no completion marker: names a resource that returned ok" ;;
+  *) ok "no completion marker: claims no stalled resource" ;;
+esac
 
-# --- Case 5: no launchctl — a logged skip, not a blocker -------------------
-# PREFLIGHT_OS pins the non-Linux branch: on a Linux host 3b checks nono instead
-# (case 10), and this case is about a host with no launcher at all.
-out5="$(CONSENT_FAKE_MODE=clean CAPTURE="$CAPTURE" PATH="$FIXTURE_PATH" \
-  PREFLIGHT_OS=Darwin PREFLIGHT_LAUNCHCTL="$BASE/no-such-launchctl" \
-  PREFLIGHT_TCC_LOCATIONS="$PROTECTED" \
-  bash "$SCRIPT" --source plan --base main --run-root "$ROOT" 2>&1)"
-if [ "$have_sandbox" = 0 ]; then
-  assert_contains "no sandbox-exec: skips rather than blocking" \
-    "PREFLIGHT CONSENT_GATE: skip (sandbox-exec not available" "$out5"
-else
-  assert_contains "no launchctl: skips rather than blocking" \
-    "PREFLIGHT CONSENT_GATE: skip (launchctl not available" "$out5"
-fi
+# --- Case 5: no launchctl — a logged skip for the probe, a launch blocker ---
+out5="$(mac_preflight clean PREFLIGHT_LAUNCHCTL="$BASE/no-such-launchctl")"
+assert_contains "no launchctl: the probe skips rather than blocking" \
+  "PREFLIGHT CONSENT_GATE: skip (launchctl not available" "$out5"
 case "$out5" in
   *"BLOCKER: interactive consent gate"*) bad "no launchctl: must not synthesize a consent blocker" ;;
   *) ok "no launchctl: no consent blocker" ;;
 esac
-# The skips above are about the probe; the launch itself has no way to spawn
-# on this host, so the verdict must be no-go (#1348), never `go` with skip notes.
-assert_contains "no launcher: reports none" "PREFLIGHT LAUNCHER: none (" "$out5"
+# The skip is about the probe; the launch itself has no way to spawn on this
+# host, so the verdict must be no-go (#1348), never `go` with skip notes.
+assert_contains "no launchctl: reports no launcher" "PREFLIGHT LAUNCHER: none (macOS: no launchctl)" "$out5"
+assert_contains "no launchctl: verdict is no-go" "PREFLIGHT VERDICT: no-go — no launchctl on this host" "$out5"
+
+# A host that is neither macOS nor Linux has no launcher at all.
+out5b="$(mac_preflight clean PREFLIGHT_OS=FreeBSD)"
+assert_contains "no launcher: reports none" "PREFLIGHT LAUNCHER: none (FreeBSD)" "$out5b"
 assert_contains "no launcher: verdict is no-go" \
-  "PREFLIGHT VERDICT: no-go — no supported launcher on this host" "$out5"
-assert_contains "no launcher: reason names both supported launchers" "or nono on Linux" "$out5"
-case "$out5" in
+  "PREFLIGHT VERDICT: no-go — no supported launcher on this host" "$out5b"
+assert_contains "no launcher: reason names both supported launchers" "through launchd on macOS, or through systemd-run on Linux" "$out5b"
+assert_contains "no launcher: the consent probe skips (TCC is macOS-only)" "PREFLIGHT CONSENT_GATE: skip (non-macOS host" "$out5b"
+assert_contains "no launcher: the smoke skips" "PREFLIGHT SMOKE: skip (no supported launcher" "$out5b"
+case "$out5b" in
   *"PREFLIGHT VERDICT: go"*) bad "no launcher: must not print VERDICT: go" ;;
   *) ok "no launcher: no go verdict" ;;
 esac
 
+# --- Case 5c: macOS — nono not ready, and no token command ------------------
+out5c="$(mac_preflight clean AUTO_PILOT_NONO_HOME="$BASE/no-nono-here")"
+assert_contains "macOS: a missing nono reports no launcher" "PREFLIGHT LAUNCHER: none (macOS: nono not ready)" "$out5c"
+assert_contains "macOS: a missing nono is a no-go naming the install" \
+  "PREFLIGHT VERDICT: no-go — nono jail not ready: nono 0.81.0 is not installed" "$out5c"
+assert_contains "macOS: no smoke without a ready nono" "PREFLIGHT SMOKE: skip (nono is not ready" "$out5c"
+assert_contains "macOS: no consent probe without a ready nono" "PREFLIGHT CONSENT_GATE: skip (nono not ready — see PREFLIGHT NONO)" "$out5c"
+out5c="$(mac_preflight clean -- --claude-token-cmd '')"
+assert_contains "macOS: no token command is a no-go naming the Keychain" \
+  "PREFLIGHT VERDICT: no-go — macOS needs --claude-token-cmd: the nono jail denies the Keychain" "$out5c"
+assert_contains "macOS: no token command skips the smoke (it would refuse too)" \
+  "PREFLIGHT SMOKE: skip (macOS needs --claude-token-cmd" "$out5c"
+out5c="$(mac_preflight clean FAKE_RENDER_FAIL=1)"
+assert_contains "macOS: a consent profile that will not render fails the probe" \
+  "PREFLIGHT CONSENT_GATE: FAIL (render-nono-profile failed)" "$out5c"
+assert_contains "macOS: the render failure is a blocker carrying its reason" "render failed (fixture)" "$out5c"
+
 # --- Case 6: a run outside every protected location needs no grant ---------
 mkdir -p "$BASE/elsewhere"
-out6="$(CONSENT_FAKE_MODE=clean CAPTURE="$CAPTURE" PATH="$FIXTURE_PATH" \
-  PREFLIGHT_LAUNCHCTL="$FIXBIN/fake-launchctl" \
-  PREFLIGHT_TCC_LOCATIONS="$BASE/elsewhere" \
-  PREFLIGHT_CONSENT_TICKS=4 \
-  bash "$SCRIPT" --source plan --base main --run-root "$ROOT" 2>&1)"
+out6="$(mac_preflight clean PREFLIGHT_TCC_LOCATIONS="$BASE/elsewhere")"
 assert_contains "run outside every protected location: records none" \
   "PREFLIGHT CONSENT_PROTECTED: none" "$out6"
 
@@ -493,9 +552,7 @@ fi
 # An unescaped `&` or `<` in a path makes the plist malformed; launchctl then
 # refuses the job and the whole check degrades to a logged skip while the
 # verdict stays `go`. So the gate fails OPEN, which is what this guards.
-if [ "$have_sandbox" = 0 ]; then
-  skipped "plist escaping: requires sandbox-exec (macOS)"
-elif ! command -v plutil >/dev/null 2>&1; then
+if ! command -v plutil >/dev/null 2>&1; then
   skipped "plist escaping: plutil not available"
 else
   amp_protected="$BASE/a&b<c"
@@ -507,11 +564,8 @@ else
   # before bootstrapping would leave this asserting against a predecessor's
   # artifact, and `plutil -lint` alone would pass vacuously.
   rm -f "$CAPTURE/plist"
-  CONSENT_FAKE_MODE=clean CAPTURE="$CAPTURE" PATH="$FIXTURE_PATH" \
-    PREFLIGHT_LAUNCHCTL="$FIXBIN/fake-launchctl" \
-    PREFLIGHT_TCC_LOCATIONS="$amp_protected" \
-    PREFLIGHT_CONSENT_TICKS=4 \
-    bash "$amp_root/scripts/preflight.sh" --source plan --base main --run-root "$amp_root" >/dev/null 2>&1
+  PF_SCRIPT="$amp_root/scripts/preflight.sh" PF_RUN_ROOT="$amp_root" \
+    mac_preflight clean PREFLIGHT_TCC_LOCATIONS="$amp_protected" >/dev/null 2>&1
   if [ ! -s "$CAPTURE/plist" ]; then
     bad "plist escaping: no job was submitted, so nothing was tested"
   elif plutil -lint "$CAPTURE/plist" >/dev/null 2>&1; then
@@ -530,73 +584,33 @@ fi
 # that actually ships. The `*` entry covers the other half: IFS makes the split
 # happen on ':' only, but it does not stop the resulting words from being
 # pathname-expanded.
-if [ "$have_sandbox" = 0 ]; then
-  skipped "space/glob in a protected location: requires sandbox-exec (macOS)"
-else
-  spaced="$BASE/with space"
-  spaced_root="$spaced/fixture"
-  mkdir -p "$spaced_root"
-  cp -R "$ROOT/scripts" "$ROOT/dev_docs" "$spaced_root/"
-  GIT_CONFIG_GLOBAL=/dev/null git -C "$spaced_root" init -q
-  out9="$(CONSENT_FAKE_MODE=clean CAPTURE="$CAPTURE" PATH="$FIXTURE_PATH" \
-    PREFLIGHT_LAUNCHCTL="$FIXBIN/fake-launchctl" \
-    PREFLIGHT_TCC_LOCATIONS="$spaced" \
-    PREFLIGHT_CONSENT_TICKS=4 \
-    bash "$spaced_root/scripts/preflight.sh" --source plan --base main --run-root "$spaced_root" 2>&1)"
-  assert_contains "space in a protected location survives the split intact" \
-    "PREFLIGHT CONSENT_PROTECTED: $spaced" "$out9"
-  assert_contains "space-containing location reaches the probe as one spec" \
-    "CONSENT resource protected_1: ok $spaced" "$out9"
+spaced="$BASE/with space"
+spaced_root="$spaced/fixture"
+mkdir -p "$spaced_root"
+cp -R "$ROOT/scripts" "$ROOT/dev_docs" "$spaced_root/"
+GIT_CONFIG_GLOBAL=/dev/null git -C "$spaced_root" init -q
+out9="$(PF_SCRIPT="$spaced_root/scripts/preflight.sh" PF_RUN_ROOT="$spaced_root" \
+  mac_preflight clean PREFLIGHT_TCC_LOCATIONS="$spaced")"
+assert_contains "space in a protected location survives the split intact" \
+  "PREFLIGHT CONSENT_PROTECTED: $spaced" "$out9"
+assert_contains "space-containing location reaches the probe as one spec" \
+  "CONSENT resource protected_1: ok $spaced" "$out9"
 
-  # The glob fixture is built so expansion CHANGES the answer: `d[x]` as a
-  # bracket expression matches the decoy `dx` and not its own literal name, so
-  # an expanded $loc no longer contains the run root and the location drops out
-  # of the inventory. Without `set -f` this reports `none`.
-  globbed="$BASE/d[x]"
-  globbed_root="$globbed/fixture"
-  mkdir -p "$globbed_root" "$BASE/dx"
-  cp -R "$ROOT/scripts" "$ROOT/dev_docs" "$globbed_root/"
-  GIT_CONFIG_GLOBAL=/dev/null git -C "$globbed_root" init -q
-  out9b="$(CONSENT_FAKE_MODE=clean CAPTURE="$CAPTURE" PATH="$FIXTURE_PATH" \
-    PREFLIGHT_LAUNCHCTL="$FIXBIN/fake-launchctl" \
-    PREFLIGHT_TCC_LOCATIONS="$globbed" \
-    PREFLIGHT_CONSENT_TICKS=4 \
-    bash "$globbed_root/scripts/preflight.sh" --source plan --base main --run-root "$globbed_root" 2>&1)"
-  assert_contains "glob metacharacter in a protected location is not expanded" \
-    "PREFLIGHT CONSENT_PROTECTED: $globbed" "$out9b"
-fi
+# The glob fixture is built so expansion CHANGES the answer: `d[x]` as a
+# bracket expression matches the decoy `dx` and not its own literal name, so
+# an expanded $loc no longer contains the run root and the location drops out
+# of the inventory. Without `set -f` this reports `none`.
+globbed="$BASE/d[x]"
+globbed_root="$globbed/fixture"
+mkdir -p "$globbed_root" "$BASE/dx"
+cp -R "$ROOT/scripts" "$ROOT/dev_docs" "$globbed_root/"
+GIT_CONFIG_GLOBAL=/dev/null git -C "$globbed_root" init -q
+out9b="$(PF_SCRIPT="$globbed_root/scripts/preflight.sh" PF_RUN_ROOT="$globbed_root" \
+  mac_preflight clean PREFLIGHT_TCC_LOCATIONS="$globbed")"
+assert_contains "glob metacharacter in a protected location is not expanded" \
+  "PREFLIGHT CONSENT_PROTECTED: $globbed" "$out9b"
 
 # --- Case 10: Linux — 3b checks the pinned nono, 4 runs the nono smoke --------
-# The real nono-install.sh runs against a stub binary whose checksum the test
-# pins, so each no-go is the installer's own text. The smoke is a stub that
-# prints the real smoke's line shape and records its arguments.
-cp "$REPO/scripts/nono-install.sh" "$ROOT/scripts/nono-install.sh"
-NH="$BASE/nono-home"
-mkdir -p "$NH/0.81.0"
-cat >"$NH/0.81.0/nono" <<'STUB'
-#!/bin/sh
-case "$1" in
-  --version) echo "nono ${STUB_VERSION:-0.81.0}" ;;
-  setup) echo "  * Landlock V${STUB_ABI:-8}" ;;
-esac
-exit 0
-STUB
-chmod 755 "$NH/0.81.0/nono"
-if command -v sha256sum >/dev/null 2>&1; then
-  NSUM="$(sha256sum "$NH/0.81.0/nono" | cut -d' ' -f1)"
-else
-  NSUM="$(shasum -a 256 "$NH/0.81.0/nono" | cut -d' ' -f1)"
-fi
-printf 'landlock\n' >"$BASE/lsm-ok"
-printf 'yama\n' >"$BASE/lsm-none"
-cat >"$FIXBIN/smoke-nono" <<'SMOKE'
-#!/bin/bash
-printf '%s\n' "$*" >"$SMOKE_ARGS"
-echo "SMOKE WRITE_HOME: pass (a write to \$HOME is denied)"
-echo "SMOKE CRED_READ: ${SMOKE_CRED:-pass} (the credential file)"
-[ "${SMOKE_CRED:-pass}" = pass ]
-SMOKE
-chmod +x "$FIXBIN/smoke-nono"
 # The systemd user manager, stubbed (#1350): its state and Linger come from env.
 printf '#!/bin/sh\necho "${STUB_SD_STATE-degraded}"\n' >"$FIXBIN/fake-systemctl"
 printf '#!/bin/sh\necho "${STUB_LINGER-yes}"\n' >"$FIXBIN/fake-loginctl"
