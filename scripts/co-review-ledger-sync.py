@@ -7,8 +7,8 @@
 
 Each machine writes only its own file, ledgers/<host>.jsonl, in the git repo
 named by CO_REVIEW_LEDGER_REMOTE, and /co-review-stats reads the union. The
-design, and why each rule below exists, is
-dev_docs/designs/2026-10-18-co-review-ledger-sync.md.
+allowlist and the failure rules, and why each exists, are in §2 of
+dev_docs/reviewer-quality-score-design.md.
 
 It prints receipt lines and nothing else: never git's output, which can carry
 the remote URL, and never ledger contents. That silence is the firewall.
