@@ -1,7 +1,8 @@
 """Now (`/now`, and `/` on a fleet instance): what to do next.
 
 Every instance's Now is this one ranker, over every source the instance has
-(dev_docs/designs/2026-10-27-shared-now-ranker.md). Needs you (needs.py) is
+(dev_docs/decisions/2026-10-27-one-now-ranker-for-every-instance.md). Needs
+you (needs.py) is
 the full list of what waits on the owner; Now is the short queue drawn from
 it, ranked, with the owner's own work added.
 
@@ -61,15 +62,15 @@ is a source that returns candidate.Candidate rows: the item, its category,
 its why, the score terms it has data for, and its features. rank() reads
 those only, and every ordering and render below reads its Ranked.
 
-MODES (dev_docs/designs/2026-10-26-now-modes.md). The owner picks one with the
-mode button at the end of the page header bar, after the filter (mode_button,
+MODES (dev_docs/decisions/2026-10-27-now-modes-picked-by-the-owner.md). The
+owner picks one with the mode button at the end of the page header bar, after the filter (mode_button,
 which the server puts there on Now only). It reads the mode's name, cycles
 overlay.NOW_MODES and saves the pick in the overlay; `?mode=` shows one mode
 once and saves nothing. With none saved the
 mode is Ship. Everything below this paragraph is Ship, except LITTLE, DEEP,
 TIDY and PLAN.
 
-ORDER is Ship's (the design's "Ship"). Pinned items first, in the overlay's order
+ORDER is Ship's. Pinned items first, in the overlay's order
 (overlay.Overlay.pin_rank). Then the fixed TIERS, in order: a session that
 asked; close-outs, at most CLOSE_OUT_CAP of them (pins aside), oldest first;
 ready to merge (`quick_win`, and `own_approved`: my PR approved with CI
