@@ -164,30 +164,43 @@ class Status(unittest.TestCase):
         self.assertEqual(groups(final(row(status="ready"), record())), ["gardened"])
 
 
+IMPORTANCE_WRITE = {"group": "importance", "field": "importance", "value": "critical"}
+
+
 class ValidityHolds(unittest.TestCase):
     def unsure(self) -> Dict[str, Any]:
         return record(
             validity={"verdict": "unsure", "confidence": "medium", "evidence": []},
+            importance={"level": "critical", "confidence": "high", "reason": "x"},
             proposed_writes=[{"group": "kind", "field": "kind", "value": "spike"}],
             human_queue=["validity unsure: no repo"],
         )
 
-    def test_unsure_holds_status_and_kind(self) -> None:
-        out = final(row(), self.unsure())
+    def test_unsure_holds_status_kind_and_importance(self) -> None:
+        rec = self.unsure()
+        rec["proposed_writes"].append(IMPORTANCE_WRITE)
+        out = final(row(), rec)
         self.assertEqual(out["status"]["target"], "ready")
+        self.assertEqual(out["importance"]["level"], "critical")
         self.assertEqual(groups(out), ["human-queue"])
 
-    def test_settled_validity_keeps_the_kind_write(self) -> None:
+    def test_settled_validity_keeps_the_kind_and_importance_writes(self) -> None:
         rec = record(
-            proposed_writes=[{"group": "kind", "field": "kind", "value": "spike"}]
+            proposed_writes=[
+                {"group": "kind", "field": "kind", "value": "spike"},
+                IMPORTANCE_WRITE,
+            ]
         )
-        self.assertEqual(groups(final(row(), rec)), ["kind", "status"])
+        self.assertEqual(groups(final(row(), rec)), ["kind", "importance", "status"])
 
     def test_closure_below_high_holds_too(self) -> None:
         rec = record(
             validity={"verdict": "fixed", "confidence": "medium", "evidence": []}
         )
-        rec["proposed_writes"] = [{"group": "kind", "field": "kind", "value": "spike"}]
+        rec["proposed_writes"] = [
+            {"group": "kind", "field": "kind", "value": "spike"},
+            IMPORTANCE_WRITE,
+        ]
         self.assertEqual(groups(final(row(), rec)), ["gardened"])
 
     def test_high_closure_and_early_exit_pass_through(self) -> None:

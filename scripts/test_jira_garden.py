@@ -89,6 +89,46 @@ def row(
     return garden.build_row(i, changed or set(), cfg(**over), PMAP)
 
 
+class SupersededTest(unittest.TestCase):
+    def test_done_work_in_the_area_resolved_since_creation(self) -> None:
+        out = garden.build_superseded_jql(
+            "proj-9",
+            "2026-03-01T10:00:00.000-0500",
+            parent="PROJ-1",
+            components=["Checkout"],
+            terms=["export failed"],
+        )
+        self.assertEqual(
+            out["jql"],
+            'statusCategory = Done AND key != "PROJ-9" AND resolved >= "2026-03-01"'
+            ' AND (parent = "PROJ-1" OR component in ("Checkout"))'
+            ' AND (text ~ "\\"export failed\\"") ORDER BY resolved DESC',
+        )
+
+    def test_no_area_is_no_query_not_no_fix(self) -> None:
+        out = garden.build_superseded_jql("PROJ-9", "2026-03-01T10:00:00Z")
+        self.assertIsNone(out["jql"])
+        self.assertEqual(out["reason"], "no parent or component")
+
+    def test_bad_input_exits_2(self) -> None:
+        for argv in (
+            ["superseded", "--key", "PROJ", "--created", "2026-03-01T10:00:00Z"],
+            ["superseded", "--key", "PROJ-9", "--created", "soon"],
+        ):
+            with mock.patch("sys.stderr"), mock.patch("sys.stdout"):
+                self.assertEqual(garden.main(argv), 2, argv)
+
+    def test_row_carries_created_and_components(self) -> None:
+        r = row(
+            issue(
+                created="2026-03-01T10:00:00.000-0500",
+                components=[{"name": "Checkout"}, {}],
+            )
+        )
+        self.assertEqual(r["created"], "2026-03-01T10:00:00.000-0500")
+        self.assertEqual(r["components"], ["Checkout"])
+
+
 class JqlTest(unittest.TestCase):
     def test_project_epic_and_fragment(self) -> None:
         self.assertTrue(
