@@ -47,7 +47,13 @@ The boundaries between adjacent levels, stated once:
   worst consequences; only evidence of current harm makes it `blocker`.
 - `critical` / `major` — **wrong outcome or no workaround vs a workaround
   exists**. Any harm-class consequence is at least `critical`, however
-  rare.
+  rare: rarity never lowers a harm-class consequence confirmed to affect even
+  one user.
+- **Reported by one user is not confirmed to affect one user.** A single
+  report nobody has reproduced leaves reach unknown, and may be the first sign
+  of a wider problem. Judge it as if the problem is real and widespread, never
+  lower for having one reporter; whether it is real at all is validity's call
+  (`unsure`, `reproduce across users`, in `validity.md` rung 3).
 - `major` / `minor` — **a task is harder or fails vs it only looks wrong**.
   Something a user or operator cannot do, or does slower, is `major`.
 - `minor` / `trivial` — **observable, or a real cost to the people maintaining
@@ -77,15 +83,21 @@ and an escalation needs a signal the judge can point to.
 - **`impact` is how much finishing the work is worth.** It is the Fibonacci
   value estimate in the `impact` row of `skills/task/SKILL.md` → **Field
   reference**, the numerator of the ranking score, with no rubric behind it.
+- **Business value is not importance.** Opportunity size, revenue and roadmap
+  fit are judged outside the ticket; the gardener cannot know them and does
+  not guess them.
 - **Importance is how bad the problem is while it stays open.** It judges
   consequence and orders nothing. A rubric that ranked tickets against each
   other or against quarter goals would judge a ticket by its neighbours, which
   is what this one exists to avoid.
 
 Priority's vocabulary has four non-empty levels; importance needs five to
-separate "happening now" from "conditional", so it has its own scale. On Jira,
-a consumer writes it to the priority field one-to-one onto the site's `P0`–`P4`
-names through task-fill's `priority_map`; this file does not define that map.
+separate "happening now" from "conditional", so it has its own scale. A
+consumer writes it to the tracker's priority field (on Jira, one-to-one onto
+the site's `P0`–`P4` names through task-fill's `priority_map`, which this file
+does not define), but never over a human-set priority
+(`commands/garden-backlog.md` → **What may be written**): a PM's priority call
+stands, and the gardener only records its disagreement for a human.
 How a Jira priority name reads back as a symbolic level is the Priority row of
 the field mapping in `commands/handlers/jira.md` → **List**.
 
@@ -126,14 +138,23 @@ The judge may not use:
 - **Sprint or quarter plans** — they say when work is wanted, not how bad the
   problem is.
 - **How urgent the reporter sounds** — tone is not evidence of consequence.
+- **Business value** — what fixing it is worth, which is priority's and
+  `impact`'s question, not this one.
 
 ## Confidence
 
-Every verdict carries `confidence: high | low`. It is `low` when either holds:
+Every verdict carries `confidence: high | low`. It is `low` when any holds:
 
 - the consequence depends on facts the ticket does not state (who is affected,
   whether a harm class is touched, whether a workaround exists), or
-- two levels are equally defensible from what the ticket does state.
+- two levels are equally defensible from what the ticket does state, or
+- the consequence is in a harm class, but the ticket does not settle whether
+  the error is big enough to do real harm: how large the wrong figure is, and
+  whether it would lead a user to a materially harmful action. The level
+  stands, at least `critical`; only the confidence drops. An estimate a little
+  off in the direction that only makes a user more cautious is not the harm of
+  one that leads them past a hard limit, and a ticket that does not say which
+  goes to a human.
 
 Otherwise it is `high`. A `low` verdict is not written to the tracker; the
 ticket goes to a human with the verdict as a suggestion.

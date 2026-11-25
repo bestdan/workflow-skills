@@ -104,7 +104,7 @@ failed. If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
    returning keys, never a per-ticket changelog read.
 
 2. **Page each query to the end.** Candidate fields:
-   `summary,description,status,issuetype,priority,parent,updated,labels,comment,issuelinks`
+   `summary,description,status,issuetype,priority,parent,created,components,updated,labels,comment,issuelinks`
    plus `<estimate_field>` when set. The `priority_changed` query needs only
    `priority`.
    - **twg:** run unsandboxed, once per query, into its own directory:
@@ -159,6 +159,8 @@ failed. If `$CLAUDE_PLUGIN_ROOT` is unset and the path doesn't resolve, Glob
    - `blocked_by` — the keys behind the ticket's "is blocked by" links whose
      status is not in the Done category, or null when the page has no
      `issuelinks` field.
+   - `created` and `components` — as Jira holds them, for **Validity:
+     supersession candidates**.
 
 4. **Resolve rung 1** — **Validity rung 1** below, which adds `own_pr` to
    every row. The core's `prejudge` reads that output, not `rows`'s.
@@ -253,6 +255,24 @@ the repos. Its title probe is what finds a merged PR whose title carries the
 key on a ticket with no trail. Never use the ticket's remote links or its
 development panel: both list PRs that only cite the key. A `source_errors`
 entry or a failed probe lands the row in `unresolved`, never in "no PR".
+
+## Validity: supersession candidates
+
+`validity.md` rung 2's supersession lead, for one ticket. Build the query from
+its row, adding each of the ticket's distinctive terms as a `--term`, or none
+when it has few and the epic's stated purpose is the guide:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-garden.py" superseded --key <KEY> --created "<created>" [--parent <parent>] [--component "<name>" ...] [--term "<term>" ...]
+```
+
+It prints `{jql, since, reason}`: Done work in the ticket's epic or
+components, resolved from the day before it was created (a day early, since JQL reads the
+date in the searching user's timezone). `jql` null means the
+ticket has no area to search (`reason` says so), which is no lead, not "no
+fix". Otherwise page it with **List** step 2's `fetch` (or the MCP loop) into
+`<dir>/superseded-<KEY>`, fields `summary,description,resolutiondate,parent,components,issuetype`,
+`--limit 25`, and read each candidate against the ticket's flow.
 
 ## Hard rules
 

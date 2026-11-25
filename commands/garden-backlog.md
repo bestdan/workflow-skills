@@ -250,10 +250,11 @@ description.
 - **Importance is written only once `importance.md` is signed off.** While its
   PM / EM sign-off table is empty, record the level and propose no importance
   write; the report says why once, not per ticket.
-- **Validity not settled holds the status and kind writes.** While validity
-  is `unsure` (or a sub-`high` closure verdict), show the status target and the
-  kind verdict in the record but propose neither write: a ticket that may
-  already be fixed is not sent to `ready`, nor retyped.
+- **Validity not settled holds the status, kind and importance writes.** While
+  validity is `unsure` (or a sub-`high` closure verdict), show the status
+  target, the kind verdict and the importance level in the record but propose
+  none of those writes: a ticket that may already be fixed is not sent to
+  `ready`, retyped, or given a priority.
 - A ticket with a `human_queue` reason gets the `human-queue` write. A ticket
   with no writes and no queue reason gets the `gardened` write, so the next run
   exits it early.

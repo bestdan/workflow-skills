@@ -30,7 +30,8 @@ writes from it. The holds:
   once the blocker clears. A row whose links were never read (`blocked_by`
   null) is held the same way: unread is not unblocked.
 - Validity not settled (`unsure`, or a closure verdict below `high`) holds the
-  `status` and `kind` writes. The record still shows the target.
+  `status`, `kind` and `importance` writes: a ticket that may already be fixed
+  gets no priority either (#1576). The record still shows the verdicts.
 - A judge that failed `has_acceptance_criteria` where the check passed did not
   rule on the conditions after it, so its quality verdict is unknown: the
   status write is held and the ticket queued for a human.
@@ -283,7 +284,7 @@ def finalize_one(record: Dict[str, Any], row: Optional[Dict[str, Any]]) -> None:
     ]
     settled = validity_settled(record)
     if not settled:
-        writes = [w for w in writes if w.get("group") != "kind"]
+        writes = [w for w in writes if w.get("group") not in ("kind", "importance")]
     if target in ("ready", "refinement") and target != current:
         if settled and not quality_unknown:
             writes.append({"group": "status", "field": "status", "value": target})

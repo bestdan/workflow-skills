@@ -7,6 +7,8 @@ otherwise have to catch by reading markdown:
 
   jql      the candidate query and the `priority CHANGED` query for a scope
            (an epic unless --wide) or for one ticket (--key)
+  superseded  the query for completed work that may have fixed one ticket
+           under other tickets: validity's supersession lead
   fetch    page a JQL search to completion through twg, one file per page
   page     read one saved search page: its issue count and next-page token
   rows     turn saved pages into the core's List rows (symbolic values only)
@@ -184,6 +186,66 @@ def build_key_jql(key: str) -> Dict[str, str]:
     if not ISSUE_KEY_RE.match(k):
         raise InputError(f"--key {key!r} is not an issue key")
     return queries(f'key = "{k}"')
+
+
+def jql_string(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def build_superseded_jql(
+    key: str,
+    created: str,
+    parent: Optional[str] = None,
+    components: Sequence[str] = (),
+    terms: Sequence[str] = (),
+) -> Dict[str, Any]:
+    """Done work in the ticket's area, resolved from the day before its creation.
+
+    `skills/task/references/validity.md` rung 2's supersession lead: a fix
+    shipped under other tickets, in other words, is invisible to the key and
+    term search. The area is the ticket's epic or its components, never the
+    whole project, which would bury the lead. A hit is only ever a lead for
+    rung 3. With no area there is nothing to search, which is not "no fix":
+    `jql` is null and `reason` says why.
+    """
+    k = key.strip().upper()
+    if not ISSUE_KEY_RE.match(k):
+        raise InputError(f"--key {key!r} is not an issue key")
+    when = parse_time(created)
+    if when is None:
+        raise InputError(f"--created {created!r} is not a timestamp")
+    area = []
+    if parent:
+        p = parent.strip().upper()
+        if not ISSUE_KEY_RE.match(p):
+            raise InputError(f"--parent {parent!r} is not an issue key")
+        area.append(f'parent = "{p}"')
+    names = [c.strip() for c in components if c.strip()]
+    if names:
+        area.append("component in (" + ", ".join(jql_string(c) for c in names) + ")")
+    # A day early: the date is in `created`'s offset, JQL reads it in the
+    # searching user's timezone, and a lead window errs wide.
+    since = (when - timedelta(days=1)).date().isoformat()
+    if not area:
+        return {"jql": None, "since": since, "reason": "no parent or component"}
+    where = [
+        "statusCategory = Done",
+        f'key != "{k}"',
+        f'resolved >= "{since}"',
+        "(" + " OR ".join(area) + ")",
+    ]
+    phrases = [t.strip() for t in terms if t.strip()]
+    if phrases:
+        where.append(
+            "("
+            + " OR ".join("text ~ " + jql_string(jql_string(t)) for t in phrases)
+            + ")"
+        )
+    return {
+        "jql": " AND ".join(where) + " ORDER BY resolved DESC",
+        "since": since,
+        "reason": None,
+    }
 
 
 # ------------------------------------------------------------------- pages
@@ -587,6 +649,10 @@ def build_row(
         "title": fields.get("summary"),
         "description": description,
         "parent": parent.get("key") if isinstance(parent, dict) else None,
+        "created": fields.get("created"),
+        "components": [
+            n for n in (name_of(c) for c in fields.get("components") or []) if n
+        ],
         "status": symbolic_status(fields, cfg),
         "status_name": name_of(fields.get("status")),
         "issuetype": issuetype,
@@ -832,6 +898,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     g.add_argument("--key")
     s.add_argument("--wide", action="store_true")
 
+    s = sub.add_parser("superseded")
+    s.add_argument("--key", required=True)
+    s.add_argument("--created", required=True)
+    s.add_argument("--parent")
+    s.add_argument("--component", action="append", default=[])
+    s.add_argument("--term", action="append", default=[])
+
     s = sub.add_parser("fetch")
     s.add_argument("--site", required=True)
     s.add_argument("--jql", required=True)
@@ -886,6 +959,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 result: Any = build_key_jql(args.key)
             else:
                 result = build_jql(args.scope, args.wide)
+        elif args.cmd == "superseded":
+            result = build_superseded_jql(
+                args.key, args.created, args.parent, args.component, args.term
+            )
         elif args.cmd == "fetch":
             result = fetch(
                 args.site,
