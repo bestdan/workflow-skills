@@ -199,7 +199,7 @@ def build_superseded_jql(
     components: Sequence[str] = (),
     terms: Sequence[str] = (),
 ) -> Dict[str, Any]:
-    """Done work in the ticket's area, resolved on or after it was created.
+    """Done work in the ticket's area, resolved from the day before its creation.
 
     `skills/task/references/validity.md` rung 2's supersession lead: a fix
     shipped under other tickets, in other words, is invisible to the key and
@@ -223,7 +223,9 @@ def build_superseded_jql(
     names = [c.strip() for c in components if c.strip()]
     if names:
         area.append("component in (" + ", ".join(jql_string(c) for c in names) + ")")
-    since = when.date().isoformat()
+    # A day early: the date is in `created`'s offset, JQL reads it in the
+    # searching user's timezone, and a lead window errs wide.
+    since = (when - timedelta(days=1)).date().isoformat()
     if not area:
         return {"jql": None, "since": since, "reason": "no parent or component"}
     where = [

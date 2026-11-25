@@ -82,9 +82,10 @@ Stop at the first conclusive rung. Record each rung you ran in `evidence`.
    ticket was created, in its component, epic or parent area, that covers the
    same flow: the ticket's distinctive terms, or the epic's stated purpose
    when the ticket has few terms of its own. A candidate is a lead for rung 3,
-   never `fixed` on its own. Unconfirmed there → `unsure`, with a note that
-   names it (`may be superseded by <key>: <title>`) so a human can settle it in
-   a minute.
+   never `fixed` on its own. A rung-3 `valid` stands. When rung 3 neither
+   confirms the candidate nor shows the problem still present → `unsure`,
+   with a note that names it (`may be superseded by <key>: <title>`) so a
+   human can settle it in a minute.
 
 3. **Read the code on the default branch.** Does the code path, flag,
    endpoint or error string still exist, and does it still behave as the

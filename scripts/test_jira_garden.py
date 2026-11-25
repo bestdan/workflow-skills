@@ -100,9 +100,30 @@ class SupersededTest(unittest.TestCase):
         )
         self.assertEqual(
             out["jql"],
-            'statusCategory = Done AND key != "PROJ-9" AND resolved >= "2026-03-01"'
+            'statusCategory = Done AND key != "PROJ-9" AND resolved >= "2026-02-28"'
             ' AND (parent = "PROJ-1" OR component in ("Checkout"))'
             ' AND (text ~ "\\"export failed\\"") ORDER BY resolved DESC',
+        )
+
+    def test_since_is_a_day_before_creation(self) -> None:
+        out = garden.build_superseded_jql(
+            "PROJ-9", "2026-03-01T01:00:00.000+0900", parent="PROJ-1"
+        )
+        self.assertEqual(out["since"], "2026-02-28")
+        self.assertIn('resolved >= "2026-02-28"', out["jql"])
+
+    def test_quote_and_backslash_in_a_term_are_escaped(self) -> None:
+        out = garden.build_superseded_jql(
+            "PROJ-9",
+            "2026-03-01T10:00:00Z",
+            parent="PROJ-1",
+            terms=['say "hi" C:\\tmp'],
+        )
+        self.assertTrue(
+            out["jql"].endswith(
+                r' AND (text ~ "\"say \\\"hi\\\" C:\\\\tmp\"") ORDER BY resolved DESC'
+            ),
+            out["jql"],
         )
 
     def test_no_area_is_no_query_not_no_fix(self) -> None:

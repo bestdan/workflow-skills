@@ -267,7 +267,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/commands/handlers/assets/jira-garden.py" supersed
 ```
 
 It prints `{jql, since, reason}`: Done work in the ticket's epic or
-components, resolved on or after the day it was created. `jql` null means the
+components, resolved from the day before it was created (a day early, since JQL reads the
+date in the searching user's timezone). `jql` null means the
 ticket has no area to search (`reason` says so), which is no lead, not "no
 fix". Otherwise page it with **List** step 2's `fetch` (or the MCP loop) into
 `<dir>/superseded-<KEY>`, fields `summary,description,resolutiondate,parent,components,issuetype`,
