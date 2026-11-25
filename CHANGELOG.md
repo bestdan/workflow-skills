@@ -4,6 +4,12 @@ All notable changes to this plugin. Sections are auto-generated from
 [Conventional Commits](https://www.conventionalcommits.org/) on merge to
 `main` by `.github/workflows/release.yml`.
 
+## [2.224.6] - 2026-11-25
+
+### Fixes
+
+- importance rubric calls and supersession lead [#1576] (#1577) (4d741b52)
+
 ## [2.224.5] - 2026-11-18
 
 ### Fixes
